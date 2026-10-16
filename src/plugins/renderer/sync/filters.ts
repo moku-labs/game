@@ -84,31 +84,37 @@ export function filtersOf(state: SyncState, entity: Entity): readonly FilterSlot
 }
 
 /**
- * Notes the kind of a slot's filter for the performance log: the filter itself, the stage filters
- * of its inputs and, for a blur, the two pass filters Pixi applies in its place. A slot without a
- * kind is left out: it counts as "other".
+ * The Pixi filters a slot draws through: the filter itself, the stage filters of its inputs and, for a blur, the two
+ * pass filters Pixi applies in its place.
+ *
+ * @param slot - The slot.
+ * @returns The filters.
+ */
+function filtersIn(slot: FilterSlot): object[] {
+  const { filter } = slot;
+  const found: object[] = [filter, ...(slot.inputs?.stages ?? [])];
+
+  // A blur draws through two pass filters of its own: they count under the blur's kind and owner.
+  if ("blurXFilter" in filter && isFilterObject(filter.blurXFilter)) found.push(filter.blurXFilter);
+  if ("blurYFilter" in filter && isFilterObject(filter.blurYFilter)) found.push(filter.blurYFilter);
+
+  return found;
+}
+
+/**
+ * Notes the kind and the owner of a slot's filters for the performance log: every filter it draws through. A slot
+ * without a kind counts as "other".
  *
  * @param state - The sync branch of the plugin state.
+ * @param entity - The entity the slot hangs on.
  * @param slot - The slot.
  */
-function nameKind(state: SyncState, slot: FilterSlot): void {
-  const { filter, kind } = slot;
+function nameFilters(state: SyncState, entity: Entity, slot: FilterSlot): void {
+  const { kind } = slot;
 
-  if (kind === undefined) return;
-
-  state.filterKinds.set(filter, kind);
-
-  const stages = slot.inputs?.stages;
-
-  if (stages !== undefined) for (const stage of stages) state.filterKinds.set(stage, kind);
-
-  // A blur draws through two pass filters of its own: they count under the blur's kind.
-  if ("blurXFilter" in filter && isFilterObject(filter.blurXFilter)) {
-    state.filterKinds.set(filter.blurXFilter, kind);
-  }
-
-  if ("blurYFilter" in filter && isFilterObject(filter.blurYFilter)) {
-    state.filterKinds.set(filter.blurYFilter, kind);
+  for (const filter of filtersIn(slot)) {
+    state.filterOwners.set(filter, entity);
+    if (kind !== undefined) state.filterKinds.set(filter, kind);
   }
 }
 
@@ -149,7 +155,7 @@ export function setFilters(
 
   // Inline and positive: Bun folds the agent guard under a production `define`.
   if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
-    for (const slot of slots) nameKind(state, slot);
+    for (const slot of slots) nameFilters(state, entity, slot);
   }
 
   const view = state.views.get(entity);

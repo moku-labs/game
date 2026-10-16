@@ -4,15 +4,53 @@
  * method, so no subclass sees a creation; the count is taken one level lower, on GPU objects that belong to this
  * application, never on a prototype and never on a Pixi object (OQ4): own properties on the engine's own device, and
  * `linkProgram` on this application's WebGL context. The remover deletes the own property, so the prototype's method
- * shows through again. A restore attaches to the new device or context.
+ * shows through again. A restore attaches to the new device or context. Each record also notes where it happened:
+ * the pass of the frame, and the filter kind and its owner while a filter applies; a compile of a plain batch has
+ * none. The flush turns the records into `shader` events.
  */
 import { pageNow } from "./clock";
+import { SHADER_WHATS, type ShaderEventDetail } from "./log-types";
 import { COUNT, type MonitorSinks, type PerfCtx } from "./types";
-import { cell } from "./units";
+import { cellF64, roundTo } from "./units";
 
 /**
- * Counts one compile of the frame and keeps it in the next of the 64 pre-made records: its frame, its label by
- * reference and the CPU time of the creation call, the part a frame waits for.
+ * Keeps one compile or shader module in the next of the 64 pre-made records: its frame, its label by reference, the
+ * CPU time of the creation call, the part a frame waits for, and the pass, filter kind and owner of the moment.
+ *
+ * @param sinks - The sinks.
+ * @param frame - The frame running now.
+ * @param label - The pipeline's or module's label, or `null`.
+ * @param ms - The time of the call.
+ * @param module - True for a WebGPU shader module.
+ */
+function writeRecord(
+  sinks: MonitorSinks,
+  frame: number,
+  label: string | null,
+  ms: number,
+  module: boolean
+): void {
+  const ring = sinks.compiles;
+  const record = ring.records[ring.next];
+  const applying = sinks.filterDepth > 0;
+
+  ring.next = (ring.next + 1) % ring.records.length;
+  ring.size = Math.min(ring.size + 1, ring.records.length);
+  ring.written += 1;
+
+  if (record === undefined) return;
+
+  record.frame = frame;
+  record.label = label;
+  record.ms = ms;
+  record.module = module;
+  record.pass = sinks.inFrame ? cellF64(sinks.counts, COUNT.passes) - 1 : -1;
+  record.kind = applying ? sinks.filterKind + 1 : 0;
+  record.owner = applying ? sinks.filterOwner : 0;
+}
+
+/**
+ * Counts one compile of the frame and keeps its record.
  *
  * @param sinks - The sinks.
  * @param frame - The frame running now.
@@ -25,22 +63,30 @@ export function recordCompile(
   label: string | null,
   ms: number
 ): void {
-  const ring = sinks.compiles;
-  const record = ring.records[ring.next];
-
-  sinks.counts[COUNT.compiles] = cell(sinks.counts, COUNT.compiles) + 1;
-  ring.next = (ring.next + 1) % ring.records.length;
-  ring.size = Math.min(ring.size + 1, ring.records.length);
-
-  if (record === undefined) return;
-
-  record.frame = frame;
-  record.label = label;
-  record.ms = ms;
+  sinks.counts[COUNT.compiles] = cellF64(sinks.counts, COUNT.compiles) + 1;
+  writeRecord(sinks, frame, label, ms, false);
 }
 
 /**
- * The compiles of one frame still in the ring, oldest first.
+ * Keeps the record of one shader module: not a compile of the frame's count, a `shader` event of its own.
+ *
+ * @param sinks - The sinks.
+ * @param frame - The frame running now.
+ * @param label - The module's label, or `null`.
+ * @param ms - The time of the call.
+ */
+export function recordModule(
+  sinks: MonitorSinks,
+  frame: number,
+  label: string | null,
+  ms: number
+): void {
+  sinks.compiles.shaderModules += 1;
+  writeRecord(sinks, frame, label, ms, true);
+}
+
+/**
+ * The compiles of one frame still in the ring, oldest first; shader modules left out.
  *
  * @param sinks - The sinks.
  * @param frame - The frame number.
@@ -56,10 +102,55 @@ export function compilesOf(
   for (let age = ring.size - 1; age >= 0; age -= 1) {
     const record = ring.records[(ring.next - 1 - age + ring.records.length) % ring.records.length];
 
-    if (record?.frame === frame) found.push({ label: record.label, ms: record.ms });
+    if (record?.frame === frame && !record.module) {
+      found.push({ label: record.label, ms: record.ms });
+    }
   }
 
   return found;
+}
+
+/**
+ * The details of the `shader` events not sent yet, oldest first, from the records still in the ring (the 64 newest);
+ * marks them sent. Built at the flush: it allocates.
+ *
+ * @param pc - The perf context.
+ * @param viewOf - The label of an entity's view now, or `null`.
+ * @returns One detail per compile or module.
+ */
+export function takeShaderEvents(
+  pc: PerfCtx,
+  viewOf: (entity: number) => string | null
+): ShaderEventDetail[] {
+  const ring = pc.sinks.compiles;
+  const { kindNames } = pc.sinks;
+  const first = Math.max(ring.sent, ring.written - ring.records.length);
+  const boot = pc.perf.firstDrawnFrame;
+  const details: ShaderEventDetail[] = [];
+
+  for (let sequence = first; sequence < ring.written; sequence += 1) {
+    const record = ring.records[sequence % ring.records.length];
+
+    if (record === undefined) continue;
+
+    details.push({
+      what: record.module ? SHADER_WHATS[1] : SHADER_WHATS[0],
+      label: record.label,
+      ms: roundTo(record.ms, 2),
+      frame: record.frame,
+      boot: Number.isNaN(boot) || record.frame <= boot,
+      during: {
+        pass: record.pass < 0 ? null : record.pass,
+        filter: record.kind === 0 ? null : (kindNames[record.kind - 1] ?? "other"),
+        owner: record.owner === 0 ? null : record.owner,
+        view: record.owner === 0 ? null : viewOf(record.owner)
+      }
+    });
+  }
+
+  ring.sent = ring.written;
+
+  return details;
 }
 
 /**
@@ -99,7 +190,8 @@ function wrapDevice(pc: PerfCtx, device: GPUDevice): () => void {
     configurable: true,
     writable: true,
     /**
-     * Creates the shader module and counts it for the header, not per frame.
+     * Creates the shader module and keeps its record: counted for the header and sent as a `shader` event, not a
+     * compile of the frame.
      *
      * @param descriptor - The module descriptor.
      * @returns The module.
@@ -108,9 +200,12 @@ function wrapDevice(pc: PerfCtx, device: GPUDevice): () => void {
       this: GPUDevice,
       descriptor: GPUShaderModuleDescriptor
     ): GPUShaderModule {
-      sinks.compiles.shaderModules += 1;
+      const started = pageNow();
+      const made = createShaderModule.call(this, descriptor);
 
-      return createShaderModule.call(this, descriptor);
+      recordModule(sinks, pc.perf.frame, descriptor.label ?? null, pageNow() - started);
+
+      return made;
     }
   });
 

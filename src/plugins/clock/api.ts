@@ -121,6 +121,10 @@ export function createClockApi(ctx: ClockCtx): Api {
       deliverElapsed(ctx.state);
     },
 
-    dueAt: (): number | undefined => ctx.state.dueAt
+    dueAt: (): number | undefined => ctx.state.dueAt,
+
+    pending: (): number => (ctx.state.dueAt === undefined ? 0 : 1),
+
+    listeners: (): number => ctx.state.listeners.length
   };
 }

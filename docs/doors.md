@@ -104,7 +104,7 @@ From `@moku-labs/game/control`. Every command runs in dev builds and in debug bu
 | `pause` | `game.pause` | none | cosmetic | `lifecycle.push("devtools")`. Value: `lifecycle.isPaused()` |
 | `resume` | `game.resume` | none | cosmetic | `lifecycle.pop("devtools")`. Value: `lifecycle.isPaused()`, still true while another reason holds |
 | `capture` | `game.capture` | `{ legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" }` | read | `renderer.capture(options)`: `{ png, legend? }` of the canvas after the next drawn frame. `undefined` while the renderer is inert. See "Capture options" |
-| `debug` | `game.debug` | `{ nineSlice: "boolean?", verifyFrames: "boolean?", kept: "boolean?" }` | cosmetic | `renderer.sync.debug.nineSlice(on)`, `renderer.sync.debug.verifyFrames(on)` and `renderer.sync.debug.kept(on)`, each field given; `{ kept: false }` alone draws every filtered view live (the A/B switch of a measurement); none answers the switches unchanged. Value: the debug switches `{ nineSlice, verifyFrames, kept }` |
+| `debug` | `game.debug` | `{ nineSlice: "boolean?", verifyFrames: "boolean?", kept: "boolean?", overdraw: "boolean?" }` | cosmetic | `renderer.sync.debug.nineSlice(on)`, `renderer.sync.debug.verifyFrames(on)`, `renderer.sync.debug.kept(on)` and `renderer.sync.debug.overdraw(on)`, each field given; `{ kept: false }` alone draws every filtered view live (the A/B switch of a measurement); `{ overdraw: true }` draws the overdraw heat map; none answers the switches unchanged. Value: the debug switches `{ nineSlice, verifyFrames, kept, overdraw }` |
 | `reducedMotion` | `game.reducedMotion` | `{ on: "boolean" }` | cosmetic | `anim.setReducedMotion(on)`. Value: `anim.reducedMotion()` |
 | `timeScale` | `game.timeScale` | `{ scale: "number" }` | cosmetic | `time.setScale(scale)`. A scale below 0 or not finite throws. Value: `time.snapshot()` |
 | `frameRate` | `game.frameRate` | `{ fps: "number?" }` | cosmetic | `time.setRate(fps)`, or `time.setRate("auto")` without `fps`: the same screen at 120 and at 60 for an A/B run. An `fps` other than 30, 60 or 120 throws `[game] time.setRate takes "auto", 30, 60 or 120.` Value: `time.rate()` |
@@ -177,7 +177,7 @@ A dev build keeps the last 120 frames of world changes, about 2 s at 60 fps. A p
 
 ## Turn the dev build on
 
-`__MOKU_GAME_DEV__` is a global the engine reads and never sets. Only `true` turns the dev build on; undefined means production, and `run` throws `[game] Control commands run in dev builds only.` Two more boolean flags follow the same rules: `__MOKU_GAME_AGENT__`, the editor's page agent is on the page and measurement code runs, and `__MOKU_GAME_CONTROL__`, every command runs, the state-changing ones too. Three strings name the page: `__MOKU_GAME_BUILD__` (the build id), `__MOKU_GAME_ENGINE__` (the engine fingerprint, `0.14.12+9c41e0`, with `.patch.<hash>` when the install root patches the engine, `0.0.0+src` from the engine's sources) and `__MOKU_GAME_EDITOR__` (the `host:port` the agent of a debug page dials). The package ships their declarations, `var __MOKU_GAME_DEV__: boolean | undefined` and the rest. A game never re-declares them.
+`__MOKU_GAME_DEV__` is a global the engine reads and never sets. Only `true` turns the dev build on; undefined means production, and `run` throws `[game] Control commands run in dev builds only.` Two more boolean flags follow the same rules: `__MOKU_GAME_AGENT__`, the editor's page agent is on the page and measurement code runs, and `__MOKU_GAME_CONTROL__`, every command runs, the state-changing ones too. Four strings name the page: `__MOKU_GAME_BUILD__` (the build id), `__MOKU_GAME_ENGINE__` (the engine fingerprint, `0.14.12+9c41e0`, with `.patch.<hash>` when the install root patches the engine, `0.0.0+src` from the engine's sources), `__MOKU_GAME_EDITOR__` (the `host:port` the agent of a debug page dials) and `__MOKU_GAME_APP__` (the app id of a debug page: `native.identifier`, with `.debug` in the native debug app, so the editor pairs a device stream with its project). The package ships their declarations, `var __MOKU_GAME_DEV__: boolean | undefined` and the rest. A game never re-declares them.
 
 **`moku-game` sets them.** Who sets what:
 
@@ -185,11 +185,11 @@ A dev build keeps the last 120 frames of world changes, about 2 s at 60 fps. A p
 |---|---|---|---|---|
 | `moku-game dev`, the editor's `preparePage`, the page of `moku-game visual` | `true` | `true` | `true` | `"dev"` |
 | `moku-game build` (release) | define `"false"` | define `"false"` | define `"false"` | not set |
-| `moku-game build --debug` (= `--debug=read`) | define `"false"` | define `"true"` + global | define `"false"` + global | `"debug-<stamp>"` |
-| `moku-game build --debug=full` | define `"false"` | define `"true"` + global | define `"true"` + global | `"debug-full-<stamp>"` |
+| `moku-game build --debug` (`--debug=full` is an alias) | define `"false"` | define `"true"` + global | define `"true"` + global | `"debug-<stamp>"` |
+| `moku-game build --debug=read` (rare: a read-only build) | define `"false"` | define `"true"` + global | define `"false"` + global | `"debug-<stamp>"` |
 | a library test, `createHeadless` | undefined unless stubbed | undefined unless stubbed | undefined unless stubbed | undefined |
 
-`__MOKU_GAME_ENGINE__` is set on the dev page and on a debug page, `__MOKU_GAME_EDITOR__` on a debug page only (`--editor`, default `127.0.0.1:47600`); a release page sets neither. `moku-game dev` defines the three flags `true` in the bunfig of the dev page, `define = { "__MOKU_GAME_DEV__" = "true", "__MOKU_GAME_AGENT__" = "true", "__MOKU_GAME_CONTROL__" = "true" }`, and its `.moku/dev.ts`, imported right after the startup mark of `.moku/main.ts`, sets the globals for code that reads `globalThis`, DEV last:
+`__MOKU_GAME_ENGINE__` is set on the dev page and on a debug page, `__MOKU_GAME_EDITOR__` on a debug page only (`--editor`, default `127.0.0.1:47600`), `__MOKU_GAME_APP__` on a debug page of a game with a native section; a release page sets none of them. `moku-game dev` defines the three flags `true` in the bunfig of the dev page, `define = { "__MOKU_GAME_DEV__" = "true", "__MOKU_GAME_AGENT__" = "true", "__MOKU_GAME_CONTROL__" = "true" }`, and its `.moku/dev.ts`, imported right after the startup mark of `.moku/main.ts`, sets the globals for code that reads `globalThis`, DEV last:
 
 ```ts
 // Written by moku-game dev. Do not edit.
@@ -207,11 +207,11 @@ A test sets a flag with `vi.stubGlobal("__MOKU_GAME_DEV__", true)`; DEV alone ru
 | Page | `read`, `cosmetic` | `route`, `cheat`, `raw` |
 |---|---|---|
 | dev, a test with DEV | run | run |
-| `--debug=full` | run | run |
-| `--debug` | run | refused: `controlReadOnly` |
+| `--debug` (and `--debug=full`) | run | run |
+| `--debug=read` | run | refused: `controlReadOnly` |
 | release, a test with no flag | refused: `controlRefused` | refused: `controlRefused` |
 
-`run` throws the read-only refusal before the command runs: `[game] The command game.tap changes the game: this debug build runs read and cosmetic commands only.` with `Build with moku-game build --debug=full to run it.` Its error carries `reason: "read-only"`, so an editor tells it apart from a failure; `controlReadOnly` and the type `ControlReadOnlyError` come from `@moku-labs/game/control`. `game.capture` with `diff` writes the state, so a `--debug` page refuses it the same way.
+`run` throws the read-only refusal before the command runs: `[game] The command game.tap changes the game: this debug build runs read and cosmetic commands only.` with `Build with moku-game build --debug to run it.` Its error carries `reason: "read-only"`, so an editor tells it apart from a failure; `controlReadOnly` and the type `ControlReadOnlyError` come from `@moku-labs/game/control`. `game.capture` with `diff` writes the state, so a `--debug=read` page refuses it the same way.
 
 **A game without the shell** does the same with a bundler `define`, `true` in dev and `false` in production. Its production `define` should also set `__MOKU_GAME_AGENT__: "false"` and `__MOKU_GAME_CONTROL__: "false"`: without them the agent-guarded code stays in its bundle and never runs (larger, not wrong).
 

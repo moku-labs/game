@@ -173,6 +173,28 @@ export function capSlackMs(displayHz: number | null, frameMs: number): number {
 }
 
 /**
+ * The rate the loop really runs at under a cap: the cap skips every tick that comes more than `capSlackMs` early, so
+ * a frame runs on the first vsync at or after one frame of the cap minus the slack, never faster than the display. The
+ * cap itself while the display is unknown. Called when the snapshot is rebuilt, never per frame.
+ *
+ * @param fps - The cap: the loop's rate, the idle cap left out.
+ * @param displayHz - The display's refresh rate, or `null` while unknown.
+ * @returns Frames per second the loop runs at.
+ * @example
+ * ```ts
+ * loopRateOf(60, 144); // 48: every third tick of a 144 Hz panel
+ * ```
+ */
+export function loopRateOf(fps: number, displayHz: number | null): number {
+  if (displayHz === null) return fps;
+
+  const frameMs = 1000 / fps;
+  const ticks = Math.ceil(((frameMs - capSlackMs(displayHz, frameMs)) * displayHz) / 1000);
+
+  return displayHz / Math.max(1, ticks);
+}
+
+/**
  * Normalizes a thermal status of the shell: a status name, or Android's whole number 0–6 mapped in order.
  *
  * @param value - The raw status.

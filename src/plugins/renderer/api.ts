@@ -157,7 +157,8 @@ export function createRendererApi(ctx: KernelSlice): Api {
       event: monitor.event,
       beginAgent: monitor.beginAgent,
       endAgent: monitor.endAgent,
-      setResolution: monitor.setResolution
+      setResolution: monitor.setResolution,
+      counts: monitor.counts
     },
     invalidate: demand.invalidate,
     stats: monitor.stats,

@@ -1,6 +1,6 @@
 /**
- * @file flow/doors — `run`, the `/control` side: dev builds and debug builds (read and cosmetic
- * commands; every command with `--debug=full`), a cheat taints, the envelope.
+ * @file flow/doors — `run`, the `/control` side: dev builds and debug builds (every command with
+ * `--debug`; the read and cosmetic ones alone with `--debug=read`), a cheat taints, the envelope.
  */
 import type { HeadlessApp } from "../headless";
 import { controlReadOnly, controlRefused, isAgent, isControl, isDev } from "./dev";
@@ -23,17 +23,17 @@ function envelopeOf(app: HeadlessApp): Envelope {
 }
 
 /**
- * Runs a command in a dev build or a debug build. A debug build of `--debug` runs the read and
- * cosmetic commands only; `--debug=full` and the dev page run every command. A `cheat` or `raw`
+ * Runs a command in a dev build or a debug build. A `--debug` build and the dev page run every
+ * command; a `--debug=read` build runs the read and cosmetic ones only. A `cheat` or `raw`
  * command taints the session and is journaled before it runs, so a failing one still counts.
  *
  * @param app - The app the command acts on.
  * @param command - The command.
  * @param input - Its input; left out when every field of its schema is optional.
  * @returns The command's value and the envelope read after it.
- * @throws {Error} Outside dev builds and debug builds (read and cosmetic commands; every command
- *   with `--debug=full`), the read-only refusal of `controlReadOnly` for a `route`, `cheat` or
- *   `raw` command on a `--debug` page, and whatever the command throws.
+ * @throws {Error} Outside dev builds and debug builds (every command with `--debug`; the read and
+ *   cosmetic ones alone with `--debug=read`), the read-only refusal of `controlReadOnly` for a
+ *   `route`, `cheat` or `raw` command on a `--debug=read` page, and whatever the command throws.
  * @example
  * ```ts
  * // An e2e script: load the bug report, then tap Play.
@@ -41,7 +41,7 @@ function envelopeOf(app: HeadlessApp): Envelope {
  * const ran = await run(app, commands.answer, { intent: "play" });
  * ran.value; // true
  * ran.state; // { path: "board/awaitIntent", frame: 14, tainted: true }
- * // On a --debug page: await run(app, commands.tap, { key: "play" }); // throws "[game] The command game.tap changes the game: …"
+ * // On a --debug=read page: await run(app, commands.tap, { key: "play" }); // throws "[game] The command game.tap changes the game: …"
  * ```
  */
 export async function run<S extends InputSchema, O, App extends HeadlessApp>(
@@ -49,7 +49,7 @@ export async function run<S extends InputSchema, O, App extends HeadlessApp>(
   command: Command<S, O, App>,
   ...input: InputArguments<S>
 ): Promise<Ran<O>> {
-  // The dev page and a --debug=full page run every command; a --debug page the read and cosmetic ones.
+  // The dev page and a --debug page run every command; a --debug=read page the read and cosmetic ones.
   if (!isDev() && !isControl()) {
     if (!isAgent()) throw controlRefused();
     if (command.effect !== "read" && command.effect !== "cosmetic") {

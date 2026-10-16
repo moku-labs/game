@@ -2,20 +2,22 @@
  * @file renderer/monitor — the performance monitor of an agent build: attaching to the application that draws (once:
  * the ring, the time listener, the long-frame observer, the host's resolution, loss and restore; then per
  * application: the passes, the compile counting and the GPU timer), the agent's spans, marks, the flow path, the pause
- * events, the thermal line, and the stop. Reached only from the agent branches of `monitor/api.ts`: a production
- * bundle carries none of it.
+ * events, the thermal line, the overdraw switch's `debug` event, and the stop. Reached only from the agent branches
+ * of `monitor/api.ts`: a production bundle carries none of it.
  */
 import type { Json } from "../../model/types";
 import type { ThermalReading } from "../../time/types";
 import { pageNow } from "./clock";
 import { commitFrame } from "./commit";
 import { attachCompileCounting } from "./compiles";
+import { clearCounts } from "./counts";
 import { createGlTimer } from "./gl-timer";
 import { createGpuTimer } from "./gpu-timer";
 import { displayOf, longFrameLine, markLine, thermalLine } from "./log";
 import type { PerfChange } from "./log-types";
 import { observeLongFrames } from "./long-frames";
 import { attachGlPasses, createPassSink } from "./passes";
+import { resetProblems } from "./problems";
 import { CHANGED, createFrameRing } from "./ring";
 import { deliver, flushPerf, writeEvent } from "./stream";
 import { resetTicks } from "./ticks";
@@ -173,10 +175,16 @@ function attachFirst(pc: PerfCtx): void {
     perf.flags |= CHANGED.restore;
     writeEvent(pc, "device-restored", { kind: host.kind() });
   });
-  // The trim reaches the log through the host (O24): `host/pool.ts` never imports the monitor.
-  host.onTrim((reason, freedMb) => writeEvent(pc, "pool-trim", { reason, freedMb }));
+  // The trim reaches the log through the host (O24): `host/pool.ts` never imports the monitor. A target made soon after
+  // it is churn (U5).
+  host.onTrim((reason, freedMb) => {
+    perf.problems.trimAt = pageNow();
+    writeEvent(pc, "pool-trim", { reason, freedMb });
+  });
   // The end of a warm-up run reaches it through sync the same way: `sync/warm.ts` never imports the monitor.
   deps.sync.onWarm(draws => writeEvent(pc, "warm", { draws }));
+  // The overdraw heat map marks the frames it draws (U6): they are no real cost.
+  deps.sync.onOverdraw(on => writeEvent(pc, "debug", { overdraw: on }));
   notePath(pc, ctx.deps.flow.state().path, false);
   perf.display = displayOf(pc);
 }
@@ -259,11 +267,14 @@ export function attachPerf(pc: PerfCtx): void {
   perf.timer = undefined;
   sinks.passes = undefined;
   sinks.filterKinds = ctx.state.sync.filterKinds;
+  sinks.filterOwners = ctx.state.sync.filterOwners;
 
   const counted = ctx.state.host.uninstallCounting !== undefined;
   const kind = pc.deps.host.kind();
   let bits = counted ? MEASURE.counted : 0;
 
+  // Render targets are counted on the WebGPU texture system of the counting classes.
+  if (counted && kind === "webgpu") bits |= MEASURE.targets;
   if (kind === "webgpu") bits |= attachGpu(pc, counted);
   else if (kind === "webgl") bits |= attachGl(pc);
 
@@ -272,8 +283,8 @@ export function attachPerf(pc: PerfCtx): void {
 
 /**
  * Stops the monitor of an agent build: the per-application removers run, the timer stops, the observer disconnects,
- * the listeners, the pending spikes, the paths and the display's ticks go. The ring keeps its arrays (a restart of the same app reuses
- * them), empty.
+ * the listeners, the pending spikes, the paths, the display's ticks, the registered counts and the problem
+ * accumulators go. The ring keeps its arrays (a restart of the same app reuses them), empty.
  *
  * @param perf - The perf state.
  * @param sinks - The sinks.
@@ -307,5 +318,9 @@ export function stopPerf(perf: PerfState, sinks: MonitorSinks): void {
   resetTicks(perf.ticks);
   sinks.passes = undefined;
   sinks.filterKinds = undefined;
+  sinks.filterOwners = undefined;
+  sinks.filterOwner = 0;
   sinks.inFrame = false;
+  clearCounts(perf.counts);
+  resetProblems({ perf, sinks });
 }

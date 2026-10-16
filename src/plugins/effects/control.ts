@@ -10,7 +10,8 @@ import type { EffectsApi } from "./types";
 
 /**
  * Turns one filter kind off or on, through `effects.diagnostics`. Answers the kinds that are off afterwards.
- * Cosmetic: it runs on a `--debug` page. A door for the MCP and the tools page; it carries no `overlay` marker.
+ * Cosmetic: it runs on every debug page, `--debug=read` too. A door for the MCP and the tools page; it carries no
+ * `overlay` marker.
  *
  * @throws {Error} `[game] No filter kind "fx.nope".` naming every known kind, and `notInstalled` without
  *   `effectsPlugin`.

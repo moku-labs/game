@@ -243,7 +243,8 @@ export function stepParts(sctx: SyncCtx): void {
   const hud = hudLayerOf(state);
   const ecs = sctx.ctx.deps.world.ecs;
 
-  overlay.nextOff.clear();
+  // Only when it holds something: V8 gives an empty set a new table at every `clear()`, and the step runs every frame.
+  if (overlay.nextOff.size > 0) overlay.nextOff.clear();
 
   for (const entity of overlay.parts) {
     const view = state.views.get(entity);

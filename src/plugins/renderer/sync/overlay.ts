@@ -469,7 +469,8 @@ export function stepOverlays(sctx: SyncCtx): void {
 
   const wholes = sctx.deps.demand.wholes();
 
-  overlay.flipped.clear();
+  // Only when it holds something: V8 gives an empty set a new table at every `clear()`, and the step runs every frame.
+  if (overlay.flipped.size > 0) overlay.flipped.clear();
   if (wholes.has("layers")) clearRange(sctx);
 
   for (const record of overlay.records.values()) record.seen = false;

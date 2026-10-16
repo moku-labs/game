@@ -1465,6 +1465,7 @@ export function stopSync(state: SyncState): void {
   stopWarm(state);
   state.held.clear();
   state.redraws = 0;
+  state.overdraw.listeners.length = 0;
 
   // The tree last: the layers, the pooled objects and the root with what still hangs in it.
   clearLayers(state);

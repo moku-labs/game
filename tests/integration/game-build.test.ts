@@ -45,7 +45,7 @@ const PROFILES = {
     __MOKU_GAME_AGENT__: "false",
     __MOKU_GAME_CONTROL__: "false"
   },
-  /** `moku-game build --debug`. */
+  /** `moku-game build --debug=read`. */
   agent: {
     __MOKU_GAME_DEV__: "false",
     __MOKU_GAME_AGENT__: "true",
@@ -91,6 +91,22 @@ function effectsMarkers(): string[] {
 
 /** The log events of the debug switches of effects: agent-only, so a release bundle drops them. */
 const agentOnlyEffectsMarkers = ["effects:diagnostics", "effects:diagnostics-unknown"];
+
+/**
+ * The telemetry of a debug build for the editor's Mission control (0.15, U3 to U6): the problem rules, the count
+ * registry and its leak count of input, the overdraw switch's log and its blend mode. Agent-only: a release bundle
+ * drops every one of them, an agent bundle keeps them.
+ */
+const telemetryMarkers = [
+  "filter-still",
+  "target-churn",
+  "not-eligible",
+  "after-trim",
+  "Monitor count table is full",
+  "inputListeners",
+  "renderer:overdraw",
+  "add-npm"
+];
 
 /** The dev warning of the shader scan (LEAD-FIXES-4 item 3): dev-only, so a release bundle drops it. */
 const devOnlyEffectsMarkers = ["effects:filter-reads-screen"];
@@ -206,6 +222,16 @@ describe("the debug switches, the trigger counter and the overlay call in a game
     expect(release).not.toContain("debug:overlay-failed");
     expect(agent).toContain("ui:debug-trigger");
     expect(agent).toContain("debug:overlay-failed");
+  }, 60_000);
+});
+
+describe("the telemetry of a debug build in a game build", () => {
+  it("leaves a release bundle and stays in an agent bundle", () => {
+    const release = bundle("screen", "release");
+    const agent = bundle("screen", "agent");
+
+    expect(telemetryMarkers.filter(marker => release.includes(marker))).toEqual([]);
+    expect(telemetryMarkers.filter(marker => !agent.includes(marker))).toEqual([]);
   }, 60_000);
 });
 

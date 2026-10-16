@@ -1050,6 +1050,25 @@ export type EcsApi = {
   ownerOf(entity: Entity): Owner | undefined;
 
   /**
+   * How many entities live now: every id `spawn` handed out that no despawn took back, the views
+   * of the projections and the layers included. It reads a size the world keeps, so it allocates
+   * nothing and a monitor may call it every second. A screen entered and left returns the count to
+   * where it was; a count that grows with every visit is a leak.
+   *
+   * @returns The number of live entities.
+   * @example
+   * ```ts
+   * // A test that spawns an entity sees it counted until the despawn.
+   * const before = app.world.ecs.count();
+   * const coin = app.world.ecs.spawn({ kind: "plugin", name: "test" }, [Transform({ x: 10 })]);
+   * app.world.ecs.count(); // before + 1
+   * app.world.ecs.despawn(coin);
+   * app.world.ecs.count(); // before
+   * ```
+   */
+  count(): number;
+
+  /**
    * The whole world as plain JSON, sorted by entity index. A component value that is not JSON is
    * left out and its name is listed in `skipped`.
    *

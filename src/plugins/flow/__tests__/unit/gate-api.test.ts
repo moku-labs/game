@@ -47,6 +47,7 @@ const createFakeTime = (): FakeTime => {
     resume: vi.fn(),
     wake: vi.fn(),
     wakes: () => 0,
+    frameListeners: () => 0,
     measure: vi.fn(),
     agentClock: () => undefined,
     chargeAgent: vi.fn(),
@@ -90,7 +91,9 @@ const createMockDeps = (time: TimeApi): Deps => ({
     scheduleAt: vi.fn(),
     onElapsed: vi.fn(() => noop),
     poke: vi.fn(),
-    dueAt: vi.fn()
+    dueAt: vi.fn(),
+    pending: vi.fn(() => 0),
+    listeners: vi.fn(() => 0)
   }
 });
 

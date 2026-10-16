@@ -452,6 +452,26 @@ export type InputApi = {
   cursor(): string;
 
   /**
+   * How many listeners and controls are registered now: every `onTap`, `onPointer` and `onKey`
+   * listener and every `controls.add` registration whose remover has not run. The pointer and key
+   * listeners input itself opens on the canvas are not counted. A screen entered and left returns
+   * the count to where it was; a count that grows with every visit is a listener left behind. It
+   * reads four lengths and allocates nothing, so a monitor may call it every second.
+   *
+   * @returns The number of registered listeners and controls.
+   * @example
+   * ```ts
+   * // A test checks that a popup takes its Escape listener back when it closes.
+   * const before = app.input.listeners();
+   * const off = app.input.onKey(key => key.key === "Escape");
+   * app.input.listeners() - before; // 1
+   * off();
+   * app.input.listeners() - before; // 0
+   * ```
+   */
+  listeners(): number;
+
+  /**
    * The components that make a view a control besides input's own: the cursor shows
    * `config.cursor.control` over a view that carries one of them.
    */

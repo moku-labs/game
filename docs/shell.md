@@ -335,7 +335,7 @@ const { app } = game.screen({ platform: fromSystem(system) }); // Back, pause, h
 |---|---|
 | `app.name`, `app.identifier`, `app.icon` | `native.name`, `native.identifier`, `native.icon` |
 | `app.orientation`, `app.backgroundColor` | `page.orientation`, `page.background` |
-| `web.build` | `moku-game build`, with the runner flags; a debug app's adds `--debug` or `--debug=full`, and `--editor host:port` when one was given |
+| `web.build` | `moku-game build`, with the runner flags; a debug app's adds `--debug` (or `--debug=read` for the read-only profile), and `--editor host:port` when one was given |
 | `web.devCommand`, `web.devUrl` | `moku-game dev --port 5173`, `http://127.0.0.1:5173` |
 | `web.dist` | `<game>/dist/web` |
 | `system` | One row per name that needs a Tauri capability: `back`, `haptics`, `store`. A `"store"` save adds `store` |
@@ -420,19 +420,20 @@ The page carries no scenario, no agent, no `.dev` module and no `/control`. Ever
 
 #### Debug build
 
-`moku-game build --debug[=full] [--editor host:port]` builds a debug page for a phone: the production page plus the editor's page agent, never shipped to a store.
+`moku-game build --debug [--editor host:port]` builds a debug page for a phone: the production page plus the editor's page agent with every command, cheats too, never shipped to a store. `--debug=full`, the spelling of earlier releases, is an alias: it builds the same page and prints one line, `--debug already includes control; =full is no longer needed`. `--debug=read` builds the rare read-only page, for when someone asks for one: read and cosmetic commands only.
 
-- **What it carries.** `main.ts` imports `script.ts` first, then `agent.ts`, which sets `__MOKU_GAME_BUILD__`, `__MOKU_GAME_ENGINE__`, `__MOKU_GAME_EDITOR__`, CONTROL, AGENT `true` and DEV `false`; then the page entry, the game's `**/*.dev.ts` modules and `@moku-labs/editor/agent/page`, which `startPage` starts after the app. The defines match: DEV `false`, AGENT `true`, CONTROL `false` for `--debug` (= `--debug=read`, read and cosmetic commands) or `true` for `--debug=full` (every command), and the three strings. No hot swap, no frame recorder, no audio journal, no scenario. The title reads `<title> Debug`.
-- **The build id** is `debug-<UTC stamp>` or `debug-full-<stamp>`, such as `debug-20261014T153012Z`. The page logs it first: `page:build` with `{ build, engine, control }`.
+- **What it carries.** `main.ts` imports `script.ts` first, then `agent.ts`, which sets `__MOKU_GAME_BUILD__`, `__MOKU_GAME_ENGINE__`, `__MOKU_GAME_EDITOR__`, `__MOKU_GAME_APP__` when the game has one, CONTROL, AGENT `true` and DEV `false`; then the page entry, the game's `**/*.dev.ts` modules and `@moku-labs/editor/agent/page`, which `startPage` starts after the app. The defines match: DEV `false`, AGENT `true`, CONTROL `true` for `--debug` (every command) or `false` for `--debug=read` (read and cosmetic commands), and the strings. No hot swap, no frame recorder, no audio journal, no scenario. The title reads `<title> Debug`.
+- **The build id** is `debug-<UTC stamp>` for both profiles, such as `debug-20261014T153012Z`; the CONTROL flag tells them apart. The page logs it first: `page:build` with `{ build, engine, control }`.
+- **The app id** is `native.identifier` of `config.ts`, with `.debug` when native builds its debug app (`MOKU_NATIVE_PROFILE=debug`), the id that app installs under: `com.mokulabs.timber.debug`. It is defined and set as `__MOKU_GAME_APP__`, so the editor pairs a device stream with its project. A game with no native section has none.
 - **The engine id** names the engine the page bundles: its version, a hash of its installed `dist/` and of the patch the install root declares for that version, `0.14.12+9c41e0.patch.3f2a7b`; `+src` when the game resolves the engine's sources. The dev page and `preparePage` carry the same id.
 - **`--editor`** is where the agent's bridge dials, written as `__MOKU_GAME_EDITOR__`: `127.0.0.1:47600` by default (a phone reaches it through `adb reverse tcp:47600 tcp:47600`), or the computer's LAN address. A value that is not `host:port` is refused, and so is `--editor` without `--debug`.
 - **The editor is the game's.** `@moku-labs/editor` must resolve from the game, else `[game] build --debug needs @moku-labs/editor in the game.` with `Install it: bun add -d @moku-labs/editor.`
-- **One warning** goes before the size line: `build: a DEBUG page with the editor agent, control: read and cosmetic commands. Build debug-20261014T153012Z, engine 0.14.12+9c41e0, editor 127.0.0.1:47600. Never ship it to a store.`
+- **One warning** goes before the size line: `build: a DEBUG page with the editor agent, control: every command, the state-changing ones too. Build debug-20261014T153012Z, engine 0.14.12+9c41e0, editor 127.0.0.1:47600. Never ship it to a store.`
 - **A store page refuses it.** Tauri runs the web build with `MOKU_NATIVE_PROFILE=debug|store`; `store` with `--debug` fails before anything is built.
 
 ### native
 
-`moku-game native <verb> [<target>]` runs one verb of `@moku-labs/native` over the native config above. `build` and `dev` need a target, such as `ios`. `doctor` and `clean` take one or none. Native prints its own progress and failures. An Android app composes native's `shell` system first, the one that sets `globalThis.__MOKU_NATIVE__`. `native build android --debug[=full] [--editor host:port]` builds a debug app: native gets `debug: true` and installs it beside the store app with its own save (move a tester's progress with `game.saveExport` and `game.saveImport`); the web build is the [debug build](#debug-build) with the same profile and `--editor`; the engine renames nothing. It warns once: `native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store.` Other verbs refuse `--debug`, and so do the other targets in this release.
+`moku-game native <verb> [<target>]` runs one verb of `@moku-labs/native` over the native config above. `build` and `dev` need a target, such as `ios`. `doctor` and `clean` take one or none. Native prints its own progress and failures. An Android app composes native's `shell` system first, the one that sets `globalThis.__MOKU_NATIVE__`. `native build android --debug [--editor host:port]` builds a debug app (`--debug=full` is the alias with its one line, `--debug=read` the read-only profile): native gets `debug: true` and installs it beside the store app with its own save (move a tester's progress with `game.saveExport` and `game.saveImport`); the web build is the [debug build](#debug-build) with the same profile and `--editor`; the engine renames nothing. It warns once: `native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store.` Other verbs refuse `--debug`, and so do the other targets in this release.
 
 ### visual
 

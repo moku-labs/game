@@ -19,6 +19,8 @@ import type {
 
 /**
  * Time each world system took in the current frame of an agent build: names by registration index, ms in the same order.
+ * `names` is a new array each time a system of a new name registers and the same array otherwise, so a reader that
+ * kept it sees growth by identity.
  *
  * @example
  * ```ts
@@ -27,7 +29,7 @@ import type {
  */
 export type SystemTiming = {
   readonly clock: () => number;
-  readonly names: string[];
+  names: readonly string[];
   ms: Float64Array;
 };
 
@@ -42,8 +44,9 @@ const WORLD_PHASES: readonly WorldPhase[] = ["input", "animate", "layout", "sync
 
 /**
  * Gives a timed system its row: the row of an earlier system of the same name, else the next one.
- * `ms` grows (a new array, the old values copied) only when the row is past its end: at
- * registration, never per frame.
+ * A new row replaces `names` with a new array, so a reader that kept the old one sees the growth
+ * by identity, and the old array stays as it was. `ms` grows (a new array, the old values copied)
+ * only when the row is past its end. Both happen at registration, never per frame.
  *
  * @param state - The ecs branch of the plugin state.
  * @param timing - The timing table.
@@ -54,7 +57,7 @@ function giveRow(state: EcsState, timing: SystemTiming, name: string): void {
 
   const row = timing.names.length;
 
-  timing.names.push(name);
+  timing.names = [...timing.names, name];
   state.timingSlots.set(name, row);
 
   if (row < timing.ms.length) return;

@@ -87,6 +87,19 @@ describe("demand.decide", () => {
     expect(demand.decide(false)).toBe(false);
   });
 
+  it("clears no empty set on a still frame or a drawn one with no mark: V8 gives an empty set a new table at each clear", () => {
+    // The heap probe (`monitor-alloc.test.ts`) is skipped under Bun; this guards the same 18 MB per 20 000 frames there.
+    const { demand } = resting();
+    const clear = vi.spyOn(Set.prototype, "clear");
+
+    demand.decide(false);
+    demand.request();
+    demand.decide(false);
+
+    expect(clear).not.toHaveBeenCalled();
+    clear.mockRestore();
+  });
+
   it.each<DemandReason>([
     "resize",
     "restore",

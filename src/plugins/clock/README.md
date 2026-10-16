@@ -18,6 +18,8 @@ rule L3). Everything else, including `fake.ts`, goes through the `ClockSource` o
 | `onElapsed(fn: (input: { now: number }) => void): () => void` | Registers a listener; returns the unsubscribe. `flow` is the listener: it puts `elapsed { now }` into its inbox. |
 | `poke(): void` | Delivers `elapsed { now: now() }` to the listeners immediately, without touching the pending moment. `flow` calls it on resume from background. |
 | `dueAt(): number \| undefined` | The pending due moment, for inspection and tests. |
+| `pending(): number` | How many scheduled timers are not yet due: 1 while a moment is scheduled, else 0 (the clock holds one). A count, no allocation: the renderer's monitor reads it once a second in a debug build as a leak signal, a moment left scheduled after its screen closed. |
+| `listeners(): number` | How many `onElapsed` listeners are registered. A count, no allocation: the renderer's monitor reads it once a second in a debug build as a leak signal, a screen that registers a listener on every visit and never removes it grows the count by one per visit; the remover takes it back down. |
 
 When the timer fires, `dueAt` becomes `undefined` first, then every listener gets `{ now: now() }`.
 The clock never reschedules by itself: after the catch-up edge the rules decide the next moment.

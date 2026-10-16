@@ -25,6 +25,7 @@ import type {
   KeptStats,
   LegendEntry,
   Orientation,
+  PerfCounts,
   PictureRect,
   PixiFilter,
   PixiTexture,
@@ -178,7 +179,9 @@ expectTypeOf(renderer.sync.debug.state()).toEqualTypeOf<{
   nineSlice: boolean;
   verifyFrames: boolean;
   kept: boolean;
+  overdraw: boolean;
 }>();
+expectTypeOf(renderer.sync.debug.overdraw).toEqualTypeOf<(on: boolean) => void>();
 expectTypeOf(renderer.sync.debug.kept).toEqualTypeOf<(on: boolean) => void>();
 // The editor's A/B switch of a measurement passes the one key it changes.
 expectTypeOf<{ kept: false }>().toExtend<Config["debug"]>();
@@ -210,6 +213,7 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   drawCalls?: number;
   redraws?: number;
   rebuilds?: number;
+  counts?: PerfCounts;
 }>();
 expectTypeOf<RenderStats["redraws"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<RenderStats["rebuilds"]>().toEqualTypeOf<number | undefined>();

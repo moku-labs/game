@@ -281,7 +281,7 @@ export const restoreCommand = defineCommand({
 
 /**
  * Answers the committed state as the save holds it: the player, the session and the rng, plain
- * JSON. A read: it runs on a `--debug` page too, so a tester's progress can leave the store app.
+ * JSON. A read: it runs on a `--debug=read` page too, so a tester's progress can leave the store app.
  *
  * @example
  * ```ts
@@ -316,7 +316,7 @@ export const saveExportCommand = defineCommand({
  * them lands. A start that is a rest node is entered; a transit node runs again on the imported
  * trees, rng included, up to the first gate it opens, at a rest node or a popup. Then the store
  * flushes. Replaces the state outside the graph, so the session is tainted and the
- * command journaled. A `--debug` page refuses it; `--debug=full` and the dev page run it.
+ * command journaled. A `--debug=read` page refuses it; a `--debug` page and the dev page run it.
  *
  * @throws {Error} `[game] game.saveImport needs { player, session, rng } of game.saveExport.` for
  *   a value without the three trees.

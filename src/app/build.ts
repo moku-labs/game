@@ -4,7 +4,7 @@
  * under a virtual `<game>/.moku/build/` that is never written, then the packed assets copied
  * beside the page. A release page that carries the editor's agent is refused and removed. With
  * `--debug` the page is a debug page instead: the editor's page agent, the game's `.dev` modules,
- * the agent flag and a control profile, a marked title and a build id. The output works from any
+ * the agent and control flags, a marked title, a build id and the app id. The output works from any
  * http sub-path and from the Tauri protocol: every link starts with `./`, and the page reads
  * `manifest.json` next to itself. Node and Bun only: the bin bundles it.
  */
@@ -29,12 +29,13 @@ import { DEV_MANIFEST, devModulesOf, hotPluginOf, loadGame } from "./serve";
 import type { ResolvedGameConfig } from "./types";
 
 /**
- * The control profile of a debug page: `read` runs the read and cosmetic commands, `full` every
- * command.
+ * The control profile of a debug page: `full` runs every command, the state-changing ones too;
+ * `read` only the read and cosmetic ones. `--debug` is `full` (`--debug=full` is an alias that
+ * says so); `--debug=read` is the rare read-only build.
  *
  * @example
  * ```ts
- * // moku-game build --debug=full
+ * // moku-game build --debug
  * const level: DebugLevel = "full";
  * ```
  */
@@ -48,14 +49,23 @@ export type BuildRun = {
   out: string;
   /** Bun plugins the page bundles with. */
   servePlugins: readonly string[];
-  /** Absent: a release page. `read` or `full`: a debug page with the editor agent and that control profile. */
+  /** Absent: a release page. `full` or `read`: a debug page with the editor agent and that control profile. */
   debug?: DebugLevel;
   /** The `host:port` the page agent dials; debug only, `editorOf` already applied the default. */
   editor?: string;
 };
 
-/** What a debug page is built with: its profile, its build id, the engine id and the editor address. */
-type DebugPage = { level: DebugLevel; build: string; engine: string; editor: string };
+/**
+ * What a debug page is built with: its profile, its build id, the engine id, the editor address
+ * and the app id (`undefined` for a game with no native identifier).
+ */
+type DebugPage = {
+  level: DebugLevel;
+  build: string;
+  engine: string;
+  editor: string;
+  app: string | undefined;
+};
 
 /** The address the page agent of a debug page dials without `--editor`. */
 export const DEFAULT_EDITOR = "127.0.0.1:47600";
@@ -265,26 +275,47 @@ async function loadPlugins(files: readonly string[]): Promise<BunPlugin[]> {
 }
 
 /**
- * The id of a debug build: the profile and the UTC time of the run, `YYYYMMDDTHHMMSSZ`.
+ * The id of a debug build: the UTC time of the run, `YYYYMMDDTHHMMSSZ`, the same for both
+ * profiles (the editor tells them apart by the CONTROL flag).
  *
- * @param debug - The profile.
  * @param now - The wall-clock time of the run, ms.
  * @returns The id.
  * @example
  * ```ts
- * buildIdOf("read", Date.UTC(2026, 9, 14, 15, 30, 12)); // "debug-20261014T153012Z"
+ * buildIdOf(Date.UTC(2026, 9, 14, 15, 30, 12)); // "debug-20261014T153012Z"
  * ```
  */
-export function buildIdOf(debug: DebugLevel, now: number): string {
-  const stamp = `${new Date(now).toISOString().slice(0, 19).replaceAll(/[-:]/g, "")}Z`;
+export function buildIdOf(now: number): string {
+  return `debug-${new Date(now).toISOString().slice(0, 19).replaceAll(/[-:]/g, "")}Z`;
+}
 
-  return debug === "full" ? `debug-full-${stamp}` : `debug-${stamp}`;
+/**
+ * The app id a debug page carries, so the editor pairs a device stream with its project: the
+ * native bundle identifier, with `.debug` when native builds its debug app
+ * (`MOKU_NATIVE_PROFILE=debug`), which installs under that id.
+ *
+ * @param identifier - `native.identifier` of `config.ts`, `undefined` without a native section.
+ * @param profile - `MOKU_NATIVE_PROFILE` of the run.
+ * @returns The app id, or `undefined` without an identifier.
+ * @example
+ * ```ts
+ * appIdOf("com.mokulabs.timber", "debug"); // "com.mokulabs.timber.debug"
+ * ```
+ */
+export function appIdOf(
+  identifier: string | undefined,
+  profile: string | undefined
+): string | undefined {
+  if (identifier === undefined) return undefined;
+
+  return profile === "debug" ? `${identifier}.debug` : identifier;
 }
 
 /**
  * The `define` map of a page: a release page defines the three flags `false`; a debug page the
  * dev flag `false`, the agent flag `true`, the control flag of its profile, and the build id, the
- * engine id and the editor address as strings.
+ * engine id, the editor address and, when the game has one, the app id (`__MOKU_GAME_APP__`) as
+ * strings.
  *
  * @param page - What a debug page is built with; `undefined` for a release page.
  * @returns The defines for `Bun.build`.
@@ -308,7 +339,8 @@ export function definesOf(page: DebugPage | undefined): Record<string, string> {
     __MOKU_GAME_CONTROL__: page.level === "full" ? "true" : "false",
     __MOKU_GAME_BUILD__: JSON.stringify(page.build),
     __MOKU_GAME_ENGINE__: JSON.stringify(page.engine),
-    __MOKU_GAME_EDITOR__: JSON.stringify(page.editor)
+    __MOKU_GAME_EDITOR__: JSON.stringify(page.editor),
+    ...(page.app === undefined ? {} : { __MOKU_GAME_APP__: JSON.stringify(page.app) })
   };
 }
 
@@ -337,7 +369,12 @@ function pageFiles(
 
   if (page === undefined) return release;
 
-  const flags = { build: page.build, control: page.level === "full", engine: page.engine };
+  const flags = {
+    build: page.build,
+    control: page.level === "full",
+    engine: page.engine,
+    app: page.app
+  };
 
   return {
     ...release,
@@ -524,12 +561,13 @@ function refuseStoreDebug(run: BuildRun, env: CliDeps["env"]): void {
 }
 
 /**
- * What a debug run builds its page with: the editor's page agent must resolve from the game, and
- * the engine the page bundles is fingerprinted.
+ * What a debug run builds its page with: the editor's page agent must resolve from the game, the
+ * engine the page bundles is fingerprinted, and the app id comes from the native identifier.
  *
  * @param run - The flags of a debug run.
  * @param level - Its profile.
- * @param deps - The resolver and the clock.
+ * @param settings - The resolved config, for the native identifier.
+ * @param deps - The resolver, the clock and the environment.
  * @returns The debug page and the engine fingerprint.
  * @throws {Error} With the install line when the game cannot resolve `@moku-labs/editor`, and
  *   when it cannot resolve `@moku-labs/game/hot`.
@@ -537,6 +575,7 @@ function refuseStoreDebug(run: BuildRun, env: CliDeps["env"]): void {
 function debugPageOf(
   run: BuildRun,
   level: DebugLevel,
+  settings: ResolvedGameConfig,
   deps: CliDeps
 ): { page: DebugPage; engine: EngineFingerprint } {
   try {
@@ -551,9 +590,10 @@ function debugPageOf(
   const engine = engineFingerprint(run.root, hotPluginOf(run.root, deps.resolve));
   const page: DebugPage = {
     level,
-    build: buildIdOf(level, deps.now()),
+    build: buildIdOf(deps.now()),
     engine: engine.id,
-    editor: run.editor ?? DEFAULT_EDITOR
+    editor: run.editor ?? DEFAULT_EDITOR,
+    app: appIdOf(settings.native?.identifier, deps.env.MOKU_NATIVE_PROFILE)
   };
 
   return { page, engine };
@@ -604,7 +644,7 @@ export async function runBuild(run: BuildRun, deps: CliDeps): Promise<number> {
   refuseOut(run.root, run.out);
 
   // A debug run resolves the agent before anything is written.
-  const debug = run.debug === undefined ? undefined : debugPageOf(run, run.debug, deps);
+  const debug = run.debug === undefined ? undefined : debugPageOf(run, run.debug, settings, deps);
   const packed = await deps.assets(packArguments(run.root, settings, false));
 
   if (packed !== 0) return packed;

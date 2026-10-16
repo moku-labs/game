@@ -455,7 +455,7 @@ describe("run", () => {
       expect(refused).toBeInstanceOf(Error);
       expect(Reflect.get(Object(refused), "reason")).toBe("read-only");
       expect((refused as Error).message).toBe(
-        `[game] The command test.${effect} changes the game: this debug build runs read and cosmetic commands only.\n  Build with moku-game build --debug=full to run it.`
+        `[game] The command test.${effect} changes the game: this debug build runs read and cosmetic commands only.\n  Build with moku-game build --debug to run it.`
       );
     }
 

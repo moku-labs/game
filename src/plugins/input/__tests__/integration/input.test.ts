@@ -254,6 +254,24 @@ describe("input plugin integration", () => {
     await app.stop();
   });
 
+  // Bug caught: a listener a popup took back still counted, or the listeners of a stopped app
+  // left behind: either shows as a leak that is not there, or hides one that is.
+  it("counts a listener while it is registered and nothing after the app stopped", async () => {
+    const app = await startApp();
+    const before = app.input.listeners();
+    const off = app.input.onKey(key => key.key === "Escape");
+
+    expect(app.input.listeners()).toBe(before + 1);
+
+    off();
+
+    expect(app.input.listeners()).toBe(before);
+
+    await app.stop();
+
+    expect(app.input.listeners()).toBe(0);
+  });
+
   it("delivers a headless key to the onKey listeners through app.input.pressKey", async () => {
     const app = await startApp();
     const seen: string[] = [];

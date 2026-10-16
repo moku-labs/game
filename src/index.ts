@@ -44,9 +44,9 @@
  * | renderer | poolLimit | 256 |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
- * | renderer | debug | { nineSlice: false, verifyFrames: false, kept: true }; shallow merge: a game that sets `debug` replaces the whole object, and a switch it leaves out is off, except `kept`, which stays on unless set to false |
+ * | renderer | debug | { nineSlice: false, verifyFrames: false, kept: true, overdraw: false }; shallow merge: a game that sets `debug` replaces the whole object, and a switch it leaves out is off, except `kept`, which stays on unless set to false; `verifyFrames` and `overdraw` work in dev and debug builds only |
  * | renderer | onDemand | false, every frame is drawn; true draws only a frame in which something changed |
- * | renderer | monitor | { budgetMs: "rate", frames: 1024 }, the performance log of an agent build; shallow merge: a game that sets `monitor` gives both fields |
+ * | renderer | monitor | { budgetMs: "rate", frames: 1024, stillFrames: 60, stillMpx: 0.25, churnPerSecond: 4, churnSeconds: 3, churnAfterTrimMs: 1000 }, the performance log of an agent build and the thresholds of its `problem` rules; shallow merge: a game that sets `monitor` gives `budgetMs` and `frames`, a threshold it leaves out keeps its default |
  * | renderer | keptMb | 64, MiB the kept pictures may hold: a filtered view that did not change is drawn from its picture, the least recently drawn goes first; 0 keeps none |
  * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
  * | input | tapSlopPx | 12 |
@@ -292,9 +292,11 @@ export type { HudPartValue, OverlayValue } from "./plugins/renderer/components";
 export {
   PERF_CAUSES,
   PERF_GAP_BUCKETS,
-  PERF_LOG_VERSION
+  PERF_LOG_VERSION,
+  PROBLEM_RULES,
+  SHADER_WHATS
 } from "./plugins/renderer/monitor/log-types";
-export { frameAt } from "./plugins/renderer/monitor/ring";
+export { frameAt, PASS_KINDS } from "./plugins/renderer/monitor/ring";
 export { DEMAND_REASONS } from "./plugins/renderer/reasons";
 export type {
   FrameColumns,
@@ -304,6 +306,7 @@ export type {
   FrameRing,
   LongFrameEntry,
   MonitorConfig,
+  MonitorCounts,
   OverlayEventDetail,
   OverlayWhat,
   PassKind,
@@ -312,9 +315,11 @@ export type {
   PerfChange,
   PerfChangeEntry,
   PerfCollectorLine,
+  PerfCounts,
   PerfDisplay,
   PerfEventLine,
   PerfEventName,
+  PerfGapLine,
   PerfHeaderLine,
   PerfLogLine,
   PerfLongFrameLine,
@@ -323,9 +328,14 @@ export type {
   PerfSampleLine,
   PerfSpikeLine,
   PerfStartupLine,
+  PerfTelemetryLine,
   PerfThermalLine,
   PoolTrim,
   PoolTrimDetail,
+  ProblemEventDetail,
+  ProblemRule,
+  ShaderEventDetail,
+  ShaderWhat,
   WarmDetail
 } from "./plugins/renderer/types";
 // input: gestures as data

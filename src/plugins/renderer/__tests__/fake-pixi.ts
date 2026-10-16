@@ -1018,7 +1018,7 @@ export type FakeRenderTarget = {
   pixelWidth: number;
   pixelHeight: number;
   label?: string;
-  colorTexture?: { label?: string };
+  colorTexture?: { label?: string; source?: { format?: string; resolution?: number } };
 };
 
 /** The fake of Pixi's `SystemRunner`: items are called by the runner's name, in order. */
@@ -1163,12 +1163,37 @@ export type FakeUploadSource = {
   pixelHeight: number;
 };
 
-/** The fake of Pixi's `GpuTextureSystem`: `onSourceUpdate` uploads a source. */
+/**
+ * The fake of Pixi's `GpuTextureSystem`: `initSource` makes a source's GPU texture (once; again it answers the same),
+ * `onSourceUpdate` uploads a source, `onSourceUnload` drops its GPU texture.
+ */
 export class FakeGpuTextureSystem {
   public static extension = { type: [WEBGPU_SYSTEM], name: "texture" };
 
   /** The sources uploaded, in order. */
   public readonly uploaded: FakeUploadSource[] = [];
+  /** The GPU textures made, by source. */
+  public readonly made = new Map<object, { label: string }>();
+  /** The sources dropped, in order. */
+  public readonly unloaded: object[] = [];
+
+  /**
+   * Makes the GPU texture of a source, or answers the one it has.
+   *
+   * @param source - The source.
+   * @returns Its GPU texture.
+   */
+  public initSource(source: FakeUploadSource): { label: string } {
+    const known = this.made.get(source);
+
+    if (known !== undefined) return known;
+
+    const texture = { label: "gpu texture" };
+
+    this.made.set(source, texture);
+
+    return texture;
+  }
 
   /**
    * Uploads a source.
@@ -1177,6 +1202,25 @@ export class FakeGpuTextureSystem {
    */
   protected onSourceUpdate(source: FakeUploadSource): void {
     this.uploaded.push(source);
+  }
+
+  /**
+   * Drops the GPU texture of a source, as Pixi's managed hash does at a destroy or an unload.
+   *
+   * @param source - The source.
+   */
+  protected onSourceUnload(source: FakeUploadSource): void {
+    this.made.delete(source);
+    this.unloaded.push(source);
+  }
+
+  /**
+   * Unloads a source the way Pixi's managed hash calls the protected hook.
+   *
+   * @param source - The source.
+   */
+  public unload(source: FakeUploadSource): void {
+    this.onSourceUnload(source);
   }
 }
 

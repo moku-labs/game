@@ -40,18 +40,28 @@ function someOf(entities: ReadonlySet<Entity>, test: (entity: Entity) => boolean
 }
 
 /**
+ * Empties a set when it holds something. V8 gives an empty set a new table at every `clear()`, so clearing the empty
+ * sets of a still screen every frame allocated about 18 MB in 20 000 frames.
+ *
+ * @param set - The set.
+ */
+function emptyOut(set: Set<unknown>): void {
+  if (set.size > 0) set.clear();
+}
+
+/**
  * Empties the marks of a decision.
  *
  * @param state - The demand state.
  */
 function clearMarks(state: DemandState): void {
-  state.marked.clear();
-  state.pending.clear();
-  state.loose.clear();
-  state.visual.clear();
-  state.moved.clear();
-  state.published.clear();
-  state.wholes.clear();
+  emptyOut(state.marked);
+  emptyOut(state.pending);
+  emptyOut(state.loose);
+  emptyOut(state.visual);
+  emptyOut(state.moved);
+  emptyOut(state.published);
+  emptyOut(state.wholes);
   state.counted = false;
 }
 
@@ -204,7 +214,7 @@ export function createDemandApi(
     if (drawn) {
       state.drawnOnce = true;
       state.requests = 0;
-      state.sinceDraw.clear();
+      emptyOut(state.sinceDraw);
     }
 
     return drawn;
@@ -237,7 +247,7 @@ export function createDemandApi(
     ) {
       verifyFrame(ctx, state, host, state.frame);
 
-      if (state.frame.reason === "verify") state.sinceDraw.clear();
+      if (state.frame.reason === "verify") emptyOut(state.sinceDraw);
     }
   };
 

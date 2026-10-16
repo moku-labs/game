@@ -179,7 +179,8 @@ internal markup: select them by nothing, set the properties instead.
 | `loopsHeld(entity, reveals?)` | The seam of `anim`: whether an endless loop of the entity writes nothing now: its view lies under an opaque cover or in a blurred kept picture of an overlay, or nobody sees it (it or a view above it is at alpha 0, or it is a leaf wholly off the screen). `reveals` says what the loop writes that could show the view again (`"alpha"`, `"place"`, `"both"`): such a loop is not held for its own alpha 0 or for being off the screen. Its clock runs on. Inert, and without a view: `false`. See "What is not drawn". |
 | `debug.overlays()` | Every overlay, bottom first: `{ entity, label, phase, mode, level, range, kept }`, a fresh array; `[]` with none. |
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
-| `debug.state()` | `{ nineSlice }`, a fresh object. |
+| `debug.overdraw(on)` | Dev and debug builds: draws every frame as the overdraw heat map (see "Overdraw heat map"); off draws the game again from the next frame. Elsewhere the switch stays off. |
+| `debug.state()` | `{ nineSlice, verifyFrames, kept, overdraw }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
 | `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
@@ -284,12 +285,13 @@ off: every pipeline is created in the first frame that draws with it, as before.
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
 | `monitor.beginAgent()`, `monitor.endAgent()` | For engine plugins and the editor's page agent. Agent builds: bracket the agent's own work, measured as the `agent` phase, left out of the spike rule and handed to `time.chargeAgent`. A nested begin and a lone end are ignored. |
 | `monitor.setResolution(n \| undefined)` | Every build: draws at `n` from the next frame; `undefined` goes back to the policy (see "Resolution"). Answers the resolution of the next frame. |
+| `monitor.counts.register(name, read)` | Agent builds: adds a count to the live object counts, read once a second (see "Live object counts"). A name registered again gets the new reader. At most 16: the 17th throws `[game] Monitor count table is full (16).` The remover; the renderer's `onStop` drops every count. Nothing kept without the flag. |
 
 `frameAt(ring, age)` (root export) turns one slot into a plain record: NaN as `null`, bits as
 names, the path id as the flow path. A reader of the columns names the bits itself with two root exports:
@@ -432,17 +434,86 @@ measured on this build or backend" is `null`, never 0.
 
 | Kind | When |
 |---|---|
-| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent; `webview` the Chrome major of an Android WebView, `; wv)` in the user agent, or of the page in the native shell, else `null`; `browser` the Chrome major of any Chromium page), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config (`budgetMs`: the newest frame's budget), what is measured. On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
+| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent; `webview` the Chrome major of an Android WebView, `; wv)` in the user agent, or of the page in the native shell, else `null`; `browser` the Chrome major of any Chromium page), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config (`budgetMs`: the newest frame's budget), what is measured (`targets` where render targets are counted), the app id (`app: { id }`, `__MOKU_GAME_APP__`: `"com.mokulabs.timber.debug"` in a native debug build, `null` without one) and the debug drawing (`debug: { overdraw }`). On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
 | `startup` | Once, at the first flush after the first drawn frame, and to every later subscriber after its header: HTML, the bundle's download, parse, evaluate, the Pixi chunk, `app.init`, the first frame, the boot long frames. |
-| `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost. |
-| `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label, the long frames around it. |
+| `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost, the live object counts (`counts`) and the render targets made and dropped (`targets: { created, destroyed }`, WebGPU; `null` elsewhere; not the memory of `textures.targets`). |
+| `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label and their detail (see "Pass detail"), the long frames around it. |
 | `longFrame` | When the observer delivers one. |
-| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display` (a resize, a restore, a turn, or a display rate `time` learned: the `PerfDisplay` of the moment, with `hz`, `time.rate().displayHz` or `null`), `compile`/`upload` (at a flush), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
+| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display` (a resize, a restore, a turn, or a display rate `time` learned: the `PerfDisplay` of the moment, with `hz`, `time.rate().displayHz` or `null`), `compile`/`upload` (at a flush), `shader` and `problem` (at a flush, see below), `debug` (`{ overdraw }`, when the overdraw switch moves), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
 | `mark` | `monitor.mark(label)`, and an auto mark when the flow rests on a new path. |
 | `thermal` | Every `time:thermal` reading of the native shell. |
 
 The engine sends nothing anywhere: the listener decides (the editor's page agent posts the lines to
-its collector). Without a listener no line is built; the ring records anyway.
+its collector). Without a listener no line is built; the ring records anyway. The editor's collector
+writes two kinds of its own into its copy of a log, `gap` (lines a device lost) and `telemetry` (wired
+device telemetry); the engine never writes them (`PerfGapLine`, `PerfTelemetryLine`).
+
+#### Pass detail
+
+Each render pass of the pass ring (`frames().passes`, `capacity × 4` of them) carries, beside its
+frame, index, kind (`PASS_KINDS[kind]`), stencil, size, GPU time and label:
+
+| Column | What |
+|---|---|
+| `owner` | The entity whose filter drew the pass (sync notes it per Pixi filter in `filters.set`: the filter, the stages of its inputs and a blur's two pass filters); 0 for the canvas, a texture pass and a filter no view hangs. |
+| `kind2` | The filter's kind, **1-based** into `frames().kindNames` (`kindNames[kind2 - 1]`, `"other"` first), 0 for none: the rule of the frame's `fltKind` column too. |
+| `drawsAt` | The frame's draws when the pass began (WebGPU; draws are not counted on WebGL): a pass drew up to the next pass's `drawsAt`, the last one up to the frame's `draws`. |
+| `format`, `resolution` | The target's texture format (by reference) and resolution; `null` / NaN when unknown. |
+
+A spike's `passes[]` reads the same: `owner` and `view` (the owner's view label when the line is
+built), `filter` (the kind id), `draws` (`null` where draws are not counted; they add up to the
+frame's draws), `format`, `resolution`, and `kept: true` for the take of a kept picture (its label
+starts with `kept:`). A filter chain is the passes of one owner in a row. `frames().systemNames` names
+`sysIdx`; a world that registers a system makes a new array, so a reader sees the growth by identity.
+
+#### Shader events
+
+Every pipeline the engine's device creates (WebGPU) or program it links (WebGL), and every WebGPU
+shader module, is kept in a ring of 64 records with its frame, label, CPU time and where it happened:
+the index of the pass of the frame, and the filter kind and its owner while a filter applies (a
+compile of a plain batch has none). At each flush with a listener, every record not sent yet becomes
+one `shader` event, `ShaderEventDetail`: `{ what: "compile" | "module", label, ms, frame, boot,
+during: { pass, filter, owner, view } }`, `boot: true` up to the first drawn frame (a listener that
+comes after the boot still gets the records the ring holds). `SHADER_WHATS` lists the values of `what`;
+`variant` and `relink` come later. The `compile { frame, count }` event stays as it was.
+
+#### Problems
+
+Once a second the flush judges three rules from accumulators the frames fill without allocating, and
+writes a `problem` event once per crossing (`ProblemEventDetail`, rules `PROBLEM_RULES`): `{ rule,
+severity, owner, view, filter, value, threshold, since, frames, reason? }`, and `{ rule, cleared: true,
+owner, view }` when the condition stops.
+
+| Rule | When | `value` |
+|---|---|---|
+| `filter-still` (warn) | A filtered view whose kept record is live while kept pictures are on stood still (no stage-1 change) for `stillFrames` drawn frames, its filter applied in every one of them over `stillMpx` a frame. `reason: "budget"` when its take was refused for the kept budget, `"not-eligible"` otherwise. A view without a kept record (a filter that reads the screen) is not judged. | Still frames |
+| `target-churn` (warn) | Render targets made and dropped `churnPerSecond` a second for `churnSeconds` seconds in a row (`reason: "rate"`), a target made in an idle frame (`"idle"`), or made within `churnAfterTrimMs` after a pool trim (`"after-trim"`). WebGPU. | Targets made and dropped in the second |
+| `retakes` (info) | A kept view taken again 3 times or more in 2 seconds, its first take left out. | Takes per second |
+
+#### Live object counts
+
+The leak detector of a debug build: `sample.counts` and `stats().counts` read, once a second and at
+call time, `entities` (`world.ecs.count()`), `views` (the views of `sync`), `timers`
+(`clock.pending()`), `frameListeners` (`time.onFrame` callbacks) and `clockListeners`
+(`clock.onElapsed` listeners), and every count a plugin registered with `monitor.counts.register`:
+`input`, which depends on the renderer and cannot be read by it, registers `inputListeners` in
+`onStart`. A screen entered and left brings every count back to where it was; a count that grows by
+one a visit is a listener or a timer the screen leaves behind.
+
+#### Overdraw heat map
+
+`sync.debug.overdraw(true)` (or the door `game.debug { overdraw: true }`) draws every frame so that a
+pixel's brightness counts the layers drawn there: 1/16 white a layer, white at sixteen and more. Only
+the stage pass changes: right before it every node under the root blends `"add-npm"` (alpha adds up),
+every layer draws at alpha 1/16 and every node under it at 1 (0 stays 0), filters are off, kept pictures
+draw live (`kept.live`: every record bypassed, the entries of every range picture lifted), and one
+`ColorMatrixFilter` on the root turns the frame's alpha into grey; right after it every node gets its
+own alpha, blend mode and filters back. Between frames the tree is the game's, so the oracles, a
+capture and the editor read the game, and off draws it again from the next frame. While on, every frame
+is asked for, also with `onDemand`. A texel a texture leaves transparent adds nothing; outside the
+root's bounds the background shows. Public Pixi API only. The frames are marked in the log (`debug`
+event, `header.debug.overdraw`). Dev and debug builds only. The browser leg
+`bun tests/visual/overdraw.visual.ts` checks it on the GPU.
 
 #### GPU time
 
@@ -470,7 +541,7 @@ WebGL pass has no stencil count and no GPU time of its own. A WebKit page report
   !__MOKU_GAME_DEV__) && (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)`
   inline, not with `isDev()`: Bun does not inline a function across modules, and the inline guard
   folds under a production `define`, so the capture code leaves the bundle; a debug page keeps it.
-  `game.capture` with `diff` writes the state, so on a `--debug` page it throws `controlReadOnly`. The dev branch logs `"moku:dev"`
+  `game.capture` with `diff` writes the state, so on a `--debug=read` page it throws `controlReadOnly`. The dev branch logs `"moku:dev"`
   with `{ command: "renderer.capture" }` at debug level, plus `options: [...]` with the names of the
   options given (`legend` counts when true). `renderer.extract.base64` exists on the
   shared systems of both backends (8.22); it draws the stage into a texture over `app.screen`,
@@ -558,9 +629,9 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `poolLimit` | `number` | `256` | Display objects kept in all pools together. |
 | `unsupportedMessage` | `string` | `"This device cannot run the game."` | Text of the unsupported-device screen. |
 | `loadPixi` | `() => Promise<PixiModule>` | `() => import("pixi.js")` | Loader seam. Tests pass a fake module. |
-| `debug` | `{ nineSlice?, verifyFrames?, kept? }` | `{ nineSlice: false, verifyFrames: false, kept: true }` | Debug drawing and checks at start, a switch left out is off (`kept` left out is on); `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)` and `sync.debug.kept(on)` switch them at run time. `verifyFrames` works in dev and debug builds only. |
+| `debug` | `{ nineSlice?, verifyFrames?, kept?, overdraw? }` | `{ nineSlice: false, verifyFrames: false, kept: true, overdraw: false }` | Debug drawing and checks at start, a switch left out is off (`kept` left out is on); `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)`, `sync.debug.kept(on)` and `sync.debug.overdraw(on)` switch them at run time. `verifyFrames` and `overdraw` work in dev and debug builds only. |
 | `onDemand` | `boolean` | `false` | Draw a frame only when something on the screen changed (see "Render on demand"). Off: every frame is drawn, as before. |
-| `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the rate the loop can reach, the frame's rate or the display's when slower, 8.33 ms at 120 fps on a 120 Hz panel, 16.7 ms at 60 or on a 60 Hz panel); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
+| `monitor` | `{ budgetMs, frames, stillFrames?, stillMpx?, churnPerSecond?, churnSeconds?, churnAfterTrimMs? }` | `{ budgetMs: "rate", frames: 1024, stillFrames: 60, stillMpx: 0.25, churnPerSecond: 4, churnSeconds: 3, churnAfterTrimMs: 1000 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the rate the loop can reach, the frame's rate or the display's when slower, 8.33 ms at 120 fps on a 120 Hz panel, 16.7 ms at 60 or on a 60 Hz panel); the ring keeps `frames` (64 to 16384), render passes 4x as many. The other keys are the thresholds of the `problem` rules (see "Problems"); a key left out keeps its default. |
 | `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |
@@ -1100,7 +1171,7 @@ only. Each logs a `moku:dev` debug entry; the one of `game.capture` lists the op
 | Key in `commands` | id | Input | Effect | Does |
 |---|---|---|---|---|
 | `capture` | `game.capture` | `{ legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" }` | read | `capture(options)`: `{ png, legend? }` of the canvas after the next drawn frame. `undefined` while inert |
-| `debug` | `game.debug` | `{ nineSlice: "boolean?", verifyFrames: "boolean?", kept: "boolean?" }` | cosmetic | `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)`, `sync.debug.kept(on)`, each field given; `{ kept: false }` alone is the editor's A/B switch. Answers `sync.debug.state()` |
+| `debug` | `game.debug` | `{ nineSlice: "boolean?", verifyFrames: "boolean?", kept: "boolean?", overdraw: "boolean?" }` | cosmetic | `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)`, `sync.debug.kept(on)`, `sync.debug.overdraw(on)`, each field given; `{ kept: false }` alone is the editor's A/B switch, `{ overdraw: true }` Mission control's heat map. Answers `sync.debug.state()` |
 
 `game.capture` checks the shapes, `renderer.capture()` the values: `layers` must be a JSON array of
 strings, `sheet` an object of two numbers `{ frames, everyMs }`, `diff` a bookmark (`readBookmark`

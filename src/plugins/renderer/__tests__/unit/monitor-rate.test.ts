@@ -56,7 +56,9 @@ describe("the header", () => {
       reason: "start",
       displayHz: 120,
       ladder: Object.freeze([120, 60]),
-      thermal: null
+      thermal: null,
+      asked: null,
+      heldBy: null
     });
     const agent = await startAgent();
 

@@ -153,6 +153,12 @@ bun run mini:visual --url http://localhost:3000/     # a page already served by 
 
 The exit code is 1 when a checkpoint differs. The same tests run through the bin with `tests/visual/index.ts`: `bun tests/fixtures/moku-game.ts visual --root tests/fixtures/mini-game --tests tests/visual/index.ts --dir tests/visual --no-pixels`; `tests/integration/app-visual.test.ts` runs it headless.
 
+### The overdraw heat map
+
+A debug or dev build draws its overdraw with `app.renderer.sync.debug.overdraw(true)`, or the door `game.debug { overdraw: true }` from the editor: a pixel's brightness counts the layers drawn there, 1/16 white a layer and white at sixteen. While it is on every frame is drawn (also with `renderer.onDemand`), kept pictures draw live and filters are off, so the map shows what a frame would draw without them; between frames the tree is the game's, and off draws the game again from the next frame. A texel a texture leaves transparent counts nothing. The map exists on the canvas alone: `renderer.capture()` and a checkpoint's `screen.webp` render the game, never the map. The performance log marks the frames (a `debug` event, `header.debug.overdraw`), so a recording made with the map on is not read as real cost.
+
+The engine's own browser leg proves it on the real GPU: `bun tests/visual/overdraw.visual.ts` stacks three white sprites with three tints from the left edge of a 480 × 640 page and reads the canvas from Chrome's screenshot, on WebGPU and on WebGL. The strip under three sprites must be three times as bright as the strip under one, flat grey whatever the tints (`[[45,45,45],[30,30,30],[15,15,15]]`), and the tints must come back when the map is off. It exits 1 when a run fails, like `bun tests/visual/kept-pictures.visual.ts`.
+
 The test of the browser leg itself opens a real Chrome only on request: `MOKU_VISUAL_BROWSER=1 bunx vitest run tests/unit/visual/browser.test.ts`. It also proves the WebP is lossless: random opaque pixels come back byte for byte. Without the variable it skips with its reason, so `bun run test` opens no browser.
 
 

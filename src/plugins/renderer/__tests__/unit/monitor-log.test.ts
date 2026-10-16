@@ -11,6 +11,23 @@ import { linesOf, startAgent } from "../perf-harness";
 // and marks, the freeze of every line, the gap histogram.
 // ---------------------------------------------------------------------------
 
+/** A canvas pass of the fake scene as a spike line carries it: no filter, no owner, no draws, no format. */
+const CANVAS_PASS = {
+  kind: "canvas",
+  label: null,
+  stencil: false,
+  w: 1080,
+  h: 1920,
+  gpuMs: null,
+  owner: null,
+  view: null,
+  filter: null,
+  draws: 0,
+  format: null,
+  resolution: null,
+  kept: false
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -126,8 +143,8 @@ describe("spikes", () => {
     expect(spike?.frame).toMatchObject({ frame: 1, workMs: 30, gpuPartial: true });
     expect(spike?.frame.causes).toEqual(["js", "longFrame"]);
     expect(spike?.passes).toEqual([
-      { index: 0, kind: "canvas", label: null, stencil: false, w: 1080, h: 1920, gpuMs: null },
-      { index: 1, kind: "canvas", label: null, stencil: false, w: 1080, h: 1920, gpuMs: null }
+      { ...CANVAS_PASS, index: 0 },
+      { ...CANVAS_PASS, index: 1 }
     ]);
     expect(spike?.longFrames).toEqual([
       {
@@ -159,7 +176,16 @@ describe("the header and the delivery", () => {
       engine: "0.14.13+9c41e0",
       timeOrigin: performance.timeOrigin,
       gpu: { backend: "webgpu", timer: null },
-      measured: ["passes", "stencilPasses", "draws", "filters", "uploads", "marks", "kept"]
+      measured: [
+        "passes",
+        "stencilPasses",
+        "draws",
+        "filters",
+        "uploads",
+        "marks",
+        "kept",
+        "targets"
+      ]
     });
     expect(lines[1]).toMatchObject({
       kind: "mark",

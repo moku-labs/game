@@ -6,13 +6,15 @@
  * runners. Passes are counted only inside a frame. Kind: `canvas` for the canvas, `filter` while a filter applies,
  * `texture` otherwise; the label is the target's or its texture's, and a pooled filter target is named by the kind
  * being applied. On WebGPU the canvas is the view's render target, kept at attach and compared by identity: Pixi 8.22
- * marks every WebGPU target `isRoot` when it first binds it. On WebGL `isRoot` is the canvas's alone.
+ * marks every WebGPU target `isRoot` when it first binds it. On WebGL `isRoot` is the canvas's alone. Each pass also
+ * gets its detail: the entity whose filter draws it and the filter's kind, the draw count of the frame when it began
+ * (WebGPU), and its target's format and resolution.
  */
 
 import type { GpuTimer } from "./gpu-timer";
-import { NO_STENCIL, writePass } from "./ring";
+import { NO_STENCIL, writePass, writePassDetail } from "./ring";
 import { COUNT, type MonitorSinks, type PassSink, type PassTarget, type PerfCtx } from "./types";
-import { cell } from "./units";
+import { cellF64 } from "./units";
 
 /** The pass kinds by index: canvas, texture, filter. */
 const KIND = { canvas: 0, texture: 1, filter: 2 } as const;
@@ -64,6 +66,27 @@ function labelOf(pc: PerfCtx, target: PassTarget, kind: number): string | null {
 }
 
 /**
+ * Writes the detail of the pass just recorded: for a filter pass the owner and the 1-based kind of the apply running
+ * now, the frame's draws so far, the target's format and resolution.
+ *
+ * @param pc - The perf context.
+ * @param target - The target.
+ * @param kind - The pass kind.
+ */
+function writeDetail(pc: PerfCtx, target: PassTarget, kind: number): void {
+  const { sinks } = pc;
+  const filter = kind === KIND.filter;
+
+  writePassDetail(
+    pc.perf.ring.passes,
+    filter ? sinks.filterOwner : 0,
+    filter ? sinks.filterKind + 1 : 0,
+    sinks.draws.frame,
+    target.colorTexture?.source
+  );
+}
+
+/**
  * Creates the WebGPU pass sink the counting encoder calls: each pass of a frame goes into the pass ring, with the
  * frame number and its index in the frame, and gets the timer's timestamp writes when there is a timer.
  *
@@ -83,7 +106,7 @@ export function createPassSink(
       const sequence = writePass(
         pc.perf.ring.passes,
         pc.perf.frame,
-        cell(pc.sinks.counts, COUNT.passes) - 1,
+        cellF64(pc.sinks.counts, COUNT.passes) - 1,
         kind,
         descriptor.depthStencilAttachment === undefined ? 0 : 1,
         target.pixelWidth,
@@ -91,6 +114,7 @@ export function createPassSink(
         labelOf(pc, target, kind)
       );
 
+      writeDetail(pc, target, kind);
       timer?.timePass(descriptor, sequence);
     },
 
@@ -123,7 +147,7 @@ export function countGlPasses(
    */
   const count = (target: PassTarget): void => {
     const { counts } = sinks;
-    const index = cell(counts, COUNT.passes);
+    const index = cellF64(counts, COUNT.passes);
 
     counts[COUNT.passes] = index + 1;
     record?.(target, index);
@@ -187,5 +211,6 @@ export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void 
       target.pixelHeight,
       labelOf(pc, target, kind)
     );
+    writeDetail(pc, target, kind);
   });
 }

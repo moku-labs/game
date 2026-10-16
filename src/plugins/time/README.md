@@ -29,11 +29,12 @@ Callbacks of one phase run in registration order. A callback registered during a
 | `isRunning()` | True while a real frame source drives the loop. False in plain Bun. |
 | `wake()` | Resets the idle timer: the next frame runs at the loop's rate again. Cheap, idempotent, safe inside a frame. Called by `input` (a pointer sample), `anim` (a track starts), `flow` (an edge), `assets` (a load settles), `scenes` (a switch), `text` (a locale change), `ui` (a reconcile). |
 | `wakes()` | How many wakes the clock has had since the app started, `resume` included; it only grows. The renderer compares two readings and draws the frame after any wake, a safety net of `renderer.onDemand`. `step` does not count. |
+| `frameListeners()` | How many `onFrame` callbacks are registered now, over the six phases; the `measure` listeners are not counted. A number, no allocation: the renderer's monitor reads it once a second for the leak counts of a debug build, and a count that grows each time a screen is entered and left is a callback nobody unsubscribed. |
 | `step(deltaMs)` | Runs exactly one frame with the given unscaled delta, ignoring the fps cap, the pause flag and `maxDeltaMs`; the scale still applies. Throws when called from inside a frame callback. For tests and tools. |
 | `measure(listener)` | Agent builds: hands `listener` what `time` measured of every frame, after `render` (see "Measuring a frame"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `agentClock()` | Agent builds: the page clock for measurement (`performance.now()`); `undefined` otherwise. `world` times its systems with it. Never for game logic. |
 | `chargeAgent(ms)` | For engine plugins. Agent builds: charges the editor's own work (its overlay, its page agent) to the frame running now, so the adaptive frame rate leaves it out. The renderer's monitor calls it when an agent span closes. Nothing otherwise. |
-| `rate()` | The loop's frame rate: `{ fps, mode, reason, displayHz, ladder, thermal }` (`Time.FrameRate`). One frozen object, the same until something in it changes: cheap to read every frame. |
+| `rate()` | The loop's frame rate: `{ fps, mode, reason, displayHz, ladder, thermal, asked, heldBy }` (`Time.FrameRate`). One frozen object, the same until something in it changes: cheap to read every frame. See [The rate asked and the rate run](#the-rate-asked-and-the-rate-run). |
 | `setRate(choice)` | `"auto"`, 30, 60 or 120. A number forces the cap (never above `maxFps`); the adaptive rule and the heat leave it alone. `"auto"` gives the rate back: the top of the ladder (a step lower under heat), or `maxFps` without `adaptive`. An equal choice changes nothing. Answers `rate()`; anything else throws `[game] time.setRate takes "auto", 30, 60 or 120.` |
 | `frameDrawn()` | For engine plugins: the renderer's `render` phase reports a frame Pixi drew. Only drawn frames count for the adaptive rate. One assignment; a stepped frame forgets it. |
 | `frameProbed()` | For engine plugins: the frame also drew warm-up probes. It is drawn, but never a sample of the adaptive rate. One assignment; a stepped frame forgets it. |
@@ -49,7 +50,7 @@ expect(app.time.snapshot().frame).toBe(1);
 
 ## Frame algorithm
 
-The cap of a frame is `idleFps` while the screen is idle (never above the rate) and the loop's rate, `rate().fps`, otherwise: `maxFps` unless `adaptive` or `setRate` changed it. The first frame, and the first frame after a `resume`, counts as one capped frame (`1000 / cap`) instead of the gap to a stale timestamp. Otherwise the raw delta is `timestamp - lastTimestamp`. A frame that arrives earlier than `1000 / cap - slack` is skipped. The slack is half a display period when one frame of the cap is a whole number of display periods (8.3 ms for a 60 cap on a 60 Hz panel, 4.2 ms on a 120 Hz one), so vsync jitter (15.6–17.8 ms ticks at 60 Hz) never drops a frame and a tick one period early is still skipped. When the cap falls between two vsyncs it is 1 ms: a 144 Hz panel under a 60 cap runs every third tick, 48 fps, as before. Until the display rate is known the slack is 12 % of the frame, at least 1 ms (2 ms at 60). The delta is clamped at `maxDeltaMs`, multiplied by `scale`, added to `elapsed`, and `frame` is increased before the phases run.
+The cap of a frame is `idleFps` while the screen is idle (never above the rate) and the loop's rate otherwise: `maxFps` unless `adaptive` or `setRate` changed it (`rate().asked` outside mode `"auto"`). The first frame, and the first frame after a `resume`, counts as one capped frame (`1000 / cap`) instead of the gap to a stale timestamp. Otherwise the raw delta is `timestamp - lastTimestamp`. A frame that arrives earlier than `1000 / cap - slack` is skipped. The slack is half a display period when one frame of the cap is a whole number of display periods (8.3 ms for a 60 cap on a 60 Hz panel, 4.2 ms on a 120 Hz one), so vsync jitter (15.6–17.8 ms ticks at 60 Hz) never drops a frame and a tick one period early is still skipped. When the cap falls between two vsyncs it is 1 ms: a 144 Hz panel under a 60 cap runs every third tick, 48 fps, as before. Until the display rate is known the slack is 12 % of the frame, at least 1 ms (2 ms at 60). The delta is clamped at `maxDeltaMs`, multiplied by `scale`, added to `elapsed`, and `frame` is increased before the phases run.
 
 ## Measuring a frame (agent builds)
 
@@ -62,7 +63,7 @@ listeners). The record is one object rewritten every frame, `FrameMeasure`:
 |---|---|
 | `frame`, `at` | `Time.frame`, and the start of the frame on the page clock: the `requestAnimationFrame` timestamp, or the moment `step()` began. |
 | `gapMs` | `at` minus `at` of the previous measured frame; NaN for the first, the first after a `resume()`, and a stepped frame. |
-| `capMs`, `rateMs` | `1000 / cap` of this frame (the idle cap included), and one frame of the loop's rate without the idle cap: `1000 / rate().fps`, from the frame a switch happens in. |
+| `capMs`, `rateMs` | `1000 / cap` of this frame (the idle cap included), and one frame of the loop's rate without the idle cap, the cap the loop is told (`1000 / rate().asked` outside mode `"auto"`), from the frame a switch happens in. It is `1000 / rate().fps` while the cap is a divisor of the display rate. |
 | `displayMs` | One display period, `1000 / rate().displayHz`; NaN until the display rate is known. No frame comes sooner, so a spike budget is `max(rateMs, displayMs)`. |
 | `skipped` | Ticks the cap skipped since the previous measured frame. |
 | `startMs`, `phaseMs`, `workMs` | The delay before the first phase (0 when stepped), the six phase durations, and `at` to the end of `render`. |
@@ -78,7 +79,7 @@ frame of the frame source, after the phases and the listeners; a stepped frame k
 
 On a page with `__MOKU_NATIVE__` of version 1 (the native shell of `@moku-labs/native`), `time`
 asks the panel for the loop's rate at start and on every change of it
-(`display.setFrameRate(rate().fps)`), so a 60 fps game does not keep the panel at 120 Hz, and hands
+(`display.setFrameRate` with the loop's cap, `rate().asked` outside mode `"auto"`), so a 60 fps game does not keep the panel at 120 Hz, and hands
 the request back at stop (`setFrameRate(null)`). Every build: it is product behaviour, not
 measurement. A refused request is warned about once and the app runs on. With `adaptive` the
 answer's `maxHz` (and `display.maxHz` once the shell is `ready`) is the display rate; `panelHz`, the
@@ -165,9 +166,33 @@ export default defineGameApp({
   pluginConfigs: { time: { maxFps: 120, adaptive: { floor: 60 } } }
 });
 
-app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none" }
+app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
 app.time.setRate(60); // the player's "60": forced until setRate("auto")
 ```
+
+### The rate asked and the rate run
+
+`rate()` tells apart the rate the loop is told to hold and the rate it really runs at, so a pin is
+never reported as held when the panel cannot hold it.
+
+- `asked` — the cap the loop is told: `maxFps` in mode `"fixed"`, the `setRate` value in mode
+  `"forced"` (never above `maxFps`), `null` in mode `"auto"`, where the adaptive rule decides.
+- `fps` — the frames per second the loop really runs at, the idle cap left out: the cap on the known
+  display. A cap above the display's rate runs at the display's rate; a cap between two vsyncs runs
+  at the next divisor below it (60 on a 144 Hz panel: every third tick, 48). The cap itself while
+  the display is unknown.
+- `heldBy` — `"panel"` when `asked` is above the known `displayHz` (120 on a 60 Hz panel): the loop
+  cannot run faster than the panel. `null` otherwise, in mode `"auto"` and while the display is
+  unknown.
+
+```ts
+// maxFps 120 without adaptive, on a 60 Hz phone:
+app.time.rate(); // { fps: 60, mode: "fixed", reason: "start", displayHz: 60, ladder: [], thermal: null, asked: 120, heldBy: "panel" }
+// the editor pins 60 on a 120 Hz phone:
+app.time.setRate(60); // { fps: 60, mode: "forced", …, asked: 60, heldBy: null }
+```
+
+`time:rate` (`RateChange`) is unchanged: its `from` and `to` are the loop's cap.
 
 ## Configuration
 
@@ -211,8 +236,9 @@ and debug builds. All three are effect `cosmetic`: the session stays clean.
   still while frames keep running, and `game.step` still steps.
 
 - `game.frameRate` — input `{ fps: "number?" }`. It calls `setRate(fps)`, or `setRate("auto")`
-  without `fps`, and answers `rate()`. For an A/B run on the phone: the same screen at 120 and at
-  60. A wrong `fps` is refused by `setRate`.
+  without `fps`, and answers `rate()`: a pin the panel cannot hold answers its real `fps` with
+  `asked` and `heldBy: "panel"` (120 on a 60 Hz phone runs at 60). For an A/B run on the phone: the
+  same screen at 120 and at 60. A wrong `fps` is refused by `setRate`.
 
 ```ts
 // The editor slows a merge to a quarter speed.

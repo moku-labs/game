@@ -19,7 +19,7 @@ import type {
 } from "./log-types";
 import { PERF_CAUSES, PERF_GAP_BUCKETS } from "./log-types";
 import type { EventRing, PerfRing, RingPasses } from "./types";
-import { cell } from "./units";
+import { cellF32, cellF64, cellU8, cellU16, cellU32 } from "./units";
 
 /** Gaps below this many ms fall into 1 ms buckets of `frameHist`. */
 const FINE_LIMIT_MS = 50;
@@ -86,11 +86,24 @@ export const CAUSE: Readonly<Record<PerfCause, number>> = {
 /** The changes in bit order. */
 const CHANGE_NAMES: readonly PerfChange[] = ["resize", "resolution", "scene", "bundle", "restore"];
 
-/** The pass kinds by their index in the pass ring. */
-const PASS_KINDS: readonly PassKind[] = ["canvas", "texture", "filter"];
+/**
+ * The pass kinds by their index in the pass ring's `kind` column: 0 the canvas, 1 a texture, 2 a filter. A root export,
+ * so a reader of the ring names a pass's kind without building a record.
+ *
+ * @example
+ * ```ts
+ * // The editor's pass strip names the newest pass of a debug build from the ring.
+ * const { passes } = app.renderer.monitor.frames();
+ * PASS_KINDS[passes.kind[passes.newest] ?? 0]; // "filter"
+ * ```
+ */
+export const PASS_KINDS: readonly PassKind[] = ["canvas", "texture", "filter"];
 
-/** Any column of the ring. */
-type Column = Uint8Array | Uint16Array | Uint32Array | Float32Array | Float64Array;
+/** The prefix of the label of a pass that took or refreshed a kept picture (`kept:<view>#n`). */
+const KEPT_PREFIX = "kept:";
+
+/** The largest draw count the 16-bit `drawsAt` column holds. */
+const DRAWS_MAX = 0xff_ff;
 
 /**
  * Creates the ring of the changes with a subject: 64 slots, empty.
@@ -142,7 +155,7 @@ function subjectOf(events: EventRing, frame: number, bit: number): string | null
   for (let age = 0; age < events.size; age += 1) {
     const slot = (events.next - 1 - age + EVENT_SLOTS) % EVENT_SLOTS;
 
-    if (cell(events.frames, slot) === frame && cell(events.kinds, slot) === bit) {
+    if (cellU32(events.frames, slot) === frame && cellU8(events.kinds, slot) === bit) {
       return events.whats[slot] ?? null;
     }
   }
@@ -194,7 +207,9 @@ function createColumns(capacity: number): FrameColumns {
     fltApplies: new Uint16Array(capacity * KIND_STRIDE),
     fltMpx: new Float32Array(capacity * KIND_STRIDE),
     kept: new Float32Array(capacity).fill(Number.NaN),
-    retakes: new Float32Array(capacity).fill(Number.NaN)
+    retakes: new Float32Array(capacity).fill(Number.NaN),
+    targetsCreated: new Float32Array(capacity).fill(Number.NaN),
+    targetsDestroyed: new Float32Array(capacity).fill(Number.NaN)
   };
 }
 
@@ -217,12 +232,19 @@ function createPasses(capacity: number): RingPasses {
     width: new Uint16Array(capacity),
     height: new Uint16Array(capacity),
     gpuMs: new Float32Array(capacity),
-    label: Array.from<string | null>({ length: capacity }).fill(null)
+    label: Array.from<string | null>({ length: capacity }).fill(null),
+    owner: new Uint32Array(capacity),
+    kind2: new Uint8Array(capacity),
+    drawsAt: new Uint16Array(capacity),
+    format: Array.from<string | null>({ length: capacity }).fill(null),
+    resolution: new Float32Array(capacity).fill(Number.NaN)
   };
 }
 
 /**
- * Copies one column of `count` frames, oldest first, into the caller's array, an indexed loop over the ring.
+ * Copies one `Float32Array` column of `count` frames, oldest first, into the caller's array, an indexed loop over the
+ * ring. One copy per array kind, as one column reader per kind: its loads and stores see one kind of array, and a
+ * double is copied unboxed.
  *
  * @param target - The caller's array; nothing is copied without one.
  * @param source - The ring's column.
@@ -231,9 +253,9 @@ function createPasses(capacity: number): RingPasses {
  * @param oldest - Slot of the oldest frame to copy.
  * @param count - Frames to copy.
  */
-function copyColumn(
-  target: Column | undefined,
-  source: Column,
+function copyF32(
+  target: Float32Array | undefined,
+  source: Float32Array,
   stride: number,
   ring: PerfRing,
   oldest: number,
@@ -245,7 +267,123 @@ function copyColumn(
     const slot = (oldest + index) % ring.capacity;
 
     for (let value = 0; value < stride; value += 1) {
-      target[index * stride + value] = cell(source, slot * stride + value);
+      target[index * stride + value] = cellF32(source, slot * stride + value);
+    }
+  }
+}
+
+/**
+ * Copies one `Float64Array` column of `count` frames, oldest first, into the caller's array: `copyF32` for its kind.
+ *
+ * @param target - The caller's array; nothing is copied without one.
+ * @param source - The ring's column.
+ * @param stride - Values per frame.
+ * @param ring - The ring.
+ * @param oldest - Slot of the oldest frame to copy.
+ * @param count - Frames to copy.
+ */
+function copyF64(
+  target: Float64Array | undefined,
+  source: Float64Array,
+  stride: number,
+  ring: PerfRing,
+  oldest: number,
+  count: number
+): void {
+  if (target === undefined) return;
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = (oldest + index) % ring.capacity;
+
+    for (let value = 0; value < stride; value += 1) {
+      target[index * stride + value] = cellF64(source, slot * stride + value);
+    }
+  }
+}
+
+/**
+ * Copies one `Uint32Array` column of `count` frames, oldest first, into the caller's array: `copyF32` for its kind.
+ *
+ * @param target - The caller's array; nothing is copied without one.
+ * @param source - The ring's column.
+ * @param stride - Values per frame.
+ * @param ring - The ring.
+ * @param oldest - Slot of the oldest frame to copy.
+ * @param count - Frames to copy.
+ */
+function copyU32(
+  target: Uint32Array | undefined,
+  source: Uint32Array,
+  stride: number,
+  ring: PerfRing,
+  oldest: number,
+  count: number
+): void {
+  if (target === undefined) return;
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = (oldest + index) % ring.capacity;
+
+    for (let value = 0; value < stride; value += 1) {
+      target[index * stride + value] = cellU32(source, slot * stride + value);
+    }
+  }
+}
+
+/**
+ * Copies one `Uint16Array` column of `count` frames, oldest first, into the caller's array: `copyF32` for its kind.
+ *
+ * @param target - The caller's array; nothing is copied without one.
+ * @param source - The ring's column.
+ * @param stride - Values per frame.
+ * @param ring - The ring.
+ * @param oldest - Slot of the oldest frame to copy.
+ * @param count - Frames to copy.
+ */
+function copyU16(
+  target: Uint16Array | undefined,
+  source: Uint16Array,
+  stride: number,
+  ring: PerfRing,
+  oldest: number,
+  count: number
+): void {
+  if (target === undefined) return;
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = (oldest + index) % ring.capacity;
+
+    for (let value = 0; value < stride; value += 1) {
+      target[index * stride + value] = cellU16(source, slot * stride + value);
+    }
+  }
+}
+
+/**
+ * Copies one `Uint8Array` column of `count` frames, oldest first, into the caller's array: `copyF32` for its kind.
+ *
+ * @param target - The caller's array; nothing is copied without one.
+ * @param source - The ring's column.
+ * @param stride - Values per frame.
+ * @param ring - The ring.
+ * @param oldest - Slot of the oldest frame to copy.
+ * @param count - Frames to copy.
+ */
+function copyU8(
+  target: Uint8Array | undefined,
+  source: Uint8Array,
+  stride: number,
+  ring: PerfRing,
+  oldest: number,
+  count: number
+): void {
+  if (target === undefined) return;
+
+  for (let index = 0; index < count; index += 1) {
+    const slot = (oldest + index) % ring.capacity;
+
+    for (let value = 0; value < stride; value += 1) {
+      target[index * stride + value] = cellU8(source, slot * stride + value);
     }
   }
 }
@@ -271,43 +409,45 @@ function readRing(ring: PerfRing, into: FrameReadout, since: number): Readonly<F
 
   const oldest = (ring.newest - count + 1 + ring.capacity) % ring.capacity;
 
-  copyColumn(into.frame, columns.frame, 1, ring, oldest, count);
-  copyColumn(into.t, columns.t, 1, ring, oldest, count);
-  copyColumn(into.gapMs, columns.gapMs, 1, ring, oldest, count);
-  copyColumn(into.capMs, columns.capMs, 1, ring, oldest, count);
-  copyColumn(into.skipped, columns.skipped, 1, ring, oldest, count);
-  copyColumn(into.startMs, columns.startMs, 1, ring, oldest, count);
-  copyColumn(into.rateMs, columns.rateMs, 1, ring, oldest, count);
-  copyColumn(into.budgetMs, columns.budgetMs, 1, ring, oldest, count);
-  copyColumn(into.phaseMs, columns.phaseMs, PHASE_STRIDE, ring, oldest, count);
-  copyColumn(into.agentMs, columns.agentMs, 1, ring, oldest, count);
-  copyColumn(into.workMs, columns.workMs, 1, ring, oldest, count);
-  copyColumn(into.drawn, columns.drawn, 1, ring, oldest, count);
-  copyColumn(into.idle, columns.idle, 1, ring, oldest, count);
-  copyColumn(into.stepped, columns.stepped, 1, ring, oldest, count);
-  copyColumn(into.passes, columns.passes, 1, ring, oldest, count);
-  copyColumn(into.stencilPasses, columns.stencilPasses, 1, ring, oldest, count);
-  copyColumn(into.draws, columns.draws, 1, ring, oldest, count);
-  copyColumn(into.filterApplies, columns.filterApplies, 1, ring, oldest, count);
-  copyColumn(into.filterMpx, columns.filterMpx, 1, ring, oldest, count);
-  copyColumn(into.uploads, columns.uploads, 1, ring, oldest, count);
-  copyColumn(into.uploadMb, columns.uploadMb, 1, ring, oldest, count);
-  copyColumn(into.compiles, columns.compiles, 1, ring, oldest, count);
-  copyColumn(into.marks, columns.marks, 1, ring, oldest, count);
-  copyColumn(into.rebuilds, columns.rebuilds, 1, ring, oldest, count);
-  copyColumn(into.gpuMs, columns.gpuMs, 1, ring, oldest, count);
-  copyColumn(into.gpuPartial, columns.gpuPartial, 1, ring, oldest, count);
-  copyColumn(into.path, columns.path, 1, ring, oldest, count);
-  copyColumn(into.changed, columns.changed, 1, ring, oldest, count);
-  copyColumn(into.causes, columns.causes, 1, ring, oldest, count);
-  copyColumn(into.reason, columns.reason, 1, ring, oldest, count);
-  copyColumn(into.sysIdx, columns.sysIdx, SYSTEM_STRIDE, ring, oldest, count);
-  copyColumn(into.sysMs, columns.sysMs, SYSTEM_STRIDE, ring, oldest, count);
-  copyColumn(into.fltKind, columns.fltKind, KIND_STRIDE, ring, oldest, count);
-  copyColumn(into.fltApplies, columns.fltApplies, KIND_STRIDE, ring, oldest, count);
-  copyColumn(into.fltMpx, columns.fltMpx, KIND_STRIDE, ring, oldest, count);
-  copyColumn(into.kept, columns.kept, 1, ring, oldest, count);
-  copyColumn(into.retakes, columns.retakes, 1, ring, oldest, count);
+  copyU32(into.frame, columns.frame, 1, ring, oldest, count);
+  copyF64(into.t, columns.t, 1, ring, oldest, count);
+  copyF32(into.gapMs, columns.gapMs, 1, ring, oldest, count);
+  copyF32(into.capMs, columns.capMs, 1, ring, oldest, count);
+  copyU8(into.skipped, columns.skipped, 1, ring, oldest, count);
+  copyF32(into.startMs, columns.startMs, 1, ring, oldest, count);
+  copyF32(into.rateMs, columns.rateMs, 1, ring, oldest, count);
+  copyF32(into.budgetMs, columns.budgetMs, 1, ring, oldest, count);
+  copyF32(into.phaseMs, columns.phaseMs, PHASE_STRIDE, ring, oldest, count);
+  copyF32(into.agentMs, columns.agentMs, 1, ring, oldest, count);
+  copyF32(into.workMs, columns.workMs, 1, ring, oldest, count);
+  copyU8(into.drawn, columns.drawn, 1, ring, oldest, count);
+  copyU8(into.idle, columns.idle, 1, ring, oldest, count);
+  copyU8(into.stepped, columns.stepped, 1, ring, oldest, count);
+  copyF32(into.passes, columns.passes, 1, ring, oldest, count);
+  copyF32(into.stencilPasses, columns.stencilPasses, 1, ring, oldest, count);
+  copyF32(into.draws, columns.draws, 1, ring, oldest, count);
+  copyF32(into.filterApplies, columns.filterApplies, 1, ring, oldest, count);
+  copyF32(into.filterMpx, columns.filterMpx, 1, ring, oldest, count);
+  copyF32(into.uploads, columns.uploads, 1, ring, oldest, count);
+  copyF32(into.uploadMb, columns.uploadMb, 1, ring, oldest, count);
+  copyF32(into.compiles, columns.compiles, 1, ring, oldest, count);
+  copyF32(into.marks, columns.marks, 1, ring, oldest, count);
+  copyF32(into.rebuilds, columns.rebuilds, 1, ring, oldest, count);
+  copyF32(into.gpuMs, columns.gpuMs, 1, ring, oldest, count);
+  copyU8(into.gpuPartial, columns.gpuPartial, 1, ring, oldest, count);
+  copyU16(into.path, columns.path, 1, ring, oldest, count);
+  copyU8(into.changed, columns.changed, 1, ring, oldest, count);
+  copyU8(into.causes, columns.causes, 1, ring, oldest, count);
+  copyU8(into.reason, columns.reason, 1, ring, oldest, count);
+  copyU16(into.sysIdx, columns.sysIdx, SYSTEM_STRIDE, ring, oldest, count);
+  copyF32(into.sysMs, columns.sysMs, SYSTEM_STRIDE, ring, oldest, count);
+  copyU8(into.fltKind, columns.fltKind, KIND_STRIDE, ring, oldest, count);
+  copyU16(into.fltApplies, columns.fltApplies, KIND_STRIDE, ring, oldest, count);
+  copyF32(into.fltMpx, columns.fltMpx, KIND_STRIDE, ring, oldest, count);
+  copyF32(into.kept, columns.kept, 1, ring, oldest, count);
+  copyF32(into.retakes, columns.retakes, 1, ring, oldest, count);
+  copyF32(into.targetsCreated, columns.targetsCreated, 1, ring, oldest, count);
+  copyF32(into.targetsDestroyed, columns.targetsDestroyed, 1, ring, oldest, count);
 
   return result;
 }
@@ -350,7 +490,8 @@ export function createFrameRing(
 export const EMPTY_RING: FrameRing = /*#__PURE__*/ createFrameRing(0);
 
 /**
- * Records one render pass in the pass ring, the label by reference.
+ * Records one render pass in the pass ring, the label by reference. The detail of the pass (its owner, filter kind,
+ * draw count, format and resolution) goes into the same slot with `writePassDetail`, right after.
  *
  * @param passes - The pass ring.
  * @param frame - The frame number.
@@ -383,11 +524,43 @@ export function writePass(
   passes.height[slot] = height;
   passes.gpuMs[slot] = Number.NaN;
   passes.label[slot] = label;
+  passes.owner[slot] = 0;
+  passes.kind2[slot] = 0;
+  passes.drawsAt[slot] = 0;
+  passes.format[slot] = null;
+  passes.resolution[slot] = Number.NaN;
   passes.newest = slot;
   passes.size = Math.min(passes.size + 1, passes.capacity);
   passes.written = sequence + 1;
 
   return sequence;
+}
+
+/**
+ * Writes the detail of the newest pass: the entity whose filter drew it, the filter kind (1-based, 0 none), the draw
+ * count of the frame when it began, and its target's format (by reference) and resolution, read from the target's
+ * source here so no double is handed over. Indexed stores only.
+ *
+ * @param passes - The pass ring, its newest slot the pass `writePass` just wrote.
+ * @param owner - The entity, 0 for none.
+ * @param kind2 - The interned filter kind plus one, 0 for none.
+ * @param drawsAt - The frame's draws so far.
+ * @param source - The source of the target's color texture, or `undefined`.
+ */
+export function writePassDetail(
+  passes: RingPasses,
+  owner: number,
+  kind2: number,
+  drawsAt: number,
+  source: { readonly format?: string; readonly resolution?: number } | undefined
+): void {
+  const slot = passes.newest;
+
+  passes.owner[slot] = owner;
+  passes.kind2[slot] = kind2;
+  passes.drawsAt[slot] = Math.min(drawsAt, DRAWS_MAX);
+  passes.format[slot] = source?.format ?? null;
+  passes.resolution[slot] = source?.resolution ?? Number.NaN;
 }
 
 /**
@@ -475,13 +648,13 @@ export function spikeCauses(
 }
 
 /**
- * Tells whether a ring is the monitor's own: the one that knows the names its columns index.
+ * Tells whether a ring is the monitor's own: the one that keeps the subjects of its changes.
  *
  * @param ring - A ring.
  * @returns True for a ring of `monitor.frames()`.
  */
 function isPerfRing(ring: FrameRing): ring is PerfRing {
-  return "events" in ring && "kindNames" in ring && "systemNames" in ring;
+  return "events" in ring;
 }
 
 /**
@@ -535,20 +708,20 @@ export function filterKindsAt(
   ring: FrameRing,
   slot: number
 ): { kind: string; applies: number; mpx: number }[] {
-  const names = isPerfRing(ring) ? ring.kindNames : [];
+  const names = ring.kindNames;
   const { columns } = ring;
   const kinds: { kind: string; applies: number; mpx: number }[] = [];
 
   for (let place = 0; place < KIND_STRIDE; place += 1) {
     const at = slot * KIND_STRIDE + place;
-    const kind = cell(columns.fltKind, at);
+    const kind = cellU8(columns.fltKind, at);
 
     if (kind === 0) continue;
 
     kinds.push({
       kind: names[kind - 1] ?? "other",
-      applies: cell(columns.fltApplies, at),
-      mpx: two(cell(columns.fltMpx, at))
+      applies: cellU16(columns.fltApplies, at),
+      mpx: two(cellF32(columns.fltMpx, at))
     });
   }
 
@@ -565,18 +738,18 @@ export function filterKindsAt(
 export function systemsAt(ring: FrameRing, slot: number): { name: string; ms: number }[] | null {
   const { columns } = ring;
 
-  if (Number.isNaN(cell(columns.sysMs, slot * SYSTEM_STRIDE))) return null;
+  if (Number.isNaN(cellF32(columns.sysMs, slot * SYSTEM_STRIDE))) return null;
 
-  const names = isPerfRing(ring) ? ring.systemNames : [];
+  const names = ring.systemNames;
   const systems: { name: string; ms: number }[] = [];
 
   for (let place = 0; place < SYSTEM_STRIDE; place += 1) {
     const at = slot * SYSTEM_STRIDE + place;
-    const index = cell(columns.sysIdx, at);
+    const index = cellU16(columns.sysIdx, at);
 
     if (index === NO_SYSTEM) continue;
 
-    systems.push({ name: names[index] ?? String(index), ms: two(cell(columns.sysMs, at)) });
+    systems.push({ name: names[index] ?? String(index), ms: two(cellF32(columns.sysMs, at)) });
   }
 
   return systems;
@@ -590,8 +763,8 @@ export function systemsAt(ring: FrameRing, slot: number): { name: string; ms: nu
  * @returns One entry per change, in bit order.
  */
 function changesAt(ring: FrameRing, slot: number): PerfChangeEntry[] {
-  const bits = cell(ring.columns.changed, slot);
-  const frame = cell(ring.columns.frame, slot);
+  const bits = cellU8(ring.columns.changed, slot);
+  const frame = cellU32(ring.columns.frame, slot);
 
   return namesOf(bits, CHANGE_NAMES).map(kind => ({
     kind,
@@ -600,35 +773,79 @@ function changesAt(ring: FrameRing, slot: number): PerfChangeEntry[] {
 }
 
 /**
- * The render passes of a frame still in the pass ring, in their order.
+ * The draws of each pass of a frame from the snapshots its passes took when they began: up to the next pass's
+ * snapshot, the last up to the frame's total. Pure: rewrites `draws` in place.
+ *
+ * @param found - The passes of the frame, in order, with `draws` holding their snapshot.
+ * @param total - The frame's draws; NaN where draws are not counted, which makes every `draws` `null`.
+ * @example
+ * ```ts
+ * splitDraws([{ draws: 0 }, { draws: 5 }], 7); // the passes now say 5 and 2
+ * ```
+ */
+function splitDraws(found: Array<{ draws?: number | null }>, total: number): void {
+  for (let index = 0; index < found.length; index += 1) {
+    const pass = found[index];
+
+    if (pass === undefined) continue;
+
+    const next = found[index + 1]?.draws ?? total;
+
+    pass.draws = Number.isNaN(total) ? null : Math.max(0, next - (pass.draws ?? 0));
+  }
+}
+
+/**
+ * The render passes of a frame still in the pass ring, in their order, with their detail: the entity whose filter drew
+ * each and its view's label, the filter kind, the draws, the target's format and resolution, whether it was a kept
+ * picture's.
  *
  * @param ring - The ring.
  * @param frame - The frame number.
+ * @param total - The frame's draws (its `draws` column); NaN where draws are not counted.
+ * @param viewOf - The label of an entity's view now, or `null` once it left.
  * @returns The passes; empty when none was recorded or they were overwritten.
  */
-export function passesOf(ring: FrameRing, frame: number): PassRecord[] {
+export function passesOf(
+  ring: FrameRing,
+  frame: number,
+  total = Number.NaN,
+  viewOf: (entity: number) => string | null = () => null
+): PassRecord[] {
   const { passes } = ring;
   const found: PassRecord[] = [];
 
   for (let age = 0; age < passes.size; age += 1) {
     const slot = (passes.newest - age + passes.capacity) % passes.capacity;
-    const owner = cell(passes.frame, slot);
+    const at = cellU32(passes.frame, slot);
 
-    if (owner < frame) break;
-    if (owner !== frame) continue;
+    if (at < frame) break;
+    if (at !== frame) continue;
 
-    const stencil = cell(passes.stencil, slot);
+    const stencil = cellU8(passes.stencil, slot);
+    const label = passes.label[slot] ?? null;
+    const owner = cellU32(passes.owner, slot);
+    const kind2 = cellU8(passes.kind2, slot);
 
     found.unshift({
-      index: cell(passes.index, slot),
-      kind: PASS_KINDS[cell(passes.kind, slot)] ?? "texture",
-      label: passes.label[slot] ?? null,
+      index: cellU8(passes.index, slot),
+      kind: PASS_KINDS[cellU8(passes.kind, slot)] ?? "texture",
+      label,
       stencil: stencil === NO_STENCIL ? null : stencil === 1,
-      w: cell(passes.width, slot),
-      h: cell(passes.height, slot),
-      gpuMs: measured(cell(passes.gpuMs, slot))
+      w: cellU16(passes.width, slot),
+      h: cellU16(passes.height, slot),
+      gpuMs: measured(cellF32(passes.gpuMs, slot)),
+      owner: owner === 0 ? null : owner,
+      view: owner === 0 ? null : viewOf(owner),
+      filter: kind2 === 0 ? null : (ring.kindNames[kind2 - 1] ?? "other"),
+      draws: cellU16(passes.drawsAt, slot),
+      format: passes.format[slot] ?? null,
+      resolution: measured(cellF32(passes.resolution, slot)),
+      kept: label?.startsWith(KEPT_PREFIX) === true
     });
   }
+
+  splitDraws(found, total);
 
   return found;
 }
@@ -643,51 +860,51 @@ export function passesOf(ring: FrameRing, frame: number): PassRecord[] {
 export function recordAt(ring: FrameRing, slot: number): FrameRecord {
   const c = ring.columns;
   const phase = slot * PHASE_STRIDE;
-  const applies = measured(cell(c.filterApplies, slot));
-  const uploads = measured(cell(c.uploads, slot));
-  const kept = measured(cell(c.kept, slot));
+  const applies = measured(cellF32(c.filterApplies, slot));
+  const uploads = measured(cellF32(c.uploads, slot));
+  const kept = measured(cellF32(c.kept, slot));
 
   return {
-    frame: cell(c.frame, slot),
-    t: two(cell(c.t, slot)),
-    gapMs: measured(cell(c.gapMs, slot)),
-    capMs: two(cell(c.capMs, slot)),
-    rateMs: two(cell(c.rateMs, slot)),
-    budgetMs: two(cell(c.budgetMs, slot)),
-    skipped: cell(c.skipped, slot),
-    startMs: two(cell(c.startMs, slot)),
+    frame: cellU32(c.frame, slot),
+    t: two(cellF64(c.t, slot)),
+    gapMs: measured(cellF32(c.gapMs, slot)),
+    capMs: two(cellF32(c.capMs, slot)),
+    rateMs: two(cellF32(c.rateMs, slot)),
+    budgetMs: two(cellF32(c.budgetMs, slot)),
+    skipped: cellU8(c.skipped, slot),
+    startMs: two(cellF32(c.startMs, slot)),
     phases: {
-      input: two(cell(c.phaseMs, phase)),
-      animate: two(cell(c.phaseMs, phase + 1)),
-      layout: two(cell(c.phaseMs, phase + 2)),
-      sync: two(cell(c.phaseMs, phase + 3)),
-      signals: two(cell(c.phaseMs, phase + 4)),
-      render: two(cell(c.phaseMs, phase + 5)),
-      agent: two(cell(c.agentMs, slot))
+      input: two(cellF32(c.phaseMs, phase)),
+      animate: two(cellF32(c.phaseMs, phase + 1)),
+      layout: two(cellF32(c.phaseMs, phase + 2)),
+      sync: two(cellF32(c.phaseMs, phase + 3)),
+      signals: two(cellF32(c.phaseMs, phase + 4)),
+      render: two(cellF32(c.phaseMs, phase + 5)),
+      agent: two(cellF32(c.agentMs, slot))
     },
-    workMs: two(cell(c.workMs, slot)),
-    drawn: cell(c.drawn, slot) === 1,
-    idle: cell(c.idle, slot) === 1,
-    stepped: cell(c.stepped, slot) === 1,
-    reason: DEMAND_REASONS[cell(c.reason, slot)] ?? null,
-    passes: measured(cell(c.passes, slot)),
-    stencilPasses: measured(cell(c.stencilPasses, slot)),
-    draws: measured(cell(c.draws, slot)),
+    workMs: two(cellF32(c.workMs, slot)),
+    drawn: cellU8(c.drawn, slot) === 1,
+    idle: cellU8(c.idle, slot) === 1,
+    stepped: cellU8(c.stepped, slot) === 1,
+    reason: DEMAND_REASONS[cellU8(c.reason, slot)] ?? null,
+    passes: measured(cellF32(c.passes, slot)),
+    stencilPasses: measured(cellF32(c.stencilPasses, slot)),
+    draws: measured(cellF32(c.draws, slot)),
     filters:
       applies === null
         ? null
-        : { applies, mpx: two(cell(c.filterMpx, slot)), kinds: filterKindsAt(ring, slot) },
-    uploads: uploads === null ? null : { count: uploads, mb: two(cell(c.uploadMb, slot)) },
-    compiles: measured(cell(c.compiles, slot)),
-    marks: measured(cell(c.marks, slot)),
-    rebuilds: measured(cell(c.rebuilds, slot)),
+        : { applies, mpx: two(cellF32(c.filterMpx, slot)), kinds: filterKindsAt(ring, slot) },
+    uploads: uploads === null ? null : { count: uploads, mb: two(cellF32(c.uploadMb, slot)) },
+    compiles: measured(cellF32(c.compiles, slot)),
+    marks: measured(cellF32(c.marks, slot)),
+    rebuilds: measured(cellF32(c.rebuilds, slot)),
     systems: systemsAt(ring, slot),
-    gpuMs: measured(cell(c.gpuMs, slot)),
-    gpuPartial: cell(c.gpuPartial, slot) === 1,
-    path: ring.paths[cell(c.path, slot)] ?? OVERFLOW_PATH,
+    gpuMs: measured(cellF32(c.gpuMs, slot)),
+    gpuPartial: cellU8(c.gpuPartial, slot) === 1,
+    path: ring.paths[cellU16(c.path, slot)] ?? OVERFLOW_PATH,
     changed: changesAt(ring, slot),
-    causes: namesOf(cell(c.causes, slot), PERF_CAUSES),
-    kept: kept === null ? null : { pictures: kept, retakes: cell(c.retakes, slot) }
+    causes: namesOf(cellU8(c.causes, slot), PERF_CAUSES),
+    kept: kept === null ? null : { pictures: kept, retakes: cellF32(c.retakes, slot) }
   };
 }
 

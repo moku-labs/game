@@ -33,8 +33,16 @@ const config: Config = {
   poolLimit: 256,
   unsupportedMessage: "This device cannot run the game.",
   loadPixi: () => import("pixi.js"),
-  debug: { nineSlice: false, verifyFrames: false, kept: true },
-  monitor: { budgetMs: "rate", frames: 1024 },
+  debug: { nineSlice: false, verifyFrames: false, kept: true, overdraw: false },
+  monitor: {
+    budgetMs: "rate",
+    frames: 1024,
+    stillFrames: 60,
+    stillMpx: 0.25,
+    churnPerSecond: 4,
+    churnSeconds: 3,
+    churnAfterTrimMs: 1000
+  },
   onDemand: false,
   keptMb: 64,
   warm: 1

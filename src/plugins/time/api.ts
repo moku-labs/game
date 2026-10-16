@@ -175,7 +175,7 @@ function noteCap(ctx: TimeCtx, frameMs: number): void {
  * skipped, is a sample of the display rate. The first frame, and the first frame after a
  * `resume`, counts as one capped frame instead of the gap to a stale timestamp. A frame that
  * arrives more than the cap's slack before the current cap allows it is skipped — the cap is
- * `idleFps` while the screen is idle and the loop's rate (`rate().fps`) otherwise, the slack half
+ * `idleFps` while the screen is idle and the loop's rate otherwise (`rate().asked`, or the adaptive rule's), the slack half
  * a display period (`capSlackMs`) — and a long gap is clamped at `maxDeltaMs` so a backgrounded
  * tab does not produce a giant step. The idle timer moves by the raw gap, at most `idleAfterMs`,
  * so a throttled page goes idle in `idleAfterMs`. The interval that ends at a run frame is judged
@@ -243,6 +243,21 @@ function addFrameCallback(ctx: TimeCtx, phase: Phase, callback: FrameCallback): 
 }
 
 /**
+ * Counts the registered frame callbacks of the six phases, named one by one as `capturePhases` does: no loop, no
+ * iterator, no allocation.
+ *
+ * @param ctx - Domain context of the time plugin.
+ * @returns The count.
+ */
+function countFrameListeners(ctx: TimeCtx): number {
+  const { input, animate, layout, sync, signals, render } = ctx.state.callbacks;
+
+  return (
+    input.length + animate.length + layout.length + sync.length + signals.length + render.length
+  );
+}
+
+/**
  * Creates the time API: frame callbacks per phase, the `Time` resource, scale, pause and
  * resume, `wake` for the idle cap, the measurement of an agent build, the frame rate, and `step`
  * for tests and tools.
@@ -289,6 +304,8 @@ export function createTimeApi(ctx: TimeCtx): Api {
     wake: () => wakeClock(ctx),
 
     wakes: () => ctx.state.wakes,
+
+    frameListeners: () => countFrameListeners(ctx),
 
     measure: listener => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {

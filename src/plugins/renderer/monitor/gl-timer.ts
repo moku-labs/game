@@ -6,7 +6,7 @@
  */
 import { noteGpuTime } from "./gpu-timer";
 import type { FrameTimer, PerfCtx } from "./types";
-import { cell } from "./units";
+import { cellF32, cellF64, cellI32, cellU32 } from "./units";
 
 /** Queries of the pool. */
 const POOL_SIZE = 24;
@@ -91,7 +91,7 @@ export function createGlTimer(
       if (state.free === 0) return;
 
       state.free -= 1;
-      state.active = cell(free, state.free);
+      state.active = cellI32(free, state.free);
 
       const query = pool[state.active];
 
@@ -119,7 +119,7 @@ export function createGlTimer(
    * Takes the query at the head of the queue back into the pool.
    */
   const dequeue = (): void => {
-    free[state.free] = cell(queue, state.head);
+    free[state.free] = cellI32(queue, state.head);
     state.free += 1;
     state.head = (state.head + 1) % POOL_SIZE;
     state.pending -= 1;
@@ -139,24 +139,24 @@ export function createGlTimer(
     }
 
     while (state.pending > 0) {
-      const query = pool[cell(queue, state.head)];
+      const query = pool[cellI32(queue, state.head)];
 
       if (query === undefined || !gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return;
 
       const ms = Number(gl.getQueryParameter(query, gl.QUERY_RESULT)) / NS_PER_MS;
-      const slot = cell(queueSlots, state.head);
-      const frame = cell(queueFrames, state.head);
+      const slot = cellI32(queueSlots, state.head);
+      const frame = cellF64(queueFrames, state.head);
 
       dequeue();
 
-      if (slot < 0 || cell(columns.frame, slot) !== frame) continue;
+      if (slot < 0 || cellU32(columns.frame, slot) !== frame) continue;
 
-      const before = cell(columns.gpuMs, slot);
+      const before = cellF32(columns.gpuMs, slot);
 
       columns.gpuMs[slot] = Number.isNaN(before) ? ms : before + ms;
 
       // The frame's last query landed: its time is final.
-      if (state.pending === 0 || cell(queueFrames, state.head) !== frame) {
+      if (state.pending === 0 || cellF64(queueFrames, state.head) !== frame) {
         columns.gpuPartial[slot] = 0;
       }
 
@@ -174,7 +174,7 @@ export function createGlTimer(
       for (let index = 0; index < state.pending; index += 1) {
         const at = (state.head + index) % POOL_SIZE;
 
-        if (cell(queueFrames, at) === frame) queueSlots[at] = slot;
+        if (cellF64(queueFrames, at) === frame) queueSlots[at] = slot;
       }
 
       if (state.tried) pc.perf.ring.columns.gpuPartial[slot] = 1;

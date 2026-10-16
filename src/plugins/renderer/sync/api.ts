@@ -14,6 +14,7 @@ import { installFont, isFontInstalled } from "./fonts";
 import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
 import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
+import { drawOverdraw } from "./overdraw";
 import {
   drainOverlayEvents,
   loopsHeld,
@@ -511,8 +512,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    * view. A still frame (nothing added, removed or left without a view) builds no set and walks no entry.
    */
   const pass = (): void => {
-    // The pass may change the tree: the unseen walks of the loops are taken again in the next frame.
-    state.held.clear();
+    // The pass may change the tree: the unseen walks of the loops are taken again in the next frame. Cleared only when
+    // it holds something: V8 gives an empty map a new table at every `clear()`, and the pass runs every frame.
+    if (state.held.size > 0) state.held.clear();
 
     if (state.removed.size > 0) {
       for (const entity of state.removed) {
@@ -693,6 +695,29 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       kept: (on: boolean): void => deps.kept.enabled(on),
 
+      overdraw: (on: boolean): void => {
+        // Inline and positive: a production `define` folds the guard, and the switch stays off.
+        const next =
+          on &&
+          ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+            (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__));
+
+        if (state.debug.overdraw === next) return;
+
+        state.debug.overdraw = next;
+        // Nothing in the tree changes: a frame is asked for, so the next one draws the map or the game again.
+        deps.demand.request();
+
+        if (
+          (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+          (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+        ) {
+          ctx.log.info("renderer:overdraw", { on: next });
+
+          for (const listener of state.overdraw.listeners) listener(next);
+        }
+      },
+
       overlays: (): readonly OverlayReport[] => overlayReports(sctx),
 
       state: (): DebugSwitches => ({
@@ -728,6 +753,24 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     onWarm: (fn: WarmListener): void => {
       state.warm.listeners.push(fn);
+    },
+
+    overdrawing: (): boolean => state.debug.overdraw,
+
+    drawOverdraw: (render: () => boolean): boolean => {
+      // Inline and positive: a production `define` folds the guard, and `overdraw.ts` leaves the bundle.
+      if (
+        (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+        (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+      ) {
+        return drawOverdraw(sctx, render);
+      }
+
+      return render();
+    },
+
+    onOverdraw: (fn: (on: boolean) => void): void => {
+      state.overdraw.listeners.push(fn);
     },
 
     loopsHeld: (entity: Entity, reveals?: "alpha" | "place" | "both"): boolean =>

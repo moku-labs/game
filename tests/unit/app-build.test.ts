@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { buildIdOf, definesOf } from "../../src/app/build";
+import { appIdOf, buildIdOf, definesOf } from "../../src/app/build";
 import type { CliDeps } from "../../src/app/cli";
 import { runCommand } from "../../src/app/cli";
 import { copyMiniGame, removeCopies } from "../integration/app-helpers";
@@ -120,7 +120,8 @@ describe("the defines and the build id of a page", () => {
     const page = {
       build: "debug-20261014T153012Z",
       engine: "0.14.12+9c41e0",
-      editor: "127.0.0.1:47600"
+      editor: "127.0.0.1:47600",
+      app: undefined
     };
 
     expect(definesOf(undefined)).toEqual({
@@ -139,11 +140,28 @@ describe("the defines and the build id of a page", () => {
     expect(definesOf({ ...page, level: "full" }).__MOKU_GAME_CONTROL__).toBe("true");
   });
 
-  it("names a debug build by its profile and the UTC time of the run", () => {
-    const now = Date.UTC(2026, 9, 14, 15, 30, 12);
+  it("a debug page of a game with a native identifier defines the app id; one without leaves it out", () => {
+    const page = {
+      level: "full" as const,
+      build: "debug-20261014T153012Z",
+      engine: "0.14.12+9c41e0",
+      editor: "127.0.0.1:47600"
+    };
 
-    expect(buildIdOf("read", now)).toBe("debug-20261014T153012Z");
-    expect(buildIdOf("full", now)).toBe("debug-full-20261014T153012Z");
+    expect(definesOf({ ...page, app: "com.mokulabs.timber.debug" }).__MOKU_GAME_APP__).toBe(
+      '"com.mokulabs.timber.debug"'
+    );
+    expect(definesOf({ ...page, app: undefined })).not.toHaveProperty("__MOKU_GAME_APP__");
+  });
+
+  it("the app id is the native identifier, with .debug when native builds its debug app", () => {
+    expect(appIdOf("com.mokulabs.timber", "debug")).toBe("com.mokulabs.timber.debug");
+    expect(appIdOf("com.mokulabs.timber", undefined)).toBe("com.mokulabs.timber");
+    expect(appIdOf(undefined, "debug")).toBeUndefined();
+  });
+
+  it("names a debug build debug-<stamp> by the UTC time of the run, whatever its profile", () => {
+    expect(buildIdOf(Date.UTC(2026, 9, 14, 15, 30, 12))).toBe("debug-20261014T153012Z");
   });
 });
 
@@ -333,12 +351,19 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build --debug, the bundle
     expect(existsSync(path.join(root, "dist"))).toBe(false);
   });
 
-  it("--debug=full builds a page with every command, the full build id, the marked title and one warning", async () => {
+  it("--debug=read builds a read-only page: CONTROL false, the debug-<stamp> id, the app id with .debug under the native debug profile, and no alias note", async () => {
     const root = game();
 
     fakeEditor(root);
+    put(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "mini-game" }, native: { name: "Mini", identifier: "com.mini.game" } };\n'
+    );
 
-    const { code, seen } = await build(["--debug=full"], root, MANIFEST_ONLY, 0, debugSeams);
+    const { code, seen } = await build(["--debug=read"], root, MANIFEST_ONLY, 0, recorded => ({
+      ...debugSeams(recorded),
+      env: { MOKU_NATIVE_PROFILE: "debug" }
+    }));
     const out = path.join(root, "dist", "web");
     const html = readFileSync(path.join(out, "index.html"), "utf8");
     const script = /<script type="module" crossorigin src="([^"]+)"/.exec(html)?.[1] ?? "";
@@ -347,12 +372,13 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build --debug, the bundle
     expect(seen.errors).toEqual([]);
     expect(code).toBe(0);
     expect(seen.warnings).toEqual([
-      `build: a DEBUG page with the editor agent, control: every command, the state-changing ones too. Build debug-full-20261014T153012Z, engine ${VERSION}+src, editor 127.0.0.1:47600. Never ship it to a store.`
+      `build: a DEBUG page with the editor agent, control: read and cosmetic commands. Build debug-20261014T153012Z, engine ${VERSION}+src, editor 127.0.0.1:47600. Never ship it to a store.`
     ]);
     expect(seen.info).toEqual([expect.stringMatching(/^built ".+": \d+ files, \d+ KB\.$/)]);
     expect(html).toContain("<title>mini-game Debug</title>");
     expect(bundled).toContain(AGENT_MARKER);
-    expect(bundled).toContain('"debug-full-20261014T153012Z"');
-    expect(bundled).toMatch(/__MOKU_GAME_CONTROL__\s*=\s*(?:true|!0)/);
+    expect(bundled).toContain('"debug-20261014T153012Z"');
+    expect(bundled).toContain('"com.mini.game.debug"');
+    expect(bundled).toMatch(/__MOKU_GAME_CONTROL__\s*=\s*(?:false|!1)/);
   });
 });

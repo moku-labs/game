@@ -29,7 +29,7 @@ export type NativeVerbOptions = {
   target?: string;
   /** iOS: build the simulator slice instead of a device archive. */
   simulator?: boolean;
-  /** Build a debug app: the web page with the editor agent; `native build` on Android only. */
+  /** Build a debug app: the web page with the editor agent and its control profile; `native build` on Android only. */
   debug?: DebugLevel;
   /** The `host:port` the page agent of the debug app dials, when `--editor` gave one. */
   editor?: string;
@@ -97,13 +97,14 @@ function systemRowsOf(settings: ResolvedGameConfig): Config["system"] {
  * @returns The command.
  * @example
  * ```ts
- * webBuildOf({ cwd: "/g", command: '"bun" "/g/bin/moku-game.mjs"' }, { level: "full", editor: "192.168.1.20:47600" }); // '"bun" "/g/bin/moku-game.mjs" build --debug=full --editor 192.168.1.20:47600'
+ * webBuildOf({ cwd: "/g", command: '"bun" "/g/bin/moku-game.mjs"' }, { level: "full", editor: "192.168.1.20:47600" }); // '"bun" "/g/bin/moku-game.mjs" build --debug --editor 192.168.1.20:47600'
  * ```
  */
 function webBuildOf(where: NativeWhere, debug: NativeDebug | undefined): string {
   if (debug === undefined) return `${where.command} build`;
 
-  const level = debug.level === "full" ? "--debug=full" : "--debug";
+  // `--debug` is the full profile; the read-only one is spelled out.
+  const level = debug.level === "full" ? "--debug" : "--debug=read";
   const editor = debug.editor === undefined ? "" : ` --editor ${debug.editor}`;
 
   return `${where.command} build ${level}${editor}`;

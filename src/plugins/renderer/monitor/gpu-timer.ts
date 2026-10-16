@@ -8,7 +8,7 @@
 import { CAUSE, sequenceOf } from "./ring";
 import { addPending, annotate } from "./stream";
 import type { FrameTimer, PerfCtx } from "./types";
-import { cell } from "./units";
+import { cellF32, cellF64, cellI32, cellU8, cellU32 } from "./units";
 
 /** Passes timed per frame; the 33rd and later are untimed and mark the frame `gpuPartial`. */
 export const PASS_SLOTS = 32;
@@ -143,11 +143,11 @@ function createBatch(): Batch {
 export function noteGpuTime(pc: PerfCtx, slot: number): void {
   const { ring } = pc.perf;
   const c = ring.columns;
-  const before = cell(c.causes, slot);
-  const gpuMs = cell(c.gpuMs, slot);
+  const before = cellU8(c.causes, slot);
+  const gpuMs = cellF32(c.gpuMs, slot);
 
-  if (cell(c.stepped, slot) === 1 || (before & CAUSE.gpu) !== 0) return;
-  if (Number.isNaN(gpuMs) || gpuMs <= cell(c.budgetMs, slot)) return;
+  if (cellU8(c.stepped, slot) === 1 || (before & CAUSE.gpu) !== 0) return;
+  if (Number.isNaN(gpuMs) || gpuMs <= cellF32(c.budgetMs, slot)) return;
 
   c.causes[slot] = before | CAUSE.gpu | (before === 0 ? annotate(pc, slot) : 0);
 
@@ -162,7 +162,7 @@ export function noteGpuTime(pc: PerfCtx, slot: number): void {
  * @returns Nanoseconds.
  */
 function stampAt(view: Uint32Array, query: number): number {
-  return cell(view, 2 * query + 1) * HIGH_WORD + cell(view, 2 * query);
+  return cellU32(view, 2 * query + 1) * HIGH_WORD + cellU32(view, 2 * query);
 }
 
 /**
@@ -177,14 +177,14 @@ function stampAt(view: Uint32Array, query: number): number {
  */
 function readFrame(timer: Timer, batch: Batch, view: Uint32Array, frame: number): void {
   const { columns, passes } = timer.pc.perf.ring;
-  const count = cell(batch.timed, frame);
+  const count = cellU8(batch.timed, frame);
   let sum = 0;
-  let whole = cell(batch.partial, frame) === 0;
+  let whole = cellU8(batch.partial, frame) === 0;
 
   for (let pass = 0; pass < count; pass += 1) {
     const start = stampAt(view, frame * QUERIES_PER_FRAME + 2 * pass);
     const end = stampAt(view, frame * QUERIES_PER_FRAME + 2 * pass + 1);
-    const sequence = cell(batch.passes, frame * PASS_SLOTS + pass);
+    const sequence = cellF64(batch.passes, frame * PASS_SLOTS + pass);
 
     if (start > 0 && end > start) {
       const ms = (end - start) / NS_PER_MS;
@@ -199,9 +199,10 @@ function readFrame(timer: Timer, batch: Batch, view: Uint32Array, frame: number)
     }
   }
 
-  const slot = cell(batch.slots, frame);
+  const slot = cellI32(batch.slots, frame);
 
-  if (count === 0 || slot < 0 || cell(columns.frame, slot) !== cell(batch.frames, frame)) return;
+  if (count === 0 || slot < 0 || cellU32(columns.frame, slot) !== cellF64(batch.frames, frame))
+    return;
 
   columns.gpuMs[slot] = sum;
 
@@ -301,7 +302,7 @@ function timePass(timer: Timer, descriptor: GPURenderPassDescriptor, sequence: n
   if (timer.buffer === -1) return;
 
   const { open } = timer;
-  const pass = cell(open.timed, timer.frameSlot);
+  const pass = cellU8(open.timed, timer.frameSlot);
   const write = timer.writes[timer.frameSlot * PASS_SLOTS + pass];
 
   if (pass >= PASS_SLOTS || write === undefined) {
@@ -327,7 +328,7 @@ function resolveFrame(timer: Timer, commandEncoder: GPUCommandEncoder): void {
   if (timer.frameSlot === -1) return;
 
   const target = timer.buffers[timer.buffer];
-  const count = cell(timer.open.timed, timer.frameSlot);
+  const count = cellU8(timer.open.timed, timer.frameSlot);
   const offset = timer.frameSlot * REGION_BYTES;
 
   if (target === undefined || count === 0) return;

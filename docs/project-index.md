@@ -107,6 +107,7 @@ The examples are keys of the engine's own fixture, `tests/fixtures/mini-game/`, 
 | `feature:<id>` | `feature:home`; `feature:ep01` of the episodes game | `defineFeature("home", …)`, at any depth: `features/episodes/ep01/index.ts` holds `feature:ep01` | the declaration. A feature made by a factory has no `feature:` key; its folder is in `features` |
 | `scene:<id>` | `scene:home` | `defineScene("home", …)` | the declaration, `features/home/scene.ts:8` |
 | `projection:<name>` | `projection:home.screen` | `projection({ name: "home.screen", … })` | the `name` property, `features/home/view.tsx:21` |
+| `system:<name>` | `system:drift` | `system({ name: "drift", … })` | the `name` property when bound to a const, otherwise the first place the name is written |
 | `emitter:<id>` | `emitter:fx.spark` | `defineEmitter("fx.spark", …)` | the declaration, `features/info/effects.ts:8` |
 | `textStyle:<key>` | `textStyle:ui.counter` | a key of `defineTextStyles({ … })` | the property, `features/home/styles.ts:16` |
 | `style:<path>#<binding>` | `style:features/info/popup.tsx#popupScreen` | `const popupScreen = defineStyle(…)` at module scope | the declaration, `features/info/popup.tsx:11` |
