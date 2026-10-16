@@ -38,7 +38,7 @@ import {
   type PerfCtx,
   type RenderStats
 } from "./types";
-import { BYTES_PER_MB, cell, roundTo } from "./units";
+import { BYTES_PER_MB, cellF64, roundTo } from "./units";
 import { beginFrame, endFrame, resetWindow, STALE_MS } from "./window";
 
 /**
@@ -130,7 +130,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
    * @param drawn - True when the render phase drew the frame.
    */
   const notePasses = (drawn: boolean): void => {
-    const count = cell(sinks.counts, COUNT.passes);
+    const count = cellF64(sinks.counts, COUNT.passes);
 
     if (drawn && count > 0) {
       passes.last = count;
@@ -330,7 +330,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     count: (_counter: "rebuilds", amount: number): void => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
         pc.perf.produced |= 1;
-        pc.sinks.counts[COUNT.rebuilds] = cell(pc.sinks.counts, COUNT.rebuilds) + amount;
+        pc.sinks.counts[COUNT.rebuilds] = cellF64(pc.sinks.counts, COUNT.rebuilds) + amount;
       }
     },
 

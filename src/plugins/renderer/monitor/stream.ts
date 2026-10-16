@@ -29,7 +29,7 @@ import { CAUSE, CHANGED, noteSubject, slotOfSequence } from "./ring";
 import { buildStartup } from "./startup";
 import { PENDING_SLOTS } from "./state";
 import type { PerfCtx, PerfRing, PerfState } from "./types";
-import { cell } from "./units";
+import { cellF32, cellF64, cellU8, cellU32 } from "./units";
 
 /** How long the header waits for the native shell to answer at page start. */
 export const SHELL_WAIT_MS = 500;
@@ -180,7 +180,8 @@ function compiledBefore(ring: PerfRing, slot: number): boolean {
   const age = (ring.newest - slot + ring.capacity) % ring.capacity;
 
   for (let back = 1; back <= COMPILE_LOOKBACK && age + back < ring.size; back += 1) {
-    if (cell(ring.columns.compiles, (slot - back + ring.capacity) % ring.capacity) > 0) return true;
+    if (cellF32(ring.columns.compiles, (slot - back + ring.capacity) % ring.capacity) > 0)
+      return true;
   }
 
   return false;
@@ -198,11 +199,11 @@ function compiledBefore(ring: PerfRing, slot: number): boolean {
 export function annotate(pc: PerfCtx, slot: number): number {
   const { ring } = pc.perf;
   const c = ring.columns;
-  const late = (cell(c.causes, slot) & CAUSE.gap) !== 0;
+  const late = (cellU8(c.causes, slot) & CAUSE.gap) !== 0;
   let bits = 0;
 
-  if (cell(c.compiles, slot) > 0 || (late && compiledBefore(ring, slot))) bits |= CAUSE.compile;
-  if (cell(c.uploadMb, slot) >= 1) bits |= CAUSE.upload;
+  if (cellF32(c.compiles, slot) > 0 || (late && compiledBefore(ring, slot))) bits |= CAUSE.compile;
+  if (cellF32(c.uploadMb, slot) >= 1) bits |= CAUSE.upload;
   if (annotateLongFrame(pc.perf, slot)) bits |= CAUSE.longFrame;
 
   return bits;
@@ -222,13 +223,13 @@ function flushSpikes(pc: PerfCtx, windowStart: number): void {
   let kept = 0;
 
   for (let index = 0; index < perf.pendingCount; index += 1) {
-    const sequence = cell(perf.pending, index);
+    const sequence = cellF64(perf.pending, index);
     const slot = slotOfSequence(ring, sequence);
 
     if (slot === -1) continue;
 
-    if (cell(c.gpuPartial, slot) === 0 || cell(c.t, slot) < windowStart) {
-      c.causes[slot] = cell(c.causes, slot) | annotate(pc, slot);
+    if (cellU8(c.gpuPartial, slot) === 0 || cellF64(c.t, slot) < windowStart) {
+      c.causes[slot] = cellU8(c.causes, slot) | annotate(pc, slot);
       deliver(pc, spikeLine(pc, slot));
     } else {
       perf.pending[kept] = sequence;
@@ -253,13 +254,13 @@ function flushLoads(pc: PerfCtx, start: number, end: number): void {
 
   for (let age = window.first + window.count - 1; age >= window.first; age -= 1) {
     const slot = slotAt(ring, age);
-    const frame = cell(c.frame, slot);
+    const frame = cellU32(c.frame, slot);
 
     // Before the first drawn frame (or with none: NaN) the compiles are the boot's, not the game's.
-    if (Number.isNaN(firstDrawnAt) || cell(c.t, slot) <= firstDrawnAt) continue;
+    if (Number.isNaN(firstDrawnAt) || cellF64(c.t, slot) <= firstDrawnAt) continue;
 
-    const compiles = cell(c.compiles, slot);
-    const mb = cell(c.uploadMb, slot);
+    const compiles = cellF32(c.compiles, slot);
+    const mb = cellF32(c.uploadMb, slot);
 
     if (compiles > 0) deliver(pc, eventLine("compile", { frame, count: compiles }, frame));
     if (mb > 0) {
@@ -313,7 +314,7 @@ function nextSecond(pc: PerfCtx): void {
   perf.secSum.fill(0);
   perf.secMax.fill(0);
   perf.listenersSum = 0;
-  perf.lastFlushAt = cell(perf.staged, 1);
+  perf.lastFlushAt = cellF64(perf.staged, 1);
 }
 
 /**
@@ -327,7 +328,7 @@ function nextSecond(pc: PerfCtx): void {
 export function flushPerf(pc: PerfCtx): void {
   const { perf } = pc;
   const start = perf.lastFlushAt;
-  const windowEnd = cell(perf.staged, 1);
+  const windowEnd = cellF64(perf.staged, 1);
 
   perf.timer?.close();
 

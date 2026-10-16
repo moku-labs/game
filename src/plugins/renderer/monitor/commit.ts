@@ -26,7 +26,7 @@ import {
 import { addPending, annotate, flushPerf, writeDisplay } from "./stream";
 import { noteTicks } from "./ticks";
 import { COUNT, MEASURE, type MonitorSinks, type PerfCtx, type PerfState } from "./types";
-import { BYTES_PER_MB, cell } from "./units";
+import { BYTES_PER_MB, cellF32, cellF64, cellU8, cellU16 } from "./units";
 
 /** A flush once a second of page clock. */
 const FLUSH_MS = 1000;
@@ -78,21 +78,21 @@ function writeCounters(pc: PerfCtx, slot: number): void {
   const bits = perf.measuring;
   const counted = (bits & MEASURE.counted) !== 0;
 
-  c.passes[slot] = (bits & MEASURE.passes) === 0 ? Number.NaN : cell(counts, COUNT.passes);
+  c.passes[slot] = (bits & MEASURE.passes) === 0 ? Number.NaN : cellF64(counts, COUNT.passes);
   c.stencilPasses[slot] =
-    (bits & MEASURE.stencilPasses) === 0 ? Number.NaN : cell(counts, COUNT.stencilPasses);
+    (bits & MEASURE.stencilPasses) === 0 ? Number.NaN : cellF64(counts, COUNT.stencilPasses);
   c.draws[slot] = (bits & MEASURE.draws) === 0 ? Number.NaN : sinks.draws.last;
-  c.filterApplies[slot] = counted ? cell(counts, COUNT.filterApplies) : Number.NaN;
-  c.filterMpx[slot] = counted ? cell(counts, COUNT.filterPixels) / PIXELS_PER_MPX : Number.NaN;
-  c.uploads[slot] = counted ? cell(counts, COUNT.uploads) : Number.NaN;
-  c.uploadMb[slot] = counted ? cell(counts, COUNT.uploadBytes) / BYTES_PER_MB : Number.NaN;
-  c.compiles[slot] = (bits & MEASURE.compiles) === 0 ? Number.NaN : cell(counts, COUNT.compiles);
+  c.filterApplies[slot] = counted ? cellF64(counts, COUNT.filterApplies) : Number.NaN;
+  c.filterMpx[slot] = counted ? cellF64(counts, COUNT.filterPixels) / PIXELS_PER_MPX : Number.NaN;
+  c.uploads[slot] = counted ? cellF64(counts, COUNT.uploads) : Number.NaN;
+  c.uploadMb[slot] = counted ? cellF64(counts, COUNT.uploadBytes) / BYTES_PER_MB : Number.NaN;
+  c.compiles[slot] = (bits & MEASURE.compiles) === 0 ? Number.NaN : cellF64(counts, COUNT.compiles);
   // The draw decision of the frame (spec 14): its marks and the index of its reason; B8 feeds `rebuilds`.
   const decided = pc.deps.demand.frame();
 
   c.marks[slot] = decided.marks;
   c.reason[slot] = reasonIndex(decided.reason);
-  c.rebuilds[slot] = perf.produced === 0 ? Number.NaN : cell(counts, COUNT.rebuilds);
+  c.rebuilds[slot] = perf.produced === 0 ? Number.NaN : cellF64(counts, COUNT.rebuilds);
   // The kept pictures of the frame (spec 23), read from the state: no object per frame.
   const kept = pc.ctx.state.kept;
 
@@ -101,8 +101,8 @@ function writeCounters(pc: PerfCtx, slot: number): void {
   // Render targets made and dropped (U4): counted on the WebGPU texture system.
   const targets = (bits & MEASURE.targets) !== 0;
 
-  c.targetsCreated[slot] = targets ? cell(counts, COUNT.targetsCreated) : Number.NaN;
-  c.targetsDestroyed[slot] = targets ? cell(counts, COUNT.targetsDestroyed) : Number.NaN;
+  c.targetsCreated[slot] = targets ? cellF64(counts, COUNT.targetsCreated) : Number.NaN;
+  c.targetsDestroyed[slot] = targets ? cellF64(counts, COUNT.targetsDestroyed) : Number.NaN;
 }
 
 /**
@@ -142,13 +142,14 @@ function insertTop(
 ): void {
   let place = stride;
 
-  while (place > 0 && value > cell(values, base + place - 1)) place -= 1;
+  while (place > 0 && value > cellF32(values, base + place - 1)) place -= 1;
 
   if (place === stride) return;
 
   for (let move = stride - 1; move > place; move -= 1) {
-    indices[base + move] = cell(indices, base + move - 1);
-    values[base + move] = cell(values, base + move - 1);
+    // Read in place, no reader: this load sees the two index kinds, a small integer, never a boxed double.
+    indices[base + move] = indices[base + move - 1] ?? 0;
+    values[base + move] = cellF32(values, base + move - 1);
   }
 
   indices[base + place] = index;
@@ -182,7 +183,7 @@ function writeSystems(pc: PerfCtx, slot: number, timing: Readonly<SystemTiming> 
   const count = Math.min(timing.names.length, timing.ms.length);
 
   for (let index = 0; index < count; index += 1) {
-    const ms = cell(timing.ms, index);
+    const ms = cellF64(timing.ms, index);
 
     if (ms > 0) insertTop(c.sysIdx, c.sysMs, base, SYSTEM_STRIDE, index, ms);
   }
@@ -207,7 +208,7 @@ function writeKinds(pc: PerfCtx, slot: number): void {
   const kinds = sinks.kindPixels.length;
 
   for (let kind = 0; kind < kinds; kind += 1) {
-    const pixels = cell(sinks.kindPixels, kind);
+    const pixels = cellF64(sinks.kindPixels, kind);
 
     if (pixels > 0) {
       insertTop(c.fltKind, c.fltMpx, base, KIND_STRIDE, kind + 1, pixels / PIXELS_PER_MPX);
@@ -215,9 +216,9 @@ function writeKinds(pc: PerfCtx, slot: number): void {
   }
 
   for (let place = 0; place < KIND_STRIDE; place += 1) {
-    const kind = cell(c.fltKind, base + place);
+    const kind = cellU8(c.fltKind, base + place);
 
-    if (kind !== 0) c.fltApplies[base + place] = cell(sinks.kindApplies, kind - 1);
+    if (kind !== 0) c.fltApplies[base + place] = cellF64(sinks.kindApplies, kind - 1);
   }
 }
 
@@ -237,7 +238,7 @@ function accumulate(
   if (!Number.isNaN(measure.gapMs)) {
     const bucket = bucketOf(measure.gapMs);
 
-    perf.gapHist[bucket] = cell(perf.gapHist, bucket) + 1;
+    perf.gapHist[bucket] = cellU16(perf.gapHist, bucket) + 1;
   }
 
   perf.listenersSum += measure.listenersMs;
@@ -247,11 +248,11 @@ function accumulate(
   const count = Math.min(timing.names.length, timing.ms.length, perf.secSum.length);
 
   for (let index = 0; index < count; index += 1) {
-    const ms = cell(timing.ms, index);
+    const ms = cellF64(timing.ms, index);
 
-    perf.secSum[index] = cell(perf.secSum, index) + ms;
+    perf.secSum[index] = cellF64(perf.secSum, index) + ms;
 
-    if (ms > cell(perf.secMax, index)) perf.secMax[index] = ms;
+    if (ms > cellF32(perf.secMax, index)) perf.secMax[index] = ms;
   }
 }
 
@@ -282,13 +283,13 @@ function turned(pc: PerfCtx): boolean {
  */
 function stageBudget(perf: PerfState, measure: Readonly<FrameMeasure>): void {
   const ticksSlower =
-    Number.isNaN(measure.displayMs) && cell(perf.ticks.periodMs, 0) > measure.rateMs;
+    Number.isNaN(measure.displayMs) && cellF64(perf.ticks.periodMs, 0) > measure.rateMs;
 
   perf.staged[0] = measure.rateMs;
 
   if (measure.displayMs > measure.rateMs) perf.staged[0] = measure.displayMs;
   else if (ticksSlower) {
-    perf.staged[0] = cell(perf.ticks.periodMs, 0);
+    perf.staged[0] = cellF64(perf.ticks.periodMs, 0);
   }
   if (perf.budget !== "rate") perf.staged[0] = perf.budget;
 }
@@ -342,9 +343,9 @@ function gapJudged(
 
   const c = pc.perf.ring.columns;
   const throttled =
-    littleWork && measure.gapMs > AWAY_GAP_MS && cell(c.gapMs, previous) > AWAY_GAP_MS;
+    littleWork && measure.gapMs > AWAY_GAP_MS && cellF32(c.gapMs, previous) > AWAY_GAP_MS;
 
-  return !throttled && (pc.perf.drawn || cell(c.drawn, previous) === 1);
+  return !throttled && (pc.perf.drawn || cellU8(c.drawn, previous) === 1);
 }
 
 /**
@@ -367,10 +368,10 @@ function writeMeasure(pc: PerfCtx, slot: number, measure: Readonly<FrameMeasure>
   c.skipped[slot] = Math.min(SKIPPED_MAX, measure.skipped);
   c.startMs[slot] = measure.startMs;
   c.rateMs[slot] = measure.rateMs;
-  c.budgetMs[slot] = cell(perf.staged, 0);
+  c.budgetMs[slot] = cellF64(perf.staged, 0);
 
   for (let index = 0; index < PHASE_STRIDE; index += 1) {
-    c.phaseMs[phase + index] = cell(measure.phaseMs, index);
+    c.phaseMs[phase + index] = cellF32(measure.phaseMs, index);
   }
 
   c.agentMs[slot] = perf.agentMs;
@@ -403,7 +404,7 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
 
   stageBudget(perf, measure);
 
-  const budget = cell(perf.staged, 0);
+  const budget = cellF64(perf.staged, 0);
   const { agentMs } = perf;
   const timing = pc.ctx.deps.world.systemTimes();
 
@@ -419,7 +420,10 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   // function: a computed double handed to a call is boxed, and this runs every frame.
   const heap = usedHeapBytes();
   const heapDrop = perf.lastHeap - heap;
-  let causes = spikeCauses(measure, agentMs, budget, cell(c.capMs, previous));
+  // No previous frame is NaN without a read: one read at slot -1 would leave `cellF32` boxing for good, every
+  // `Float32Array` read of the per-frame path a heap number.
+  const previousCapMs = previous === -1 ? Number.NaN : cellF32(c.capMs, previous);
+  let causes = spikeCauses(measure, agentMs, budget, previousCapMs);
   const littleWork = measure.workMs - agentMs < budget * GC_WORK_SHARE;
 
   if ((causes & CAUSE.gap) !== 0 && !gapJudged(pc, measure, previous, littleWork)) {

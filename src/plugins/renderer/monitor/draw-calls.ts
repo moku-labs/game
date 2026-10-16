@@ -20,7 +20,7 @@ import {
   OWNER_SLOTS,
   type OwnerTable
 } from "./types";
-import { cell } from "./units";
+import { cellF64 } from "./units";
 
 /** The arguments of a batch draw. */
 type BatchArguments = Parameters<InstanceType<PixiModule["GpuBatchAdaptor"]>["execute"]>;
@@ -108,7 +108,7 @@ function ownerSlot(owners: OwnerTable, owner: number): number {
   let free = -1;
 
   for (let slot = 0; slot < OWNER_SLOTS; slot += 1) {
-    const id = cell(owners.ids, slot);
+    const id = cellF64(owners.ids, slot);
 
     if (id === owner) return slot;
     if (id === 0 && free === -1) free = slot;
@@ -140,17 +140,17 @@ function countApply(
   const owner = sinks.filterOwners?.get(filter) ?? 0;
   const slot = owner === 0 ? -1 : ownerSlot(owners, owner);
 
-  counts[COUNT.filterApplies] = cell(counts, COUNT.filterApplies) + 1;
-  counts[COUNT.filterPixels] = cell(counts, COUNT.filterPixels) + pixels;
-  sinks.kindApplies[kind] = cell(sinks.kindApplies, kind) + 1;
-  sinks.kindPixels[kind] = cell(sinks.kindPixels, kind) + pixels;
+  counts[COUNT.filterApplies] = cellF64(counts, COUNT.filterApplies) + 1;
+  counts[COUNT.filterPixels] = cellF64(counts, COUNT.filterPixels) + pixels;
+  sinks.kindApplies[kind] = cellF64(sinks.kindApplies, kind) + 1;
+  sinks.kindPixels[kind] = cellF64(sinks.kindPixels, kind) + pixels;
   sinks.filterKind = kind;
   sinks.filterOwner = owner;
 
   // The owner's applies of the frame, for the `filter-still` rule (U5).
   if (slot !== -1) {
-    owners.applies[slot] = cell(owners.applies, slot) + 1;
-    owners.pixels[slot] = cell(owners.pixels, slot) + pixels;
+    owners.applies[slot] = cellF64(owners.applies, slot) + 1;
+    owners.pixels[slot] = cellF64(owners.pixels, slot) + pixels;
     owners.kinds[slot] = kind + 1;
   }
 }
@@ -200,8 +200,8 @@ function countUpload(sinks: MonitorSinks, source: Source): void {
 
   const { counts } = sinks;
 
-  counts[COUNT.uploads] = cell(counts, COUNT.uploads) + 1;
-  counts[COUNT.uploadBytes] = cell(counts, COUNT.uploadBytes) + uploadBytes(source);
+  counts[COUNT.uploads] = cellF64(counts, COUNT.uploads) + 1;
+  counts[COUNT.uploadBytes] = cellF64(counts, COUNT.uploadBytes) + uploadBytes(source);
 }
 
 /**
@@ -229,7 +229,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param instructionSet - The instruction set being rebuilt.
      */
     public override buildStart(instructionSet: InstructionSet): void {
-      if (sinks.inFrame) sinks.counts[COUNT.rebuilds] = cell(sinks.counts, COUNT.rebuilds) + 1;
+      if (sinks.inFrame) sinks.counts[COUNT.rebuilds] = cellF64(sinks.counts, COUNT.rebuilds) + 1;
 
       sinks.rebuildsWindow += 1;
       super.buildStart(instructionSet);
@@ -326,10 +326,10 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
         const { counts } = sinks;
         const { descriptor } = gpuRenderTarget;
 
-        counts[COUNT.passes] = cell(counts, COUNT.passes) + 1;
+        counts[COUNT.passes] = cellF64(counts, COUNT.passes) + 1;
 
         if (descriptor.depthStencilAttachment !== undefined) {
-          counts[COUNT.stencilPasses] = cell(counts, COUNT.stencilPasses) + 1;
+          counts[COUNT.stencilPasses] = cellF64(counts, COUNT.stencilPasses) + 1;
         }
 
         sinks.passes?.begin(descriptor, this.owner.renderTarget.renderTarget);
@@ -405,7 +405,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
 
       if (made) {
         this.targets.add(source);
-        sinks.counts[COUNT.targetsCreated] = cell(sinks.counts, COUNT.targetsCreated) + 1;
+        sinks.counts[COUNT.targetsCreated] = cellF64(sinks.counts, COUNT.targetsCreated) + 1;
       }
 
       return texture;
@@ -428,7 +428,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      */
     protected override onSourceUnload(source: Source): void {
       if (this.targets.delete(source)) {
-        sinks.counts[COUNT.targetsDestroyed] = cell(sinks.counts, COUNT.targetsDestroyed) + 1;
+        sinks.counts[COUNT.targetsDestroyed] = cellF64(sinks.counts, COUNT.targetsDestroyed) + 1;
       }
 
       super.onSourceUnload(source);
@@ -534,7 +534,7 @@ export function installPassCounting(pixi: PixiModule, sinks: MonitorSinks): () =
      * @returns The pass encoder.
      */
     public override beginRenderPass(gpuRenderTarget: GpuRenderTarget): GPURenderPassEncoder {
-      if (sinks.inFrame) sinks.counts[COUNT.passes] = cell(sinks.counts, COUNT.passes) + 1;
+      if (sinks.inFrame) sinks.counts[COUNT.passes] = cellF64(sinks.counts, COUNT.passes) + 1;
 
       return super.beginRenderPass(gpuRenderTarget);
     }

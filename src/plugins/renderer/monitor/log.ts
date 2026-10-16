@@ -29,7 +29,7 @@ import { entryOf, heapMb, longFramesIn } from "./long-frames";
 import { viewLabel } from "./problems";
 import { CAUSE, OVERFLOW_PATH, PHASE_STRIDE, passesOf, recordAt } from "./ring";
 import { type LongFrameRecord, MEASURE, type PerfCtx, type PerfRing } from "./types";
-import { BYTES_PER_MB, cell, roundTo } from "./units";
+import { BYTES_PER_MB, cellF32, cellF64, cellU8, cellU32, roundTo } from "./units";
 
 /** What follows the Android model in a user agent: `…; SM-A266B Build/…`. */
 const UA_BUILD = " Build/";
@@ -220,13 +220,13 @@ function capsOf(ring: PerfRing): { maxFps: number; idleFps: number; budgetMs: nu
 
   for (let age = 0; age < ring.size && (maxFps === 0 || idleFps === 0); age += 1) {
     const slot = (ring.newest - age + ring.capacity) % ring.capacity;
-    const fps = Math.round(1000 / cell(c.capMs, slot));
+    const fps = Math.round(1000 / cellF32(c.capMs, slot));
 
-    if (cell(c.idle, slot) === 1) idleFps ||= fps;
+    if (cellU8(c.idle, slot) === 1) idleFps ||= fps;
     else maxFps ||= fps;
   }
 
-  return { maxFps, idleFps, budgetMs: ring.size === 0 ? 0 : cell(c.budgetMs, ring.newest) };
+  return { maxFps, idleFps, budgetMs: ring.size === 0 ? 0 : cellF32(c.budgetMs, ring.newest) };
 }
 
 /**
@@ -338,7 +338,7 @@ function meanMax(sum: number, count: number, max: number): { mean: number; max: 
 function rank(sorted: Float32Array, count: number, quantile: number): number {
   if (count === 0) return 0;
 
-  return ms(cell(sorted, Math.min(count - 1, Math.max(0, Math.ceil(quantile * count) - 1))));
+  return ms(cellF32(sorted, Math.min(count - 1, Math.max(0, Math.ceil(quantile * count) - 1))));
 }
 
 /**
@@ -357,11 +357,12 @@ export function windowOf(
   const c = ring.columns;
   let first = 0;
 
-  while (first < ring.size && cell(c.t, slotAt(ring, first)) >= end) first += 1;
+  while (first < ring.size && cellF64(c.t, slotAt(ring, first)) >= end) first += 1;
 
   let count = 0;
 
-  while (first + count < ring.size && cell(c.t, slotAt(ring, first + count)) >= start) count += 1;
+  while (first + count < ring.size && cellF64(c.t, slotAt(ring, first + count)) >= start)
+    count += 1;
 
   return { first, count };
 }
@@ -378,25 +379,26 @@ export function slotAt(ring: PerfRing, age: number): number {
 }
 
 /**
- * Sorts the values a window gives into the scratch array and answers its spread.
+ * Sorts the values of one column over a window into the scratch array and answers its spread. The column, not a
+ * reader closure: a closure's double comes back boxed from its call, once for every frame of the window.
  *
  * @param pc - The perf context.
  * @param window - The window.
  * @param window.first - Its first age.
  * @param window.count - Its frames.
- * @param read - Reads a frame's value; NaN leaves the frame out.
+ * @param column - A `Float32Array` column of the ring; NaN leaves the frame out.
  * @returns The values kept, and the scratch view sorted over them.
  */
 function sortedOf(
   pc: PerfCtx,
   window: { first: number; count: number },
-  read: (slot: number) => number
+  column: Float32Array
 ): { count: number; sorted: Float32Array } {
   const { ring, scratch } = pc.perf;
   let count = 0;
 
   for (let age = window.first; age < window.first + window.count; age += 1) {
-    const value = read(slotAt(ring, age));
+    const value = cellF32(column, slotAt(ring, age));
 
     if (!Number.isNaN(value)) {
       scratch[count] = value;
@@ -450,8 +452,8 @@ type Totals = {
  * @param value - The phase's ms.
  */
 function addPhase(totals: Totals, index: number, value: number): void {
-  totals.phaseSum[index] = cell(totals.phaseSum, index) + value;
-  totals.phaseMax[index] = Math.max(cell(totals.phaseMax, index), value);
+  totals.phaseSum[index] = cellF64(totals.phaseSum, index) + value;
+  totals.phaseMax[index] = Math.max(cellF64(totals.phaseMax, index), value);
 }
 
 /**
@@ -463,29 +465,29 @@ function addPhase(totals: Totals, index: number, value: number): void {
  * @param slot - The frame's slot.
  */
 function addFrame(totals: Totals, c: PerfRing["columns"], slot: number): void {
-  const agent = cell(c.agentMs, slot);
-  const missed = (cell(c.causes, slot) & CAUSE.gap) !== 0;
+  const agent = cellF32(c.agentMs, slot);
+  const missed = (cellU8(c.causes, slot) & CAUSE.gap) !== 0;
 
-  addPhase(totals, 0, cell(c.startMs, slot));
+  addPhase(totals, 0, cellF32(c.startMs, slot));
 
   for (let index = 0; index < PHASE_STRIDE; index += 1) {
-    addPhase(totals, index + 1, cell(c.phaseMs, slot * PHASE_STRIDE + index));
+    addPhase(totals, index + 1, cellF32(c.phaseMs, slot * PHASE_STRIDE + index));
   }
 
   addPhase(totals, PHASE_STRIDE + 1, agent);
-  totals.idle += cell(c.idle, slot);
-  totals.overBudget += cell(c.workMs, slot) - agent > cell(c.budgetMs, slot) ? 1 : 0;
-  totals.spikes += cell(c.causes, slot) === 0 ? 0 : 1;
+  totals.idle += cellU8(c.idle, slot);
+  totals.overBudget += cellF32(c.workMs, slot) - agent > cellF32(c.budgetMs, slot) ? 1 : 0;
+  totals.spikes += cellU8(c.causes, slot) === 0 ? 0 : 1;
   totals.missed += missed ? 1 : 0;
-  totals.missedDrawn += missed && cell(c.drawn, slot) === 1 ? 1 : 0;
-  totals.skipped += cell(c.skipped, slot);
-  totals.uploads += cell(c.uploads, slot);
-  totals.uploadMb += cell(c.uploadMb, slot);
-  totals.compiles += cell(c.compiles, slot);
-  totals.rebuilds += cell(c.rebuilds, slot);
-  totals.retakes += cell(c.retakes, slot);
-  totals.targetsCreated += cell(c.targetsCreated, slot);
-  totals.targetsDestroyed += cell(c.targetsDestroyed, slot);
+  totals.missedDrawn += missed && cellU8(c.drawn, slot) === 1 ? 1 : 0;
+  totals.skipped += cellU8(c.skipped, slot);
+  totals.uploads += cellF32(c.uploads, slot);
+  totals.uploadMb += cellF32(c.uploadMb, slot);
+  totals.compiles += cellF32(c.compiles, slot);
+  totals.rebuilds += cellF32(c.rebuilds, slot);
+  totals.retakes += cellF32(c.retakes, slot);
+  totals.targetsCreated += cellF32(c.targetsCreated, slot);
+  totals.targetsDestroyed += cellF32(c.targetsDestroyed, slot);
 }
 
 /**
@@ -497,15 +499,15 @@ function addFrame(totals: Totals, c: PerfRing["columns"], slot: number): void {
  */
 function addDrawn(totals: Totals, c: PerfRing["columns"], slot: number): void {
   totals.drawn += 1;
-  totals.passes += cell(c.passes, slot);
-  totals.passesMax = Math.max(totals.passesMax, cell(c.passes, slot));
-  totals.stencil += cell(c.stencilPasses, slot);
-  totals.draws += cell(c.draws, slot);
-  totals.drawsMax = Math.max(totals.drawsMax, cell(c.draws, slot));
-  totals.applies += cell(c.filterApplies, slot);
-  totals.appliesMax = Math.max(totals.appliesMax, cell(c.filterApplies, slot));
-  totals.mpx += cell(c.filterMpx, slot);
-  totals.keptMax = Math.max(totals.keptMax, cell(c.kept, slot));
+  totals.passes += cellF32(c.passes, slot);
+  totals.passesMax = Math.max(totals.passesMax, cellF32(c.passes, slot));
+  totals.stencil += cellF32(c.stencilPasses, slot);
+  totals.draws += cellF32(c.draws, slot);
+  totals.drawsMax = Math.max(totals.drawsMax, cellF32(c.draws, slot));
+  totals.applies += cellF32(c.filterApplies, slot);
+  totals.appliesMax = Math.max(totals.appliesMax, cellF32(c.filterApplies, slot));
+  totals.mpx += cellF32(c.filterMpx, slot);
+  totals.keptMax = Math.max(totals.keptMax, cellF32(c.kept, slot));
 }
 
 /**
@@ -553,7 +555,7 @@ function totalsOf(pc: PerfCtx, window: { first: number; count: number }): Totals
 
     addFrame(totals, c, slot);
 
-    if (cell(c.drawn, slot) === 1) addDrawn(totals, c, slot);
+    if (cellU8(c.drawn, slot) === 1) addDrawn(totals, c, slot);
   }
 
   return totals;
@@ -580,8 +582,8 @@ function systemsOfSecond(
     .slice(0, secSum.length)
     .map((name, index) => ({
       name,
-      mean: frames === 0 ? 0 : cell(secSum, index) / frames,
-      max: cell(secMax, index)
+      mean: frames === 0 ? 0 : cellF64(secSum, index) / frames,
+      max: cellF32(secMax, index)
     }))
     .filter(system => system.mean > 0)
     .toSorted((first, second) => second.mean - first.mean)
@@ -651,7 +653,7 @@ function gpuOfSecond(
   window: { first: number; count: number }
 ): { p50: number; p90: number; max: number; frames: number } {
   const { columns } = pc.perf.ring;
-  const gpu = sortedOf(pc, window, slot => cell(columns.gpuMs, slot));
+  const gpu = sortedOf(pc, window, columns.gpuMs);
 
   return {
     p50: rank(gpu.sorted, gpu.count, 0.5),
@@ -697,11 +699,11 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
   const totals = totalsOf(pc, window);
   const bits = perf.measuring;
   const counted = (bits & MEASURE.counted) !== 0;
-  const work = sortedOf(pc, window, slot => cell(c.workMs, slot));
+  const work = sortedOf(pc, window, c.workMs);
   const workP50 = rank(work.sorted, work.count, 0.5);
   const workP90 = rank(work.sorted, work.count, 0.9);
   const workMax = rank(work.sorted, work.count, 1);
-  const gaps = sortedOf(pc, window, slot => cell(c.gapMs, slot));
+  const gaps = sortedOf(pc, window, c.gapMs);
   const gapP50 = rank(gaps.sorted, gaps.count, 0.5);
   const gapP90 = rank(gaps.sorted, gaps.count, 0.9);
   const gapP99 = rank(gaps.sorted, gaps.count, 0.99);
@@ -709,14 +711,14 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
   const counts = deps.sync.counts();
   const drawn = totals.drawn;
   const phase = (index: number): { mean: number; max: number } =>
-    meanMax(cell(totals.phaseSum, index), frames, cell(totals.phaseMax, index));
+    meanMax(cellF64(totals.phaseSum, index), frames, cellF64(totals.phaseMax, index));
 
   return {
     v: PERF_LOG_VERSION,
     kind: "sample",
     t: epochOf(end),
     build: buildId(),
-    frame: frames === 0 ? 0 : cell(c.frame, slotAt(ring, window.first)),
+    frame: frames === 0 ? 0 : cellU32(c.frame, slotAt(ring, window.first)),
     windowMs: ms(end - start),
     path: ring.paths[perf.pathId] ?? OVERFLOW_PATH,
     ticks: frames + totals.skipped,
@@ -809,7 +811,7 @@ export function spikeLine(pc: PerfCtx, slot: number): PerfSpikeLine {
       ms: ms(compile.ms)
     })),
     filters: record.filters?.kinds ?? [],
-    passes: passesOf(ring, record.frame, cell(ring.columns.draws, slot), entity =>
+    passes: passesOf(ring, record.frame, cellF32(ring.columns.draws, slot), entity =>
       viewLabel(pc, entity)
     ),
     longFrames: longFramesIn(longFrames, start, record.t + record.workMs).map(entry =>
@@ -900,11 +902,11 @@ function framesOver(ring: PerfRing, record: LongFrameRecord): readonly [number, 
 
   for (let age = ring.size - 1; age >= 0; age -= 1) {
     const slot = slotAt(ring, age);
-    const t = cell(c.t, slot);
+    const t = cellF64(c.t, slot);
 
-    if (t < end && t + cell(c.workMs, slot) > record.startMs) {
-      if (Number.isNaN(first)) first = cell(c.frame, slot);
-      last = cell(c.frame, slot);
+    if (t < end && t + cellF32(c.workMs, slot) > record.startMs) {
+      if (Number.isNaN(first)) first = cellU32(c.frame, slot);
+      last = cellU32(c.frame, slot);
     }
   }
 

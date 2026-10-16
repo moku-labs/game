@@ -7,7 +7,7 @@
  */
 import type { LongFrameEntry } from "./log-types";
 import type { LongFrameRecord, LongFrameRing, PerfState, ScriptRecord } from "./types";
-import { BYTES_PER_MB, cell, roundTo } from "./units";
+import { BYTES_PER_MB, cellF32, cellF64, roundTo } from "./units";
 
 /** The entry types the observer takes, the better first. */
 type LongFrameType = "long-animation-frame" | "longtask";
@@ -259,13 +259,13 @@ export function overlapsLongFrame(ring: LongFrameRing, start: number, end: numbe
  */
 export function annotateLongFrame(perf: PerfState, slot: number): boolean {
   const c = perf.ring.columns;
-  const t = cell(c.t, slot);
-  const gap = cell(c.gapMs, slot);
+  const t = cellF64(c.t, slot);
+  const gap = cellF32(c.gapMs, slot);
 
   return overlapsLongFrame(
     perf.longFrames,
     Number.isNaN(gap) ? t : t - gap,
-    t + cell(c.workMs, slot)
+    t + cellF32(c.workMs, slot)
   );
 }
 

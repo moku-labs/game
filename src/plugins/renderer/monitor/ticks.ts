@@ -7,7 +7,7 @@
 import { DISPLAY_RATES, displayIndexOf, TICK_IGNORE_MS } from "../../time/rate-rules";
 import type { FrameMeasure } from "../../time/types";
 import type { TickEstimate } from "./types";
-import { cell } from "./units";
+import { cellF32 } from "./units";
 
 /** Tick intervals the median is taken over. */
 export const TICK_SAMPLES = 9;
@@ -57,20 +57,20 @@ export function noteTicks(ticks: TickEstimate, measure: Readonly<FrameMeasure>):
 
   // Insertion-sort the held samples into scratch to take the median.
   for (let index = 0; index < ticks.size; index += 1) {
-    const value = cell(samples, index);
+    const value = cellF32(samples, index);
     let place = index;
 
-    while (place > 0 && cell(sorted, place - 1) > value) {
-      sorted[place] = cell(sorted, place - 1);
+    while (place > 0 && cellF32(sorted, place - 1) > value) {
+      sorted[place] = cellF32(sorted, place - 1);
       place -= 1;
     }
 
     sorted[place] = value;
   }
 
-  const rate = displayIndexOf(cell(sorted, ticks.size >> 1));
-  // Indexed directly, never through `cell`: a plain array beside the typed arrays would turn `cell`'s shared feedback
-  // generic, and every typed-array read it inlines on the per-frame path would box its double.
+  const rate = displayIndexOf(cellF32(sorted, ticks.size >> 1));
+  // Indexed directly, never through a column reader: a plain array beside a reader's typed arrays would turn its
+  // feedback generic, and every read it inlines on the per-frame path would box its double.
   const hz = rate === -1 ? undefined : DISPLAY_RATES[rate];
 
   ticks.periodMs[0] = hz === undefined ? Number.NaN : 1000 / hz;

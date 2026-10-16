@@ -201,8 +201,7 @@ export type CompileRing = {
 /**
  * The owners of the filter applies of a frame, in a fixed table: the entity, its applies and pixels of the frame
  * (zeroed in `begin()`) and the kind of its last apply. A slot stays while its owner applies. The entities are held in
- * a `Float64Array`, exact for every entity: a `Uint32Array` read through `cell` would give its loads a fifth array
- * kind, and the per-frame reads of every column would box their doubles. Not public.
+ * a `Float64Array`, exact for every entity, read with `cellF64` like the applies and pixels beside them. Not public.
  */
 export type OwnerTable = {
   ids: Float64Array;

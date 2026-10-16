@@ -14,7 +14,7 @@
 import type { GpuTimer } from "./gpu-timer";
 import { NO_STENCIL, writePass, writePassDetail } from "./ring";
 import { COUNT, type MonitorSinks, type PassSink, type PassTarget, type PerfCtx } from "./types";
-import { cell } from "./units";
+import { cellF64 } from "./units";
 
 /** The pass kinds by index: canvas, texture, filter. */
 const KIND = { canvas: 0, texture: 1, filter: 2 } as const;
@@ -106,7 +106,7 @@ export function createPassSink(
       const sequence = writePass(
         pc.perf.ring.passes,
         pc.perf.frame,
-        cell(pc.sinks.counts, COUNT.passes) - 1,
+        cellF64(pc.sinks.counts, COUNT.passes) - 1,
         kind,
         descriptor.depthStencilAttachment === undefined ? 0 : 1,
         target.pixelWidth,
@@ -147,7 +147,7 @@ export function countGlPasses(
    */
   const count = (target: PassTarget): void => {
     const { counts } = sinks;
-    const index = cell(counts, COUNT.passes);
+    const index = cellF64(counts, COUNT.passes);
 
     counts[COUNT.passes] = index + 1;
     record?.(target, index);

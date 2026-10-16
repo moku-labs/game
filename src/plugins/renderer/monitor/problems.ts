@@ -9,7 +9,7 @@ import type { FrameMeasure } from "../../time/types";
 import type { KeptRecord } from "../kept/types";
 import type { ProblemEventDetail } from "./log-types";
 import { COUNT, OWNER_SLOTS, type PerfCtx, type ProblemState } from "./types";
-import { cell, roundTo } from "./units";
+import { cellF64, cellU8, roundTo } from "./units";
 
 /** Pixels per megapixel. */
 const PIXELS_PER_MPX = 1_000_000;
@@ -47,17 +47,17 @@ function accumulateOwners(pc: PerfCtx, measure: Readonly<FrameMeasure>): void {
   const { owners } = pc.sinks;
 
   for (let slot = 0; slot < OWNER_SLOTS; slot += 1) {
-    if (cell(owners.ids, slot) === 0) continue;
+    if (cellF64(owners.ids, slot) === 0) continue;
 
-    if (cell(owners.applies, slot) === 0) {
+    if (cellF64(owners.applies, slot) === 0) {
       problems.run[slot] = 0;
       continue;
     }
 
-    if (cell(problems.run, slot) === 0) problems.runSince[slot] = measure.frame;
-    problems.run[slot] = cell(problems.run, slot) + 1;
-    problems.secFrames[slot] = cell(problems.secFrames, slot) + 1;
-    problems.secPixels[slot] = cell(problems.secPixels, slot) + cell(owners.pixels, slot);
+    if (cellF64(problems.run, slot) === 0) problems.runSince[slot] = measure.frame;
+    problems.run[slot] = cellF64(problems.run, slot) + 1;
+    problems.secFrames[slot] = cellF64(problems.secFrames, slot) + 1;
+    problems.secPixels[slot] = cellF64(problems.secPixels, slot) + cellF64(owners.pixels, slot);
   }
 }
 
@@ -71,9 +71,9 @@ function accumulateOwners(pc: PerfCtx, measure: Readonly<FrameMeasure>): void {
 function accumulateTargets(pc: PerfCtx, measure: Readonly<FrameMeasure>): void {
   const { problems } = pc.perf;
   const { counts } = pc.sinks;
-  const created = cell(counts, COUNT.targetsCreated);
+  const created = cellF64(counts, COUNT.targetsCreated);
 
-  problems.secTargets += created + cell(counts, COUNT.targetsDestroyed);
+  problems.secTargets += created + cellF64(counts, COUNT.targetsDestroyed);
 
   if (created === 0) return;
   if (measure.idle && !problems.idleCreate) {
@@ -114,14 +114,14 @@ function standsStill(pc: PerfCtx, slot: number, record: KeptRecord | undefined):
   const { problems } = pc.perf;
   const { stillFrames, stillMpx } = problems.thresholds;
   const kept = pc.ctx.state.kept;
-  const frames = cell(problems.secFrames, slot);
+  const frames = cellF64(problems.secFrames, slot);
 
   if (record === undefined || record.mode !== "live" || !kept.on || kept.bypassed) return false;
-  if (frames === 0 || record.quiet < stillFrames || cell(problems.run, slot) < stillFrames) {
+  if (frames === 0 || record.quiet < stillFrames || cellF64(problems.run, slot) < stillFrames) {
     return false;
   }
 
-  return cell(problems.secPixels, slot) / frames / PIXELS_PER_MPX >= stillMpx;
+  return cellF64(problems.secPixels, slot) / frames / PIXELS_PER_MPX >= stillMpx;
 }
 
 /**
@@ -142,11 +142,11 @@ function judgeStillOwner(
   const { owners, kindNames } = pc.sinks;
   const record = pc.ctx.state.kept.byEntity.get(owner);
   const still = standsStill(pc, slot, record);
-  const open = cell(problems.stillOpen, slot) === 1;
+  const open = cellU8(problems.stillOpen, slot) === 1;
 
   if (still && !open && record !== undefined) {
-    const kind = cell(owners.kinds, slot);
-    const frames = cell(problems.run, slot);
+    const kind = cellU8(owners.kinds, slot);
+    const frames = cellF64(problems.run, slot);
 
     problems.stillOpen[slot] = 1;
     out.push({
@@ -157,7 +157,7 @@ function judgeStillOwner(
       filter: kind === 0 ? null : (kindNames[kind - 1] ?? "other"),
       value: Math.min(frames, record.quiet),
       threshold: problems.thresholds.stillFrames,
-      since: cell(problems.runSince, slot),
+      since: cellF64(problems.runSince, slot),
       frames,
       reason: record.refused > 0 ? "budget" : "not-eligible"
     });
@@ -180,14 +180,14 @@ function judgeStill(pc: PerfCtx, out: ProblemEventDetail[]): void {
   const { owners } = pc.sinks;
 
   for (let slot = 0; slot < OWNER_SLOTS; slot += 1) {
-    const owner = cell(owners.ids, slot);
+    const owner = cellF64(owners.ids, slot);
 
     if (owner === 0) continue;
 
     judgeStillOwner(pc, slot, owner, out);
 
     // An owner that did not apply in this second leaves its slot: the table holds the owners that filter now.
-    if (cell(problems.secFrames, slot) === 0) {
+    if (cellF64(problems.secFrames, slot) === 0) {
       owners.ids[slot] = 0;
       problems.run[slot] = 0;
     }

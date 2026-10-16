@@ -11,7 +11,7 @@
 import { pageNow } from "./clock";
 import { SHADER_WHATS, type ShaderEventDetail } from "./log-types";
 import { COUNT, type MonitorSinks, type PerfCtx } from "./types";
-import { cell, roundTo } from "./units";
+import { cellF64, roundTo } from "./units";
 
 /**
  * Keeps one compile or shader module in the next of the 64 pre-made records: its frame, its label by reference, the
@@ -44,7 +44,7 @@ function writeRecord(
   record.label = label;
   record.ms = ms;
   record.module = module;
-  record.pass = sinks.inFrame ? cell(sinks.counts, COUNT.passes) - 1 : -1;
+  record.pass = sinks.inFrame ? cellF64(sinks.counts, COUNT.passes) - 1 : -1;
   record.kind = applying ? sinks.filterKind + 1 : 0;
   record.owner = applying ? sinks.filterOwner : 0;
 }
@@ -63,7 +63,7 @@ export function recordCompile(
   label: string | null,
   ms: number
 ): void {
-  sinks.counts[COUNT.compiles] = cell(sinks.counts, COUNT.compiles) + 1;
+  sinks.counts[COUNT.compiles] = cellF64(sinks.counts, COUNT.compiles) + 1;
   writeRecord(sinks, frame, label, ms, false);
 }
 
