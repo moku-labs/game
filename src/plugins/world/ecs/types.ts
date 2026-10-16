@@ -1058,14 +1058,12 @@ export type EcsApi = {
    * @returns The number of live entities.
    * @example
    * ```ts
-   * // The renderer's monitor reads it once a second in a debug build.
-   * const entities = ctx.require(worldPlugin).ecs.count(); // 42
-   *
    * // A test that spawns an entity sees it counted until the despawn.
+   * const before = app.world.ecs.count();
    * const coin = app.world.ecs.spawn({ kind: "plugin", name: "test" }, [Transform({ x: 10 })]);
-   * app.world.ecs.count(); // 43
+   * app.world.ecs.count(); // before + 1
    * app.world.ecs.despawn(coin);
-   * app.world.ecs.count(); // 42
+   * app.world.ecs.count(); // before
    * ```
    */
   count(): number;

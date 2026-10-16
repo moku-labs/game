@@ -97,6 +97,12 @@ function createWarmState(): WarmState {
  * @returns The sync branch of the plugin state.
  */
 export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncState {
+  // Inline and positive: the overdraw switch of the config stays off in a production build.
+  const overdrawInDebugBuild =
+    debug.overdraw === true &&
+    ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__));
+
   return {
     root: undefined,
     layerList: undefined,
@@ -119,14 +125,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     reparented: emptySet(),
     orphans: emptySet(),
     mismatched: emptySet(),
-    // Inline and positive: the overdraw switch of the config stays off in a production build.
-    debug: {
-      nineSlice: debug.nineSlice === true,
-      overdraw:
-        debug.overdraw === true &&
-        ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
-          (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__))
-    },
+    debug: { nineSlice: debug.nineSlice === true, overdraw: overdrawInDebugBuild },
     overdraw: createOverdrawState(),
     outlinesStale: false,
     filters: emptyMap(),

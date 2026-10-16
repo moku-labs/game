@@ -80,11 +80,13 @@ function accumulateTargets(pc: PerfCtx, measure: Readonly<FrameMeasure>): void {
     problems.idleCreate = true;
     problems.createFrame = measure.frame;
   }
-  if (
+
+  const createdSoonAfterTrim =
     !problems.trimCreate &&
     measure.at > problems.trimAt &&
-    measure.at - problems.trimAt <= problems.thresholds.churnAfterTrimMs
-  ) {
+    measure.at - problems.trimAt <= problems.thresholds.churnAfterTrimMs;
+
+  if (createdSoonAfterTrim) {
     problems.trimCreate = true;
     problems.createFrame = measure.frame;
   }
@@ -115,11 +117,14 @@ function standsStill(pc: PerfCtx, slot: number, record: KeptRecord | undefined):
   const { stillFrames, stillMpx } = problems.thresholds;
   const kept = pc.ctx.state.kept;
   const frames = cellF64(problems.secFrames, slot);
+  const isKeptLive = record !== undefined && record.mode === "live" && kept.on && !kept.bypassed;
 
-  if (record === undefined || record.mode !== "live" || !kept.on || kept.bypassed) return false;
-  if (frames === 0 || record.quiet < stillFrames || cellF64(problems.run, slot) < stillFrames) {
-    return false;
-  }
+  if (!isKeptLive) return false;
+
+  const stoodStill =
+    frames > 0 && record.quiet >= stillFrames && cellF64(problems.run, slot) >= stillFrames;
+
+  if (!stoodStill) return false;
 
   return cellF64(problems.secPixels, slot) / frames / PIXELS_PER_MPX >= stillMpx;
 }
@@ -198,6 +203,20 @@ function judgeStill(pc: PerfCtx, out: ProblemEventDetail[]): void {
 }
 
 /**
+ * Why `target-churn` opens: a create soon after a pool trim wins over a create in an idle frame, and both over the
+ * rate.
+ *
+ * @param problems - The problem state.
+ * @returns The reason of the problem line.
+ */
+function churnReason(problems: ProblemState): "rate" | "idle" | "after-trim" {
+  if (problems.trimCreate) return "after-trim";
+  if (problems.idleCreate) return "idle";
+
+  return "rate";
+}
+
+/**
  * Judges `target-churn`: `churnPerSecond` targets made and dropped in each of `churnSeconds` seconds in a row, a
  * create in an idle frame, or a create within `churnAfterTrimMs` after a pool trim. One problem for the whole canvas.
  *
@@ -209,6 +228,7 @@ function judgeChurn(pc: PerfCtx, out: ProblemEventDetail[]): void {
   const { churnPerSecond, churnSeconds } = problems.thresholds;
   const busy = problems.secTargets >= churnPerSecond;
 
+  // Decide: a busy second extends the run of busy seconds, a calm one ends it; a single create may churn alone.
   if (busy && problems.churnRun === 0) problems.churnSince = pc.perf.frame;
 
   problems.churnRun = busy ? problems.churnRun + 1 : 0;
@@ -216,12 +236,9 @@ function judgeChurn(pc: PerfCtx, out: ProblemEventDetail[]): void {
   const steady = problems.churnRun >= churnSeconds;
   const churns = steady || problems.idleCreate || problems.trimCreate;
 
+  // Open on the crossing, clear on the stop: one line each, never one per second.
   if (churns && !problems.churnOpen) {
     const since = steady ? problems.churnSince : problems.createFrame;
-    let reason: "rate" | "idle" | "after-trim" = "rate";
-
-    if (problems.trimCreate) reason = "after-trim";
-    else if (problems.idleCreate) reason = "idle";
 
     problems.churnOpen = true;
     out.push({
@@ -234,13 +251,14 @@ function judgeChurn(pc: PerfCtx, out: ProblemEventDetail[]): void {
       threshold: churnPerSecond,
       since,
       frames: Math.max(1, pc.perf.frame - since),
-      reason
+      reason: churnReason(problems)
     });
   } else if (!churns && problems.churnOpen) {
     problems.churnOpen = false;
     out.push({ rule: "target-churn", cleared: true, owner: null, view: null });
   }
 
+  // Reset the second's accumulators: the next second counts from zero.
   problems.secTargets = 0;
   problems.idleCreate = false;
   problems.trimCreate = false;
@@ -273,6 +291,7 @@ function judgeRetakes(pc: PerfCtx, out: ProblemEventDetail[]): void {
   const now = new Map<number, number>();
   const since = problems.takesFrame[1];
 
+  // Open or clear the problem of every live record, and note its takes for the next two judgments.
   for (const record of records) {
     const { entity } = record;
     const count = retakesOf(problems, record);
@@ -299,6 +318,7 @@ function judgeRetakes(pc: PerfCtx, out: ProblemEventDetail[]): void {
     }
   }
 
+  // A record that left clears its open problem.
   for (const entity of problems.retakesOpen) {
     if (now.has(entity)) continue;
 
@@ -306,6 +326,7 @@ function judgeRetakes(pc: PerfCtx, out: ProblemEventDetail[]): void {
     out.push({ rule: "retakes", cleared: true, owner: entity, view: viewLabel(pc, entity) });
   }
 
+  // Shift the window: this judgment's takes become the last, the last become two back.
   problems.takes = [now, problems.takes[0]];
   problems.takesFrame = [pc.perf.frame, problems.takesFrame[0]];
 }

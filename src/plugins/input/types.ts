@@ -462,11 +462,11 @@ export type InputApi = {
    * @example
    * ```ts
    * // A test checks that a popup takes its Escape listener back when it closes.
-   * const before = app.input.listeners(); // 6 in a started app: ui's own listeners and control
+   * const before = app.input.listeners();
    * const off = app.input.onKey(key => key.key === "Escape");
-   * app.input.listeners(); // 7
+   * app.input.listeners() - before; // 1
    * off();
-   * app.input.listeners(); // 6, the same as before
+   * app.input.listeners() - before; // 0
    * ```
    */
   listeners(): number;

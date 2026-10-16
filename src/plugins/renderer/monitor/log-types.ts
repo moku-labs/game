@@ -681,8 +681,10 @@ export type ShaderEventDetail = {
  *
  * @example
  * ```ts
- * // The editor shows one issue row per open problem and closes it on the `cleared` line of the same rule and owner.
- * PROBLEM_RULES.includes(detail.rule); // true for "filter-still"
+ * // The editor reads the rule of the first problem a recording opened: a fog blur filtered again on a still board.
+ * const problems = lines.filter((line): line is PerfEventLine => line.kind === "event" && line.name === "problem");
+ * const opened = problems.find(line => line.detail.cleared !== true);
+ * PROBLEM_RULES.find(rule => rule === opened?.detail.rule); // "filter-still"
  * ```
  */
 export const PROBLEM_RULES = ["filter-still", "target-churn", "retakes"] as const;

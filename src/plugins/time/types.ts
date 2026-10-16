@@ -661,11 +661,11 @@ export type Api = {
    * ```ts
    * // The renderer's monitor reads it once a second for the leak counts of a debug build.
    * const time = ctx.require(timePlugin);
-   * time.frameListeners(); // 7
-   * const off = time.onFrame("animate", time => counter.advance(time.delta));
-   * time.frameListeners(); // 8
+   * const before = time.frameListeners();
+   * const off = time.onFrame("animate", frame => counter.advance(frame.delta));
+   * time.frameListeners() - before; // 1
    * off();
-   * time.frameListeners(); // 7
+   * time.frameListeners() - before; // 0
    * ```
    */
   frameListeners(): number;

@@ -810,8 +810,8 @@ export type PerfMonitorApi = {
  *
  * @example
  * ```ts
- * // input, in onStart of a debug build: its listeners join the leak counts of the sample.
- * ctx.require(rendererPlugin).monitor.counts.register("inputListeners", () => countListeners(ctx.state));
+ * // A game's pool of sparks joins the leak counts of the sample.
+ * app.renderer.monitor.counts.register("sparks", () => sparkPool.size);
  * ```
  */
 export type MonitorCounts = {
@@ -828,11 +828,12 @@ export type MonitorCounts = {
    * @throws {Error} When 16 counts are registered already: `[game] Monitor count table is full (16).`
    * @example
    * ```ts
-   * // input registers its listeners in onStart of a debug build; a screen that leaks an onKey listener on every
-   * // visit makes sample.counts.inputListeners grow by one per visit.
-   * const renderer = ctx.require(rendererPlugin);
-   * renderer.monitor.counts.register("inputListeners", () => countListeners(ctx.state));
-   * renderer.stats().counts?.inputListeners; // 6
+   * // A game's pool of sparks joins the leak counts: the reader answers the pool's size, and a pool that grows with
+   * // every visit of the shop shows as a count that grows in every sample.
+   * const off = app.renderer.monitor.counts.register("myPool", () => pool.size);
+   * app.renderer.stats().counts?.myPool; // 24 while the pool holds 24 sparks
+   * off();
+   * app.renderer.stats().counts?.myPool; // undefined
    * ```
    */
   register(name: string, read: () => number): () => void;
