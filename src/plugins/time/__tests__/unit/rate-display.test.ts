@@ -92,12 +92,14 @@ describe("the display rate without adaptive", () => {
     s.play(32 * (1000 / 60));
 
     expect(s.api.rate()).toEqual({
-      fps: 120,
+      fps: 60,
       mode: "fixed",
       reason: "start",
       displayHz: 60,
       ladder: [],
-      thermal: null
+      thermal: null,
+      asked: 120,
+      heldBy: "panel"
     });
     expect(s.changes()).toEqual([]);
 

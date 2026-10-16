@@ -55,6 +55,7 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual([
       "kept",
       "nineSlice",
+      "overdraw",
       "overlays",
       "state",
       "verifyFrames"

@@ -295,7 +295,7 @@ Save `features/board/effects.ts` while the dev server runs: a changed `starsBurs
 Without `effectsPlugin` in the app it throws `[game] The source game.effects needs effectsPlugin.`
 It also holds `game.filters` (key `filters`): `{ kinds, off }` of `diagnostics`, read every frame; `off` is always `[]` in a production build. Without `effectsPlugin`: `[game] The source game.filters needs effectsPlugin.`
 
-`control.ts` holds `game.filter` (key `filter` in `commands`), a cosmetic command, so it runs on a `--debug` page: `{ kind, on }` switches the kind through `diagnostics` and answers `disabled()`. An unknown kind throws `[game] No filter kind "fx.nope".` with `Known:` and every id of `kinds()`; without `effectsPlugin` it throws `[game] The command game.filter needs effectsPlugin.` It carries no `overlay` marker: a game that wants a switch in the editor's overlay wraps the call in its own overlay command (`docs/doors.md`, "Overlay commands").
+`control.ts` holds `game.filter` (key `filter` in `commands`), a cosmetic command, so it runs on every debug page, `--debug=read` too: `{ kind, on }` switches the kind through `diagnostics` and answers `disabled()`. An unknown kind throws `[game] No filter kind "fx.nope".` with `Known:` and every id of `kinds()`; without `effectsPlugin` it throws `[game] The command game.filter needs effectsPlugin.` It carries no `overlay` marker: a game that wants a switch in the editor's overlay wraps the call in its own overlay command (`docs/doors.md`, "Overlay commands").
 
 ## Events
 

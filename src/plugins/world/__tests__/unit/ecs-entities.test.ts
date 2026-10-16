@@ -79,4 +79,37 @@ describe("ecs entities", () => {
     expect(snapshot.entities[0]?.index).toBe(0);
     expect(snapshot.entities[0]?.generation).toBe(1);
   });
+
+  // Bug caught: count() reads the index table, which never shrinks, so a despawned entity would
+  // still count and a scene that cleans up would look like a leak.
+  it("counts the live entities: a spawn adds one, a despawn takes it back", () => {
+    const world = createMockWorld();
+    const baseline = world.api.ecs.count();
+    const first = world.api.ecs.spawn(test, [Transform()]);
+
+    world.api.ecs.spawn(other, [Transform()]);
+
+    expect(world.api.ecs.count()).toBe(baseline + 2);
+
+    world.api.ecs.despawn(first);
+    world.api.ecs.spawn(test, [Transform()]);
+    world.api.ecs.despawnOwnedBy(test);
+
+    expect(world.api.ecs.count()).toBe(baseline + 1);
+  });
+
+  // Bug caught: a screen that spawns on every visit and never despawns: the count must grow with
+  // every visit, so the leak shows offline.
+  it("grows by the leaked entities on every visit", () => {
+    const world = createMockWorld();
+    const baseline = world.api.ecs.count();
+
+    for (let visit = 1; visit <= 3; visit += 1) {
+      world.api.ecs.spawn(other, [Transform()]);
+      world.api.ecs.spawn(test, [Transform()]);
+      world.api.ecs.despawnOwnedBy(test);
+
+      expect(world.api.ecs.count()).toBe(baseline + visit);
+    }
+  });
 });

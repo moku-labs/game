@@ -10,6 +10,7 @@ import type { SystemTiming } from "../../world/types";
 import type { DemandReason } from "../demand/types";
 import { DEMAND_REASONS } from "../reasons";
 import { usedHeapBytes } from "./long-frames";
+import { accumulateProblems } from "./problems";
 import {
   bucketOf,
   CAUSE,
@@ -58,6 +59,8 @@ export function openFrame(sinks: MonitorSinks): void {
   sinks.counts.fill(0);
   sinks.kindApplies.fill(0);
   sinks.kindPixels.fill(0);
+  sinks.owners.applies.fill(0);
+  sinks.owners.pixels.fill(0);
   sinks.inFrame = true;
 }
 
@@ -95,6 +98,11 @@ function writeCounters(pc: PerfCtx, slot: number): void {
 
   c.kept[slot] = perf.drawn ? kept.drawnPictures : 0;
   c.retakes[slot] = kept.frameTakes;
+  // Render targets made and dropped (U4): counted on the WebGPU texture system.
+  const targets = (bits & MEASURE.targets) !== 0;
+
+  c.targetsCreated[slot] = targets ? cell(counts, COUNT.targetsCreated) : Number.NaN;
+  c.targetsDestroyed[slot] = targets ? cell(counts, COUNT.targetsDestroyed) : Number.NaN;
 }
 
 /**
@@ -443,13 +451,15 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
     flushPerf(pc);
   }
 
-  // The per-second accumulators, the pending spike, the first drawn frame, and a `display` event after a resize, a
-  // restore, a turn or a display rate `time` learned.
+  // The per-second accumulators, the problem rules' run of the frame, the pending spike, the first drawn frame, and a
+  // `display` event after a resize, a restore, a turn or a display rate `time` learned.
   accumulate(perf, measure, timing);
+  accumulateProblems(pc, measure);
 
   if (causes !== 0) addPending(perf, sequenceOf(ring, slot));
   if (perf.drawn && Number.isNaN(perf.firstDrawnAt)) {
     perf.firstDrawnAt = measure.at + measure.workMs;
+    perf.firstDrawnFrame = measure.frame;
   }
   if ((perf.flags & (CHANGED.resize | CHANGED.restore)) !== 0 || turned(pc) || retuned(pc)) {
     writeDisplay(pc);

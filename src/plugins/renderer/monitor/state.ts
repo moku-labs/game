@@ -10,12 +10,16 @@ import { createTickEstimate } from "./ticks";
 import {
   COUNT,
   type CompileRing,
+  type CountTable,
   type DrawCounter,
   KIND_SLOTS,
   type LongFrameRing,
   type MonitorSinks,
   type MonitorState,
-  type PerfState
+  OWNER_SLOTS,
+  type OwnerTable,
+  type PerfState,
+  type ProblemState
 } from "./types";
 
 /** Compiles the compile ring keeps. */
@@ -32,6 +36,24 @@ export const PENDING_SLOTS = 64;
 
 /** Rows the per-second system accumulators hold before they first grow. */
 const SYSTEM_ROWS = 16;
+
+/** The counts plugins may register with `monitor.counts.register`. */
+export const COUNT_SLOTS = 16;
+
+/** Drawn frames a filtered view stands still, filtered in every one, before `filter-still` (U5). */
+const STILL_FRAMES = 60;
+
+/** Megapixels a still filtered view filters a frame before `filter-still`. */
+const STILL_MPX = 0.25;
+
+/** Render targets made and dropped a second that count as churn. */
+const CHURN_PER_SECOND = 4;
+
+/** Seconds in a row of churn before `target-churn`. */
+const CHURN_SECONDS = 3;
+
+/** A target made this soon after a pool trim is churn, ms. */
+const CHURN_AFTER_TRIM_MS = 1000;
 
 /**
  * Creates an empty map. It lives in its own non-exported function because lint rule L5 refuses
@@ -53,16 +75,93 @@ function emptyWeakSet<Value extends WeakKey>(): WeakSet<Value> {
 }
 
 /**
+ * Creates an empty set. Same reason as `emptyMap`.
+ *
+ * @returns An empty set.
+ */
+function emptySet<Value>(): Set<Value> {
+  return new Set();
+}
+
+/**
  * Creates the compile ring: 64 pre-made records.
  *
  * @returns The ring, empty.
  */
 function createCompileRing(): CompileRing {
   return {
-    records: Array.from({ length: COMPILE_SLOTS }, () => ({ frame: 0, label: null, ms: 0 })),
+    records: Array.from({ length: COMPILE_SLOTS }, () => ({
+      frame: 0,
+      label: null,
+      ms: 0,
+      module: false,
+      pass: -1,
+      kind: 0,
+      owner: 0
+    })),
     next: 0,
     size: 0,
-    shaderModules: 0
+    shaderModules: 0,
+    written: 0,
+    sent: 0
+  };
+}
+
+/**
+ * Creates the owner table of the filter applies: `OWNER_SLOTS` empty slots.
+ *
+ * @returns The table.
+ */
+function createOwnerTable(): OwnerTable {
+  return {
+    ids: new Float64Array(OWNER_SLOTS),
+    applies: new Float64Array(OWNER_SLOTS),
+    pixels: new Float64Array(OWNER_SLOTS),
+    kinds: new Uint8Array(OWNER_SLOTS)
+  };
+}
+
+/**
+ * Creates the count table: room for `COUNT_SLOTS` counts, none registered.
+ *
+ * @returns The table.
+ */
+function createCountTable(): CountTable {
+  return { names: [], reads: [], failed: emptySet() };
+}
+
+/**
+ * Creates the problem accumulators with the thresholds of `renderer.monitor`, a key left out at its default: a game
+ * that sets `monitor` replaces the whole object (shallow merge).
+ *
+ * @param config - `renderer.monitor`.
+ * @returns The accumulators, no problem open.
+ */
+export function createProblemState(config: Readonly<MonitorConfig>): ProblemState {
+  return {
+    thresholds: {
+      stillFrames: config.stillFrames ?? STILL_FRAMES,
+      stillMpx: config.stillMpx ?? STILL_MPX,
+      churnPerSecond: config.churnPerSecond ?? CHURN_PER_SECOND,
+      churnSeconds: config.churnSeconds ?? CHURN_SECONDS,
+      churnAfterTrimMs: config.churnAfterTrimMs ?? CHURN_AFTER_TRIM_MS
+    },
+    run: new Float64Array(OWNER_SLOTS),
+    runSince: new Float64Array(OWNER_SLOTS),
+    secFrames: new Float64Array(OWNER_SLOTS),
+    secPixels: new Float64Array(OWNER_SLOTS),
+    stillOpen: new Uint8Array(OWNER_SLOTS),
+    secTargets: 0,
+    idleCreate: false,
+    trimCreate: false,
+    createFrame: 0,
+    trimAt: Number.NaN,
+    churnRun: 0,
+    churnSince: 0,
+    churnOpen: false,
+    takes: [emptyMap(), emptyMap()],
+    takesFrame: [0, 0],
+    retakesOpen: emptySet()
   };
 }
 
@@ -114,6 +213,9 @@ export function createSinks(draws?: DrawCounter): MonitorSinks {
     kindApplies: new Float64Array(KIND_SLOTS),
     kindPixels: new Float64Array(KIND_SLOTS),
     filterKinds: undefined,
+    filterOwners: undefined,
+    filterOwner: 0,
+    owners: createOwnerTable(),
     compiles: createCompileRing(),
     passes: undefined,
     measuring: false,
@@ -166,6 +268,9 @@ export function createPerfState(config: Readonly<MonitorConfig>, sinks: MonitorS
     shell: "unknown",
     startup: undefined,
     firstDrawnAt: Number.NaN,
+    firstDrawnFrame: Number.NaN,
+    counts: createCountTable(),
+    problems: createProblemState(config),
     timer: undefined,
     longFrames: createLongFrameRing(),
     detach: [],

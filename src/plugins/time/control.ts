@@ -106,12 +106,15 @@ export const timeScaleCommand = defineCommand({
 
 /**
  * Forces the frame rate, or gives it back to the config without `fps`, and answers the rate after
- * the call. For an A/B run on the phone: the same screen at 120 and at 60. A wrong `fps` is
- * refused by `setRate` with its own message.
+ * the call: the rate the loop really runs at, the rate asked and whether the panel holds it lower.
+ * For an A/B run on the phone: the same screen at 120 and at 60. A wrong `fps` is refused by
+ * `setRate` with its own message.
  *
  * @example
  * ```ts
  * (await run(app, commands.frameRate, { fps: 60 })).value.fps; // 60
+ * // a pin of 120 on a 60 Hz phone runs at the panel's rate:
+ * (await run(app, commands.frameRate, { fps: 120 })).value; // { fps: 60, mode: "forced", …, asked: 120, heldBy: "panel" }
  * (await run(app, commands.frameRate, {})).value.mode; // "auto" with adaptive, "fixed" without
  * ```
  */

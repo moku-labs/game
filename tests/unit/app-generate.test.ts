@@ -543,6 +543,15 @@ describe("the debug page", () => {
       `globalThis.__MOKU_GAME_EDITOR__ = ${JSON.stringify(hostile)};`
     );
   });
+
+  it("agentFlag writes the app id after the editor when the game has one", () => {
+    const lines = agentFlag({ ...debugPage, app: "com.mokulabs.timber.debug" }).split("\n");
+
+    expect(lines.slice(2, 4)).toEqual([
+      'globalThis.__MOKU_GAME_EDITOR__ = "127.0.0.1:47600";',
+      'globalThis.__MOKU_GAME_APP__ = "com.mokulabs.timber.debug";'
+    ]);
+  });
 });
 
 describe("assetsStamp", () => {

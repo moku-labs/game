@@ -2,11 +2,12 @@
  * @file project, extract — the keys one file defines. A call is a definition when its callee is a
  * definer binding of the file (`definersOf`): `defineFlow("board", …)` makes `flow:board`, and its
  * `nodes` table is kept for the cross-file pass that makes the `node:` keys; `defineFeature`,
- * `defineScene`, `defineEmitter`, `projection`, `defineTextStyles`, `defineStyle` and
- * `defineComponent` make their own keys; a `defineStyle` built in a module-level function is keyed
- * by that function. A definer whose id is not a literal goes to `unresolved` with the reason;
- * nothing is guessed. The plain components and the JSX keys of the file join the
- * same lists, and the component names the file renders are kept for their `uses`.
+ * `defineScene`, `defineEmitter`, `defineTextStyles`, `defineStyle` and `defineComponent` make their
+ * own keys, and `projection` and `system` take theirs from the `name` of their options: `system({
+ * name: "drift", … })` makes `system:drift`. A `defineStyle` built in a module-level function is
+ * keyed by that function. A definer whose id is not a literal goes to `unresolved` with the
+ * reason; nothing is guessed. The plain components and the JSX keys of the file join the same
+ * lists, and the component names the file renders are kept for their `uses`.
  */
 import type ts from "typescript";
 import type { Anchor } from "../types";
@@ -57,6 +58,12 @@ const ID_PREFIXES: Partial<Record<Definer, string>> = {
   defineScene: "scene",
   defineEmitter: "emitter",
   defineComponent: "component"
+};
+
+/** The key prefix of each definer that takes its id as the `name` of its first-argument options. */
+const NAME_PREFIXES: Partial<Record<Definer, string>> = {
+  projection: "projection",
+  system: "system"
 };
 
 /** One file being read: the module, its path, its definers and the lists being filled. */
@@ -304,23 +311,31 @@ function readIdCall(
 }
 
 /**
- * Reads a projection: its key is its `name`, its line the `name` property.
+ * Reads a definer named by its options, a projection or a system: its key is its `name`, its line
+ * the `name` property.
  *
  * @param reading - The file being read.
  * @param call - The call.
+ * @param definer - The definer.
+ * @param prefix - The key prefix.
  */
-function readProjection(reading: Reading, call: ts.CallExpression): void {
+function readNameCall(
+  reading: Reading,
+  call: ts.CallExpression,
+  definer: Definer,
+  prefix: string
+): void {
   const { typescript } = reading;
   const spec = objectOf(typescript, call.arguments[0]);
   const name =
     spec === undefined ? undefined : literalOf(typescript, propertyValue(typescript, spec, "name"));
 
   if (name === undefined) {
-    unresolve(reading, "projection name is not a string literal");
+    unresolve(reading, `${definer} name is not a string literal`);
     return;
   }
 
-  define(reading, call, `projection:${name}`, name, { key: "name" });
+  define(reading, call, `${prefix}:${name}`, name, { key: "name" });
 }
 
 /**
@@ -437,9 +452,10 @@ function readStyle(reading: Reading, call: ts.CallExpression): void {
  */
 function readCall(reading: Reading, call: ts.CallExpression, definer: Definer): void {
   const prefix = ID_PREFIXES[definer];
+  const namePrefix = NAME_PREFIXES[definer];
 
   if (prefix !== undefined) readIdCall(reading, call, definer, prefix);
-  if (definer === "projection") readProjection(reading, call);
+  if (namePrefix !== undefined) readNameCall(reading, call, definer, namePrefix);
   if (definer === "defineTextStyles") readTextStyles(reading, call);
   if (definer === "defineStyle") readStyle(reading, call);
 }

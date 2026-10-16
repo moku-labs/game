@@ -347,6 +347,7 @@ export function createRecord(
     still: 0,
     churn: 0,
     calm: false,
+    quiet: 0,
     lastDrawn: kctx.state.frame,
     depth: 0,
     bytes: 0,
@@ -1143,6 +1144,7 @@ export function stepRecord(
 
   if (drawingChanged(kctx, record, BEFORE)) dirtyAbove(kctx, record);
 
+  record.quiet = record.dirtyS1 ? 0 : record.quiet + 1;
   record.dirtyS1 = false;
   record.dirtyS2 = false;
   record.dirtyS3 = false;

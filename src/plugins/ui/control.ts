@@ -2,7 +2,7 @@
  * @file ui plugin — the two ui commands of the `/control` door: a tap on a keyed element or on a
  * view, and the text typed into a field. The tap goes through `app.input`, so the gate decides;
  * the text goes through `app.ui.fill`, which writes a component's local and answers nothing. The
- * session stays clean. Dev builds and `--debug=full` builds: each body starts with the inline
+ * session stays clean. Dev builds and `--debug` builds (not `--debug=read`): each body starts with the inline
  * control guard of a route command, so a bundler `define` of `false` drops it, and logs the
  * `moku:dev` marker.
  */

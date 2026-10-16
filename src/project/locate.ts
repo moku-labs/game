@@ -2,8 +2,9 @@
  * @file project — an anchor read on one parse of its file. A JSX anchor answers every element
  * whose key reads the same: the line of the attribute, the element as the range. A binding
  * answers its declaration statement, or the property of its `key` inside it (a text style, the
- * `name` of a projection, a slot of a flow table). A style built in a function answers its calls
- * there instead: every style call of the function, or the call under the property of its `key`.
+ * `name` of a projection or a system, a slot of a flow table). A style built in a function
+ * answers its calls there instead: every style call of the function, or the call under the
+ * property of its `key`.
  * An anchor with a key and no binding answers the first place the key is written.
  */
 import type ts from "typescript";

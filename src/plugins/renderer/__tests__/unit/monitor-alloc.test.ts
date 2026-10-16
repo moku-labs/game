@@ -1,6 +1,17 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { FrameMeasure } from "../../../time/types";
-import { startAgent } from "../perf-harness";
+import { Layer } from "../../../world/ecs/define";
+import { Sprite, Transform } from "../../components";
+import type { PixiFilter } from "../../types";
+import {
+  FakeFilter,
+  FakeFilterSystem,
+  type FakeGpuEncoderSystem,
+  type FakeGpuTextureSystem,
+  fakeExtensions,
+  WEBGPU_SYSTEM
+} from "../fake-pixi";
+import { type AgentRenderer, startAgent } from "../perf-harness";
 
 // ---------------------------------------------------------------------------
 // Unit: the per-frame path allocates nothing (spec 11, LEAD-FIXES-2). A dev-only
@@ -19,9 +30,12 @@ type ProfileNode = {
   children: ProfileNode[];
 };
 
-/** The modules whose code runs on the per-frame path. */
+/**
+ * The modules whose code runs on the per-frame path: the monitor's commit and its counters, the pass and filter
+ * detail and the problem accumulators of the 0.15 telemetry (U3–U6), the renderer's frame callback, `time` and `world`.
+ */
 const PER_FRAME =
-  /src\/plugins\/(renderer\/monitor\/(commit|ring|ticks|draw-calls|units|long-frames|api|passes|clock)|time\/(measure|phases|api|rate-rules)|world\/ecs\/systems)\.ts/;
+  /src\/plugins\/(renderer\/(monitor\/(commit|ring|ticks|draw-calls|units|long-frames|api|passes|clock|problems|compiles)|lifecycle)|time\/(measure|phases|api|rate-rules)|world\/ecs\/systems)\.ts/;
 
 /** An inspector session with a heap sampler, or `undefined` where the runtime has none. */
 async function heapSession(): Promise<
@@ -65,7 +79,70 @@ function perFrameBytes(node: ProfileNode): number {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  FakeFilterSystem.onApply = undefined;
 });
+
+/**
+ * Adds the per-frame work of the 0.15 telemetry to every frame: a filtered view whose filter applies with a pass of
+ * its own inside (the owner table, the pass detail, the problem run), and a render target Pixi looks up again (the
+ * target set's lookup). Made once: the work allocates nothing itself.
+ *
+ * @param agent - The started agent build.
+ */
+function filterEveryFrame(agent: AgentRenderer): void {
+  const { mock } = agent;
+  const Encoder = fakeExtensions.named(WEBGPU_SYSTEM, "encoder") as unknown as new (
+    renderer: unknown
+  ) => FakeGpuEncoderSystem;
+  const Filters = fakeExtensions.named(
+    WEBGPU_SYSTEM,
+    "filter"
+  ) as unknown as new () => FakeFilterSystem;
+  const Textures = fakeExtensions.named(
+    WEBGPU_SYSTEM,
+    "texture"
+  ) as unknown as new () => FakeGpuTextureSystem;
+  const target = { isRoot: true, pixelWidth: 256, pixelHeight: 256 };
+  const encoder = new Encoder({ renderTarget: { renderTarget: target }, drawn: 0 });
+  const filters = new Filters();
+  const textures = new Textures();
+  const fog = new FakeFilter();
+  const input = { frame: { width: 256, height: 256 }, source: { resolution: 1 } };
+  const source = {
+    uploadMethodId: "unknown",
+    resource: undefined,
+    pixelWidth: 256,
+    pixelHeight: 256
+  };
+  const descriptor = { descriptor: {} };
+
+  encoder.record = false;
+  mock.world.projection.setLayers([{ name: "items", sort: "none" }]);
+
+  const entity = mock.world.ecs.spawn({ kind: "plugin", name: "probe" }, [
+    Layer({ name: "items" }),
+    Transform(),
+    Sprite({ texture: "board.fog" })
+  ]);
+
+  mock.modules.sync.pass();
+  mock.api.sync.filters.set(entity, [
+    { filter: fog as unknown as PixiFilter, passes: 1, kind: "fog" }
+  ]);
+  textures.initSource(source);
+  FakeFilterSystem.onApply = () => {
+    encoder.beginRenderPass(descriptor);
+    encoder.draw(descriptor);
+  };
+  mock.frames.unshift({
+    phase: "render",
+    callback: () => {
+      filters.applied.length = 0;
+      filters.applyFilter(fog, input, descriptor, true);
+      textures.initSource(source);
+    }
+  });
+}
 
 afterAll(async () => {
   await session?.post("HeapProfiler.disable");
@@ -78,6 +155,8 @@ describe("the per-frame path", () => {
     if (session === undefined) skip("the runtime's inspector has no HeapProfiler domain");
 
     const agent = await startAgent({ scene: { passes: 2, batches: 2, draws: 1 } });
+
+    filterEveryFrame(agent);
     const record: Partial<FrameMeasure> = {
       gapMs: 8.3,
       capMs: 8.33,

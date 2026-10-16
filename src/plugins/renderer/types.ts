@@ -309,11 +309,14 @@ export type Config = {
 };
 
 /**
- * The performance monitor of an agent build (`__MOKU_GAME_AGENT__`: dev and `--debug` builds).
+ * The performance monitor of an agent build (`__MOKU_GAME_AGENT__`: dev and `--debug` builds): the spike budget, the
+ * ring's frames and the thresholds of the `problem` rules. A threshold left out keeps its default.
  *
  * @example
  * ```ts
  * createApp({ pluginConfigs: { renderer: { mount: "#game", monitor: { budgetMs: 8.3, frames: 2048 } } } });
+ * // A game with a large blurred backdrop flags it sooner: 30 still frames over 0.1 Mpx.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", monitor: { budgetMs: "rate", frames: 1024, stillFrames: 30, stillMpx: 0.1 } } } });
  * ```
  */
 export type MonitorConfig = {
@@ -326,6 +329,16 @@ export type MonitorConfig = {
   budgetMs: number | "rate";
   /** Frames the ring keeps in an agent build, 64 to 16384; render passes keep 4x as many. */
   frames: number;
+  /** `filter-still`: drawn frames a filtered view stands still, filtered in every one. Default 60. */
+  stillFrames?: number;
+  /** `filter-still`: megapixels its filter covers a frame, at least. Default 0.25. */
+  stillMpx?: number;
+  /** `target-churn`: render targets made and dropped a second that count as churn. Default 4. */
+  churnPerSecond?: number;
+  /** `target-churn`: seconds of churn in a row before the problem. Default 3. */
+  churnSeconds?: number;
+  /** `target-churn`: a render target made this many ms after a pool trim is churn at once. Default 1000. */
+  churnAfterTrimMs?: number;
 };
 
 /**
@@ -541,9 +554,11 @@ export type {
   PerfChange,
   PerfChangeEntry,
   PerfCollectorLine,
+  PerfCounts,
   PerfDisplay,
   PerfEventLine,
   PerfEventName,
+  PerfGapLine,
   PerfHeaderLine,
   PerfLogLine,
   PerfLongFrameLine,
@@ -552,8 +567,13 @@ export type {
   PerfSampleLine,
   PerfSpikeLine,
   PerfStartupLine,
+  PerfTelemetryLine,
   PerfThermalLine,
   PoolTrimDetail,
+  ProblemEventDetail,
+  ProblemRule,
+  ShaderEventDetail,
+  ShaderWhat,
   WarmDetail
 } from "./monitor/log-types";
 export type {
@@ -563,6 +583,7 @@ export type {
   DrawCounter,
   LegendEntry,
   MonitorApi,
+  MonitorCounts,
   MonitorDeps,
   MonitorInternal,
   MonitorState,

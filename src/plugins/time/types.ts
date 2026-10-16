@@ -114,11 +114,15 @@ export type ThermalStatus =
  *
  * @example
  * ```ts
- * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none" }
+ * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
  * ```
  */
 export type FrameRate = {
-  /** Frames per second the loop runs at, the idle cap left out. */
+  /**
+   * Frames per second the loop really runs at, the idle cap left out: the cap on the known display. A cap above the
+   * display's rate runs at the display's rate (`heldBy: "panel"`); a cap between two vsyncs runs at the next divisor
+   * below it (60 on a 144 Hz panel runs at 48). The cap itself while the display is unknown.
+   */
   fps: number;
   /** Who decides the rate. */
   mode: RateMode;
@@ -134,6 +138,17 @@ export type FrameRate = {
   ladder: readonly number[];
   /** The native shell's last thermal status; `null` without a shell, before its first reading, and without `adaptive`. */
   thermal: ThermalStatus | null;
+  /**
+   * The rate the loop is told to hold: `maxFps` in mode `"fixed"`, the `setRate` value in mode `"forced"` (never above
+   * `maxFps`); `null` in mode `"auto"`, where the adaptive rule decides.
+   */
+  asked: Exclude<RateChoice, "auto"> | null;
+  /**
+   * `"panel"` when the asked rate is above the known `displayHz` (120 asked on a 60 Hz panel): the loop cannot run
+   * faster than the panel, and `fps` is the panel's rate. `null` otherwise, in mode `"auto"` and while the display is
+   * unknown.
+   */
+  heldBy: "panel" | null;
 };
 
 /**
@@ -182,7 +197,11 @@ export type FrameMeasure = {
   gapMs: number;
   /** `1000 / cap` of this frame: the loop's rate, or `idleFps` while idle. */
   capMs: number;
-  /** `1000 / fps` of the loop's rate in this frame, the idle cap left out: `1000 / time.rate().fps`. */
+  /**
+   * One frame of the cap of the loop's rate in this frame, the idle cap left out: `1000 / time.rate().asked` in mode
+   * `"fixed"` and `"forced"`, the adaptive rule's rate in `"auto"`. Equal to `1000 / time.rate().fps` while the cap is
+   * a divisor of the display rate.
+   */
   rateMs: number;
   /**
    * One period of the display, `1000 / time.rate().displayHz`, ms; `NaN` until the display rate is known. No frame
@@ -633,6 +652,25 @@ export type Api = {
   wakes(): number;
 
   /**
+   * How many `onFrame` callbacks are registered now, over the six phases. The measure listeners of `measure` are not
+   * counted. A number, no allocation: a leak check reads it once a second, and a count that grows each time a screen
+   * is entered and left is a callback nobody unsubscribed.
+   *
+   * @returns The count.
+   * @example
+   * ```ts
+   * // The renderer's monitor reads it once a second for the leak counts of a debug build.
+   * const time = ctx.require(timePlugin);
+   * time.frameListeners(); // 7
+   * const off = time.onFrame("animate", time => counter.advance(time.delta));
+   * time.frameListeners(); // 8
+   * off();
+   * time.frameListeners(); // 7
+   * ```
+   */
+  frameListeners(): number;
+
+  /**
    * Hands what `time` measured of every frame to `listener`, after the `render` phase: the gap, the skipped ticks, the
    * six phase durations and the whole work. Agent builds only (`__MOKU_GAME_AGENT__`, true in dev and `--debug`
    * builds): without the flag nothing is measured, the listener is never called and the returned function does
@@ -684,13 +722,18 @@ export type Api = {
    * adaptive rule chooses from, and the native shell's thermal status. One frozen object, the same until something in
    * it changes: cheap to read every frame.
    *
+   * `fps` is the rate the loop really runs at; `asked` the rate it is told to hold outside the adaptive rule, and
+   * `heldBy: "panel"` says the panel is slower than that.
+   *
    * @returns The frame rate.
    * @example
    * ```ts
    * // The settings screen shows the rate the game runs at on this phone.
-   * app.time.rate(); // { fps: 120, mode: "auto", reason: "start", displayHz: 120, ladder: [120, 60], thermal: "none" }
+   * app.time.rate(); // { fps: 120, mode: "auto", reason: "start", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
    * // on the memory screen of a weak phone, a second later:
-   * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none" }
+   * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
+   * // a game with maxFps 120 and no adaptive, on a 60 Hz phone:
+   * app.time.rate(); // { fps: 60, mode: "fixed", reason: "start", displayHz: 60, ladder: [], thermal: null, asked: 120, heldBy: "panel" }
    * ```
    */
   rate(): Readonly<FrameRate>;
@@ -708,9 +751,11 @@ export type Api = {
    * @example
    * ```ts
    * // The player picked "60" in the settings to save battery.
-   * app.time.setRate(60); // { fps: 60, mode: "forced", reason: "forced", displayHz: 120, ladder: [120, 60], thermal: "none" }
+   * app.time.setRate(60); // { fps: 60, mode: "forced", reason: "forced", displayHz: 120, ladder: [120, 60], thermal: "none", asked: 60, heldBy: null }
    * // …and later "Auto" again, on a 120 Hz phone:
-   * app.time.setRate("auto"); // { fps: 120, mode: "auto", reason: "auto", displayHz: 120, ladder: [120, 60], thermal: "none" }
+   * app.time.setRate("auto"); // { fps: 120, mode: "auto", reason: "auto", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
+   * // A pin of 120 on a 60 Hz phone runs at the panel's rate:
+   * app.time.setRate(120); // { fps: 60, mode: "forced", reason: "forced", displayHz: 60, ladder: [60], thermal: "none", asked: 120, heldBy: "panel" }
    * ```
    */
   setRate(choice: RateChoice): Readonly<FrameRate>;

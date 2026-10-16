@@ -608,14 +608,20 @@ export type FiltersApi = {
 };
 
 /**
- * The debug switches of the renderer: the nine-slice outline, the pixel check of skipped frames and the kept pictures.
+ * The debug switches of the renderer: the nine-slice outline, the pixel check of skipped frames, the kept pictures and
+ * the overdraw heat map.
  *
  * @example
  * ```ts
- * const switches: DebugSwitches = { nineSlice: true, verifyFrames: false, kept: true };
+ * const switches: DebugSwitches = { nineSlice: true, verifyFrames: false, kept: true, overdraw: false };
  * ```
  */
-export type DebugSwitches = { nineSlice: boolean; verifyFrames: boolean; kept: boolean };
+export type DebugSwitches = {
+  nineSlice: boolean;
+  verifyFrames: boolean;
+  kept: boolean;
+  overdraw: boolean;
+};
 
 /**
  * The debug drawing of the renderer, `app.renderer.sync.debug`. The switch outlines every
@@ -626,7 +632,7 @@ export type DebugSwitches = { nineSlice: boolean; verifyFrames: boolean; kept: b
  * ```ts
  * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
  * app.renderer.sync.debug.nineSlice(true);
- * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true }
+ * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true, overdraw: false }
  * ```
  */
 export type DebugApi = {
@@ -660,7 +666,7 @@ export type DebugApi = {
    * ```ts
    * // The visual runner checks every stepped frame of a test in the browser.
    * app.renderer.sync.debug.verifyFrames(true);
-   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: true, kept: true }
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: true, kept: true, overdraw: false }
    * ```
    */
   verifyFrames(on: boolean): void;
@@ -675,10 +681,30 @@ export type DebugApi = {
    * ```ts
    * // The editor's tools page compares the memory screen with and without kept pictures.
    * app.renderer.sync.debug.kept(false);
-   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: false }
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: false, overdraw: false }
    * ```
    */
   kept(on: boolean): void;
+
+  /**
+   * Draws every frame as the overdraw heat map (true) or as the game (false): a pixel's brightness counts the layers
+   * drawn there, 1/16 white for one, white for sixteen and more. While it is on every frame is drawn (also with
+   * `onDemand`), kept pictures are drawn live and filters are off, so the map shows what a frame would draw without
+   * them; the frames of the performance log are marked (`debug` event, header `debug.overdraw`), so a recording is not
+   * read as real cost. Only the stage pass changes: between frames every view keeps its own alpha, blend mode and
+   * filters, and off draws the game again from the next frame. A texel a texture leaves transparent counts nothing.
+   * Dev and debug builds only; elsewhere the switch stays off.
+   *
+   * @param on - True to draw the heat map.
+   * @example
+   * ```ts
+   * // The editor's Mission control shows where the board stacks its layers: three full-screen backdrops show 3/16 white.
+   * app.renderer.sync.debug.overdraw(true);
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: true, overdraw: true }
+   * app.renderer.sync.debug.overdraw(false); // the next frame draws the board as before
+   * ```
+   */
+  overdraw(on: boolean): void;
 
   /**
    * What every overlay does this frame, bottom first: its phase, its mode, its level, how many entries its range has
@@ -702,7 +728,7 @@ export type DebugApi = {
    * @example
    * ```ts
    * // An e2e test makes sure no outline is drawn before it compares a screenshot.
-   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: true }
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: true, overdraw: false }
    * ```
    */
   state(): DebugSwitches;
@@ -833,7 +859,7 @@ export type SyncApi = {
    * ```ts
    * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
    * app.renderer.sync.debug.nineSlice(true);
-   * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true }
+   * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true, overdraw: false }
    * ```
    */
   debug: DebugApi;
@@ -997,6 +1023,30 @@ export type SyncInternal = {
    * @param fn - Called with the probe draws made since the queue last started.
    */
   onWarm(fn: WarmListener): void;
+
+  /**
+   * Whether the overdraw heat map draws: the frame then asks to be drawn, and the stage pass goes through
+   * `drawOverdraw`.
+   *
+   * @returns True while `debug.overdraw` is on.
+   */
+  overdrawing(): boolean;
+
+  /**
+   * Draws the stage pass as the overdraw heat map and puts every node back after it (`overdraw.ts`).
+   *
+   * @param render - The stage pass, `host.render`.
+   * @returns What `render` answered.
+   */
+  drawOverdraw(render: () => boolean): boolean;
+
+  /**
+   * Subscribes to a move of the overdraw switch (the monitor of an agent build writes the `debug` event line).
+   * Emptied by `stopSync`.
+   *
+   * @param fn - Called with the switch, when it moved.
+   */
+  onOverdraw(fn: (on: boolean) => void): void;
 
   /**
    * Gives the view of an entity its wrapper before the kept cache takes its first picture (spec 23 D4), so the
@@ -1318,8 +1368,13 @@ export type SyncState = {
   orphans: Set<Entity>;
   /** Entities the tree check of a dev or agent build already reported, so each is reported once (spec 16 U2.5). */
   mismatched: Set<Entity>;
-  /** The nine-slice switch, from `config.debug` and `debug.nineSlice`; the pixel check lives in `demand`. */
-  debug: { nineSlice: boolean };
+  /**
+   * The nine-slice and overdraw switches, from `config.debug` and `debug.nineSlice` / `debug.overdraw`; the pixel check
+   * lives in `demand`, the kept switch in `kept`.
+   */
+  debug: { nineSlice: boolean; overdraw: boolean };
+  /** The restore table of the overdraw stage pass, its matrix and the listeners of the switch. */
+  overdraw: OverdrawState;
   /** The nine-slice switch moved: the next pass writes every nine-slice again. */
   outlinesStale: boolean;
   /** The filters `effects` set per entity, kept while the entity lives, view or not. */
@@ -1339,6 +1394,11 @@ export type SyncState = {
    * blur's two passes are filters of their own and are in it too. Empty in a production build.
    */
   filterKinds: WeakMap<object, string>;
+  /**
+   * The entity each Pixi filter a slot hangs on (its stages and a blur's pass filters too), for the passes of the
+   * performance log; the slot set last wins. Empty in a production build.
+   */
+  filterOwners: WeakMap<object, Entity>;
   /** Hidden masks of engine objects that are no view (an overlay's dim, a kept quad). */
   objectHidden: WeakMap<PixiContainer, number>;
   /** The view whose top (`wrapper ?? object`) a node is, for the hidden masks (O15; skeleton choice, confirmed in LEAD-FIXES-3). */
@@ -1353,6 +1413,20 @@ export type SyncState = {
    */
   held: Map<Entity, Unseen>;
   cleanups: Array<() => void>;
+};
+
+/**
+ * The overdraw heat map's state: the restore table of one stage pass (a node, its alpha, its blend mode, its filters
+ * or `undefined` for none), the root's own filters, the matrix made once, and who hears a move of the switch.
+ */
+export type OverdrawState = {
+  nodes: PixiContainer[];
+  alphas: number[];
+  blends: Array<PixiContainer["blendMode"]>;
+  filters: Array<readonly PixiFilter[] | undefined>;
+  rootFilters: readonly PixiFilter[] | undefined;
+  matrix: PixiFilter | undefined;
+  listeners: Array<(on: boolean) => void>;
 };
 
 /**

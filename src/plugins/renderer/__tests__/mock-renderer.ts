@@ -84,6 +84,8 @@ export type MockRenderer = {
   setPath(path: string): void;
   /** Sets what the fake `world.systemTimes()` answers. */
   setSystemTimes(timing: SystemTiming | undefined): void;
+  /** Sets what the fake `clock.pending()` and `clock.listeners()` answer. */
+  setClockCounts(pending: number, listeners: number): void;
 };
 
 /**
@@ -255,7 +257,7 @@ export function createMockRenderer(
   const frames: FrameRegistration[] = [];
   const pauses: Array<{ action: "push" | "pop"; reason: PauseReason }> = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
-  const clock = { now: 0, paused: false, wakes: 0 };
+  const clock = { now: 0, paused: false, wakes: 0, pending: 0, listeners: 0 };
   const measures: MeasureListener[] = [];
   const charged: number[] = [];
   // The rate of a game without `adaptive`, as the real time state starts it.
@@ -294,6 +296,7 @@ export function createMockRenderer(
       clock.wakes += 1;
     },
     wakes: () => clock.wakes,
+    frameListeners: () => frames.length,
     step: vi.fn(),
     measure: (listener: MeasureListener): (() => void) => {
       measures.push(listener);
@@ -321,7 +324,11 @@ export function createMockRenderer(
     fx: { onHint: noRemover }
   } as unknown as FlowApi;
 
-  const clockApi = { now: () => clock.now } as unknown as ClockApi;
+  const clockApi = {
+    now: () => clock.now,
+    pending: () => clock.pending,
+    listeners: () => clock.listeners
+  } as unknown as ClockApi;
 
   const lifecycleApi = {
     push: (reason: PauseReason) => pauses.push({ action: "push", reason }),
@@ -433,6 +440,10 @@ export function createMockRenderer(
     },
     setSystemTimes: (timing: SystemTiming | undefined): void => {
       systems.timing = timing;
+    },
+    setClockCounts: (pending: number, listeners: number): void => {
+      clock.pending = pending;
+      clock.listeners = listeners;
     }
   };
 }

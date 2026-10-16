@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/no-null -- a frame rate is JSON: an asked rate of the adaptive rule and a loop no panel holds are null. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../../../index";
 import { run } from "../../../flow/doors/run";
@@ -155,6 +156,17 @@ describe("game.frameRate", () => {
     await expect(run(app, frameRateCommand, { fps: 90 })).rejects.toThrow(
       /^\[game] time\.setRate takes "auto", 30, 60 or 120\./
     );
+  });
+
+  it("answers the asked rate of a pin, and none after {} hands an adaptive game back to the rule", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const app = createApp({ pluginConfigs: { time: { maxFps: 120, adaptive: { floor: 60 } } } });
+
+    const forced = await run(app, frameRateCommand, { fps: 60 });
+    const released = await run(app, frameRateCommand, {});
+
+    expect(forced.value).toMatchObject({ mode: "forced", asked: 60 });
+    expect(released.value).toMatchObject({ mode: "auto", asked: null, heldBy: null });
   });
 
   it("is refused without the dev or agent flag, and leaves a moku:dev entry inside one", async () => {

@@ -45,3 +45,19 @@ export function createInputState(_ctx: { readonly config: Readonly<Config> }): S
     controls: []
   };
 }
+
+/**
+ * Counts the listeners and controls other code registered: `onTap`, `onPointer`, `onKey` and
+ * `controls.add`, four lengths, nothing allocated.
+ *
+ * @param state - The input state.
+ * @returns The number of registrations whose remover has not run.
+ */
+export function countListeners(state: State): number {
+  return (
+    state.tapListeners.length +
+    state.pointerListeners.length +
+    state.keyListeners.length +
+    state.controls.length
+  );
+}

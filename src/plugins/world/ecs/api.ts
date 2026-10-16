@@ -198,6 +198,8 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
 
     ownerOf: (entity: Entity): Owner | undefined => state.owners.get(entity),
 
+    count: (): number => state.owners.size,
+
     onOwnerLeft: (fn: (owner: Owner) => void): (() => void) => {
       state.ownerLeft.push(fn);
 

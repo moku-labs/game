@@ -14,6 +14,7 @@ import type {
   FrameReadResult,
   FrameRing,
   PerfChange,
+  PerfCounts,
   PerfDisplay,
   PerfEventName,
   PerfLogLine,
@@ -98,6 +99,11 @@ export type RenderStats = {
    * rebuilds at its start and its end. Dev and debug builds only.
    */
   rebuilds?: number;
+  /**
+   * The live object counts of the moment, the same the performance log samples once a second: entities, views, the
+   * clock's timers and listeners, the frame callbacks and every count a plugin registered. Agent builds only.
+   */
+  counts?: PerfCounts;
 };
 
 /**
@@ -132,7 +138,9 @@ export const COUNT = {
   uploadBytes: 5,
   compiles: 6,
   marks: 7,
-  rebuilds: 8
+  rebuilds: 8,
+  targetsCreated: 9,
+  targetsDestroyed: 10
 } as const;
 
 /**
@@ -150,24 +158,57 @@ export const MEASURE = {
   draws: 4,
   counted: 8,
   compiles: 16,
-  gpu: 32
+  gpu: 32,
+  targets: 64
 } as const;
 
-/**
- * One pipeline or program compile a wrapper saw: its frame, its label (by reference) and the CPU
- * time of the creation call. Not public.
- */
-export type CompileRecord = { frame: number; label: string | null; ms: number };
+/** Owners of filter applies a frame tells apart, for the `filter-still` rule. Not public. */
+export const OWNER_SLOTS = 32;
 
 /**
- * The last 64 compiles, in pre-made records written in turn, and the shader modules counted for
- * the header. Not public.
+ * One pipeline or program compile, or one shader module, a wrapper saw: its frame, its label (by reference), the CPU
+ * time of the creation call, and where it happened: the pass of the frame, the filter kind and its owner. Not public.
+ */
+export type CompileRecord = {
+  frame: number;
+  label: string | null;
+  ms: number;
+  /** A WebGPU shader module, not a pipeline: not a compile of the frame's count. */
+  module: boolean;
+  /** The index of the pass of the frame it happened in; -1 before the first pass or outside a frame. */
+  pass: number;
+  /** The interned kind of the filter applying then, 1-based; 0 without a filter. */
+  kind: number;
+  /** The entity whose filter applied then; 0 without one. */
+  owner: number;
+};
+
+/**
+ * The last 64 compiles and shader modules, in pre-made records written in turn, the shader modules counted for the
+ * header, and how many records were ever written and sent as `shader` events. Not public.
  */
 export type CompileRing = {
   records: CompileRecord[];
   next: number;
   size: number;
   shaderModules: number;
+  /** Records ever written. */
+  written: number;
+  /** Records sent as `shader` events: the ones from `sent` to `written` wait for a flush with a listener. */
+  sent: number;
+};
+
+/**
+ * The owners of the filter applies of a frame, in a fixed table: the entity, its applies and pixels of the frame
+ * (zeroed in `begin()`) and the kind of its last apply. A slot stays while its owner applies. The entities are held in
+ * a `Float64Array`, exact for every entity: a `Uint32Array` read through `cell` would give its loads a fifth array
+ * kind, and the per-frame reads of every column would box their doubles. Not public.
+ */
+export type OwnerTable = {
+  ids: Float64Array;
+  applies: Float64Array;
+  pixels: Float64Array;
+  kinds: Uint8Array;
 };
 
 /**
@@ -179,7 +220,12 @@ export type PassTarget = {
   readonly pixelWidth: number;
   readonly pixelHeight: number;
   readonly label?: string | undefined;
-  readonly colorTexture?: { readonly label?: string | undefined } | undefined;
+  readonly colorTexture?:
+    | {
+        readonly label?: string | undefined;
+        readonly source?: { readonly format?: string; readonly resolution?: number } | undefined;
+      }
+    | undefined;
 };
 
 /**
@@ -224,6 +270,12 @@ export type MonitorSinks = {
   kindPixels: Float64Array;
   /** The kind of each Pixi filter, `SyncState.filterKinds`, handed over at attach. */
   filterKinds: WeakMap<object, string> | undefined;
+  /** The entity each Pixi filter hangs on, `SyncState.filterOwners`, handed over at attach. */
+  filterOwners: WeakMap<object, number> | undefined;
+  /** The entity of the apply running now (0 = none); names the owner of a filter pass. */
+  filterOwner: number;
+  /** The owners of this frame's filter applies (agent builds). */
+  owners: OwnerTable;
   compiles: CompileRing;
   /** The WebGPU pass sink, set at attach. */
   passes: PassSink | undefined;
@@ -249,6 +301,11 @@ export type RingPasses = {
   height: Uint16Array;
   gpuMs: Float32Array;
   label: (string | null)[];
+  owner: Uint32Array;
+  kind2: Uint8Array;
+  drawsAt: Uint16Array;
+  format: (string | null)[];
+  resolution: Float32Array;
 };
 
 /**
@@ -275,7 +332,7 @@ export type PerfRing = {
   columns: FrameColumns;
   passes: RingPasses;
   paths: string[];
-  /** Interned filter kind names, the sinks' list: `fltKind − 1` indexes it. */
+  /** Interned filter kind names, the sinks' list: `fltKind − 1` and `passes.kind2 − 1` index it. */
   kindNames: readonly string[];
   /** The world's system names by registration index: `sysIdx` indexes it. */
   systemNames: readonly string[];
@@ -362,6 +419,64 @@ export type TickEstimate = {
 };
 
 /**
+ * The counts plugins registered with `monitor.counts.register`, in a table of `COUNT_SLOTS` read once a second. Not
+ * public.
+ */
+export type CountTable = {
+  names: string[];
+  reads: Array<() => number>;
+  /** Readers that threw once and were warned about. */
+  failed: Set<string>;
+};
+
+/**
+ * The thresholds of the problem rules, from `renderer.monitor`, defaults filled in. Not public.
+ */
+export type ProblemThresholds = {
+  stillFrames: number;
+  stillMpx: number;
+  churnPerSecond: number;
+  churnSeconds: number;
+  churnAfterTrimMs: number;
+};
+
+/**
+ * The accumulators of the problem rules: per owner of a filter (the slots of `MonitorSinks.owners`) the drawn frames
+ * in a row it applied in, the frame that run began, its applies and pixels of the second; the render targets of the
+ * second and its churn seconds in a row; the takes of each kept record two flushes back; and the problems open now.
+ * Not public.
+ */
+export type ProblemState = {
+  thresholds: ProblemThresholds;
+  run: Float64Array;
+  runSince: Float64Array;
+  secFrames: Float64Array;
+  secPixels: Float64Array;
+  /** 1 while the `filter-still` problem of the owner in that slot is open. */
+  stillOpen: Uint8Array;
+  /** Render targets made and dropped this second. */
+  secTargets: number;
+  /** A create in an idle frame, this second. */
+  idleCreate: boolean;
+  /** A create within `churnAfterTrimMs` after a pool trim, this second. */
+  trimCreate: boolean;
+  /** The frame of the first such create of the second. */
+  createFrame: number;
+  /** Page clock of the last pool trim; NaN before one. */
+  trimAt: number;
+  /** Seconds in a row with `churnPerSecond` or more targets made and dropped, and the frame the run began. */
+  churnRun: number;
+  churnSince: number;
+  churnOpen: boolean;
+  /** The stage-1 takes (`s1Version`) of each kept record at the last two flushes, newest first. */
+  takes: [Map<number, number>, Map<number, number>];
+  /** The frame of each of those two flushes. */
+  takesFrame: [number, number];
+  /** The owners with an open `retakes` problem. */
+  retakesOpen: Set<number>;
+};
+
+/**
  * What the monitor of an agent build keeps. `undefined` in a build without the flag. Not public.
  */
 export type PerfState = {
@@ -422,6 +537,12 @@ export type PerfState = {
   startup: PerfStartupLine | undefined;
   /** Page-clock end of the first drawn frame; NaN before. */
   firstDrawnAt: number;
+  /** The number of the first drawn frame; NaN before. A compile up to it is a boot compile. */
+  firstDrawnFrame: number;
+  /** The counts plugins registered. */
+  counts: CountTable;
+  /** The problem rules' accumulators. */
+  problems: ProblemState;
   timer: FrameTimer | undefined;
   longFrames: LongFrameRing;
   /** Per-application removers: runners, wrappers, the timer. */
@@ -671,6 +792,51 @@ export type PerfMonitorApi = {
    * ```
    */
   setResolution(resolution: number | undefined): number;
+  /**
+   * The live object counts of a debug build: a plugin the renderer cannot depend on (it depends on the renderer)
+   * registers a count here, and the monitor reads it once a second into `sample.counts` and `stats().counts`.
+   *
+   * @example
+   * ```ts
+   * // A game's own pool of particles joins the leak counts of a debug build.
+   * app.renderer.monitor.counts.register("sparks", () => sparkPool.live);
+   * app.renderer.stats().counts?.sparks; // 24
+   * ```
+   */
+  counts: MonitorCounts;
+};
+
+/**
+ * The count registry of `renderer.monitor.counts`: at most 16 counts, read once a second. Agent builds only.
+ *
+ * @example
+ * ```ts
+ * // input, in onStart of a debug build: its listeners join the leak counts of the sample.
+ * ctx.require(rendererPlugin).monitor.counts.register("inputListeners", () => countListeners(ctx.state));
+ * ```
+ */
+export type MonitorCounts = {
+  /**
+   * Registers a count under a name: `read` is called once a second, at the flush of the sample, and its number goes
+   * into `sample.counts[name]` and `stats().counts[name]`. It must answer a number and allocate nothing. A name already
+   * registered gets the new reader. The renderer's `onStop` drops every registration. Agent builds only: without the
+   * flag nothing is kept and the returned remover does nothing.
+   *
+   * @param name - The count's name in the sample, beside `entities`, `views`, `timers`, `frameListeners` and
+   *   `clockListeners`.
+   * @param read - Answers the count now.
+   * @returns The remover; a second call does nothing.
+   * @throws {Error} When 16 counts are registered already: `[game] Monitor count table is full (16).`
+   * @example
+   * ```ts
+   * // input registers its listeners in onStart of a debug build; a screen that leaks an onKey listener on every
+   * // visit makes sample.counts.inputListeners grow by one per visit.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.monitor.counts.register("inputListeners", () => countListeners(ctx.state));
+   * renderer.stats().counts?.inputListeners; // 6
+   * ```
+   */
+  register(name: string, read: () => number): () => void;
 };
 
 /**

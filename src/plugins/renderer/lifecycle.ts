@@ -53,7 +53,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * oracle; `demand` settles the
  * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
  * waiting capture; last, `host` trims Pixi's texture pool when a rest or a scene change is due. The display objects
- * are written by the `sync` system.
+ * are written by the `sync` system. While the overdraw heat map of a dev or debug build is on, every frame asks to be
+ * drawn and its stage pass is drawn as the map (`sync.drawOverdraw`).
  *
  * With `onDemand`, a frame in which nothing visible changed is not drawn: the canvas keeps the
  * last picture (WebGPU presents a canvas texture only when one is rendered; a WebGL canvas keeps
@@ -82,6 +83,11 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
   // Before the decision clears the marks: they become the dirty flags of the pictures.
   modules.kept.collect();
 
+  // The heat map shows every frame as drawn: a still screen too.
+  const overdraw = modules.sync.overdrawing();
+
+  if (overdraw) modules.demand.request();
+
   const drawn = modules.demand.decide(modules.monitor.waiting());
 
   if (drawn) {
@@ -91,7 +97,11 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
     // The pictures before the stage pass: every render a picture needs is done when the canvas is drawn.
     modules.kept.flush();
 
-    if (modules.host.render()) {
+    const rendered = overdraw
+      ? modules.sync.drawOverdraw(modules.host.render)
+      : modules.host.render();
+
+    if (rendered) {
       ctx.deps.time.frameDrawn();
       if (probed) ctx.deps.time.frameProbed();
     }

@@ -256,6 +256,7 @@ const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000, holdMs = 0) =
       resume: vi.fn(),
       wake: vi.fn(),
       wakes: () => 0,
+      frameListeners: () => 0,
       measure: vi.fn(),
       agentClock: () => undefined,
       chargeAgent: vi.fn(),
@@ -273,7 +274,9 @@ const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000, holdMs = 0) =
       scheduleAt: vi.fn(),
       onElapsed: () => unregister,
       poke: vi.fn(),
-      dueAt: vi.fn()
+      dueAt: vi.fn(),
+      pending: vi.fn(() => 0),
+      listeners: vi.fn(() => 0)
     }
   };
   const ctx: FlowCtx = {

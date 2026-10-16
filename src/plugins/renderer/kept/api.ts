@@ -22,7 +22,7 @@ import { bypassRecord, createRecord, dropRecord, goLive, stepRecord } from "./re
 import { canKeep, dropTexture, matricesOf } from "./render";
 import { destroyRange } from "./state";
 import type { KeptCtx, KeptMatrices, KeptRange, KeptRecord, KeptStats } from "./types";
-import { verifyPictures } from "./verify";
+import { drawLive, verifyPictures } from "./verify";
 
 /**
  * The category a slot list lets the cache keep it under: the worst of its slots, `undefined` for an empty list, a
@@ -305,10 +305,12 @@ export function createKeptApi(
     },
 
     after: (): void => {
+      // The overdraw heat map is no picture of the game: its frames are not compared.
       if (
         ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
           (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)) &&
-        deps.demand.verifying()
+        deps.demand.verifying() &&
+        !ctx.state.sync.debug.overdraw
       ) {
         verifyPictures(kctx, bypass, () => {
           for (const record of state.records) if (record.mode === "kept") live(record);
@@ -360,6 +362,18 @@ export function createKeptApi(
     },
 
     bypass,
+
+    live: <Result>(draw: () => Result): Result => {
+      // Inline and positive: a production `define` folds the guard, and `verify.ts` leaves the bundle.
+      if (
+        (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+        (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+      ) {
+        return drawLive(kctx, bypass, draw);
+      }
+
+      return draw();
+    },
 
     enabled: (on: boolean): void => {
       const next = on && state.allowed;

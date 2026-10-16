@@ -2,12 +2,14 @@
 /**
  * @file renderer/monitor — the stream of the performance log (R11.3–4): who listens, what each new listener gets first
  * (the header, then the startup line once it is measured), what a flush writes once a second (the sample, the spikes
- * whose GPU time is known or that waited a flush, the compiles and uploads of the second), and the delivery itself:
+ * whose GPU time is known or that waited a flush, the compiles and uploads of the second, the `shader` events of the
+ * compiles not sent yet, the `problem` events of the rules that crossed or stopped), and the delivery itself:
  * synchronous, in subscription order, one fresh deep-frozen line for every listener, a throwing listener warned once
  * and kept. Nothing is built while nobody listens; the ring records anyway.
  */
 import type { Json } from "../../model/types";
 import { nativeShell, readingOf, whenShellReady } from "../../time/native";
+import { takeShaderEvents } from "./compiles";
 import {
   deepFreeze,
   displayOf,
@@ -22,6 +24,7 @@ import {
 } from "./log";
 import type { PerfEventName, PerfLogLine } from "./log-types";
 import { annotateLongFrame } from "./long-frames";
+import { judgeProblems, viewLabel } from "./problems";
 import { CAUSE, CHANGED, noteSubject, slotOfSequence } from "./ring";
 import { buildStartup } from "./startup";
 import { PENDING_SLOTS } from "./state";
@@ -266,6 +269,32 @@ function flushLoads(pc: PerfCtx, start: number, end: number): void {
 }
 
 /**
+ * Writes a `shader` event for every compile and shader module not sent yet that the ring still holds, boot compiles
+ * included: a listener that came after the boot still gets them at its first flush.
+ *
+ * @param pc - The perf context.
+ */
+function flushShaders(pc: PerfCtx): void {
+  for (const detail of takeShaderEvents(pc, entity => viewLabel(pc, entity))) {
+    deliver(pc, eventLine("shader", detail, detail.frame));
+  }
+}
+
+/**
+ * Judges the problem rules of the second and writes a `problem` event for each that opened or cleared; without a
+ * listener the rules are judged all the same, so their accumulators stay per second.
+ *
+ * @param pc - The perf context.
+ */
+function flushProblems(pc: PerfCtx): void {
+  const details = judgeProblems(pc);
+
+  if (pc.perf.listeners.length === 0) return;
+
+  for (const detail of details) deliver(pc, eventLine("problem", detail, pc.perf.frame));
+}
+
+/**
  * Starts a new second: the histogram, the system sums and maxima and the monitor's own cost go back to 0, the system
  * accumulators grown when the world registered more systems than they hold.
  *
@@ -313,10 +342,12 @@ export function flushPerf(pc: PerfCtx): void {
     deliver(pc, sampleLine(pc, start, windowEnd));
     flushSpikes(pc, start);
     flushLoads(pc, start, windowEnd);
+    flushShaders(pc);
   } else {
     perf.pendingCount = 0;
   }
 
+  flushProblems(pc);
   nextSecond(pc);
 }
 

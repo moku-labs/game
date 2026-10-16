@@ -223,7 +223,7 @@ and one function. Each lives with the plugin that owns its data, in that plugin'
 | `read(app, source, input?)` | `/inspect` | Calls the source's `read` once. Never changes the game. The input may be left out when every field of the schema is optional. |
 | `watch(app, source, input, fn)` | `/inspect` | Reads on the first `signals` phase, then again when the source's change key moved: `"frame"` every frame, `"commit"` when `model.store.snapshot()` is a new object, `"edge"` when `flow.state()` is. Both are memoised, so an unchanged frame allocates nothing. Returns the stop function. |
 | `defineCommand(command)` | `/control` | Checks the id and freezes the descriptor. |
-| `run(app, command, input?)` | `/control` | Runs every command when `__MOKU_GAME_DEV__` or `__MOKU_GAME_CONTROL__` is `true`; with `__MOKU_GAME_AGENT__` alone (a `--debug` page) the `read` and `cosmetic` ones, and throws `controlReadOnly(id)` (`reason: "read-only"`) for the others; with no flag throws `[game] Control commands run in dev builds only.` Resolves `{ value, state }`, where `state` is the envelope `{ path, frame, tainted }` read after the command. |
+| `run(app, command, input?)` | `/control` | Runs every command when `__MOKU_GAME_DEV__` or `__MOKU_GAME_CONTROL__` is `true`; with `__MOKU_GAME_AGENT__` alone (a `--debug=read` page) the `read` and `cosmetic` ones, and throws `controlReadOnly(id)` (`reason: "read-only"`) for the others; with no flag throws `[game] Control commands run in dev builds only.` Resolves `{ value, state }`, where `state` is the envelope `{ path, frame, tainted }` read after the command. |
 
 An input schema maps field names to `"string"`, `"number"`, `"boolean"` or `"json"`; a kind with a
 trailing `?` is optional. The command reads its input already typed:
@@ -244,7 +244,7 @@ export const jumpToLevel = defineCommand({
 **The flags.** `__MOKU_GAME_DEV__` is a global the engine never replaces; undefined means
 production. A dev build defines it `true` in the bundler, or sets `globalThis.__MOKU_GAME_DEV__ =
 true` before the engine runs. `__MOKU_GAME_AGENT__` (a debug page with the editor's agent) and
-`__MOKU_GAME_CONTROL__` (`--debug=full`) follow the same rules. `isDev()`, `isAgent()` and
+`__MOKU_GAME_CONTROL__` (`--debug`, which includes control; `--debug=read` leaves it `false`) follow the same rules. `isDev()`, `isAgent()` and
 `isControl()` read them at call time. Bun does not inline them across modules, so every command
 body writes the guard of its effect inline: the agent form for `read` and `cosmetic`
 (`(DEV off) && (AGENT off)`), the control form for `route`, `cheat` and `raw` (`(DEV off) &&

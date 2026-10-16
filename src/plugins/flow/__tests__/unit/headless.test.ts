@@ -96,6 +96,7 @@ const createFakeApp = (options: AppOptions = {}) => {
       resume: vi.fn(),
       wake: vi.fn(),
       wakes: () => 0,
+      frameListeners: () => 0,
       measure: vi.fn(),
       agentClock: () => undefined,
       chargeAgent: vi.fn(),

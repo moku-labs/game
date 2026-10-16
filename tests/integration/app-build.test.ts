@@ -304,7 +304,7 @@ describe("moku-game build --debug", () => {
     debug.stderr = ran.stderr;
   }, 180_000);
 
-  it("starts the editor's page agent with the .dev modules, names the build, the engine and the editor, and marks the page", () => {
+  it("starts the editor's page agent with the .dev modules and control, names the build, the engine and the editor, and marks the page", () => {
     expect(debug.code).toBe(0);
 
     const code = pageCode(debug.out);
@@ -312,6 +312,7 @@ describe("moku-game build --debug", () => {
     expect(code).toContain(AGENT_MARKER);
     expect(code).toContain(DEV_MODULE_MARKER);
     expect(code).toMatch(/"debug-\d{8}T\d{6}Z"/);
+    expect(code).toMatch(/__MOKU_GAME_CONTROL__\s*=\s*(?:true|!0)/);
     expect(code).toContain(`"${VERSION}+src"`);
     expect(code).toContain('"127.0.0.1:47600"');
     expect(code).toContain('"moku:script"');
@@ -334,7 +335,7 @@ describe("moku-game build --debug", () => {
 
     expect(debug.stderr).toMatch(
       new RegExp(
-        String.raw`build: a DEBUG page with the editor agent, control: read and cosmetic commands\. Build debug-\d{8}T\d{6}Z, engine ${version}\+src, editor 127\.0\.0\.1:47600\. Never ship it to a store\.`
+        String.raw`build: a DEBUG page with the editor agent, control: every command, the state-changing ones too\. Build debug-\d{8}T\d{6}Z, engine ${version}\+src, editor 127\.0\.0\.1:47600\. Never ship it to a store\.`
       )
     );
     expect(debug.stderr.match(/a DEBUG page/g)).toHaveLength(1);

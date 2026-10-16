@@ -1,7 +1,8 @@
 /**
  * @file input plugin — lifecycle functions: dependency resolution, the frame step registered in
- * `onInit`, the pointer listeners opened in `onStart` and the teardown that closes exactly what
- * was opened.
+ * `onInit`, the pointer listeners opened in `onStart` (and, in a debug build, the count of the
+ * listeners other code registered, pushed into the renderer's monitor) and the teardown that
+ * closes exactly what was opened.
  */
 import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
@@ -10,6 +11,7 @@ import { worldPlugin } from "../world";
 import { stepGestures } from "./gestures";
 import { attachKeys, detachKeys } from "./keys";
 import { attach, detach } from "./pointer";
+import { countListeners } from "./state";
 import type { Deps, InputCtx, KernelSlice, State } from "./types";
 
 /**
@@ -57,12 +59,22 @@ export function initInput(ctx: KernelSlice): void {
 /**
  * Opens the pointer listeners on the canvas the renderer created and the one `keydown` listener
  * on `window`. Without a DOM the renderer has no canvas: nothing is attached, the plugin is
- * inert, and `app.input.*` still answers the gate.
+ * inert, and `app.input.*` still answers the gate. In an agent build the count of the listeners
+ * and controls other code registered goes into the renderer monitor's leak counts as
+ * `inputListeners`, pushed: the renderer cannot depend on input, which depends on it. The
+ * renderer's `onStop` drops the registration.
  *
  * @param ctx - Kernel context of the input plugin.
  */
 export function startInput(ctx: KernelSlice): void {
-  const canvas = ctx.require(rendererPlugin).host.canvas();
+  const renderer = ctx.require(rendererPlugin);
+
+  // Inline and positive: a production `define` folds the guard, and the registration leaves the bundle.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    renderer.monitor.counts.register("inputListeners", () => countListeners(ctx.state));
+  }
+
+  const canvas = renderer.host.canvas();
 
   ctx.state.canvas = canvas;
   if (canvas === undefined) return;

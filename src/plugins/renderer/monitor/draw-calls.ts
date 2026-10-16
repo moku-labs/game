@@ -3,7 +3,8 @@
  * subclass. Pixi 8.22 has no counter of its own. Under WebGPU three classes issue every draw of the scene:
  * `GpuBatchAdaptor` (sprites, text), `GpuGraphicsAdaptor` (graphics) and `GpuEncoderSystem` (meshes, tiling sprites,
  * particles, filters); the encoder also begins every render pass Pixi draws a frame with. `FilterSystem` applies
- * every filter on both backends, the two texture systems upload every source, and `BatcherPipe.buildStart` begins
+ * every filter on both backends, the two texture systems upload every source (the WebGPU one also creates and drops
+ * every render target), and `BatcherPipe.buildStart` begins
  * every rebuild of a render group's instruction list (spec 26 R2.3). Counting subclasses of the seven go into Pixi's
  * own extension registry before `app.init()`, under the same names. No native prototype and no Pixi instance is
  * patched, and no private field is read. What is not counted (renderer README, "What is not counted"):
@@ -11,7 +12,14 @@
  * MSAA restore — and draws outside the three classes.
  */
 import type { PixiModule } from "../types";
-import { COUNT, type CountingClasses, KIND_SLOTS, type MonitorSinks } from "./types";
+import {
+  COUNT,
+  type CountingClasses,
+  KIND_SLOTS,
+  type MonitorSinks,
+  OWNER_SLOTS,
+  type OwnerTable
+} from "./types";
 import { cell } from "./units";
 
 /** The arguments of a batch draw. */
@@ -42,6 +50,9 @@ type ApplyArguments = Parameters<InstanceType<PixiModule["FilterSystem"]>["apply
 
 /** A texture source a texture system uploads. */
 type Source = InstanceType<PixiModule["Texture"]>["source"];
+
+/** The GPU texture the WebGPU texture system makes for a source. */
+type GpuSourceTexture = ReturnType<InstanceType<PixiModule["GpuTextureSystem"]>["initSource"]>;
 
 /** Bytes of one pixel of an uncompressed source: the engine's sources are 8-bit RGBA. */
 const BYTES_PER_PIXEL = 4;
@@ -83,6 +94,75 @@ function internKind(sinks: MonitorSinks, kind: string | undefined): number {
   sinks.kindNames.push(kind);
 
   return sinks.kindNames.length - 1;
+}
+
+/**
+ * The slot of an owner in the owner table of the frame: its own slot, else the first free one, which it takes. An
+ * indexed search over at most 32 slots: no allocation. A full table tracks no more owners.
+ *
+ * @param owners - The owner table.
+ * @param owner - The entity, not 0.
+ * @returns The slot, or -1 when the table is full.
+ */
+function ownerSlot(owners: OwnerTable, owner: number): number {
+  let free = -1;
+
+  for (let slot = 0; slot < OWNER_SLOTS; slot += 1) {
+    const id = cell(owners.ids, slot);
+
+    if (id === owner) return slot;
+    if (id === 0 && free === -1) free = slot;
+  }
+
+  if (free !== -1) owners.ids[free] = owner;
+
+  return free;
+}
+
+/**
+ * Counts one filter apply of a frame: its pixels (width times height times resolution squared), its interned kind and
+ * its owner, into the frame's counters, the kinds' and the owner table, and notes the kind and the owner being applied
+ * so a pass begun inside is named by them. A plain function apart from the class: indexed stores only.
+ *
+ * @param sinks - The sinks.
+ * @param filter - The filter applied.
+ * @param input - Its input texture.
+ */
+function countApply(
+  sinks: MonitorSinks,
+  filter: ApplyArguments[0],
+  input: ApplyArguments[1]
+): void {
+  const { counts, owners } = sinks;
+  const resolution = input.source.resolution;
+  const pixels = input.frame.width * input.frame.height * resolution * resolution;
+  const kind = internKind(sinks, sinks.filterKinds?.get(filter));
+  const owner = sinks.filterOwners?.get(filter) ?? 0;
+  const slot = owner === 0 ? -1 : ownerSlot(owners, owner);
+
+  counts[COUNT.filterApplies] = cell(counts, COUNT.filterApplies) + 1;
+  counts[COUNT.filterPixels] = cell(counts, COUNT.filterPixels) + pixels;
+  sinks.kindApplies[kind] = cell(sinks.kindApplies, kind) + 1;
+  sinks.kindPixels[kind] = cell(sinks.kindPixels, kind) + pixels;
+  sinks.filterKind = kind;
+  sinks.filterOwner = owner;
+
+  // The owner's applies of the frame, for the `filter-still` rule (U5).
+  if (slot !== -1) {
+    owners.applies[slot] = cell(owners.applies, slot) + 1;
+    owners.pixels[slot] = cell(owners.pixels, slot) + pixels;
+    owners.kinds[slot] = kind + 1;
+  }
+}
+
+/**
+ * Tells whether a source is a render target: it has no upload method, as `countUpload` tells them apart.
+ *
+ * @param source - The source.
+ * @returns True for a render target.
+ */
+function isTarget(source: Source): boolean {
+  return source.uploadMethodId === "unknown";
 }
 
 /**
@@ -274,39 +354,62 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
     public static override readonly extension = pixi.FilterSystem.extension;
 
     /**
-     * Counts the apply and its area inside a frame, notes the kind being applied so a pass begun
-     * inside is a filter pass named by it, then applies.
+     * Counts the apply and its area inside a frame, notes the kind and the owner being applied so a pass begun
+     * inside is a filter pass named by them, then applies. Its four arguments are named, not spread: a rest array
+     * would be made at every apply.
      *
-     * @param args - The filter, its input, the output and the clear.
+     * @param filter - The filter.
+     * @param input - Its input texture.
+     * @param output - Where it draws.
+     * @param clear - Whether the output is cleared first.
      */
-    public override applyFilter(...args: ApplyArguments): void {
-      const [filter, input] = args;
-
-      if (sinks.inFrame) {
-        const { counts } = sinks;
-        const pixels = input.frame.width * input.frame.height * input.source.resolution ** 2;
-        const kind = internKind(sinks, sinks.filterKinds?.get(filter));
-
-        counts[COUNT.filterApplies] = cell(counts, COUNT.filterApplies) + 1;
-        counts[COUNT.filterPixels] = cell(counts, COUNT.filterPixels) + pixels;
-        sinks.kindApplies[kind] = cell(sinks.kindApplies, kind) + 1;
-        sinks.kindPixels[kind] = cell(sinks.kindPixels, kind) + pixels;
-        sinks.filterKind = kind;
-      }
+    public override applyFilter(
+      filter: ApplyArguments[0],
+      input: ApplyArguments[1],
+      output: ApplyArguments[2],
+      clear: ApplyArguments[3]
+    ): void {
+      if (sinks.inFrame) countApply(sinks, filter, input);
 
       sinks.filterDepth += 1;
 
       try {
-        super.applyFilter(...args);
+        super.applyFilter(filter, input, output, clear);
       } finally {
         sinks.filterDepth -= 1;
       }
     }
   }
 
-  /** Counts every upload of the WebGPU texture system. */
+  /**
+   * Counts every upload of the WebGPU texture system, and every render target it creates and drops: a target's
+   * source is created once in `initSource` and dropped once in `onSourceUnload` (a destroy, a pool trim, a lost
+   * device). Pixi calls `initSource` again for a source it already made (it answers the same texture then): the set of
+   * the targets made tells a new one.
+   */
   class CountingGpuTextureSystem extends pixi.GpuTextureSystem {
     public static override readonly extension = pixi.GpuTextureSystem.extension;
+
+    /** The render-target sources this system made and has not dropped. */
+    private readonly targets = new WeakSet<Source>();
+
+    /**
+     * Makes the GPU texture of a source, and counts a render target made for the first time.
+     *
+     * @param source - The source.
+     * @returns The GPU texture.
+     */
+    public override initSource(source: Source): GpuSourceTexture {
+      const made = isTarget(source) && !this.targets.has(source);
+      const texture = super.initSource(source);
+
+      if (made) {
+        this.targets.add(source);
+        sinks.counts[COUNT.targetsCreated] = cell(sinks.counts, COUNT.targetsCreated) + 1;
+      }
+
+      return texture;
+    }
 
     /**
      * Uploads the source, then counts it; the first upload goes through here too.
@@ -316,6 +419,19 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
     protected override onSourceUpdate(source: Source): void {
       super.onSourceUpdate(source);
       countUpload(sinks, source);
+    }
+
+    /**
+     * Drops the source's GPU texture, and counts a render target dropped.
+     *
+     * @param source - The source.
+     */
+    protected override onSourceUnload(source: Source): void {
+      if (this.targets.delete(source)) {
+        sinks.counts[COUNT.targetsDestroyed] = cell(sinks.counts, COUNT.targetsDestroyed) + 1;
+      }
+
+      super.onSourceUnload(source);
     }
   }
 

@@ -175,9 +175,9 @@ describe("nativeConfigOf", () => {
     const read = nativeConfigOf(settingsOf(), where, "android", { level: "read" });
 
     expect(full.web.build).toBe(
-      '"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug=full --editor 192.168.1.20:47600'
+      '"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug --editor 192.168.1.20:47600'
     );
-    expect(read.web.build).toBe('"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug');
+    expect(read.web.build).toBe('"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug=read');
     expect(store.web.build).toBe('"bun" "/g/bin/moku-game.mjs" "--root" "/g" build');
     expect({ ...full, web: store.web }).toEqual(store);
     expect(full.app).toMatchObject({ name: "Лесной городок", identifier: "com.mokulabs.timber" });
@@ -236,9 +236,7 @@ describe("runNative", () => {
       ["build", { target: "android", simulator: undefined, debug: true }],
       ["stop"]
     ]);
-    expect(recorder.configs[0]?.web.build).toContain(
-      "build --debug=full --editor 192.168.1.20:47600"
-    );
+    expect(recorder.configs[0]?.web.build).toContain("build --debug --editor 192.168.1.20:47600");
   });
 
   it("dev runs the native shell on the target", async () => {

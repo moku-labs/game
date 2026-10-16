@@ -88,6 +88,11 @@ export type KeptInternal = {
   drainRefreshes(): number;
   /** Dev and agent builds only: every record and range drawn live for one extract, and back. */
   bypass(on: boolean): void;
+  /**
+   * Dev and agent builds only: runs `draw` with every kept record drawn live and every range's entries lifted (its
+   * sprite hidden), then puts every picture back: the live render of the pixel leg and of the overdraw map.
+   */
+  live<Result>(draw: () => Result): Result;
   /** The debug switch: false draws every view live from the next drawn frame. */
   enabled(on: boolean): void;
   /** Whether the switch is on (and `keptMb` above 0). */
@@ -141,6 +146,11 @@ export type KeptRecord = {
   still: number;
   churn: number;
   calm: boolean;
+  /**
+   * Drawn frames in a row its subtree did not change (no stage-1 mark), whether it may be kept or not: the monitor's
+   * `filter-still` rule reads it.
+   */
+  quiet: number;
   /** Drawn-frame number of the last frame its quad was drawn; the LRU key of P6. */
   lastDrawn: number;
   /** Depth of the top under the stage, for the inner-first order (P5.2). */

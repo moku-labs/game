@@ -23,7 +23,7 @@ import {
 /**
  * Every command of the engine, keyed by its short name: what an editor lists as buttons and MCP
  * tools. Frozen. Each runs on the dev page and on a debug page, by the profile `run` checks: a
- * `--debug` page runs the read and cosmetic ones.
+ * `--debug` page runs every one, a `--debug=read` page the read and cosmetic ones.
  *
  * @example
  * ```ts

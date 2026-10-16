@@ -579,7 +579,8 @@ describe("game.debug", () => {
     expect(debugCommand.input).toEqual({
       nineSlice: "boolean?",
       verifyFrames: "boolean?",
-      kept: "boolean?"
+      kept: "boolean?",
+      overdraw: "boolean?"
     });
   });
 
@@ -589,16 +590,22 @@ describe("game.debug", () => {
 
     const on = await run(appOf(mock), debugCommand, { nineSlice: true });
 
-    expect(on.value).toEqual({ nineSlice: true, verifyFrames: false, kept: true });
+    expect(on.value).toEqual({ nineSlice: true, verifyFrames: false, kept: true, overdraw: false });
     expect(mock.api.sync.debug.state()).toEqual({
       nineSlice: true,
       verifyFrames: false,
-      kept: true
+      kept: true,
+      overdraw: false
     });
 
     const off = await run(appOf(mock), debugCommand, { nineSlice: false });
 
-    expect(off.value).toEqual({ nineSlice: false, verifyFrames: false, kept: true });
+    expect(off.value).toEqual({
+      nineSlice: false,
+      verifyFrames: false,
+      kept: true,
+      overdraw: false
+    });
   });
 
   it("sets verifyFrames alone and answers both switches; a call with neither changes nothing", async () => {
@@ -611,8 +618,18 @@ describe("game.debug", () => {
     const verify = await run(app, debugCommand, { verifyFrames: true });
     const same = await run(app, debugCommand, {});
 
-    expect(verify.value).toEqual({ nineSlice: true, verifyFrames: true, kept: true });
-    expect(same.value).toEqual({ nineSlice: true, verifyFrames: true, kept: true });
+    expect(verify.value).toEqual({
+      nineSlice: true,
+      verifyFrames: true,
+      kept: true,
+      overdraw: false
+    });
+    expect(same.value).toEqual({
+      nineSlice: true,
+      verifyFrames: true,
+      kept: true,
+      overdraw: false
+    });
     expect(app.log.trace().slice(-2)).toEqual([
       expect.objectContaining({ data: { command: "game.debug", verifyFrames: true } }),
       expect.objectContaining({ data: { command: "game.debug" } })
@@ -626,7 +643,12 @@ describe("game.debug", () => {
 
     const off = await run(app, debugCommand, { kept: false });
 
-    expect(off.value).toEqual({ nineSlice: false, verifyFrames: false, kept: false });
+    expect(off.value).toEqual({
+      nineSlice: false,
+      verifyFrames: false,
+      kept: false,
+      overdraw: false
+    });
     expect(mock.ctx.state.kept.on).toBe(false);
     expect(app.log.trace().at(-1)).toEqual(
       expect.objectContaining({ data: { command: "game.debug", kept: false } })
@@ -634,7 +656,26 @@ describe("game.debug", () => {
 
     const on = await run(app, debugCommand, { kept: true });
 
-    expect(on.value).toEqual({ nineSlice: false, verifyFrames: false, kept: true });
+    expect(on.value).toEqual({
+      nineSlice: false,
+      verifyFrames: false,
+      kept: true,
+      overdraw: false
+    });
+  });
+
+  // Bug caught: the door drops the overdraw field, so Mission control cannot switch the heat map on a phone.
+  it("takes { overdraw: true } alone and answers the switches with the heat map on", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const mock = createMockRenderer({ dom: false });
+    const app = appOf(mock);
+
+    const on = await run(app, debugCommand, { overdraw: true });
+
+    expect(on.value).toEqual({ nineSlice: false, verifyFrames: false, kept: true, overdraw: true });
+    expect(app.log.trace().at(-1)).toEqual(
+      expect.objectContaining({ data: { command: "game.debug", overdraw: true } })
+    );
   });
 });
 
@@ -648,7 +689,8 @@ describe("the renderer commands", () => {
     expect(mock.api.sync.debug.state()).toEqual({
       nineSlice: false,
       verifyFrames: false,
-      kept: true
+      kept: true,
+      overdraw: false
     });
 
     vi.stubGlobal("__MOKU_GAME_DEV__", true);

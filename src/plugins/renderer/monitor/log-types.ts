@@ -62,6 +62,10 @@ export type FrameColumns = {
   kept: Float32Array;
   /** Kept pictures and range pictures taken in the frame; refreshes go to the per-second count only. */
   retakes: Float32Array;
+  /** Render targets Pixi created in the frame (WebGPU, counted on the texture system); NaN where not counted. */
+  targetsCreated: Float32Array;
+  /** Render targets Pixi destroyed in the frame (a pool trim, a resize); NaN where not counted. */
+  targetsDestroyed: Float32Array;
 };
 
 /**
@@ -96,6 +100,11 @@ export type FrameReadout = Partial<FrameColumns> & { length: number };
  * ```ts
  * const ring = app.renderer.monitor.frames();
  * ring.size; // 1024 after nine seconds at 120 fps; 0 in a production build
+ * // The filter of the newest pass, from the pass ring: `kind2` is 1-based, 0 is "no filter".
+ * const kind2 = ring.passes.kind2[ring.passes.newest] ?? 0; // 2
+ * kind2 === 0 ? null : ring.kindNames[kind2 - 1]; // "fog.blur"
+ * // The world systems the `sysIdx` column indexes; a new system makes a new array.
+ * ring.systemNames[ring.columns.sysIdx[ring.newest * 5] ?? 0]; // "board.looks"
  * ```
  */
 export type FrameRing = {
@@ -124,9 +133,26 @@ export type FrameRing = {
     gpuMs: Float32Array;
     /** Pre-sized; references, never copies. */
     label: (string | null)[];
+    /** The entity whose filter drew the pass; 0 for none (the canvas, a texture pass, a filter no view hangs). */
+    owner: Uint32Array;
+    /** The filter kind of a filter pass, 1-based into `kindNames` (`kindNames[kind2 - 1]`); 0 for none. */
+    kind2: Uint8Array;
+    /** The draw count of the frame when the pass began: a pass drew up to the next one's (WebGPU; 0 on WebGL). */
+    drawsAt: Uint16Array;
+    /** The target's texture format (`"rgba8unorm"`), by reference; `null` when unknown. */
+    format: (string | null)[];
+    /** The target's resolution; NaN when unknown. */
+    resolution: Float32Array;
   };
   /** Path id → flow path. */
   readonly paths: readonly string[];
+  /**
+   * The interned filter kinds, `"other"` first: `fltKind` and the passes' `kind2` index it 1-based
+   * (`kindNames[kind - 1]`), 0 is none. It only grows, at most 32 names.
+   */
+  readonly kindNames: readonly string[];
+  /** The world's system names by registration index (`sysIdx`); a registration makes a new array. */
+  readonly systemNames: readonly string[];
   /**
    * Copies the frames committed after the cursor `since` (a `written` value read earlier), oldest first, into the
    * columns `into` provides (`phaseMs` takes 6 values a frame), at most `into.length` of the newest of them. Allocates
@@ -179,7 +205,8 @@ export type PerfMeasured =
   | "longFrames"
   | "heap"
   | "systems"
-  | "kept";
+  | "kept"
+  | "targets";
 
 /**
  * What the screen is: in the header and in every `display` event.
@@ -239,6 +266,17 @@ export type PerfHeaderLine = PerfLine<"header"> & {
     frames: number;
   };
   measured: readonly PerfMeasured[];
+  /**
+   * The bundle identifier of the app, `"com.mokulabs.timber.debug"` in a native debug build (`__MOKU_GAME_APP__`), so a
+   * device stream pairs with its project; `null` on a page without one. The engine always writes it; optional for a
+   * reader of an older log.
+   */
+  app?: { id: string | null };
+  /**
+   * The debug drawing at the moment of the header: `overdraw` true while the overdraw heat map draws, so the frames that
+   * follow are not read as real cost (a `debug` event marks a switch later). Optional for a reader of an older log.
+   */
+  debug?: { overdraw: boolean };
 };
 
 /**
@@ -291,6 +329,29 @@ type Spread = { p50: number; p90: number; max: number };
 type MeanMax = { mean: number; max: number };
 
 /**
+ * The live object counts of a sample, read once a second: a count that grows each time a screen is entered and left
+ * is a leak. `entities` are the world's live entities, `views` the display objects `sync` holds, `timers` the clock's
+ * scheduled moments not yet due, `frameListeners` the `time.onFrame` callbacks, `clockListeners` the `clock.onElapsed`
+ * listeners; every count a plugin registered through `monitor.counts.register` sits beside them by its name
+ * (`inputListeners`).
+ *
+ * @example
+ * ```ts
+ * const counts: PerfCounts = {
+ *   entities: 412, views: 180, timers: 1, frameListeners: 9, clockListeners: 2, inputListeners: 6
+ * };
+ * ```
+ */
+export type PerfCounts = {
+  readonly entities: number;
+  readonly views: number;
+  readonly timers: number;
+  readonly frameListeners: number;
+  readonly clockListeners: number;
+  readonly [registered: string]: number;
+};
+
+/**
  * One second of frames.
  */
 export type PerfSampleLine = PerfLine<"sample"> & {
@@ -336,6 +397,13 @@ export type PerfSampleLine = PerfLine<"sample"> & {
   resolution: number;
   monitorMs: number;
   spikes: number;
+  /** The live object counts of the moment (U3); optional for a reader of an older log. */
+  counts?: PerfCounts;
+  /**
+   * Render targets Pixi created and destroyed in the second (WebGPU); `null` where they are not counted. Not the
+   * texture memory of `textures.targets`. Optional for a reader of an older log.
+   */
+  targets?: { created: number; destroyed: number } | null;
 };
 
 /**
@@ -431,7 +499,8 @@ export type FrameRecord = {
 export type PassKind = "canvas" | "texture" | "filter";
 
 /**
- * One render pass of a spike frame.
+ * One render pass of a spike frame. The fields after `gpuMs` came with the 0.15 telemetry; a reader of an older log
+ * finds them absent.
  */
 export type PassRecord = {
   index: number;
@@ -441,6 +510,20 @@ export type PassRecord = {
   w: number;
   h: number;
   gpuMs: number | null;
+  /** The entity whose filter drew the pass; `null` for the canvas, a texture pass and a filter no view hangs. */
+  owner?: Entity | null;
+  /** The label of the owner's view when the line was built; `null` without an owner or once the view left. */
+  view?: string | null;
+  /** The kind id of the filter that drew it (`"fog.blur"`), `"other"` for a filter without one; `null` otherwise. */
+  filter?: string | null;
+  /** The draws issued in the pass (WebGPU); `null` where draws are not counted. */
+  draws?: number | null;
+  /** The target's texture format; `null` when unknown. */
+  format?: string | null;
+  /** The target's resolution; `null` when unknown. */
+  resolution?: number | null;
+  /** The pass took or refreshed a kept picture (its label starts with `kept:`). */
+  kept?: boolean;
 };
 
 /**
@@ -484,7 +567,10 @@ export type PerfEventName =
   | "rate"
   | "devtools"
   | "pool-trim"
-  | "warm";
+  | "warm"
+  | "shader"
+  | "problem"
+  | "debug";
 
 /**
  * What an `overlay` event line says happened to an overlay (spec 22 O10.2): it opened, landed (its enter motion is
@@ -538,6 +624,114 @@ export type PoolTrimDetail = { reason: "rest" | "scene" | "pause"; freedMb: numb
 export type WarmDetail = { draws: number };
 
 /**
+ * What a `shader` event line reports, in its `what`: a render pipeline (WebGPU) or a program (WebGL) created, or a
+ * WebGPU shader module compiled. New values are only ever appended.
+ *
+ * @example
+ * ```ts
+ * // The editor counts the pipelines of a recording without a switch over strings it does not know.
+ * const pipelines = lines.filter(line => line.kind === "event" && line.name === "shader" && line.detail.what === SHADER_WHATS[0]).length; // 14
+ * ```
+ */
+export const SHADER_WHATS = ["compile", "module"] as const;
+
+/**
+ * One value of `SHADER_WHATS`.
+ *
+ * @example
+ * ```ts
+ * const what: ShaderWhat = "module";
+ * ```
+ */
+export type ShaderWhat = (typeof SHADER_WHATS)[number];
+
+/**
+ * The detail of a `shader` event line: one pipeline or program created, or one shader module compiled, in the frame
+ * `frame`, written at the flush of its second. `boot` is true up to the first drawn frame (the warm-up and the first
+ * screen); `during` names where it happened: the index of the pass of the frame, and the filter, its entity and the
+ * label of that entity's view when a filter was applying. A compile of a plain batch has no filter: `owner: null`.
+ *
+ * @example
+ * ```ts
+ * // The fog blur of the memory screen compiled its pipeline while it applied on the board's fog layer.
+ * const detail: ShaderEventDetail = {
+ *   what: "compile", label: "PIXI Pipeline (blur-pass-filter)", ms: 4.2, frame: 1824, boot: false,
+ *   during: { pass: 2, filter: "fog.blur", owner: 1_048_601, view: "Sprite#1048601 board.fog:fog" }
+ * };
+ * ```
+ */
+export type ShaderEventDetail = {
+  what: ShaderWhat;
+  label: string | null;
+  ms: number;
+  frame: number;
+  boot: boolean;
+  during: {
+    pass: number | null;
+    filter: string | null;
+    owner: Entity | null;
+    view: string | null;
+  };
+};
+
+/**
+ * The rules of the `problem` event lines, judged once a second: `filter-still` (a filtered view stood still and was
+ * filtered again in every drawn frame), `target-churn` (render targets made and dropped all the time, or right after a
+ * pool trim, or while idle), `retakes` (a kept view taken again and again). New rules are only ever appended.
+ *
+ * @example
+ * ```ts
+ * // The editor shows one issue row per open problem and closes it on the `cleared` line of the same rule and owner.
+ * PROBLEM_RULES.includes(detail.rule); // true for "filter-still"
+ * ```
+ */
+export const PROBLEM_RULES = ["filter-still", "target-churn", "retakes"] as const;
+
+/**
+ * One value of `PROBLEM_RULES`.
+ *
+ * @example
+ * ```ts
+ * const rule: ProblemRule = "target-churn";
+ * ```
+ */
+export type ProblemRule = (typeof PROBLEM_RULES)[number];
+
+/**
+ * The detail of a `problem` event line: a rule crossed its threshold. Written once per crossing; the line with
+ * `cleared: true` follows when the condition stops. `value` is in the rule's unit (still frames, targets made and
+ * dropped per second, takes in two seconds), `since` the frame the run began, `frames` the frames it covers. `reason`
+ * says why a still filtered view is not kept (`"budget"`: its take was refused for the kept budget, `"not-eligible"`:
+ * the kept policy may not keep it) and which clause of `target-churn` fired (`"rate"`, `"idle"`, `"after-trim"`).
+ *
+ * @example
+ * ```ts
+ * // The fog of the board is blurred again in every frame of a still screen: the budget refused its picture.
+ * const opened: ProblemEventDetail = {
+ *   rule: "filter-still", severity: "warn", owner: 1_048_601, view: "Sprite#1048601 board.fog:fog",
+ *   filter: "fog.blur", value: 75, threshold: 60, since: 1700, frames: 75, reason: "budget"
+ * };
+ * const closed: ProblemEventDetail = {
+ *   rule: "filter-still", cleared: true, owner: 1_048_601, view: "Sprite#1048601 board.fog:fog"
+ * };
+ * ```
+ */
+export type ProblemEventDetail =
+  | {
+      rule: ProblemRule;
+      severity: "info" | "warn";
+      owner: Entity | null;
+      view: string | null;
+      filter: string | null;
+      value: number;
+      threshold: number;
+      since: number;
+      frames: number;
+      reason?: "budget" | "not-eligible" | "rate" | "idle" | "after-trim";
+    }
+  | { rule: ProblemRule; cleared: true; owner: Entity | null; view: string | null };
+
+/**
  * Something that happened, at the frame it happened in.
  */
 export type PerfEventLine = PerfLine<"event"> & {
@@ -582,6 +776,35 @@ export type PerfCollectorLine = PerfLine<"gfx"> & {
 };
 
 /**
+ * A line the editor's collector writes into the computer's copy of a device log for lines the device lost before it
+ * sent them; the engine never produces it.
+ */
+export type PerfGapLine = PerfLine<"gap"> & {
+  /** Computer epoch ms at receipt. */
+  rx: number;
+  device: string | null;
+  /** Lines lost. */
+  lines: number;
+};
+
+/**
+ * A line of wired device telemetry (GPU clock and load, CPU and memory per process, heap samples) the editor's
+ * collector writes into the computer's copy of a device log while it records; the engine never produces it. The
+ * readings are the editor's `DeviceTelemetry` fields as it defines them: the engine passes them as JSON.
+ */
+export type PerfTelemetryLine = PerfLine<"telemetry"> & {
+  /** Computer epoch ms at receipt. */
+  rx: number;
+  device: string;
+  serial: string | null;
+  wired: boolean;
+  gpu: Json;
+  cpu: Json;
+  memory: Json;
+  heap: Json;
+};
+
+/**
  * One line of the performance log.
  *
  * @example
@@ -598,4 +821,6 @@ export type PerfLogLine =
   | PerfEventLine
   | PerfMarkLine
   | PerfThermalLine
-  | PerfCollectorLine;
+  | PerfCollectorLine
+  | PerfGapLine
+  | PerfTelemetryLine;

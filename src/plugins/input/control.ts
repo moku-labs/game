@@ -1,7 +1,7 @@
 /**
  * @file input plugin — the input commands of the `/control` door: a drag from one view onto
  * another, a trace through many views and a key press. Each goes through `app.input`, so the gate
- * decides and the session stays clean. Dev builds and `--debug=full` builds: every body starts
+ * decides and the session stays clean. Dev builds and `--debug` builds (not `--debug=read`): every body starts
  * with the inline control guard of a route command, so a bundler `define` of `false` drops it,
  * and logs the `moku:dev` marker. The targets
  * are read with `target.ts`; `readTarget` is re-exported here for the `game.tap` command of ui,

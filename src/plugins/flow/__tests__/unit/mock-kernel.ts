@@ -130,6 +130,7 @@ function createFakeTime(record: Recorder): TimeApi {
     resume: vi.fn(),
     wake: vi.fn(),
     wakes: () => 0,
+    frameListeners: () => 0,
     measure: vi.fn(),
     agentClock: () => undefined,
     chargeAgent: vi.fn(),
@@ -163,7 +164,9 @@ function createFakeClock(record: Recorder): ClockApi {
     poke: (): void => {
       record.pokes += 1;
     },
-    dueAt: () => undefined
+    dueAt: () => undefined,
+    pending: () => 0,
+    listeners: () => 0
   };
 }
 

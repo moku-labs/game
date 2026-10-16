@@ -379,7 +379,8 @@ const setup = (options: SetupOptions) => {
       wake: (): void => {
         wakes.push(calls.at(-1) ?? "start");
       },
-      wakes: () => wakes.length
+      wakes: () => wakes.length,
+      frameListeners: () => frameListeners.length
     },
     model: { store: model.store, rng: { peek: vi.fn() } },
     clock: {
@@ -390,7 +391,9 @@ const setup = (options: SetupOptions) => {
       scheduleAt: vi.fn(),
       onElapsed: vi.fn(),
       poke: vi.fn(),
-      dueAt: vi.fn()
+      dueAt: vi.fn(),
+      pending: vi.fn(() => 0),
+      listeners: vi.fn(() => 0)
     }
   };
   const ctx: FlowCtx = {

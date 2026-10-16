@@ -32,12 +32,27 @@ const main = defineFlow("main", {
   edges: { home: { play: "board" }, board: { quit: exit("over") } }
 });
 
+const round = defineNode({ outcomes: { back: type() }, rest: true });
+const lobby = defineNode({ outcomes: { play: type() }, rest: true });
+/** A screen entered and left again and again: the lobby and a round. */
+const rounds = defineFlow("main", {
+  nodes: { lobby, round },
+  start: "lobby",
+  outcomes: { over: type() },
+  edges: { lobby: { play: "round" }, round: { back: "lobby" } }
+});
+
 const tick = async (times = 40): Promise<void> => {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
 };
 
-/** Starts the app over the fakes, with the page clock in the test's hand. */
-async function startApp() {
+/**
+ * Starts the app over the fakes, with the page clock in the test's hand.
+ *
+ * @param mainFlow - The flow the app runs.
+ * @returns The started app and the page clock.
+ */
+async function startApp(mainFlow: typeof main | typeof rounds = main) {
   const pixi = createFakePixi();
   const clock = { now: 0 };
 
@@ -47,7 +62,7 @@ async function startApp() {
   const app = createApp({
     plugins: [worldPlugin, rendererPlugin],
     pluginConfigs: {
-      flow: { mainFlow: main },
+      flow: { mainFlow },
       model: { initialPlayer: {}, initialSession: {}, seed: 1 },
       renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
     }
@@ -112,6 +127,56 @@ describe("the performance monitor of an agent build", () => {
     app.renderer.monitor.mark("after the stop");
 
     expect(lines).toHaveLength(after);
+  });
+
+  // Bug caught: a count that does not come back to where it was after a screen is left (a count of the wrong thing, or
+  // one never taken back), and a listener a screen leaks on every visit that the counts do not show.
+  it("samples counts that come back to their baseline after every visit, and grow by one a visit for a leaked listener", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { app, clock } = await startApp(rounds);
+    const lines: PerfLogLine[] = [];
+    const counts = (): unknown => lines.findLast(line => line.kind === "sample")?.counts;
+
+    app.renderer.monitor.stream(line => lines.push(line));
+    app.flow.run().catch(() => undefined);
+    await tick();
+    steps(app, clock, 130);
+
+    const baseline = counts();
+    const visits: unknown[] = [];
+
+    for (let visit = 0; visit < 3; visit += 1) {
+      app.flow.gate.answer({ intent: "play" });
+      await tick();
+      app.flow.gate.answer({ intent: "back" });
+      await tick();
+      steps(app, clock, 130);
+      visits.push(counts());
+    }
+
+    expect(baseline).toMatchObject({
+      entities: expect.any(Number),
+      clockListeners: expect.any(Number)
+    });
+    expect(visits).toEqual([baseline, baseline, baseline]);
+
+    const leaked: number[] = [];
+
+    for (let visit = 0; visit < 3; visit += 1) {
+      app.flow.gate.answer({ intent: "play" });
+      await tick();
+      app.clock.onElapsed(() => undefined);
+      app.flow.gate.answer({ intent: "back" });
+      await tick();
+      steps(app, clock, 130);
+      leaked.push(app.renderer.stats().counts?.clockListeners ?? Number.NaN);
+    }
+
+    const before = (baseline as { clockListeners: number }).clockListeners;
+
+    expect(leaked).toEqual([before + 1, before + 2, before + 3]);
+
+    await app.stop();
   });
 
   it("measures nothing and calls no listener in a build without the flag", async () => {

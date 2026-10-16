@@ -231,7 +231,8 @@ describe("sync nine-slice debug switch", () => {
     expect(mock.api.sync.debug.state()).toEqual({
       nineSlice: true,
       verifyFrames: false,
-      kept: true
+      kept: true,
+      overdraw: false
     });
 
     mock.modules.sync.pass();
@@ -273,7 +274,8 @@ describe("sync nine-slice debug switch", () => {
     expect(mock.api.sync.debug.state()).toEqual({
       nineSlice: true,
       verifyFrames: false,
-      kept: true
+      kept: true,
+      overdraw: false
     });
     expect(outlineOf(mock, entity)?.strokes[0]?.color).toBe(CYAN);
   });
@@ -284,7 +286,8 @@ describe("sync nine-slice debug switch", () => {
     expect(mock.api.sync.debug.state()).toEqual({
       nineSlice: false,
       verifyFrames: false,
-      kept: true
+      kept: true,
+      overdraw: false
     });
     expect(mock.api.sync.debug.state()).not.toBe(mock.api.sync.debug.state());
   });
@@ -298,7 +301,8 @@ describe("sync nine-slice debug switch", () => {
     expect(mock.api.sync.debug.state()).toEqual({
       nineSlice: true,
       verifyFrames: false,
-      kept: true
+      kept: true,
+      overdraw: false
     });
   });
 });

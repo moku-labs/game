@@ -106,21 +106,20 @@ function shownRecords(kctx: KeptCtx): KeptRecord[] {
 }
 
 /**
- * Reads the stage once more with every picture drawn live: the kept records bypassed, the entries of every range
- * lifted and its sprite hidden. The records draw their pictures again after the read.
+ * Runs a draw with every picture drawn live: the kept records bypassed, the entries of every range with a sprite lifted
+ * and its sprite hidden. The records draw their pictures again after it, the ranges show their sprites again.
  *
  * @param kctx - The kept context.
- * @param ranges - The ranges whose sprite stood in the frame.
  * @param bypass - Draws every kept record live (true) or as its picture again (false).
- * @param resolution - The resolution of the read, the renderer's.
- * @returns The pixels drawn live, or `undefined` when Pixi could not read them.
+ * @param draw - The render or the read.
+ * @returns What `draw` returned.
  */
-function renderLive(
+export function drawLive<Result>(
   kctx: KeptCtx,
-  ranges: readonly RangeRecord[],
   bypass: (on: boolean) => void,
-  resolution: number
-): Uint8ClampedArray | undefined {
+  draw: () => Result
+): Result {
+  const ranges = [...kctx.state.ranges.values()].filter(range => range.sprite !== undefined);
   const lift: PixiContainer[] = ranges.flatMap(range => range.entries);
   const hide: PixiContainer[] = ranges.flatMap(range =>
     range.sprite === undefined ? [] : [range.sprite]
@@ -129,7 +128,7 @@ function renderLive(
   bypass(true);
 
   try {
-    return kctx.sync.liftFor(kctx.hidden, lift, hide, "freeze", () => kctx.host.pixels(resolution));
+    return kctx.sync.liftFor(kctx.hidden, lift, hide, "freeze", draw);
   } finally {
     bypass(false);
   }
@@ -193,7 +192,7 @@ export function verifyPictures(
 
   if (drawn === undefined) return;
 
-  const live = renderLive(kctx, ranges, bypass, resolution);
+  const live = drawLive(kctx, bypass, () => host.pixels(resolution));
 
   if (live === undefined || live.length !== drawn.length) return;
 

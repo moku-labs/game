@@ -29,6 +29,7 @@ import { addControl } from "./hover";
 import { addKeyListener, runKeys } from "./keys";
 import { withDeps } from "./lifecycle";
 import { addPointerListener } from "./pointer";
+import { countListeners } from "./state";
 import type { Direction, InputApi, InputCtx, KernelSlice, Target } from "./types";
 
 /** One resolved target: the entity and the component the gesture needs. */
@@ -183,7 +184,7 @@ function answerTrace(ctx: InputCtx, path: readonly Target[]): boolean {
 
 /**
  * Creates the input API: `app.input.tap`, `.press`, `.drag`, `.swipe`, `.trace`, `.onTap`,
- * `.onPointer`, `.onKey`, `.pressKey`, `.cursor` and `.controls`.
+ * `.onPointer`, `.onKey`, `.pressKey`, `.cursor`, `.listeners` and `.controls`.
  *
  * @param ctx - Kernel context of the input plugin.
  * @returns The plugin API.
@@ -202,6 +203,7 @@ export function createInputApi(ctx: KernelSlice): InputApi {
     onKey: fn => addKeyListener(inputCtx.state, fn),
     pressKey: (key, options) => runKeys(inputCtx, { key, shift: options?.shift ?? false }),
     cursor: () => inputCtx.state.cursor ?? inputCtx.config.cursor.idle,
+    listeners: () => countListeners(inputCtx.state),
     controls: { add: component => addControl(inputCtx.state, component) }
   };
 }

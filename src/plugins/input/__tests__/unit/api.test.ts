@@ -204,6 +204,43 @@ describe("the types of the door", () => {
   });
 });
 
+describe("app.input.listeners", () => {
+  // Bug caught: one kind of registration left out of the count, so a screen that leaks its
+  // onKey listener (or its control, its onPointer, its onTap) looks clean offline.
+  it("counts every onTap, onPointer and onKey listener and every control, and drops each one its remover took back", () => {
+    const mock = createMockInput();
+    const api = createInputApi(mock.ctx);
+    const removers = [
+      api.onTap(() => undefined),
+      api.onPointer(() => undefined),
+      api.onKey(() => false),
+      api.controls.add(Touchable)
+    ];
+
+    expect(api.listeners()).toBe(4);
+
+    for (const off of removers) off();
+
+    expect(api.listeners()).toBe(0);
+  });
+
+  // Bug caught: a listener registered on every visit of a screen and never removed must make the
+  // count grow by one per visit.
+  it("grows by one per visit when a screen forgets to remove its key listener", () => {
+    const mock = createMockInput();
+    const api = createInputApi(mock.ctx);
+
+    for (let visit = 1; visit <= 3; visit += 1) {
+      const offTap = api.onTap(() => undefined);
+
+      api.onKey(() => false);
+      offTap();
+
+      expect(api.listeners()).toBe(visit);
+    }
+  });
+});
+
 describe("app.input.onTap", () => {
   it("calls the listeners in registration order, before the Tappable answer", () => {
     const mock = createMockInput();

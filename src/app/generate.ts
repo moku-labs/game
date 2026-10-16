@@ -67,14 +67,16 @@ export type MainSources = {
 
 /** What the in-memory `agent.ts` of a debug page sets. */
 type AgentFlags = {
-  /** The build id: `debug-<stamp>` or `debug-full-<stamp>`. */
+  /** The build id: `debug-<stamp>`, for both profiles. */
   build: string;
-  /** True for `--debug=full`: every command runs. */
+  /** True for `--debug` (and its alias `--debug=full`): every command runs; false for `--debug=read`. */
   control: boolean;
   /** The id of the engine fingerprint. */
   engine: string;
   /** The `host:port` the page agent dials. */
   editor: string;
+  /** The app id, the native identifier (`.debug` in a native debug app); left out without one. */
+  app?: string | undefined;
 };
 
 /** The absolute paths the dev bunfig names. */
@@ -535,10 +537,10 @@ export function devFlag(engine: string): string {
 }
 
 /**
- * The in-memory `agent.ts` module of a debug page, imported after the startup mark: six lines
- * that set the build id, the engine id and the editor address, each through `JSON.stringify`, the
- * control flag of the profile, the agent flag, and the dev flag `false`. No header: nobody opens
- * it.
+ * The in-memory `agent.ts` module of a debug page, imported after the startup mark: lines that
+ * set the build id, the engine id, the editor address and, when the game has one, the app id, each
+ * through `JSON.stringify`, the control flag of the profile, the agent flag, and the dev flag
+ * `false`. No header: nobody opens it.
  *
  * @param page - What the page is built with.
  * @returns The text.
@@ -552,6 +554,9 @@ export function agentFlag(page: AgentFlags): string {
     `globalThis.__MOKU_GAME_BUILD__ = ${JSON.stringify(page.build)};`,
     `globalThis.__MOKU_GAME_ENGINE__ = ${JSON.stringify(page.engine)};`,
     `globalThis.__MOKU_GAME_EDITOR__ = ${JSON.stringify(page.editor)};`,
+    ...(page.app === undefined
+      ? []
+      : [`globalThis.__MOKU_GAME_APP__ = ${JSON.stringify(page.app)};`]),
     `globalThis.__MOKU_GAME_CONTROL__ = ${String(page.control)};`,
     "globalThis.__MOKU_GAME_AGENT__ = true;",
     "globalThis.__MOKU_GAME_DEV__ = false;",

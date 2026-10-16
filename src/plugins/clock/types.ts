@@ -210,6 +210,42 @@ export type Api = {
    * ```
    */
   dueAt(): number | undefined;
+
+  /**
+   * How many scheduled timers are not yet due. The clock holds one pending moment, so the answer
+   * is 0 or 1: a moment a screen scheduled and never cancelled reads 1 after the screen closed,
+   * where the count was 0 before it opened. It allocates nothing; the renderer's monitor reads it
+   * once a second in a debug build.
+   *
+   * @returns 1 while a moment is scheduled, else 0.
+   * @example
+   * ```ts
+   * app.clock.pending(); // 0
+   * app.clock.scheduleAt(app.clock.now() + 60_000);
+   * app.clock.pending(); // 1
+   * app.clock.scheduleAt(undefined);
+   * app.clock.pending(); // 0
+   * ```
+   */
+  pending(): number;
+
+  /**
+   * How many `onElapsed` listeners are registered. A screen that registers one on every visit and
+   * never calls the remover adds one per visit; a screen that cleans up leaves the count where it
+   * was. It allocates nothing; the renderer's monitor reads it once a second in a debug build.
+   *
+   * @returns The number of registered listeners.
+   * @example
+   * ```ts
+   * // A leak check over one visit of the screen that shows the refill timer.
+   * const before = app.clock.listeners();
+   * const off = app.clock.onElapsed(({ now }) => refillTimer.update(now));
+   * app.clock.listeners() - before; // 1
+   * off(); // the screen closed
+   * app.clock.listeners() - before; // 0
+   * ```
+   */
+  listeners(): number;
 };
 
 /**

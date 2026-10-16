@@ -1,5 +1,5 @@
 import type { Log } from "@moku-labs/common/browser";
-import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createTimeApi, PHASES, tickFrame } from "../../api";
 import { createTimeState } from "../../state";
 import type { Api, Config, Phase, Time, TimeCtx } from "../../types";
@@ -153,6 +153,40 @@ describe("onFrame", () => {
     api.step(20);
 
     expect(seen).toEqual([{ delta: 20, elapsed: 20, scale: 1, frame: 1, idle: false }]);
+  });
+});
+
+// ─── frameListeners ───────────────────────────────────────────
+
+describe("frameListeners", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("counts the onFrame listeners of every phase, and an unsubscribe takes one away once", () => {
+    const { api } = createApi();
+    const offInput = api.onFrame("input", vi.fn());
+    const offRender = api.onFrame("render", vi.fn());
+
+    api.onFrame("render", vi.fn());
+
+    expect(api.frameListeners()).toBe(3);
+
+    offRender();
+    offRender();
+    offInput();
+
+    expect(api.frameListeners()).toBe(1);
+  });
+
+  it("leaves the measure listeners of an agent build out", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { api } = createApi();
+
+    api.measure(vi.fn());
+    api.onFrame("animate", vi.fn());
+
+    expect(api.frameListeners()).toBe(1);
   });
 });
 

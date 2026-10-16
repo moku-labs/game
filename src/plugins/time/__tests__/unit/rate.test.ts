@@ -293,7 +293,9 @@ describe("what counts as a sample", () => {
       reason: "start",
       displayHz: 120,
       ladder: [],
-      thermal: null
+      thermal: null,
+      asked: 60,
+      heldBy: null
     });
   });
 });

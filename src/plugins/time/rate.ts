@@ -32,6 +32,7 @@ import {
   HOLD_RESET_MS,
   INTERVAL_IGNORE_MS,
   ladderOf,
+  loopRateOf,
   missLineMs,
   RETURN_GRACE_MS,
   RETURN_HEAVY_SHARE,
@@ -167,7 +168,20 @@ function createGovernor(floor: number): Governor {
 }
 
 /**
- * The frozen object `rate()` answers, built from the rate now.
+ * The rate the loop is told to hold: the cap in mode `"fixed"` (`maxFps`) and `"forced"` (the `setRate` value, never
+ * above `maxFps`); `null` in mode `"auto"`, where the adaptive rule decides. Outside `"auto"` the cap is always one of
+ * the fixed choices, so the guard only narrows its type.
+ *
+ * @param rate - The rate and its mode.
+ * @returns The asked rate, or `null`.
+ */
+function askedOf(rate: Pick<RateState, "fps" | "mode">): FrameRate["asked"] {
+  return rate.mode !== "auto" && isChoice(rate.fps) ? rate.fps : null;
+}
+
+/**
+ * The frozen object `rate()` answers, built from the rate now: `fps` is what the loop really runs at under the cap on
+ * the known display, and `heldBy` is `"panel"` when the asked rate is above the display's.
  *
  * @param rate - The rate, its mode, its reason, the display and the governor.
  * @returns A fresh frozen snapshot.
@@ -176,14 +190,18 @@ function snapshotOf(
   rate: Pick<RateState, "fps" | "mode" | "reason" | "display" | "governor">
 ): Readonly<FrameRate> {
   const { governor } = rate;
+  const { hz } = rate.display;
+  const asked = askedOf(rate);
 
   return Object.freeze({
-    fps: rate.fps,
+    fps: loopRateOf(rate.fps, hz),
     mode: rate.mode,
     reason: rate.reason,
-    displayHz: rate.display.hz,
+    displayHz: hz,
     ladder: governor?.ladder ?? NO_STEPS,
-    thermal: governor?.thermal ?? null
+    thermal: governor?.thermal ?? null,
+    asked,
+    heldBy: asked !== null && hz !== null && asked > hz ? "panel" : null
   });
 }
 

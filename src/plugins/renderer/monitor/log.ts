@@ -10,6 +10,7 @@ import { nativeShell, readingOf } from "../../time/native";
 import type { ThermalReading } from "../../time/types";
 import { epochOf, pageNow } from "./clock";
 import { compilesOf } from "./compiles";
+import { readCounts } from "./counts";
 import {
   type FrameRecord,
   PERF_LOG_VERSION,
@@ -25,6 +26,7 @@ import {
   type PerfThermalLine
 } from "./log-types";
 import { entryOf, heapMb, longFramesIn } from "./long-frames";
+import { viewLabel } from "./problems";
 import { CAUSE, OVERFLOW_PATH, PHASE_STRIDE, passesOf, recordAt } from "./ring";
 import { type LongFrameRecord, MEASURE, type PerfCtx, type PerfRing } from "./types";
 import { BYTES_PER_MB, cell, roundTo } from "./units";
@@ -42,12 +44,22 @@ const UA_WEBVIEW = /; wv\)/;
 const BYTES_PER_KB = 1024;
 
 /**
- * Spec 10's build id of the page: `"debug-20261014T153012Z"`, `"debug-full-…"` or `"dev"`; never a version string.
+ * Spec 10's build id of the page: `"debug-20261014T153012Z"` or `"dev"`; never a version string.
  *
  * @returns The id, or `null` on a page without one.
  */
 export function buildId(): string | null {
   return typeof __MOKU_GAME_BUILD__ === "string" ? __MOKU_GAME_BUILD__ : null;
+}
+
+/**
+ * The bundle identifier the build wrote into the page (`__MOKU_GAME_APP__`), the `.debug` suffix of a native debug
+ * build included.
+ *
+ * @returns The id, or `null` on a page without one.
+ */
+function appId(): string | null {
+  return typeof __MOKU_GAME_APP__ === "string" ? __MOKU_GAME_APP__ : null;
 }
 
 /**
@@ -190,6 +202,7 @@ function measuredOf(pc: PerfCtx): PerfMeasured[] {
   if (pc.ctx.deps.world.systemTimes() !== undefined) list.push("systems");
   // The kept pictures of spec 23 are counted in every agent build.
   list.push("kept");
+  if ((bits & MEASURE.targets) !== 0) list.push("targets");
 
   return list;
 }
@@ -296,7 +309,9 @@ export function headerLine(pc: PerfCtx, thermal: ThermalReading | null): PerfHea
       budget,
       frames: pc.perf.ring.capacity
     },
-    measured: measuredOf(pc)
+    measured: measuredOf(pc),
+    app: { id: appId() },
+    debug: { overdraw: pc.ctx.state.sync.debug.overdraw }
   };
 }
 
@@ -422,6 +437,9 @@ type Totals = {
   /** The most kept pictures of a drawn frame, and the takes of the window. */
   keptMax: number;
   retakes: number;
+  /** Render targets made and dropped in the window. */
+  targetsCreated: number;
+  targetsDestroyed: number;
 };
 
 /**
@@ -466,6 +484,8 @@ function addFrame(totals: Totals, c: PerfRing["columns"], slot: number): void {
   totals.compiles += cell(c.compiles, slot);
   totals.rebuilds += cell(c.rebuilds, slot);
   totals.retakes += cell(c.retakes, slot);
+  totals.targetsCreated += cell(c.targetsCreated, slot);
+  totals.targetsDestroyed += cell(c.targetsDestroyed, slot);
 }
 
 /**
@@ -523,7 +543,9 @@ function totalsOf(pc: PerfCtx, window: { first: number; count: number }): Totals
     compiles: 0,
     rebuilds: 0,
     keptMax: 0,
-    retakes: 0
+    retakes: 0,
+    targetsCreated: 0,
+    targetsDestroyed: 0
   };
 
   for (let age = window.first; age < window.first + window.count; age += 1) {
@@ -753,7 +775,12 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
     pooled: counts.pooled,
     resolution: deps.host.resolution(),
     monitorMs: frames === 0 ? 0 : roundTo(perf.listenersSum / frames, 3),
-    spikes: totals.spikes
+    spikes: totals.spikes,
+    counts: readCounts(pc),
+    targets:
+      (bits & MEASURE.targets) === 0
+        ? null
+        : { created: totals.targetsCreated, destroyed: totals.targetsDestroyed }
   };
 }
 
@@ -782,7 +809,9 @@ export function spikeLine(pc: PerfCtx, slot: number): PerfSpikeLine {
       ms: ms(compile.ms)
     })),
     filters: record.filters?.kinds ?? [],
-    passes: passesOf(ring, record.frame),
+    passes: passesOf(ring, record.frame, cell(ring.columns.draws, slot), entity =>
+      viewLabel(pc, entity)
+    ),
     longFrames: longFramesIn(longFrames, start, record.t + record.workMs).map(entry =>
       entryOf(entry)
     )

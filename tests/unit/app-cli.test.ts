@@ -1046,8 +1046,8 @@ describe("the command line", () => {
       "moku-game <command> [options]",
       "",
       "  dev [--port 3000] [--packed]          serve the game with hot reload",
-      "  build [--out dist/web] [--debug[=full] [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent",
-      "  native build <target> [--simulator] [--debug[=full] [--editor host:port]]  build the native app (ios, macos, android)",
+      "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
+      "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
       "  native dev <target>                   run the native shell on the dev server",
       "  native doctor | native clean          check or remove the native project",
       "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -1279,7 +1279,10 @@ describe("--debug and --editor", () => {
   const nativeWarning =
     "native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store.";
 
-  it("native build android takes --debug as read, --debug=read the same, --debug=full as full, and warns once", async () => {
+  /** The one line `--debug=full` prints: the alias is accepted and changes nothing. */
+  const aliasNote = "--debug already includes control; =full is no longer needed";
+
+  it("native build android takes --debug as full, --debug=full the same with the alias note once, --debug=read as read, and warns once", async () => {
     const root = makeGame({ "config.ts": native });
     const bare = await run(["native", "build", "android", "--debug"], root);
     const read = await run(["native", "build", "android", "--debug=read"], root);
@@ -1289,7 +1292,7 @@ describe("--debug and --editor", () => {
     );
     const store = await run(["native", "build", "android"], root);
 
-    expect(bare.seen.natives[0]?.options).toEqual({ target: "android", debug: "read" });
+    expect(bare.seen.natives[0]?.options).toEqual({ target: "android", debug: "full" });
     expect(read.seen.natives[0]?.options).toEqual({ target: "android", debug: "read" });
     expect(full.seen.natives[0]?.options).toEqual({
       target: "android",
@@ -1302,6 +1305,22 @@ describe("--debug and --editor", () => {
       [nativeWarning],
       []
     ]);
+    expect([bare, read, full, store].map(ran => ran.seen.out)).toEqual([[], [], [aliasNote], []]);
+  });
+
+  it("build --debug=full prints the alias note once; build --debug and --debug=read print none", async () => {
+    const root = makeGame();
+    // The pack fails, so each run stops after the debug page is resolved and before the bundle.
+    const stop = { assets: async () => 2 };
+    const notes = async (flag: string): Promise<string[]> => {
+      const { seen } = await run(["build", flag], root, stop);
+
+      return seen.out.filter(line => line === aliasNote);
+    };
+
+    expect(await notes("--debug=full")).toEqual([aliasNote]);
+    expect(await notes("--debug")).toEqual([]);
+    expect(await notes("--debug=read")).toEqual([]);
   });
 
   it("native dev --debug is refused, native build ios --debug is refused as Android only, and --editor needs --debug", async () => {
@@ -1317,7 +1336,7 @@ describe("--debug and --editor", () => {
       "[game] native: --editor goes with --debug."
     ]);
     expect(await errorsOf(["native", "build", "android", "--debug", "full"], root)).toEqual([
-      '[game] native: unexpected argument "full". Write --debug=full.'
+      '[game] native: unexpected argument "full". Write --debug.'
     ]);
   });
 
@@ -1328,7 +1347,10 @@ describe("--debug and --editor", () => {
       '[game] build: --debug takes no value, "read" or "full", got "loud".'
     ]);
     expect(await errorsOf(["build", "--debug", "full"], root)).toEqual([
-      '[game] build: unexpected argument "full". Write --debug=full.'
+      '[game] build: unexpected argument "full". Write --debug.'
+    ]);
+    expect(await errorsOf(["build", "--debug", "read"], root)).toEqual([
+      '[game] build: unexpected argument "read". Write --debug=read.'
     ]);
 
     for (const command of ["dev", "keys", "pack", "visual"]) {

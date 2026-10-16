@@ -182,13 +182,19 @@ const MAX_PORT = 65_535;
 /** A host of `--editor`: a name or an IPv4 address, or an IPv6 address in brackets. */
 const EDITOR_HOST = /^(?:[\w.-]+|\[[\da-f:.]+\])$/i;
 
+/** The value a bare `--debug` reads as: the full profile, with no alias note. */
+const BARE_DEBUG = "";
+
+/** The one line `--debug=full` prints: the alias builds the same page as `--debug`. */
+const FULL_ALIAS_NOTE = "--debug already includes control; =full is no longer needed";
+
 /** The text of `moku-game help`. */
 const USAGE = [
   "moku-game <command> [options]",
   "",
   "  dev [--port 3000] [--packed]          serve the game with hot reload",
-  "  build [--out dist/web] [--debug[=full] [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent",
-  "  native build <target> [--simulator] [--debug[=full] [--editor host:port]]  build the native app (ios, macos, android)",
+  "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
+  "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
   "  native dev <target>                   run the native shell on the dev server",
   "  native doctor | native clean          check or remove the native project",
   "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -303,8 +309,8 @@ function checkTokens(command: Command, tokens: ReturnType<typeof parseLoose>["to
 
 /**
  * Reads the command line into one command with its flags, the paths resolved against the
- * working directory. A bare `--debug` reads as `--debug=read`: a string flag without its value
- * would take the next word.
+ * working directory. A bare `--debug` reads as `--debug=` (the empty value, the full profile): a
+ * string flag without its value would take the next word.
  *
  * @param given - The arguments after the bin.
  * @param cwd - The working directory.
@@ -312,7 +318,7 @@ function checkTokens(command: Command, tokens: ReturnType<typeof parseLoose>["to
  * @throws {Error} When the command is unknown or a flag is refused.
  */
 function parseCommand(given: readonly string[], cwd: string): Parsed | "help" | undefined {
-  const argv = given.map(word => (word === "--debug" ? "--debug=read" : word));
+  const argv = given.map(word => (word === "--debug" ? `--debug=${BARE_DEBUG}` : word));
   const loose = parseLoose(argv);
   const word = loose.positionals[0];
 
@@ -353,31 +359,44 @@ function refuseExtra(parsed: Parsed, count: number): void {
 
   // `--debug full` reads as `--debug` and an argument: say how to write the profile.
   const profile = parsed.values.debug !== undefined && (extra === "full" || extra === "read");
-  const advice = profile ? ` Write --debug=${extra}.` : "";
+  const spelled = extra === "read" ? "--debug=read" : "--debug";
+  const advice = profile ? ` Write ${spelled}.` : "";
 
   throw new Error(`[game] ${parsed.command}: unexpected argument "${extra}".${advice}`);
 }
 
 /**
- * Reads `--debug`: no flag is a release page, a bare flag or `read` the read profile, `full`
- * every command.
+ * Reads `--debug`: no flag is a release page, a bare flag or its alias `full` every command,
+ * `read` the read and cosmetic commands only.
  *
- * @param value - The value of the flag, `read` for a bare `--debug`.
+ * @param value - The value of the flag, the empty value for a bare `--debug`.
  * @param command - The command word, for the message.
  * @returns The profile, or `undefined` without the flag.
  * @throws {Error} When the value is another word.
  * @example
  * ```ts
- * debugLevelOf("full"); // "full"
+ * debugLevelOf(""); // "full"
  * ```
  */
 function debugLevelOf(
   value: string | undefined,
   command: Command = "build"
 ): DebugLevel | undefined {
+  if (value === BARE_DEBUG) return "full";
   if (value === undefined || value === "read" || value === "full") return value;
 
   throw new Error(`[game] ${command}: --debug takes no value, "read" or "full", got "${value}".`);
+}
+
+/**
+ * Prints the alias note once when the command line spells the full profile out: `--debug=full`
+ * builds the same page as `--debug`.
+ *
+ * @param parsed - The command line.
+ * @param ui - The console.
+ */
+function noteFullAlias(parsed: Parsed, ui: CliUi): void {
+  if (parsed.values.debug === "full") ui.info(FULL_ALIAS_NOTE);
 }
 
 /**
@@ -497,6 +516,9 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
   refuseExtra(parsed, 2);
 
   const debug = nativeDebugOf(parsed, verb, target);
+
+  noteFullAlias(parsed, deps.ui);
+
   const settings = await loadSettings(parsed.root);
   const where: NativeWhere = { cwd: parsed.root, command: selfCommand(parsed, deps) };
   const options: NativeVerbOptions = {
@@ -625,8 +647,8 @@ function hop(argv: readonly string[], parsed: Parsed, deps: CliDeps): Promise<nu
 }
 
 /**
- * Runs `moku-game build`: a release page, or with `--debug[=full]` a debug page whose agent dials
- * `--editor`.
+ * Runs `moku-game build`: a release page, or with `--debug` a debug page whose agent dials
+ * `--editor` (`--debug=read` for the rare read-only page).
  *
  * @param parsed - The command line.
  * @param deps - The process seams.
@@ -642,6 +664,8 @@ function runBuildCommand(parsed: Parsed, deps: CliDeps): Promise<number> {
   if (debug === undefined && editor !== undefined) {
     throw new Error("[game] build: --editor goes with --debug.");
   }
+
+  noteFullAlias(parsed, deps.ui);
 
   const out = parsed.values.out ?? path.join(parsed.root, "dist", "web");
   const run: BuildRun = {

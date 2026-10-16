@@ -85,7 +85,8 @@ export type Api = {
    *
    * A live view, not a copy: the table is the world's own, the same object every call, and the next frame zeroes and
    * rewrites `ms` in place. The monitor reads it every frame of an agent build without allocating, which a copy would
-   * break. A caller that keeps numbers past the frame copies them (`[...systems.ms]`); a write into it changes what the
+   * break. `names` is replaced by a new array when a system of a new name registers, and only then: a reader that kept
+   * the array tells a new system by `names !== kept`. A caller that keeps numbers past the frame copies them (`[...systems.ms]`); a write into it changes what the
    * monitor logs.
    *
    * @returns The live timing table, or `undefined`.

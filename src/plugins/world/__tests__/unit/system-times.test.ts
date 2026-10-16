@@ -131,6 +131,49 @@ describe("world.systemTimes in an agent build", () => {
   });
 });
 
+describe("world.systemTimes names identity", () => {
+  // Bug caught: the names grow in place, so a reader that kept the array (the monitor's ring)
+  // cannot tell a new system registered: the old reference would show the new name too.
+  it("hands out a new names array when a system registers and leaves the old one as it was", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { world } = timedWorld();
+
+    world.api.ecs.system(quiet("ward.pan"));
+    world.start();
+    world.frame();
+
+    const before = world.api.systemTimes()?.names;
+
+    world.api.ecs.system(quiet("ward.fog"));
+
+    const after = world.api.systemTimes()?.names;
+
+    expect(after).not.toBe(before);
+    expect(before).toEqual(["ward.pan"]);
+    expect(after).toEqual(["ward.pan", "ward.fog"]);
+  });
+
+  // Bug caught: a new array per frame or per re-registration makes the reader see growth that is
+  // not there, and allocates on the frame path.
+  it("keeps the same names array across frames and for a system that comes back under its name", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { world } = timedWorld();
+    const off = world.api.ecs.system(quiet("ward.pan"));
+
+    world.start();
+    world.frame();
+
+    const names = world.api.systemTimes()?.names;
+
+    world.frame();
+    off();
+    world.api.ecs.system(quiet("ward.pan"));
+    world.frame();
+
+    expect(world.api.systemTimes()?.names).toBe(names);
+  });
+});
+
 describe("world.systemTimes without the agent flag", () => {
   it("is undefined and the clock is never read", () => {
     const { world, clock } = timedWorld();

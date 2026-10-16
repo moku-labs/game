@@ -86,8 +86,24 @@ export const CAUSE: Readonly<Record<PerfCause, number>> = {
 /** The changes in bit order. */
 const CHANGE_NAMES: readonly PerfChange[] = ["resize", "resolution", "scene", "bundle", "restore"];
 
-/** The pass kinds by their index in the pass ring. */
-const PASS_KINDS: readonly PassKind[] = ["canvas", "texture", "filter"];
+/**
+ * The pass kinds by their index in the pass ring's `kind` column: 0 the canvas, 1 a texture, 2 a filter. A root export,
+ * so a reader of the ring names a pass's kind without building a record.
+ *
+ * @example
+ * ```ts
+ * // The editor's pass strip names the newest pass of a debug build from the ring.
+ * const { passes } = app.renderer.monitor.frames();
+ * PASS_KINDS[passes.kind[passes.newest] ?? 0]; // "filter"
+ * ```
+ */
+export const PASS_KINDS: readonly PassKind[] = ["canvas", "texture", "filter"];
+
+/** The prefix of the label of a pass that took or refreshed a kept picture (`kept:<view>#n`). */
+const KEPT_PREFIX = "kept:";
+
+/** The largest draw count the 16-bit `drawsAt` column holds. */
+const DRAWS_MAX = 0xff_ff;
 
 /** Any column of the ring. */
 type Column = Uint8Array | Uint16Array | Uint32Array | Float32Array | Float64Array;
@@ -194,7 +210,9 @@ function createColumns(capacity: number): FrameColumns {
     fltApplies: new Uint16Array(capacity * KIND_STRIDE),
     fltMpx: new Float32Array(capacity * KIND_STRIDE),
     kept: new Float32Array(capacity).fill(Number.NaN),
-    retakes: new Float32Array(capacity).fill(Number.NaN)
+    retakes: new Float32Array(capacity).fill(Number.NaN),
+    targetsCreated: new Float32Array(capacity).fill(Number.NaN),
+    targetsDestroyed: new Float32Array(capacity).fill(Number.NaN)
   };
 }
 
@@ -217,7 +235,12 @@ function createPasses(capacity: number): RingPasses {
     width: new Uint16Array(capacity),
     height: new Uint16Array(capacity),
     gpuMs: new Float32Array(capacity),
-    label: Array.from<string | null>({ length: capacity }).fill(null)
+    label: Array.from<string | null>({ length: capacity }).fill(null),
+    owner: new Uint32Array(capacity),
+    kind2: new Uint8Array(capacity),
+    drawsAt: new Uint16Array(capacity),
+    format: Array.from<string | null>({ length: capacity }).fill(null),
+    resolution: new Float32Array(capacity).fill(Number.NaN)
   };
 }
 
@@ -308,6 +331,8 @@ function readRing(ring: PerfRing, into: FrameReadout, since: number): Readonly<F
   copyColumn(into.fltMpx, columns.fltMpx, KIND_STRIDE, ring, oldest, count);
   copyColumn(into.kept, columns.kept, 1, ring, oldest, count);
   copyColumn(into.retakes, columns.retakes, 1, ring, oldest, count);
+  copyColumn(into.targetsCreated, columns.targetsCreated, 1, ring, oldest, count);
+  copyColumn(into.targetsDestroyed, columns.targetsDestroyed, 1, ring, oldest, count);
 
   return result;
 }
@@ -350,7 +375,8 @@ export function createFrameRing(
 export const EMPTY_RING: FrameRing = /*#__PURE__*/ createFrameRing(0);
 
 /**
- * Records one render pass in the pass ring, the label by reference.
+ * Records one render pass in the pass ring, the label by reference. The detail of the pass (its owner, filter kind,
+ * draw count, format and resolution) goes into the same slot with `writePassDetail`, right after.
  *
  * @param passes - The pass ring.
  * @param frame - The frame number.
@@ -383,11 +409,43 @@ export function writePass(
   passes.height[slot] = height;
   passes.gpuMs[slot] = Number.NaN;
   passes.label[slot] = label;
+  passes.owner[slot] = 0;
+  passes.kind2[slot] = 0;
+  passes.drawsAt[slot] = 0;
+  passes.format[slot] = null;
+  passes.resolution[slot] = Number.NaN;
   passes.newest = slot;
   passes.size = Math.min(passes.size + 1, passes.capacity);
   passes.written = sequence + 1;
 
   return sequence;
+}
+
+/**
+ * Writes the detail of the newest pass: the entity whose filter drew it, the filter kind (1-based, 0 none), the draw
+ * count of the frame when it began, and its target's format (by reference) and resolution, read from the target's
+ * source here so no double is handed over. Indexed stores only.
+ *
+ * @param passes - The pass ring, its newest slot the pass `writePass` just wrote.
+ * @param owner - The entity, 0 for none.
+ * @param kind2 - The interned filter kind plus one, 0 for none.
+ * @param drawsAt - The frame's draws so far.
+ * @param source - The source of the target's color texture, or `undefined`.
+ */
+export function writePassDetail(
+  passes: RingPasses,
+  owner: number,
+  kind2: number,
+  drawsAt: number,
+  source: { readonly format?: string; readonly resolution?: number } | undefined
+): void {
+  const slot = passes.newest;
+
+  passes.owner[slot] = owner;
+  passes.kind2[slot] = kind2;
+  passes.drawsAt[slot] = Math.min(drawsAt, DRAWS_MAX);
+  passes.format[slot] = source?.format ?? null;
+  passes.resolution[slot] = source?.resolution ?? Number.NaN;
 }
 
 /**
@@ -475,13 +533,13 @@ export function spikeCauses(
 }
 
 /**
- * Tells whether a ring is the monitor's own: the one that knows the names its columns index.
+ * Tells whether a ring is the monitor's own: the one that keeps the subjects of its changes.
  *
  * @param ring - A ring.
  * @returns True for a ring of `monitor.frames()`.
  */
 function isPerfRing(ring: FrameRing): ring is PerfRing {
-  return "events" in ring && "kindNames" in ring && "systemNames" in ring;
+  return "events" in ring;
 }
 
 /**
@@ -535,7 +593,7 @@ export function filterKindsAt(
   ring: FrameRing,
   slot: number
 ): { kind: string; applies: number; mpx: number }[] {
-  const names = isPerfRing(ring) ? ring.kindNames : [];
+  const names = ring.kindNames;
   const { columns } = ring;
   const kinds: { kind: string; applies: number; mpx: number }[] = [];
 
@@ -567,7 +625,7 @@ export function systemsAt(ring: FrameRing, slot: number): { name: string; ms: nu
 
   if (Number.isNaN(cell(columns.sysMs, slot * SYSTEM_STRIDE))) return null;
 
-  const names = isPerfRing(ring) ? ring.systemNames : [];
+  const names = ring.systemNames;
   const systems: { name: string; ms: number }[] = [];
 
   for (let place = 0; place < SYSTEM_STRIDE; place += 1) {
@@ -600,35 +658,79 @@ function changesAt(ring: FrameRing, slot: number): PerfChangeEntry[] {
 }
 
 /**
- * The render passes of a frame still in the pass ring, in their order.
+ * The draws of each pass of a frame from the snapshots its passes took when they began: up to the next pass's
+ * snapshot, the last up to the frame's total. Pure: rewrites `draws` in place.
+ *
+ * @param found - The passes of the frame, in order, with `draws` holding their snapshot.
+ * @param total - The frame's draws; NaN where draws are not counted, which makes every `draws` `null`.
+ * @example
+ * ```ts
+ * splitDraws([{ draws: 0 }, { draws: 5 }], 7); // the passes now say 5 and 2
+ * ```
+ */
+function splitDraws(found: Array<{ draws?: number | null }>, total: number): void {
+  for (let index = 0; index < found.length; index += 1) {
+    const pass = found[index];
+
+    if (pass === undefined) continue;
+
+    const next = found[index + 1]?.draws ?? total;
+
+    pass.draws = Number.isNaN(total) ? null : Math.max(0, next - (pass.draws ?? 0));
+  }
+}
+
+/**
+ * The render passes of a frame still in the pass ring, in their order, with their detail: the entity whose filter drew
+ * each and its view's label, the filter kind, the draws, the target's format and resolution, whether it was a kept
+ * picture's.
  *
  * @param ring - The ring.
  * @param frame - The frame number.
+ * @param total - The frame's draws (its `draws` column); NaN where draws are not counted.
+ * @param viewOf - The label of an entity's view now, or `null` once it left.
  * @returns The passes; empty when none was recorded or they were overwritten.
  */
-export function passesOf(ring: FrameRing, frame: number): PassRecord[] {
+export function passesOf(
+  ring: FrameRing,
+  frame: number,
+  total = Number.NaN,
+  viewOf: (entity: number) => string | null = () => null
+): PassRecord[] {
   const { passes } = ring;
   const found: PassRecord[] = [];
 
   for (let age = 0; age < passes.size; age += 1) {
     const slot = (passes.newest - age + passes.capacity) % passes.capacity;
-    const owner = cell(passes.frame, slot);
+    const at = cell(passes.frame, slot);
 
-    if (owner < frame) break;
-    if (owner !== frame) continue;
+    if (at < frame) break;
+    if (at !== frame) continue;
 
     const stencil = cell(passes.stencil, slot);
+    const label = passes.label[slot] ?? null;
+    const owner = cell(passes.owner, slot);
+    const kind2 = cell(passes.kind2, slot);
 
     found.unshift({
       index: cell(passes.index, slot),
       kind: PASS_KINDS[cell(passes.kind, slot)] ?? "texture",
-      label: passes.label[slot] ?? null,
+      label,
       stencil: stencil === NO_STENCIL ? null : stencil === 1,
       w: cell(passes.width, slot),
       h: cell(passes.height, slot),
-      gpuMs: measured(cell(passes.gpuMs, slot))
+      gpuMs: measured(cell(passes.gpuMs, slot)),
+      owner: owner === 0 ? null : owner,
+      view: owner === 0 ? null : viewOf(owner),
+      filter: kind2 === 0 ? null : (ring.kindNames[kind2 - 1] ?? "other"),
+      draws: cell(passes.drawsAt, slot),
+      format: passes.format[slot] ?? null,
+      resolution: measured(cell(passes.resolution, slot)),
+      kept: label?.startsWith(KEPT_PREFIX) === true
     });
   }
+
+  splitDraws(found, total);
 
   return found;
 }

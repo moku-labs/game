@@ -1,6 +1,7 @@
 /**
  * @file renderer/sync — state factory.
  */
+import { createOverdrawState } from "./overdraw";
 import type { DebugSwitches, OverlayState, SyncState, WarmState } from "./types";
 
 /**
@@ -118,13 +119,22 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     reparented: emptySet(),
     orphans: emptySet(),
     mismatched: emptySet(),
-    debug: { nineSlice: debug.nineSlice === true },
+    // Inline and positive: the overdraw switch of the config stays off in a production build.
+    debug: {
+      nineSlice: debug.nineSlice === true,
+      overdraw:
+        debug.overdraw === true &&
+        ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+          (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__))
+    },
+    overdraw: createOverdrawState(),
     outlinesStale: false,
     filters: emptyMap(),
     areas: emptyMap(),
     viewlessEntries: false,
     warm: createWarmState(),
     filterKinds: emptyWeakMap(),
+    filterOwners: emptyWeakMap(),
     objectHidden: emptyWeakMap(),
     viewOfTop: emptyWeakMap(),
     overlay: createOverlayState(),

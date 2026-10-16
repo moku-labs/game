@@ -9,6 +9,7 @@ import { createMockWorld } from "./mock-world";
 const ECS_MEMBERS = [
   "add",
   "changed",
+  "count",
   "despawn",
   "despawnOwnedBy",
   "diff",

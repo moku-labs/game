@@ -35,6 +35,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
 | `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
 | `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
+| `count(): number` | How many entities live now, views and layers included: every id `spawn` handed out that no despawn took back. A size the world keeps, no allocation. A screen entered and left returns it to where it was; a count that grows per visit is a leak. The renderer's monitor reads it once a second in a debug build. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
 | `snapshot(): WorldSnapshot` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
 | `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. Only marked components are compared: a value written in place without a mark (into a row of a plain term) is not recorded, also when another component of the entity was marked. The caller is `game.diff`. |
@@ -205,7 +206,9 @@ same order, the time each system took in the current frame. The world takes the 
 `time.agentClock()` at start, reads it twice around every system run (the run's own error isolation
 unchanged), and zeroes `ms` in place at the start of the next frame, so after a frame it holds that
 frame's time. A system that comes back under the same name keeps its row; the table grows only when
-a system registers past its end, never per frame. The renderer's monitor reads it after each frame
+a system registers past its end, never per frame. `names` is replaced by a new array when a system
+of a new name registers, and stays the same array otherwise (frames, a system back under its name),
+so a reader that kept it tells a new system by identity: `names !== kept`. The renderer's monitor reads it after each frame
 for the five slowest systems of the frame and of the second. It is the live table, the same object
 every call and never a copy, so that read allocates nothing; a reader that keeps numbers past the
 frame copies them, and never writes into it. `undefined` without the flag: a release build times

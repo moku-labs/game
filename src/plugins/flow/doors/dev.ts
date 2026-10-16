@@ -39,19 +39,19 @@ declare global {
 
   /**
    * The control flag: every /control command runs, the state-changing ones too (`route`, `cheat`, `raw`).
-   * `moku-game dev` and `moku-game build --debug=full` set it; `--debug` and `moku-game build` define it `false`.
+   * `moku-game dev` and `moku-game build --debug` set it; `--debug=read` and `moku-game build` define it `false`.
    *
    * @example
    * ```ts
-   * // The in-memory agent.ts of `moku-game build --debug=full`.
+   * // The in-memory agent.ts of `moku-game build --debug`.
    * globalThis.__MOKU_GAME_CONTROL__ = true;
    * ```
    */
   var __MOKU_GAME_CONTROL__: boolean | undefined;
 
   /**
-   * The id of the build the page came from: `"dev"` on the dev page, `"debug-20261014T153012Z"` or
-   * `"debug-full-20261014T153012Z"` on a debug build, undefined on a release build.
+   * The id of the build the page came from: `"dev"` on the dev page, `"debug-20261014T153012Z"` on a
+   * debug build of either profile, undefined on a release build.
    *
    * @example
    * ```ts
@@ -88,6 +88,19 @@ declare global {
   var __MOKU_GAME_EDITOR__: string | undefined;
 
   /**
+   * The app id of a debug build, so the editor pairs a device stream with its project: `native.identifier` of
+   * `config.ts`, with `.debug` in the native debug app (`MOKU_NATIVE_PROFILE=debug`), which installs under that id.
+   * Undefined on a debug build of a game with no native section, on the dev page and on a release build.
+   *
+   * @example
+   * ```ts
+   * // moku-game native build android --debug, a game with native: { identifier: "com.mokulabs.timber" }
+   * globalThis.__MOKU_GAME_APP__; // "com.mokulabs.timber.debug"
+   * ```
+   */
+  var __MOKU_GAME_APP__: string | undefined;
+
+  /**
    * The overlay channel of the page agent: the editor's page agent sets it when it starts and deletes it when it stops.
    * `open()` shows the card; `open({ mode: "pill" })` the small pill; `toggle()` switches between hidden and the last
    * visible mode; `isOpen()` is true for the pill or the card. A game never sets it: it calls `app.debug.overlay`.
@@ -109,7 +122,7 @@ declare global {
 }
 
 /**
- * The error `run` throws on a `--debug` page for a command that changes the game: its `reason`
+ * The error `run` throws on a `--debug=read` page for a command that changes the game: its `reason`
  * tells it apart from any other failure.
  *
  * @example
@@ -157,7 +170,7 @@ export function isAgent(): boolean {
  * @returns True only when `__MOKU_GAME_CONTROL__` is exactly `true`.
  * @example
  * ```ts
- * isControl(); // true on the page of moku-game build --debug=full, false on a --debug page
+ * isControl(); // true on the page of moku-game build --debug, false on a --debug=read page
  * ```
  */
 export function isControl(): boolean {
@@ -167,7 +180,7 @@ export function isControl(): boolean {
 /**
  * The error a control command throws when its body runs outside the builds its guard allows. It
  * carries `reason: "dev-only"`, so an editor tells a refusal by the body's guard apart from a
- * failure, as `reason: "read-only"` tells the refusal of `run` on a `--debug` page.
+ * failure, as `reason: "read-only"` tells the refusal of `run` on a `--debug=read` page.
  *
  * @example
  * ```ts
@@ -198,21 +211,21 @@ export function controlRefused(): ControlRefusedError {
 }
 
 /**
- * Builds the error `run` throws on a `--debug` page for a command whose effect is `route`,
+ * Builds the error `run` throws on a `--debug=read` page for a command whose effect is `route`,
  * `cheat` or `raw`. It carries `reason: "read-only"`, so an editor tells it apart from a failure.
  *
  * @param id - The id of the refused command.
  * @returns The error, ready to throw.
  * @example
  * ```ts
- * // The editor on a --debug page.
+ * // The editor on a --debug=read page.
  * try { await run(app, commands.tap, { key: "play" }); } catch (error) { Reflect.get(Object(error), "reason"); // "read-only" }
  * ```
  */
 export function controlReadOnly(id: string): ControlReadOnlyError {
   return Object.assign(
     new Error(
-      `[game] The command ${id} changes the game: this debug build runs read and cosmetic commands only.\n  Build with moku-game build --debug=full to run it.`
+      `[game] The command ${id} changes the game: this debug build runs read and cosmetic commands only.\n  Build with moku-game build --debug to run it.`
     ),
     { reason: "read-only" as const }
   );

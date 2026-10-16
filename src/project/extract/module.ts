@@ -19,7 +19,8 @@ export const DEFINERS = [
   "defineEmitter",
   "defineTextStyles",
   "defineStyle",
-  "defineComponent"
+  "defineComponent",
+  "system"
 ] as const;
 
 /** One definer whose calls make keys. */

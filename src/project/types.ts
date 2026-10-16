@@ -1,8 +1,8 @@
 /**
  * @file project — the public types of the project index: the options of `openProject`, the index
  * it holds, the anchors of a key, the fresh lines `find` answers and the handle itself. The index
- * maps every engine id of a game (flows, nodes, features, scenes, projections, emitters, text
- * styles, styles, components and JSX keys) to anchors: a path plus a binding, a key or a component. It never
+ * maps every engine id of a game (flows, nodes, features, scenes, projections, systems, emitters,
+ * text styles, styles, components and JSX keys) to anchors: a path plus a binding, a key or a component. It never
  * holds a line number; `find` reads the line from the file as it is on disk at the call. Names are
  * followed through relative imports and the tsconfig `paths` of the game. No type here names a
  * `typescript` type, so the shipped declarations need no TypeScript.
@@ -62,8 +62,8 @@ export type Anchor = {
   /** The const, function or export the definition is bound to. */
   binding?: string;
   /**
-   * The property or attribute key: a text style key, the `name` of a projection, a JSX key, or
-   * the property a style function builds a style under (`icon` of `roundStylesOf`).
+   * The property or attribute key: a text style key, the `name` of a projection or a system, a
+   * JSX key, or the property a style function builds a style under (`icon` of `roundStylesOf`).
    */
   key?: string;
   /**

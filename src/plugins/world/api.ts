@@ -82,6 +82,7 @@ function exposeEcs(ecs: EcsModule, projection: ProjectionModule): EcsApi {
     changed: ecs.changed,
     typeOf: ecs.typeOf,
     ownerOf: ecs.ownerOf,
+    count: ecs.count,
     mode: ecs.mode,
     setMode: (mode: WorldMode): void => {
       ecs.setMode(mode);

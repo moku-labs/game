@@ -16,6 +16,20 @@ const marker = "moku:dev";
 /** The frame history logs this once when it starts, so a bundle that has it kept the recorder. */
 const historyMarker = "world:history-on";
 
+/**
+ * Strings only the telemetry of a debug build carries (0.15, U3 to U6): the reasons of the problem rules (the rule
+ * names are the root export `PROBLEM_RULES`, which a bundle of the whole root keeps), the count registry and input's
+ * count, the overdraw switch's log and its blend mode.
+ */
+const telemetryMarkers = [
+  "not-eligible",
+  "after-trim",
+  "Monitor count table is full",
+  "inputListeners",
+  "renderer:overdraw",
+  "add-npm"
+];
+
 /** The three flags as each page defines them. */
 const PROFILES = {
   /** `moku-game build`. */
@@ -24,9 +38,9 @@ const PROFILES = {
     __MOKU_GAME_AGENT__: "false",
     __MOKU_GAME_CONTROL__: "false"
   },
-  /** `moku-game build --debug`. */
+  /** `moku-game build --debug=read`. */
   read: { __MOKU_GAME_DEV__: "false", __MOKU_GAME_AGENT__: "true", __MOKU_GAME_CONTROL__: "false" },
-  /** `moku-game build --debug=full`. */
+  /** `moku-game build --debug` (and its alias `--debug=full`). */
   full: { __MOKU_GAME_DEV__: "false", __MOKU_GAME_AGENT__: "true", __MOKU_GAME_CONTROL__: "true" },
   /** The bunfig of `moku-game dev`. */
   dev: { __MOKU_GAME_DEV__: "true", __MOKU_GAME_AGENT__: "true", __MOKU_GAME_CONTROL__: "true" }
@@ -143,5 +157,13 @@ describe("the dev flag in a Bun build of src/index.ts", () => {
 
   it("keeps the frame history recorder when the dev page defines the flags true", () => {
     expect(bundle("index.ts", "dev")).toContain(historyMarker);
+  });
+
+  it("drops the telemetry of a debug build when the three flags are defined false, and a read-only debug page keeps it", () => {
+    const release = bundle("index.ts", "release");
+    const read = bundle("index.ts", "read");
+
+    expect(telemetryMarkers.filter(marker => release.includes(marker))).toEqual([]);
+    expect(telemetryMarkers.filter(marker => !read.includes(marker))).toEqual([]);
   });
 });

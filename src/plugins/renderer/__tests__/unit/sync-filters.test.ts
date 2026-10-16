@@ -516,6 +516,36 @@ describe("sync.filters.set — the kinds of the performance log", () => {
   });
 });
 
+describe("sync.filters.set — the owners of the performance log", () => {
+  // Bug caught: only the slot's own filter names its entity: a blur's two pass filters and the stages of its inputs,
+  // which draw the passes, have no owner, so their passes show no view.
+  it("names the entity of a slot's filter, its stages and a blur's pass filters in an agent build, even without a kind", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const blur = Object.assign(new FakeFilter(), {
+      blurXFilter: new FakeFilter(),
+      blurYFilter: new FakeFilter()
+    });
+    const stage = new FakeFilter();
+    const inputs = {
+      stages: [stage as unknown as PixiFilter],
+      count: 1,
+      version: () => 1,
+      scaleOf: () => 0.5,
+      draw: () => undefined,
+      hold: () => undefined
+    };
+    const mock = await started();
+    const entity = spawnSprite(mock);
+    const owners = mock.ctx.state.sync.filterOwners;
+
+    mock.api.sync.filters.set(entity, [{ ...slot(blur, 2), inputs }]);
+
+    expect(
+      [blur, blur.blurXFilter, blur.blurYFilter, stage].map(filter => owners.get(filter))
+    ).toEqual([entity, entity, entity, entity]);
+  });
+});
+
 describe("renderPasses with kept pictures", () => {
   it("counts no pass of a filter inside another view's kept picture: the splash at rest draws one", async () => {
     const stage = await startOverlayStage({ onDemand: false });

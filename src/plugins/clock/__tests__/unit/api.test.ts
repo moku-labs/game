@@ -327,6 +327,104 @@ describe("createClockApi", () => {
     });
   });
 
+  describe("pending", () => {
+    // Bug caught: a second scheduleAt stacks a timer instead of replacing the moment, so the
+    // count would read 2 where one timer is alive.
+    it("counts the one scheduled moment, also after it was replaced", () => {
+      const { ctx } = createFakeCtx();
+      const api = createClockApi(ctx);
+
+      expect(api.pending()).toBe(0);
+
+      api.scheduleAt(1500);
+      api.scheduleAt(1800);
+
+      expect(api.pending()).toBe(1);
+    });
+
+    // Bug caught: a delivered or cancelled moment still counted: every screen would look like it
+    // left a timer behind.
+    it("drops back to 0 when the moment is delivered or cancelled", () => {
+      const { ctx, clock } = createFakeCtx();
+      const api = createClockApi(ctx);
+
+      api.scheduleAt(1500);
+      clock.advance(500);
+
+      expect(api.pending()).toBe(0);
+
+      api.scheduleAt(3000);
+      api.scheduleAt(undefined);
+
+      expect(api.pending()).toBe(0);
+    });
+
+    // Bug caught: the count reads the timer handle, which a source may leave undefined (its
+    // `setTimer` returns a handle of any shape), so a scheduled moment would hide.
+    it("counts a moment of a source whose timer handle is undefined", () => {
+      const source: ClockSource = {
+        now: () => 1000,
+        setTimer: () => undefined,
+        clearTimer: () => {}
+      };
+      const api = createClockApi(createMockCtx(source));
+
+      api.scheduleAt(2000);
+
+      expect(api.pending()).toBe(1);
+    });
+
+    // Bug caught: a timer that fired early and was armed again reads as not pending, so a moment
+    // left waiting would hide from the leak count.
+    it("still counts a moment whose timer fired early and was armed again", () => {
+      const source: ClockSource & { fire(): void } = {
+        now: () => 1000,
+        setTimer: callback => {
+          source.fire = callback;
+          return 1;
+        },
+        clearTimer: () => {},
+        fire: () => {}
+      };
+      const api = createClockApi(createMockCtx(source));
+
+      api.scheduleAt(2000);
+      source.fire();
+
+      expect(api.pending()).toBe(1);
+    });
+  });
+
+  describe("listeners", () => {
+    // Bug caught: a screen that registers onElapsed on every visit and never calls the remover
+    // leaks one listener per visit; the count must grow with it so the monitor can see the leak.
+    it("grows by one for each listener a visit forgets to remove", () => {
+      const { ctx } = createFakeCtx();
+      const api = createClockApi(ctx);
+
+      expect(api.listeners()).toBe(0);
+
+      api.onElapsed(() => {});
+      api.onElapsed(() => {});
+
+      expect(api.listeners()).toBe(2);
+    });
+
+    // Bug caught: the remover does not take the listener off, so a screen that cleans up still
+    // reads as a leak; a second call of the same remover must not take a neighbour off either.
+    it("drops by one when the remover runs, and only once", () => {
+      const { ctx } = createFakeCtx();
+      const api = createClockApi(ctx);
+      api.onElapsed(() => {});
+      const off = api.onElapsed(() => {});
+
+      off();
+      off();
+
+      expect(api.listeners()).toBe(1);
+    });
+  });
+
   describe("types", () => {
     it("delivers an Elapsed input to a listener", () => {
       const { ctx } = createFakeCtx();
