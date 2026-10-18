@@ -1,13 +1,13 @@
 /**
  * @file world/ecs — the query walk: the store of the first term in insertion order, filtered by
  * the other terms, with `mut()` marking every row it yields. A system's terms are resolved once,
- * when it registers; the walk itself copies nothing and builds a row only for an entity that
- * carries every term.
+ * when it registers, into one walk the runner resets every run: it allocates nothing and hands out
+ * one row array, rewritten for every row. `ecs.query()` walks with a fresh walk and fresh rows.
  */
 import type { WorldCtx } from "../types";
 import { markChanged } from "./changes";
 import { registerType, termType } from "./storage";
-import type { EcsState, Entity, QueryTerm } from "./types";
+import type { EcsState, Entity, QueryTerm, SystemEntry } from "./types";
 
 /**
  * A query resolved once: the component names in order, and the names the system writes (marked as it walks).
@@ -221,7 +221,7 @@ function carriesAll(
  * @param plan - The resolved query.
  * @returns The rows: the entity, then one stored value per name.
  */
-export function walkPlan(ctx: WorldCtx, plan: QueryPlan): Iterable<readonly unknown[]> {
+function walkPlan(ctx: WorldCtx, plan: QueryPlan): Iterable<readonly unknown[]> {
   return new QueryWalk(ctx, plan);
 }
 
@@ -305,6 +305,237 @@ function reportStoreChange(ctx: WorldCtx, component: string): void {
 
   ctx.state.ecs.walkReported = true;
   ctx.log.error("world:store-changed-during-walk", { component });
+}
+
+/** One component store, read by entity. */
+type Store = ReadonlyMap<Entity, object | true>;
+
+/**
+ * The walk `collectMatch` fills while the first store hands it its keys: set for the length of
+ * one `forEach`, a scratch read by a module-level callback, never kept between runs.
+ */
+const collecting: { walk: SystemWalk | undefined } = { walk: undefined };
+
+/**
+ * Hands one key of the first store to the walk that collects: the module-level callback of
+ * `Map.forEach`, so a run makes no closure.
+ *
+ * @param _value - The stored value, read later by the row.
+ * @param entity - The key.
+ */
+function collectMatch(_value: object | true, entity: Entity): void {
+  collecting.walk?.keep(entity);
+}
+
+/**
+ * The walk of one system's declared query, made once when the system registers and reset by the
+ * runner before every run. It allocates nothing per run: the entity list and the store list are
+ * kept and overwritten by index, and every row it yields is the same array, written in place.
+ * A row is valid until the next row; a system that keeps one copies it.
+ */
+export class SystemWalk implements Iterator<readonly unknown[], undefined> {
+  /** The step handed back for every row: always the one row array. */
+  private readonly step: IteratorYieldResult<readonly unknown[]>;
+  /** The one row: the entity, then one stored value per name, sized at registration. */
+  private readonly row: unknown[];
+  /** The component names of the terms, in order. */
+  private readonly names: readonly string[];
+  /** The names of the `mut()` terms, marked for every yielded row. */
+  private readonly written: readonly string[];
+  /** The store of each name, read once per run at the first step; `undefined` for a name no entity carried yet. */
+  private readonly stores: Array<Store | undefined> = [];
+  /** The matching entities of this run, from index 0 to `count`; kept and overwritten by index. */
+  private readonly entities: Entity[] = [];
+  /** How many entities this run collected. */
+  private count = 0;
+  /** The next entity to visit. */
+  private index = 0;
+  /** Whether this run took its entities yet. */
+  private started = false;
+  /** The first store's size at the first step: a dev build compares it; -1 when not watched. */
+  private size = -1;
+
+  /**
+   * Prepares the walk of one system.
+   *
+   * @param ctx - Domain context of the world plugin.
+   * @param plan - The system's resolved query.
+   */
+  constructor(
+    private readonly ctx: WorldCtx,
+    plan: QueryPlan
+  ) {
+    this.names = plan.names;
+    this.written = plan.written;
+    this.step = { done: false, value: NO_ROW };
+    this.row = [];
+
+    // Filled with `push`, so the row is a packed array of its exact length from the start.
+    for (let index = 0; index <= plan.names.length; index += 1) this.row.push(undefined);
+
+    this.step.value = this.row;
+  }
+
+  /**
+   * The walk is its own iterator, so the runner hands it to `run` as the rows. A second loop over
+   * it in the same run finds it walked.
+   *
+   * @returns This walk.
+   */
+  [Symbol.iterator](): SystemWalk {
+    return this;
+  }
+
+  /**
+   * Starts a new run: nothing is read before the first step.
+   *
+   * @returns This walk, the rows of the run.
+   */
+  reset(): SystemWalk {
+    this.started = false;
+    this.index = 0;
+    this.count = 0;
+    this.size = -1;
+
+    return this;
+  }
+
+  /**
+   * Keeps one key of the first store when the entity carries every other name.
+   *
+   * @param entity - The key.
+   */
+  keep(entity: Entity): void {
+    const stores = this.stores;
+    const count = stores.length;
+
+    for (let index = 1; index < count; index += 1) {
+      if (stores[index]?.has(entity) !== true) return;
+    }
+
+    // Per run: overwritten by index, never cut, so the list keeps its store from run to run.
+    this.entities[this.count] = entity;
+    this.count += 1;
+  }
+
+  /**
+   * Hands out the next row: the next collected entity, its values written into the one row, and
+   * marked for every `mut()` name.
+   *
+   * @returns The step of the row, or the end.
+   */
+  next(): IteratorResult<readonly unknown[], undefined> {
+    if (!this.started) this.start();
+
+    const first = this.stores[0];
+
+    if (first === undefined) return DONE;
+
+    if (this.size !== -1 && first.size !== this.size) {
+      this.size = first.size;
+      reportStoreChange(this.ctx, this.names[0] ?? "");
+    }
+
+    while (this.index < this.count) {
+      const entity = this.entities[this.index];
+
+      this.index += 1;
+
+      if (entity === undefined || !this.fill(entity)) continue;
+
+      markWritten(this.ctx.state.ecs, this.written, entity);
+
+      return this.step;
+    }
+
+    return DONE;
+  }
+
+  /**
+   * Reads the stores of this run and collects the entities that carry every name, in the first
+   * store's order. Structural changes are queued until the phase ends, so the matches stay true
+   * while the rows are consumed.
+   */
+  private start(): void {
+    const all = this.ctx.state.ecs.stores;
+    const names = this.names;
+    const stores = this.stores;
+    const count = names.length;
+
+    this.started = true;
+
+    for (let index = 0; index < count; index += 1) {
+      const name = names[index];
+
+      stores[index] = name === undefined ? undefined : all.get(name);
+    }
+
+    const first = stores[0];
+
+    if (first === undefined) return;
+
+    collecting.walk = this;
+    // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+    first.forEach(collectMatch);
+    collecting.walk = undefined;
+
+    if (devBuild()) this.size = first.size;
+  }
+
+  /**
+   * Writes the row of one entity in place: the entity, then the value of every name.
+   *
+   * @param entity - The entity.
+   * @returns False when the entity no longer carries a name, and the row is not handed out.
+   */
+  private fill(entity: Entity): boolean {
+    const row = this.row;
+    const stores = this.stores;
+    const count = stores.length;
+
+    row[0] = entity;
+
+    for (let index = 0; index < count; index += 1) {
+      const value = stores[index]?.get(entity);
+
+      if (value === undefined) return false;
+
+      row[index + 1] = value;
+    }
+
+    return true;
+  }
+}
+
+/**
+ * The rows of a system with an empty query: none, from one shared iterator.
+ */
+const NO_ROWS: Iterable<readonly unknown[]> & Iterator<readonly unknown[], undefined> = {
+  /**
+   * The rows are their own iterator.
+   *
+   * @returns The same empty rows.
+   */
+  [Symbol.iterator](): Iterator<readonly unknown[], undefined> {
+    return NO_ROWS;
+  },
+  next: () => DONE
+};
+
+/**
+ * The rows the runner hands a system's `run`: its walk, reset; none for an empty query. A system
+ * entry made without a walk gets one here, once.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param entry - The registered system.
+ * @returns The rows of this run.
+ */
+export function systemRows(ctx: WorldCtx, entry: SystemEntry): Iterable<readonly unknown[]> {
+  if (entry.plan.names.length === 0) return NO_ROWS;
+
+  entry.walk ??= new SystemWalk(ctx, entry.plan);
+
+  return entry.walk.reset();
 }
 
 /**

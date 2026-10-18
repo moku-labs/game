@@ -4,9 +4,19 @@
  * the flush also apply a pending `lift(false)`, the sweep forgets what is kept of a dead element
  * and starts the loops the views owe.
  */
+
+import type { Entity } from "../ecs/types";
 import { cancelTracks, forgetEndedTracks } from "./driver";
 import { checkConvergence, finishHandles, restingPeers, startLoop, stillMoving } from "./motions";
-import type { AnyProjectionSpec, Mounted, ProjectionCtx, View } from "./types";
+import type {
+  AnyProjectionSpec,
+  MotionCause,
+  Mounted,
+  ProjectionCtx,
+  ProjectionKey,
+  RestPose,
+  View
+} from "./types";
 import { writeLayer } from "./views";
 
 /**
@@ -57,10 +67,14 @@ export function despawnView(pctx: ProjectionCtx, mounted: Mounted, view: View): 
   for (const handle of view.handles) handle.cancel();
   view.handles = [];
   cancelTracks(pctx, view.entity);
-  pctx.ctx.state.projection.byEntity.delete(view.entity);
-  pctx.ctx.state.projection.mutes.delete(view.entity);
-  pctx.ctx.state.projection.rests.delete(view.entity);
-  pctx.ctx.state.projection.leaving.set(view.entity, view.cause);
+
+  const state = pctx.ctx.state.projection;
+
+  state.byEntity.delete(view.entity);
+  state.mutes.delete(view.entity);
+  state.rests.delete(view.entity);
+  state.leaving.set(view.entity, view.cause);
+  state.membershipVersion += 1;
   pctx.deps.ecs.despawn(view.entity);
 }
 
@@ -86,6 +100,7 @@ export function dequeueRevive(
   pctx.deps.ecs.untag(view.entity, pctx.deps.components.Exiting);
   writeLayer(pctx, view.entity, view.lifted && spec.lift !== undefined ? spec.lift : spec.layer);
   mounted.live.set(view.key, view);
+  pctx.ctx.state.projection.membershipVersion += 1;
 }
 
 /**
@@ -120,74 +135,185 @@ export function dropIfStill(pctx: ProjectionCtx, view: View): void {
 }
 
 /**
+ * What the per-frame callbacks of the sweep read: set before each `forEach`, so the callbacks are
+ * module-level and a frame makes no closure.
+ */
+const sweeping: { pctx: ProjectionCtx | undefined; live: boolean } = {
+  pctx: undefined,
+  live: false
+};
+
+/**
+ * Forgets the cause of one view despawned since the last sweep, once its entity is gone.
+ *
+ * @param _cause - How the view left.
+ * @param entity - Its entity.
+ * @param leaving - The table of causes.
+ */
+function forgetLeft(_cause: MotionCause, entity: Entity, leaving: Map<Entity, MotionCause>): void {
+  const pctx = sweeping.pctx;
+
+  if (pctx === undefined || pctx.deps.ecs.ownerOf(entity) !== undefined) return;
+
+  leaving.delete(entity);
+  pctx.ctx.state.projection.membershipVersion += 1;
+}
+
+/**
+ * Despawns the queued views of one projection whose motions ended, in queue order. The queue is
+ * walked by index; a despawn takes the view out of it, so the index stays. Only the views queued
+ * when the walk began are visited.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param mounted - The mounted projection.
+ */
+function despawnStill(pctx: ProjectionCtx, mounted: Mounted): void {
+  const queue = mounted.queue;
+  let left = queue.length;
+  let index = 0;
+
+  while (left > 0 && index < queue.length) {
+    const view = queue[index];
+
+    left -= 1;
+
+    if (view === undefined || stillMoving(view)) {
+      index += 1;
+
+      continue;
+    }
+
+    despawnView(pctx, mounted, view);
+    if (queue[index] === view) index += 1;
+  }
+}
+
+/**
+ * Settles one live view whose motions all ended: it is checked against its rest pose and gets its
+ * pending `lift(false)`. A view still moving keeps the live walk on for the next frame.
+ *
+ * @param view - The view.
+ */
+function settleIfStill(view: View): void {
+  const pctx = sweeping.pctx;
+
+  if (pctx === undefined || view.handles.length === 0) return;
+
+  if (stillMoving(view)) {
+    pctx.ctx.state.projection.moving = true;
+
+    return;
+  }
+
+  view.handles = [];
+  checkConvergence(pctx, view);
+  dropPending(pctx, view);
+}
+
+/**
+ * Sweeps one mounted projection: its despawn queue, then its live views while one may move.
+ *
+ * @param mounted - The mounted projection.
+ */
+function sweepMounted(mounted: Mounted): void {
+  const pctx = sweeping.pctx;
+
+  if (pctx === undefined) return;
+  if (mounted.queue.length > 0) despawnStill(pctx, mounted);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+  if (sweeping.live) mounted.live.forEach(settleIfStill);
+}
+
+/**
  * The sweep of phase `animate`: the cause of every view despawned since the last sweep is
  * forgotten, queued views whose motions ended are despawned, and a live view that came to rest is
- * checked against its rest pose and gets its pending `lift(false)`.
+ * checked against its rest pose and gets its pending `lift(false)`. The live views are walked only
+ * while one may move: every view handle sets the flag, and a walk that finds no view moving
+ * clears it. A frame where nothing moves walks nothing and allocates nothing.
  *
  * @param pctx - Domain context of the projection module.
  */
 export function sweepQueue(pctx: ProjectionCtx): void {
   const state = pctx.ctx.state.projection;
 
-  for (const entity of state.leaving.keys()) {
-    if (pctx.deps.ecs.ownerOf(entity) === undefined) state.leaving.delete(entity);
-  }
+  sweeping.pctx = pctx;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+  if (state.leaving.size > 0) state.leaving.forEach(forgetLeft);
 
   forgetEndedTracks(pctx);
 
-  for (const mounted of state.mounted.values()) {
-    // A copy: despawning splices the very list this loop walks.
-    // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-    for (const view of [...mounted.queue]) {
-      if (!stillMoving(view)) despawnView(pctx, mounted, view);
-    }
+  // A view handle made during the walk sets the flag again.
+  sweeping.live = state.moving;
+  state.moving = false;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+  state.mounted.forEach(sweepMounted);
+  sweeping.pctx = undefined;
+}
 
-    // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-    for (const view of [...mounted.live.values()]) {
-      if (view.handles.length === 0 || stillMoving(view)) continue;
+/**
+ * Drops the rest pose an owner recorded for an entity that is gone.
+ *
+ * @param _pose - The rest pose.
+ * @param entity - Its entity.
+ * @param rests - The table of rest poses.
+ */
+function dropDeadRest(_pose: RestPose, entity: Entity, rests: Map<Entity, RestPose>): void {
+  if (sweeping.pctx?.deps.ecs.ownerOf(entity) === undefined) rests.delete(entity);
+}
 
-      view.handles = [];
-      checkConvergence(pctx, view);
-      dropPending(pctx, view);
-    }
-  }
+/**
+ * Drops the key of an element whose entity is gone, and its side of the key table when the key
+ * still names that entity.
+ *
+ * @param place - The projection and key of the element.
+ * @param entity - Its entity.
+ * @param keysByEntity - The reverse key table.
+ */
+function dropDeadKey(
+  place: ProjectionKey,
+  entity: Entity,
+  keysByEntity: Map<Entity, ProjectionKey>
+): void {
+  const pctx = sweeping.pctx;
+
+  if (pctx === undefined || pctx.deps.ecs.ownerOf(entity) !== undefined) return;
+
+  keysByEntity.delete(entity);
+
+  const byKey = pctx.ctx.state.projection.keys.get(place.projection);
+
+  if (byKey?.get(place.key) === entity) byKey.delete(place.key);
 }
 
 /**
  * Drops what the projection keeps about an element whose entity is gone: the rest pose `setRest`
  * or `viewOf` recorded, and the key `registerKey` published. An owner that despawns its element
  * without calling the key remover leaves both, and `entityOf` would go on answering with an
- * entity that is gone. The sweep calls it once per frame, and the converge step before it
- * writes. A key a newer element took over stays, and the remover that comes late is still safe.
+ * entity that is gone. The sweep calls it after a frame that despawned an entity or registered a
+ * key, and the converge step before it writes. A key a newer element took over stays, and the
+ * remover that comes late is still safe.
  *
  * @param pctx - Domain context of the projection module.
  */
 export function forgetDeadElements(pctx: ProjectionCtx): void {
-  const { ecs } = pctx.deps;
   const state = pctx.ctx.state.projection;
+  const outer = sweeping.pctx;
 
-  for (const entity of state.rests.keys()) {
-    if (ecs.ownerOf(entity) === undefined) state.rests.delete(entity);
-  }
-
-  for (const [entity, { projection, key }] of state.keysByEntity) {
-    if (ecs.ownerOf(entity) !== undefined) continue;
-
-    state.keysByEntity.delete(entity);
-
-    const byKey = state.keys.get(projection);
-
-    if (byKey?.get(key) === entity) byKey.delete(key);
-  }
+  sweeping.pctx = pctx;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+  state.rests.forEach(dropDeadRest);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+  state.keysByEntity.forEach(dropDeadKey);
+  sweeping.pctx = outer;
 }
 
 /**
  * Starts the loop of every live view that owes one and clears the flag: a view that entered in a
- * direct reconcile, and a view whose tracks a flush ended. The sweep calls it, so it runs only
- * while the world is live, which also covers a world that comes back from `paused` or `fast`
- * with no reconcile of its own. Without a tween driver nothing starts and the views keep owing:
- * the instant driver would write the end pose of the loop once. A view of a projection without
- * a `loop` hook only has its flag cleared.
+ * direct reconcile, and a view whose tracks a flush ended. The sweep calls it while a view owes
+ * one, so it runs only while the world is live, which also covers a world that comes back from
+ * `paused` or `fast` with no reconcile of its own. Without a tween driver nothing starts and the
+ * views keep owing: the instant driver would write the end pose of the loop once. A view of a
+ * projection without a `loop` hook only has its flag cleared.
  *
  * @param pctx - Domain context of the projection module.
  */
@@ -195,6 +321,8 @@ export function startOwedLoops(pctx: ProjectionCtx): void {
   const state = pctx.ctx.state.projection;
 
   if (state.driver === undefined) return;
+
+  state.owedLoops = 0;
 
   for (const [name, mounted] of state.mounted) {
     const spec = state.specs.get(name);
@@ -224,6 +352,7 @@ export function flushMounted(pctx: ProjectionCtx, mounted: Mounted): void {
     cancelTracks(pctx, view.entity);
     dropPending(pctx, view);
     view.loopOwed = true;
+    pctx.ctx.state.projection.owedLoops += 1;
   }
   // A copy: despawning splices the queue this loop walks.
   // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated

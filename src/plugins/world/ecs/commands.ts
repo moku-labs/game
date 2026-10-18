@@ -23,6 +23,7 @@ export function despawnEntity(ctx: WorldCtx, entity: Entity): void {
   clearEntity(ctx, entity);
   releaseEntity(ctx.state.ecs, entity);
   forgetChanges(ctx.state.ecs, entity);
+  ctx.state.ecs.despawns += 1;
 }
 
 /**

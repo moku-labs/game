@@ -157,6 +157,7 @@ export function createViewRecord(
     entity,
     projection,
     key,
+    address: Object.freeze({ projection, key }),
     item,
     rest,
     handles: [],

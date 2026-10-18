@@ -190,6 +190,59 @@ type PerfLine<Kind extends string> = {
 };
 
 /**
+ * Which groups of the monitor's per-frame work run in an agent build, each on unless switched off (spec 11 R14): `gpu`
+ * the GPU timer, `passes` the pass ring with its stencil count, `counts` the draws, filter applies, uploads, compiles,
+ * marks, rebuilds and render targets the counting classes count, `systems` the time of every world system and the five
+ * slowest of a frame, `longFrames` the long frames the browser reports, `heap` the heap read of every frame and its
+ * `gc?` hint. A section switched off skips its work, and its columns and sample fields read as not measured.
+ *
+ * @example
+ * ```ts
+ * // The editor measures the ward without the per-system timing, the rest as it was.
+ * const sections: MonitorSections = {
+ *   gpu: true, passes: true, counts: true, systems: false, longFrames: true, heap: true
+ * };
+ * ```
+ */
+export type MonitorSections = {
+  gpu: boolean;
+  passes: boolean;
+  counts: boolean;
+  systems: boolean;
+  longFrames: boolean;
+  heap: boolean;
+};
+
+/**
+ * The sections of the monitor in their order: the order of the header's and the `sections` event's lists, and of
+ * `sample.sectionsMs` (which adds `base`, the rest of the commit). New sections are only ever appended.
+ *
+ * @example
+ * ```ts
+ * // The editor draws one switch per section of the device's monitor, in the engine's order, and greys the ones off.
+ * app.renderer.monitor.sections({ systems: false });
+ * MONITOR_SECTIONS.filter(section => !app.renderer.monitor.sections()[section]); // ["systems"]
+ * ```
+ */
+export const MONITOR_SECTIONS = [
+  "gpu",
+  "passes",
+  "counts",
+  "systems",
+  "longFrames",
+  "heap"
+] as const satisfies readonly (keyof MonitorSections)[];
+
+/**
+ * The sections on and off, in the order of `MONITOR_SECTIONS`: the header's `sections` and the detail of a `sections`
+ * event.
+ */
+type PerfSections = {
+  on: readonly (keyof MonitorSections)[];
+  off: readonly (keyof MonitorSections)[];
+};
+
+/**
  * What an agent build could measure on this page; the header lists it.
  */
 export type PerfMeasured =
@@ -277,6 +330,12 @@ export type PerfHeaderLine = PerfLine<"header"> & {
    * follow are not read as real cost (a `debug` event marks a switch later). Optional for a reader of an older log.
    */
   debug?: { overdraw: boolean };
+  /**
+   * The sections of the monitor on and off at the moment of the header (a `sections` event marks a switch later): a
+   * section `measured` lists but `off` names is switched off, not missing. The engine always writes it; optional for a
+   * reader of an older log.
+   */
+  sections?: PerfSections;
 };
 
 /**
@@ -404,6 +463,13 @@ export type PerfSampleLine = PerfLine<"sample"> & {
    * texture memory of `textures.targets`. Optional for a reader of an older log.
    */
   targets?: { created: number; destroyed: number } | null;
+  /**
+   * What each section of the monitor cost in the second: page-clock ms its part of the frame commits took, summed over
+   * the second, 0 for a section switched off; `base` is the rest of the commits. Pixi-side counting is not timed. A
+   * WebView's clock ticks in 0.1 ms, so a part shorter than that adds 0 or 0.1 at a time: the sum over a second is
+   * what to read. The engine always writes it; optional for a reader of an older log.
+   */
+  sectionsMs?: { readonly [Section in keyof MonitorSections | "base"]: number };
 };
 
 /**
@@ -547,7 +613,8 @@ export type PerfLongFrameLine = PerfLine<"longFrame"> &
 /**
  * The names of `event` lines (`"devtools"` is the editor's overlay event, in 2b because the editor's page agent emits
  * it on the 2b debug build; `"pool-trim"` is the pool trim of spec 25, detail `PoolTrimDetail`; `"warm"` is the end of
- * a pipeline warm-up run of spec 27, detail `WarmDetail`).
+ * a pipeline warm-up run of spec 27, detail `WarmDetail`; `"sections"` is a switch of the monitor's sections, detail
+ * `{ on, off }` as the header's `sections`).
  */
 export type PerfEventName =
   | "scene"
@@ -570,7 +637,8 @@ export type PerfEventName =
   | "warm"
   | "shader"
   | "problem"
-  | "debug";
+  | "debug"
+  | "sections";
 
 /**
  * What an `overlay` event line says happened to an overlay (spec 22 O10.2): it opened, landed (its enter motion is

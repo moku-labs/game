@@ -9,6 +9,7 @@ import type { Unseen } from "../demand/types";
 import type { PixiContainer, PixiFilter, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { provideDisplay, updateAdapterView } from "./adapters";
 import { boundsOf, hitBoxOf, layerOf } from "./bounds";
+import { eachEntity, isEmptyList } from "./each";
 import { forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
 import { clearHidden } from "./hidden";
@@ -32,6 +33,7 @@ import type {
   CreateTextureOptions,
   DebugSwitches,
   DisplayAdapter,
+  DisplayEntry,
   FilterSlot,
   HitBox,
   OverlayEventSink,
@@ -59,6 +61,18 @@ import { startWarm, warmFilter, warmStep } from "./warm";
 
 /** Label of the container the viewport transform is written on. */
 const ROOT_LABEL = "renderer.root";
+
+/** The change steps of a pass that write an entity's view: what `runStep` does for each changed component. */
+const STEP = {
+  transform: 0,
+  sprite: 1,
+  nineSlice: 2,
+  shape: 3,
+  order: 4,
+  layer: 5,
+  parent: 6,
+  adapter: 7
+} as const;
 
 /**
  * The mark of the quiet context: a write the kept cache makes for its picture changes no pixel and marks nothing.
@@ -156,6 +170,25 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   // What a pass with nothing to build hands its change steps: made once, so a still frame builds no set.
   const nothingBuilt: ReadonlySet<Entity> = emptyEntitySet();
 
+  /** The entities the running pass built: its change steps skip them. Set by every pass that does work. */
+  let built: ReadonlySet<Entity> = nothingBuilt;
+  /** The adapter registration whose component the adapter step walks now. */
+  let adapterEntry: DisplayEntry | undefined;
+
+  /**
+   * Logs the throw of one entity's work: it costs that entity, never the frame.
+   *
+   * @param entity - The entity being worked on.
+   * @param error - What it threw.
+   */
+  const report = (entity: Entity, error: unknown): void => {
+    ctx.log.error("renderer: sync failed for an entity", {
+      entity,
+      label: state.views.get(entity)?.object.label,
+      error
+    });
+  };
+
   /**
    * Runs one piece of work for one entity. A throw costs that entity, never the frame.
    *
@@ -166,11 +199,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     try {
       work();
     } catch (error) {
-      ctx.log.error("renderer: sync failed for an entity", {
-        entity,
-        label: state.views.get(entity)?.object.label,
-        error
-      });
+      report(entity, error);
     }
   };
 
@@ -237,21 +266,120 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Step 4 for the views whose `Parent` was removed: back to the layer the entity names, at its
-   * own pose, sorted by that layer's rule. An entity that left has no view and is skipped.
+   * Writes what one changed component asks of an entity's view (step 4).
    *
-   * @param built - The entities this pass has just built, which hang in the right place already.
+   * @param step - The change step, a `STEP` value.
+   * @param entity - The entity.
+   * @param view - Its view.
    */
-  const applyReparented = (built: ReadonlySet<Entity>): void => {
+  const runStep = (step: number, entity: Entity, view: View): void => {
+    switch (step) {
+      case STEP.transform: {
+        // Placement: a moved entity gets a new transform and may sort differently.
+        applyTransform(sctx, entity, view);
+        resort(sctx, entity, view);
+        break;
+      }
+      case STEP.sprite: {
+        // Look: a new size or fit changes the stretch the transform folds into the scale.
+        if (applySprite(sctx, entity, view)) applyTransform(sctx, entity, view);
+        break;
+      }
+      case STEP.nineSlice: {
+        applyNineSlice(sctx, entity, view);
+        break;
+      }
+      case STEP.shape: {
+        applyShape(sctx, entity, view);
+        break;
+      }
+      case STEP.order: {
+        // Draw order: only the position among the siblings changed.
+        resort(sctx, entity, view);
+        break;
+      }
+      case STEP.layer: {
+        // Tree position: the view moves to another layer and is sorted there.
+        attach(sctx, entity, view);
+        resort(sctx, entity, view);
+        break;
+      }
+      case STEP.parent: {
+        rehang(entity, view);
+        break;
+      }
+      default: {
+        if (view.display === adapterEntry) updateAdapterView(sctx, entity, view);
+      }
+    }
+  };
+
+  /**
+   * Runs one change step on one entity's view, its throw costing that entity only: the try is here, once, not in the
+   * walk of the change list.
+   *
+   * @param step - The change step, a `STEP` value.
+   * @param entity - The entity.
+   * @param view - Its view.
+   */
+  const guardedStep = (step: number, entity: Entity, view: View): void => {
+    try {
+      runStep(step, entity, view);
+    } catch (error) {
+      report(entity, error);
+    }
+  };
+
+  /**
+   * Runs one change step on an entity's view, unless the entity has none or this pass built it a moment ago.
+   *
+   * @param step - The change step, a `STEP` value.
+   * @param entity - The entity.
+   */
+  const stepOn = (step: number, entity: Entity): void => {
+    if (built.has(entity)) return;
+
+    const view = state.views.get(entity);
+
+    if (view !== undefined) guardedStep(step, entity, view);
+  };
+
+  // The visitors of the change lists, made once: a pass walks the lists with them and makes no closure.
+  const onTransform = (entity: Entity): void => stepOn(STEP.transform, entity);
+  const onSprite = (entity: Entity): void => stepOn(STEP.sprite, entity);
+  const onNineSlice = (entity: Entity): void => stepOn(STEP.nineSlice, entity);
+  const onShape = (entity: Entity): void => stepOn(STEP.shape, entity);
+  const onOrder = (entity: Entity): void => stepOn(STEP.order, entity);
+  const onLayer = (entity: Entity): void => stepOn(STEP.layer, entity);
+  const onParent = (entity: Entity): void => stepOn(STEP.parent, entity);
+  const onAdapter = (entity: Entity): void => stepOn(STEP.adapter, entity);
+
+  /**
+   * A new `Display` object of the game replaces the old view outright, unless this pass built it.
+   *
+   * @param entity - The entity.
+   */
+  const onDisplay = (entity: Entity): void => {
+    if (built.has(entity)) return;
+
+    guard(entity, () => {
+      dropView(sctx, entity);
+      createView(sctx, entity);
+    });
+  };
+
+  /**
+   * Step 4 for the views whose `Parent` was removed: back to the layer the entity names, at its
+   * own pose, sorted by that layer's rule. An entity that left has no view and is skipped, and one
+   * this pass built hangs in the right place already.
+   */
+  const applyReparented = (): void => {
     if (state.reparented.size === 0) return;
 
     const entities = copyOf(state.reparented);
 
     state.reparented.clear();
-
-    for (const entity of entities) {
-      if (!built.has(entity)) withView(entity, view => rehang(entity, view));
-    }
+    eachEntity(entities, onParent);
   };
 
   /**
@@ -279,118 +407,110 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
   /**
    * The entities the tree check of this pass reads: the ones it built and the ones it hangs again (a new `Parent` or
-   * `Layer`, a `Parent` that left). Read before the change steps clear the set of the views that lost their `Parent`.
+   * `Layer`, a `Parent` that left, an orphan whose parent came). Read before the change steps clear the set of the views
+   * that lost their `Parent`.
    *
-   * @param built - The entities this pass has just built.
-   * @returns A new set, which the orphan step adds to.
+   * @returns A new set, which the orphan step adds to; `undefined` when none of them changed, and no set is made.
    */
-  const touchedBy = (built: ReadonlySet<Entity>): Set<Entity> => {
-    const touched = copyOf(built);
+  const touchedBy = (): Set<Entity> | undefined => {
     const ecs = ctx.deps.world.ecs;
+    const parents = ecs.changed(Parent);
+    const layers = ecs.changed(Layer);
 
-    for (const entity of ecs.changed(Parent)) touched.add(entity);
-    for (const entity of ecs.changed(Layer)) touched.add(entity);
+    if (
+      built.size === 0 &&
+      state.reparented.size === 0 &&
+      state.orphans.size === 0 &&
+      isEmptyList(parents) &&
+      isEmptyList(layers)
+    ) {
+      return undefined;
+    }
+
+    const touched = copyOf(built);
+
+    for (const entity of parents) touched.add(entity);
+    for (const entity of layers) touched.add(entity);
     for (const entity of state.reparented) touched.add(entity);
 
     return touched;
   };
 
   /**
-   * Step 4 for the components a plugin above draws its own way: one `update` per changed value.
-   *
-   * @param built - The entities this pass has just built, whose adapter wrote them already.
+   * Step 4 for the components a plugin above draws its own way: one `update` per changed value, an entity this pass
+   * built left out (its adapter wrote it already).
    */
-  const applyAdapterChanges = (built: ReadonlySet<Entity>): void => {
+  const applyAdapterChanges = (): void => {
     const ecs = ctx.deps.world.ecs;
 
-    for (const entry of state.adapters) {
-      for (const entity of ecs.changed(entry.component)) {
-        if (built.has(entity)) continue;
+    for (let index = 0; index < state.adapters.length; index += 1) {
+      adapterEntry = state.adapters[index];
 
-        withView(entity, view => {
-          if (view.display === entry) updateAdapterView(sctx, entity, view);
-        });
-      }
+      if (adapterEntry !== undefined) eachEntity(ecs.changed(adapterEntry.component), onAdapter);
     }
+
+    adapterEntry = undefined;
   };
 
   /**
-   * Runs work on the view of an entity, unless this pass built it a moment ago. Made once, not per pass: a still frame
-   * makes no closure.
-   *
-   * @param built - The entities this pass has just built.
-   * @param entity - The entity.
-   * @param work - What to do with its view.
+   * Step 4: only the entities the frame really changed, each list walked once with its visitor. An entity this pass
+   * built carries every value already and is left out.
    */
-  const writeUnbuilt = (
-    built: ReadonlySet<Entity>,
-    entity: Entity,
-    work: (view: View) => void
-  ): void => {
-    if (built.has(entity)) return;
+  const applyChanges = (): void => {
+    const ecs = ctx.deps.world.ecs;
 
-    withView(entity, work);
+    eachEntity(ecs.changed(Transform), onTransform);
+    eachEntity(ecs.changed(Sprite), onSprite);
+    eachEntity(ecs.changed(NineSlice), onNineSlice);
+    eachEntity(ecs.changed(Shape), onShape);
+    eachEntity(ecs.changed(Order), onOrder);
+    eachEntity(ecs.changed(Layer), onLayer);
+    eachEntity(ecs.changed(Parent), onParent);
+    eachEntity(ecs.changed(Display), onDisplay);
   };
 
   /**
-   * Step 4: only the entities the frame really changed.
+   * Tells whether the pass has nothing to do: nothing waits to be built, dropped, hung or resolved again, the layer list
+   * is the one built, and no watched component of any entity changed. A still frame returns on this, before any work.
    *
-   * @param built - The entities this pass has just built, which carry every value already.
+   * @returns True when the pass would change nothing.
    */
-  const applyChanges = (built: ReadonlySet<Entity>): void => {
+  const still = (): boolean => {
+    if (
+      state.removed.size > 0 ||
+      state.added.size > 0 ||
+      state.reparented.size > 0 ||
+      state.orphans.size > 0 ||
+      state.invalidated.size > 0 ||
+      state.viewlessEntries ||
+      state.outlinesStale ||
+      ctx.deps.world.projection.layers() !== state.layerList
+    ) {
+      return false;
+    }
+
     const ecs = ctx.deps.world.ecs;
 
-    // Placement: a moved entity gets a new transform and may sort differently.
-    for (const entity of ecs.changed(Transform)) {
-      writeUnbuilt(built, entity, view => {
-        applyTransform(sctx, entity, view);
-        resort(sctx, entity, view);
-      });
+    if (
+      !isEmptyList(ecs.changed(Transform)) ||
+      !isEmptyList(ecs.changed(Sprite)) ||
+      !isEmptyList(ecs.changed(NineSlice)) ||
+      !isEmptyList(ecs.changed(Shape)) ||
+      !isEmptyList(ecs.changed(Order)) ||
+      !isEmptyList(ecs.changed(Layer)) ||
+      !isEmptyList(ecs.changed(Parent)) ||
+      !isEmptyList(ecs.changed(Display))
+    ) {
+      return false;
     }
 
-    // Look: the drawn content of the view changed.
-    for (const entity of ecs.changed(Sprite)) {
-      writeUnbuilt(built, entity, view => {
-        applySprite(sctx, entity, view);
-        // A new size or fit changes the stretch the transform folds into the scale.
-        applyTransform(sctx, entity, view);
-      });
+    for (let index = 0; index < state.adapters.length; index += 1) {
+      const entry = state.adapters[index];
+
+      if (entry !== undefined && !isEmptyList(ecs.changed(entry.component))) return false;
     }
 
-    for (const entity of ecs.changed(NineSlice)) {
-      writeUnbuilt(built, entity, view => applyNineSlice(sctx, entity, view));
-    }
-
-    for (const entity of ecs.changed(Shape)) {
-      writeUnbuilt(built, entity, view => applyShape(sctx, entity, view));
-    }
-
-    // Draw order: only the position among the siblings changed.
-    for (const entity of ecs.changed(Order)) {
-      writeUnbuilt(built, entity, view => resort(sctx, entity, view));
-    }
-
-    // Tree position: the view moves to another layer or parent, and is placed and sorted there.
-    for (const entity of ecs.changed(Layer)) {
-      writeUnbuilt(built, entity, view => {
-        attach(sctx, entity, view);
-        resort(sctx, entity, view);
-      });
-    }
-
-    for (const entity of ecs.changed(Parent)) {
-      writeUnbuilt(built, entity, view => rehang(entity, view));
-    }
-
-    // A new `Display` object of the game replaces the old view outright.
-    for (const entity of ecs.changed(Display)) {
-      if (built.has(entity)) continue;
-
-      guard(entity, () => {
-        dropView(sctx, entity);
-        createView(sctx, entity);
-      });
-    }
+    return true;
   };
 
   /**
@@ -509,12 +629,15 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   /**
    * One pass: removed, layers, added, changed, orphans, invalidated. A despawned entity takes its filter
    * slots with it, also when its view left in an earlier pass; a live one keeps them for its next
-   * view. A still frame (nothing added, removed or left without a view) builds no set and walks no entry.
+   * view. A still frame (nothing changed, nothing waits) returns before any work and makes nothing.
    */
   const pass = (): void => {
     // The pass may change the tree: the unseen walks of the loops are taken again in the next frame. Cleared only when
     // it holds something: V8 gives an empty map a new table at every `clear()`, and the pass runs every frame.
     if (state.held.size > 0) state.held.clear();
+
+    // per frame: a still frame stops here, with no set, no closure and no iterator made.
+    if (still()) return;
 
     if (state.removed.size > 0) {
       for (const entity of state.removed) {
@@ -533,20 +656,22 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       deps.host.sceneChanged();
     }
 
-    const built = state.added.size === 0 ? nothingBuilt : buildParentFirst(takeAdded());
+    built = state.added.size === 0 ? nothingBuilt : buildParentFirst(takeAdded());
     // The tree check runs in a dev or an agent build only; the guard is inline so a release build drops it (U2.5).
     const touched =
       (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
       (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
-        ? touchedBy(built)
+        ? touchedBy()
         : undefined;
 
-    applyChanges(built);
-    applyReparented(built);
+    applyChanges();
+    applyReparented();
     attachOrphans(touched);
-    applyAdapterChanges(built);
+    applyAdapterChanges();
     applyInvalidated();
     applyOutlines();
+    // The built set goes with the pass.
+    built = nothingBuilt;
 
     if (touched !== undefined) checkTree(sctx, touched);
   };

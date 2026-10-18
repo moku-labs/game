@@ -14,6 +14,16 @@ function emptyMap<Key, Value>(): Map<Key, Value> {
 }
 
 /**
+ * Creates an empty weak table. It lives in its own non-exported function because lint rule L5
+ * refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty weak map.
+ */
+function emptyWeakMap<Key extends WeakKey, Value>(): WeakMap<Key, Value> {
+  return new WeakMap();
+}
+
+/**
  * Creates the initial projection state: nothing registered, nothing mounted, no layer list, no
  * running track and no driver, so every motion is instant until `anim` installs one.
  *
@@ -33,8 +43,14 @@ export function createProjectionState(): ProjectionState {
     keys: emptyMap(),
     keysByEntity: emptyMap(),
     mutes: emptyMap(),
+    ownedSets: emptyWeakMap(),
+    joinedMutes: emptyWeakMap(),
     converged: [],
     offHints: [],
-    leaving: emptyMap()
+    leaving: emptyMap(),
+    membershipVersion: 0,
+    moving: false,
+    owedLoops: 0,
+    sweptDespawns: 0
   };
 }

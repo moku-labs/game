@@ -34,22 +34,41 @@ const ZERO_SEED = 0x9e_37_79_b9;
  * ```
  */
 export function createRng(seed: number): Rng {
-  let state = seed >>> 0 || ZERO_SEED;
+  // The state is a uint32, mostly above the small integers V8 keeps unboxed: a typed cell holds it
+  // without a heap number per draw, where a closure variable would box every store.
+  const cell = new Uint32Array(1);
 
-  const next = (): number => {
+  cell[0] = seed >>> 0 || ZERO_SEED;
+
+  // One xorshift step, kept in the cell: it hands nothing back, so a call V8 does not inline boxes nothing either.
+  const advance = (): void => {
+    let state = cell[0] ?? ZERO_SEED;
+
     state ^= state << 13;
     state >>>= 0;
     state ^= state >>> 17;
     state ^= state << 5;
     state >>>= 0;
-
-    return state / UINT32;
+    cell[0] = state;
   };
 
   return {
-    next,
-    int: (count: number): number => Math.min(count - 1, Math.floor(next() * count)),
-    between: (min: number, max: number): number => min + (max - min) * next()
+    next: (): number => {
+      advance();
+
+      return (cell[0] ?? 0) / UINT32;
+    },
+    // A small integer comes back unboxed: the pick of a texture never makes a heap number.
+    int: (count: number): number => {
+      advance();
+
+      return Math.min(count - 1, Math.floor(((cell[0] ?? 0) / UINT32) * count));
+    },
+    between: (min: number, max: number): number => {
+      advance();
+
+      return min + (max - min) * ((cell[0] ?? 0) / UINT32);
+    }
   };
 }
 
@@ -191,7 +210,8 @@ function reachOf(config: ResolvedEmitterConfig, maxSide: number): number {
 
 /**
  * Bakes an effect over its resolved textures: the scale, alpha and tint of every 1/64 of a life,
- * the reach and the textures. Entry `k` holds the value at `t = k / 63`.
+ * the packed colour Pixi draws a particle with at each (the tint under the alpha byte), the reach
+ * and the textures. Entry `k` holds the value at `t = k / 63`.
  *
  * @param definition - The effect.
  * @param textures - Its textures, in the order of `config.textures`; at least one.
@@ -205,6 +225,7 @@ export function bakeEmitter(
   const scaleTable = new Float32Array(TABLE_SIZE);
   const alphaTable = new Float32Array(TABLE_SIZE);
   const tintTable = new Uint32Array(TABLE_SIZE);
+  const colorTable = new Uint32Array(TABLE_SIZE);
 
   for (let index = 0; index < TABLE_SIZE; index += 1) {
     const t = index / (TABLE_SIZE - 1);
@@ -212,6 +233,8 @@ export function bakeEmitter(
     scaleTable[index] = along(config.scale, t);
     alphaTable[index] = along(config.alpha, t);
     tintTable[index] = toBgr(mixColor(config.tint, t));
+    // The alpha as the table stores it (float32), under the byte of the tint: what a step reads, never recomputed.
+    colorTable[index] = ((tintTable[index] ?? 0) | (alphaByte(alphaTable[index] ?? 1) << 24)) >>> 0;
   }
 
   const maxSide = Math.max(...textures.map(texture => Math.max(texture.width, texture.height)));
@@ -222,6 +245,7 @@ export function bakeEmitter(
     scaleTable,
     alphaTable,
     tintTable,
+    colorTable,
     reach: reachOf(config, maxSide),
     textures: Object.freeze([...textures]),
     source: textures[0]?.source,

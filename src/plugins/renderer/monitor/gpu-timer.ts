@@ -191,7 +191,8 @@ function readFrame(timer: Timer, batch: Batch, view: Uint32Array, frame: number)
 
       sum += ms;
 
-      if (passes.written - sequence <= passes.capacity) {
+      // -1: the pass ring did not keep the pass (its section was off); the frame's sum still counts it.
+      if (sequence >= 0 && passes.written - sequence <= passes.capacity) {
         passes.gpuMs[sequence % passes.capacity] = ms;
       }
     } else {

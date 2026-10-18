@@ -46,7 +46,7 @@
  * | renderer | loadPixi | () => import("pixi.js") |
  * | renderer | debug | { nineSlice: false, verifyFrames: false, kept: true, overdraw: false }; shallow merge: a game that sets `debug` replaces the whole object, and a switch it leaves out is off, except `kept`, which stays on unless set to false; `verifyFrames` and `overdraw` work in dev and debug builds only |
  * | renderer | onDemand | false, every frame is drawn; true draws only a frame in which something changed |
- * | renderer | monitor | { budgetMs: "rate", frames: 1024, stillFrames: 60, stillMpx: 0.25, churnPerSecond: 4, churnSeconds: 3, churnAfterTrimMs: 1000 }, the performance log of an agent build and the thresholds of its `problem` rules; shallow merge: a game that sets `monitor` gives `budgetMs` and `frames`, a threshold it leaves out keeps its default |
+ * | renderer | monitor | { budgetMs: "rate", frames: 1024, stillFrames: 60, stillMpx: 0.25, churnPerSecond: 4, churnSeconds: 3, churnAfterTrimMs: 1000 }, the performance log of an agent build, the thresholds of its `problem` rules and `sections`, the sections it starts with (`MonitorSections`, every one on when left out); shallow merge: a game that sets `monitor` gives `budgetMs` and `frames`, a threshold it leaves out keeps its default, a section it leaves out is on |
  * | renderer | keptMb | 64, MiB the kept pictures may hold: a filtered view that did not change is drawn from its picture, the least recently drawn goes first; 0 keeps none |
  * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
  * | input | tapSlopPx | 12 |
@@ -290,6 +290,7 @@ export {
 export type { HudPartValue, OverlayValue } from "./plugins/renderer/components";
 // renderer: the performance log of an agent build, its frame ring and the record of one frame
 export {
+  MONITOR_SECTIONS,
   PERF_CAUSES,
   PERF_GAP_BUCKETS,
   PERF_LOG_VERSION,
@@ -307,6 +308,7 @@ export type {
   LongFrameEntry,
   MonitorConfig,
   MonitorCounts,
+  MonitorSections,
   OverlayEventDetail,
   OverlayWhat,
   PassKind,

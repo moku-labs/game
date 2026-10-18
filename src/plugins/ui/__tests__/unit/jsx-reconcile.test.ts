@@ -983,7 +983,7 @@ describe("what an equal description is resolved against", () => {
     expect(h.resolveElement).toHaveBeenCalledTimes(1);
     expect(h.touched()).toEqual([h.entity("go")]);
     expect(h.stored("go", Shape)).toMatchObject({ fill: 0x33_33_33 });
-    expect(h.root().dirty).toBe(true);
+    expect(h.root().dirty).toBe(false);
 
     vi.clearAllMocks();
     h.frame.reconcile();

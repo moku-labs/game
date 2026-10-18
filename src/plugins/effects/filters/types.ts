@@ -11,7 +11,7 @@ import type {
   PixiSprite,
   PixiTexture
 } from "../../renderer/types";
-import type { ComponentHandle, ComponentType } from "../../world/types";
+import type { ComponentHandle, ComponentType, Entity } from "../../world/types";
 
 /**
  * One uniform of a custom filter, as declared: a number is an `f32` (`float` in GLSL), `{ color }`
@@ -506,6 +506,8 @@ export type FilterBody =
       readonly filter: InstanceType<PixiModule["BlurFilter"]>;
       /** The fields the setters were last given; compared before a write. */
       readonly applied: Record<string, FilterField>;
+      /** The keys of `applied`, listed once: a compare walks them by index, with no `Object.keys` per frame. */
+      readonly fields: readonly string[];
       passes: number;
     }
   | {
@@ -513,6 +515,8 @@ export type FilterBody =
       readonly filter: InstanceType<PixiModule["ColorMatrixFilter"]>;
       /** The fields the setters were last given; compared before a write. */
       readonly applied: Record<string, FilterField>;
+      /** The keys of `applied`, listed once: a compare walks them by index, with no `Object.keys` per frame. */
+      readonly fields: readonly string[];
       passes: number;
     }
   | {
@@ -520,6 +524,8 @@ export type FilterBody =
       readonly filter: InstanceType<PixiModule["NoiseFilter"]>;
       /** The fields the setters were last given; compared before a write. */
       readonly applied: Record<string, FilterField>;
+      /** The keys of `applied`, listed once: a compare walks them by index, with no `Object.keys` per frame. */
+      readonly fields: readonly string[];
       passes: number;
     }
   | {
@@ -528,6 +534,8 @@ export type FilterBody =
       readonly sprite: PixiSprite;
       /** The fields the setters were last given; compared before a write. */
       readonly applied: Record<string, FilterField>;
+      /** The keys of `applied`, listed once: a compare walks them by index, with no `Object.keys` per frame. */
+      readonly fields: readonly string[];
       /** The asset key the map sprite shows now. */
       map: string;
       passes: number;
@@ -537,6 +545,8 @@ export type FilterBody =
       readonly filter: InstanceType<PixiModule["AlphaFilter"]>;
       /** The fields the setters were last given; compared before a write. */
       readonly applied: Record<string, FilterField>;
+      /** The keys of `applied`, listed once: a compare walks them by index, with no `Object.keys` per frame. */
+      readonly fields: readonly string[];
       passes: number;
     };
 
@@ -640,16 +650,23 @@ export type CheckState = {
 /**
  * What the filter sync keeps for one entity: the kinds it carries, one instance per kind, the
  * instances waiting to be destroyed after the next assignment, the slots last handed to
- * `renderer.sync.filters.set`, the core kinds whose component changed this frame, the
- * instances of this frame in their sorted order (one array, reused every frame), and the one
- * `renderer.invalidate` call a visible filter write of the frame makes.
+ * `renderer.sync.filters.set`, the run in which each core kind's component last changed, the
+ * instances of this frame in their sorted order (one array, reused every frame), the one
+ * `renderer.invalidate` call a visible filter write of the frame makes, and whether the next run
+ * syncs it.
  */
 export type FilteredView = {
+  /** The entity the record is kept for. */
+  readonly entity: Entity;
   readonly kinds: Set<string>;
   readonly instances: Map<string, FilterInstance>;
   readonly retired: FilterInstance[];
   assigned: readonly FilterSlot[];
-  readonly changed: Set<string>;
+  /**
+   * Per kind `index`, the run of the filter sync in which its component was last seen changed; read only for a
+   * Pixi-core kind, which is written only in such a run. A number per kind, so marking allocates nothing.
+   */
+  readonly marks: number[];
   readonly placed: FilterInstance[];
   /** True once `renderer.invalidate` was called for this view in the current frame. */
   signalled: boolean;
@@ -659,4 +676,29 @@ export type FilteredView = {
   readonly areaSent: AreaBox;
   /** The `enabled` switches of the placed instances when the area was last judged, one bit each in placed order. */
   areaMask: number;
+  /**
+   * The next run of the filter sync brings the view up to date: a filter component of it changed, came or left, its
+   * map was retired, a kind of it still waits for its instance, or a chain left places to destroy.
+   */
+  dirty: boolean;
+  /** Forgotten: out of `State.views`; the next run drops it from `State.viewList`. */
+  gone: boolean;
+};
+
+/**
+ * Where the filter sync stands between two runs. It syncs only the views marked dirty, and judges the full-screen
+ * budget only when something it depends on moved.
+ */
+export type FilterSyncState = {
+  /** The current run, counted from 1: a core kind's change mark holds the run it was made in. */
+  round: number;
+  /**
+   * Every view syncs at the next run: a debug switch turned a kind off or on, or a filter broke or ran its chains at a
+   * new resolution inside a render, where the view it belongs to is not known.
+   */
+  all: boolean;
+  /** The viewport width the full-screen budget was last judged at; -1 before the first judgement. */
+  width: number;
+  /** The viewport height the full-screen budget was last judged at; -1 before the first judgement. */
+  height: number;
 };

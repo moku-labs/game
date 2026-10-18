@@ -68,6 +68,9 @@ component is set, so `changed()` names none of its components.
 - **A style is a value.** Write it inline or keep one from `defineStyle`. An object changed in place
   is the same object, so the change is not seen until that element is resolved again.
 - **A patch that throws** is done in full at the next render.
+- **A pointer or focus flag restyles one element.** A press, a release, the mouse over it and the
+  keyboard focus resolve the style of that element and write its components; no view runs and its
+  root is not diffed. A view never reads these flags, so the next render finds them in step.
 
 `UiCounters` counts both passes: `styled` is one per element whose style was resolved or written
 onto its layout node, `written` one per live element whose components were written again. On a
@@ -509,6 +512,10 @@ the views lose that `Parent` and fall back to their layer; after a restore the n
 in the same frame. An exiting view keeps its host while its exit plays. A `guide` whose target is a
 hosted view cuts its hole where the view is drawn: its pose through the `Parent` chain, and its
 nine-slice or sprite size times that scale.
+
+The hosting step walks the hosts only in a frame where something it reads moved: a host came, went,
+became live or was patched, a view of a projection came or went, or a view lost its `Parent` or its
+`Held`. An idle frame compares two numbers and walks no view.
 
 ```tsx
 <stack

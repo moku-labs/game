@@ -411,11 +411,13 @@ export function stopAnim(state: State): void {
   state.loopsHeld = undefined;
 
   state.tracks.clear();
+  state.trackList.length = 0;
   state.owner.clear();
   state.offsets.clear();
   state.bases.clear();
   state.additive.clear();
   state.timelines.clear();
+  state.timelineList.length = 0;
   state.registry.clear();
   state.markListeners.clear();
   state.overMaxTracks = false;

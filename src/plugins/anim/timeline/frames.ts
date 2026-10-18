@@ -66,6 +66,9 @@ export function frameIndexAt(
   return Math.min(Math.max(raw, 0), keys.length - 1);
 }
 
+/** The one patch every frame key is written with: `ecs.set` copies it, so it is refilled, never kept. */
+const FRAME_PATCH = { texture: "" };
+
 /**
  * Writes one texture key onto the sprite of an entity.
  *
@@ -74,5 +77,7 @@ export function frameIndexAt(
  * @param key - The texture key.
  */
 export function writeFrame(rt: TimelineRuntime, entity: Entity, key: string): void {
-  rt.write(entity, asComponent(Sprite), { texture: key });
+  // per key change: the shared patch, refilled; no object per write.
+  FRAME_PATCH.texture = key;
+  rt.write(entity, asComponent(Sprite), FRAME_PATCH);
 }

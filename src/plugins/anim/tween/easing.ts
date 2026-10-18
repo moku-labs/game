@@ -22,6 +22,71 @@ export const EASE_NAMES = [
 ] as const;
 
 /**
+ * Eases the normalised time in one cell of a `Float64Array`, in place: `applyEase` for the frame
+ * step. It takes no number and returns none, so a frame boxes no number whether V8 inlines it or
+ * not. A curve nobody knows is linear, and a function ease is called with the same time.
+ *
+ * @param ease - The curve to apply.
+ * @param cells - The cells; `cells[at]` holds the normalised time and receives the eased fraction.
+ * @param at - The index of the cell.
+ * @example
+ * ```ts
+ * const cells = Float64Array.of(0.5);
+ * easeCell("out", cells, 0); // cells[0] === 0.75
+ * ```
+ */
+export function easeCell(ease: Ease, cells: Float64Array, at: number): void {
+  const t = cells[at] ?? 0;
+
+  if (typeof ease === "function") {
+    cells[at] = ease(t);
+
+    return;
+  }
+
+  switch (ease) {
+    case "in": {
+      cells[at] = t * t;
+      break;
+    }
+    case "out": {
+      cells[at] = 1 - (1 - t) * (1 - t);
+      break;
+    }
+    case "inOut": {
+      cells[at] = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      break;
+    }
+    case "inCubic": {
+      cells[at] = t ** 3;
+      break;
+    }
+    case "outCubic": {
+      cells[at] = 1 - (1 - t) ** 3;
+      break;
+    }
+    case "inOutCubic": {
+      cells[at] = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
+      break;
+    }
+    case "inBack": {
+      cells[at] = (BACK + 1) * t ** 3 - BACK * t * t;
+      break;
+    }
+    case "outBack": {
+      cells[at] = 1 + (BACK + 1) * (t - 1) ** 3 + BACK * (t - 1) ** 2;
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+}
+
+/** The cell `applyEase` eases in. */
+const EASED = new Float64Array(1);
+
+/**
  * Eases a normalised time. A curve nobody knows is linear, and a function ease is called with
  * the same normalised time.
  *
@@ -35,35 +100,8 @@ export const EASE_NAMES = [
  * ```
  */
 export function applyEase(ease: Ease, t: number): number {
-  if (typeof ease === "function") return ease(t);
+  EASED[0] = t;
+  easeCell(ease, EASED, 0);
 
-  switch (ease) {
-    case "in": {
-      return t * t;
-    }
-    case "out": {
-      return 1 - (1 - t) * (1 - t);
-    }
-    case "inOut": {
-      return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-    }
-    case "inCubic": {
-      return t ** 3;
-    }
-    case "outCubic": {
-      return 1 - (1 - t) ** 3;
-    }
-    case "inOutCubic": {
-      return t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
-    }
-    case "inBack": {
-      return (BACK + 1) * t ** 3 - BACK * t * t;
-    }
-    case "outBack": {
-      return 1 + (BACK + 1) * (t - 1) ** 3 + BACK * (t - 1) ** 2;
-    }
-    default: {
-      return t;
-    }
-  }
+  return EASED[0] ?? 0;
 }

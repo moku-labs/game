@@ -1,6 +1,7 @@
 /**
  * @file renderer/sync — how a sized sprite fills its box. Pure numbers: the box, the stretch from
- * texture to box, the anchor the Pixi sprite needs, and the crop of a `"cover"` sprite.
+ * texture to box, the anchor the Pixi sprite needs, and the crop of a `"cover"` sprite, each written
+ * into an object the caller keeps, so a sprite written every frame makes no object.
  */
 import type { SpriteValue } from "../components";
 import type { Point } from "../types";
@@ -17,13 +18,13 @@ import type { HitBox } from "./types";
 export type Size = { width: number; height: number };
 
 /**
- * Where a sprite draws and what it shows.
+ * Where a sprite draws and what it shows: one object a caller keeps and `layoutSpriteInto` writes in place.
  *
  * @example
  * ```ts
  * const layout: SpriteLayout = {
  *   box: { width: 100, height: 100 }, drawScale: { x: 0.5, y: 0.5 },
- *   anchor: { x: 0.5, y: 0.5 }, crop: undefined
+ *   anchor: { x: 0.5, y: 0.5 }, crop: { x: 0, y: 0, width: 0, height: 0 }, cover: false
  * };
  * ```
  */
@@ -34,49 +35,68 @@ export type SpriteLayout = {
   drawScale: Point;
   /** The anchor of the Pixi sprite, so the drawn texture lands where the fit puts it. */
   anchor: Point;
-  /** The part of the texture a `"cover"` sprite shows, in texture pixels; else `undefined`. */
-  crop: HitBox | undefined;
+  /** The part of the texture a `"cover"` sprite shows, in texture pixels; read only when `cover` is true. */
+  crop: HitBox;
+  /** True for a `"cover"` sprite: it draws `crop` of its texture. */
+  cover: boolean;
 };
 
 /**
- * The box a sprite fills: its own size on an axis where the component says 0.
+ * Creates a layout to write into, every field present.
  *
- * @param texture - The size of the texture.
- * @param value - The sprite component.
- * @returns The box, in local units.
- * @example
- * ```ts
- * boxOf({ width: 200, height: 100 }, { ...Sprite.defaults, width: 400 });
- * // { width: 400, height: 100 }
- * ```
+ * @returns A layout of a 0 x 0 box at scale 1.
  */
-export function boxOf(texture: Size, value: Readonly<SpriteValue>): Size {
+export function createSpriteLayout(): SpriteLayout {
   return {
-    width: value.width > 0 ? value.width : texture.width,
-    height: value.height > 0 ? value.height : texture.height
+    box: { width: 0, height: 0 },
+    drawScale: { x: 1, y: 1 },
+    anchor: { x: 0, y: 0 },
+    crop: { x: 0, y: 0, width: 0, height: 0 },
+    cover: false
   };
 }
 
 /**
- * The box around an anchor: the part of the box left and above the anchor point is negative.
+ * Writes the box a sprite fills: its own size on an axis where the component says 0.
  *
- * @param anchor - The anchor, a fraction of the box.
- * @param box - The box.
- * @returns The box in local units, with the anchor at the origin.
+ * @param out - The size to write.
+ * @param texture - The size of the texture.
+ * @param value - The sprite component.
+ * @returns `out`, in local units.
  * @example
  * ```ts
- * anchoredBox({ x: 0.5, y: 0 }, { width: 64, height: 32 });
+ * boxInto({ width: 0, height: 0 }, { width: 200, height: 100 }, { ...Sprite.defaults, width: 400 });
+ * // { width: 400, height: 100 }
+ * ```
+ */
+export function boxInto(out: Size, texture: Readonly<Size>, value: Readonly<SpriteValue>): Size {
+  out.width = value.width > 0 ? value.width : texture.width;
+  out.height = value.height > 0 ? value.height : texture.height;
+
+  return out;
+}
+
+/**
+ * Writes the box around an anchor: the part of the box left and above the anchor point is negative.
+ *
+ * @param out - The box to write.
+ * @param anchor - The anchor, a fraction of the box.
+ * @param box - The box.
+ * @returns `out`, in local units, with the anchor at the origin.
+ * @example
+ * ```ts
+ * anchoredBoxInto({ x: 0, y: 0, width: 0, height: 0 }, { x: 0.5, y: 0 }, { width: 64, height: 32 });
  * // { x: -32, y: 0, width: 64, height: 32 }
  * ```
  */
-export function anchoredBox(anchor: Point, box: Size): HitBox {
+export function anchoredBoxInto(out: HitBox, anchor: Readonly<Point>, box: Readonly<Size>): HitBox {
   // Subtracting from 0 keeps a zero anchor at +0 instead of the -0 a negation gives.
-  return {
-    x: 0 - anchor.x * box.width,
-    y: 0 - anchor.y * box.height,
-    width: box.width,
-    height: box.height
-  };
+  out.x = 0 - anchor.x * box.width;
+  out.y = 0 - anchor.y * box.height;
+  out.width = box.width;
+  out.height = box.height;
+
+  return out;
 }
 
 /**
@@ -97,23 +117,35 @@ function centredAnchor(anchor: number, box: number, drawn: number): number {
 }
 
 /**
- * Lays a sprite out in its box. A texture with no area is drawn as it is.
+ * Lays a sprite out in its box, written into a layout the caller keeps: a sprite written every frame (an alpha tween)
+ * makes no object. A texture with no area is drawn as it is.
  *
+ * @param out - The layout to write.
  * @param texture - The size of the texture it draws.
  * @param value - The sprite component.
- * @returns The box, the stretch, the anchor and the crop.
+ * @returns `out`: the box, the stretch, the anchor and, for a `"cover"` sprite, the crop.
  * @example
  * ```ts
  * const value = { ...Sprite.defaults, width: 100, height: 100 };
- * layoutSprite({ width: 200, height: 100 }, value).drawScale; // { x: 0.5, y: 1 }
+ * layoutSpriteInto(createSpriteLayout(), { width: 200, height: 100 }, value).drawScale; // { x: 0.5, y: 1 }
  * ```
  */
-export function layoutSprite(texture: Size, value: Readonly<SpriteValue>): SpriteLayout {
-  const box = boxOf(texture, value);
-  const anchor = { x: value.anchor.x, y: value.anchor.y };
+export function layoutSpriteInto(
+  out: SpriteLayout,
+  texture: Readonly<Size>,
+  value: Readonly<SpriteValue>
+): SpriteLayout {
+  const box = boxInto(out.box, texture, value);
+
+  out.anchor.x = value.anchor.x;
+  out.anchor.y = value.anchor.y;
+  out.cover = false;
 
   if (texture.width <= 0 || texture.height <= 0) {
-    return { box, drawScale: { x: 1, y: 1 }, anchor, crop: undefined };
+    out.drawScale.x = 1;
+    out.drawScale.y = 1;
+
+    return out;
   }
 
   const scaleX = box.width / texture.width;
@@ -122,15 +154,12 @@ export function layoutSprite(texture: Size, value: Readonly<SpriteValue>): Sprit
   if (value.fit === "contain") {
     const scale = Math.min(scaleX, scaleY);
 
-    return {
-      box,
-      drawScale: { x: scale, y: scale },
-      anchor: {
-        x: centredAnchor(anchor.x, box.width, texture.width * scale),
-        y: centredAnchor(anchor.y, box.height, texture.height * scale)
-      },
-      crop: undefined
-    };
+    out.drawScale.x = scale;
+    out.drawScale.y = scale;
+    out.anchor.x = centredAnchor(value.anchor.x, box.width, texture.width * scale);
+    out.anchor.y = centredAnchor(value.anchor.y, box.height, texture.height * scale);
+
+    return out;
   }
 
   if (value.fit === "cover") {
@@ -138,18 +167,19 @@ export function layoutSprite(texture: Size, value: Readonly<SpriteValue>): Sprit
     const width = box.width / scale;
     const height = box.height / scale;
 
-    return {
-      box,
-      drawScale: { x: scale, y: scale },
-      anchor,
-      crop: {
-        x: (texture.width - width) / 2,
-        y: (texture.height - height) / 2,
-        width,
-        height
-      }
-    };
+    out.drawScale.x = scale;
+    out.drawScale.y = scale;
+    out.crop.x = (texture.width - width) / 2;
+    out.crop.y = (texture.height - height) / 2;
+    out.crop.width = width;
+    out.crop.height = height;
+    out.cover = true;
+
+    return out;
   }
 
-  return { box, drawScale: { x: scaleX, y: scaleY }, anchor, crop: undefined };
+  out.drawScale.x = scaleX;
+  out.drawScale.y = scaleY;
+
+  return out;
 }

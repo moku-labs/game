@@ -14,11 +14,12 @@ import { clearCounts } from "./counts";
 import { createGlTimer } from "./gl-timer";
 import { createGpuTimer } from "./gpu-timer";
 import { displayOf, longFrameLine, markLine, thermalLine } from "./log";
-import type { PerfChange } from "./log-types";
+import type { MonitorSections, PerfChange } from "./log-types";
 import { observeLongFrames } from "./long-frames";
 import { attachGlPasses, createPassSink } from "./passes";
 import { resetProblems } from "./problems";
 import { CHANGED, createFrameRing } from "./ring";
+import { bitsOf, listsOf, switched } from "./sections";
 import { deliver, flushPerf, writeEvent } from "./stream";
 import { resetTicks } from "./ticks";
 import { MEASURE, type MonitorSinks, type PerfCtx, type PerfState } from "./types";
@@ -163,7 +164,7 @@ function attachFirst(pc: PerfCtx): void {
   perf.frame = ctx.deps.time.snapshot().frame + 1;
   perf.lastFlushAt = Number.NaN;
   ctx.state.host.cleanups.push(ctx.deps.time.measure(measure => commitFrame(pc, measure)));
-  observeLongFrames(perf.longFrames, record => {
+  observeLongFrames(perf.longFrames, pc.sinks, record => {
     if (perf.listeners.length > 0) deliver(pc, longFrameLine(pc, record));
   });
   host.onResolution((from, to, reason) => {
@@ -323,4 +324,52 @@ export function stopPerf(perf: PerfState, sinks: MonitorSinks): void {
   sinks.inFrame = false;
   clearCounts(perf.counts);
   resetProblems({ perf, sinks });
+}
+
+/**
+ * Switches the sections of a page with control: the answer changes now, the bits at the start of the next frame, and a
+ * `sections` event says which are on and off. A switch that changes nothing writes nothing.
+ *
+ * @param pc - The perf context.
+ * @param next - The switches asked for.
+ * @returns The sections from the next frame on.
+ */
+export function switchSections(
+  pc: PerfCtx,
+  next: Partial<MonitorSections>
+): Readonly<MonitorSections> {
+  const { perf, sinks } = pc;
+  const sections = switched(perf.sections, next);
+
+  if (sections === perf.sections) return sections;
+
+  perf.sections = sections;
+  sinks.sectionsNext = bitsOf(sections);
+  writeEvent(pc, "sections", listsOf(sections));
+
+  return sections;
+}
+
+/**
+ * Refuses a switch on a read-only page: the sections stay, and a switch that would have changed them is logged with
+ * `reason: "read-only"`.
+ *
+ * @param pc - The perf context.
+ * @param next - The switches asked for.
+ * @returns The sections as they are.
+ */
+export function refuseSections(
+  pc: PerfCtx,
+  next: Partial<MonitorSections>
+): Readonly<MonitorSections> {
+  const { sections } = pc.perf;
+
+  if (switched(sections, next) !== sections) {
+    pc.ctx.log.warn("renderer: monitor.sections is read-only on this page", {
+      reason: "read-only",
+      asked: { ...next }
+    });
+  }
+
+  return sections;
 }

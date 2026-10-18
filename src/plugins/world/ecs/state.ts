@@ -28,21 +28,26 @@ export function createEcsState(): EcsState {
     byOwner: emptyMap(),
     types: emptyMap(),
     stores: emptyMap(),
+    typeStores: emptyMap(),
     resources: emptyMap(),
+    resourceSlots: emptyMap(),
     engineResources: emptyMap(),
     systems: { input: [], animate: [], layout: [], sync: [] },
     running: undefined,
     commands: [],
     changed: emptyMap(),
+    changeFrame: 1,
     added: emptyMap(),
     removed: emptyMap(),
     ownerLeft: [],
     mode: "live",
     offFrame: [],
     frameSnapshot: undefined,
+    phaseContext: undefined,
     history: undefined,
     timing: undefined,
     timingSlots: emptyMap(),
-    walkReported: false
+    walkReported: false,
+    despawns: 0
   };
 }

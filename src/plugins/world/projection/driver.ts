@@ -7,6 +7,7 @@ import type { AnyComponent, Entity } from "../ecs/types";
 import type {
   MotionHandle,
   ProjectionCtx,
+  ProjectionState,
   Track,
   TrackOptions,
   TrackSegment,
@@ -14,31 +15,75 @@ import type {
 } from "./types";
 
 /**
- * The empty field set of an unmuted component. It lives in its own non-exported function because
- * lint rule L5 refuses a collection built inside an exported declaration.
+ * The muted fields of a component nobody mutes and nobody owns: one shared set, so a driver's ask
+ * on every frame allocates nothing. Read-only by its type.
+ */
+const EMPTY_SET: ReadonlySet<string> = Object.freeze(new Set<string>());
+
+/**
+ * Creates an empty set of names. It lives in its own non-exported function because lint rule L5
+ * refuses a collection built inside an exported declaration.
  *
- * @returns An empty set of field names.
+ * @returns An empty set.
  */
 function noFields(): Set<string> {
   return new Set();
 }
 
 /**
- * Joins the fields a driver holds and the fields a plugin owns, for the same L5 reason.
+ * The owned fields of a component type as a set, made the first time the world asks about the
+ * type, then kept with the world's projection state.
  *
- * @param driven - The fields a running driver holds, if any.
- * @param owned - The fields the component type gives to a plugin.
- * @returns Both, as one set.
- * @example
- * ```ts
- * joinFields(new Set(["x"]), ["resolved"]); // Set { "x", "resolved" }
- * ```
+ * @param state - The projection branch of the plugin state.
+ * @param owned - The type's frozen `owned` list.
+ * @returns The same set for every ask.
  */
-function joinFields(
-  driven: ReadonlySet<string> | undefined,
-  owned: readonly string[]
-): Set<string> {
-  return new Set([...(driven ?? []), ...owned]);
+function ownedSetOf(state: ProjectionState, owned: readonly string[]): ReadonlySet<string> {
+  const known = state.ownedSets.get(owned);
+
+  if (known !== undefined) return known;
+
+  const made: ReadonlySet<string> = Object.freeze(new Set(owned));
+
+  state.ownedSets.set(owned, made);
+
+  return made;
+}
+
+/**
+ * Forgets the joined set of one mute's field set, because `mute()` or its release changed it.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param driven - The field set of one muted component of one entity.
+ */
+export function forgetJoined(state: ProjectionState, driven: ReadonlySet<string>): void {
+  state.joinedMutes.delete(driven);
+}
+
+/**
+ * The fields a mute holds joined with the fields a type owns, built once and kept with the mute's
+ * field set until a mute or its release changes it.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param driven - The fields a mute holds.
+ * @param owned - The owned fields of the component's type.
+ * @returns Both, as one set.
+ */
+function joinedOf(
+  state: ProjectionState,
+  driven: ReadonlySet<string>,
+  owned: ReadonlySet<string>
+): ReadonlySet<string> {
+  const known = state.joinedMutes.get(driven);
+
+  if (known?.owned === owned) return known.joined;
+
+  const joined = new Set(driven);
+
+  for (const field of owned) joined.add(field);
+  state.joinedMutes.set(driven, { owned, joined });
+
+  return joined;
 }
 
 /** What a component no loop adds to answers: no offset on any field. */
@@ -78,12 +123,16 @@ export function mutedFields(
   entity: Entity,
   name: string
 ): ReadonlySet<string> {
-  const driven = pctx.ctx.state.projection.mutes.get(entity)?.get(name);
-  const owned = pctx.deps.ecs.typeOf(name)?.owned ?? [];
+  const state = pctx.ctx.state.projection;
+  const driven = state.mutes.get(entity)?.get(name);
+  const owned = pctx.deps.ecs.typeOf(name)?.owned;
 
-  if (owned.length === 0) return driven ?? noFields();
+  // Per frame per track: a shared or kept set is handed out, none is made.
+  if (owned === undefined || owned.length === 0) return driven ?? EMPTY_SET;
 
-  return joinFields(driven, owned);
+  const ownedSet = ownedSetOf(state, owned);
+
+  return driven === undefined || driven.size === 0 ? ownedSet : joinedOf(state, driven, ownedSet);
 }
 
 /**
@@ -214,7 +263,30 @@ export function cancelTracks(pctx: ProjectionCtx, entity: Entity): void {
   const state = pctx.ctx.state.projection;
 
   state.driver?.cancelAll(entity);
-  state.tracks = state.tracks.filter(track => track.entity !== entity && track.handle.active());
+  keepTracks(state.tracks, entity);
+}
+
+/**
+ * Compacts the track table in place: the tracks that still run stay, in order, and the tracks of
+ * `entity` go. The tail is popped, never cut with `length`: cutting releases the array's store,
+ * and the next track would allocate it again.
+ *
+ * @param tracks - The track table.
+ * @param entity - The entity whose tracks go; none when left out.
+ */
+function keepTracks(tracks: Track[], entity?: Entity): void {
+  let kept = 0;
+
+  for (let index = 0; index < tracks.length; index += 1) {
+    const track = tracks[index];
+
+    if (track === undefined || track.entity === entity || !track.handle.active()) continue;
+
+    tracks[kept] = track;
+    kept += 1;
+  }
+
+  while (tracks.length > kept) tracks.pop();
 }
 
 /**
@@ -223,9 +295,8 @@ export function cancelTracks(pctx: ProjectionCtx, entity: Entity): void {
  * @param pctx - Domain context of the projection module.
  */
 export function forgetEndedTracks(pctx: ProjectionCtx): void {
-  const state = pctx.ctx.state.projection;
-
-  state.tracks = state.tracks.filter(track => track.handle.active());
+  // Per frame: compacted in place, no new table.
+  keepTracks(pctx.ctx.state.projection.tracks);
 }
 
 /**

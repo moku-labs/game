@@ -279,8 +279,12 @@ export function createKeptApi(
         for (const record of state.records) record.dirtyS1 = true;
       }
 
-      for (const entity of deps.demand.marked()) collectOne(entity);
-      for (const entity of deps.demand.loose()) collectOne(entity);
+      const marked = deps.demand.marked();
+      const loose = deps.demand.loose();
+
+      // per frame: the marks walked by index, no iterator.
+      for (let index = 0; index < marked.size; index += 1) collectOne(marked.at(index));
+      for (let index = 0; index < loose.size; index += 1) collectOne(loose.at(index));
     },
 
     flush: (): void => {

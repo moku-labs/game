@@ -13,7 +13,13 @@ import { cancelCaptures, captureFrame, serveCaptures } from "./capture";
 import { pageNow } from "./clock";
 import { openFrame } from "./commit";
 import { readCounts, registerCount } from "./counts";
-import type { FrameRing, PerfChange, PerfEventName, PerfLogLine } from "./log-types";
+import type {
+  FrameRing,
+  MonitorSections,
+  PerfChange,
+  PerfEventName,
+  PerfLogLine
+} from "./log-types";
 import { countGlPasses } from "./passes";
 import {
   attachPerf,
@@ -22,11 +28,14 @@ import {
   noteChange,
   notePath,
   notePauses,
+  refuseSections,
   stopPerf,
+  switchSections,
   writeMark,
   writeThermal
 } from "./perf";
 import { EMPTY_RING } from "./ring";
+import { ALL_SECTIONS } from "./sections";
 import { flushPerf, subscribe, writeEvent } from "./stream";
 import {
   type Captured,
@@ -39,7 +48,7 @@ import {
   type RenderStats
 } from "./types";
 import { BYTES_PER_MB, cellF64, roundTo } from "./units";
-import { beginFrame, endFrame, resetWindow, STALE_MS } from "./window";
+import { beginStaged, endStaged, resetWindow, STALE_MS } from "./window";
 
 /**
  * The unsubscribe `stream` answers in a build without the agent flag: it does nothing.
@@ -144,7 +153,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     stats: (): RenderStats => {
       const usage = deps.host.textures();
       const counts = deps.sync.counts();
-      const drawing = state.lastStart !== undefined && clock.now() - state.lastStart <= STALE_MS;
+      const drawing = !Number.isNaN(state.lastStart) && clock.now() - state.lastStart <= STALE_MS;
       const stats: RenderStats = {
         fps: drawing ? roundTo(state.fps, 1) : 0,
         drawn: drawing ? roundTo(state.drawnFps, 1) : 0,
@@ -241,6 +250,23 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       }
     },
 
+    sections: (next?: Partial<MonitorSections>): Readonly<MonitorSections> => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        if (next === undefined) return pc.perf.sections;
+        // A switch changes what the page measures: a dev page or one with control (`--debug`) only.
+        if (
+          (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+          (typeof __MOKU_GAME_CONTROL__ !== "undefined" && __MOKU_GAME_CONTROL__)
+        ) {
+          return switchSections(pc, next);
+        }
+
+        return refuseSections(pc, next);
+      }
+
+      return ALL_SECTIONS;
+    },
+
     counts: {
       register: (name: string, read: () => number): (() => void) => {
         if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
@@ -259,8 +285,10 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     },
 
     begin: (): void => {
-      // A closed window reads the takes of its second: `stats().kept.retakes`.
-      if (beginFrame(state, clock.now())) deps.kept.drainTakes();
+      // per frame: the clock reading staged, not passed (a double handed to a call is boxed). A closed window reads the
+      // takes of its second: `stats().kept.retakes`.
+      state.staged[0] = clock.now();
+      if (beginStaged(state)) deps.kept.drainTakes();
       // A draw between two frames, as the extract of a capture, is not a draw of this frame.
       state.draws.frame = 0;
       // The passes of this frame, counted in every build (F8); a pass between frames is not.
@@ -274,7 +302,8 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
 
     end: (drawn: boolean): void => {
       // The engine's redraws are counted in every build (an increment is cheaper than a guard) and taken every frame.
-      endFrame(state, clock.now(), deps.sync.takeRedraws(), sinks.rebuildsWindow);
+      state.staged[0] = clock.now();
+      endStaged(state, deps.sync.takeRedraws(), sinks.rebuildsWindow);
       sinks.rebuildsWindow = 0;
       // A skipped frame keeps the draw calls of the last drawn one.
       if (drawn) state.draws.last = state.draws.frame;

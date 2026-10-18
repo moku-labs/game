@@ -8,14 +8,16 @@ import type { AnimCtx } from "../types";
 import { addedOffsets, cancelTracksOf, handleOf, startTrack } from "./advance";
 import type { StepMotion } from "./types";
 
+/** The empty field set of every track nobody muted: one frozen set, shared, read every frame. */
+const NO_FIELDS: ReadonlySet<string> = Object.freeze(new Set<string>());
+
 /**
- * The empty field set of a track nobody muted. It lives in its own function because lint rule L5
- * refuses a collection built inside an exported declaration.
+ * The muted fields of a timeline step's track: none.
  *
- * @returns An empty set of field names.
+ * @returns The shared empty set; a frame builds no set.
  */
 function noFields(): ReadonlySet<string> {
-  return new Set();
+  return NO_FIELDS;
 }
 
 /**

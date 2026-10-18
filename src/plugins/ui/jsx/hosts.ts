@@ -8,6 +8,7 @@
 import { Held } from "../../input/components";
 import { Parent } from "../../renderer/components";
 import { rootPoseOf } from "../../renderer/sync/pose";
+import { membershipVersion } from "../../world/membership";
 import type { Entity } from "../../world/types";
 import type { ElementLookup, Rect } from "../layout/types";
 import type { UiCtx } from "../types";
@@ -24,7 +25,14 @@ const NO_HOSTS: readonly string[] = Object.freeze([]);
  * @returns True for an array of strings.
  */
 function isNameList(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every(name => typeof name === "string");
+  if (!Array.isArray(value)) return false;
+
+  // A loop, not `every` with an arrow: the slots read the names, and no closure is built per call.
+  for (const name of value) {
+    if (typeof name !== "string") return false;
+  }
+
+  return true;
 }
 
 /**
@@ -45,14 +53,40 @@ export function hostsOf(node: DescriptionNode): readonly string[] {
 }
 
 /**
- * Keeps the set of host elements in step with one element that entered or was patched.
+ * Moves the hosts version on: the next full hosting step and the next slot assignment run. Called
+ * when a host comes, goes, becomes live or is patched, and when a view loses its `Parent` or its
+ * `Held`, which may free it for its host.
+ *
+ * @param state - The jsx state.
+ */
+export function hostsMoved(state: JsxState): void {
+  state.hostsVersion += 1;
+}
+
+/**
+ * Keeps the set of host elements in step with one element that entered or was patched. A host,
+ * or an element that stopped hosting, moves the hosts version: its names may have changed.
  *
  * @param state - The jsx state.
  * @param element - The element.
  */
 export function trackHost(state: JsxState, element: Element): void {
-  if (hostsOf(element.node).length > 0) state.hosts.add(element.entity);
-  else state.hosts.delete(element.entity);
+  if (hostsOf(element.node).length > 0) {
+    state.hosts.add(element.entity);
+    hostsMoved(state);
+  } else if (state.hosts.delete(element.entity)) {
+    hostsMoved(state);
+  }
+}
+
+/**
+ * Takes an element that leaves out of the host set; the hosts version moves when it hosted.
+ *
+ * @param state - The jsx state.
+ * @param entity - The element entity.
+ */
+export function dropHost(state: JsxState, entity: Entity): void {
+  if (state.hosts.delete(entity)) hostsMoved(state);
 }
 
 /**
@@ -145,7 +179,9 @@ function unparent(ctx: UiCtx, view: Entity, host: Entity): void {
 }
 
 /**
- * The hosting step of every reconcile. A view the host no longer holds falls back to its layer; a
+ * The hosting step of every reconcile. It walks only when something it reads moved since its last
+ * walk: the hosts version of the jsx state, or the membership version of the world's projections.
+ * A view the host no longer holds falls back to its layer; a
  * live view without a parent, and not held by a drag, gets the host as its parent. With `only`,
  * the step of the solve: the release is left to the reconcile and only the hosts that became live
  * in this solve are walked, so their views hang under them in the frame they are first drawn and
@@ -160,7 +196,17 @@ function unparent(ctx: UiCtx, view: Entity, host: Entity): void {
  */
 export function hostViews(ctx: UiCtx, state: JsxState, only?: ReadonlySet<Entity>): void {
   if (state.hosts.size === 0 && state.hosted.size === 0) return;
-  if (only === undefined) releaseLeft(ctx, state);
+
+  if (only === undefined) {
+    // Per frame: two numbers decide; an idle frame walks no host and no view.
+    const membership = membershipVersion(ctx.deps.world);
+
+    if (state.hostsVersion === state.hostsSeen && membership === state.membershipSeen) return;
+
+    state.hostsSeen = state.hostsVersion;
+    state.membershipSeen = membership;
+    releaseLeft(ctx, state);
+  }
 
   // Only the host elements are walked, never the whole screen.
   for (const host of only ?? state.hosts) {
@@ -178,10 +224,14 @@ export function hostViews(ctx: UiCtx, state: JsxState, only?: ReadonlySet<Entity
  * @param state - The jsx state.
  */
 function releaseLeft(ctx: UiCtx, state: JsxState): void {
-  state.released.clear();
+  // A `clear()` allocates a new table, also on an empty set.
+  if (state.released.size > 0) state.released.clear();
 
-  for (const [view, host] of state.hosted) {
-    if (stillHosts(ctx, state, view, host)) continue;
+  // The keys, not `[view, host]` entries: no pair is built per view.
+  for (const view of state.hosted.keys()) {
+    const host = state.hosted.get(view);
+
+    if (host === undefined || stillHosts(ctx, state, view, host)) continue;
 
     state.hosted.delete(view);
     unparent(ctx, view, host);
@@ -198,10 +248,11 @@ function releaseLeft(ctx: UiCtx, state: JsxState): void {
 function hostNames(ctx: UiCtx, state: JsxState, element: Element): void {
   const names = hostsOf(element.node);
 
-  for (const [index, name] of names.entries()) {
-    if (names.indexOf(name) === index && ownerOf(state, name) === element.entity) {
-      parentViews(ctx, state, name, element.entity);
-    }
+  for (let index = 0; index < names.length; index += 1) {
+    const name = names[index];
+
+    if (name === undefined || names.indexOf(name) !== index) continue;
+    if (ownerOf(state, name) === element.entity) parentViews(ctx, state, name, element.entity);
   }
 }
 

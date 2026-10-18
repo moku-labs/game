@@ -6,7 +6,15 @@
  * browser's entry list, never per frame.
  */
 import type { LongFrameEntry } from "./log-types";
-import type { LongFrameRecord, LongFrameRing, PerfState, ScriptRecord } from "./types";
+import { sectionOn } from "./sections";
+import {
+  type LongFrameRecord,
+  type LongFrameRing,
+  type MonitorSinks,
+  type PerfState,
+  type ScriptRecord,
+  SECTION
+} from "./types";
 import { BYTES_PER_MB, cellF32, cellF64, roundTo } from "./units";
 
 /** The entry types the observer takes, the better first. */
@@ -129,13 +137,16 @@ export function writeLongFrame(ring: LongFrameRing, entry: PerformanceEntry): Lo
 
 /**
  * Observes the long frames from the first attach on: `long-animation-frame` where the browser has it, else
- * `longtask` (no script attribution), else nothing. `buffered: true`, so the boot entries arrive too.
+ * `longtask` (no script attribution), else nothing. `buffered: true`, so the boot entries arrive too. While the
+ * `longFrames` section is off the entries are dropped: none is kept and none delivered.
  *
  * @param ring - The long-frame ring; it keeps the type observed and the disconnect.
+ * @param sinks - The sinks: their section bits say whether long frames are kept.
  * @param deliver - Called with each record the observer writes.
  */
 export function observeLongFrames(
   ring: LongFrameRing,
+  sinks: MonitorSinks,
   deliver: (record: LongFrameRecord) => void
 ): void {
   const Observer = globalThis.PerformanceObserver;
@@ -153,6 +164,8 @@ export function observeLongFrames(
   if (type === undefined) return;
 
   const observer = new Observer(list => {
+    if (!sectionOn(sinks, SECTION.longFrames)) return;
+
     for (const entry of list.getEntries()) deliver(writeLongFrame(ring, entry));
   });
 
@@ -270,12 +283,20 @@ export function annotateLongFrame(perf: PerfState, slot: number): boolean {
 }
 
 /**
- * The heap the page uses, in bytes: Chromium's `performance.memory.usedJSHeapSize`, read through a type guard.
+ * Chromium's `performance` with its `memory`: the one field the heap read takes. Absent elsewhere.
+ */
+type MemoryPerformance = Performance & { readonly memory?: { readonly usedJSHeapSize: number } };
+
+/**
+ * The heap the page uses, in bytes: Chromium's `performance.memory.usedJSHeapSize`. Read every frame: one property
+ * load of one shape, no guard shared with the entry readers, so the read stays monomorphic.
  *
  * @returns The bytes, or NaN elsewhere.
  */
 export function usedHeapBytes(): number {
-  return numberField(field(globalThis.performance, "memory"), "usedJSHeapSize");
+  const memory = (globalThis.performance as MemoryPerformance).memory;
+
+  return memory === undefined ? Number.NaN : memory.usedJSHeapSize;
 }
 
 /**

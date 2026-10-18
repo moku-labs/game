@@ -344,25 +344,32 @@ function mapTexture(
 
 /**
  * The fields a core kind's setters are given: a copy of the stored value without `enabled` and
- * `order`.
+ * `order`, and its keys, listed once.
  *
  * @param value - The stored filter value.
- * @returns A fresh record, kept by the instance as `applied`.
+ * @returns A fresh record, kept by the instance as `applied`, and its keys as `fields`.
  * @example
  * ```ts
- * appliedOf({ enabled: true, order: 2, alpha: 0.4 }); // { alpha: 0.4 }
+ * appliedOf({ enabled: true, order: 2, alpha: 0.4 }); // { applied: { alpha: 0.4 }, fields: ["alpha"] }
  * ```
  */
-function appliedOf(value: Readonly<FilterFields>): Record<string, FilterField> {
+function appliedOf(value: Readonly<FilterFields>): {
+  applied: Record<string, FilterField>;
+  fields: string[];
+} {
   const applied: Record<string, FilterField> = {};
+  const fields: string[] = [];
 
   for (const field of Object.keys(value)) {
     const held = value[field];
 
-    if (field !== "enabled" && field !== "order" && held !== undefined) applied[field] = held;
+    if (field !== "enabled" && field !== "order" && held !== undefined) {
+      applied[field] = held;
+      fields.push(field);
+    }
   }
 
-  return applied;
+  return { applied, fields };
 }
 
 /**
@@ -392,7 +399,7 @@ function createDisplacement(
     resolution: CANVAS_RESOLUTION
   });
 
-  return { kind: "displacement", filter, sprite, map, applied: appliedOf(value), passes: 1 };
+  return { kind: "displacement", filter, sprite, map, ...appliedOf(value), passes: 1 };
 }
 
 /**
@@ -424,14 +431,14 @@ function createCore(
 
       filter.repeatEdgePixels = value.repeatEdgePixels === true;
 
-      return { kind: "blur", filter, applied: appliedOf(value), passes: 2 * quality };
+      return { kind: "blur", filter, ...appliedOf(value), passes: 2 * quality };
     }
     case "colorMatrix": {
       const filter = new pixi.ColorMatrixFilter({ resolution: CANVAS_RESOLUTION });
 
       composeMatrix(filter, value);
 
-      return { kind: "colorMatrix", filter, applied: appliedOf(value), passes: 1 };
+      return { kind: "colorMatrix", filter, ...appliedOf(value), passes: 1 };
     }
     case "noise": {
       const filter = new pixi.NoiseFilter({
@@ -440,7 +447,7 @@ function createCore(
         resolution: CANVAS_RESOLUTION
       });
 
-      return { kind: "noise", filter, applied: appliedOf(value), passes: 1 };
+      return { kind: "noise", filter, ...appliedOf(value), passes: 1 };
     }
     case "displacement": {
       return createDisplacement(ectx, pixi, value, probeMap);
@@ -452,7 +459,7 @@ function createCore(
           alpha: numberOf(value, "alpha"),
           resolution: CANVAS_RESOLUTION
         }),
-        applied: appliedOf(value),
+        ...appliedOf(value),
         passes: 1
       };
     }
@@ -639,9 +646,15 @@ function bindInput(instance: OursInstance, index: number, last: PixiTexture): vo
  */
 function unbindInputs(pixi: PixiModule, instance: OursInstance): void {
   const { resources } = instance.filter;
+  const { inputs } = instance.definition;
   const empty = pixi.Texture.EMPTY.source;
 
-  for (const input of instance.definition.inputs) {
+  // per apply: an index over the frozen list; `for…of` over a frozen array allocates its iterator.
+  // eslint-disable-next-line unicorn/no-for-loop -- the hot path walks a frozen list by index
+  for (let index = 0; index < inputs.length; index += 1) {
+    const input = inputs[index];
+
+    if (input === undefined) continue;
     if (resources[input.texture] !== empty) resources[input.texture] = empty;
     if (resources[input.sampler] !== empty.style) resources[input.sampler] = empty.style;
   }
@@ -676,7 +689,7 @@ function applyInputs(
   const { resolution } = input.source;
 
   if (inputs.held === undefined && resolution !== inputs.resolution) {
-    evaluate(ectx, pixi, instance, inputs, resolution);
+    evaluateInRender(ectx, pixi, instance, inputs, resolution);
   }
 
   // A chain the new resolution broke draws like any broken instance.
@@ -728,7 +741,7 @@ function drawInto(
   const { resolution } = picture.source;
 
   if (!instance.broken && resolution !== inputs.resolution) {
-    evaluate(ectx, pixi, instance, inputs, resolution);
+    evaluateInRender(ectx, pixi, instance, inputs, resolution);
   }
 
   if (instance.broken) return;
@@ -967,7 +980,15 @@ function writeStep(place: Place, step: FilterStep): boolean {
 
   if (uniforms === undefined) return false;
 
-  for (const uniform of place.definition.uniforms) {
+  const specs = place.definition.uniforms;
+
+  // An index over the frozen list: `for…of` over a frozen array allocates its iterator.
+  // eslint-disable-next-line unicorn/no-for-loop -- a tween's chain walks a frozen list by index
+  for (let index = 0; index < specs.length; index += 1) {
+    const uniform = specs[index];
+
+    if (uniform === undefined) continue;
+
     const field = step.uniforms?.[uniform.name] ?? defaultOf(step.stage, uniform.name);
 
     if (writeField(uniforms, uniform, field, true)) changed = true;
@@ -1110,6 +1131,28 @@ function evaluate(
   instance.passes = passes;
 
   if (changed) inputs.version += 1;
+}
+
+/**
+ * Runs the chains at a new resolution from inside a render, where the view the instance belongs to is not known: the
+ * next sync looks at every view, so the one that holds it hands over its new passes and stage filters and destroys
+ * the places that left.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param instance - The instance.
+ * @param inputs - Its chains.
+ * @param resolution - The resolution of the texture the view is drawn into.
+ */
+function evaluateInRender(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  instance: OursInstance,
+  inputs: InputsState,
+  resolution: number
+): void {
+  evaluate(ectx, pixi, instance, inputs, resolution);
+  ectx.state.filterSync.all = true;
 }
 
 /**
@@ -1359,8 +1402,16 @@ function oursDiffer(
   value: Readonly<FilterFields>
 ): boolean {
   if (instance.group !== undefined) {
-    for (const uniform of definition.uniforms) {
-      if (writeUniform(instance.group.uniforms, uniform, value, false)) return true;
+    const specs = definition.uniforms;
+
+    // per sync of a changed view: an index over the frozen list; `for…of` over a frozen array allocates its iterator.
+    // eslint-disable-next-line unicorn/no-for-loop -- the hot path walks a frozen list by index
+    for (let index = 0; index < specs.length; index += 1) {
+      const uniform = specs[index];
+
+      if (uniform !== undefined && writeUniform(instance.group.uniforms, uniform, value, false)) {
+        return true;
+      }
     }
   }
 
@@ -1385,8 +1436,15 @@ function writeOurs(
   value: Readonly<FilterFields>
 ): void {
   if (instance.group !== undefined) {
-    for (const uniform of definition.uniforms)
-      writeUniform(instance.group.uniforms, uniform, value, true);
+    const specs = definition.uniforms;
+
+    // per write: an index over the frozen list; `for…of` over a frozen array allocates its iterator.
+    // eslint-disable-next-line unicorn/no-for-loop -- the hot path walks a frozen list by index
+    for (let index = 0; index < specs.length; index += 1) {
+      const uniform = specs[index];
+
+      if (uniform !== undefined) writeUniform(instance.group.uniforms, uniform, value, true);
+    }
   }
 
   if (typeof definition.padding !== "string") return;
@@ -1421,10 +1479,13 @@ function sameField(a: FilterField | undefined, b: FilterField | undefined): bool
  * @returns True when a write would call a setter with a new value.
  */
 function coreDiffers(instance: CoreInstance, value: Readonly<FilterFields>): boolean {
-  for (const field of Object.keys(instance.applied)) {
+  const { fields, applied } = instance;
+
+  // per sync of a changed view: the keys listed once, a plain array; `Object.keys` would make one every call.
+  for (const field of fields) {
     if (instance.kind === "displacement" && field === "map") {
       if (mapOf(value) !== instance.map) return true;
-    } else if (!sameField(instance.applied[field], value[field])) {
+    } else if (!sameField(applied[field], value[field])) {
       return true;
     }
   }
@@ -1457,11 +1518,13 @@ function mapOf(value: Readonly<FilterFields>): string {
 function writeCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<FilterFields>): void {
   setCore(ectx, instance, value);
 
-  // Copied in place: the record was made once with the instance.
-  for (const field of Object.keys(instance.applied)) {
+  const { fields, applied } = instance;
+
+  // Copied in place: the record and its keys were made once with the instance.
+  for (const field of fields) {
     const next = value[field];
 
-    if (next !== undefined) instance.applied[field] = next;
+    if (next !== undefined) applied[field] = next;
   }
 }
 
@@ -1532,7 +1595,8 @@ function staleArea(instance: FilterInstance): void {
  * A broken instance stays off whatever its component says. Switching on or off is a visible
  * change; so is a new value of a filter that is on. A filter that is off and stays off still gets
  * its new values written, so it is current when it comes back on, but asks for nothing: an off
- * filter draws no pixel. Ours compare every frame; a core kind only when its component changed.
+ * filter draws no pixel. Ours compare on every sync of their view (a view syncs when something of it changed); a core
+ * kind only when its component changed.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param instance - The instance.

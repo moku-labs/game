@@ -11,7 +11,13 @@ import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Entity, Api as WorldApi } from "../world/types";
-import type { CheckState, FilteredView, FilterKind, WarmProbe } from "./filters/types";
+import type {
+  CheckState,
+  FilteredView,
+  FilterKind,
+  FilterSyncState,
+  WarmProbe
+} from "./filters/types";
 import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particles/types";
 
 /**
@@ -68,6 +74,15 @@ export type State = {
   checks: CheckState;
   /** Entity to the filters the sync keeps for it. */
   views: Map<Entity, FilteredView>;
+  /**
+   * The records of `views` in the order they were first seen: the dense list the filter sync walks by index. A
+   * forgotten record stays, `gone`, until the next run drops it.
+   */
+  viewList: FilteredView[];
+  /** The filter kinds in registration order, one per `index`: the change sets the filter sync reads, by index. */
+  kindList: FilterKind[];
+  /** Where the filter sync stands between two runs. */
+  filterSync: FilterSyncState;
   /** Keys of the one-shot warnings: `"emitter:fx.x"`, `"texture:board.cell"`, `"atlas:fx.x"`. */
   warned: Set<string>;
   /** Whether each budget warning is in force, so a crossing warns once. */

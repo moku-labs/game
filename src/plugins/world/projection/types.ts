@@ -482,6 +482,8 @@ export type View = {
   entity: Entity;
   projection: string;
   key: string;
+  /** `{ projection, key }`, made once with the view: what `keyOf` answers, every call the same object. */
+  readonly address: ProjectionKey;
   item: unknown;
   /** The last output of `view(item)`, by component name: what the picture equals at rest. */
   rest: Map<string, AnyComponentValue>;
@@ -572,6 +574,14 @@ export type ProjectionKey = { projection: string; key: string };
 export type Dirty = { causes: Cause[]; roots: Set<Root>; force: boolean };
 
 /**
+ * A mute's fields joined with a type's owned fields, and the owned set they were joined with.
+ */
+export type JoinedFields = {
+  readonly owned: ReadonlySet<string>;
+  readonly joined: ReadonlySet<string>;
+};
+
+/**
  * projection module state.
  */
 export type ProjectionState = {
@@ -599,11 +609,33 @@ export type ProjectionState = {
   keysByEntity: Map<Entity, ProjectionKey>;
   /** Entity to component name to the fields another writer owns. */
   mutes: Map<Entity, Map<string, Set<string>>>;
+  /** The owned fields of each component type as a set, by the type's frozen `owned` list: made once. */
+  ownedSets: WeakMap<readonly string[], ReadonlySet<string>>;
+  /** The muted and the owned fields joined, by the mute's field set: dropped when `mute()` or its release changes it. */
+  joinedMutes: WeakMap<ReadonlySet<string>, JoinedFields>;
   /** The `onConverged` listeners: the owners of elements, told after a restore or a load. */
   converged: Array<() => void>;
   offHints: Array<() => void>;
   /** The cause of every view despawned since the last sweep, so a removal hook can still ask. */
   leaving: Map<Entity, MotionCause>;
+  /**
+   * Moves on every time a view enters `live`, leaves it, or leaves `leaving`, and on a clear:
+   * `ui` hosts the views of a projection again only when it moved (`membershipVersion()` of
+   * `world/membership.ts`).
+   */
+  membershipVersion: number;
+  /**
+   * A live view may hold a running handle: set by every view handle made, cleared by a sweep that
+   * walked the live views and found none moving. While it is false the sweep walks no live view.
+   */
+  moving: boolean;
+  /** Views were marked as owing their loop since the last start of the owed loops. */
+  owedLoops: number;
+  /**
+   * The despawn count of the ecs when the sweep last looked for dead elements; -1 after a new
+   * key, so the next sweep looks.
+   */
+  sweptDespawns: number;
 };
 
 /**
@@ -848,7 +880,8 @@ export type ProjectionApi = {
 
   /**
    * The projection and key of an entity. Also answers for a view in the despawn queue and for an
-   * element registered with `registerKey`.
+   * element registered with `registerKey`. A view answers the address it keeps for its life, the
+   * same frozen object every call, so asking every frame allocates nothing.
    *
    * @param entity - The entity to ask about.
    * @returns The projection name and the key, or `undefined`.
@@ -856,6 +889,7 @@ export type ProjectionApi = {
    * ```ts
    * // `renderer.sync` labels its display objects for the inspector.
    * app.world.projection.keyOf(1_048_576); // { projection: "board.items", key: "i7" }
+   * app.world.projection.keyOf(1_048_576) === app.world.projection.keyOf(1_048_576); // true
    * app.world.projection.keyOf(42); // undefined: not a view
    * ```
    */

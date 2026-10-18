@@ -6,8 +6,10 @@
 import type { MonitorConfig } from "../types";
 import { PERF_GAP_BUCKETS } from "./log-types";
 import { createEventRing, createFrameRing } from "./ring";
+import { ALL_SECTIONS, bitsOf, switched } from "./sections";
 import { createTickEstimate } from "./ticks";
 import {
+  COST,
   COUNT,
   type CompileRing,
   type CountTable,
@@ -19,7 +21,8 @@ import {
   OWNER_SLOTS,
   type OwnerTable,
   type PerfState,
-  type ProblemState
+  type ProblemState,
+  SECTIONS_ALL
 } from "./types";
 
 /** Compiles the compile ring keeps. */
@@ -219,13 +222,15 @@ export function createSinks(draws?: DrawCounter): MonitorSinks {
     compiles: createCompileRing(),
     passes: undefined,
     measuring: false,
-    rebuildsWindow: 0
+    rebuildsWindow: 0,
+    sections: SECTIONS_ALL,
+    sectionsNext: SECTIONS_ALL
   };
 }
 
 /**
- * Creates the performance monitor of an agent build. Nothing large is allocated here: the ring
- * gets its capacity at the first attach, once per renderer state.
+ * Creates the performance monitor of an agent build, its sections as the config names them (the sinks take their
+ * bits). Nothing large is allocated here: the ring gets its capacity at the first attach, once per renderer state.
  *
  * @param config - `renderer.monitor`.
  * @param sinks - The sinks of the monitor state.
@@ -233,13 +238,19 @@ export function createSinks(draws?: DrawCounter): MonitorSinks {
  */
 export function createPerfState(config: Readonly<MonitorConfig>, sinks: MonitorSinks): PerfState {
   const events = createEventRing();
+  const sections = switched(ALL_SECTIONS, config.sections);
+
+  sinks.sections = bitsOf(sections);
+  sinks.sectionsNext = sinks.sections;
 
   return {
     budget: config.budgetMs,
     frames: config.frames,
     ring: createFrameRing(0, events, sinks.kindNames),
     scratch: new Float32Array(0),
-    staged: new Float64Array(2),
+    staged: new Float64Array(3),
+    sections,
+    sectionsMs: new Float64Array(COST.base + 1),
     ticks: createTickEstimate(),
     rate: undefined,
     drawn: false,
@@ -290,8 +301,9 @@ export function createMonitorState(config: Readonly<MonitorConfig>): MonitorStat
   const sinks = createSinks(draws);
 
   return {
-    frameStart: undefined,
-    lastStart: undefined,
+    frameStart: Number.NaN,
+    lastStart: Number.NaN,
+    staged: new Float64Array(1),
     windowMs: 0,
     intervals: 0,
     workMs: 0,

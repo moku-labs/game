@@ -94,6 +94,8 @@ export function breakInstance(
   detail?: BrokenDetail
 ): void {
   instance.broken = true;
+  // The view the instance belongs to is not known here (a render broke it): the next sync looks at every view.
+  ectx.state.filterSync.all = true;
 
   const fallback = kind?.source === "wgsl" ? kind.definition.fallback : undefined;
 

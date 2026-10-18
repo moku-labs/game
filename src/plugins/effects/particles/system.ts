@@ -3,22 +3,43 @@
  * when an `Emitter` names an effect, retires it when the effect changes or the component leaves,
  * steps the instances and the orphans, and keeps the particle budget. Under reduced motion a
  * stream stands still. The renderer draws nothing headless, so neither does this system.
+ *
+ * Per frame it allocates nothing: the host's root pose is written into one scratch pose, the
+ * emission offset into one scratch point, and a local-space container's `Transform` is written
+ * only when the host's pose moved.
  */
 import { isDev } from "../../flow/doors/dev";
-import { Transform } from "../../renderer/components";
-import { rootPoseOf } from "../../renderer/sync/pose";
+import { Transform, type TransformValue } from "../../renderer/components";
+import { rootPoseInto } from "../../renderer/sync/pose";
 import type { PixiModule, PixiTexture, Point } from "../../renderer/types";
 import { system } from "../../world/ecs/define";
-import type { AnySystem, Entity } from "../../world/types";
+import type { AnySystem, EcsApi, Entity } from "../../world/types";
 import type { EffectsCtx } from "../types";
 import { bakeEmitter } from "./bake";
 import { Emitter } from "./component";
 import { createInstance, destroyInstance } from "./instance";
-import { standsStill, stepInstance } from "./step";
-import type { BakedEmitter, EmitterInstance, EmitterValue } from "./types";
+import { standsStill, stepBy } from "./step";
+import type { BakedEmitter, EmitterInstance, EmitterValue, StepTime } from "./types";
 
 /** The origin of an emission that does not follow its host. */
 const STILL: Readonly<Point> = Object.freeze({ x: 0, y: 0 });
+
+/** The host's root pose of the emitter being run: one object for the module, written in place every frame. */
+const POSE: TransformValue = { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } };
+
+/** Where a world-space stream emits from this frame, written in place; the step reads it at once and keeps nothing. */
+const OFFSET: Point = { x: 0, y: 0 };
+
+/** The four numbers of a local-space container's move, handed to `ecs.set`, which copies them: reused. */
+const MOVE: Pick<TransformValue, "x" | "y" | "rotation" | "scale"> = {
+  x: 0,
+  y: 0,
+  rotation: 0,
+  scale: 1
+};
+
+/** The live particles `countParticles` sums, read by its module-level callback: no closure per frame. */
+const tally = { live: 0 };
 
 /**
  * Warns once per key. The key is kept in `state.warned`, so a bundle that comes back can let it
@@ -133,16 +154,56 @@ function retireInstance(ectx: EffectsCtx, instance: EmitterInstance): void {
  */
 function followHost(ectx: EffectsCtx, instance: EmitterInstance): Readonly<Point> {
   const ecs = ectx.deps.world.ecs;
-  const pose = rootPoseOf(ecs, instance.host);
+  const pose = rootPoseInto(ecs, instance.host, POSE);
 
   if (instance.space === "world") {
-    return { x: pose.x - instance.origin.x, y: pose.y - instance.origin.y };
+    OFFSET.x = pose.x - instance.origin.x;
+    OFFSET.y = pose.y - instance.origin.y;
+
+    return OFFSET;
   }
 
   // A container spawned this frame is attached when the phase ends; its Transform is this pose.
-  if (ecs.has(instance.entity, Transform)) ecs.set(instance.entity, Transform, pose);
+  const placed = ecs.get(instance.entity, Transform);
+
+  if (placed !== undefined) movePlaced(ecs, instance.entity, placed, pose);
 
   return STILL;
+}
+
+/**
+ * Writes the host's root pose into a local-space container's `Transform` when it differs from what the container
+ * holds: a still host writes nothing, so the renderer has nothing to sync. The pivot gets an object of its own only
+ * when it moved; the four numbers go through the reused `MOVE`.
+ *
+ * @param ecs - The world.
+ * @param entity - The container's entity.
+ * @param placed - Its stored `Transform`.
+ * @param pose - The host's root pose of this frame.
+ */
+function movePlaced(
+  ecs: EcsApi,
+  entity: Entity,
+  placed: Readonly<TransformValue>,
+  pose: Readonly<TransformValue>
+): void {
+  if (placed.pivot.x !== pose.pivot.x || placed.pivot.y !== pose.pivot.y) {
+    ecs.set(entity, Transform, { pivot: { x: pose.pivot.x, y: pose.pivot.y } });
+  }
+
+  const still =
+    placed.x === pose.x &&
+    placed.y === pose.y &&
+    placed.rotation === pose.rotation &&
+    placed.scale === pose.scale;
+
+  if (still) return;
+
+  MOVE.x = pose.x;
+  MOVE.y = pose.y;
+  MOVE.rotation = pose.rotation;
+  MOVE.scale = pose.scale;
+  ecs.set(entity, Transform, MOVE);
 }
 
 /**
@@ -184,24 +245,25 @@ function startInstance(
  *
  * @param ectx - Domain context of the effects plugin.
  * @param instance - The instance.
- * @param deltaMs - Milliseconds of game time.
+ * @param time - The frame's time: `delta` milliseconds of game time.
  * @param offset - Where the emission is, in the container's space.
  * @param emitting - True while the stream emits.
  */
 function stepShown(
   ectx: EffectsCtx,
   instance: EmitterInstance,
-  deltaMs: number,
+  time: StepTime,
   offset: Readonly<Point>,
   emitting: boolean
 ): void {
+  const moves = time.delta > 0;
   const held = instance.container.particleChildren.length > 0;
 
-  if (deltaMs > 0 && held) ectx.deps.renderer.invalidate(instance.entity);
+  if (moves && held) ectx.deps.renderer.invalidate(instance.entity);
 
-  stepInstance(instance, deltaMs, offset, emitting);
+  stepBy(instance, time, offset, emitting);
 
-  if (deltaMs > 0 && !held && instance.container.particleChildren.length > 0) {
+  if (moves && !held && instance.container.particleChildren.length > 0) {
     ectx.deps.renderer.invalidate(instance.entity);
   }
 }
@@ -215,7 +277,7 @@ function stepShown(
  * @param pixi - The module the renderer loaded.
  * @param host - The entity.
  * @param emitter - Its `Emitter`.
- * @param deltaMs - Milliseconds of game time.
+ * @param time - The frame's time: `delta` milliseconds of game time.
  * @param reducedMotion - What `anim.reducedMotion()` answers this frame.
  */
 function runEmitter(
@@ -223,7 +285,7 @@ function runEmitter(
   pixi: PixiModule,
   host: Entity,
   emitter: Readonly<EmitterValue>,
-  deltaMs: number,
+  time: StepTime,
   reducedMotion: boolean
 ): void {
   const { state } = ectx;
@@ -241,7 +303,7 @@ function runEmitter(
   const offset = followHost(ectx, instance);
 
   if (!standsStill(instance, reducedMotion)) {
-    stepShown(ectx, instance, deltaMs, offset, emitter.active);
+    stepShown(ectx, instance, time, offset, emitter.active);
   }
 }
 
@@ -249,14 +311,17 @@ function runEmitter(
  * Steps the orphans, which emit nothing, and destroys the ones that ran empty.
  *
  * @param ectx - Domain context of the effects plugin.
- * @param deltaMs - Milliseconds of game time.
+ * @param time - The frame's time: `delta` milliseconds of game time.
  */
-function runOrphans(ectx: EffectsCtx, deltaMs: number): void {
+function runOrphans(ectx: EffectsCtx, time: StepTime): void {
   const { state } = ectx;
+
+  // per frame: nothing to copy while no orphan flies.
+  if (state.orphans.size === 0) return;
 
   // eslint-disable-next-line unicorn/no-useless-spread -- an orphan that ran empty leaves the set
   for (const orphan of [...state.orphans]) {
-    stepShown(ectx, orphan, deltaMs, STILL, false);
+    stepShown(ectx, orphan, time, STILL, false);
 
     if (orphan.container.particleChildren.length > 0) continue;
 
@@ -266,17 +331,30 @@ function runOrphans(ectx: EffectsCtx, deltaMs: number): void {
 }
 
 /**
+ * Adds the live particles of one instance to `tally`.
+ *
+ * @param instance - A running instance or an orphan.
+ */
+function addLive(instance: EmitterInstance): void {
+  tally.live += instance.container.particleChildren.length;
+}
+
+/**
  * Counts the live particles and warns once each time they cross `config.maxParticles` upward.
  *
  * @param ectx - Domain context of the effects plugin.
  */
 function countParticles(ectx: EffectsCtx): void {
   const { state, config } = ectx;
-  let live = 0;
 
-  for (const instance of state.instances.values())
-    live += instance.container.particleChildren.length;
-  for (const orphan of state.orphans) live += orphan.container.particleChildren.length;
+  // per frame: `forEach` with a module-level callback, no iterator and no closure.
+  tally.live = 0;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+  state.instances.forEach(addLive);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, read without an iterator, by a module-level callback
+  state.orphans.forEach(addLive);
+
+  const live = tally.live;
 
   state.particles = live;
 
@@ -309,11 +387,13 @@ export function createParticleSystem(ectx: EffectsCtx): AnySystem {
 
       const reducedMotion = ectx.deps.anim.reducedMotion();
 
+      // per frame: the frame's time is handed down as the object it is, never as a number (a double handed to a
+      // call is boxed).
       for (const [entity, emitter] of rows) {
-        runEmitter(ectx, pixi, entity, emitter, context.time.delta, reducedMotion);
+        runEmitter(ectx, pixi, entity, emitter, context.time, reducedMotion);
       }
 
-      runOrphans(ectx, context.time.delta);
+      runOrphans(ectx, context.time);
       countParticles(ectx);
     }
   });

@@ -11,6 +11,7 @@ import { formatBound, isTextFormat, unitOf } from "./format";
 import { layoutRuns } from "./measure";
 import { parseTags } from "./tags";
 import type {
+  SeenText,
   Size,
   State,
   TextBind,
@@ -225,23 +226,12 @@ function bindTypeOf(ctx: TextCtx, name: string): AnyComponent | undefined {
 }
 
 /**
- * What one run of the system shares between its labels: the trusted time, read on the first
- * countdown that asks and reset at the top of every run, so the clock is read at most once a frame.
+ * What one run of the system shares between its labels: the locale, read once at the top of the
+ * run, the trusted time, read on the first countdown that asks, so neither is read per label, and
+ * the duration formatter, made once with the system. `now` is `NaN` until read: the field stays a
+ * double, and writing it keeps nothing.
  */
-type Frame = { now: number | undefined };
-
-/**
- * The trusted time of this frame, read from `clock` on the first call of the run.
- *
- * @param ctx - Domain context of the text plugin.
- * @param frame - What this run of the system shares.
- * @returns The current moment in epoch milliseconds.
- */
-function frameNow(ctx: TextCtx, frame: Frame): number {
-  frame.now ??= ctx.deps.clock.now();
-
-  return frame.now;
-}
+type Frame = { now: number; locale: string; duration: (ms: number) => string };
 
 /**
  * Tells whether a bind shows the time left of a `Countdown`, which is derived, not read.
@@ -265,9 +255,15 @@ function isCountdownLeft(bind: TextBind): boolean {
  */
 function readBound(ctx: TextCtx, entity: Entity, bind: TextBind, frame: Frame): unknown {
   if (isCountdownLeft(bind)) {
-    const until = ctx.deps.world.ecs.get(entity, Countdown)?.until;
+    // Per frame: `until` is an epoch moment past the small-integer range, so it is read straight
+    // into the subtraction. Joined with `undefined` first (`get(…)?.until`) it is boxed, 16 B.
+    const countdown = ctx.deps.world.ecs.get(entity, Countdown);
 
-    return typeof until === "number" ? Math.max(0, until - frameNow(ctx, frame)) : undefined;
+    if (countdown === undefined || typeof countdown.until !== "number") return undefined;
+
+    if (Number.isNaN(frame.now)) frame.now = ctx.deps.clock.now();
+
+    return Math.max(0, countdown.until - frame.now);
   }
 
   const type = bindTypeOf(ctx, bind.component);
@@ -328,7 +324,8 @@ function formatOf(ctx: TextCtx, entity: Entity, bind: TextBind, value: number): 
 }
 
 /**
- * The key of a bind, so a changed binding or format is seen as a change.
+ * The key of a bind, so a changed binding or format is seen as a change. Built once per attached
+ * bind object, never per frame: `isSameBind` compares the object first.
  *
  * @param bind - What the component carries.
  * @returns The key, or `undefined` for a label with no bind.
@@ -338,49 +335,111 @@ function bindKeyOf(bind: TextBind | undefined): string | undefined {
 }
 
 /**
+ * Tells whether a label carries the bind it was seen with. The same object, or no bind on both
+ * sides, is one compare. A new object is keyed once; an equal one is kept as the seen object, so
+ * its key is not built again on the next frame.
+ *
+ * @param seen - What was resolved for the label last.
+ * @param bind - What the label carries now.
+ * @returns True when the binding and its format stand.
+ */
+function isSameBind(seen: SeenText, bind: TextBind | undefined): boolean {
+  if (seen.bindRef === bind) return true;
+
+  if (seen.bind !== bindKeyOf(bind)) return false;
+
+  seen.bindRef = bind;
+
+  return true;
+}
+
+/**
  * Writes down what was resolved for an entity, so the next frame knows whether anything moved.
+ * The entry of a label is made once and then overwritten in place.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
  * @param text - Its component value.
+ * @param frame - What this run of the system shares.
  * @param unit - What a bound label's string was built from; `undefined` for any other label.
  */
-function remember(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, unit?: number): void {
-  ctx.state.seen.set(entity, {
-    content: text.content,
-    style: text.style,
-    bind: bindKeyOf(text.bind),
-    locale: ctx.deps.i18n.locale(),
-    unit
-  });
+function remember(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  frame: Frame,
+  unit?: number
+): void {
+  const seen = ctx.state.seen.get(entity);
+
+  if (seen === undefined) {
+    ctx.state.seen.set(entity, {
+      content: text.content,
+      style: text.style,
+      bindRef: text.bind,
+      bind: bindKeyOf(text.bind),
+      locale: frame.locale,
+      unit
+    });
+
+    return;
+  }
+
+  if (!isSameBind(seen, text.bind)) {
+    seen.bindRef = text.bind;
+    seen.bind = bindKeyOf(text.bind);
+  }
+
+  seen.content = text.content;
+  seen.style = text.style;
+  seen.locale = frame.locale;
+  seen.unit = unit;
+}
+
+/**
+ * Keeps the measured size of a label: made once, then overwritten in place.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param layout - The layout of what the label shows now.
+ */
+function keepSize(ctx: TextCtx, entity: Entity, layout: TextLayout): void {
+  const size = ctx.state.measured.get(entity);
+
+  if (size === undefined) {
+    ctx.state.measured.set(entity, sizeOf(layout));
+
+    return;
+  }
+
+  size.width = layout.width;
+  size.height = layout.height;
 }
 
 /**
  * Tells whether a bound label already shows what its value would build: the same unit, style and
  * binding, and for a `"duration"` the same locale.
  *
- * @param ctx - Domain context of the text plugin.
- * @param entity - The entity.
+ * @param seen - What was resolved for the label last.
  * @param text - Its component value.
  * @param unit - The unit of the value this frame.
  * @param format - The format it is shown in.
+ * @param frame - What this run of the system shares.
  * @returns True when nothing has to be formatted or written.
  */
 function isShown(
-  ctx: TextCtx,
-  entity: Entity,
+  seen: SeenText | undefined,
   text: Readonly<TextValue>,
   unit: number | undefined,
-  format: TextFormat
+  format: TextFormat,
+  frame: Frame
 ): boolean {
-  const seen = ctx.state.seen.get(entity);
-
   return (
     seen !== undefined &&
     seen.unit === unit &&
     seen.style === text.style &&
-    seen.bind === bindKeyOf(text.bind) &&
-    (format !== "duration" || seen.locale === ctx.deps.i18n.locale())
+    isSameBind(seen, text.bind) &&
+    (format !== "duration" || seen.locale === frame.locale)
   );
 }
 
@@ -412,35 +471,8 @@ function showBound(
   }
 
   if (changed || !ctx.state.measured.has(entity)) {
-    ctx.state.measured.set(entity, sizeOf(layoutFor(ctx, next, text.style)));
+    keepSize(ctx, entity, layoutFor(ctx, next, text.style));
   }
-}
-
-/**
- * Keeps `seen` of a bound label in step. Nothing is allocated while the binding stands: the
- * entry is updated in place.
- *
- * @param ctx - Domain context of the text plugin.
- * @param entity - The entity.
- * @param text - Its component value.
- * @param unit - What the shown string was built from.
- */
-function rememberBound(
-  ctx: TextCtx,
-  entity: Entity,
-  text: Readonly<TextValue>,
-  unit: number | undefined
-): void {
-  const seen = ctx.state.seen.get(entity);
-
-  if (seen === undefined || seen.style !== text.style || seen.bind !== bindKeyOf(text.bind)) {
-    remember(ctx, entity, text, unit);
-
-    return;
-  }
-
-  seen.unit = unit;
-  seen.locale = ctx.deps.i18n.locale();
 }
 
 /**
@@ -455,7 +487,7 @@ function rememberBound(
  */
 function showAgain(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): void {
   ctx.deps.world.ecs.set(entity, Text, { resolved: text.resolved });
-  ctx.state.measured.set(entity, sizeOf(layoutFor(ctx, text.resolved, text.style)));
+  keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style));
 }
 
 /**
@@ -477,9 +509,10 @@ function warnWithoutDigits(ctx: TextCtx, styleName: string): void {
 
 /**
  * One frame of a bound label: the value read every frame, the string built and written only
- * when its unit moved. A label that stands still costs a read and a few compares; no tag is
- * parsed, and the locale is read only for a `"duration"`. A marked label that stands still is
- * written once with the string it shows.
+ * when its unit moved. A label that stands still costs a read and a few compares and keeps
+ * nothing: no tag is parsed, no key is built. A marked label that stands still is written once
+ * with the string it shows. The style is checked for digits only when the label is written, so
+ * a label on a wrong style builds no warning key per frame.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
@@ -494,8 +527,6 @@ function stepBound(
   bind: TextBind,
   frame: Frame
 ): void {
-  warnWithoutDigits(ctx, text.style);
-
   // The number of this frame, and the unit its string is built from.
   const value = boundValue(ctx, entity, bind, frame);
   const format = value === undefined ? "int" : formatOf(ctx, entity, bind, value);
@@ -503,20 +534,24 @@ function stepBound(
 
   // The mark comes off here, whichever way the frame goes.
   const marked = ctx.state.dirty.delete(entity);
+  const seen = ctx.state.seen.get(entity);
 
   // The unit stands still: no string is built. A label that was marked is written once as it is.
-  if (isShown(ctx, entity, text, unit, format)) {
-    if (marked) showAgain(ctx, entity, text);
+  if (isShown(seen, text, unit, format, frame)) {
+    if (!marked) return;
+
+    warnWithoutDigits(ctx, text.style);
+    showAgain(ctx, entity, text);
 
     return;
   }
 
   // The unit moved: build the string, write it with its size, and remember what it was built from.
-  const next =
-    value === undefined ? "" : formatBound(value, format, ms => ctx.deps.i18n.duration(ms));
+  warnWithoutDigits(ctx, text.style);
+  const next = value === undefined ? "" : formatBound(value, format, frame.duration);
 
   showBound(ctx, entity, text, next, value);
-  rememberBound(ctx, entity, text, unit);
+  remember(ctx, entity, text, frame, unit);
 }
 
 /**
@@ -526,9 +561,10 @@ function stepBound(
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
  * @param text - Its component value.
+ * @param frame - What this run of the system shares.
  * @returns True when the string has to be built again.
  */
-function isStale(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): boolean {
+function isStale(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame: Frame): boolean {
   if (ctx.state.dirty.has(entity)) return true;
 
   const seen = ctx.state.seen.get(entity);
@@ -538,8 +574,8 @@ function isStale(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): boole
   return (
     seen.content !== text.content ||
     seen.style !== text.style ||
-    seen.bind !== bindKeyOf(text.bind) ||
-    seen.locale !== ctx.deps.i18n.locale()
+    !isSameBind(seen, text.bind) ||
+    seen.locale !== frame.locale
   );
 }
 
@@ -558,13 +594,13 @@ function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame
     return;
   }
 
-  if (!isStale(ctx, entity, text)) return;
+  if (!isStale(ctx, entity, text, frame)) return;
 
   const resolved = resolveContent(ctx, entity, text);
 
-  ctx.state.measured.set(entity, sizeOf(layoutFor(ctx, resolved, text.style)));
+  keepSize(ctx, entity, layoutFor(ctx, resolved, text.style));
   ctx.state.dirty.delete(entity);
-  remember(ctx, entity, text);
+  remember(ctx, entity, text, frame);
 }
 
 /**
@@ -589,23 +625,33 @@ export function resolveContent(ctx: TextCtx, entity: Entity, text: Readonly<Text
 }
 
 /**
- * The one system of the plugin: phase `layout`, before the two of `ui`, over every label. The
- * clock is read at most once per run, and only when a countdown label asks.
+ * The one system of the plugin: phase `layout`, before the two of `ui`, over every label. Every
+ * label is visited every frame: `ui` writes `Text` after this system and change sets clear in
+ * phase `signals`, so `changed(Text)` cannot tell which moved. The locale is read once per run,
+ * the clock at most once and only when a countdown label asks.
  *
  * @param ctx - Domain context of the text plugin.
  * @returns The system definition `world.ecs.system` takes.
  */
 export function createTextSystem(ctx: TextCtx): AnySystem {
-  const frame: Frame = { now: undefined };
+  // Made once: a formatter made per label would be a closure, and its context, per call.
+  const frame: Frame = {
+    now: Number.NaN,
+    locale: "",
+    duration: (ms: number): string => ctx.deps.i18n.duration(ms)
+  };
 
   return system({
     name: TEXT_SYSTEM_NAME,
     phase: "layout",
     query: [Text],
     run: (entities): void => {
-      frame.now = undefined;
+      frame.now = Number.NaN;
+      frame.locale = ctx.deps.i18n.locale();
 
-      for (const [entity, text] of entities) stepText(ctx, entity, text, frame);
+      // Per frame: the rows are the world's one reused row, read by index, never destructured
+      // (a destructuring pattern walks an array iterator) and never kept.
+      for (const row of entities) stepText(ctx, row[0], row[1], frame);
     }
   });
 }

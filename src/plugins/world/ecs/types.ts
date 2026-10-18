@@ -5,7 +5,7 @@
 import type { Json, Snapshot, SnapshotOf } from "../../model/types";
 import type { Time } from "../../time/types";
 import type { ProjectionKey } from "../projection/types";
-import type { QueryPlan } from "./query";
+import type { QueryPlan, SystemWalk } from "./query";
 import type { SystemTiming } from "./systems";
 
 /**
@@ -346,6 +346,12 @@ export type SystemDefinition<Terms extends readonly QueryTerm[]> = {
   readonly name: string;
   readonly phase: WorldPhase;
   readonly query: Terms;
+  /**
+   * Runs the system once a frame in its phase. `entities` walks the declared `query` once; every
+   * row it hands out is the same array, rewritten for the next row, so a row is valid until the
+   * next row. A system that keeps a row copies what it keeps: `const [entity, transform] = row`.
+   * `ecs.query()` called inside `run` hands out a new array per row.
+   */
   run(entities: Iterable<QueryTuple<Terms>>, ctx: SystemContext): void;
 };
 
@@ -409,13 +415,14 @@ export type AnySystem = {
   readonly name: string;
   readonly phase: WorldPhase;
   readonly query: readonly QueryTerm[];
+  /** As `SystemDefinition.run`: one row array per walk, valid until the next row. */
   run(entities: Iterable<readonly unknown[]>, ctx: SystemContext): void;
 };
 
 /**
- * One registered system, the frame it was registered in and its query resolved once. A system
- * registered during a frame runs from the next frame on. Spec 28 (deferred) extends it with the
- * system's scope.
+ * One registered system, the frame it was registered in, its query resolved once and the walk the
+ * runner resets for every run. A system registered during a frame runs from the next frame on.
+ * Spec 28 (deferred) extends it with the system's scope.
  *
  * @example
  * ```ts
@@ -426,6 +433,11 @@ export type SystemEntry = {
   readonly definition: AnySystem;
   readonly frame: number;
   readonly plan: QueryPlan;
+  /**
+   * The walk of the declared query, made at registration; `undefined` for an empty query, which
+   * the runner never walks. An entry built without one gets it on its first run.
+   */
+  walk?: SystemWalk | undefined;
 };
 
 /**
@@ -454,7 +466,8 @@ export type Command =
 export type StructuralHook = (entity: Entity, value: unknown) => void;
 
 /**
- * The frozen model snapshot of one frame, kept so four phases read it once.
+ * The frozen model snapshot of one frame, kept so four phases read it once. One object per world,
+ * rewritten when a new frame reads its snapshot.
  *
  * @example
  * ```ts
@@ -462,6 +475,21 @@ export type StructuralHook = (entity: Entity, value: unknown) => void;
  * ```
  */
 export type FrameSnapshot = { frame: number; snapshot: Snapshot };
+
+/**
+ * The context the runner hands every system of one world: one object, made at the first phase
+ * run, whose `time` and `snapshot` are rewritten for every phase.
+ */
+export type PhaseContext = {
+  /** The ecs API the systems of this world receive. */
+  readonly world: EcsApi;
+  /** The resource reader, one function per world. */
+  readonly res: <Value extends object>(resource: ResourceType<Value>) => Value;
+  /** The frozen model snapshot of the running frame. */
+  snapshot: Snapshot;
+  /** The running frame's `Time`. */
+  time: Readonly<Time>;
+};
 
 /**
  * The JSON kind of one component field, read from its default value: what the editor's component
@@ -620,6 +648,18 @@ export type History = {
 export type MarkCount = { marked: number; changed: number };
 
 /**
+ * The entities marked changed for one component in the current frame, each once, in mark order.
+ * Both collections are kept from frame to frame, so a frame's marks allocate nothing once they
+ * have grown to its size.
+ */
+export type ChangeList = {
+  /** The marked entities of this frame, in mark order: what `changed()` hands out. */
+  readonly entities: Entity[];
+  /** Entity to the frame stamp of its last mark; a stamp of the current frame is a repeat. */
+  readonly frames: Map<Entity, number>;
+};
+
+/**
  * ecs module state.
  */
 export type EcsState = {
@@ -630,7 +670,11 @@ export type EcsState = {
   byOwner: Map<string, Set<Entity>>;
   types: Map<string, AnyComponentType>;
   stores: Map<string, Map<Entity, object | true>>;
+  /** The store of each type object that was read, written or asked through, once it has one. */
+  typeStores: Map<AnyComponentType, Map<Entity, object | true>>;
   resources: Map<string, object>;
+  /** The value of each resource type object that was read, so a read is one lookup. */
+  resourceSlots: Map<ResourceType<object>, object>;
   /**
    * The type object stored under each engine resource name (`"Now"`, `"Pointer"`, …), so a game
    * resource of the same name is refused instead of sharing the engine's value.
@@ -639,13 +683,18 @@ export type EcsState = {
   systems: Record<WorldPhase, SystemEntry[]>;
   running: WorldPhase | undefined;
   commands: Command[];
-  changed: Map<string, Set<Entity>>;
+  /** The change list of each component marked since the world began, emptied at every `signals`. */
+  changed: Map<string, ChangeList>;
+  /** The stamp of the current frame's marks, moved on by every clear of the change lists. */
+  changeFrame: number;
   added: Map<string, StructuralHook[]>;
   removed: Map<string, StructuralHook[]>;
   ownerLeft: Array<(owner: Owner) => void>;
   mode: WorldMode;
   offFrame: Array<() => void>;
   frameSnapshot: FrameSnapshot | undefined;
+  /** The context of every system run of this world; `undefined` before the first phase ran. */
+  phaseContext: PhaseContext | undefined;
   /** The frame history: dev builds only, from the first frame on; `undefined` before it. */
   history: History | undefined;
   /** Time per system of an agent build (H2b); `undefined` without the flag and before start. */
@@ -654,6 +703,8 @@ export type EcsState = {
   timingSlots: Map<string, number>;
   /** A dev build reported a store whose keys changed while a phase walked it: reported once. */
   walkReported: boolean;
+  /** How many entities were despawned since the world began: the sweep looks for dead elements when it moved. */
+  despawns: number;
 };
 
 /**
@@ -853,8 +904,10 @@ export type EcsApi = {
    * Walks the store of the FIRST term in insertion order and keeps the entities that carry every
    * term. Deterministic. A `mut()` term marks every yielded entity changed for that component
    * (README, "Marking what changed"). Inside a system the walk reads the store live (changes are
-   * queued until the phase ends); outside one it walks the keys taken at the start. Every row is a
-   * new array: keep it if you like. Put the rarest component first: the walk visits its store.
+   * queued until the phase ends); outside one it walks the keys taken at the start. Every row of
+   * `ecs.query()` is a new array: keep it if you like. The rows a system's `run` gets for its
+   * declared `query` are not: they share one array, valid until the next row. Put the rarest
+   * component first: the walk visits its store.
    *
    * @param terms - Component types, tag types and `mut()` terms.
    * @returns The matching rows: the entity and one value per term.
@@ -971,7 +1024,9 @@ export type EcsApi = {
 
   /**
    * The coarse change set of the frame, cleared in `time` phase `signals` after every `sync`
-   * system ran.
+   * system ran. It is the world's own list, in mark order, each entity once: walk it in the frame
+   * and copy what you keep, because the clear empties it in place. A component nothing marked
+   * answers one shared empty list. Asking allocates nothing.
    *
    * @param component - The component type to ask about.
    * @returns The entities marked changed for it this frame.

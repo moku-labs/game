@@ -94,6 +94,8 @@ export type MockEffects = {
   state: State;
   api: EffectsApi;
   world: WorldApi;
+  /** The kernel context of `world`: a perf fixture builds its own phase runner over it. */
+  worldCtx: WorldKernelSlice;
   log: Log.LogApi;
   pixi: FakeEffectsPixi;
   gpu: FakeDevice;
@@ -324,6 +326,7 @@ export function createMockEffects(
     state,
     api: createEffectsApi(ctx),
     world,
+    worldCtx,
     log,
     pixi,
     gpu,

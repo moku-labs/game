@@ -8,6 +8,7 @@ import type { EcsApi, FrameDiff, WorldMode } from "./ecs/types";
 import { resolveDeps } from "./lifecycle";
 import { createProjectionApi } from "./projection/api";
 import type { ProjectionApi, WorldComponents } from "./projection/types";
+import { trackWorld } from "./registry";
 import type { Api, EcsModule, KernelSlice, ProjectionModule, WorldCtx } from "./types";
 
 /** The four components the projection writes; injected, never imported by the module. */
@@ -136,10 +137,13 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
 export function createWorldApi(ctx: KernelSlice): Api {
   const worldCtx: WorldCtx = { ...ctx, deps: resolveDeps(ctx) };
   const { ecs, projection } = createModules(worldCtx);
-
-  return {
+  const api: Api = {
     ecs: exposeEcs(ecs, projection),
     projection: exposeProjection(projection),
     systemTimes: () => ctx.state.ecs.timing
   };
+
+  trackWorld(api, worldCtx);
+
+  return api;
 }

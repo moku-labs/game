@@ -14,10 +14,12 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
  * ```ts
  * const track: Track = {
  *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 },
- *   keys: { x: "1048576:Transform:x" }, ms: 350, ease: "out", delayMs: 0, elapsed: 0,
- *   from: undefined, muted: () => new Set(), additive: false, driven: false, bornFrame: 4,
- *   ended: false, segments: undefined, repeatsLeft: 0, held: false, masked: new Set(), keep: false,
- *   reveals: "place"
+ *   keys: { x: "1048576:Transform:x" }, ms: 350, ease: "out", delayMs: 0,
+ *   clock: new Float64Array(2), begun: false, names: ["x"], slotKeys: ["1048576:Transform:x"],
+ *   targets: Float64Array.of(200), starts: new Float64Array(1), live: Uint8Array.of(1),
+ *   moved: new Uint8Array(1), values: new Float64Array(1), seen: Float64Array.of(Number.NaN), muted: () => new Set(), additive: false, driven: false,
+ *   bornFrame: 4, ended: false, segments: undefined, repeatsLeft: 0, held: false,
+ *   masked: new Set(), keep: false, reveals: "place", patch: { x: 200 }
  * };
  * ```
  */
@@ -25,7 +27,10 @@ export type Track = {
   readonly id: number;
   readonly entity: Entity;
   readonly component: AnyComponent;
-  /** The target fields. Retarget deletes the fields a newer absolute track took over. */
+  /**
+   * The target fields. Retarget deletes the fields a newer absolute track took over. A frame reads
+   * the slots (`names`, `targets`, `live`) instead.
+   */
   to: Record<string, number>;
   /**
    * The key of the owner, bases and offsets tables per field, built once when the track starts.
@@ -35,9 +40,37 @@ export type Track = {
   readonly ms: number;
   readonly ease: Ease;
   readonly delayMs: number;
-  elapsed: number;
-  /** Read when the delay ends, never earlier. */
-  from: Record<string, number> | undefined;
+  /**
+   * `[0]`: the milliseconds the track has run, its delay included; `[1]`: the normalised time of
+   * the write that runs. Cells and not fields, so a frame writes them in place: a double stored in
+   * an object field is a new heap number.
+   */
+  readonly clock: Float64Array;
+  /** True once the start values are read, when the delay ends, never earlier. */
+  begun: boolean;
+  /** The target fields in slot order: every field `to` held when the track started. */
+  readonly names: readonly string[];
+  /** The key of each slot: the strings of `keys`, by slot. */
+  readonly slotKeys: readonly string[];
+  /** The target of each slot. */
+  readonly targets: Float64Array;
+  /** The start value of each slot, read when the delay ends. */
+  readonly starts: Float64Array;
+  /** `1` while the track drives the slot, `0` once a newer absolute track took its field. */
+  readonly live: Uint8Array;
+  /** `1` for a slot the frame that runs moved: a write of only some fields reads it. */
+  readonly moved: Uint8Array;
+  /**
+   * Per slot, the numbers of the write that runs: first what the slot contributes, then what the
+   * field reads, the base plus every offset. Kept here so no number crosses a call boxed.
+   */
+  readonly values: Float64Array;
+  /**
+   * Per slot, the value this track last left in the field or found there, `NaN` while unknown: at
+   * the start and while another writer holds the field. A frame whose value moved off it writes
+   * without reading the field back.
+   */
+  readonly seen: Float64Array;
   readonly muted: () => ReadonlySet<string>;
   readonly additive: boolean;
   /** True for a track a timeline step advances by hand; the frame step leaves it alone. */
@@ -74,6 +107,12 @@ export type Track = {
    * that cannot (a tint, a fill colour). Computed once when the track is made.
    */
   readonly reveals: "alpha" | "place" | "both" | undefined;
+  /**
+   * The patch the track writes, one per track with every field of `to` in it: a frame fills it in
+   * place instead of building one. A field the frame leaves alone carries its stored value back.
+   * Rebuilt when the track loses a field.
+   */
+  patch: Record<string, unknown>;
 };
 
 /**

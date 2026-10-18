@@ -5,7 +5,7 @@
 import type { ViewportSize } from "../../renderer/viewport/types";
 import type { UiCtx } from "../types";
 import { flagsOf, sameViewport } from "./flags";
-import { resolve } from "./resolve";
+import { resolve, type StyleFlags } from "./resolve";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "./types";
 
 /** What an element is resolved against before the first frame read the real viewport. */
@@ -25,6 +25,22 @@ const FALLBACK_VIEWPORT: Readonly<ViewportSize> = {
  */
 export function createStylesApi(ctx: UiCtx): StylesModule {
   const state = ctx.state.styles;
+  // Per restyle: the flags an element is resolved against, one object written in place; `resolve`
+  // reads it and keeps nothing. A merged object per call would also hand V8 a hidden class that
+  // dies at every full GC, which throws the optimized `resolve` away ("embedded weak objects").
+  const flags: StyleFlags = {
+    portrait: true,
+    landscape: false,
+    tall: false,
+    wide: false,
+    pressed: false,
+    hover: false,
+    focus: false,
+    disabled: false,
+    active: false,
+    selected: false,
+    covered: false
+  };
 
   return {
     flagsOf: (viewport: Readonly<ViewportSize>) => flagsOf(viewport, ctx.config.breakpoints),
@@ -43,7 +59,22 @@ export function createStylesApi(ctx: UiCtx): StylesModule {
       return changed;
     },
 
-    resolveElement: (style: Style | undefined, is: IsFlags): ResolvedStyle =>
-      resolve(style, { ...state.flags, ...is }, state.viewport ?? FALLBACK_VIEWPORT)
+    resolveElement: (style: Style | undefined, is: IsFlags): ResolvedStyle => {
+      const when = state.flags;
+
+      flags.portrait = when.portrait;
+      flags.landscape = when.landscape;
+      flags.tall = when.tall;
+      flags.wide = when.wide;
+      flags.pressed = is.pressed;
+      flags.hover = is.hover;
+      flags.focus = is.focus;
+      flags.disabled = is.disabled;
+      flags.active = is.active;
+      flags.selected = is.selected;
+      flags.covered = is.covered;
+
+      return resolve(style, flags, state.viewport ?? FALLBACK_VIEWPORT);
+    }
   };
 }
