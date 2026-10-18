@@ -42,6 +42,7 @@ const PROJECTION_MEMBERS = [
   "keyOf",
   "layers",
   "lift",
+  "membershipVersion",
   "motionsOf",
   "mount",
   "mute",

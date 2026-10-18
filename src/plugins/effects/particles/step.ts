@@ -2,10 +2,14 @@
  * @file effects/particles — the particle step: emission with a fractional carry, the advance of
  * every live particle, retirement by swap-remove, and one `update()` when anything was born or
  * died. Works on one instance and its container; no ctx, no world.
+ *
+ * The length of a step travels as an object, a `StepTime` (the frame's `Time`, or a scratch of
+ * this module), and is read where it is used: a fractional number handed from call to call is
+ * boxed at every call V8 does not inline, a field read is not.
  */
 import type { Point } from "../../renderer/types";
-import { alphaByte, TABLE_SIZE } from "./bake";
-import type { BakedEmitter, BornFields, EmitterInstance, PixiParticle, Rng, Shape } from "./types";
+import { TABLE_SIZE } from "./bake";
+import type { BornFields, EmitterInstance, PixiParticle, Rng, Shape, StepTime } from "./types";
 
 /** The slice a prewarm is simulated in, in milliseconds. */
 const SLICE_MS = 16;
@@ -24,6 +28,12 @@ const ORIGIN: Readonly<Point> = Object.freeze({ x: 0, y: 0 });
  * a birth makes no new one.
  */
 const BIRTH: Point = { x: 0, y: 0 };
+
+/** The step time of a caller that hands a plain number (`stepInstance`, `advanceParticles`), written in place. */
+const GIVEN: { delta: number } = { delta: 0.5 };
+
+/** The step time of one prewarm slice, written in place; never the frame's, which a prewarm runs inside of. */
+const SLICE: { delta: number } = { delta: 0.5 };
 
 /**
  * Writes where a particle is born inside its shape, around the origin, into `at`.
@@ -53,17 +63,6 @@ function birthPoint(shape: Shape, rng: Rng, at: Point): void {
 
   at.x = Math.cos(turn) * distance;
   at.y = Math.sin(turn) * distance;
-}
-
-/**
- * The packed colour of a particle at one step of its life: the tint under the alpha byte.
- *
- * @param baked - The baked effect.
- * @param step - The table entry, 0..63.
- * @returns Pixi's `0xaabbggrr` particle colour.
- */
-function colorAt(baked: BakedEmitter, step: number): number {
-  return ((baked.tintTable[step] ?? 0) | (alphaByte(baked.alphaTable[step] ?? 1) << 24)) >>> 0;
 }
 
 /**
@@ -103,16 +102,17 @@ function swapRemove(instance: EmitterInstance, index: number): void {
 }
 
 /**
- * Advances every live particle by `deltaMs`: age, gravity, drag, position, spin, then the scale
+ * Advances every live particle by the step: age, gravity, drag, position, spin, then the scale
  * and the packed colour of its new age. A particle at its life is swap-removed.
  *
  * @param instance - The instance.
- * @param deltaMs - Milliseconds of game time.
+ * @param time - The step: `delta` milliseconds of game time.
  * @returns How many particles died.
  */
-function advanceLive(instance: EmitterInstance, deltaMs: number): number {
+function advanceLive(instance: EmitterInstance, time: StepTime): number {
   const { baked, born } = instance;
   const children = instance.container.particleChildren;
+  const deltaMs = time.delta;
   const seconds = deltaMs / 1000;
   const keep = (1 - baked.config.drag) ** seconds;
   const fall = baked.config.gravity * seconds;
@@ -143,7 +143,8 @@ function advanceLive(instance: EmitterInstance, deltaMs: number): number {
     particle.rotation += (born.spin[index] ?? 0) * seconds;
     particle.scaleX = scale;
     particle.scaleY = scale;
-    particle.color = colorAt(baked, step);
+    // per particle: read from the baked table, no call (a colour with its alpha byte is no small integer).
+    particle.color = baked.colorTable[step] ?? 0;
     index += 1;
   }
 
@@ -180,7 +181,7 @@ function birthParticle(
   particle.rotation = 0;
   particle.scaleX = baked.scaleTable[0] ?? 1;
   particle.scaleY = particle.scaleX;
-  particle.color = colorAt(baked, 0);
+  particle.color = baked.colorTable[0] ?? 0;
 
   // The born fields the advance reads: age, life, velocity, spin and texture.
   born.age[index] = 0;
@@ -230,6 +231,37 @@ export function emitParticles(
 }
 
 /**
+ * Runs one step without the upload, its length read from `time`: a stream emits what its carry
+ * owes, then every live particle advances. A burst emits only when its instance starts.
+ *
+ * @param instance - The instance.
+ * @param time - The step: `delta` milliseconds of game time.
+ * @param offset - Where the origin of the emission is now, in the container's space.
+ * @param emitting - Whether a stream emits: the `active` flag of its `Emitter`.
+ * @returns True when a particle was born or died, which needs one `update()`.
+ */
+function advanceBy(
+  instance: EmitterInstance,
+  time: StepTime,
+  offset: Readonly<Point>,
+  emitting: boolean
+): boolean {
+  const rate = instance.baked.config.rate;
+  let born = 0;
+
+  if (rate !== undefined && emitting) {
+    instance.carry += (rate * time.delta) / 1000;
+
+    const due = Math.floor(instance.carry + EPSILON);
+
+    instance.carry = Math.max(0, instance.carry - due);
+    born = emitParticles(instance, due, offset);
+  }
+
+  return advanceLive(instance, time) > 0 || born > 0;
+}
+
+/**
  * Runs one step without the upload: a stream emits what its carry owes, then every live particle
  * advances. A burst emits only when its instance starts.
  *
@@ -245,19 +277,9 @@ export function advanceParticles(
   offset: Readonly<Point>,
   emitting: boolean
 ): boolean {
-  const rate = instance.baked.config.rate;
-  let born = 0;
+  GIVEN.delta = deltaMs;
 
-  if (rate !== undefined && emitting) {
-    instance.carry += (rate * deltaMs) / 1000;
-
-    const due = Math.floor(instance.carry + EPSILON);
-
-    instance.carry = Math.max(0, instance.carry - due);
-    born = emitParticles(instance, due, offset);
-  }
-
-  return advanceLive(instance, deltaMs) > 0 || born > 0;
+  return advanceBy(instance, GIVEN, offset, emitting);
 }
 
 /**
@@ -274,9 +296,28 @@ export function standsStill(instance: EmitterInstance, reducedMotion: boolean): 
 }
 
 /**
- * Runs one step of an instance and uploads once when a particle was born or died. Never
- * `addParticle` or `removeParticle` per particle: `update()` marks every attribute dirty, which
- * the churn needs anyway.
+ * Runs one step of an instance, its length read from `time` (the frame's `Time` in the particle
+ * system), and uploads once when a particle was born or died. Never `addParticle` or
+ * `removeParticle` per particle: `update()` marks every attribute dirty, which the churn needs
+ * anyway.
+ *
+ * @param instance - The instance.
+ * @param time - The step: `delta` milliseconds of game time.
+ * @param offset - Where the origin of the emission is now, in the container's space.
+ * @param emitting - Whether a stream emits.
+ */
+export function stepBy(
+  instance: EmitterInstance,
+  time: StepTime,
+  offset: Readonly<Point>,
+  emitting: boolean
+): void {
+  if (advanceBy(instance, time, offset, emitting)) instance.container.update();
+}
+
+/**
+ * Runs one step of an instance and uploads once when a particle was born or died: `stepBy` for a
+ * caller that holds the length as a number.
  *
  * @param instance - The instance.
  * @param deltaMs - Milliseconds of game time.
@@ -289,7 +330,8 @@ export function stepInstance(
   offset: Readonly<Point>,
   emitting: boolean
 ): void {
-  if (advanceParticles(instance, deltaMs, offset, emitting)) instance.container.update();
+  GIVEN.delta = deltaMs;
+  stepBy(instance, GIVEN, offset, emitting);
 }
 
 /**
@@ -304,9 +346,8 @@ export function fillInstance(instance: EmitterInstance, emitting: boolean): void
   let changed = false;
 
   for (let spent = 0; spent < prewarmMs; spent += SLICE_MS) {
-    const slice = Math.min(SLICE_MS, prewarmMs - spent);
-
-    changed = advanceParticles(instance, slice, ORIGIN, emitting) || changed;
+    SLICE.delta = Math.min(SLICE_MS, prewarmMs - spent);
+    changed = advanceBy(instance, SLICE, ORIGIN, emitting) || changed;
   }
 
   if (burst !== undefined) changed = emitParticles(instance, burst, ORIGIN) > 0 || changed;

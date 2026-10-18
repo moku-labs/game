@@ -5,6 +5,7 @@
 import type { Entity } from "../../world/types";
 import type { DEMAND_REASONS } from "../reasons";
 import type { PixiBounds, PixiContainer } from "../types";
+import type { MarkList } from "./marks";
 
 /**
  * Why the render phase drew a frame, or `"none"` when it did not. Internal: `monitor` and the agent log read it.
@@ -20,6 +21,31 @@ export type DemandReason = (typeof DEMAND_REASONS)[number];
 export type Unseen = "shown" | "alpha-above" | "alpha-own" | "off-screen" | "other";
 
 /**
+ * The change marks of one kind of the running decision, read: each entity once, in mark order. What a `Set` offered
+ * its readers, kept in a list that empties without allocating (`MarkList`). Internal.
+ */
+export type Marks = {
+  /** Entities marked in this decision. */
+  readonly size: number;
+  /**
+   * Tells whether an entity is marked in this decision.
+   *
+   * @param entity - The entity.
+   * @returns True when it is.
+   */
+  has(entity: Entity): boolean;
+  /**
+   * The entity marked `index`-th in this decision: a walk by index makes no iterator.
+   *
+   * @param index - 0 to `size - 1`.
+   * @returns The entity; 0 past the end.
+   */
+  at(index: number): Entity;
+  /** Walks the marks, allocating an iterator: for a test or a spread, never per frame. */
+  [Symbol.iterator](): Iterator<Entity>;
+};
+
+/**
  * The last decision of the render phase, one object reused every frame.
  */
 export type DemandFrame = { drawn: boolean; reason: DemandReason; marks: number };
@@ -29,17 +55,17 @@ export type DemandFrame = { drawn: boolean; reason: DemandReason; marks: number 
  */
 export type DemandState = {
   /** Entities marked by a compared or structural write since the last decision. */
-  marked: Set<Entity>;
+  marked: MarkList;
   /** Marked entities whose view was not drawn at mark time; counted at the decision when drawn then. */
-  pending: Set<Entity>;
+  pending: MarkList;
   /** Entities a display adapter reported after its `update` (not `false`): counted unless an ancestor is hidden. */
-  loose: Set<Entity>;
+  loose: MarkList;
   /** Marked by a write that changes what the view draws (`mark`): the kept cache retakes its picture. */
-  visual: Set<Entity>;
+  visual: MarkList;
   /** Marked by a write of the view's own transform or depth (`markMoved`): a kept picture only moves. */
-  moved: Set<Entity>;
+  moved: MarkList;
   /** Marked through the public `invalidate`: a filter value or a self-drawn object about to change. */
-  published: Set<Entity>;
+  published: MarkList;
   /**
    * Every whole-frame reason found since the last decision (O17, LEAD-FIXES-3). The first one added is
    * `frame().reason`, as spec 14 says; the set keeps the others visible to the overlay step and `kept.collect`.
@@ -95,15 +121,15 @@ export type DemandInternal = {
   /** Where the walk of `shown` stopped for the entity's view, for `sync.loopsHeld` (spec 26 R1.7.3). */
   unseenBy(entity: Entity): Unseen;
   /** Marks of the current decision. */
-  marked(): ReadonlySet<Entity>;
+  marked(): Marks;
   /** The adapter marks of the current decision, as `marked()` for the others. */
-  loose(): ReadonlySet<Entity>;
+  loose(): Marks;
   /** The marks of the current decision made by `mark`: what a view draws changed. */
-  visual(): ReadonlySet<Entity>;
+  visual(): Marks;
   /** The marks of the current decision made by `markMoved`: a view's own transform or depth changed. */
-  moved(): ReadonlySet<Entity>;
+  moved(): Marks;
   /** The marks of the current decision made through the public `invalidate`. */
-  published(): ReadonlySet<Entity>;
+  published(): Marks;
   /** The pixel oracle switch, behind `DebugApi.verifyFrames`. */
   verifyFrames(on: boolean): void;
   /** Whether the pixel oracle is on. */

@@ -13,6 +13,7 @@ import type {
   FrameReadout,
   FrameReadResult,
   FrameRing,
+  MonitorSections,
   PerfChange,
   PerfCounts,
   PerfDisplay,
@@ -162,6 +163,40 @@ export const MEASURE = {
   targets: 64
 } as const;
 
+/**
+ * The sections of the monitor as bits of `MonitorSinks.sections`, bit `1 << index` for `MONITOR_SECTIONS[index]`,
+ * tested inline on the per-frame path. Not public.
+ */
+export const SECTION = {
+  gpu: 1,
+  passes: 2,
+  shaders: 4,
+  problems: 8,
+  memory: 16,
+  systems: 32,
+  nodes: 64,
+  longFrames: 128
+} as const;
+
+/** Every section on: the bits a monitor starts with. Not public. */
+export const SECTIONS_ALL = 255;
+
+/**
+ * Where each section's cost of the second is summed in `PerfState.sectionsMs`, `base` the rest of the commit: the
+ * order of `MONITOR_SECTIONS`, then `base`. Not public.
+ */
+export const COST = {
+  gpu: 0,
+  passes: 1,
+  shaders: 2,
+  problems: 3,
+  memory: 4,
+  systems: 5,
+  nodes: 6,
+  longFrames: 7,
+  base: 8
+} as const;
+
 /** Owners of filter applies a frame tells apart, for the `filter-still` rule. Not public. */
 export const OWNER_SLOTS = 32;
 
@@ -282,6 +317,10 @@ export type MonitorSinks = {
   measuring: boolean;
   /** Pixi's instruction rebuilds since the monitor last took them, in a frame or between frames (spec 26 R2.3). */
   rebuildsWindow: number;
+  /** The `SECTION` bits of the sections that run in the frame now: what the commit and the counting classes test. */
+  sections: number;
+  /** The `SECTION` bits a switch asked for: they apply at the start of the next frame, so a frame is measured whole. */
+  sectionsNext: number;
 };
 
 /**
@@ -486,8 +525,15 @@ export type PerfState = {
   ring: PerfRing;
   /** `capacity` long, for percentiles at a flush. */
   scratch: Float32Array;
-  /** Doubles kept unboxed: `[0]` the budget of the frame being committed, `[1]` the end of a flushed window. */
+  /**
+   * Doubles kept unboxed: `[0]` the budget of the frame being committed, `[1]` the end of a flushed window, `[2]` the
+   * page clock of the last lap of the commit, where the next section's cost starts.
+   */
   staged: Float64Array;
+  /** The sections `monitor.sections()` answers: the config's at first, then the last switch; frozen. */
+  sections: Readonly<MonitorSections>;
+  /** Page-clock ms of the commits of the current second, by section in `COST` order, `base` last. */
+  sectionsMs: Float64Array;
   /** The display's frame period from the ticks: the budget's display part while `time` does not know the display. */
   ticks: TickEstimate;
   /** The `time.rate()` snapshot the last frame saw: a new one may carry another `displayHz` (a `display` event). */
@@ -565,10 +611,12 @@ export type PerfCtx = {
  * wait for a drawn frame.
  */
 export type MonitorState = {
-  /** Clock time at the start of the frame being drawn; `undefined` between frames. */
-  frameStart: number | undefined;
-  /** Clock time at the start of the last frame, the far end of the next interval. */
-  lastStart: number | undefined;
+  /** Clock time at the start of the frame being drawn; NaN between frames. A double from the start: never boxed. */
+  frameStart: number;
+  /** Clock time at the start of the last frame, the far end of the next interval; NaN before the first. */
+  lastStart: number;
+  /** `[0]`: the clock reading `begin` or `end` hands the window, staged: a double handed to a call is boxed. */
+  staged: Float64Array;
   /** Clock milliseconds between frame starts, summed over the open window. */
   windowMs: number;
   /** Intervals between frame starts in the open window. */
@@ -791,6 +839,25 @@ export type PerfMonitorApi = {
    * ```
    */
   setResolution(resolution: number | undefined): number;
+  /**
+   * The sections of the monitor of a debug build, each on unless switched off: what runs every frame, and what can be
+   * switched off to measure the game without it. Without an argument it reads them. With one it switches the sections
+   * it names, from the next frame on, and writes a `sections` event; a write needs control (`--debug`, or a dev page):
+   * a read-only page (`--debug=read`) keeps the sections and throws. A section off skips its work: its ring columns and its sample fields read as not measured, and its
+   * `sample.sectionsMs` is 0. Agent builds only: elsewhere every section answers on and nothing switches.
+   *
+   * @param next - The sections to switch: `true` on, `false` off; a section left out keeps its switch.
+   * @returns The sections from the next frame on, one frozen object until the next switch.
+   * @throws {Error} With `reason: "read-only"` when a page without control is asked to change a section.
+   * @example
+   * ```ts
+   * // The editor's Mission control: what does the ward cost without the per-system timing?
+   * app.renderer.monitor.sections().systems; // true
+   * app.renderer.monitor.sections({ systems: false }); // { gpu: true, passes: true, shaders: true, problems: true, memory: true, systems: false, nodes: true, longFrames: true }
+   * // a stream() listener gets { kind: "event", name: "sections", detail: { on: ["gpu", "passes", "shaders", "problems", "memory", "nodes", "longFrames"], off: ["systems"] }, … }
+   * ```
+   */
+  sections(next?: Partial<MonitorSections>): Readonly<MonitorSections>;
   /**
    * The live object counts of a debug build: a plugin the renderer cannot depend on (it depends on the renderer)
    * registers a count here, and the monitor reads it once a second into `sample.counts` and `stats().counts`.

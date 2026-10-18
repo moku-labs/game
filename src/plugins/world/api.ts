@@ -113,6 +113,7 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     mute: projection.mute,
     lift: projection.lift,
     keyOf: projection.keyOf,
+    membershipVersion: projection.membershipVersion,
     causeOf: projection.causeOf,
     motionsOf: projection.motionsOf,
     entityOf: projection.entityOf,
@@ -136,7 +137,6 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
 export function createWorldApi(ctx: KernelSlice): Api {
   const worldCtx: WorldCtx = { ...ctx, deps: resolveDeps(ctx) };
   const { ecs, projection } = createModules(worldCtx);
-
   return {
     ecs: exposeEcs(ecs, projection),
     projection: exposeProjection(projection),

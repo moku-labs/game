@@ -137,6 +137,7 @@ export function syncLayers(sctx: SyncCtx): boolean {
 
   dropLeftLayers(sctx, next);
   state.layers = next;
+  state.hudLayer = hudLayerIn(next);
 
   for (const spec of list) {
     const container = next.get(spec.name)?.container;
@@ -176,6 +177,19 @@ function dropLeftLayers(sctx: SyncCtx, next: Map<string, LayerEntry>): void {
 }
 
 /**
+ * The name of the HUD layer of a layer table: the first entry above the overlays. Read once per new layer list, kept in
+ * `SyncState.hudLayer`, so the overlay step reads a name, never the table.
+ *
+ * @param layers - The layer table.
+ * @returns The name, or `undefined` for a scene without one.
+ */
+function hudLayerIn(layers: ReadonlyMap<string, LayerEntry>): string | undefined {
+  for (const [name, entry] of layers) if (entry.hud) return name;
+
+  return undefined;
+}
+
+/**
  * Detaches and forgets every layer container. Works on the state alone.
  *
  * @param state - The sync branch of the plugin state.
@@ -187,4 +201,5 @@ export function clearLayers(state: SyncState): void {
 
   state.layers.clear();
   state.layerList = undefined;
+  state.hudLayer = undefined;
 }

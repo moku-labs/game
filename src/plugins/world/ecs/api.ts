@@ -14,9 +14,9 @@ import { snapshotWorld } from "./snapshot";
 import {
   addHook,
   asComponent,
-  readComponent,
   registerType,
   resourceValue,
+  storeFor,
   writeComponent
 } from "./storage";
 import { effectiveMode, registerSystem, runPhase } from "./systems";
@@ -53,7 +53,10 @@ function clearWorldState(ctx: WorldCtx): void {
   state.byOwner.clear();
   state.types.clear();
   state.stores.clear();
+  state.typeStores.clear();
+  state.queryPlans.clear();
   state.resources.clear();
+  state.resourceSlots.clear();
   state.engineResources.clear();
   state.systems.input.length = 0;
   state.systems.animate.length = 0;
@@ -103,9 +106,7 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
       entity: Entity,
       component: ComponentHandle<Value>
     ): Readonly<Value> | undefined => {
-      registerType(ctx, component);
-
-      const stored = readComponent(state, entity, component.componentName);
+      const stored = storeFor(ctx, component)?.get(entity);
 
       // The store holds the value this component type describes; a tag stores `true`.
       return stored === undefined || stored === true ? undefined : (stored as Readonly<Value>);
@@ -116,8 +117,7 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
       component: ComponentHandle<Value>,
       patch: Partial<Value>
     ): void => {
-      registerType(ctx, component);
-      writeComponent(ctx, entity, component.componentName, patch);
+      writeComponent(ctx, entity, component, patch);
     },
 
     add: (entity: Entity, value: AnyComponentValue): void => {
@@ -129,11 +129,8 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
       queueOrApply(ctx, { kind: "remove", entity, component: component.componentName });
     },
 
-    has: (entity: Entity, component: AnyComponentType): boolean => {
-      registerType(ctx, component);
-
-      return readComponent(state, entity, component.componentName) !== undefined;
-    },
+    has: (entity: Entity, component: AnyComponentType): boolean =>
+      storeFor(ctx, component)?.has(entity) === true,
 
     tag: (entity: Entity, tagType: TagType): void => {
       queueOrApply(ctx, { kind: "add", entity, value: tagType() });

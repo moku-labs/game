@@ -283,6 +283,8 @@ export type PopupLink = {
  * popup (its open is an event), the cause of its projection view otherwise, `"mount"` after a
  * restore or a load. `slot` is the host element the root is laid out in (`undefined` for the
  * viewport), `slotRect` the content box it was last solved in, in the host's own units.
+ * `pending` is true while the solve running now still waits to lay the root out; `mountRoot`
+ * creates it `false`.
  */
 export type Root = {
   entity: Entity;
@@ -298,6 +300,7 @@ export type Root = {
   cause: MotionCause | undefined;
   slot: Entity | undefined;
   slotRect: { x: number; y: number; w: number; h: number } | undefined;
+  pending?: boolean;
 };
 
 /**
@@ -421,7 +424,10 @@ export type TextState = {
  * the element that hosts it; `fields` holds the text fields by entity. `hints` buffers the hints
  * released since the last frame step; `scrolls` holds the scroll containers; `windowRenders`
  * counts the re-renders of a windowed list its range made. `styled` and `written` count the style
- * passes and the write passes of the reconcile, for `UiCounters`.
+ * passes and the write passes of the reconcile, for `UiCounters`. `hostsVersion` moves on when a
+ * host came, went, became live or was patched, and when a view lost its `Parent` or its `Held`;
+ * `hostsSeen` and `membershipSeen` are that version and the world's membership version at the
+ * last full hosting step, which runs again only when one of them moved.
  */
 export type JsxState = {
   components: Map<string, AnyComponentDefinition>;
@@ -434,6 +440,9 @@ export type JsxState = {
   removing: Set<Entity>;
   hosts: Set<Entity>;
   hosted: Map<Entity, Entity>;
+  hostsVersion: number;
+  hostsSeen: number;
+  membershipSeen: number;
   /** The host elements that became live in this solve: the solve hosts their views in the same frame (spec 16 U2). */
   risen: Set<Entity>;
   /** The views the full hosting step of this frame took back from their host; their removal lands at the flush. */

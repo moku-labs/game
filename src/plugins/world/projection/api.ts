@@ -6,7 +6,7 @@ import type { Hint } from "../../flow/types";
 import type { Root } from "../../model/types";
 import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
-import { cancelTracks, forgetEndedTracks, runningComponents } from "./driver";
+import { cancelTracks, forgetEndedTracks, forgetJoined, runningComponents } from "./driver";
 import {
   cancelHandles,
   createViewHandle,
@@ -43,7 +43,7 @@ import type {
   View,
   ViewHandle
 } from "./types";
-import { writeLayer } from "./views";
+import { createViewRecord, writeLayer } from "./views";
 
 /**
  * Tells whether a cause sets the picture instead of playing it.
@@ -260,19 +260,14 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
   // The view record a handle of a plugin-owned element runs on. It never reaches `byEntity`, so
   // no reconcile ever meets it: the owner drives it and records its rest pose with `setRest`.
-  const elementView = (entity: Entity): View => ({
-    entity,
-    projection: state.keysByEntity.get(entity)?.projection ?? "",
-    key: state.keysByEntity.get(entity)?.key ?? "",
-    item: undefined,
-    rest: restOf(entity),
-    handles: [],
-    lifted: false,
-    dropWhenStill: false,
-    loopOwed: false,
-    exiting: false,
-    cause: "mount"
-  });
+  const elementView = (entity: Entity): View =>
+    createViewRecord(
+      entity,
+      state.keysByEntity.get(entity)?.projection ?? "",
+      state.keysByEntity.get(entity)?.key ?? "",
+      undefined,
+      restOf(entity)
+    );
 
   const api: ProjectionModule = {
     register: (spec: AnyProjectionSpec): void => {
@@ -403,6 +398,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       const owned = byComponent.get(component.componentName) ?? emptyFieldSet();
 
       for (const field of fields) owned.add(field);
+      forgetJoined(state, owned);
       byComponent.set(component.componentName, owned);
       state.mutes.set(entity, byComponent);
 
@@ -413,6 +409,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
         released = true;
         for (const field of fields) owned.delete(field);
+        forgetJoined(state, owned);
         dropEmptyMute(state.mutes, entity, component.componentName, owned);
       };
     },
@@ -445,13 +442,10 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       writeLayer(pctx, entity, spec.layer);
     },
 
-    keyOf: (entity: Entity): ProjectionKey | undefined => {
-      const view = state.byEntity.get(entity);
+    keyOf: (entity: Entity): ProjectionKey | undefined =>
+      state.byEntity.get(entity)?.address ?? state.keysByEntity.get(entity),
 
-      return view === undefined
-        ? state.keysByEntity.get(entity)
-        : { projection: view.projection, key: view.key };
-    },
+    membershipVersion: (): number => state.membershipVersion,
 
     causeOf: (entity: Entity): MotionCause | undefined =>
       state.byEntity.get(entity)?.cause ?? state.leaving.get(entity),
@@ -514,6 +508,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       byKey.set(key, entity);
       state.keys.set(projection, byKey);
       state.keysByEntity.set(entity, { projection, key });
+      // The next sweep looks for dead elements, also when no entity was despawned since the last.
+      state.sweptDespawns = -1;
 
       return (): void => {
         if (byKey.get(key) === entity) byKey.delete(key);
@@ -558,8 +554,16 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       if (deps.ecs.mode() !== "live") return;
 
       sweepQueue(pctx);
-      forgetDeadElements(pctx);
-      startOwedLoops(pctx);
+
+      // Per frame: an element's key and rest pose can only go stale when an entity was despawned.
+      const despawns = ctx.state.ecs.despawns;
+
+      if (state.sweptDespawns !== despawns) {
+        state.sweptDespawns = despawns;
+        forgetDeadElements(pctx);
+      }
+
+      if (state.owedLoops > 0) startOwedLoops(pctx);
     },
 
     flushAll: (): void => {
@@ -595,6 +599,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.hints.length = 0;
       state.dirty = undefined;
       state.layers = Object.freeze([]);
+      state.membershipVersion += 1;
     }
   };
 

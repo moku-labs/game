@@ -7,7 +7,8 @@
  * every render target), and `BatcherPipe.buildStart` begins
  * every rebuild of a render group's instruction list (spec 26 R2.3). Counting subclasses of the seven go into Pixi's
  * own extension registry before `app.init()`, under the same names. No native prototype and no Pixi instance is
- * patched, and no private field is read. What is not counted (renderer README, "What is not counted"):
+ * patched, and no private field is read. A count runs while its section of the monitor is on (spec 11 R14): one bit
+ * test, inline. What is not counted (renderer README, "What is not counted"):
  * passes Pixi opens on command encoders of its own — a stand-alone clear between frames, the mipmap generator, the
  * MSAA restore — and draws outside the three classes.
  */
@@ -18,12 +19,16 @@ import {
   KIND_SLOTS,
   type MonitorSinks,
   OWNER_SLOTS,
-  type OwnerTable
+  type OwnerTable,
+  SECTION
 } from "./types";
 import { cellF64 } from "./units";
 
-/** The arguments of a batch draw. */
+/** The arguments of a batch draw: the batcher pipe and the batch. */
 type BatchArguments = Parameters<InstanceType<PixiModule["GpuBatchAdaptor"]>["execute"]>;
+
+/** The passes and the GPU timer: a pass is handed to the pass sink while either runs. */
+const PASS_SECTIONS = SECTION.passes | SECTION.gpu;
 
 /** The graphics pipe and the graphics object of a graphics draw. */
 type GraphicsArguments = Parameters<InstanceType<PixiModule["GpuGraphicsAdaptor"]>["execute"]>;
@@ -122,7 +127,8 @@ function ownerSlot(owners: OwnerTable, owner: number): number {
 /**
  * Counts one filter apply of a frame: its pixels (width times height times resolution squared), its interned kind and
  * its owner, into the frame's counters, the kinds' and the owner table, and notes the kind and the owner being applied
- * so a pass begun inside is named by them. A plain function apart from the class: indexed stores only.
+ * so a pass begun inside is named by them. With the `passes` section off it only names them. A plain function apart
+ * from the class: indexed stores only.
  *
  * @param sinks - The sinks.
  * @param filter - The filter applied.
@@ -133,19 +139,23 @@ function countApply(
   filter: ApplyArguments[0],
   input: ApplyArguments[1]
 ): void {
+  const kind = internKind(sinks, sinks.filterKinds?.get(filter));
+  const owner = sinks.filterOwners?.get(filter) ?? 0;
+
+  sinks.filterKind = kind;
+  sinks.filterOwner = owner;
+
+  if ((sinks.sections & SECTION.passes) === 0) return;
+
   const { counts, owners } = sinks;
   const resolution = input.source.resolution;
   const pixels = input.frame.width * input.frame.height * resolution * resolution;
-  const kind = internKind(sinks, sinks.filterKinds?.get(filter));
-  const owner = sinks.filterOwners?.get(filter) ?? 0;
   const slot = owner === 0 ? -1 : ownerSlot(owners, owner);
 
   counts[COUNT.filterApplies] = cellF64(counts, COUNT.filterApplies) + 1;
   counts[COUNT.filterPixels] = cellF64(counts, COUNT.filterPixels) + pixels;
   sinks.kindApplies[kind] = cellF64(sinks.kindApplies, kind) + 1;
   sinks.kindPixels[kind] = cellF64(sinks.kindPixels, kind) + pixels;
-  sinks.filterKind = kind;
-  sinks.filterOwner = owner;
 
   // The owner's applies of the frame, for the `filter-still` rule (U5).
   if (slot !== -1) {
@@ -189,12 +199,14 @@ function uploadBytes(source: Source): number {
 /**
  * Counts one upload of a source, in or between frames: an upload between two frames is zeroed
  * by the next `begin()`, so it is lost (Pixi uploads lazily at the first draw, inside a frame).
- * A render target has no upload method and no resource and is not counted.
+ * A render target has no upload method and no resource and is not counted, and nothing is while the `passes` section
+ * is off.
  *
  * @param sinks - The sinks.
  * @param source - The source the texture system just uploaded.
  */
 function countUpload(sinks: MonitorSinks, source: Source): void {
+  if ((sinks.sections & SECTION.passes) === 0) return;
   if (source.uploadMethodId === "unknown") return;
   if (source.resource === null || source.resource === undefined) return;
 
@@ -211,7 +223,7 @@ function countUpload(sinks: MonitorSinks, source: Source): void {
  *
  * @param pixi - The loaded Pixi module.
  * @param sinks - What every instance counts into.
- * @returns The six counting classes.
+ * @returns The seven counting classes (BatcherPipe among them).
  */
 export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): CountingClasses {
   const counter = sinks.draws;
@@ -229,9 +241,12 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param instructionSet - The instruction set being rebuilt.
      */
     public override buildStart(instructionSet: InstructionSet): void {
-      if (sinks.inFrame) sinks.counts[COUNT.rebuilds] = cellF64(sinks.counts, COUNT.rebuilds) + 1;
+      if ((sinks.sections & SECTION.passes) !== 0) {
+        if (sinks.inFrame) sinks.counts[COUNT.rebuilds] = cellF64(sinks.counts, COUNT.rebuilds) + 1;
 
-      sinks.rebuildsWindow += 1;
+        sinks.rebuildsWindow += 1;
+      }
+
       super.buildStart(instructionSet);
     }
   }
@@ -241,13 +256,16 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
     public static override readonly extension = pixi.GpuBatchAdaptor.extension;
 
     /**
-     * Counts the batch, then draws it.
+     * Counts the batch, then draws it. Its two arguments are named, not spread: a rest array would be made at every
+     * batch.
      *
-     * @param args - The batcher pipe and the batch.
+     * @param batchPipe - The batcher pipe.
+     * @param batch - The batch.
      */
-    public override execute(...args: BatchArguments): void {
-      counter.frame += 1;
-      super.execute(...args);
+    public override execute(batchPipe: BatchArguments[0], batch: BatchArguments[1]): void {
+      if ((sinks.sections & SECTION.passes) !== 0) counter.frame += 1;
+
+      super.execute(batchPipe, batch);
     }
   }
 
@@ -266,7 +284,10 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
       renderable: GraphicsArguments[1]
     ): void {
       super.execute(graphicsPipe, renderable);
-      counter.frame += graphicsDraws(graphicsPipe, renderable);
+
+      if ((sinks.sections & SECTION.passes) !== 0) {
+        counter.frame += graphicsDraws(graphicsPipe, renderable);
+      }
     }
   }
 
@@ -300,7 +321,8 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param options - The draw options.
      */
     public override draw(options: DrawOptions): void {
-      counter.frame += 1;
+      if ((sinks.sections & SECTION.passes) !== 0) counter.frame += 1;
+
       super.draw(options);
     }
 
@@ -310,13 +332,14 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param options - The draw options.
      */
     public override drawIndirect(options: IndirectOptions): void {
-      counter.frame += 1;
+      if ((sinks.sections & SECTION.passes) !== 0) counter.frame += 1;
+
       super.drawIndirect(options);
     }
 
     /**
-     * Counts the pass and its stencil inside a frame and lets the pass sink record it (and set its
-     * timestamp writes), then begins it.
+     * Counts the pass inside a frame (every build counts it, F8), its stencil while the `passes` section is on, and
+     * lets the pass sink record it and set its timestamp writes while the passes or the GPU timer run, then begins it.
      *
      * @param gpuRenderTarget - The GPU render target with the descriptor Pixi built for the pass.
      * @returns The pass encoder.
@@ -328,11 +351,16 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
 
         counts[COUNT.passes] = cellF64(counts, COUNT.passes) + 1;
 
-        if (descriptor.depthStencilAttachment !== undefined) {
+        if (
+          (sinks.sections & SECTION.passes) !== 0 &&
+          descriptor.depthStencilAttachment !== undefined
+        ) {
           counts[COUNT.stencilPasses] = cellF64(counts, COUNT.stencilPasses) + 1;
         }
 
-        sinks.passes?.begin(descriptor, this.owner.renderTarget.renderTarget);
+        if ((sinks.sections & PASS_SECTIONS) !== 0) {
+          sinks.passes?.begin(descriptor, this.owner.renderTarget.renderTarget);
+        }
       }
 
       return super.beginRenderPass(gpuRenderTarget);
@@ -405,7 +433,10 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
 
       if (made) {
         this.targets.add(source);
-        sinks.counts[COUNT.targetsCreated] = cellF64(sinks.counts, COUNT.targetsCreated) + 1;
+
+        if ((sinks.sections & SECTION.passes) !== 0) {
+          sinks.counts[COUNT.targetsCreated] = cellF64(sinks.counts, COUNT.targetsCreated) + 1;
+        }
       }
 
       return texture;
@@ -427,7 +458,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param source - The source.
      */
     protected override onSourceUnload(source: Source): void {
-      if (this.targets.delete(source)) {
+      if (this.targets.delete(source) && (sinks.sections & SECTION.passes) !== 0) {
         sinks.counts[COUNT.targetsDestroyed] = cellF64(sinks.counts, COUNT.targetsDestroyed) + 1;
       }
 

@@ -3,7 +3,7 @@
  * the systems fill the tables as entities carry effects.
  */
 import type { Entity } from "../world/types";
-import type { CheckState, FilteredView, FilterKind } from "./filters/types";
+import type { CheckState, FilteredView, FilterKind, FilterSyncState } from "./filters/types";
 import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particles/types";
 import type { State } from "./types";
 
@@ -53,15 +53,38 @@ function createCheckState(run: number): CheckState {
 }
 
 /**
+ * Creates where the filter sync stands before its first run: no run yet, no view to sync them all, no viewport judged.
+ *
+ * @returns The fresh sync state.
+ */
+export function createFilterSync(): FilterSyncState {
+  return { round: 0, all: false, pending: false, width: -1, height: -1 };
+}
+
+/**
  * Creates the filter tables and the shared one-shot sets.
  *
  * @returns The empty kinds, checks, views, broken and ready marks and warnings.
  */
-function filterTables(): Pick<State, "kinds" | "checks" | "views" | "broken" | "ready" | "warned"> {
+function filterTables(): Pick<
+  State,
+  | "kinds"
+  | "kindList"
+  | "checks"
+  | "views"
+  | "viewList"
+  | "filterSync"
+  | "broken"
+  | "ready"
+  | "warned"
+> {
   return {
     kinds: new Map<string, FilterKind>(),
+    kindList: [],
     checks: createCheckState(0),
     views: new Map<Entity, FilteredView>(),
+    viewList: [],
+    filterSync: createFilterSync(),
     broken: new Set<string>(),
     ready: new Set<string>(),
     warned: new Set<string>()

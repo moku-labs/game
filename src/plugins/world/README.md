@@ -29,10 +29,10 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `set(entity, Component, patch)` | Shallow merge into the stored object, marks changed. Never queued. Throws for a stale entity or a missing component. |
 | `add(entity, value)` / `remove(entity, Component)` | Structural. `add` on an existing component replaces the value and marks changed, no `onAdded`. |
 | `has(entity, Component)` / `tag` / `untag` | Structural and idempotent. False for a stale id. |
-| `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C` ("Marking what changed", below). Inside a system the walk reads the store live (changes are queued until the phase ends); outside one it walks the keys taken at the start, and skips an entity despawned before its turn. Every row is a new array: keep it if you like. |
+| `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C` ("Marking what changed", below). Inside a system the walk reads the store live (changes are queued until the phase ends); outside one it walks the keys taken at the start, and skips an entity despawned before its turn. Every row of `ecs.query()` is a new array, also inside a system: keep it if you like. The rows a system's `run` gets for its declared `query` are not: see "The rows of a system", below. |
 | `resource(Resource)` | The one mutable value per world, made on first read: a deep clone of plain defaults, or one call of a factory default. |
 | `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied, for a component or a tag. A component listener gets the entity and the value; a tag listener gets the entity. A throwing listener is logged; the others still run. |
-| `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
+| `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`: the world's own list, each entity once in mark order, emptied in place. Walk it in the frame and copy what you keep. Nothing marked: one shared empty list. Allocates nothing. Inside a system nothing leaves it until the phase ends; outside a phase a despawn or a removal takes the entity out at once and the ones after it move up, so a loop that despawns or removes there walks a copy (`[...ecs.changed(C)]`). |
 | `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
 | `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
 | `count(): number` | How many entities live now, views and layers included: every id `spawn` handed out that no despawn took back. A size the world keeps, no allocation. A screen entered and left returns it to where it was; a count that grows per visit is a leak. The renderer's monitor reads it once a second in a debug build. |
@@ -102,6 +102,24 @@ A few rows marked by a tween that does change are never reported.
 Put the rarest component first in a query: the walk visits every entity of the first term's store
 and builds a row only for those that carry every term.
 
+### The rows of a system
+
+A system's `query` is resolved once, when it registers, into one walk the runner resets before
+every run. The walk allocates nothing: every row it hands `run` is the same array, rewritten for
+the next row. A row is valid until the next row. Destructuring copies, so the usual loop is safe:
+
+```ts
+run: rows => {
+  for (const [entity, transform] of rows) kept.set(entity, transform); // the values, not the row
+}
+```
+
+A system that keeps the row itself (`list.push(row)`) sees every kept row turn into the last one;
+it copies instead (`list.push([...row])`). `ecs.query()` keeps fresh rows everywhere, also when a
+system calls it inside `run`. A system with an empty `query` runs every frame and walks nothing.
+The context a system gets is one object per world; its `time` and `snapshot` are the running
+phase's.
+
 `snapshot()` is typed. Both types reach a game as `World.WorldSnapshot` and `World.EntitySnapshot`;
 `diff()` and `schema()` answer `World.FrameDiff` (with `World.EntityDiff` entries) and
 `World.ComponentSchema`.
@@ -136,7 +154,8 @@ app.world.ecs.snapshot().entities[0];
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
-| `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. |
+| `membershipVersion(): number` | Moves every time a view enters the live views, leaves them, or is forgotten after its despawn, and on a clear. `ui` hosts the views of a projection again only when it moved. Allocates nothing. |
+| `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. A view's `keyOf` is the frozen address it keeps for its life: the same object every call. |
 | `causeOf(entity)` | Why the view's motion hooks play: `"mount"` when the view came or goes with its screen (a scene mount, a load, a restore), `"change"` when a commit changed a live screen; also answers for a view that just left, until the next sweep. A world projection passes the same value to `enter`/`exit` as their fourth argument. |
 | `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
 | `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
@@ -245,6 +264,11 @@ const app = createApp({
 | `sync` | systems of `sync` → flush |
 | `signals` | record the frame history (dev builds only) → clear every change set |
 
+The sweep does only the work there is: the live views are walked only while one may hold a motion
+(every view handle made since the last sweep, or a view still moving), the dead elements are looked
+for only after a despawn or a new `registerKey`, and the owed loops only while a view owes one. An
+idle frame of the world allocates nothing; `__tests__/perf/` holds the budgets that prove it.
+
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
 `ctx.log.error("world:system-failed", …)` and skipped for this frame; the frame goes on. A dev
@@ -316,8 +340,8 @@ entity with a pose recorded by `setRest`. Every track on the entity is ended wit
 `driver.cancelAll`, then each recorded component the entity still carries is written, muted fields
 left out. A component the element dropped is not added back. An element tagged `Exiting` has its
 tracks ended and keeps its place, so its owner sweeps it. The recorded pose and the registered key
-of an entity that is gone are dropped before anything is written, as the sweep of every live frame
-drops them: an owner that despawns its element leaves both behind. A pose recorded for a
+of an entity that is gone are dropped before anything is written, as the sweep of the next live
+frame after a despawn drops them: an owner that despawns its element leaves both behind. A pose recorded for a
 projection view is skipped. Last, every `onConverged` listener runs:
 the owner puts back what only it knows, as `ui` builds its roots again through its mount path. A
 listener that throws is logged with `log.error("world:converged-listener-failed", …)` and the

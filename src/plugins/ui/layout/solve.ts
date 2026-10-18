@@ -148,11 +148,29 @@ export function solveRoot(
  *
  * @param state - The layout state, for the node of the element and the edge enums of Yoga.
  * @param element - The element, a slot.
- * @returns The content box.
+ * @param into - The rect written; a new one when left out.
+ * @returns The content box: `into` itself when given.
  */
-export function contentRectOf(state: LayoutState, element: Element): Rect {
-  const box: Rect = { x: 0, y: 0, w: element.rect.w, h: element.rect.h };
+export function contentRectOf(state: LayoutState, element: Element, into?: Rect): Rect {
+  const box = into ?? { x: 0, y: 0, w: 0, h: 0 };
   const node = state.byEntity.get(element.entity);
+  const yoga = state.yoga;
 
-  return node === undefined ? box : frameOf(state, box, node).content;
+  box.x = 0;
+  box.y = 0;
+  box.w = element.rect.w;
+  box.h = element.rect.h;
+
+  if (node === undefined || yoga === undefined) return box;
+
+  // Per solve of a slotted root: the padding read straight into the box, no frame built.
+  const left = node.getComputedPadding(yoga.EDGE_LEFT);
+  const top = node.getComputedPadding(yoga.EDGE_TOP);
+
+  box.x = left;
+  box.y = top;
+  box.w = element.rect.w - left - node.getComputedPadding(yoga.EDGE_RIGHT);
+  box.h = element.rect.h - top - node.getComputedPadding(yoga.EDGE_BOTTOM);
+
+  return box;
 }

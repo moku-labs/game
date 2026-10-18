@@ -53,7 +53,7 @@ import {
 } from "./pools";
 import { isLeaving, parentOf } from "./pose";
 import { drawShapePath, strokeShape } from "./shape-path";
-import { anchoredBox, boxOf, layoutSprite } from "./sizing";
+import { anchoredBoxInto, boxInto, createSpriteLayout, layoutSpriteInto } from "./sizing";
 import {
   clearFrames,
   coverTexture,
@@ -98,6 +98,21 @@ type WritablePoint = { x: number; y: number; set(x: number, y?: number): void };
 
 /** The tint that leaves a colour as it is: a painted shape's, and the white a tinted shape's path is drawn in. */
 const WHITE = 0xff_ff_ff;
+
+/** What `applyAlpha` reads of a visual's component: its alpha. */
+type Faded = { alpha: number };
+
+/** The alpha of a visual whose component is gone: drawn whole. */
+const OPAQUE: Readonly<Faded> = Object.freeze({ alpha: 1 });
+
+/** The box of the placeholder square on an axis without a size. */
+const PLACEHOLDER_BOX = Object.freeze({ width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE });
+
+/**
+ * The layout every sprite write fills and reads at once: per frame, reused, no allocation (one write at a time, in the
+ * sync pass).
+ */
+const LAYOUT = createSpriteLayout();
 
 /**
  * The depth of a wrapper's own visual among the wrapper's children: a child at `Order` 0 or more draws above it, one
@@ -323,12 +338,13 @@ function drawPlaceholder(
   value: Readonly<SpriteValue>,
   texture: PixiTexture | undefined
 ): void {
-  const box = boxOf({ width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE }, value);
+  const box = boxInto(LAYOUT.box, PLACEHOLDER_BOX, value);
 
   writeLook(sctx, entity, object, texture, PLACEHOLDER_TINT);
   writePoint(sctx, entity, object.anchor, value.anchor.x, value.anchor.y);
-  view.drawScale = { x: box.width, y: box.height };
-  view.hitBox = anchoredBox(value.anchor, box);
+  view.drawScale.x = box.width;
+  view.drawScale.y = box.height;
+  anchoredBoxInto(view.hitBox, value.anchor, box);
 }
 
 /**
@@ -370,12 +386,13 @@ function ownsAlpha(view: View): boolean {
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - The view of a `Sprite`, a `NineSlice` or a `Shape`.
- * @param alpha - The alpha of the component; the view's HUD factor multiplies it.
+ * @param look - The component whose `alpha` it draws; the view's HUD factor multiplies it. The component, not the
+ *   number: a double handed to a call is boxed, and an alpha tween writes every frame.
  */
-function applyAlpha(sctx: SyncCtx, entity: Entity, view: View, alpha: number): void {
+function applyAlpha(sctx: SyncCtx, entity: Entity, view: View, look: Readonly<Faded>): void {
   const target = view.wrapper ?? view.object;
   // A HUD part an overlay fades draws its own alpha times the factor (spec 22 O7.4); every other view at 1.
-  const drawn = alpha * view.hud;
+  const drawn = look.alpha * view.hud;
 
   if (target.alpha !== drawn) {
     markView(sctx, entity);
@@ -391,20 +408,20 @@ function applyAlpha(sctx: SyncCtx, entity: Entity, view: View, alpha: number): v
 }
 
 /**
- * The alpha the component of a built-in visual asks for, before the HUD factor.
+ * The component of a built-in visual whose alpha it draws, before the HUD factor.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - The view of a `Sprite`, a `NineSlice` or a `Shape`.
- * @returns The component's alpha, 1 when it has none.
+ * @returns The component, or an alpha of 1 when it has none.
  */
-function componentAlpha(sctx: SyncCtx, entity: Entity, view: View): number {
+function componentAlpha(sctx: SyncCtx, entity: Entity, view: View): Readonly<Faded> {
   const ecs = sctx.ctx.deps.world.ecs;
 
-  if (view.kind === "Sprite") return ecs.get(entity, Sprite)?.alpha ?? 1;
-  if (view.kind === "NineSlice") return ecs.get(entity, NineSlice)?.alpha ?? 1;
+  if (view.kind === "Sprite") return ecs.get(entity, Sprite) ?? OPAQUE;
+  if (view.kind === "NineSlice") return ecs.get(entity, NineSlice) ?? OPAQUE;
 
-  return ecs.get(entity, Shape)?.alpha ?? 1;
+  return ecs.get(entity, Shape) ?? OPAQUE;
 }
 
 /**
@@ -437,25 +454,31 @@ export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: numb
 
 /**
  * Writes the `Sprite` component onto its display object: the texture, or its crop for a `"cover"`
- * sprite, the stretch into the box, and the box as the hit box, the anchor applied. A new stretch of
- * a view without a wrapper changes the object's own units, so its filter area is written again (B4).
+ * sprite, the stretch into the box, and the box as the hit box, the anchor applied. The stretch and
+ * the hit box are written into the view's own objects. A new stretch of a view without a wrapper
+ * changes the object's own units, so its filter area is written again (B4); a write that keeps it (an
+ * alpha tween, a tint) writes no area.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - Its view.
+ * @returns True when the stretch changed: the transform, which folds it into the scale, is owed a write.
  */
-export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
+export function applySprite(sctx: SyncCtx, entity: Entity, view: View): boolean {
   const stretch = view.drawScale;
+  // Compared by its numbers: the view keeps one stretch object, written in place.
+  const x = stretch.x;
+  const y = stretch.y;
 
   writeSprite(sctx, entity, view);
 
-  if (
-    view.drawScale !== stretch &&
-    view.wrapper === undefined &&
-    sctx.ctx.state.sync.areas.has(entity)
-  ) {
+  const stretched = stretch.x !== x || stretch.y !== y;
+
+  if (stretched && view.wrapper === undefined && sctx.ctx.state.sync.areas.has(entity)) {
     applyArea(sctx, entity, view);
   }
+
+  return stretched;
 }
 
 /**
@@ -473,29 +496,37 @@ function writeSprite(sctx: SyncCtx, entity: Entity, view: View): void {
 
   retargetKey(sctx.ctx.state.sync, entity, view, value.texture);
 
-  const { texture, missing } = textureFor(sctx, value.texture);
+  // per frame: the texture resolved without a result object (an alpha tween writes this every frame).
+  const texture = resolveTexture(sctx, value.texture);
 
-  view.placeholder = missing;
-  applyAlpha(sctx, entity, view, value.alpha);
+  if (texture === undefined) warnMissing(sctx, value.texture);
 
-  if (missing || texture === undefined) {
+  view.placeholder = texture === undefined;
+  applyAlpha(sctx, entity, view, value);
+
+  if (texture === undefined) {
     showCover(sctx, entity, view, "");
-    drawPlaceholder(sctx, entity, object, view, value, texture);
+    drawPlaceholder(sctx, entity, object, view, value, placeholderTexture(sctx));
 
     return;
   }
 
-  const layout = layoutSprite({ width: texture.width, height: texture.height }, value);
-  const cover =
-    layout.crop === undefined
-      ? { texture, frameKey: "" }
-      : coverTexture(sctx, entity, value.texture, texture, layout.box, layout.crop);
+  const layout = layoutSpriteInto(LAYOUT, texture, value);
 
-  writeLook(sctx, entity, object, cover.texture, value.tint);
-  showCover(sctx, entity, view, cover.frameKey);
+  if (layout.cover) {
+    const cover = coverTexture(sctx, entity, value.texture, texture, layout.box, layout.crop);
+
+    writeLook(sctx, entity, object, cover.texture, value.tint);
+    showCover(sctx, entity, view, cover.frameKey);
+  } else {
+    writeLook(sctx, entity, object, texture, value.tint);
+    showCover(sctx, entity, view, "");
+  }
+
   writePoint(sctx, entity, object.anchor, layout.anchor.x, layout.anchor.y);
-  view.drawScale = layout.drawScale;
-  view.hitBox = anchoredBox(value.anchor, layout.box);
+  view.drawScale.x = layout.drawScale.x;
+  view.drawScale.y = layout.drawScale.y;
+  anchoredBoxInto(view.hitBox, value.anchor, layout.box);
 }
 
 /**
@@ -600,7 +631,7 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
   changed = writeSlice(sctx, entity, object, "bottomHeight", borders.bottom) || changed;
   changed =
     writeSlice(sctx, entity, object, "tint", missing ? PLACEHOLDER_TINT : value.tint) || changed;
-  applyAlpha(sctx, entity, view, value.alpha);
+  applyAlpha(sctx, entity, view, value);
   changed = writeSlice(sctx, entity, object, "width", value.width) || changed;
   changed = writeSlice(sctx, entity, object, "height", value.height) || changed;
 
@@ -898,7 +929,7 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
   setHidden(sctx, entity, view, "empty", empty);
   if (!empty) drawShape(sctx, entity, view, object, value);
 
-  applyAlpha(sctx, entity, view, value.alpha);
+  applyAlpha(sctx, entity, view, value);
   writeHitBox(view.hitBox, value.w, value.h);
   applyClip(sctx, entity, view, value);
 }
@@ -1052,6 +1083,8 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   // The subtree reasons move from the visual up to the wrapper; the visual keeps only its own.
   sctx.ctx.state.sync.viewOfTop.delete(view.object);
   sctx.ctx.state.sync.viewOfTop.set(wrapper, view);
+  // A new top for the view: the render passes walk a new chain (Q2).
+  sctx.ctx.state.sync.passesVersion += 1;
   writeRenderable(view);
   applyTransform(sctx, parentEntity, view);
   // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.

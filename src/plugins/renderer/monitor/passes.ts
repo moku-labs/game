@@ -13,7 +13,14 @@
 
 import type { GpuTimer } from "./gpu-timer";
 import { NO_STENCIL, writePass, writePassDetail } from "./ring";
-import { COUNT, type MonitorSinks, type PassSink, type PassTarget, type PerfCtx } from "./types";
+import {
+  COUNT,
+  type MonitorSinks,
+  type PassSink,
+  type PassTarget,
+  type PerfCtx,
+  SECTION
+} from "./types";
 import { cellF64 } from "./units";
 
 /** The pass kinds by index: canvas, texture, filter. */
@@ -88,7 +95,8 @@ function writeDetail(pc: PerfCtx, target: PassTarget, kind: number): void {
 
 /**
  * Creates the WebGPU pass sink the counting encoder calls: each pass of a frame goes into the pass ring, with the
- * frame number and its index in the frame, and gets the timer's timestamp writes when there is a timer.
+ * frame number and its index in the frame, while the `passes` section is on, and gets the timer's timestamp writes
+ * when there is a timer and the `gpu` section is on (a pass the ring does not keep has the number -1).
  *
  * @param pc - The perf context.
  * @param timer - The GPU timer of the application, or `undefined` without `timestamp-query`.
@@ -102,20 +110,26 @@ export function createPassSink(
 ): PassSink {
   return {
     begin: (descriptor, target) => {
-      const kind = kindOf(pc, target === canvas);
-      const sequence = writePass(
-        pc.perf.ring.passes,
-        pc.perf.frame,
-        cellF64(pc.sinks.counts, COUNT.passes) - 1,
-        kind,
-        descriptor.depthStencilAttachment === undefined ? 0 : 1,
-        target.pixelWidth,
-        target.pixelHeight,
-        labelOf(pc, target, kind)
-      );
+      const { sections } = pc.sinks;
+      let sequence = -1;
 
-      writeDetail(pc, target, kind);
-      timer?.timePass(descriptor, sequence);
+      if ((sections & SECTION.passes) !== 0) {
+        const kind = kindOf(pc, target === canvas);
+
+        sequence = writePass(
+          pc.perf.ring.passes,
+          pc.perf.frame,
+          cellF64(pc.sinks.counts, COUNT.passes) - 1,
+          kind,
+          descriptor.depthStencilAttachment === undefined ? 0 : 1,
+          target.pixelWidth,
+          target.pixelHeight,
+          labelOf(pc, target, kind)
+        );
+        writeDetail(pc, target, kind);
+      }
+
+      if ((sections & SECTION.gpu) !== 0) timer?.timePass(descriptor, sequence);
     },
 
     resolve: commandEncoder => timer?.resolve(commandEncoder)
@@ -191,7 +205,7 @@ export function countGlPasses(
 
 /**
  * Counts and records the WebGL passes of an agent build: `countGlPasses` with each pass written into the ring, with
- * its kind and its label.
+ * its kind and its label, while the `passes` section is on.
  *
  * @param renderer - Pixi's WebGL renderer.
  * @param pc - The perf context.
@@ -199,6 +213,8 @@ export function countGlPasses(
  */
 export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void {
   return countGlPasses(renderer, pc.sinks, (target, index) => {
+    if ((pc.sinks.sections & SECTION.passes) === 0) return;
+
     const kind = kindOf(pc, target.isRoot);
 
     writePass(

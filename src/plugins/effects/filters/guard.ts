@@ -94,6 +94,8 @@ export function breakInstance(
   detail?: BrokenDetail
 ): void {
   instance.broken = true;
+  // The view the instance belongs to is not known here (a render broke it): the next sync looks at every view.
+  ectx.state.filterSync.all = true;
 
   const fallback = kind?.source === "wgsl" ? kind.definition.fallback : undefined;
 
@@ -103,9 +105,14 @@ export function breakInstance(
 
   if (!instance.standIn && kind !== undefined && pixi !== undefined) {
     instance.replacement = createStandIn(ectx, pixi, kind, instance.value);
+    if (instance.replacement !== undefined) instance.replacement.entity = instance.entity;
   }
 
-  if (instance.replacement === undefined) instance.filter.enabled = false;
+  if (instance.replacement !== undefined) return;
+
+  // Switched off is a change the renderer cannot see (its view and its passes): told first, under `onDemand` too.
+  if (instance.entity !== 0) ectx.deps.renderer.invalidate(instance.entity);
+  instance.filter.enabled = false;
 }
 
 /**

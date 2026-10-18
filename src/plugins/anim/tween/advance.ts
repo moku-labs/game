@@ -5,10 +5,12 @@
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import type { AnyComponent } from "../../world/ecs/types";
-import type { Ease, Entity, TrackOptions, TrackSegment } from "../../world/types";
+import type { Entity, TrackOptions, TrackSegment } from "../../world/types";
 import { Animation, countPlaying } from "../components";
+import { dropEnded } from "../dense";
 import type { AnimCtx } from "../types";
-import { applyEase } from "./easing";
+import { baseOr, cellValue, setBase, setOffset, sumOffsets } from "./cells";
+import { easeCell } from "./easing";
 import type { StepMotion, Track } from "./types";
 
 /**
@@ -60,41 +62,6 @@ function keysOf(
  */
 function keyOf(track: Track, field: string): string {
   return track.keys[field] ?? fieldKey(track.entity, track.component.componentName, field);
-}
-
-/**
- * Creates the offsets table of one field. It lives in its own function because lint rule L5
- * refuses a collection built inside an exported declaration.
- *
- * @param actx - Domain context of the anim plugin.
- * @param key - The field key.
- * @returns The table of track id to contributed delta.
- */
-function offsetsOf(actx: AnimCtx, key: string): Map<number, number> {
-  const offsets = actx.state.offsets.get(key) ?? new Map<number, number>();
-
-  actx.state.offsets.set(key, offsets);
-
-  return offsets;
-}
-
-/**
- * The sum of what every additive track contributes to one field.
- *
- * @param actx - Domain context of the anim plugin.
- * @param key - The field key.
- * @returns The sum, `0` when no additive track drives the field.
- */
-function sumOffsets(actx: AnimCtx, key: string): number {
-  const offsets = actx.state.offsets.get(key);
-
-  if (offsets === undefined) return 0;
-
-  let sum = 0;
-
-  for (const delta of offsets.values()) sum += delta;
-
-  return sum;
 }
 
 /**
@@ -163,101 +130,112 @@ function unfileAdditive(actx: AnimCtx, track: Track): void {
  * @param actx - Domain context of the anim plugin.
  * @param track - The track that is about to write.
  * @param stored - The stored component value.
- * @returns The start value per field.
  */
-function readFrom(
-  actx: AnimCtx,
-  track: Track,
-  stored: Readonly<Record<string, unknown>>
-): Record<string, number> {
-  if (track.from !== undefined) return track.from;
+function beginTrack(actx: AnimCtx, track: Track, stored: Readonly<Record<string, unknown>>): void {
+  if (track.begun) return;
 
-  const from: Record<string, number> = {};
+  track.begun = true;
 
-  for (const [field, target] of Object.entries(track.to)) {
-    const key = keyOf(track, field);
+  for (let slot = 0; slot < track.names.length; slot++) {
+    const field = track.names[slot];
+    const key = track.slotKeys[slot];
+
+    if (track.live[slot] === 0 || field === undefined || key === undefined) continue;
+
     const base = actx.state.bases.get(key);
     const current = stored[field];
-    const value = base ?? (typeof current === "number" ? current : target);
+    const read = typeof current === "number" ? current : (track.targets[slot] ?? 0);
+    const value = base === undefined ? read : cellValue(base);
 
-    from[field] = value;
-    if (base === undefined) actx.state.bases.set(key, value);
+    track.starts[slot] = value;
+    if (base === undefined) setBase(actx, key, value);
   }
-
-  track.from = from;
-
-  return from;
 }
 
 /**
- * Walks the keyframe segments of a track to one normalised time of the whole track. Each segment
- * eases, with its own curve or the track's, from where the segment before left the field; a
- * segment that does not name the field holds it, and past the last segment the field holds too.
+ * Walks the keyframe segments of a track to its normalised time `clock[1]`, for one slot. Each
+ * segment eases, with its own curve or the track's, from where the segment before left the
+ * field; a segment that does not name the field holds it, and past the last segment the field
+ * holds too. An additive walk starts at no offset, an absolute one at the start value. The value
+ * lands in `values[slot]`.
  *
- * @param segments - The segments of the track, in order.
- * @param ease - The curve of a segment that names none.
- * @param field - The field to read.
- * @param start - The value the track started from.
- * @param fraction - Normalised time of the whole track.
- * @returns The value of the field.
- * @example
- * ```ts
- * walkValue([{ at: 0.5, to: { x: 100 } }, { at: 1, to: { x: 50 } }], "linear", "x", 0, 0.75); // 75
- * ```
+ * @param track - The track, with segments.
+ * @param segments - Its segments, in order.
+ * @param slot - The slot.
  */
-function walkValue(
-  segments: readonly TrackSegment[],
-  ease: Ease,
-  field: string,
-  start: number,
-  fraction: number
-): number {
-  let from = start;
+function walkSlot(track: Track, segments: readonly TrackSegment[], slot: number): void {
+  const values = track.values;
+  const field = track.names[slot] ?? "";
+  const fraction = track.clock[1] ?? 0;
+  // An additive walk names offsets and starts at none; an absolute one starts at the start value.
+  let from = track.additive ? 0 : (track.starts[slot] ?? 0);
   let fromAt = 0;
 
-  for (const segment of segments) {
+  // per frame: an indexed loop, no iterator.
+  // eslint-disable-next-line unicorn/no-for-loop -- the hot path walks by index
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+
+    if (segment === undefined) continue;
+
     const target = segment.to[field] ?? from;
 
     if (fraction <= segment.at) {
       const span = segment.at - fromAt;
-      const t = span <= 0 ? 1 : (fraction - fromAt) / span;
+
+      values[slot] = span <= 0 ? 1 : (fraction - fromAt) / span;
 
       // On the key itself the value is the key's, exactly: no float drift from `from + Δ × 1`.
-      if (t >= 1) return target;
+      if ((values[slot] ?? 0) >= 1) {
+        values[slot] = target;
 
-      return from + (target - from) * applyEase(segment.ease ?? ease, t);
+        return;
+      }
+
+      easeCell(segment.ease ?? track.ease, values, slot);
+      values[slot] = from + (target - from) * (values[slot] ?? 0);
+
+      return;
     }
 
     from = target;
     fromAt = segment.at;
   }
 
-  return from;
+  values[slot] = from;
 }
 
 /**
- * The value one field of a track takes at one normalised time: eased straight from the start to
- * the target, or along the keyframe segments.
+ * What one slot of a track contributes at its write: eased straight from the start to the target,
+ * or along the keyframe segments, at the normalised time `clock[1]`; the exact target on the last
+ * frame. An absolute track contributes the value, an additive one the offset over its origin: 0
+ * for a keyframe walk of offsets, the start value for a straight track. The result lands in
+ * `values[slot]`: the numbers of a frame live in the track's cells, so no number crosses a call
+ * boxed.
  *
- * @param track - The track.
- * @param field - The field to read.
- * @param start - The value the walk starts from: the start value, or 0 for an offset walk.
- * @param target - The value the track ends on.
- * @param fraction - Normalised time of the whole track.
- * @returns The value of the field.
+ * @param track - The track that writes.
+ * @param slot - The slot.
+ * @param final - True on the last frame, which reaches the exact target.
  */
-function fieldValue(
-  track: Track,
-  field: string,
-  start: number,
-  target: number,
-  fraction: number
-): number {
-  if (track.segments === undefined) {
-    return start + (target - start) * applyEase(track.ease, fraction);
+function slotValue(track: Track, slot: number, final: boolean): void {
+  const values = track.values;
+  const segments = track.segments;
+  const walksOffsets = track.additive && segments !== undefined;
+
+  if (final) {
+    values[slot] = track.targets[slot] ?? 0;
+  } else if (segments === undefined) {
+    const start = track.starts[slot] ?? 0;
+
+    values[slot] = track.clock[1] ?? 0;
+    easeCell(track.ease, values, slot);
+    values[slot] = start + ((track.targets[slot] ?? 0) - start) * (values[slot] ?? 0);
+  } else {
+    walkSlot(track, segments, slot);
   }
 
-  return walkValue(track.segments, track.ease, field, start, fraction);
+  if (track.additive && !walksOffsets)
+    values[slot] = (values[slot] ?? 0) - (track.starts[slot] ?? 0);
 }
 
 /**
@@ -298,20 +276,69 @@ const UNTOUCHED = 1e-6;
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The additive track.
- * @param field - The field.
- * @param delta - What the track adds to the field now.
- * @param left - The value that stands in the field before this write.
+ * @param slot - The slot of the field; `values[slot]` holds what the track adds to it now.
+ * @param stored - The stored component value, before this write. Read only on a give-back.
  */
-function addOffset(actx: AnimCtx, track: Track, field: string, delta: number, left: unknown): void {
-  const key = keyOf(track, field);
-  const written = (actx.state.bases.get(key) ?? 0) + sumOffsets(actx, key);
+function addOffset(
+  actx: AnimCtx,
+  track: Track,
+  slot: number,
+  stored: Readonly<Record<string, unknown>>
+): void {
+  const key = track.slotKeys[slot] ?? "";
+  const field = track.names[slot] ?? "";
+  const written = baseOr(actx, key, 0) + sumOffsets(actx, key);
 
-  offsetsOf(actx, key).set(track.id, delta);
+  setOffset(actx, key, track.id, track.values[slot] ?? 0);
 
-  if (!track.masked.delete(field) || typeof left !== "number") return;
-  if (Math.abs(left - written) <= UNTOUCHED) return;
+  if (!track.masked.delete(field)) return;
 
-  actx.state.bases.set(key, left - sumOffsets(actx, key));
+  const left = stored[field];
+
+  if (typeof left !== "number" || Math.abs(left - written) <= UNTOUCHED) return;
+
+  setBase(actx, key, left - sumOffsets(actx, key));
+}
+
+/**
+ * Books what one slot of a track contributes at this write, into the base of the field for an
+ * absolute track or its offset for an additive one, then leaves in `values[slot]` what the field
+ * reads now: the base plus every offset.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that writes.
+ * @param slot - The slot; `values[slot]` holds its contribution (`slotValue`).
+ * @param stored - The stored component value, before this write.
+ */
+function bookSlot(
+  actx: AnimCtx,
+  track: Track,
+  slot: number,
+  stored: Readonly<Record<string, unknown>>
+): void {
+  const key = track.slotKeys[slot] ?? "";
+
+  if (track.additive) addOffset(actx, track, slot, stored);
+  else setBase(actx, key, track.values[slot] ?? 0);
+
+  track.values[slot] = baseOr(actx, key, track.starts[slot] ?? 0) + sumOffsets(actx, key);
+}
+
+/**
+ * Tells whether the value a track writes now moved off the one it last left in the field. An
+ * unknown last value (`NaN`) never counts as moved: the field is read then.
+ *
+ * @param last - What the track last left in the field, `NaN` when unknown.
+ * @param next - What it would write now.
+ * @returns True when the two are known and differ.
+ * @example
+ * ```ts
+ * movedOff(0.5, 0.75); // true
+ * movedOff(Number.NaN, 0.75); // false
+ * ```
+ */
+function movedOff(last: number, next: number): boolean {
+  return !Number.isNaN(last) && !Number.isNaN(next) && last !== next;
 }
 
 /**
@@ -349,12 +376,14 @@ function same(stored: unknown, next: number): boolean {
  * no field changed, so a holding loop marks nothing changed. The bases and offsets are booked
  * every frame all the same.
  *
+ * A frame that moves every field writes the track's own patch, filled in place. A frame that
+ * leaves a field alone builds the patch of the fields it moves, so no other field is written.
+ *
  * @param actx - Domain context of the anim plugin.
- * @param track - The track to write.
- * @param fraction - Normalised time of the track.
+ * @param track - The track to write, its normalised time in `clock[1]`.
  * @param final - True on the last frame, which writes the exact target.
  */
-function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boolean): void {
+function writeFields(actx: AnimCtx, track: Track, final: boolean): void {
   const ecs = actx.deps.world.ecs;
   const stored = ecs.get(track.entity, track.component);
 
@@ -364,35 +393,70 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
     return;
   }
 
-  const from = readFrom(actx, track, stored);
+  beginTrack(actx, track, stored);
+
   const owned = track.muted();
-  const walksOffsets = track.additive && track.segments !== undefined;
-  let patch: Record<string, number> | undefined;
+  // per frame: the slots of the track, its value cells and its own patch, all made when it
+  // started; the numbers pass between the steps in `values`, so nothing new is made.
+  const { names, live, moved, values, seen, patch } = track;
+  let fields = 0;
+  let count = 0;
 
-  // `for…in` and not `Object.entries`: no array of pairs per track per frame. `to` is a plain
-  // record of own fields.
-  for (const field in track.to) {
-    const target = track.to[field];
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes four arrays of the track
+  for (let slot = 0; slot < names.length; slot++) {
+    const field = names[slot];
 
-    if (target === undefined || skipsOwned(track, owned, field)) continue;
+    moved[slot] = 0;
+    if (live[slot] === 0 || field === undefined) continue;
 
-    const key = keyOf(track, field);
-    const start = from[field] ?? target;
-    const origin = walksOffsets ? 0 : start;
-    const value = final ? target : fieldValue(track, field, origin, target, fraction);
-
-    if (track.additive) addOffset(actx, track, field, value - origin, stored[field]);
-    else actx.state.bases.set(key, value);
-
-    const next = (actx.state.bases.get(key) ?? start) + sumOffsets(actx, key);
-
-    if (!same(stored[field], next)) {
-      patch ??= {};
-      patch[field] = next;
+    fields++;
+    if (skipsOwned(track, owned, field)) {
+      // Another writer holds the field: what it holds is unknown again until it is read.
+      seen[slot] = Number.NaN;
+      continue;
     }
+
+    slotValue(track, slot, final);
+    bookSlot(actx, track, slot, stored);
+
+    const next = values[slot] ?? 0;
+
+    // per frame: a value that moved off the one this track last left in the field is written
+    // without reading the field, which would box a number; a value that stands still is checked
+    // against the field, so a writer that moved it in between is undone and a still field is not.
+    if (!movedOff(seen[slot] ?? Number.NaN, next) && same(stored[field], next)) {
+      seen[slot] = next;
+      continue;
+    }
+
+    seen[slot] = next;
+    patch[field] = next;
+    moved[slot] = 1;
+    count++;
   }
 
-  if (patch !== undefined) ecs.set(track.entity, track.component, patch);
+  if (count === 0) return;
+
+  ecs.set(track.entity, track.component, count === fields ? patch : movedPatch(track));
+}
+
+/**
+ * The patch of a frame that moved only some of the fields of a track: those fields, at the values
+ * the frame put into the track's patch.
+ *
+ * @param track - The track that writes.
+ * @returns A new patch of the moved fields only.
+ */
+function movedPatch(track: Track): Record<string, unknown> {
+  const written: Record<string, unknown> = {};
+
+  for (let slot = 0; slot < track.names.length; slot++) {
+    const field = track.names[slot];
+
+    if (track.moved[slot] === 1 && field !== undefined) written[field] = track.patch[field];
+  }
+
+  return written;
 }
 
 /**
@@ -427,10 +491,10 @@ function releaseFields(
         base !== undefined &&
         stored !== undefined &&
         !owned.has(field) &&
-        !same(stored[field], base)
+        !same(stored[field], cellValue(base))
       ) {
         clean ??= {};
-        clean[field] = base;
+        clean[field] = cellValue(base);
       }
     }
 
@@ -474,7 +538,9 @@ function endTrack(actx: AnimCtx, track: Track): void {
  */
 function dropField(actx: AnimCtx, track: Track, field: string): void {
   delete track.to[field];
-  if (track.from !== undefined) delete track.from[field];
+  track.live[track.names.indexOf(field)] = 0;
+  // The patch keeps exactly the fields of `to`: a field the newer track took is never written back.
+  track.patch = { ...track.to };
   if (Object.keys(track.to).length === 0) endTrack(actx, track);
 }
 
@@ -586,7 +652,7 @@ function isSizeField(field: string): boolean {
  * @returns What it reveals, or `undefined` for a write that cannot show the view (a tint, a fill colour).
  * @example
  * ```ts
- * revealsOf(Transform, ["rotation"]); // "place"
+ * revealsOf(Transform, { rotation: 0.5 }); // "place"
  * ```
  */
 function revealsOf(
@@ -656,28 +722,39 @@ export function startTrack(
   const repeats = repeatsOf(options.repeat);
   const keep = options.reduced === "keep";
   const instant = actx.state.reducedMotion && !keep && repeats !== Number.POSITIVE_INFINITY;
+  const keys = keysOf(entity, component.componentName, target);
+  const names = Object.keys(target);
   const track: Track = {
     id: actx.state.nextId,
     entity,
     component,
     to: target,
-    keys: keysOf(entity, component.componentName, target),
+    keys,
     ms: instant ? 0 : options.ms,
     ease: options.ease ?? "out",
     delayMs: instant ? 0 : (options.delayMs ?? 0),
-    elapsed: 0,
-    from: undefined,
+    clock: new Float64Array(2),
+    begun: false,
+    names,
+    slotKeys: names.map(field => keys[field] ?? ""),
+    targets: Float64Array.from(names, field => target[field] ?? 0),
+    starts: new Float64Array(names.length),
+    live: new Uint8Array(names.length).fill(1),
+    moved: new Uint8Array(names.length),
+    values: new Float64Array(names.length),
+    seen: new Float64Array(names.length).fill(Number.NaN),
     muted,
     additive: options.additive === true,
     driven,
     bornFrame: actx.state.frame,
-    ended: Object.keys(target).length === 0,
+    ended: names.length === 0,
     segments: options.segments,
     repeatsLeft: instant ? 0 : repeats,
     held: false,
     masked: noMaskedFields(),
     keep,
-    reveals: revealsOf(component, target)
+    reveals: revealsOf(component, target),
+    patch: { ...target }
   };
 
   actx.state.nextId += 1;
@@ -687,6 +764,7 @@ export function startTrack(
   else claimFields(actx, track);
 
   actx.state.tracks.set(track.id, track);
+  actx.state.trackList.push(track);
   countPlaying(actx.deps.world.ecs, entity, 1);
   actx.deps.time.wake();
   warnIfCrowded(actx);
@@ -713,20 +791,23 @@ function holdsFirstKey(actx: AnimCtx, track: Track): boolean {
 /**
  * Starts the next runs of a repeating track whose time went past the end of its run. The frame
  * that lands exactly on the end of a run still writes that end; the next run starts after it.
+ * It reads the milliseconds since the delay ended off `clock[0]` and leaves the milliseconds into
+ * the run that plays now in `clock[1]`, so no number crosses the call boxed.
  *
  * @param track - The track.
- * @param past - Milliseconds since the delay ended, as the track counts them.
- * @returns The milliseconds into the run that plays now.
  */
-function wrapRuns(track: Track, past: number): number {
-  if (track.ms <= 0 || track.repeatsLeft === 0 || past <= track.ms) return past;
+function wrapRuns(track: Track): void {
+  const clock = track.clock;
+  const past = (clock[0] ?? 0) - track.delayMs;
+
+  clock[1] = past;
+  if (track.ms <= 0 || track.repeatsLeft === 0 || past <= track.ms) return;
 
   const runs = Math.min(Math.ceil(past / track.ms) - 1, track.repeatsLeft);
 
   track.repeatsLeft -= runs;
-  track.elapsed -= runs * track.ms;
-
-  return past - runs * track.ms;
+  clock[0] = (clock[0] ?? 0) - runs * track.ms;
+  clock[1] = past - runs * track.ms;
 }
 
 /**
@@ -737,11 +818,12 @@ function wrapRuns(track: Track, past: number): number {
  * @param track - The loop that holds.
  */
 function holdFirstKey(actx: AnimCtx, track: Track): void {
-  track.elapsed = track.delayMs;
+  track.clock[0] = track.delayMs;
 
   if (!track.held) {
     track.held = true;
-    writeFields(actx, track, 0, false);
+    track.clock[1] = 0;
+    writeFields(actx, track, false);
   } else if (actx.deps.world.ecs.get(track.entity, track.component) === undefined) {
     endTrack(actx, track);
   }
@@ -760,11 +842,12 @@ function holdFirstKey(actx: AnimCtx, track: Track): void {
 export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): number {
   if (track.ended) return deltaMs;
 
-  track.elapsed += deltaMs;
+  const clock = track.clock;
 
-  const past = track.elapsed - track.delayMs;
+  // per frame: the clock is a cell, written in place.
+  clock[0] = (clock[0] ?? 0) + deltaMs;
 
-  if (past < 0) return 0;
+  if ((clock[0] ?? 0) - track.delayMs < 0) return 0;
 
   if (holdsFirstKey(actx, track)) {
     holdFirstKey(actx, track);
@@ -774,7 +857,9 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
 
   track.held = false;
 
-  const run = wrapRuns(track, past);
+  wrapRuns(track);
+
+  const run = clock[1] ?? 0;
   const fraction = track.ms <= 0 ? 1 : Math.min(run / track.ms, 1);
   const final = fraction >= 1 && (track.repeatsLeft === 0 || track.ms <= 0);
 
@@ -789,7 +874,8 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
     return 0;
   }
 
-  writeFields(actx, track, fraction, final);
+  clock[1] = fraction;
+  writeFields(actx, track, final);
   if (!final) return 0;
 
   endTrack(actx, track);
@@ -806,7 +892,8 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
 export function finishTrack(actx: AnimCtx, track: Track): void {
   if (track.ended) return;
 
-  writeFields(actx, track, 1, true);
+  track.clock[1] = 1;
+  writeFields(actx, track, true);
   endTrack(actx, track);
 }
 
@@ -844,23 +931,48 @@ export function handleOf(actx: AnimCtx, track: Track): StepMotion {
  *
  * A track a timeline step drives is left alone: its own step already handed it the delta, which
  * is what lets the remainder past its end reach the next step of the same frame. A track born
- * inside the running frame step is skipped for the same reason.
+ * inside the running frame step is skipped for the same reason. The tracks that ended leave the
+ * dense list after both passes.
  *
  * @param actx - Domain context of the anim plugin.
  * @param deltaMs - Milliseconds of game time of the frame.
  */
 export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
-  const open = [...actx.state.tracks.values()].filter(
-    track => !track.ended && !track.driven && track.bornFrame !== actx.state.frame
-  );
+  const list = actx.state.trackList;
+  // A track started during the walk is past `count`; it was born in this step and waits anyway.
+  const count = list.length;
+  const frame = actx.state.frame;
 
-  for (const track of open) {
-    if (track.additive) advanceTrack(actx, track, deltaMs);
+  // per frame: two indexed passes over the dense list, no snapshot array and no filter closure.
+  for (let index = 0; index < count; index++) {
+    const track = list[index];
+
+    if (track?.additive && opens(track, frame)) {
+      advanceTrack(actx, track, deltaMs);
+    }
   }
 
-  for (const track of open) {
-    if (!track.additive) advanceTrack(actx, track, deltaMs);
+  for (let index = 0; index < count; index++) {
+    const track = list[index];
+
+    if (track !== undefined && !track.additive && opens(track, frame)) {
+      advanceTrack(actx, track, deltaMs);
+    }
   }
+
+  dropEnded(list);
+}
+
+/**
+ * Tells whether the frame step advances a track: it still runs, no timeline step drives it and it
+ * was not born in this step.
+ *
+ * @param track - A track of the dense list.
+ * @param frame - The number of the running frame step.
+ * @returns True when the frame step hands it the delta.
+ */
+function opens(track: Track, frame: number): boolean {
+  return !track.ended && !track.driven && track.bornFrame !== frame;
 }
 
 /**
@@ -873,12 +985,21 @@ export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
  * @param keepLoops - True to leave every track that repeats forever running.
  */
 export function finishAllTracks(actx: AnimCtx, keepLoops = false): void {
-  // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-  for (const track of [...actx.state.tracks.values()]) {
-    if (keepLoops && track.repeatsLeft === Number.POSITIVE_INFINITY) continue;
+  const list = actx.state.trackList;
+  // A fast world calls this every frame: an indexed walk of the tracks there were, no snapshot.
+  const count = list.length;
+
+  for (let index = 0; index < count; index++) {
+    const track = list[index];
+
+    if (track === undefined || (keepLoops && track.repeatsLeft === Number.POSITIVE_INFINITY)) {
+      continue;
+    }
 
     finishTrack(actx, track);
   }
+
+  dropEnded(list);
 }
 
 /**

@@ -1,7 +1,8 @@
 /**
- * @file renderer/demand — the demand state: empty sets, no whole-frame reason yet, nothing drawn yet.
+ * @file renderer/demand — the demand state: empty mark lists and sets, no whole-frame reason yet, nothing drawn yet.
  */
 import type { Entity } from "../../world/types";
+import { MarkList } from "./marks";
 import type { DemandReason, DemandState } from "./types";
 
 /**
@@ -32,12 +33,12 @@ function emptyReasons(): Set<DemandReason> {
  */
 export function createDemandState(verifyFrames = false): DemandState {
   return {
-    marked: emptyEntities(),
-    pending: emptyEntities(),
-    loose: emptyEntities(),
-    visual: emptyEntities(),
-    moved: emptyEntities(),
-    published: emptyEntities(),
+    marked: new MarkList(),
+    pending: new MarkList(),
+    loose: new MarkList(),
+    visual: new MarkList(),
+    moved: new MarkList(),
+    published: new MarkList(),
     wholes: emptyReasons(),
     counted: false,
     wakes: 0,
@@ -60,7 +61,7 @@ export function createDemandState(verifyFrames = false): DemandState {
 }
 
 /**
- * Empties every set, resets the scalars, drops `reference` and `bounds`. Works on the state alone, because `onStop`
+ * Empties every mark list and set, resets the scalars, drops `reference` and `bounds`. Works on the state alone, because `onStop`
  * has no context. The frame object keeps its identity.
  *
  * @param state - The demand state.

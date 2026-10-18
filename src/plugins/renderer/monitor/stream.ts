@@ -28,7 +28,7 @@ import { judgeProblems, viewLabel } from "./problems";
 import { CAUSE, CHANGED, noteSubject, slotOfSequence } from "./ring";
 import { buildStartup } from "./startup";
 import { PENDING_SLOTS } from "./state";
-import type { PerfCtx, PerfRing, PerfState } from "./types";
+import { type PerfCtx, type PerfRing, type PerfState, SECTION } from "./types";
 import { cellF32, cellF64, cellU8, cellU32 } from "./units";
 
 /** How long the header waits for the native shell to answer at page start. */
@@ -188,15 +188,15 @@ function compiledBefore(ring: PerfRing, slot: number): boolean {
 }
 
 /**
- * The annotations of a spike: a compile (in the frame, or for a gap spike in one of the 4 frames before it), an upload
- * of a megabyte or more, an overlapping long frame. Read at the commit, after the frame's causes are written, and again
- * at the flush, when late long frames have arrived. No allocation.
+ * The annotations of a spike the counters give: a compile (in the frame, or for a gap spike in one of the 4 frames
+ * before it), an upload of a megabyte or more. A frame whose `shaders` or `passes` section was off counted none. Read after the
+ * frame's causes are written (a gap spike reads them). No allocation.
  *
  * @param pc - The perf context.
  * @param slot - The ring slot of the frame.
  * @returns The `CAUSE` bits of the annotations.
  */
-export function annotate(pc: PerfCtx, slot: number): number {
+export function annotateCounted(pc: PerfCtx, slot: number): number {
   const { ring } = pc.perf;
   const c = ring.columns;
   const late = (cellU8(c.causes, slot) & CAUSE.gap) !== 0;
@@ -204,7 +204,24 @@ export function annotate(pc: PerfCtx, slot: number): number {
 
   if (cellF32(c.compiles, slot) > 0 || (late && compiledBefore(ring, slot))) bits |= CAUSE.compile;
   if (cellF32(c.uploadMb, slot) >= 1) bits |= CAUSE.upload;
-  if (annotateLongFrame(pc.perf, slot)) bits |= CAUSE.longFrame;
+
+  return bits;
+}
+
+/**
+ * The annotations of a spike: the counters' (`annotateCounted`) and an overlapping long frame while the `longFrames`
+ * section is on. Read at the flush, when late long frames have arrived, and when a GPU time lands. No allocation.
+ *
+ * @param pc - The perf context.
+ * @param slot - The ring slot of the frame.
+ * @returns The `CAUSE` bits of the annotations.
+ */
+export function annotate(pc: PerfCtx, slot: number): number {
+  let bits = annotateCounted(pc, slot);
+
+  if ((pc.sinks.sections & SECTION.longFrames) !== 0 && annotateLongFrame(pc.perf, slot)) {
+    bits |= CAUSE.longFrame;
+  }
 
   return bits;
 }
@@ -283,11 +300,13 @@ function flushShaders(pc: PerfCtx): void {
 
 /**
  * Judges the problem rules of the second and writes a `problem` event for each that opened or cleared; without a
- * listener the rules are judged all the same, so their accumulators stay per second.
+ * listener the rules are judged all the same, so their accumulators stay per second. Nothing while `problems` is off.
  *
  * @param pc - The perf context.
  */
 function flushProblems(pc: PerfCtx): void {
+  if ((pc.sinks.sections & SECTION.problems) === 0) return;
+
   const details = judgeProblems(pc);
 
   if (pc.perf.listeners.length === 0) return;
@@ -296,8 +315,8 @@ function flushProblems(pc: PerfCtx): void {
 }
 
 /**
- * Starts a new second: the histogram, the system sums and maxima and the monitor's own cost go back to 0, the system
- * accumulators grown when the world registered more systems than they hold.
+ * Starts a new second: the histogram, the system sums and maxima, the sections' cost and the monitor's own cost go back
+ * to 0, the system accumulators grown when the world registered more systems than they hold.
  *
  * @param pc - The perf context; `perf.staged[1]` is where the next window starts.
  */
@@ -313,6 +332,7 @@ function nextSecond(pc: PerfCtx): void {
   perf.gapHist.fill(0);
   perf.secSum.fill(0);
   perf.secMax.fill(0);
+  perf.sectionsMs.fill(0);
   perf.listenersSum = 0;
   perf.lastFlushAt = cellF64(perf.staged, 1);
 }

@@ -64,6 +64,10 @@ export function createJsxState(): JsxState {
     removing: emptySet(),
     hosts: emptySet(),
     hosted: emptyMap(),
+    hostsVersion: 0,
+    // Never seen: the first full hosting step runs.
+    hostsSeen: -1,
+    membershipSeen: -1,
     risen: emptySet(),
     released: emptySet(),
     building: undefined,

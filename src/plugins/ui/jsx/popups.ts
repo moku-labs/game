@@ -193,8 +193,18 @@ function anyWaits(state: JsxState): boolean {
  * @param unmount - Starts the exit of a root.
  */
 export function settlePopups(ctx: UiCtx, state: JsxState, unmount: (entity: Entity) => void): void {
-  if (!anyWaits(state)) return;
+  // Per frame: the closures live in `settleWaiting`, so a frame with nothing waiting builds no context.
+  if (anyWaits(state)) settleWaiting(ctx, state, unmount);
+}
 
+/**
+ * Settles the roots that wait, the newest first.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param state - The jsx state.
+ * @param unmount - Starts the exit of a root.
+ */
+function settleWaiting(ctx: UiCtx, state: JsxState, unmount: (entity: Entity) => void): void {
   const waiting = [...state.roots.values()].filter(root => waits(state, root));
   const rests = flowRests(ctx.deps.flow.state());
 

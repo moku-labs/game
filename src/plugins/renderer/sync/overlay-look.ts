@@ -8,7 +8,7 @@ import { HudPart } from "../components";
 import type { DemandReason } from "../demand/types";
 import type { PixiContainer, PixiModule, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
-import type { OverlayRecord, SyncCtx, SyncState } from "./types";
+import type { OverlayRecord, SyncCtx } from "./types";
 import { applyHud } from "./views";
 
 /**
@@ -183,18 +183,6 @@ function targetOf(order: readonly OverlayRecord[], key: string): number {
 }
 
 /**
- * The name of the scene's HUD layer.
- *
- * @param state - The sync state.
- * @returns The name, or `undefined` for a scene without one.
- */
-function hudLayerOf(state: SyncState): string | undefined {
-  for (const [name, entry] of state.layers) if (entry.hud) return name;
-
-  return undefined;
-}
-
-/**
  * Tells whether two sets hold the same nodes.
  *
  * @param left - One set.
@@ -240,7 +228,8 @@ export function stepParts(sctx: SyncCtx): void {
 
   if (overlay.parts.size === 0 && overlay.offTops.size === 0) return;
 
-  const hud = hudLayerOf(state);
+  // per frame: the HUD layer's name kept with the layers, no walk of the layer table.
+  const hud = state.hudLayer;
   const ecs = sctx.ctx.deps.world.ecs;
 
   // Only when it holds something: V8 gives an empty set a new table at every `clear()`, and the step runs every frame.

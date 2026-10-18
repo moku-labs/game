@@ -159,12 +159,14 @@ function enterEntry(
 
   mounted.live.set(entry.key, view);
   pctx.ctx.state.projection.byEntity.set(entity, view);
+  pctx.ctx.state.projection.membershipVersion += 1;
 
   const hook = spec.motion?.enter;
   const loop = spec.motion?.loop;
 
   if (entry.direct) {
     view.loopOwed = true;
+    pctx.ctx.state.projection.owedLoops += 1;
 
     return;
   }
@@ -353,6 +355,7 @@ function exitEntry(
   const hook = spec.motion?.exit;
 
   mounted.live.delete(view.key);
+  pctx.ctx.state.projection.membershipVersion += 1;
   view.cause = entry.direct ? "mount" : "change";
 
   if (entry.direct || hook === undefined) {

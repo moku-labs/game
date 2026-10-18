@@ -151,6 +151,20 @@ function createLocalUniforms(
 }
 
 /**
+ * The shader a text already draws with on one renderer: the custom shader of its graphics context.
+ *
+ * @param text - The text.
+ * @param renderer - The renderer's uid, the key of the text's GPU data.
+ * @returns The shader, or `undefined` before the text was laid out on that renderer.
+ */
+function shaderOf(text: BitmapText, renderer: number): Shader | undefined {
+  const gpu: { readonly context: { readonly customShader?: Shader | null } } | undefined =
+    text._gpuData[renderer];
+
+  return gpu?.context.customShader ?? undefined;
+}
+
+/**
  * Keeps one compiled program per batch texture limit: compiled the first time a limit is asked
  * for, shared by every text after. Its own function, because lint rule L5 refuses a collection
  * built inside an exported declaration.
@@ -237,8 +251,9 @@ function glProgramCache(pixi: PixiModule): (maxTextures: number) => GlProgram {
 /**
  * Builds the renderer's bitmap text pipe from the module object. It is made at call time, because
  * Pixi's pipe arrives with the lazily loaded module. It keeps the base's `static extension` object
- * as it is, so the registry files it under the same types and name. Every text gets a new shader,
- * as from Pixi's pipe, over the one shared program of its backend; a WebGL shader also gets
+ * as it is, so the registry files it under the same types and name. Every text gets a shader of its
+ * own once, at its first layout, over the one shared program of its backend, and keeps it when it is laid out again
+ * (Pixi asks for one at every layout); a WebGL shader also gets
  * Pixi's batch sampler slots, as Pixi's own `SdfShader` does. Its `uDistance` answers Pixi's CSS
  * distance at the text's world scale times the renderer's resolution: the pipe names the text
  * while Pixi's `addRenderable` and `updateRenderable`, the two that write the distance, run.
@@ -258,14 +273,24 @@ export function createSdfTextPipe(pixi: PixiModule): BitmapTextPipeClass {
     private readonly writing: Writing = { text: undefined };
 
     /**
-     * Adds a text to the instructions as Pixi does, naming it while Pixi writes its distance.
+     * The text Pixi lays out now: `getSdfShader` hands its own shader back, read at the call, so the text keeps it and no
+     * shader is made. Pixi asks `getSdfShader()` at every layout of a text (twice for a new one) and keeps the answer
+     * only for a context without a shader: a new shader each time was garbage (about 22 KB a text update), and on WebGL
+     * it listened to the shared batch-sampler group for good, a leak.
+     */
+    private laying: BitmapText | undefined;
+
+    /**
+     * Adds a text to the instructions as Pixi does, naming it while Pixi writes its distance and lays it out.
      *
      * @param text - The text.
      * @param instructionSet - The instructions of its render group.
      */
     public override addRenderable(text: BitmapText, instructionSet: InstructionSet): void {
       this.writing.text = text;
+      this.laying = text;
       super.addRenderable(text, instructionSet);
+      this.laying = undefined;
       this.writing.text = undefined;
     }
 
@@ -281,11 +306,16 @@ export function createSdfTextPipe(pixi: PixiModule): BitmapTextPipeClass {
     }
 
     /**
-     * The shader of one distance-field text, asked for each time Pixi lays the text out.
+     * The shader of one distance-field text, asked for each time Pixi lays the text out: the text's own when it has one,
+     * else a new one.
      *
-     * @returns A new shader with its own local uniforms, on the program of the backend.
+     * @returns The text's shader, or a new shader with its own local uniforms on the program of the backend.
      */
     protected override getSdfShader(): Shader | null {
+      const own = this.laying === undefined ? undefined : shaderOf(this.laying, this._renderer.uid);
+
+      if (own !== undefined) return own;
+
       const maxTextures = this._renderer.limits.maxBatchableTextures;
       // The canvas's resolution, read at each draw: the edge width in device pixels.
       const density = this._renderer;

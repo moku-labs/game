@@ -1,9 +1,11 @@
 /**
  * @file renderer/monitor — the measuring window: frames per second, drawn frames per second, the
  * mean frame work, and the engine's redraws and Pixi's rebuilds per second, over one second of clock
- * time. Plain arithmetic on the state, no allocation per frame.
+ * time. Plain arithmetic on the state, no allocation per frame: the two clock fields hold NaN, never
+ * `undefined`, so they stay doubles and a store never boxes one.
  */
 import type { MonitorState } from "./types";
+import { cellF64 } from "./units";
 
 /** Length of one measuring window, in clock milliseconds. */
 export const WINDOW_MS = 1000;
@@ -44,22 +46,36 @@ function closeWindow(state: MonitorState): void {
 }
 
 /**
- * Marks the start of a frame. The interval since the last start joins the window, and a window
- * that reached one second closes. The interval belongs to the last frame, whose decision is known:
- * it counts as a drawn one when that frame was drawn. A gap longer than `STALE_MS` restarts the
- * window, so a pause or a hidden tab does not read as one very slow frame.
+ * Marks the start of a frame at a clock time: `beginStaged` with the time staged first.
  *
  * @param state - The monitor branch of the plugin state.
  * @param now - Clock time of the frame start, in milliseconds.
  * @returns True when a window closed: its counts were read.
  */
 export function beginFrame(state: MonitorState, now: number): boolean {
+  state.staged[0] = now;
+
+  return beginStaged(state);
+}
+
+/**
+ * Marks the start of a frame. The interval since the last start joins the window, and a window
+ * that reached one second closes. The interval belongs to the last frame, whose decision is known:
+ * it counts as a drawn one when that frame was drawn. A gap longer than `STALE_MS` restarts the
+ * window, so a pause or a hidden tab does not read as one very slow frame.
+ *
+ * @param state - The monitor branch of the plugin state; `state.staged[0]` is the clock time of the frame start, in
+ *   milliseconds, staged there, not passed: a double handed to a call is boxed, and this runs every frame.
+ * @returns True when a window closed: its counts were read.
+ */
+export function beginStaged(state: MonitorState): boolean {
+  const now = cellF64(state.staged, 0);
   const previous = state.lastStart;
 
   state.lastStart = now;
   state.frameStart = now;
 
-  if (previous === undefined || now - previous > STALE_MS) {
+  if (Number.isNaN(previous) || now - previous > STALE_MS) {
     openWindow(state);
 
     return false;
@@ -77,8 +93,7 @@ export function beginFrame(state: MonitorState, now: number): boolean {
 }
 
 /**
- * Marks the end of a frame and adds its work, its redraws and its rebuilds to the window. An end without a seen
- * start, as the first frame after the renderer came up mid-frame, is ignored.
+ * Marks the end of a frame at a clock time: `endStaged` with the time staged first.
  *
  * @param state - The monitor branch of the plugin state.
  * @param now - Clock time at the end of `render`, in milliseconds.
@@ -86,13 +101,27 @@ export function beginFrame(state: MonitorState, now: number): boolean {
  * @param rebuilds - Pixi's instruction rebuilds since the last end.
  */
 export function endFrame(state: MonitorState, now: number, redraws = 0, rebuilds = 0): void {
-  if (state.frameStart === undefined) return;
+  state.staged[0] = now;
+  endStaged(state, redraws, rebuilds);
+}
+
+/**
+ * Marks the end of a frame and adds its work, its redraws and its rebuilds to the window. An end without a seen
+ * start, as the first frame after the renderer came up mid-frame, is ignored.
+ *
+ * @param state - The monitor branch of the plugin state; `state.staged[0]` is the clock time at the end of `render`,
+ *   in milliseconds, staged as for `beginStaged`.
+ * @param redraws - `Graphics` paths the engine drew since the last end.
+ * @param rebuilds - Pixi's instruction rebuilds since the last end.
+ */
+export function endStaged(state: MonitorState, redraws: number, rebuilds: number): void {
+  if (Number.isNaN(state.frameStart)) return;
 
   state.redrawsOpen += redraws;
   state.rebuildsOpen += rebuilds;
-  state.workMs += now - state.frameStart;
+  state.workMs += cellF64(state.staged, 0) - state.frameStart;
   state.frames += 1;
-  state.frameStart = undefined;
+  state.frameStart = Number.NaN;
 }
 
 /**
@@ -102,8 +131,8 @@ export function endFrame(state: MonitorState, now: number, redraws = 0, rebuilds
  */
 export function resetWindow(state: MonitorState): void {
   openWindow(state);
-  state.frameStart = undefined;
-  state.lastStart = undefined;
+  state.frameStart = Number.NaN;
+  state.lastStart = Number.NaN;
   state.fps = 0;
   state.drawnFps = 0;
   state.lastDrawn = false;

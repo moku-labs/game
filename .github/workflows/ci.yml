@@ -38,3 +38,26 @@ jobs:
       game: https://pkg.pr.new/@moku-labs/game@${{ github.event.pull_request.head.sha }}
       tier: ${{ contains(github.event.pull_request.labels.*.name, 'demos:full') && 'full' || 'fast' }}
       bun_version: "1.4.3"
+
+  # Heap bytes per call against the budgets (`*.perf.ts`) and time per call (`*.bench.ts`, reported
+  # only, its table in the run's summary). Node, not Bun: `alloc` needs `--expose-gc`. Make the
+  # check "perf" required in the GitHub settings: this repo has no rulesets/ folder.
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"
+      - run: bun install --frozen-lockfile
+      - run: bun run test:perf
+      - name: bench:perf
+        run: |
+          {
+            echo '```'
+            bun run bench:perf 2>&1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

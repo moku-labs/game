@@ -8,6 +8,11 @@
  * stand-in. A view whose filters declare an `area` gets the union of their areas handed to
  * `renderer.sync.filters.area` when it changes (B4). Once the checks settled, every checked
  * definition and every Pixi-core kind is handed to `renderer.sync.filters.warm` as a probe (F4).
+ *
+ * Per frame it brings up to date only the views marked dirty: a filter component changed (the change sets of every
+ * kind), came or left, a map was retired, a kind still waits for its instance, a chain left places to destroy; a debug
+ * switch and a filter that broke or re-ran its chains inside a render mark them all. A frame where nothing of that
+ * happened syncs no view and allocates nothing.
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import type { FilterCache, FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
@@ -55,12 +60,18 @@ const union: AreaBox = { x: 0, y: 0, width: 0, height: 0, some: false };
  * @returns An empty view.
  */
 function emptyView(ectx: EffectsCtx, entity: Entity): FilteredView {
+  const marks: number[] = [];
+
+  // A mark per kind from the start, so the array never grows holey.
+  for (let index = 0; index < ectx.state.kindList.length; index += 1) marks.push(-1);
+
   const view: FilteredView = {
+    entity,
     kinds: new Set(),
     instances: new Map(),
     retired: [],
     assigned: [],
-    changed: new Set(),
+    marks,
     placed: [],
     signalled: false,
     signal: (): void => {
@@ -70,10 +81,23 @@ function emptyView(ectx: EffectsCtx, entity: Entity): FilteredView {
       ectx.deps.renderer.invalidate(entity);
     },
     areaSent: { x: 0, y: 0, width: 0, height: 0, some: false },
-    areaMask: 0
+    areaMask: 0,
+    dirty: true,
+    gone: false
   };
 
   return view;
+}
+
+/**
+ * Marks a view for the next run of the filter sync.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param view - The view's record.
+ */
+function markDirty(ectx: EffectsCtx, view: FilteredView): void {
+  view.dirty = true;
+  ectx.state.filterSync.pending = true;
 }
 
 /**
@@ -272,21 +296,45 @@ function syncArea(ectx: EffectsCtx, entity: Entity, view: FilteredView, relisted
 }
 
 /**
- * Marks on each view the Pixi-core kinds whose component changed this frame. A core kind is
- * written only then; ours are written every frame.
+ * Marks dirty every view whose filter component of any kind changed this frame, and on it the run in which a
+ * Pixi-core kind changed: a core kind is written only in such a run. Reads the change set of each kind.
  *
  * @param ectx - Domain context of the effects plugin.
  */
-function markCoreChanges(ectx: EffectsCtx): void {
+function markChanges(ectx: EffectsCtx): void {
   const { state, deps } = ectx;
+  const { kindList, views } = state;
+  const round = state.filterSync.round;
 
-  for (const kind of state.kinds.values()) {
-    if (kind.source !== "core") continue;
-
+  // per frame: plain arrays only (the kinds, each change set as the world hands it out): `for…of` allocates nothing.
+  for (const kind of kindList) {
     for (const entity of deps.world.ecs.changed(kind.component)) {
-      state.views.get(entity)?.changed.add(kind.id);
+      const view = views.get(entity);
+
+      if (view === undefined) continue;
+
+      markDirty(ectx, view);
+      if (kind.source === "core") view.marks[kind.index] = round;
     }
   }
+}
+
+/**
+ * Tells whether the instances of a view are in draw order already: by `order`, then by the index of their kind. A
+ * view whose orders did not change is, and is not sorted again: a sort copies the list.
+ *
+ * @param placed - The instances of this frame.
+ * @returns True when no pair is out of order.
+ */
+function inOrder(placed: readonly FilterInstance[]): boolean {
+  for (let index = 1; index < placed.length; index += 1) {
+    const before = placed[index - 1];
+    const after = placed[index];
+
+    if (before !== undefined && after !== undefined && byOrder(before, after) > 0) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -387,6 +435,7 @@ function installReplacement(
   if (replacement === undefined) return instance;
 
   instance.replacement = undefined;
+  replacement.entity = instance.entity;
   view.instances.set(kind.id, replacement);
   view.retired.push(instance);
 
@@ -464,6 +513,11 @@ function syncKind(
     instance.order = value.order;
     refreshInputs(ectx, pixi, instance, off);
 
+    // Places a chain left in this sync are destroyed by the next one.
+    if (instance.kind === "wgsl" && (instance.inputs?.retired.length ?? 0) > 0) {
+      markDirty(ectx, view);
+    }
+
     // A chain that broke in this sync built its stand-in: it takes the place now.
     return installReplacement(view, kind, instance);
   }
@@ -471,6 +525,8 @@ function syncKind(
   instance = firstInstance(ectx, pixi, kind, value);
 
   if (instance === undefined) return undefined;
+
+  instance.entity = entity;
 
   // A chain that broke at its first evaluation built its stand-in already.
   instance = installReplacement(view, kind, instance);
@@ -510,39 +566,51 @@ function slotOf(instance: FilterInstance): FilterSlot {
 }
 
 /**
- * Brings one view up to date, hands the renderer a new frozen slot list when it differs, then
- * destroys what left. A view with nothing left is forgotten; a despawned one gets no call, since
- * the renderer cleared its view when it released it.
+ * Brings every kind of a view up to date and collects the instances it has, in kind order, into the view's own list.
+ * A kind with no instance yet (its check pending, its map not loaded) keeps the view dirty, so the next run asks
+ * again; a kind a debug switch turned off is written and left out of the list.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
- * @param entity - The entity.
- * @param view - Its record.
+ * @param view - The view's record.
  */
-function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: FilteredView): void {
-  // Bring every kind of the view up to date, consuming its change mark, and collect the instances
-  // it has into the view's own list.
-  const { placed } = view;
+function placeKinds(ectx: EffectsCtx, pixi: PixiModule, view: FilteredView): void {
+  const { placed, entity } = view;
+  const round = ectx.state.filterSync.round;
 
-  placed.length = 0;
+  // per sync: emptied by `pop`, so the array keeps its store (a cut with `length = 0` gives it up).
+  while (placed.length > 0) placed.pop();
   view.signalled = false;
 
   for (const id of view.kinds) {
     const kind = ectx.state.kinds.get(id);
-    const changed = view.changed.delete(id);
+    const changed = kind !== undefined && view.marks[kind.index] === round;
     const off = isSwitchedOff(ectx, id);
     const instance =
       kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed, off);
 
-    // A kind a debug switch turned off stays written above and leaves the slots.
-    if (instance !== undefined && !off) placed.push(instance);
+    if (instance === undefined) markDirty(ectx, view);
+    else if (!off) placed.push(instance);
   }
+}
 
-  // A kind that left this frame leaves no mark behind for a later frame.
-  if (view.changed.size > 0) view.changed.clear();
+/**
+ * Brings one view up to date, hands the renderer a new frozen slot list when it differs, then
+ * destroys what left. A view with nothing left is forgotten; a despawned one gets no call, since
+ * the renderer cleared its view when it released it. A kind that still has no instance (its check
+ * pending, its map not loaded) keeps the view dirty, so the next run asks again.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param view - The view's record.
+ */
+function syncView(ectx: EffectsCtx, pixi: PixiModule, view: FilteredView): void {
+  const { placed, entity } = view;
 
-  // Hand the renderer a new frozen list only when the sorted instances changed.
-  placed.sort(byOrder);
+  placeKinds(ectx, pixi, view);
+
+  // Hand the renderer a new frozen list only when the sorted instances changed; a sort only when an order did.
+  if (!inOrder(placed)) placed.sort(byOrder);
 
   const relisted = differs(view.assigned, placed);
 
@@ -566,7 +634,67 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
   }
 
   // Forget a view with nothing left on it.
-  if (view.kinds.size === 0 && view.instances.size === 0) ectx.state.views.delete(entity);
+  if (view.kinds.size === 0 && view.instances.size === 0) forgetView(ectx, view);
+}
+
+/**
+ * Forgets a view: out of `State.views` now, out of the dense list at the next run, which skips it.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param view - The view's record.
+ */
+function forgetView(ectx: EffectsCtx, view: FilteredView): void {
+  view.gone = true;
+  view.dirty = false;
+  ectx.state.views.delete(view.entity);
+  // The next run walks the list to drop it.
+  ectx.state.filterSync.pending = true;
+}
+
+/**
+ * Syncs the views marked dirty, in the order they were first seen, and drops the forgotten ones from the dense list
+ * in the same walk (written back in place by a second index, no new array).
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @returns True when a view was synced or dropped: the full-screen budget is judged again.
+ */
+function syncDirty(ectx: EffectsCtx, pixi: PixiModule): boolean {
+  const list = ectx.state.viewList;
+  const sync = ectx.state.filterSync;
+  let kept = 0;
+  let moved = false;
+
+  // per frame: nothing marked, nothing forgotten — the list is not walked at all.
+  if (!sync.pending) return false;
+
+  // A view the walk marks again (a kind still waiting) sets it for the next run.
+  sync.pending = false;
+
+  // per frame: an indexed walk over the dense list; a clean view costs one flag read.
+  for (let index = 0; index < list.length; index += 1) {
+    const view = list[index];
+
+    if (view === undefined) continue;
+
+    if (view.dirty && !view.gone) {
+      view.dirty = false;
+      moved = true;
+      syncView(ectx, pixi, view);
+    }
+
+    if (view.gone) {
+      moved = true;
+      continue;
+    }
+
+    list[kept] = view;
+    kept += 1;
+  }
+
+  while (list.length > kept) list.pop();
+
+  return moved;
 }
 
 /**
@@ -665,24 +793,69 @@ function checkPassBudget(ectx: EffectsCtx): void {
   state.over.passes = overPasses;
 }
 
+/** The components a view's box and scale are read from (`coversScreen`): one plain array, never frozen. */
+const BOX_COMPONENTS = [Transform, Sprite, NineSlice, Shape] as const;
+
 /**
- * Warns once per crossing of each filter budget: the renderer's render passes over
- * `config.maxPasses`, and more than one full-screen view with an enabled filter.
+ * Tells whether the box or the scale of a filtered view changed this frame.
  *
  * @param ectx - Domain context of the effects plugin.
+ * @returns True when a change set of `Transform`, `Sprite`, `NineSlice` or `Shape` holds a filtered view.
  */
-function checkBudgets(ectx: EffectsCtx): void {
+function boxesChanged(ectx: EffectsCtx): boolean {
+  const { views } = ectx.state;
+  const ecs = ectx.deps.world.ecs;
+
+  for (const component of BOX_COMPONENTS) {
+    for (const entity of ecs.changed(component)) if (views.has(entity)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Counts the views that cover the viewport with an enabled filter, over the dense list.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param size - The viewport size.
+ * @returns The count.
+ */
+function countFullScreen(ectx: EffectsCtx, size: ViewportSize): number {
+  let count = 0;
+
+  for (const view of ectx.state.viewList) {
+    if (view.gone) continue;
+    if (hasEnabledFilter(ectx, view) && coversScreen(ectx, view.entity, size)) count += 1;
+  }
+
+  return count;
+}
+
+/**
+ * Warns once per crossing of each filter budget: the renderer's render passes over
+ * `config.maxPasses`, read every frame, and more than one full-screen view with an enabled filter,
+ * judged again only when a view was synced or dropped, the viewport changed size, or the box or the
+ * scale of a filtered view changed; otherwise the last judgement stands.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param moved - A view was synced or dropped this run.
+ */
+function checkBudgets(ectx: EffectsCtx, moved: boolean): void {
   const { state, deps } = ectx;
+  const sync = state.filterSync;
 
   checkPassBudget(ectx);
 
-  // The full-screen budget: count the views that cover the viewport with an enabled filter.
   const size = deps.renderer.viewport.size();
-  let count = 0;
+  const resized = size.width !== sync.width || size.height !== sync.height;
 
-  for (const [entity, view] of state.views) {
-    if (hasEnabledFilter(ectx, view) && coversScreen(ectx, entity, size)) count += 1;
-  }
+  if (!moved && !resized && !boxesChanged(ectx)) return;
+
+  sync.width = size.width;
+  sync.height = size.height;
+
+  // The full-screen budget: count the views that cover the viewport with an enabled filter.
+  const count = countFullScreen(ectx, size);
 
   // Warn once when more than one such view is on screen.
   const overScreen = count > 1;
@@ -825,6 +998,35 @@ function startWarm(ectx: EffectsCtx, pixi: PixiModule): void {
 }
 
 /**
+ * One run of the filter sync with a ready host: the change marks of this run, the dirty views, the budgets. With no
+ * filtered view only the budgets need a look, and the dense list lets go of the records it still held.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ */
+function runSync(ectx: EffectsCtx, pixi: PixiModule): void {
+  const { state } = ectx;
+  const sync = state.filterSync;
+
+  if (state.views.size === 0) {
+    while (state.viewList.length > 0) state.viewList.pop();
+    checkBudgets(ectx, true);
+
+    return;
+  }
+
+  sync.round += 1;
+
+  if (sync.all) {
+    sync.all = false;
+    for (const view of state.viewList) markDirty(ectx, view);
+  }
+
+  markChanges(ectx);
+  checkBudgets(ectx, syncDirty(ectx, pixi));
+}
+
+/**
  * Builds the `sync` system of the filters. It runs in every world mode, so a paused game and a
  * fast walk keep the right values, and returns at once while the renderer does not draw.
  *
@@ -848,17 +1050,7 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
       if (!ectx.state.warm.started) startWarm(ectx, pixi);
       if (ectx.state.checks.gl.length > 0) pollChecks(ectx);
 
-      // With no filtered view only the budgets need a look: no change to mark.
-      if (ectx.state.views.size === 0) {
-        checkBudgets(ectx);
-        return;
-      }
-
-      markCoreChanges(ectx);
-
-      for (const [entity, view] of ectx.state.views) syncView(ectx, pixi, entity, view);
-
-      checkBudgets(ectx);
+      runSync(ectx, pixi);
     }
   };
 }
@@ -871,10 +1063,16 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
  * @param entity - The entity.
  */
 export function trackFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity): void {
-  const view = ectx.state.views.get(entity) ?? emptyView(ectx, entity);
+  let view = ectx.state.views.get(entity);
+
+  if (view === undefined) {
+    view = emptyView(ectx, entity);
+    ectx.state.views.set(entity, view);
+    ectx.state.viewList.push(view);
+  }
 
   view.kinds.add(kind.id);
-  ectx.state.views.set(entity, view);
+  markDirty(ectx, view);
 }
 
 /**
@@ -892,6 +1090,7 @@ export function forgetFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity)
   if (view === undefined) return;
 
   view.kinds.delete(kind.id);
+  markDirty(ectx, view);
 
   const instance = view.instances.get(kind.id);
 
@@ -902,7 +1101,7 @@ export function forgetFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity)
 
   const isUnused = view.kinds.size === 0 && view.retired.length === 0 && view.assigned.length === 0;
 
-  if (isUnused) ectx.state.views.delete(entity);
+  if (isUnused) forgetView(ectx, view);
 }
 
 /**
@@ -919,6 +1118,7 @@ export function retireFilterMaps(ectx: EffectsCtx, keys: readonly string[]): voi
 
       view.instances.delete(id);
       view.retired.push(instance);
+      markDirty(ectx, view);
     }
   }
 }
@@ -941,6 +1141,7 @@ export function retireAllFilters(ectx: EffectsCtx): void {
   }
 
   ectx.state.views.clear();
+  while (ectx.state.viewList.length > 0) ectx.state.viewList.pop();
 
   const { warm } = ectx.state;
 

@@ -28,7 +28,15 @@ import {
 import { entryOf, heapMb, longFramesIn } from "./long-frames";
 import { viewLabel } from "./problems";
 import { CAUSE, OVERFLOW_PATH, PHASE_STRIDE, passesOf, recordAt } from "./ring";
-import { type LongFrameRecord, MEASURE, type PerfCtx, type PerfRing } from "./types";
+import {
+  COST,
+  type LongFrameRecord,
+  MEASURE,
+  type PerfCtx,
+  type PerfRing,
+  type PerfState,
+  SECTION
+} from "./types";
 import { BYTES_PER_MB, cellF32, cellF64, cellU8, cellU32, roundTo } from "./units";
 
 /** What follows the Android model in a user agent: `…; SM-A266B Build/…`. */
@@ -311,7 +319,8 @@ export function headerLine(pc: PerfCtx, thermal: ThermalReading | null): PerfHea
     },
     measured: measuredOf(pc),
     app: { id: appId() },
-    debug: { overdraw: pc.ctx.state.sync.debug.overdraw }
+    debug: { overdraw: pc.ctx.state.sync.debug.overdraw },
+    sections: pc.perf.sections
   };
 }
 
@@ -445,6 +454,20 @@ type Totals = {
 };
 
 /**
+ * A counter of a frame for the sums of a window: a frame whose section was off (NaN) adds nothing.
+ *
+ * @param value - The column's value.
+ * @returns The value, 0 for NaN.
+ * @example
+ * ```ts
+ * counted(Number.NaN); // 0
+ * ```
+ */
+function counted(value: number): number {
+  return Number.isNaN(value) ? 0 : value;
+}
+
+/**
  * Adds one phase of a frame to the sums of a window.
  *
  * @param totals - The sums.
@@ -481,13 +504,13 @@ function addFrame(totals: Totals, c: PerfRing["columns"], slot: number): void {
   totals.missed += missed ? 1 : 0;
   totals.missedDrawn += missed && cellU8(c.drawn, slot) === 1 ? 1 : 0;
   totals.skipped += cellU8(c.skipped, slot);
-  totals.uploads += cellF32(c.uploads, slot);
-  totals.uploadMb += cellF32(c.uploadMb, slot);
-  totals.compiles += cellF32(c.compiles, slot);
-  totals.rebuilds += cellF32(c.rebuilds, slot);
+  totals.uploads += counted(cellF32(c.uploads, slot));
+  totals.uploadMb += counted(cellF32(c.uploadMb, slot));
+  totals.compiles += counted(cellF32(c.compiles, slot));
+  totals.rebuilds += counted(cellF32(c.rebuilds, slot));
   totals.retakes += cellF32(c.retakes, slot);
-  totals.targetsCreated += cellF32(c.targetsCreated, slot);
-  totals.targetsDestroyed += cellF32(c.targetsDestroyed, slot);
+  totals.targetsCreated += counted(cellF32(c.targetsCreated, slot));
+  totals.targetsDestroyed += counted(cellF32(c.targetsDestroyed, slot));
 }
 
 /**
@@ -498,15 +521,19 @@ function addFrame(totals: Totals, c: PerfRing["columns"], slot: number): void {
  * @param slot - The frame's slot.
  */
 function addDrawn(totals: Totals, c: PerfRing["columns"], slot: number): void {
+  const passes = counted(cellF32(c.passes, slot));
+  const draws = counted(cellF32(c.draws, slot));
+  const applies = counted(cellF32(c.filterApplies, slot));
+
   totals.drawn += 1;
-  totals.passes += cellF32(c.passes, slot);
-  totals.passesMax = Math.max(totals.passesMax, cellF32(c.passes, slot));
-  totals.stencil += cellF32(c.stencilPasses, slot);
-  totals.draws += cellF32(c.draws, slot);
-  totals.drawsMax = Math.max(totals.drawsMax, cellF32(c.draws, slot));
-  totals.applies += cellF32(c.filterApplies, slot);
-  totals.appliesMax = Math.max(totals.appliesMax, cellF32(c.filterApplies, slot));
-  totals.mpx += cellF32(c.filterMpx, slot);
+  totals.passes += passes;
+  totals.passesMax = Math.max(totals.passesMax, passes);
+  totals.stencil += counted(cellF32(c.stencilPasses, slot));
+  totals.draws += draws;
+  totals.drawsMax = Math.max(totals.drawsMax, draws);
+  totals.applies += applies;
+  totals.appliesMax = Math.max(totals.appliesMax, applies);
+  totals.mpx += counted(cellF32(c.filterMpx, slot));
   totals.keptMax = Math.max(totals.keptMax, cellF32(c.kept, slot));
 }
 
@@ -682,8 +709,60 @@ function passesOfSecond(
 }
 
 /**
+ * What this application measures now: its `MEASURE` bits less those of the sections switched off.
+ *
+ * @param measuring - The `MEASURE` bits of the application.
+ * @param sections - The `SECTION` bits on.
+ * @returns The bits.
+ * @example
+ * ```ts
+ * measuredNow(MEASURE.gpu | MEASURE.draws, SECTION.gpu); // MEASURE.gpu: draws are counted, passes is off
+ * ```
+ */
+function measuredNow(measuring: number, sections: number): number {
+  let bits = measuring;
+
+  if ((sections & SECTION.gpu) === 0) bits &= ~MEASURE.gpu;
+  if ((sections & SECTION.passes) === 0) {
+    bits &= ~(
+      MEASURE.passes |
+      MEASURE.stencilPasses |
+      MEASURE.draws |
+      MEASURE.counted |
+      MEASURE.targets
+    );
+  }
+  if ((sections & SECTION.shaders) === 0) bits &= ~MEASURE.compiles;
+
+  return bits;
+}
+
+/**
+ * What each section of the monitor cost in the second, ms with 3 decimals, `base` last.
+ *
+ * @param perf - The perf state.
+ * @returns A fresh object.
+ */
+function sectionsMsOf(perf: PerfState): NonNullable<PerfSampleLine["sectionsMs"]> {
+  const sums = perf.sectionsMs;
+
+  return {
+    gpu: roundTo(cellF64(sums, COST.gpu), 3),
+    passes: roundTo(cellF64(sums, COST.passes), 3),
+    shaders: roundTo(cellF64(sums, COST.shaders), 3),
+    problems: roundTo(cellF64(sums, COST.problems), 3),
+    memory: roundTo(cellF64(sums, COST.memory), 3),
+    systems: roundTo(cellF64(sums, COST.systems), 3),
+    nodes: roundTo(cellF64(sums, COST.nodes), 3),
+    longFrames: roundTo(cellF64(sums, COST.longFrames), 3),
+    base: roundTo(cellF64(sums, COST.base), 3)
+  };
+}
+
+/**
  * The sample of one window: counts, gaps, work, phases, systems, the GPU, passes, draws, filters, uploads, compiles,
- * long frames, heap, textures and what measuring cost.
+ * long frames, heap, textures and what measuring cost, each section's part of it too. The parts of a section that is
+ * off at the flush are `null`, as on a build that does not measure them.
  *
  * @param pc - The perf context.
  * @param start - The window's start, page clock.
@@ -697,8 +776,10 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
   const window = windowOf(ring, start, end);
   const frames = window.count;
   const totals = totalsOf(pc, window);
-  const bits = perf.measuring;
-  const counted = (bits & MEASURE.counted) !== 0;
+  const sections = pc.sinks.sections;
+  const counts = (sections & SECTION.passes) !== 0;
+  const bits = measuredNow(perf.measuring, sections);
+  const filtered = (bits & MEASURE.counted) !== 0;
   const work = sortedOf(pc, window, c.workMs);
   const workP50 = rank(work.sorted, work.count, 0.5);
   const workP90 = rank(work.sorted, work.count, 0.9);
@@ -708,7 +789,7 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
   const gapP90 = rank(gaps.sorted, gaps.count, 0.9);
   const gapP99 = rank(gaps.sorted, gaps.count, 0.99);
   const usage = deps.host.textures();
-  const counts = deps.sync.counts();
+  const views = deps.sync.counts();
   const drawn = totals.drawn;
   const phase = (index: number): { mean: number; max: number } =>
     meanMax(cellF64(totals.phaseSum, index), frames, cellF64(totals.phaseMax, index));
@@ -744,22 +825,22 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
       render: phase(6),
       agent: phase(7)
     },
-    systems: systemsOfSecond(pc, frames),
+    systems: (sections & SECTION.systems) === 0 ? null : systemsOfSecond(pc, frames),
     gpuMs: (bits & MEASURE.gpu) === 0 ? null : gpuOfSecond(pc, window),
     passes: (bits & MEASURE.passes) === 0 ? null : passesOfSecond(totals, bits),
     draws: (bits & MEASURE.draws) === 0 ? null : meanMax(totals.draws, drawn, totals.drawsMax),
-    filters: counted
+    filters: filtered
       ? {
           applies: meanMax(totals.applies, drawn, totals.appliesMax),
           mpx: perDrawn(totals.mpx, drawn)
         }
       : null,
-    uploads: counted ? { count: totals.uploads, mb: ms(totals.uploadMb) } : null,
+    uploads: filtered ? { count: totals.uploads, mb: ms(totals.uploadMb) } : null,
     compiles: (bits & MEASURE.compiles) === 0 ? null : totals.compiles,
     marks: null,
-    rebuilds: perf.produced === 0 ? null : totals.rebuilds,
-    longFrames: longFramesOfSecond(pc, start, end),
-    heapMb: heapMb(),
+    rebuilds: perf.produced === 0 || !counts ? null : totals.rebuilds,
+    longFrames: (sections & SECTION.longFrames) === 0 ? null : longFramesOfSecond(pc, start, end),
+    heapMb: (sections & SECTION.memory) === 0 ? null : heapMb(),
     kept: {
       pictures: totals.keptMax,
       mb: roundTo(pc.ctx.state.kept.bytes / BYTES_PER_MB, 2),
@@ -773,8 +854,8 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
       targets: ms(usage.targets / BYTES_PER_MB),
       kept: ms(usage.kept / BYTES_PER_MB)
     },
-    views: counts.views,
-    pooled: counts.pooled,
+    views: views.views,
+    pooled: views.pooled,
     resolution: deps.host.resolution(),
     monitorMs: frames === 0 ? 0 : roundTo(perf.listenersSum / frames, 3),
     spikes: totals.spikes,
@@ -782,7 +863,8 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
     targets:
       (bits & MEASURE.targets) === 0
         ? null
-        : { created: totals.targetsCreated, destroyed: totals.targetsDestroyed }
+        : { created: totals.targetsCreated, destroyed: totals.targetsDestroyed },
+    sectionsMs: sectionsMsOf(perf)
   };
 }
 

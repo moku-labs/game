@@ -70,6 +70,8 @@ function writeStyle(state: LayoutState, source: TextSource, element: Element): v
 export function createLayoutApi(ctx: UiCtx): LayoutModule {
   const state = ctx.state.layout;
   const source = textSourceOf(ctx);
+  // Per frame (a root in a slot reads it at every solve): one box, written in place.
+  const contentBox: Rect = { x: 0, y: 0, w: 0, h: 0 };
 
   return {
     load: async (): Promise<void> => {
@@ -104,7 +106,7 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
     solve: (rootElement: Element, size: Rect, lookup: ElementLookup): boolean =>
       solveRoot(state, rootElement, size, lookup),
 
-    contentRect: (element: Element): Rect => contentRectOf(state, element),
+    contentRect: (element: Element): Rect => contentRectOf(state, element, contentBox),
 
     commit: (element: Element, parent: Rect | undefined): void => {
       if (element.live) ctx.deps.world.ecs.set(element.entity, Box, element.rect);

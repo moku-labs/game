@@ -93,6 +93,9 @@ export function createViewHandle(
   view: View,
   peers: Peers
 ): ViewHandle<unknown> {
+  // A handle may start a motion the view keeps: the next sweep walks the live views.
+  pctx.ctx.state.projection.moving = true;
+
   const handle: ViewHandle<unknown> = {
     entity: view.entity,
     key: view.key,
@@ -487,7 +490,15 @@ export function finishHandles(view: View): void {
  * @returns True while one handle is active.
  */
 export function stillMoving(view: View): boolean {
-  return view.handles.some(handle => handle.active());
+  const handles = view.handles;
+  const count = handles.length;
+
+  // Per moving view per frame: an index loop, no callback.
+  for (let index = 0; index < count; index += 1) {
+    if (handles[index]?.active() === true) return true;
+  }
+
+  return false;
 }
 
 /**

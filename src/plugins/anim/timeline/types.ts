@@ -175,8 +175,11 @@ export type Cursor = {
   readonly children: readonly Cursor[];
   /** Position in a `sequence`, and the last written key of a `frames` step. */
   index: number;
-  /** Consumed milliseconds of a `wait` or a `frames` step. */
-  elapsed: number;
+  /**
+   * `[0]`: the consumed milliseconds of a `wait` or a `frames` step. A cell and not a field, so a
+   * frame writes it in place: a double stored in an object field is a new heap number.
+   */
+  readonly clock: Float64Array;
   motion: StepMotion | undefined;
   started: boolean;
   ended: boolean;
@@ -299,12 +302,14 @@ export type TimelineRuntime = {
  * the entities its key targets named when it started.
  */
 export type CursorCtx = {
-  readonly rt: TimelineRuntime;
-  readonly animation: string;
+  /** The runtime of the frame step that walks the tree now. */
+  rt: TimelineRuntime;
+  /** Swapped for the nested id while a `use` step walks its tree, and set back after. */
+  animation: string;
   readonly marks: string[];
   readonly spawned: Map<string, Entity>;
-  /** The entities the key targets named when the timeline started. */
-  readonly targets: ReadonlyMap<string, Entity>;
+  /** The entities the key targets named when the timeline started, by target object. */
+  readonly targets: ReadonlyMap<Target, Entity>;
 };
 
 /**
@@ -318,10 +323,12 @@ export type RunningTimeline = {
   readonly cursor: Cursor;
   readonly marks: string[];
   readonly entities: readonly Entity[];
-  /** The entities its `{ projection, key }` targets named when it started, by target key. */
-  readonly targets: ReadonlyMap<string, Entity>;
+  /** The entities its `{ projection, key }` targets named when it started, by target object. */
+  readonly targets: ReadonlyMap<Target, Entity>;
   /** The entities its `spawn` steps made, by spawn id. Despawned when the timeline ends. */
   readonly spawned: Map<string, Entity>;
   readonly resolve: () => void;
   ended: boolean;
+  /** The one cursor context of the timeline, made at its start and reused by every frame. */
+  readonly cctx: CursorCtx;
 };

@@ -35,12 +35,14 @@ function emptySet<Value>(): Set<Value> {
 export function createAnimState(ctx: { readonly config: Readonly<Config> }): State {
   return {
     tracks: emptyMap(),
+    trackList: [],
     nextId: 1,
     owner: emptyMap(),
     offsets: emptyMap(),
     bases: emptyMap(),
     additive: emptyMap(),
     timelines: emptyMap(),
+    timelineList: [],
     registry: emptyMap(),
     markListeners: emptySet(),
     frame: 0,

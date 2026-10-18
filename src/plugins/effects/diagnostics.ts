@@ -37,6 +37,8 @@ function switchKind(ctx: KernelSlice, kind: string, on: boolean): boolean {
   else diagnostics.off.add(kind);
 
   diagnostics.offList = Object.freeze(diagnostics.kinds.filter(id => diagnostics.off.has(id)));
+  // A kind's slots come and go on every view that carries it: the next filter sync looks at every view.
+  state.filterSync.all = true;
   ctx.log.info("effects:diagnostics", { kind, on });
   ctx.require(rendererPlugin).monitor.event("switch", { kind, on });
 

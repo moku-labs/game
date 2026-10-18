@@ -17,7 +17,7 @@ import type { FilterDefinition, FilterFields, FilterKind, KindEntry } from "./fi
 import { Emitter } from "./particles/component";
 import { createParticleSystem, forgetEmitter, retireAllParticles } from "./particles/system";
 import type { EmitterDefinition } from "./particles/types";
-import { NO_KINDS, resetChecks } from "./state";
+import { createFilterSync, NO_KINDS, resetChecks } from "./state";
 import type { EffectsCtx, KernelSlice, State } from "./types";
 
 /** The short side, in CSS pixels, at or under which a coarse pointer is a phone. */
@@ -200,9 +200,13 @@ function registerKinds(ectx: EffectsCtx): void {
     entries.push({ id, component: entry, source: "wgsl", definition: entry.filter });
   }
 
-  // The registration order is each kind's index.
-  for (const [index, entry] of entries.entries())
-    ectx.state.kinds.set(entry.id, { ...entry, index });
+  // The registration order is each kind's index; the filter sync reads them by index from `kindList`.
+  for (const [index, entry] of entries.entries()) {
+    const kind: FilterKind = { ...entry, index };
+
+    ectx.state.kinds.set(entry.id, kind);
+    ectx.state.kindList.push(kind);
+  }
 
   // Inline and positive: a release bundle drops the scan's warning (LEAD-FIXES-4 item 3).
   if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) warnScreenReads(ectx, entries);
@@ -272,7 +276,7 @@ export function startEffects(ctx: KernelSlice): void {
   state.diagnostics.kinds = Object.freeze([...state.kinds.keys()]);
   state.removers.push(ectx.deps.flow.onEnter("load", (node, run) => gateChecks(ectx, node, run)));
   registerEmitters(ectx);
-  openWorld(ectx, [...state.kinds.values()]);
+  openWorld(ectx, state.kindList);
 }
 
 /**
@@ -290,9 +294,12 @@ export function stopEffects(state: State): void {
   state.instances.clear();
   state.orphans.clear();
   state.kinds.clear();
+  state.kindList.length = 0;
   // A check still in flight belongs to this run: its answer is ignored.
   resetChecks(state);
   state.views.clear();
+  state.viewList.length = 0;
+  state.filterSync = createFilterSync();
   state.warned.clear();
   state.particles = 0;
   state.over = { particles: false, passes: false, fullScreen: false };

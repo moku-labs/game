@@ -88,7 +88,11 @@ export type LayoutModule = {
   place(parent: Element, children: readonly Element[]): void;
   free(element: Element): void;
   solve(rootElement: Element, size: Rect, lookup: ElementLookup): boolean;
-  /** The content box of an element in its own units: a JSX root laid out in it as a slot is solved there. */
+  /**
+   * The content box of an element in its own units: a JSX root laid out in it as a slot is solved
+   * there. One box the module writes in place: valid until the next call, copied by a caller that
+   * keeps it.
+   */
   contentRect(element: Element): Rect;
   commit(element: Element, parent: Rect | undefined): void;
   /** Plays the enter hook and starts the loop; `span` notes the longest finite track the hook started. */

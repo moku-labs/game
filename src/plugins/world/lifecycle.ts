@@ -236,6 +236,9 @@ export function clearWorld(state: State): void {
   state.projection.hints.length = 0;
   state.projection.dirty = undefined;
   state.projection.layers = Object.freeze([]);
+  state.projection.membershipVersion += 1;
+  state.projection.moving = false;
+  state.projection.owedLoops = 0;
 
   state.ecs.generations.length = 0;
   state.ecs.free.length = 0;
@@ -243,7 +246,10 @@ export function clearWorld(state: State): void {
   state.ecs.byOwner.clear();
   state.ecs.types.clear();
   state.ecs.stores.clear();
+  state.ecs.typeStores.clear();
+  state.ecs.queryPlans.clear();
   state.ecs.resources.clear();
+  state.ecs.resourceSlots.clear();
   state.ecs.engineResources.clear();
   state.ecs.systems.input.length = 0;
   state.ecs.systems.animate.length = 0;

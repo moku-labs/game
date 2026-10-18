@@ -166,18 +166,21 @@ export function setHidden(
  * Changes one reason of a view and its `renderable` without a mark: the view and the quad that stands for it draw the
  * same pixels. Used by spec 23 for `"kept"`.
  *
- * @param _sctx - The sync context, or any `HiddenCtx`; the swap needs nothing of it.
+ * @param sctx - The sync context, or any `HiddenCtx`: its render-pass version moves on.
  * @param view - The view.
  * @param reason - The reason.
  * @param hidden - True to add the reason, false to remove it.
  */
 export function swapHidden(
-  _sctx: HiddenCtx,
+  sctx: HiddenCtx,
   view: View,
   reason: HiddenReason,
   hidden: boolean
 ): void {
   if (!changes(view, reason, hidden)) return;
+
+  // A view drawn or not changes the render passes of a frame (Q2); a kept picture taken or let go swaps `"kept"` here.
+  sctx.ctx.state.sync.passesVersion += 1;
 
   const name = maskOf(view, reason);
 
@@ -240,6 +243,7 @@ export function setLayerHidden(
   if (next === entry.hidden) return;
 
   sctx.deps.demand.whole("overlay");
+  sctx.ctx.state.sync.passesVersion += 1;
   entry.hidden = next;
   if (entry.container !== undefined) writeNode(entry.container, next === 0);
 }
@@ -296,11 +300,14 @@ export function liftFor<Result>(
   try {
     for (const node of lift) if (nodeMask(state, node) === BITS[reason]) writeNode(node, true);
     for (const node of hide) writeNode(node, false);
+    // The render passes count what the picture draws, and again what the frame draws after it (Q2).
+    state.passesVersion += 1;
 
     return draw();
   } finally {
     for (const node of lift) writeNode(node, nodeMask(state, node) === 0);
     for (const node of hide) writeNode(node, nodeMask(state, node) === 0);
+    state.passesVersion += 1;
   }
 }
 

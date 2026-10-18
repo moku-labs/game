@@ -37,7 +37,7 @@ import { CONTENT, visualOf } from "../visual";
 import { cancelExtra, livePatch, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
-import { hostsOf, hostViews, slotFor, slotOf, trackHost } from "./hosts";
+import { dropHost, hostsMoved, hostsOf, hostViews, slotFor, slotOf, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
 import { childOrder, SIBLING_SPAN } from "./order";
 import { createSpan, enterOverlay, exitOverlay, overlayOf, settleOverlays } from "./overlay";
@@ -67,6 +67,40 @@ const VISUALS: readonly AnyComponentType[] = [Sprite, NineSlice, Shape, Text];
  * the answering one and the marker.
  */
 const INPUTS: readonly AnyComponentType[] = [Tappable, Touchable, LocalWrite, Scroll, Escapable];
+
+/**
+ * One list of the visual and the input types. Its own function, because lint rule L5 refuses a
+ * collection built in a module-scope declaration.
+ *
+ * @param lists - The lists, in order.
+ * @returns Their types, in order.
+ */
+function concatTypes(...lists: ReadonlyArray<readonly AnyComponentType[]>): AnyComponentType[] {
+  return lists.flat();
+}
+
+/** Every type a live element may carry and drop again: the visuals, then the inputs. */
+const LIVE_TYPES: readonly AnyComponentType[] = concatTypes(VISUALS, INPUTS);
+
+/** The owned fields of a type that gives none to a plugin: one list, never a new one. */
+const NO_OWNED: readonly string[] = [];
+
+/**
+ * Tells whether a list of component values holds one of a type.
+ *
+ * @param values - The values.
+ * @param type - The type.
+ * @returns True when a value of that type is there.
+ */
+function carries(values: readonly AnyComponentValue[], type: AnyComponentType): boolean {
+  // Per restyle, nine times: an index loop, which allocates nothing in every tier of V8 (measured).
+  // eslint-disable-next-line unicorn/no-for-loop -- the iterator of `for…of` is not always optimised away here.
+  for (let index = 0; index < values.length; index += 1) {
+    if (values[index]?.type === type) return true;
+  }
+
+  return false;
+}
 
 /**
  * The names of a list of component types. Its own function, because lint rule L5 refuses a
@@ -442,16 +476,6 @@ function sameBox(solved: Rect | undefined, next: Rect): boolean {
 }
 
 /**
- * Creates the set of roots of one solve. Its own function, because lint rule L5 refuses a
- * collection built inside an exported declaration.
- *
- * @returns An empty set.
- */
-function rootSet(): Set<Root> {
-  return new Set();
-}
-
-/**
  * Tells whether two values of one component carry the same fields: shallow, `Object.is` per
  * field. A tag value is the same as another tag value.
  *
@@ -587,6 +611,17 @@ export function createReconciler(
     forgetSubtree,
     despawnTree
   });
+  // The reconciler's per-frame scratch, kept so an idle frame allocates nothing: the roots to
+  // reconcile, the scroll containers, the roots whose slot changed in this solve, the roots still
+  // waiting in it, the viewport box, and what the slots were last assigned for.
+  const dirtyList: Root[] = [];
+  const scrollList: Element[] = [];
+  const movedRoots: Root[] = [];
+  let movedCount = 0;
+  let waitingCount = 0;
+  const viewportBox: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  let slotsVersion = -1;
+  let slotsRoots = -1;
 
   /**
    * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
@@ -885,38 +920,46 @@ export function createReconciler(
     state.written += 1;
     writeOrder(element);
 
-    // Remove the visuals and inputs the element no longer carries.
+    // Remove the visuals and inputs the element no longer carries. Per restyle: the two lists are
+    // read as they come, with no joined copy and no closure per type.
     const visuals = visualOf(element);
-    const values = [...visuals, ...inputOf(element)];
+    const inputs = inputOf(element);
 
-    for (const type of [...VISUALS, ...INPUTS]) {
-      const carried = values.some(value => value.type === type);
-      const isDropped = !carried && ecs.has(element.entity, type);
+    for (const type of LIVE_TYPES) {
+      const isDropped = !carries(visuals, type) && !carries(inputs, type);
 
-      if (isDropped) ecs.remove(element.entity, type);
+      if (isDropped && ecs.has(element.entity, type)) ecs.remove(element.entity, type);
     }
 
     // Add the ones the entity lacks; patch the fields of the rest, but never a tag or `Scroll`.
-    for (const value of values) {
-      if (!ecs.has(element.entity, value.type)) {
-        ecs.add(element.entity, value);
-
-        continue;
-      }
-
-      const isPatchable = value.value !== true && value.type !== Scroll;
-
-      if (!isPatchable) continue;
-
-      const owned = ecs.typeOf(value.type.componentName)?.owned ?? [];
-
-      ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
-    }
+    for (const value of visuals) writeValue(element, value);
+    for (const value of inputs) writeValue(element, value);
 
     // The look just written is the rest of the visual.
     for (const value of visuals) recordRest(ctx, element, value);
 
     writeExtras(element);
+  }
+
+  /**
+   * Writes one visual or input value onto a live element: added when the entity lacks it, else
+   * its fields patched, but never a tag or `Scroll`, and never a field its type gives to a plugin.
+   *
+   * @param element - The live element.
+   * @param value - The value of this render.
+   */
+  function writeValue(element: Element, value: AnyComponentValue): void {
+    if (!ecs.has(element.entity, value.type)) {
+      ecs.add(element.entity, value);
+
+      return;
+    }
+
+    if (value.value === true || value.type === Scroll) return;
+
+    const owned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
+
+    ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
   }
 
   /**
@@ -1225,7 +1268,7 @@ export function createReconciler(
    * @param cause - Why the subtree leaves.
    */
   function exitSubtree(element: Element, cause: MotionCause): void {
-    state.hosts.delete(element.entity);
+    dropHost(state, element.entity);
     state.scrolls.delete(element.entity);
 
     if (overlayOf(element) === undefined) {
@@ -1307,6 +1350,10 @@ export function createReconciler(
       fields.exit(element);
       fields.drop(element);
     }
+
+    // A host that goes moves the hosts version, also one whose exit took it out of the host set
+    // earlier: it still holds its views and a root may still be laid out in it until this despawn.
+    if (hostsOf(element.node).length > 0) hostsMoved(state);
 
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
@@ -1528,11 +1575,17 @@ export function createReconciler(
   /**
    * Gives every root its slot for this solve (spec 16 U3.3). A root whose slot changed needs a
    * solve, and takes its new rects with no motion; a live root element hangs at its new place now.
-   *
-   * @returns The roots whose slot changed.
+   * The slots stand while no host moved and no root came or went: the hosts version and the root
+   * count are those of the last assignment.
    */
-  function assignSlots(): Set<Root> {
-    const moved = rootSet();
+  function assignSlots(): void {
+    movedCount = 0;
+
+    // Per frame: two numbers decide; an idle frame walks no root.
+    if (state.hostsVersion === slotsVersion && state.roots.size === slotsRoots) return;
+
+    slotsVersion = state.hostsVersion;
+    slotsRoots = state.roots.size;
 
     for (const root of state.roots.values()) {
       if (state.removing.has(root.entity)) continue;
@@ -1546,48 +1599,64 @@ export function createReconciler(
       root.slot = slot;
       root.slotRect = undefined;
       root.needsSolve = true;
-      moved.add(root);
+      movedRoots[movedCount] = root;
+      movedCount += 1;
       placeRoot(root);
     }
-
-    return moved;
   }
 
   /**
-   * The roots this solve may lay out: every root marked for a solve, and every root in a slot,
-   * whose slot may have been resized.
+   * Tells whether the slot of a root changed in this solve.
    *
-   * @returns The roots, in mount order.
+   * @param root - The root.
+   * @returns True when it takes its rects with no motion.
    */
-  function pendingRoots(): Set<Root> {
-    const pending = rootSet();
-
-    for (const root of state.roots.values()) {
-      if (root.element === undefined || lookup(root.element) === undefined) continue;
-      if (root.needsSolve || root.slot !== undefined) pending.add(root);
+  function isMoved(root: Root): boolean {
+    for (let index = 0; index < movedCount; index += 1) {
+      if (movedRoots[index] === root) return true;
     }
 
-    return pending;
+    return false;
+  }
+
+  /**
+   * Marks the roots this solve may lay out `pending`: every root marked for a solve, and every root
+   * in a slot, whose slot may have been resized.
+   *
+   * @returns How many roots wait.
+   */
+  function pendingRoots(): number {
+    let count = 0;
+
+    // Per solve: a flag on the root, not a new set.
+    for (const root of state.roots.values()) {
+      const waits =
+        root.element !== undefined &&
+        lookup(root.element) !== undefined &&
+        (root.needsSolve || root.slot !== undefined);
+
+      root.pending = waits;
+      if (waits) count += 1;
+    }
+
+    return count;
   }
 
   /**
    * The box a root in a slot is solved in: the slot's content box, once the slot's own root needs
-   * no solve in this call any more.
+   * no solve in this call any more. The box is the layout's scratch: valid until the next call.
    *
    * @param root - A root laid out in a slot.
-   * @param pending - The roots still waiting in this solve.
    * @returns The box, or `undefined` while the slot's root waits.
    */
-  function slotBoxOf(root: Root, pending: ReadonlySet<Root>): Rect | undefined {
+  function slotBoxOf(root: Root): Rect | undefined {
     const host = root.slot === undefined ? undefined : state.elements.get(root.slot);
 
     if (host === undefined) return undefined;
 
     const hostRoot = state.roots.get(host.root);
 
-    return hostRoot !== undefined && pending.has(hostRoot)
-      ? undefined
-      : modules.layout.contentRect(host);
+    return hostRoot?.pending === true ? undefined : modules.layout.contentRect(host);
   }
 
   /**
@@ -1607,7 +1676,8 @@ export function createReconciler(
     const resized = root.slot !== undefined && !sameBox(root.slotRect, box);
 
     if (!root.needsSolve && !resized) return false;
-    if (root.slot !== undefined) root.slotRect = box;
+    // Kept: a copy, the box may be scratch.
+    if (root.slot !== undefined) root.slotRect = { x: box.x, y: box.y, w: box.w, h: box.h };
 
     modules.layout.solve(element, box, lookup);
     root.needsSolve = false;
@@ -1619,47 +1689,56 @@ export function createReconciler(
   /**
    * Solves every root that needs it, in passes: a root in a slot waits for the root of its slot,
    * and a slot inside a slot takes one more pass. The roots still waiting after the last pass are
-   * slotted in each other: each is laid out on the viewport instead.
+   * slotted in each other: each is laid out on the viewport instead. A root whose slot changed in
+   * this solve takes its rects with no motion.
    *
    * @param size - The viewport.
-   * @param moved - The roots whose slot changed: they take their rects with no motion.
    * @returns True when a root was solved.
    */
-  function layOutRoots(size: Rect, moved: ReadonlySet<Root>): boolean {
-    const pending = pendingRoots();
+  function layOutRoots(size: Rect): boolean {
     let changed = false;
 
-    for (let pass = 0; pass < SLOT_PASSES && pending.size > 0; pass += 1) {
-      if (solvePass(pending, size, moved)) changed = true;
+    waitingCount = pendingRoots();
+
+    for (let pass = 0; pass < SLOT_PASSES && waitingCount > 0; pass += 1) {
+      if (solvePass(size)) changed = true;
     }
 
-    for (const root of pending) {
+    if (waitingCount === 0) return changed;
+
+    for (const root of state.roots.values()) {
+      if (root.pending !== true) continue;
+
+      root.pending = false;
       breakCycle(root);
       if (solveOne(root, size, true)) changed = true;
     }
+
+    waitingCount = 0;
 
     return changed;
   }
 
   /**
-   * One pass over the waiting roots: every root whose box is known now is solved and leaves the
-   * waiting set.
+   * One pass over the waiting roots, in mount order: every root whose box is known now is solved
+   * and stops waiting.
    *
-   * @param pending - The roots still waiting; emptied of the ones this pass solves.
    * @param size - The viewport.
-   * @param moved - The roots whose slot changed: they take their rects with no motion.
    * @returns True when a root was solved.
    */
-  function solvePass(pending: Set<Root>, size: Rect, moved: ReadonlySet<Root>): boolean {
+  function solvePass(size: Rect): boolean {
     let changed = false;
 
-    for (const root of pending) {
-      const box = root.slot === undefined ? size : slotBoxOf(root, pending);
+    for (const root of state.roots.values()) {
+      if (root.pending !== true) continue;
+
+      const box = root.slot === undefined ? size : slotBoxOf(root);
 
       if (box === undefined) continue;
 
-      pending.delete(root);
-      if (solveOne(root, box, moved.has(root))) changed = true;
+      root.pending = false;
+      waitingCount -= 1;
+      if (solveOne(root, box, isMoved(root))) changed = true;
     }
 
     return changed;
@@ -1780,40 +1859,51 @@ export function createReconciler(
    * The live scroll containers, which the frame step moves with the finger. Read from the set the
    * enter fills and the exit empties, so an idle frame walks no other element.
    *
-   * @returns Every live element whose tag is `scroll`.
+   * @returns Every live element whose tag is `scroll`: the reconciler's own list, valid until the
+   *   next call.
    */
-  function scrollContainers(): Element[] {
-    const containers: Element[] = [];
+  function scrollContainers(): readonly Element[] {
+    // Per frame: one kept list, emptied by `pop` (a cut by `length` would free its store).
+    while (scrollList.length > 0) scrollList.pop();
 
     for (const entity of state.scrolls) {
       const element = state.elements.get(entity);
 
-      if (element?.live === true) containers.push(element);
+      if (element?.live === true) scrollList.push(element);
     }
 
-    return containers;
+    return scrollList;
   }
 
   /**
-   * Collects the roots that have work this frame: a changed tree, a dirty instance or style, and
-   * every root when the viewport changed.
+   * Collects the roots that have work this frame into the dirty list: a changed tree, a dirty
+   * instance or style, and every root when the viewport changed.
    *
    * @param viewportChanged - Whether the viewport moved since the last frame.
-   * @returns The roots to reconcile, in mount order.
+   * @returns How many roots the list holds, in mount order.
    */
-  function dirtyRoots(viewportChanged: boolean): Root[] {
-    const changed = entitySet(ecs.changed(WORLD_TREE));
+  function dirtyRoots(viewportChanged: boolean): number {
+    // A changed tree marks its root: the walk below then reads one flag per root.
+    for (const entity of ecs.changed(WORLD_TREE)) {
+      const root = state.roots.get(entity);
 
-    return [...state.roots.values()].filter(root => {
-      if (state.removing.has(root.entity)) return false;
-      if (viewportChanged) {
-        root.needsSolve = true;
+      if (root !== undefined && !state.removing.has(entity)) root.dirty = true;
+    }
 
-        return true;
-      }
+    let count = 0;
 
-      return root.dirty || changed.has(root.entity);
-    });
+    for (const root of state.roots.values()) {
+      if (state.removing.has(root.entity)) continue;
+
+      if (viewportChanged) root.needsSolve = true;
+      else if (!root.dirty) continue;
+
+      // Per frame: written by index into the kept list, its count beside it.
+      dirtyList[count] = root;
+      count += 1;
+    }
+
+    return count;
   }
 
   /**
@@ -1908,7 +1998,13 @@ export function createReconciler(
     // full, however equal its description is.
     if (viewportChanged) state.epoch += 1;
 
-    for (const root of dirtyRoots(viewportChanged)) reconcileDirtyRoot(root);
+    const count = dirtyRoots(viewportChanged);
+
+    for (let index = 0; index < count; index += 1) {
+      const root = dirtyList[index];
+
+      if (root !== undefined) reconcileDirtyRoot(root);
+    }
 
     // Give the views a slot hosts their parent, take it back where the slot left, and publish the
     // frame's counters.
@@ -1917,15 +2013,16 @@ export function createReconciler(
   }
 
   /**
-   * Copies the counters of the two modules into the resource the acceptance tests read.
+   * Copies the counters of the two modules into the resource the acceptance tests read. The three
+   * of the layout are read from its state: `layout.counters()` would build an object per call.
    */
   function writeCounters(): void {
     const counters = ecs.resource(UiCounters);
-    const { nodes, measured, solves } = modules.layout.counters();
+    const layout = ctx.state.layout;
 
-    counters.nodes = nodes;
-    counters.measured = measured;
-    counters.solves = solves;
+    counters.nodes = layout.nodes;
+    counters.measured = layout.measured;
+    counters.solves = layout.solves;
     counters.reconciles = state.reconciles;
     counters.windowRenders = state.windowRenders;
     counters.styled = state.styled;
@@ -1941,8 +2038,13 @@ export function createReconciler(
    */
   function solve(): void {
     const viewport = modules.styles.viewport();
-    const size: Rect = { x: 0, y: 0, w: viewport?.width ?? 0, h: viewport?.height ?? 0 };
-    const changed = layOutRoots(size, assignSlots());
+
+    // Per frame: the viewport box is the reconciler's scratch; the solve keeps no reference to it.
+    viewportBox.w = viewport?.width ?? 0;
+    viewportBox.h = viewport?.height ?? 0;
+    assignSlots();
+
+    const changed = layOutRoots(viewportBox);
 
     if (changed) ctx.deps.time.wake();
 
@@ -1989,6 +2091,8 @@ export function createReconciler(
 
     const tree = ecs.get(entity, WORLD_TREE);
 
+    // A new root takes its slot at the next solve.
+    hostsMoved(state);
     state.roots.set(entity, {
       entity,
       name,
@@ -2002,7 +2106,8 @@ export function createReconciler(
       covered: false,
       cause: popup === undefined ? undefined : "change",
       slot: undefined,
-      slotRect: undefined
+      slotRect: undefined,
+      pending: false
     });
   }
 
@@ -2024,6 +2129,8 @@ export function createReconciler(
       root.popup === undefined ? (ctx.deps.world.projection.causeOf(entity) ?? "change") : "change";
 
     state.removing.add(entity);
+    // A root that leaves gives its slot up at the next solve.
+    hostsMoved(state);
 
     if (element !== undefined) exitElement(element, cause);
 
@@ -2033,7 +2140,9 @@ export function createReconciler(
   /**
    * Re-resolves the style of one element whose pointer or focus flag changed: a press, a release,
    * the mouse coming over it or leaving it, the keyboard focus arriving or leaving. A new rect
-   * waits for the solve; a new look and a new rest pose apply now.
+   * waits for the solve; a new look and a new rest pose apply now. Only this element is restyled:
+   * its root is not reconciled again, because no view reads a pointer or focus flag, and the next
+   * render that does come finds the flags and the style already in step.
    *
    * @param entity - The element entity.
    * @param flag - Which flag changed.
@@ -2044,7 +2153,8 @@ export function createReconciler(
 
     if (element === undefined) return;
 
-    element.is = { ...element.is, [flag]: on };
+    // Per press: the flag flips in place; the flags object is the element's own.
+    element.is[flag] = on;
 
     const style = styleFor(parentOf(element), element.node, element.is);
     const root = state.roots.get(element.root);
@@ -2059,7 +2169,6 @@ export function createReconciler(
       if (root !== undefined) root.needsSolve = true;
     }
 
-    if (root !== undefined) root.dirty = true;
     if (!element.live) return;
 
     writeLive(element);

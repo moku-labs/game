@@ -6,6 +6,18 @@ import type { PixiModule, PixiTexture, Point } from "../../renderer/types";
 import type { Entity } from "../../world/types";
 
 /**
+ * The length of one particle step, read from an object: the frame's `Time` in the particle system, a scratch of
+ * `step.ts` for a caller that holds a plain number. A fractional number handed from call to call is boxed; a field
+ * read is not.
+ *
+ * @example
+ * ```ts
+ * const time: StepTime = { delta: 16.6 };
+ * ```
+ */
+export type StepTime = { readonly delta: number };
+
+/**
  * An inclusive `[min, max]` range; every particle draws its own value from it.
  *
  * @example
@@ -162,6 +174,11 @@ export type BakedEmitter = {
   readonly alphaTable: Float32Array;
   /** Tint per 1/64 of the life, packed as Pixi's `0xbbggrr`. */
   readonly tintTable: Uint32Array;
+  /**
+   * The colour a particle is drawn with per 1/64 of the life, packed as Pixi's `0xaabbggrr`: the tint under the alpha
+   * byte. Read straight from the table every frame: a number above the small integers handed back by a call is boxed.
+   */
+  readonly colorTable: Uint32Array;
   /** Half side of the box no particle leaves, in reference units. */
   readonly reach: number;
   readonly textures: readonly PixiTexture[];

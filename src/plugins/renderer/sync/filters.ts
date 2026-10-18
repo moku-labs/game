@@ -8,7 +8,7 @@ import type { EcsApi } from "../../world/ecs/types";
 import type { Entity } from "../../world/types";
 import type { KeptState } from "../kept/types";
 import type { KeptModule, PixiContainer, PixiFilter, PixiRectangle } from "../types";
-import type { AreaEntry, FilterSlot, SyncCtx, SyncState, View } from "./types";
+import type { AreaEntry, FilterSlot, PassCount, SyncCtx, SyncState, View } from "./types";
 
 /**
  * The filters a display object holds now. Pixi answers `undefined` before the first write and
@@ -153,6 +153,8 @@ export function setFilters(
   if (slots.length === 0) state.filters.delete(entity);
   else state.filters.set(entity, [...slots]);
 
+  state.passesVersion += 1;
+
   // Inline and positive: Bun folds the agent guard under a production `define`.
   if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
     for (const slot of slots) nameFilters(state, entity, slot);
@@ -206,7 +208,7 @@ export function moveFilters(
 export function forgetLeft(state: SyncState, ecs: Pick<EcsApi, "ownerOf">, entity: Entity): void {
   if (ecs.ownerOf(entity) !== undefined) return;
 
-  state.filters.delete(entity);
+  if (state.filters.delete(entity)) state.passesVersion += 1;
   state.areas.delete(entity);
 }
 
@@ -432,16 +434,95 @@ function isDrawn(view: View | undefined, root: PixiContainer): view is View {
  */
 function passesOf(slots: readonly FilterSlot[]): number {
   let passes = 0;
+  let enabled = false;
 
-  for (const slot of slots) if (slot.filter.enabled) passes += slot.passes;
+  for (const slot of slots) {
+    if (slot.filter.enabled) {
+      passes += slot.passes;
+      enabled = true;
+    }
+  }
 
-  return slots.some(slot => slot.filter.enabled) ? 1 + passes : 0;
+  return enabled ? 1 + passes : 0;
+}
+
+/** What the count of the filtered views reads while it walks the filters: set before the walk, one at a time. */
+const walk: { sync: SyncState | undefined; kept: KeptState | undefined; passes: number } = {
+  sync: undefined,
+  kept: undefined,
+  passes: 0
+};
+
+/**
+ * Notes every filter of a view with its `enabled` in the pass count, then adds what the view costs to the walk's
+ * count: nothing when its picture is kept or it is not drawn.
+ *
+ * @param slots - The filters of the view.
+ * @param entity - The entity.
+ */
+function addFiltered(slots: readonly FilterSlot[], entity: Entity): void {
+  const { sync, kept } = walk;
+
+  if (sync === undefined || kept === undefined || sync.root === undefined) return;
+
+  const cache = sync.passes;
+
+  for (const slot of slots) {
+    cache.filters[cache.count] = slot.filter;
+    cache.enabled[cache.count] = slot.filter.enabled;
+    cache.count += 1;
+  }
+
+  if (kept.byEntity.get(entity)?.mode === "kept") return;
+  if (isDrawn(sync.views.get(entity), sync.root)) walk.passes += passesOf(slots);
+}
+
+/**
+ * Counts the passes the filtered views drawn under the root cost into the cache, a view drawn from its kept picture and
+ * every view inside one excepted, and notes every filter with its `enabled`. Walks the filters with `forEach` and a
+ * callback made once: no iterator, no entry array.
+ *
+ * @param state - The sync branch of the plugin state.
+ * @param kept - The kept state.
+ */
+function countFiltered(state: SyncState, kept: KeptState): void {
+  const cache = state.passes;
+  const before = cache.count;
+
+  walk.sync = state;
+  walk.kept = kept;
+  walk.passes = 0;
+  cache.count = 0;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no entry arrays.
+  state.filters.forEach(addFiltered);
+  cache.filtered = walk.passes;
+  walk.sync = undefined;
+  walk.kept = undefined;
+
+  // The filters of the last count past this one are let go.
+  for (let index = cache.count; index < before; index += 1) cache.filters[index] = undefined;
+}
+
+/**
+ * Tells whether a filter of the count was switched on or off since, by its field alone.
+ *
+ * @param cache - The pass count.
+ * @returns True when one differs.
+ */
+function switchedSince(cache: PassCount): boolean {
+  for (let index = 0; index < cache.count; index += 1) {
+    if (cache.filters[index]?.enabled !== cache.enabled[index]) return true;
+  }
+
+  return false;
 }
 
 /**
  * The render passes of a frame: 1 for the frame, plus what every filtered view drawn under the root costs, a view
  * drawn from its kept picture and every view inside one excepted, plus what the last flush of the kept cache cost
- * (spec 23 P9.2). Read from the slots, never asked of the GPU.
+ * (spec 23 P9.2). Read from the slots, never asked of the GPU. The filtered views' part is counted again only when
+ * `passesVersion` moved, the root changed or a filter was switched since: a still frame compares the filters' `enabled`
+ * with the count's and reads one number (Q2).
  *
  * @param state - The sync branch of the plugin state.
  * @param kept - The kept state.
@@ -452,12 +533,13 @@ export function renderPassesOf(state: SyncState, kept: KeptState): number {
 
   if (root === undefined) return 0;
 
-  let passes = 1 + kept.flushPasses;
+  const cache = state.passes;
 
-  for (const [entity, slots] of state.filters) {
-    if (kept.byEntity.get(entity)?.mode === "kept") continue;
-    if (isDrawn(state.views.get(entity), root)) passes += passesOf(slots);
+  if (cache.at !== state.passesVersion || cache.root !== root || switchedSince(cache)) {
+    countFiltered(state, kept);
+    cache.at = state.passesVersion;
+    cache.root = root;
   }
 
-  return passes;
+  return 1 + kept.flushPasses + cache.filtered;
 }

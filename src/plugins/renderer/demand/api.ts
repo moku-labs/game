@@ -10,7 +10,7 @@ import type { HiddenReason, View } from "../sync/types";
 import type { DemandModule, HostModule, PixiContainer, RendererCtx } from "../types";
 import { checkMissedMarks } from "./check";
 import { ancestorsShown, isShown, unseenBy } from "./shown";
-import type { DemandFrame, DemandReason, DemandState, Unseen } from "./types";
+import type { DemandFrame, DemandReason, DemandState, Marks, Unseen } from "./types";
 import { verifyFrame } from "./verify";
 
 /**
@@ -24,17 +24,16 @@ function firstWhole(wholes: ReadonlySet<DemandReason>): DemandReason | undefined
 }
 
 /**
- * Tells whether one entity of a set passes a test. The set is walked only when it holds something, so a still screen
- * makes no iterator.
+ * Tells whether one entity of a mark list passes a test, walked by index: no iterator.
  *
- * @param entities - The entities.
+ * @param entities - The marks.
  * @param test - The test.
  * @returns True when one passes.
  */
-function someOf(entities: ReadonlySet<Entity>, test: (entity: Entity) => boolean): boolean {
-  if (entities.size === 0) return false;
-
-  for (const entity of entities) if (test(entity)) return true;
+function someOf(entities: Marks, test: (entity: Entity) => boolean): boolean {
+  for (let index = 0; index < entities.size; index += 1) {
+    if (test(entities.at(index))) return true;
+  }
 
   return false;
 }
@@ -55,12 +54,13 @@ function emptyOut(set: Set<unknown>): void {
  * @param state - The demand state.
  */
 function clearMarks(state: DemandState): void {
-  emptyOut(state.marked);
-  emptyOut(state.pending);
-  emptyOut(state.loose);
-  emptyOut(state.visual);
-  emptyOut(state.moved);
-  emptyOut(state.published);
+  // per frame: the mark lists empty by a new decision number, without a new table.
+  state.marked.clear();
+  state.pending.clear();
+  state.loose.clear();
+  state.visual.clear();
+  state.moved.clear();
+  state.published.clear();
   emptyOut(state.wholes);
   state.counted = false;
 }
@@ -301,15 +301,15 @@ export function createDemandApi(
     unseenBy: (entity: Entity): Unseen =>
       unseenBy(state, host, views, entity, through, alphaHidden),
 
-    marked: (): ReadonlySet<Entity> => state.marked,
+    marked: (): Marks => state.marked,
 
-    loose: (): ReadonlySet<Entity> => state.loose,
+    loose: (): Marks => state.loose,
 
-    visual: (): ReadonlySet<Entity> => state.visual,
+    visual: (): Marks => state.visual,
 
-    moved: (): ReadonlySet<Entity> => state.moved,
+    moved: (): Marks => state.moved,
 
-    published: (): ReadonlySet<Entity> => state.published,
+    published: (): Marks => state.published,
 
     verifyFrames: (on: boolean): void => {
       // Inline and positive: a production `define` folds the guard, and `verify.ts` leaves the bundle.
@@ -325,6 +325,8 @@ export function createDemandApi(
     invalidate: (entity: Entity): void => {
       if (ctx.state.sync.root === undefined || !views.has(entity)) return;
 
+      // A write the renderer cannot see (a filter switched on or off): the render passes are counted again (Q2).
+      ctx.state.sync.passesVersion += 1;
       state.published.add(entity);
       judge(entity);
     }

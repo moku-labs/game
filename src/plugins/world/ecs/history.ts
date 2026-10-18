@@ -360,11 +360,11 @@ function recordChangedEntities(ctx: WorldCtx, history: History, frame: number): 
   const slot = slotFor(history, frame);
 
   for (const component of state.changed.keys()) {
-    const set = state.changed.get(component);
+    const list = state.changed.get(component);
 
-    if (set === undefined) continue;
+    if (list === undefined) continue;
 
-    for (const entity of set) {
+    for (const entity of list.entities) {
       const owner = state.owners.get(entity);
       const entry = history.shadow.get(entity);
 

@@ -6,7 +6,8 @@
  *
  * Engine-internal, not a root export. `input`, `anim` and `ui` import `rootPoseOf` and
  * `localPoseOf` from this module path (`../renderer/sync/pose`) and never walk the `Parent` chain
- * themselves; `input` places a carried view under the last pose of a despawned held view with
+ * themselves; a per-frame reader (`effects`' following emitters) writes the root pose into its own
+ * object with `rootPoseInto`, which allocates nothing; `input` places a carried view under the last pose of a despawned held view with
  * `poseUnder`; `sync` places a box with `rootPointOf`. `input` places the drop lookup of an aimed
  * view with `applyPose`.
  */
@@ -128,6 +129,63 @@ export function poseUnder(
 }
 
 /**
+ * Where an entity really is, written into the caller's pose: its `Transform` composed through the `Parent` chain,
+ * every pivot on the way applied, the numbers of `rootPoseOf` (the same steps in the same order). The answer keeps the
+ * entity's own pivot. Allocates nothing: a reader that asks every frame passes the same object.
+ *
+ * @param ecs - The world read, `world.ecs`.
+ * @param entity - The entity to place.
+ * @param out - The pose to write, its `pivot` object included; it may be `own`.
+ * @param own - A pose to use in place of the entity's own `Transform`, such as its rest pose.
+ * @returns `out`, in root space. An entity without a `Transform` sits at the identity pose.
+ * @example
+ * ```ts
+ * // `effects` follows a host every frame: the slot sits at (40, 60) scaled 0.5, the host at (100, 200) inside it.
+ * const pose = { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } };
+ * rootPoseInto(ctx.require(worldPlugin).ecs, host, pose);
+ * // pose is { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { x: 0, y: 0 } }
+ * ```
+ */
+export function rootPoseInto(
+  ecs: PoseReader,
+  entity: Entity,
+  out: TransformValue,
+  own?: Readonly<TransformValue>
+): TransformValue {
+  const start = own ?? ecs.get(entity, Transform) ?? Transform.defaults;
+
+  out.x = start.x;
+  out.y = start.y;
+  out.rotation = start.rotation;
+  out.scale = start.scale;
+  out.pivot.x = start.pivot.x;
+  out.pivot.y = start.pivot.y;
+
+  let current = entity;
+
+  for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
+    const parent = parentOf(ecs, current);
+
+    if (parent === 0) break;
+
+    // per frame: `poseUnder` in place, no pose object (the same arithmetic as `applyPose`).
+    const above = ecs.get(parent, Transform) ?? Transform.defaults;
+    const cos = Math.cos(above.rotation);
+    const sin = Math.sin(above.rotation);
+    const dx = out.x - above.pivot.x;
+    const dy = out.y - above.pivot.y;
+
+    out.x = above.x + above.scale * (dx * cos - dy * sin);
+    out.y = above.y + above.scale * (dx * sin + dy * cos);
+    out.rotation = out.rotation + above.rotation;
+    out.scale = out.scale * above.scale;
+    current = parent;
+  }
+
+  return out;
+}
+
+/**
  * Where an entity really is: its `Transform` composed through the `Parent` chain, every pivot on
  * the way applied. The answer keeps the entity's own pivot, so it can be written straight into the
  * `Transform` of an entity without a parent and the view does not move.
@@ -135,7 +193,7 @@ export function poseUnder(
  * @param ecs - The world read, `world.ecs`.
  * @param entity - The entity to place.
  * @param own - A pose to use in place of the entity's own `Transform`, such as its rest pose.
- * @returns The pose in root space. An entity without a `Transform` sits at the identity pose.
+ * @returns The pose in root space, a fresh object. An entity without a `Transform` sits at the identity pose.
  * @example
  * ```ts
  * // `input` lifts a board cell out of its slot: the slot sits at (40, 60) scaled 0.5,
@@ -149,19 +207,12 @@ export function rootPoseOf(
   entity: Entity,
   own?: Readonly<TransformValue>
 ): TransformValue {
-  let pose = copyPose(own ?? ecs.get(entity, Transform) ?? Transform.defaults);
-  let current = entity;
-
-  for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
-    const parent = parentOf(ecs, current);
-
-    if (parent === 0) break;
-
-    pose = poseUnder(ecs.get(parent, Transform) ?? Transform.defaults, pose);
-    current = parent;
-  }
-
-  return pose;
+  return rootPoseInto(
+    ecs,
+    entity,
+    { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
+    own
+  );
 }
 
 /**

@@ -8,8 +8,9 @@ import { debugPlugin } from "../debug";
 import { flowPlugin } from "../flow";
 import { i18nPlugin } from "../i18n";
 import { inputPlugin } from "../input";
-import { PointerOver, Pressed } from "../input/components";
+import { Held, PointerOver, Pressed } from "../input/components";
 import { rendererPlugin } from "../renderer";
+import { Parent } from "../renderer/components";
 import { textPlugin } from "../text";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
@@ -19,6 +20,7 @@ import { Box, DebugTrigger, LocalWrite, UI_OWNER } from "./components";
 import { installHot } from "./hot";
 import { checkTrigger, debugTap } from "./jsx/debug";
 import { stopFields } from "./jsx/fields";
+import { hostsMoved } from "./jsx/hosts";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
@@ -81,7 +83,8 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 
 /**
  * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
- * `PointerOver`, the listener that asks for every root to be built again after a restore or a
+ * `PointerOver`, the two that tell the hosting step a view lost its `Parent` or its `Held` (a
+ * view freed so may hang under its host again), the listener that asks for every root to be built again after a restore or a
  * load, the two effect handlers, the hint listener that buffers every released hint for
  * the `change` hooks of the next frame step, the three tap listeners (the `LocalWrite` patch, the
  * pointer tap that clears the keyboard focus, and the tap that starts or ends the editing of a
@@ -114,6 +117,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ecs.onRemoved(Pressed, entity => jsx.markPointer(entity, "pressed", false)),
     ecs.onAdded(PointerOver, entity => jsx.markPointer(entity, "hover", true)),
     ecs.onRemoved(PointerOver, entity => jsx.markPointer(entity, "hover", false)),
+    ecs.onRemoved(Parent, () => hostsMoved(ctx.state.jsx)),
+    ecs.onRemoved(Held, () => hostsMoved(ctx.state.jsx)),
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.flow.fx.onHint(hint => {

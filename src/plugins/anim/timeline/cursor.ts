@@ -27,7 +27,7 @@ export function createCursor(step: Step): Cursor {
     step,
     children: childrenOf(step),
     index: step.kind === "frames" ? BEFORE_FIRST_FRAME : 0,
-    elapsed: 0,
+    clock: new Float64Array(1),
     motion: undefined,
     started: false,
     ended: false,
@@ -64,19 +64,18 @@ function reportMark(cctx: CursorCtx, name: string): void {
 }
 
 /**
- * The table key of a projection-key target; `undefined` for an entity or a spawned id, which need no table.
+ * Tells whether a target is a `{ projection, key }` target, the one kind the timeline resolves when
+ * it starts.
  *
  * @param target - The target a step names.
- * @returns The key, or `undefined`.
+ * @returns True for a projection key.
  * @example
  * ```ts
- * targetKey({ projection: "board.items", key: "i7" }); // '["board.items","i7"]'
+ * isKeyTarget({ projection: "board.items", key: "i7" }); // true
  * ```
  */
-function targetKey(target: Target): string | undefined {
-  if (typeof target === "number" || "spawned" in target) return undefined;
-
-  return JSON.stringify([target.projection, target.key]);
+function isKeyTarget(target: Target): boolean {
+  return typeof target !== "number" && !("spawned" in target);
 }
 
 /**
@@ -90,10 +89,8 @@ function targetKey(target: Target): string | undefined {
  * @returns The entity, or `undefined`.
  */
 function entityFor(cctx: CursorCtx, target: Target): Entity | undefined {
-  const key = targetKey(target);
-  const held = key === undefined ? undefined : cctx.targets.get(key);
-
-  return held ?? cctx.rt.entityOf(target, cctx.spawned);
+  // A frames step asks every frame: the table is keyed by the target object, so no key is built.
+  return cctx.targets.get(target) ?? cctx.rt.entityOf(target, cctx.spawned);
 }
 
 /**
@@ -274,7 +271,12 @@ function advanceUse(cctx: CursorCtx, cursor: Cursor, id: string, deltaMs: number
     return deltaMs;
   }
 
-  const rest = advanceCursor({ ...cctx, animation: id }, child, deltaMs);
+  const outer = cctx.animation;
+
+  // per frame: the one context carries the nested id down and gets the outer one back, no copy.
+  cctx.animation = id;
+  const rest = advanceCursor(cctx, child, deltaMs);
+  cctx.animation = outer;
 
   if (!child.ended) return 0;
 
@@ -284,21 +286,41 @@ function advanceUse(cctx: CursorCtx, cursor: Cursor, id: string, deltaMs: number
 }
 
 /**
- * Advances a `wait`.
+ * Advances a `wait`. It reads the length off the step itself: a length that is not a small whole
+ * number would be boxed anew at every call that hands it over.
  *
  * @param cursor - The wait cursor.
- * @param durationMs - How long the step waits.
+ * @param step - The wait step.
  * @param deltaMs - Milliseconds of game time to consume.
  * @returns The milliseconds left over past the end of the wait.
  */
-function advanceWait(cursor: Cursor, durationMs: number, deltaMs: number): number {
-  cursor.elapsed += deltaMs;
+function advanceWait(
+  cursor: Cursor,
+  step: Extract<Step, { kind: "wait" }>,
+  deltaMs: number
+): number {
+  tick(cursor, deltaMs);
 
-  if (cursor.elapsed < durationMs) return 0;
+  const durationMs = step.ms;
+  const elapsed = cursor.clock[0] ?? 0;
+
+  if (elapsed < durationMs) return 0;
 
   cursor.ended = true;
 
-  return cursor.elapsed - durationMs;
+  return elapsed - durationMs;
+}
+
+/**
+ * Moves the clock of a `wait` or a `frames` cursor on by one delta.
+ *
+ * @param cursor - The cursor.
+ * @param deltaMs - Milliseconds of game time to consume.
+ */
+function tick(cursor: Cursor, deltaMs: number): void {
+  // per frame: the clock is a cell, written in place; the caller reads it back, so no number
+  // leaves this call boxed.
+  cursor.clock[0] = (cursor.clock[0] ?? 0) + deltaMs;
 }
 
 /**
@@ -395,9 +417,11 @@ function advanceFrames(
   }
 
   holdSprite(cctx, cursor, entity);
-  cursor.elapsed += deltaMs;
 
-  const index = frameIndexAt(step.keys, step.fps, step.loop, cursor.elapsed);
+  tick(cursor, deltaMs);
+
+  const elapsed = cursor.clock[0] ?? 0;
+  const index = frameIndexAt(step.keys, step.fps, step.loop, elapsed);
   const key = step.keys[index];
 
   if (index !== cursor.index && key !== undefined) {
@@ -407,12 +431,12 @@ function advanceFrames(
 
   const total = framesDurationMs(step.keys, step.fps);
 
-  if (step.loop || cursor.elapsed < total) return 0;
+  if (step.loop || elapsed < total) return 0;
 
   releaseSprite(cctx, cursor);
   cursor.ended = true;
 
-  return cursor.elapsed - total;
+  return elapsed - total;
 }
 
 /**
@@ -439,7 +463,7 @@ export function advanceCursor(cctx: CursorCtx, cursor: Cursor, deltaMs: number):
       return advanceUse(cctx, cursor, step.id, deltaMs);
     }
     case "wait": {
-      return advanceWait(cursor, step.ms, deltaMs);
+      return advanceWait(cursor, step, deltaMs);
     }
     case "tween": {
       return advanceTween(cctx, cursor, step, deltaMs);
@@ -501,7 +525,13 @@ export function finishCursor(cctx: CursorCtx, cursor: Cursor): void {
     case "use": {
       const child = cursor.children[0];
 
-      if (child !== undefined) finishCursor({ ...cctx, animation: step.id }, child);
+      if (child === undefined) break;
+
+      const outer = cctx.animation;
+
+      cctx.animation = step.id;
+      finishCursor(cctx, child);
+      cctx.animation = outer;
 
       break;
     }
@@ -605,13 +635,13 @@ export function cancelCursor(cctx: CursorCtx, cursor: Cursor): void {
  *
  * @param rt - The timeline runtime.
  * @param step - The step tree.
- * @returns The entity of each key target by its table key, and the entities, each once, in tree
- *   order.
+ * @returns The entity of each key target by the target object, and the entities, each once, in
+ *   tree order.
  */
 export function resolveTargets(
   rt: TimelineRuntime,
   step: Step
-): { targets: Map<string, Entity>; entities: readonly Entity[] } {
+): { targets: Map<Target, Entity>; entities: readonly Entity[] } {
   const found = emptyEntitySet();
   const targets = emptyTargetTable();
 
@@ -624,9 +654,9 @@ export function resolveTargets(
  * Creates the empty target table of one walk. It lives in its own non-exported function because
  * lint rule L5 refuses a collection built inside an exported declaration.
  *
- * @returns An empty map from target key to entity.
+ * @returns An empty map from key target to entity.
  */
-function emptyTargetTable(): Map<string, Entity> {
+function emptyTargetTable(): Map<Target, Entity> {
   return new Map();
 }
 
@@ -642,7 +672,8 @@ function emptyEntitySet(): Set<Entity> {
 
 /**
  * Walks the tree and collects the entities its writing steps name, and the entity of every key
- * target under its table key.
+ * target under the target object. Each step keeps its target object for the whole play, so the
+ * object is the key and no key string is ever built.
  *
  * @param rt - The timeline runtime.
  * @param step - The step to look into.
@@ -653,7 +684,7 @@ function collectEntities(
   rt: TimelineRuntime,
   step: Step,
   found: Set<Entity>,
-  targets: Map<string, Entity>
+  targets: Map<Target, Entity>
 ): void {
   if (step.kind === "sequence" || step.kind === "parallel") {
     for (const child of step.steps) collectEntities(rt, child, found, targets);
@@ -673,8 +704,6 @@ function collectEntities(
 
   if (entity === undefined) return;
 
-  const key = targetKey(step.target);
-
   found.add(entity);
-  if (key !== undefined) targets.set(key, entity);
+  if (isKeyTarget(step.target)) targets.set(step.target, entity);
 }

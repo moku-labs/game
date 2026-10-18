@@ -75,7 +75,7 @@ frame is drawn while they live and once when the last one dies: nothing for a ga
 The first frame an `Emitter` names an effect, the effect is baked (64-entry scale, alpha and tint tables, the reach of its particles, its textures) and an instance starts: one `ParticleContainer` with the dynamic set `{ position, vertex, rotation, color }` (`uvs` static), its first texture, its blend, and a `boundsArea` of the reach, so a future culling pass never hides it. The container is the `Display` of an entity owned by `{ kind: "plugin", name: "effects" }`, with a `Transform` and the `Layer` and `Order` of the top of the host's `Parent` chain copied (the first ancestor without a `Parent`, or the host itself). The renderer draws a parented view in the layer of its top ancestor, so a burst on a slot-hosted view draws above the screen that hosts it; in a layer sorted by `"y"` or `"order"` the particles tie with that ancestor and draw just above it. The entity has no gesture component, so `input` never accepts it, and no `Parent`, in either space.
 
 - **World space**: the container stands at the host's root point and stays there. A stream emits from where the host is now, so a moving stream leaves a trail.
-- **Local space**: the system writes the container's `Transform` from `rootPoseOf(host)` every frame, so the particles move with the host.
+- **Local space**: the system compares the container's `Transform` with the host's root pose every frame and writes it when the pose moved, so the particles move with the host; a still host writes nothing, and the renderer has nothing to sync. The pose is computed into one reused object (`rootPoseInto`).
 
 The seed of an instance is `seedOf(id, ordinal)`, its random source xorshift32: never `Math.random`, never the model's rng, so a visual checkpoint renders the same twice.
 
@@ -208,7 +208,7 @@ Every filter but `Blur` renders at `resolution: "inherit"`: the resolution of th
 
 ### The filter sync
 
-One system, `effects:filters`, phase `sync`, in every world mode. It walks the views the world hooks recorded, never the whole world:
+One system, `effects:filters`, phase `sync`, in every world mode. It walks the views the world hooks recorded, never the whole world, and brings up to date only the views something happened to: a filter component of the view changed (the change set of every kind, ours and the core kinds), came or left, its `Displacement` map was retired, a kind still waits for its instance (its check pending, its map not loaded), or a chain left places to destroy. A debug switch, and a filter that broke or ran its chains at a new resolution inside a render, bring every view up to date at the next sync. A frame where none of that happened syncs no view and allocates nothing:
 
 - One instance per view and kind, made the first frame the kind is seen and kept until the component or the entity leaves. An instance of ours carries both programs, a `GpuProgram` of the WGSL and a `GlProgram` of the GLSL over `defaultFilterVert`, and one uniform group: Pixi binds it as `fu` on WebGPU and by bare uniform name on WebGL. `GpuProgram.from` and `GlProgram.from` cache by source, so every view of a kind shares its programs.
 - Every write compares first. Ours compare each uniform with what the group holds (a number as it is, a colour or a tuple element by element as the `Float32Array` stores it, rounded to float32; two NaN are equal) and the padding named after a uniform; only what differs is written, no `update()`. The core kinds compare the fields their setters were last given, only on a frame their component changed, and call the setters only when one differs (`ColorMatrix` starts from `reset()`); an equal value written by a system calls no setter. `enabled` is written only when it flips.
@@ -239,7 +239,7 @@ Every Pixi filter the engine builds, ours and the core kinds, a `Blur` on both i
 | `phone` | `"auto"` | Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart` |
 | `blur` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to. Shallow merge: a game that sets `blur` gives both fields |
 
-More than one full-screen view with an enabled filter warns `effects:full-screen-filters` once per crossing. A view is full-screen when the box its `Sprite`, `NineSlice` or `Shape` declares, times its `Transform.scale`, covers the viewport.
+More than one full-screen view with an enabled filter warns `effects:full-screen-filters` once per crossing. A view is full-screen when the box its `Sprite`, `NineSlice` or `Shape` declares, times its `Transform.scale`, covers the viewport. The count is taken again only on a frame a filtered view was synced or forgotten, the viewport changed size, or the `Transform`, `Sprite`, `NineSlice` or `Shape` of a filtered view changed; otherwise the last count stands.
 
 ## API — `app.effects`
 
@@ -303,4 +303,4 @@ None. Nothing above `effects` needs to know a particle died or a filter was assi
 
 ## Dependencies
 
-`flow` (`features.all()`, `onEnter("load", …)` for the gate of the shader checks), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `host.resolution()`, `sync.filters.set`, `sync.filters.area`, `sync.filters.warm`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)`, the `assets:bundle-unloaded` and `assets:replaced` hooks), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.
+`flow` (`features.all()`, `onEnter("load", …)` for the gate of the shader checks), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `host.resolution()`, `sync.filters.set`, `sync.filters.area`, `sync.filters.warm`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`, `rootPoseInto`), `assets` (`texture(key)`, the `assets:bundle-unloaded` and `assets:replaced` hooks), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.

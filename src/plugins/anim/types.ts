@@ -273,14 +273,25 @@ export type Config = {
 export type State = {
   /** The one track table. Insertion order is advance order. */
   tracks: Map<number, Track>;
+  /**
+   * The tracks of the table in start order, as a dense list the frame step walks by index. An ended
+   * track stays in it until the next frame step drops it.
+   */
+  trackList: Track[];
   /** Ids of tracks and timelines. */
   nextId: number;
   /** `"<entity>:<component>:<field>"` to the id of the absolute track that drives the field. */
   owner: Map<string, number>;
-  /** Per field key, the delta each additive track contributes. */
-  offsets: Map<string, Map<number, number>>;
-  /** Per field key, the value the offsets are added to. Dropped when no track drives the field. */
-  bases: Map<string, number>;
+  /**
+   * Per field key, the delta each additive track contributes, in a one-number cell per track that
+   * a frame writes in place.
+   */
+  offsets: Map<string, Map<number, Float64Array>>;
+  /**
+   * Per field key, the value the offsets are added to, in a one-number cell a frame writes in
+   * place. Dropped when no track drives the field.
+   */
+  bases: Map<string, Float64Array>;
   /**
    * Per entity, its running additive tracks. `offsetsOf` of the driver reads it, so the cost of
    * one answer is the loops of that entity and not every track of the game.
@@ -288,6 +299,11 @@ export type State = {
   additive: Map<Entity, Set<Track>>;
   /** The running timelines, by id. */
   timelines: Map<number, RunningTimeline>;
+  /**
+   * The timelines in start order, as a dense list the frame step walks by index. An ended timeline
+   * stays in it until the next frame step drops it.
+   */
+  timelineList: RunningTimeline[];
   /** The `animations` of every feature, read in `onStart`. */
   registry: Map<string, AnyAnimationDefinition>;
   /** `onMark` subscribers, in subscription order. */

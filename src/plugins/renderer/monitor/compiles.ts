@@ -10,7 +10,7 @@
  */
 import { pageNow } from "./clock";
 import { SHADER_WHATS, type ShaderEventDetail } from "./log-types";
-import { COUNT, type MonitorSinks, type PerfCtx } from "./types";
+import { COUNT, type MonitorSinks, type PerfCtx, SECTION } from "./types";
 import { cellF64, roundTo } from "./units";
 
 /**
@@ -50,7 +50,7 @@ function writeRecord(
 }
 
 /**
- * Counts one compile of the frame and keeps its record.
+ * Counts one compile of the frame and keeps its record, while the `shaders` section is on.
  *
  * @param sinks - The sinks.
  * @param frame - The frame running now.
@@ -63,12 +63,15 @@ export function recordCompile(
   label: string | null,
   ms: number
 ): void {
+  if ((sinks.sections & SECTION.shaders) === 0) return;
+
   sinks.counts[COUNT.compiles] = cellF64(sinks.counts, COUNT.compiles) + 1;
   writeRecord(sinks, frame, label, ms, false);
 }
 
 /**
- * Keeps the record of one shader module: not a compile of the frame's count, a `shader` event of its own.
+ * Keeps the record of one shader module: not a compile of the frame's count, a `shader` event of its own. Nothing
+ * while the `shaders` section is off.
  *
  * @param sinks - The sinks.
  * @param frame - The frame running now.
@@ -81,6 +84,8 @@ export function recordModule(
   label: string | null,
   ms: number
 ): void {
+  if ((sinks.sections & SECTION.shaders) === 0) return;
+
   sinks.compiles.shaderModules += 1;
   writeRecord(sinks, frame, label, ms, true);
 }

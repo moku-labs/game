@@ -8,6 +8,7 @@ import { Transform } from "../../renderer/components";
 import { rootPoseOf } from "../../renderer/sync/pose";
 import type { Entity } from "../../world/types";
 import { countPlaying } from "../components";
+import { dropEnded } from "../dense";
 import type {
   AnimationDefinition,
   AnimCtx,
@@ -103,20 +104,21 @@ function emptySpawnTable(): Map<string, Entity> {
 }
 
 /**
- * What the cursor of one running timeline carries down its tree.
+ * What the cursor of one running timeline carries down its tree: its one context, made at its
+ * start, with the runtime of the caller and its own animation id set in place.
  *
  * @param rt - The timeline runtime.
  * @param running - The running timeline.
  * @returns The cursor context.
  */
 function cursorCtxOf(rt: TimelineRuntime, running: RunningTimeline): CursorCtx {
-  return {
-    rt,
-    animation: running.animation,
-    marks: running.marks,
-    spawned: running.spawned,
-    targets: running.targets
-  };
+  const cctx = running.cctx;
+
+  // per frame: the timeline's one context, reset in place; no object per timeline per frame.
+  cctx.rt = rt;
+  cctx.animation = running.animation;
+
+  return cctx;
 }
 
 /**
@@ -185,19 +187,22 @@ export function startTimeline<Tags extends SlotTags>(
   const done = new Promise<void>(resolve => {
     settle = resolve;
   });
+  const marks: string[] = [];
   const running: RunningTimeline = {
     id,
     animation: definition.id,
     cursor,
-    marks: [],
+    marks,
     entities,
     targets,
     spawned,
     resolve: (): void => settle(),
-    ended: false
+    ended: false,
+    cctx: { rt, animation: definition.id, marks, spawned, targets }
   };
 
   actx.state.timelines.set(id, running);
+  actx.state.timelineList.push(running);
   rt.wake();
 
   return {
@@ -227,13 +232,21 @@ export function startTimeline<Tags extends SlotTags>(
  * @param deltaMs - Milliseconds of game time of the frame.
  */
 export function advanceTimelines(actx: AnimCtx, rt: TimelineRuntime, deltaMs: number): void {
-  // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-  for (const running of [...actx.state.timelines.values()]) {
-    if (running.ended) continue;
+  const list = actx.state.timelineList;
+  // A timeline started during the walk is past `count` and starts walking with the next frame.
+  const count = list.length;
+
+  // per frame: an indexed walk of the dense list, no snapshot array.
+  for (let index = 0; index < count; index++) {
+    const running = list[index];
+
+    if (running === undefined || running.ended) continue;
 
     advanceCursor(cursorCtxOf(rt, running), running.cursor, deltaMs);
     if (running.cursor.ended) endTimeline(actx, running, true);
   }
+
+  dropEnded(list);
 }
 
 /**
@@ -244,11 +257,18 @@ export function advanceTimelines(actx: AnimCtx, rt: TimelineRuntime, deltaMs: nu
  * @param rt - The timeline runtime.
  */
 export function finishAllTimelines(actx: AnimCtx, rt: TimelineRuntime): void {
-  // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-  for (const running of [...actx.state.timelines.values()]) {
-    if (running.ended) continue;
+  const list = actx.state.timelineList;
+  // A fast world calls this every frame: an indexed walk of the timelines there were, no snapshot.
+  const count = list.length;
+
+  for (let index = 0; index < count; index++) {
+    const running = list[index];
+
+    if (running === undefined || running.ended) continue;
 
     finishCursor(cursorCtxOf(rt, running), running.cursor);
     endTimeline(actx, running, true);
   }
+
+  dropEnded(list);
 }

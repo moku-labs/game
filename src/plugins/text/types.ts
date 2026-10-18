@@ -311,11 +311,6 @@ export type DrawnLabel = { style: TextStyle; layout: TextLayout; generation: num
 /**
  * A dev warning that is written once per key. Pure modules take it as an argument, so nothing
  * below the plugin context reaches the log itself.
- *
- * @example
- * ```ts
- * const warn: Warn = (key, message) => seen.has(key) || log.warn(message);
- * ```
  */
 export type Warn = (key: string, message: string, data?: Record<string, unknown>) => void;
 
@@ -332,18 +327,21 @@ export type LayoutOptions = { warn: Warn };
 /**
  * What was resolved for one entity last, so the frame step knows whether anything moved. `unit`
  * is what the shown string of a bound label was built from: the rounded value for `"int"`, whole
- * seconds for a time format.
+ * seconds for a time format. `bindRef` is the bind object `bind` was keyed from, so the key is
+ * built once per attached bind and a frame compares one reference.
  *
  * @example
  * ```ts
+ * const left = bind(Countdown, "left", { format: "mm:ss" });
  * const seen: SeenText = {
- *   content: "", style: "digits", bind: "Countdown.left:mm:ss", locale: "ru", unit: 95
+ *   content: "", style: "digits", bindRef: left, bind: "Countdown.left:mm:ss", locale: "ru", unit: 95
  * };
  * ```
  */
 export type SeenText = {
   content: unknown;
   style: string;
+  bindRef: TextBind | undefined;
   bind: string | undefined;
   locale: string;
   unit: number | undefined;

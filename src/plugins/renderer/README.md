@@ -292,6 +292,7 @@ off: every pipeline is created in the first frame that draws with it, as before.
 | `monitor.beginAgent()`, `monitor.endAgent()` | For engine plugins and the editor's page agent. Agent builds: bracket the agent's own work, measured as the `agent` phase, left out of the spike rule and handed to `time.chargeAgent`. A nested begin and a lone end are ignored. |
 | `monitor.setResolution(n \| undefined)` | Every build: draws at `n` from the next frame; `undefined` goes back to the policy (see "Resolution"). Answers the resolution of the next frame. |
 | `monitor.counts.register(name, read)` | Agent builds: adds a count to the live object counts, read once a second (see "Live object counts"). A name registered again gets the new reader. At most 16: the 17th throws `[game] Monitor count table is full (16).` The remover; the renderer's `onStop` drops every count. Nothing kept without the flag. |
+| `monitor.sections(next?)` | Agent builds: which sections of the monitor run (see "Sections"), one frozen `MonitorSections` until a switch. With `next` it switches the sections named, from the next frame on, and writes a `sections` event; a write needs control (a dev page or `--debug`): on a `--debug=read` page a switch that would change a section throws an `Error` with `reason: "read-only"`, and the sections stay. Without the flag every section answers on. |
 
 `frameAt(ring, age)` (root export) turns one slot into a plain record: NaN as `null`, bits as
 names, the path id as the flow path. A reader of the columns names the bits itself with two root exports:
@@ -392,8 +393,8 @@ writes one slot of the ring from it and from what the counting classes saw: rend
 Pixi begins them (stencil passes on WebGPU), draws, filter applies with their pixels and the four
 filter kinds with the most, uploads with their bytes, pipeline compiles, the five slowest world
 systems (`world.systemTimes()`), the flow path, the changes of the frame (resize, resolution,
-scene, bundle, restore). The counting is six subclasses swapped in through `extensions`
-(`GpuBatchAdaptor`, `GpuGraphicsAdaptor`, `GpuEncoderSystem`, `FilterSystem`, `GpuTextureSystem`,
+scene, bundle, restore). The counting is seven subclasses swapped in through `extensions`
+(`BatcherPipe`, `GpuBatchAdaptor`, `GpuGraphicsAdaptor`, `GpuEncoderSystem`, `FilterSystem`, `GpuTextureSystem`,
 `GlTextureSystem`); on WebGL a pass is a bound target, seen on Pixi's public runners. Compiles are
 counted on GPU objects of this application only: own properties on the engine's own device and
 `linkProgram` on this app's WebGL context. A pass's kind is `canvas` for the canvas, `filter` while a filter applies,
@@ -402,7 +403,8 @@ compared by identity, because Pixi 8.22 marks every WebGPU target `isRoot` when 
 Frames come from a `PerformanceObserver`
 (long tasks where the browser has no LoAF, none on WebKit), the heap from Chromium's
 `performance.memory`. The per-frame path allocates nothing: indexed stores into typed arrays
-allocated once; a dev-only probe (`monitor-alloc.test.ts`, under Node's heap sampler) checks it.
+allocated once; a dev-only probe (`monitor-alloc.test.ts`, under Node's heap sampler) checks it, and the `alloc` gates
+of `__tests__/perf/` (`bun run test:perf`) check the frame, the sections and the sync pass in bytes per call.
 `monitor/clock.ts` is the one renderer file that reads the page clock (lint L3 ignores it).
 
 **The spike rule.** The budget of a frame is one frame of the rate the loop can reach (`monitor.budgetMs: "rate"`,
@@ -424,6 +426,23 @@ budget, after the heap dropped by 0.5 MB or more: Chromium only, a hint, never a
 a spike. A sample's `gaps.missed` counts the frames with the `gap` cause: the same line and the same exceptions, one
 rule for both (a 120 fps loop on a 60 Hz panel misses none).
 
+#### Sections
+
+The monitor's per-frame work is eight sections (`MONITOR_SECTIONS`, root export; the names of the editor's contract),
+each on unless `renderer.monitor.sections` or `monitor.sections({ … })` switches it off: `gpu` (the GPU timer),
+`passes` (the pass ring and its stencil count, and the draws, filter applies, uploads, instruction rebuilds and render
+targets the counting classes count), `shaders` (the pipeline compiles and shader modules), `problems` (the problem
+rules' accumulators and their judgment), `memory` (the heap read of every frame and its `gc?` hint), `systems` (the time
+of every world system), `nodes` (the change marks of the frame and its draw reason) and `longFrames` (the long frames the
+browser reports). A section off skips its part of the commit and its counting increments (one bit test each); its ring
+columns read NaN and its sample fields `null`, as on a build that cannot measure them, and while `passes` is off
+`stats().drawCalls` and `rebuilds` read 0. The header's `sections` is the object `monitor.sections()` answers, so a
+switched-off section differs from one `measured` does not list; a `sections` event names the sections `{ on, off }`.
+Every `sample` carries `sectionsMs`: the page-clock ms of the second each section's part of the commits took, 0 for one
+that is off, and `base`, the rest of the commits; a commit reads the clock once per section that runs. Pixi-side
+counting is not timed. An Android WebView's clock is coarse, 0.1 ms: a part shorter than that adds 0 or 0.1 ms at a
+time, so read the sum over the second, never a single frame.
+
 #### The log
 
 `monitor.stream(listener)` hands a listener one JSON object per line, every one with `v: 1`
@@ -434,12 +453,12 @@ measured on this build or backend" is `null`, never 0.
 
 | Kind | When |
 |---|---|
-| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent; `webview` the Chrome major of an Android WebView, `; wv)` in the user agent, or of the page in the native shell, else `null`; `browser` the Chrome major of any Chromium page), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config (`budgetMs`: the newest frame's budget), what is measured (`targets` where render targets are counted), the app id (`app: { id }`, `__MOKU_GAME_APP__`: `"com.mokulabs.timber.debug"` in a native debug build, `null` without one) and the debug drawing (`debug: { overdraw }`). On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
+| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent; `webview` the Chrome major of an Android WebView, `; wv)` in the user agent, or of the page in the native shell, else `null`; `browser` the Chrome major of any Chromium page), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config (`budgetMs`: the newest frame's budget), what is measured (`targets` where render targets are counted), the app id (`app: { id }`, `__MOKU_GAME_APP__`: `"com.mokulabs.timber.debug"` in a native debug build, `null` without one), the debug drawing (`debug: { overdraw }`) and the sections of the monitor (`sections`, as `monitor.sections()` answers them). On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
 | `startup` | Once, at the first flush after the first drawn frame, and to every later subscriber after its header: HTML, the bundle's download, parse, evaluate, the Pixi chunk, `app.init`, the first frame, the boot long frames. |
-| `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost, the live object counts (`counts`) and the render targets made and dropped (`targets: { created, destroyed }`, WebGPU; `null` elsewhere; not the memory of `textures.targets`). |
+| `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost, the live object counts (`counts`), the render targets made and dropped (`targets: { created, destroyed }`, WebGPU; `null` elsewhere; not the memory of `textures.targets`) and what each section of the monitor cost (`sectionsMs`, see "Sections"). |
 | `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label and their detail (see "Pass detail"), the long frames around it. |
 | `longFrame` | When the observer delivers one. |
-| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display` (a resize, a restore, a turn, or a display rate `time` learned: the `PerfDisplay` of the moment, with `hz`, `time.rate().displayHz` or `null`), `compile`/`upload` (at a flush), `shader` and `problem` (at a flush, see below), `debug` (`{ overdraw }`, when the overdraw switch moves), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
+| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display` (a resize, a restore, a turn, or a display rate `time` learned: the `PerfDisplay` of the moment, with `hz`, `time.rate().displayHz` or `null`), `compile`/`upload` (at a flush), `shader` and `problem` (at a flush, see below), `debug` (`{ overdraw }`, when the overdraw switch moves), `sections` (`{ on, off }`, when a switch changes them), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
 | `mark` | `monitor.mark(label)`, and an auto mark when the flow rests on a new path. |
 | `thermal` | Every `time:thermal` reading of the native shell. |
 
@@ -605,6 +624,7 @@ the `Parent` chain themselves; `sync` places the corners of a box with `rootPoin
 | Function | Answers |
 |---|---|
 | `rootPoseOf(ecs, entity, own?)` | The entity's `Transform` composed through its `Parent` chain, every pivot applied: where it really is in reference space. `own` replaces its own `Transform` (the rest pose, for `anim.at`). The answer keeps the entity's pivot, so writing it into the `Transform` of an entity without a parent does not move the view. |
+| `rootPoseInto(ecs, entity, out, own?)` | The same pose written into `out` (its `pivot` object too) and answered: no object of its own, for a reader that asks every frame (`effects`' following emitters). |
 | `localPoseOf(ecs, parent, root)` | The inverse: the local pose under `parent` that lands on `root`. `parent` 0 answers `root` itself. A parent collapsed to scale 0 counts as scale 1. |
 | `rootPointOf(ecs, entity, point)` | Where a local point of the entity lands in reference space: the point through the entity's `Transform` and its `Parent` chain, with the real scale. `boundsOf` brings the four corners of a hit box through it. |
 
@@ -631,7 +651,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `loadPixi` | `() => Promise<PixiModule>` | `() => import("pixi.js")` | Loader seam. Tests pass a fake module. |
 | `debug` | `{ nineSlice?, verifyFrames?, kept?, overdraw? }` | `{ nineSlice: false, verifyFrames: false, kept: true, overdraw: false }` | Debug drawing and checks at start, a switch left out is off (`kept` left out is on); `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)`, `sync.debug.kept(on)` and `sync.debug.overdraw(on)` switch them at run time. `verifyFrames` and `overdraw` work in dev and debug builds only. |
 | `onDemand` | `boolean` | `false` | Draw a frame only when something on the screen changed (see "Render on demand"). Off: every frame is drawn, as before. |
-| `monitor` | `{ budgetMs, frames, stillFrames?, stillMpx?, churnPerSecond?, churnSeconds?, churnAfterTrimMs? }` | `{ budgetMs: "rate", frames: 1024, stillFrames: 60, stillMpx: 0.25, churnPerSecond: 4, churnSeconds: 3, churnAfterTrimMs: 1000 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the rate the loop can reach, the frame's rate or the display's when slower, 8.33 ms at 120 fps on a 120 Hz panel, 16.7 ms at 60 or on a 60 Hz panel); the ring keeps `frames` (64 to 16384), render passes 4x as many. The other keys are the thresholds of the `problem` rules (see "Problems"); a key left out keeps its default. |
+| `monitor` | `{ budgetMs, frames, stillFrames?, stillMpx?, churnPerSecond?, churnSeconds?, churnAfterTrimMs?, sections? }` | `{ budgetMs: "rate", frames: 1024, stillFrames: 60, stillMpx: 0.25, churnPerSecond: 4, churnSeconds: 3, churnAfterTrimMs: 1000 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the rate the loop can reach, the frame's rate or the display's when slower, 8.33 ms at 120 fps on a 120 Hz panel, 16.7 ms at 60 or on a 60 Hz panel); the ring keeps `frames` (64 to 16384), render passes 4x as many. The other keys are the thresholds of the `problem` rules (see "Problems") and `sections`, the sections a debug build starts with (see "Sections"); a key left out keeps its default, a section left out is on. |
 | `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |
@@ -1066,7 +1086,10 @@ coverage is the glyph's alone, and the template's `outColor * vColor` applies ev
 label's (`Text.alpha` is the alpha of its container), a parent's (a disabled button, a popup fade)
 and the world's. Full-alpha text draws the same pixels as before. The program is compiled once per
 batch texture limit and shared by every text; each text gets its own local uniforms, as from Pixi's
-pipe.
+pipe. A text keeps its one shader: Pixi asks `getSdfShader()` at every layout of a text and keeps the answer only for
+a context without one, so the pipe hands the text's own shader back while it lays it out again. A new shader per update
+was about 22 KB of garbage a text change, and on WebGL every dropped shader stayed subscribed to the shared batch-sampler
+group, a leak.
 
 Both backends. On WebGPU the shader carries the WGSL program above. On the WebGL fallback it
 carries the GLSL program, compiled with `compileHighShaderGlProgram` from the GL twins of the same

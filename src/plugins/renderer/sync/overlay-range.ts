@@ -5,7 +5,7 @@
  * written before the old one comes off, so no stage pass shows the range neither live nor as a current picture (K3).
  */
 import type { Entity } from "../../world/types";
-import type { DemandReason } from "../demand/types";
+import type { DemandReason, Marks } from "../demand/types";
 import type { KeptRange } from "../kept/types";
 import type { PixiBounds, PixiContainer } from "../types";
 import type { Rect } from "../viewport/types";
@@ -286,11 +286,14 @@ function markedInRange(
  */
 function anyInRange(
   state: SyncState,
-  marks: ReadonlySet<Entity>,
+  marks: Marks,
   set: ReadonlySet<PixiContainer>,
   root: PixiContainer
 ): boolean {
-  for (const entity of marks) {
+  // per frame: the marks walked by index, no iterator.
+  for (let index = 0; index < marks.size; index += 1) {
+    const entity = marks.at(index);
+
     if (state.overlay.flipped.has(entity)) continue;
 
     const view = state.views.get(entity);

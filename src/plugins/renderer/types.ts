@@ -12,6 +12,7 @@ import type { Entity, Owner, ProjectionKey, Api as WorldApi } from "../world/typ
 import type { DemandInternal, DemandState } from "./demand/types";
 import type { HostApi, HostInternal, HostState } from "./host/types";
 import type { KeptInternal, KeptState } from "./kept/types";
+import type { MonitorSections } from "./monitor/log-types";
 import type { MonitorApi, MonitorInternal, MonitorState, PerfMonitorApi } from "./monitor/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
@@ -317,6 +318,8 @@ export type Config = {
  * createApp({ pluginConfigs: { renderer: { mount: "#game", monitor: { budgetMs: 8.3, frames: 2048 } } } });
  * // A game with a large blurred backdrop flags it sooner: 30 still frames over 0.1 Mpx.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", monitor: { budgetMs: "rate", frames: 1024, stillFrames: 30, stillMpx: 0.1 } } } });
+ * // A debug build that starts without the per-system timing: app.renderer.monitor.sections().systems is false.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", monitor: { budgetMs: "rate", frames: 1024, sections: { systems: false } } } } });
  * ```
  */
 export type MonitorConfig = {
@@ -339,6 +342,11 @@ export type MonitorConfig = {
   churnSeconds?: number;
   /** `target-churn`: a render target made this many ms after a pool trim is churn at once. Default 1000. */
   churnAfterTrimMs?: number;
+  /**
+   * The sections of the monitor a debug build starts with (spec 11 R14): a section left out is on. `monitor.sections`
+   * switches them later.
+   */
+  sections?: Partial<MonitorSections>;
 };
 
 /**
@@ -546,6 +554,7 @@ export type {
   FrameRecord,
   FrameRing,
   LongFrameEntry,
+  MonitorSections,
   OverlayEventDetail,
   OverlayWhat,
   PassKind,

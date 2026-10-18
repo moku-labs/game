@@ -5,7 +5,8 @@
  * disjoint GPU drops every pending result. No time per pass: WebGL forbids nested timer queries.
  */
 import { noteGpuTime } from "./gpu-timer";
-import type { FrameTimer, PerfCtx } from "./types";
+import { sectionOn } from "./sections";
+import { type FrameTimer, type PerfCtx, SECTION } from "./types";
 import { cellF32, cellF64, cellI32, cellU32 } from "./units";
 
 /** Queries of the pool. */
@@ -82,9 +83,9 @@ export function createGlTimer(
   for (let index = 0; index < POOL_SIZE; index += 1) free[index] = index;
 
   const begin = {
-    /** Begins the query of a render call inside a frame, while none is active and one is free. */
+    /** Begins the query of a render call inside a frame, while none is active, one is free and `gpu` is on. */
     prerender: (): void => {
-      if (!pc.sinks.inFrame || state.active !== -1) return;
+      if (!pc.sinks.inFrame || state.active !== -1 || !sectionOn(pc.sinks, SECTION.gpu)) return;
 
       state.tried = true;
 

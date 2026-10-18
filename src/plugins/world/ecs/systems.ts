@@ -5,12 +5,13 @@ import type { Snapshot } from "../../model/types";
 import type { Time } from "../../time/types";
 import type { WorldCtx } from "../types";
 import { flushCommands } from "./commands";
-import { planOf, walkPlan } from "./query";
+import { planOf, SystemWalk, systemRows } from "./query";
 import { asError, resourceValue } from "./storage";
 import type {
   AnySystem,
   EcsApi,
   EcsState,
+  PhaseContext,
   ResourceType,
   SystemContext,
   SystemEntry,
@@ -120,7 +121,12 @@ export function frameSnapshot(ctx: WorldCtx, time: Readonly<Time>): Snapshot {
 
   const snapshot = ctx.deps.model.store.snapshot();
 
-  ctx.state.ecs.frameSnapshot = { frame: time.frame, snapshot };
+  // Per frame: the one cache object is rewritten, no new one.
+  if (cached === undefined) ctx.state.ecs.frameSnapshot = { frame: time.frame, snapshot };
+  else {
+    cached.frame = time.frame;
+    cached.snapshot = snapshot;
+  }
 
   return snapshot;
 }
@@ -147,11 +153,14 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void
     }
   }
 
-  // The query is read once, here: the plan registers every term's type and keeps the names.
+  // The query is read once, here: the plan registers every term's type and keeps the names, and
+  // the one walk every run of the system resets is made.
+  const plan = planOf(ctx, definition.query);
   const entry: SystemEntry = {
     definition,
     frame: ctx.deps.time.snapshot().frame,
-    plan: planOf(ctx, definition.query)
+    plan,
+    walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan)
   };
   const list = state.systems[definition.phase];
 
@@ -164,6 +173,83 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void
 
     if (at !== -1) list.splice(at, 1);
   };
+}
+
+/**
+ * Makes the one context of a world's system runs, with its one resource reader. A function of its
+ * own: a closure literal in `phaseContextOf` would make V8 allocate the closure scope on every
+ * call, also on the path that only reuses the context (40 B a phase, measured).
+ *
+ * @param state - The ecs branch of the plugin state.
+ * @param world - The ecs API a system's `run` receives.
+ * @param snapshot - The frame's model snapshot.
+ * @param time - The frame's `Time`.
+ * @returns The context, stored in the state.
+ */
+function createPhaseContext(
+  state: EcsState,
+  world: EcsApi,
+  snapshot: Snapshot,
+  time: Readonly<Time>
+): PhaseContext {
+  const context: PhaseContext = {
+    world,
+    res: <Value extends object>(resourceType: ResourceType<Value>): Value =>
+      resourceValue(state, resourceType),
+    snapshot,
+    time
+  };
+
+  state.phaseContext = context;
+
+  return context;
+}
+
+/**
+ * The context of every system run of one world: made at the first phase run, then the same object
+ * with the phase's `time` and `snapshot` written in. A world whose phases another ecs object runs
+ * gets a context of its own.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param world - The ecs API a system's `run` receives.
+ * @param time - The frame's `Time`.
+ * @returns The context, set to this phase.
+ */
+function phaseContextOf(ctx: WorldCtx, world: EcsApi, time: Readonly<Time>): PhaseContext {
+  const state = ctx.state.ecs;
+  const snapshot = frameSnapshot(ctx, time);
+  const known = state.phaseContext;
+
+  if (known === undefined || known.world !== world) {
+    return createPhaseContext(state, world, snapshot, time);
+  }
+
+  // Per phase: two fields of the one context are rewritten, no object is made.
+  known.time = time;
+  known.snapshot = snapshot;
+
+  return known;
+}
+
+/**
+ * Runs one system, reporting a throw: the try lives here, so the loop of a phase holds none.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param entry - The system.
+ * @param context - What its `run` receives.
+ * @param phase - The phase, for the report.
+ */
+function guardedRun(
+  ctx: WorldCtx,
+  entry: SystemEntry,
+  context: SystemContext,
+  phase: WorldPhase
+): void {
+  try {
+    entry.definition.run(systemRows(ctx, entry), context);
+  } catch (error) {
+    ctx.log.error("world:system-failed", { system: entry.definition.name, phase }, asError(error));
+  }
 }
 
 /**
@@ -185,32 +271,21 @@ export function runPhase(
 
   if (phase !== ALWAYS && effectiveMode(ctx) !== "live") return;
 
-  const context: SystemContext = {
-    world,
-    res: <Value extends object>(resourceType: ResourceType<Value>): Value =>
-      resourceValue(state, resourceType),
-    snapshot: frameSnapshot(ctx, time),
-    time
-  };
+  const context = phaseContextOf(ctx, world, time);
+  const entries = state.systems[phase];
 
   state.running = phase;
 
   if (state.timing === undefined) {
-    for (const entry of state.systems[phase]) {
-      if (entry.frame >= time.frame) continue;
+    // Per phase: an index loop, the length read every turn as `for…of` would, no iterator.
+    // eslint-disable-next-line unicorn/no-for-loop -- the hot path walks by index; a system may register another
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
 
-      try {
-        entry.definition.run(walkPlan(ctx, entry.plan), context);
-      } catch (error) {
-        ctx.log.error(
-          "world:system-failed",
-          { system: entry.definition.name, phase },
-          asError(error)
-        );
-      }
+      if (entry !== undefined && entry.frame < time.frame) guardedRun(ctx, entry, context, phase);
     }
   } else {
-    runTimed(ctx, state.timing, state.systems[phase], context, phase, time);
+    runTimed(ctx, state.timing, entries, context, phase, time);
   }
 
   state.running = undefined;
@@ -247,15 +322,7 @@ function runTimed(
     const row = rowOf(ctx.state.ecs, entry.definition.name);
     const started = timing.clock();
 
-    try {
-      entry.definition.run(walkPlan(ctx, entry.plan), context);
-    } catch (error) {
-      ctx.log.error(
-        "world:system-failed",
-        { system: entry.definition.name, phase },
-        asError(error)
-      );
-    }
+    guardedRun(ctx, entry, context, phase);
 
     timing.ms[row] = (timing.ms[row] ?? 0) + timing.clock() - started;
   }
