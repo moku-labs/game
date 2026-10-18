@@ -358,21 +358,27 @@ export async function unseenBoard(moving = false): Promise<() => void> {
   };
 }
 
+/** A started kept board: the stage, its kept views with their alpha filters, and a view that is no kept one. */
+type KeptBoard = {
+  stage: Awaited<ReturnType<typeof startOverlayStage>>;
+  views: Entity[];
+  filters: InstanceType<typeof pixi.AlphaFilter>[];
+  other: Entity;
+};
+
 /**
- * A board whose `count` filtered views the kept cache draws from their pictures (E5), over the real Pixi of the
- * overlay stage, every frame drawn: each view carries one alpha filter the cache may keep, in a frozen list as
- * `effects` hands it over, and stood still long enough to be taken. A frame collects the marks and flushes the cache,
- * as the render phase does: with no mark, a calm frame; with one view elsewhere marked, every record steps.
+ * Starts a board of `count` views, each with one alpha filter the cache may keep in a frozen list as `effects` hands
+ * it over, run until every view is drawn from its picture, and one plain view elsewhere.
  *
  * @param count - The kept views.
- * @param marked - True to mark a view that is no kept one's every frame.
- * @returns One frame of the cache: the collect and the flush.
+ * @returns The board.
  */
-export async function keptBoard(count: number, marked = false): Promise<() => void> {
+async function startKeptBoard(count: number): Promise<KeptBoard> {
   const stage = await startOverlayStage({ onDemand: false });
-  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const { sync } = stage.drawn.mock.modules;
   const other = stage.view({ order: 1, x: 900, y: 1500 });
   const views: Entity[] = [];
+  const filters: InstanceType<typeof pixi.AlphaFilter>[] = [];
 
   for (let index = 0; index < count; index += 1) {
     views.push(stage.view({ order: 1, x: (index % 5) * 200, y: Math.floor(index / 5) * 200 }));
@@ -382,15 +388,14 @@ export async function keptBoard(count: number, marked = false): Promise<() => vo
   stage.frame();
 
   for (const view of views) {
+    const filter = new pixi.AlphaFilter();
+
+    filters.push(filter);
     // Frozen, as `effects` hands its lists over.
     sync.filters.set(
       view,
       Object.freeze([
-        {
-          filter: new pixi.AlphaFilter() as unknown as PixiFilter,
-          passes: 1,
-          cache: "local" as const
-        }
+        { filter: filter as unknown as PixiFilter, passes: 1, cache: "local" as const }
       ])
     );
   }
@@ -402,6 +407,49 @@ export async function keptBoard(count: number, marked = false): Promise<() => vo
   if (records.length !== count || records.some(record => record.mode !== "kept")) {
     throw new Error("perf fixture: a view of the kept board is not kept");
   }
+
+  return { stage, views, filters, other };
+}
+
+/**
+ * The board of `keptBoard` whose first view's alpha filter `effects` switches off and on in turn, every frame, as it
+ * did for an `Alpha` that crossed 1 in every frame (change 2026-10-18-memory-render, M4): the view is marked through
+ * `invalidate` before the switch, then the frame's filter step hands Pixi the view's new list, and the kept cache
+ * collects and flushes. The view goes live at its first switch and is not taken again while it switches.
+ *
+ * @param count - The kept views.
+ * @returns One frame of the switch: the mark, the switch, the filter step, the collect and the flush.
+ */
+export async function alphaSwitchBoard(count: number): Promise<() => void> {
+  const { stage, views, filters } = await startKeptBoard(count);
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const view = views[0] ?? 0;
+  const filter = filters[0];
+
+  if (filter === undefined) throw new Error("perf fixture: the switch board has no view");
+
+  return () => {
+    demand.invalidate(view);
+    filter.enabled = !filter.enabled;
+    sync.stepFilters();
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * A board whose `count` filtered views the kept cache draws from their pictures (E5), over the real Pixi of the
+ * overlay stage, every frame drawn: each view carries one alpha filter the cache may keep, in a frozen list as
+ * `effects` hands it over, and stood still long enough to be taken. A frame collects the marks and flushes the cache,
+ * as the render phase does: with no mark, a calm frame; with one view elsewhere marked, every record steps.
+ *
+ * @param count - The kept views.
+ * @param marked - True to mark a view that is no kept one's every frame.
+ * @returns One frame of the cache: the collect and the flush.
+ */
+export async function keptBoard(count: number, marked = false): Promise<() => void> {
+  const { stage, other } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
 
   return marked
     ? () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FakeFilter, FakeUniformGroup } from "../../../renderer/__tests__/fake-pixi";
+import { CALM_AFTER } from "../../../renderer/kept/record";
 import type { PixiModule } from "../../../renderer/types";
 import { Alpha, Blur, ColorMatrix, Displacement, Glow, Noise } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
@@ -637,31 +638,73 @@ describe("Alpha: its resolution and the pass it skips at 1", () => {
     expect(enabledOf(Alpha({ alpha: 0.5, enabled: false }).value)).toBe(false);
   });
 
-  // Bug: a fade back to 1 leaves the pass on, or the switch is made without asking the renderer for the frame, and a
-  // screen drawn on demand keeps the old fade.
-  it("an Alpha reaching 1 switches its filter off and asks for the frame; leaving 1 switches it on and asks", () => {
+  // Bug: an Alpha that touches 1 on a keyframe switches its Pixi filter at every touch (a new filter list, a render
+  // group rebuilt, a kept picture let go and taken again); or one that rests at 1 keeps its pass for ever; or the
+  // switch asks the renderer for no frame, and a screen drawn on demand keeps the old picture.
+  it("an Alpha at 1 keeps its filter for CALM_AFTER - 1 syncs, switches it off at the next and asks; a resolution switches it on at once", () => {
     const { mock, pixi } = started();
-    const instance = build(mock, pixi, "effects.alpha", Alpha({ alpha: 0.5 }).value);
+    const instance = build(mock, pixi, "effects.alpha", Alpha({ alpha: 0.6 }).value);
     const filter = instance.filter as unknown as FakeFxAlphaFilter;
     const before = vi.fn();
+    const rest = Alpha().value;
+    const held: boolean[] = [];
 
-    expect(writeFilter(mock.ectx, instance, Alpha().value, true, before)).toBe(true);
-    expect(before).toHaveBeenCalledTimes(1);
-    expect(filter.enabled).toBe(false);
-    expect(filter.calls).toEqual(["alpha=1"]);
+    // A touch: CALM_AFTER - 1 syncs at 1, then away, twice.
+    for (let touch = 0; touch < 2; touch += 1) {
+      for (let sync = 1; sync < CALM_AFTER; sync += 1) {
+        writeFilter(mock.ectx, instance, rest, sync === 1, before);
+        held.push(filter.enabled);
+      }
 
-    expect(writeFilter(mock.ectx, instance, Alpha({ alpha: 0.7 }).value, true, before)).toBe(true);
-    expect(before).toHaveBeenCalledTimes(2);
+      writeFilter(mock.ectx, instance, Alpha({ alpha: 0.6 }).value, true, before);
+      held.push(filter.enabled);
+    }
+
+    expect(held.every(Boolean)).toBe(true);
+    // Every move of the value is drawn; the syncs at rest ask for nothing.
+    expect(before).toHaveBeenCalledTimes(4);
+
+    for (let sync = 1; sync < CALM_AFTER; sync += 1) {
+      writeFilter(mock.ectx, instance, rest, sync === 1, before);
+    }
+
     expect(filter.enabled).toBe(true);
+    expect(before).toHaveBeenCalledTimes(5);
 
-    writeFilter(mock.ectx, instance, Alpha().value, true, before);
+    // The CALM_AFTER-th sync at 1: off, and the frame is asked for.
+    expect(writeFilter(mock.ectx, instance, rest, false, before)).toBe(true);
+    expect(filter.enabled).toBe(false);
+    expect(before).toHaveBeenCalledTimes(6);
 
     // A resolution at 1 keeps the pass: the subtree is drawn at fewer pixels through it.
     expect(writeFilter(mock.ectx, instance, Alpha({ resolution: 0.5 }).value, true, before)).toBe(
       true
     );
-    expect(before).toHaveBeenCalledTimes(4);
     expect(filter.enabled).toBe(true);
+    expect(before).toHaveBeenCalledTimes(7);
+  });
+
+  // Bug: a resolution typed as 50 makes Pixi draw the subtree into a texture of 50 texels per CSS px.
+  it("clamps an Alpha's resolution to 4, at build and on a change", () => {
+    const { mock, pixi } = started();
+    const instance = build(
+      mock,
+      pixi,
+      "effects.alpha",
+      Alpha({ alpha: 0.5, resolution: 50 }).value
+    );
+    const filter = instance.filter as unknown as FakeFxAlphaFilter;
+
+    expect(filter.built.resolution).toBe(4);
+
+    writeFilter(
+      mock.ectx,
+      instance,
+      Alpha({ alpha: 0.5, resolution: Number.POSITIVE_INFINITY }).value,
+      true,
+      ignore
+    );
+    expect(filter.resolution).toBe(4);
   });
 
   // Bug: a game's filter declares a resolution and is drawn at the canvas's anyway.

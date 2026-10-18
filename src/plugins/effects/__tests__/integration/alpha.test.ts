@@ -11,6 +11,7 @@ import {
   FakeTexture
 } from "../../../renderer/__tests__/fake-pixi";
 import { Shape, Transform } from "../../../renderer/components";
+import { CALM_AFTER } from "../../../renderer/kept/record";
 import { worldPlugin } from "../../../world";
 import { Alpha } from "../../filters/builtins";
 import { effectsPlugin } from "../../index";
@@ -147,9 +148,10 @@ function rendersOf(pixi: FakeEffectsPixi): number {
 }
 
 describe("the core Alpha on a running app", () => {
-  // Bug: an Alpha at 1 still renders its subtree into a texture and back in every frame; or its switch at 1 is a
-  // write render on demand never draws, and the screen keeps the old fade; or the pass count still counts it.
-  it("at 1 hangs no filter and costs no pass; leaving 1 hangs it and draws the frame; back at 1 it comes off and draws", async () => {
+  // Bug: an Alpha at 1 still renders its subtree into a texture and back in every frame; or its switch is a write
+  // render on demand never draws, and the screen keeps the old picture; or a fade that ends at 1 on a still screen is
+  // never synced again and keeps its pass; or the pass count still counts it.
+  it("at 1 hangs no filter; leaving 1 hangs it and draws; resting at 1 on a still screen it comes off after CALM_AFTER frames and draws that frame", async () => {
     const { app, pixi } = await startVeil();
 
     await frames(app, 6);
@@ -173,20 +175,59 @@ describe("the core Alpha on a running app", () => {
     // The frame, the veil's content, the alpha's pass.
     expect(app.effects.stats().renderPasses).toBe(3);
 
+    // The fade ends at 1: the move is drawn, and the filter stays on while the Alpha may still leave 1.
     app.world.ecs.set(entity, Alpha, { alpha: 1 });
-    await frames(app, 1);
+    await frames(app, CALM_AFTER - 1);
 
     expect(rendersOf(pixi)).toBe(rest + 2);
-    expect(object.filters ?? []).toEqual([]);
-    expect(app.effects.stats().renderPasses).toBe(1);
+    expect(object.filters).toHaveLength(1);
 
-    // A resolution at 1 keeps the pass: the veil is drawn at fewer pixels through it.
-    app.world.ecs.set(entity, Alpha, { resolution: 0.5 });
+    // Its CALM_AFTER-th frame at 1, nothing else changed: the filter comes off, and that frame is drawn.
     await frames(app, 1);
 
     expect(rendersOf(pixi)).toBe(rest + 3);
+    expect(object.filters ?? []).toEqual([]);
+    expect(app.effects.stats().renderPasses).toBe(1);
+
+    await frames(app, 4);
+
+    expect(rendersOf(pixi)).toBe(rest + 3);
+
+    // A resolution at 1 hangs the pass at once: the veil is drawn at fewer pixels through it.
+    app.world.ecs.set(entity, Alpha, { resolution: 0.5 });
+    await frames(app, 1);
+
+    expect(rendersOf(pixi)).toBe(rest + 4);
     expect(object.filters).toHaveLength(1);
     expect(app.effects.stats().renderPasses).toBe(3);
+
+    await app.stop();
+  });
+
+  // Bug: keyframes [1, 0.6, 1] switch the filter at every touch of 1: Pixi is handed a new filter list each time, the
+  // render group is rebuilt and a kept picture of the view is let go.
+  it("a tween that touches 1 every few frames never hands Pixi a new filter list", async () => {
+    const { app } = await startVeil();
+
+    await frames(app, 2);
+
+    const [entity = 0] = [...app.world.ecs.query(Alpha)].map(([found]) => found);
+    const object = app.renderer.sync.displayOf(entity) as FakeContainer;
+
+    app.world.ecs.set(entity, Alpha, { alpha: 0.6 });
+    await frames(app, 1);
+
+    const writes = object.filterWrites;
+
+    for (let touch = 0; touch < 6; touch += 1) {
+      app.world.ecs.set(entity, Alpha, { alpha: 1 });
+      await frames(app, 3);
+      app.world.ecs.set(entity, Alpha, { alpha: 0.6 });
+      await frames(app, 3);
+    }
+
+    expect(object.filterWrites).toBe(writes);
+    expect(object.filters).toHaveLength(1);
 
     await app.stop();
   });

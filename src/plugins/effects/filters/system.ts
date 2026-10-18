@@ -518,8 +518,12 @@ function syncKind(
     instance.order = value.order;
     refreshInputs(ectx, pixi, instance, off);
 
-    // Places a chain left in this sync are destroyed by the next one.
-    if (instance.kind === "wgsl" && (instance.inputs?.retired.length ?? 0) > 0) {
+    // Places a chain left in this sync are destroyed by the next one; an `Alpha` counting its syncs at rest is synced
+    // again, so a fade that ends at 1 lets its pass go on a still screen too.
+    if (
+      (instance.kind === "wgsl" && (instance.inputs?.retired.length ?? 0) > 0) ||
+      (instance.kind === "alpha" && instance.calm > 0)
+    ) {
       markDirty(ectx, view);
     }
 

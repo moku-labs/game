@@ -512,6 +512,29 @@ describe("the chain — when it runs, on the filter sync", () => {
     expect(chain).toHaveBeenCalledTimes(2);
   });
 
+  // Bug: a filter with inputs and a resolution of its own runs its chains at the renderer's resolution when it is built,
+  // then again at its own in its first apply: two evaluations, and its places built twice.
+  it("runs the chain of a filter with its own resolution once, at that resolution", () => {
+    const chain = vi.fn(softChain);
+    const Half = defineFilter("fixture.half", {
+      ...SOFT_BODIES,
+      uniforms: { spread: 1, tone: 0 },
+      inputs: { soft: { stages: SOFT_STAGES, chain } },
+      resolution: 0.5
+    });
+    const mock = started([Half]);
+    const instance = instanceOf(mock, viewWith(mock, Half()), "fixture.half");
+    const input = new FakeTexture({
+      source: { width: 390, height: 844, destroyed: false, resolution: 0.5 },
+      frame: new FakeRectangle(0, 0, 390, 844)
+    }) as unknown as PixiTexture;
+
+    instance.filter.apply(recorder().manager, input, input, false);
+
+    expect(chain).toHaveBeenCalledTimes(1);
+    expect(chain.mock.lastCall?.[1].resolution).toBe(0.5);
+  });
+
   it("allocates nothing per apply of a stable filter: one options object, one taken list, no new filter", () => {
     const { Spied } = spied();
     const mock = started([Spied]);

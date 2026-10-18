@@ -229,21 +229,27 @@ function readArea(id: string, area: unknown): FilterDefinition["area"] {
 }
 
 /**
+ * The most texels per CSS px a filter draws at: a definition above it is refused, an `Alpha` value above it is drawn at
+ * it. Four covers every phone's device pixel ratio; more only sizes larger textures.
+ */
+export const MAX_RESOLUTION = 4;
+
+/**
  * Reads the declared resolution: texels per CSS px, or 0 for the canvas's. A JavaScript caller may pass anything.
  *
  * @param id - The filter id.
  * @param resolution - What the game declared.
  * @returns The resolution; 0 when it was left out.
- * @throws {Error} When it is given and is not a finite number of 0 or more.
+ * @throws {Error} When it is given and is not a number from 0 to `MAX_RESOLUTION`.
  */
 function readResolution(id: string, resolution: unknown): number {
   if (resolution === undefined) return 0;
-  if (typeof resolution === "number" && Number.isFinite(resolution) && resolution >= 0) {
+  if (typeof resolution === "number" && resolution >= 0 && resolution <= MAX_RESOLUTION) {
     return resolution;
   }
 
   throw new Error(
-    `[game] Filter "${id}": resolution must be 0 or more, 0 for the resolution of the canvas.\n  Got ${String(resolution)}.`
+    `[game] Filter "${id}": resolution must be from 0 to ${MAX_RESOLUTION}, 0 for the resolution of the canvas.\n  Got ${String(resolution)}.`
   );
 }
 
@@ -736,7 +742,7 @@ function cacheWithInputs(
  * @throws {Error} When the id is empty, the WGSL has no `mainFragment`, the GLSL no `void main(`,
  *   a uniform is reserved, badly named or of no known form, the passes or the padding break
  *   their rules, an input or the fallback breaks one of its rules, `passes` is given with inputs,
- *   `area` is not a function, or `resolution` is not a finite number of 0 or more.
+ *   `area` is not a function, or `resolution` is not a number from 0 to 4.
  * @example
  * ```ts
  * // features/board/effects.ts: a gold tint a motion hook tweens on a merge, on WebGPU and WebGL.

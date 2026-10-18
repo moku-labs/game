@@ -149,9 +149,10 @@ export const Displacement = /*#__PURE__*/ component("effects.displacement", disp
 /**
  * Pixi's alpha over a view and its subtree as one layer, so overlapping children do not show
  * through each other. `resolution: 0` draws at the resolution of the canvas; a number draws the
- * subtree at that many texels per CSS px, and every other filter of the view with it (Pixi's
- * smallest resolution wins). At `alpha: 1` and `resolution: 0` the filter is switched off: it would
- * copy the subtree unchanged through a pass of its own. One render pass per apply.
+ * subtree at that many texels per CSS px, at most 4, and every other filter of the view with it
+ * (Pixi's smallest resolution wins). At `alpha: 1` and `resolution: 0` the filter is switched off
+ * after 8 frames there: it would copy the subtree unchanged through a pass of its own, and a
+ * keyframe that only touches 1 switches nothing. One render pass per apply.
  *
  * @example
  * ```ts

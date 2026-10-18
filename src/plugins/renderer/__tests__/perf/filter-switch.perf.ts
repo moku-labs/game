@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
-import { bytesPerCall, filteredStage } from "./fixtures";
+import { alphaSwitchBoard, bytesPerCall, filteredStage } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the frame's step that hands Pixi a filter switched on or off (E3 of change 2026-10-18-render-path-garbage).
@@ -14,6 +14,12 @@ describe("the filter switch step", () => {
 
     expect(bytesPerCall(() => mock.modules.sync.stepFilters())).toBeLessThanOrEqual(
       BUDGET.filterSwitchStill + NOISE
+    );
+  });
+
+  it("keeps its budget for an alpha filter switched off and on every frame on a board of 10 kept views", async () => {
+    expect(bytesPerCall(await alphaSwitchBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.filterSwitchAlpha + NOISE
     );
   });
 

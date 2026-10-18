@@ -2,16 +2,19 @@ import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
 import {
   bytesPerCall,
+  CROSSING,
   fadeStep,
   fadeWrite,
   filtersFixture,
+  HALF,
+  RESTING,
   tweenStep,
   tweenWrite
 } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the filter sync of `effects` (change 2026-10-18-cheap-idle-tick, E1) — 12 filtered views with
-// nothing changed, one uniform tweened on one of them, and one Alpha crossing 1 (change 2026-10-18-memory-render, M4).
+// nothing changed, one uniform tweened on one of them, and one Alpha fading (change 2026-10-18-memory-render, M4).
 // ---------------------------------------------------------------------------
 
 describe("effects:filters, heap bytes per frame step", () => {
@@ -30,15 +33,23 @@ describe("effects:filters, heap bytes per frame step", () => {
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
   });
 
-  it("one Alpha crossing 1 on one of 12 filtered views: its filter switched off and on", () => {
+  it.each([
+    ["touching 1 in every other step: its filter stays on", CROSSING, BUDGET.filtersFadeCrossing],
+    [
+      "resting at 1 until its filter is switched off, then fading in",
+      RESTING,
+      BUDGET.filtersFadeResting
+    ],
+    ["at resolution 0.5", HALF, BUDGET.filtersFadeHalf]
+  ] as const)("one Alpha of 12 filtered views fading, %s", (_name, fade, budget) => {
     const fixture = filtersFixture();
     const asked = fixture.counter.invalidated;
-    const step = bytesPerCall(fadeStep(fixture));
+    const step = bytesPerCall(fadeStep(fixture, fade));
     // The fade's own write of the alpha into the stored value: not the sync's bytes.
-    const write = bytesPerCall(fadeWrite(fixture));
+    const write = bytesPerCall(fadeWrite(fixture, fade));
 
-    // Every step wrote the switch the player sees: the renderer was asked for its frame.
+    // The moves of the fade are drawn: the renderer was asked for their frames.
     expect(fixture.counter.invalidated).toBeGreaterThan(asked);
-    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersFade + NOISE);
+    expect(step - write).toBeLessThanOrEqual(budget + NOISE);
   });
 });
