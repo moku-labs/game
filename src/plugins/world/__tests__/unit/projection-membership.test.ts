@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createModules } from "../../api";
 import { withDeps } from "../../lifecycle";
-import { membershipVersion } from "../../membership";
 import { type Item, mountBoard, Transform } from "./board";
 import { createMockWorld, type MockWorld } from "./mock-world";
 
 // ---------------------------------------------------------------------------
 // Unit test: what `ui` reads to host the views of a projection only when they
 // changed (change 2026-10-18-cheap-idle-tick, U1): `keyOf` answers the address a
-// view keeps, and `membershipVersion` moves when a view comes or goes.
+// view keeps, and `projection.membershipVersion()` moves when a view comes or goes.
 // ---------------------------------------------------------------------------
 
 const items: Item[] = [
@@ -49,7 +48,7 @@ describe("membershipVersion", () => {
     mountBoard(world, items);
     world.frame(16);
 
-    const before = membershipVersion(world.api);
+    const before = world.api.projection.membershipVersion();
 
     world.frame(16);
     world.frame(16);
@@ -58,24 +57,24 @@ describe("membershipVersion", () => {
       { id: "b", level: 1, x: 10, y: 0 }
     ]);
 
-    expect(membershipVersion(world.api)).toBe(before);
+    expect(world.api.projection.membershipVersion()).toBe(before);
   });
 
   it("moves when a view enters, when one leaves, and when the sweep forgets the left view", () => {
     const world = createMockWorld();
     const { projection } = createModules(withDeps(world.ctx));
 
-    expect(membershipVersion(world.api)).toBe(0);
+    expect(world.api.projection.membershipVersion()).toBe(0);
 
     mountBoard(world, items);
 
-    const mounted = membershipVersion(world.api);
+    const mounted = world.api.projection.membershipVersion();
 
     expect(mounted).toBeGreaterThan(0);
 
     commitAndStep(world, [...items, { id: "c", level: 1, x: 20, y: 0 }]);
 
-    const entered = membershipVersion(world.api);
+    const entered = world.api.projection.membershipVersion();
 
     expect(entered).toBeGreaterThan(mounted);
 
@@ -83,13 +82,13 @@ describe("membershipVersion", () => {
     world.commit();
     projection.reconcileIfDirty();
 
-    const left = membershipVersion(world.api);
+    const left = world.api.projection.membershipVersion();
 
     expect(left).toBeGreaterThan(entered);
 
     projection.sweep();
 
-    expect(membershipVersion(world.api)).toBeGreaterThan(left);
+    expect(world.api.projection.membershipVersion()).toBeGreaterThan(left);
   });
 
   it("moves when a view starts its exit, before it is despawned", () => {
@@ -100,14 +99,14 @@ describe("membershipVersion", () => {
     });
     world.frame(16);
 
-    const before = membershipVersion(world.api);
+    const before = world.api.projection.membershipVersion();
 
     world.model.player = { items: [items[0]] } as unknown as MockWorld["model"]["player"];
     world.commit();
     world.frame(16);
 
     expect(world.api.projection.entitiesOf("board.items")).toHaveLength(1);
-    expect(membershipVersion(world.api)).toBeGreaterThan(before);
+    expect(world.api.projection.membershipVersion()).toBeGreaterThan(before);
   });
 
   it("moves when a projection is unmounted", () => {
@@ -115,10 +114,10 @@ describe("membershipVersion", () => {
 
     mountBoard(world, items);
 
-    const before = membershipVersion(world.api);
+    const before = world.api.projection.membershipVersion();
 
     world.api.projection.unmount(["board.items"]);
 
-    expect(membershipVersion(world.api)).toBeGreaterThan(before);
+    expect(world.api.projection.membershipVersion()).toBeGreaterThan(before);
   });
 });

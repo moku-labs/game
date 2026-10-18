@@ -393,8 +393,8 @@ writes one slot of the ring from it and from what the counting classes saw: rend
 Pixi begins them (stencil passes on WebGPU), draws, filter applies with their pixels and the four
 filter kinds with the most, uploads with their bytes, pipeline compiles, the five slowest world
 systems (`world.systemTimes()`), the flow path, the changes of the frame (resize, resolution,
-scene, bundle, restore). The counting is six subclasses swapped in through `extensions`
-(`GpuBatchAdaptor`, `GpuGraphicsAdaptor`, `GpuEncoderSystem`, `FilterSystem`, `GpuTextureSystem`,
+scene, bundle, restore). The counting is seven subclasses swapped in through `extensions`
+(`BatcherPipe`, `GpuBatchAdaptor`, `GpuGraphicsAdaptor`, `GpuEncoderSystem`, `FilterSystem`, `GpuTextureSystem`,
 `GlTextureSystem`); on WebGL a pass is a bound target, seen on Pixi's public runners. Compiles are
 counted on GPU objects of this application only: own properties on the engine's own device and
 `linkProgram` on this app's WebGL context. A pass's kind is `canvas` for the canvas, `filter` while a filter applies,

@@ -9,19 +9,6 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
  * One running track: the numeric fields of one component of one entity moving from the values
  * read at the end of the delay to the exact target, straight or through keyframe segments. A
  * track with repeats walks again from its first segment each time a run ends.
- *
- * @example
- * ```ts
- * const track: Track = {
- *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 },
- *   keys: { x: "1048576:Transform:x" }, ms: 350, ease: "out", delayMs: 0,
- *   clock: new Float64Array(2), begun: false, names: ["x"], slotKeys: ["1048576:Transform:x"],
- *   targets: Float64Array.of(200), starts: new Float64Array(1), live: Uint8Array.of(1),
- *   moved: new Uint8Array(1), values: new Float64Array(1), seen: Float64Array.of(Number.NaN), muted: () => new Set(), additive: false, driven: false,
- *   bornFrame: 4, ended: false, segments: undefined, repeatsLeft: 0, held: false,
- *   masked: new Set(), keep: false, reveals: "place", patch: { x: 200 }
- * };
- * ```
  */
 export type Track = {
   readonly id: number;
@@ -118,12 +105,6 @@ export type Track = {
 /**
  * A motion handle that can also be advanced by hand: what the timeline cursor needs, so a track
  * born inside a frame step still consumes the remainder of that step's delta.
- *
- * @example
- * ```ts
- * const motion: StepMotion = { ...inert, advance: () => 0 };
- * motion.advance(16); // 0: nothing is left over
- * ```
  */
 export type StepMotion = MotionHandle & {
   /**

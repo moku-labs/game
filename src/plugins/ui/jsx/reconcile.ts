@@ -1351,8 +1351,11 @@ export function createReconciler(
       fields.drop(element);
     }
 
-    // A host a remount drops goes without an exit: it frees its views now.
-    dropHost(state, element.entity);
+    // A host that goes moves the hosts version, also one whose exit took it out of the host set
+    // earlier: it still holds its views and a root may still be laid out in it until this despawn.
+    if (hostsOf(element.node).length > 0) hostsMoved(state);
+
+    state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
     state.exiting.delete(element.entity);
     state.overlays.delete(element.entity);

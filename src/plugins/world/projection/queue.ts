@@ -101,6 +101,8 @@ export function dequeueRevive(
   writeLayer(pctx, view.entity, view.lifted && spec.lift !== undefined ? spec.lift : spec.layer);
   mounted.live.set(view.key, view);
   pctx.ctx.state.projection.membershipVersion += 1;
+  // A view that owed its loop when it left owes it again now that it lives: the sweep starts it.
+  if (view.loopOwed) pctx.ctx.state.projection.owedLoops += 1;
 }
 
 /**

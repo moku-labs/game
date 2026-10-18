@@ -311,11 +311,6 @@ export type DrawnLabel = { style: TextStyle; layout: TextLayout; generation: num
 /**
  * A dev warning that is written once per key. Pure modules take it as an argument, so nothing
  * below the plugin context reaches the log itself.
- *
- * @example
- * ```ts
- * const warn: Warn = (key, message) => seen.has(key) || log.warn(message);
- * ```
  */
 export type Warn = (key: string, message: string, data?: Record<string, unknown>) => void;
 

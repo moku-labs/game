@@ -17,11 +17,6 @@ import type { UiCtx } from "../../types";
 // neither the hosted views nor the projections the hosts name.
 // ---------------------------------------------------------------------------
 
-/** The membership version the world counts: the test moves it as the world would. */
-const membership = vi.hoisted(() => ({ version: 0 }));
-
-vi.mock("../../../world/membership", () => ({ membershipVersion: () => membership.version }));
-
 /** The host element of every test. */
 const HOST = 10;
 
@@ -78,12 +73,16 @@ function hostElement(): Element {
 }
 
 /**
- * A world of maps: the parents of the views and the views of the hosted projection.
+ * A world of maps: the parents of the views, the views of the hosted projection, and the
+ * membership version the world counts.
  *
- * @returns The ui context, the jsx state, the views, their parents, and the two readers spied.
+ * @returns The ui context, the jsx state, the views, their parents, the membership, and the two
+ *   readers spied.
  */
 function harness() {
   const parents = new Map<Entity, Entity>();
+  // The membership version the world counts: a test moves it as the world would.
+  const membership = { version: 0 };
   const views: Entity[] = [];
   const entitiesOf = vi.fn((name: string): readonly Entity[] => (name === PIECES ? views : []));
   const keyOf = vi.fn((view: Entity) =>
@@ -105,7 +104,7 @@ function harness() {
         parents.delete(entity);
       }
     },
-    projection: { entitiesOf, keyOf }
+    projection: { entitiesOf, keyOf, membershipVersion: (): number => membership.version }
   } as unknown as WorldApi;
   const state: JsxState = createJsxState();
   const ctx = { deps: { world }, state: { jsx: state } } as unknown as UiCtx;
@@ -113,7 +112,7 @@ function harness() {
   state.elements.set(HOST, hostElement());
   trackHost(state, hostElement());
 
-  return { ctx, state, views, parents, entitiesOf, keyOf };
+  return { ctx, state, views, parents, membership, entitiesOf, keyOf };
 }
 
 describe("hostViews", () => {
@@ -143,7 +142,7 @@ describe("hostViews", () => {
     // The world has not counted the view yet: nothing is walked.
     expect(h.parents.has(3)).toBe(false);
 
-    membership.version += 1;
+    h.membership.version += 1;
     hostViews(h.ctx, h.state);
 
     expect(h.parents.get(3)).toBe(HOST);

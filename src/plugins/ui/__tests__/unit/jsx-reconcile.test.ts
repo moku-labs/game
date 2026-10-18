@@ -272,6 +272,7 @@ function harness() {
           causeOf: () => undefined,
           entitiesOf: () => [],
           layers: () => [],
+          membershipVersion: () => 0,
           setRest
         }
       },

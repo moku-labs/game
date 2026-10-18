@@ -32,7 +32,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C` ("Marking what changed", below). Inside a system the walk reads the store live (changes are queued until the phase ends); outside one it walks the keys taken at the start, and skips an entity despawned before its turn. Every row of `ecs.query()` is a new array, also inside a system: keep it if you like. The rows a system's `run` gets for its declared `query` are not: see "The rows of a system", below. |
 | `resource(Resource)` | The one mutable value per world, made on first read: a deep clone of plain defaults, or one call of a factory default. |
 | `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied, for a component or a tag. A component listener gets the entity and the value; a tag listener gets the entity. A throwing listener is logged; the others still run. |
-| `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`: the world's own list, each entity once in mark order, emptied in place. Walk it in the frame and copy what you keep. Nothing marked: one shared empty list. Allocates nothing. |
+| `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`: the world's own list, each entity once in mark order, emptied in place. Walk it in the frame and copy what you keep. Nothing marked: one shared empty list. Allocates nothing. Inside a system nothing leaves it until the phase ends; outside a phase a despawn or a removal takes the entity out at once and the ones after it move up, so a loop that despawns or removes there walks a copy (`[...ecs.changed(C)]`). |
 | `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
 | `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
 | `count(): number` | How many entities live now, views and layers included: every id `spawn` handed out that no despawn took back. A size the world keeps, no allocation. A screen entered and left returns it to where it was; a count that grows per visit is a leak. The renderer's monitor reads it once a second in a debug build. |
@@ -154,6 +154,7 @@ app.world.ecs.snapshot().entities[0];
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
+| `membershipVersion(): number` | Moves every time a view enters the live views, leaves them, or is forgotten after its despawn, and on a clear. `ui` hosts the views of a projection again only when it moved. Allocates nothing. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. A view's `keyOf` is the frozen address it keeps for its life: the same object every call. |
 | `causeOf(entity)` | Why the view's motion hooks play: `"mount"` when the view came or goes with its screen (a scene mount, a load, a restore), `"change"` when a commit changed a live screen; also answers for a view that just left, until the next sweep. A world projection passes the same value to `enter`/`exit` as their fourth argument. |
 | `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
@@ -164,11 +165,6 @@ app.world.ecs.snapshot().entities[0];
 | `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. A key whose entity is gone is dropped in the next live frame, also when the remover was never called. |
 | `onConverged(listener)` | Calls the listener after a reconcile a restore or a load caused, when every view and every element stands on its rest pose and every track on them is ended. `ui` builds its roots again after it, so each element stands as freshly mounted. The remover is safe to call twice. |
 | `rerunAll()` | Marks every mounted projection dirty and forces `view` for every item. |
-
-`ui` hosts the live views of a projection inside an element, and walks its hosts again only when a
-view came or went: `membershipVersion(world)` of `world/membership.ts` (not on the API, a game never
-needs it) answers a number that moves when a view enters the live views, leaves them, or is
-forgotten after its despawn. Reading it allocates nothing.
 
 The authoring helpers are pure and exported from the package root:
 `component`, `tag`, `resource`, `mut`, `system`, `projection`, and `Layer`, `Order`, `Exiting`,

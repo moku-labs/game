@@ -930,10 +930,6 @@ function stepProblem(
  * @param input - The input.
  * @param steps - What its chain returned.
  * @returns The problem, or `undefined` for steps that may draw.
- * @example
- * ```ts
- * stepsProblem(blurInput, [{ stage: Unlisted, scale: 0.5 }]); // 'input "blur" names stage "Unlisted", which is not in its stages…'
- * ```
  */
 function stepsProblem(input: FilterInputDefinition, steps: unknown): string | undefined {
   if (!Array.isArray(steps)) return `input "${input.name}": chain must return an array of steps.`;

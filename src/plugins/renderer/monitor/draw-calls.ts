@@ -223,7 +223,7 @@ function countUpload(sinks: MonitorSinks, source: Source): void {
  *
  * @param pixi - The loaded Pixi module.
  * @param sinks - What every instance counts into.
- * @returns The six counting classes.
+ * @returns The seven counting classes (BatcherPipe among them).
  */
 export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): CountingClasses {
   const counter = sinks.draws;

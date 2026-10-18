@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Owner } from "../../ecs/types";
-import { BOARD, type Item, mountBoard, Transform, viewOf } from "./board";
+import { BOARD, commitItems, type Item, mountBoard, Transform, viewOf } from "./board";
 import { createMockWorld } from "./mock-world";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +32,33 @@ describe("the sweep", () => {
 
     expect(world.api.projection.entityOf("hud", "coins")).toBeUndefined();
     expect(world.api.projection.keyOf(element)).toBeUndefined();
+  });
+
+  it("starts the owed loop of a view that was revived from its exit before its loop began", () => {
+    const world = createMockWorld();
+    const looped: string[] = [];
+
+    // Mounted directly: both views owe their loop, which the first sweep starts.
+    mountBoard(world, items, {
+      exit: view => view.tween(Transform, { x: 900 }, { ms: 1000, ease: "linear" }),
+      loop: view => {
+        looped.push(view.key);
+
+        return view.tween(Transform, { scale: 1.1 }, { ms: 500, ease: "linear", additive: true });
+      }
+    });
+    // Before that sweep, "a" leaves and plays its exit: it owes its loop from the exit queue.
+    commitItems(world, [items[1] ?? items[0] ?? { id: "b", level: 1, x: 0, y: 0 }]);
+    world.frame(16);
+
+    expect(looped).toEqual(["b"]);
+
+    // "a" comes back while its exit still plays: revived, it still owes its loop.
+    commitItems(world, items);
+    world.frame(16);
+    world.frame(16);
+
+    expect(looped).toEqual(["b", "a"]);
   });
 
   it("settles a view whose motion ends after frames in which nothing else moved", () => {

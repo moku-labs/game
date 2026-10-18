@@ -8,7 +8,6 @@
 import { Held } from "../../input/components";
 import { Parent } from "../../renderer/components";
 import { rootPoseOf } from "../../renderer/sync/pose";
-import { membershipVersion } from "../../world/membership";
 import type { Entity } from "../../world/types";
 import type { ElementLookup, Rect } from "../layout/types";
 import type { UiCtx } from "../types";
@@ -199,7 +198,7 @@ export function hostViews(ctx: UiCtx, state: JsxState, only?: ReadonlySet<Entity
 
   if (only === undefined) {
     // Per frame: two numbers decide; an idle frame walks no host and no view.
-    const membership = membershipVersion(ctx.deps.world);
+    const membership = ctx.deps.world.projection.membershipVersion();
 
     if (state.hostsVersion === state.hostsSeen && membership === state.membershipSeen) return;
 

@@ -652,7 +652,7 @@ function isSizeField(field: string): boolean {
  * @returns What it reveals, or `undefined` for a write that cannot show the view (a tint, a fill colour).
  * @example
  * ```ts
- * revealsOf(Transform, ["rotation"]); // "place"
+ * revealsOf(Transform, { rotation: 0.5 }); // "place"
  * ```
  */
 function revealsOf(

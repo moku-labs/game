@@ -620,8 +620,7 @@ export type ProjectionState = {
   leaving: Map<Entity, MotionCause>;
   /**
    * Moves on every time a view enters `live`, leaves it, or leaves `leaving`, and on a clear:
-   * `ui` hosts the views of a projection again only when it moved (`membershipVersion()` of
-   * `world/membership.ts`).
+   * `ui` hosts the views of a projection again only when it moved (`projection.membershipVersion()`).
    */
   membershipVersion: number;
   /**
@@ -894,6 +893,23 @@ export type ProjectionApi = {
    * ```
    */
   keyOf(entity: Entity): ProjectionKey | undefined;
+
+  /**
+   * A number that moves every time a view enters the live views of a mounted projection, leaves
+   * them (an exit or a despawn), or is forgotten after its despawn, and when the projections are
+   * cleared. An equal number means the same views live as at the last read, so a plugin that
+   * works on the live views (`ui` hosting them in an element) skips its step while it holds.
+   * Reading it allocates nothing.
+   *
+   * @returns The version; 0 for a world where no view ever came or went.
+   * @example
+   * ```ts
+   * // ui, at the start of its hosting step: nothing to do while no view came or went.
+   * const version = ctx.require(worldPlugin).projection.membershipVersion(); // 7, as on the last frame
+   * if (version === state.hostedMembership) return;
+   * ```
+   */
+  membershipVersion(): number;
 
   /**
    * How the view of an entity came, or how it is leaving: `"mount"` when a direct reconcile or an unmount moved it,

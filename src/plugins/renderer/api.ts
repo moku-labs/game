@@ -19,7 +19,7 @@ import { createViewportApi } from "./viewport/api";
 import type { ViewportApi } from "./viewport/types";
 
 /**
- * The counting `host` installs before `new Application()`: the six counting classes of
+ * The counting `host` installs before `new Application()`: the seven counting classes (BatcherPipe among them) of
  * `monitor` in a dev build and in a debug build, bound to the sinks in the monitor branch of the
  * state, none in production. A production `define` folds the dev or agent guard, so the counting
  * module leaves the bundle.

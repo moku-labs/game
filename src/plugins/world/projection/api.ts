@@ -445,6 +445,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     keyOf: (entity: Entity): ProjectionKey | undefined =>
       state.byEntity.get(entity)?.address ?? state.keysByEntity.get(entity),
 
+    membershipVersion: (): number => state.membershipVersion,
+
     causeOf: (entity: Entity): MotionCause | undefined =>
       state.byEntity.get(entity)?.cause ?? state.leaving.get(entity),
 

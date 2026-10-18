@@ -423,11 +423,6 @@ export type AnySystem = {
  * One registered system, the frame it was registered in, its query resolved once and the walk the
  * runner resets for every run. A system registered during a frame runs from the next frame on.
  * Spec 28 (deferred) extends it with the system's scope.
- *
- * @example
- * ```ts
- * const entry: SystemEntry = { definition: bobSystem, frame: 12, plan: { names: ["Transform"], written: ["Transform"] } };
- * ```
  */
 export type SystemEntry = {
   readonly definition: AnySystem;
@@ -468,11 +463,6 @@ export type StructuralHook = (entity: Entity, value: unknown) => void;
 /**
  * The frozen model snapshot of one frame, kept so four phases read it once. One object per world,
  * rewritten when a new frame reads its snapshot.
- *
- * @example
- * ```ts
- * const cached: FrameSnapshot = { frame: 12, snapshot: { player: {}, session: {}, rng: rngState } };
- * ```
  */
 export type FrameSnapshot = { frame: number; snapshot: Snapshot };
 
@@ -1026,7 +1016,10 @@ export type EcsApi = {
    * The coarse change set of the frame, cleared in `time` phase `signals` after every `sync`
    * system ran. It is the world's own list, in mark order, each entity once: walk it in the frame
    * and copy what you keep, because the clear empties it in place. A component nothing marked
-   * answers one shared empty list. Asking allocates nothing.
+   * answers one shared empty list. Asking allocates nothing. Inside a system nothing leaves the
+   * list until the phase ends. Outside a phase a despawn, or a removal of the component, takes the
+   * entity out at once and the entities after it move up, so a loop that despawns or removes
+   * outside a phase walks a copy: `const copy = [...ecs.changed(C)]`.
    *
    * @param component - The component type to ask about.
    * @returns The entities marked changed for it this frame.
