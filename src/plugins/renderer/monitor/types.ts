@@ -170,14 +170,16 @@ export const MEASURE = {
 export const SECTION = {
   gpu: 1,
   passes: 2,
-  counts: 4,
-  systems: 8,
-  longFrames: 16,
-  heap: 32
+  shaders: 4,
+  problems: 8,
+  memory: 16,
+  systems: 32,
+  nodes: 64,
+  longFrames: 128
 } as const;
 
 /** Every section on: the bits a monitor starts with. Not public. */
-export const SECTIONS_ALL = 63;
+export const SECTIONS_ALL = 255;
 
 /**
  * Where each section's cost of the second is summed in `PerfState.sectionsMs`, `base` the rest of the commit: the
@@ -186,11 +188,13 @@ export const SECTIONS_ALL = 63;
 export const COST = {
   gpu: 0,
   passes: 1,
-  counts: 2,
-  systems: 3,
-  longFrames: 4,
-  heap: 5,
-  base: 6
+  shaders: 2,
+  problems: 3,
+  memory: 4,
+  systems: 5,
+  nodes: 6,
+  longFrames: 7,
+  base: 8
 } as const;
 
 /** Owners of filter applies a frame tells apart, for the `filter-still` rule. Not public. */
@@ -838,19 +842,19 @@ export type PerfMonitorApi = {
   /**
    * The sections of the monitor of a debug build, each on unless switched off: what runs every frame, and what can be
    * switched off to measure the game without it. Without an argument it reads them. With one it switches the sections
-   * it names, from the next frame on, and writes a `sections` event; a write needs control (`--debug`, or a dev page),
-   * and a read-only page (`--debug=read`) keeps the sections, logs the refusal as `read-only` and answers them as they
-   * are. A section off skips its work: its ring columns and its sample fields read as not measured, and its
+   * it names, from the next frame on, and writes a `sections` event; a write needs control (`--debug`, or a dev page):
+   * a read-only page (`--debug=read`) keeps the sections and throws. A section off skips its work: its ring columns and its sample fields read as not measured, and its
    * `sample.sectionsMs` is 0. Agent builds only: elsewhere every section answers on and nothing switches.
    *
    * @param next - The sections to switch: `true` on, `false` off; a section left out keeps its switch.
    * @returns The sections from the next frame on, one frozen object until the next switch.
+   * @throws {Error} With `reason: "read-only"` when a page without control is asked to change a section.
    * @example
    * ```ts
    * // The editor's Mission control: what does the ward cost without the per-system timing?
-   * app.renderer.monitor.sections(); // { gpu: true, passes: true, counts: true, systems: true, longFrames: true, heap: true }
-   * app.renderer.monitor.sections({ systems: false }); // { gpu: true, passes: true, counts: true, systems: false, longFrames: true, heap: true }
-   * // a stream() listener gets { kind: "event", name: "sections", detail: { on: ["gpu", "passes", "counts", "longFrames", "heap"], off: ["systems"] }, … }
+   * app.renderer.monitor.sections().systems; // true
+   * app.renderer.monitor.sections({ systems: false }); // { gpu: true, passes: true, shaders: true, problems: true, memory: true, systems: false, nodes: true, longFrames: true }
+   * // a stream() listener gets { kind: "event", name: "sections", detail: { on: ["gpu", "passes", "shaders", "problems", "memory", "nodes", "longFrames"], off: ["systems"] }, … }
    * ```
    */
   sections(next?: Partial<MonitorSections>): Readonly<MonitorSections>;

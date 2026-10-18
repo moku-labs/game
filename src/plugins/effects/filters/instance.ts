@@ -505,7 +505,8 @@ export function createFilter(
     value,
     kindId: kind.id,
     standIn: false,
-    replacement: undefined
+    replacement: undefined,
+    entity: 0
   });
 
   if (instance.kind === "wgsl" && instance.definition.inputs.length > 0) {
@@ -1275,7 +1276,8 @@ export function createStandIn(
     value,
     kindId: kind.id,
     standIn: true,
-    replacement: undefined
+    replacement: undefined,
+    entity: 0
   });
 
   guardApply(ectx, standIn, kind);
@@ -1587,6 +1589,20 @@ function staleArea(instance: FilterInstance): void {
 }
 
 /**
+ * Keeps a broken instance switched off whatever its component says. Switched off is a change the renderer cannot see,
+ * so `before` is called first, once, when the filter really flips; an instance already off asks for nothing.
+ *
+ * @param instance - The broken instance.
+ * @param before - Called before the write.
+ */
+function switchOffBroken(instance: FilterInstance, before: () => void): void {
+  if (!instance.filter.enabled) return;
+
+  before();
+  instance.filter.enabled = false;
+}
+
+/**
  * Brings one instance up to the stored value for a frame, comparing before anything is written.
  * A broken instance stays off whatever its component says. Switching on or off is a visible
  * change; so is a new value of a filter that is on. A filter that is off and stays off still gets
@@ -1609,7 +1625,7 @@ export function writeFilter(
   before: () => void
 ): boolean {
   if (instance.broken) {
-    instance.filter.enabled = false;
+    switchOffBroken(instance, before);
 
     return false;
   }

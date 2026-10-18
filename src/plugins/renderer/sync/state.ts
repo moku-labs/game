@@ -139,6 +139,9 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     overlay: createOverlayState(),
     redraws: 0,
     held: emptyMap(),
+    passesVersion: 0,
+    passes: { at: -1, root: undefined, filtered: 0, count: 0, filters: [], enabled: [] },
+    hudLayer: undefined,
     cleanups: []
   };
 }

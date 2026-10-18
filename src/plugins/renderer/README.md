@@ -292,7 +292,7 @@ off: every pipeline is created in the first frame that draws with it, as before.
 | `monitor.beginAgent()`, `monitor.endAgent()` | For engine plugins and the editor's page agent. Agent builds: bracket the agent's own work, measured as the `agent` phase, left out of the spike rule and handed to `time.chargeAgent`. A nested begin and a lone end are ignored. |
 | `monitor.setResolution(n \| undefined)` | Every build: draws at `n` from the next frame; `undefined` goes back to the policy (see "Resolution"). Answers the resolution of the next frame. |
 | `monitor.counts.register(name, read)` | Agent builds: adds a count to the live object counts, read once a second (see "Live object counts"). A name registered again gets the new reader. At most 16: the 17th throws `[game] Monitor count table is full (16).` The remover; the renderer's `onStop` drops every count. Nothing kept without the flag. |
-| `monitor.sections(next?)` | Agent builds: which sections of the monitor run (see "Sections"), one frozen `MonitorSections` until a switch. With `next` it switches the sections named, from the next frame on, and writes a `sections` event; a write needs control (a dev page or `--debug`), a `--debug=read` page keeps them and logs `read-only`. Without the flag every section answers on. |
+| `monitor.sections(next?)` | Agent builds: which sections of the monitor run (see "Sections"), one frozen `MonitorSections` until a switch. With `next` it switches the sections named, from the next frame on, and writes a `sections` event; a write needs control (a dev page or `--debug`): on a `--debug=read` page a switch that would change a section throws an `Error` with `reason: "read-only"`, and the sections stay. Without the flag every section answers on. |
 
 `frameAt(ring, age)` (root export) turns one slot into a plain record: NaN as `null`, bits as
 names, the path id as the flow path. A reader of the columns names the bits itself with two root exports:
@@ -428,17 +428,20 @@ rule for both (a 120 fps loop on a 60 Hz panel misses none).
 
 #### Sections
 
-The monitor's per-frame work is six sections (`MONITOR_SECTIONS`, root export), each on unless `renderer.monitor.sections`
-or `monitor.sections({ … })` switches it off: `gpu` (the GPU timer), `passes` (the pass ring and the stencil count),
-`counts` (draws, filter applies, uploads, compiles, marks, rebuilds and render targets of the counting classes),
-`systems` (the time of every world system), `longFrames` (the long frames the browser reports) and `heap` (the heap read
-of every frame and its `gc?` hint). A section off skips its part of the commit and its counting increments (one bit
-test each); its ring columns read NaN and its sample fields `null`, as on a build that cannot measure them, and while
-`counts` is off `stats().drawCalls` and `rebuilds` read 0. The header's `sections: { on, off }` tells a switched-off
-section from one `measured` does not list. Every `sample` carries `sectionsMs`: the page-clock ms of the second each
-section's part of the commits took, 0 for one that is off, and `base`, the rest of the commits; a commit reads the
-clock once per section that runs. Pixi-side counting is not timed. An Android WebView's clock is coarse, 0.1 ms: a
-part shorter than that adds 0 or 0.1 ms at a time, so read the sum over the second, never a single frame.
+The monitor's per-frame work is eight sections (`MONITOR_SECTIONS`, root export; the names of the editor's contract),
+each on unless `renderer.monitor.sections` or `monitor.sections({ … })` switches it off: `gpu` (the GPU timer),
+`passes` (the pass ring and its stencil count, and the draws, filter applies, uploads, instruction rebuilds and render
+targets the counting classes count), `shaders` (the pipeline compiles and shader modules), `problems` (the problem
+rules' accumulators and their judgment), `memory` (the heap read of every frame and its `gc?` hint), `systems` (the time
+of every world system), `nodes` (the change marks of the frame and its draw reason) and `longFrames` (the long frames the
+browser reports). A section off skips its part of the commit and its counting increments (one bit test each); its ring
+columns read NaN and its sample fields `null`, as on a build that cannot measure them, and while `passes` is off
+`stats().drawCalls` and `rebuilds` read 0. The header's `sections` is the object `monitor.sections()` answers, so a
+switched-off section differs from one `measured` does not list; a `sections` event names the sections `{ on, off }`.
+Every `sample` carries `sectionsMs`: the page-clock ms of the second each section's part of the commits took, 0 for one
+that is off, and `base`, the rest of the commits; a commit reads the clock once per section that runs. Pixi-side
+counting is not timed. An Android WebView's clock is coarse, 0.1 ms: a part shorter than that adds 0 or 0.1 ms at a
+time, so read the sum over the second, never a single frame.
 
 #### The log
 
@@ -450,7 +453,7 @@ measured on this build or backend" is `null`, never 0.
 
 | Kind | When |
 |---|---|
-| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent; `webview` the Chrome major of an Android WebView, `; wv)` in the user agent, or of the page in the native shell, else `null`; `browser` the Chrome major of any Chromium page), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config (`budgetMs`: the newest frame's budget), what is measured (`targets` where render targets are counted), the app id (`app: { id }`, `__MOKU_GAME_APP__`: `"com.mokulabs.timber.debug"` in a native debug build, `null` without one), the debug drawing (`debug: { overdraw }`) and the sections on and off (`sections: { on, off }`). On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
+| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent; `webview` the Chrome major of an Android WebView, `; wv)` in the user agent, or of the page in the native shell, else `null`; `browser` the Chrome major of any Chromium page), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config (`budgetMs`: the newest frame's budget), what is measured (`targets` where render targets are counted), the app id (`app: { id }`, `__MOKU_GAME_APP__`: `"com.mokulabs.timber.debug"` in a native debug build, `null` without one), the debug drawing (`debug: { overdraw }`) and the sections of the monitor (`sections`, as `monitor.sections()` answers them). On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
 | `startup` | Once, at the first flush after the first drawn frame, and to every later subscriber after its header: HTML, the bundle's download, parse, evaluate, the Pixi chunk, `app.init`, the first frame, the boot long frames. |
 | `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost, the live object counts (`counts`), the render targets made and dropped (`targets: { created, destroyed }`, WebGPU; `null` elsewhere; not the memory of `textures.targets`) and what each section of the monitor cost (`sectionsMs`, see "Sections"). |
 | `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label and their detail (see "Pass detail"), the long frames around it. |

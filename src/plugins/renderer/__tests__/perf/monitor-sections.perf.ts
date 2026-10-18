@@ -31,10 +31,12 @@ describe("the monitor's sections", () => {
     agent.mock.api.monitor.sections({
       gpu: false,
       passes: false,
-      counts: false,
+      shaders: false,
+      problems: false,
+      memory: false,
       systems: false,
-      longFrames: false,
-      heap: false
+      nodes: false,
+      longFrames: false
     });
 
     expect(bytesPerCall(() => monitorFrame(agent, record))).toBeLessThanOrEqual(

@@ -387,3 +387,73 @@ export function ecsCallsFixture(): EcsCalls {
     }
   };
 }
+
+/** A tag on the few entities an outer query of the nested case walks. */
+const Picked = component("Picked", { at: 0 });
+
+/**
+ * Walks every row of an `ecs.query()` as a game does, reading the entity.
+ *
+ * @param rows - The rows.
+ */
+function readRows(rows: Iterable<readonly unknown[]>): void {
+  for (const row of rows) sink.value = row[0];
+}
+
+/**
+ * `ecs.query(Cell, Lit)` outside a phase over 300 entities of which 30 carry both, as a game
+ * calls it every frame. Rows stay fresh: the measure holds 30 rows and a walk.
+ *
+ * @returns One query, walked.
+ */
+export function queryFixture(): () => void {
+  const world = createMockWorld();
+  const ecs = world.api.ecs;
+
+  for (let index = 0; index < ENTITIES; index += 1) {
+    ecs.spawn(OWNER, index % 10 === 0 ? [Cell(), Lit()] : [Cell()]);
+  }
+
+  return (): void => {
+    readRows(ecs.query(Cell, Lit));
+  };
+}
+
+/**
+ * The rows alone the query fixture yields: 30 fresh rows of three entries, the yardstick of its
+ * budget.
+ *
+ * @returns One call making 30 rows.
+ */
+export function rowsFixture(): () => void {
+  const cell = Cell().value;
+  const lit = Lit().value;
+
+  return (): void => {
+    for (let index = 0; index < 30; index += 1) sink.value = [index, cell, lit];
+  };
+}
+
+/**
+ * A query nested in another query's loop: five picked entities walked outside a phase, and for
+ * each `ecs.query(Cell, Lit)` over the 300 entities, 30 matching.
+ *
+ * @returns One outer query with its five inner ones, walked.
+ */
+export function nestedQueryFixture(): () => void {
+  const world = createMockWorld();
+  const ecs = world.api.ecs;
+
+  for (let index = 0; index < ENTITIES; index += 1) {
+    const picked = index % 60 === 0;
+
+    ecs.spawn(OWNER, index % 10 === 0 ? [Cell(), Lit(), ...(picked ? [Picked()] : [])] : [Cell()]);
+  }
+
+  return (): void => {
+    for (const outer of ecs.query(Picked)) {
+      sink.value = outer[0];
+      readRows(ecs.query(Cell, Lit));
+    }
+  };
+}

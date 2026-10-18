@@ -8,9 +8,16 @@ import { alloc } from "../../../../../tests/perf/alloc";
 import type { FrameMeasure } from "../../../time/types";
 import { Layer } from "../../../world/ecs/define";
 import type { Entity, SystemTiming } from "../../../world/types";
-import { Sprite, type SpriteValue, Transform, type TransformValue } from "../../components";
+import {
+  HudPart,
+  Sprite,
+  type SpriteValue,
+  Transform,
+  type TransformValue
+} from "../../components";
 import { commitFrame } from "../../monitor/commit";
-import { FakeTexture } from "../fake-pixi";
+import type { PixiFilter } from "../../types";
+import { FakeFilter, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 import { type AgentRenderer, startAgent } from "../perf-harness";
 
@@ -218,4 +225,67 @@ export async function markedFrame(count: number, onDemand: boolean): Promise<() 
 
     demand.decide(false);
   };
+}
+
+/**
+ * A still stage of 12 filtered sprites among 40, as the ward of A Memory Missing: each carries one filter of one apply,
+ * hung through the seam `effects` uses. The pass that builds them has run, every change set is cleared.
+ *
+ * @returns The started renderer.
+ */
+export async function filteredStage(): Promise<MockRenderer> {
+  const { mock, entities } = await startSprites(40);
+
+  for (let index = 0; index < 12; index += 1) {
+    const entity = entities[index * 3] ?? 0;
+    const filter = new FakeFilter() as unknown as PixiFilter;
+
+    mock.api.sync.filters.set(entity, [{ filter, passes: 1, kind: "fog" }]);
+  }
+
+  mock.modules.sync.pass();
+  mock.world.clearChanges();
+
+  return mock;
+}
+
+/**
+ * A still stage with a HUD: the layers `scene` and `hud` (above the overlays), 20 sprites in the scene and 5 HUD parts
+ * in the HUD layer, no overlay open. The pass that builds them has run, every change set is cleared.
+ *
+ * @returns The started renderer.
+ */
+export async function hudStage(): Promise<MockRenderer> {
+  const mock = createMockRenderer();
+  const texture = new FakeTexture({ source: { width: 64, height: 64, destroyed: false } });
+
+  await mock.start();
+  mock.api.sync.textures.provide(() => texture as never);
+  mock.world.projection.setLayers([
+    { name: "scene", sort: "none" },
+    { name: "hud", sort: "none", above: "overlays" }
+  ]);
+
+  for (let index = 0; index < 20; index += 1) {
+    mock.world.ecs.spawn(OWNER, [
+      Layer({ name: "scene" }),
+      Transform({ x: index * 50 }),
+      Sprite({ texture: "board.cell" })
+    ]);
+  }
+
+  for (let index = 0; index < 5; index += 1) {
+    mock.world.ecs.spawn(OWNER, [
+      Layer({ name: "hud" }),
+      Transform({ x: index * 100 }),
+      Sprite({ texture: "board.cell" }),
+      HudPart({ key: `part${index}` })
+    ]);
+  }
+
+  mock.modules.sync.pass();
+  mock.modules.sync.stepOverlays();
+  mock.world.clearChanges();
+
+  return mock;
 }

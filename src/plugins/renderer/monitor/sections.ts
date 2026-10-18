@@ -11,10 +11,12 @@ import type { MonitorSinks } from "./types";
 export const ALL_SECTIONS: Readonly<MonitorSections> = Object.freeze({
   gpu: true,
   passes: true,
-  counts: true,
+  shaders: true,
+  problems: true,
+  memory: true,
   systems: true,
-  longFrames: true,
-  heap: true
+  nodes: true,
+  longFrames: true
 });
 
 /**
@@ -53,7 +55,7 @@ export function switched(
  * @returns The bits.
  * @example
  * ```ts
- * bitsOf({ gpu: true, passes: true, counts: false, systems: true, longFrames: true, heap: true }); // 59
+ * bitsOf({ ...ALL_SECTIONS, passes: false }); // 253
  * ```
  */
 export function bitsOf(sections: Readonly<MonitorSections>): number {
@@ -73,7 +75,7 @@ export function bitsOf(sections: Readonly<MonitorSections>): number {
  * @returns Two fresh lists.
  * @example
  * ```ts
- * listsOf({ gpu: true, passes: true, counts: false, systems: true, longFrames: true, heap: true }).off; // ["counts"]
+ * listsOf({ ...ALL_SECTIONS, memory: false }).off; // ["memory"]
  * ```
  */
 export function listsOf(sections: Readonly<MonitorSections>): {

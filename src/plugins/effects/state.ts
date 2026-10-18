@@ -58,7 +58,7 @@ function createCheckState(run: number): CheckState {
  * @returns The fresh sync state.
  */
 export function createFilterSync(): FilterSyncState {
-  return { round: 0, all: false, width: -1, height: -1 };
+  return { round: 0, all: false, pending: false, width: -1, height: -1 };
 }
 
 /**

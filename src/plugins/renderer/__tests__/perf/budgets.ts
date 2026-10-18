@@ -37,6 +37,12 @@ export const BUDGET = {
   demandMarks: 0,
   // The same with `onDemand`, every mark judged for the decision. Before 2 720 B.
   demandMarksOnDemand: 0,
+  // Q2: before 768 B (the filter table walked with entry arrays, a closure per view, every tree walked again). Now the
+  // count is kept until a change moves `passesVersion`; a still read compares the filters' `enabled` and reads one number.
+  renderPassesStill: 0,
+  // Q2: before 128 B (the layer table walked with entry arrays for the HUD layer's name every step). Now the name is
+  // kept with the layers.
+  hudPartsStill: 0,
   // `rootPoseInto` for effects' E2: `rootPoseOf` made 600 B through the same chain of three.
   rootPoseInto: 0
 } as const;

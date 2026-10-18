@@ -7,7 +7,14 @@
 import type { WorldCtx } from "../types";
 import { markChanged } from "./changes";
 import { registerType, termType } from "./storage";
-import type { EcsState, Entity, QueryTerm, SystemEntry } from "./types";
+import type {
+  AnyComponentType,
+  EcsState,
+  Entity,
+  KnownPlan,
+  QueryTerm,
+  SystemEntry
+} from "./types";
 
 /**
  * A query resolved once: the component names in order, and the names the system writes (marked as it walks).
@@ -61,20 +68,64 @@ const DONE: IteratorReturnResult<undefined> = Object.freeze({ done: true, value:
 /** The value of a walk's step before its first row. */
 const NO_ROW: readonly unknown[] = Object.freeze([]);
 
+/** One component store, read by entity. */
+type Store = ReadonlyMap<Entity, object | true>;
+
+/** A walk that has not read its store yet. */
+const FRESH = 0;
+
+/** A walk that is handing out rows. */
+const WALKING = 1;
+
+/** A walk that ended: it hands out nothing more. */
+const ENDED = 2;
+
+/** The walk the module-level callbacks of `QueryWalk.start` fill: set for the length of one `forEach`. */
+const listing: { walk: QueryWalk | undefined } = { walk: undefined };
+
 /**
- * One walk of a plan: an iterator over its rows that allocates nothing but the rows. A generator
- * would allocate a result object for every row, and a `for…of` over the store's keys one for every
- * entity of the store, matching or not; this walk reuses one result object and reads the store
- * with `forEach`.
+ * Lists one key of the first store for the walk that starts, outside a phase: every key, each
+ * checked at its turn.
+ *
+ * @param _value - The stored value, read at the key's turn.
+ * @param entity - The key.
+ */
+function listKey(_value: object | true, entity: Entity): void {
+  listing.walk?.keep(entity);
+}
+
+/**
+ * Lists one key of the first store for the walk that starts, inside a phase: only an entity that
+ * carries every name, since structural changes wait for the phase's end.
+ *
+ * @param _value - The stored value, read at the key's turn.
+ * @param entity - The key.
+ */
+function listMatch(_value: object | true, entity: Entity): void {
+  listing.walk?.keepMatch(entity);
+}
+
+/**
+ * One walk of `ecs.query()`: an iterator over fresh rows. It is its own step, so a row costs its
+ * array and nothing more, and it lists the keys it visits into an entity list the world keeps and
+ * takes back when the walk ends, so no key is copied into a new array.
  */
 class QueryWalk implements Iterator<readonly unknown[], undefined> {
-  /** The step handed back for every row: only its `value` changes. */
-  private readonly step: IteratorYieldResult<readonly unknown[]> = { done: false, value: NO_ROW };
-  /** The entities to visit, taken at the first step; `undefined` before it. */
+  /** Always false: a step the walk hands back is a row; the end is `DONE`. */
+  readonly done = false;
+  /** The row of the current step. */
+  value: readonly unknown[] = NO_ROW;
+  /** The entities to visit, from index 0 to `count`: a kept list, taken at the first step. */
   private entities: Entity[] | undefined = undefined;
+  /** How many entities the walk listed. */
+  private count = 0;
   /** The next entity to visit. */
   private index = 0;
-  /** The walked store's size at the last step: a dev build's walk inside a phase compares it. */
+  /** The store of the first name, read at the first step. */
+  private store: Store | undefined = undefined;
+  /** `FRESH`, `WALKING` or `ENDED`. */
+  private stage = FRESH;
+  /** The walked store's size at the first step: a dev build's walk inside a phase compares it. */
   private size = -1;
 
   /**
@@ -98,27 +149,27 @@ class QueryWalk implements Iterator<readonly unknown[], undefined> {
   }
 
   /**
-   * Hands out the next row: the next entity that still carries every name, marked for every
-   * `mut()` name.
+   * Hands out the next row: the next listed entity that still carries every name, marked for
+   * every `mut()` name.
    *
-   * @returns The step of the row, or the end.
+   * @returns This walk with the row, or the end.
    */
   next(): IteratorResult<readonly unknown[], undefined> {
+    if (this.stage !== WALKING && !this.start()) return DONE;
+
     const state = this.ctx.state.ecs;
     const { names, written } = this.plan;
-    const first = names[0];
-    const store = first === undefined ? undefined : state.stores.get(first);
+    const store = this.store;
+    const entities = this.entities;
 
-    if (first === undefined || store === undefined) return DONE;
-
-    const entities = this.entities ?? this.start(store);
+    if (store === undefined || entities === undefined) return this.end();
 
     if (this.size !== -1 && store.size !== this.size) {
       this.size = store.size;
-      reportStoreChange(this.ctx, first);
+      reportStoreChange(this.ctx, names[0] ?? "");
     }
 
-    while (this.index < entities.length) {
+    while (this.index < this.count) {
       const entity = entities[this.index];
 
       this.index += 1;
@@ -129,44 +180,115 @@ class QueryWalk implements Iterator<readonly unknown[], undefined> {
       if (!carriesAll(state.stores, names, entity)) continue;
 
       markWritten(state, written, entity);
-      this.step.value = rowOf(state.stores, names, entity, value);
+      this.value = rowOf(state.stores, names, entity, value);
 
-      return this.step;
+      return this;
     }
 
-    return DONE;
+    return this.end();
   }
 
   /**
-   * Takes the entities to visit. Inside a phase only the matching ones, read live in one pass:
-   * structural changes are queued until the phase ends, so the matches stay true while the rows
-   * are consumed. Outside a phase every key of the store, checked at its turn: an entity spawned
-   * during the walk is not visited, one despawned before its turn is skipped.
+   * Ends a walk a loop left early, and gives its list back.
    *
-   * @param store - The store of the first name.
-   * @returns The entities, in the store's insertion order.
+   * @returns The end.
    */
-  private start(store: ReadonlyMap<Entity, object | true>): Entity[] {
+  return(): IteratorResult<readonly unknown[], undefined> {
+    return this.end();
+  }
+
+  /**
+   * Lists one key at the end of this walk's list.
+   *
+   * @param entity - The key.
+   */
+  keep(entity: Entity): void {
+    const entities = this.entities;
+
+    if (entities === undefined) return;
+
+    // Overwritten by index, never cut: the kept list keeps its store from walk to walk.
+    entities[this.count] = entity;
+    this.count += 1;
+  }
+
+  /**
+   * Lists one key when its entity carries every name.
+   *
+   * @param entity - The key.
+   */
+  keepMatch(entity: Entity): void {
+    if (carriesAll(this.ctx.state.ecs.stores, this.plan.names, entity)) this.keep(entity);
+  }
+
+  /**
+   * Reads the store of the first name and lists the keys to visit, in the store's insertion
+   * order. Inside a phase only the matching ones: structural changes are queued until the phase
+   * ends, so the matches stay true while the rows are consumed. Outside a phase every key, checked
+   * at its turn: an entity spawned during the walk is not visited, one despawned before its turn
+   * is skipped, exactly as a copy of the keys taken at the start.
+   *
+   * @returns False when the walk has nothing to walk.
+   */
+  private start(): boolean {
+    if (this.stage === ENDED) return false;
+
     const state = this.ctx.state.ecs;
-    const stores = state.stores;
-    const names = this.plan.names;
-    const inPhase = state.running !== undefined;
-    const entities: Entity[] = inPhase ? [] : [...store.keys()];
+    const first = this.plan.names[0];
+    const store = first === undefined ? undefined : state.stores.get(first);
 
-    if (inPhase) {
-      // `forEach` hands every key without a result object per entry; nothing is yielded inside.
-      // eslint-disable-next-line unicorn/no-array-for-each -- a Map, read without an iterator
-      store.forEach((_value, entity) => {
-        if (carriesAll(stores, names, entity)) entities.push(entity);
-      });
+    if (store === undefined) {
+      this.stage = ENDED;
 
+      return false;
+    }
+
+    this.store = store;
+    this.entities = state.walkLists.pop() ?? newList();
+    this.count = 0;
+    this.stage = WALKING;
+    listing.walk = this;
+
+    if (state.running === undefined) {
+      // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+      store.forEach(listKey);
+    } else {
+      // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+      store.forEach(listMatch);
       if (devBuild()) this.size = store.size;
     }
 
-    this.entities = entities;
+    listing.walk = undefined;
 
-    return entities;
+    return true;
   }
+
+  /**
+   * Ends the walk and gives its list back to the world for the next walk.
+   *
+   * @returns The end.
+   */
+  private end(): IteratorResult<readonly unknown[], undefined> {
+    const entities = this.entities;
+
+    if (entities !== undefined) this.ctx.state.ecs.walkLists.push(entities);
+
+    this.entities = undefined;
+    this.store = undefined;
+    this.stage = ENDED;
+
+    return DONE;
+  }
+}
+
+/**
+ * Creates an entity list for a walk, when the world keeps none free: only while walks nest
+ * deeper than ever before. It lives in its own non-exported function, as lint rule L5 asks.
+ *
+ * @returns An empty list.
+ */
+function newList(): Entity[] {
+  return [];
 }
 
 /**
@@ -208,21 +330,6 @@ function carriesAll(
   }
 
   return true;
-}
-
-/**
- * Walks the store of the first name of a plan and yields the entities that carry every name, in
- * that store's insertion order, so two runs of the same world yield the same rows. Inside a phase
- * the store is read live: structural changes are queued until the phase ends, so no key comes or
- * goes while it is walked (a dev build reports it once when one does). Outside a phase the keys
- * are taken at the start. Every row is a new array.
- *
- * @param ctx - Domain context of the world plugin.
- * @param plan - The resolved query.
- * @returns The rows: the entity, then one stored value per name.
- */
-function walkPlan(ctx: WorldCtx, plan: QueryPlan): Iterable<readonly unknown[]> {
-  return new QueryWalk(ctx, plan);
 }
 
 /**
@@ -306,9 +413,6 @@ function reportStoreChange(ctx: WorldCtx, component: string): void {
   ctx.state.ecs.walkReported = true;
   ctx.log.error("world:store-changed-during-walk", { component });
 }
-
-/** One component store, read by entity. */
-type Store = ReadonlyMap<Entity, object | true>;
 
 /**
  * The walk `collectMatch` fills while the first store hands it its keys: set for the length of
@@ -547,5 +651,96 @@ export function systemRows(ctx: WorldCtx, entry: SystemEntry): Iterable<readonly
  * @returns The rows: the entity, then one stored value per term.
  */
 export function runQuery(ctx: WorldCtx, terms: readonly QueryTerm[]): Iterable<readonly unknown[]> {
-  return walkPlan(ctx, planOf(ctx, terms));
+  return new QueryWalk(ctx, cachedPlanOf(ctx, terms));
+}
+
+/** The plan of a query with no term: it walks nothing. */
+const NO_PLAN: QueryPlan = Object.freeze({ names: Object.freeze([]), written: Object.freeze([]) });
+
+/**
+ * Tells whether a remembered plan was made for these terms: the same type objects, `mut()` on the
+ * same places. A `mut()` term is a new object at every call, so its type is compared, not it.
+ *
+ * @param known - The remembered plan.
+ * @param terms - The terms of the call.
+ * @returns True when the plan answers the call.
+ */
+function sameTerms(known: KnownPlan, terms: readonly QueryTerm[]): boolean {
+  const count = terms.length;
+
+  if (known.types.length !== count) return false;
+
+  for (let index = 0; index < count; index += 1) {
+    const term = terms[index];
+
+    if (term === undefined) return false;
+
+    const written = "of" in term;
+
+    if (known.written[index] !== written || known.types[index] !== (written ? term.of : term)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * The plan of `ecs.query()` terms, remembered per world by the type of the first term: a call
+ * with the same type objects finds it without a string key and without a new array. The first
+ * call of a tuple makes it, registering every type, as `planOf` does.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param terms - The query terms, in the order the row is built.
+ * @returns The plan.
+ * @throws {Error} When a term's type clashes with another type of the same name.
+ */
+export function cachedPlanOf(ctx: WorldCtx, terms: readonly QueryTerm[]): QueryPlan {
+  const first = terms[0];
+
+  if (first === undefined) return NO_PLAN;
+
+  const key = termType(first);
+  const known = ctx.state.ecs.queryPlans.get(key);
+
+  if (known !== undefined) {
+    const count = known.length;
+
+    // Per call: a few identity checks over the plans that start with this type.
+    for (let index = 0; index < count; index += 1) {
+      const plan = known[index];
+
+      if (plan !== undefined && sameTerms(plan, terms)) return plan.plan;
+    }
+  }
+
+  return rememberPlan(ctx, key, terms);
+}
+
+/**
+ * Makes and remembers the plan of a tuple of terms the world has not met.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param key - The type of the first term.
+ * @param terms - The query terms.
+ * @returns The new plan.
+ * @throws {Error} When a term's type clashes with another type of the same name.
+ */
+function rememberPlan(
+  ctx: WorldCtx,
+  key: AnyComponentType,
+  terms: readonly QueryTerm[]
+): QueryPlan {
+  const plan = planOf(ctx, terms);
+  const plans = ctx.state.ecs.queryPlans;
+  const known = plans.get(key) ?? [];
+
+  known.push({
+    plan,
+    types: terms.map(term => termType(term)),
+    written: terms.map(term => "of" in term)
+  });
+  plans.set(key, known);
+
+  return plan;
 }

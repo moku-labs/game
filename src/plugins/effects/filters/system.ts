@@ -90,6 +90,17 @@ function emptyView(ectx: EffectsCtx, entity: Entity): FilteredView {
 }
 
 /**
+ * Marks a view for the next run of the filter sync.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param view - The view's record.
+ */
+function markDirty(ectx: EffectsCtx, view: FilteredView): void {
+  view.dirty = true;
+  ectx.state.filterSync.pending = true;
+}
+
+/**
  * Logs a warning once per key.
  *
  * @param ectx - Domain context of the effects plugin.
@@ -302,7 +313,7 @@ function markChanges(ectx: EffectsCtx): void {
 
       if (view === undefined) continue;
 
-      view.dirty = true;
+      markDirty(ectx, view);
       if (kind.source === "core") view.marks[kind.index] = round;
     }
   }
@@ -424,6 +435,7 @@ function installReplacement(
   if (replacement === undefined) return instance;
 
   instance.replacement = undefined;
+  replacement.entity = instance.entity;
   view.instances.set(kind.id, replacement);
   view.retired.push(instance);
 
@@ -502,7 +514,9 @@ function syncKind(
     refreshInputs(ectx, pixi, instance, off);
 
     // Places a chain left in this sync are destroyed by the next one.
-    if (instance.kind === "wgsl" && (instance.inputs?.retired.length ?? 0) > 0) view.dirty = true;
+    if (instance.kind === "wgsl" && (instance.inputs?.retired.length ?? 0) > 0) {
+      markDirty(ectx, view);
+    }
 
     // A chain that broke in this sync built its stand-in: it takes the place now.
     return installReplacement(view, kind, instance);
@@ -511,6 +525,8 @@ function syncKind(
   instance = firstInstance(ectx, pixi, kind, value);
 
   if (instance === undefined) return undefined;
+
+  instance.entity = entity;
 
   // A chain that broke at its first evaluation built its stand-in already.
   instance = installReplacement(view, kind, instance);
@@ -573,7 +589,7 @@ function placeKinds(ectx: EffectsCtx, pixi: PixiModule, view: FilteredView): voi
     const instance =
       kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed, off);
 
-    if (instance === undefined) view.dirty = true;
+    if (instance === undefined) markDirty(ectx, view);
     else if (!off) placed.push(instance);
   }
 }
@@ -631,6 +647,8 @@ function forgetView(ectx: EffectsCtx, view: FilteredView): void {
   view.gone = true;
   view.dirty = false;
   ectx.state.views.delete(view.entity);
+  // The next run walks the list to drop it.
+  ectx.state.filterSync.pending = true;
 }
 
 /**
@@ -643,8 +661,15 @@ function forgetView(ectx: EffectsCtx, view: FilteredView): void {
  */
 function syncDirty(ectx: EffectsCtx, pixi: PixiModule): boolean {
   const list = ectx.state.viewList;
+  const sync = ectx.state.filterSync;
   let kept = 0;
   let moved = false;
+
+  // per frame: nothing marked, nothing forgotten — the list is not walked at all.
+  if (!sync.pending) return false;
+
+  // A view the walk marks again (a kind still waiting) sets it for the next run.
+  sync.pending = false;
 
   // per frame: an indexed walk over the dense list; a clean view costs one flag read.
   for (let index = 0; index < list.length; index += 1) {
@@ -994,7 +1019,7 @@ function runSync(ectx: EffectsCtx, pixi: PixiModule): void {
 
   if (sync.all) {
     sync.all = false;
-    for (const view of state.viewList) view.dirty = true;
+    for (const view of state.viewList) markDirty(ectx, view);
   }
 
   markChanges(ectx);
@@ -1047,7 +1072,7 @@ export function trackFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity):
   }
 
   view.kinds.add(kind.id);
-  view.dirty = true;
+  markDirty(ectx, view);
 }
 
 /**
@@ -1065,7 +1090,7 @@ export function forgetFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity)
   if (view === undefined) return;
 
   view.kinds.delete(kind.id);
-  view.dirty = true;
+  markDirty(ectx, view);
 
   const instance = view.instances.get(kind.id);
 
@@ -1093,7 +1118,7 @@ export function retireFilterMaps(ectx: EffectsCtx, keys: readonly string[]): voi
 
       view.instances.delete(id);
       view.retired.push(instance);
-      view.dirty = true;
+      markDirty(ectx, view);
     }
   }
 }

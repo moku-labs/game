@@ -189,7 +189,7 @@ function compiledBefore(ring: PerfRing, slot: number): boolean {
 
 /**
  * The annotations of a spike the counters give: a compile (in the frame, or for a gap spike in one of the 4 frames
- * before it), an upload of a megabyte or more. A frame whose `counts` section was off counted none. Read after the
+ * before it), an upload of a megabyte or more. A frame whose `shaders` or `passes` section was off counted none. Read after the
  * frame's causes are written (a gap spike reads them). No allocation.
  *
  * @param pc - The perf context.
@@ -300,11 +300,13 @@ function flushShaders(pc: PerfCtx): void {
 
 /**
  * Judges the problem rules of the second and writes a `problem` event for each that opened or cleared; without a
- * listener the rules are judged all the same, so their accumulators stay per second.
+ * listener the rules are judged all the same, so their accumulators stay per second. Nothing while `problems` is off.
  *
  * @param pc - The perf context.
  */
 function flushProblems(pc: PerfCtx): void {
+  if ((pc.sinks.sections & SECTION.problems) === 0) return;
+
   const details = judgeProblems(pc);
 
   if (pc.perf.listeners.length === 0) return;

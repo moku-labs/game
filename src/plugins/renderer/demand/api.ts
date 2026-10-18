@@ -325,6 +325,8 @@ export function createDemandApi(
     invalidate: (entity: Entity): void => {
       if (ctx.state.sync.root === undefined || !views.has(entity)) return;
 
+      // A write the renderer cannot see (a filter switched on or off): the render passes are counted again (Q2).
+      ctx.state.sync.passesVersion += 1;
       state.published.add(entity);
       judge(entity);
     }

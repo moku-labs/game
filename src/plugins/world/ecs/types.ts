@@ -650,6 +650,16 @@ export type ChangeList = {
 };
 
 /**
+ * A plan `ecs.query()` remembers: the plan, and the type objects and `mut()` places it was made
+ * for, compared by identity at every call.
+ */
+export type KnownPlan = {
+  readonly plan: QueryPlan;
+  readonly types: readonly AnyComponentType[];
+  readonly written: readonly boolean[];
+};
+
+/**
  * ecs module state.
  */
 export type EcsState = {
@@ -693,6 +703,10 @@ export type EcsState = {
   timingSlots: Map<string, number>;
   /** A dev build reported a store whose keys changed while a phase walked it: reported once. */
   walkReported: boolean;
+  /** The plans of `ecs.query()` by the type of their first term, made once per tuple of types. */
+  queryPlans: Map<AnyComponentType, KnownPlan[]>;
+  /** The entity lists of ended `ecs.query()` walks, taken by the next walks: no key copy per call. */
+  walkLists: Entity[][];
   /** How many entities were despawned since the world began: the sweep looks for dead elements when it moved. */
   despawns: number;
 };

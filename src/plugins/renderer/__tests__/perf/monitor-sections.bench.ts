@@ -12,10 +12,12 @@ const offFrame = steadyFrame();
 off.mock.api.monitor.sections({
   gpu: false,
   passes: false,
-  counts: false,
+  shaders: false,
+  problems: false,
+  memory: false,
   systems: false,
-  longFrames: false,
-  heap: false
+  nodes: false,
+  longFrames: false
 });
 
 describe("the monitor's frame by its sections", () => {

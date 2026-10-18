@@ -247,6 +247,7 @@ export function clearWorld(state: State): void {
   state.ecs.types.clear();
   state.ecs.stores.clear();
   state.ecs.typeStores.clear();
+  state.ecs.queryPlans.clear();
   state.ecs.resources.clear();
   state.ecs.resourceSlots.clear();
   state.ecs.engineResources.clear();

@@ -54,6 +54,7 @@ function clearWorldState(ctx: WorldCtx): void {
   state.types.clear();
   state.stores.clear();
   state.typeStores.clear();
+  state.queryPlans.clear();
   state.resources.clear();
   state.resourceSlots.clear();
   state.engineResources.clear();

@@ -48,6 +48,8 @@ export function createEcsState(): EcsState {
     timing: undefined,
     timingSlots: emptyMap(),
     walkReported: false,
+    queryPlans: emptyMap(),
+    walkLists: [],
     despawns: 0
   };
 }

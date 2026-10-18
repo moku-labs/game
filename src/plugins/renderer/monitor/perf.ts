@@ -350,13 +350,20 @@ export function switchSections(
   return sections;
 }
 
+/** The message of a switch a read-only page refuses. */
+const READ_ONLY_SECTIONS =
+  "[game] monitor.sections switches the sections only on a page with control: this debug build is read-only.\n" +
+  "  Build with moku-game build --debug to switch them.";
+
 /**
- * Refuses a switch on a read-only page: the sections stay, and a switch that would have changed them is logged with
- * `reason: "read-only"`.
+ * Refuses a switch on a read-only page: the sections stay, and a switch that would have changed them throws an error
+ * carrying `reason: "read-only"`, the shape the editor maps to its `read_only` answer. A switch that changes nothing
+ * answers the sections.
  *
  * @param pc - The perf context.
  * @param next - The switches asked for.
  * @returns The sections as they are.
+ * @throws {Error} With `reason: "read-only"` when the switch would change a section.
  */
 export function refuseSections(
   pc: PerfCtx,
@@ -364,12 +371,7 @@ export function refuseSections(
 ): Readonly<MonitorSections> {
   const { sections } = pc.perf;
 
-  if (switched(sections, next) !== sections) {
-    pc.ctx.log.warn("renderer: monitor.sections is read-only on this page", {
-      reason: "read-only",
-      asked: { ...next }
-    });
-  }
+  if (switched(sections, next) === sections) return sections;
 
-  return sections;
+  throw Object.assign(new Error(READ_ONLY_SECTIONS), { reason: "read-only" as const });
 }

@@ -43,6 +43,15 @@ export const BUDGET = {
   ecsSetThree: 48,
   /** W6: `ecs.set` of one integer field. Was 0 B. */
   ecsSetInteger: 0,
+  /**
+   * Q1: `ecs.query(Cell, Lit)` outside a phase, 300 entities, 30 matching. Was 5 177 B: a new
+   * plan (names and written arrays), a copy of the 300 keys, the walk and its step. 2 500 B stays:
+   * the 30 fresh rows (2 168 B; games keep and spread them, so they stay new arrays), the walk
+   * object and the call's rest array of terms (about 170 B, one walk per call).
+   */
+  queryOutside: 2500,
+  /** Q1: a query nested in a query's loop, 5 outer rows. Was 26 406 B. 12 300 B stays: 155 fresh rows and 6 walks. */
+  queryNested: 12_300,
   /** W6: `ecs.has`. Was 0 B. */
   ecsHas: 0,
   /** W6: `ecs.resource(Now)`, the read behind `res(Now)`. Was 0 B. */

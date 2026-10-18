@@ -28,7 +28,6 @@ import {
 import { entryOf, heapMb, longFramesIn } from "./long-frames";
 import { viewLabel } from "./problems";
 import { CAUSE, OVERFLOW_PATH, PHASE_STRIDE, passesOf, recordAt } from "./ring";
-import { listsOf } from "./sections";
 import {
   COST,
   type LongFrameRecord,
@@ -321,7 +320,7 @@ export function headerLine(pc: PerfCtx, thermal: ThermalReading | null): PerfHea
     measured: measuredOf(pc),
     app: { id: appId() },
     debug: { overdraw: pc.ctx.state.sync.debug.overdraw },
-    sections: listsOf(pc.perf.sections)
+    sections: pc.perf.sections
   };
 }
 
@@ -717,17 +716,23 @@ function passesOfSecond(
  * @returns The bits.
  * @example
  * ```ts
- * measuredNow(MEASURE.gpu | MEASURE.draws, SECTION.gpu); // MEASURE.gpu: draws are counted, counts is off
+ * measuredNow(MEASURE.gpu | MEASURE.draws, SECTION.gpu); // MEASURE.gpu: draws are counted, passes is off
  * ```
  */
 function measuredNow(measuring: number, sections: number): number {
   let bits = measuring;
 
   if ((sections & SECTION.gpu) === 0) bits &= ~MEASURE.gpu;
-  if ((sections & SECTION.passes) === 0) bits &= ~(MEASURE.passes | MEASURE.stencilPasses);
-  if ((sections & SECTION.counts) === 0) {
-    bits &= ~(MEASURE.draws | MEASURE.counted | MEASURE.compiles | MEASURE.targets);
+  if ((sections & SECTION.passes) === 0) {
+    bits &= ~(
+      MEASURE.passes |
+      MEASURE.stencilPasses |
+      MEASURE.draws |
+      MEASURE.counted |
+      MEASURE.targets
+    );
   }
+  if ((sections & SECTION.shaders) === 0) bits &= ~MEASURE.compiles;
 
   return bits;
 }
@@ -744,10 +749,12 @@ function sectionsMsOf(perf: PerfState): NonNullable<PerfSampleLine["sectionsMs"]
   return {
     gpu: roundTo(cellF64(sums, COST.gpu), 3),
     passes: roundTo(cellF64(sums, COST.passes), 3),
-    counts: roundTo(cellF64(sums, COST.counts), 3),
+    shaders: roundTo(cellF64(sums, COST.shaders), 3),
+    problems: roundTo(cellF64(sums, COST.problems), 3),
+    memory: roundTo(cellF64(sums, COST.memory), 3),
     systems: roundTo(cellF64(sums, COST.systems), 3),
+    nodes: roundTo(cellF64(sums, COST.nodes), 3),
     longFrames: roundTo(cellF64(sums, COST.longFrames), 3),
-    heap: roundTo(cellF64(sums, COST.heap), 3),
     base: roundTo(cellF64(sums, COST.base), 3)
   };
 }
@@ -770,7 +777,7 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
   const frames = window.count;
   const totals = totalsOf(pc, window);
   const sections = pc.sinks.sections;
-  const counts = (sections & SECTION.counts) !== 0;
+  const counts = (sections & SECTION.passes) !== 0;
   const bits = measuredNow(perf.measuring, sections);
   const filtered = (bits & MEASURE.counted) !== 0;
   const work = sortedOf(pc, window, c.workMs);
@@ -833,7 +840,7 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
     marks: null,
     rebuilds: perf.produced === 0 || !counts ? null : totals.rebuilds,
     longFrames: (sections & SECTION.longFrames) === 0 ? null : longFramesOfSecond(pc, start, end),
-    heapMb: (sections & SECTION.heap) === 0 ? null : heapMb(),
+    heapMb: (sections & SECTION.memory) === 0 ? null : heapMb(),
     kept: {
       pictures: totals.keptMax,
       mb: roundTo(pc.ctx.state.kept.bytes / BYTES_PER_MB, 2),

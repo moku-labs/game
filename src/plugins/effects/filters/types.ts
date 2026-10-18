@@ -579,6 +579,11 @@ export type FilterInstance = FilterBody & {
   readonly standIn: boolean;
   /** A stand-in built while this broken instance was drawing; the next sync puts it in its place. */
   replacement: FilterInstance | undefined;
+  /**
+   * The entity of the view it draws on, set when the filter sync takes it in; 0 for a warm-up probe. A break inside a
+   * render tells the renderer about this view (`renderer.invalidate`) before it switches the filter off.
+   */
+  entity: Entity;
 };
 
 /**
@@ -697,6 +702,8 @@ export type FilterSyncState = {
    * new resolution inside a render, where the view it belongs to is not known.
    */
   all: boolean;
+  /** A view was marked dirty or forgotten since the last walk: the next run walks the dense list, otherwise it skips it. */
+  pending: boolean;
   /** The viewport width the full-screen budget was last judged at; -1 before the first judgement. */
   width: number;
   /** The viewport height the full-screen budget was last judged at; -1 before the first judgement. */

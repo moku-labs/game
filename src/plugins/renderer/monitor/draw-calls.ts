@@ -127,7 +127,7 @@ function ownerSlot(owners: OwnerTable, owner: number): number {
 /**
  * Counts one filter apply of a frame: its pixels (width times height times resolution squared), its interned kind and
  * its owner, into the frame's counters, the kinds' and the owner table, and notes the kind and the owner being applied
- * so a pass begun inside is named by them. With the `counts` section off it only names them. A plain function apart
+ * so a pass begun inside is named by them. With the `passes` section off it only names them. A plain function apart
  * from the class: indexed stores only.
  *
  * @param sinks - The sinks.
@@ -145,7 +145,7 @@ function countApply(
   sinks.filterKind = kind;
   sinks.filterOwner = owner;
 
-  if ((sinks.sections & SECTION.counts) === 0) return;
+  if ((sinks.sections & SECTION.passes) === 0) return;
 
   const { counts, owners } = sinks;
   const resolution = input.source.resolution;
@@ -199,14 +199,14 @@ function uploadBytes(source: Source): number {
 /**
  * Counts one upload of a source, in or between frames: an upload between two frames is zeroed
  * by the next `begin()`, so it is lost (Pixi uploads lazily at the first draw, inside a frame).
- * A render target has no upload method and no resource and is not counted, and nothing is while the `counts` section
+ * A render target has no upload method and no resource and is not counted, and nothing is while the `passes` section
  * is off.
  *
  * @param sinks - The sinks.
  * @param source - The source the texture system just uploaded.
  */
 function countUpload(sinks: MonitorSinks, source: Source): void {
-  if ((sinks.sections & SECTION.counts) === 0) return;
+  if ((sinks.sections & SECTION.passes) === 0) return;
   if (source.uploadMethodId === "unknown") return;
   if (source.resource === null || source.resource === undefined) return;
 
@@ -241,7 +241,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param instructionSet - The instruction set being rebuilt.
      */
     public override buildStart(instructionSet: InstructionSet): void {
-      if ((sinks.sections & SECTION.counts) !== 0) {
+      if ((sinks.sections & SECTION.passes) !== 0) {
         if (sinks.inFrame) sinks.counts[COUNT.rebuilds] = cellF64(sinks.counts, COUNT.rebuilds) + 1;
 
         sinks.rebuildsWindow += 1;
@@ -263,7 +263,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param batch - The batch.
      */
     public override execute(batchPipe: BatchArguments[0], batch: BatchArguments[1]): void {
-      if ((sinks.sections & SECTION.counts) !== 0) counter.frame += 1;
+      if ((sinks.sections & SECTION.passes) !== 0) counter.frame += 1;
 
       super.execute(batchPipe, batch);
     }
@@ -285,7 +285,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
     ): void {
       super.execute(graphicsPipe, renderable);
 
-      if ((sinks.sections & SECTION.counts) !== 0) {
+      if ((sinks.sections & SECTION.passes) !== 0) {
         counter.frame += graphicsDraws(graphicsPipe, renderable);
       }
     }
@@ -321,7 +321,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param options - The draw options.
      */
     public override draw(options: DrawOptions): void {
-      if ((sinks.sections & SECTION.counts) !== 0) counter.frame += 1;
+      if ((sinks.sections & SECTION.passes) !== 0) counter.frame += 1;
 
       super.draw(options);
     }
@@ -332,7 +332,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param options - The draw options.
      */
     public override drawIndirect(options: IndirectOptions): void {
-      if ((sinks.sections & SECTION.counts) !== 0) counter.frame += 1;
+      if ((sinks.sections & SECTION.passes) !== 0) counter.frame += 1;
 
       super.drawIndirect(options);
     }
@@ -434,7 +434,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
       if (made) {
         this.targets.add(source);
 
-        if ((sinks.sections & SECTION.counts) !== 0) {
+        if ((sinks.sections & SECTION.passes) !== 0) {
           sinks.counts[COUNT.targetsCreated] = cellF64(sinks.counts, COUNT.targetsCreated) + 1;
         }
       }
@@ -458,7 +458,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
      * @param source - The source.
      */
     protected override onSourceUnload(source: Source): void {
-      if (this.targets.delete(source) && (sinks.sections & SECTION.counts) !== 0) {
+      if (this.targets.delete(source) && (sinks.sections & SECTION.passes) !== 0) {
         sinks.counts[COUNT.targetsDestroyed] = cellF64(sinks.counts, COUNT.targetsDestroyed) + 1;
       }
 

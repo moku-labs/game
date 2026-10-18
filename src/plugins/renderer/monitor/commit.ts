@@ -60,7 +60,8 @@ const GC_GAP_MS = 500;
 const AWAY_GAP_MS = 500;
 
 /** The sections whose part of the commit runs before the spike rule, each a lap after the base's first part. */
-const EARLY_SECTIONS = SECTION.passes | SECTION.counts | SECTION.heap | SECTION.gpu;
+const EARLY_SECTIONS =
+  SECTION.passes | SECTION.shaders | SECTION.nodes | SECTION.memory | SECTION.gpu;
 
 /**
  * Opens a frame: a switch of the sections applies now, so a frame is measured whole or not at all; the counters and
@@ -79,7 +80,9 @@ export function openFrame(sinks: MonitorSinks): void {
 }
 
 /**
- * Writes the pass counts of the frame into its slot (section `passes`): what this backend does not measure is NaN.
+ * Writes what the counting classes saw of the frame into its slot (section `passes`): the passes and their stencil, the
+ * draws, the filter applies with their pixels, the uploads, the instruction rebuilds and the render targets made and
+ * dropped. What this backend does not measure, and what no producer feeds, is NaN.
  *
  * @param pc - The perf context.
  * @param slot - The ring slot.
@@ -87,38 +90,19 @@ export function openFrame(sinks: MonitorSinks): void {
 function writePasses(pc: PerfCtx, slot: number): void {
   const { perf, sinks } = pc;
   const c = perf.ring.columns;
-  const bits = perf.measuring;
-
-  c.passes[slot] = (bits & MEASURE.passes) === 0 ? Number.NaN : cellF64(sinks.counts, COUNT.passes);
-  c.stencilPasses[slot] =
-    (bits & MEASURE.stencilPasses) === 0 ? Number.NaN : cellF64(sinks.counts, COUNT.stencilPasses);
-}
-
-/**
- * Writes the counters of the frame into its slot (section `counts`): what this backend does not measure, and what no
- * producer feeds, is NaN.
- *
- * @param pc - The perf context.
- * @param slot - The ring slot.
- */
-function writeCounters(pc: PerfCtx, slot: number): void {
-  const { perf, sinks } = pc;
-  const c = perf.ring.columns;
   const { counts } = sinks;
   const bits = perf.measuring;
   const counted = (bits & MEASURE.counted) !== 0;
 
+  c.passes[slot] = (bits & MEASURE.passes) === 0 ? Number.NaN : cellF64(counts, COUNT.passes);
+  c.stencilPasses[slot] =
+    (bits & MEASURE.stencilPasses) === 0 ? Number.NaN : cellF64(counts, COUNT.stencilPasses);
   c.draws[slot] = (bits & MEASURE.draws) === 0 ? Number.NaN : sinks.draws.last;
   c.filterApplies[slot] = counted ? cellF64(counts, COUNT.filterApplies) : Number.NaN;
   c.filterMpx[slot] = counted ? cellF64(counts, COUNT.filterPixels) / PIXELS_PER_MPX : Number.NaN;
   c.uploads[slot] = counted ? cellF64(counts, COUNT.uploads) : Number.NaN;
   c.uploadMb[slot] = counted ? cellF64(counts, COUNT.uploadBytes) / BYTES_PER_MB : Number.NaN;
-  c.compiles[slot] = (bits & MEASURE.compiles) === 0 ? Number.NaN : cellF64(counts, COUNT.compiles);
-  // The draw decision of the frame (spec 14): its marks and the index of its reason; B8 feeds `rebuilds`.
-  const decided = pc.deps.demand.frame();
-
-  c.marks[slot] = decided.marks;
-  c.reason[slot] = reasonIndex(decided.reason);
+  // B8 feeds `rebuilds`.
   c.rebuilds[slot] = perf.produced === 0 ? Number.NaN : cellF64(counts, COUNT.rebuilds);
   // Render targets made and dropped (U4): counted on the WebGPU texture system.
   const targets = (bits & MEASURE.targets) !== 0;
@@ -128,29 +112,42 @@ function writeCounters(pc: PerfCtx, slot: number): void {
 }
 
 /**
- * Writes the counters of a frame whose `counts` section is off: every column of it not measured, no filter kind.
+ * Writes the columns of a frame whose `passes` section is off: every count of it not measured, no filter kind.
  *
  * @param pc - The perf context.
  * @param slot - The ring slot.
  */
-function writeUncounted(pc: PerfCtx, slot: number): void {
+function writeNoPasses(pc: PerfCtx, slot: number): void {
   const c = pc.perf.ring.columns;
   const base = slot * KIND_STRIDE;
 
+  c.passes[slot] = Number.NaN;
+  c.stencilPasses[slot] = Number.NaN;
   c.draws[slot] = Number.NaN;
   c.filterApplies[slot] = Number.NaN;
   c.filterMpx[slot] = Number.NaN;
   c.uploads[slot] = Number.NaN;
   c.uploadMb[slot] = Number.NaN;
-  c.compiles[slot] = Number.NaN;
-  c.marks[slot] = Number.NaN;
-  c.reason[slot] = NO_REASON;
   c.rebuilds[slot] = Number.NaN;
   c.targetsCreated[slot] = Number.NaN;
   c.targetsDestroyed[slot] = Number.NaN;
   c.fltKind.fill(0, base, base + KIND_STRIDE);
   c.fltMpx.fill(0, base, base + KIND_STRIDE);
   c.fltApplies.fill(0, base, base + KIND_STRIDE);
+}
+
+/**
+ * Writes the change marks of the frame and the index of its draw reason (section `nodes`, spec 14).
+ *
+ * @param pc - The perf context.
+ * @param slot - The ring slot.
+ */
+function writeNodes(pc: PerfCtx, slot: number): void {
+  const c = pc.perf.ring.columns;
+  const decided = pc.deps.demand.frame();
+
+  c.marks[slot] = decided.marks;
+  c.reason[slot] = reasonIndex(decided.reason);
 }
 
 /**
@@ -488,18 +485,19 @@ function writeMeasure(pc: PerfCtx, slot: number, measure: Readonly<FrameMeasure>
 function writeOff(pc: PerfCtx, slot: number, sections: number): void {
   const c = pc.perf.ring.columns;
 
-  if ((sections & SECTION.passes) === 0) {
-    c.passes[slot] = Number.NaN;
-    c.stencilPasses[slot] = Number.NaN;
+  if ((sections & SECTION.passes) === 0) writeNoPasses(pc, slot);
+  if ((sections & SECTION.shaders) === 0) c.compiles[slot] = Number.NaN;
+  if ((sections & SECTION.nodes) === 0) {
+    c.marks[slot] = Number.NaN;
+    c.reason[slot] = NO_REASON;
   }
-  if ((sections & SECTION.counts) === 0) writeUncounted(pc, slot);
   if ((sections & SECTION.systems) === 0) writeNoSystems(pc, slot);
 }
 
 /**
  * The sections whose part of the commit runs before the spike rule, each a lap of its own after the base's first part:
- * the passes, the counters and the filter kinds, the heap read, the GPU timer's frame. With all four off the base goes
- * on with no clock read. The heap read is the `gc?` hint's: the heap dropped by half a megabyte or more since the
+ * the counting classes' numbers and the filter kinds, the compiles, the marks, the heap read, the GPU timer's frame.
+ * With all five off the base goes on with no clock read. The heap read is the `gc?` hint's: the heap dropped by half a megabyte or more since the
  * previous commit (Chromium only; a hint, never a certainty); the drop is judged here, so no double leaves.
  *
  * @param pc - The perf context.
@@ -510,26 +508,34 @@ function writeOff(pc: PerfCtx, slot: number, sections: number): void {
  */
 function commitEarly(pc: PerfCtx, slot: number, frame: number, sections: number): boolean {
   const { perf } = pc;
+  const c = perf.ring.columns;
   let heapDropped = false;
 
   if ((sections & EARLY_SECTIONS) !== 0) lap(perf, COST.base);
   if ((sections & SECTION.passes) !== 0) {
     writePasses(pc, slot);
+    writeKinds(pc, slot);
     lap(perf, COST.passes);
   }
-  if ((sections & SECTION.counts) !== 0) {
-    writeCounters(pc, slot);
-    writeKinds(pc, slot);
-    lap(perf, COST.counts);
+  if ((sections & SECTION.shaders) !== 0) {
+    c.compiles[slot] =
+      (perf.measuring & MEASURE.compiles) === 0
+        ? Number.NaN
+        : cellF64(pc.sinks.counts, COUNT.compiles);
+    lap(perf, COST.shaders);
   }
-  if ((sections & SECTION.heap) === 0) {
+  if ((sections & SECTION.nodes) !== 0) {
+    writeNodes(pc, slot);
+    lap(perf, COST.nodes);
+  }
+  if ((sections & SECTION.memory) === 0) {
     perf.lastHeap = Number.NaN;
   } else {
     const heap = usedHeapBytes();
 
     heapDropped = perf.lastHeap - heap >= GC_DROP_BYTES;
     perf.lastHeap = heap;
-    lap(perf, COST.heap);
+    lap(perf, COST.memory);
   }
   if ((sections & SECTION.gpu) !== 0) {
     perf.timer?.commit(slot, frame);
@@ -619,7 +625,7 @@ function commitSystems(pc: PerfCtx, slot: number): void {
 }
 
 /**
- * The end of the commit: the problem rules' run of the frame, the pending spike, the first drawn frame, a `display`
+ * The end of the commit: the problem rules' run of the frame while `problems` is on (a lap of its own), the pending spike, the first drawn frame, a `display`
  * event after a resize, a restore, a turn or a display rate `time` learned, and the frame closes, the next one starting
  * with clean flags. The last lap of the base.
  *
@@ -636,7 +642,11 @@ function closeCommit(
 ): void {
   const { perf, sinks } = pc;
 
-  accumulateProblems(pc, measure);
+  if ((sinks.sections & SECTION.problems) !== 0) {
+    lap(perf, COST.base);
+    accumulateProblems(pc, measure);
+    lap(perf, COST.problems);
+  }
 
   if (causes !== 0) addPending(perf, sequenceOf(perf.ring, slot));
   if (perf.drawn && Number.isNaN(perf.firstDrawnAt)) {

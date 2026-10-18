@@ -1412,6 +1412,16 @@ export type SyncState = {
    * an entity with several endless loops is walked once a frame. Cleared by every pass, which may change the tree.
    */
   held: Map<Entity, Unseen>;
+  /**
+   * Moves on with every change that may change the render passes of a frame: a filter set or forgotten, a node's
+   * `renderable` flipped, a view hung, wrapped or dropped (a pass that did work), a kept picture taken or let go, a
+   * write a plugin announced with `invalidate` (a filter switched on or off).
+   */
+  passesVersion: number;
+  /** The filtered views' passes of `renderPassesOf`, counted at `passesVersion` `at` under `root`. */
+  passes: PassCount;
+  /** The name of the scene's HUD layer (`above: "overlays"`), kept with the layers; `undefined` without one. */
+  hudLayer: string | undefined;
   cleanups: Array<() => void>;
 };
 
@@ -1438,6 +1448,21 @@ export type SyncDeps = {
   viewport: ViewportApi & ViewportInternal;
   demand: DemandModule;
   kept: KeptModule;
+};
+
+/**
+ * The filtered views' part of the render passes, counted once and read every frame while nothing it reads changed: the
+ * version and the root it was counted at, and every filter of the filter table with its `enabled` then (a plugin may
+ * switch a filter by its field alone). Not public.
+ */
+export type PassCount = {
+  at: number;
+  root: PixiContainer | undefined;
+  filtered: number;
+  /** Filters recorded: the first `count` of `filters` and `enabled`. */
+  count: number;
+  filters: Array<PixiFilter | undefined>;
+  enabled: boolean[];
 };
 
 /**

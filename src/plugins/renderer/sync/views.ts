@@ -1083,6 +1083,8 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   // The subtree reasons move from the visual up to the wrapper; the visual keeps only its own.
   sctx.ctx.state.sync.viewOfTop.delete(view.object);
   sctx.ctx.state.sync.viewOfTop.set(wrapper, view);
+  // A new top for the view: the render passes walk a new chain (Q2).
+  sctx.ctx.state.sync.passesVersion += 1;
   writeRenderable(view);
   applyTransform(sctx, parentEntity, view);
   // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.

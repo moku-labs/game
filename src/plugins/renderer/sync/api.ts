@@ -639,6 +639,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     // per frame: a still frame stops here, with no set, no closure and no iterator made.
     if (still()) return;
 
+    // A pass that works may hang, wrap or drop views: the render passes are counted again (Q2).
+    state.passesVersion += 1;
+
     if (state.removed.size > 0) {
       for (const entity of state.removed) {
         guard(entity, () => dropView(sctx, entity));
@@ -709,6 +712,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     destroyPools(state);
     clearLayers(state);
     state.root = undefined;
+    state.passesVersion += 1;
   };
 
   /**
