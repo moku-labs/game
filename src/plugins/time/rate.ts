@@ -19,7 +19,6 @@ import {
   watchThermal
 } from "./native";
 import {
-  BUSY_SHARE,
   DISPLAY_FIRST_WINDOW_TICKS,
   DISPLAY_LOWER_WINDOWS,
   DISPLAY_RATES,
@@ -76,7 +75,7 @@ const MISSED = 1;
 /** Bit of a sample whose frame was heavy for the higher rate. */
 const HEAVY = 2;
 
-/** Bit of a late sample whose frame was busy on the main thread. */
+/** Bit of a late sample whose frame kept the main thread longer than its frame. */
 const BUSY = 4;
 
 /** The thermal rank from which the rule never steps up: `"moderate"` and every hotter status. */
@@ -703,8 +702,8 @@ function shouldDrop(g: Governor): boolean {
 }
 
 /**
- * Tells whether the late frames of the drop window are GPU-bound: fewer than half of them were busy on the main
- * thread.
+ * Tells whether the late frames of the drop window are GPU-bound: fewer than half of them kept the main thread longer
+ * than their frame.
  *
  * @param g - The governor.
  * @returns True when the scale, not the rate, should give.
@@ -734,9 +733,10 @@ function canReturn(g: Governor, at: number, scaleStep: boolean): boolean {
 
 /**
  * Decides on the windows after a sample. Down one step when late intervals reach `max(8, 10 %)` of the second's: the
- * render scale when the window is GPU-bound and a lower scale is allowed, the rate otherwise. Up one step the other
- * way round, with 90 steady drawn frames in three seconds, at most one late and no heat: the scale first, after twice
- * the dwell, then the rate after the dwell with a tenth heavy at most.
+ * render scale when the window is GPU-bound and a lower scale is allowed, the rate otherwise. Up one step in the
+ * reverse of the way down, with 90 steady drawn frames in three seconds, at most one late and no heat: the rate first,
+ * at the scale it dropped at, after the dwell and with a tenth heavy at most, then the scale after twice the dwell. A
+ * probe of the higher rate so never starts at full scale, and its failure changes no resolution.
  *
  * @param ctx - Domain context of the time plugin.
  * @param g - The governor.
@@ -755,18 +755,18 @@ function decide(ctx: TimeCtx, g: Governor, at: number): void {
     return;
   }
 
-  const larger = stepAbove(g.scales, scale);
-
-  if (larger !== undefined) {
-    if (canReturn(g, at, true)) switchRate(ctx, fps, larger, "auto", "headroom", at);
-
-    return;
-  }
-
   const higher = stepAbove(g.ladder, fps);
 
   if (higher !== undefined && canReturn(g, at, false)) {
     switchRate(ctx, higher, scale, "auto", "headroom", at);
+
+    return;
+  }
+
+  const larger = stepAbove(g.scales, scale);
+
+  if (larger !== undefined && canReturn(g, at, true)) {
+    switchRate(ctx, fps, larger, "auto", "headroom", at);
   }
 }
 
@@ -790,12 +790,14 @@ export function judgeFrame(ctx: TimeCtx, g: Governor, intervalMs: number, at: nu
 
   if (!isSample(ctx, g, intervalMs)) return;
 
-  // Grade the interval: late past the miss line, heavy for the step above, busy when late with the main thread full.
+  // Grade the interval: late past the miss line, heavy for the step above, and busy when late after more main-thread
+  // time than its frame. The work runs from the frame's timestamp, so a stall that held the callback (a GC, a handler)
+  // is in it; a light frame that came late waited for the GPU.
   const { fps } = ctx.state.rate;
   const higher = stepAbove(g.ladder, fps);
   const missed = intervalMs > missLineMs(fps, ctx.state.rate.display.hz ?? fps);
   const heavy = higher !== undefined && g.lastWorkMs > (RETURN_WORK_SHARE * SECOND_MS) / higher;
-  const busy = missed && g.lastWorkMs > (BUSY_SHARE * SECOND_MS) / fps;
+  const busy = missed && g.lastWorkMs > SECOND_MS / fps;
 
   // Write it into the ring and count it in both windows.
   const slot = g.written % RING;

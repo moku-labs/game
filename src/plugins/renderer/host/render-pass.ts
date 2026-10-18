@@ -266,7 +266,8 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
     }
 
     /**
-     * Copies out of a render target, as Pixi does, after the clear the canvas owes when the copy reads or writes it.
+     * Copies out of a render target, as Pixi does. A copy that reads or writes the canvas first pays the clear it owes,
+     * or a first pass it never had; a canvas that had its pass in this render and owes nothing begins no empty one.
      *
      * @param source - The target copied from.
      * @param destination - The texture copied into.
@@ -286,7 +287,8 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
 
       if (
         canvas !== undefined &&
-        (source === canvas || destination.source === canvas.colorTexture)
+        (source === canvas || destination.source === canvas.colorTexture) &&
+        (this.owed !== CLEAR_NONE || !this.acquired)
       ) {
         this.payOwed(canvas);
       }

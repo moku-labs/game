@@ -780,9 +780,10 @@ export type Api = {
 
   /**
    * Lets the adaptive frame rate lower the render scale before it lowers the rate. When the late frames of a window
-   * were light on the main thread the screen is GPU-bound: the rule steps the scale down through 0.85, 0.75, 0.6 and
-   * 0.5 to `floor` (at the lowest rate too), and only then drops the rate; on the way back it raises the scale first,
-   * a step after twice the dwell, then the rate. A late window busy on the main thread skips the scale. For engine
+   * kept the main thread no longer than their frame (from their timestamp, a stall that held the callback included) the
+   * screen is GPU-bound: the rule steps the scale down through 0.85, 0.75, 0.6 and 0.5 to `floor` (at the lowest rate
+   * too), and only then drops the rate. The way back is the reverse: the rate first, at the scale it dropped at, then
+   * the scale, a step after twice the dwell. A late window busy on the main thread skips the scale. For engine
    * plugins: the renderer calls it at start with the floor of its `adaptiveScale`, with 1 while a player's resolution
    * holds, and with the floor again after. A scale under a new floor goes up to it at once, without `time:rate`.
    * Without `adaptive` nothing changes.

@@ -256,7 +256,7 @@ export type PoolTrim = {
  * ```
  */
 export type AdaptiveScale = {
-  /** The lowest share of the resolution, 0.5 to 1; the steps are 1, 0.85, 0.75, 0.6 and 0.5. 1 allows none. */
+  /** The lowest share of the resolution, a step of the scale: 1, 0.85, 0.75, 0.6 or 0.5. 1 allows none. */
   floor: number;
   /**
    * Where it applies: `"phone"`, a coarse pointer and a short side of at most 820 CSS px (read at start), or `"all"`.

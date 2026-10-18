@@ -66,9 +66,6 @@ export const DWELL_MAX_MS = 120_000;
 /** A return held this long before its first drop resets the dwell to the base; held shorter it failed: it doubles, ms. */
 export const HOLD_RESET_MS = 60_000;
 
-/** A late frame whose work took over this share of its own frame was busy on the main thread: CPU-bound. */
-export const BUSY_SHARE = 0.75;
-
 /** A step up of the render scale waits this many dwells: every change of the scale redraws the whole canvas. */
 export const SCALE_DWELL_FACTOR = 2;
 
@@ -121,8 +118,9 @@ export function ladderOf(displayHz: number, maxFps: number, floor: number): read
 }
 
 /**
- * The render scales the rule may choose down to a floor, highest first, frozen; none when 1 alone reaches it.
- * Allocates: called when the renderer allows a floor, never per frame.
+ * The render scales the rule may choose down to a floor, highest first, frozen; none when 1 alone reaches it. A floor
+ * between two steps stops at the step above it (the renderer's config only takes a step). Allocates: called when the
+ * renderer allows a floor, never per frame.
  *
  * @param floor - The lowest scale the renderer allows.
  * @returns The scales.

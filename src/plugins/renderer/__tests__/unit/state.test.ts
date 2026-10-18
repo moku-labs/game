@@ -162,14 +162,14 @@ describe("renderer state: the probe draws of the warm-up", () => {
 
 describe("renderer state: the adaptive render scale", () => {
   // Bug: a floor of 0.1 draws a blur on a phone; a typo in devices turns the scale off without a word.
-  it("refuses a floor outside 0.5 to 1 and devices other than phone or all; takes false", () => {
-    for (const floor of [0.4, 1.2, Number.NaN, "0.75"]) {
+  it("refuses a floor that is not a step of the scale and devices other than phone or all; takes false", () => {
+    for (const floor of [0.4, 0.7, 1.2, Number.NaN, "0.75"]) {
       expect(() =>
         createRendererState({
           config: { ...config, adaptiveScale: { floor, devices: "phone" } as never }
         })
       ).toThrow(
-        `[game] renderer.adaptiveScale.floor is ${String(floor)}.\n  Give the lowest share of the resolution, from 0.5 to 1.`
+        `[game] renderer.adaptiveScale.floor is ${String(floor)}.\n  Give a step of the scale: 1, 0.85, 0.75, 0.6 or 0.5.`
       );
     }
 

@@ -37,7 +37,7 @@ export const timePlugin = /*#__PURE__*/ createPlugin("time", {
   events: (register: RegisterFunction) =>
     register.map<Events>({
       "time:thermal": "The native shell reported a thermal reading",
-      "time:rate": "The loop's frame rate changed"
+      "time:rate": "The loop's frame rate or render scale changed"
     }),
   createState: createTimeState,
   api: createTimeApi,

@@ -148,11 +148,15 @@ force the rate with `game.frameRate` for a clean A/B run.
 down to 0.75 on a phone by default), a late window that is GPU-bound gives the scale first: down one
 step of 1, 0.85, 0.75, 0.6 and 0.5 instead of the rate, also at the lowest rate (60 that cannot
 hold), and the rate only once the scale is at its floor. A window is GPU-bound when fewer than half
-of its late frames were busy on the main thread, a frame busy when its work took over three quarters
-of its frame (6.25 ms at 120): a light frame that still came late waited for the GPU. A busy window
-skips the scale and drops the rate, since fewer pixels do not help the main thread. Up the other way
-round: the scale first, a step after twice the dwell (a change of the scale redraws the canvas and
-retakes the kept pictures), with the return's evidence but without the heavy check, then the rate.
+of its late frames were busy on the main thread, a frame busy when its work took longer than its
+frame (8.33 ms at 120). The work runs from the frame's timestamp, so a GC or a handler that held the
+callback is in it; a frame that fit its frame and still came late waited for the GPU. A busy window
+skips the scale and drops the rate, since fewer pixels do not help the main thread. Up in the reverse
+of the way down: the rate first, at the scale it dropped at, after the dwell (so a probe of 120 never
+starts at full scale and its failure changes no resolution), then the scale, a step after twice the
+dwell (a change of the scale redraws the canvas and retakes the kept pictures), with the return's
+evidence but without the heavy check. When frames too heavy for the higher rate block it, the scale
+comes back at the lower rate.
 A forced rate and `setRate("auto")` start at scale 1. A change of the scale alone is a `time:rate`
 with `from` equal to `to`, logs `time: render scale` and asks the shell for nothing.
 

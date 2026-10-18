@@ -141,13 +141,21 @@ describe("down on a GPU-bound screen", () => {
     expect(s.api.rate()).toMatchObject({ fps: 60, scale: 0.75, reason: "missed" });
   });
 
-  it("a late frame whose work took over three quarters of its frame is CPU-bound: the rate drops, the scale stays", () => {
-    // Three quarters of 8.33 ms is 6.25 ms.
-    expect(firstStep(() => ({ workMs: 6.2 }))).toEqual([120, 0.85]);
-    expect(firstStep(() => ({ workMs: 6.3 }))).toEqual([60, 1]);
+  // Bug: a GPU-bound frame with 6.5–8 ms of encoding at 120 was taken for CPU-bound and dropped the rate.
+  it("a late frame whose work fits its frame is GPU-bound, one whose work took more than its frame is CPU-bound", () => {
+    // One frame at 120 is 8.33 ms.
+    expect(firstStep(() => ({ workMs: 7 }))).toEqual([120, 0.85]);
+    expect(firstStep(() => ({ workMs: 8.3 }))).toEqual([120, 0.85]);
+    expect(firstStep(() => ({ workMs: 8.4 }))).toEqual([60, 1]);
     // Two of three late frames busy is CPU-bound; one of three is not.
-    expect(firstStep(index => ({ workMs: index % 3 === 0 ? 1 : 7 }))).toEqual([60, 1]);
-    expect(firstStep(index => ({ workMs: index % 3 === 0 ? 7 : 1 }))).toEqual([120, 0.85]);
+    expect(firstStep(index => ({ workMs: index % 3 === 0 ? 1 : 9 }))).toEqual([60, 1]);
+    expect(firstStep(index => ({ workMs: index % 3 === 0 ? 9 : 1 }))).toEqual([120, 0.85]);
+  });
+
+  // Bug: a GC or a handler that held the main thread when the frame was due lowered the scale for nothing.
+  it("a stall that held the frame's callback past its timestamp is main-thread time: the rate drops, the scale stays", () => {
+    expect(firstStep(() => ({ stallMs: 8, workMs: 1 }))).toEqual([60, 1]);
+    expect(firstStep(() => ({ stallMs: 3, workMs: 1 }))).toEqual([120, 0.85]);
   });
 
   it("at the floor of the rate it lowers the scale when 60 cannot hold, never under the scale's floor", () => {
@@ -173,26 +181,47 @@ describe("down on a GPU-bound screen", () => {
 });
 
 describe("up again", () => {
-  it("raises the scale first, a step after twice the dwell, then the rate after the dwell", () => {
+  it("climbs the reverse of the descent: the rate after the dwell at the scale it dropped at, then the scale a step after twice the dwell", () => {
     const s = scaled();
     const down = screen(s, 20, 3000);
     const up = screen(s, 4, 30_000);
-    const [scaleUp, full, rate] = up;
+    const [rate, scaleUp, full] = up;
 
     expect(rungs(up)).toEqual([
-      [60, 0.85, "headroom"],
-      [60, 1, "headroom"],
+      [120, 0.75, "headroom"],
+      [120, 0.85, "headroom"],
       [120, 1, "headroom"]
     ]);
 
     const droppedAt = down.at(-1)?.at ?? 0;
 
-    expect((scaleUp?.at ?? 0) - droppedAt).toBeGreaterThanOrEqual(10_000);
-    expect((scaleUp?.at ?? 0) - droppedAt).toBeLessThan(10_020);
+    expect((rate?.at ?? 0) - droppedAt).toBeGreaterThanOrEqual(5000);
+    expect((rate?.at ?? 0) - droppedAt).toBeLessThan(5020);
+    expect((scaleUp?.at ?? 0) - (rate?.at ?? 0)).toBeGreaterThanOrEqual(10_000);
+    expect((scaleUp?.at ?? 0) - (rate?.at ?? 0)).toBeLessThan(10_020);
     expect((full?.at ?? 0) - (scaleUp?.at ?? 0)).toBeGreaterThanOrEqual(10_000);
     expect((full?.at ?? 0) - (scaleUp?.at ?? 0)).toBeLessThan(10_020);
-    expect((rate?.at ?? 0) - (full?.at ?? 0)).toBeGreaterThanOrEqual(5000);
-    expect((rate?.at ?? 0) - (full?.at ?? 0)).toBeLessThan(5020);
+  });
+
+  // Bug: every probe of 120 began at full scale and walked 120@1 → 120@0.85 → 120@0.75 → 60@0.75 again: three late
+  // windows and four resolution changes, each retaking the kept pictures, per failed cycle.
+  it("a GPU-bound phone that cannot hold 120 probes it at the scale it dropped at, never at full scale", () => {
+    const s = scaled();
+    const steps = screen(s, 20, 200_000);
+
+    expect(rungs(steps.slice(0, 3))).toEqual([
+      [120, 0.85, "missed"],
+      [120, 0.75, "missed"],
+      [60, 0.75, "missed"]
+    ]);
+    // Every probe and its failure stay at 0.75: no resolution changes after the way down.
+    expect(steps.slice(3).every(step => step.scale === 0.75)).toBe(true);
+    expect(rungs(steps.slice(3, 5))).toEqual([
+      [120, 0.75, "headroom"],
+      [60, 0.75, "missed"]
+    ]);
+    // One doubling per failed cycle.
+    expect(dwells(s)).toEqual([5000, 5000, 5000, 10_000, 20_000, 40_000, 80_000, 120_000]);
   });
 
   it("raises the scale when the frames are too heavy for the higher rate: the scale costs the GPU, not the main thread", () => {
@@ -244,15 +273,12 @@ describe("the back-off of a failed return", () => {
       steps.push(...screen(s, heavy ? 20 : 4, 1000 - ((s.last() - start) % 1000)));
     }
 
-    // The scale 1 fails in every heavy second: each failed return doubles the wait for the next one, up to twice the
-    // longest dwell (20, 40, 80, 160, then 240 s).
-    const climbs = steps.filter(step => step.reason === "headroom").map(step => step.at);
-    const waits = climbs.slice(1).map((at, index) => at - (climbs[index] ?? 0));
-
-    expect(waits.every((wait, index) => wait >= (waits[index - 1] ?? 0))).toBe(true);
-    expect(waits.at(-1)).toBeGreaterThanOrEqual(240_000);
-    expect(steps.length).toBeLessThanOrEqual(16);
-    expect(dwells(s).at(-1)).toBe(120_000);
+    // 120 fails in every heavy second, even at 0.75: each failed return doubles the dwell before the next one, up to
+    // the longest (10, 20, 40, 80, then 120 s), and the resolution never moves after the way down.
+    expect(dwells(s)).toEqual([
+      5000, 5000, 5000, 10_000, 20_000, 40_000, 80_000, 120_000, 120_000, 120_000, 120_000
+    ]);
+    expect(steps.slice(3).every(step => step.scale === 0.75)).toBe(true);
   });
 });
 

@@ -1,6 +1,7 @@
 /**
  * @file renderer plugin — state factory.
  */
+import { SCALE_STEPS } from "../time/rate-rules";
 import { createDemandState } from "./demand/state";
 import { createHostState } from "./host/state";
 import { createKeptState } from "./kept/state";
@@ -14,9 +15,6 @@ const RING_FRAMES = { min: 64, max: 16_384 } as const;
 
 /** The most probe draws of the warm-up a drawn frame may make. */
 const MAX_WARM = 16;
-
-/** The lowest floor of the adaptive render scale: half the resolution. */
-const MIN_SCALE = 0.5;
 
 /**
  * Tells a finite number of at least 0 from anything else a config can hold.
@@ -67,11 +65,12 @@ function checkPoolTrim(poolTrim: unknown): void {
 }
 
 /**
- * Checks the adaptive render scale of the config: `false`, or a floor from 0.5 to 1 and the devices it applies to.
+ * Checks the adaptive render scale of the config: `false`, or a floor that is a step of the scale and the devices it
+ * applies to.
  *
  * @param adaptiveScale - What the config holds.
- * @throws {Error} When it is neither `false` nor an object, the floor is outside 0.5 to 1, or the devices are neither
- *   `"phone"` nor `"all"`.
+ * @throws {Error} When it is neither `false` nor an object, the floor is not 1, 0.85, 0.75, 0.6 or 0.5, or the
+ *   devices are neither `"phone"` nor `"all"`.
  */
 function checkAdaptiveScale(adaptiveScale: unknown): void {
   if (adaptiveScale === false) return;
@@ -85,10 +84,10 @@ function checkAdaptiveScale(adaptiveScale: unknown): void {
   const floor = "floor" in adaptiveScale ? adaptiveScale.floor : undefined;
   const devices = "devices" in adaptiveScale ? adaptiveScale.devices : undefined;
 
-  if (typeof floor !== "number" || !(floor >= MIN_SCALE && floor <= 1)) {
+  if (typeof floor !== "number" || !SCALE_STEPS.includes(floor)) {
     throw new Error(
       `[game] renderer.adaptiveScale.floor is ${String(floor)}.\n` +
-        "  Give the lowest share of the resolution, from 0.5 to 1."
+        "  Give a step of the scale: 1, 0.85, 0.75, 0.6 or 0.5."
     );
   }
 

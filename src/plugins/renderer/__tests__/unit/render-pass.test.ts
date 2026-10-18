@@ -188,6 +188,34 @@ describe("the lazy canvas pass", () => {
     expect(stage.gpu.passes.map(pass => pass.load)).toEqual(["clear", "clear", "load"]);
   });
 
+  // Bug: a second backdrop's copy of a canvas whose clear was already paid began and ended an empty pass first, one
+  // more store and reload of the whole canvas on a tiled GPU.
+  it("begins no empty pass before a copy of a canvas that owes nothing", () => {
+    const stage = lazyStage();
+
+    // A frame that ends on the canvas: the next one binds it again with no target change.
+    stage.frame(stage.draw);
+
+    const from = stage.gpu.log.length;
+    const passes = stage.gpu.passes.length;
+
+    stage.frame(() => {
+      stage.copyCanvas();
+      stage.copyCanvas();
+      stage.draw();
+    });
+
+    expect(stage.gpu.log.slice(from)).toEqual([
+      "begin canvas",
+      "end",
+      "copy canvas",
+      "copy canvas",
+      "begin canvas",
+      "end"
+    ]);
+    expect(stage.gpu.passes.slice(passes).map(pass => pass.load)).toEqual(["clear", "load"]);
+  });
+
   it("keeps the stencil a mask was drawn into across a filter inside the mask", () => {
     const stage = lazyStage();
 
