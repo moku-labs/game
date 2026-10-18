@@ -15,7 +15,7 @@ import { type ExtrasApp, startExtrasApp, Tally } from "../extras-app";
 /**
  * Mounts the bound screen and runs its first frame: the reconcile and the first solve.
  *
- * @returns The running app, the screen solved once and `text` not run on it yet.
+ * @returns The running app, the screen solved once and its labels resolved after the solve.
  */
 async function mountBound(): Promise<ExtrasApp> {
   const app = await startExtrasApp();
@@ -93,11 +93,12 @@ describe("a bound text sized by the string it shows", () => {
     await app.stop();
   });
 
-  it("asks for no second solve when text first resolves the string it was measured with", async () => {
+  it("shows the string it was measured with in its spawn frame, and asks for no second solve", async () => {
     const app = await mountBound();
     const solves = app.world.ecs.resource(UiCounters).solves;
 
-    expect(shown(app)).toBe("");
+    // F22: text resolves the label right after the layout flush that attached it.
+    expect(shown(app)).toBe("9");
 
     app.time.step(16);
 

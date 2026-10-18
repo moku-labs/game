@@ -51,6 +51,6 @@ export const textPlugin = /*#__PURE__*/ createPlugin("text", {
   api: createTextApi,
   hooks: createHandlers,
   onStart: startText,
-  // @no-resource-check — onStop removes the system, the two world hooks and the display adapter.
+  // @no-resource-check — onStop removes the system, the layout step, the world hooks and the adapter.
   onStop: ({ state }) => stopText(state)
 });

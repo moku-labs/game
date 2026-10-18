@@ -129,7 +129,7 @@ app.scenes.current(); // "home"
 | 8 | `named` = the scene's `bundle` and its `bundles` of the committed state. A throw rejects before any load |
 | 9 | `assets.load` for every name at once, all awaited, raced against the node's abort signal. The first failure rejects |
 | 10 | Aborted: return. Nothing was touched, the old scene is still there |
-| 11 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` → `world.ecs.setScene(id)` → `named` → `assets.sceneBundles(named)` → `time.wake()` → `scenes:changed` |
+| 11 | One synchronous block: `setLayers` → `unmount` what only the old scene lists → `mount` the new scene's list (a projection both list stays, see below) → `current` → `world.ecs.setScene(id)` → `named` → `assets.sceneBundles(named)` → `time.wake()` → `scenes:changed` |
 
 **The scene of the systems.** `world.ecs.setScene(id)` in the block above tells the world which scene is mounted, so a system with `scenes: ["board"]` runs while the board is mounted, and while it leaves: the world keeps the scene before as leaving until nothing carries `Exiting` any more (world README, "When a system runs"). A failed or aborted switch returns before the block, so the world keeps the old scene.
 
@@ -143,17 +143,59 @@ app.scenes.current(); // "home"
 | Abort during the load | The callback returns. A rejection would be a node failure; `flow` handles the abort itself |
 | Bundle load fails | The callback rejects. `flow` rolls back, emits `flow:error` and re-enters the rest node, whose scene is still mounted |
 | `mount` throws | Same path as a failed load |
-| Shared projection in both scenes | Unmounted and mounted again. A diff by name is a later optimisation |
+| Shared projection in both scenes | Stays mounted when both declare its layers alike: the same entities, no exit and no enter, its motions run on, and its screen roots move to their place in the new list. Declared otherwise: unmounted and mounted again ("A projection both scenes list") |
 | Fast walk | Transit nodes only record. The switch happens once per rest point, and a headless run really mounts |
 | `restore`, rollback, deep link | Same path: the node is entered and the scene is built from the declaration. A restore target that names no scene keeps the current scene, so checkpoints name theirs |
 | Restore at a scene with `bundles` | The store holds the bookmark's state before the node's stages run, so the switch reads `bundles` from the restored session: the ward of `ep02` is mounted once `location` and `ep02` are in, before the gate opens, and `ep01` is never fetched. `flow.restore` of a rest node resolves before the stages; `await app.flow.walk([])` returns with the scene standing |
 | Safe-node recovery | The recovery edge is committed before the stages. A safe node that keeps the scene re-reads `bundles` from the recovered state and awaits what its `recover` named before the gate opens, without mounting again; one that mounts a scene reads it on the switch path. A `bundles` that throws at the safe node is fatal |
 | Headless, plain Bun | Everything runs. Layers are stored, projections mount, entities exist per layer. No pixels, because `renderer` is inert |
-| Leaving a scene | `unmount` flushes motions and the despawn queue at once |
+| Leaving a scene | `unmount` flushes the motions and the despawn queue of every projection only the old scene lists, at once |
 
 A load that fails after the abort is logged with `ctx.log.warn` and never thrown: nobody waits for it any more.
 
 **Known limit.** When a scene stays mounted and the committed state changes what `bundles` names (a restore of another episode while the ward is up), the projections reconcile on `model:committed` before the scene stage awaits the new bundle, so the new art may be missing for the frames of that load (the texture lookup of `assets` warns and loads it). A switch never shows a scene before its bundles are in.
+
+## A projection both scenes list
+
+A projection the leaving scene and the coming scene both list stays mounted when both declare its
+`layer`, and its `lift` when it has one, alike: the same `sort`, the same `above`, every field of
+the entry the same. A HUD the ward and the board share is not torn down and built again on every
+change: its entities keep their ids, its elements play no exit and no enter (a `"mount"` motion
+plays only for a view that comes or goes with its screen), its running motions run on, and its keys
+answer the same entities. It is not reconciled by the switch either: it follows the commits as it
+always does. The container of a layer both scenes declare stays with every view in it. Only its
+place is written again, by `mount`. A projection whose layer the coming scene declares otherwise (a
+`ui` layer sorted `"none"` on the ward and `"order"` on the board) is unmounted and mounted again,
+as before: the renderer sorts a view under the rule of its layer when it builds it, and a kept view
+would stand at its old place.
+
+The order rules of a switch, settled with this change:
+
+1. **The list decides the place.** Every projection of the coming scene draws its screen roots at
+   `Order` k − n − 1, the k-th of n: −n … −1, in list order. A kept projection takes the place of its
+   line in the new list, on its entity and in its rest pose; `ui` gives its root element that `Order`
+   in the first layout phase that runs after the switch (one switch made while the world is paused
+   lands when it runs again), so its focus ring and its hit test follow.
+2. **The layers keep the scene's order.** `setLayers` comes first: a layer both scenes declare keeps
+   its container and its views, and the containers stand in the coming scene's draw order.
+3. **A layer sorted by `"order"` draws in list order.** The `ui` layer sorts by `Order` unless the
+   scene says otherwise, so there the last listed root draws on top and is hit first, kept or not,
+   exactly as before.
+4. **The keyboard goes to the root listed last.** With no popup open, Escape and the phone's Back
+   press go to the last screen root in draw order outside the HUD layer, read by layer and
+   `Order`, never by the moment a root was mounted. "The root mounted last" of a game's notes is the
+   root listed last: a kept root listed last takes the keyboard, one listed earlier gives it up to
+   the root after it.
+5. **A layer sorted by `"none"` draws in build order.** There the views draw in the order they were
+   built: a kept projection keeps its place, and the views the switch builds come above it. Before
+   this change every projection was built again in list order. A scene that needs the list order in
+   such a layer sorts it by `"order"`; a world view draws at the `Order` its own view gives it.
+6. **The rest is as before.** What only the leaving scene lists is unmounted first, its views
+   despawned in the same call with the cause `"mount"`. What only the coming scene lists is mounted
+   in list order and reconciled at once, direct, its views coming with the cause `"mount"`.
+
+A label the coming scene spawns shows its string in its first frame (text, "The spawn frame"), so a
+HUD that is not shared does not blink either.
 
 ## Static validation of scene ids
 
@@ -178,7 +220,7 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
-| `world` | `projection.setLayers`, `projection.mount`, `projection.unmount`; `ecs.setScene` of the mounted scene |
+| `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"` |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
@@ -189,4 +231,4 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 
 ## Not in V2
 
-`flow.fx.handle("scene")`: no node needs a switch in the middle of its body. A transition effect between two scenes, and a diff of the projections two scenes share, are later work.
+`flow.fx.handle("scene")`: no node needs a switch in the middle of its body. A transition effect between two scenes is later work.

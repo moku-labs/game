@@ -20,7 +20,8 @@ export const BUDGET = {
    * U1, U2: `ui.reconcile` and `ui.solve` of an idle frame over ten roots, one of them in a slot.
    * Was 30 524 B at HEAD: the hosting step, a set and a filtered copy of the roots, two sets of
    * the solve, the slot's content box with its frame, the counters object, the viewport box, and
-   * the closure context of the popup step.
+   * the closure context of the popup step. F23 (change 2026-10-18-hud-blink) adds one identity
+   * compare of the layer list a frame, for the roots a new scene kept: still 0 B.
    */
   reconcileIdle: 0,
   /**

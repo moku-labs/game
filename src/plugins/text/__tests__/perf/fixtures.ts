@@ -17,7 +17,7 @@ import type { Entity, Owner } from "../../../world/ecs/types";
 import { withDeps } from "../../../world/lifecycle";
 import type { EcsModule } from "../../../world/types";
 import { bind, builtInStyles, Countdown, Text } from "../../components";
-import { createTextSystem } from "../../resolve";
+import { createTextFrame, createTextSystem, resolveAdded } from "../../resolve";
 import { createTextState } from "../../state";
 import type { Config, Deps, TextCtx } from "../../types";
 
@@ -133,30 +133,43 @@ function textCtx(world: MockWorld, now: Float64Array): TextCtx {
 export type Moving = "nothing" | "value" | "countdown";
 
 /**
+ * What one call of a fixture runs: phase `layout` with the text system and the clear of phase
+ * `signals`; the step `text` runs right after the layout flush alone; or the phase after a flush
+ * whose step resolved the 20 bound labels, which writes their `Text` once more.
+ */
+export type Measured = "phase" | "added" | "rewrite";
+
+/**
  * 100 labels: 80 with a plain string, 20 bound to their entity's `Counter.value` in the digits
  * style, the text system registered in phase `layout`. With `"value"`, the counter of the first
  * bound label moves by one every frame, cycling through ten values. With `"countdown"`, one more
  * label shows a `Countdown` of ten seconds in `"mm:ss"`, started again whenever it ends, and the
  * clock moves a phone's frame each frame: its time left is read every frame and its string changes
- * once a second.
+ * once a second. With `measured` `"added"` a call is the step after the layout flush with no label
+ * added, the frame every frame of a still screen runs (F22); with `"rewrite"` it is the phase
+ * after a flush whose step resolved the 20 bound labels.
  *
  * @param moving - What changes per frame.
- * @returns One frame: phase `layout`, then the clear of phase `signals`.
+ * @param measured - What one call runs; the whole phase when left out.
+ * @returns One frame: phase `layout`, then the clear of phase `signals`; or the step after the
+ *   layout flush.
  */
-export function resolveFixture(moving: Moving): () => void {
+export function resolveFixture(moving: Moving, measured: Measured = "phase"): () => void {
   const world = createMockWorld();
   const ecs = stableEcs(world);
   const now = new Float64Array([CLOCK_START_MS]);
   const ctx = textCtx(world, now);
   const time: Time = { delta: 16.6, elapsed: 0, scale: 1, frame: 1, idle: false };
+  const textFrame = createTextFrame(ctx);
 
-  world.api.ecs.system(createTextSystem(ctx));
+  world.api.ecs.system(createTextSystem(ctx, textFrame));
 
   for (let index = 0; index < PLAIN; index += 1) {
     world.api.ecs.spawn(OWNER, [Text({ content: `label ${index}` })]);
   }
 
   let first: Entity | undefined;
+  const bound: Entity[] = [];
 
   for (let index = 0; index < BOUND; index += 1) {
     const entity = world.api.ecs.spawn(OWNER, [
@@ -165,6 +178,7 @@ export function resolveFixture(moving: Moving): () => void {
     ]);
 
     first ??= entity;
+    bound.push(entity);
   }
 
   const timer = world.api.ecs.spawn(OWNER, [
@@ -202,5 +216,24 @@ export function resolveFixture(moving: Moving): () => void {
 
   for (let index = 0; index < WARM_FRAMES; index += 1) frame();
 
-  return frame;
+  if (measured === "phase") return frame;
+
+  if (measured === "rewrite") {
+    // As the step after a flush lists them: into the kept list, whose store has grown already.
+    const again = (): void => {
+      for (const entity of bound) ctx.state.rewrite.push(entity);
+      frame();
+    };
+
+    for (let index = 0; index < WARM_FRAMES; index += 1) again();
+
+    return again;
+  }
+
+  // The labels came before the first phase: its run emptied the list, and nothing comes after.
+  const step = (): void => resolveAdded(ctx, textFrame);
+
+  for (let index = 0; index < WARM_FRAMES; index += 1) step();
+
+  return step;
 }

@@ -31,5 +31,17 @@ export const BUDGET = {
    * (clock's code, once a frame while a countdown label lives), and ~4 B the string of each new
    * second with its two patches and its key, spread over the 60 frames of the second.
    */
-  textResolveCountdown: 20
+  textResolveCountdown: 20,
+  /**
+   * F22: the step after the layout flush in a frame where no label came, over the 100 labels of
+   * the idle fixture. New with change 2026-10-18-hud-blink: one length read of the list of the
+   * labels that came, and nothing else.
+   */
+  textAddedIdle: 0,
+  /**
+   * F22: the idle phase in the frame after a flush whose step resolved the 20 bound labels: their
+   * `Text` is written once more, with no field, so `ui` measures the string they show. New with
+   * change 2026-10-18-hud-blink: one frozen empty patch for every write, nothing kept.
+   */
+  textRewrite: 0
 } as const;

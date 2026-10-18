@@ -100,13 +100,14 @@ describe("startText", () => {
     expect([...mock.state.styles.keys()]).toEqual(["body", "digits"]);
   });
 
-  it("registers the layout system, the two world hooks and the adapter", () => {
+  it("registers the layout system, the step after the layout flush, the two world hooks and the adapter", () => {
     const mock = withFeatures();
 
     expect(mock.world.systems.map(system => system.name)).toEqual(["text.resolve"]);
     expect(mock.world.systems[0]?.phase).toBe("layout");
+    expect(mock.frames.map(frame => frame.phase)).toEqual(["layout"]);
     expect(mock.renderer.provided).toHaveLength(1);
-    expect(mock.state.removers).toHaveLength(4);
+    expect(mock.state.removers).toHaveLength(5);
   });
 });
 

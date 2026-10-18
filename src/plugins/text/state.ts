@@ -50,6 +50,8 @@ export function createTextState(): State {
     cache: emptyMap(),
     drawn: emptyWeakMap(),
     dirty: emptySet(),
+    added: [],
+    rewrite: [],
     generation: 0,
     warned: emptySet(),
     removers: []

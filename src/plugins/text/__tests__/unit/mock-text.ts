@@ -15,7 +15,7 @@ import type { FeatureDescription, Api as FlowApi } from "../../../flow/types";
 import type { I18nApi, Message, Part } from "../../../i18n/types";
 import type { DisplayAdapter } from "../../../renderer/sync/types";
 import type { PixiModule, PixiTexture, Api as RendererApi } from "../../../renderer/types";
-import type { Api as TimeApi } from "../../../time/types";
+import type { FrameCallback, Phase, Api as TimeApi } from "../../../time/types";
 import type {
   AnyComponent,
   AnyComponentType,
@@ -145,6 +145,8 @@ function createFakePixi(): PixiModule {
 export type FakeWorld = {
   api: WorldApi;
   systems: AnySystem[];
+  /** What `ecs.mode()` answers: `"live"` until a case pauses the world. */
+  mode: "live" | "paused" | "fast";
   writes: Array<{ entity: Entity; component: string; patch: Record<string, unknown> }>;
   /** Writes a component value and fires the `onAdded` listeners of that component. */
   put(entity: Entity, component: ComponentHandle<object>, value: object): void;
@@ -167,6 +169,7 @@ function createFakeWorld(): FakeWorld {
   const removed = new Map<string, Array<(entity: Entity, value: object) => void>>();
   const systems: AnySystem[] = [];
   const writes: FakeWorld["writes"] = [];
+  const fake = { mode: "live" as FakeWorld["mode"] };
 
   const storeOf = (name: string): Map<Entity, Record<string, unknown>> => {
     const store = stores.get(name) ?? new Map<Entity, Record<string, unknown>>();
@@ -250,12 +253,19 @@ function createFakeWorld(): FakeWorld {
     onRemoved: (
       component: { componentName: string },
       fn: (entity: Entity, value: object) => void
-    ): (() => void) => subscribe(removed, component, fn)
+    ): (() => void) => subscribe(removed, component, fn),
+    mode: (): FakeWorld["mode"] => fake.mode
   };
 
   return {
     api: { ecs } as unknown as WorldApi,
     systems,
+    get mode(): FakeWorld["mode"] {
+      return fake.mode;
+    },
+    set mode(mode: FakeWorld["mode"]) {
+      fake.mode = mode;
+    },
     writes,
     put: (entity: Entity, component: ComponentHandle<object>, value: object): void => {
       types.set(component.componentName, component as unknown as AnyComponent);
@@ -433,10 +443,17 @@ export type MockText = {
   /** Stands in for the page reload a failed font replace calls. */
   reload: Mock<() => void>;
   hooks: ReturnType<typeof createHandlers>;
+  /** Every `time.onFrame` registration of the plugin, in registration order. */
+  frames: Array<{ phase: Phase; callback: FrameCallback }>;
   start(): void;
   stop(): void;
   /** Runs the one world system `text` registered, the way `world` runs a phase. */
   step(): void;
+  /**
+   * Runs the `time.onFrame("layout")` callbacks of the plugin: what `text` does once the world's
+   * layout phase and its command flush are over, before phase `sync`.
+   */
+  afterLayout(): void;
 };
 
 /** Creates the engine log as spies. */
@@ -490,7 +507,21 @@ export function createMockText(
   const flow = {
     features: { all: () => options.features ?? [] }
   } as unknown as FlowApi;
-  const time = { wake } as unknown as TimeApi;
+  const frames: MockText["frames"] = [];
+  const time = {
+    wake,
+    onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {
+      const registration = { phase, callback };
+
+      frames.push(registration);
+
+      return (): void => {
+        const at = frames.indexOf(registration);
+
+        if (at !== -1) frames.splice(at, 1);
+      };
+    }
+  } as unknown as TimeApi;
 
   const apis: Record<string, unknown> = {
     time,
@@ -527,6 +558,7 @@ export function createMockText(
     wake,
     reload,
     hooks: createHandlers(kernel as unknown as Parameters<typeof createHandlers>[0], reload),
+    frames,
     start: (): void => startText(kernel as unknown as Parameters<typeof startText>[0]),
     stop: (): void => stopText(state),
     step: (): void => {
@@ -536,6 +568,11 @@ export function createMockText(
           undefined as unknown as Parameters<AnySystem["run"]>[1]
         );
       }
+    },
+    afterLayout: (): void => {
+      const time = { delta: 16, elapsed: 0, scale: 1, frame: 1, idle: false };
+
+      for (const { phase, callback } of frames) if (phase === "layout") callback(time);
     }
   };
 }

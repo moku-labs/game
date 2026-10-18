@@ -12,7 +12,14 @@ import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { builtInStyles, readStyle, Text } from "./components";
 import { createTextAdapter, installFonts } from "./display";
-import { createTextSystem, forgetText, markDirty } from "./resolve";
+import {
+  createTextFrame,
+  createTextSystem,
+  forgetText,
+  markDirty,
+  noteAdded,
+  resolveAdded
+} from "./resolve";
 import type { Deps, KernelSlice, State, TextCtx, TextStyles } from "./types";
 
 /** The owner of the two built-in styles, which no feature can collide with. */
@@ -151,9 +158,12 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
 }
 
 /**
- * Opens what the plugin owns: the style table, the font keys, the layout system, the two world
- * hooks of `Text` and the display adapter. The fonts of a bundle that is already loaded are read
- * at once, because the boot bundle lands before this runs.
+ * Opens what the plugin owns: the style table, the font keys, the layout system, the step after
+ * the layout flush, the two world hooks of `Text` and the display adapter. The step is a frame
+ * callback of phase `layout`: `world` registered its own in its `onStart`, which runs before this
+ * one (`text` depends on `world`), so the step runs after the world's layout phase and its flush,
+ * and before phase `sync`. The fonts of a bundle that is already loaded are read at once, because
+ * the boot bundle lands before this runs.
  *
  * @param ctx - Kernel context of the text plugin.
  * @throws {Error} When two features define the same style name.
@@ -161,15 +171,15 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
 export function startText(ctx: KernelSlice): void {
   const tctx = withDeps(ctx);
   const ecs = tctx.deps.world.ecs;
+  const frame = createTextFrame(tctx);
 
   buildStyles(tctx);
   collectFonts(tctx);
 
   tctx.state.removers.push(
-    ecs.system(createTextSystem(tctx)),
-    ecs.onAdded(Text, entity => {
-      tctx.state.dirty.add(entity);
-    }),
+    ecs.system(createTextSystem(tctx, frame)),
+    tctx.deps.time.onFrame("layout", () => resolveAdded(tctx, frame)),
+    ecs.onAdded(Text, entity => noteAdded(tctx, entity)),
     ecs.onRemoved(Text, entity => {
       forgetText(tctx.state, entity);
     }),
@@ -180,8 +190,9 @@ export function startText(ctx: KernelSlice): void {
 }
 
 /**
- * Closes what the plugin opened: the system, the two world hooks and the adapter. The Pixi
- * objects the adapter built are the renderer's, and it frees them in its own teardown.
+ * Closes what the plugin opened: the system, the step after the layout flush, the two world hooks
+ * and the adapter. The Pixi objects the adapter built are the renderer's, and it frees them in its
+ * own teardown.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
  */
@@ -199,5 +210,7 @@ export function stopText(state: State): void {
   state.measured.clear();
   state.cache.clear();
   state.dirty.clear();
+  state.added.length = 0;
+  state.rewrite.length = 0;
   state.warned.clear();
 }
