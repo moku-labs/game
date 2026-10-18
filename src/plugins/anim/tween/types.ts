@@ -95,11 +95,20 @@ export type Track = {
    */
   readonly reveals: "alpha" | "place" | "both" | undefined;
   /**
-   * The patch the track writes, one per track with every field of `to` in it: a frame fills it in
-   * place instead of building one. A field the frame leaves alone carries its stored value back.
-   * Rebuilt when the track loses a field.
+   * The patch the track writes when a frame moves every field, one per track with every field of
+   * `to` in it: a frame fills it in place instead of building one. Rebuilt when the track loses a
+   * field.
    */
   patch: Record<string, unknown>;
+  /**
+   * The patch of a frame that moves only some fields (another writer holds one, or one stands
+   * still): exactly the fields `partialMoved` flags, filled in place by the next frame that moves
+   * the same ones and built again when they change, so a field the track lost, which never moves
+   * again, is never in it. `undefined` until the first such frame.
+   */
+  partial: Record<string, unknown> | undefined;
+  /** The `moved` flags `partial` was built for, by slot. */
+  readonly partialMoved: Uint8Array;
 };
 
 /**

@@ -48,5 +48,22 @@ export const BUDGET = {
   // Pixi laying the label out again (its graphics context's instructions and the layout), not the engine's.
   sdfTextUpdate: 2900,
   // `rootPoseInto` for effects' E2: `rootPoseOf` made 600 B through the same chain of three.
-  rootPoseInto: 0
+  rootPoseInto: 0,
+  // E1: before 320 B (Pixi's generated sync read every text's `uDistance` through an accessor laid per text over its
+  // data property, which sent each uniforms object to dictionary mode: a boxed double per text per frame). Now one
+  // accessor pair shared by every text, and a still text hands back its last answer, boxed once.
+  sdfUniformsSync: 0,
+  // E4: before 2 352 B (the held answers cleared at every pass, `for…of` over Pixi's frozen filter lists, Pixi's `alpha`
+  // boxed at every node of every walk). Now an answer stands while `passesVersion` does.
+  unseenStill: 0,
+  // E4: before 2 352 B, the same walks. Now every view walked again reads the engine's records and indexes the lists.
+  unseenMoving: 0,
+  // E5: before 3 441 B (`for…of` over each record's frozen slot list in the stack read, the blend check and the
+  // refresh). Now a calm frame draws a kept record that owes nothing as it stands.
+  keptFlushQuiet: 0,
+  // E5: before 3 444 B, the same lists. Now walked by index.
+  keptFlushStepped: 0,
+  // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
+  // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
+  filterSwitchStill: 0
 } as const;

@@ -10,11 +10,12 @@ import { timePlugin } from "../time";
 import { createModules } from "./api";
 import { Now } from "./ecs/define";
 import { recordFrame, resetHistory } from "./ecs/history";
+import { openScope, reportNeverActive, resetScope, scopeOf } from "./ecs/scope";
 import { registerType } from "./ecs/storage";
-import { startTiming } from "./ecs/systems";
+import { registerSystem, startTiming } from "./ecs/systems";
 import type { AnyComponentType, AnySystem } from "./ecs/types";
 import type { AnyProjectionSpec } from "./projection/types";
-import type { Deps, EcsModule, KernelSlice, ProjectionModule, State, WorldCtx } from "./types";
+import type { Deps, KernelSlice, ProjectionModule, State, WorldCtx } from "./types";
 
 /**
  * Resolves the dependency APIs `time`, `model`, `flow` and `clock` with `ctx.require`.
@@ -131,24 +132,38 @@ function registerEach<Entry>(
 
 /**
  * Registers what every feature brought, in feature order: components first, so their schema is
- * known, then systems, then projections.
+ * known, then systems, then projections. A feature's index is its place in the list: the systems
+ * of a feature with `systemsRun: "active"` carry it as their scope, and each projection is counted
+ * for it (rule V). A dev build warns about a feature nothing can make active.
  *
  * @param ctx - Domain context of the world plugin.
- * @param ecs - The ecs module.
  * @param projection - The projection module.
  */
-function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionModule): void {
-  for (const feature of ctx.deps.flow.features.all()) {
+function registerFeatures(ctx: WorldCtx, projection: ProjectionModule): void {
+  const projections = ctx.state.ecs.scope.projections;
+
+  for (const [at, feature] of ctx.deps.flow.features.all().entries()) {
+    const scope = scopeOf(ctx, at, feature);
+
     registerEach(ctx, feature, "components", isComponentEntry, entry => registerType(ctx, entry));
-    registerEach(ctx, feature, "systems", isSystemEntry, entry => ecs.system(entry));
-    registerEach(ctx, feature, "projections", isProjectionEntry, entry =>
-      projection.register(entry)
+    registerEach(ctx, feature, "systems", isSystemEntry, entry =>
+      registerSystem(ctx, entry, scope)
     );
+    registerEach(ctx, feature, "projections", isProjectionEntry, entry => {
+      projection.register(entry);
+      projections.set(entry.name, at);
+    });
+
+    // Inline and positive, as the frame history below: a production `define` drops the check.
+    if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+      reportNeverActive(ctx, feature);
+    }
   }
 }
 
 /**
- * Connects the world in `onStart`: it reads every feature description, registers the five frame
+ * Connects the world in `onStart`: it sizes the scope to the features, reads every feature
+ * description, registers the five frame
  * callbacks of the phases and listens to the released hints. In a dev build the `signals`
  * callback records the frame history before it clears the change sets; in an agent build the
  * timing table starts with the page clock of `time` and the `input` callback zeroes it each
@@ -174,7 +189,8 @@ export function connectWorld(ctx: KernelSlice): void {
     if (clock !== undefined) startTiming(worldCtx.state.ecs, clock);
   }
 
-  registerFeatures(worldCtx, ecs, projection);
+  openScope(worldCtx);
+  registerFeatures(worldCtx, projection);
   ecs.resource(Now).now = clock.now();
 
   worldCtx.state.ecs.offFrame.push(
@@ -211,7 +227,8 @@ export function connectWorld(ctx: KernelSlice): void {
 
 /**
  * Empties the world in `onStop`: the frame callbacks and the hint listener are removed, then
- * every track, view, queued view, entity and resource is dropped and the frame history is reset.
+ * every track, view, queued view, entity and resource is dropped, the scope and the frame history
+ * are reset.
  * No `onRemoved` fires, because `renderer` stopped earlier and destroyed its own objects.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
@@ -265,5 +282,6 @@ export function clearWorld(state: State): void {
   state.ecs.mode = "live";
   state.ecs.timing = undefined;
   state.ecs.timingSlots.clear();
+  resetScope(state.ecs.scope);
   resetHistory(state.ecs);
 }

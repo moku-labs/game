@@ -26,6 +26,13 @@ export const BUDGET = {
    * it the numbers handed to world (`MOVED_FIELD`).
    */
   animTracks: 75 * MOVED_FIELD,
+  /**
+   * 50 tracks whose `y` a hand holds, 50 fields moved per frame (E6, change
+   * 2026-10-18-render-path-garbage). Before: 3 601 B, a new patch of the moved fields per track.
+   * Now 50 × 16 = 800 B, all of it the numbers handed to world (`MOVED_FIELD`): the track keeps
+   * its patch of the moved fields.
+   */
+  animTracksPartial: 50 * MOVED_FIELD,
   /** 10 timelines that only wait. Before: 822 B. Now 0. */
   timelinesWaiting: 0,
   /**
@@ -33,5 +40,10 @@ export const BUDGET = {
    * step writes a texture key, no number). Before: 8 553 B. Now 20 × 16 = 320 B, all of it the
    * numbers handed to world (`MOVED_FIELD`).
    */
-  timelines: 20 * MOVED_FIELD
+  timelines: 20 * MOVED_FIELD,
+  /**
+   * One eased time on a curve of `cubicBezier`, a design curve and one that leaves vertically (E6).
+   * Before, the game's own `cubicBezier` solved the curve by Newton at every call: 48 B. Now 0.
+   */
+  cubicBezier: 0
 } as const;

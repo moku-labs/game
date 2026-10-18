@@ -12,7 +12,7 @@ import { createMonitorApi } from "./monitor/api";
 import { installCounting, installPassCounting } from "./monitor/draw-calls";
 import { createSyncApi } from "./sync/api";
 import { applyFilters, clearFilters, renderPassesOf } from "./sync/filters";
-import { hiddenBy, hiddenOnlyAmong, liftFor, swapHidden } from "./sync/hidden";
+import { hiddenBy, hiddenOnlyAmong, liftFor, swapHidden, transparentNode } from "./sync/hidden";
 import type { SyncApi, SyncWriters } from "./sync/types";
 import type { Api, HostModule, KernelSlice, Modules, RendererCtx, SyncModule } from "./types";
 import { createViewportApi } from "./viewport/api";
@@ -70,7 +70,12 @@ export function createModules(ctx: RendererCtx): Modules {
     installPasses: pixi => installPassCounting(pixi, ctx.state.monitor.sinks)
   });
   const viewport = createViewportApi(ctx, { host });
-  const demand = createDemandApi(ctx, { host, views: ctx.state.sync.views, hiddenBy });
+  const demand = createDemandApi(ctx, {
+    host,
+    views: ctx.state.sync.views,
+    hiddenBy,
+    transparent: node => transparentNode(ctx.state.sync, node)
+  });
   // `kept` is built before `sync`: its wrap reaches `sync` through this holder, filled below, first called in a flush.
   const built: { sync?: SyncModule } = {};
   const kept = createKeptApi(ctx, {

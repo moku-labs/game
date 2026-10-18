@@ -14,6 +14,16 @@ function emptyRegistry(): Map<string, SceneDefinition> {
 }
 
 /**
+ * Creates the table of which feature declared which scene, for the same reason as
+ * `emptyRegistry`.
+ *
+ * @returns An empty table of scene id to feature name.
+ */
+function emptyOwners(): Map<string, string> {
+  return new Map();
+}
+
+/**
  * Creates the one owner every mount of this plugin carries. One is enough: a single scene is
  * mounted at a time and `unmount` is what flushes.
  *
@@ -24,8 +34,8 @@ function sceneOwner(): SceneOwner {
 }
 
 /**
- * Creates the initial scenes state: nothing declared, nothing mounted, nothing pending. The
- * registry is filled in `onStart` from the feature descriptions.
+ * Creates the initial scenes state: nothing declared, nothing mounted, nothing pending, nothing
+ * held. The registry and its owners are filled in `onStart` from the feature descriptions.
  *
  * @returns A fresh state, owned by one app.
  */
@@ -36,6 +46,8 @@ export function createScenesState(): State {
     pending: undefined,
     named: [],
     owner: sceneOwner(),
-    teardown: undefined
+    teardown: undefined,
+    owners: emptyOwners(),
+    held: undefined
   };
 }

@@ -19,7 +19,8 @@ export const NOT_THROUGH = -1;
 export function slotsPadding(slots: readonly FilterSlot[]): number {
   let pad = 0;
 
-  for (const slot of slots) pad += slot.filter.padding;
+  // per walk through a kept top: a frozen list, walked by index (`for…of` allocates over a frozen array).
+  for (let index = 0; index < slots.length; index += 1) pad += slots[index]?.filter.padding ?? 0;
 
   return pad;
 }

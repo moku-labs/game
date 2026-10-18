@@ -84,8 +84,107 @@ const PROGRAM_NAME = "sdf-shader-single-alpha";
  * ```
  */
 function scaleOf(linear: Linear): number {
-  return (Math.hypot(linear.a, linear.b) + Math.hypot(linear.c, linear.d)) / 2;
+  const { a, b, c, d } = linear;
+
+  // per draw: the square root of the squares, as Pixi's own; `Math.hypot` takes its arguments as a list.
+  // eslint-disable-next-line unicorn/prefer-modern-math-apis -- the hot path's form, E1.
+  return (Math.sqrt(a * a + b * b) + Math.sqrt(c * c + d * d)) / 2;
 }
+
+/**
+ * The key the state of a text's `uDistance` hangs under on its uniforms: a symbol, not enumerable, so Pixi's walk of
+ * the uniforms (`for…in` on WebGL) and a deep compare see the four uniforms alone.
+ */
+const DISTANCE = Symbol("sdf-text-distance");
+
+/** What the `uDistance` accessor of one text reads and writes. */
+type DistanceState = {
+  /**
+   * `[0]`: Pixi's last write, CSS px; `[1]`: that write per unit of the group scale it was made with, 0 when none is
+   * known; `[2]`: the last answer of a read, `NaN` before the first. Doubles in a typed array: a write or a read of
+   * them boxes nothing.
+   */
+  readonly cell: Float64Array;
+  /** The text of Pixi's last write. */
+  text: TextTransforms | undefined;
+  /** The text whose distance Pixi writes now, held by the pipe. */
+  readonly writing: Readonly<Writing>;
+  /** What the device pixels per CSS pixel are read from at each draw: the renderer. */
+  readonly density: { readonly resolution: number };
+  /**
+   * The last answer of a read, `cell[2]` as the number V8 boxed it into once; `undefined` before the first. A field that
+   * starts as `undefined` keeps its numbers boxed, so it is handed back as it is: a double computed and returned to
+   * Pixi's sync, which may not inline the getter, is boxed again at every draw (16 B a text a frame).
+   */
+  answer: number | undefined;
+};
+
+/** The local uniforms of one text in the order of the WGSL struct, the state of `uDistance` under its symbol. */
+type TextUniforms = {
+  uColor: Float32Array<ArrayBuffer>;
+  uTransformMatrix: InstanceType<PixiModule["Matrix"]>;
+  uDistance: number;
+  uRound: number;
+  readonly [DISTANCE]: DistanceState;
+};
+
+/**
+ * Pixi's read of `uDistance`, at every upload: the distance per unit of scale at the text's world scale, or Pixi's last
+ * write without one, times the renderer's resolution.
+ *
+ * @param this - The text's uniforms.
+ * @returns The distance in device pixels.
+ */
+function readDistance(this: TextUniforms): number {
+  const state = this[DISTANCE];
+  const perScale = state.cell[1] ?? 0;
+  const text = state.text;
+  const css =
+    text === undefined || perScale === 0
+      ? (state.cell[0] ?? 0)
+      : perScale * scaleOf(text.worldTransform);
+  const distance = css * state.density.resolution;
+  const answer = state.answer;
+
+  // per draw: a still text hands back its last answer, boxed once. Compared through the cell, not the field: a number
+  // compare would unbox the field, and V8 would box the return again.
+  if (answer !== undefined && distance === state.cell[2]) return answer;
+
+  state.cell[2] = distance;
+  state.answer = distance;
+
+  return distance;
+}
+
+/**
+ * Pixi's write of `uDistance`, at a layout: the CSS distance and, while the pipe names the text, the distance per unit
+ * of its group scale.
+ *
+ * @param this - The text's uniforms.
+ * @param value - Pixi's distance, CSS px.
+ */
+function writeDistance(this: TextUniforms, value: number): void {
+  const state = this[DISTANCE];
+  const text = state.writing.text;
+  const scale = text === undefined ? 0 : scaleOf(text.groupTransform);
+
+  state.cell[0] = value;
+  state.cell[1] = scale > 0 ? value / scale : 0;
+  state.text = text;
+}
+
+/**
+ * The `uDistance` of every text's uniforms: one pair of functions, so every uniforms object has the same hidden class
+ * and Pixi's generated sync function reads it monomorphic. A pair made per text, or an accessor laid over Pixi's data
+ * property, sends each object to dictionary mode. The getter hands a still text's answer back boxed once (`answer`):
+ * Pixi's sync may not inline it.
+ */
+const DISTANCE_ACCESSOR: PropertyDescriptor = {
+  enumerable: true,
+  configurable: true,
+  get: readDistance,
+  set: writeDistance
+};
 
 /**
  * The local uniforms of one text, in the order of the WGSL struct, at Pixi's starting values. The
@@ -107,6 +206,9 @@ function scaleOf(linear: Linear): number {
  * keeps the distance per unit of the group scale it was made with; a read answers that times the
  * text's world scale. A write without a text, or at a group scale of 0, is answered as Pixi wrote it.
  *
+ * The uniforms object is the renderer's own, made in one shape for every text with the one accessor pair
+ * `DISTANCE_ACCESSOR`, in place of the one Pixi's group made.
+ *
  * @param pixi - The loaded Pixi module.
  * @param density - What the device pixels per CSS pixel are read from at each draw: the renderer.
  * @param density.resolution - The renderer's resolution, read at each upload.
@@ -124,28 +226,24 @@ function createLocalUniforms(
     uDistance: { value: 4, type: "f32" },
     uRound: { value: 0, type: "f32" }
   });
-  // Pixi's starting value, the one the group was made with.
-  let css = 4;
-  // The text of Pixi's last write, and the distance per unit of its group scale then; 0 when none is known.
-  let text: TextTransforms | undefined;
-  let perScale = 0;
+  const values = group.uniforms;
+  // Pixi's starting value, the one the group was made with, and no scale known.
+  const state: DistanceState = {
+    cell: Float64Array.of(4, 0, Number.NaN),
+    text: undefined,
+    writing,
+    density,
+    answer: undefined
+  };
+  const uniforms = {
+    uColor: values.uColor,
+    uTransformMatrix: values.uTransformMatrix,
+    uRound: values.uRound
+  };
 
-  Object.defineProperty(group.uniforms, "uDistance", {
-    enumerable: true,
-    get: (): number => {
-      const hasScale = text !== undefined && perScale !== 0;
-      const distance =
-        hasScale && text !== undefined ? perScale * scaleOf(text.worldTransform) : css;
-      return distance * density.resolution;
-    },
-    set: (value: number): void => {
-      const scale = writing.text === undefined ? 0 : scaleOf(writing.text.groupTransform);
-
-      css = value;
-      text = writing.text;
-      perScale = scale > 0 ? value / scale : 0;
-    }
-  });
+  Object.defineProperty(uniforms, "uDistance", DISTANCE_ACCESSOR);
+  Object.defineProperty(uniforms, DISTANCE, { value: state });
+  group.uniforms = uniforms as TextUniforms;
 
   return group;
 }

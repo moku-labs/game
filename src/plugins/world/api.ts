@@ -27,7 +27,8 @@ export function createModules(ctx: WorldCtx): {
   const ecs = createEcsApi(ctx);
   const projection = createProjectionApi(ctx, {
     ecs,
-    components: WORLD_COMPONENTS
+    components: WORLD_COMPONENTS,
+    views: { came: ecs.viewCame, left: ecs.viewLeft, cleared: ecs.viewsCleared }
   });
 
   return { ecs, projection };
@@ -65,6 +66,8 @@ function withKeys(diff: FrameDiff, ecs: EcsModule, projection: ProjectionModule)
 function exposeEcs(ecs: EcsModule, projection: ProjectionModule): EcsApi {
   return {
     system: ecs.system,
+    hold: ecs.hold,
+    isActive: ecs.isActive,
     spawn: ecs.spawn,
     despawn: ecs.despawn,
     despawnOwnedBy: ecs.despawnOwnedBy,

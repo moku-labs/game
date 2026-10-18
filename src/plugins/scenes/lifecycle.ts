@@ -41,23 +41,16 @@ export function withDeps(ctx: KernelSlice): ScenesCtx {
 }
 
 /**
- * Records which feature declared which scene, so a duplicate id can name both of them.
- *
- * @returns An empty table of scene id to feature name.
- */
-function emptyOwners(): Map<string, string> {
-  return new Map();
-}
-
-/**
- * Reads the `scenes` key of every registered feature into the registry. Features register in
- * their own `onInit`, which runs before this `onStart`, so every scene of the game is here.
+ * Reads the `scenes` key of every registered feature into the registry, and which feature declared
+ * each scene: a duplicate id names both, and the switch holds the declaring feature while its
+ * scene is mounted. Features register in their own `onInit`, which runs before this `onStart`, so
+ * every scene of the game is here.
  *
  * @param ctx - Domain context of the plugin.
  * @throws {Error} When two features declare the same scene id.
  */
 function readScenes(ctx: ScenesCtx): void {
-  const owners = emptyOwners();
+  const owners = ctx.state.owners;
 
   for (const feature of ctx.deps.flow.features.all()) {
     const list: unknown = feature.description.scenes;
@@ -105,9 +98,9 @@ export function startScenes(ctx: KernelSlice): void {
 }
 
 /**
- * Removes the `onEnter` callback in `onStop` and forgets every scene and the bundles the mounted
- * one named. Nothing is unmounted: a
- * teardown context may not call another plugin, and `world.onStop` clears every entity anyway.
+ * Removes the `onEnter` callback in `onStop` and forgets every scene, the bundles the mounted
+ * one named and the hold on its feature. Nothing is unmounted and nothing is released: a teardown
+ * context may not call another plugin, and `world.onStop` clears every entity and its scope anyway.
  *
  * @param teardown - What the teardown context carries.
  * @param teardown.state - The plugin state.
@@ -123,6 +116,8 @@ export function stopScenes(teardown: { state: State }): void {
   state.teardown?.();
   state.teardown = undefined;
   state.scenes.clear();
+  state.owners.clear();
+  state.held = undefined;
   state.current = undefined;
   state.pending = undefined;
   state.named = [];

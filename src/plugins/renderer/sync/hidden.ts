@@ -323,6 +323,28 @@ export function hiddenBy(view: View, reason: HiddenReason): boolean {
 }
 
 /**
+ * Whether a node on the chain of a view is drawn at alpha 0, read from the engine's records (E4): Pixi's `alpha` getter
+ * hands its double back boxed at every read of a walk of `shown`. The top of a built-in visual, its wrapper or its
+ * object, draws at alpha 0 exactly when the `"alpha"` reason hides it, and so does an adapter's own object. A node of no
+ * view on a chain is the engine's (a clip container, a layer, the root), never faded. A game's object and the wrapper
+ * of an adapter carry an alpha the engine does not hold: Pixi's is read.
+ *
+ * @param state - The sync state.
+ * @param node - A node on the chain of a view, below the stage.
+ * @returns True at alpha 0.
+ */
+export function transparentNode(state: SyncState, node: PixiContainer): boolean {
+  const view = state.viewOfTop.get(node);
+
+  if (view === undefined) return false;
+  if (view.kind === "Display" || (view.kind === "adapter" && node === view.wrapper)) {
+    return node.alpha <= 0;
+  }
+
+  return hiddenBy(view, "alpha");
+}
+
+/**
  * Tells whether one reason hides a layer container (O16; skeleton choice, confirmed in LEAD-FIXES-3).
  *
  * @param sctx - The sync context, or any `HiddenCtx`.

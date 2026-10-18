@@ -131,6 +131,37 @@ describe("world.systemTimes in an agent build", () => {
   });
 });
 
+describe("world.systemTimes of a skipped system (spec 28 W4)", () => {
+  // Bug caught: the skip sits after the first clock read, so a sleeping system is still timed and
+  // shows up in the monitor's slowest five.
+  it("a skipped system takes no clock read in an agent build", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { world, clock } = timedWorld();
+
+    world.features.push(
+      {
+        name: "board",
+        description: {
+          scenes: [{ id: "board" }],
+          systems: [quiet("board.looks")],
+          systemsRun: "active"
+        }
+      },
+      { name: "hud", description: { systems: [quiet("hud.pulse")] } }
+    );
+    world.start();
+    world.frame();
+    clock.mockClear();
+    world.frame();
+
+    const times = world.api.systemTimes();
+
+    expect(clock).toHaveBeenCalledTimes(2);
+    expect(times?.names).toEqual(["board.looks", "hud.pulse"]);
+    expect([...(times?.ms.subarray(0, 2) ?? [])]).toEqual([0, 0.5]);
+  });
+});
+
 describe("world.systemTimes names identity", () => {
   // Bug caught: the names grow in place, so a reader that kept the array (the monitor's ring)
   // cannot tell a new system registered: the old reference would show the new name too.

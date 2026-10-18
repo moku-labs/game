@@ -201,7 +201,12 @@ pass built the view lands when it is built. The Pixi target is `view.wrapper ?? 
 filters cover the entity's subtree, so a glow on a button glows its label too, and they move from
 the object to a wrapper made later. Pixi copies and freezes the list on every assignment and
 rebuilds the render group when a view goes from no filter to some, so `sync` writes only when the
-instances differ from what the target holds; uniform writes and `enabled` flips need no call.
+instances differ from what the target holds. Pixi is handed only the enabled filters of a view, and none when all of
+them are disabled: a filter Pixi holds is pushed and popped around its view every frame, two batch breaks, even
+switched off (a button's press dim waits switched off). A filter switched on or off is handed over again by the draw
+callback's first step (`sync.stepFilters`), before anything reads the tree, so the switch is drawn in the frame it was
+made; uniform writes and `enabled` flips need no call. The render passes and the kept pictures read the slots, enabled
+or not, as before.
 
 The filters come off the object and its wrapper when the view lets its object go: a pooled sprite
 never carries one into its next life, and a `Display` object leaves without them, on despawn as at
@@ -772,7 +777,9 @@ enabled filter with inputs runs once over that picture into engine-owned targets
 texture (stage 3, `#3`). The stage pass then draws one sprite, the quad, in the view's place, while
 the view itself is hidden (`renderable = false`, reason `"kept"` of `sync/hidden.ts`, swapped
 without a mark: both draw the same pixels). Every render happens in a flush before the stage pass,
-so the canvas stays one pass. A picture's render makes the top a render group while it is kept; a
+so the canvas stays one pass. In a drawn frame with no mark and no whole-frame reason (a calm frame) a kept record
+that owes nothing (no retake, no refresh, no settle, no churn to reset) is drawn from its picture as it stands, without
+its step. A picture's render makes the top a render group while it is kept; a
 top drawn live again stops being one (drawn with its filters inside a parent's filter pass, a render
 group draws other pixels than the container did: found by the browser leg), and the colour of its
 subtree is worked out again: Pixi's `disableRenderGroup` leaves the children with the colour they had
@@ -986,9 +993,14 @@ still counts them. A pooled object comes back drawable and, for a `Graphics`, wh
 by its tint, so a colour change rewrites the tint, never the path (a shape with a stroke is painted in its colours).
 
 Endless loops of a view the player cannot see — at alpha 0, under a view at alpha 0, or a leaf wholly off the screen
-— write nothing; their phase follows time (`sync.loopsHeld`, asked by `anim`, walked once per entity per frame). A
-loop that writes the view's own alpha or place keeps writing: it may bring the view back. In the frame a view comes
-back a held loop shows its old phase once.
+— write nothing; their phase follows time (`sync.loopsHeld`, asked by `anim`). The walk of an entity is kept with the
+`passesVersion` it was taken at and taken again only once the version moved: every write that can change where it
+stops moves it (a pass that did work, a hidden reason, a filter set or switched, a HUD factor, a resize, an
+`invalidate`), so the loops of a still board are answered without a walk. A walk reads whether a node is faded from the
+engine's records (the `"alpha"` reason of a built-in visual or an adapter's object), not from Pixi's `alpha`, whose
+getter boxes its double at every read; only a game's object and an adapter's wrapper are read from Pixi. A loop that
+writes the view's own alpha or place keeps writing: it may bring the view back. In the frame a view comes back a held
+loop shows its old phase once.
 
 Removing `Parent` puts the view back in the layer its `Layer` names, at its own pose, in the same
 pass: `world` records no change for a removed component, so `sync` watches `onRemoved(Parent)`.
@@ -1111,7 +1123,10 @@ over its scale), while the shader measures it in device pixels, so on a phone at
 glyph edge was smeared over three pixels. The text's uniform group, which the pipe makes, answers
 Pixi's distance times the renderer's resolution: its `uDistance` is an accessor, Pixi's write keeps
 the CSS value and every upload reads it times the resolution of the moment, so a change of
-resolution needs nothing more. Text at a resolution above 1 is sharper; text at 1 draws the same
+resolution needs nothing more. Every text's uniforms share one shape and one accessor pair, so Pixi's generated sync
+function reads them monomorphic; a pair per text, or one laid over Pixi's own data property, sent each object to
+dictionary mode and boxed a double per text per frame. A text whose distance did not change hands back the number it
+answered last, boxed once. Text at a resolution above 1 is sharper; text at 1 draws the same
 pixels. The canvas's resolution is used, also for a text inside a filter of another resolution,
 which only a blurred text shows. A unit test runs Pixi's own `_updateDistanceField` and fails the day
 Pixi multiplies by the resolution itself: the engine's factor must then go.

@@ -362,6 +362,7 @@ export { defineScene } from "./plugins/scenes/define";
 // anim: choreography as data, the motion sugar, its components, the AnimPlayer resource of systems
 export { Animation, AnimPlayer, Frames } from "./plugins/anim/components";
 export { defineMotion } from "./plugins/anim/motion";
+export { cubicBezier } from "./plugins/anim/tween/bezier";
 export {
   defineAnimation,
   external,

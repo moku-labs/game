@@ -22,7 +22,9 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 
 | Method | Behaviour |
 |---|---|
-| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. Its `query` is read once, when it registers. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. |
+| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. Its `query` is read once, when it registers. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. A system registered here always runs; `systemsRun` is a key of a feature (below). |
+| `hold(feature): () => void` | Keeps a feature active while something of it is shown that the world cannot see: `scenes` holds the feature that declares the mounted scene, `ui` the feature of each popup or JSX root. Counted; the release is idempotent. An unknown name holds nothing (dev warning `world:hold-unknown-feature`). Counts for the systems from the next phase. |
+| `isActive(feature): boolean` | Whether a feature is active now: a node of it on the flow stack, a scene it declares mounted, a view of its projections (leaving included), a popup or JSX root of it. Any feature, whatever its `systemsRun`; false for a name that is not a feature. Allocates nothing. |
 | `spawn(owner, components): Entity` | The id is reserved and returned at once. Owner is required by the type. |
 | `despawn(entity)` / `despawnOwnedBy(owner)` | Removes every component (each fires `onRemoved`), frees the index, bumps the generation. A stale id is a no-op. |
 | `get(entity, Component)` | The stored value, read-only, or `undefined`. A stale id gives `undefined`. |
@@ -269,6 +271,10 @@ The sweep does only the work there is: the live views are walked only while one 
 for only after a despawn or a new `registerKey`, and the owed loops only while a view owes one. An
 idle frame of the world allocates nothing; `__tests__/perf/` holds the budgets that prove it.
 
+Before the systems of a phase run, the systems of a feature with `systemsRun: "active"` that is
+not active are skipped in place; a skipped system walks no query and marks nothing; `ctx.resumed`
+is true on its first run after a skip.
+
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
 `ctx.log.error("world:system-failed", …)` and skipped for this frame; the frame goes on. A dev
@@ -278,6 +284,85 @@ queue) logs `ctx.log.error("world:store-changed-during-walk", { component })` on
 While a phase runs, `spawn`, `despawn`, `despawnOwnedBy`, `add`, `remove`, `tag` and `untag` are
 queued and applied in call order when the phase ends. `set` is never queued. A queued command on an
 entity that died meanwhile is dropped.
+
+### Systems that run where their feature is
+
+A feature may say its systems run only while it is active:
+`defineFeature("board", { systems: [looks, fade, leaving, veil], systemsRun: "active" })`. The
+default, `"always"`, runs them every frame as before. The systems the engine's plugins register,
+and every system registered with `ecs.system`, always run. Feature `F` is active while at least one
+of these holds; each rule counts `F` itself only, so a parent and its sub-features are separate
+features.
+
+| Rule | `F` is active while | How the world learns it |
+|---|---|---|
+| **N** node | a frame of `flow.state().stack` (every frame, the outer frames of sub-flows included) addresses a node whose `owner` in `flow.describe()` is `F` | the memoised `flow.state()` object; an owner table built once from one `describe()` at the first stack that is not empty |
+| **S** scene | a scene `F` lists in `scenes` is the mounted scene, from the switch that mounts it to the switch that replaces it | `scenes` holds `F` with `ecs.hold` |
+| **V** view | a view of a projection `F` registered exists: live, or leaving with `Exiting` until its last motion ended | a per-feature view count the projection keeps |
+| **U** ui root | `ui` holds a popup root of a component `F` lists in `ui`, or the JSX root of a view of a projection `F` registered, until the sweep drops it after its exit | `ui` holds `F` with `ecs.hold` |
+
+- **Fail-safe.** When the world cannot tell, the feature counts as active: a `describe()` that throws
+  (logged once, `world:scope-owners-failed`) makes every feature count as on the stack while the
+  stack is not empty; a view count never goes below 0, and a view despawned behind the projection's
+  back keeps its count. A skipped system is never the result of an error.
+- **Deterministic.** Every input moves only with the flow, a scene switch, a projection reconcile or
+  the ui reconcile; nothing reads the wall clock, the renderer or the GPU. Two runs of the same
+  session decide the same active features in every phase. A headless app has no world, so nothing
+  is skipped there.
+- **When it takes effect.** The active set is evaluated at the start of every phase that runs
+  systems, from the state at that moment. A source that moves between frames counts from the first
+  phase of the next frame; one that moves inside a phase (a hold taken by a system, a popup root
+  recorded by `ui.reconcile` in `layout`) counts from the next phase. Views spawned by the reconcile
+  at the top of `input` count in that frame's `input` already.
+- **A JSX projection root's hold.** `ui` takes the rule-U hold of a JSX root of a projection view at
+  the root's first reconcile, not when the root mounts (spec 28 places it at the mount). Nothing is
+  lost in between: the view that carries the root is counted by rule V from its spawn, so its
+  feature is active the whole time.
+- **A late release.** A hold's release kept past a stop changes nothing, also after the world
+  started again: each start and stop moves the scope's generation, and a release from an older
+  generation is a no-op (spec 28 W7.1).
+- **Cost.** A game with no scoped feature pays one flag read per phase and one integer comparison per
+  system. A skipped system walks no query, marks nothing, takes no clock read of `systemTimes()`
+  (its `ms` stays 0) and allocates nothing; a frame in which nothing moved evaluates nothing.
+- **Dev warnings.** `world:feature-never-active` for a feature with systems and `systemsRun: "active"`
+  but no node, flow, scene, projection or ui component (a kit whose systems serve its siblings:
+  remove the key); `world:bad-feature-entry` with `key: "systemsRun"` for another value, whose
+  systems then always run; `world:hold-unknown-feature`.
+
+A scoped system dresses only its own feature's views; a system that writes another feature's views
+belongs to that feature or stays `"always"`. A scoped system that caches what it drew rebuilds it
+when `ctx.resumed` is true: nothing was kept for it while it slept.
+
+```ts
+// features/board/index.ts of the game: the board's systems stop on the ward.
+export const boardFeature = defineFeature("board", {
+  flows: [mergeBoard],
+  projections: [boardBack, boardItems, boardFront],
+  systems: [looks, fade, leaving, veil],
+  systemsRun: "active"
+});
+
+// features/board/world/systems/looks.ts: the cache is rebuilt after the board was away.
+export const looks = system({
+  name: "board.looks",
+  phase: "animate",
+  query: [Look],
+  run: (rows, { res, resumed }) => {
+    const shown = res(BoardLooks).shown;
+
+    if (resumed) shown.clear(); // what was drawn before the ward is not known any more
+
+    for (const [entity, look] of rows) {
+      if (shown.get(entity)?.look !== look.name) shown.set(entity, { look: look.name });
+    }
+  }
+});
+
+// A test of the screen app: the board's systems do not run on the ward.
+app.world.ecs.isActive("board"); // false on the ward
+await app.flow.walk([{ at: "ward", intent: "play" }]);
+app.world.ecs.isActive("board"); // true: "board/awaitIntent" is on the stack
+```
 
 ### The cause of a reconcile
 
@@ -441,13 +526,14 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   runs once, at the start of the next frame, so two commits in one frame give one reconcile. In fast
   mode it reconciles at once, direct. What each cause does is in
   [The cause of a reconcile](#the-cause-of-a-reconcile).
-- **onStart** `connectWorld` reads every feature description and registers its `components`, then
-  `systems`, then `projections`, in feature order; writes `Now` once from `clock.now()`; registers the five `time.onFrame` callbacks, the
+- **onStart** `connectWorld` sizes the scope of `systemsRun` to the features, reads every feature
+  description and registers its `components`, then `systems` (with the feature's scope), then
+  `projections`, in feature order; writes `Now` once from `clock.now()`; registers the five `time.onFrame` callbacks, the
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
   views, registered keys, recorded rest poses, the `onConverged` listeners, the despawn queue,
-  entities and resources, and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
+  entities and resources, and resets the scope and the frame history. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Doors
 

@@ -72,12 +72,16 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
     const root = modules.sync.root();
 
     modules.monitor.changed("resize");
+    // A new screen and root transform: the walks of `shown` (which leaf is off the screen) are taken again (E4).
+    ctx.state.sync.passesVersion += 1;
 
     if (root !== undefined) modules.viewport.apply(root);
     // The browser emptied the canvas when it took its new size: the frame is drawn.
     modules.demand.whole("resize");
   }
 
+  // A filter switched on or off this frame reaches Pixi before the overlays, the kept cache and the decision read it.
+  modules.sync.stepFilters();
   modules.sync.stepOverlays();
   modules.sync.drainOverlayEvents(modules.monitor);
   // Before the decision clears the marks: they become the dirty flags of the pictures.

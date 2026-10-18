@@ -129,7 +129,9 @@ app.scenes.current(); // "home"
 | 8 | `named` = the scene's `bundle` and its `bundles` of the committed state. A throw rejects before any load |
 | 9 | `assets.load` for every name at once, all awaited, raced against the node's abort signal. The first failure rejects |
 | 10 | Aborted: return. Nothing was touched, the old scene is still there |
-| 11 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` and `named` → `assets.sceneBundles(named)` → `time.wake()` → `scenes:changed` |
+| 11 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` → `world.ecs.hold` of the feature that declares the new scene, then the release of the old scene's hold → `named` → `assets.sceneBundles(named)` → `time.wake()` → `scenes:changed` |
+
+**The hold.** While a scene is mounted, `scenes` holds the feature that declares it with `world.ecs.hold`, so the systems of a feature with `systemsRun: "active"` run while its scene is on screen (rule S, world README "Systems that run where their feature is"). The new hold is taken before the old one is released, in the block above, so no phase sees a moment with neither. A failed or aborted switch returns before the block and keeps the old hold with the old scene.
 
 **The re-read.** At any other node (no target, or the mounted scene: a rest node, a live transit node, an over node) a mounted scene with `bundles` is read again from the committed state. The same list, in the same order: nothing happens. Another list: every name is awaited, then `named` is replaced and `assets.sceneBundles(named)` is told. No mount, no `scenes:changed`, no `time.wake()`. An abort keeps the old list. A scene without `bundles` is never re-read, and a transit node of a fast walk neither switches nor re-reads.
 
@@ -176,14 +178,14 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
-| `world` | `projection.setLayers`, `projection.mount`, `projection.unmount` |
+| `world` | `projection.setLayers`, `projection.mount`, `projection.unmount`; `ecs.hold` of the mounted scene's feature |
 | `assets` | `load(bundle)`; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"` |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle
 
-`onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity.
+`onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover and forgets the scenes, their owners, the pending scene, the named list and the hold. Nothing is unmounted and nothing is released at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and resets its scope.
 
 ## Not in V2
 

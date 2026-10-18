@@ -377,7 +377,8 @@ function same(stored: unknown, next: number): boolean {
  * every frame all the same.
  *
  * A frame that moves every field writes the track's own patch, filled in place. A frame that
- * leaves a field alone builds the patch of the fields it moves, so no other field is written.
+ * leaves a field alone writes the track's patch of the fields it moves, kept for the next such
+ * frame and built again only when the moved fields change, so no other field is written.
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track to write, its normalised time in `clock[1]`.
@@ -398,7 +399,7 @@ function writeFields(actx: AnimCtx, track: Track, final: boolean): void {
   const owned = track.muted();
   // per frame: the slots of the track, its value cells and its own patch, all made when it
   // started; the numbers pass between the steps in `values`, so nothing new is made.
-  const { names, live, moved, values, seen, patch } = track;
+  const { names, live, moved, values, seen } = track;
   let fields = 0;
   let count = 0;
 
@@ -430,33 +431,78 @@ function writeFields(actx: AnimCtx, track: Track, final: boolean): void {
     }
 
     seen[slot] = next;
-    patch[field] = next;
     moved[slot] = 1;
     count++;
   }
 
   if (count === 0) return;
 
-  ecs.set(track.entity, track.component, count === fields ? patch : movedPatch(track));
+  const written = count === fields ? track.patch : partialPatch(track);
+
+  fillPatch(track, written);
+  ecs.set(track.entity, track.component, written);
 }
 
 /**
- * The patch of a frame that moved only some of the fields of a track: those fields, at the values
- * the frame put into the track's patch.
+ * Puts the values of the moved slots into a patch of the track: each moved field gets what the
+ * frame left in `values` for it.
  *
  * @param track - The track that writes.
- * @returns A new patch of the moved fields only.
+ * @param written - Its full patch, or its patch of the moved fields.
  */
-function movedPatch(track: Track): Record<string, unknown> {
-  const written: Record<string, unknown> = {};
+function fillPatch(track: Track, written: Record<string, unknown>): void {
+  const { names, moved, values } = track;
+
+  // per frame: one indexed pass; a double written into the patch is the only box (budgets.ts).
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes three arrays of the track
+  for (let slot = 0; slot < names.length; slot++) {
+    const field = names[slot];
+
+    if (moved[slot] === 1 && field !== undefined) written[field] = values[slot] ?? 0;
+  }
+}
+
+/**
+ * The patch of a frame that moved only some of the fields of a track: the one the track keeps,
+ * when the frame moved the same fields as the frame it was built for, otherwise a new one.
+ *
+ * @param track - The track that writes, its `moved` flags set by this frame.
+ * @returns The patch of exactly the moved fields; their values are filled after.
+ */
+function partialPatch(track: Track): Record<string, unknown> {
+  const { moved, partialMoved, partial } = track;
+
+  if (partial === undefined) return keepPartial(track);
+
+  // per frame: the same fields as last time keep the patch, so a hand that holds a field costs no object.
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes two arrays of the track
+  for (let slot = 0; slot < moved.length; slot++) {
+    if (moved[slot] !== partialMoved[slot]) return keepPartial(track);
+  }
+
+  return partial;
+}
+
+/**
+ * Builds the patch of the fields the frame moved and keeps it on the track, with the `moved`
+ * flags it was built for. Runs only when the moved fields change.
+ *
+ * @param track - The track that writes.
+ * @returns The new patch, its values still to fill.
+ */
+function keepPartial(track: Track): Record<string, unknown> {
+  const built: Record<string, unknown> = {};
 
   for (let slot = 0; slot < track.names.length; slot++) {
     const field = track.names[slot];
 
-    if (track.moved[slot] === 1 && field !== undefined) written[field] = track.patch[field];
+    if (track.moved[slot] === 1 && field !== undefined) built[field] = 0;
   }
 
-  return written;
+  track.partialMoved.set(track.moved);
+  track.partial = built;
+
+  return built;
 }
 
 /**
@@ -754,7 +800,9 @@ export function startTrack(
     masked: noMaskedFields(),
     keep,
     reveals: revealsOf(component, target),
-    patch: { ...target }
+    patch: { ...target },
+    partial: undefined,
+    partialMoved: new Uint8Array(names.length)
   };
 
   actx.state.nextId += 1;

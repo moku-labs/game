@@ -57,6 +57,8 @@ use(animation, slots, tools?)           // nests one animation; pass the outer t
 play(animation, slots)                  // the fx descriptor a node awaits
 external(player, clip)                  // reserved for Spine: always throws
 defineMotion({ states?, keyframes?, transition?, loop?, on, when? })
+cubicBezier(x1, y1, x2, y2)             // the CSS timing function as an `ease`: solved once into a
+                                        // table, 0 B per eased time, within 1e-4 of the exact curve
 ```
 
 A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.

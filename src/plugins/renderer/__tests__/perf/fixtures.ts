@@ -3,6 +3,7 @@
  * record, and a started renderer with a layer of sprite views. Not a test file. Every fixture is built outside the
  * measured window; what a window calls allocates only what the engine allocates.
  */
+import * as pixi from "pixi.js";
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import type { FrameMeasure } from "../../../time/types";
@@ -19,6 +20,7 @@ import { commitFrame } from "../../monitor/commit";
 import type { PixiFilter } from "../../types";
 import { FakeFilter, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
+import { startOverlayStage } from "../overlay-harness";
 import { type AgentRenderer, startAgent } from "../perf-harness";
 
 /** The owner of every entity the fixtures spawn. */
@@ -233,14 +235,19 @@ export async function markedFrame(count: number, onDemand: boolean): Promise<() 
  * A still stage of 12 filtered sprites among 40, as the ward of A Memory Missing: each carries one filter of one apply,
  * hung through the seam `effects` uses. The pass that builds them has run, every change set is cleared.
  *
+ * @param enabled - False for filters switched off, as the press dims of the A26 board's buttons wait.
  * @returns The started renderer.
  */
-export async function filteredStage(): Promise<MockRenderer> {
+export async function filteredStage(enabled = true): Promise<MockRenderer> {
   const { mock, entities } = await startSprites(40);
 
   for (let index = 0; index < 12; index += 1) {
     const entity = entities[index * 3] ?? 0;
-    const filter = new FakeFilter() as unknown as PixiFilter;
+    const fake = new FakeFilter();
+
+    fake.enabled = enabled;
+
+    const filter = fake as unknown as PixiFilter;
 
     mock.api.sync.filters.set(entity, [{ filter, passes: 1, kind: "fog" }]);
   }
@@ -290,4 +297,120 @@ export async function hudStage(): Promise<MockRenderer> {
   mock.world.clearChanges();
 
   return mock;
+}
+
+/** What an endless loop hands `loopsHeld`: what it writes that could show its view again. */
+type Reveals = "alpha" | "place" | "both" | undefined;
+
+/**
+ * A still board of the A26 kind for the unseen walk (E4), over the real Pixi of the overlay stage: 4 views at alpha 0,
+ * 4 under a panel at alpha 0, 4 leaves wholly off the screen, 4 shown views with a filter of padding 8 and 4 shown
+ * plain. A frame asks for every view what two endless loops of it ask, one writing its place and one its alpha, then
+ * runs the sync pass of a still frame. The frames that build it have run. On a moving board the tree's version moves on
+ * before the asks, as a pass that moved a view elsewhere moves it, so every view is walked again.
+ *
+ * @param moving - True for a board where something else moves every frame.
+ * @returns One frame: the asks of the loops and the still pass.
+ */
+export async function unseenBoard(moving = false): Promise<() => void> {
+  const stage = await startOverlayStage();
+  const { sync } = stage.drawn.mock.modules;
+  const state = stage.drawn.mock.ctx.state.sync;
+  const asked: Entity[] = [];
+  const panel = stage.view({ order: 1, w: 600, h: 600, alpha: 0 });
+
+  for (let index = 0; index < 4; index += 1) {
+    // At alpha 0, under the panel at alpha 0, off the screen, lit (its filter comes below), plain.
+    asked.push(
+      stage.view({ order: 1, x: index * 120, y: 100, alpha: 0 }),
+      stage.view({ parent: panel, x: index * 120, w: 40, h: 40 }),
+      stage.view({ order: 1, x: 5000 + index * 120, y: 300 }),
+      stage.view({ order: 1, x: index * 120, y: 500 }),
+      stage.view({ order: 1, x: index * 120, y: 700 })
+    );
+  }
+
+  // The views are built first: `effects` hangs its filters on a view that exists, in a frozen list.
+  stage.frame();
+
+  for (let index = 3; index < asked.length; index += 5) {
+    const glow = new pixi.AlphaFilter();
+
+    glow.padding = 8;
+    sync.filters.set(
+      asked[index] ?? 0,
+      Object.freeze([{ filter: glow as unknown as PixiFilter, passes: 1 }])
+    );
+  }
+
+  stage.frames(2);
+
+  const reveals: readonly Reveals[] = ["place", "alpha"];
+
+  return () => {
+    if (moving) state.passesVersion += 1;
+
+    for (const entity of asked) {
+      for (const reveal of reveals) sync.loopsHeld(entity, reveal);
+    }
+
+    sync.pass();
+  };
+}
+
+/**
+ * A board whose `count` filtered views the kept cache draws from their pictures (E5), over the real Pixi of the
+ * overlay stage, every frame drawn: each view carries one alpha filter the cache may keep, in a frozen list as
+ * `effects` hands it over, and stood still long enough to be taken. A frame collects the marks and flushes the cache,
+ * as the render phase does: with no mark, a calm frame; with one view elsewhere marked, every record steps.
+ *
+ * @param count - The kept views.
+ * @param marked - True to mark a view that is no kept one's every frame.
+ * @returns One frame of the cache: the collect and the flush.
+ */
+export async function keptBoard(count: number, marked = false): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const views: Entity[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: (index % 5) * 200, y: Math.floor(index / 5) * 200 }));
+  }
+
+  // The views are built first: `effects` hangs its filters on a view that exists.
+  stage.frame();
+
+  for (const view of views) {
+    // Frozen, as `effects` hands its lists over.
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.AlphaFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  stage.frames(8);
+
+  const records = stage.drawn.mock.ctx.state.kept.records;
+
+  if (records.length !== count || records.some(record => record.mode !== "kept")) {
+    throw new Error("perf fixture: a view of the kept board is not kept");
+  }
+
+  return marked
+    ? () => {
+        demand.mark(other);
+        kept.collect();
+        kept.flush();
+      }
+    : () => {
+        kept.collect();
+        kept.flush();
+      };
 }

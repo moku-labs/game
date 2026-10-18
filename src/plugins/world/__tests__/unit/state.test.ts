@@ -75,7 +75,9 @@ describe("createWorldState", () => {
     first.ecs.systems.input.push({
       definition: { name: "noop", phase: "input", query: [], run: () => {} },
       frame: 0,
-      plan: { names: [], written: [] }
+      plan: { names: [], written: [] },
+      scope: -1,
+      skipped: false
     });
     first.projection.hints.push({ kind: "merged", hint: true });
 

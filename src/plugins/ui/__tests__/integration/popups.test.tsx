@@ -4,6 +4,7 @@ import { Text as TextComponent } from "../../../text/components";
 import { Tree } from "../../../world/ecs/define";
 import { Covered } from "../../components";
 import type { UiNode } from "../../jsx/types";
+import { answer, settleExits, startHeldApp } from "../held-app";
 import { hold, played, type StackApp, settle, startStackApp, tick } from "../stack-app";
 
 // ---------------------------------------------------------------------------
@@ -16,11 +17,11 @@ import { hold, played, type StackApp, settle, startStackApp, tick } from "../sta
 /**
  * The root entities of one popup component, read from the `Tree` components.
  *
- * @param app - The running app.
+ * @param app - The running app: the stack app or the hold app.
  * @param component - The component name.
  * @returns The entities, in spawn order.
  */
-function rootsOf(app: StackApp, component: string): number[] {
+function rootsOf(app: Pick<StackApp, "world">, component: string): number[] {
   const roots: number[] = [];
 
   for (const [entity, tree] of app.world.ecs.query(Tree)) {
@@ -230,3 +231,110 @@ function textOf(app: StackApp): unknown {
 
   return level === undefined ? undefined : world.ecs.get(level, TextComponent)?.content;
 }
+
+// ---------------------------------------------------------------------------
+// The holds of `ui` (spec 28 U1–U3): a popup root holds the feature of its
+// component, the JSX root of a projection the feature of its projection, from
+// the moment `ui` records the root until the sweep drops it after its exit.
+// The flow's nodes belong to the feature `home`, so the other features are
+// active only through these holds.
+// ---------------------------------------------------------------------------
+
+describe("the feature a ui root holds", () => {
+  // Bug caught: the hold ends with the answer, so the reward's systems stop while its panel still
+  // plays its exit; or it is never released, so they run for good.
+  it("a popup holds its component's feature until its exit ended", async () => {
+    const app = await startHeldApp();
+
+    expect(app.world.ecs.isActive("reward")).toBe(false);
+
+    await answer(app, "reward");
+
+    expect(app.flow.state().path).toBe("showReward");
+    expect(app.world.ecs.isActive("reward")).toBe(true);
+
+    await answer(app, "ok", 1);
+
+    expect(app.flow.state().path).toBe("home");
+    expect(app.ui.find("rewardPanel")).toBeUndefined();
+    expect(rootsOf(app, "Reward")).toHaveLength(1);
+    expect(app.world.ecs.isActive("reward")).toBe(true);
+
+    settleExits(app);
+
+    expect(rootsOf(app, "Reward")).toEqual([]);
+    expect(app.world.ecs.isActive("reward")).toBe(false);
+
+    await app.stop();
+  });
+
+  // Bug caught: covering a popup drops the hold of the one beneath, so its feature sleeps while it is shown.
+  it("a popup kept covered beneath another stays held", async () => {
+    const app = await startHeldApp();
+
+    await answer(app, "prefs");
+    await answer(app, "confirm");
+
+    expect(app.flow.state().path).toBe("confirm");
+    expect(app.world.ecs.isActive("prefs")).toBe(true);
+    expect(app.world.ecs.isActive("confirmKit")).toBe(true);
+
+    await answer(app, "yes", 1);
+    settleExits(app);
+
+    expect(rootsOf(app, "Prefs")).toEqual([]);
+    expect(rootsOf(app, "Confirm")).toEqual([]);
+    expect(app.world.ecs.isActive("prefs")).toBe(false);
+    expect(app.world.ecs.isActive("confirmKit")).toBe(false);
+
+    await app.stop();
+  });
+
+  // Bug caught: the popup that takes a released root back holds again, so the feature stays active
+  // after the root is gone.
+  it("a reclaimed popup root is held once", async () => {
+    const app = await startHeldApp();
+
+    await answer(app, "prefs");
+
+    const [root] = rootsOf(app, "Prefs");
+
+    await answer(app, "louder");
+    await answer(app, "louder");
+
+    expect(rootsOf(app, "Prefs")).toEqual([root]);
+    expect(app.world.ecs.isActive("prefs")).toBe(true);
+
+    await answer(app, "close", 1);
+    settleExits(app);
+
+    expect(rootsOf(app, "Prefs")).toEqual([]);
+    expect(app.world.ecs.isActive("prefs")).toBe(false);
+
+    await app.stop();
+  });
+
+  // Bug caught: the hold of a JSX root ends with its view, so the shop's systems stop while the
+  // sheet's elements still leave.
+  it("the JSX root of a projection holds the projection's feature while its elements leave", async () => {
+    const app = await startHeldApp();
+
+    expect(app.world.ecs.isActive("shop")).toBe(false);
+
+    await answer(app, "shop");
+
+    expect(app.world.projection.entitiesOf("shop.sheet")).toHaveLength(1);
+    expect(app.world.ecs.isActive("shop")).toBe(true);
+
+    await answer(app, "shop", 1);
+
+    expect(app.world.projection.entitiesOf("shop.sheet")).toEqual([]);
+    expect(app.world.ecs.isActive("shop")).toBe(true);
+
+    settleExits(app);
+
+    expect(app.world.ecs.isActive("shop")).toBe(false);
+
+    await app.stop();
+  });
+});
