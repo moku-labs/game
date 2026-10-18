@@ -387,13 +387,24 @@ export type State = {
   /** Entities to re-resolve in the next layout phase. */
   dirty: Set<Entity>;
   /**
+   * The labels whose `Text` came while the world was live since the layout system last ran. The
+   * flush of phase `layout` brings the ones `ui` adds in its solve, and they are resolved right
+   * after it.
+   */
+  added: Entity[];
+  /**
+   * The labels the step after the last layout flush resolved. The next system run writes their
+   * `Text` once more, so `ui` measures the string they show.
+   */
+  rewrite: Entity[];
+  /**
    * Counts the dev hot swaps that replaced a font or an inline icon of a live label. A label
    * container drawn under an older count is built again on its next update.
    */
   generation: number;
   /** Warning keys already written, so a style, a tag, a glyph or a font warns once. */
   warned: Set<string>;
-  /** The system, the two world hooks and the display adapter. */
+  /** The system, the step after the layout flush, the two world hooks and the display adapter. */
   removers: Array<() => void>;
 };
 

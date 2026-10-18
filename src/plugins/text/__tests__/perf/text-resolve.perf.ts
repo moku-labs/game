@@ -32,4 +32,22 @@ describe("text resolve: heap per frame", () => {
     await annotate(`text resolve, one countdown running: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.textResolveCountdown + NOISE_BYTES);
   }, 60_000);
+
+  it("the step after the layout flush with no label added stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(resolveFixture("nothing", "added"), CALLS);
+
+    await annotate(`text, step after the layout flush, nothing added: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textAddedIdle + NOISE_BYTES);
+  }, 60_000);
+
+  it("the phase that writes 20 labels resolved after the last flush once more stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(resolveFixture("nothing", "rewrite"), CALLS);
+
+    await annotate(`text resolve, 20 labels written once more: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textRewrite + NOISE_BYTES);
+  }, 60_000);
 });

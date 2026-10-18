@@ -823,3 +823,32 @@ describe("the scene the world's systems run on", () => {
     expect(mock.world.scenes).toEqual(["ward"]);
   });
 });
+
+describe("a projection both scenes list", () => {
+  const shared = { name: "shared.hud", layer: "ui" } as const;
+  const wardScene = defineScene("ward", {
+    bundle: "ward",
+    layers: { scene: {} },
+    projections: [{ name: "ward.room", layer: "scene" }, shared]
+  });
+  const shopScene = defineScene("shop", {
+    bundle: "shop",
+    layers: {},
+    projections: [shared, { name: "shop.shelf", layer: "ui" }]
+  });
+
+  // Bug caught (F23): the switch unmounts every projection of the leaving scene, so the shared
+  // HUD is torn down and built again, and its labels blink for a frame.
+  it("unmounts only what the new scene does not list, and mounts the new scene's whole list", async () => {
+    const mock = startedMock([wardScene, shopScene]);
+
+    await mock.enter({ rest: true, scene: "ward" });
+    await mock.enter({ rest: true, scene: "shop" });
+
+    expect(mock.world.unmounted).toEqual([["ward.room"]]);
+    expect(mock.world.mounted[1]).toEqual({
+      names: ["shared.hud", "shop.shelf"],
+      owner: { kind: "plugin", name: "scenes" }
+    });
+  });
+});

@@ -7,6 +7,7 @@ import type {
   AnyProjectionSpec,
   DescriptionNode,
   MotionCause,
+  Mounted,
   ProjectionCtx,
   View,
   ViewOutput
@@ -94,6 +95,58 @@ export function collectView(
   }
 
   return values;
+}
+
+/**
+ * Tells whether a view is a screen root that draws at the place of its projection in a list: its
+ * view described a node, so `collectView` gave it a `Tree` and the `Order` of that place. A view
+ * that returned its own components keeps whatever `Order` it gave itself.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - A live view of the projection.
+ * @param order - The `Order` of the place the projection had.
+ * @returns True when the view draws at that place.
+ */
+function drawsAtPlace(pctx: ProjectionCtx, view: View, order: number): boolean {
+  const { Order, Tree } = pctx.deps.components;
+  const rest = view.rest.get(Order.componentName)?.value;
+
+  return (
+    view.rest.has(Tree.componentName) &&
+    typeof rest === "object" &&
+    "value" in rest &&
+    rest.value === order
+  );
+}
+
+/**
+ * Keeps a mounted projection for the scene that comes, as a scene switch does for a projection
+ * both scenes list: it stays mounted into the new layer list, and its screen roots take the
+ * `Order` of their place in the new list, on the entity and in the rest pose, so the next node of
+ * a root compares equal and writes none. Nothing else is touched: no view is spawned or
+ * despawned, no motion is cut, no hook runs. A view on its way out keeps the order it leaves with.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param mounted - The mounted projection the new list names again.
+ * @param order - The `Order` of its place in the new list.
+ */
+export function placeMounted(pctx: ProjectionCtx, mounted: Mounted, order: number): void {
+  const previous = mounted.order;
+
+  mounted.layers = pctx.ctx.state.projection.layers;
+
+  if (previous === order) return;
+
+  mounted.order = order;
+
+  for (const view of mounted.live.values()) {
+    if (!drawsAtPlace(pctx, view, previous)) continue;
+
+    const value = pctx.deps.components.Order({ value: order });
+
+    view.rest.set(value.type.componentName, value);
+    writeValue(pctx, view.entity, value);
+  }
 }
 
 /**

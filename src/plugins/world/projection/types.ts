@@ -504,8 +504,8 @@ export type View = {
 };
 
 /**
- * One mounted projection: its owner, the live views by key, the despawn queue and the items of
- * the last reconcile.
+ * One mounted projection: its owner, the live views by key, the despawn queue, the items of the
+ * last reconcile, its place in the list of its scene and the layer list of that scene.
  *
  * @example
  * ```ts
@@ -514,7 +514,8 @@ export type View = {
  *   live: new Map(),
  *   queue: [],
  *   items: new Map(),
- *   order: -1
+ *   order: -1,
+ *   layers: Object.freeze([{ name: "items", sort: "y" }])
  * };
  * ```
  */
@@ -528,6 +529,11 @@ export type Mounted = {
    * minus the length of that list (the roots of one scene take −n … −1, in list order).
    */
   order: number;
+  /**
+   * The layer list (`setLayers`) of the scene the projection was mounted into or kept by last, compared by
+   * identity: a `mount` under the same list is a second mount of one scene, a `mount` under a new one keeps it.
+   */
+  layers: ReadonlyArray<LayerSpec>;
 };
 
 /**
@@ -795,17 +801,30 @@ export type ProjectionApi = {
 
   /**
    * Marks projections mounted under an owner and reconciles them at once, direct: a scene brings
-   * its own transition. Nothing is mounted when the call throws.
+   * its own transition. A screen root draws at the `Order` of its place in the list, −n … −1. A
+   * projection a scene before mounted (under another layer list, `setLayers`) stays mounted when
+   * the new list declares its `layer` and `lift` alike: its views keep their entities and their
+   * motions, no hook runs, and its screen roots take the `Order` of their place in this list. One
+   * whose layer the new list declares otherwise is unmounted and mounted again. One mounted under
+   * the current layer list already is a second mount of one scene: it warns
+   * `world:already-mounted` and changes nothing. Nothing is mounted when the call throws.
    *
    * @param names - Names of the projections to mount.
    * @param owner - Who owns the entities of these projections.
    * @throws {Error} For an unknown name, or a `layer` or `lift` the scene does not declare.
    * @example
    * ```ts
-   * // `scenes` mounts the projections of the board scene it just switched to.
+   * // `scenes` mounts the board scene it just switched to: its HUD screen is listed last, at -1.
    * const world = ctx.require(worldPlugin);
-   * world.projection.mount(["board.cells", "board.items"], { kind: "plugin", name: "scenes" });
+   * world.projection.mount(["board.items", "hud"], { kind: "plugin", name: "scenes" });
    * world.projection.entityOf("board.items", "i7"); // 1048576, the picture is already there
+   *
+   * // The shop lists the HUD too and declares `ui` alike: the shop's layers, the board's items
+   * // out, the shop's list in.
+   * world.projection.setLayers([{ name: "ui", sort: "order" }]);
+   * world.projection.unmount(["board.items"]);
+   * world.projection.mount(["hud", "shop.shelf"], { kind: "plugin", name: "scenes" });
+   * world.ecs.get(world.projection.entityOf("hud", "hud") ?? 0, Order)?.value; // -2: the same entity, first of two
    * ```
    */
   mount(names: readonly string[], owner: Owner): void;

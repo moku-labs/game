@@ -51,6 +51,20 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `duration` reads as words in the current locale through `i18n.duration(ms)` and is built again
   after a locale change. `bind(Counter, "name")` on a string field does not compile, and neither
   does a hand-written `{ component, field }`: only `bind()` makes a `TextBind`.
+- **The spawn frame:** a label shows its string in the frame it is spawned. The layout system
+  resolves every label that exists when phase `layout` starts; `ui` adds the `Text` of a JSX
+  label in its solve, after that system, and the flush at the end of the phase attaches it with
+  the rest of its batch, a bound component included. Right after that flush, before phase `sync`,
+  `text` resolves exactly the labels whose `Text` came since its system ran (the step is a
+  `time.onFrame("layout")` callback registered after the world's own), so the renderer builds
+  them with their string and their glyphs. `ui` measured them before they were resolved, so the
+  next system run writes their `Text` once more, with no field: the change reaches the remeasure
+  of `ui` in that layout phase, and a bound label whose listed value measures otherwise than its
+  string gets its size. A label whose content changed is not among them: it resolves in the next
+  layout phase, as before. A system of phase `sync` that writes `resolved` itself (a typing
+  effect) so finds a spawned label resolved in its first run, and a label whose content a
+  re-render of `ui` changed one frame after that re-render. A label that comes while the world is
+  paused or fast is not listed: it is resolved by the next live run of the system, as before.
 - **Countdown:** `Countdown({ until })` plus `bind(Countdown, "left", { format })` on the same
   entity. `until` is a moment of `clock` in epoch ms. `left` is engine-owned: computed from one
   `clock.now()` per frame on the render side, written with the label and only when its string

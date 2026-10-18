@@ -25,6 +25,7 @@ import type {
   AnyComponentType,
   AnyComponentValue,
   Entity,
+  LayerSpec,
   MotionCause,
   MotionHandle
 } from "../../world/types";
@@ -613,7 +614,8 @@ export function createReconciler(
   });
   // The reconciler's per-frame scratch, kept so an idle frame allocates nothing: the roots to
   // reconcile, the scroll containers, the roots whose slot changed in this solve, the roots still
-  // waiting in it, the viewport box, and what the slots were last assigned for.
+  // waiting in it, the viewport box, what the slots were last assigned for, and the layer list
+  // the roots last took their order under.
   const dirtyList: Root[] = [];
   const scrollList: Element[] = [];
   const movedRoots: Root[] = [];
@@ -622,6 +624,7 @@ export function createReconciler(
   const viewportBox: Rect = { x: 0, y: 0, w: 0, h: 0 };
   let slotsVersion = -1;
   let slotsRoots = -1;
+  let placedUnder: ReadonlyArray<LayerSpec> | undefined;
 
   /**
    * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
@@ -1928,6 +1931,25 @@ export function createReconciler(
   }
 
   /**
+   * Gives every root the order its entity holds once a new scene stands: a scene that keeps a
+   * projection both scenes list places it again (F23), and its tree stands, so no root is dirty.
+   * The world places it only under a new layer list, so the walk runs once per new list, in the
+   * first layout phase that runs after it, also when the switch came while the world was paused.
+   */
+  function reorderRoots(): void {
+    const layers = ctx.deps.world.projection.layers();
+
+    // Per frame: one identity compare while the scene stands.
+    if (layers === placedUnder) return;
+
+    placedUnder = layers;
+
+    for (const root of state.roots.values()) {
+      if (!state.removing.has(root.entity)) refreshRootOrder(root);
+    }
+  }
+
+  /**
    * Reconciles one dirty root: reads its current tree and projection name, then diffs it. The root
    * stays dirty while the layout engine is not loaded, and a failure is logged for this root only.
    *
@@ -1958,9 +1980,9 @@ export function createReconciler(
 
   /**
    * The first of the two systems of phase `layout`: the sweep, the roots a restore asked to build
-   * again, the popups that may leave, the pull of the text being typed, the scroll offsets and the
-   * windowed ranges, the bound texts that show a string of another size, the viewport, the dirty
-   * roots and the hosted views.
+   * again, the roots a scene placed again, the popups that may leave, the pull of the text being
+   * typed, the scroll offsets and the windowed ranges, the bound texts that show a string of
+   * another size, the viewport, the dirty roots and the hosted views.
    */
   function reconcile(): void {
     // Despawn what finished exiting, and count this pass.
@@ -1969,6 +1991,9 @@ export function createReconciler(
 
     // After a restore or a load every root is built again, the way a mount builds it.
     if (state.remount) remountRoots();
+
+    // A root a new scene kept draws at its place in that scene's list.
+    reorderRoots();
 
     // A released popup leaves once the flow rests on a node that shows none of its component.
     settlePopups(ctx, state, unmountRoot);

@@ -169,9 +169,23 @@ function overTargetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string |
 }
 
 /**
- * Builds the scene in one synchronous block: the layers, then the projections of the old scene
- * out, then the ones of the new scene in, the new scene to the world's systems, then the list the
- * scene names to `assets`, then the frame loop out of its idle cap, and only then the event.
+ * The projections of the scene that leaves which the scene that comes does not list. A projection
+ * both list stays mounted: the layers of a projection are the ones its spec names, and both scenes
+ * declare them, so its views stay in the same layer containers.
+ *
+ * @param previous - The scene that leaves.
+ * @param scene - The scene that comes.
+ * @returns The names to unmount, in the order the leaving scene lists them.
+ */
+function leavingOf(previous: SceneDefinition, scene: SceneDefinition): readonly string[] {
+  return previous.projections.filter(name => !scene.projections.includes(name));
+}
+
+/**
+ * Builds the scene in one synchronous block: the layers, then the projections only the old scene
+ * lists out, then the list of the new scene in (a projection both list stays and takes its new
+ * place), the new scene to the world's systems, then the list the scene names to `assets`, then
+ * the frame loop out of its idle cap, and only then the event.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundles are there.
@@ -185,7 +199,7 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition, named: readonly string[])
 
   projection.setLayers(scene.layers);
 
-  if (previous !== undefined) projection.unmount(previous.projections);
+  if (previous !== undefined) projection.unmount(leavingOf(previous, scene));
 
   projection.mount(scene.projections, state.owner);
   state.current = scene.id;

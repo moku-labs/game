@@ -1,7 +1,8 @@
 /**
  * @file text plugin — resolution: a `content` becomes one tagged string, a tagged string becomes
  * a cached layout, and the one world system of phase `layout` keeps `Text.resolved`, the measured
- * sizes and `Countdown.left` true. This is also where every dev warning is written once.
+ * sizes and `Countdown.left` true; the step after the layout flush does the same for the labels the
+ * flush brings. This is also where every dev warning is written once.
  */
 import type { ElementNode, Message } from "../i18n/types";
 import { system } from "../world/ecs/define";
@@ -226,12 +227,12 @@ function bindTypeOf(ctx: TextCtx, name: string): AnyComponent | undefined {
 }
 
 /**
- * What one run of the system shares between its labels: the locale, read once at the top of the
- * run, the trusted time, read on the first countdown that asks, so neither is read per label, and
- * the duration formatter, made once with the system. `now` is `NaN` until read: the field stays a
- * double, and writing it keeps nothing.
+ * What one run of the system shares between its labels, and the step after the layout flush with
+ * it: the locale, read once at the top of a run, the trusted time, read on the first countdown that
+ * asks, so neither is read per label, and the duration formatter, made once with the plugin. `now`
+ * is `NaN` until read: the field stays a double, and writing it keeps nothing.
  */
-type Frame = { now: number; locale: string; duration: (ms: number) => string };
+export type TextFrame = { now: number; locale: string; duration: (ms: number) => string };
 
 /**
  * Tells whether a bind shows the time left of a `Countdown`, which is derived, not read.
@@ -253,7 +254,7 @@ function isCountdownLeft(bind: TextBind): boolean {
  * @param frame - What this run of the system shares.
  * @returns The value, or `undefined` when the entity has nothing there.
  */
-function readBound(ctx: TextCtx, entity: Entity, bind: TextBind, frame: Frame): unknown {
+function readBound(ctx: TextCtx, entity: Entity, bind: TextBind, frame: TextFrame): unknown {
   if (isCountdownLeft(bind)) {
     // Per frame: `until` is an epoch moment past the small-integer range, so it is read straight
     // into the subtraction. Joined with `undefined` first (`get(…)?.until`) it is boxed, 16 B.
@@ -285,7 +286,7 @@ function boundValue(
   ctx: TextCtx,
   entity: Entity,
   bind: TextBind,
-  frame: Frame
+  frame: TextFrame
 ): number | undefined {
   const value = readBound(ctx, entity, bind, frame);
 
@@ -367,7 +368,7 @@ function remember(
   ctx: TextCtx,
   entity: Entity,
   text: Readonly<TextValue>,
-  frame: Frame,
+  frame: TextFrame,
   unit?: number
 ): void {
   const seen = ctx.state.seen.get(entity);
@@ -432,7 +433,7 @@ function isShown(
   text: Readonly<TextValue>,
   unit: number | undefined,
   format: TextFormat,
-  frame: Frame
+  frame: TextFrame
 ): boolean {
   return (
     seen !== undefined &&
@@ -525,7 +526,7 @@ function stepBound(
   entity: Entity,
   text: Readonly<TextValue>,
   bind: TextBind,
-  frame: Frame
+  frame: TextFrame
 ): void {
   // The number of this frame, and the unit its string is built from.
   const value = boundValue(ctx, entity, bind, frame);
@@ -564,7 +565,12 @@ function stepBound(
  * @param frame - What this run of the system shares.
  * @returns True when the string has to be built again.
  */
-function isStale(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame: Frame): boolean {
+function isStale(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  frame: TextFrame
+): boolean {
   if (ctx.state.dirty.has(entity)) return true;
 
   const seen = ctx.state.seen.get(entity);
@@ -587,7 +593,7 @@ function isStale(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame:
  * @param text - Its component value.
  * @param frame - What this run of the system shares.
  */
-function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame: Frame): void {
+function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame: TextFrame): void {
   if (text.bind !== undefined) {
     stepBound(ctx, entity, text, text.bind, frame);
 
@@ -625,22 +631,79 @@ export function resolveContent(ctx: TextCtx, entity: Entity, text: Readonly<Text
 }
 
 /**
- * The one system of the plugin: phase `layout`, before the two of `ui`, over every label. Every
- * label is visited every frame: `ui` writes `Text` after this system and change sets clear in
- * phase `signals`, so `changed(Text)` cannot tell which moved. The locale is read once per run,
- * the clock at most once and only when a countdown label asks.
+ * The frame the system and the step after the layout flush share, made once per plugin.
  *
  * @param ctx - Domain context of the text plugin.
- * @returns The system definition `world.ecs.system` takes.
+ * @returns A frame with no locale and no moment read yet.
  */
-export function createTextSystem(ctx: TextCtx): AnySystem {
+export function createTextFrame(ctx: TextCtx): TextFrame {
   // Made once: a formatter made per label would be a closure, and its context, per call.
-  const frame: Frame = {
+  return {
     now: Number.NaN,
     locale: "",
     duration: (ms: number): string => ctx.deps.i18n.duration(ms)
   };
+}
 
+/**
+ * Empties a list of labels in place: popped, so it keeps its store for the next batch.
+ *
+ * @param labels - The list.
+ */
+function forgetAdded(labels: Entity[]): void {
+  while (labels.length > 0) labels.pop();
+}
+
+/** A patch with no field: the write marks `Text` changed and changes nothing. Frozen, so no caller fills it. */
+const NO_FIELDS: Partial<TextValue> = Object.freeze({});
+
+/**
+ * Writes `Text` once more, with no field, for the labels the step after the last layout flush
+ * resolved. `ui` measured them in its solve, before they were resolved, and the change of that
+ * frame is gone; this one reaches its remeasure in the same layout phase, so a label whose string
+ * measures otherwise than what `ui` measured gets its size. A label whose `Text` left is skipped.
+ *
+ * @param ctx - Domain context of the text plugin.
+ */
+function writeOnceMore(ctx: TextCtx): void {
+  const ecs = ctx.deps.world.ecs;
+
+  for (const entity of ctx.state.rewrite) {
+    if (ecs.get(entity, Text) !== undefined) ecs.set(entity, Text, NO_FIELDS);
+  }
+
+  forgetAdded(ctx.state.rewrite);
+}
+
+/**
+ * Notes a label whose `Text` came, as the world's `onAdded` hook calls it: it is marked for the
+ * next layout phase, and while the world is live it is listed for the step after the layout
+ * flush. In another mode no layout phase runs and the list would only grow: the label waits for
+ * the next live run of the system, which resolves every marked label.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity that got a `Text`.
+ */
+export function noteAdded(ctx: TextCtx, entity: Entity): void {
+  ctx.state.dirty.add(entity);
+
+  if (ctx.deps.world.ecs.mode() === "live") ctx.state.added.push(entity);
+}
+
+/**
+ * The one system of the plugin: phase `layout`, before the two of `ui`, over every label. Every
+ * label is visited every frame: `ui` writes `Text` after this system and change sets clear in
+ * phase `signals`, so `changed(Text)` cannot tell which moved. The locale is read once per run,
+ * the clock at most once and only when a countdown label asks. The labels that came before the run
+ * are in its walk, so the list of the labels that came starts again empty: the step after the
+ * layout flush takes only the ones the flush brings. The labels that step resolved last get their
+ * `Text` written once more first, so `ui` measures the string they show.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param frame - What the runs share with the step after the layout flush.
+ * @returns The system definition `world.ecs.system` takes.
+ */
+export function createTextSystem(ctx: TextCtx, frame: TextFrame): AnySystem {
   return system({
     name: TEXT_SYSTEM_NAME,
     phase: "layout",
@@ -648,12 +711,57 @@ export function createTextSystem(ctx: TextCtx): AnySystem {
     run: (entities): void => {
       frame.now = Number.NaN;
       frame.locale = ctx.deps.i18n.locale();
+      forgetAdded(ctx.state.added);
+
+      // Per frame: one length read while no label was resolved after the last flush.
+      if (ctx.state.rewrite.length > 0) writeOnceMore(ctx);
 
       // Per frame: the rows are the world's one reused row, read by index, never destructured
       // (a destructuring pattern walks an array iterator) and never kept.
       for (const row of entities) stepText(ctx, row[0], row[1], frame);
     }
   });
+}
+
+/**
+ * Resolves the labels whose `Text` came after the layout system ran. `ui` adds a label in its
+ * solve, and the flush at the end of phase `layout` attaches it with the rest of its batch, a bound
+ * component included; this runs right after that flush and before phase `sync`, so the renderer
+ * builds the label with its string, and lists it, so the next system run writes its `Text` once
+ * more for the remeasure of `ui`. A label whose content changed is not among them: it resolves in
+ * the next layout phase, as before. While the world is not live its layout phase did not run: the
+ * list is dropped, and the labels, marked, wait for the next live run, as every label does.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param frame - What the system's runs share.
+ */
+export function resolveAdded(ctx: TextCtx, frame: TextFrame): void {
+  const added = ctx.state.added;
+
+  // Per frame: one length read while no label came with the flush.
+  if (added.length === 0) return;
+
+  // The layout phase did not run: the labels are marked, and the next live run resolves them.
+  if (ctx.deps.world.ecs.mode() !== "live") {
+    added.length = 0;
+
+    return;
+  }
+
+  frame.now = Number.NaN;
+  frame.locale = ctx.deps.i18n.locale();
+
+  // A label whose `Text` left again in the same flush is skipped.
+  for (const entity of added) {
+    const text = ctx.deps.world.ecs.get(entity, Text);
+
+    if (text === undefined) continue;
+
+    stepText(ctx, entity, text, frame);
+    ctx.state.rewrite.push(entity);
+  }
+
+  forgetAdded(added);
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   stillMoving,
   writeRestUnderLoops
 } from "./motions";
+import { checkLayers, mountNames, unmountNames } from "./mount";
 import {
   clearMounted,
   dropIfStill,
@@ -78,20 +79,8 @@ function isConvergeCause(cause: Cause): boolean {
 }
 
 /**
- * Creates the empty view tables of a freshly mounted projection. These live in their own
- * non-exported functions because lint rule L5 refuses a collection built inside an exported
- * declaration.
- *
- * @param owner - Who owns the entities of this projection.
- * @param order - The `Order` its screen roots draw at.
- * @returns A mounted projection with nothing in it yet.
- */
-function emptyMounted(owner: Owner, order: number): Mounted {
-  return { owner, live: new Map(), queue: [], items: new Map(), order };
-}
-
-/**
- * Creates the empty mute table of one entity.
+ * Creates the empty mute table of one entity. It lives in its own non-exported function because
+ * lint rule L5 refuses a collection built inside an exported declaration.
  *
  * @returns An empty table of component name to owned fields.
  */
@@ -185,26 +174,6 @@ function liveEntities(mounted: Mounted): Entity[] {
  */
 function noPeers(): Peers {
   return { next: new Map(), previous: new Map() };
-}
-
-/**
- * Checks that every layer a projection names is declared by the scene.
- *
- * @param pctx - Domain context of the projection module.
- * @param spec - The projection spec.
- * @throws {Error} When `layer` or `lift` is not in the layer list.
- */
-function checkLayers(pctx: ProjectionCtx, spec: AnyProjectionSpec): void {
-  const declared = new Set(pctx.ctx.state.projection.layers.map(layer => layer.name));
-
-  for (const name of [spec.layer, spec.lift]) {
-    if (name === undefined || declared.has(name)) continue;
-
-    throw new Error(
-      `[game] Projection "${spec.name}" names layer "${name}", which the scene does not declare.\n` +
-        "  Add it to the layers of the scene."
-    );
-  }
 }
 
 /**
@@ -303,53 +272,11 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     layers: (): ReadonlyArray<LayerSpec> => state.layers,
 
     mount: (names: readonly string[], owner: Owner): void => {
-      const fresh: AnyProjectionSpec[] = [];
-
-      for (const name of names) {
-        const spec = state.specs.get(name);
-
-        if (spec === undefined) {
-          throw new Error(
-            `[game] Projection "${name}" is not registered.\n` +
-              "  Register it before a scene mounts it."
-          );
-        }
-
-        if (state.mounted.has(name)) {
-          ctx.log.warn("world:already-mounted", { projection: name });
-
-          continue;
-        }
-
-        checkLayers(pctx, spec);
-        fresh.push(spec);
-      }
-
-      // A screen root draws at its place in the list: the roots of one scene take −n … −1 (spec 16 U1.6).
-      for (const spec of fresh) {
-        state.mounted.set(spec.name, emptyMounted(owner, names.indexOf(spec.name) - names.length));
-      }
-
-      if (fresh.length > 0) {
-        reconcile(pctx, {
-          names: fresh.map(spec => spec.name),
-          direct: true,
-          force: true,
-          converge: false,
-          settle: false
-        });
-      }
+      mountNames(pctx, names, owner);
     },
 
     unmount: (names: readonly string[]): void => {
-      for (const name of names) {
-        const mounted = state.mounted.get(name);
-
-        if (mounted === undefined) continue;
-
-        clearMounted(pctx, mounted);
-        state.mounted.delete(name);
-      }
+      unmountNames(pctx, names);
     },
 
     restOf: <Value extends object>(

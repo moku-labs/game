@@ -284,7 +284,10 @@ Inside one element, bottom first:
 4. its children at `zIndex` 1, then 2, and so on.
 
 The roots of a scene draw in the order of its `projections` (the k-th of n takes `Order` k − n − 1),
-also after a commit mounts one again. The `ui` layer sorts by `Order` (`scenes` makes it so); a scene
+also after a commit mounts one again, and after a switch to a scene that lists the projection too:
+the world keeps it and writes the `Order` of its new place on its entity, and the reconcile gives
+every root element the `Order` of its entity once per new layer list, in the first layout phase that
+runs under it, with no new tree (scenes, "A projection both scenes list"). The `ui` layer sorts by `Order` (`scenes` makes it so); a scene
 that writes `ui: { sort: "none" }` keeps insertion order. Inside the `ui` layer, bottom first:
 
 1. the scene's JSX roots, in list order;
