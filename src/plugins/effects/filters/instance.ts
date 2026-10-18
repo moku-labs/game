@@ -4,7 +4,9 @@
  * one `UniformGroup` both read. The Pixi-core kinds: their own class, written through their setters
  * when a field differs from what they were last given. Every kind but `Blur` renders at
  * `resolution: "inherit"`, the resolution of the canvas, so a filtered view stays sharp on DPR 2-3
- * (decision 32). Every write compares first: a value the filter holds already writes nothing and
+ * (decision 32), unless its value (`Alpha`) or its definition (`defineFilter`) gives a resolution of
+ * its own. An `Alpha` at 1 drawn at the canvas's is switched off: it would copy the view unchanged
+ * through a pass. Every write compares first: a value the filter holds already writes nothing and
  * asks the renderer for no frame. A destroy frees the uniform buffers first: `Filter.destroy()`
  * leaves them to a GC that runs after a minute (P10). A filter with inputs draws each place of its
  * chains through Pixi's public `applyFilter` from inside its own `apply`, into pooled textures given
@@ -61,6 +63,21 @@ const PROBE_VALUE: Readonly<FilterFields> = Object.freeze({ enabled: true, order
 
 /** The numbers of a vector field that holds none. */
 const NO_NUMBERS: readonly number[] = Object.freeze([]);
+
+/**
+ * The resolution Pixi is given for a resolution of a value or a definition: the number, or the canvas's for 0 (or
+ * less, or not a number).
+ *
+ * @param resolution - Texels per CSS px; 0 for the canvas's.
+ * @returns What a filter's `resolution` takes.
+ * @example
+ * ```ts
+ * resolutionOf(0); // "inherit"
+ * ```
+ */
+function resolutionOf(resolution: number): number | typeof CANVAS_RESOLUTION {
+  return resolution > 0 ? resolution : CANVAS_RESOLUTION;
+}
 
 /**
  * Tells whether two numbers are the same value for the GPU: equal, or both NaN.
@@ -251,7 +268,7 @@ function createOurs(
     glProgram,
     resources,
     padding: paddingOf(definition, value),
-    resolution: CANVAS_RESOLUTION
+    resolution: resolutionOf(definition.resolution)
   });
 
   return {
@@ -294,6 +311,26 @@ function blurResolution(ectx: EffectsCtx, value: Readonly<FilterFields>): number
   if (resolution > 0) return resolution;
 
   return ectx.state.phone ? ectx.config.blur.phoneResolution : 1;
+}
+
+/**
+ * The `enabled` switch of a filter for a stored value: the value's own, but off for an `Alpha` at 1 drawn at the
+ * canvas's resolution, which would copy the view unchanged through a pass of its own.
+ *
+ * @param kind - The kind of the instance.
+ * @param value - The stored filter value.
+ * @returns True when Pixi is to draw the filter.
+ * @example
+ * ```ts
+ * switchOf("alpha", { enabled: true, order: 0, alpha: 1, resolution: 0 }); // false
+ * ```
+ */
+function switchOf(kind: FilterBody["kind"], value: Readonly<FilterFields>): boolean {
+  if (!value.enabled || kind !== "alpha") return value.enabled;
+
+  const { alpha, resolution } = value;
+
+  return alpha !== 1 || (typeof resolution === "number" && resolution > 0);
 }
 
 /**
@@ -457,7 +494,7 @@ function createCore(
         kind: "alpha",
         filter: new pixi.AlphaFilter({
           alpha: numberOf(value, "alpha"),
-          resolution: CANVAS_RESOLUTION
+          resolution: resolutionOf(numberOf(value, "resolution"))
         }),
         ...appliedOf(value),
         passes: 1
@@ -495,7 +532,7 @@ export function createFilter(
 
   if (body === undefined) return undefined;
 
-  body.filter.enabled = value.enabled;
+  body.filter.enabled = switchOf(body.kind, value);
   if (body.kind === "wgsl") body.areaStale = body.definition.area !== undefined;
 
   const instance: FilterInstance = Object.assign(body, {
@@ -1518,6 +1555,16 @@ function writeCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<Fil
 
   const { fields, applied } = instance;
 
+  // An `Alpha` copies its two fields by name: a fade writes them in every frame, and the keyed copy boxes a fraction.
+  if (instance.kind === "alpha") {
+    const { alpha, resolution } = value;
+
+    if (alpha !== undefined) applied.alpha = alpha;
+    if (resolution !== undefined) applied.resolution = resolution;
+
+    return;
+  }
+
   // Copied in place: the record and its keys were made once with the instance.
   for (const field of fields) {
     const next = value[field];
@@ -1573,7 +1620,11 @@ function setCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<Filte
       return;
     }
     default: {
-      instance.filter.alpha = numberOf(value, "alpha");
+      // Read by name: a fade writes them in every frame, and a number `numberOf` hands back is boxed (16 B).
+      const { alpha, resolution } = value;
+
+      instance.filter.alpha = typeof alpha === "number" ? alpha : 0;
+      instance.filter.resolution = resolutionOf(typeof resolution === "number" ? resolution : 0);
     }
   }
 }
@@ -1604,8 +1655,9 @@ function switchOffBroken(instance: FilterInstance, before: () => void): void {
 
 /**
  * Brings one instance up to the stored value for a frame, comparing before anything is written.
- * A broken instance stays off whatever its component says. Switching on or off is a visible
- * change; so is a new value of a filter that is on. A filter that is off and stays off still gets
+ * A broken instance stays off whatever its component says, and an `Alpha` at 1 drawn at the
+ * canvas's resolution is off too. Switching on or off is a visible change; so is a new value of a
+ * filter that is on. A filter that is off and stays off still gets
  * its new values written, so it is current when it comes back on, but asks for nothing: an off
  * filter draws no pixel. Ours compare on every sync of their view (a view syncs when something of it changed); a core
  * kind only when its component changed.
@@ -1630,7 +1682,8 @@ export function writeFilter(
     return false;
   }
 
-  const toggled = instance.filter.enabled !== value.enabled;
+  const on = switchOf(instance.kind, value);
+  const toggled = instance.filter.enabled !== on;
   const differs =
     instance.kind === "wgsl"
       ? oursDiffer(instance, instance.definition, value)
@@ -1640,10 +1693,10 @@ export function writeFilter(
 
   staleArea(instance);
 
-  const visible = toggled || value.enabled;
+  const visible = toggled || on;
 
   if (visible) before();
-  if (toggled) instance.filter.enabled = value.enabled;
+  if (toggled) instance.filter.enabled = on;
 
   if (differs) {
     if (instance.kind === "wgsl") {

@@ -237,6 +237,18 @@ describe("defineFilter", () => {
   });
 });
 
+describe("defineFilter: the resolution", () => {
+  // Bug: a negative or NaN resolution reaches Pixi, which sizes a texture of no pixels and blanks the view.
+  it("refuses a resolution below 0 or not finite, naming the filter", () => {
+    expect(() => defineFilter("fx.x", { wgsl: BODY, glsl: GLSL, resolution: -1 })).toThrow(
+      '[game] Filter "fx.x": resolution must be 0 or more, 0 for the resolution of the canvas.\n  Got -1.'
+    );
+    expect(() => defineFilter("fx.x", { wgsl: BODY, glsl: GLSL, resolution: Number.NaN })).toThrow(
+      'Filter "fx.x": resolution must be 0 or more'
+    );
+  });
+});
+
 describe("wgsl", () => {
   it("writes a struct in declaration order and the fu binding", () => {
     expect(
@@ -331,7 +343,7 @@ describe("the built-in filters", () => {
       enabled: true,
       order: 0
     });
-    expect(Alpha.defaults).toEqual({ alpha: 1, enabled: true, order: 0 });
+    expect(Alpha.defaults).toEqual({ alpha: 1, resolution: 0, enabled: true, order: 0 });
   });
 
   it("draw Glow and Outline with our WGSL and GLSL, padded by their live reach", () => {

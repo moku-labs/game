@@ -603,3 +603,85 @@ describe("destroyFilter", () => {
     expect(map.sprite.texture.destroyed).toBe(false);
   });
 });
+
+describe("Alpha: its resolution and the pass it skips at 1", () => {
+  // Bug: the fog asks for half the pixels and is still drawn at the canvas resolution: the field is ignored.
+  it("builds an Alpha at its own resolution, at the canvas's for 0, and follows a change both ways", () => {
+    const { mock, pixi } = started();
+    const instance = build(
+      mock,
+      pixi,
+      "effects.alpha",
+      Alpha({ alpha: 0.5, resolution: 0.5 }).value
+    );
+    const filter = instance.filter as unknown as FakeFxAlphaFilter;
+
+    expect(filter.built).toEqual({ alpha: 0.5, resolution: 0.5 });
+
+    writeFilter(mock.ectx, instance, Alpha({ alpha: 0.5 }).value, true, ignore);
+    expect(filter.resolution).toBe("inherit");
+
+    writeFilter(mock.ectx, instance, Alpha({ alpha: 0.5, resolution: 0.75 }).value, true, ignore);
+    expect(filter.resolution).toBe(0.75);
+  });
+
+  // Bug: an Alpha at 1 renders its whole subtree into a texture and copies it back unchanged, in every frame.
+  it("builds an Alpha at 1 switched off; at 0.5, or at 1 with a resolution, switched on; a disabled one off", () => {
+    const { mock, pixi } = started();
+    const enabledOf = (value: FilterFields): boolean =>
+      build(mock, pixi, "effects.alpha", value).filter.enabled;
+
+    expect(enabledOf(Alpha().value)).toBe(false);
+    expect(enabledOf(Alpha({ alpha: 0.5 }).value)).toBe(true);
+    expect(enabledOf(Alpha({ resolution: 0.5 }).value)).toBe(true);
+    expect(enabledOf(Alpha({ alpha: 0.5, enabled: false }).value)).toBe(false);
+  });
+
+  // Bug: a fade back to 1 leaves the pass on, or the switch is made without asking the renderer for the frame, and a
+  // screen drawn on demand keeps the old fade.
+  it("an Alpha reaching 1 switches its filter off and asks for the frame; leaving 1 switches it on and asks", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "effects.alpha", Alpha({ alpha: 0.5 }).value);
+    const filter = instance.filter as unknown as FakeFxAlphaFilter;
+    const before = vi.fn();
+
+    expect(writeFilter(mock.ectx, instance, Alpha().value, true, before)).toBe(true);
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(filter.enabled).toBe(false);
+    expect(filter.calls).toEqual(["alpha=1"]);
+
+    expect(writeFilter(mock.ectx, instance, Alpha({ alpha: 0.7 }).value, true, before)).toBe(true);
+    expect(before).toHaveBeenCalledTimes(2);
+    expect(filter.enabled).toBe(true);
+
+    writeFilter(mock.ectx, instance, Alpha().value, true, before);
+
+    // A resolution at 1 keeps the pass: the subtree is drawn at fewer pixels through it.
+    expect(writeFilter(mock.ectx, instance, Alpha({ resolution: 0.5 }).value, true, before)).toBe(
+      true
+    );
+    expect(before).toHaveBeenCalledTimes(4);
+    expect(filter.enabled).toBe(true);
+  });
+
+  // Bug: a game's filter declares a resolution and is drawn at the canvas's anyway.
+  it("builds a defined filter at its resolution, at the canvas's without one", () => {
+    const { mock, pixi } = started();
+    const Half = defineFilter("fx.half", {
+      wgsl: BODY,
+      glsl: GLSL,
+      uniforms: { amount: 1 },
+      resolution: 0.5
+    });
+    const half = createFilter(
+      mock.ectx,
+      pixi,
+      { id: "fx.half", component: Half, source: "wgsl", definition: Half.filter, index: 8 },
+      Half().value
+    );
+    const tint = build(mock, pixi, "fx.tint", Tint().value);
+
+    expect((half?.filter as unknown as FakeFxFilter).resolution).toBe(0.5);
+    expect((tint.filter as unknown as FakeFxFilter).resolution).toBe("inherit");
+  });
+});

@@ -211,6 +211,20 @@ describe("the warm-up hand-over (spec 27 F4)", () => {
     expect(displacement?.sprite.texture).toBe(FakeTexture.WHITE);
   });
 
+  // Bug: the Alpha probe is built at its default alpha 1 and switched off like any Alpha at 1: Pixi skips it, and its
+  // pipeline compiles in the frame of the first fade.
+  it("the Alpha probe is handed over switched on, though its default alpha is 1", async () => {
+    const mock = started([]);
+
+    mock.renderer.warmAnswer = "later";
+    mock.frame();
+    await settle();
+
+    const alpha = mock.renderer.warms.find(filter => filter instanceof FakeFxAlphaFilter);
+
+    expect(alpha?.enabled).toBe(true);
+  });
+
   // Bug: with nothing to warm (warm: 0) every probe is built, a program compiled for each, and kept for the app's life.
   it("when the renderer has nothing to warm the probe is destroyed and no further probe is built", async () => {
     const mock = started([Soft]);

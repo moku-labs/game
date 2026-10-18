@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Entity } from "../../../world/types";
-import { Blur } from "../../filters/builtins";
+import { Alpha, Blur } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import type { FilterArea, FilterComponent, FilterValueOf } from "../../filters/types";
 import { createMockEffects, type MockEffects } from "./mock-effects";
@@ -115,6 +115,19 @@ describe("the area of a filtered view", () => {
     mock.frame();
 
     expect(areasOf(mock, view)).toEqual([]);
+  });
+
+  // Bug: the fog's Alpha beside the lens cancels the lens's box, and the lens fills the whole cover again.
+  it("an Alpha beside an area filter keeps that area; an Alpha alone sends none", () => {
+    const { Lens } = lensFilter();
+    const mock = started([Lens] as never);
+    const lens = mock.spawn([Lens(), Alpha({ alpha: 0.5 })]);
+    const alone = mock.spawn([Alpha({ alpha: 0.5 })]);
+
+    mock.frame();
+
+    expect(areasOf(mock, lens)).toEqual([[90, 90, 20, 20]]);
+    expect(areasOf(mock, alone)).toEqual([]);
   });
 
   // Bug: a Blur that draws nothing still widens the area to the view's bounds; a kind measured off still counts.

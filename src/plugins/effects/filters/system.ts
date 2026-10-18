@@ -197,8 +197,10 @@ function judgeArea(ectx: EffectsCtx, instance: OursInstance): void {
 
 /**
  * The union of the areas of a view's enabled filters, into the scratch box: none while no filter is enabled, and none
- * when an enabled filter has no area (every built-in kind, or a definition that answered `undefined`) — it draws over
- * the view's bounds. A disabled filter, and a kind a debug switch turned off (it is not placed), do not count.
+ * when an enabled filter has no area (every other built-in kind, or a definition that answered `undefined`) — it draws
+ * over the view's bounds. An `Alpha` does not count: it only scales the pixels the others draw, and makes none where
+ * they draw nothing; alone it leaves the view without an area. A disabled filter, and a kind a debug switch turned off
+ * (it is not placed), do not count either.
  *
  * @param view - The view's record, its instances placed.
  */
@@ -211,7 +213,7 @@ function unionOf(view: FilteredView): void {
   union.some = false;
 
   for (const instance of view.placed) {
-    if (!instance.filter.enabled) continue;
+    if (!instance.filter.enabled || instance.kind === "alpha") continue;
     if (instance.kind !== "wgsl" || !instance.area.some) {
       union.some = false;
 
@@ -226,6 +228,9 @@ function unionOf(view: FilteredView): void {
     right = Math.max(right, area.x + area.width);
     bottom = Math.max(bottom, area.y + area.height);
   }
+
+  // None: the numbers are read only for some, and writing the infinite ones would box two numbers per call.
+  if (!union.some) return;
 
   union.x = left;
   union.y = top;
@@ -885,7 +890,8 @@ function dropProbe(ectx: EffectsCtx, probe: WarmProbe): void {
 
 /**
  * A probe of one Pixi-core kind at the frozen defaults of its component; a `Displacement` draws over Pixi's white
- * texture, since its program does not depend on the map. Its `apply` is guarded like any instance's.
+ * texture, since its program does not depend on the map. A probe is switched on whatever its defaults: an `Alpha` at 1
+ * would be off, and Pixi would warm nothing. Its `apply` is guarded like any instance's.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -900,6 +906,8 @@ function coreProbe(ectx: EffectsCtx, pixi: PixiModule, id: string): WarmProbe | 
       : createFilter(ectx, pixi, kind, kind.component.defaults, pixi.Texture.WHITE);
 
   if (instance === undefined) return undefined;
+
+  instance.filter.enabled = true;
 
   return { filter: instance.filter, destroy: (): void => destroyFilter(instance) };
 }

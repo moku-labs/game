@@ -20,7 +20,7 @@ import { Alpha, Blur, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
-import { atlasTexture } from "../fake-effects-pixi";
+import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
 import { createMockEffects, type MockEffects } from "../unit/mock-effects";
 
 /** Calls before a window: the code under measure reaches its optimized tier first, as on a phone after a few seconds. */
@@ -80,6 +80,29 @@ const VIEWPORT: Readonly<ViewportSize> = Object.freeze({
   orientation: "portrait",
   safeArea: Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 })
 });
+
+/**
+ * Pixi's `AlphaFilter` as a fixture draws it: its setter writes the alpha into its uniform in place, as Pixi's does.
+ * The fake of the unit tests records every write as a string: those would be the fake's bytes, not the sync's.
+ */
+class QuietAlphaFilter extends FakeFxFilter {
+  /** The uniform the alpha lives in, as Pixi's `alphaUniforms.uniforms`. */
+  private readonly uniforms: { uAlpha: number };
+
+  public constructor(options: { alpha?: number; resolution?: number | "inherit" } = {}) {
+    super(options);
+    this.uniforms = { uAlpha: options.alpha ?? 1 };
+  }
+
+  /** @returns The alpha. */
+  public get alpha(): number {
+    return this.uniforms.uAlpha;
+  }
+
+  public set alpha(value: number) {
+    this.uniforms.uAlpha = value;
+  }
+}
 
 /** The two renderer calls a fixture makes allocation-free, as they are on the real renderer. */
 type PlainRenderer = {
@@ -150,6 +173,10 @@ export type FiltersFixture = {
   tweened: Entity;
   /** The value the world holds for its `Glow`, writable: a tween case moves it in place. */
   glow: { strength: number };
+  /** The view whose `Alpha` a fade case moves across 1. */
+  faded: Entity;
+  /** The value the world holds for its `Alpha`, writable: a fade case moves it in place. */
+  fade: { alpha: number };
   /** How often the sync called `renderer.invalidate`. */
   counter: { invalidated: number };
 };
@@ -194,6 +221,7 @@ export function filtersFixture(): FiltersFixture {
 
   const counter = plainRenderer(mock);
 
+  Reflect.set(mock.pixi.module, "AlphaFilter", QuietAlphaFilter);
   mock.start();
 
   const views: Entity[] = [];
@@ -210,10 +238,13 @@ export function filtersFixture(): FiltersFixture {
 
   const tweened = views[0] ?? 0;
   const glow = mock.world.ecs.get(tweened, Glow) as { strength: number } | undefined;
+  const faded = views[3] ?? 0;
+  const fade = mock.world.ecs.get(faded, Alpha) as { alpha: number } | undefined;
 
   if (glow === undefined) throw new Error("perf fixture: the first view has no Glow");
+  if (fade === undefined) throw new Error("perf fixture: the fourth view has no Alpha");
 
-  return { mock, run: phaseRunner(mock, "sync"), tweened, glow, counter };
+  return { mock, run: phaseRunner(mock, "sync"), tweened, glow, faded, fade, counter };
 }
 
 /** The two strengths a tween case moves between. */
@@ -249,6 +280,45 @@ export function tweenWrite(fixture: FiltersFixture): () => void {
  */
 export function tweenStep(fixture: FiltersFixture): () => void {
   const write = tweenWrite(fixture);
+  const { run } = fixture;
+
+  return (): void => {
+    write();
+    run();
+  };
+}
+
+/** The alphas a fade case moves between: 1, where the filter is switched off, and a fraction, where it draws. */
+const ALPHAS: readonly [number, number] = [1, 0.8];
+
+/**
+ * The write of a fade on the `Alpha` of one view, alone: its alpha crosses 1 in place in every call, the way a tween's
+ * write lands in the stored value. The change mark is made once, by `ecs.set`, and stays, as in `tweenWrite`.
+ *
+ * @param fixture - A fixture of `filtersFixture`.
+ * @returns The write.
+ */
+export function fadeWrite(fixture: FiltersFixture): () => void {
+  const { mock, faded, fade } = fixture;
+  let frame = 0;
+
+  mock.world.ecs.set(faded, Alpha, { alpha: ALPHAS[1] });
+
+  return (): void => {
+    frame += 1;
+    // per call: 1, then the fraction: every sync switches the filter off or on.
+    fade.alpha = (frame & 1) === 0 ? ALPHAS[1] : ALPHAS[0];
+  };
+}
+
+/**
+ * The step of a fade across 1 on the `Alpha` of one view: the write of `fadeWrite`, then the `sync` phase.
+ *
+ * @param fixture - A fixture of `filtersFixture`.
+ * @returns The step.
+ */
+export function fadeStep(fixture: FiltersFixture): () => void {
+  const write = fadeWrite(fixture);
   const { run } = fixture;
 
   return (): void => {

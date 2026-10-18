@@ -229,6 +229,25 @@ function readArea(id: string, area: unknown): FilterDefinition["area"] {
 }
 
 /**
+ * Reads the declared resolution: texels per CSS px, or 0 for the canvas's. A JavaScript caller may pass anything.
+ *
+ * @param id - The filter id.
+ * @param resolution - What the game declared.
+ * @returns The resolution; 0 when it was left out.
+ * @throws {Error} When it is given and is not a finite number of 0 or more.
+ */
+function readResolution(id: string, resolution: unknown): number {
+  if (resolution === undefined) return 0;
+  if (typeof resolution === "number" && Number.isFinite(resolution) && resolution >= 0) {
+    return resolution;
+  }
+
+  throw new Error(
+    `[game] Filter "${id}": resolution must be 0 or more, 0 for the resolution of the canvas.\n  Got ${String(resolution)}.`
+  );
+}
+
+/**
  * Tells whether a value is a list of 2 to 4 finite numbers.
  *
  * @param value - A uniform declaration.
@@ -704,18 +723,20 @@ function cacheWithInputs(
  * `enabled: true` and `order: 0`. An input `blur` gives the body `sampleBlur(uv)`: the last texture
  * of its chain, read at the body's `uv`. A `fallback` draws instead when the filter is broken.
  * An `area` answers, from the value, the rectangle in the entity's own units outside of which the
- * filter draws nothing: Pixi then renders and fills only that box, not the view's bounds.
+ * filter draws nothing: Pixi then renders and fills only that box, not the view's bounds. A
+ * `resolution` draws the view and its filters at that many texels per CSS px instead of the
+ * canvas's.
  * Register it through the `filters` key of a feature. The README shows a filter with a blur input
  * and one with an `area`.
  *
  * @param id - The filter id, also the component name; unique, and not one of the built-ins.
  * @param spec - Both bodies, the uniforms, the passes one apply costs, the padding, the inputs, the fallback, the
- *   cache category and the area.
+ *   cache category, the area and the resolution.
  * @returns The component type, with the frozen `filter` definition attached.
  * @throws {Error} When the id is empty, the WGSL has no `mainFragment`, the GLSL no `void main(`,
  *   a uniform is reserved, badly named or of no known form, the passes or the padding break
  *   their rules, an input or the fallback breaks one of its rules, `passes` is given with inputs,
- *   or `area` is not a function.
+ *   `area` is not a function, or `resolution` is not a finite number of 0 or more.
  * @example
  * ```ts
  * // features/board/effects.ts: a gold tint a motion hook tweens on a merge, on WebGPU and WebGL.
@@ -751,6 +772,7 @@ export function defineFilter<
   checkCache(id, spec.cache);
 
   const area = readArea(id, spec.area);
+  const resolution = readResolution(id, spec.resolution);
 
   // Assemble the frozen definition: both shaders with the engine's header, and what the renderer's cache may keep.
   const origin = callsCanvasPixel(spec.wgsl, spec.glsl) ? KEPT_ORIGIN : undefined;
@@ -766,6 +788,7 @@ export function defineFilter<
     fallback,
     cache,
     origin,
+    resolution,
     // The key is there only when the spec gave an area (`exactOptionalPropertyTypes`).
     ...(area === undefined ? {} : { area })
   });

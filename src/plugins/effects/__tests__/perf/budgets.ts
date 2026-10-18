@@ -15,6 +15,12 @@ export const BUDGET = {
   // E1: one `Glow` strength tweened on one of 12 filtered views, the tween's own write subtracted. Before: 4 698 B. Now
   // 0: one view syncs, its uniforms walked by index.
   filtersTween: 0,
+  // Change 2026-10-18-memory-render, M4: the `Alpha` of one of 12 filtered views crosses 1 in every step, so its filter
+  // is switched off and on and the view's area judged again, the fade's own write subtracted. Before: 16 B (the alpha
+  // `numberOf` handed back and the keyed copy of the fields the setters were given each boxed a fraction; the switch
+  // and the judged union added 32 B more while they were written the same way). Now 0: an `Alpha` reads and copies its
+  // two fields by name, and a union of no area writes no numbers.
+  filtersFade: 0,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the
   // frame's delta boxed into each step call). Now 0: nothing is written for a still host.
