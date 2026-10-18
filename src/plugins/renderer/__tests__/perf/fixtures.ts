@@ -38,15 +38,17 @@ const CALLS = 100_000;
 
 /**
  * The heap bytes one call of a step keeps: the step run until V8 optimized what it calls, outside the window, then
- * `alloc` over a window of `CALLS`.
+ * `alloc` over a window of `calls`.
  *
  * @param fn - The step.
+ * @param calls - Calls of the window; fewer for a step that allocates kilobytes, so the window stays in the young
+ *   generation.
  * @returns Bytes per call.
  */
-export function bytesPerCall(fn: () => void): number {
+export function bytesPerCall(fn: () => void, calls = CALLS): number {
   for (let call = 0; call < WARM_CALLS; call += 1) fn();
 
-  return alloc(fn, CALLS);
+  return alloc(fn, calls);
 }
 
 /**

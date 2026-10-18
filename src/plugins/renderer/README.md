@@ -1086,7 +1086,10 @@ coverage is the glyph's alone, and the template's `outColor * vColor` applies ev
 label's (`Text.alpha` is the alpha of its container), a parent's (a disabled button, a popup fade)
 and the world's. Full-alpha text draws the same pixels as before. The program is compiled once per
 batch texture limit and shared by every text; each text gets its own local uniforms, as from Pixi's
-pipe.
+pipe. A text keeps its one shader: Pixi asks `getSdfShader()` at every layout of a text and keeps the answer only for
+a context without one, so the pipe hands the text's own shader back while it lays it out again. A new shader per update
+was about 22 KB of garbage a text change, and on WebGL every dropped shader stayed subscribed to the shared batch-sampler
+group, a leak.
 
 Both backends. On WebGPU the shader carries the WGSL program above. On the WebGL fallback it
 carries the GLSL program, compiled with `compileHighShaderGlProgram` from the GL twins of the same

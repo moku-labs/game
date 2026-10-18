@@ -43,6 +43,10 @@ export const BUDGET = {
   // Q2: before 128 B (the layer table walked with entry arrays for the HUD layer's name every step). Now the name is
   // kept with the layers.
   hudPartsStill: 0,
+  // A26 heap profile: before 22 400 B (a new SDF shader made at every layout of a text and dropped by Pixi: its bind
+  // groups, its resource accessors, its uniform group). Now the text keeps its shader; measured 2 819 B, all of it
+  // Pixi laying the label out again (its graphics context's instructions and the layout), not the engine's.
+  sdfTextUpdate: 2900,
   // `rootPoseInto` for effects' E2: `rootPoseOf` made 600 B through the same chain of three.
   rootPoseInto: 0
 } as const;
