@@ -118,6 +118,23 @@ export default defineConfig({
             "src/plugins/**/__tests__/integration/**/*.test.{ts,tsx}"
           ]
         }
+      },
+      {
+        // Heap bytes per call (`*.perf.ts`, asserted against budgets) and time per call
+        // (`*.bench.ts`, reported only). Node only: `alloc` needs an exposed gc, and a 256 MB young
+        // generation keeps a scavenge out of a measured window. One file at a time, so another
+        // file's work never lands in a window.
+        extends: true,
+        test: {
+          name: "perf",
+          include: ["src/plugins/**/__tests__/perf/**/*.perf.ts", "tests/perf/**/*.perf.ts"],
+          pool: "forks",
+          execArgv: ["--expose-gc", "--min-semi-space-size=256", "--max-semi-space-size=256"],
+          fileParallelism: false,
+          benchmark: {
+            include: ["src/plugins/**/__tests__/perf/**/*.bench.ts", "tests/perf/**/*.bench.ts"]
+          }
+        }
       }
     ],
     coverage: {
