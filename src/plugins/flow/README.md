@@ -436,6 +436,25 @@ composes a feature without its screen set.
 `GameTypes.emitters` is the emitter id union of a game. `EmitterIdOf<Types>` reads it and falls
 back to `string`, as `TextStylesOf` does for `textStyles`.
 
+`systemsRun?: "always" | "active"` (type `Flow.SystemsRun`) says when the feature's `systems` run,
+read by `world`. `"always"`, the default, runs them every frame as before. `"active"` runs them only
+while the feature is active: a node of it is on the stack (rule N, "Which feature is on the stack"
+below), a scene it declares is mounted (rule S), a view of a projection it registered exists,
+leaving included (rule V), or `ui` holds a popup or JSX root of it until its exit ended (rule U).
+Skipping changes nothing the flow sees: systems never write the model. `defineFeature` throws for
+another value: `[game] Feature "board" has systemsRun "scene".` `logicOnly` drops the key with
+`systems`, and it is no part of `describe()` or the graph hash. The rules, the timing and the cost
+are in the world README, "Systems that run where their feature is".
+
+```ts
+// features/board/index.ts: the board's four systems stop on the ward and on the splash.
+export const boardFeature = defineFeature("board", {
+  flows: [mergeBoard],
+  systems: [looks, fade, leaving, veil],
+  systemsRun: "active"
+});
+```
+
 ### Sub-features
 
 A feature may declare sub-features: `defineFeature("episodes", { features: [episodesKitFeature,

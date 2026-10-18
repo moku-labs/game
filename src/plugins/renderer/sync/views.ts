@@ -439,6 +439,8 @@ export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: numb
 
   markView(sctx, entity);
   view.hud = factor;
+  // A new alpha on the chain of the part's subtree: the walks of `shown` are taken again (E4).
+  sctx.ctx.state.sync.passesVersion += 1;
 
   if (ownsAlpha(view)) {
     applyAlpha(sctx, entity, view, componentAlpha(sctx, entity, view));
@@ -1423,6 +1425,8 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
   // Its filters and area stay while the entity lives: the pass looks for its despawn.
   if (state.filters.has(entity) || state.areas.has(entity)) state.viewlessEntries = true;
   state.orphans.delete(entity);
+  // The answer of its loops' walk goes with the view: a new view is walked again.
+  state.held.delete(entity);
   state.entityOf.delete(view.object);
   state.viewOfTop.delete(view.wrapper ?? view.object);
   untrackKey(state, entity, view.textureKey);

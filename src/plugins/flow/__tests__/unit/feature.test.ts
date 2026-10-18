@@ -387,3 +387,27 @@ describe("sub-features", () => {
     expect(episodes.logicOnly.features.map(child => child.name)).toEqual(["kit"]);
   });
 });
+
+// ─── systemsRun (spec 28 F1) ──────────────────────────────────
+
+describe("systemsRun", () => {
+  // Bug caught: a JavaScript game (or a factory that passes a string through) writes a value
+  // the world does not know, and its systems silently run as "always" with no word about it.
+  it("defineFeature refuses a systemsRun that is neither always nor active, naming the feature and the value", () => {
+    const bad = { systemsRun: "scene" } as unknown as FeatureDescription;
+
+    expect(() => defineFeature("board", bad)).toThrow(
+      '[game] Feature "board" has systemsRun "scene".\n  Use "always" (the default) or "active".'
+    );
+    expect(() => defineFeature("board", { systemsRun: "active" })).not.toThrow();
+    expect(() => defineFeature("board", { systemsRun: "always" })).not.toThrow();
+  });
+
+  // Bug caught: the key leaks into the headless registry, where no world reads it.
+  it("logicOnly drops systemsRun", () => {
+    const feature = defineFeature("board", { ...description, systemsRun: "active" });
+
+    expect(runInit(feature.logicOnly)[0]?.description).not.toHaveProperty("systemsRun");
+    expect(runInit(feature)[0]?.description.systemsRun).toBe("active");
+  });
+});

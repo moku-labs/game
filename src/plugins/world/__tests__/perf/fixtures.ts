@@ -5,7 +5,8 @@
  * `flow` answer with one kept object, so the mock's own fresh snapshot and flow state never land
  * in a window.
  */
-import type { Api as FlowApi } from "../../../flow/types";
+import type { FeatureDescription } from "../../../flow/features/types";
+import type { Api as FlowApi, FlowGraph, FlowState } from "../../../flow/types";
 import type { Api as ModelApi, Snapshot } from "../../../model/types";
 import type { Time } from "../../../time/types";
 import { createModules } from "../../api";
@@ -420,17 +421,21 @@ export function queryFixture(): () => void {
 }
 
 /**
- * The rows alone the query fixture yields: 30 fresh rows of three entries, the yardstick of its
- * budget.
+ * The rows alone a query fixture yields, made in the same process as the query: the yardstick of
+ * its budget. `wide` rows of three entries, as `query(Cell, Lit)` yields, and `narrow` rows of two,
+ * as `query(Picked)` yields.
  *
- * @returns One call making 30 rows.
+ * @param wide - Rows of the entity and two values.
+ * @param narrow - Rows of the entity and one value.
+ * @returns One call making those rows.
  */
-export function rowsFixture(): () => void {
+export function rowsFixture(wide: number, narrow = 0): () => void {
   const cell = Cell().value;
   const lit = Lit().value;
 
   return (): void => {
-    for (let index = 0; index < 30; index += 1) sink.value = [index, cell, lit];
+    for (let index = 0; index < wide; index += 1) sink.value = [index, cell, lit];
+    for (let index = 0; index < narrow; index += 1) sink.value = [index, cell];
   };
 }
 
@@ -456,4 +461,221 @@ export function nestedQueryFixture(): () => void {
       readRows(ecs.query(Cell, Lit));
     }
   };
+}
+
+/** Features of the scope fixtures: one scoped feature per system group, as a game of twenty doors. */
+const FEATURES = 20;
+
+/**
+ * A frozen flow state resting on one node of `main`, as `flow.state()` answers while the graph
+ * does not move.
+ *
+ * @param node - The node the stack holds.
+ * @returns The state.
+ */
+function restingOn(node: string): FlowState {
+  return Object.freeze({
+    running: true,
+    path: node,
+    stack: Object.freeze([Object.freeze({ flow: "main", node, input: {} })]),
+    pending: Object.freeze({}),
+    mode: "live"
+  });
+}
+
+/**
+ * The described graph of the scope fixtures: every node of `main` owned by the feature of the same
+ * name.
+ *
+ * @param names - The feature names.
+ * @returns The graph.
+ */
+function graphOwnedBy(names: readonly string[]): FlowGraph {
+  const nodes: FlowGraph["flows"][string]["nodes"] = {};
+
+  for (const name of names) {
+    nodes[name] = {
+      flow: "main",
+      node: name,
+      rest: true,
+      over: false,
+      checkpoint: false,
+      barrier: false,
+      outcomes: [],
+      owner: name
+    };
+  }
+
+  return { main: "main", flows: { main: { nodes, start: names[0] ?? "", edges: {} } }, slots: {} };
+}
+
+/**
+ * The world modules over the mock world's state with a `model` that answers one kept snapshot and
+ * a `flow` whose `state()` answers whatever `current` holds: one kept frozen object while the
+ * graph rests, as the memoised `flow.state()` does.
+ *
+ * @param world - The mock world.
+ * @param current - The flow state `state()` answers.
+ * @param current.state - The state.
+ * @param graph - What `describe()` answers.
+ * @returns The ecs module.
+ */
+function scopedModules(
+  world: MockWorld,
+  current: { state: FlowState },
+  graph: FlowGraph
+): EcsModule {
+  const deps = withDeps(world.ctx).deps;
+  const model = { store: { snapshot: () => SNAPSHOT } } as unknown as ModelApi;
+  const flow = {
+    ...deps.flow,
+    state: () => current.state,
+    describe: () => graph
+  } as unknown as FlowApi;
+
+  return createModules({ ...world.ctx, deps: { ...deps, model, flow } }).ecs;
+}
+
+/**
+ * Registers the features of a scope fixture with the mock world and starts it, so the scope is
+ * sized and every system carries its feature.
+ *
+ * @param world - The mock world.
+ * @param features - The features, in order.
+ */
+function startFeatures(
+  world: MockWorld,
+  features: ReadonlyArray<{ name: string; description: FeatureDescription }>
+): void {
+  for (const feature of features) world.features.push(feature);
+
+  world.start();
+}
+
+/** One frame of a scope fixture and how often its scoped systems ran. */
+export type ScopedFrame = { frame: () => void; runs: () => number };
+
+/**
+ * Forty systems of the feature `board`, each walking `[Cell, mut(Lit)]` over 300 entities, 30
+ * matching, in phase `animate`; the flow rests on the ward, so with `systemsRun: "active"` the
+ * board is not active and its systems sleep. With `"always"` they run, as every system ran before
+ * spec 28.
+ *
+ * @param run - The board's `systemsRun`.
+ * @returns One frame of the four phases and the clear, and the count of the board's runs.
+ */
+export function scopedFixture(run: "active" | "always"): ScopedFrame {
+  const world = createMockWorld();
+  const counted = { runs: 0 };
+  const systems: AnySystem[] = [];
+
+  for (let index = 0; index < ENTITIES; index += 1) {
+    world.api.ecs.spawn(OWNER, index % 10 === 0 ? [Cell(), Lit()] : [Cell()]);
+  }
+
+  for (let index = 0; index < SYSTEMS; index += 1) {
+    systems.push(
+      system({
+        name: `perf.board${index}`,
+        phase: "animate",
+        query: [Cell, mut(Lit)],
+        run: rows => {
+          counted.runs += 1;
+
+          for (const row of rows) sink.entity = row[0];
+        }
+      })
+    );
+  }
+
+  startFeatures(world, [
+    { name: "ward", description: { scenes: [{ id: "ward" }] } },
+    { name: "board", description: { scenes: [{ id: "board" }], systems, systemsRun: run } }
+  ]);
+
+  const ecs = scopedModules(world, { state: restingOn("ward") }, graphOwnedBy(["ward", "board"]));
+  const time = frameTime();
+  const phases = PHASES.length;
+
+  return {
+    frame: (): void => {
+      time.frame += 1;
+
+      // An index loop: the measured window holds the engine's work only, no iterator of the fixture.
+      for (let at = 0; at < phases; at += 1) ecs.runPhase(PHASES[at] ?? "input", time);
+
+      ecs.clearChanges();
+    },
+    runs: (): number => counted.runs
+  };
+}
+
+/**
+ * Twenty scoped features, one empty-query system each, and a flow that moves every frame between
+ * two nodes of `main`: every frame reads the stack again and evaluates the whole active set, the
+ * worst case of the check. The ward's feature is the only one on the stack.
+ *
+ * @returns One frame of the four phases with `isActive` asked once, and the clear.
+ */
+export function scopeCheckFixture(): () => void {
+  const world = createMockWorld();
+  const names: string[] = [];
+  const features: Array<{ name: string; description: FeatureDescription }> = [];
+
+  for (let index = 0; index < FEATURES; index += 1) {
+    const name = `door${index}`;
+
+    names.push(name);
+    features.push({
+      name,
+      description: {
+        scenes: [{ id: name }],
+        systems: [
+          system({
+            name: `perf.door${index}`,
+            phase: "animate",
+            query: [],
+            run: (_rows, { resumed }) => {
+              sink.flag = resumed;
+            }
+          })
+        ],
+        systemsRun: "active"
+      }
+    });
+  }
+
+  startFeatures(world, features);
+
+  const states = [restingOn("door0"), restingOn("door1")];
+  const current = { state: states[0] ?? restingOn("door0") };
+  const ecs = scopedModules(world, current, graphOwnedBy(names));
+  const time = frameTime();
+  const phases = PHASES.length;
+
+  return (): void => {
+    time.frame += 1;
+    current.state = states[time.frame % 2] ?? current.state;
+
+    for (let at = 0; at < phases; at += 1) ecs.runPhase(PHASES[at] ?? "input", time);
+
+    sink.flag = ecs.isActive("door1");
+    ecs.clearChanges();
+  };
+}
+
+/** Calls before a measure, so a tier-up of V8 never falls inside one of `alloc`'s windows. */
+const SETTLE = 30_000;
+
+/**
+ * Runs a fixture until V8 has settled on its code, then hands it back: `alloc` compares two
+ * windows, and a tier-up between them reads as a GC inside the window.
+ *
+ * @param fn - The fixture call.
+ * @returns The same call.
+ */
+export function settled(fn: () => void): () => void {
+  for (let call = 0; call < SETTLE; call += 1) fn();
+
+  return fn;
 }

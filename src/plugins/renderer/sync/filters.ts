@@ -10,6 +10,9 @@ import type { KeptState } from "../kept/types";
 import type { KeptModule, PixiContainer, PixiFilter, PixiRectangle } from "../types";
 import type { AreaEntry, FilterSlot, PassCount, SyncCtx, SyncState, View } from "./types";
 
+/** What a display object without filters holds: one shared list, plain, so a still frame's compare makes none. */
+const NO_FILTERS: readonly PixiFilter[] = [];
+
 /**
  * The filters a display object holds now. Pixi answers `undefined` before the first write and
  * `null` after a clear, which its getter type does not say.
@@ -20,11 +23,12 @@ import type { AreaEntry, FilterSlot, PassCount, SyncCtx, SyncState, View } from 
 function heldFilters(target: PixiContainer): readonly PixiFilter[] {
   const held: readonly PixiFilter[] | null | undefined = target.filters;
 
-  return held ?? [];
+  return held ?? NO_FILTERS;
 }
 
 /**
- * Tells whether a display object holds exactly these filter instances, in this order.
+ * Tells whether a display object holds exactly the enabled filters of these slots, in their order (E3): Pixi is handed
+ * no disabled filter, which draws nothing but costs a filter push and pop, two batch breaks, every frame.
  *
  * @param target - The display object.
  * @param slots - The slots to compare with.
@@ -32,8 +36,50 @@ function heldFilters(target: PixiContainer): readonly PixiFilter[] {
  */
 function holds(target: PixiContainer, slots: readonly FilterSlot[]): boolean {
   const held = heldFilters(target);
+  let at = 0;
 
-  return held.length === slots.length && slots.every((slot, index) => held[index] === slot.filter);
+  // per frame and filtered view: both lists are frozen, so they are walked by index (`for…of` allocates over one).
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot is matched against a second list.
+  for (let index = 0; index < slots.length; index += 1) {
+    const filter = slots[index]?.filter;
+
+    if (filter === undefined || !filter.enabled) continue;
+    if (held[at] !== filter) return false;
+
+    at += 1;
+  }
+
+  return at === held.length;
+}
+
+/**
+ * The enabled filters of slots, in their order: what Pixi is handed.
+ *
+ * @param slots - The slots.
+ * @returns A new list, or `undefined` when no filter is enabled.
+ */
+function enabledFilters(slots: readonly FilterSlot[]): PixiFilter[] | undefined {
+  let enabled: PixiFilter[] | undefined;
+
+  for (const slot of slots) {
+    if (slot.filter.enabled) {
+      enabled ??= [];
+      enabled.push(slot.filter);
+    }
+  }
+
+  return enabled;
+}
+
+/**
+ * Writes the enabled filters of slots onto a display object, or clears them when none is enabled.
+ *
+ * @param target - The display object.
+ * @param slots - The slots.
+ */
+function writeFilters(target: PixiContainer, slots: readonly FilterSlot[]): void {
+  // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
+  target.filters = enabledFilters(slots) ?? null;
 }
 
 /**
@@ -50,8 +96,10 @@ export function clearFilters(target: PixiContainer): void {
 /**
  * Hangs the filters on a view: on its wrapper when it has one, so they cover the entity's whole
  * subtree, otherwise on the object; on the stand-in of its kept picture while it has one
- * (`kept.filterTarget`, spec 23 P9.1). Written only when the instances differ from what the target
- * holds, and `before` runs once just before that write: the caller marks the entity there.
+ * (`kept.filterTarget`, spec 23 P9.1). Only the enabled ones: a disabled filter draws nothing, and Pixi would push and
+ * pop it around the view every frame (E3); a view whose filters are all disabled holds none. Written only when they
+ * differ from what the target holds, and `before` runs once just before that write: the caller marks the entity there.
+ * A filter switched on or off later is written by `applySwitched` in the frame it was switched.
  *
  * @param view - The view.
  * @param slots - The filters in draw order; empty clears them.
@@ -67,9 +115,7 @@ export function applyFilters(
   if (holds(target, slots)) return;
 
   before();
-
-  // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
-  target.filters = slots.length === 0 ? null : slots.map(slot => slot.filter);
+  writeFilters(target, slots);
 }
 
 /**
@@ -194,6 +240,55 @@ export function moveFilters(
   if (heldFilters(view.object).length > 0) before();
   clearFilters(view.object);
   applyFilters(view, slots, before);
+}
+
+/** What the walk of the switched filters reads, set before the walk: one at a time, no closure per frame. */
+const switched: {
+  sync: SyncState | undefined;
+  kept: Pick<KeptModule, "filterTarget"> | undefined;
+  wrote: boolean;
+} = { sync: undefined, kept: undefined, wrote: false };
+
+/**
+ * Writes the enabled filters of one view again when one of them was switched on or off since they were handed to Pixi.
+ *
+ * @param slots - The filters of the view.
+ * @param entity - The entity.
+ */
+function applySwitchedOne(slots: readonly FilterSlot[], entity: Entity): void {
+  const { sync, kept } = switched;
+  const view = sync?.views.get(entity);
+
+  if (view === undefined || kept === undefined) return;
+
+  const target = kept.filterTarget(view);
+
+  if (holds(target, slots)) return;
+
+  writeFilters(target, slots);
+  switched.wrote = true;
+}
+
+/**
+ * Hands Pixi the filters of every view whose filters were switched on or off since they were written (E3), before the
+ * frame is drawn, so a switch is drawn in the frame it was made. No mark: the writer of a switch tells the renderer
+ * with `invalidate` first. A write moves `passesVersion` on: the paddings the walks of `shown` read changed (E4).
+ *
+ * @param state - The sync branch of the plugin state.
+ * @param kept - The kept module: where each view's filters hang.
+ */
+export function applySwitched(state: SyncState, kept: Pick<KeptModule, "filterTarget">): void {
+  if (state.filters.size === 0) return;
+
+  switched.sync = state;
+  switched.kept = kept;
+  switched.wrote = false;
+  // per frame: a Map walked with `forEach` and a callback made once, no iterator, no entry array.
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no entry arrays.
+  state.filters.forEach(applySwitchedOne);
+  if (switched.wrote) state.passesVersion += 1;
+  switched.sync = undefined;
+  switched.kept = undefined;
 }
 
 /**

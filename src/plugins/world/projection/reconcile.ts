@@ -159,6 +159,7 @@ function enterEntry(
 
   mounted.live.set(entry.key, view);
   pctx.ctx.state.projection.byEntity.set(entity, view);
+  pctx.deps.views.came(spec.name);
   pctx.ctx.state.projection.membershipVersion += 1;
 
   const hook = spec.motion?.enter;

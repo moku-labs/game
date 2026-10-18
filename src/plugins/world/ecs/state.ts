@@ -1,7 +1,7 @@
 /**
  * @file world/ecs — state factory.
  */
-import type { EcsState } from "./types";
+import type { EcsState, ScopeState } from "./types";
 
 /**
  * Creates an empty collection. It lives in its own non-exported function because lint rule L5
@@ -11,6 +11,30 @@ import type { EcsState } from "./types";
  */
 function emptyMap<Key, Value>(): Map<Key, Value> {
   return new Map();
+}
+
+/**
+ * Creates the scope of a world that has not started: no feature, no table of owners, typed arrays
+ * of length 0. `onStart` sizes it once to the feature count.
+ *
+ * @returns An empty scope.
+ */
+function emptyScope(): ScopeState {
+  return {
+    names: [],
+    index: new Map(),
+    projections: new Map(),
+    owners: undefined,
+    ownersFailed: false,
+    flow: undefined,
+    onStack: new Uint8Array(0),
+    holds: new Int32Array(0),
+    views: new Int32Array(0),
+    active: new Uint8Array(0),
+    dirty: false,
+    scoped: false,
+    generation: 0
+  };
 }
 
 /**
@@ -50,6 +74,7 @@ export function createEcsState(): EcsState {
     walkReported: false,
     queryPlans: emptyMap(),
     walkLists: [],
-    despawns: 0
+    despawns: 0,
+    scope: emptyScope()
   };
 }

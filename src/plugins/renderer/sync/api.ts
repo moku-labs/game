@@ -10,7 +10,7 @@ import type { PixiContainer, PixiFilter, PixiTexture, RendererCtx, SyncModule } 
 import { provideDisplay, updateAdapterView } from "./adapters";
 import { boundsOf, hitBoxOf, layerOf } from "./bounds";
 import { eachEntity, isEmptyList } from "./each";
-import { forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
+import { applySwitched, forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
 import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
@@ -103,8 +103,9 @@ function emptyEntitySet(): Set<Entity> {
 }
 
 /**
- * Where the walk of `shown` stopped for an entity's view, walked once between two sync passes: an entity with several
- * endless loops asks once a frame (spec 26 R1.7.3). Nothing is allocated once the map has grown.
+ * Where the walk of `shown` stopped for an entity's view, walked again only when `passesVersion` moved since (E4): an
+ * entity with several endless loops is walked once, and the loops of a still board are answered from their records
+ * (spec 26 R1.7.3). A record is made at an entity's first ask and written in place after.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity a loop is about to write.
@@ -117,11 +118,16 @@ function unseenOf(sctx: SyncCtx, entity: Entity): Unseen {
 
   const known = state.held.get(entity);
 
-  if (known !== undefined) return known;
+  // per loop and frame: the answer stands while nothing that moves the version changed the tree.
+  if (known !== undefined && known.at === state.passesVersion) return known.answer;
 
   const answer = sctx.deps.demand.unseenBy(entity);
 
-  state.held.set(entity, answer);
+  if (known === undefined) state.held.set(entity, { answer, at: state.passesVersion });
+  else {
+    known.answer = answer;
+    known.at = state.passesVersion;
+  }
 
   return answer;
 }
@@ -632,14 +638,11 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    * view. A still frame (nothing changed, nothing waits) returns before any work and makes nothing.
    */
   const pass = (): void => {
-    // The pass may change the tree: the unseen walks of the loops are taken again in the next frame. Cleared only when
-    // it holds something: V8 gives an empty map a new table at every `clear()`, and the pass runs every frame.
-    if (state.held.size > 0) state.held.clear();
-
     // per frame: a still frame stops here, with no set, no closure and no iterator made.
     if (still()) return;
 
-    // A pass that works may hang, wrap or drop views: the render passes are counted again (Q2).
+    // A pass that works may hang, wrap, move or drop views: the render passes are counted again (Q2), and the walks of
+    // `shown` the loops ask for are taken again (E4).
     state.passesVersion += 1;
 
     if (state.removed.size > 0) {
@@ -875,6 +878,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     layerOf: (entity: Entity): string | undefined => layerOf(sctx, entity),
 
     stepOverlays: (): void => stepOverlays(sctx),
+
+    stepFilters: (): void => applySwitched(state, deps.kept),
 
     drainOverlayEvents: (monitor: OverlayEventSink): void => drainOverlayEvents(sctx, monitor),
 

@@ -6,6 +6,7 @@ import type { Time } from "../../time/types";
 import type { WorldCtx } from "../types";
 import { flushCommands } from "./commands";
 import { planOf, SystemWalk, systemRows } from "./query";
+import { refreshScope } from "./scope";
 import { asError, resourceValue } from "./storage";
 import type {
   AnySystem,
@@ -133,14 +134,17 @@ export function frameSnapshot(ctx: WorldCtx, time: Readonly<Time>): Snapshot {
 
 /**
  * Registers a system at the end of its phase list and returns the remover. Its query is resolved
- * here, once: a later change to the definition's `query` array is not seen.
+ * here, once: a later change to the definition's `query` array is not seen. A system of a feature
+ * with `systemsRun: "active"` carries the feature's index as its scope and runs only while the
+ * feature is active; `ecs.system` passes none, so a system registered by hand always runs.
  *
  * @param ctx - Domain context of the world plugin.
  * @param definition - The system.
+ * @param scope - The index of its feature in the scope, or -1 for a system that always runs.
  * @returns The remover; calling it twice is a no-op.
  * @throws {Error} When a system of that name is already registered.
  */
-export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void {
+export function registerSystem(ctx: WorldCtx, definition: AnySystem, scope = -1): () => void {
   const state = ctx.state.ecs;
   const phases: WorldPhase[] = ["input", "animate", "layout", "sync"];
 
@@ -160,11 +164,15 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void
     definition,
     frame: ctx.deps.time.snapshot().frame,
     plan,
+    scope,
+    skipped: false,
     walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan)
   };
   const list = state.systems[definition.phase];
 
   list.push(entry);
+
+  if (scope !== -1) state.scope.scoped = true;
 
   if (state.timing !== undefined) giveRow(state, state.timing, definition.name);
 
@@ -197,7 +205,8 @@ function createPhaseContext(
     res: <Value extends object>(resourceType: ResourceType<Value>): Value =>
       resourceValue(state, resourceType),
     snapshot,
-    time
+    time,
+    resumed: false
   };
 
   state.phaseContext = context;
@@ -232,6 +241,54 @@ function phaseContextOf(ctx: WorldCtx, world: EcsApi, time: Readonly<Time>): Pha
 }
 
 /**
+ * Tells whether a system of a scoped feature runs in this phase. One whose feature is not active is
+ * skipped in its slot and remembers it; one that runs is told whether its runs before were
+ * skipped. No walk, no mark and no clock read happen for a skipped system: the check comes before
+ * all three. The caller sets `resumed` back to false after the run, so a system that always runs
+ * reads false without a write of its own.
+ *
+ * @param active - The active flags of the features, evaluated at the start of the phase.
+ * @param entry - The system, whose scope is a feature index.
+ * @param context - What its `run` receives; `resumed` is written here.
+ * @returns True when the system runs.
+ */
+function wakes(active: Uint8Array, entry: SystemEntry, context: PhaseContext): boolean {
+  if (active[entry.scope] === 0) {
+    entry.skipped = true;
+
+    return false;
+  }
+
+  context.resumed = entry.skipped;
+  entry.skipped = false;
+
+  return true;
+}
+
+/**
+ * Runs one system of a scoped feature when its feature is active, and leaves `resumed` false for
+ * the systems after it.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param active - The active flags of the features.
+ * @param entry - The system.
+ * @param context - What its `run` receives.
+ * @param phase - The phase, for the report of a throw.
+ */
+function runScoped(
+  ctx: WorldCtx,
+  active: Uint8Array,
+  entry: SystemEntry,
+  context: PhaseContext,
+  phase: WorldPhase
+): void {
+  if (!wakes(active, entry, context)) return;
+
+  guardedRun(ctx, entry, context, phase);
+  context.resumed = false;
+}
+
+/**
  * Runs one system, reporting a throw: the try lives here, so the loop of a phase holds none.
  *
  * @param ctx - Domain context of the world plugin.
@@ -254,7 +311,9 @@ function guardedRun(
 
 /**
  * Runs the systems of one phase and flushes the commands they queued. A throwing system is
- * reported and skipped for this frame; the frame goes on.
+ * reported and skipped for this frame; the frame goes on. When a feature scopes its systems, the
+ * active set is evaluated first, from the sources as they stand at the start of the phase; a
+ * system of a feature that is not active is skipped in its slot.
  *
  * @param ctx - Domain context of the world plugin.
  * @param world - The ecs API a system's `run` receives.
@@ -270,9 +329,12 @@ export function runPhase(
   const state = ctx.state.ecs;
 
   if (phase !== ALWAYS && effectiveMode(ctx) !== "live") return;
+  // Per phase: one flag read for a game with no scoped system.
+  if (state.scope.scoped) refreshScope(ctx);
 
   const context = phaseContextOf(ctx, world, time);
   const entries = state.systems[phase];
+  const active = state.scope.active;
 
   state.running = phase;
 
@@ -282,7 +344,10 @@ export function runPhase(
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index];
 
-      if (entry !== undefined && entry.frame < time.frame) guardedRun(ctx, entry, context, phase);
+      if (entry === undefined || entry.frame >= time.frame) continue;
+      // Per system: one integer comparison for a system that always runs.
+      if (entry.scope === -1) guardedRun(ctx, entry, context, phase);
+      else runScoped(ctx, active, entry, context, phase);
     }
   } else {
     runTimed(ctx, state.timing, entries, context, phase, time);
@@ -293,9 +358,10 @@ export function runPhase(
 }
 
 /**
- * Runs the systems of one phase as `runPhase` does, same order, same error isolation, and adds
- * each run's time to its row of the timing table: two clock reads per run, an indexed loop, no
- * closure. The rows were zeroed at the start of the frame, so after the frame they hold its time.
+ * Runs the systems of one phase as `runPhase` does, same order, same error isolation, same skip,
+ * and adds each run's time to its row of the timing table: two clock reads per run, an indexed
+ * loop, no closure. The rows were zeroed at the start of the frame, so after the frame they hold
+ * its time; a skipped system's row stays 0.
  *
  * @param ctx - Domain context of the world plugin.
  * @param timing - The timing table of the agent build.
@@ -308,16 +374,19 @@ function runTimed(
   ctx: WorldCtx,
   timing: SystemTiming,
   entries: readonly SystemEntry[],
-  context: SystemContext,
+  context: PhaseContext,
   phase: WorldPhase,
   time: Readonly<Time>
 ): void {
   const count = entries.length;
+  const active = ctx.state.ecs.scope.active;
 
   for (let index = 0; index < count; index += 1) {
     const entry = entries[index];
 
     if (entry === undefined || entry.frame >= time.frame) continue;
+    // Before the first clock read: a skipped system is not timed, its row keeps the frame's 0.
+    if (entry.scope !== -1 && !wakes(active, entry, context)) continue;
 
     const row = rowOf(ctx.state.ecs, entry.definition.name);
     const started = timing.clock();
@@ -325,5 +394,6 @@ function runTimed(
     guardedRun(ctx, entry, context, phase);
 
     timing.ms[row] = (timing.ms[row] ?? 0) + timing.clock() - started;
+    context.resumed = false;
   }
 }

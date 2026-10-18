@@ -590,6 +590,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.mounted.clear();
       state.specs.clear();
       state.byEntity.clear();
+      pctx.deps.views.cleared();
       state.mutes.clear();
       state.rests.clear();
       state.keys.clear();

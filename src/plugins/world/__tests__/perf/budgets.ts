@@ -7,6 +7,13 @@
 /** What a measurement of a call that keeps nothing may read: the agreement of `alloc` itself. */
 export const NOISE_BYTES = 1;
 
+/**
+ * Headroom of a query budget over its rows and walks: the size of a fresh row moves with V8's
+ * array growth from run to run, so a query budget is relative and carries this margin. The 0 B
+ * budgets stay strict.
+ */
+export const QUERY_MARGIN = 256;
+
 /** Bytes per call each fixture may keep allocated. */
 export const BUDGET = {
   /**
@@ -44,16 +51,22 @@ export const BUDGET = {
   /** W6: `ecs.set` of one integer field. Was 0 B. */
   ecsSetInteger: 0,
   /**
-   * Q1: `ecs.query(Cell, Lit)` outside a phase, 300 entities, 30 matching. Was 5 177 B: a new
-   * plan (names and written arrays), a copy of the 300 keys, the walk and its step. 2 500 B stays:
-   * the 30 fresh rows (2 168 B; games keep and spread them, so they stay new arrays), the walk
-   * object and the call's rest array of terms (about 170 B, one walk per call).
+   * Q1: `ecs.query()` outside a phase, bytes per walk besides its rows. The rows stay fresh by
+   * contract (games keep and spread them), so a query's budget is the rows measured in the same
+   * process plus this per walk plus `QUERY_MARGIN`. 170 B: the walk object and the call's rest
+   * array of terms (167 B measured). Before Q1 a 300-entity query over 30 matches kept 3 010 B
+   * besides its rows: a new plan, a copy of the 300 keys, the walk and its step (5 177 B in all).
    */
-  queryOutside: 2500,
-  /** Q1: a query nested in a query's loop, 5 outer rows. Was 26 406 B. 12 300 B stays: 155 fresh rows and 6 walks. */
-  queryNested: 12_300,
+  queryWalk: 170,
   /** W6: `ecs.has`. Was 0 B. */
   ecsHas: 0,
   /** W6: `ecs.resource(Now)`, the read behind `res(Now)`. Was 0 B. */
-  ecsRes: 0
+  ecsRes: 0,
+  /**
+   * Spec 28: a frame whose 40 systems of an inactive feature (`systemsRun: "active"`) sleep. Before
+   * spec 28 they ran: 0 B, every walk reused, but 40 walks and 1 200 marks a frame.
+   */
+  scopeInactive: 0,
+  /** Spec 28: a frame whose flow moved, so the stack is read and 20 features are evaluated again, plus one `isActive`. */
+  scopeCheck: 0
 } as const;

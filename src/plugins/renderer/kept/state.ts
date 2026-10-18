@@ -63,7 +63,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     warnedBudget: false,
     verifySkipped: 0,
     bypassed: false,
-    flushPasses: 0
+    flushPasses: 0,
+    calm: false
   };
 }
 

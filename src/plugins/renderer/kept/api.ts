@@ -18,7 +18,7 @@ import type {
 } from "../types";
 import { flushRanges, moveRange, releaseRange, retakeRange, spriteOf, takeRange } from "./freeze";
 import { drawnThrough, NOT_THROUGH, slotsPadding } from "./readers";
-import { bypassRecord, createRecord, dropRecord, goLive, stepRecord } from "./record";
+import { bypassRecord, createRecord, dropRecord, goLive, stepCalm, stepRecord } from "./record";
 import { canKeep, dropTexture, matricesOf } from "./render";
 import { destroyRange } from "./state";
 import type { KeptCtx, KeptMatrices, KeptRange, KeptRecord, KeptStats } from "./types";
@@ -103,7 +103,9 @@ function stepRecords(kctx: KeptCtx, pixi: PixiModule, matrices: KeptMatrices): v
 
     const view = kctx.ctx.state.sync.views.get(record.entity);
 
-    if (view !== undefined) stepRecord(kctx, pixi, matrices, record, view);
+    // per drawn frame: in a calm frame a kept record that owes nothing is not stepped (E5).
+    if (view !== undefined && !stepCalm(kctx, record))
+      stepRecord(kctx, pixi, matrices, record, view);
   }
 }
 
@@ -167,10 +169,11 @@ export function createKeptApi(
 
     state.bypassed = on;
 
-    for (const record of state.records) {
-      const view = viewOf(record);
+    for (let index = 0; index < state.records.length; index += 1) {
+      const record = state.records[index];
+      const view = record === undefined ? undefined : viewOf(record);
 
-      if (record.mode === "kept" && view !== undefined) bypassRecord(kctx, record, view, on);
+      if (record?.mode === "kept" && view !== undefined) bypassRecord(kctx, record, view, on);
     }
   };
 
@@ -181,7 +184,12 @@ export function createKeptApi(
   const sortRecords = (): void => {
     let changed = state.unsorted;
 
-    for (const record of state.records) {
+    // per drawn frame: the records walked by index, as every walk of them.
+    for (let index = 0; index < state.records.length; index += 1) {
+      const record = state.records[index];
+
+      if (record === undefined) continue;
+
       const depth = depthOf(record.top);
 
       if (depth !== record.depth) {
@@ -282,6 +290,9 @@ export function createKeptApi(
       const marked = deps.demand.marked();
       const loose = deps.demand.loose();
 
+      // No mark and no whole-frame reason: nothing a kept picture reads changed in this frame (E5).
+      state.calm = wholes.size === 0 && marked.size === 0 && loose.size === 0;
+
       // per frame: the marks walked by index, no iterator.
       for (let index = 0; index < marked.size; index += 1) collectOne(marked.at(index));
       for (let index = 0; index < loose.size; index += 1) collectOne(loose.at(index));
@@ -301,6 +312,8 @@ export function createKeptApi(
       if (state.on) {
         sortRecords();
         stepRecords(kctx, pixi, matrices);
+        // A flush that no collect went before steps every record.
+        state.calm = false;
       } else {
         for (const record of state.records) if (record.mode === "kept") live(record);
       }

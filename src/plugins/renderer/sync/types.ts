@@ -993,6 +993,13 @@ export type SyncInternal = {
   stepOverlays(): void;
 
   /**
+   * Hands Pixi again the filters of every view whose filters were switched on or off since they were written: Pixi
+   * holds only the enabled ones (E3). Run by the draw callback before anything reads the tree, so a switch is drawn in
+   * the frame it was made. Allocates nothing when no filter was switched.
+   */
+  stepFilters(): void;
+
+  /**
    * The `Graphics` paths the engine drew since the last call (shapes, clip masks, nine-slice outlines), and zeroes the
    * count: the monitor's `stats().redraws` (spec 26 R2.3).
    *
@@ -1408,14 +1415,16 @@ export type SyncState = {
   /** `Graphics` paths drawn since the monitor last took them: shapes, clip masks, outlines (spec 26 R2.3). */
   redraws: number;
   /**
-   * Where the walk of `shown` stopped for the entities whose loops asked since the last sync pass (spec 26 R1.7.3):
-   * an entity with several endless loops is walked once a frame. Cleared by every pass, which may change the tree.
+   * Where the walk of `shown` stopped for the entities whose loops asked (spec 26 R1.7.3), at the `passesVersion` it
+   * was taken: an answer stands while the version does, so an entity with several endless loops is walked once, and a
+   * still board not at all (E4). One record per entity, made at its first ask, dropped with its view.
    */
-  held: Map<Entity, Unseen>;
+  held: Map<Entity, HeldUnseen>;
   /**
-   * Moves on with every change that may change the render passes of a frame: a filter set or forgotten, a node's
-   * `renderable` flipped, a view hung, wrapped or dropped (a pass that did work), a kept picture taken or let go, a
-   * write a plugin announced with `invalidate` (a filter switched on or off).
+   * Moves on with every change that may change the render passes of a frame or where a walk of `shown` stops: a filter
+   * set, forgotten or switched, a node's `renderable` flipped (every hidden reason, the alpha's too), a view hung,
+   * moved, wrapped or dropped (a pass that did work), a kept picture taken or let go, a HUD factor, a new viewport, a
+   * write a plugin announced with `invalidate`.
    */
   passesVersion: number;
   /** The filtered views' passes of `renderPassesOf`, counted at `passesVersion` `at` under `root`. */
@@ -1449,6 +1458,9 @@ export type SyncDeps = {
   demand: DemandModule;
   kept: KeptModule;
 };
+
+/** Where the walk of `shown` stopped for one entity, and the `passesVersion` it was taken at. */
+export type HeldUnseen = { answer: Unseen; at: number };
 
 /**
  * The filtered views' part of the render passes, counted once and read every frame while nothing it reads changed: the

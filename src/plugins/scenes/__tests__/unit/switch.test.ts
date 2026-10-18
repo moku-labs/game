@@ -762,3 +762,75 @@ describe("a switch in the performance log", () => {
     ]);
   });
 });
+
+describe("the hold of the mounted scene's feature (spec 28 S2)", () => {
+  const wardScene = defineScene("ward", { bundle: "ward", layers: { scene: {} }, projections: [] });
+
+  /**
+   * Starts the plugin with the ward declared by `screens` and the board by `boardScreens`.
+   *
+   * @returns The started mock.
+   */
+  function twoOwners(): MockScenes {
+    const mock = createMockScenes();
+
+    mock.flow.features.push(
+      { name: "screens", description: { scenes: [wardScene] } },
+      { name: "boardScreens", description: { scenes: [boardScene] } }
+    );
+    mock.start();
+
+    return mock;
+  }
+
+  // Bug caught: the old hold is released before the new one is taken, so one phase sees neither
+  // feature active and its systems sleep for a frame on the new scene.
+  it("mounting a scene holds the feature that declares it and releases the previous scene's hold", async () => {
+    const mock = twoOwners();
+
+    await mock.enter({ rest: true, scene: "ward" });
+
+    expect(mock.world.holds).toEqual(["hold:screens"]);
+
+    await mock.enter({ rest: true, scene: "board" });
+
+    expect(mock.world.holds).toEqual(["hold:screens", "hold:boardScreens", "release:screens"]);
+  });
+
+  // Bug caught: a switch that never mounted drops the hold of the scene still on screen.
+  it("an aborted or failed switch keeps the old hold", async () => {
+    const mock = twoOwners();
+
+    await mock.enter({ rest: true, scene: "ward" });
+
+    mock.assets.control.gated = true;
+
+    const controller = new AbortController();
+    const aborted = mock.enter({ rest: true, scene: "board" }, { signal: controller.signal });
+
+    await Promise.resolve();
+    controller.abort();
+    await aborted;
+
+    const failed = mock.enter({ rest: true, scene: "board" });
+
+    await Promise.resolve();
+    mock.assets.fail(new Error("offline"));
+    await expect(failed).rejects.toThrow("offline");
+
+    expect(mock.world.holds).toEqual(["hold:screens"]);
+    expect(mock.state.current).toBe("ward");
+  });
+
+  // Bug caught: the teardown calls the world's release from a context that may not call another plugin.
+  it("stop drops the hold without calling the release", async () => {
+    const mock = twoOwners();
+
+    await mock.enter({ rest: true, scene: "ward" });
+    mock.stop();
+
+    expect(mock.world.holds).toEqual(["hold:screens"]);
+    expect(mock.state.held).toBeUndefined();
+    expect(mock.state.owners.size).toBe(0);
+  });
+});

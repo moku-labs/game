@@ -588,6 +588,17 @@ function entitySet(entities: Iterable<Entity>): Set<Entity> {
 }
 
 /**
+ * Takes the hold of the feature a root shows, when the root belongs to a feature.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param feature - The feature of the root's component or projection, if any.
+ * @returns The release, or `undefined` for a root of no feature.
+ */
+function holdFor(ctx: UiCtx, feature: string | undefined): (() => void) | undefined {
+  return feature === undefined ? undefined : ctx.deps.world.ecs.hold(feature);
+}
+
+/**
  * Builds the reconcile half of the jsx module: the two systems of the frame and the root
  * bookkeeping around them.
  *
@@ -1393,6 +1404,8 @@ export function createReconciler(
       if (isStillMounted) continue;
 
       state.removing.delete(entity);
+      // The root's elements have left with their motions: its feature may sleep from now on.
+      root.held?.();
       state.roots.delete(entity);
       state.byKey.delete(entity);
       ecs.despawn(entity);
@@ -1928,8 +1941,11 @@ export function createReconciler(
   }
 
   /**
-   * Reconciles one dirty root: reads its current tree and projection name, then diffs it. The root
-   * stays dirty while the layout engine is not loaded, and a failure is logged for this root only.
+   * Reconciles one dirty root: reads its current tree and projection name, then diffs it. A
+   * projection root takes the hold of its projection's feature here, at the first reconcile that
+   * names its projection: its `Tree` hook fires inside the spawn, before the world knows the view.
+   * The root stays dirty while the layout engine is not loaded, and a failure is logged for this
+   * root only.
    *
    * @param root - A root with work this frame.
    */
@@ -1938,7 +1954,14 @@ export function createReconciler(
     const tree = ecs.get(root.entity, WORLD_TREE);
     const place = ctx.deps.world.projection.keyOf(root.entity);
 
-    if (place !== undefined) root.name = place.projection;
+    if (place !== undefined) {
+      root.name = place.projection;
+
+      if (root.popup === undefined) {
+        root.held ??= holdFor(ctx, state.featureOfProjection.get(place.projection));
+      }
+    }
+
     if (tree !== undefined) root.tree = tree.node as DescriptionNode;
 
     refreshRootOrder(root);
@@ -2065,7 +2088,10 @@ export function createReconciler(
   /**
    * Records a root: a projection view that returned a tree, or a popup this plugin spawned. The
    * `Tree` hook and the popup handler both call it, in either order, so a second call fills in
-   * what the first one could not know.
+   * what the first one could not know. A new popup root holds its component's feature; a root
+   * first recorded by the `Tree` hook takes that hold when the popup handler names the component,
+   * and a reclaimed root keeps the hold it has. A projection root takes its projection's hold at
+   * its first reconcile.
    *
    * @param entity - The entity that carries `Tree`.
    * @param name - The projection name, or the component name of a popup.
@@ -2084,6 +2110,7 @@ export function createReconciler(
         known.name = name;
         // A popup's open is an event: its elements play their motion whatever `when` says.
         known.cause = "change";
+        known.held ??= holdFor(ctx, state.featureOfComponent.get(name));
       }
 
       return;
@@ -2107,7 +2134,9 @@ export function createReconciler(
       cause: popup === undefined ? undefined : "change",
       slot: undefined,
       slotRect: undefined,
-      pending: false
+      pending: false,
+      // A projection root takes its hold at its first reconcile, which names its projection.
+      held: popup === undefined ? undefined : holdFor(ctx, state.featureOfComponent.get(name))
     });
   }
 

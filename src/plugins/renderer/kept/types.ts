@@ -230,6 +230,12 @@ export type KeptState = {
   bypassed: boolean;
   /** Render passes the last flush cost: the estimate `sync.renderPasses()` adds (P9.2). */
   flushPasses: number;
+  /**
+   * The frame `collect` read had no mark and no whole-frame reason: nothing a kept picture reads changed, so a kept
+   * record that owes nothing is drawn from its picture as it stands, without its step (E5). Set by `collect`, spent by
+   * the next flush.
+   */
+  calm: boolean;
 };
 
 /** The scratch matrices of the module, made once from the Pixi module. */

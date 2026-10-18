@@ -9,7 +9,7 @@ import { changeBelow, drawnThrough } from "../kept/readers";
 import type { HiddenReason, View } from "../sync/types";
 import type { DemandModule, HostModule, PixiContainer, RendererCtx } from "../types";
 import { checkMissedMarks } from "./check";
-import { ancestorsShown, isShown, unseenBy } from "./shown";
+import { ancestorsShown, isShown, type Transparent, unseenBy } from "./shown";
 import type { DemandFrame, DemandReason, DemandState, Marks, Unseen } from "./types";
 import { verifyFrame } from "./verify";
 
@@ -21,6 +21,16 @@ import { verifyFrame } from "./verify";
  */
 function firstWhole(wholes: ReadonlySet<DemandReason>): DemandReason | undefined {
   return wholes.size === 0 ? undefined : wholes.values().next().value;
+}
+
+/**
+ * Whether a node is drawn at alpha 0, read from Pixi: the reader of a demand module built without sync's records.
+ *
+ * @param node - A node on the chain of a view.
+ * @returns True at alpha 0 or below.
+ */
+function pixiTransparent(node: PixiContainer): boolean {
+  return node.alpha <= 0;
 }
 
 /**
@@ -73,6 +83,7 @@ function clearMarks(state: DemandState): void {
  * @param deps.host - The host module.
  * @param deps.views - The views by entity: `ctx.state.sync.views`, whose identity sync keeps.
  * @param deps.hiddenBy - Sync's `hiddenBy`: whether one reason hides a view (spec 26 R1.7.1).
+ * @param deps.transparent - Sync's reader of a node drawn at alpha 0 from its records (E4); Pixi's `alpha` without it.
  * @returns The demand module.
  */
 export function createDemandApi(
@@ -81,10 +92,11 @@ export function createDemandApi(
     host: HostModule;
     views: ReadonlyMap<Entity, View>;
     hiddenBy: (view: View, reason: HiddenReason) => boolean;
+    transparent?: Transparent;
   }
 ): DemandModule {
   const state = ctx.state.demand;
-  const { host, views, hiddenBy } = deps;
+  const { host, views, hiddenBy, transparent = pixiTransparent } = deps;
 
   /**
    * Whether the render phase decides this frame: `onDemand` is on, or the pixel oracle runs in shadow.
@@ -99,7 +111,8 @@ export function createDemandApi(
    * @param entity - The entity.
    * @returns True when its view is drawn as the frame stands.
    */
-  const shown = (entity: Entity): boolean => isShown(state, host, views, entity, through);
+  const shown = (entity: Entity): boolean =>
+    isShown(state, host, views, entity, through, transparent);
 
   /**
    * Whether a node is the top or the visual of a view hidden by `"alpha"` (spec 26 R1.7.1), read from sync's state.
@@ -130,7 +143,8 @@ export function createDemandApi(
    * @param entity - The entity of a loose mark.
    * @returns True when it counts.
    */
-  const looseShown = (entity: Entity): boolean => ancestorsShown(host, views, entity, through);
+  const looseShown = (entity: Entity): boolean =>
+    ancestorsShown(host, views, entity, through, transparent);
 
   /**
    * Notes an entity in the record since the last drawn frame, in a dev or an agent build.
@@ -299,7 +313,7 @@ export function createDemandApi(
     shown,
 
     unseenBy: (entity: Entity): Unseen =>
-      unseenBy(state, host, views, entity, through, alphaHidden),
+      unseenBy(state, host, views, entity, through, alphaHidden, transparent),
 
     marked: (): Marks => state.marked,
 

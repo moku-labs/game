@@ -660,6 +660,8 @@ export type WorldComponents = {
 export type ProjectionDeps = {
   ecs: EcsApi;
   components: WorldComponents;
+  /** The view counters of the scope (rule V of `systemsRun`): a view came, a view left, all were cleared. */
+  views: { came(projection: string): void; left(projection: string): void; cleared(): void };
 };
 
 /**

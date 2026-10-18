@@ -17,7 +17,9 @@ import {
   wait
 } from "../../timeline/steps";
 import { advanceTracks, beginFrame } from "../../tween/advance";
+import { cubicBezier } from "../../tween/bezier";
 import { createDriver } from "../../tween/driver";
+import { easeCell } from "../../tween/easing";
 import type { Target } from "../../types";
 import { createMockAnim, type MockAnim, spawnTestEntity } from "../unit/mock-anim";
 
@@ -128,6 +130,40 @@ export function tracksFixture(): () => void {
   });
 }
 
+/** The fields a hand holds on every view of the partial fixture: `y`, one set for every track. */
+const HELD_Y: ReadonlySet<string> = new Set(["y"]);
+
+/**
+ * The muted fields of a track whose `y` a hand holds.
+ *
+ * @returns The shared set of `y`.
+ */
+function yHeld(): ReadonlySet<string> {
+  return HELD_Y;
+}
+
+/**
+ * The track table with 50 tweens of `x` and `y` whose `y` another writer holds: every frame moves
+ * `x` only, so every track writes a patch of some of its fields. Every frame moves 50 fields.
+ *
+ * @returns One frame step of the track table.
+ */
+export function partialTracksFixture(): () => void {
+  const mock = createMockAnim();
+  const driver = createDriver(mock.actx);
+
+  for (let index = 0; index < TRACKS; index++) {
+    const entity = spawnTestEntity(mock, [Transform({ x: index, y: index })]);
+
+    driver.track(entity, Transform, { x: 500, y: 300 }, { ms: TWEEN_MS, ease: "inOut" }, yHeld);
+  }
+
+  return warmed((): void => {
+    beginFrame(mock.actx);
+    advanceTracks(mock.actx, FRAME_MS);
+  });
+}
+
 /**
  * The track table with 50 bobbing loops whose views the player cannot see: the renderer holds
  * them, so every frame walks every track and writes nothing.
@@ -223,4 +259,28 @@ export function timelinesFixture(): () => void {
  */
 export function waitingTimelinesFixture(): () => void {
   return playTen(pause);
+}
+
+/** How far the time of the easing fixture moves per call: no round step, so it visits every interval. */
+const TIME_STEP = 0.000_37;
+
+/**
+ * Eases a time that walks over 0 to 1 again and again on a curve made by `cubicBezier`, the way a
+ * track's frame step eases it: through `easeCell`, the result in a cell.
+ *
+ * @param points - The control points `[x1, y1, x2, y2]`.
+ * @returns One eased time.
+ */
+export function bezierFixture(points: readonly [number, number, number, number]): () => void {
+  const ease = cubicBezier(...points);
+  // [0]: the cell eased in place; [1]: the time, kept in a cell so it never boxes.
+  const cells = new Float64Array(2);
+
+  return warmed((): void => {
+    const time = (cells[1] ?? 0) + TIME_STEP;
+
+    cells[1] = time >= 1 ? time - 1 : time;
+    cells[0] = cells[1] ?? 0;
+    easeCell(ease, cells, 0);
+  });
 }

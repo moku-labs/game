@@ -301,6 +301,12 @@ export type Root = {
   slot: Entity | undefined;
   slotRect: { x: number; y: number; w: number; h: number } | undefined;
   pending?: boolean;
+  /**
+   * The release of the hold on the feature the root shows (`world.ecs.hold`): the feature of a
+   * popup's component, or of a JSX projection. Called when the sweep drops the root. Optional
+   * like `pending`: `mountRoot` always writes it.
+   */
+  held?: (() => void) | undefined;
 };
 
 /**
@@ -473,6 +479,10 @@ export type JsxState = {
   debugWarned: boolean;
   /** Elements that carry `Overlay`, from their enter to their despawn (spec 22 O4.5). */
   overlays: Set<Entity>;
+  /** Component name to the feature whose `ui` key lists it: the feature a popup root holds. */
+  featureOfComponent: Map<string, string>;
+  /** Projection name to the feature that registered it: the feature a JSX root holds. */
+  featureOfProjection: Map<string, string>;
 };
 
 /**

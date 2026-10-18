@@ -67,16 +67,52 @@ function isComponent(entry: unknown): entry is AnyComponentDefinition {
 }
 
 /**
- * Fills the component registry from the `ui` key of every feature, in feature order.
+ * The name of a projection a feature lists, read without trusting the entry.
+ *
+ * @param entry - What the feature put under its `projections` key.
+ * @returns The name, or `undefined` when the entry carries none.
+ * @example
+ * ```ts
+ * projectionName({ name: "shop.sheet", layer: "ui" }); // "shop.sheet"
+ * ```
+ */
+function projectionName(entry: unknown): string | undefined {
+  if (typeof entry !== "object" || entry === null) return undefined;
+
+  const name: unknown = (entry as { name?: unknown }).name;
+
+  return typeof name === "string" ? name : undefined;
+}
+
+/**
+ * Fills the component registry from the `ui` key of every feature, in feature order, and records
+ * which feature each component and each projection belongs to: a root holds that feature while it
+ * is shown, so the feature's systems run with `systemsRun: "active"`. Two tables, because a
+ * component and a projection may share a name.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param jsx - The jsx module, which owns the registry.
  * @throws {Error} When two features define the same component name.
  */
 function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
+  const { featureOfComponent, featureOfProjection } = ctx.state.jsx;
+
   for (const feature of ctx.deps.flow.features.all()) {
     for (const entry of feature.description.ui ?? []) {
-      if (isComponent(entry)) jsx.register(entry);
+      if (!isComponent(entry)) continue;
+
+      jsx.register(entry);
+      featureOfComponent.set(entry.name, feature.name);
+    }
+
+    const projections: unknown = feature.description.projections;
+
+    if (!Array.isArray(projections)) continue;
+
+    for (const entry of projections) {
+      const name = projectionName(entry);
+
+      if (name !== undefined) featureOfProjection.set(name, feature.name);
     }
   }
 }
@@ -201,6 +237,10 @@ export function stopUi(state: State): void {
   state.layout.scrolling = undefined;
   state.layout.iconLine = undefined;
   state.jsx.components.clear();
+  state.jsx.featureOfComponent.clear();
+  state.jsx.featureOfProjection.clear();
+  // The holds of the roots are dropped, not released: a teardown calls no other plugin, and the
+  // world's own stop resets its scope.
   state.jsx.roots.clear();
   state.jsx.elements.clear();
   state.jsx.byIdentity.clear();

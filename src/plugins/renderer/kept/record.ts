@@ -109,12 +109,16 @@ function readStack(slots: readonly FilterSlot[], resolution: number, into: Stack
   let rs = Number.POSITIVE_INFINITY;
   let padding = 0;
 
-  for (const slot of slots) {
-    if (!slot.filter.enabled) continue;
+  // per drawn frame and record: `effects` hands its lists frozen, and `for…of` over a frozen array allocates (88 B).
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const filter = slots[index]?.filter;
+
+    if (filter === undefined || !filter.enabled) continue;
 
     enabled += 1;
-    rs = Math.min(rs, resolutionOf(slot.filter, resolution));
-    padding += slot.filter.padding;
+    rs = Math.min(rs, resolutionOf(filter, resolution));
+    padding += filter.padding;
   }
 
   into.enabled = enabled;
@@ -151,9 +155,12 @@ function holdsFilters(node: PixiContainer): boolean {
  * @returns True when they do.
  */
 function plainFilters(slots: readonly FilterSlot[]): boolean {
-  for (const slot of slots) {
-    const { filter } = slot;
+  // per drawn frame and record: a frozen list, walked by index (`for…of` allocates over a frozen array).
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const filter = slots[index]?.filter;
 
+    if (filter === undefined) continue;
     if (filter.enabled && (filter.blendRequired || !plainBlend(filter.blendMode))) return false;
   }
 
@@ -543,17 +550,19 @@ function neededBytes(
 }
 
 /**
- * Hands the filters of a live record from its top to its stand-in, before stage 1 renders the top without them.
+ * Hands the filters of a live record from its top to its stand-in, before stage 1 renders the top without them: the
+ * enabled ones, as `sync` hangs them (E3).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
  * @param record - The record.
+ * @param view - Its view.
  */
-function handFilters(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
+function handFilters(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord, view: View): void {
   const standIn = standInOf(pixi, record);
 
   kctx.sync.clearFilters(record.top);
-  standIn.filters = filtersOf(kctx.ctx.state.sync, record.entity).map(slot => slot.filter);
+  kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark, standIn);
 }
 
 /**
@@ -694,7 +703,7 @@ function renderStages(
 ): boolean {
   const live = record.mode === "live";
 
-  if (live) handFilters(kctx, pixi, record);
+  if (live) handFilters(kctx, pixi, record, view);
 
   const first = firstInputs(record.slots);
   let ok = renderStage1(kctx, pixi, matrices, record);
@@ -1118,6 +1127,38 @@ function drawingChanged(kctx: KeptCtx, record: KeptRecord, before: Readonly<Draw
 }
 
 /**
+ * The frame of a kept record in a calm frame (no mark, no whole-frame reason) that owes nothing: no dirty flag, no
+ * settle retake, no churn, not bypassed. Its step would find every key as it stands and its quad where it is, so it is
+ * counted as drawn from its picture and left alone (E5).
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @returns True when the record was drawn as it stands; false when it is to be stepped.
+ */
+export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
+  const { state } = kctx;
+
+  if (
+    !state.calm ||
+    state.bypassed ||
+    record.mode !== "kept" ||
+    record.dirtyS1 ||
+    record.dirtyS2 ||
+    record.dirtyS3 ||
+    record.settle ||
+    record.churn !== 0
+  ) {
+    return false;
+  }
+
+  record.lastDrawn = state.frame;
+  state.drawnPictures += 1;
+  record.quiet += 1;
+
+  return true;
+}
+
+/**
  * One drawn frame of a record, inside the flush: eligibility, the keys of this frame, the policy of its life, the quad
  * of a kept one; the dirty flags are cleared.
  *
@@ -1258,7 +1299,7 @@ export function bypassRecord(kctx: KeptCtx, record: KeptRecord, view: View, live
   }
 
   kctx.sync.clearFilters(record.top);
-  if (record.standIn !== undefined) record.standIn.filters = filters.map(slot => slot.filter);
+  if (record.standIn !== undefined) kctx.sync.applyFilters(view, filters, noMark, record.standIn);
   kctx.sync.swapHidden(kctx.hidden, view, "kept", true);
   if (record.quad !== undefined) {
     record.quad.visible =

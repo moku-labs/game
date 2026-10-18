@@ -19,6 +19,8 @@ export type SdfTextStage = {
   shader(): unknown;
   /** Shaders the pipe made so far. */
   made(): number;
+  /** Lays out another text of this text's font on the same pipe, once, and answers it. */
+  add(text: string): InstanceType<typeof pixi.BitmapText>;
 };
 
 /**
@@ -60,13 +62,65 @@ function installFont(): void {
   pixi.Cache.set(`${FAMILY}-bitmap`, font);
 }
 
+/** The uniform group of a text's shader, as Pixi's ubo system syncs it. */
+type TextUniformGroup = InstanceType<typeof pixi.UniformGroup>;
+
+/**
+ * The distance-field texts of one pipe, laid out once each, and one frame of their local uniforms as Pixi draws them:
+ * the graphics pipe writes the transform, the rounding and the colour, then the ubo system's generated function reads
+ * every uniform, `uDistance` through the renderer's accessor, into the frame's uniform buffer. The renderer draws at a
+ * phone's resolution, so every distance is a fraction, as on the A26.
+ *
+ * @param count - The texts.
+ * @returns One frame of the sync of every text.
+ */
+export function sdfSyncStage(count: number): () => void {
+  const stage = sdfTextStage("webgpu", 2.8);
+  const texts = [stage.text];
+  const drawn: Array<{
+    text: InstanceType<typeof pixi.BitmapText>;
+    group: TextUniformGroup;
+    offset: number;
+  }> = [];
+
+  for (let index = 1; index < count; index += 1) {
+    texts.push(stage.add(String(index % 10)));
+  }
+
+  for (const text of texts) {
+    const shader = (text._gpuData as Record<number, { context: { customShader: pixi.Shader } }>)[1]
+      ?.context.customShader;
+    const group = shader?.resources.localUniforms as TextUniformGroup | undefined;
+
+    if (group === undefined) throw new Error("sdf stage: a text has no local uniforms");
+
+    drawn.push({ text, group, offset: drawn.length * 64 });
+  }
+
+  const ubo = new pixi.GpuUboSystem();
+  const data = new Float32Array(64 * count);
+  const white = 0xff_ff_ff_ff;
+
+  return () => {
+    for (const { text, group, offset } of drawn) {
+      const uniforms = group.uniforms;
+
+      uniforms.uTransformMatrix = text.groupTransform;
+      uniforms.uRound = 0;
+      pixi.color32BitToUniform(white, uniforms.uColor as Float32Array, 0);
+      ubo.syncUniformGroup(group, data, offset);
+    }
+  };
+}
+
 /**
  * Builds the renderer's pipe on a renderer stub of one backend and a text on it, laid out once.
  *
  * @param backend - `"webgpu"` or `"webgl"`.
+ * @param resolution - The renderer's resolution.
  * @returns The stage.
  */
-export function sdfTextStage(backend: "webgpu" | "webgl" = "webgpu"): SdfTextStage {
+export function sdfTextStage(backend: "webgpu" | "webgl" = "webgpu", resolution = 1): SdfTextStage {
   let made = 0;
 
   /** Pixi's shader, counted. */
@@ -84,7 +138,7 @@ export function sdfTextStage(backend: "webgpu" | "webgl" = "webgpu"): SdfTextSta
   const renderer = {
     name: backend,
     uid: 1,
-    resolution: 1,
+    resolution,
     limits: { maxBatchableTextures: 16 },
     gc: { addResourceHash: (): void => undefined, now: 0 },
     renderPipes: {
@@ -115,6 +169,17 @@ export function sdfTextStage(backend: "webgpu" | "webgl" = "webgpu"): SdfTextSta
       text.didViewUpdate = false;
     },
     shader: () => gpuData[1]?.context.customShader,
-    made: () => made
+    made: () => made,
+    add: next => {
+      const other = new pixi.BitmapText({
+        text: next,
+        style: { fontFamily: FAMILY, fontSize: 32 }
+      });
+
+      pipe.addRenderable(other, instructions);
+      other.didViewUpdate = false;
+
+      return other;
+    }
   };
 }

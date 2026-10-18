@@ -22,6 +22,18 @@ describe("alloc", () => {
     expect(bytes).toBeLessThanOrEqual(310);
   });
 
+  it("still measures the real size of a function that allocates on every call", () => {
+    const items = Array.from({ length: 30 }, (_, index) => index);
+    let kept: number[] = [];
+    const bytes = alloc(() => {
+      kept = [...items];
+    }, 4000);
+
+    expect(kept).toHaveLength(30);
+    expect(bytes).toBeGreaterThanOrEqual(270);
+    expect(bytes).toBeLessThanOrEqual(310);
+  });
+
   it("measures a kept {a,b} object that inlining would hide", () => {
     let index = 0;
     let kept = { a: 0, b: 0 };

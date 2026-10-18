@@ -169,8 +169,12 @@ export function endLoan(inputs: FilterSlotInputs | undefined): void {
 export function firstInputs(
   slots: readonly FilterSlot[]
 ): { slot: FilterSlot; inputs: FilterSlotInputs } | undefined {
-  for (const slot of slots) {
-    if (!slot.filter.enabled) continue;
+  // per drawn frame and record: a frozen list, walked by index (`for…of` allocates over a frozen array).
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+
+    if (slot === undefined || !slot.filter.enabled) continue;
 
     return slot.inputs === undefined ? undefined : { slot, inputs: slot.inputs };
   }
@@ -522,8 +526,15 @@ export function renderStage3(
   key[KEY.s3Ty] = now.ty;
 
   let passes = 1;
+  const slots = record.slots;
 
-  for (const slot of record.slots) if (slot.filter.enabled) passes += slot.passes;
+  // A frozen list, walked by index: `for…of` allocates over a frozen array.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+
+    if (slot?.filter.enabled === true) passes += slot.passes;
+  }
 
   kctx.state.flushPasses += passes;
 

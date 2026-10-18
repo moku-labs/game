@@ -131,6 +131,8 @@ export default defineConfig({
           pool: "forks",
           execArgv: ["--expose-gc", "--min-semi-space-size=256", "--max-semi-space-size=256"],
           fileParallelism: false,
+          // Alloc measures three windows after a long warm-up; one renderer perf test hit the 5 s default once.
+          testTimeout: 60_000,
           benchmark: {
             include: ["src/plugins/**/__tests__/perf/**/*.bench.ts", "tests/perf/**/*.bench.ts"]
           }

@@ -1,6 +1,6 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HudPart, Shape } from "../../components";
+import { HudPart, Shape, Transform } from "../../components";
 import type { FilterSlot } from "../../sync/types";
 import { createMockRenderer } from "../mock-renderer";
 import { endStage, type OverlayStage, startOverlayStage } from "../overlay-harness";
@@ -314,7 +314,8 @@ describe("loopsHeld — views the player cannot see (spec 26 R1.7)", () => {
     ]).toEqual([true, true, true, true]);
   });
 
-  it("walks an entity with several loops once a frame", async () => {
+  // E4 of change 2026-10-18-render-path-garbage: the answer is kept across a still frame, no longer walked every frame.
+  it("walks an entity with several loops once, and again only after a frame that changed the tree", async () => {
     const stage = await stageOf();
     // The module the frames drive, built with the demand module the spy watches.
     const sync = stage.drawn.mock.modules.sync;
@@ -330,6 +331,13 @@ describe("loopsHeld — views the player cannot see (spec 26 R1.7)", () => {
 
     expect(walk).toHaveBeenCalledTimes(1);
 
+    stage.frame();
+    sync.loopsHeld(glint);
+    sync.loopsHeld(glint, "both");
+
+    expect(walk).toHaveBeenCalledTimes(1);
+
+    stage.drawn.mock.world.ecs.set(glint, Transform, { x: 40 });
     stage.frame();
     sync.loopsHeld(glint);
     sync.loopsHeld(glint, "both");

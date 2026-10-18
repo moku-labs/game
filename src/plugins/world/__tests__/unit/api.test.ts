@@ -15,6 +15,8 @@ const ECS_MEMBERS = [
   "diff",
   "get",
   "has",
+  "hold",
+  "isActive",
   "mode",
   "onAdded",
   "onRemoved",
@@ -33,7 +35,16 @@ const ECS_MEMBERS = [
   "untag"
 ];
 
-const ECS_INTERNALS = ["onOwnerLeft", "runPhase", "flush", "clearChanges", "clear"];
+const ECS_INTERNALS = [
+  "onOwnerLeft",
+  "runPhase",
+  "flush",
+  "clearChanges",
+  "clear",
+  "viewCame",
+  "viewLeft",
+  "viewsCleared"
+];
 
 const PROJECTION_MEMBERS = [
   "causeOf",

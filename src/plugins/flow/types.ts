@@ -285,7 +285,8 @@ export type {
   FeaturePlugin,
   FeaturesApi,
   FeatureTree,
-  RegisteredFeature
+  RegisteredFeature,
+  SystemsRun
 } from "./features/types";
 export type {
   Descriptor,

@@ -479,6 +479,13 @@ component's outcomes; the node goes on with the answer and never waits for the e
   answer nothing: only the top popup answers the gate. When `Settings` is shown again (a cancel),
   the same root is taken back and uncovered. When the coverer leaves and nothing takes the covered
   root back, it leaves too. `over` is the option of `popup()`, not the `over` flag of a node.
+- **The feature it holds.** A popup root holds the feature whose `ui` key lists its component, and
+  the JSX root of a projection view holds the feature that registered the projection, with
+  `world.ecs.hold`: from the moment `ui` records the root (a projection root at its first
+  reconcile) until the sweep drops it after its exit motions. A covered root stays held; a root
+  taken back keeps its one hold. So the systems of a feature with `systemsRun: "active"` run while
+  its popup or sheet is on screen, leaving included (world README, "Systems that run where their
+  feature is"). The teardown drops the holds without releasing them: the world resets its scope.
 
 ```ts
 const settings = defineNode({

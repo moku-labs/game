@@ -3,6 +3,9 @@ import { getHeapStatistics } from "node:v8";
 /** Calls before the measurement, so the function runs optimized and its caches are filled. */
 const WARM = 5000;
 
+/** Measured windows; the smallest wins, so a one-off runtime event in one window is dropped. */
+const ROUNDS = 3;
+
 /** Bytes per call two sound windows may differ by, absolute. */
 const AGREE_BYTES = 1;
 
@@ -87,12 +90,15 @@ for (const dummy of dummies) heapGrowth(() => {}, dummy, 2000);
  * 5 000 times to warm it up, then reads `used_heap_size` around `calls` calls after a full GC
  * and subtracts the same window of an empty function. A GC inside the window is caught by a
  * second window of `calls / 2`: the two must agree within 1 B or 2 % per call, else it measures
- * once more and then throws. Needs Node started with `--expose-gc` (the `perf` project of
+ * once more and then throws. The whole window is measured 3 times and the smallest result is
+ * returned: an allocation made on every call shows in all three, while a one-off runtime event
+ * (a tier-up, a lazily allocated feedback vector, a deopt) lands in one window only and is
+ * dropped by the minimum. Needs Node started with `--expose-gc` (the `perf` project of
  * vitest), never Bun.
  *
- * @param fn - The function to measure; it runs `5 000 + 3 × calls / 2` times or more.
+ * @param fn - The function to measure; it runs `5 000 + 9 × calls / 2` times or more.
  * @param calls - Calls in the full window.
- * @returns Bytes per call, the control subtracted; `0` or near it for a function that keeps nothing.
+ * @returns Bytes per call (smallest of 3 windows), the control subtracted; `0` or near it for a function that keeps nothing.
  * @throws {Error} "alloc needs Node with --expose-gc" under Bun or without an exposed `gc`.
  * @throws {Error} "alloc: a GC inside the window" when two attempts fail the cross-check.
  * @example
@@ -112,6 +118,24 @@ export function alloc(fn: () => void, calls = 10_000): number {
   for (let call = 0; call < WARM; call++) fn();
   heapGrowth(gc, empty, WARM);
 
+  let smallest = Number.POSITIVE_INFINITY;
+  for (let round = 0; round < ROUNDS; round++) {
+    smallest = Math.min(smallest, soundWindow(gc, fn, calls));
+  }
+
+  return smallest;
+}
+
+/**
+ * One window with its GC cross-check: measures the full and the half window, once more on a
+ * disagreement, then throws.
+ *
+ * @param gc - The exposed garbage collector.
+ * @param fn - The function to measure.
+ * @param calls - Calls in the full window.
+ * @returns Bytes per call of the full window.
+ */
+function soundWindow(gc: () => void, fn: () => void, calls: number): number {
   for (let attempt = 0; attempt < 2; attempt++) {
     const full = perCall(gc, fn, calls);
     const half = perCall(gc, fn, Math.floor(calls / 2));
