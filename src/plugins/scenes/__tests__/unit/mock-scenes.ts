@@ -60,6 +60,8 @@ export type FakeWorld = {
 export type FakeTime = {
   /** How often the switch asked the loop to come back to the full frame rate. */
   wakes: number;
+  /** How often the switch told the adaptive frame rate that a new scene stands. */
+  scenes: number;
   api: TimeApi;
 };
 
@@ -231,16 +233,19 @@ function createFakeWorld(): FakeWorld {
 }
 
 /**
- * Creates the fake `time`: the one member `scenes` calls, counting the wakes.
+ * Creates the fake `time`: the two members `scenes` calls, counting the wakes and the new scenes.
  *
  * @returns The fake time and its recording.
  */
 function createFakeTime(): FakeTime {
-  const fake: FakeTime = { wakes: 0, api: undefined as unknown as TimeApi };
+  const fake: FakeTime = { wakes: 0, scenes: 0, api: undefined as unknown as TimeApi };
 
   fake.api = {
     wake: (): void => {
       fake.wakes += 1;
+    },
+    sceneChanged: (): void => {
+      fake.scenes += 1;
     }
   } as unknown as TimeApi;
 

@@ -264,6 +264,8 @@ const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000, holdMs = 0) =
       setRate: vi.fn(),
       frameDrawn: vi.fn(),
       frameProbed: vi.fn(),
+      allowScale: vi.fn(),
+      sceneChanged: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => frames.running,
       step: vi.fn()

@@ -1,7 +1,7 @@
 /**
  * Standard tier — single rAF loop, six frame phases, the Time resource, the measurement of an
- * agent build, the adaptive frame rate and the native shell's frame rate. Emits `time:thermal`
- * and `time:rate`.
+ * agent build, the adaptive frame rate with its render scale and the native shell's frame rate.
+ * Emits `time:thermal` and `time:rate`.
  *
  * @see README.md
  */

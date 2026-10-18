@@ -1,7 +1,8 @@
 /* eslint-disable unicorn/no-null -- a thermal status is JSON: an unknown one is null, as `FrameRate.thermal` (spec 21 G1.3). */
 /**
  * @file time — the rules of the adaptive frame rate (spec 21 G2): the constants and the pure functions of the drop,
- * the return, the display detection and the thermal input. No state, no clock: `rate.ts` applies them.
+ * the return, the render scale, the display detection and the thermal input. No state, no clock: `rate.ts` applies
+ * them.
  */
 import type { ThermalStatus } from "./types";
 
@@ -62,11 +63,20 @@ export const DWELL_BASE_MS = 5000;
 /** The dwell never grows past this, ms. */
 export const DWELL_MAX_MS = 120_000;
 
-/** A drop this soon after a return is a failed return: the dwell doubles, ms. */
-export const RETURN_GRACE_MS = 10_000;
-
-/** A returned rate held this long resets the dwell to the base at its next drop, ms. */
+/** A return held this long before its first drop resets the dwell to the base; held shorter it failed: it doubles, ms. */
 export const HOLD_RESET_MS = 60_000;
+
+/** A late frame whose work took over this share of its own frame was busy on the main thread: CPU-bound. */
+export const BUSY_SHARE = 0.75;
+
+/** A step up of the render scale waits this many dwells: every change of the scale redraws the whole canvas. */
+export const SCALE_DWELL_FACTOR = 2;
+
+/** The render scales the adaptive rule steps through, highest first: shares of the canvas resolution. */
+export const SCALE_STEPS: readonly number[] = Object.freeze([1, 0.85, 0.75, 0.6, 0.5]);
+
+/** No scale to step through: the renderer allows none. */
+const NO_SCALES: readonly number[] = Object.freeze([]);
 
 /** Samples the ring holds: three seconds at 120 fps are 360. */
 export const RING = 512;
@@ -108,6 +118,23 @@ export function ladderOf(displayHz: number, maxFps: number, floor: number): read
   if (steps.length === 0) steps.push(displayHz / Math.ceil(displayHz / maxFps));
 
   return Object.freeze(steps);
+}
+
+/**
+ * The render scales the rule may choose down to a floor, highest first, frozen; none when 1 alone reaches it.
+ * Allocates: called when the renderer allows a floor, never per frame.
+ *
+ * @param floor - The lowest scale the renderer allows.
+ * @returns The scales.
+ * @example
+ * ```ts
+ * scaleStepsOf(0.75); // [1, 0.85, 0.75]
+ * ```
+ */
+export function scaleStepsOf(floor: number): readonly number[] {
+  const steps = SCALE_STEPS.filter(step => step >= floor);
+
+  return steps.length > 1 ? Object.freeze(steps) : NO_SCALES;
 }
 
 /**

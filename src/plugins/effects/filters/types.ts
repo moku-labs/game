@@ -80,15 +80,17 @@ export type FilterArea = readonly [x: number, y: number, width: number, height: 
  *
  * @example
  * ```ts
- * // A Memory Missing's frost: the body reads a blurred copy of the scene through sampleBlur(uv).
+ * // A Memory Missing's frost on the layer of its panels: the body reads a blurred copy of the scene drawn under them.
  * const Frost = defineFilter("Frost", {
  *   wgsl: FROST_WGSL,
  *   glsl: FROST_GLSL,
  *   uniforms: { view: [0, 0, 1], rectA: [0, 0, 0, 0], strength: 16, vivid: 1.2 },
- *   inputs: { blur: { stages: [FrostBox4, FrostHalf, FrostGauss], chain: frostChain } },
+ *   backdrop: true,
+ *   inputs: { blur: { from: "back", stages: [FrostBox4, FrostHalf, FrostGauss], chain: frostChain } },
+ *   area: value => [value.rectA[0] ?? 0, value.rectA[1] ?? 0, value.rectA[2] ?? 0, value.rectA[3] ?? 0],
  *   fallback: FrostVeil
  * });
- * Frost.filter.fallback?.id; // "FrostVeil"
+ * [Frost.filter.backdrop, Frost.filter.cache, Frost.filter.inputs[0]?.from]; // [true, "screen", "back"]
  * ```
  */
 export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
@@ -141,6 +143,15 @@ export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
    * `scale` sizes it.
    */
   readonly resolution?: number;
+  /**
+   * `true` for a filter that reads what was drawn under its view, inside its box (the view's bounds, or its `area`):
+   * Pixi copies that part of the canvas before the view draws, the body reads it through `sampleBack(uv)`, and an input
+   * may start from it (`from: "back"`). Its output is laid over the canvas like the view's own pixels: where the body
+   * answers transparent the canvas stays as it is. A backdrop is drawn live in every frame, never kept (`cache` may only
+   * be left out or `false`), has no padding, and is no stage; its fallback may be one. On WebGL the renderer then draws
+   * every frame into Pixi's back buffer. Default `false`.
+   */
+  readonly backdrop?: boolean;
 };
 
 /**
@@ -196,6 +207,8 @@ export type FilterDefinition = {
   readonly area?: (value: Readonly<FilterFields>) => FilterArea | undefined;
   /** The texels per CSS px it draws at; 0 for the resolution of the canvas. */
   readonly resolution: number;
+  /** True for a filter that reads what was drawn under its view: Pixi's `blendRequired`, and `sampleBack` in its body. */
+  readonly backdrop: boolean;
 };
 
 /**
@@ -266,6 +279,12 @@ export type FilterChainContext = { readonly resolution: number };
  * ```
  */
 export type FilterInput<Value> = {
+  /**
+   * Where the first step reads: `"input"` (the default), the view's own input; `"back"`, what was drawn under the
+   * view inside its box, for a backdrop filter only. A chain from back runs at the resolution of the surface under the
+   * view, which `context.resolution` then holds.
+   */
+  readonly from?: "input" | "back";
   readonly stages: readonly FilterStage[];
   /**
    * The steps of the second texture for this value and resolution. Pure: no state, no randomness; the context object
@@ -290,12 +309,14 @@ export type FilterInput<Value> = {
  * @example
  * ```ts
  * const [blur] = Frost.filter.inputs;
- * [blur?.texture, blur?.sampler, blur?.scale.name, blur?.clamp.name, blur?.sample];
- * // ["blurTexture", "blurSampler", "blurScale", "blurClamp", "sampleBlur"]
+ * [blur?.texture, blur?.sampler, blur?.scale.name, blur?.clamp.name, blur?.sample, blur?.from];
+ * // ["blurTexture", "blurSampler", "blurScale", "blurClamp", "sampleBlur", "back"]
  * ```
  */
 export type FilterInputDefinition = {
   readonly name: string;
+  /** Where its first step reads: the view's own input, or what was drawn under the view. */
+  readonly from: "input" | "back";
   readonly texture: string;
   readonly sampler: string;
   readonly scale: UniformSpec;
@@ -625,8 +646,14 @@ export type Place = {
 export type InputsState = {
   /** A uniform of the value changed since the last evaluation (set by `writeFilter`). */
   stale: boolean;
-  /** The resolution of the last evaluation. */
+  /** The resolution of the view's input at the last evaluation. */
   resolution: number;
+  /** The resolution of what was drawn under the view at the last evaluation; the input's for a filter that reads none. */
+  backResolution: number;
+  /** An input starts from the view's own input: a new resolution of the input runs the chains again. */
+  readonly fromInput: boolean;
+  /** An input starts from what was drawn under the view: a new resolution of the back runs the chains again. */
+  readonly fromBack: boolean;
   /** Changes whenever what the stages draw changes; 1 after the first evaluation. */
   version: number;
   /** The object `chain` receives, reused: its `resolution` is written before each call. */

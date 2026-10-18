@@ -98,21 +98,29 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 
 ### Resolution
 
-The drawing resolution has three sources and one rule: `override ?? min(devicePixelRatio, maxResolution)`.
+The drawing resolution has four sources and one rule: `override ?? min(devicePixelRatio, maxResolution) × scale`.
 
 - `devicePixelRatio` is followed in every build: a `matchMedia("(resolution: <dpr>dppx)")` query,
   armed again for the new ratio after every change, so a window moved to a screen of another ratio,
   or a browser zoom, draws sharp from the next frame. No window or no `matchMedia`: nothing is armed.
 - `maxResolution` is a number of the config (memory grows with its square).
-- `app.renderer.monitor.setResolution(n)` overrides both, in every build: a player's graphics
+- `scale` is the render scale of the adaptive frame rate (`time.adaptive` on, `adaptiveScale` of the config): 1, or
+  on a GPU-bound screen 0.85, then 0.75, down to the floor, before the frame rate drops. `time:rate` carries it; the
+  renderer draws at it from the next frame, reason `"rate"`. The default, `{ floor: 0.75, devices: "phone" }`, applies
+  on a phone only (a coarse pointer and a short side of at most 820 CSS px, read at start), so a phone at resolution 2
+  draws the memory screen at 1.5 before it drops to 60 fps. Every change redraws the canvas and retakes each kept
+  picture once; the rule holds a lower scale at least twice its dwell, so a picture never goes live from it.
+- `app.renderer.monitor.setResolution(n)` overrides them all, in every build: a player's graphics
   setting is applied by it from an effect, and the A/B runs of a debug build switch with it.
-  `undefined` hands the choice back. Outside 0.5 to 4 it throws a `RangeError`.
+  `undefined` hands the choice back. Outside 0.5 to 4 it throws a `RangeError`. While it holds the
+  adaptive frame rate gets no scale (`time.allowScale(1)`); after it, the floor again.
 
 Every change goes through one mechanism: it is remembered, and the next frame applies it on the
 resize path (`viewport` lays out, `host.resize(w, h)` calls Pixi's `renderer.resize(w, h, r)`), so
 a burst of changes costs one resize, the CSS size, the frame and the scale stay, only the backing
 store changes. A restore after a lost device comes back at the current target, override
-included. `host.onResolution(fn)` (internal) hears every applied change with `(from, to, reason)`;
+included. `host.onResolution(fn)` (internal) hears every applied change with `(from, to, reason)`, the reason
+`"dpr"`, `"setting"`, `"debug"` or `"rate"`;
 the monitor writes it into the log, and B1, F12, C14 and PX1 subscribe in later blocks.
 
 ### `viewport` — `app.renderer.viewport`
@@ -463,7 +471,7 @@ measured on this build or backend" is `null`, never 0.
 | `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost, the live object counts (`counts`), the render targets made and dropped (`targets: { created, destroyed }`, WebGPU; `null` elsewhere; not the memory of `textures.targets`) and what each section of the monitor cost (`sectionsMs`, see "Sections"). |
 | `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label and their detail (see "Pass detail"), the long frames around it. |
 | `longFrame` | When the observer delivers one. |
-| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display` (a resize, a restore, a turn, or a display rate `time` learned: the `PerfDisplay` of the moment, with `hz`, `time.rate().displayHz` or `null`), `compile`/`upload` (at a flush), `shader` and `problem` (at a flush, see below), `debug` (`{ overdraw }`, when the overdraw switch moves), `sections` (`{ on, off }`, when a switch changes them), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
+| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display` (a resize, a restore, a turn, or a display rate `time` learned: the `PerfDisplay` of the moment, with `hz`, `time.rate().displayHz` or `null`), `compile`/`upload` (at a flush), `shader` and `problem` (at a flush, see below), `debug` (`{ overdraw }`, when the overdraw switch moves), `sections` (`{ on, off }`, when a switch changes them), `rate` (every `time:rate`, the payload as its detail), `scale` (a `time:rate` that moved the render scale: `{ from, to, reason, fps }`), and every `monitor.event` call. |
 | `mark` | `monitor.mark(label)`, and an auto mark when the flow rests on a new path. |
 | `thermal` | Every `time:thermal` reading of the native shell. |
 
@@ -649,7 +657,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `background` | `number` | `0x000000` | Clear colour, and the colour of the bars around the frame. |
 | `antialias` | `boolean` | `false` | Antialias the whole canvas. |
 | `maxResolution` | `number` | `2` | Cap of `devicePixelRatio`. Memory grows with its square. A player's graphics setting is applied by `monitor.setResolution`. |
-| `preference` | `"webgpu" \| "webgl"` | `"webgpu"` | Passed to Pixi. Pixi falls back to WebGL by itself. |
+| `preference` | `"webgpu" \| "webgl"` | `"webgpu"` | Passed to Pixi. Pixi falls back to WebGL by itself. A game whose features bring a backdrop filter (`defineFilter({ backdrop: true })`) also gets Pixi's `useBackBuffer`: on WebGL every frame is drawn into a back buffer and copied to the canvas, which such a filter reads under its view; WebGPU ignores it. |
 | `aspect` | `{ min, max }` | `{ 4 / 3, 21 / 9 }` | Allowed long side / short side. A window outside it gets bars. |
 | `poolLimit` | `number` | `256` | Display objects kept in all pools together. |
 | `unsupportedMessage` | `string` | `"This device cannot run the game."` | Text of the unsupported-device screen. |
@@ -660,6 +668,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |
+| `adaptiveScale` | `{ floor, devices } \| false` | `{ floor: 0.75, devices: "phone" }` | The render scale of the adaptive frame rate on a GPU-bound screen (see "Resolution"): the steps 1, 0.85, 0.75, 0.6 and 0.5 down to `floor` (0.5 to 1; 1 allows none), on `"phone"` only or on `"all"` devices. Needs `time.adaptive`. `false` keeps the resolution. Shallow merge: a game that sets it gives both fields. Anything else throws at `createApp`. |
 
 ```ts
 const app = createApp({
@@ -1154,6 +1163,41 @@ clear. Nothing else changes; the engine never caches a group itself (its kept pi
 textures). A unit test against the real module pins the bug: it fails the day Pixi restores the
 bind itself, and the subclass may go. Reported upstream.
 
+### The canvas pass on WebGPU
+
+Pixi 8.22 begins the canvas's render pass when a render starts, with a clear and a store. A frame
+whose first instruction is a filter ends that pass at once with no draw in it, and the filter's apply
+begins it again with a load: on a tiled phone GPU (the Mali of a Galaxy A26) the memory screen paid
+1.6 ms for that empty pass. And Pixi stores and reloads the canvas's depth-stencil attachment, which
+the canvas has from its first stencil mask on, around every filter break. The renderer swaps Pixi's
+WebGPU render target system and pipeline system for subclasses, the same way as the text pipe
+(`host/render-pass.ts`, every build, once per host state, swapped back at stop; the stencil system is
+registered again after them, as it subscribes to the render target system when it is made). No
+encoder is swapped: the counting encoders count the passes that really begin.
+
+- **The canvas pass begins at its first draw.** A bind of the canvas with no pass open on it begins
+  nothing and keeps its clear owed; the first draw (the pipeline system is asked for a pipeline, a
+  vertex buffer layout or a stencil mode before every command of a pass) begins the pass with that
+  clear. A frame clears its canvas exactly once, in the pass that draws first. A read of the canvas (a
+  backdrop filter's copy) pays the owed clear first. At the end of a render an owed clear is paid, and
+  a canvas that saw no pass gets one, so a frame that draws nothing still clears and presents it. A
+  canvas with multisampling is left to Pixi.
+- **Stencil, the rule.** Pixi's masks count: a push draws the mask with `increment` where the stencil
+  equals the depth of the mask stack, its pop draws it again with `decrement`, so with no mask open
+  the stencil is 0 wherever a draw tests it. A canvas pass loads the stencil only while a mask is open
+  on the canvas and clears it to 0 otherwise. It stores the stencil while a mask is open, or when a
+  mask was pushed on the canvas in this frame or the one before; otherwise it discards it. A mask
+  pushed into a pass that discards (the first mask after frames without one) begins the pass again
+  first, the stencil cleared and stored, so a mask that spans a filter break never loses what it drew.
+- **Depth, the rule.** Depth is read only by a pipeline that tests it and written only by one that
+  writes it; Pixi's 2D pipes draw with `State.for2d()`, which does neither. Until a pipeline asks for
+  either, the canvas clears and discards its depth. The first one begins the pass again (depth cleared,
+  as nothing wrote it, and stored) and the canvas keeps its depth from then on; a copy of the canvas's
+  depth does the same.
+
+`stats().renderPasses` counts the passes that ran: a frame that opens with a filter now measures one
+pass fewer than `sync.renderPasses()` estimates.
+
 ## Device loss and the hidden tab
 
 | Step | WebGPU | WebGL |
@@ -1176,7 +1220,8 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
 ## Lifecycle
 
 - **onStart** `startRenderer` resolves the mount, loads Pixi, in a dev build swaps in the
-  draw-counting classes, in every build the bitmap text and render-group pipes, creates the
+  draw-counting classes, in every build the bitmap text and render-group pipes and the lazy canvas
+  pass's render target and pipeline systems, creates the
   application and appends the canvas; then, in the `onReady` callback, `viewport` creates the two safe-area probes, the
   two resize observers and the `moku-native:insets` listener, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
   `render` frame callback is registered, and the warm-up queues its probes; in an agent build the monitor then attaches (and again

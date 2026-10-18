@@ -25,7 +25,8 @@ export function createPoolState(): PoolState {
 /**
  * Creates the initial host state: no Pixi, no application, nothing drawn, nothing listening, no
  * counting, no bitmap text pipe and no render-group pipe installed, the resolution of a page without a window (device
- * pixels 1, cap 2, no override, nothing pending), no own GPU, no kept picture and no pool trim yet.
+ * pixels 1, cap 2, no override, nothing pending, the whole scale, no scale allowed yet), no own GPU, no kept picture
+ * and no pool trim yet.
  *
  * @returns The host branch of the plugin state.
  */
@@ -47,7 +48,8 @@ export function createHostState(): HostState {
     uninstallPasses: undefined,
     uninstallSdfText: undefined,
     uninstallRenderGroup: undefined,
-    resolution: { dpr: 1, cap: 2, override: undefined, pending: undefined },
+    uninstallRenderPass: undefined,
+    resolution: { dpr: 1, cap: 2, override: undefined, pending: undefined, scale: 1, floor: 1 },
     onResolutionChange: [],
     ownGpu: undefined,
     kept: emptyWeakSet(),

@@ -86,6 +86,8 @@ const createMockDeps = (): Deps => ({
     setRate: vi.fn(),
     frameDrawn: vi.fn(),
     frameProbed: vi.fn(),
+    allowScale: vi.fn(),
+    sceneChanged: vi.fn(),
     isPaused: vi.fn(),
     isRunning: vi.fn(() => false),
     step: vi.fn()

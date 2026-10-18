@@ -1,8 +1,8 @@
 /**
  * @file renderer plugin — the hooks: a pause hands the captures still waiting for a drawn frame
- * their picture, since no frame comes while the clock is paused, and trims Pixi's texture pool. In an agent build the
- * performance monitor also hears the pause stack, the flow path, the thermal readings and the
- * changes of the frame rate.
+ * their picture, since no frame comes while the clock is paused, and trims Pixi's texture pool; a change of the frame
+ * rate brings the render scale the adaptive rule chose. In an agent build the performance monitor also hears the pause
+ * stack, the flow path, the thermal readings, the changes of the frame rate and of the scale.
  */
 import { flowPlugin } from "../flow";
 import type { Events as FlowEvents } from "../flow/types";
@@ -11,6 +11,7 @@ import { timePlugin } from "../time";
 import type { RateChange, ThermalReading } from "../time/types";
 import { createModules } from "./api";
 import { trimOnPause } from "./host/pool";
+import { followScale } from "./host/resolution";
 import { withDeps } from "./lifecycle";
 import { servePaused } from "./monitor/capture";
 import type { KernelSlice, MonitorModule } from "./types";
@@ -110,14 +111,27 @@ export function createHandlers(ctx: KernelSlice): {
     },
 
     /**
-     * Writes a change of the frame rate as a `rate` event line, the payload as its detail. Agent
-     * builds only.
+     * Draws at the render scale the change carries from the next frame, in every build. An agent build writes the
+     * change as a `rate` event line, the payload as its detail, and a move of the scale as a `scale` line.
      *
      * @param change - The change `time:rate` carried.
      */
     "time:rate": (change: RateChange): void => {
+      const from = ctx.state.host.resolution.scale;
+
+      followScale(ctx.state.host, change.scale);
+
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
         monitorOf().event("rate", change);
+
+        if (change.scale !== from) {
+          monitorOf().event("scale", {
+            from,
+            to: change.scale,
+            reason: change.reason,
+            fps: change.to
+          });
+        }
       }
     }
   };

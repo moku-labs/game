@@ -31,6 +31,7 @@ import {
 import type {
   AreaBox,
   FilterArea,
+  FilterDefinition,
   FilteredView,
   FilterFields,
   FilterInstance,
@@ -392,15 +393,35 @@ function cacheOfInstance(instance: FilterInstance): FilterCache {
 }
 
 /**
+ * Tells whether one of the inputs of a definition starts from the view's own input: its chain draws a copy of the
+ * view's subtree. A chain from back draws what was drawn under the view instead.
+ *
+ * @param definition - The definition.
+ * @returns True when one does.
+ */
+function readsOwnInput(definition: FilterDefinition): boolean {
+  const { inputs } = definition;
+
+  // per sync of a changed view: an index over the frozen list; `for…of` over a frozen array allocates its iterator.
+  // eslint-disable-next-line unicorn/no-for-loop -- the hot path walks a frozen list by index
+  for (let index = 0; index < inputs.length; index += 1) {
+    if (inputs[index]?.from === "input") return true;
+  }
+
+  return false;
+}
+
+/**
  * Whether an instance shows a blurred copy of what is under it (spec 23 P8.5): the built-in `Blur`, or one of ours
- * with inputs. The predicate an overlay's held loops read (spec 22).
+ * with an input drawn from its own subtree. A backdrop whose chains start from back blurs the scene under the view,
+ * not the view: an overlay holds no loops for it. The predicate an overlay's held loops read (spec 22).
  *
  * @param instance - The instance.
  * @returns True, or `undefined` for every other filter (the slot leaves the key out).
  */
 function blursOf(instance: FilterInstance): true | undefined {
   const showsBlur =
-    instance.kind === "blur" || (instance.kind === "wgsl" && instance.definition.inputs.length > 0);
+    instance.kind === "blur" || (instance.kind === "wgsl" && readsOwnInput(instance.definition));
 
   return showsBlur ? true : undefined;
 }

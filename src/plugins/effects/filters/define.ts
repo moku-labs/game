@@ -1,9 +1,9 @@
 /**
  * @file effects/filters — `defineFilter`: a WGSL fragment body and its GLSL twin become a flat
- * component type with its filter attached, with the second textures the body reads (`inputs`) and
- * the filter drawn in its place when it is broken (`fallback`). Pure: no ctx, no device; every
- * shader a kind can draw is checked on the running backend when the renderer first draws, in
- * every build, by the filter sync.
+ * component type with its filter attached, with the second textures the body reads (`inputs`),
+ * what was drawn under its view (`backdrop`) and the filter drawn in its place when it is broken
+ * (`fallback`). Pure: no ctx, no device; every shader a kind can draw is checked on the running
+ * backend when the renderer first draws, in every build, by the filter sync.
  */
 import type { FilterCache } from "../../renderer/types";
 import { component } from "../../world/ecs/define";
@@ -46,10 +46,11 @@ const MAIN_GLSL = /\bvoid\s+main\s*\(/;
 /**
  * Names a uniform cannot take: the two fields every filter component carries, and the names the
  * shader headers declare, which a game uniform would clash with (on WebGL only, for most). The
- * GLSL header also declares `finalColor` and `vTextureCoord`.
+ * GLSL header also declares `finalColor` and `vTextureCoord`; a backdrop's, `uBackTexture`,
+ * `backScale`, `backClamp` and `sampleBack`.
  */
 const RESERVED_NAME =
-  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler|finalColor|vTextureCoord|keptOrigin|canvasPixel)$/;
+  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler|finalColor|vTextureCoord|keptOrigin|canvasPixel|uBackTexture|backScale|backClamp|sampleBack)$/;
 
 /**
  * What a body reads of the screen: the root target's frame, the fragment position, the output target's size, the
@@ -141,25 +142,27 @@ function worstOf(a: FilterCache, b: FilterCache): FilterCache {
 
 /**
  * What the kept-picture cache may do with a filter, from what the game declared and what its bodies read only, never
- * the engine's header (LEAD-FIXES-4 item 3): `cache: false` is `"screen"`; a body that reads the screen and declares
- * nothing is `"screen"` too (the safe direction); a body that calls `canvasPixel` is `"placed"`, as is
- * `cache: "placed"`; everything else is `"local"`.
+ * the engine's header (LEAD-FIXES-4 item 3): a backdrop and `cache: false` are `"screen"`; a body that reads the
+ * screen and declares nothing is `"screen"` too (the safe direction); a body that calls `canvasPixel` is `"placed"`,
+ * as is `cache: "placed"`; everything else is `"local"`.
  *
  * @param wgsl - The WGSL body.
  * @param glsl - The GLSL body.
  * @param cache - What the game declared.
+ * @param backdrop - Whether the filter reads what was drawn under its view.
  * @returns The category.
  * @example
  * ```ts
- * cacheOf("let p = gfu.uOutputFrame.xy + uv * gfu.uInputSize.xy;", "", undefined); // "screen"
+ * cacheOf("let p = gfu.uOutputFrame.xy + uv * gfu.uInputSize.xy;", "", undefined, false); // "screen"
  * ```
  */
 function cacheOf(
   wgsl: string,
   glsl: string,
-  cache: "local" | "placed" | false | undefined
+  cache: "local" | "placed" | false | undefined,
+  backdrop: boolean
 ): FilterCache {
-  if (cache === false) return "screen";
+  if (cache === false || backdrop) return "screen";
   if (cache === undefined && (readsScreenIn(wgsl) || readsScreenIn(glsl))) return "screen";
   if (cache === "placed" || callsCanvasPixel(wgsl, glsl)) return "placed";
 
@@ -251,6 +254,78 @@ function readResolution(id: string, resolution: unknown): number {
   throw new Error(
     `[game] Filter "${id}": resolution must be from 0 to ${MAX_RESOLUTION}, 0 for the resolution of the canvas.\n  Got ${String(resolution)}.`
   );
+}
+
+/**
+ * Reads the declared backdrop switch: `true`, `false` or left out. A JavaScript caller may pass anything.
+ *
+ * @param id - The filter id.
+ * @param backdrop - What the game declared.
+ * @returns True for a backdrop.
+ * @throws {Error} When it is given and is not a boolean.
+ */
+function readBackdrop(id: string, backdrop: unknown): boolean {
+  if (backdrop === undefined || typeof backdrop === "boolean") return backdrop === true;
+
+  throw new Error(
+    `[game] Filter "${id}": backdrop must be true or false.\n  Got ${JSON.stringify(backdrop)}.`
+  );
+}
+
+/**
+ * Refuses what a backdrop cannot have: a padding (Pixi copies the canvas under the padded box, and a copy past the
+ * canvas edge fails on the GPU) and a cache that keeps it (what is under it changes without it).
+ *
+ * @param id - The filter id.
+ * @param padding - The padding as declared, `0` when left out.
+ * @param cache - The cache as declared.
+ * @throws {Error} When the padding is not 0 or the cache keeps it.
+ */
+function checkBackdrop(id: string, padding: number | string, cache: unknown): void {
+  if (padding !== 0) {
+    throw new Error(
+      `[game] Filter "${id}" is a backdrop: its padding must be 0.\n` +
+        "  Pixi copies the canvas under the padded box, and a copy past the canvas edge fails: leave padding out."
+    );
+  }
+
+  if (cache === "local" || cache === "placed") {
+    throw new Error(
+      `[game] Filter "${id}" is a backdrop: it reads what is drawn under its view, so it is drawn live in every frame.\n` +
+        "  Leave cache out, or set it to false."
+    );
+  }
+}
+
+/**
+ * Reads where an input's first step reads: the view's own input (the default) or, for a backdrop, what was drawn under
+ * the view. A JavaScript caller may pass anything.
+ *
+ * @param id - The filter id.
+ * @param name - The input name.
+ * @param from - What the game declared.
+ * @param backdrop - Whether the filter is a backdrop.
+ * @returns `"input"` or `"back"`.
+ * @throws {Error} When it is neither, or `"back"` on a filter that is no backdrop.
+ */
+function readFrom(id: string, name: string, from: unknown, backdrop: boolean): "input" | "back" {
+  if (from === undefined || from === "input") return "input";
+
+  if (from !== "back") {
+    throw new Error(
+      `[game] Filter "${id}": input "${name}" starts from ${JSON.stringify(from)}.\n` +
+        '  Write from: "input" or from: "back".'
+    );
+  }
+
+  if (!backdrop) {
+    throw new Error(
+      `[game] Filter "${id}": input "${name}" starts from "back", which only a backdrop filter can read.\n` +
+        "  Give the filter backdrop: true."
+    );
+  }
+
+  return "back";
 }
 
 /**
@@ -540,6 +615,13 @@ function readStages(id: string, name: string, stages: unknown): readonly FilterS
       );
     }
 
+    if (stage.filter.backdrop) {
+      throw new Error(
+        `[game] Filter "${id}": stage "${stage.filter.id}" of input "${name}" is a backdrop.\n` +
+          "  A stage reads the step before it: give it no backdrop."
+      );
+    }
+
     if (!read.includes(stage)) read.push(stage);
   }
 
@@ -547,19 +629,21 @@ function readStages(id: string, name: string, stages: unknown): readonly FilterS
 }
 
 /**
- * Reads the inputs of a definition: the names the engine declares for each, its two uniforms, its
- * stages and its chain.
+ * Reads the inputs of a definition: the names the engine declares for each, where its first step reads, its two
+ * uniforms, its stages and its chain.
  *
  * @param id - The filter id.
  * @param declared - What the game declared under `inputs`.
  * @param uniforms - The read uniforms.
+ * @param backdrop - Whether the filter is a backdrop: only then may an input start from back.
  * @returns The inputs in declaration order, frozen; empty without `inputs`.
  * @throws {Error} When `inputs` is not an object, has more than four entries, or an input breaks one of its rules.
  */
 function readInputs<Value>(
   id: string,
   declared: Readonly<Record<string, FilterInput<Value>>> | undefined,
-  uniforms: readonly UniformSpec[]
+  uniforms: readonly UniformSpec[],
+  backdrop: boolean
 ): readonly FilterInputDefinition[] {
   if (declared === undefined) return Object.freeze([]);
 
@@ -584,6 +668,7 @@ function readInputs<Value>(
   return Object.freeze(
     entries.map(([name, input]) => {
       const names = checkInputNames(id, name, uniforms, taken);
+      const from = readFrom(id, name, input.from, backdrop);
       const stages = readStages(id, name, input.stages);
 
       if (typeof input.chain !== "function") {
@@ -595,6 +680,7 @@ function readInputs<Value>(
 
       return Object.freeze({
         name,
+        from,
         texture: names.texture,
         sampler: names.sampler,
         scale: Object.freeze({ name: names.scale, type: "vec2<f32>", form: "vector", size: 2 }),
@@ -610,19 +696,21 @@ function readInputs<Value>(
 
 /**
  * Reads the fallback of a definition: another filter of ours, drawing alone, over a subset of its
- * uniforms with the same types.
+ * uniforms with the same types; a backdrop only for a backdrop, which it draws in place of on the same view.
  *
  * @param id - The filter id.
  * @param fallback - What the game declared under `fallback`.
  * @param uniforms - The read uniforms.
+ * @param backdrop - Whether the filter is a backdrop.
  * @returns The fallback's definition, or `undefined` without one.
- * @throws {Error} When it is no filter of ours, has the same id, has inputs or a fallback, or a uniform of it is not
- *   one of this filter's with the same type.
+ * @throws {Error} When it is no filter of ours, has the same id, has inputs or a fallback, a uniform of it is not
+ *   one of this filter's with the same type, or it is a backdrop and the filter is not.
  */
 function readFallback(
   id: string,
   fallback: unknown,
-  uniforms: readonly UniformSpec[]
+  uniforms: readonly UniformSpec[],
+  backdrop: boolean
 ): FilterDefinition | undefined {
   if (fallback === undefined) return undefined;
 
@@ -644,6 +732,13 @@ function readFallback(
     throw new Error(
       `[game] Filter "${id}": its fallback "${definition.id}" has inputs or a fallback of its own.\n` +
         "  A fallback draws alone and simply: give it neither."
+    );
+  }
+
+  if (definition.backdrop && !backdrop) {
+    throw new Error(
+      `[game] Filter "${id}": its fallback "${definition.id}" is a backdrop, and "${id}" is not.\n` +
+        `  A fallback draws in its place on the same view: give it no backdrop, or make "${id}" a backdrop too.`
     );
   }
 
@@ -731,18 +826,20 @@ function cacheWithInputs(
  * An `area` answers, from the value, the rectangle in the entity's own units outside of which the
  * filter draws nothing: Pixi then renders and fills only that box, not the view's bounds. A
  * `resolution` draws the view and its filters at that many texels per CSS px instead of the
- * canvas's.
- * Register it through the `filters` key of a feature. The README shows a filter with a blur input
- * and one with an `area`.
+ * canvas's. A `backdrop` reads what was drawn under its view inside that box: the body calls
+ * `sampleBack(uv)`, and an input may start `from: "back"`; it is drawn live in every frame.
+ * Register it through the `filters` key of a feature. The README shows a filter with a blur input,
+ * one with an `area` and a backdrop.
  *
  * @param id - The filter id, also the component name; unique, and not one of the built-ins.
  * @param spec - Both bodies, the uniforms, the passes one apply costs, the padding, the inputs, the fallback, the
- *   cache category, the area and the resolution.
+ *   cache category, the area, the resolution and the backdrop switch.
  * @returns The component type, with the frozen `filter` definition attached.
  * @throws {Error} When the id is empty, the WGSL has no `mainFragment`, the GLSL no `void main(`,
  *   a uniform is reserved, badly named or of no known form, the passes or the padding break
  *   their rules, an input or the fallback breaks one of its rules, `passes` is given with inputs,
- *   `area` is not a function, or `resolution` is not a number from 0 to 4.
+ *   `area` is not a function, `resolution` is not a number from 0 to 4, `backdrop` is not a
+ *   boolean, or a backdrop has a padding or a cache that keeps it.
  * @example
  * ```ts
  * // features/board/effects.ts: a gold tint a motion hook tweens on a merge, on WebGPU and WebGL.
@@ -762,7 +859,8 @@ export function defineFilter<
     readUniform(id, name, declaration)
   );
   const uniforms = Object.freeze(read.map(entry => entry.spec));
-  const inputs = readInputs(id, spec.inputs, uniforms);
+  const backdrop = readBackdrop(id, spec.backdrop);
+  const inputs = readInputs(id, spec.inputs, uniforms, backdrop);
 
   if (spec.inputs !== undefined && spec.passes !== undefined) {
     throw new Error(
@@ -770,23 +868,24 @@ export function defineFilter<
     );
   }
 
-  const fallback = readFallback(id, spec.fallback, uniforms);
+  const fallback = readFallback(id, spec.fallback, uniforms, backdrop);
   const passes = spec.passes ?? 1;
   const padding = spec.padding ?? 0;
 
   checkCost(id, passes, padding, uniforms);
   checkCache(id, spec.cache);
+  if (backdrop) checkBackdrop(id, padding, spec.cache);
 
   const area = readArea(id, spec.area);
   const resolution = readResolution(id, spec.resolution);
 
   // Assemble the frozen definition: both shaders with the engine's header, and what the renderer's cache may keep.
   const origin = callsCanvasPixel(spec.wgsl, spec.glsl) ? KEPT_ORIGIN : undefined;
-  const cache = cacheWithInputs(cacheOf(spec.wgsl, spec.glsl, spec.cache), inputs);
+  const cache = cacheWithInputs(cacheOf(spec.wgsl, spec.glsl, spec.cache, backdrop), inputs);
   const filter: FilterDefinition = Object.freeze({
     id,
-    source: assemble(uniforms, inputs, spec.wgsl, origin),
-    glsl: assembleGlsl(uniforms, inputs, spec.glsl, origin),
+    source: assemble(uniforms, inputs, spec.wgsl, origin, backdrop),
+    glsl: assembleGlsl(uniforms, inputs, spec.glsl, origin, backdrop),
     uniforms,
     passes,
     padding,
@@ -795,11 +894,13 @@ export function defineFilter<
     cache,
     origin,
     resolution,
+    backdrop,
     // The key is there only when the spec gave an area (`exactOptionalPropertyTypes`).
     ...(area === undefined ? {} : { area })
   });
 
-  if (spec.cache !== false && (readsScreenIn(spec.wgsl) || readsScreenIn(spec.glsl))) {
+  // A backdrop is drawn live by its declaration: its reads of the screen need no `cache: false`.
+  if (!backdrop && spec.cache !== false && (readsScreenIn(spec.wgsl) || readsScreenIn(spec.glsl))) {
     screenReaders.add(filter);
   }
 

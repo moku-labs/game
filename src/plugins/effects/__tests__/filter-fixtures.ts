@@ -4,7 +4,8 @@
  * input; `Along` blurs along a direction; `Soft` reads a second texture `soft` whose first stage and scale follow
  * `spread` (an empty chain at `spread: 0`, one Gaussian fewer below resolution 1.5); `Bad` reads a name it never
  * declared; `Hazy` names `Bad` in its chain; `SoftDim` is a one-pass fallback over `spread`; `Veiled` is `Soft` with
- * `SoftDim` as its fallback.
+ * `SoftDim` as its fallback. `Under` is a backdrop filter that reads what was drawn under its view through
+ * `sampleBack`; `Frosted` is `Soft` as a backdrop, its input drawn from what was drawn under the view.
  */
 import { defineFilter } from "../filters/define";
 import type { FilterChainContext, FilterStep } from "../filters/types";
@@ -99,6 +100,27 @@ export const Veiled = defineFilter("fixture.veiled", {
   uniforms: { spread: 1, tone: 0 },
   inputs: { soft: { stages: SOFT_STAGES, chain: softChain } },
   fallback: SoftDim
+});
+
+/** The bodies of `Under`: what was drawn under the view, read through `sampleBack` and dimmed by `spread`. */
+export const UNDER_BODIES = {
+  wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return sampleBack(uv) * fu.spread; }",
+  glsl: "void main() { finalColor = sampleBack(vTextureCoord) * spread; }"
+} as const;
+
+/** A backdrop filter without inputs: what was drawn under the view, dimmed. */
+export const Under = defineFilter("fixture.under", {
+  ...UNDER_BODIES,
+  uniforms: { spread: 1 },
+  backdrop: true
+});
+
+/** `Soft` as a backdrop: its input `soft` is a blurred copy of what was drawn under the view. */
+export const Frosted = defineFilter("fixture.frosted", {
+  ...SOFT_BODIES,
+  uniforms: { spread: 1, tone: 0 },
+  backdrop: true,
+  inputs: { soft: { from: "back", stages: SOFT_STAGES, chain: softChain } }
 });
 
 /** A filter whose chain names the stage that does not compile, with a fallback. */

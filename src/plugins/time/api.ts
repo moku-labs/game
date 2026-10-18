@@ -3,7 +3,15 @@
  */
 import { addMeasureListener, pageNow, runMeasuredFrame } from "./measure";
 import { capturePhases, PHASES } from "./phases";
-import { closeFrame, judgeFrame, observeTick, resumeRate, setRateChoice } from "./rate";
+import {
+  allowScale,
+  closeFrame,
+  judgeFrame,
+  observeTick,
+  resumeRate,
+  sceneRate,
+  setRateChoice
+} from "./rate";
 import { capSlackMs } from "./rate-rules";
 import type { Api, FrameCallback, Phase, TimeCtx } from "./types";
 
@@ -259,7 +267,7 @@ function countFrameListeners(ctx: TimeCtx): number {
 
 /**
  * Creates the time API: frame callbacks per phase, the `Time` resource, scale, pause and
- * resume, `wake` for the idle cap, the measurement of an agent build, the frame rate, and `step`
+ * resume, `wake` for the idle cap, the measurement of an agent build, the frame rate and its render scale, and `step`
  * for tests and tools.
  *
  * @param ctx - Domain context of the time plugin.
@@ -331,6 +339,10 @@ export function createTimeApi(ctx: TimeCtx): Api {
     rate: () => ctx.state.rate.snapshot,
 
     setRate: choice => setRateChoice(ctx, choice),
+
+    allowScale: floor => allowScale(ctx.state.rate, floor),
+
+    sceneChanged: () => sceneRate(ctx.state.rate),
 
     frameDrawn: () => {
       ctx.state.rate.drawnNow = true;

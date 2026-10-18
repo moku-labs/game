@@ -308,6 +308,18 @@ describe("the synchronous block of the switch", () => {
     expect(mock.time.wakes).toBe(2);
   });
 
+  // Bug: the adaptive frame rate judges a new screen with the back-off and the frames of the old one.
+  it("tells the adaptive frame rate once per new scene, never for the same one", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+    await mock.enter({ scene: "board" });
+    await mock.enter({ scene: "board" });
+    await mock.enter({ rest: true });
+
+    expect(mock.time.scenes).toBe(2);
+  });
+
   it("does not wake the loop when no scene changed", async () => {
     const mock = startedMock();
 

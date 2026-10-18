@@ -2,7 +2,9 @@
  * @file effects/filters — the WGSL the engine writes around a fragment body: the inputs Pixi's
  * filter system fills, the vertex stage, and the uniform struct generated from the declaration,
  * so the shader and the uniform layout cannot drift. For each input the engine declares the texture,
- * its sampler (WGSL only), its scale and clamp uniforms and `sample<Name>(uv)`. Pure strings.
+ * its sampler (WGSL only), its scale and clamp uniforms and `sample<Name>(uv)`; for a backdrop, the
+ * texture Pixi copies the canvas under the view into (`uBackTexture`, group 0 binding 3), its scale
+ * and clamp uniforms and `sampleBack(uv)`. Pure strings.
  */
 import type { FilterInputDefinition, UniformSpec } from "./types";
 
@@ -99,32 +101,69 @@ export const CANVAS_PIXEL = /* wgsl */ `fn canvasPixel(uv: vec2<f32>) -> vec2<f3
 `;
 
 /**
+ * The engine's uniform a backdrop's `sampleBack` scales its uv by: one over the size of the back texture's backing,
+ * CSS px. Filled by every apply from the texture Pixi copied.
+ */
+export const BACK_SCALE: UniformSpec = Object.freeze({
+  name: "backScale",
+  type: "vec2<f32>",
+  form: "vector",
+  size: 2
+});
+
+/** The engine's uniform a backdrop's `sampleBack` clamps to: half a texel inside the copied part of the back texture. */
+export const BACK_CLAMP: UniformSpec = Object.freeze({
+  name: "backClamp",
+  type: "vec4<f32>",
+  form: "vector",
+  size: 4
+});
+
+/**
+ * What a backdrop's body reads what was drawn under its view through: the texture Pixi's filter system copies the
+ * canvas into and binds at group 0 binding 3 (`Filter.blendRequired`), sampled at the body's uv with the engine's
+ * scale and clamp, as an input is.
+ */
+export const SAMPLE_BACK = /* wgsl */ `@group(0) @binding(3) var uBackTexture: texture_2d<f32>;
+
+fn sampleBack(uv: vec2<f32>) -> vec4<f32> {
+  return textureSampleLevel(uBackTexture, uSampler, clamp(uv * gfu.uInputSize.xy * fu.backScale, fu.backClamp.xy, fu.backClamp.zw), 0.0);
+}
+
+`;
+
+/**
  * The whole source of a filter: the header, the uniform struct (the uniforms, then the scale and the clamp of each
- * input, then the engine's `keptOrigin` of a body that calls `canvasPixel`), the input bindings, the helper, the
- * body. A body without the helper assembles byte-identically to one without the cache.
+ * input, then a backdrop's back scale and clamp, then the engine's `keptOrigin` of a body that calls `canvasPixel`),
+ * the input bindings, a backdrop's `sampleBack`, the `canvasPixel` helper, the body. A body without either helper
+ * assembles byte-identically to one without the cache and without the backdrop.
  *
  * @param uniforms - The uniforms in declaration order.
  * @param inputs - The inputs in declaration order.
  * @param body - The fragment body the game wrote.
  * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
+ * @param backdrop - True for a filter that reads what was drawn under its view.
  * @returns The WGSL source both stages are built from.
  * @example
  * ```ts
- * assemble([], [], body).endsWith(body); // true
+ * assemble([], [], body, undefined, true).includes("fn sampleBack(uv: vec2<f32>) -> vec4<f32>"); // true
  * ```
  */
 export function assemble(
   uniforms: readonly UniformSpec[],
   inputs: readonly FilterInputDefinition[],
   body: string,
-  origin?: UniformSpec
+  origin?: UniformSpec,
+  backdrop = false
 ): string {
   const struct = uniformStruct([
     ...uniforms,
     ...inputs.flatMap(input => [input.scale, input.clamp]),
+    ...(backdrop ? [BACK_SCALE, BACK_CLAMP] : []),
     ...(origin === undefined ? [] : [origin])
   ]);
+  const back = backdrop ? SAMPLE_BACK : "";
   const helper = origin === undefined ? "" : CANVAS_PIXEL;
 
-  return `${HEADER}${struct}${inputBindings(inputs)}${helper}${body}`;
+  return `${HEADER}${struct}${inputBindings(inputs)}${back}${helper}${body}`;
 }

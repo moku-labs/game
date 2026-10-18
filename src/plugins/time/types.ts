@@ -114,7 +114,7 @@ export type ThermalStatus =
  *
  * @example
  * ```ts
- * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
+ * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null, scale: 0.75 }
  * ```
  */
 export type FrameRate = {
@@ -149,14 +149,21 @@ export type FrameRate = {
    * unknown.
    */
   heldBy: "panel" | null;
+  /**
+   * The share of its resolution the canvas draws at for the adaptive rule: 1, or a step of 0.85, 0.75, 0.6 and 0.5
+   * down to the floor the renderer allows on a GPU-bound screen. Always 1 without `adaptive`, outside mode `"auto"` and
+   * while the renderer allows no scale.
+   */
+  scale: number;
 };
 
 /**
- * Payload of `time:rate`: a change of the loop's rate or of its mode, with the evidence the rule read.
+ * Payload of `time:rate`: a change of the loop's rate, of its mode or of the render scale, with the evidence the rule
+ * read. A change of the scale alone has `from` equal to `to`.
  *
  * @example
  * ```ts
- * const change: RateChange = { from: 120, to: 60, reason: "missed", mode: "auto", displayHz: 120, thermal: "none", window: { drawn: 41, missed: 9, heavy: 0 }, dwellMs: 5000 };
+ * const change: RateChange = { from: 120, to: 120, reason: "missed", mode: "auto", displayHz: 120, thermal: "none", window: { drawn: 41, missed: 9, heavy: 0 }, dwellMs: 5000, scale: 0.85 };
  * ```
  */
 export type RateChange = {
@@ -174,8 +181,10 @@ export type RateChange = {
   thermal: ThermalStatus | null;
   /** Drawn intervals, the late ones and the heavy ones of the window the rule read; zeros for a reason that reads none. */
   window: { drawn: number; missed: number; heavy: number };
-  /** How long a return must now wait at the lower rate, ms; 0 without `adaptive`. */
+  /** How long a return must now wait at the lower rate, ms (twice that for a step up of the scale); 0 without `adaptive`. */
   dwellMs: number;
+  /** The render scale after the change, as `FrameRate.scale`. */
+  scale: number;
 };
 
 /**
@@ -294,8 +303,8 @@ export type Events = {
    */
   "time:thermal": ThermalReading;
   /**
-   * The loop's frame rate or its mode changed (the adaptive rule, the display, the thermal input or `setRate`).
-   * Never per frame, never at start.
+   * The loop's frame rate, its mode or the render scale changed (the adaptive rule, the display, the thermal input or
+   * `setRate`). Never per frame, never at start.
    */
   "time:rate": RateChange;
 };
@@ -435,6 +444,8 @@ export type DisplayState = {
 export type RateState = {
   /** The loop's rate now; `maxFps` at creation. */
   fps: number;
+  /** The render scale the adaptive rule chose; 1 at creation. */
+  scale: number;
   /** `"auto"` with `adaptive`, else `"fixed"`, until `setRate` forces a number. */
   mode: RateMode;
   /** The reason of the last change; `"start"` at creation. */
@@ -463,6 +474,8 @@ export type Governor = {
   floor: number;
   /** The rates the rule chooses from, highest first, frozen; empty until the display rate is known. */
   ladder: readonly number[];
+  /** The render scales the rule steps through before a rate, highest first, frozen; empty while the renderer allows none. */
+  scales: readonly number[];
   /** The shell's last thermal status; `null` before the first reading. */
   thermal: ThermalStatus | null;
   /** The frame that ran last was drawn. */
@@ -479,7 +492,7 @@ export type Governor = {
   skipNext: boolean;
   /** Timestamp of each sample, a ring of `RING`. */
   sampleAt: Float64Array;
-  /** Flags of each sample: bit 0 missed, bit 1 heavy. */
+  /** Flags of each sample: bit 0 missed, bit 1 heavy, bit 2 missed and busy. */
   sampleFlags: Uint8Array;
   /** Samples written since creation: the next slot is `written % RING`. */
   written: number;
@@ -489,6 +502,8 @@ export type Governor = {
   dropDrawn: number;
   /** Late samples in the drop window. */
   dropMissed: number;
+  /** Late samples in the drop window whose frame was busy on the main thread. */
+  dropBusy: number;
   /** The oldest sample of the return window. */
   returnTail: number;
   /** Samples in the return window. */
@@ -501,6 +516,8 @@ export type Governor = {
   switchedAt: number;
   /** When the rule last returned a step up; -Infinity before the first return. */
   lastReturnAt: number;
+  /** The last step of the rule was a return: its first drop judges it. */
+  climbed: boolean;
   /** How long a return waits after a switch, ms. */
   dwellMs: number;
   /** The rate last asked of the shell. */
@@ -719,8 +736,8 @@ export type Api = {
 
   /**
    * The loop's frame rate now: the rate, who decides it, why it is what it is, the display rate and the ladder the
-   * adaptive rule chooses from, and the native shell's thermal status. One frozen object, the same until something in
-   * it changes: cheap to read every frame.
+   * adaptive rule chooses from, the native shell's thermal status and the render scale. One frozen object, the same
+   * until something in it changes: cheap to read every frame.
    *
    * `fps` is the rate the loop really runs at; `asked` the rate it is told to hold outside the adaptive rule, and
    * `heldBy: "panel"` says the panel is slower than that.
@@ -729,11 +746,11 @@ export type Api = {
    * @example
    * ```ts
    * // The settings screen shows the rate the game runs at on this phone.
-   * app.time.rate(); // { fps: 120, mode: "auto", reason: "start", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
+   * app.time.rate(); // { fps: 120, mode: "auto", reason: "start", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null, scale: 1 }
    * // on the memory screen of a weak phone, a second later:
-   * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
+   * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null, scale: 0.75 }
    * // a game with maxFps 120 and no adaptive, on a 60 Hz phone:
-   * app.time.rate(); // { fps: 60, mode: "fixed", reason: "start", displayHz: 60, ladder: [], thermal: null, asked: 120, heldBy: "panel" }
+   * app.time.rate(); // { fps: 60, mode: "fixed", reason: "start", displayHz: 60, ladder: [], thermal: null, asked: 120, heldBy: "panel", scale: 1 }
    * ```
    */
   rate(): Readonly<FrameRate>;
@@ -742,8 +759,9 @@ export type Api = {
    * Forces the frame rate, or gives it back with `"auto"`. A number is the cap from now on, like a `maxFps` of that
    * value (never above `maxFps`): the adaptive rule and the thermal input leave it alone. `"auto"` hands the rate back
    * to the config: the top of the adaptive ladder (a step lower while the shell reports heat), or `maxFps` without
-   * `adaptive`. A choice equal to the current one changes nothing, so a game may apply its player's setting on every
-   * commit. Every change emits `time:rate` and asks the native shell for the panel rate.
+   * `adaptive`. Both start the render scale over at 1. A choice equal to the current one changes nothing, so a game may
+   * apply its player's setting on every commit. Every change emits `time:rate` and asks the native shell for the panel
+   * rate.
    *
    * @param choice - `"auto"`, 30, 60 or 120.
    * @returns The frame rate after the call.
@@ -751,14 +769,50 @@ export type Api = {
    * @example
    * ```ts
    * // The player picked "60" in the settings to save battery.
-   * app.time.setRate(60); // { fps: 60, mode: "forced", reason: "forced", displayHz: 120, ladder: [120, 60], thermal: "none", asked: 60, heldBy: null }
+   * app.time.setRate(60); // { fps: 60, mode: "forced", reason: "forced", displayHz: 120, ladder: [120, 60], thermal: "none", asked: 60, heldBy: null, scale: 1 }
    * // …and later "Auto" again, on a 120 Hz phone:
-   * app.time.setRate("auto"); // { fps: 120, mode: "auto", reason: "auto", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
+   * app.time.setRate("auto"); // { fps: 120, mode: "auto", reason: "auto", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null, scale: 1 }
    * // A pin of 120 on a 60 Hz phone runs at the panel's rate:
-   * app.time.setRate(120); // { fps: 60, mode: "forced", reason: "forced", displayHz: 60, ladder: [60], thermal: "none", asked: 120, heldBy: "panel" }
+   * app.time.setRate(120); // { fps: 60, mode: "forced", reason: "forced", displayHz: 60, ladder: [60], thermal: "none", asked: 120, heldBy: "panel", scale: 1 }
    * ```
    */
   setRate(choice: RateChoice): Readonly<FrameRate>;
+
+  /**
+   * Lets the adaptive frame rate lower the render scale before it lowers the rate. When the late frames of a window
+   * were light on the main thread the screen is GPU-bound: the rule steps the scale down through 0.85, 0.75, 0.6 and
+   * 0.5 to `floor` (at the lowest rate too), and only then drops the rate; on the way back it raises the scale first,
+   * a step after twice the dwell, then the rate. A late window busy on the main thread skips the scale. For engine
+   * plugins: the renderer calls it at start with the floor of its `adaptiveScale`, with 1 while a player's resolution
+   * holds, and with the floor again after. A scale under a new floor goes up to it at once, without `time:rate`.
+   * Without `adaptive` nothing changes.
+   *
+   * @param floor - The lowest share of its resolution the canvas may draw at; 1 allows no scale.
+   * @returns The frame rate after the call.
+   * @example
+   * ```ts
+   * // The renderer on a phone, at start:
+   * ctx.require(timePlugin).allowScale(0.75); // { fps: 120, …, scale: 1 }
+   * // on the memory screen of a weak phone, half a second later:
+   * app.time.rate(); // { fps: 120, mode: "auto", reason: "missed", …, scale: 0.75 }
+   * // the player picked a resolution in the settings: the renderer takes the scale away from the rule
+   * ctx.require(timePlugin).allowScale(1); // { fps: 120, …, scale: 1 }
+   * ```
+   */
+  allowScale(floor: number): Readonly<FrameRate>;
+
+  /**
+   * Tells the adaptive frame rate that a new scene stands: the back-off of failed returns starts over at a dwell of
+   * 5 s, and the new screen is judged on its own frames (both windows start empty, the first interval is skipped). The
+   * rate and the scale stay. For engine plugins: `scenes` calls it when a switch has built the new scene.
+   *
+   * @example
+   * ```ts
+   * // scenes, once the new scene stands:
+   * ctx.require(timePlugin).sceneChanged(); // the next return waits 5 s, not the 40 s three failed returns had grown
+   * ```
+   */
+  sceneChanged(): void;
 
   /**
    * Tells the clock that the frame running now was drawn. For engine plugins: the renderer calls it from its `render`

@@ -10,7 +10,9 @@
  * asks the renderer for no frame. A destroy frees the uniform buffers first: `Filter.destroy()`
  * leaves them to a GC that runs after a minute (P10). A filter with inputs draws each place of its
  * chains through Pixi's public `applyFilter` from inside its own `apply`, into pooled textures given
- * back in a `finally`; a stand-in draws in place of a broken kind or instance.
+ * back in a `finally`; a stand-in draws in place of a broken kind or instance. A backdrop is built
+ * with Pixi's `blendRequired`: Pixi copies the canvas under the view before it draws, and the apply
+ * places `sampleBack` on that copy (`activeBackTexture`) and starts the chains `from: "back"` there.
  */
 
 import { CALM_AFTER } from "../../renderer/kept/record";
@@ -36,6 +38,7 @@ import type {
   UniformSpec,
   UniformValues
 } from "./types";
+import { BACK_CLAMP, BACK_SCALE } from "./wgsl";
 
 /**
  * The resolution of every filter but `Blur`: the render target's, so a filter draws at the
@@ -243,6 +246,18 @@ function createOurs(
     };
   }
 
+  // A backdrop's two uniforms, filled by every apply from the copy Pixi made of the canvas under the view.
+  if (definition.backdrop) {
+    structures[BACK_SCALE.name] = {
+      value: new Float32Array(BACK_SCALE.size),
+      type: BACK_SCALE.type
+    };
+    structures[BACK_CLAMP.name] = {
+      value: new Float32Array(BACK_CLAMP.size),
+      type: BACK_CLAMP.type
+    };
+  }
+
   // The canvas origin of a kept picture for `canvasPixel`: 0 drawn live, written in place by the renderer (spec 23).
   if (definition.origin !== undefined) {
     structures[definition.origin.name] = {
@@ -251,10 +266,11 @@ function createOurs(
     };
   }
 
-  // A group only for a filter that binds a uniform of its own: a declared one, an input's or the canvas origin.
+  // A group only for a filter that binds a uniform of its own: a declared one, an input's, a backdrop's or the origin.
   const bindsUniforms =
     definition.uniforms.length > 0 ||
     definition.inputs.length > 0 ||
+    definition.backdrop ||
     definition.origin !== undefined;
   const group = bindsUniforms ? new pixi.UniformGroup(structures) : undefined;
   const resources: Record<string, unknown> = group === undefined ? {} : { fu: group };
@@ -266,12 +282,14 @@ function createOurs(
     resources[input.sampler] = empty.style;
   }
 
+  // A backdrop asks Pixi for the canvas under the view: Pixi copies it and binds it at group 0 binding 3.
   const filter = new pixi.Filter({
     gpuProgram,
     glProgram,
     resources,
     padding: paddingOf(definition, value),
-    resolution: resolutionOf(definition.resolution)
+    resolution: resolutionOf(definition.resolution),
+    blendRequired: definition.backdrop
   });
 
   return {
@@ -580,11 +598,112 @@ export function createFilter(
 
   if (instance.kind === "wgsl" && instance.definition.inputs.length > 0) {
     wireInputs(ectx, pixi, instance);
+  } else if (instance.kind === "wgsl" && instance.definition.backdrop) {
+    wireBack(pixi, instance);
   }
 
   guardApply(ectx, instance, kind);
 
   return instance;
+}
+
+/**
+ * What was drawn under the view of the running apply: the texture Pixi's filter system copied the canvas under the
+ * view's box into, or its empty texture outside a backdrop's pop.
+ *
+ * @param pixi - The module the renderer loaded.
+ * @param manager - Pixi's filter system, inside an apply.
+ * @returns The back texture.
+ */
+function backOf(pixi: PixiModule, manager: PixiFilterManager): PixiTexture {
+  return manager.activeBackTexture ?? pixi.Texture.EMPTY;
+}
+
+/**
+ * Writes the scale and the clamp that place a sample of the body's uv on a texture: one over the size of its backing,
+ * and half a texel inside the part of it its frame covers, rounded to float32. Written only where a value differs, so
+ * Pixi's bind group stays cached; no array is allocated.
+ *
+ * @param uniforms - The values of the uniform group.
+ * @param scaleName - The `vec2` scale uniform.
+ * @param clampName - The `vec4` clamp uniform.
+ * @param texture - The texture the body samples through them.
+ */
+function writePlacement(
+  uniforms: UniformValues,
+  scaleName: string,
+  clampName: string,
+  texture: PixiTexture
+): void {
+  const { source } = texture;
+  const scale = uniforms[scaleName];
+  const clamp = uniforms[clampName];
+  const halfX = 0.5 / source.pixelWidth;
+  const halfY = 0.5 / source.pixelHeight;
+
+  if (scale instanceof Float32Array) {
+    writeAt(scale, 0, 1 / source.width, true);
+    writeAt(scale, 1, 1 / source.height, true);
+  }
+
+  if (clamp instanceof Float32Array) {
+    writeAt(clamp, 0, halfX, true);
+    writeAt(clamp, 1, halfY, true);
+    writeAt(clamp, 2, texture.frame.width / source.width - halfX, true);
+    writeAt(clamp, 3, texture.frame.height / source.height - halfY, true);
+  }
+}
+
+/**
+ * Places a backdrop's `sampleBack` on the back texture of this apply. Pixi binds the texture itself (group 0
+ * binding 3); the engine fills the scale and the clamp, since the copy's backing is sized at the resolution of the
+ * surface under the view, the input's at the view's.
+ *
+ * @param body - The backdrop body.
+ * @param back - What was drawn under the view.
+ */
+function bindBack(body: OursBody, back: PixiTexture): void {
+  const uniforms = body.group?.uniforms;
+
+  if (uniforms !== undefined) writePlacement(uniforms, BACK_SCALE.name, BACK_CLAMP.name, back);
+}
+
+/**
+ * The apply of a backdrop without inputs, as Pixi calls it: `sampleBack` placed on the copy Pixi made, then the body
+ * drawn from the view's input.
+ *
+ * @param pixi - The module the renderer loaded.
+ * @param body - The backdrop body.
+ * @param manager - Pixi's filter system.
+ * @param input - The view's input texture.
+ * @param output - The output.
+ * @param clearMode - Whether the output is cleared.
+ */
+function applyBack(
+  pixi: PixiModule,
+  body: OursBody,
+  manager: PixiFilterManager,
+  input: PixiTexture,
+  output: Output,
+  clearMode: boolean
+): void {
+  bindBack(body, backOf(pixi, manager));
+  manager.applyFilter(body.filter, input, output, clearMode);
+}
+
+/**
+ * Gives a backdrop body without inputs its own `apply`, which places `sampleBack` before it draws.
+ *
+ * @param pixi - The module the renderer loaded.
+ * @param body - The body, just built.
+ */
+function wireBack(pixi: PixiModule, body: OursBody): void {
+  body.filter.apply = (
+    manager: PixiFilterManager,
+    input: PixiTexture,
+    output: Output,
+    clearMode: boolean
+  ): void => applyBack(pixi, body, manager, input, output, clearMode);
 }
 
 /**
@@ -615,9 +734,18 @@ function stagesOf(inputs: InputsState): readonly PixiFilter[] {
  * @param inputs - The chains of the instance.
  */
 function giveBack(pixi: PixiModule, inputs: InputsState): void {
-  for (const target of inputs.taken) pixi.TexturePool.returnTexture(target);
+  const { taken } = inputs;
 
-  inputs.taken.length = 0;
+  // per apply: given back in the order taken, then emptied by `pop`, so the array keeps its store (a cut with
+  // `length = 0` gives it up, and the next apply grows a new one: 152 B).
+  // eslint-disable-next-line unicorn/no-for-loop -- the hot path walks the list by index, then empties it in place
+  for (let index = 0; index < taken.length; index += 1) {
+    const target = taken[index];
+
+    if (target !== undefined) pixi.TexturePool.returnTexture(target);
+  }
+
+  while (taken.length > 0) taken.pop();
 }
 
 /**
@@ -628,7 +756,7 @@ function giveBack(pixi: PixiModule, inputs: InputsState): void {
  * @param inputs - The chains of the instance.
  * @param index - The input.
  * @param manager - Pixi's filter system, inside an active filter pass.
- * @param from - The view's input, or a kept picture.
+ * @param from - The view's input, the copy of what was drawn under the view, or a kept picture.
  * @param resolution - The resolution of `from`.
  * @param target - Where the last place draws, instead of a pooled texture.
  * @returns The texture the last place drew into; `from` for an empty chain.
@@ -689,22 +817,7 @@ function bindInput(instance: OursInstance, index: number, last: PixiTexture): vo
   if (resources[input.texture] !== source) resources[input.texture] = source;
   if (resources[input.sampler] !== source.style) resources[input.sampler] = source.style;
 
-  const scale = uniforms[input.scale.name];
-  const clamp = uniforms[input.clamp.name];
-  const halfX = 0.5 / source.pixelWidth;
-  const halfY = 0.5 / source.pixelHeight;
-
-  if (scale instanceof Float32Array) {
-    writeAt(scale, 0, 1 / source.width, true);
-    writeAt(scale, 1, 1 / source.height, true);
-  }
-
-  if (clamp instanceof Float32Array) {
-    writeAt(clamp, 0, halfX, true);
-    writeAt(clamp, 1, halfY, true);
-    writeAt(clamp, 2, last.frame.width / source.width - halfX, true);
-    writeAt(clamp, 3, last.frame.height / source.height - halfY, true);
-  }
+  writePlacement(uniforms, input.scale.name, input.clamp.name, last);
 }
 
 /**
@@ -731,11 +844,28 @@ function unbindInputs(pixi: PixiModule, instance: OursInstance): void {
 }
 
 /**
+ * Tells whether the chains of an instance must run again for the resolutions of this apply: the view's input's for a
+ * chain that starts from it, what was drawn under the view's for one that starts from back.
+ *
+ * @param inputs - The chains of the instance.
+ * @param resolution - The resolution of the view's input.
+ * @param backResolution - The resolution of the back; the input's for a filter that reads none.
+ * @returns True when one the chains start from changed.
+ */
+function resolutionMoved(inputs: InputsState, resolution: number, backResolution: number): boolean {
+  return (
+    (inputs.fromInput && resolution !== inputs.resolution) ||
+    (inputs.fromBack && backResolution !== inputs.backResolution)
+  );
+}
+
+/**
  * The apply of a filter with inputs, as Pixi calls it: a resolution change runs the chains once
- * at the new value, then every place draws, the last texture of each input is bound, and the main
- * body draws from the view's input. Held results are bound instead and no stage draws. The pooled
- * textures go back and the inputs are unbound in a `finally`, also when a place throws; a throw then
- * reaches the guard, which breaks the instance.
+ * at the new value, then every place draws, each chain from the view's input or, `from: "back"`,
+ * from the copy Pixi made of the canvas under the view, the last texture of each input is bound, a
+ * backdrop's `sampleBack` is placed, and the main body draws from the view's input. Held results are
+ * bound instead and no stage draws. The pooled textures go back and the inputs are unbound in a
+ * `finally`, also when a place throws; a throw then reaches the guard, which breaks the instance.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -757,9 +887,12 @@ function applyInputs(
   clearMode: boolean
 ): void {
   const { resolution } = input.source;
+  const { definition } = instance;
+  const back = definition.backdrop ? backOf(pixi, manager) : input;
+  const backResolution = inputs.fromBack ? back.source.resolution : resolution;
 
-  if (inputs.held === undefined && resolution !== inputs.resolution) {
-    evaluateInRender(ectx, pixi, instance, inputs, resolution);
+  if (inputs.held === undefined && resolutionMoved(inputs, resolution, backResolution)) {
+    evaluateInRender(ectx, pixi, instance, inputs, resolution, backResolution);
   }
 
   // A chain the new resolution broke draws like any broken instance.
@@ -771,13 +904,18 @@ function applyInputs(
 
   try {
     for (let index = 0; index < inputs.places.length; index += 1) {
+      const fromBack = definition.inputs[index]?.from === "back";
+      const start = fromBack ? back : input;
+      const startResolution = fromBack ? backResolution : resolution;
       const last =
         inputs.held === undefined
-          ? drawChain(pixi, inputs, index, manager, input, resolution)
+          ? drawChain(pixi, inputs, index, manager, start, startResolution)
           : (inputs.held[index] ?? input);
 
       bindInput(instance, index, last);
     }
+
+    if (definition.backdrop) bindBack(instance, back);
 
     manager.applyFilter(instance.filter, input, output, clearMode);
   } finally {
@@ -810,8 +948,9 @@ function drawInto(
 ): void {
   const { resolution } = picture.source;
 
+  // A backdrop is never kept: the picture is the view's own input, whatever its chains start from.
   if (!instance.broken && resolution !== inputs.resolution) {
-    evaluateInRender(ectx, pixi, instance, inputs, resolution);
+    evaluateInRender(ectx, pixi, instance, inputs, resolution, resolution);
   }
 
   if (instance.broken) return;
@@ -837,10 +976,14 @@ function drawInto(
  * @param instance - The instance, just built.
  */
 function wireInputs(ectx: EffectsCtx, pixi: PixiModule, instance: OursInstance): void {
-  const count = instance.definition.inputs.length;
+  const declared = instance.definition.inputs;
+  const count = declared.length;
   const inputs: InputsState = {
     stale: true,
     resolution: 0,
+    backResolution: 0,
+    fromInput: declared.some(input => input.from === "input"),
+    fromBack: declared.some(input => input.from === "back"),
     version: 0,
     context: { resolution: 0 },
     places: Array.from({ length: count }, (): Place[] => []),
@@ -871,16 +1014,13 @@ function wireInputs(ectx: EffectsCtx, pixi: PixiModule, instance: OursInstance):
     output: Output,
     clearMode: boolean
   ): void => applyInputs(ectx, pixi, instance, inputs, manager, input, output, clearMode);
-  // A definition with a resolution of its own is drawn at it: its first apply then finds the chains current.
+  // A definition with a resolution of its own is drawn at it, and the canvas under it at the canvas's: its first apply
+  // then finds the chains current.
   const { resolution } = instance.definition;
+  const canvas = ectx.deps.renderer.host.resolution();
+  const own = resolution > 0 ? resolution : canvas;
 
-  evaluate(
-    ectx,
-    pixi,
-    instance,
-    inputs,
-    resolution > 0 ? resolution : ectx.deps.renderer.host.resolution()
-  );
+  evaluate(ectx, pixi, instance, inputs, own, inputs.fromBack ? canvas : own);
 }
 
 /**
@@ -1153,9 +1293,10 @@ function placeSteps(
 }
 
 /**
- * Runs the chain of every input for the instance's value at a resolution and places its steps.
+ * Runs the chain of every input for the instance's value at a resolution and places its steps: a chain that starts
+ * from the view's input at the input's resolution, one that starts from back at the back's.
  * A chain that throws or returns a step it may not draw breaks the instance (reason `"chain"`).
- * The version moves when a place, a scale, a stage uniform or the resolution changed; the passes
+ * The version moves when a place, a scale, a stage uniform or a resolution changed; the passes
  * become the main body plus every place.
  *
  * @param ectx - Domain context of the effects plugin.
@@ -1163,22 +1304,24 @@ function placeSteps(
  * @param instance - The instance.
  * @param inputs - Its chains.
  * @param resolution - The resolution of the texture the view is drawn into.
+ * @param backResolution - The resolution of what was drawn under the view; the input's for a filter that reads none.
  */
 function evaluate(
   ectx: EffectsCtx,
   pixi: PixiModule,
   instance: OursInstance,
   inputs: InputsState,
-  resolution: number
+  resolution: number,
+  backResolution: number
 ): void {
   const kind = ectx.state.kinds.get(instance.kindId);
-  let changed = resolution !== inputs.resolution;
+  let changed = resolution !== inputs.resolution || backResolution !== inputs.backResolution;
   let passes = 1;
-
-  inputs.context.resolution = resolution;
 
   for (const [index, input] of instance.definition.inputs.entries()) {
     let steps: readonly FilterStep[];
+
+    inputs.context.resolution = input.from === "back" ? backResolution : resolution;
 
     try {
       steps = input.chain(instance.value, inputs.context);
@@ -1202,6 +1345,7 @@ function evaluate(
   }
 
   inputs.resolution = resolution;
+  inputs.backResolution = backResolution;
   inputs.stale = false;
   instance.passes = passes;
 
@@ -1218,15 +1362,17 @@ function evaluate(
  * @param instance - The instance.
  * @param inputs - Its chains.
  * @param resolution - The resolution of the texture the view is drawn into.
+ * @param backResolution - The resolution of what was drawn under the view.
  */
 function evaluateInRender(
   ectx: EffectsCtx,
   pixi: PixiModule,
   instance: OursInstance,
   inputs: InputsState,
-  resolution: number
+  resolution: number,
+  backResolution: number
 ): void {
-  evaluate(ectx, pixi, instance, inputs, resolution);
+  evaluate(ectx, pixi, instance, inputs, resolution, backResolution);
   ectx.state.filterSync.all = true;
 }
 
@@ -1259,13 +1405,14 @@ export function refreshInputs(
 
   if (instance.broken || !instance.filter.enabled || off || !inputs.stale) return;
 
-  evaluate(ectx, pixi, instance, inputs, inputs.resolution);
+  evaluate(ectx, pixi, instance, inputs, inputs.resolution, inputs.backResolution);
 }
 
 /**
  * The body a stand-in of a dev build draws: the fallback with the striped mark over it, or the
  * mark alone. The pair draws the fallback into one pooled texture of the input's frame and
- * resolution, then the mark from it into the output, and gives the texture back in a `finally`.
+ * resolution, then the mark from it into the output, and gives the texture back in a `finally`. A
+ * backdrop fallback has its `sampleBack` placed first.
  *
  * @param pixi - The module the renderer loaded.
  * @param fallback - The checked fallback, or `undefined`.
@@ -1295,6 +1442,8 @@ function markedBody(
     request.resolution = input.source.resolution;
 
     const pooled = pixi.TexturePool.getOptimalTexture(request);
+
+    if (body.definition.backdrop) bindBack(body, backOf(pixi, manager));
 
     try {
       manager.applyFilter(body.filter, input, pooled, true);
@@ -1340,6 +1489,7 @@ export function createStandIn(
     body = markedBody(pixi, usable, value);
   } else if (usable !== undefined) {
     body = createOurs(pixi, usable, value);
+    if (usable.backdrop) wireBack(pixi, body);
   }
 
   if (body === undefined) return undefined;

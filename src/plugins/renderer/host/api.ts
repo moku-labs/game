@@ -16,10 +16,12 @@ import { createApplication, destroyApplication, resolveMount } from "./init";
 import { afterFrame, sceneChanged, trimPool } from "./pool";
 import { extractStage, readPixels, textureUsage } from "./readback";
 import {
+  allowRuleScale,
   askResolution,
   type ResolutionReason,
   refreshResolution,
   resizeAt,
+  scaleFloorOf,
   targetResolution,
   watchPixelRatio
 } from "./resolution";
@@ -134,6 +136,8 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
 
     overrideResolution: (value: number | undefined): number => {
       state.resolution.override = value;
+      // A player's resolution wins: the adaptive frame rate gets no scale while it holds.
+      allowRuleScale(ctx);
       refreshResolution(ctx, "debug");
 
       return targetResolution(state.resolution);
@@ -214,6 +218,8 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       watchDevice(ctx, restart);
       watchVisibility(ctx);
       watchPixelRatio(ctx);
+      state.resolution.floor = scaleFloorOf(ctx.config);
+      allowRuleScale(ctx);
       state.ready = true;
 
       for (const fn of state.onReady) fn();

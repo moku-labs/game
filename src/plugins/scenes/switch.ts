@@ -185,7 +185,7 @@ function leavingOf(previous: SceneDefinition, scene: SceneDefinition): readonly 
  * Builds the scene in one synchronous block: the layers, then the projections only the old scene
  * lists out, then the list of the new scene in (a projection both list stays and takes its new
  * place), the new scene to the world's systems, then the list the scene names to `assets`, then
- * the frame loop out of its idle cap, and only then the event.
+ * the frame loop out of its idle cap and the adaptive frame rate told of the new screen, and only then the event.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundles are there.
@@ -209,6 +209,8 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition, named: readonly string[])
   ctx.deps.assets.sceneBundles(named);
   // A fresh picture is drawn at the full frame rate, even when the loop had gone idle.
   ctx.deps.time.wake();
+  // The adaptive frame rate judges the new screen on its own frames, its back-off started over.
+  ctx.deps.time.sceneChanged();
 
   ctx.emit("scenes:changed", { from, to: scene.id, music: scene.music });
 

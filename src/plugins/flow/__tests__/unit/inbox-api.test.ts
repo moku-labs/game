@@ -41,6 +41,8 @@ const createMockTime = (): TimeApi => ({
   setRate: vi.fn(),
   frameDrawn: vi.fn(),
   frameProbed: vi.fn(),
+  allowScale: vi.fn(),
+  sceneChanged: vi.fn(),
   isPaused: () => false,
   isRunning: () => true,
   step: vi.fn()

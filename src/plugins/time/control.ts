@@ -114,7 +114,7 @@ export const timeScaleCommand = defineCommand({
  * ```ts
  * (await run(app, commands.frameRate, { fps: 60 })).value.fps; // 60
  * // a pin of 120 on a 60 Hz phone runs at the panel's rate:
- * (await run(app, commands.frameRate, { fps: 120 })).value; // { fps: 60, mode: "forced", …, asked: 120, heldBy: "panel" }
+ * (await run(app, commands.frameRate, { fps: 120 })).value; // { fps: 60, mode: "forced", …, asked: 120, heldBy: "panel", scale: 1 }
  * (await run(app, commands.frameRate, {})).value.mode; // "auto" with adaptive, "fixed" without
  * ```
  */

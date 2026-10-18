@@ -15,6 +15,9 @@ const RING_FRAMES = { min: 64, max: 16_384 } as const;
 /** The most probe draws of the warm-up a drawn frame may make. */
 const MAX_WARM = 16;
 
+/** The lowest floor of the adaptive render scale: half the resolution. */
+const MIN_SCALE = 0.5;
+
 /**
  * Tells a finite number of at least 0 from anything else a config can hold.
  *
@@ -64,12 +67,45 @@ function checkPoolTrim(poolTrim: unknown): void {
 }
 
 /**
+ * Checks the adaptive render scale of the config: `false`, or a floor from 0.5 to 1 and the devices it applies to.
+ *
+ * @param adaptiveScale - What the config holds.
+ * @throws {Error} When it is neither `false` nor an object, the floor is outside 0.5 to 1, or the devices are neither
+ *   `"phone"` nor `"all"`.
+ */
+function checkAdaptiveScale(adaptiveScale: unknown): void {
+  if (adaptiveScale === false) return;
+
+  if (typeof adaptiveScale !== "object" || adaptiveScale === null) {
+    throw new Error(
+      `[game] renderer.adaptiveScale is ${String(adaptiveScale)}.\n  Give { floor, devices } or false.`
+    );
+  }
+
+  const floor = "floor" in adaptiveScale ? adaptiveScale.floor : undefined;
+  const devices = "devices" in adaptiveScale ? adaptiveScale.devices : undefined;
+
+  if (typeof floor !== "number" || !(floor >= MIN_SCALE && floor <= 1)) {
+    throw new Error(
+      `[game] renderer.adaptiveScale.floor is ${String(floor)}.\n` +
+        "  Give the lowest share of the resolution, from 0.5 to 1."
+    );
+  }
+
+  if (devices !== "phone" && devices !== "all") {
+    throw new Error(
+      `[game] renderer.adaptiveScale.devices is ${String(devices)}.\n  Give "phone" or "all".`
+    );
+  }
+}
+
+/**
  * Checks the numbers of the config a game can get wrong, at `createApp`, in every build: the
- * resolution cap, the pool trim, the performance monitor, the budget of the kept pictures and the
- * probe draws of the warm-up.
+ * resolution cap, the pool trim, the adaptive render scale, the performance monitor, the budget of the kept pictures
+ * and the probe draws of the warm-up.
  *
  * @param config - The resolved plugin config.
- * @throws {Error} When `maxResolution` is not a number above 0, `poolTrim` fails its check,
+ * @throws {Error} When `maxResolution` is not a number above 0, `poolTrim` or `adaptiveScale` fails its check,
  *   `monitor.budgetMs` is neither `"rate"` nor a number above 0, `monitor.frames` is not a whole
  *   number from 64 to 16384, `keptMb` is not a finite number of at least 0, or `warm` is not a
  *   whole number from 0 to 16.
@@ -83,6 +119,7 @@ function checkConfig(config: Readonly<Config>): void {
   }
 
   checkPoolTrim(config.poolTrim);
+  checkAdaptiveScale(config.adaptiveScale);
 
   if (budgetMs !== "rate" && !(Number.isFinite(budgetMs) && budgetMs > 0)) {
     throw new Error(

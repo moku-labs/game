@@ -41,7 +41,8 @@ describe("rate() of a fixed rate", () => {
       ladder: [],
       thermal: null,
       asked: 120,
-      heldBy: "panel"
+      heldBy: "panel",
+      scale: 1
     });
   });
 

@@ -375,6 +375,8 @@ const setup = (options: SetupOptions) => {
       setRate: vi.fn(),
       frameDrawn: vi.fn(),
       frameProbed: vi.fn(),
+      allowScale: vi.fn(),
+      sceneChanged: vi.fn(),
       // Recorded apart from `calls`, with the call it followed: the order is the assertion.
       wake: (): void => {
         wakes.push(calls.at(-1) ?? "start");

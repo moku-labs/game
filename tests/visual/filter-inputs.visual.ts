@@ -4,11 +4,14 @@
  * the real compile, the real bind groups and the WebGL sampler binding by name are proven: a filter that reads a
  * second texture through `sampleSoft` draws its blurred copy; a kind whose stage does not compile is broken by the
  * check, logged under the stage's id, and drawn by its fallback (with magenta stripes on the dev page only); no frame
- * is blank. Not a vitest file: `bun tests/visual/filter-inputs.visual.ts`. It bundles `filter-inputs/page.ts` twice,
- * serves both bundles, and exits 1 when a run fails.
+ * is blank. Two backdrop filters read what was drawn under them (change 2026-10-18-memory-render, B1): a frosted band
+ * blurs the edge of the square under it and only there, a dimming panel halves it in place, read from a texture and
+ * from the canvas, where WebGL copies from Pixi's back buffer. Not a vitest file:
+ * `bun tests/visual/filter-inputs.visual.ts`. It bundles `filter-inputs/page.ts` twice, serves both bundles, and exits
+ * 1 when a run fails.
  */
 import { launchChrome, loadChromium } from "../../src/visual/leg-browser";
-import type { FilterInputsResult } from "./filter-inputs/page";
+import type { BackdropRead, FilterInputsResult } from "./filter-inputs/page";
 
 /** The flags each page is bundled with. */
 const BUILDS = {
@@ -50,6 +53,51 @@ async function bundle(build: keyof typeof BUILDS): Promise<string> {
   }
 
   return output.text();
+}
+
+/**
+ * The problems of one reading of the backdrop square, in words: the band's edge blurred, the edge above it sharp, the
+ * panel's edge halved in place (white to about 128, black stays black: the copy is not shifted or scaled).
+ *
+ * @param where - Where the pixels were read: `"texture"` or `"canvas"`.
+ * @param read - The reading.
+ * @returns The problems.
+ */
+function readProblems(where: string, read: BackdropRead): string[] {
+  const problems: string[] = [];
+  const blurred = read.inside.filter(red => red > 10 && red < 245).length;
+  const sharp = read.outside.filter(red => red > 10 && red < 245).length;
+  const white = read.dim.slice(0, 4);
+  const black = read.dim.slice(4);
+
+  if (blurred < 4) problems.push(`the ${where} band is not blurred: ${read.inside.join(",")}`);
+  if (sharp !== 0)
+    problems.push(`the ${where} edge above the band is not sharp: ${read.outside.join(",")}`);
+  if (white.some(red => red < 110 || red > 145) || black.some(red => red > 10)) {
+    problems.push(`the ${where} dimmed edge is ${read.dim.join(",")}`);
+  }
+
+  return problems;
+}
+
+/**
+ * The problems of the backdrop square, in words: both backdrop kinds checked ok on the device, and the square read
+ * from a texture and from the canvas as `readProblems` wants it.
+ *
+ * @param result - What the page answered.
+ * @returns The problems.
+ */
+function backdropProblems(result: FilterInputsResult): string[] {
+  const problems: string[] = [];
+
+  if (result.status.frost !== "ok") problems.push(`the frost kind is ${result.status.frost}`);
+  if (result.status.dim !== "ok") problems.push(`the dim kind is ${result.status.dim}`);
+
+  return [
+    ...problems,
+    ...readProblems("texture", result.backdrop.texture),
+    ...readProblems("canvas", result.backdrop.canvas)
+  ];
 }
 
 /**
@@ -98,6 +146,7 @@ function problemsOf(run: Run, result: FilterInputsResult): string[] {
     problems.push(`the release page draws ${result.hazy.magenta} magenta pixels`);
   }
   if (result.frames.includes(0)) problems.push(`a blank frame: ${result.frames.join(",")}`);
+  problems.push(...backdropProblems(result));
 
   return problems;
 }
@@ -124,7 +173,7 @@ const server = Bun.serve({
 });
 const browser = await launchChrome(await loadChromium(), undefined);
 const context = await browser.newContext({
-  viewport: { width: 560, height: 200 },
+  viewport: { width: 760, height: 200 },
   deviceScaleFactor: 1,
   isMobile: false,
   hasTouch: false
@@ -152,7 +201,12 @@ try {
       `${run.renderer} ${run.build}: ${problems.length === 0 ? "ok" : "FAIL"}`,
       "error" in answer
         ? ""
-        : JSON.stringify({ edge: answer.edge.soft, hazy: answer.hazy, draws: answer.draws }),
+        : JSON.stringify({
+            edge: answer.edge.soft,
+            hazy: answer.hazy,
+            draws: answer.draws,
+            backdrop: answer.backdrop
+          }),
       problems.join("; ")
     );
     await page.close();

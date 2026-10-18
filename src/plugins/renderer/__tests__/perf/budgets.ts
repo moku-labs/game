@@ -77,5 +77,14 @@ export const BUDGET = {
   // view's list: the engine's array of the enabled filters and Pixi's `filters` setter (its frozen copy, the filter
   // effect added to or taken off the view's effects with an iterator, a splice and a sort); the kept collect and flush
   // add nothing. `effects` makes such a switch for an `Alpha` at most once a rest of `CALM_AFTER` frames at 1.
-  filterSwitchAlpha: 400
+  filterSwitchAlpha: 400,
+  // Change 2026-10-18-memory-render, B3: a bind of the canvas whose pass waits for its first draw (the apply of a
+  // filter binds it this way). New, measured 0 B: copies of the viewport and the clear into the adaptor's own fields.
+  lazyCanvasBind: 0,
+  // B3: what the lazy pipeline system adds to a draw and to a batch of Pixi's own, over Pixi's (64 B a draw and 16 B a
+  // batch, its pipeline key, both measured the same with and without). New, measured 0 B: two booleans tested.
+  lazyCanvasDraw: 0,
+  // B3: what a frame that starts with a filter adds over Pixi's own frame. New, measured −344 B: the empty canvas pass
+  // Pixi begins at render start, its descriptor and attachment objects, is never begun.
+  lazyCanvasFrame: 0
 } as const;

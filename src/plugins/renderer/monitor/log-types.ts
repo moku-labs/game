@@ -611,7 +611,8 @@ export type PerfLongFrameLine = PerfLine<"longFrame"> &
  * The names of `event` lines (`"devtools"` is the editor's overlay event, in 2b because the editor's page agent emits
  * it on the 2b debug build; `"pool-trim"` is the pool trim of spec 25, detail `PoolTrimDetail`; `"warm"` is the end of
  * a pipeline warm-up run of spec 27, detail `WarmDetail`; `"sections"` is a switch of the monitor's sections, detail
- * `{ on, off }`: the names of the sections on and off, in the order of `MONITOR_SECTIONS`).
+ * `{ on, off }`: the names of the sections on and off, in the order of `MONITOR_SECTIONS`; `"scale"` is a move of the
+ * render scale of the adaptive frame rate, detail `{ from, to, reason, fps }`).
  */
 export type PerfEventName =
   | "scene"
@@ -635,7 +636,8 @@ export type PerfEventName =
   | "shader"
   | "problem"
   | "debug"
-  | "sections";
+  | "sections"
+  | "scale";
 
 /**
  * What an `overlay` event line says happened to an overlay (spec 22 O10.2): it opened, landed (its enter motion is

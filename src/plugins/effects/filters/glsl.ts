@@ -4,9 +4,12 @@
  * fills, and one `uniform` per declared uniform under its bare name. Pixi binds a `UniformGroup`
  * on WebGL by uniform name, so the one group of an instance serves both programs and the shader
  * cannot drift from it. For each input the engine declares the texture, its scale and clamp uniforms and
- * `sample<Name>(uv)`; on WebGL a texture carries its sampler state. Pure strings.
+ * `sample<Name>(uv)`; on WebGL a texture carries its sampler state. For a backdrop it declares `uBackTexture`, the
+ * texture Pixi copies the canvas under the view into (bound by name, `Filter.blendRequired`), and `sampleBack(uv)`.
+ * Pure strings.
  */
 import type { FilterInputDefinition, UniformSpec } from "./types";
+import { BACK_CLAMP, BACK_SCALE } from "./wgsl";
 
 /**
  * The head of every filter's GLSL. `#version 300 es` comes first, so Pixi compiles both stages
@@ -87,32 +90,46 @@ export const GLSL_CANVAS_PIXEL = /* glsl */ `vec2 canvasPixel(vec2 uv) {
 
 `;
 
+/** The GLSL twin of `sampleBack(uv)`: what was drawn under the view, at the body's uv, scaled and clamped. */
+export const GLSL_SAMPLE_BACK = /* glsl */ `uniform sampler2D uBackTexture;
+
+vec4 sampleBack(vec2 uv) {
+  return textureLod(uBackTexture, clamp(uv * uInputSize.xy * backScale, backClamp.xy, backClamp.zw), 0.0);
+}
+
+`;
+
 /**
- * The whole GLSL of a filter: the header, the uniforms (then the scale and the clamp of each input, then the
- * engine's `keptOrigin` of a body that calls `canvasPixel`), the inputs, the helper, the body.
+ * The whole GLSL of a filter: the header, the uniforms (then the scale and the clamp of each input, then a backdrop's
+ * back scale and clamp, then the engine's `keptOrigin` of a body that calls `canvasPixel`), the inputs, a backdrop's
+ * `sampleBack`, the `canvasPixel` helper, the body.
  *
  * @param uniforms - The uniforms in declaration order.
  * @param inputs - The inputs in declaration order.
  * @param body - The fragment body the game wrote.
  * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
+ * @param backdrop - True for a filter that reads what was drawn under its view.
  * @returns The GLSL fragment source the `GlProgram` is built from.
  * @example
  * ```ts
- * assembleGlsl([], [], body).endsWith(body); // true
+ * assembleGlsl([], [], body, undefined, true).includes("uniform sampler2D uBackTexture;"); // true
  * ```
  */
 export function assembleGlsl(
   uniforms: readonly UniformSpec[],
   inputs: readonly FilterInputDefinition[],
   body: string,
-  origin?: UniformSpec
+  origin?: UniformSpec,
+  backdrop = false
 ): string {
   const declared = glslUniforms([
     ...uniforms,
     ...inputs.flatMap(input => [input.scale, input.clamp]),
+    ...(backdrop ? [BACK_SCALE, BACK_CLAMP] : []),
     ...(origin === undefined ? [] : [origin])
   ]);
+  const back = backdrop ? GLSL_SAMPLE_BACK : "";
   const helper = origin === undefined ? "" : GLSL_CANVAS_PIXEL;
 
-  return `${GLSL_HEADER}${declared}${glslInputs(inputs)}${helper}${body}`;
+  return `${GLSL_HEADER}${declared}${glslInputs(inputs)}${back}${helper}${body}`;
 }
