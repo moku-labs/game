@@ -15,7 +15,12 @@ import { readsScreen } from "./filters/define";
 import { createFilterSystem, forgetFilter, retireAllFilters, trackFilter } from "./filters/system";
 import type { FilterDefinition, FilterFields, FilterKind, KindEntry } from "./filters/types";
 import { Emitter } from "./particles/component";
-import { createParticleSystem, forgetEmitter, retireAllParticles } from "./particles/system";
+import {
+  createOrphanSystem,
+  createParticleSystem,
+  forgetEmitter,
+  retireAllParticles
+} from "./particles/system";
 import type { EmitterDefinition } from "./particles/types";
 import { createFilterSync, NO_KINDS, resetChecks } from "./state";
 import type { EffectsCtx, KernelSlice, State } from "./types";
@@ -232,7 +237,7 @@ function warnScreenReads(ectx: EffectsCtx, entries: readonly KindEntry[]): void 
 }
 
 /**
- * Opens the world side: the two systems, the hook that retires an emitter's instance, and the two
+ * Opens the world side: the three systems, the hook that retires an emitter's instance, and the two
  * hooks per filter kind; then records the filter components that are on entities already.
  *
  * @param ectx - Domain context of the effects plugin.
@@ -243,6 +248,7 @@ function openWorld(ectx: EffectsCtx, kinds: readonly FilterKind[]): void {
 
   ectx.state.removers.push(
     ecs.system(createParticleSystem(ectx)),
+    ecs.system(createOrphanSystem(ectx)),
     ecs.system(createFilterSystem(ectx)),
     ecs.onRemoved(Emitter, entity => forgetEmitter(ectx, entity)),
     ...kinds.map(kind => ecs.onRemoved(kind.component, entity => forgetFilter(ectx, kind, entity))),

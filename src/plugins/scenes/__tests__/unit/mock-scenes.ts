@@ -51,8 +51,8 @@ export type FakeWorld = {
   unmounted: string[][];
   /** Set by a test: `mount` throws it once, the way an unknown projection does. */
   mountError: unknown;
-  /** Every `ecs.hold` and every call of a release it returned, in order: `hold:screens`, `release:screens`. */
-  holds: string[];
+  /** Every scene `ecs.setScene` was told, in order. */
+  scenes: string[];
   api: WorldApi;
 };
 
@@ -182,7 +182,7 @@ function createFakeAssets(): FakeAssets {
 
 /**
  * Creates the fake `world`: the three `projection` members the switch calls, each recording the
- * call and its order, and `ecs.hold`, recording the holds and their releases.
+ * call and its order, and `ecs.setScene`, recording the scenes it was told.
  *
  * @returns The fake world and its recordings.
  */
@@ -193,18 +193,14 @@ function createFakeWorld(): FakeWorld {
     mounted: [],
     unmounted: [],
     mountError: undefined,
-    holds: [],
+    scenes: [],
     api: undefined as unknown as WorldApi
   };
 
   fake.api = {
     ecs: {
-      hold: (feature: string): (() => void) => {
-        fake.holds.push(`hold:${feature}`);
-
-        return () => {
-          fake.holds.push(`release:${feature}`);
-        };
+      setScene: (scene: string): void => {
+        fake.scenes.push(scene);
       }
     },
     projection: {

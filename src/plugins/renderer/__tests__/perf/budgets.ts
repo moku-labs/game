@@ -44,15 +44,21 @@ export const BUDGET = {
   // kept with the layers.
   hudPartsStill: 0,
   // A26 heap profile: before 22 400 B (a new SDF shader made at every layout of a text and dropped by Pixi: its bind
-  // groups, its resource accessors, its uniform group). Now the text keeps its shader; measured 2 819 B, all of it
-  // Pixi laying the label out again (its graphics context's instructions and the layout), not the engine's.
-  sdfTextUpdate: 2900,
+  // groups, its resource accessors, its uniform group); then 2 831 B with the text's own shader kept. S: the text gets
+  // no shader at all; measured 2 767 B, all of it Pixi laying the label out again (its graphics context's
+  // instructions and the layout), not the engine's: the glyph edge is measured only on a font change.
+  sdfTextUpdate: 2800,
   // `rootPoseInto` for effects' E2: `rootPoseOf` made 600 B through the same chain of three.
   rootPoseInto: 0,
-  // E1: before 320 B (Pixi's generated sync read every text's `uDistance` through an accessor laid per text over its
-  // data property, which sent each uniforms object to dictionary mode: a boxed double per text per frame). Now one
-  // accessor pair shared by every text, and a still text hands back its last answer, boxed once.
-  sdfUniformsSync: 0,
+  // S: new. The SDF batcher's pack of a glyph quad: Pixi's `DefaultBatcher` loop and the distance. Pixi's own pack of
+  // the same element measured 0 B.
+  sdfPack: 0,
+  // S: new. The routing of a label's glyph to the SDF batcher and Pixi's add. Pixi's own `addToBatch` measured 0 B.
+  sdfAddToBatch: 0,
+  // S: new. A pooled element named for the SDF batcher, sent back to Pixi's default one.
+  sdfAddToBatchPooled: 0,
+  // S: new. The draw of an SDF batch whose resolution did not move: two compares before Pixi's own.
+  sdfDrawStill: 0,
   // E4: before 2 352 B (the held answers cleared at every pass, `for…of` over Pixi's frozen filter lists, Pixi's `alpha`
   // boxed at every node of every walk). Now an answer stands while `passesVersion` does.
   unseenStill: 0,

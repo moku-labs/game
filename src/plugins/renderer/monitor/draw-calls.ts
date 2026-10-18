@@ -219,20 +219,27 @@ function countUpload(sinks: MonitorSinks, source: Source): void {
 /**
  * Builds the seven counting subclasses from the module object. They are made at call time,
  * because the base classes arrive with the lazily loaded module. Each keeps the base's `static
- * extension` object as it is, so the registry files it under the same type and name.
+ * extension` object as it is, so the registry files it under the same type and name. The batch pipe extends the one
+ * it is given: the routing pipe of the renderer's batched text, which the plugin root injects, so the counting pipe
+ * that takes its place routes the same.
  *
  * @param pixi - The loaded Pixi module.
  * @param sinks - What every instance counts into.
+ * @param batcherPipe - The batch pipe the counting one extends; Pixi's own when none is given.
  * @returns The seven counting classes (BatcherPipe among them).
  */
-export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): CountingClasses {
+export function createCountingClasses(
+  pixi: PixiModule,
+  sinks: MonitorSinks,
+  batcherPipe: PixiModule["BatcherPipe"] = pixi.BatcherPipe
+): CountingClasses {
   const counter = sinks.draws;
 
   /**
    * Counts every rebuild of a render group's instruction list: Pixi's render group system calls `buildStart` once per
    * rebuild and nowhere else. It inherits the static batcher registry, so batchers resolve as before.
    */
-  class CountingBatcherPipe extends pixi.BatcherPipe {
+  class CountingBatcherPipe extends batcherPipe {
     public static override readonly extension = pixi.BatcherPipe.extension;
 
     /**
@@ -500,10 +507,15 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
  *
  * @param pixi - The loaded Pixi module.
  * @param sinks - The sinks of the renderer that installs it.
+ * @param batcherPipe - The batch pipe the counting one extends: the routing pipe of the batched text.
  * @returns The remover.
  */
-export function installCounting(pixi: PixiModule, sinks: MonitorSinks): () => void {
-  const counting = createCountingClasses(pixi, sinks);
+export function installCounting(
+  pixi: PixiModule,
+  sinks: MonitorSinks,
+  batcherPipe: PixiModule["BatcherPipe"] = pixi.BatcherPipe
+): () => void {
+  const counting = createCountingClasses(pixi, sinks, batcherPipe);
   const bases = [
     pixi.BatcherPipe,
     pixi.GpuBatchAdaptor,

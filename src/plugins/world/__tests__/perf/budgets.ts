@@ -63,10 +63,17 @@ export const BUDGET = {
   /** W6: `ecs.resource(Now)`, the read behind `res(Now)`. Was 0 B. */
   ecsRes: 0,
   /**
-   * Spec 28: a frame whose 40 systems of an inactive feature (`systemsRun: "active"`) sleep. Before
-   * spec 28 they ran: 0 B, every walk reused, but 40 walks and 1 200 marks a frame.
+   * D1: a frame whose 40 systems over `[Cell, mut(Ghost)]` find the `Ghost` store empty and are
+   * skipped. Was 0 B at 10 086 frames/s: each of them ran and walked the 300 keys of `Cell` for
+   * nothing. Now 0 B at 1 338 000 frames/s.
    */
-  scopeInactive: 0,
-  /** Spec 28: a frame whose flow moved, so the stack is read and 20 features are evaluated again, plus one `isActive`. */
-  scopeCheck: 0
+  skipEmpty: 0,
+  /** D2: a frame whose 40 systems run on a scene that is not mounted and are skipped. New: 0 B. */
+  skipScene: 0,
+  /**
+   * D1, D2: the check before 40 systems that run, two stores each, half on the mounted scene and
+   * half on a leaving one: 0 B. The same 40 systems without `scenes` ran at 1 193 000 frames/s
+   * before the check and run at 731 000 with it: about 13 ns a system.
+   */
+  skipCheck: 0
 } as const;

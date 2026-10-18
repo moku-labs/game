@@ -1247,15 +1247,41 @@ export const WEBGL_PIPES = "webgl-pipes";
 /** Pixi's `ExtensionType.WebGPUPipes`: the bitmap text pipe registers here and under WebGL. */
 export const WEBGPU_PIPES = "webgpu-pipes";
 
+/** Pixi's `ExtensionType.Batcher`: a batcher registers under its name in the batcher pipe's registry. */
+export const BATCHER = "batcher";
+
+/** The fake of Pixi's `ExtensionType`: the types the renderer names. */
+export const FakeExtensionType = {
+  Batcher: BATCHER,
+  WebGLPipes: WEBGL_PIPES,
+  WebGPUPipes: WEBGPU_PIPES
+} as const;
+
+/** What the fake batcher pipe reads of its renderer: the resolution a batch of distance-field text is packed at. */
+export type FakeBatchRenderer = { resolution: number };
+
 /**
  * The fake of Pixi's `BatcherPipe`: Pixi calls `buildStart` once per instruction rebuild of a render group, the one
- * method the rebuild counter overrides.
+ * method the rebuild counter overrides; `addToBatch` and `execute` record what reached Pixi's own.
  */
 export class FakeBatcherPipe {
   public static extension = { type: [WEBGL_PIPES, WEBGPU_PIPES], name: "batch" };
 
   /** Instruction rebuilds begun on this pipe. */
   public builds = 0;
+
+  /** The elements Pixi's `addToBatch` was handed, with the batcher name each carried then. */
+  public added: Array<{ element: unknown; batcherName: unknown }> = [];
+
+  /** The batches Pixi's `execute` was handed. */
+  public executed: unknown[] = [];
+
+  /** The renderer the pipe draws for. */
+  public renderer: FakeBatchRenderer;
+
+  public constructor(renderer?: FakeBatchRenderer) {
+    this.renderer = renderer ?? { resolution: 1 };
+  }
 
   /**
    * Begins one rebuild of a render group's instruction list.
@@ -1264,6 +1290,97 @@ export class FakeBatcherPipe {
    */
   public buildStart(_instructionSet: unknown): void {
     this.builds += 1;
+  }
+
+  /**
+   * Adds an element to the active batch: recorded with its batcher name.
+   *
+   * @param element - The element.
+   * @param element.batcherName - The batcher it names.
+   * @param _instructionSet - The instructions it goes into.
+   */
+  public addToBatch(element: { batcherName?: unknown }, _instructionSet: unknown): void {
+    this.added.push({ element, batcherName: element.batcherName });
+  }
+
+  /**
+   * Draws a batch: recorded.
+   *
+   * @param batch - The batch.
+   */
+  public execute(batch: unknown): void {
+    this.executed.push(batch);
+  }
+}
+
+/** The fake of Pixi's `Batcher`: the options it was made with, its batches, and the elements it packed again. */
+export class FakeBatcher {
+  public maxTextures: number;
+  public batches: Array<{ elements: unknown[] }> = [];
+  public batchIndex = 0;
+  public attributeSize = 0;
+  public dirty = true;
+
+  /** The elements `updateElement` packed, in order. */
+  public updated: unknown[] = [];
+
+  public constructor(options: { maxTextures: number }) {
+    this.maxTextures = options.maxTextures;
+  }
+
+  /**
+   * Packs one element again, as Pixi's does: recorded.
+   *
+   * @param element - The element.
+   */
+  public updateElement(element: unknown): void {
+    this.updated.push(element);
+    this.dirty = true;
+  }
+}
+
+/** The fake of Pixi's `BufferUsage`: Pixi's flags. */
+export const FakeBufferUsage = { INDEX: 16, VERTEX: 32, COPY_DST: 8 } as const;
+
+/** The fake of Pixi's `Buffer`: its options, and the sizes handed to `update`. */
+export class FakeBuffer {
+  public options: Record<string, unknown>;
+
+  /** Every `update` size, `undefined` for the whole buffer. */
+  public updates: Array<number | undefined> = [];
+
+  public constructor(options: Record<string, unknown>) {
+    this.options = options;
+  }
+
+  /**
+   * Marks the buffer for an upload, as Pixi's does: recorded.
+   *
+   * @param size - Bytes to upload.
+   */
+  public update(size?: number): void {
+    this.updates.push(size);
+  }
+}
+
+/** One attribute of a fake geometry. */
+export type FakeAttribute = { buffer: FakeBuffer; format: string; stride: number; offset: number };
+
+/** The fake of Pixi's `Geometry`: its attributes, its index buffer, and its buffers in order, each once. */
+export class FakeGeometry {
+  public attributes: Record<string, FakeAttribute>;
+  public indexBuffer: FakeBuffer;
+  public buffers: FakeBuffer[];
+
+  public constructor(options: {
+    attributes: Record<string, FakeAttribute>;
+    indexBuffer: FakeBuffer;
+  }) {
+    this.attributes = options.attributes;
+    this.indexBuffer = options.indexBuffer;
+    this.buffers = [
+      ...new Set(Object.values(options.attributes).map(attribute => attribute.buffer))
+    ];
   }
 }
 
@@ -1347,20 +1464,6 @@ export const fakeMSDFBit: FakeShaderBit = {
   }
 };
 
-/** The fake of Pixi 8.22's `localUniformMSDFBit`, with the step that hands over `vColor`. */
-export const fakeLocalUniformMSDFBit = {
-  name: "local-uniform-msdf-bit",
-  vertex: {
-    header: "struct LocalUniforms { uColor:vec4<f32>, }",
-    main: "vColor *= localUniforms.uColor;",
-    end: "if(localUniforms.uRound == 1) {}"
-  },
-  fragment: {
-    header: "struct LocalUniforms { uColor:vec4<f32>, }",
-    main: "outColor = vec4<f32>(calculateMSDFAlpha(outColor, vColor, localUniforms.uDistance));"
-  }
-};
-
 /** The texture batch bits made so far, one per texture count, as Pixi caches them. */
 const textureBatchBits = new Map<number, FakeShaderBit>();
 
@@ -1398,20 +1501,6 @@ export const fakeMSDFBitGl: FakeShaderBit = {
   name: "msdf-bit",
   fragment: {
     header: "float calculateMSDFAlpha(vec4 msdfColor, vec4 shapeColor, float distance) {}"
-  }
-};
-
-/** The fake of Pixi 8.22's `localUniformMSDFBitGl`, with the step that hands over `vColor`. */
-export const fakeLocalUniformMSDFBitGl = {
-  name: "local-uniform-msdf-bit",
-  vertex: {
-    header: "uniform mat3 uTransformMatrix; uniform vec4 uColor; uniform float uRound;",
-    main: "vColor *= uColor;",
-    end: "if(uRound == 1.) {}"
-  },
-  fragment: {
-    header: "uniform float uDistance;",
-    main: "outColor = vec4(calculateMSDFAlpha(outColor, vColor, uDistance));"
   }
 };
 
@@ -2121,19 +2210,22 @@ export function createFakePixi(
     GlTextureSystem: FakeGlTextureSystem,
     BitmapTextPipe: FakeBitmapTextPipe,
     BatcherPipe: FakeBatcherPipe,
+    Batcher: FakeBatcher,
+    Buffer: FakeBuffer,
+    BufferUsage: FakeBufferUsage,
+    Geometry: FakeGeometry,
+    ExtensionType: FakeExtensionType,
     RenderGroupPipe: FakeRenderGroupPipe,
     Shader: FakeShader,
     Matrix: FakeMatrix,
     compileHighShaderGpuProgram: fakeShaderCompiler.compile,
     colorBit: fakeColorBit,
     generateTextureBatchBit: fakeTextureBatchBit,
-    localUniformMSDFBit: fakeLocalUniformMSDFBit,
     mSDFBit: fakeMSDFBit,
     roundPixelsBit: fakeRoundPixelsBit,
     compileHighShaderGlProgram: fakeShaderCompiler.compileGl,
     colorBitGl: fakeColorBitGl,
     generateTextureBatchBitGl: fakeTextureBatchBitGl,
-    localUniformMSDFBitGl: fakeLocalUniformMSDFBitGl,
     mSDFBitGl: fakeMSDFBitGl,
     roundPixelsBitGl: fakeRoundPixelsBitGl,
     getBatchSamplersUniformGroup: fakeBatchSamplers

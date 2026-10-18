@@ -272,13 +272,6 @@ export type State = {
   owner: SceneOwner;
   /** The remover of the `onEnter` callback: set in `onStart`, run in `onStop`. */
   teardown: (() => void) | undefined;
-  /** Scene id to the feature that declares it, filled in `onStart`. */
-  owners: Map<string, string>;
-  /**
-   * The release of the hold on the mounted scene's feature (`world.ecs.hold`), so the systems of a
-   * feature with `systemsRun: "active"` run while its scene is mounted.
-   */
-  held: (() => void) | undefined;
 };
 
 /**

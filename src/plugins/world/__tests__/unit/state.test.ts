@@ -76,7 +76,8 @@ describe("createWorldState", () => {
       definition: { name: "noop", phase: "input", query: [], run: () => {} },
       frame: 0,
       plan: { names: [], written: [] },
-      scope: -1,
+      stores: [],
+      scenes: undefined,
       skipped: false
     });
     first.projection.hints.push({ kind: "merged", hint: true });

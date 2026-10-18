@@ -368,8 +368,9 @@ function countParticles(ectx: EffectsCtx): void {
 }
 
 /**
- * Builds the `animate` system of the particles. It returns at once while the renderer does not
- * draw. Time is the frame's `delta` only, so `time.step(dt)` drives every test.
+ * Builds the `animate` system of the emitters. It runs while an entity carries `Emitter` (the world
+ * skips a system whose query has no entity) and returns at once while the renderer does not draw.
+ * Time is the frame's `delta` only, so `time.step(dt)` drives every test.
  *
  * @param ectx - Domain context of the effects plugin.
  * @returns The system `world.ecs.system` takes.
@@ -392,6 +393,28 @@ export function createParticleSystem(ectx: EffectsCtx): AnySystem {
       for (const [entity, emitter] of rows) {
         runEmitter(ectx, pixi, entity, emitter, context.time, reducedMotion);
       }
+    }
+  });
+}
+
+/**
+ * Builds the `animate` system of the orphans, registered right after the emitters: the particles
+ * of an emitter whose host left fly on after the last `Emitter` is gone, so this system has no
+ * query and runs every frame. It returns at once while the renderer does not draw, then steps the
+ * orphans and keeps the particle budget.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @returns The system `world.ecs.system` takes.
+ */
+export function createOrphanSystem(ectx: EffectsCtx): AnySystem {
+  return system({
+    name: "effects:orphans",
+    phase: "animate",
+    query: [],
+    run: (_rows, context): void => {
+      const host = ectx.deps.renderer.host;
+
+      if (!host.ready() || host.pixi() === undefined) return;
 
       runOrphans(ectx, context.time);
       countParticles(ectx);

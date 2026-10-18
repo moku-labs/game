@@ -169,26 +169,9 @@ function overTargetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string |
 }
 
 /**
- * Holds the feature that declares the scene now mounted, then releases the hold of the scene
- * before: the new hold first, so no phase sees the moment with neither. A scene no feature
- * declared holds nothing.
- *
- * @param ctx - Domain context of the plugin.
- * @param scene - The id of the scene now mounted.
- */
-function holdOwner(ctx: ScenesCtx, scene: string): void {
-  const state = ctx.state;
-  const release = state.held;
-  const owner = state.owners.get(scene);
-
-  state.held = owner === undefined ? undefined : ctx.deps.world.ecs.hold(owner);
-  release?.();
-}
-
-/**
  * Builds the scene in one synchronous block: the layers, then the projections of the old scene
- * out, then the ones of the new scene in, the hold on its feature, then the list the scene names
- * to `assets`, then the frame loop out of its idle cap, and only then the event.
+ * out, then the ones of the new scene in, the new scene to the world's systems, then the list the
+ * scene names to `assets`, then the frame loop out of its idle cap, and only then the event.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundles are there.
@@ -206,7 +189,8 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition, named: readonly string[])
 
   projection.mount(scene.projections, state.owner);
   state.current = scene.id;
-  holdOwner(ctx, scene.id);
+  // The systems with `scenes` run on the new scene from the next phase; the old one leaves.
+  ctx.deps.world.ecs.setScene(scene.id);
   state.named = named;
   ctx.deps.assets.sceneBundles(named);
   // A fresh picture is drawn at the full frame rate, even when the loop had gone idle.

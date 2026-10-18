@@ -22,9 +22,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 
 | Method | Behaviour |
 |---|---|
-| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. Its `query` is read once, when it registers. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. A system registered here always runs; `systemsRun` is a key of a feature (below). |
-| `hold(feature): () => void` | Keeps a feature active while something of it is shown that the world cannot see: `scenes` holds the feature that declares the mounted scene, `ui` the feature of each popup or JSX root. Counted; the release is idempotent. An unknown name holds nothing (dev warning `world:hold-unknown-feature`). Counts for the systems from the next phase. |
-| `isActive(feature): boolean` | Whether a feature is active now: a node of it on the flow stack, a scene it declares mounted, a view of its projections (leaving included), a popup or JSX root of it. Any feature, whatever its `systemsRun`; false for a name that is not a feature. Allocates nothing. |
+| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. Its `query` and its `scenes` are read once, when it registers. It is skipped while a term of its query has no entity, or while none of its `scenes` is mounted or leaving ("When a system runs", below). A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. |
 | `spawn(owner, components): Entity` | The id is reserved and returned at once. Owner is required by the type. |
 | `despawn(entity)` / `despawnOwnedBy(owner)` | Removes every component (each fires `onRemoved`), frees the index, bumps the generation. A stale id is a no-op. |
 | `get(entity, Component)` | The stored value, read-only, or `undefined`. A stale id gives `undefined`. |
@@ -39,6 +37,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
 | `count(): number` | How many entities live now, views and layers included: every id `spawn` handed out that no despawn took back. A size the world keeps, no allocation. A screen entered and left returns it to where it was; a count that grows per visit is a leak. The renderer's monitor reads it once a second in a debug build. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
+| `setScene(scene)` | Tells the world the scene now mounted, for the systems with `scenes`; the scene before leaves until nothing carries `Exiting`. Each system reads it before its next run. `scenes` calls it at every switch; a game never does. |
 | `snapshot(): WorldSnapshot` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
 | `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. Only marked components are compared: a value written in place without a mark (into a row of a plain term) is not recorded, also when another component of the entity was marked. The caller is `game.diff`. |
 | `schema(): ComponentSchema[]` | Every component and tag type the world met so far, sorted by name, with the JSON kind of each field. A new list on every call. The caller is `game.schema`, the editor's component palette. |
@@ -118,7 +117,8 @@ run: rows => {
 
 A system that keeps the row itself (`list.push(row)`) sees every kept row turn into the last one;
 it copies instead (`list.push([...row])`). `ecs.query()` keeps fresh rows everywhere, also when a
-system calls it inside `run`. A system with an empty `query` runs every frame and walks nothing.
+system calls it inside `run`. A system with an empty `query` walks nothing and runs every frame (on
+its `scenes` only, when it lists some).
 The context a system gets is one object per world; its `time` and `snapshot` are the running
 phase's.
 
@@ -271,9 +271,9 @@ The sweep does only the work there is: the live views are walked only while one 
 for only after a despawn or a new `registerKey`, and the owed loops only while a view owes one. An
 idle frame of the world allocates nothing; `__tests__/perf/` holds the budgets that prove it.
 
-Before the systems of a phase run, the systems of a feature with `systemsRun: "active"` that is
-not active are skipped in place; a skipped system walks no query and marks nothing; `ctx.resumed`
-is true on its first run after a skip.
+Before each system runs, the phase checks it: a system whose query has no entity, or none of
+whose `scenes` is mounted or leaving, is skipped in its slot; it walks nothing and marks nothing,
+and `ctx.resumed` is true on its next run ("When a system runs", below).
 
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
@@ -285,84 +285,119 @@ While a phase runs, `spawn`, `despawn`, `despawnOwnedBy`, `add`, `remove`, `tag`
 queued and applied in call order when the phase ends. `set` is never queued. A queued command on an
 entity that died meanwhile is dropped.
 
-### Systems that run where their feature is
+### When a system runs
 
-A feature may say its systems run only while it is active:
-`defineFeature("board", { systems: [looks, fade, leaving, veil], systemsRun: "active" })`. The
-default, `"always"`, runs them every frame as before. The systems the engine's plugins register,
-and every system registered with `ecs.system`, always run. Feature `F` is active while at least one
-of these holds; each rule counts `F` itself only, so a parent and its sub-features are separate
-features.
+A system runs once a frame in its phase, unless it is skipped. Two rules decide it, checked before
+each run from what is there at that moment; together they cost a few reads and allocate nothing.
 
-| Rule | `F` is active while | How the world learns it |
-|---|---|---|
-| **N** node | a frame of `flow.state().stack` (every frame, the outer frames of sub-flows included) addresses a node whose `owner` in `flow.describe()` is `F` | the memoised `flow.state()` object; an owner table built once from one `describe()` at the first stack that is not empty |
-| **S** scene | a scene `F` lists in `scenes` is the mounted scene, from the switch that mounts it to the switch that replaces it | `scenes` holds `F` with `ecs.hold` |
-| **V** view | a view of a projection `F` registered exists: live, or leaving with `Exiting` until its last motion ended | a per-feature view count the projection keeps |
-| **U** ui root | `ui` holds a popup root of a component `F` lists in `ui`, or the JSX root of a view of a projection `F` registered, until the sweep drops it after its exit | `ui` holds `F` with `ecs.hold` |
+1. **Its query has an entity.** A system with a `query` is skipped while one of its terms has no
+   entity: the smallest store among the terms is empty. A skipped system walks nothing, marks
+   nothing with `mut()` and takes no clock read of `systemTimes()` (its row stays 0). Only store
+   sizes are read: an entity that carries one term and not the others still lets the system run,
+   and its walk finds nothing, as before. A system without a query is never skipped by this rule.
+2. **One of its `scenes` is on screen.** `system({ ..., scenes: ["board"] })` runs only while one
+   of the scenes it lists is mounted or leaving. `scenes` tells the world each scene it mounts
+   (`ecs.setScene`); the scene before keeps leaving until nothing carries `Exiting` any more, so
+   a system that drives a leaving root runs to the end of its exit. Any exit counts, also one of
+   the next scene, so a leave may last longer than the scene's own exits, never shorter. The
+   next scene's entities stand during the leave, so a system with a query that matches them too
+   writes them as well: keep a `scenes` system's writes to its own scene's entities.
+   Left out, a system runs on every scene. A dev build throws at start, and at a later
+   `ecs.system`, for a name no feature declares as a scene:
+   `[game] System "board.idle" runs on the scene "bord", which no feature declares.` A world
+   without `scenes` (a test of the world alone) mounts no scene, so a system with `scenes` never
+   runs there.
 
-- **Fail-safe.** When the world cannot tell, the feature counts as active: a `describe()` that throws
-  (logged once, `world:scope-owners-failed`) makes every feature count as on the stack while the
-  stack is not empty; a view count never goes below 0, and a view despawned behind the projection's
-  back keeps its count. A skipped system is never the result of an error.
-- **Deterministic.** Every input moves only with the flow, a scene switch, a projection reconcile or
-  the ui reconcile; nothing reads the wall clock, the renderer or the GPU. Two runs of the same
-  session decide the same active features in every phase. A headless app has no world, so nothing
-  is skipped there.
-- **When it takes effect.** The active set is evaluated at the start of every phase that runs
-  systems, from the state at that moment. A source that moves between frames counts from the first
-  phase of the next frame; one that moves inside a phase (a hold taken by a system, a popup root
-  recorded by `ui.reconcile` in `layout`) counts from the next phase. Views spawned by the reconcile
-  at the top of `input` count in that frame's `input` already.
-- **A JSX projection root's hold.** `ui` takes the rule-U hold of a JSX root of a projection view at
-  the root's first reconcile, not when the root mounts (spec 28 places it at the mount). Nothing is
-  lost in between: the view that carries the root is counted by rule V from its spawn, so its
-  feature is active the whole time.
-- **A late release.** A hold's release kept past a stop changes nothing, also after the world
-  started again: each start and stop moves the scope's generation, and a release from an older
-  generation is a no-op (spec 28 W7.1).
-- **Cost.** A game with no scoped feature pays one flag read per phase and one integer comparison per
-  system. A skipped system walks no query, marks nothing, takes no clock read of `systemTimes()`
-  (its `ms` stays 0) and allocates nothing; a frame in which nothing moved evaluates nothing.
-- **Dev warnings.** `world:feature-never-active` for a feature with systems and `systemsRun: "active"`
-  but no node, flow, scene, projection or ui component (a kit whose systems serve its siblings:
-  remove the key); `world:bad-feature-entry` with `key: "systemsRun"` for another value, whose
-  systems then always run; `world:hold-unknown-feature`.
+`ctx.resumed` is true on the first run after one or more skipped runs, whichever rule skipped them,
+and false on every other run. `world.changed()` holds this frame's changes only, so a system that
+keeps in a resource what it drew, or what it saw last, starts over from the components then.
 
-A scoped system dresses only its own feature's views; a system that writes another feature's views
-belongs to that feature or stays `"always"`. A scoped system that caches what it drew rebuilds it
-when `ctx.resumed` is true: nothing was kept for it while it slept.
+The rules are the same for every system: the ones a feature lists in `systems`, the ones
+`ecs.system` registers, the engine's own. Both read the world and the scene the flow mounted, never
+a clock or the renderer, so two runs of one session run the same systems in every phase. A system
+pays one size read per term (its stores are kept once they exist) and, with `scenes`, a comparison
+with the mounted scene and the leaving ones; a phase pays one length read while no scene leaves.
+Forty skipped systems cost 0 B a frame (`__tests__/perf/skip.perf.ts`).
 
 ```ts
-// features/board/index.ts of the game: the board's systems stop on the ward.
-export const boardFeature = defineFeature("board", {
-  flows: [mergeBoard],
-  projections: [boardBack, boardItems, boardFront],
-  systems: [looks, fade, leaving, veil],
-  systemsRun: "active"
+// features/board/world/systems/idle.ts: no query, so `scenes` alone keeps it to the board.
+const BoardIdle = resource("BoardIdle", { ms: 0 });
+export const idle = system({
+  name: "board.idle",
+  phase: "animate",
+  query: [],
+  scenes: ["board"],
+  run: (_rows, { res, time }) => {
+    res(BoardIdle).ms += time.delta;
+  }
 });
+// On the ward it is not run and BoardIdle.ms stands still. On the board it grows by each frame's
+// delta. After the switch to the ward it runs while the board's elements play their exit, then
+// not any more.
+```
 
-// features/board/world/systems/looks.ts: the cache is rebuilt after the board was away.
+What the first rule covers with no word from the game: a component one feature puts on the
+elements of another feature's JSX root (A Memory Missing's order cards inside the board) runs its
+system while those elements stand; a leaving root that carries a component runs its system until
+its exit ended and the root is gone; a component on the views of another feature (the hub's sweep
+anchors) runs its system from the first frame those views stand. The framework test
+`tests/integration/scoped-systems.test.tsx` plays the three.
+
+**A run with no rows does not happen any more.** Work a system did whatever its rows held moves
+out of its query:
+
+| A system that … | Under the rules | Write it as |
+|---|---|---|
+| walks its rows and does nothing else | sleeps while it has no entity: nothing on screen changes | as it is |
+| does frame work besides its rows: follows a hover, ends a press or a drop when the finger left, resets a resource when its last entity left, steps what outlives its entities | stops doing it once its query is empty | `query: []` with `scenes`, the rows read inside with `world.query()`; or a query on a component that is there whenever the work is |
+| remembers in a resource what it saw last (a cue, a cache of what it drew) | misses what happened while it slept | starts over when `ctx.resumed` is true |
+| works on a component every screen has (`Sprite`, `Transform`) | never sleeps | add `scenes` |
+
+```ts
+// The work does not depend on the rows: no query, and the scene it belongs to.
 export const looks = system({
   name: "board.looks",
-  phase: "animate",
-  query: [Look],
-  run: (rows, { res, resumed }) => {
-    const shown = res(BoardLooks).shown;
+  phase: "input",
+  query: [],
+  scenes: ["board"],
+  run: (_rows, context) => {
+    // `ecs.query()` makes a walk (about 170 B) and a fresh row per match: one walk a frame here.
+    const held = firstOf(context.world.query(Held, ItemInfo));
 
-    if (resumed) shown.clear(); // what was drawn before the ward is not known any more
-
-    for (const [entity, look] of rows) {
-      if (shown.get(entity)?.look !== look.name) shown.set(entity, { look: look.name });
-    }
+    followHand(context, context.res(BoardLooks), held);
+    followHover(context, context.res(BoardLooks));
   }
 });
 
-// A test of the screen app: the board's systems do not run on the ward.
-app.world.ecs.isActive("board"); // false on the ward
-await app.flow.walk([{ at: "ward", intent: "play" }]);
-app.world.ecs.isActive("board"); // true: "board/awaitIntent" is on the stack
+// A cue remembered in a resource: the first run after a sleep only notes the one it finds.
+export const payStars = system({
+  name: "story.payStars",
+  phase: "input",
+  query: [PayPlan],
+  run: (rows, { res, resumed, snapshot }) => {
+    const watch = res(PayWatch);
+
+    if (resumed) watch.seen = undefined;
+    // … as before
+  }
+});
 ```
+
+#### From `systemsRun` (0.15.3)
+
+0.15.3 had `defineFeature(name, { systemsRun: "active" })`, four rules that made a feature active
+(N: a node of it on the stack, S: a scene it declares mounted, V: a view of its projections, U: a
+popup or JSX root of it), `ecs.hold` and `ecs.isActive`. They are gone; `ctx.resumed` stays. To
+move a game:
+
+1. Delete `systemsRun` from every feature: the type refuses it now (`never`).
+2. Read every system's `run`. A system that does work outside its loop over the rows is written
+   as the table above says. The rest needs nothing: it sleeps while its query is empty.
+3. Add `scenes` only to a system whose entities stand on every screen, and to a system without a
+   query of a feature that had `systemsRun: "active"`: it slept while its feature was not active,
+   and now runs on every screen.
+4. A test that asked `ecs.isActive(feature)` asks what it means: the scene
+   (`app.scenes.current()`), or whether the system ran.
 
 ### The cause of a reconcile
 
@@ -526,14 +561,14 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   runs once, at the start of the next frame, so two commits in one frame give one reconcile. In fast
   mode it reconciles at once, direct. What each cause does is in
   [The cause of a reconcile](#the-cause-of-a-reconcile).
-- **onStart** `connectWorld` sizes the scope of `systemsRun` to the features, reads every feature
-  description and registers its `components`, then `systems` (with the feature's scope), then
+- **onStart** `connectWorld` reads the scene ids every feature declares (for the dev check of
+  `scenes`), then every feature description, and registers its `components`, then `systems`, then
   `projections`, in feature order; writes `Now` once from `clock.now()`; registers the five `time.onFrame` callbacks, the
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
   views, registered keys, recorded rest poses, the `onConverged` listeners, the despawn queue,
-  entities and resources, and resets the scope and the frame history. No `onRemoved` fires: `renderer` stopped earlier.
+  entities and resources, forgets the mounted scene, and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Doors
 

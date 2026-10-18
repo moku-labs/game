@@ -159,7 +159,9 @@ describe("the rows of a system", () => {
 
     world.frame();
 
-    expect(frames).toEqual([[], [entity]]);
+    // The first frame has no `Late` at all, so the system is skipped there (it ran with no row
+    // before the skip of an empty query); the frame after sees the store made since.
+    expect(frames).toEqual([[entity]]);
   });
 
   it("are none for a system with an empty query, which still runs every frame", () => {

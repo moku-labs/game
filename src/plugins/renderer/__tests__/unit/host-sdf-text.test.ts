@@ -1,88 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSdfTextPipe, installSdfTextPipe } from "../../host/sdf-text";
+import { SDF, SDF_BATCHER } from "../../host/sdf-batcher";
+import { createSdfTextPipe, installSdfText } from "../../host/sdf-text";
 import type { PixiModule } from "../../types";
 import {
+  BATCHER,
   createFakePixi,
+  FakeBatcher,
+  FakeBatcherPipe,
   FakeBitmapTextPipe,
-  FakeGlProgram,
-  FakeGpuProgram,
-  FakeMatrix,
-  FakeSdfShader,
-  FakeShader,
-  FakeUniformGroup,
-  fakeBatchSamplers,
-  fakeColorBit,
-  fakeColorBitGl,
   fakeExtensions,
-  fakeLocalUniformMSDFBit,
-  fakeLocalUniformMSDFBitGl,
-  fakeMSDFBit,
-  fakeMSDFBitGl,
-  fakeRoundPixelsBit,
-  fakeRoundPixelsBitGl,
-  fakeShaderCompiler,
-  fakeTextureBatchBit,
-  fakeTextureBatchBitGl,
   WEBGL_PIPES,
   WEBGPU_PIPES
 } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 // ---------------------------------------------------------------------------
-// Unit test: the renderer's own bitmap text pipe. A subclass of Pixi's pipe,
-// swapped in through the extension registry before init, whose SDF shader
-// hands `calculateMSDFAlpha` the colour un-premultiplied, so every alpha is
-// applied once: WGSL on WebGPU, GLSL on the WebGL fallback.
+// Unit test: the install of the renderer's batched distance-field text. Its batcher, its bitmap text pipe and its
+// routing batch pipe go into Pixi's extension registry before init, under Pixi's names, and come out at stop; a dev
+// build's counting batch pipe extends the routing pipe and takes its place.
 // ---------------------------------------------------------------------------
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
-
-/** The fragment step Pixi 8.22 ships, which hands the premultiplied colour over. */
-const pixiStep = "calculateMSDFAlpha(outColor, vColor, localUniforms.uDistance)";
-
-/** The fragment step of the renderer: the colour un-premultiplied, at alpha 1. */
-const singleAlphaStep =
-  "calculateMSDFAlpha(outColor, vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0), localUniforms.uDistance)";
-
-/** The GLSL fragment step Pixi 8.22 ships, the same double alpha on WebGL. */
-const pixiStepGl = "calculateMSDFAlpha(outColor, vColor, uDistance)";
-
-/** The GLSL fragment step of the renderer: the colour un-premultiplied, at alpha 1. */
-const singleAlphaStepGl =
-  "calculateMSDFAlpha(outColor, vec4(vColor.rgb / max(vColor.a, 1e-4), 1.0), uDistance)";
-
-/** What the fake pipe reads of its renderer. */
-type PipeRenderer = {
-  name: "webgpu" | "webgl";
-  limits: { maxBatchableTextures: number };
-  resolution: number;
-};
-
-/**
- * Builds the pipe on a fake renderer of one backend.
- *
- * @param pixi - The fake module.
- * @param name - The backend.
- * @returns The pipe.
- */
-function pipeOn(pixi: PixiModule, name: "webgpu" | "webgl"): object {
-  const Pipe = createSdfTextPipe(pixi);
-  const renderer: PipeRenderer = { name, limits: { maxBatchableTextures: 16 }, resolution: 1 };
-
-  return new Pipe(renderer as unknown as ConstructorParameters<typeof Pipe>[0]);
-}
-
-/**
- * Asks a pipe for the shader of one distance-field text, as Pixi does per text.
- *
- * @param pipe - The pipe.
- * @returns The shader.
- */
-function shaderOf(pipe: object): FakeShader {
-  return (pipe as { getSdfShader(): FakeShader }).getSdfShader();
-}
 
 /**
  * Yields the microtask queue, so a restore inside the renderer can finish.
@@ -101,131 +41,52 @@ describe("createSdfTextPipe", () => {
       FakeBitmapTextPipe.extension
     );
   });
-
-  it("compiles Pixi's SDF bits with the alpha handed over once on WebGPU", () => {
-    const pixi = createFakePixi();
-    const shader = shaderOf(pipeOn(pixi.module, "webgpu"));
-    const [compile] = fakeShaderCompiler.compiled;
-    const textBit = compile?.bits[2];
-
-    expect(shader).toBeInstanceOf(FakeShader);
-    expect(shader).not.toBeInstanceOf(FakeSdfShader);
-    expect(shader.gpuProgram).toBeInstanceOf(FakeGpuProgram);
-    expect(compile?.bits).toEqual([
-      fakeColorBit,
-      fakeTextureBatchBit(16),
-      textBit,
-      fakeMSDFBit,
-      fakeRoundPixelsBit
-    ]);
-    expect(textBit?.fragment?.main).toContain(singleAlphaStep);
-    expect(textBit?.fragment?.main).not.toContain(pixiStep);
-    // Everything but the fragment step is Pixi's own.
-    expect(textBit?.vertex).toBe(fakeLocalUniformMSDFBit.vertex);
-    expect(textBit?.fragment?.header).toBe(fakeLocalUniformMSDFBit.fragment.header);
-    expect(textBit?.name).not.toBe(fakeLocalUniformMSDFBit.name);
-  });
-
-  it("gives every shader its own local uniforms at Pixi's starting values", () => {
-    const pixi = createFakePixi();
-    const pipe = pipeOn(pixi.module, "webgpu");
-    const first = shaderOf(pipe).resources.localUniforms;
-    const second = shaderOf(pipe).resources.localUniforms;
-
-    expect(first).toBeInstanceOf(FakeUniformGroup);
-    expect(first).not.toBe(second);
-    expect((first as FakeUniformGroup).uniforms).toEqual({
-      uColor: new Float32Array([1, 1, 1, 1]),
-      uTransformMatrix: new FakeMatrix(),
-      uDistance: 4,
-      uRound: 0
-    });
-  });
-
-  it("compiles the program once per texture count and shares it between shaders", () => {
-    const pixi = createFakePixi();
-    const pipe = pipeOn(pixi.module, "webgpu");
-    const first = shaderOf(pipe);
-    const second = shaderOf(pipe);
-
-    expect(first).not.toBe(second);
-    expect(second.gpuProgram).toBe(first.gpuProgram);
-    expect(fakeShaderCompiler.compiled).toHaveLength(1);
-  });
-
-  it("compiles Pixi's GLSL SDF bits with the alpha handed over once on WebGL", () => {
-    const pixi = createFakePixi();
-    const shader = shaderOf(pipeOn(pixi.module, "webgl"));
-    const [compile] = fakeShaderCompiler.compiledGl;
-    const textBit = compile?.bits[2];
-
-    expect(shader).toBeInstanceOf(FakeShader);
-    expect(shader).not.toBeInstanceOf(FakeSdfShader);
-    expect(shader.glProgram).toBeInstanceOf(FakeGlProgram);
-    expect(shader.gpuProgram).toBeUndefined();
-    expect(fakeShaderCompiler.compiled).toHaveLength(0);
-    expect(compile?.bits).toEqual([
-      fakeColorBitGl,
-      fakeTextureBatchBitGl(16),
-      textBit,
-      fakeMSDFBitGl,
-      fakeRoundPixelsBitGl
-    ]);
-    expect(textBit?.fragment?.main).toContain(singleAlphaStepGl);
-    expect(textBit?.fragment?.main).not.toContain(pixiStepGl);
-    // Everything but the fragment step is Pixi's own.
-    expect(textBit?.vertex).toBe(fakeLocalUniformMSDFBitGl.vertex);
-    expect(textBit?.fragment?.header).toBe(fakeLocalUniformMSDFBitGl.fragment.header);
-    expect(textBit?.name).not.toBe(fakeLocalUniformMSDFBitGl.name);
-  });
-
-  it("gives a WebGL shader its own local uniforms and Pixi's batch samplers", () => {
-    const pixi = createFakePixi();
-    const pipe = pipeOn(pixi.module, "webgl");
-    const first = shaderOf(pipe);
-    const second = shaderOf(pipe);
-
-    expect(first.resources.localUniforms).toBeInstanceOf(FakeUniformGroup);
-    expect(first.resources.localUniforms).not.toBe(second.resources.localUniforms);
-    expect((first.resources.localUniforms as FakeUniformGroup).uniforms).toEqual({
-      uColor: new Float32Array([1, 1, 1, 1]),
-      uTransformMatrix: new FakeMatrix(),
-      uDistance: 4,
-      uRound: 0
-    });
-    expect(first.resources.batchSamplers).toBe(fakeBatchSamplers(16));
-    expect(second.glProgram).toBe(first.glProgram);
-    expect(fakeShaderCompiler.compiledGl).toHaveLength(1);
-  });
-
-  it("keeps a WebGPU shader free of the WebGL program and samplers", () => {
-    const pixi = createFakePixi();
-    const shader = shaderOf(pipeOn(pixi.module, "webgpu"));
-
-    expect(shader.glProgram).toBeUndefined();
-    expect(shader.resources.batchSamplers).toBeUndefined();
-    expect(fakeShaderCompiler.compiledGl).toHaveLength(0);
-  });
 });
 
-describe("installSdfTextPipe", () => {
-  it("swaps Pixi's pipe for the subclass under the same name on both backends, and back", () => {
+describe("installSdfText", () => {
+  // Bug: a pipe left in Pixi's registry after stop draws the next application's text with a removed batcher.
+  it("swaps both pipes for the subclasses under Pixi's names on both backends, adds the batcher, and swaps the pipes back", () => {
     const pixi = createFakePixi();
-    const off = installSdfTextPipe(pixi.module);
-    const gpu = fakeExtensions.named(WEBGPU_PIPES, "bitmapText");
+    const off = installSdfText(pixi.module);
+    const text = fakeExtensions.named(WEBGPU_PIPES, "bitmapText");
+    const batch = fakeExtensions.named(WEBGPU_PIPES, "batch");
+    const batcher = fakeExtensions.named(BATCHER, SDF_BATCHER);
 
-    expect(gpu).not.toBe(FakeBitmapTextPipe);
-    expect(Object.getPrototypeOf(gpu)).toBe(FakeBitmapTextPipe);
-    expect(fakeExtensions.named(WEBGL_PIPES, "bitmapText")).toBe(gpu);
+    expect(Object.getPrototypeOf(text)).toBe(FakeBitmapTextPipe);
+    expect(Object.getPrototypeOf(batch)).toBe(FakeBatcherPipe);
+    expect(Object.getPrototypeOf(batcher)).toBe(FakeBatcher);
+    expect(fakeExtensions.named(WEBGL_PIPES, "bitmapText")).toBe(text);
+    expect(fakeExtensions.named(WEBGL_PIPES, "batch")).toBe(batch);
 
     off();
 
     expect(fakeExtensions.named(WEBGPU_PIPES, "bitmapText")).toBe(FakeBitmapTextPipe);
     expect(fakeExtensions.named(WEBGL_PIPES, "bitmapText")).toBe(FakeBitmapTextPipe);
+    expect(fakeExtensions.named(WEBGPU_PIPES, "batch")).toBe(FakeBatcherPipe);
+    expect(fakeExtensions.named(WEBGL_PIPES, "batch")).toBe(FakeBatcherPipe);
+  });
+
+  // Bug: stopping one application removed the batcher another one on the same module still met in a pooled element.
+  it("keeps the batcher registered after the remover, so a pooled element named moku-sdf still finds it", () => {
+    const pixi = createFakePixi();
+
+    installSdfText(pixi.module)();
+
+    expect(Object.getPrototypeOf(fakeExtensions.named(BATCHER, SDF_BATCHER))).toBe(FakeBatcher);
+  });
+
+  // Bug: a module without a piece left the registry half swapped: the batcher in, Pixi's text pipe out.
+  it("touches the registry not at all when a piece is missing", () => {
+    const pixi = createFakePixi();
+    const lacking = { ...pixi.module, BatcherPipe: undefined } as unknown as PixiModule;
+
+    expect(() => installSdfText(lacking)).toThrow(TypeError);
+    expect(fakeExtensions.named(WEBGPU_PIPES, "bitmapText")).toBe(FakeBitmapTextPipe);
+    expect(fakeExtensions.named(BATCHER, SDF_BATCHER)).toBeUndefined();
   });
 });
 
-describe("the host and the bitmap text pipe", () => {
+describe("the host and the batched text", () => {
   it("installs the pipe before init in a production build", async () => {
     const mock = createMockRenderer();
 
@@ -235,6 +96,7 @@ describe("the host and the bitmap text pipe", () => {
 
     expect(pipe).not.toBe(FakeBitmapTextPipe);
     expect(Object.getPrototypeOf(pipe)).toBe(FakeBitmapTextPipe);
+    expect(Object.getPrototypeOf(mock.pixi.last().drawClasses?.batcher)).toBe(FakeBatcherPipe);
     expect(mock.ctx.state.host.uninstallSdfText).toBeTypeOf("function");
   });
 
@@ -271,7 +133,7 @@ describe("the host and the bitmap text pipe", () => {
     expect(second.textPipe).toBe(first.textPipe);
   });
 
-  it("swaps Pixi's own pipe back when the host stops", async () => {
+  it("swaps Pixi's own pipes back when the host stops", async () => {
     const mock = createMockRenderer();
 
     await mock.start();
@@ -279,6 +141,7 @@ describe("the host and the bitmap text pipe", () => {
 
     expect(fakeExtensions.named(WEBGPU_PIPES, "bitmapText")).toBe(FakeBitmapTextPipe);
     expect(fakeExtensions.named(WEBGL_PIPES, "bitmapText")).toBe(FakeBitmapTextPipe);
+    expect(fakeExtensions.named(WEBGPU_PIPES, "batch")).toBe(FakeBatcherPipe);
     expect(mock.ctx.state.host.uninstallSdfText).toBeUndefined();
   });
 
@@ -302,5 +165,30 @@ describe("the host and the bitmap text pipe", () => {
       "renderer: distance-field text applies its alpha twice",
       expect.objectContaining({ error: expect.any(TypeError) })
     );
+  });
+
+  // Bug: the counting pipe of a dev build took the name "batch" from the routing pipe, so a dev build drew every label
+  // with Pixi's default batcher; or the routing pipe took it back, and the rebuilds went uncounted.
+  it("in a dev build, counts with a batch pipe that extends the routing pipe and still routes", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = createMockRenderer();
+
+    await mock.start();
+
+    const Counting = fakeExtensions.named(
+      WEBGPU_PIPES,
+      "batch"
+    ) as unknown as new () => FakeBatcherPipe;
+    const routing: unknown = Object.getPrototypeOf(Counting);
+    const pipe = new Counting();
+    const label = { batcherName: "default", renderable: { [SDF]: { perScale: 4 } } };
+
+    pipe.buildStart({});
+    pipe.addToBatch(label, {});
+
+    expect(routing).not.toBe(FakeBatcherPipe);
+    expect(Object.getPrototypeOf(routing)).toBe(FakeBatcherPipe);
+    expect(pipe.builds).toBe(1);
+    expect(pipe.added).toEqual([{ element: label, batcherName: SDF_BATCHER }]);
   });
 });

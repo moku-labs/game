@@ -1081,66 +1081,65 @@ measures (the fixture's display font was 12.9 u low at 54 u without it; both lin
 
 ### Distance-field text
 
-Pixi 8.22 applies the alpha of distance-field (MSDF, SDF) bitmap text twice. Its SDF shader hands
-`calculateMSDFAlpha` the vertex colour, which is premultiplied: the function raises
-`vColor.a × coverage` to a gamma that leans on the luma of the premultiplied colour, and the shader
-template multiplies the result by `vColor` again. A label at alpha 0.5 so drew at about 0.25, a
-0.55 shadow at 0.31, a label under a parent at 0.6 at 0.42.
+Pixi 8.22 draws every distance-field (MSDF, SDF) bitmap label with a shader of its own: the custom shader of the
+label's graphics context makes the context unbatchable, so every label is one draw through the graphics adaptor with a
+uniform bind group of its own, and it breaks the batch around it (the A26 board: about 20 draws a frame, 538 KB/s of
+garbage). Pixi's SDF shader also applies the alpha twice: its fragment step hands `calculateMSDFAlpha` the vertex
+colour, which is premultiplied, the function raises `vColor.a × coverage` to a gamma that leans on the luma of the
+premultiplied colour, and the template multiplies the result by `vColor` again. A label at alpha 0.5 drew at about
+0.25.
 
-The renderer brings its own bitmap text pipe. `host/sdf-text.ts` builds a subclass of Pixi's
-`BitmapTextPipe` from the module object, with the base's `static extension` object, and
-`host/init.ts` swaps it in through `pixi.extensions.remove` and `add` before `new Application()`,
-in every build, as the draw counter does. No Pixi prototype and no Pixi instance is patched. Its
-`getSdfShader()` compiles Pixi's own five SDF bits with one step changed: the fragment step of
-`localUniformMSDFBit` hands the function
-`vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0)`, the colour un-premultiplied at alpha 1. The
-coverage is the glyph's alone, and the template's `outColor * vColor` applies every alpha once: the
-label's (`Text.alpha` is the alpha of its container), a parent's (a disabled button, a popup fade)
-and the world's. Full-alpha text draws the same pixels as before. The program is compiled once per
-batch texture limit and shared by every text; each text gets its own local uniforms, as from Pixi's
-pipe. A text keeps its one shader: Pixi asks `getSdfShader()` at every layout of a text and keeps the answer only for
-a context without one, so the pipe hands the text's own shader back while it lays it out again. A new shader per update
-was about 22 KB of garbage a text change, and on WebGL every dropped shader stayed subscribed to the shared batch-sampler
-group, a leak.
+The renderer draws distance-field text in a batch, through Pixi's public extension points, in every build. Three
+pieces go into Pixi's extension registry before `new Application()` (`host/init.ts`, once per host state, swapped back
+at stop), with the base classes' own `static extension` objects; no Pixi prototype and no Pixi instance is patched:
 
-Both backends. On WebGPU the shader carries the WGSL program above. On the WebGL fallback it
-carries the GLSL program, compiled with `compileHighShaderGlProgram` from the GL twins of the same
-five bits (`colorBitGl`, `generateTextureBatchBitGl`, `localUniformMSDFBitGl`, `mSDFBitGl`,
-`roundPixelsBitGl`), with the same step changed:
-`calculateMSDFAlpha(outColor, vec4(vColor.rgb / max(vColor.a, 1e-4), 1.0), uDistance)`. A WebGL
-shader also gets Pixi's batch sampler slots (`getBatchSamplersUniformGroup`), as Pixi's own
-`SdfShader` does. Each backend's program is compiled once per texture limit.
+- **The text pipe** (`host/sdf-text.ts`), a subclass of `BitmapTextPipe`. `getSdfShader()` answers `null`, so Pixi
+  gives the label's context no shader and it stays batchable. `initGpuText` sets the context's `batchMode` to
+  `"batch"` (Pixi's `"auto"` gives a context of 50 glyphs or more up, and a context without a shader would then draw
+  the glyph atlas as a plain texture) and keeps the edge of the label's glyphs on its proxy graphics under a symbol,
+  one shape for every proxy: Pixi's distance at scale 1 (`range × fontSize / baseRenderedFontSize`, Pixi's own formula
+  from `_updateDistanceField`), 0 for a font without a distance field. `addRenderable` and `updateRenderable` bring it
+  up to date before Pixi's own; it is measured again only when the font family or size changes, so a text update
+  makes no cache key.
+- **The batcher** (`host/sdf-batcher.ts`), a subclass of Pixi's `Batcher` under the name `moku-sdf`: Pixi's default
+  vertex (position, uv, colour, texture id and rounding) and one float more, the label's edge width; its geometry is
+  Pixi's batch geometry with `aSdfDistance` after the texture id, 7 floats a vertex. Its packing is Pixi's
+  `DefaultBatcher` loop with the distance written after the texture id: Pixi's distance at the label's scale in its
+  render group (its group transform) times the renderer's resolution. Its shader is Pixi's five SDF bits with the local
+  uniforms replaced by the renderer's piece, made once per batch texture limit and shared by every batcher: the vertex
+  stage multiplies the distance by the scale of the render group's world transform, a global uniform, and the fragment
+  step hands `calculateMSDFAlpha` the colour un-premultiplied at alpha 1,
+  `vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0)`, so the template's `outColor * vColor` applies every alpha once:
+  the label's (`Text.alpha` is the alpha of its container), a parent's (a disabled button, a popup fade) and the
+  world's. The shader reads bind groups 0 and 1 alone, the two Pixi's batch adaptor binds. On WebGL the GLSL twin of
+  the same piece; Pixi compiles its batch programs as GLSL ES 1.00, so the distance is a plain varying there.
+- **The batch pipe**, a subclass of `BatcherPipe`. `addToBatch` names an element's batcher before Pixi adds it: the
+  glyphs of a distance-field label go to `moku-sdf`; a pooled element that carried that name before, now another
+  graphics' or a plain font's, goes back to Pixi's `default`. `execute` packs the distances of an SDF batcher again,
+  before Pixi binds its geometry, when the renderer's resolution changed since it last drew: two compares per batch
+  run otherwise. The counting batch pipe of a dev or debug build extends this pipe (the plugin root hands it to
+  `monitor`), and is installed after it, in its place.
 
-The swap happens once per host state, a restore reuses the pipe, and `onStop` swaps Pixi's own pipe
-back. A Pixi module without the pieces draws on with its own pipe, with `ctx.log.warn`. A unit test
-against the real module pins the pipe's name and metadata, the exact WGSL and GLSL steps it
-replaces, and the compiled fragment of both programs, so a Pixi that renames them, or fixes the
-double alpha itself, fails in CI.
+Consecutive labels share one draw. Text never joins a batch of sprites: Pixi hands sprites to its default batcher by
+name, so draws fall where labels follow each other in the draw order. A Pixi module without the pieces draws on with
+its own pipes, with `ctx.log.warn`.
 
-Distance-field text uses device pixels for its edge (PX1). Pixi writes the edge width `uDistance` in
-CSS pixels (`AbstractBitmapTextPipe._updateDistanceField`: the world scale times the font's range
-over its scale), while the shader measures it in device pixels, so on a phone at resolution 2.8 the
-glyph edge was smeared over three pixels. The text's uniform group, which the pipe makes, answers
-Pixi's distance times the renderer's resolution: its `uDistance` is an accessor, Pixi's write keeps
-the CSS value and every upload reads it times the resolution of the moment, so a change of
-resolution needs nothing more. Every text's uniforms share one shape and one accessor pair, so Pixi's generated sync
-function reads them monomorphic; a pair per text, or one laid over Pixi's own data property, sent each object to
-dictionary mode and boxed a double per text per frame. A text whose distance did not change hands back the number it
-answered last, boxed once. Text at a resolution above 1 is sharper; text at 1 draws the same
-pixels. The canvas's resolution is used, also for a text inside a filter of another resolution,
-which only a blurred text shows. A unit test runs Pixi's own `_updateDistanceField` and fails the day
-Pixi multiplies by the resolution itself: the engine's factor must then go.
+The edge is measured in device pixels (PX1): Pixi writes its distance in CSS pixels, while the shader spreads the glyph
+edge over that many device pixels, so on a phone at resolution 2.8 the edge was smeared over three pixels. The
+renderer's resolution is used, also for a label inside a filter or a kept picture of another resolution, as before the
+batch. The scale of the edge is the label's world scale (K5): the label's scale in its render group, packed, times the
+render group's own scale, read by the shader at the draw. A kept picture renders its view as a render group of its own
+with the view's world transform, so its labels draw with the edges they have live, and a render group that scales (a
+camera's, a popup's) needs no new vertices; a label whose view scaled is packed again by Pixi's own update of the
+label. Inside a group cached as a texture, the group's own scale is used, the scale its texture is drawn at.
 
-The scale of that edge is the text's world scale, read at the draw too (K5). Pixi scales the
-distance by the text's group transform, the text against its render group, which leaves out the
-group's own scale, and writes it only when the group's instructions are built. A kept picture
-renders its view as a render group of its own, so the label of a view at world scale 0.25 drew its
-glyph edges four times sharper in the picture than live, and a label whose view scaled since its
-instructions were built kept the edge of the old scale. The pipe names the text while Pixi's
-`addRenderable` and `updateRenderable` write the distance; the uniform keeps Pixi's distance per unit
-of that group scale and answers it times the text's world scale and the resolution at every upload.
-Live text whose render group is the stage draws the same pixels as before; a picture of it now
-equals the live frame.
+Measured on the mini and sheets visual legs and a fixture of labels (alpha 0.5, a tint with a faded parent, a
+0.25-scaled render group and container, rotation, `roundPixels`, a filter, 60 glyphs, a cached group, a kept-like
+render), WebGPU and WebGL, resolutions 2.8 and 1: every capture equal to the per-label shader's, except edge pixels of
+the rotated label at 2.8 (at most 2/255 on WebGPU and 7/255 at one pixel on WebGL), where the glyph's corners are now
+transformed on the CPU in doubles, as Pixi's batch does for every sprite. Ten consecutive labels draw in one batch where
+they were ten graphics draws. Unit tests against the real module pin the names and members of the pieces, Pixi's batch
+vertex layout, Pixi's coverage function and Pixi's distance formula, so a Pixi that moves them fails in CI.
 
 ### A cached group inside a filter
 
@@ -1260,6 +1259,6 @@ player, belong to the e2e station too. The real `drawCalls` number needs a GPU: 
 measured on the board screen of the merge game in moku-labs/demos, which has no filter and no
 emitter, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
 How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,
-a label under a 0.6 parent at 0.6, and the same pixels for full-alpha text, in the browser, under
+a label under a 0.6 parent at 0.6, and the same pixels as the per-label shader drew, in the browser, under
 WebGPU and under WebGL. So does the alpha of a parent: the icon of a disabled round button measured
 at 0.6 in the browser.
