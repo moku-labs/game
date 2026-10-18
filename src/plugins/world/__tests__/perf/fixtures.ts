@@ -5,13 +5,12 @@
  * `flow` answer with one kept object, so the mock's own fresh snapshot and flow state never land
  * in a window.
  */
-import type { FeatureDescription } from "../../../flow/features/types";
-import type { Api as FlowApi, FlowGraph, FlowState } from "../../../flow/types";
+import type { Api as FlowApi } from "../../../flow/types";
 import type { Api as ModelApi, Snapshot } from "../../../model/types";
 import type { Time } from "../../../time/types";
 import { createModules } from "../../api";
 import { clearAllChanges, markChanged } from "../../ecs/changes";
-import { component, mut, Now, system } from "../../ecs/define";
+import { component, Exiting, mut, Now, system } from "../../ecs/define";
 import type { AnySystem, Entity, Owner, WorldPhase } from "../../ecs/types";
 import { withDeps } from "../../lifecycle";
 import type { MotionHandle, Track, TweenDriver } from "../../projection/types";
@@ -463,122 +462,33 @@ export function nestedQueryFixture(): () => void {
   };
 }
 
-/** Features of the scope fixtures: one scoped feature per system group, as a game of twenty doors. */
-const FEATURES = 20;
+/** A term of the skip fixtures that no entity carries any more: its store is there and empty. */
+const Ghost = component("Ghost", { at: 0 });
+
+/** One frame of a skip fixture and how often its systems ran. */
+export type SkipFrame = { frame: () => void; runs: () => number };
 
 /**
- * A frozen flow state resting on one node of `main`, as `flow.state()` answers while the graph
- * does not move.
+ * Forty systems of phase `animate` over `[Cell, mut(Ghost)]`: 300 entities carry `Cell`, and the
+ * one entity that carried `Ghost` was despawned, so the smallest store among the terms is empty.
+ * Before the skip each of them walked the 300 keys of `Cell` and found nothing.
  *
- * @param node - The node the stack holds.
- * @returns The state.
+ * @returns One frame of the four phases and the clear, and the count of the runs.
  */
-function restingOn(node: string): FlowState {
-  return Object.freeze({
-    running: true,
-    path: node,
-    stack: Object.freeze([Object.freeze({ flow: "main", node, input: {} })]),
-    pending: Object.freeze({}),
-    mode: "live"
-  });
-}
-
-/**
- * The described graph of the scope fixtures: every node of `main` owned by the feature of the same
- * name.
- *
- * @param names - The feature names.
- * @returns The graph.
- */
-function graphOwnedBy(names: readonly string[]): FlowGraph {
-  const nodes: FlowGraph["flows"][string]["nodes"] = {};
-
-  for (const name of names) {
-    nodes[name] = {
-      flow: "main",
-      node: name,
-      rest: true,
-      over: false,
-      checkpoint: false,
-      barrier: false,
-      outcomes: [],
-      owner: name
-    };
-  }
-
-  return { main: "main", flows: { main: { nodes, start: names[0] ?? "", edges: {} } }, slots: {} };
-}
-
-/**
- * The world modules over the mock world's state with a `model` that answers one kept snapshot and
- * a `flow` whose `state()` answers whatever `current` holds: one kept frozen object while the
- * graph rests, as the memoised `flow.state()` does.
- *
- * @param world - The mock world.
- * @param current - The flow state `state()` answers.
- * @param current.state - The state.
- * @param graph - What `describe()` answers.
- * @returns The ecs module.
- */
-function scopedModules(
-  world: MockWorld,
-  current: { state: FlowState },
-  graph: FlowGraph
-): EcsModule {
-  const deps = withDeps(world.ctx).deps;
-  const model = { store: { snapshot: () => SNAPSHOT } } as unknown as ModelApi;
-  const flow = {
-    ...deps.flow,
-    state: () => current.state,
-    describe: () => graph
-  } as unknown as FlowApi;
-
-  return createModules({ ...world.ctx, deps: { ...deps, model, flow } }).ecs;
-}
-
-/**
- * Registers the features of a scope fixture with the mock world and starts it, so the scope is
- * sized and every system carries its feature.
- *
- * @param world - The mock world.
- * @param features - The features, in order.
- */
-function startFeatures(
-  world: MockWorld,
-  features: ReadonlyArray<{ name: string; description: FeatureDescription }>
-): void {
-  for (const feature of features) world.features.push(feature);
-
-  world.start();
-}
-
-/** One frame of a scope fixture and how often its scoped systems ran. */
-export type ScopedFrame = { frame: () => void; runs: () => number };
-
-/**
- * Forty systems of the feature `board`, each walking `[Cell, mut(Lit)]` over 300 entities, 30
- * matching, in phase `animate`; the flow rests on the ward, so with `systemsRun: "active"` the
- * board is not active and its systems sleep. With `"always"` they run, as every system ran before
- * spec 28.
- *
- * @param run - The board's `systemsRun`.
- * @returns One frame of the four phases and the clear, and the count of the board's runs.
- */
-export function scopedFixture(run: "active" | "always"): ScopedFrame {
+export function emptyQueryFixture(): SkipFrame {
   const world = createMockWorld();
+  const { ecs } = stableModules(world);
   const counted = { runs: 0 };
-  const systems: AnySystem[] = [];
 
-  for (let index = 0; index < ENTITIES; index += 1) {
-    world.api.ecs.spawn(OWNER, index % 10 === 0 ? [Cell(), Lit()] : [Cell()]);
-  }
+  for (let index = 0; index < ENTITIES; index += 1) ecs.spawn(OWNER, [Cell()]);
+  ecs.despawn(ecs.spawn(OWNER, [Ghost()]));
 
   for (let index = 0; index < SYSTEMS; index += 1) {
-    systems.push(
+    ecs.system(
       system({
-        name: `perf.board${index}`,
+        name: `perf.ghost${index}`,
         phase: "animate",
-        query: [Cell, mut(Lit)],
+        query: [Cell, mut(Ghost)],
         run: rows => {
           counted.runs += 1;
 
@@ -588,80 +498,103 @@ export function scopedFixture(run: "active" | "always"): ScopedFrame {
     );
   }
 
-  startFeatures(world, [
-    { name: "ward", description: { scenes: [{ id: "ward" }] } },
-    { name: "board", description: { scenes: [{ id: "board" }], systems, systemsRun: run } }
-  ]);
-
-  const ecs = scopedModules(world, { state: restingOn("ward") }, graphOwnedBy(["ward", "board"]));
   const time = frameTime();
-  const phases = PHASES.length;
 
-  return {
-    frame: (): void => {
-      time.frame += 1;
-
-      // An index loop: the measured window holds the engine's work only, no iterator of the fixture.
-      for (let at = 0; at < phases; at += 1) ecs.runPhase(PHASES[at] ?? "input", time);
-
-      ecs.clearChanges();
-    },
-    runs: (): number => counted.runs
-  };
+  return { frame: () => runFrame(ecs, time), runs: (): number => counted.runs };
 }
 
 /**
- * Twenty scoped features, one empty-query system each, and a flow that moves every frame between
- * two nodes of `main`: every frame reads the stack again and evaluates the whole active set, the
- * worst case of the check. The ward's feature is the only one on the stack.
+ * Runs the four phases of one frame and the clear of phase `signals`.
  *
- * @returns One frame of the four phases with `isActive` asked once, and the clear.
+ * @param ecs - The ecs module of the fixture.
+ * @param time - The fixture's frame time, moved here.
  */
-export function scopeCheckFixture(): () => void {
+function runFrame(ecs: EcsModule, time: Time): void {
+  time.frame += 1;
+
+  // An index loop: the measured window holds the engine's work only, no iterator of the fixture.
+  for (let at = 0; at < PHASES.length; at += 1) ecs.runPhase(PHASES[at] ?? "input", time);
+
+  ecs.clearChanges();
+}
+
+/**
+ * Forty systems of phase `animate` over `[Cell, Lit]`, every store filled, whose `run` reads no
+ * row: a frame of them costs the check before each run and the call, nothing else. With
+ * `withScenes`, half of them run on the mounted scene `board`, half on the scene `ward`, which
+ * leaves while one entity still carries `Exiting`: the check reads the stores of two terms, the
+ * mounted scene and the list of the leaving ones.
+ *
+ * @param withScenes - Whether the systems list `scenes`.
+ * @returns One frame of the four phases and the clear, and the count of the runs.
+ */
+export function skipCheckFixture(withScenes = true): SkipFrame {
   const world = createMockWorld();
-  const names: string[] = [];
-  const features: Array<{ name: string; description: FeatureDescription }> = [];
+  const { ecs } = stableModules(world);
+  const counted = { runs: 0 };
 
-  for (let index = 0; index < FEATURES; index += 1) {
-    const name = `door${index}`;
-
-    names.push(name);
-    features.push({
-      name,
-      description: {
-        scenes: [{ id: name }],
-        systems: [
-          system({
-            name: `perf.door${index}`,
-            phase: "animate",
-            query: [],
-            run: (_rows, { resumed }) => {
-              sink.flag = resumed;
-            }
-          })
-        ],
-        systemsRun: "active"
-      }
-    });
+  for (let index = 0; index < ENTITIES; index += 1) {
+    ecs.spawn(OWNER, index % 10 === 0 ? [Cell(), Lit()] : [Cell()]);
   }
 
-  startFeatures(world, features);
+  ecs.spawn(OWNER, [Exiting()]);
 
-  const states = [restingOn("door0"), restingOn("door1")];
-  const current = { state: states[0] ?? restingOn("door0") };
-  const ecs = scopedModules(world, current, graphOwnedBy(names));
+  for (let index = 0; index < SYSTEMS; index += 1) {
+    ecs.system(
+      system({
+        name: `perf.check${index}`,
+        phase: "animate",
+        query: [Cell, Lit],
+        ...(withScenes ? { scenes: [index % 2 === 0 ? "board" : "ward"] } : {}),
+        run: () => {
+          counted.runs += 1;
+        }
+      })
+    );
+  }
+
+  ecs.setScene("ward");
+  ecs.setScene("board");
+
   const time = frameTime();
-  const phases = PHASES.length;
 
-  return (): void => {
-    time.frame += 1;
-    current.state = states[time.frame % 2] ?? current.state;
+  return { frame: () => runFrame(ecs, time), runs: (): number => counted.runs };
+}
 
-    for (let at = 0; at < phases; at += 1) ecs.runPhase(PHASES[at] ?? "input", time);
+/**
+ * Forty systems of phase `animate` over `[Cell]`, every store filled, that run on the scene
+ * `board` while the ward is mounted and nothing leaves: each is skipped for its scenes.
+ *
+ * @returns One frame of the four phases and the clear, and the count of the runs.
+ */
+export function sceneSkipFixture(): SkipFrame {
+  const world = createMockWorld();
+  const { ecs } = stableModules(world);
+  const counted = { runs: 0 };
 
-    sink.flag = ecs.isActive("door1");
-    ecs.clearChanges();
-  };
+  for (let index = 0; index < ENTITIES; index += 1) ecs.spawn(OWNER, [Cell()]);
+
+  for (let index = 0; index < SYSTEMS; index += 1) {
+    ecs.system(
+      system({
+        name: `perf.board${index}`,
+        phase: "animate",
+        query: [Cell],
+        scenes: ["board"],
+        run: rows => {
+          counted.runs += 1;
+
+          for (const row of rows) sink.entity = row[0];
+        }
+      })
+    );
+  }
+
+  ecs.setScene("ward");
+
+  const time = frameTime();
+
+  return { frame: () => runFrame(ecs, time), runs: (): number => counted.runs };
 }
 
 /** Calls before a measure, so a tier-up of V8 never falls inside one of `alloc`'s windows. */

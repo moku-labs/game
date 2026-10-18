@@ -9,6 +9,7 @@ import { markChanged } from "./changes";
 import { registerType, termType } from "./storage";
 import type {
   AnyComponentType,
+  ComponentStore,
   EcsState,
   Entity,
   KnownPlan,
@@ -625,6 +626,41 @@ const NO_ROWS: Iterable<readonly unknown[]> & Iterator<readonly unknown[], undef
   },
   next: () => DONE
 };
+
+/**
+ * Tells whether a system's query may match, before its run: every term has a store and none of them
+ * is empty, which is the smallest store among the terms not being empty. A store met for the first
+ * time is kept in the entry, so later checks only read sizes. An empty query may always match. An
+ * entity that carries one term and not the others still passes: the walk finds nothing, as before.
+ *
+ * @param stores - Every component store of the world, by name.
+ * @param entry - The registered system.
+ * @returns False when a term has no entity: the system is skipped.
+ */
+export function mayMatch(stores: ReadonlyMap<string, ComponentStore>, entry: SystemEntry): boolean {
+  const names = entry.plan.names;
+  const kept = entry.stores;
+  const count = names.length;
+
+  // Per system and phase: an index loop over the terms, one size read each, no lookup once kept.
+  for (let index = 0; index < count; index += 1) {
+    let store = kept[index];
+
+    if (store === undefined) {
+      const name = names[index];
+
+      store = name === undefined ? undefined : stores.get(name);
+
+      if (store === undefined) return false;
+
+      kept[index] = store;
+    }
+
+    if (store.size === 0) return false;
+  }
+
+  return true;
+}
 
 /**
  * The rows the runner hands a system's `run`: its walk, reset; none for an empty query. A system

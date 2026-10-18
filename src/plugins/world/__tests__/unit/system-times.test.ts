@@ -11,14 +11,22 @@ import { createMockWorld, type MockWorld } from "./mock-world";
 
 const Marker = component("Marker", { at: 0 });
 
+/** A component no entity of these tests carries. */
+const Ghost = component("Ghost", { at: 0 });
+
 function quiet(name: string, phase: WorldPhase = "layout", run: () => void = () => undefined) {
   return system({ name, phase, query: [Marker], run });
 }
 
-/** A world whose fake `time` hands out a clock of 0.5 ms a read; the clock spy is returned. */
+/**
+ * A world whose fake `time` hands out a clock of 0.5 ms a read; the clock spy is returned. One
+ * entity carries `Marker`, so the systems over it run.
+ */
 function timedWorld(): { world: MockWorld; clock: ReturnType<typeof vi.fn> } {
   const world = createMockWorld();
   let now = 0;
+
+  world.api.ecs.spawn({ kind: "plugin", name: "test" }, [Marker()]);
   const clock = vi.fn(() => {
     now += 0.5;
 
@@ -131,24 +139,17 @@ describe("world.systemTimes in an agent build", () => {
   });
 });
 
-describe("world.systemTimes of a skipped system (spec 28 W4)", () => {
-  // Bug caught: the skip sits after the first clock read, so a sleeping system is still timed and
-  // shows up in the monitor's slowest five.
-  it("a skipped system takes no clock read in an agent build", () => {
+describe("world.systemTimes of a skipped system", () => {
+  // Bug caught: the skip sits after the first clock read, so a system that did not run is still
+  // timed and shows up in the monitor's slowest five.
+  it("a system whose query has no entity takes no clock read in an agent build", () => {
     vi.stubGlobal("__MOKU_GAME_AGENT__", true);
     const { world, clock } = timedWorld();
 
-    world.features.push(
-      {
-        name: "board",
-        description: {
-          scenes: [{ id: "board" }],
-          systems: [quiet("board.looks")],
-          systemsRun: "active"
-        }
-      },
-      { name: "hud", description: { systems: [quiet("hud.pulse")] } }
+    world.api.ecs.system(
+      system({ name: "board.looks", phase: "layout", query: [Ghost], run: () => undefined })
     );
+    world.api.ecs.system(quiet("hud.pulse"));
     world.start();
     world.frame();
     clock.mockClear();

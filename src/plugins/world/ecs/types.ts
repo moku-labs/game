@@ -2,7 +2,6 @@
  * @file world/ecs — type definitions: entities, component types, queries, systems and the module API.
  */
 
-import type { FlowState } from "../../flow/types";
 import type { Json, Snapshot, SnapshotOf } from "../../model/types";
 import type { Time } from "../../time/types";
 import type { ProjectionKey } from "../projection/types";
@@ -328,16 +327,19 @@ export type SystemContext = {
   readonly snapshot: Snapshot;
   readonly time: Readonly<Time>;
   /**
-   * True on the first run after one or more runs of this system were skipped because its feature was not active
-   * (`systemsRun: "active"`). Nothing was kept for it while it slept: `world.changed()` holds this frame's changes
-   * only, so a system that caches what it drew rebuilds from the components when this is true. Always false for a
-   * system that always runs. Read it during the run.
+   * True on the first run after one or more of this system's runs were skipped: its query had no entity, or none of
+   * its `scenes` was mounted or leaving. Nothing was kept for it while it slept: `world.changed()` holds this frame's
+   * changes only, so a system that caches what it drew, or remembers what it saw last, starts over from the
+   * components when this is true. False on every other run. Read it during the run.
    */
   readonly resumed: boolean;
 };
 
 /**
- * A system definition, typed over its query tuple.
+ * A system definition, typed over its query tuple. A system with a query runs only while its query
+ * can match: before each run the world looks at the store of every term, and when one of them holds
+ * no entity the run is skipped (no walk, no `mut()` mark, no timing). A system without a query
+ * always runs. `scenes` limits either kind to some scenes.
  *
  * @example
  * ```ts
@@ -356,10 +358,42 @@ export type SystemDefinition<Terms extends readonly QueryTerm[]> = {
   readonly phase: WorldPhase;
   readonly query: Terms;
   /**
-   * Runs the system once a frame in its phase. `entities` walks the declared `query` once; every
-   * row it hands out is the same array, rewritten for the next row, so a row is valid until the
-   * next row. A system that keeps a row copies what it keeps: `const [entity, transform] = row`.
-   * `ecs.query()` called inside `run` hands out a new array per row.
+   * The scenes the system runs on: it runs only while one of them is mounted or leaving. A scene
+   * leaves from the switch that replaces it until nothing carries `Exiting` any more, so the exits
+   * of its JSX elements play to the end; any exit counts, also one of the next scene, so a leave may
+   * last longer than the scene's own exits. The next scene's entities already stand during a leave:
+   * a query that matches them too hands them to the system, so it writes only its own scene's
+   * entities. Left out, the system runs on every scene. Read once, when the system registers. A dev
+   * build throws at start for a name no feature declares as a scene. For a system without a query,
+   * or one whose entities stand on every screen.
+   *
+   * @example
+   * ```ts
+   * // features/board/world/systems/idle.ts: no query, so `scenes` alone keeps it to the board.
+   * const BoardIdle = resource("BoardIdle", { ms: 0 });
+   * export const idle = system({
+   *   name: "board.idle",
+   *   phase: "animate",
+   *   query: [],
+   *   scenes: ["board"],
+   *   run: (_rows, { res, time }) => {
+   *     res(BoardIdle).ms += time.delta;
+   *   }
+   * });
+   * // On the ward it is not run and BoardIdle.ms stands still. On the board it grows by each
+   * // frame's delta. After the switch to the ward it runs while the board's elements play their
+   * // exit, then not any more.
+   * ```
+   */
+  readonly scenes?: readonly string[];
+  /**
+   * Runs the system once a frame in its phase, unless it is skipped: a term of its `query` has no
+   * entity, or none of its `scenes` is mounted or leaving. `entities` walks the declared `query`
+   * once; every row it hands out is the same array, rewritten for the next row, so a row is valid
+   * until the next row. A system that keeps a row copies what it keeps:
+   * `const [entity, transform] = row`. `ecs.query()` called inside `run` hands out a new array per
+   * row. Work that must happen when the query has no entity (end a press, reset a resource) belongs
+   * in a system without a query.
    */
   run(entities: Iterable<QueryTuple<Terms>>, ctx: SystemContext): void;
 };
@@ -424,25 +458,33 @@ export type AnySystem = {
   readonly name: string;
   readonly phase: WorldPhase;
   readonly query: readonly QueryTerm[];
+  /** As `SystemDefinition.scenes`: the scenes it runs on, every scene when left out. */
+  readonly scenes?: readonly string[];
   /** As `SystemDefinition.run`: one row array per walk, valid until the next row. */
   run(entities: Iterable<readonly unknown[]>, ctx: SystemContext): void;
 };
 
+/** One component store, keyed by entity: a component's value, `true` for a tag. */
+export type ComponentStore = Map<Entity, object | true>;
+
 /**
  * One registered system, the frame it was registered in, its query resolved once, the walk the
- * runner resets for every run and its scope. A system registered during a frame runs from the
- * next frame on. Module state: no game reads it.
+ * runner resets for every run, the stores its check reads and its scenes. A system registered
+ * during a frame runs from the next frame on. Module state: no game reads it.
  */
 export type SystemEntry = {
   readonly definition: AnySystem;
   readonly frame: number;
   readonly plan: QueryPlan;
   /**
-   * The index of its feature in `ScopeState` for a system of a feature with `systemsRun: "active"`, -1 for a
-   * system that always runs.
+   * The store of each term, in term order, kept once it exists: a store lives as long as the
+   * systems of its world, so the check before a run reads sizes and looks nothing up.
+   * `undefined` for a term no entity carried yet.
    */
-  readonly scope: number;
-  /** The system's last chance to run was skipped because its feature was not active. */
+  readonly stores: Array<ComponentStore | undefined>;
+  /** The scenes it runs on, read once at registration; `undefined` for every scene. */
+  readonly scenes: readonly string[] | undefined;
+  /** Its last chance to run was skipped: the next run is told so with `resumed`. */
   skipped: boolean;
   /**
    * The walk of the declared query, made at registration; `undefined` for an empty query, which
@@ -452,39 +494,17 @@ export type SystemEntry = {
 };
 
 /**
- * Which features are active, kept so a phase reads one byte per scoped system. Indexed by the feature's position in
- * `flow.features.all()`. Filled in `onStart`, sized once; nothing in it grows per frame.
+ * Which scene is mounted and which are still leaving, as `scenes` tells the world with
+ * `ecs.setScene`: what a system with `scenes` runs on. Changed at a scene switch only; a phase
+ * reads it.
  */
-export type ScopeState = {
-  /** Feature names by index, registration order. */
-  names: string[];
-  /** Feature name to index. */
-  index: Map<string, number>;
-  /** Projection name to the index of the feature that registered it (rule V). */
-  projections: Map<string, number>;
-  /** Flow id to node name to the owner's index (rule N); built from one `describe()` when first needed. */
-  owners: Map<string, Map<string, number>> | undefined;
-  /** `describe()` threw: every feature counts as on the stack while the stack is not empty (fail-safe). */
-  ownersFailed: boolean;
-  /** The `flow.state()` object the stack flags were read from. */
-  flow: FlowState | undefined;
-  /** 1 while a frame of the stack addresses a node the feature owns. */
-  onStack: Uint8Array;
-  /** The holds `scenes` and `ui` keep on the feature. */
-  holds: Int32Array;
-  /** The live and leaving views of the projections the feature registered. */
-  views: Int32Array;
-  /** 1 while the feature is active, as of the last evaluation. */
-  active: Uint8Array;
-  /** A hold or a view count moved since the last evaluation. */
-  dirty: boolean;
-  /** At least one registered system runs only while its feature is active. */
-  scoped: boolean;
-  /**
-   * Moves on at every start and every stop: a hold's release remembers the generation it was
-   * taken in, and a release from an older one changes nothing (spec 28 W7.1).
-   */
-  generation: number;
+export type SceneState = {
+  /** The mounted scene, `undefined` before the first switch. */
+  mounted: string | undefined;
+  /** The scenes a switch replaced while something still carries `Exiting`, oldest first; no repeats. */
+  leaving: string[];
+  /** The scene ids the features declare, read at start for the dev check of `scenes`; `undefined` before. */
+  declared: ReadonlySet<string> | undefined;
 };
 
 /**
@@ -531,7 +551,7 @@ export type PhaseContext = {
   snapshot: Snapshot;
   /** The running frame's `Time`. */
   time: Readonly<Time>;
-  /** Written before every run: the system's runs before this one were skipped for its scope. */
+  /** Written before every run: the system's last chance to run before this one was skipped. */
   resumed: boolean;
 };
 
@@ -763,8 +783,8 @@ export type EcsState = {
   walkLists: Entity[][];
   /** How many entities were despawned since the world began: the sweep looks for dead elements when it moved. */
   despawns: number;
-  /** Which features are active, for the systems of the features with `systemsRun: "active"`. */
-  scope: ScopeState;
+  /** The mounted scene and the leaving ones, for the systems with `scenes`. */
+  scene: SceneState;
 };
 
 /**
@@ -782,57 +802,23 @@ export type EcsState = {
 export type EcsApi = {
   /**
    * Registers a system at the end of its phase list. A system registered during a frame runs
-   * from the next frame on.
+   * from the next frame on. In every frame the system is skipped while a term of its query has no
+   * entity, or while none of its `scenes` is mounted or leaving.
    *
    * @param definition - The system, built with `system()`.
    * @returns The remover; calling it twice is a no-op.
-   * @throws {Error} When a system of that name is already registered.
+   * @throws {Error} When a system of that name is already registered, and in a dev build after
+   *   start for a name in `scenes` that no feature declares as a scene.
    * @example
    * ```ts
    * // `text` registers its layout system when the plugin starts.
    * const world = ctx.require(worldPlugin);
-   * const off = world.ecs.system(measureLabels); // runs from the next frame
+   * const off = world.ecs.system(measureLabels); // runs from the next frame on which a label exists
    *
    * off(); // the plugin stops
    * ```
    */
   system(definition: AnySystem): () => void;
-
-  /**
-   * Keeps a feature active while something of it is shown that the world cannot see: `scenes` holds the feature that
-   * declares the mounted scene, `ui` the feature of each popup or JSX root it holds. Holds are counted; the returned
-   * release is idempotent. A name that is not a registered feature holds nothing (a dev warning
-   * `world:hold-unknown-feature`). Takes effect at the next phase that runs systems.
-   *
-   * @param feature - The feature to keep active.
-   * @returns The release.
-   * @example
-   * ```ts
-   * // scenes, as it mounts the scene "ward" that the feature "screens" declares:
-   * const release = ctx.require(worldPlugin).ecs.hold("screens");
-   * app.world.ecs.isActive("screens"); // true
-   * release(); // the next scene replaced the ward
-   * app.world.ecs.isActive("screens"); // false: no node, view or hold of "screens" is left
-   * ```
-   */
-  hold(feature: string): () => void;
-
-  /**
-   * Whether a feature is active now: a node of it is on the flow stack, a scene it declares is mounted, a view of a
-   * projection it registered exists (leaving included), or `ui` holds a popup or JSX root of it. Answers for any
-   * feature, whatever its `systemsRun`; the systems of a feature with `systemsRun: "active"` run exactly while this
-   * is true. False for a name that is not a feature.
-   *
-   * @param feature - The feature name.
-   * @returns True while it is active.
-   * @example
-   * ```ts
-   * // A test of the board: the graph rests at the board's awaitIntent and the shop sheet is closed.
-   * app.world.ecs.isActive("board"); // true: a node of the board is on the stack, its views are drawn
-   * app.world.ecs.isActive("shop"); // false: no view of the sheet, no node of the shop on the stack
-   * ```
-   */
-  isActive(feature: string): boolean;
 
   /**
    * Creates an entity. The id is reserved and returned at once, also inside a phase, where the
@@ -1167,6 +1153,25 @@ export type EcsApi = {
   setMode(mode: WorldMode): void;
 
   /**
+   * Tells the world which scene is mounted now, for the systems that list `scenes`. The scene
+   * mounted before it, and any scene still leaving, keep their systems running until nothing
+   * carries `Exiting` any more: the elements of their JSX views played their exit (the views themselves
+   * go at the switch). Each system reads it
+   * before its next run. The same scene again changes nothing. `scenes` calls it in the block that
+   * mounts a scene; a game never needs to.
+   *
+   * @param scene - The id of the scene now mounted.
+   * @example
+   * ```ts
+   * // scenes, in the block that replaces the ward with the board:
+   * ctx.require(worldPlugin).ecs.setScene("board");
+   * // In the next frame a system with scenes: ["board"] runs. One with scenes: ["ward"] runs
+   * // until the ward's elements played their exit, then sleeps.
+   * ```
+   */
+  setScene(scene: string): void;
+
+  /**
    * The component type behind a name. A type registers itself on first use, so a name nobody
    * wrote, read or queried yet is unknown.
    *
@@ -1316,23 +1321,4 @@ export type EcsInternal = {
    * Drops every entity, component, resource, system and hook.
    */
   clear(): void;
-
-  /**
-   * Counts a new view of a projection for the feature that registered it (rule V of `systemsRun`).
-   *
-   * @param projection - The projection name.
-   */
-  viewCame(projection: string): void;
-
-  /**
-   * Takes back the count of a despawned view; never below 0.
-   *
-   * @param projection - The projection name.
-   */
-  viewLeft(projection: string): void;
-
-  /**
-   * Drops every view count: the projections were cleared.
-   */
-  viewsCleared(): void;
 };

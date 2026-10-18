@@ -6,7 +6,7 @@ import type { PixiModule, RendererCtx } from "../types";
 import { initTimed, startupMark } from "./gpu";
 import { installRebindingRenderGroupPipe } from "./render-group";
 import { devicePixels, targetResolution } from "./resolution";
-import { installSdfTextPipe } from "./sdf-text";
+import { installSdfText } from "./sdf-text";
 import { createPoolState } from "./state";
 import type { HostDeps, HostState, InstallCounting } from "./types";
 
@@ -108,21 +108,22 @@ function installCounting(ctx: RendererCtx, pixi: PixiModule, deps: HostDeps): vo
 }
 
 /**
- * Swaps Pixi's bitmap text pipe for the renderer's, whose SDF shader applies the alpha of
- * distance-field text once. Like the draw counter it runs before `new Application()`, because Pixi
- * builds its pipes inside `init`, and once per host state: a restore reuses the installed pipe.
- * Every build installs it. A Pixi without the pieces draws on with its own pipe, with a warning.
+ * Installs the renderer's batched distance-field text: its batcher, its bitmap text pipe and its batch pipe, which draw
+ * consecutive labels in one draw with the alpha applied once. It runs before `new Application()`, because Pixi builds
+ * its pipes inside `init`, and before the draw counter, whose batch pipe extends the routing one and takes its place;
+ * once per host state: a restore reuses the installed pieces. Every build installs it. A Pixi without the pieces draws
+ * on with its own pipes, with a warning.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param pixi - The module the application is built from.
  */
-function installSdfText(ctx: RendererCtx, pixi: PixiModule): void {
+function installTextBatch(ctx: RendererCtx, pixi: PixiModule): void {
   const state = ctx.state.host;
 
   if (state.uninstallSdfText !== undefined) return;
 
   try {
-    state.uninstallSdfText = installSdfTextPipe(pixi);
+    state.uninstallSdfText = installSdfText(pixi);
   } catch (error) {
     ctx.log.warn("renderer: distance-field text applies its alpha twice", { error });
   }
@@ -130,7 +131,7 @@ function installSdfText(ctx: RendererCtx, pixi: PixiModule): void {
 
 /**
  * Swaps Pixi's render-group pipe for the renderer's, which binds a filter's input again after a group cached as a
- * texture was refreshed inside the filter (F10). Like the bitmap text pipe it runs before `new Application()`, once per
+ * texture was refreshed inside the filter (F10). Like the batched text it runs before `new Application()`, once per
  * host state, in every build. A Pixi without the pieces draws on with its own pipe, with a warning.
  *
  * @param ctx - Domain context of the renderer plugin.
@@ -180,8 +181,8 @@ export async function createApplication(
   }
 
   state.pixi = pixi;
+  installTextBatch(ctx, pixi);
   installCounting(ctx, pixi, deps);
-  installSdfText(ctx, pixi);
   installRenderGroup(ctx, pixi);
 
   state.resolution.dpr = devicePixels();
@@ -236,7 +237,7 @@ export function destroyApplication(state: HostState): void {
 /**
  * Undoes everything `init` created. Works on the state alone, because `onStop` has no context.
  * `ready` drops first, so a device that goes away during the teardown is ignored. The draw
- * counter, the bitmap text pipe and the render-group pipe swap Pixi's own classes back, so the next application on
+ * counter, the batched text and the render-group pipe swap Pixi's own classes back, so the next application on
  * the page starts from them. The pool trim starts over and its listeners go; Pixi's pool itself is left.
  *
  * @param state - The host branch of the plugin state.

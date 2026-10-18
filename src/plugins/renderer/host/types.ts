@@ -99,9 +99,9 @@ export type HostState = {
    */
   uninstallPasses: (() => void) | undefined;
   /**
-   * Swaps Pixi's own bitmap text pipe back in. Set once per host state when the renderer's pipe,
-   * whose SDF shader applies the alpha once, went into Pixi's registry, so a restore reuses it;
-   * `undefined` while inert and when the module lacked the pieces.
+   * Swaps Pixi's own bitmap text and batch pipes back in and drops the SDF batcher. Set once per host state when the
+   * renderer's batched distance-field text went into Pixi's registry, so a restore reuses it; `undefined` while inert
+   * and when the module lacked the pieces.
    */
   uninstallSdfText: (() => void) | undefined;
   /**

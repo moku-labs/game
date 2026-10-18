@@ -9,8 +9,8 @@ import { despawnEntity, flushCommands, queueOrApply } from "./commands";
 import { reserveEntity } from "./entities";
 import { diffHistory, resetHistory } from "./history";
 import { runQuery } from "./query";
+import { mountScene } from "./scenes";
 import { schemaOf } from "./schema";
-import { holdFeature, isFeatureActive, viewCame, viewLeft, viewsCleared } from "./scope";
 import { snapshotWorld } from "./snapshot";
 import {
   addHook,
@@ -38,10 +38,9 @@ import type {
 } from "./types";
 
 /**
- * Empties the world in place: entities, components, resources, systems, hooks, the frame history
- * and the view counts of the scope. The holds stay: the plugins above still show their scene or
- * root. The owner table stays: the graph did not change. The state object keeps its identity, so
- * every view on it stays valid.
+ * Empties the world in place: entities, components, resources, systems, hooks and the frame
+ * history. The mounted scene stays: `scenes` still shows it. The state object keeps its identity,
+ * so every view on it stays valid.
  *
  * @param ctx - Domain context of the world plugin.
  */
@@ -74,7 +73,6 @@ function clearWorldState(ctx: WorldCtx): void {
   state.mode = "live";
   state.frameSnapshot = undefined;
   resetHistory(state);
-  viewsCleared(state.scope);
 }
 
 /**
@@ -89,10 +87,6 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
 
   const api: EcsModule = {
     system: (definition: AnySystem): (() => void) => registerSystem(ctx, definition),
-
-    hold: (feature: string): (() => void) => holdFeature(ctx, feature),
-
-    isActive: (feature: string): boolean => isFeatureActive(ctx, feature),
 
     spawn: (owner: Owner, components: readonly AnyComponentValue[]): Entity => {
       const entity = reserveEntity(state, owner);
@@ -193,6 +187,10 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
       state.mode = mode;
     },
 
+    setScene: (scene: string): void => {
+      mountScene(state.scene, scene);
+    },
+
     typeOf: (name: string) => asComponent(state.types.get(name)),
 
     snapshot: () => snapshotWorld(state, effectiveMode(ctx)),
@@ -229,18 +227,6 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
 
     clear: (): void => {
       clearWorldState(ctx);
-    },
-
-    viewCame: (projection: string): void => {
-      viewCame(state.scope, projection);
-    },
-
-    viewLeft: (projection: string): void => {
-      viewLeft(state.scope, projection);
-    },
-
-    viewsCleared: (): void => {
-      viewsCleared(state.scope);
     }
   };
 

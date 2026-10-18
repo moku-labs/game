@@ -1,20 +1,20 @@
 /**
- * @file Root integration — systems that run where their feature is (spec 28). A small game on the screen set, no
- * canvas, a fake clock: `screens` declares the ward and the board scenes and owns the main flow; `board` owns the
- * board's sub-flow and its items; `shop` a sheet in the board scene, open while `session.shop`; `ward` the room of
- * the ward scene; `reward` a popup component; `orders` one node of the board's flow. Each of `board`, `shop`, `ward`
- * writes a look on its own views from `res(Now)` in phase `animate`; `reward` counts its runs. Cross-plugin: flow
- * (the stack), world (the scope and the views), scenes (the hold of the mounted scene), ui (the hold of a popup
- * root), assets (a held bundle keeps the board's scene on screen after its node left).
+ * @file Root integration — when a system runs. A system with a query runs while its query has an entity; a system
+ * with `scenes` runs while one of them is mounted or leaving. A small game on the screen set, no canvas, a fake
+ * clock, shaped as A Memory Missing's three hard cases: `screens` declares the ward and the board and owns the main
+ * flow; `board` owns the board's sub-flow, its items and its JSX root, which leaves with a motion of 160 ms after the
+ * switch to the ward; `orders` owns one node and the component its cards carry inside the board's root (no scene,
+ * no view of its own); `story` owns a component the ward's room carries (no node, no scene, no view). Cross-plugin:
+ * flow (the walk), world (the skip), scenes (`setScene`), ui (the root's elements and their exit), anim (the motion).
  */
-import type { Assets, Flow } from "@moku-labs/game";
+import type { Assets } from "@moku-labs/game";
 import {
   component,
   defineGame,
+  defineMotion,
   defineScene,
   exit,
   mut,
-  Now,
   projection,
   system,
   Transform,
@@ -22,32 +22,38 @@ import {
 } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import { describe, expect, it } from "vitest";
-import { graphHash } from "../../src/plugins/flow/runner/registry";
 import { tick } from "./helpers";
 
 type Player = { coins: number };
-type Session = { shop: boolean };
+type Session = Record<string, never>;
 
-const { defineNode, defineFlow, defineFeature, defineComponent, popup } = defineGame<{
+const { defineNode, defineFlow, defineFeature } = defineGame<{
   player: Player;
   session: Session;
   assets: string;
   strings: Record<string, never>;
 }>();
 
-/** Where the fake clock starts. */
-const START = 1_000_000;
-
-/** The look each scoped feature writes on its own views, from the frame's moment. */
+/** The look the board writes on its items. */
 const BoardLook = component("scoped.boardLook", { shade: 0 });
-const ShopLook = component("scoped.shopLook", { shade: 0 });
+/** The look the ward writes on its room. */
 const WardLook = component("scoped.wardLook", { shade: 0 });
-
-/** How often each scoped system ran, per app. */
-type Runs = { board: number; shop: number; ward: number; reward: number };
+/** What `orders` puts on the cards it shows inside the board's root. */
+const OrderCard = component("scoped.orderCard", { seen: false });
+/** What the board puts on its root's panel, which leaves with a motion. */
+const BoardLeave = component("scoped.boardLeave", { left: 0 });
+/** What `story` reads off the ward's room: where the sweep stands. */
+const SweepAnchor = component("scoped.sweepAnchor", { zone: "" });
 
 /** One row of a projection. */
 type Row = { id: string };
+
+/** The board's root leaves as A Memory Missing's does: it grows to 105 % for 160 ms. */
+const grow = defineMotion({
+  states: { gone: { Transform: { scale: 1.05 } } },
+  transition: { ms: 160 },
+  on: { exit: "gone" }
+});
 
 /** The board's two items. */
 const boardItems = projection({
@@ -58,32 +64,31 @@ const boardItems = projection({
   view: () => [BoardLook(), Transform()]
 });
 
-/** The shop sheet, in the board scene, while the session says the shop is open. */
-const shopSheet = projection({
-  name: "shop.sheet",
+/** The board's JSX root: a panel that leaves with `grow`, and two order cards inside it. */
+const boardRoot = projection({
+  name: "board.root",
   layer: "cells",
-  from: (_player: Player, session: Session): Row[] => (session.shop ? [{ id: "sheet" }] : []),
-  key: (row: Row) => row.id,
-  view: () => [ShopLook(), Transform()]
+  from: () => ({ id: "root" }),
+  view: () => (
+    <stack
+      key="boardPanel"
+      motion={grow}
+      components={[BoardLeave()]}
+      style={{ width: 1080, height: 1920 }}
+    >
+      <stack key="card1" components={[OrderCard()]} style={{ width: 200, height: 200 }} />
+      <stack key="card2" components={[OrderCard()]} style={{ width: 200, height: 200 }} />
+    </stack>
+  )
 });
 
-/** The ward's room. */
+/** The ward's room: the hub `story` reads its anchor from. */
 const wardRoom = projection({
   name: "ward.room",
   layer: "room",
   from: (): Row[] => [{ id: "room" }],
   key: (row: Row) => row.id,
-  view: () => [WardLook(), Transform()]
-});
-
-/** The reward popup. */
-const RewardPopup = defineComponent("Reward", {
-  outcomes: { ok: type() },
-  view: () => (
-    <panel key="rewardPanel" style={{ width: 400, height: 300 }}>
-      <button key="ok" intent="ok" style={{ width: 100, height: 60 }} />
-    </panel>
-  )
+  view: () => [WardLook(), SweepAnchor({ zone: "hall" }), Transform()]
 });
 
 const wardScene = defineScene("ward", {
@@ -94,66 +99,23 @@ const wardScene = defineScene("ward", {
 const boardScene = defineScene("board", {
   bundle: "board",
   layers: { cells: {} },
-  projections: [boardItems, shopSheet]
+  projections: [boardItems, boardRoot]
 });
 
 const awaitIntent = defineNode({
   rest: true,
   scene: "board",
-  outcomes: { openShop: type(), celebrate: type(), deliver: type(), leave: type() }
-});
-const openShop = defineNode({
-  outcomes: { done: type() },
-  run: ({ session, out }) => {
-    session.shop = true;
-
-    return out.done();
-  }
-});
-const shopping = defineNode({ rest: true, outcomes: { buy: type(), close: type() } });
-const buy = defineNode({
-  outcomes: { done: type() },
-  run: ({ player, out }) => {
-    player.coins += 1;
-
-    return out.done();
-  }
-});
-const closeShop = defineNode({
-  outcomes: { done: type() },
-  run: ({ session, out }) => {
-    session.shop = false;
-
-    return out.done();
-  }
-});
-const celebrate = defineNode({
-  outcomes: { done: type() },
-  run: async ({ fx, out }) => {
-    await fx(popup(RewardPopup, {}));
-
-    return out.done();
-  }
+  outcomes: { deliver: type(), leave: type() }
 });
 /** A node of the board's flow that `orders` lists: `orders` owns it, not `board`. */
 const deliver = defineNode({ rest: true, outcomes: { done: type() } });
 
 const boardPlay = defineFlow("boardPlay", {
-  nodes: { awaitIntent, openShop, shopping, buy, closeShop, celebrate, deliver },
+  nodes: { awaitIntent, deliver },
   start: "awaitIntent",
   outcomes: { left: type() },
   edges: {
-    awaitIntent: {
-      openShop: "openShop",
-      celebrate: "celebrate",
-      deliver: "deliver",
-      leave: exit("left")
-    },
-    openShop: { done: "shopping" },
-    shopping: { buy: "buy", close: "closeShop" },
-    buy: { done: "shopping" },
-    closeShop: { done: "awaitIntent" },
-    celebrate: { done: "awaitIntent" },
+    awaitIntent: { deliver: "deliver", leave: exit("left") },
     deliver: { done: "awaitIntent" }
   }
 });
@@ -171,142 +133,155 @@ const mainFlow = defineFlow("main", {
   edges: { ward: { play: "board" }, board: { left: "ward" } }
 });
 
-/**
- * The game, its features with `systemsRun` or without, and the run counts of its systems.
- *
- * @param run - What `board`, `shop`, `ward` and `reward` write under `systemsRun`; `undefined` leaves the key out.
- * @returns The game definition and its run counts.
- */
-function scopedGame(run: Flow.SystemsRun | undefined) {
-  const runs: Runs = { board: 0, shop: 0, ward: 0, reward: 0 };
-  const scoped = run === undefined ? {} : { systemsRun: run };
-  const lookOf = (name: keyof Runs, look: typeof BoardLook) =>
-    system({
-      name: `scoped.${name}`,
-      phase: "animate",
-      query: [mut(look)],
-      run: (rows, { res }) => {
-        runs[name] += 1;
+/** What every system saw: its runs, `resumed` of each, and the scene mounted at each run. */
+type Seen = { runs: number; resumed: boolean[]; scenes: string[] };
 
-        for (const [, value] of rows) value.shade = res(Now).now - START;
-      }
-    });
+/** The systems the test watches, by name. */
+type Watched =
+  | "board.look"
+  | "ward.look"
+  | "orders.cards"
+  | "board.leave"
+  | "board.shade"
+  | "story.sweep";
+
+/**
+ * The game and what its systems saw.
+ *
+ * @returns The game definition and the record of its systems.
+ */
+function watchedGame() {
+  const seen = {} as Record<Watched, Seen>;
+  const scene = { current: (): string => "" };
+
+  /**
+   * Records one run of a watched system.
+   *
+   * @param name - The system.
+   * @param resumed - Its `resumed`.
+   */
+  const record = (name: Watched, resumed: boolean): void => {
+    seen[name] ??= { runs: 0, resumed: [], scenes: [] };
+    seen[name].runs += 1;
+    seen[name].resumed.push(resumed);
+    seen[name].scenes.push(scene.current());
+  };
+
+  const boardLook = system({
+    name: "board.look",
+    phase: "animate",
+    query: [mut(BoardLook)],
+    run: (rows, { resumed }) => {
+      record("board.look", resumed);
+      for (const [, look] of rows) look.shade += 1;
+    }
+  });
+  const wardLook = system({
+    name: "ward.look",
+    phase: "animate",
+    query: [mut(WardLook)],
+    run: (rows, { resumed }) => {
+      record("ward.look", resumed);
+      for (const [, look] of rows) look.shade += 1;
+    }
+  });
+  const boardLeave = system({
+    name: "board.leave",
+    phase: "animate",
+    query: [BoardLeave],
+    run: (_rows, { resumed }) => record("board.leave", resumed)
+  });
+  // Every view carries Transform, on every screen: only `scenes` keeps it to the board.
+  const boardShade = system({
+    name: "board.shade",
+    phase: "sync",
+    query: [Transform],
+    scenes: ["board"],
+    run: (_rows, { resumed }) => record("board.shade", resumed)
+  });
+  const orderCards = system({
+    name: "orders.cards",
+    phase: "sync",
+    query: [OrderCard],
+    run: (_rows, { resumed }) => record("orders.cards", resumed)
+  });
+  const storySweep = system({
+    name: "story.sweep",
+    phase: "sync",
+    query: [SweepAnchor, Transform],
+    run: (_rows, { resumed }) => record("story.sweep", resumed)
+  });
 
   const screens = defineFeature("screens", { flows: [mainFlow], scenes: [wardScene, boardScene] });
   const board = defineFeature("board", {
     flows: [boardPlay],
-    projections: [boardItems],
-    systems: [lookOf("board", BoardLook)],
-    ...scoped
-  });
-  const shop = defineFeature("shop", {
-    projections: [shopSheet],
-    systems: [lookOf("shop", ShopLook)],
-    ...scoped
+    projections: [boardItems, boardRoot],
+    components: [BoardLook, BoardLeave],
+    systems: [boardLook, boardLeave, boardShade]
   });
   const wardFeature = defineFeature("ward", {
     projections: [wardRoom],
-    systems: [lookOf("ward", WardLook)],
-    ...scoped
+    components: [WardLook],
+    systems: [wardLook]
   });
-  const reward = defineFeature("reward", {
-    ui: [RewardPopup],
-    systems: [
-      system({
-        name: "scoped.reward",
-        phase: "animate",
-        query: [],
-        run: () => {
-          runs.reward += 1;
-        }
-      })
-    ],
-    ...scoped
+  const orders = defineFeature("orders", {
+    nodes: [deliver],
+    components: [OrderCard],
+    systems: [orderCards]
   });
-  const orders = defineFeature("orders", { nodes: [deliver] });
+  const story = defineFeature("story", { components: [SweepAnchor], systems: [storySweep] });
 
   const game = defineGameApp({
     flow: mainFlow,
     safeNode: "ward",
     player: { coins: 0 },
-    session: { shop: false },
-    features: [screens, board, shop, wardFeature, reward, orders]
+    session: {},
+    features: [screens, board, wardFeature, orders, story]
   });
 
-  return { game, runs };
+  return { game, seen, scene };
 }
 
-/** The features a trace reads. */
-const FEATURES = ["screens", "board", "shop", "ward", "reward", "orders"] as const;
-
-/** The two scene bundles: the ward names one file, so a test can hold its load. */
+/** The two scene bundles, with no files to fetch. */
 const manifest: Assets.Manifest = {
   version: 1,
   bundles: {
-    ward: {
-      feature: "screens",
-      tier: "lazy",
-      mb: 0,
-      files: [{ key: "ward.room", path: "ward/room.png", width: 4, height: 4, mb: 0 }]
-    },
+    ward: { feature: "screens", tier: "lazy", mb: 0, files: [] },
     board: { feature: "screens", tier: "lazy", mb: 0, files: [] }
   }
 };
 
-/** The file seam: every fetch answers at once, unless the test holds them. */
-type HeldIo = { io: Assets.AssetsIo; hold: () => void; release: () => void };
+/** What every fetch of the file seam answers. */
+const response = {
+  ok: true,
+  status: 200,
+  // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
+  headers: { get: () => null },
+  json: () => Promise.resolve({}),
+  blob: () => Promise.resolve(new Blob([new Uint8Array(4)])),
+  text: () => Promise.resolve(""),
+  arrayBuffer: () => Promise.resolve(new ArrayBuffer(4))
+};
+
+/** The file seam: every fetch answers at once. */
+const io: Assets.AssetsIo = {
+  fetch: () => Promise.resolve(response),
+  decode: () => Promise.resolve({ width: 4, height: 4 } as unknown as Assets.DecodedImage),
+  createTexture: () => ({ label: "texture" }) as unknown as Assets.Texture,
+  sliceTexture: () => ({ label: "slice" }) as unknown as Assets.Texture,
+  destroyTexture: () => undefined
+};
 
 /**
- * A file seam whose fetches the test can hold and release.
+ * Starts the screen app on the ward.
  *
- * @returns The seam and its switch.
+ * @returns The app, what its systems saw and a frame driver, resting on the ward.
  */
-function heldIo(): HeldIo {
-  const gate = { held: false, waiting: [] as Array<() => void> };
-  const response = {
-    ok: true,
-    status: 200,
-    // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
-    headers: { get: () => null },
-    json: () => Promise.resolve({}),
-    blob: () => Promise.resolve(new Blob([new Uint8Array(4)])),
-    text: () => Promise.resolve(""),
-    arrayBuffer: () => Promise.resolve(new ArrayBuffer(4))
-  };
+async function startOnWard() {
+  const { game, seen, scene } = watchedGame();
+  const { app, clock } = game.screen({ manifest, io });
 
-  return {
-    io: {
-      fetch: () =>
-        gate.held
-          ? new Promise(resolve => gate.waiting.push(() => resolve(response)))
-          : Promise.resolve(response),
-      decode: () => Promise.resolve({ width: 4, height: 4 } as unknown as Assets.DecodedImage),
-      createTexture: () => ({ label: "texture" }) as unknown as Assets.Texture,
-      sliceTexture: () => ({ label: "slice" }) as unknown as Assets.Texture,
-      destroyTexture: () => undefined
-    },
-    hold: () => {
-      gate.held = true;
-    },
-    release: () => {
-      gate.held = false;
-
-      for (const resolve of gate.waiting.splice(0)) resolve();
-    }
-  };
-}
-
-/**
- * Starts the screen app of one variant on the ward.
- *
- * @param run - The variant's `systemsRun`.
- * @returns The app, its seams and its run counts, resting on the ward.
- */
-async function startOnWard(run: Flow.SystemsRun | undefined) {
-  const { game, runs } = scopedGame(run);
-  const files = heldIo();
-  const { app, clock } = game.screen({ manifest, io: files.io });
-
+  scene.current = () => app.scenes.current() ?? "";
   await app.start();
   app.flow.run().catch(() => undefined);
 
@@ -314,251 +289,140 @@ async function startOnWard(run: Flow.SystemsRun | undefined) {
    * Steps frames of 16 ms on the fake clock, the runner given its turn before each.
    *
    * @param count - How many.
-   * @param each - What runs after each frame.
    */
-  const frames = async (count: number, each?: () => void): Promise<void> => {
+  const frames = async (count: number): Promise<void> => {
     for (let frame = 0; frame < count; frame += 1) {
       await tick(80);
       clock.advance(16);
       app.time.step(16);
-      each?.();
     }
   };
+
+  /**
+   * The runs of one system so far.
+   *
+   * @param name - The system.
+   * @returns How often it ran.
+   */
+  const runs = (name: Watched): number => seen[name]?.runs ?? 0;
 
   await frames(6);
   expect(app.flow.state().path).toBe("ward");
 
-  return { app, runs, files, frames };
+  return { app, seen, frames, runs };
 }
 
-/** The scripted session: at these frames, these answers. */
-const SCRIPT: ReadonlyArray<readonly [number, string]> = [
-  [4, "play"],
-  [14, "openShop"],
-  [24, "buy"],
-  [34, "close"],
-  [44, "celebrate"],
-  [54, "ok"],
-  [64, "deliver"],
-  [74, "done"],
-  [84, "leave"]
-];
+/** Frames the board's root needs to play its exit of 160 ms, and more. */
+const SETTLED = 20;
 
-/** Frames the scripted session runs. */
-const SESSION = 110;
+describe("when a system runs", () => {
+  // Bug caught: a system runs over a screen that has nothing for it (the board's look on the ward), or does not run
+  // once its entities came, or does not know it slept.
+  it("runs while its query has an entity: the board's look on the board, not on the ward", async () => {
+    const { app, seen, frames, runs } = await startOnWard();
 
-/** A started app of one variant. */
-type Started = Awaited<ReturnType<typeof startOnWard>>;
-
-/**
- * What every view of the game shows in one frame: each look component's views, by key, with their shade.
- *
- * @param app - The running app.
- * @returns One line.
- */
-function looksOf(app: Started["app"]): string {
-  const line: string[] = [];
-
-  for (const look of [BoardLook, ShopLook, WardLook]) {
-    for (const [entity, value] of app.world.ecs.query(look)) {
-      line.push(`${app.world.projection.keyOf(entity)?.key ?? entity}:${value.shade}`);
-    }
-  }
-
-  return line.join(" ");
-}
-
-/**
- * Plays the scripted session on a started app, calling `each` after every frame.
- *
- * @param started - The app on the ward.
- * @param each - Called after every frame.
- */
-async function playSession(started: Started, each: () => void): Promise<void> {
-  for (let index = 0; index < SESSION; index += 1) {
-    for (const [at, intent] of SCRIPT) {
-      if (at === index) expect(started.app.flow.gate.answer({ intent })).toBe(true);
-    }
-
-    await started.frames(1, each);
-  }
-}
-
-/**
- * Plays the scripted session on a fresh app of one variant and keeps what every view shows in every frame.
- *
- * @param run - The variant's `systemsRun`.
- * @returns One line of looks per frame.
- */
-async function looksOfSession(run: Flow.SystemsRun | undefined): Promise<string[]> {
-  const started = await startOnWard(run);
-  const seen: string[] = [];
-
-  await playSession(started, () => seen.push(looksOf(started.app)));
-  await started.app.stop();
-
-  return seen;
-}
-
-/**
- * Plays the scripted session on a fresh scoped app and keeps, in every phase of every frame, which features are
- * active: a system of each phase that always runs reads it.
- *
- * @returns One line per phase run: the phase and a flag per feature.
- */
-async function activeOfSession(): Promise<string[]> {
-  const started = await startOnWard("active");
-  const seen: string[] = [];
-  const ecs = started.app.world.ecs;
-
-  for (const phase of ["input", "animate", "layout", "sync"] as const) {
-    ecs.system(
-      system({
-        name: `trace.${phase}`,
-        phase,
-        query: [],
-        run: () => {
-          seen.push(`${phase} ${FEATURES.map(name => (ecs.isActive(name) ? 1 : 0)).join("")}`);
-        }
-      })
-    );
-  }
-
-  await playSession(started, () => undefined);
-  await started.app.stop();
-
-  return seen;
-}
-
-describe("systems that run where their feature is", () => {
-  // Bug caught: the board's systems stop the moment its node leaves the stack, while its scene is still drawn
-  // during the ward's load (a frozen look), or they keep running on the ward.
-  it("the board's systems run on the board, while the board scene is still shown after its node left, and not on the ward", async () => {
-    const { app, runs, files, frames } = await startOnWard("active");
-
-    expect(app.world.ecs.isActive("board")).toBe(false);
-    expect(runs.board).toBe(0);
-    expect(runs.ward).toBeGreaterThan(0);
+    expect(runs("ward.look")).toBeGreaterThan(0);
+    expect(runs("board.look")).toBe(0);
 
     app.flow.gate.answer({ intent: "play" });
     await frames(6);
 
     expect(app.scenes.current()).toBe("board");
-    expect(app.world.ecs.isActive("board")).toBe(true);
-    expect(app.world.ecs.isActive("ward")).toBe(false);
-    expect(runs.board).toBeGreaterThan(0);
+    expect(runs("board.look")).toBeGreaterThan(0);
+    expect(seen["board.look"].resumed[0]).toBe(true);
+    expect(seen["board.look"].resumed.slice(1).every(resumed => !resumed)).toBe(true);
 
-    const wardRuns = runs.ward;
+    const wardRuns = runs("ward.look");
 
-    // The ward's file is fetched again on the way back, and the test holds it.
-    app.assets.unload("ward");
-    files.hold();
-    app.flow.gate.answer({ intent: "leave" });
     await frames(4);
 
-    expect(app.flow.state().path).toBe("ward");
-    expect(app.scenes.current()).toBe("board");
-    expect(app.world.ecs.isActive("board")).toBe(true);
-
-    const whileLoading = runs.board;
-
-    await frames(3);
-
-    expect(runs.board).toBe(whileLoading + 3);
-    expect(runs.ward).toBe(wardRuns);
-
-    files.release();
-    await frames(1);
-
-    expect(app.scenes.current()).toBe("ward");
-
-    await frames(1);
-
-    const stopped = runs.board;
-
-    expect(app.world.ecs.isActive("board")).toBe(false);
-    expect(app.world.ecs.isActive("ward")).toBe(true);
-
-    await frames(5);
-
-    expect(runs.board).toBe(stopped);
+    expect(runs("ward.look")).toBe(wardRuns);
 
     await app.stop();
   });
 
-  // Bug caught: a system skipped while its feature's views are shown, a frozen or missing look (the K invariant).
-  it("a scoped feature's views look the same in every frame as under always", async () => {
-    const always = await looksOfSession(undefined);
-    const scoped = await looksOfSession("active");
+  // Bug caught (A Memory Missing, orders): a feature whose only presence is a component on the elements of another
+  // feature's JSX root never runs its system, or keeps running after those elements left.
+  it("runs a system over the cards of one feature inside another feature's root while they stand", async () => {
+    const { app, frames, runs } = await startOnWard();
 
-    expect(scoped).toEqual(always);
-    expect(always.some(line => line.includes("sheet:"))).toBe(true);
-    expect(always.some(line => line.includes("room:"))).toBe(true);
-  });
-
-  // Bug caught: the active set depends on something else than the session (an order of a map, a wall clock).
-  it("two runs of the same session decide the same active features in every phase", async () => {
-    const first = await activeOfSession();
-    const second = await activeOfSession();
-
-    expect(second).toEqual(first);
-    expect(new Set(first.map(line => line.slice(-6))).size).toBeGreaterThan(3);
-  });
-
-  // Bug caught: systemsRun leaks into the logic set, so the headless walk or the graph hash (and every
-  // bookmark) changes when a game scopes its systems.
-  it("the headless app of a game with scoped features walks to the same results and the same graph hash", async () => {
-    const route: Flow.RouteStep[] = [
-      { at: "ward", intent: "play" },
-      { at: "board/awaitIntent", intent: "openShop" },
-      { at: "board/shopping", intent: "buy" },
-      { at: "board/shopping", intent: "close" },
-      { at: "board/awaitIntent", intent: "leave" }
-    ];
-    const walkOf = async (run: Flow.SystemsRun | undefined) => {
-      const { app } = scopedGame(run).game.headless();
-
-      await app.start();
-      app.flow.run().catch(() => undefined);
-      await tick(80);
-
-      const state = await app.flow.walk(route);
-      const result = { path: state.path, player: app.model.store.snapshot().player };
-      const hash = graphHash(app.flow.describe());
-
-      await app.stop();
-
-      return { result, hash };
-    };
-
-    const always = await walkOf(undefined);
-    const scoped = await walkOf("active");
-
-    expect(scoped).toEqual(always);
-    expect(scoped.result).toEqual({ path: "ward", player: { coins: 1 } });
-  });
-
-  // Bug caught: the owner of a node is taken from its flow, so the board's feature runs for a node `orders` lists,
-  // or `orders` keeps running after its node left.
-  it("a feature of a contributed node stays active only while its node is on the stack", async () => {
-    const { app, frames } = await startOnWard("active");
+    expect(runs("orders.cards")).toBe(0);
 
     app.flow.gate.answer({ intent: "play" });
     await frames(4);
 
-    expect(app.world.ecs.isActive("orders")).toBe(false);
+    const onBoard = runs("orders.cards");
+
+    expect(onBoard).toBeGreaterThan(0);
 
     app.flow.gate.answer({ intent: "deliver" });
-    await frames(2);
-
-    expect(app.flow.state().path).toBe("board/deliver");
-    expect(app.world.ecs.isActive("orders")).toBe(true);
-
+    await frames(3);
     app.flow.gate.answer({ intent: "done" });
-    await frames(2);
+    await frames(3);
 
     expect(app.flow.state().path).toBe("board/awaitIntent");
-    expect(app.world.ecs.isActive("orders")).toBe(false);
+    expect(runs("orders.cards")).toBe(onBoard + 6);
+
+    app.flow.gate.answer({ intent: "leave" });
+    await frames(SETTLED);
+
+    const after = runs("orders.cards");
+
+    await frames(5);
+
+    expect(app.scenes.current()).toBe("ward");
+    expect(runs("orders.cards")).toBe(after);
+
+    await app.stop();
+  });
+
+  // Bug caught (A Memory Missing, board): the board's systems stop at the switch, so its leaving root freezes under
+  // the ward; or a system with scenes: ["board"] runs on for good.
+  it("drives the board's leaving root after the switch to the ward, until its exit ended", async () => {
+    const { app, seen, frames, runs } = await startOnWard();
+
+    expect(runs("board.shade")).toBe(0);
+
+    app.flow.gate.answer({ intent: "play" });
+    await frames(4);
+
+    expect(runs("board.leave")).toBeGreaterThan(0);
+    expect(runs("board.shade")).toBeGreaterThan(0);
+
+    app.flow.gate.answer({ intent: "leave" });
+    await frames(SETTLED);
+
+    expect(app.scenes.current()).toBe("ward");
+    expect(seen["board.leave"].scenes).toContain("ward");
+    expect(seen["board.shade"].scenes).toContain("ward");
+
+    const leave = runs("board.leave");
+    const shade = runs("board.shade");
+
+    await frames(5);
+
+    expect(runs("board.leave")).toBe(leave);
+    expect(runs("board.shade")).toBe(shade);
+
+    await app.stop();
+  });
+
+  // Bug caught (A Memory Missing, story): a system of a feature with no node, scene or view waits for its feature to
+  // show something, so the hub's anchors are never read on the ward.
+  it("runs a system over a component another feature's view carries, as soon as that view stands", async () => {
+    const { app, seen, frames, runs } = await startOnWard();
+
+    expect(runs("story.sweep")).toBeGreaterThan(0);
+    expect(seen["story.sweep"].scenes.every(scene => scene === "ward")).toBe(true);
+
+    app.flow.gate.answer({ intent: "play" });
+    await frames(4);
+
+    const onBoard = runs("story.sweep");
+
+    await frames(4);
+
+    expect(runs("story.sweep")).toBe(onBoard);
 
     await app.stop();
   });

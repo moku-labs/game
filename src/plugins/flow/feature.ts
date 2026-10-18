@@ -134,22 +134,6 @@ function assertFeatures(name: string, children: readonly MaybeFeature[]): void {
 }
 
 /**
- * Throws for a `systemsRun` outside its type. The type already says so; a game in JavaScript, or
- * a factory that passes a string through, is caught here, before the world reads it.
- *
- * @param name - The feature that declares it.
- * @param value - What the description holds under `systemsRun`.
- * @throws {Error} When the value is present and neither `"always"` nor `"active"`.
- */
-function assertSystemsRun(name: string, value: unknown): void {
-  if (value === undefined || value === "always" || value === "active") return;
-
-  throw new Error(
-    `[game] Feature "${name}" has systemsRun "${String(value)}".\n  Use "always" (the default) or "active".`
-  );
-}
-
-/**
  * Builds the plugin of one feature: it depends on `flow`, checks in `onInit` that the app composes
  * every declared sub-feature, then registers its description, before any plugin above reads the
  * registry in `onStart`.
@@ -195,14 +179,12 @@ function featurePluginOf(
  * same plugin built from the V1 keys of the description, for headless tests. A feature that
  * declares `features` is a parent: its `onInit` throws when one of them is not composed. The
  * plugin carries them in `features`, its `logicOnly` carries their `logicOnly`.
- * `systemsRun: "active"` runs the feature's systems only while it is active (see `SystemsRun`).
  *
  * @param name - Feature name. Shares the namespace with plugin names.
  * @param description - What the feature brings: nodes, flows, slot contributions, sub-features.
  * @returns The feature plugin, with its `logicOnly` twin.
- * @throws {Error} When the name is reserved or belongs to an engine plugin, for an entry of
- *   `features` that `defineFeature` did not make, and for a `systemsRun` that is neither
- *   `"always"` nor `"active"`.
+ * @throws {Error} When the name is reserved or belongs to an engine plugin, and for an entry of
+ *   `features` that `defineFeature` did not make.
  * @example
  * ```ts
  * // The reward popup is a feature: the main flow only declares slot("afterOrder").
@@ -222,7 +204,7 @@ export function defineFeature(name: string, description: FeatureDescription): Fe
     );
   }
 
-  assertSystemsRun(name, description.systemsRun);
+  assertNoSystemsRun(name, description);
 
   const children = Object.freeze([...(description.features ?? [])]);
 
@@ -236,6 +218,23 @@ export function defineFeature(name: string, description: FeatureDescription): Fe
     features: children,
     logicOnly
   });
+}
+
+/**
+ * Throws for a feature that still writes `systemsRun`, removed after 0.15.3: the type refuses it,
+ * this catches a game in JavaScript or a factory that passes the key through.
+ *
+ * @param name - Feature name.
+ * @param description - What the feature brings.
+ * @throws {Error} When the description carries `systemsRun`.
+ */
+function assertNoSystemsRun(name: string, description: FeatureDescription): void {
+  if (!("systemsRun" in description)) return;
+
+  throw new Error(
+    `[game] Feature "${name}" sets systemsRun, which the engine no longer has.\n` +
+      '  Delete it: a system whose query has no entity is not run (world README, "When a system runs").'
+  );
 }
 
 /**

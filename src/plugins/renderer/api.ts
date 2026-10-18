@@ -5,6 +5,7 @@
  */
 import { createDemandApi } from "./demand/api";
 import { createHostApi } from "./host/api";
+import { createSdfBatcherPipe } from "./host/sdf-batcher";
 import type { HostApi, InstallCounting } from "./host/types";
 import { createKeptApi } from "./kept/api";
 import { resolveDeps } from "./lifecycle";
@@ -21,8 +22,8 @@ import type { ViewportApi } from "./viewport/types";
 /**
  * The counting `host` installs before `new Application()`: the seven counting classes (BatcherPipe among them) of
  * `monitor` in a dev build and in a debug build, bound to the sinks in the monitor branch of the
- * state, none in production. A production `define` folds the dev or agent guard, so the counting
- * module leaves the bundle.
+ * state, none in production; the counting batch pipe extends the routing pipe of the batched text. A production
+ * `define` folds the dev or agent guard, so the counting module leaves the bundle.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @returns The bound installer, or `undefined` without the dev flag and the agent flag.
@@ -30,7 +31,7 @@ import type { ViewportApi } from "./viewport/types";
 function countingOf(ctx: RendererCtx): InstallCounting | undefined {
   return (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
     (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
-    ? pixi => installCounting(pixi, ctx.state.monitor.sinks)
+    ? pixi => installCounting(pixi, ctx.state.monitor.sinks, createSdfBatcherPipe(pixi))
     : undefined;
 }
 

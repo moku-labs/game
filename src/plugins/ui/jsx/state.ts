@@ -90,8 +90,6 @@ export function createJsxState(): JsxState {
     written: 0,
     debugTaps: [],
     debugWarned: false,
-    overlays: emptySet(),
-    featureOfComponent: emptyMap(),
-    featureOfProjection: emptyMap()
+    overlays: emptySet()
   };
 }

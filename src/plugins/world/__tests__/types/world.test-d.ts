@@ -54,6 +54,26 @@ system({
   }
 });
 
+// `scenes` is a list of scene ids, and a system with it is still a system the world takes.
+const shade = system({
+  name: "board.shade",
+  phase: "sync",
+  query: [Sprite],
+  scenes: ["board"],
+  run: () => undefined
+});
+
+expectTypeOf(shade).toMatchTypeOf<AnySystem>();
+
+system({
+  name: "board.glow",
+  phase: "sync",
+  query: [Sprite],
+  // @ts-expect-error — one scene is still a list: scenes: ["board"]
+  scenes: "board",
+  run: () => undefined
+});
+
 // The item type comes from `from` and reaches `key`, `view` and every motion hook.
 const boardItems = projection({
   name: "board.items",

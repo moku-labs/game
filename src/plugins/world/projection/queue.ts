@@ -70,8 +70,7 @@ export function despawnView(pctx: ProjectionCtx, mounted: Mounted, view: View): 
 
   const state = pctx.ctx.state.projection;
 
-  // The count follows the record: a view the projection no longer knew was counted out before.
-  if (state.byEntity.delete(view.entity)) pctx.deps.views.left(view.projection);
+  state.byEntity.delete(view.entity);
   state.mutes.delete(view.entity);
   state.rests.delete(view.entity);
   state.leaving.set(view.entity, view.cause);

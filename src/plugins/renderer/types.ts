@@ -25,9 +25,9 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * the render textures and matrices the kept pictures are drawn with (an `AlphaFilter` runs their pre-pass), and the
  * extension registry with the seven classes the counting of a dev or debug build swaps
  * (the three WebGPU draw classes, the filter system, both texture systems and the batcher pipe whose `buildStart`
- * begins every instruction rebuild; production swaps the encoder alone, to count the passes) and the bitmap text
- * pipe `host` swaps for one whose SDF shader applies the alpha once (with the WGSL and GLSL shader
- * pieces it compiles that shader from). The module object
+ * begins every instruction rebuild; production swaps the encoder alone, to count the passes), and the pieces of
+ * batched distance-field text `host` installs: Pixi's `Batcher` with its geometry and buffers, the bitmap text pipe
+ * and the batcher pipe it subclasses, and the WGSL and GLSL shader pieces of the batch's SDF shader. The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
  * Pixi in its bundle.
  *
@@ -39,6 +39,7 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * pixi.FilterSystem.extension.name; // "filter"
  * pixi.BatcherPipe.extension.name; // "batch"
  * pixi.BitmapTextPipe.extension.name; // "bitmapText"
+ * pixi.ExtensionType.Batcher; // "batcher"
  * pixi.defaultFilterVert.startsWith("in vec2 aPosition;"); // true
  * ```
  */
@@ -46,18 +47,24 @@ export type PixiModule = Pick<
   typeof import("pixi.js"),
   | "AlphaFilter"
   | "Application"
+  | "Batcher"
   | "BatcherPipe"
   | "BitmapFont"
   | "BitmapText"
   | "BitmapTextPipe"
   | "BlurFilter"
   | "Bounds"
+  | "Buffer"
+  | "BufferUsage"
   | "Cache"
   | "ColorMatrixFilter"
   | "Container"
+  | "DefaultBatcher"
   | "DisplacementFilter"
+  | "ExtensionType"
   | "Filter"
   | "FilterSystem"
+  | "Geometry"
   | "GlProgram"
   | "GlTextureSystem"
   | "GpuBatchAdaptor"
@@ -90,8 +97,6 @@ export type PixiModule = Pick<
   | "generateTextureBatchBit"
   | "generateTextureBatchBitGl"
   | "getBatchSamplersUniformGroup"
-  | "localUniformMSDFBit"
-  | "localUniformMSDFBitGl"
   | "mSDFBit"
   | "mSDFBitGl"
   | "roundPixelsBit"

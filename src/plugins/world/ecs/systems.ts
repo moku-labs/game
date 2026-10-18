@@ -5,11 +5,12 @@ import type { Snapshot } from "../../model/types";
 import type { Time } from "../../time/types";
 import type { WorldCtx } from "../types";
 import { flushCommands } from "./commands";
-import { planOf, SystemWalk, systemRows } from "./query";
-import { refreshScope } from "./scope";
+import { mayMatch, planOf, SystemWalk, systemRows } from "./query";
+import { checkScenes, endLeaving, onScene } from "./scenes";
 import { asError, resourceValue } from "./storage";
 import type {
   AnySystem,
+  ComponentStore,
   EcsApi,
   EcsState,
   PhaseContext,
@@ -133,18 +134,32 @@ export function frameSnapshot(ctx: WorldCtx, time: Readonly<Time>): Snapshot {
 }
 
 /**
- * Registers a system at the end of its phase list and returns the remover. Its query is resolved
- * here, once: a later change to the definition's `query` array is not seen. A system of a feature
- * with `systemsRun: "active"` carries the feature's index as its scope and runs only while the
- * feature is active; `ecs.system` passes none, so a system registered by hand always runs.
+ * An empty slot for each term of a plan: the stores its check keeps, filled with `push`, so the
+ * list is a packed array of its exact length from the start.
+ *
+ * @param count - The number of terms.
+ * @returns The slots, all `undefined`.
+ */
+function storeSlots(count: number): Array<ComponentStore | undefined> {
+  const slots: Array<ComponentStore | undefined> = [];
+
+  for (let index = 0; index < count; index += 1) slots.push(undefined);
+
+  return slots;
+}
+
+/**
+ * Registers a system at the end of its phase list and returns the remover. Its query and its
+ * `scenes` are read here, once: a later change to the definition is not seen. A dev build checks
+ * the `scenes` against the scenes the features declare, once the world started.
  *
  * @param ctx - Domain context of the world plugin.
  * @param definition - The system.
- * @param scope - The index of its feature in the scope, or -1 for a system that always runs.
  * @returns The remover; calling it twice is a no-op.
- * @throws {Error} When a system of that name is already registered.
+ * @throws {Error} When a system of that name is already registered, and in a dev build for a
+ *   name in `scenes` that no feature declares.
  */
-export function registerSystem(ctx: WorldCtx, definition: AnySystem, scope = -1): () => void {
+export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void {
   const state = ctx.state.ecs;
   const phases: WorldPhase[] = ["input", "animate", "layout", "sync"];
 
@@ -157,6 +172,11 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem, scope = -1)
     }
   }
 
+  // Inline and positive: a production `define` folds the guard and the check goes.
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+    checkScenes(state.scene, definition);
+  }
+
   // The query is read once, here: the plan registers every term's type and keeps the names, and
   // the one walk every run of the system resets is made.
   const plan = planOf(ctx, definition.query);
@@ -164,15 +184,14 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem, scope = -1)
     definition,
     frame: ctx.deps.time.snapshot().frame,
     plan,
-    scope,
+    stores: storeSlots(plan.names.length),
+    scenes: definition.scenes === undefined ? undefined : [...definition.scenes],
     skipped: false,
     walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan)
   };
   const list = state.systems[definition.phase];
 
   list.push(entry);
-
-  if (scope !== -1) state.scope.scoped = true;
 
   if (state.timing !== undefined) giveRow(state, state.timing, definition.name);
 
@@ -241,19 +260,20 @@ function phaseContextOf(ctx: WorldCtx, world: EcsApi, time: Readonly<Time>): Pha
 }
 
 /**
- * Tells whether a system of a scoped feature runs in this phase. One whose feature is not active is
- * skipped in its slot and remembers it; one that runs is told whether its runs before were
- * skipped. No walk, no mark and no clock read happen for a skipped system: the check comes before
- * all three. The caller sets `resumed` back to false after the run, so a system that always runs
- * reads false without a write of its own.
+ * Tells whether a system runs in this phase: one of its `scenes` is mounted or leaving, and no
+ * term of its query has an empty store. A skipped system remembers it; one that runs is told in
+ * `resumed` whether its last chance was skipped. No walk, no mark and no clock read happen for a
+ * skipped system: the check comes before all three.
  *
- * @param active - The active flags of the features, evaluated at the start of the phase.
- * @param entry - The system, whose scope is a feature index.
+ * @param state - The ecs branch of the plugin state.
+ * @param entry - The system.
  * @param context - What its `run` receives; `resumed` is written here.
  * @returns True when the system runs.
  */
-function wakes(active: Uint8Array, entry: SystemEntry, context: PhaseContext): boolean {
-  if (active[entry.scope] === 0) {
+function wakes(state: EcsState, entry: SystemEntry, context: PhaseContext): boolean {
+  const scenes = entry.scenes;
+
+  if ((scenes !== undefined && !onScene(state.scene, scenes)) || !mayMatch(state.stores, entry)) {
     entry.skipped = true;
 
     return false;
@@ -263,29 +283,6 @@ function wakes(active: Uint8Array, entry: SystemEntry, context: PhaseContext): b
   entry.skipped = false;
 
   return true;
-}
-
-/**
- * Runs one system of a scoped feature when its feature is active, and leaves `resumed` false for
- * the systems after it.
- *
- * @param ctx - Domain context of the world plugin.
- * @param active - The active flags of the features.
- * @param entry - The system.
- * @param context - What its `run` receives.
- * @param phase - The phase, for the report of a throw.
- */
-function runScoped(
-  ctx: WorldCtx,
-  active: Uint8Array,
-  entry: SystemEntry,
-  context: PhaseContext,
-  phase: WorldPhase
-): void {
-  if (!wakes(active, entry, context)) return;
-
-  guardedRun(ctx, entry, context, phase);
-  context.resumed = false;
 }
 
 /**
@@ -311,9 +308,9 @@ function guardedRun(
 
 /**
  * Runs the systems of one phase and flushes the commands they queued. A throwing system is
- * reported and skipped for this frame; the frame goes on. When a feature scopes its systems, the
- * active set is evaluated first, from the sources as they stand at the start of the phase; a
- * system of a feature that is not active is skipped in its slot.
+ * reported and skipped for this frame; the frame goes on. A system whose query has no entity, or
+ * none of whose `scenes` is mounted or leaving, is skipped in its slot. While a scene leaves, the
+ * phase first ends the leave when nothing carries `Exiting` any more.
  *
  * @param ctx - Domain context of the world plugin.
  * @param world - The ecs API a system's `run` receives.
@@ -329,12 +326,11 @@ export function runPhase(
   const state = ctx.state.ecs;
 
   if (phase !== ALWAYS && effectiveMode(ctx) !== "live") return;
-  // Per phase: one flag read for a game with no scoped system.
-  if (state.scope.scoped) refreshScope(ctx);
+  // Per phase: one length read while no scene leaves.
+  if (state.scene.leaving.length > 0) endLeaving(state);
 
   const context = phaseContextOf(ctx, world, time);
   const entries = state.systems[phase];
-  const active = state.scope.active;
 
   state.running = phase;
 
@@ -345,9 +341,7 @@ export function runPhase(
       const entry = entries[index];
 
       if (entry === undefined || entry.frame >= time.frame) continue;
-      // Per system: one integer comparison for a system that always runs.
-      if (entry.scope === -1) guardedRun(ctx, entry, context, phase);
-      else runScoped(ctx, active, entry, context, phase);
+      if (wakes(state, entry, context)) guardedRun(ctx, entry, context, phase);
     }
   } else {
     runTimed(ctx, state.timing, entries, context, phase, time);
@@ -378,22 +372,21 @@ function runTimed(
   phase: WorldPhase,
   time: Readonly<Time>
 ): void {
+  const state = ctx.state.ecs;
   const count = entries.length;
-  const active = ctx.state.ecs.scope.active;
 
   for (let index = 0; index < count; index += 1) {
     const entry = entries[index];
 
     if (entry === undefined || entry.frame >= time.frame) continue;
     // Before the first clock read: a skipped system is not timed, its row keeps the frame's 0.
-    if (entry.scope !== -1 && !wakes(active, entry, context)) continue;
+    if (!wakes(state, entry, context)) continue;
 
-    const row = rowOf(ctx.state.ecs, entry.definition.name);
+    const row = rowOf(state, entry.definition.name);
     const started = timing.clock();
 
     guardedRun(ctx, entry, context, phase);
 
     timing.ms[row] = (timing.ms[row] ?? 0) + timing.clock() - started;
-    context.resumed = false;
   }
 }

@@ -4,12 +4,12 @@
  * `time`, `model` and `flow`; frames are driven by calling the recorded phase callbacks.
  */
 import type { Log } from "@moku-labs/common/browser";
-import { type Mock, vi } from "vitest";
+import { vi } from "vitest";
 import type { Require } from "../../../../config";
 import { fakeClock } from "../../../clock/fake";
 import type { Api as ClockApi, FakeClock } from "../../../clock/types";
 import type { FeatureDescription } from "../../../flow/features/types";
-import type { Api as FlowApi, FlowGraph, FlowState, Hint } from "../../../flow/types";
+import type { Api as FlowApi, Hint } from "../../../flow/types";
 import type { Json, Api as ModelApi, Root, Snapshot } from "../../../model/types";
 import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/types";
 import { createWorldApi } from "../../api";
@@ -26,22 +26,6 @@ const PHASE_ORDER: readonly Phase[] = ["input", "animate", "layout", "sync", "si
 /** One `time.onFrame` registration. */
 export type FrameRegistration = { phase: Phase; callback: FrameCallback };
 
-/**
- * The fake flow a test moves: the mode, the stack `state()` hands out and the node owners
- * `describe()` answers with. `state()` is memoised as the real one is: the same frozen object
- * until the mode changes or a test assigns a new `stack`.
- */
-export type FakeFlow = {
-  /** Effective flow mode, read by `ecs.mode()`. */
-  mode: "live" | "fast";
-  /** The stack frames; assign a new array to move the graph. */
-  stack: FlowState["stack"];
-  /** Flow id to node name to the feature that owns it, read by every `describe()`. */
-  owners: Record<string, Record<string, string | undefined>>;
-  /** The spy behind `describe()`; a case may make it throw. */
-  describe: Mock<() => FlowGraph>;
-};
-
 /** The mock world: the plugin API, the fakes behind it and a frame driver. */
 export type MockWorld = {
   ctx: KernelSlice;
@@ -50,8 +34,8 @@ export type MockWorld = {
   emitted: Array<{ name: string; payload: unknown }>;
   /** The mutable model roots the fake `store.snapshot()` reads. */
   model: { player: Json; session: Json };
-  /** The fake flow: mode, stack and node owners. */
-  flow: FakeFlow;
+  /** Effective flow mode, read by `ecs.mode()`. */
+  flow: { mode: "live" | "fast" };
   features: Array<{ name: string; description: FeatureDescription }>;
   frames: FrameRegistration[];
   time: Time;
@@ -91,74 +75,6 @@ function createMockLog(): Log.LogApi {
 }
 
 /**
- * The graph `describe()` answers with: one flow per owner table, each node with its owner.
- *
- * @param owners - Flow id to node name to owner.
- * @returns The described graph.
- */
-function graphOf(owners: FakeFlow["owners"]): FlowGraph {
-  const flows: FlowGraph["flows"] = {};
-
-  for (const [id, nodes] of Object.entries(owners)) {
-    const described: FlowGraph["flows"][string]["nodes"] = {};
-
-    for (const [node, owner] of Object.entries(nodes)) {
-      described[node] = {
-        flow: id,
-        node,
-        rest: true,
-        over: false,
-        checkpoint: false,
-        barrier: false,
-        outcomes: [],
-        ...(owner === undefined ? {} : { owner })
-      };
-    }
-
-    flows[id] = { nodes: described, start: Object.keys(nodes)[0] ?? "", edges: {} };
-  }
-
-  return { main: Object.keys(owners)[0] ?? "", flows, slots: {} };
-}
-
-/**
- * Creates the fake flow and its memoised `state()`.
- *
- * @returns The fake and the `state()` the world reads.
- */
-function createFakeFlow(): { flow: FakeFlow; state: () => FlowState } {
-  const flow: FakeFlow = {
-    mode: "live",
-    stack: [],
-    owners: {},
-    describe: vi.fn((): FlowGraph => graphOf(flow.owners))
-  };
-  const memo: {
-    mode: string;
-    stack: FlowState["stack"] | undefined;
-    state: FlowState | undefined;
-  } = { mode: "", stack: undefined, state: undefined };
-
-  const state = (): FlowState => {
-    if (memo.state === undefined || memo.mode !== flow.mode || memo.stack !== flow.stack) {
-      memo.mode = flow.mode;
-      memo.stack = flow.stack;
-      memo.state = Object.freeze({
-        running: flow.stack.length > 0,
-        path: "",
-        stack: Object.freeze([...flow.stack]),
-        pending: Object.freeze({}),
-        mode: flow.mode
-      });
-    }
-
-    return memo.state;
-  };
-
-  return { flow, state };
-}
-
-/**
  * Creates the mock world.
  *
  * @param options - Config overrides of the plugin.
@@ -170,7 +86,7 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
   const log = createMockLog();
   const emitted: Array<{ name: string; payload: unknown }> = [];
   const model: { player: Json; session: Json } = { player: {}, session: {} };
-  const { flow, state: flowState } = createFakeFlow();
+  const flow: { mode: "live" | "fast" } = { mode: "live" };
   const features: Array<{ name: string; description: FeatureDescription }> = [];
   const frames: FrameRegistration[] = [];
   const hintListeners: Array<(hint: Hint) => void> = [];
@@ -211,8 +127,7 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
   } as unknown as ModelApi;
 
   const flowApi = {
-    state: flowState,
-    describe: () => flow.describe(),
+    state: () => ({ mode: flow.mode }),
     features: { all: () => features },
     fx: {
       onHint: (listener: (hint: Hint) => void): (() => void) => {

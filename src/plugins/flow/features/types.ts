@@ -78,31 +78,11 @@ export type FeatureTextStyles = {
 };
 
 /**
- * When the systems of a feature run. `"always"` (the default): every frame, as before. `"active"`: only while the
- * feature is active — a node of it is on the flow stack, a scene it declares is mounted, a view of a projection it
- * registered exists, or `ui` holds a popup or a JSX root of it — leaving included, until the last view is gone.
- * Skipping changes nothing the flow sees: systems never write the model. The systems the engine's plugins
- * register always run.
- *
- * @example
- * ```ts
- * // features/board/index.ts: the board's four systems stop on the ward and on the splash.
- * export const boardFeature = defineFeature("board", {
- *   flows: [mergeBoard],
- *   systems: [looks, fade, leaving, veil],
- *   systemsRun: "active"
- * });
- * ```
- */
-export type SystemsRun = "always" | "active";
-
-/**
  * What a feature brings to the game. The logic keys are typed here; the keys of later milestones
  * pass through the index signature until their plugin types them. `flow` stores them untouched,
  * and `logicOnly` drops them. The V2 screen plugins read five of them through the index signature:
  * `projections`, `systems` and `components` (`world`), `scenes` (`scenes`, `assets`, and the
- * scene-id check of `flow`) and `assets` (`assets`). `world` also reads the typed `systemsRun`.
- * The V3 interface keys are typed below.
+ * scene-id check of `flow`) and `assets` (`assets`). The V3 interface keys are typed below.
  *
  * @example
  * ```ts
@@ -141,8 +121,12 @@ export type FeatureDescription = {
   emitters?: readonly FeatureEmitter[];
   /** Filters the feature puts on its interface components, read by `effects`. */
   filters?: readonly FeatureFilter[];
-  /** When the feature's systems run, read by `world`. Absent is `"always"`. */
-  systemsRun?: SystemsRun;
+  /**
+   * The key of 0.15.3, removed: typed `never`, so a game that still writes it is told. A system
+   * now runs while its query has an entity, and `scenes` on `system()` limits it to some scenes:
+   * delete the key (world README, "When a system runs").
+   */
+  systemsRun?: never;
   [later: string]: unknown;
 };
 
