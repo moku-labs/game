@@ -11,6 +11,7 @@ import { alloc } from "../../../../../tests/perf/alloc";
 import type { Api as FlowApi } from "../../../flow/types";
 import type { Api as ModelApi, Snapshot } from "../../../model/types";
 import { Parent, Sprite, Transform } from "../../../renderer/components";
+import { CALM_AFTER } from "../../../renderer/kept/record";
 import type { ViewportSize } from "../../../renderer/types";
 import type { Time } from "../../../time/types";
 import { createModules } from "../../../world/api";
@@ -20,7 +21,7 @@ import { Alpha, Blur, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
-import { atlasTexture } from "../fake-effects-pixi";
+import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
 import { createMockEffects, type MockEffects } from "../unit/mock-effects";
 
 /** Calls before a window: the code under measure reaches its optimized tier first, as on a phone after a few seconds. */
@@ -80,6 +81,29 @@ const VIEWPORT: Readonly<ViewportSize> = Object.freeze({
   orientation: "portrait",
   safeArea: Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 })
 });
+
+/**
+ * Pixi's `AlphaFilter` as a fixture draws it: its setter writes the alpha into its uniform in place, as Pixi's does.
+ * The fake of the unit tests records every write as a string: those would be the fake's bytes, not the sync's.
+ */
+class QuietAlphaFilter extends FakeFxFilter {
+  /** The uniform the alpha lives in, as Pixi's `alphaUniforms.uniforms`. */
+  private readonly uniforms: { uAlpha: number };
+
+  public constructor(options: { alpha?: number; resolution?: number | "inherit" } = {}) {
+    super(options);
+    this.uniforms = { uAlpha: options.alpha ?? 1 };
+  }
+
+  /** @returns The alpha. */
+  public get alpha(): number {
+    return this.uniforms.uAlpha;
+  }
+
+  public set alpha(value: number) {
+    this.uniforms.uAlpha = value;
+  }
+}
 
 /** The two renderer calls a fixture makes allocation-free, as they are on the real renderer. */
 type PlainRenderer = {
@@ -150,6 +174,8 @@ export type FiltersFixture = {
   tweened: Entity;
   /** The value the world holds for its `Glow`, writable: a tween case moves it in place. */
   glow: { strength: number };
+  /** The views whose `Alpha` a fade case moves, by name: `canvas` at the canvas's resolution, `half` at 0.5. */
+  fades: Readonly<Record<FadeView, { entity: Entity; value: { alpha: number } }>>;
   /** How often the sync called `renderer.invalidate`. */
   counter: { invalidated: number };
 };
@@ -176,7 +202,8 @@ function viewComponents(index: number): AnyComponentValue[] {
       return [sprite, place, Blur({ strength: 4 })];
     }
     default: {
-      return [sprite, place, Alpha({ alpha: 0.8 })];
+      // The second Alpha draws at half a texel per CSS px, as the fog of A Memory Missing.
+      return [sprite, place, Alpha({ alpha: 0.8, resolution: index === 7 ? 0.5 : 0 })];
     }
   }
 }
@@ -194,6 +221,7 @@ export function filtersFixture(): FiltersFixture {
 
   const counter = plainRenderer(mock);
 
+  Reflect.set(mock.pixi.module, "AlphaFilter", QuietAlphaFilter);
   mock.start();
 
   const views: Entity[] = [];
@@ -210,10 +238,26 @@ export function filtersFixture(): FiltersFixture {
 
   const tweened = views[0] ?? 0;
   const glow = mock.world.ecs.get(tweened, Glow) as { strength: number } | undefined;
+  const fades = { canvas: fadeOf(mock, views[3] ?? 0), half: fadeOf(mock, views[7] ?? 0) };
 
   if (glow === undefined) throw new Error("perf fixture: the first view has no Glow");
 
-  return { mock, run: phaseRunner(mock, "sync"), tweened, glow, counter };
+  return { mock, run: phaseRunner(mock, "sync"), tweened, glow, fades, counter };
+}
+
+/**
+ * The `Alpha` of one view of the fixture: the entity and the value the world holds for it.
+ *
+ * @param mock - The started mock.
+ * @param entity - The view.
+ * @returns The entity and its writable value.
+ */
+function fadeOf(mock: MockEffects, entity: Entity): { entity: Entity; value: { alpha: number } } {
+  const value = mock.world.ecs.get(entity, Alpha) as { alpha: number } | undefined;
+
+  if (value === undefined) throw new Error("perf fixture: a fade's view has no Alpha");
+
+  return { entity, value };
 }
 
 /** The two strengths a tween case moves between. */
@@ -249,6 +293,63 @@ export function tweenWrite(fixture: FiltersFixture): () => void {
  */
 export function tweenStep(fixture: FiltersFixture): () => void {
   const write = tweenWrite(fixture);
+  const { run } = fixture;
+
+  return (): void => {
+    write();
+    run();
+  };
+}
+
+/** The views a fade case may move: the `Alpha` at the canvas's resolution, and the one at 0.5. */
+export type FadeView = "canvas" | "half";
+
+/** A fade case: the view it moves and the alphas it writes, one a step, in turn. */
+export type Fade = { readonly view: FadeView; readonly alphas: readonly number[] };
+
+/** Keyframes that touch 1 in every other step: the filter stays switched on. */
+export const CROSSING: Fade = { view: "canvas", alphas: [1, 0.8] };
+
+/** A rest at 1 long enough to switch the filter off (`CALM_AFTER` steps), then a fraction that switches it on. */
+export const RESTING: Fade = {
+  view: "canvas",
+  alphas: [...Array.from({ length: CALM_AFTER }, () => 1), 0.8]
+};
+
+/** A fade of the `Alpha` at resolution 0.5: its resolution is never written again. */
+export const HALF: Fade = { view: "half", alphas: [0.9, 0.8] };
+
+/**
+ * The write of a fade on the `Alpha` of one view, alone: its alpha moves in place to the next of the fade's alphas in
+ * every call, the way a tween's write lands in the stored value. The change mark is made once, by `ecs.set`, and
+ * stays, as in `tweenWrite`.
+ *
+ * @param fixture - A fixture of `filtersFixture`.
+ * @param fade - The fade.
+ * @returns The write.
+ */
+export function fadeWrite(fixture: FiltersFixture, fade: Fade): () => void {
+  const { entity, value } = fixture.fades[fade.view];
+  const { alphas } = fade;
+  let step = 0;
+
+  fixture.mock.world.ecs.set(entity, Alpha, { alpha: alphas.at(-1) ?? 1 });
+
+  return (): void => {
+    value.alpha = alphas[step] ?? 1;
+    step = step + 1 === alphas.length ? 0 : step + 1;
+  };
+}
+
+/**
+ * The step of a fade on the `Alpha` of one view: the write of `fadeWrite`, then the `sync` phase.
+ *
+ * @param fixture - A fixture of `filtersFixture`.
+ * @param fade - The fade.
+ * @returns The step.
+ */
+export function fadeStep(fixture: FiltersFixture, fade: Fade): () => void {
+  const write = fadeWrite(fixture, fade);
   const { run } = fixture;
 
   return (): void => {

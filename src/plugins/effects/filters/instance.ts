@@ -4,14 +4,19 @@
  * one `UniformGroup` both read. The Pixi-core kinds: their own class, written through their setters
  * when a field differs from what they were last given. Every kind but `Blur` renders at
  * `resolution: "inherit"`, the resolution of the canvas, so a filtered view stays sharp on DPR 2-3
- * (decision 32). Every write compares first: a value the filter holds already writes nothing and
+ * (decision 32), unless its value (`Alpha`) or its definition (`defineFilter`) gives a resolution of
+ * its own. An `Alpha` at 1 drawn at the canvas's is switched off once it rested there: it would copy
+ * the view unchanged through a pass. Every write compares first: a value the filter holds already writes nothing and
  * asks the renderer for no frame. A destroy frees the uniform buffers first: `Filter.destroy()`
  * leaves them to a GC that runs after a minute (P10). A filter with inputs draws each place of its
  * chains through Pixi's public `applyFilter` from inside its own `apply`, into pooled textures given
  * back in a `finally`; a stand-in draws in place of a broken kind or instance.
  */
+
+import { CALM_AFTER } from "../../renderer/kept/record";
 import type { PixiFilter, PixiFilterManager, PixiModule, PixiTexture } from "../../renderer/types";
 import type { EffectsCtx } from "../types";
+import { MAX_RESOLUTION } from "./define";
 import { breakInstance, drawBroken, guardApply, messageOf } from "./guard";
 import { brokenMark } from "./mark";
 import type {
@@ -61,6 +66,21 @@ const PROBE_VALUE: Readonly<FilterFields> = Object.freeze({ enabled: true, order
 
 /** The numbers of a vector field that holds none. */
 const NO_NUMBERS: readonly number[] = Object.freeze([]);
+
+/**
+ * The resolution Pixi is given for a resolution of a value or a definition: the number, at most `MAX_RESOLUTION`, or
+ * the canvas's for 0 (or less, or not a number).
+ *
+ * @param resolution - Texels per CSS px; 0 for the canvas's.
+ * @returns What a filter's `resolution` takes.
+ * @example
+ * ```ts
+ * resolutionOf(50); // 4
+ * ```
+ */
+function resolutionOf(resolution: number): number | typeof CANVAS_RESOLUTION {
+  return resolution > 0 ? Math.min(resolution, MAX_RESOLUTION) : CANVAS_RESOLUTION;
+}
 
 /**
  * Tells whether two numbers are the same value for the GPU: equal, or both NaN.
@@ -251,7 +271,7 @@ function createOurs(
     glProgram,
     resources,
     padding: paddingOf(definition, value),
-    resolution: CANVAS_RESOLUTION
+    resolution: resolutionOf(definition.resolution)
   });
 
   return {
@@ -294,6 +314,53 @@ function blurResolution(ectx: EffectsCtx, value: Readonly<FilterFields>): number
   if (resolution > 0) return resolution;
 
   return ectx.state.phone ? ectx.config.blur.phoneResolution : 1;
+}
+
+/**
+ * Tells whether an `Alpha` value draws its view unchanged: switched on, at alpha 1, at the canvas's resolution. Its
+ * filter would copy the view through a pass of its own. The fields are read by name: a fade reads them every frame.
+ *
+ * @param value - The stored `Alpha` value.
+ * @returns True when the filter may be switched off.
+ * @example
+ * ```ts
+ * drawsUnchanged({ enabled: true, order: 0, alpha: 1, resolution: 0 }); // true
+ * ```
+ */
+function drawsUnchanged(value: Readonly<FilterFields>): boolean {
+  const { alpha, resolution } = value;
+
+  return value.enabled && alpha === 1 && !(typeof resolution === "number" && resolution > 0);
+}
+
+/**
+ * The `enabled` switch of an instance for the stored value of this sync: the value's own, at once, but an `Alpha` that
+ * draws its view unchanged is switched off only at its `CALM_AFTER`-th sync in a row so while its filter is on, counted
+ * in `calm`: keyframes that touch 1 keep the pass and switch nothing, a fade that ends at 1 lets it go. The filter
+ * sync syncs the view again while `calm` counts.
+ *
+ * @param instance - The instance.
+ * @param value - The stored filter value.
+ * @returns True when Pixi is to draw the filter.
+ */
+function switchOf(instance: FilterInstance, value: Readonly<FilterFields>): boolean {
+  if (instance.kind !== "alpha") return value.enabled;
+
+  if (!drawsUnchanged(value)) {
+    instance.calm = 0;
+
+    return value.enabled;
+  }
+
+  if (!instance.filter.enabled) return false;
+
+  instance.calm += 1;
+
+  if (instance.calm < CALM_AFTER) return true;
+
+  instance.calm = 0;
+
+  return false;
 }
 
 /**
@@ -457,10 +524,11 @@ function createCore(
         kind: "alpha",
         filter: new pixi.AlphaFilter({
           alpha: numberOf(value, "alpha"),
-          resolution: CANVAS_RESOLUTION
+          resolution: resolutionOf(numberOf(value, "resolution"))
         }),
         ...appliedOf(value),
-        passes: 1
+        passes: 1,
+        calm: 0
       };
     }
   }
@@ -495,7 +563,8 @@ export function createFilter(
 
   if (body === undefined) return undefined;
 
-  body.filter.enabled = value.enabled;
+  // Built at rest an `Alpha` that draws its view unchanged is off at once: nothing was switched yet.
+  body.filter.enabled = value.enabled && !(body.kind === "alpha" && drawsUnchanged(value));
   if (body.kind === "wgsl") body.areaStale = body.definition.area !== undefined;
 
   const instance: FilterInstance = Object.assign(body, {
@@ -802,7 +871,16 @@ function wireInputs(ectx: EffectsCtx, pixi: PixiModule, instance: OursInstance):
     output: Output,
     clearMode: boolean
   ): void => applyInputs(ectx, pixi, instance, inputs, manager, input, output, clearMode);
-  evaluate(ectx, pixi, instance, inputs, ectx.deps.renderer.host.resolution());
+  // A definition with a resolution of its own is drawn at it: its first apply then finds the chains current.
+  const { resolution } = instance.definition;
+
+  evaluate(
+    ectx,
+    pixi,
+    instance,
+    inputs,
+    resolution > 0 ? resolution : ectx.deps.renderer.host.resolution()
+  );
 }
 
 /**
@@ -1479,6 +1557,13 @@ function sameField(a: FilterField | undefined, b: FilterField | undefined): bool
 function coreDiffers(instance: CoreInstance, value: Readonly<FilterFields>): boolean {
   const { fields, applied } = instance;
 
+  // An `Alpha` compares its two fields by name: a fade compares them every frame, and a keyed read boxes a fraction.
+  if (instance.kind === "alpha") {
+    return (
+      !sameField(applied.alpha, value.alpha) || !sameField(applied.resolution, value.resolution)
+    );
+  }
+
   // per sync of a changed view: the keys listed once, a plain array; `Object.keys` would make one every call.
   for (const field of fields) {
     if (instance.kind === "displacement" && field === "map") {
@@ -1517,6 +1602,17 @@ function writeCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<Fil
   setCore(ectx, instance, value);
 
   const { fields, applied } = instance;
+
+  // An `Alpha` copies its two fields by name: a fade writes them in every frame, and the keyed copy boxes a fraction.
+  if (instance.kind === "alpha") {
+    const { alpha, resolution } = value;
+
+    if (alpha !== undefined) applied.alpha = alpha;
+    if (resolution !== undefined && resolution !== applied.resolution)
+      applied.resolution = resolution;
+
+    return;
+  }
 
   // Copied in place: the record and its keys were made once with the instance.
   for (const field of fields) {
@@ -1573,7 +1669,15 @@ function setCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<Filte
       return;
     }
     default: {
-      instance.filter.alpha = numberOf(value, "alpha");
+      // Read by name: a fade writes them in every frame, and a number `numberOf` hands back is boxed (16 B).
+      const { alpha, resolution } = value;
+
+      instance.filter.alpha = typeof alpha === "number" ? alpha : 0;
+
+      // Only a new resolution is written (`applied` holds the last one here): a number written every frame is boxed.
+      if (resolution !== instance.applied.resolution) {
+        instance.filter.resolution = resolutionOf(typeof resolution === "number" ? resolution : 0);
+      }
     }
   }
 }
@@ -1604,8 +1708,9 @@ function switchOffBroken(instance: FilterInstance, before: () => void): void {
 
 /**
  * Brings one instance up to the stored value for a frame, comparing before anything is written.
- * A broken instance stays off whatever its component says. Switching on or off is a visible
- * change; so is a new value of a filter that is on. A filter that is off and stays off still gets
+ * A broken instance stays off whatever its component says, and an `Alpha` at 1 drawn at the
+ * canvas's resolution is switched off at its `CALM_AFTER`-th sync there. Switching on or off is a
+ * visible change; so is a new value of a filter that is on. A filter that is off and stays off still gets
  * its new values written, so it is current when it comes back on, but asks for nothing: an off
  * filter draws no pixel. Ours compare on every sync of their view (a view syncs when something of it changed); a core
  * kind only when its component changed.
@@ -1630,7 +1735,8 @@ export function writeFilter(
     return false;
   }
 
-  const toggled = instance.filter.enabled !== value.enabled;
+  const on = switchOf(instance, value);
+  const toggled = instance.filter.enabled !== on;
   const differs =
     instance.kind === "wgsl"
       ? oursDiffer(instance, instance.definition, value)
@@ -1640,10 +1746,10 @@ export function writeFilter(
 
   staleArea(instance);
 
-  const visible = toggled || value.enabled;
+  const visible = toggled || on;
 
   if (visible) before();
-  if (toggled) instance.filter.enabled = value.enabled;
+  if (toggled) instance.filter.enabled = on;
 
   if (differs) {
     if (instance.kind === "wgsl") {

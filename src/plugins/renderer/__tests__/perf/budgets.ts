@@ -71,5 +71,11 @@ export const BUDGET = {
   keptFlushStepped: 0,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
-  filterSwitchStill: 0
+  filterSwitchStill: 0,
+  // Change 2026-10-18-memory-render, M4: an alpha filter switched off and on every frame on a board of 10 kept views:
+  // the mark, the filter step, the collect and the flush. New, measured 380 B a switch, all of it in the write of the
+  // view's list: the engine's array of the enabled filters and Pixi's `filters` setter (its frozen copy, the filter
+  // effect added to or taken off the view's effects with an iterator, a splice and a sort); the kept collect and flush
+  // add nothing. `effects` makes such a switch for an `Alpha` at most once a rest of `CALM_AFTER` frames at 1.
+  filterSwitchAlpha: 400
 } as const;

@@ -134,6 +134,13 @@ export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
    * only when the value changed.
    */
   readonly area?: (value: Readonly<FilterValueOf<Uniforms>>) => FilterArea | undefined;
+  /**
+   * The texels per CSS px the view and its filters are drawn at under this filter, from 0 to 4; `0` (the default) for
+   * the resolution of the canvas. Pixi draws all the filters of a view at the smallest resolution among them, so a
+   * resolution below the canvas's lowers the others on the same view too. A stage of an input ignores it: its step's
+   * `scale` sizes it.
+   */
+  readonly resolution?: number;
 };
 
 /**
@@ -187,6 +194,8 @@ export type FilterDefinition = {
   readonly origin: UniformSpec | undefined;
   /** The rectangle outside of which the filter draws nothing, from the value; present only when the spec gave one. */
   readonly area?: (value: Readonly<FilterFields>) => FilterArea | undefined;
+  /** The texels per CSS px it draws at; 0 for the resolution of the canvas. */
+  readonly resolution: number;
 };
 
 /**
@@ -428,14 +437,20 @@ export type DisplacementValue = {
 };
 
 /**
- * `Alpha`: Pixi's alpha over the whole subtree, as one layer.
+ * `Alpha`: Pixi's alpha over the whole subtree, as one layer. `resolution` is the texels per CSS px the subtree is drawn
+ * at, at most 4, `0` for the resolution of the canvas; Pixi draws all the filters of a view at the smallest resolution
+ * among them, so `Alpha({ resolution: 0.5 })` beside a `Glow` draws the glow at 0.5 too. At `alpha: 1` and
+ * `resolution: 0` the filter would copy the subtree unchanged through a pass of its own: it is switched off, at once
+ * when it is built so, otherwise after 8 frames at rest there (a keyframe that touches 1 switches nothing), and the
+ * subtree draws as if the Alpha were not there.
  *
  * @example
  * ```ts
- * const value: AlphaValue = { alpha: 0.5, enabled: true, order: 0 };
+ * // The fog of a memory screen, opaque, drawn at half a texel per CSS px through the Alpha's one pass.
+ * const value: AlphaValue = { alpha: 1, resolution: 0.5, enabled: true, order: 0 };
  * ```
  */
-export type AlphaValue = { alpha: number; enabled: boolean; order: number };
+export type AlphaValue = { alpha: number; resolution: number; enabled: boolean; order: number };
 
 /**
  * The five built-in kinds drawn by a Pixi core filter.
@@ -548,6 +563,11 @@ export type FilterBody =
       /** The keys of `applied`, listed once: a compare walks them by index, with no `Object.keys` per frame. */
       readonly fields: readonly string[];
       passes: number;
+      /**
+       * Syncs in a row its value drew the view unchanged (at 1, at the canvas's resolution) while its filter was on;
+       * the filter is switched off at `CALM_AFTER` and the count starts over.
+       */
+      calm: number;
     };
 
 /**

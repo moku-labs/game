@@ -53,7 +53,7 @@ const displacementDefaults: DisplacementValue = {
   order: 0
 };
 
-const alphaDefaults: AlphaValue = { alpha: 1, enabled: true, order: 0 };
+const alphaDefaults: AlphaValue = { alpha: 1, resolution: 0, enabled: true, order: 0 };
 
 /**
  * A soft halo of `color` around the opaque pixels of a view and its subtree, `distance` pixels
@@ -148,11 +148,16 @@ export const Displacement = /*#__PURE__*/ component("effects.displacement", disp
 
 /**
  * Pixi's alpha over a view and its subtree as one layer, so overlapping children do not show
- * through each other.
+ * through each other. `resolution: 0` draws at the resolution of the canvas; a number draws the
+ * subtree at that many texels per CSS px, at most 4, and every other filter of the view with it
+ * (Pixi's smallest resolution wins). At `alpha: 1` and `resolution: 0` the filter is switched off
+ * after 8 frames there: it would copy the subtree unchanged through a pass of its own, and a
+ * keyframe that only touches 1 switches nothing. One render pass per apply.
  *
  * @example
  * ```ts
- * Alpha({ alpha: 0.5 }).value; // { alpha: 0.5, enabled: true, order: 0 }
+ * // The fog of a memory screen, drawn at half a texel per CSS px through one pass.
+ * Alpha({ resolution: 0.5 }).value; // { alpha: 1, resolution: 0.5, enabled: true, order: 0 }
  * ```
  */
 export const Alpha = /*#__PURE__*/ component("effects.alpha", alphaDefaults);

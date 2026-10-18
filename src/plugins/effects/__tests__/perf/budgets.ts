@@ -15,6 +15,16 @@ export const BUDGET = {
   // E1: one `Glow` strength tweened on one of 12 filtered views, the tween's own write subtracted. Before: 4 698 B. Now
   // 0: one view syncs, its uniforms walked by index.
   filtersTween: 0,
+  // Change 2026-10-18-memory-render, M4: the `Alpha` of one of 12 filtered views touches 1 in every other step, the
+  // fade's own write subtracted; its filter stays on (it is switched off only after `CALM_AFTER` syncs at 1). Before:
+  // 16 B (the alpha `numberOf` handed back and the keyed copy of the fields the setters were given each boxed a
+  // fraction). Now 0: an `Alpha` reads and copies its two fields by name.
+  filtersFadeCrossing: 0,
+  // M4: the same `Alpha` rests at 1 for `CALM_AFTER` steps, its view synced again each step, then its filter is
+  // switched off, and a fraction switches it on again: the union of the view judged twice a round. New.
+  filtersFadeResting: 0,
+  // M4: an `Alpha` at resolution 0.5 fading between two fractions: its resolution is not written again. New.
+  filtersFadeHalf: 0,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the
   // frame's delta boxed into each step call). Now 0: nothing is written for a still host.

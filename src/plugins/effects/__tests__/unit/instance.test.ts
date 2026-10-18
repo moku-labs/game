@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FakeFilter, FakeUniformGroup } from "../../../renderer/__tests__/fake-pixi";
+import { CALM_AFTER } from "../../../renderer/kept/record";
 import type { PixiModule } from "../../../renderer/types";
 import { Alpha, Blur, ColorMatrix, Displacement, Glow, Noise } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
@@ -601,5 +602,129 @@ describe("destroyFilter", () => {
     expect(map.destroyed).toBe(true);
     expect((map.sprite as FakeFxSprite).destroyOptions).toEqual({ texture: false });
     expect(map.sprite.texture.destroyed).toBe(false);
+  });
+});
+
+describe("Alpha: its resolution and the pass it skips at 1", () => {
+  // Bug: the fog asks for half the pixels and is still drawn at the canvas resolution: the field is ignored.
+  it("builds an Alpha at its own resolution, at the canvas's for 0, and follows a change both ways", () => {
+    const { mock, pixi } = started();
+    const instance = build(
+      mock,
+      pixi,
+      "effects.alpha",
+      Alpha({ alpha: 0.5, resolution: 0.5 }).value
+    );
+    const filter = instance.filter as unknown as FakeFxAlphaFilter;
+
+    expect(filter.built).toEqual({ alpha: 0.5, resolution: 0.5 });
+
+    writeFilter(mock.ectx, instance, Alpha({ alpha: 0.5 }).value, true, ignore);
+    expect(filter.resolution).toBe("inherit");
+
+    writeFilter(mock.ectx, instance, Alpha({ alpha: 0.5, resolution: 0.75 }).value, true, ignore);
+    expect(filter.resolution).toBe(0.75);
+  });
+
+  // Bug: an Alpha at 1 renders its whole subtree into a texture and copies it back unchanged, in every frame.
+  it("builds an Alpha at 1 switched off; at 0.5, or at 1 with a resolution, switched on; a disabled one off", () => {
+    const { mock, pixi } = started();
+    const enabledOf = (value: FilterFields): boolean =>
+      build(mock, pixi, "effects.alpha", value).filter.enabled;
+
+    expect(enabledOf(Alpha().value)).toBe(false);
+    expect(enabledOf(Alpha({ alpha: 0.5 }).value)).toBe(true);
+    expect(enabledOf(Alpha({ resolution: 0.5 }).value)).toBe(true);
+    expect(enabledOf(Alpha({ alpha: 0.5, enabled: false }).value)).toBe(false);
+  });
+
+  // Bug: an Alpha that touches 1 on a keyframe switches its Pixi filter at every touch (a new filter list, a render
+  // group rebuilt, a kept picture let go and taken again); or one that rests at 1 keeps its pass for ever; or the
+  // switch asks the renderer for no frame, and a screen drawn on demand keeps the old picture.
+  it("an Alpha at 1 keeps its filter for CALM_AFTER - 1 syncs, switches it off at the next and asks; a resolution switches it on at once", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "effects.alpha", Alpha({ alpha: 0.6 }).value);
+    const filter = instance.filter as unknown as FakeFxAlphaFilter;
+    const before = vi.fn();
+    const rest = Alpha().value;
+    const held: boolean[] = [];
+
+    // A touch: CALM_AFTER - 1 syncs at 1, then away, twice.
+    for (let touch = 0; touch < 2; touch += 1) {
+      for (let sync = 1; sync < CALM_AFTER; sync += 1) {
+        writeFilter(mock.ectx, instance, rest, sync === 1, before);
+        held.push(filter.enabled);
+      }
+
+      writeFilter(mock.ectx, instance, Alpha({ alpha: 0.6 }).value, true, before);
+      held.push(filter.enabled);
+    }
+
+    expect(held.every(Boolean)).toBe(true);
+    // Every move of the value is drawn; the syncs at rest ask for nothing.
+    expect(before).toHaveBeenCalledTimes(4);
+
+    for (let sync = 1; sync < CALM_AFTER; sync += 1) {
+      writeFilter(mock.ectx, instance, rest, sync === 1, before);
+    }
+
+    expect(filter.enabled).toBe(true);
+    expect(before).toHaveBeenCalledTimes(5);
+
+    // The CALM_AFTER-th sync at 1: off, and the frame is asked for.
+    expect(writeFilter(mock.ectx, instance, rest, false, before)).toBe(true);
+    expect(filter.enabled).toBe(false);
+    expect(before).toHaveBeenCalledTimes(6);
+
+    // A resolution at 1 keeps the pass: the subtree is drawn at fewer pixels through it.
+    expect(writeFilter(mock.ectx, instance, Alpha({ resolution: 0.5 }).value, true, before)).toBe(
+      true
+    );
+    expect(filter.enabled).toBe(true);
+    expect(before).toHaveBeenCalledTimes(7);
+  });
+
+  // Bug: a resolution typed as 50 makes Pixi draw the subtree into a texture of 50 texels per CSS px.
+  it("clamps an Alpha's resolution to 4, at build and on a change", () => {
+    const { mock, pixi } = started();
+    const instance = build(
+      mock,
+      pixi,
+      "effects.alpha",
+      Alpha({ alpha: 0.5, resolution: 50 }).value
+    );
+    const filter = instance.filter as unknown as FakeFxAlphaFilter;
+
+    expect(filter.built.resolution).toBe(4);
+
+    writeFilter(
+      mock.ectx,
+      instance,
+      Alpha({ alpha: 0.5, resolution: Number.POSITIVE_INFINITY }).value,
+      true,
+      ignore
+    );
+    expect(filter.resolution).toBe(4);
+  });
+
+  // Bug: a game's filter declares a resolution and is drawn at the canvas's anyway.
+  it("builds a defined filter at its resolution, at the canvas's without one", () => {
+    const { mock, pixi } = started();
+    const Half = defineFilter("fx.half", {
+      wgsl: BODY,
+      glsl: GLSL,
+      uniforms: { amount: 1 },
+      resolution: 0.5
+    });
+    const half = createFilter(
+      mock.ectx,
+      pixi,
+      { id: "fx.half", component: Half, source: "wgsl", definition: Half.filter, index: 8 },
+      Half().value
+    );
+    const tint = build(mock, pixi, "fx.tint", Tint().value);
+
+    expect((half?.filter as unknown as FakeFxFilter).resolution).toBe(0.5);
+    expect((tint.filter as unknown as FakeFxFilter).resolution).toBe("inherit");
   });
 });
