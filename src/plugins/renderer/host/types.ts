@@ -13,18 +13,22 @@ import type {
 import type { ResolutionReason } from "./resolution";
 
 /**
- * Where the drawing resolution comes from (contract C-d): the device pixels, the cap, the switch
- * that overrides both, and the change the next frame applies. Not public.
+ * Where the drawing resolution comes from (contract C-d): the device pixels, the cap, the render scale of the adaptive
+ * frame rate, the switch that overrides them, and the change the next frame applies. Not public.
  */
 export type ResolutionState = {
   /** The last `devicePixelRatio` seen; 1 without a window. */
   dpr: number;
   /** `maxResolution` of the config. */
   cap: number;
-  /** Set by `monitor.setResolution`; `undefined` hands the choice back to `dpr` and `cap`. */
+  /** Set by `monitor.setResolution`; `undefined` hands the choice back to `dpr`, `cap` and `scale`. */
   override: number | undefined;
   /** A change asked for and not applied yet: the next frame resizes with it. */
   pending: { value: number; reason: ResolutionReason } | undefined;
+  /** The render scale the adaptive frame rate chose, a share of `min(dpr, cap)`; 1 at start. */
+  scale: number;
+  /** The lowest scale `adaptiveScale` allows on this device, read at init; 1 allows none. */
+  floor: number;
 };
 
 /**
@@ -110,6 +114,12 @@ export type HostState = {
    * inert and when the module lacked the pieces.
    */
   uninstallRenderGroup: (() => void) | undefined;
+  /**
+   * Swaps Pixi's own WebGPU render target and pipeline systems back in. Set once per host state when the lazy canvas
+   * pass (B3), which begins the canvas's pass at its first draw and keeps its stencil and depth only where something
+   * reads them, went into Pixi's registry; `undefined` while inert and when the module lacked the pieces.
+   */
+  uninstallRenderPass: (() => void) | undefined;
   /** The drawing resolution: device pixels, cap, override and the pending change. */
   resolution: ResolutionState;
   /** Run after a frame applied a new resolution; emptied by `stopHost`. */

@@ -2,9 +2,11 @@
  * @file renderer/host — the init sequence: resolve the mount, load Pixi, create the one
  * application, append its canvas. And the teardown that undoes exactly that.
  */
+import type { RegisteredFeature } from "../../flow/types";
 import type { PixiModule, RendererCtx } from "../types";
 import { initTimed, startupMark } from "./gpu";
 import { installRebindingRenderGroupPipe } from "./render-group";
+import { installLazyCanvasPass } from "./render-pass";
 import { devicePixels, targetResolution } from "./resolution";
 import { installSdfText } from "./sdf-text";
 import { createPoolState } from "./state";
@@ -150,11 +152,51 @@ function installRenderGroup(ctx: RendererCtx, pixi: PixiModule): void {
 }
 
 /**
+ * Swaps Pixi's WebGPU render target and pipeline systems for the renderer's, which begin the canvas's render pass at
+ * its first draw and keep the canvas's stencil and depth only where something reads them (B3). Like the batched text it
+ * runs before `new Application()`, once per host state, in every build. A Pixi without the pieces draws on with its own
+ * systems, with a warning.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param pixi - The module the application is built from.
+ */
+function installRenderPass(ctx: RendererCtx, pixi: PixiModule): void {
+  const state = ctx.state.host;
+
+  if (state.uninstallRenderPass !== undefined) return;
+
+  try {
+    state.uninstallRenderPass = installLazyCanvasPass(pixi);
+  } catch (error) {
+    ctx.log.warn("renderer: the canvas pass begins at render start", { error });
+  }
+}
+
+/**
+ * Tells whether a feature brings a filter that reads what was drawn under its view (`defineFilter({ backdrop: true })`).
+ * Pixi's WebGL renderer copies that from its back buffer, and skips such a filter, with a warning, without one; the back
+ * buffer costs a full-screen copy per drawn frame, so it is asked for only then. WebGPU copies from the canvas and
+ * ignores the option.
+ *
+ * @param features - Every feature of the game, its sub-features included.
+ * @returns True when one of their filters is a backdrop.
+ */
+function wantsBackBuffer(features: readonly RegisteredFeature[]): boolean {
+  for (const feature of features) {
+    for (const entry of feature.description.filters ?? []) {
+      if ("backdrop" in entry.filter && entry.filter.backdrop === true) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Loads Pixi once, creates the application and appends its canvas, at the target resolution of
  * now: a restore after a lost device comes back at it, override included. Pixi picks WebGL by
  * itself when WebGPU is missing, so only a device with neither ends up in the catch of the
  * caller. An agent build marks the Pixi load and the init on the page's timeline and hands Pixi
- * the engine's own device.
+ * the engine's own device. A game with a backdrop filter gets Pixi's WebGL back buffer.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param mount - Where the canvas goes.
@@ -184,6 +226,7 @@ export async function createApplication(
   installTextBatch(ctx, pixi);
   installCounting(ctx, pixi, deps);
   installRenderGroup(ctx, pixi);
+  installRenderPass(ctx, pixi);
 
   state.resolution.dpr = devicePixels();
   state.resolution.cap = ctx.config.maxResolution;
@@ -197,7 +240,8 @@ export async function createApplication(
     resolution: targetResolution(state.resolution),
     autoDensity: true,
     autoStart: false,
-    sharedTicker: false
+    sharedTicker: false,
+    useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all())
   };
 
   // Inline and positive: a production `define` folds the condition to `app.init(options)`.
@@ -237,8 +281,8 @@ export function destroyApplication(state: HostState): void {
 /**
  * Undoes everything `init` created. Works on the state alone, because `onStop` has no context.
  * `ready` drops first, so a device that goes away during the teardown is ignored. The draw
- * counter, the batched text and the render-group pipe swap Pixi's own classes back, so the next application on
- * the page starts from them. The pool trim starts over and its listeners go; Pixi's pool itself is left.
+ * counter, the batched text, the render-group pipe and the lazy canvas pass swap Pixi's own classes back, so the next
+ * application on the page starts from them. The pool trim starts over and its listeners go; Pixi's pool itself is left.
  *
  * @param state - The host branch of the plugin state.
  */
@@ -259,6 +303,8 @@ export function stopHost(state: HostState): void {
   state.uninstallSdfText = undefined;
   state.uninstallRenderGroup?.();
   state.uninstallRenderGroup = undefined;
+  state.uninstallRenderPass?.();
+  state.uninstallRenderPass = undefined;
   state.unsupported?.remove();
   state.unsupported = undefined;
   state.onReady.length = 0;

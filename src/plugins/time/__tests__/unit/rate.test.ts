@@ -295,7 +295,8 @@ describe("what counts as a sample", () => {
       ladder: [],
       thermal: null,
       asked: 60,
-      heldBy: null
+      heldBy: null,
+      scale: 1
     });
   });
 });

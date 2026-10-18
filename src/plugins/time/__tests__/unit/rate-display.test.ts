@@ -99,7 +99,8 @@ describe("the display rate without adaptive", () => {
       ladder: [],
       thermal: null,
       asked: 120,
-      heldBy: "panel"
+      heldBy: "panel",
+      scale: 1
     });
     expect(s.changes()).toEqual([]);
 

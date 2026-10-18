@@ -90,7 +90,8 @@ describe("createTimeState with adaptive", () => {
       ladder: [],
       thermal: null,
       asked: null,
-      heldBy: null
+      heldBy: null,
+      scale: 1
     });
     expect(adaptive.rate.governor).toBeDefined();
     expect(fixed.rate.snapshot.mode).toBe("fixed");

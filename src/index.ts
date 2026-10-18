@@ -42,6 +42,7 @@
  * | renderer | preference | "webgpu", WebGL is Pixi's fallback |
  * | renderer | aspect | { min: 4/3, max: 21/9 }; shallow merge: a game that sets `aspect` gives both fields |
  * | renderer | poolLimit | 256 |
+ * | renderer | adaptiveScale | { floor: 0.75, devices: "phone" }, the render scale of the adaptive frame rate on a GPU-bound phone; false keeps the resolution; shallow merge: a game that sets it gives both fields |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
  * | renderer | debug | { nineSlice: false, verifyFrames: false, kept: true, overdraw: false }; shallow merge: a game that sets `debug` replaces the whole object, and a switch it leaves out is off, except `kept`, which stays on unless set to false; `verifyFrames` and `overdraw` work in dev and debug builds only |
@@ -333,6 +334,7 @@ export type {
   PerfTelemetryLine,
   PerfThermalLine,
   PoolTrim,
+  AdaptiveScale,
   PoolTrimDetail,
   ProblemEventDetail,
   ProblemRule,

@@ -11,8 +11,10 @@ import { startTime, stopTime } from "../../lifecycle";
 import { createTimeState } from "../../state";
 import type { Api, Config, Governor, RateChange, TimeCtx } from "../../types";
 
-/** What the frames of a stretch do. Left out: 1 ms of work, drawn, no probe, no agent charge. */
+/** What the frames of a stretch do. Left out: no stall, 1 ms of work, drawn, no probe, no agent charge. */
 export type FrameScript = {
+  /** The main thread was busy this long when the frame was due (a GC, a handler): its callback runs this late, ms. */
+  stallMs?: number;
   /** Work of the frame on the page clock, ms. */
   workMs?: number;
   /** The renderer drew the frame. */
@@ -119,13 +121,13 @@ export function createScript(
     const before = ctx.state.time.frame;
 
     current = frame;
-    clock.now = at;
+    clock.now = at + (frame.stallMs ?? 0);
     tickFrame(ctx, at);
     source.lastTick = at;
 
     if (ctx.state.time.frame !== before) {
       source.lastRun = at;
-      busyUntil = at + (frame.workMs ?? 1);
+      busyUntil = at + (frame.stallMs ?? 0) + (frame.workMs ?? 1);
     }
   };
 

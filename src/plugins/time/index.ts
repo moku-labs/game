@@ -1,7 +1,7 @@
 /**
  * Standard tier — single rAF loop, six frame phases, the Time resource, the measurement of an
- * agent build, the adaptive frame rate and the native shell's frame rate. Emits `time:thermal`
- * and `time:rate`.
+ * agent build, the adaptive frame rate with its render scale and the native shell's frame rate.
+ * Emits `time:thermal` and `time:rate`.
  *
  * @see README.md
  */
@@ -37,7 +37,7 @@ export const timePlugin = /*#__PURE__*/ createPlugin("time", {
   events: (register: RegisterFunction) =>
     register.map<Events>({
       "time:thermal": "The native shell reported a thermal reading",
-      "time:rate": "The loop's frame rate changed"
+      "time:rate": "The loop's frame rate or render scale changed"
     }),
   createState: createTimeState,
   api: createTimeApi,

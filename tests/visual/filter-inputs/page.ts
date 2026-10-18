@@ -3,8 +3,10 @@
  * it twice, once with the flags of a release page and once with those of a dev page, and opens it in Chrome on WebGPU
  * and on WebGL (`?renderer=webgl`). It runs the engine's own filter code on the real Pixi and the real GPU: the shader
  * check of every body, stage and fallback, a filter that reads a second texture through `sampleSoft`, and a kind whose
- * stage does not compile, drawn by its fallback (and the striped mark on the dev page). It answers in
- * `globalThis.filterInputs`.
+ * stage does not compile, drawn by its fallback (and the striped mark on the dev page), and two backdrop filters over a
+ * fourth square: a frosted band whose chain starts from what was drawn under it, and a panel that dims what is under
+ * it through `sampleBack`, read both from a texture (extract) and from the canvas itself, where WebGL copies from
+ * Pixi's back buffer. It answers in `globalThis.filterInputs`.
  */
 import * as PIXI from "pixi.js";
 import { kindStatus, pollChecks, startChecks } from "../../../src/plugins/effects/filters/check";
@@ -15,11 +17,21 @@ import { createEffectsState } from "../../../src/plugins/effects/state";
 import type { EffectsCtx } from "../../../src/plugins/effects/types";
 import type { PixiModule } from "../../../src/plugins/renderer/types";
 
+/** What the backdrop square drew, read one way: the frosted band's edge, the edge above it, the dimmed panel's edge. */
+export type BackdropRead = {
+  /** The red channel across the square's edge inside the frosted band, 12 px each side. */
+  inside: number[];
+  /** The same edge above the band, where nothing filters the square. */
+  outside: number[];
+  /** The red channel across the square's edge under the dimming panel, 4 px each side. */
+  dim: number[];
+};
+
 /** What the page answers: the backend that drew, the check, and what each view drew. */
 export type FilterInputsResult = {
   backend: string;
   build: "release" | "dev";
-  status: { soft: string; hazy: string };
+  status: { soft: string; hazy: string; frost: string; dim: string };
   errors: Array<{ event: string; data: unknown }>;
   /** The red channel across the edge of the plain view and of the soft one, 12 px each side. */
   edge: { plain: number[]; soft: number[] };
@@ -29,10 +41,24 @@ export type FilterInputsResult = {
   frames: number[];
   /** Filter draws Pixi's filter system made in one frame. */
   draws: number;
+  /** The backdrop square, read from a texture the stage was drawn into and from the canvas. */
+  backdrop: { texture: BackdropRead; canvas: BackdropRead };
 };
 
 /** One side of a view, CSS px. */
 const SIDE = 160;
+
+/** The left edge of the fourth square, the one under the backdrop filters. */
+const BACK_X = 3 * SIDE + 60;
+
+/** The width of the stage: four squares and the gaps between them. */
+const STAGE_WIDTH = 4 * SIDE + 60;
+
+/** The frosted band over the fourth square: its top and its height. */
+const BAND = { y: 40, height: 80 } as const;
+
+/** The dimming panel over the fourth square's edge: left, top, width, height. */
+const DIM = { x: BACK_X + 40, y: 130, width: 80, height: 20 } as const;
 
 /** A stage that copies its input. */
 const Small = defineFilter("visual.small", {
@@ -106,6 +132,22 @@ const Hazy = defineFilter("visual.hazy", {
   fallback: SoftDim
 });
 
+/** A backdrop whose input is a blurred copy of what was drawn under the view, shown where the view has content. */
+const Frost = defineFilter("visual.frost", {
+  wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return sampleSoft(uv) * textureSampleLevel(uTexture, uSampler, uv, 0.0).a; }",
+  glsl: "void main() { finalColor = sampleSoft(vTextureCoord) * textureLod(uTexture, vTextureCoord, 0.0).a; }",
+  uniforms: { spread: 2 },
+  backdrop: true,
+  inputs: { soft: { from: "back", stages: [Small, Along], chain: softSteps } }
+});
+
+/** A backdrop without inputs: what was drawn under the view at half its brightness, opaque, where the view has content. */
+const Dim = defineFilter("visual.dim", {
+  wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return vec4<f32>(sampleBack(uv).rgb * 0.5, 1.0) * textureSampleLevel(uTexture, uSampler, uv, 0.0).a; }",
+  glsl: "void main() { finalColor = vec4(sampleBack(vTextureCoord).rgb * 0.5, 1.0) * textureLod(uTexture, vTextureCoord, 0.0).a; }",
+  backdrop: true
+});
+
 /**
  * A view: a square, white on its left half and black on its right, at an x of the stage.
  *
@@ -129,16 +171,62 @@ function square(x: number): PIXI.Container {
  * @param pixels - The stage's pixels, RGBA.
  * @param width - Their row length.
  * @param x - The view's left edge.
- * @returns 24 values across its white-to-black edge.
+ * @param row - The row; the middle of the view by default.
+ * @param reach - The pixels read on each side of the edge.
+ * @returns `2 × reach` values across its white-to-black edge.
  */
-function edgeOf(pixels: Uint8ClampedArray, width: number, x: number): number[] {
-  const row = SIDE / 2;
-  const from = x + SIDE / 2 - 12;
+function edgeOf(
+  pixels: Uint8ClampedArray,
+  width: number,
+  x: number,
+  row = SIDE / 2,
+  reach = 12
+): number[] {
+  const from = x + SIDE / 2 - reach;
 
   return Array.from(
-    { length: 24 },
+    { length: 2 * reach },
     (_unused, index) => pixels[(row * width + from + index) * 4] ?? -1
   );
+}
+
+/**
+ * Reads the backdrop square from the pixels of the stage.
+ *
+ * @param pixels - The stage's pixels, RGBA.
+ * @param width - Their row length.
+ * @returns The three rows of the backdrop square.
+ */
+function backdropOf(pixels: Uint8ClampedArray, width: number): BackdropRead {
+  return {
+    inside: edgeOf(pixels, width, BACK_X, BAND.y + BAND.height / 2),
+    outside: edgeOf(pixels, width, BACK_X, BAND.y / 2),
+    dim: edgeOf(pixels, width, BACK_X, DIM.y + DIM.height / 2, 4)
+  };
+}
+
+/**
+ * Draws the stage onto the canvas itself, as the engine draws a frame, and reads the canvas back in the same task
+ * through a 2D canvas: on WebGL the frame went through Pixi's back buffer.
+ *
+ * @param app - The running Pixi application.
+ * @returns The pixels of the canvas and their row length.
+ */
+function canvasFrame(app: PIXI.Application): Frame {
+  const copy = document.createElement("canvas");
+
+  copy.width = STAGE_WIDTH;
+  copy.height = SIDE;
+
+  const context = copy.getContext("2d", { willReadFrequently: true });
+
+  app.renderer.render(app.stage);
+  context?.drawImage(app.canvas, 0, 0);
+
+  return {
+    pixels: context?.getImageData(0, 0, STAGE_WIDTH, SIDE).data ?? new Uint8ClampedArray(),
+    width: STAGE_WIDTH
+  };
 }
 
 /** The pixels of the last frame and their row length. */
@@ -155,7 +243,7 @@ type Frame = { pixels: Uint8ClampedArray; width: number };
 function contextOf(
   app: PIXI.Application,
   errors: FilterInputsResult["errors"]
-): { ectx: EffectsCtx; soft: FilterKind; hazy: FilterKind } {
+): { ectx: EffectsCtx; soft: FilterKind; hazy: FilterKind; frost: FilterKind; dim: FilterKind } {
   const { renderer } = app;
   const log = (event: string, data: unknown): void => {
     errors.push({ event, data });
@@ -175,11 +263,24 @@ function contextOf(
     definition: Hazy.filter,
     index: 1
   };
+  const frost: FilterKind = {
+    id: Frost.componentName,
+    component: Frost,
+    source: "wgsl",
+    definition: Frost.filter,
+    index: 2
+  };
+  const dim: FilterKind = {
+    id: Dim.componentName,
+    component: Dim,
+    source: "wgsl",
+    definition: Dim.filter,
+    index: 3
+  };
   const gpu = (renderer as unknown as { gpu?: { device: GPUDevice } }).gpu;
   const gl = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
 
-  state.kinds.set(soft.id, soft);
-  state.kinds.set(hazy.id, hazy);
+  for (const kind of [soft, hazy, frost, dim]) state.kinds.set(kind.id, kind);
 
   const ectx = {
     state,
@@ -205,7 +306,7 @@ function contextOf(
     }
   } as unknown as EffectsCtx;
 
-  return { ectx, soft, hazy };
+  return { ectx, soft, hazy, frost, dim };
 }
 
 /**
@@ -267,7 +368,7 @@ function drawFrames(
 
     const extracted = app.renderer.extract.pixels({
       target: app.stage,
-      frame: new PIXI.Rectangle(0, 0, SIDE * 3 + 40, SIDE)
+      frame: new PIXI.Rectangle(0, 0, STAGE_WIDTH, SIDE)
     });
     let lit = 0;
 
@@ -316,35 +417,49 @@ async function play(): Promise<FilterInputsResult> {
     new URLSearchParams(location.search).get("renderer") === "webgl" ? "webgl" : "webgpu";
   const app = new PIXI.Application();
 
+  // As the engine's renderer asks for it when a feature brings a backdrop filter: Pixi skips one on WebGL without it.
   await app.init({
-    width: SIDE * 3 + 40,
+    width: STAGE_WIDTH,
     height: SIDE,
     preference,
     resolution: 1,
     antialias: false,
-    backgroundAlpha: 0
+    backgroundAlpha: 0,
+    useBackBuffer: true
   });
   document.body.append(app.canvas);
 
   const errors: FilterInputsResult["errors"] = [];
-  const { ectx, soft, hazy } = contextOf(app, errors);
+  const { ectx, soft, hazy, frost, dim } = contextOf(app, errors);
 
   await checkAll(ectx);
 
   const pixi = PIXI as unknown as PixiModule;
-  const status = { soft: kindStatus(ectx, soft), hazy: kindStatus(ectx, hazy) };
+  const status = {
+    soft: kindStatus(ectx, soft),
+    hazy: kindStatus(ectx, hazy),
+    frost: kindStatus(ectx, frost),
+    dim: kindStatus(ectx, dim)
+  };
   const instance = createFilter(ectx, pixi, soft, Soft().value);
   const standIn = createStandIn(ectx, pixi, hazy, Hazy().value);
+  const frosted = createFilter(ectx, pixi, frost, Frost().value);
+  const dimmed = createFilter(ectx, pixi, dim, Dim().value);
   const hazyX = 2 * SIDE + 40;
   const softView = square(SIDE + 20);
   const hazyView = square(hazyX);
+  const band = new PIXI.Graphics().rect(BACK_X, BAND.y, SIDE, BAND.height).fill(0xff_ff_ff);
+  const panel = new PIXI.Graphics().rect(DIM.x, DIM.y, DIM.width, DIM.height).fill(0xff_ff_ff);
 
   if (instance !== undefined) softView.filters = [instance.filter];
   if (standIn !== undefined) hazyView.filters = [standIn.filter];
-  app.stage.addChild(square(0), softView, hazyView);
+  if (frosted !== undefined) band.filters = [frosted.filter];
+  if (dimmed !== undefined) panel.filters = [dimmed.filter];
+  app.stage.addChild(square(0), softView, hazyView, square(BACK_X), band, panel);
 
   const draws = countDraws(app.renderer);
   const { frames, last } = drawFrames(app, draws);
+  const canvas = canvasFrame(app);
   const whiteAt = ((SIDE / 2) * last.width + hazyX + SIDE / 4) * 4;
 
   return {
@@ -364,7 +479,11 @@ async function play(): Promise<FilterInputsResult> {
       standIn: standIn !== undefined
     },
     frames,
-    draws: draws.count()
+    draws: draws.count(),
+    backdrop: {
+      texture: backdropOf(last.pixels, last.width),
+      canvas: backdropOf(canvas.pixels, canvas.width)
+    }
   };
 }
 

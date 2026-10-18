@@ -151,6 +151,8 @@ export function createDoorsFake(): DoorsFake {
       setRate: vi.fn(),
       frameDrawn: vi.fn(),
       frameProbed: vi.fn(),
+      allowScale: vi.fn(),
+      sceneChanged: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => true,
       step: vi.fn()

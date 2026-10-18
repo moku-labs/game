@@ -91,7 +91,7 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 
 ## Filters
 
-`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding?, inputs?, fallback?, cache?, area?, resolution? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
+`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding?, inputs?, fallback?, cache?, area?, resolution?, backdrop? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
 
 - `wgsl` is the WGSL fragment body only: `fn mainFragment` and its helpers. The engine prepends the vertex stage, the input bindings `gfu`, `uTexture`, `uSampler`, and a `FilterUniforms` struct in declaration order bound as `fu`. The body reads `fu.amount`.
 - `glsl` is the same math in GLSL ES 3.0: `void main()`, which sets `finalColor`, and its helpers. The engine prepends `#version 300 es`, `precision highp float;`, `in vec2 vTextureCoord;`, `out vec4 finalColor;`, `uniform sampler2D uTexture;`, Pixi's global filter uniforms `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture` as `vec4`, and one `uniform` per declared uniform under its bare name. The body reads `amount`. The vertex stage is Pixi's `defaultFilterVert`.
@@ -104,7 +104,7 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 | `color: { color: 0xffd700 }` | `vec3<f32>` | `uniform vec3 color;` | the hex number |
 | `offset: [2, 3]` (2 to 4 numbers) | `vec2<f32>` … `vec4<f32>` | `uniform vec2 offset;` … `vec4` | an array, not tweenable |
 
-Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is; `resolution` (default 0, the resolution of the canvas) is the texels per CSS px, from 0 to 4, the view and its filters are drawn at under this filter; a filter with inputs runs its chains first at it. A WGSL without `mainFragment`, a GLSL without `void main(`, a reserved or badly named uniform, a bad `passes`, `padding` or `resolution` (below 0, above 4 or not a number) throw at definition; a duplicate id or the id of a built-in throws in `onStart`. The reserved names are `enabled`, `order` and the names the headers declare: `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture`, `uTexture`, `uSampler`, and the GLSL header's `finalColor` and `vTextureCoord`.
+Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is; `resolution` (default 0, the resolution of the canvas) is the texels per CSS px, from 0 to 4, the view and its filters are drawn at under this filter; a filter with inputs runs its chains first at it. A WGSL without `mainFragment`, a GLSL without `void main(`, a reserved or badly named uniform, a bad `passes`, `padding` or `resolution` (below 0, above 4 or not a number) throw at definition; a duplicate id or the id of a built-in throws in `onStart`. The reserved names are `enabled`, `order` and the names the headers declare: `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture`, `uTexture`, `uSampler`, the GLSL header's `finalColor` and `vTextureCoord`, and a backdrop's `uBackTexture`, `backScale`, `backClamp` and `sampleBack`.
 
 ### Area: the box a filter draws in
 
@@ -133,7 +133,7 @@ The value has no new field: `area` lives on the definition (`LensWindow.filter.a
 `inputs: { blur: { stages, chain } }` gives the body a second texture to read, by name. For each input (at most 4) the engine declares, in the WGSL and in the GLSL it assembles, the texture `blurTexture`, its sampler `blurSampler` (WGSL only: on WebGL a texture carries its sampler state, `@group(1)` bindings `1 + 2k` and `2 + 2k`), two uniforms of its own, `blurScale: vec2<f32>` and `blurClamp: vec4<f32>`, and the function `sampleBlur(uv)`: the body calls `sampleBlur(uv)` and the scale and the clamp happen inside. The engine's two uniforms are no fields of the component and not in `filter.uniforms`; they are in `filter.inputs[k].scale` and `.clamp`.
 
 - `stages` is the static list of the filters the chain may draw, each made by `defineFilter` and drawing alone (no inputs, no fallback of its own); a built-in kind cannot be a stage. They are checked on the device with the kind, before its first instance.
-- `chain(value, { resolution })` returns the steps `{ stage, scale, uniforms? }`, in draw order, at most 16. Each place draws from the one before, the first from the view's own input, into a pooled texture of the input's frame at `resolution × scale` (the scale is a share of the input's resolution, above 0 and at most 1); the body reads the last one. A uniform a step leaves out takes the stage's default. An empty chain binds the view's own input and draws no stage.
+- `chain(value, { resolution })` returns the steps `{ stage, scale, uniforms? }`, in draw order, at most 16. Each place draws from the one before, the first from the view's own input (a backdrop's `from: "back"`: from what was drawn under the view, see "Backdrop"), into a pooled texture of the input's frame at `resolution × scale` (the scale is a share of the input's resolution, above 0 and at most 1); the body reads the last one. A uniform a step leaves out takes the stage's default. An empty chain binds the view's own input and draws no stage.
 - The chain runs at creation, when a uniform of the value changed (an in-place `world.set` included) and when the resolution of the view's input changed, never per frame and never for `enabled` or `order`; a filter that is off, or a kind switched off by the diagnostics, runs it when it is drawn again.
 - Each place is its own Pixi `Filter` with its own uniform group, drawn through Pixi's public `applyFilter` from inside the main filter's `apply`. Every pooled texture goes back to the pool in a `finally`, also when a place throws, and the inputs are bound to Pixi's empty texture again after every apply: a filter never holds a pooled texture between frames. A place that leaves the chain is destroyed by the next sync, never inside a render.
 - The engine counts the passes: `1` (the body) plus the steps; leave `passes` out (with `inputs`, `passes` throws). `stats().filters` counts instances: the stages are counted in `renderPasses`, not in `filters`.
@@ -154,6 +154,33 @@ Frost.filter.inputs.map(input => input.sample); // ["sampleBlur"]
 
 `fallback` is another filter made by `defineFilter`, drawing alone, over a subset of the filter's uniforms with the same types: it draws with the kind's value when the filter is broken.
 
+### Backdrop: a filter that reads what was drawn under its view
+
+`backdrop: true` (change 2026-10-18-memory-render, B1) makes a filter read the canvas under its view, inside its box: the view's bounds, or its `area`. Pixi copies that part of the surface the view is drawn into (the canvas, or an enclosing filter's texture) before the view draws, the filter's `blendRequired`, and binds the copy at group 0 binding 3. The engine declares, in both languages, `uBackTexture`, two uniforms of its own, `backScale: vec2<f32>` and `backClamp: vec4<f32>`, filled by every apply from the copy, and `sampleBack(uv)`: what was drawn under the pixel the body draws. An input may start from it, `from: "back"`: its first step reads the copy instead of the view's own input, and its chain runs at the resolution of the surface under the view (`context.resolution`), again only when that changes. The body's output is laid over the canvas like the view's own pixels: where it answers transparent the canvas stays as it is.
+
+So one frost on the layer of a screen's panels replaces a frost on the root of the scene: the scene is drawn straight to the canvas, and only the box of the panels is copied and blurred.
+
+```ts
+export const Frost = defineFilter("Frost", {
+  wgsl: FROST_WGSL, // let blurred = sampleBlur(uv); the panel's own pixels: textureSampleLevel(uTexture, uSampler, uv, 0.0)
+  glsl: FROST_GLSL,
+  uniforms: { view: [0, 0, 1], rectA: [0, 0, 0, 0], strength: 16, vivid: 1.2 },
+  backdrop: true,
+  inputs: { blur: { from: "back", stages: [FrostBox4, FrostHalf, FrostGauss], chain: frostChain } },
+  // Only the panel is copied and blurred, not the layer's whole bounds.
+  area: value => [value.rectA[0] ?? 0, value.rectA[1] ?? 0, value.rectA[2] ?? 0, value.rectA[3] ?? 0],
+  fallback: FrostVeil
+});
+[Frost.filter.backdrop, Frost.filter.cache, Frost.filter.inputs[0]?.from]; // [true, "screen", "back"]
+```
+
+- A backdrop is drawn live in every frame, never kept as a picture (its category is `"screen"`; `cache` may only be left out or `false`); a change of what is drawn under it is a change of that view and draws the frame, also on demand. The kept cache also refuses any filter with `blendRequired`.
+- It has no padding: Pixi copies the padded box, and a copy past the canvas edge fails on the GPU. A padded filter beside it on the same view (`Glow`, `Outline`) pads the copy too: keep the backdrop's view to itself.
+- A stage is no backdrop (it reads the step before it). A fallback may be one only for a backdrop; a fallback that is none draws over the view's own pixels alone.
+- Its slot says it blurs (`blurs`) only for an input from the view's own input: a chain from back blurs the scene under the view, not the view, so an overlay over it holds no loops for it.
+- WebGL copies from Pixi's back buffer: the renderer asks for it when a feature brings a backdrop (renderer README, `preference`); WebGPU copies from the canvas.
+- Inside the box, everything already drawn under the view is in the copy: the scene and an overlay's dim alike.
+
 ### Filters that are kept
 
 The renderer keeps a still view under a filter as a picture (renderer README, "Kept pictures"): the
@@ -164,7 +191,7 @@ do with a filter is its category, `FilterDefinition.cache`:
   also while the view moves.
 - `"placed"` — the body reads its canvas position through `canvasPixel(uv)`, or declares
   `cache: "placed"`; kept, and a move redoes the output only, with the new origin.
-- `"screen"` — never kept: the view is drawn live in every frame. `cache: false`, Pixi's `Noise` and
+- `"screen"` — never kept: the view is drawn live in every frame. `cache: false`, a backdrop, Pixi's `Noise` and
   `Displacement`.
 
 The category is the option `defineFilter(id, { cache?: "local" | "placed" | false })`. The engine reads
@@ -188,7 +215,8 @@ let canvas = canvasPixel(uv);
 
 A body that does not call it assembles byte-identically. Each slot handed to the renderer carries its
 category (`cache`), a placed filter's `keptOrigin` array by reference (`origin`), and `blurs: true`
-for a `Blur` and a filter with inputs (an overlay over it holds the loops under it, spec 22).
+for a `Blur` and a filter with an input from the view's own input (an overlay over it holds the loops under it,
+spec 22).
 
 ### Built-in filters
 

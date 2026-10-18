@@ -27,7 +27,9 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * (the three WebGPU draw classes, the filter system, both texture systems and the batcher pipe whose `buildStart`
  * begins every instruction rebuild; production swaps the encoder alone, to count the passes), and the pieces of
  * batched distance-field text `host` installs: Pixi's `Batcher` with its geometry and buffers, the bitmap text pipe
- * and the batcher pipe it subclasses, and the WGSL and GLSL shader pieces of the batch's SDF shader. The module object
+ * and the batcher pipe it subclasses, and the WGSL and GLSL shader pieces of the batch's SDF shader, and the WebGPU
+ * render target system with its adaptor, the pipeline system and the stencil system the lazy canvas pass of `host`
+ * subclasses or registers again (`host/render-pass.ts`). The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
  * Pixi in its bundle.
  *
@@ -71,6 +73,9 @@ export type PixiModule = Pick<
   | "GpuEncoderSystem"
   | "GpuGraphicsAdaptor"
   | "GpuProgram"
+  | "GpuRenderTargetAdaptor"
+  | "GpuRenderTargetSystem"
+  | "GpuStencilSystem"
   | "GpuTextureSystem"
   | "Graphics"
   | "Matrix"
@@ -78,6 +83,7 @@ export type PixiModule = Pick<
   | "NoiseFilter"
   | "Particle"
   | "ParticleContainer"
+  | "PipelineSystem"
   | "Rectangle"
   | "RenderGroupPipe"
   | "RenderTexture"
@@ -239,6 +245,26 @@ export type PoolTrim = {
 };
 
 /**
+ * The render scale the adaptive frame rate may lower on a GPU-bound screen (`time.adaptive` on): before the rate drops,
+ * the canvas draws at 0.85, then 0.75 of its resolution, down to `floor`, and back up when there is room again.
+ *
+ * @example
+ * ```ts
+ * // The default: on a phone the memory screen draws at 1.5 instead of 2 before it drops to 60 fps.
+ * const scale: AdaptiveScale = { floor: 0.75, devices: "phone" };
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", adaptiveScale: scale }, time: { maxFps: 120, adaptive: { floor: 60 } } } });
+ * ```
+ */
+export type AdaptiveScale = {
+  /** The lowest share of the resolution, a step of the scale: 1, 0.85, 0.75, 0.6 or 0.5. 1 allows none. */
+  floor: number;
+  /**
+   * Where it applies: `"phone"`, a coarse pointer and a short side of at most 820 CSS px (read at start), or `"all"`.
+   */
+  devices: "phone" | "all";
+};
+
+/**
  * renderer plugin config.
  *
  * @example
@@ -256,6 +282,8 @@ export type PoolTrim = {
  * createApp({ pluginConfigs: { renderer: { mount: "#game", keptMb: 32 } } }); // a game with small art
  * // A short splash: two probe draws a frame create the pipelines sooner.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", onDemand: true, warm: 2 } } });
+ * // A game whose art must stay sharp: the adaptive frame rate drops the rate, never the resolution.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", adaptiveScale: false } } });
  * ```
  */
 export type Config = {
@@ -312,6 +340,12 @@ export type Config = {
    * created in the first frame that draws with it, as before. A whole number from 0 to 16; default 1.
    */
   warm: number;
+  /**
+   * The render scale of the adaptive frame rate on a GPU-bound screen: `{ floor: 0.75, devices: "phone" }` by default,
+   * `false` keeps the resolution. Needs `time.adaptive`. A player's `monitor.setResolution` wins over it. Every change
+   * of the scale redraws the canvas and retakes the kept pictures once.
+   */
+  adaptiveScale: AdaptiveScale | false;
 };
 
 /**

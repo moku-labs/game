@@ -17,7 +17,8 @@ const config: Config = {
   monitor: { budgetMs: "rate", frames: 1024 },
   onDemand: false,
   keptMb: 64,
-  warm: 1
+  warm: 1,
+  adaptiveScale: { floor: 0.75, devices: "phone" }
 };
 
 describe("renderer state", () => {
@@ -38,7 +39,7 @@ describe("renderer state", () => {
       cleanups: [],
       unsupported: undefined,
       uninstallCounting: undefined,
-      resolution: { dpr: 1, cap: 2, override: undefined, pending: undefined },
+      resolution: { dpr: 1, cap: 2, override: undefined, pending: undefined, scale: 1, floor: 1 },
       onResolutionChange: [],
       ownGpu: undefined,
       kept: new WeakSet(),
@@ -156,5 +157,35 @@ describe("renderer state: the probe draws of the warm-up", () => {
 
     expect(() => createRendererState({ config: { ...config, warm: 0 } })).not.toThrow();
     expect(() => createRendererState({ config: { ...config, warm: 16 } })).not.toThrow();
+  });
+});
+
+describe("renderer state: the adaptive render scale", () => {
+  // Bug: a floor of 0.1 draws a blur on a phone; a typo in devices turns the scale off without a word.
+  it("refuses a floor that is not a step of the scale and devices other than phone or all; takes false", () => {
+    for (const floor of [0.4, 0.7, 1.2, Number.NaN, "0.75"]) {
+      expect(() =>
+        createRendererState({
+          config: { ...config, adaptiveScale: { floor, devices: "phone" } as never }
+        })
+      ).toThrow(
+        `[game] renderer.adaptiveScale.floor is ${String(floor)}.\n  Give a step of the scale: 1, 0.85, 0.75, 0.6 or 0.5.`
+      );
+    }
+
+    expect(() =>
+      createRendererState({
+        config: { ...config, adaptiveScale: { floor: 0.75, devices: "tablet" } as never }
+      })
+    ).toThrow('[game] renderer.adaptiveScale.devices is tablet.\n  Give "phone" or "all".');
+    expect(() =>
+      createRendererState({ config: { ...config, adaptiveScale: true as never } })
+    ).toThrow("[game] renderer.adaptiveScale is true.\n  Give { floor, devices } or false.");
+    expect(() =>
+      createRendererState({ config: { ...config, adaptiveScale: false } })
+    ).not.toThrow();
+    expect(() =>
+      createRendererState({ config: { ...config, adaptiveScale: { floor: 0.5, devices: "all" } } })
+    ).not.toThrow();
   });
 });

@@ -1,10 +1,11 @@
 /* eslint-disable unicorn/no-null -- `FrameRate` and `RateChange` are JSON: an unknown display rate and an absent thermal status are null (spec 21 G1.3). */
 /**
  * @file time — the adaptive frame rate (spec 21 G3–G6): the governor that drops to the next divisor of the display
- * rate when drawn frames come late and returns one step after steady room, the display rate learned from the ticks
- * in every app (and with the governor from the native shell), the thermal input, and `setRate`. Every number of the
- * per-frame path lives in the governor and the display state, allocated once; a frame allocates nothing here. Only a
- * change allocates: its payload, the snapshot, the request.
+ * rate when drawn frames come late and returns one step after steady room, on a GPU-bound screen the render scale
+ * stepped before the rate, the back-off of failed returns, the display rate learned from the ticks in every app (and
+ * with the governor from the native shell), the thermal input, and `setRate`. Every number of the per-frame path lives
+ * in the governor and the display state, allocated once; a frame allocates nothing here. Only a change allocates: its
+ * payload, the snapshot, the request.
  */
 import { pageNow } from "./measure";
 import {
@@ -34,13 +35,14 @@ import {
   ladderOf,
   loopRateOf,
   missLineMs,
-  RETURN_GRACE_MS,
   RETURN_HEAVY_SHARE,
   RETURN_MAX_MISSES,
   RETURN_MIN_FRAMES,
   RETURN_WINDOW_MS,
   RETURN_WORK_SHARE,
   RING,
+  SCALE_DWELL_FACTOR,
+  scaleStepsOf,
   stepAbove,
   stepBelow,
   TICK_IGNORE_MS,
@@ -64,7 +66,7 @@ import type {
   TimeCtx
 } from "./types";
 
-/** The ladder before the display rate is known, and always without `adaptive`. */
+/** The ladder before the display rate is known, and always without `adaptive`; the scales the renderer allows none of. */
 const NO_STEPS: readonly number[] = Object.freeze([]);
 
 /** Bit of a sample that came late. */
@@ -72,6 +74,9 @@ const MISSED = 1;
 
 /** Bit of a sample whose frame was heavy for the higher rate. */
 const HEAVY = 2;
+
+/** Bit of a late sample whose frame kept the main thread longer than its frame. */
+const BUSY = 4;
 
 /** The thermal rank from which the rule never steps up: `"moderate"` and every hotter status. */
 const HEAT_LIMIT_RANK = 2;
@@ -142,6 +147,7 @@ function createGovernor(floor: number): Governor {
   return {
     floor,
     ladder: NO_STEPS,
+    scales: NO_STEPS,
     thermal: null,
     lastDrawn: false,
     lastIdle: false,
@@ -155,12 +161,14 @@ function createGovernor(floor: number): Governor {
     dropTail: 0,
     dropDrawn: 0,
     dropMissed: 0,
+    dropBusy: 0,
     returnTail: 0,
     returnDrawn: 0,
     returnMissed: 0,
     returnHeavy: 0,
     switchedAt: Number.NEGATIVE_INFINITY,
     lastReturnAt: Number.NEGATIVE_INFINITY,
+    climbed: false,
     dwellMs: DWELL_BASE_MS,
     requested: 0,
     requestSeq: 0
@@ -187,7 +195,7 @@ function askedOf(rate: Pick<RateState, "fps" | "mode">): FrameRate["asked"] {
  * @returns A fresh frozen snapshot.
  */
 function snapshotOf(
-  rate: Pick<RateState, "fps" | "mode" | "reason" | "display" | "governor">
+  rate: Pick<RateState, "fps" | "scale" | "mode" | "reason" | "display" | "governor">
 ): Readonly<FrameRate> {
   const { governor } = rate;
   const { hz } = rate.display;
@@ -201,7 +209,8 @@ function snapshotOf(
     ladder: governor?.ladder ?? NO_STEPS,
     thermal: governor?.thermal ?? null,
     asked,
-    heldBy: asked !== null && hz !== null && asked > hz ? "panel" : null
+    heldBy: asked !== null && hz !== null && asked > hz ? "panel" : null,
+    scale: rate.scale
   });
 }
 
@@ -217,8 +226,9 @@ function snapshotOf(
 export function createRateState(config: Readonly<Config>): RateState {
   const floor = floorOf(config);
   const mode: RateMode = floor === undefined ? "fixed" : "auto";
-  const parts: Pick<RateState, "fps" | "mode" | "reason" | "display" | "governor"> = {
+  const parts: Pick<RateState, "fps" | "scale" | "mode" | "reason" | "display" | "governor"> = {
     fps: config.maxFps,
+    scale: 1,
     mode,
     reason: "start",
     display: createDisplayState(),
@@ -252,6 +262,7 @@ function emptyWindows(g: Governor): void {
   g.dropTail = g.written;
   g.dropDrawn = 0;
   g.dropMissed = 0;
+  g.dropBusy = 0;
   g.returnTail = g.written;
   g.returnDrawn = 0;
   g.returnMissed = 0;
@@ -268,6 +279,7 @@ function dropOldest(g: Governor): void {
 
   g.dropDrawn -= 1;
   if ((flags & MISSED) !== 0) g.dropMissed -= 1;
+  if ((flags & BUSY) !== 0) g.dropBusy -= 1;
   g.dropTail += 1;
 }
 
@@ -331,8 +343,20 @@ function evidenceOf(g: Governor | undefined, reason: RateReason): RateChange["wi
 }
 
 /**
- * The dwell's bookkeeping of a switch: a drop soon after a return doubles it (a failed return), a drop after a long
- * hold resets it, a return notes when it happened, `setRate` starts it over; the display and the heat leave it.
+ * Starts the back-off over: the base dwell, no return to judge.
+ *
+ * @param g - The governor.
+ */
+function resetDwell(g: Governor): void {
+  g.dwellMs = DWELL_BASE_MS;
+  g.lastReturnAt = Number.NEGATIVE_INFINITY;
+  g.climbed = false;
+}
+
+/**
+ * The dwell's bookkeeping of a switch: the first drop after a return judges it (held less than a minute it failed and
+ * the dwell doubles, held longer the dwell starts over), the steps down after it leave the dwell, a return notes when
+ * it happened, `setRate` starts it over; the display and the heat leave it.
  *
  * @param g - The governor.
  * @param reason - The reason of the switch.
@@ -341,20 +365,24 @@ function evidenceOf(g: Governor | undefined, reason: RateReason): RateChange["wi
 function keepDwell(g: Governor, reason: RateReason, at: number): void {
   switch (reason) {
     case "missed": {
-      const held = at - g.lastReturnAt;
+      if (g.climbed) {
+        g.dwellMs =
+          at - g.lastReturnAt < HOLD_RESET_MS
+            ? Math.min(2 * g.dwellMs, DWELL_MAX_MS)
+            : DWELL_BASE_MS;
+      }
 
-      if (held < RETURN_GRACE_MS) g.dwellMs = Math.min(2 * g.dwellMs, DWELL_MAX_MS);
-      else if (held >= HOLD_RESET_MS) g.dwellMs = DWELL_BASE_MS;
+      g.climbed = false;
       break;
     }
     case "headroom": {
       g.lastReturnAt = at;
+      g.climbed = true;
       break;
     }
     case "forced":
     case "auto": {
-      g.dwellMs = DWELL_BASE_MS;
-      g.lastReturnAt = Number.NEGATIVE_INFINITY;
+      resetDwell(g);
       break;
     }
     default: {
@@ -407,13 +435,14 @@ function requestRate(ctx: TimeCtx): void {
 }
 
 /**
- * The one place the rate or its mode changes (the governor, the display, the heat and `setRate` call it). Nothing
- * when both stay. Otherwise the dwell is kept, both windows are emptied and the next interval is skipped, the
- * snapshot is rebuilt, `time:rate` is emitted with the evidence, the change is logged and the shell is asked for the
- * new rate. The new cap applies from the next tick: the frame that is due still runs.
+ * The one place the rate, the render scale or the mode changes (the governor, the display, the heat and `setRate`
+ * call it). Nothing when all stay. Otherwise the dwell is kept, both windows are emptied and the next interval is
+ * skipped, the snapshot is rebuilt, `time:rate` is emitted with the evidence, the change is logged and the shell is
+ * asked for the new rate. The new cap applies from the next tick: the frame that is due still runs, at the new scale.
  *
  * @param ctx - Domain context of the time plugin.
  * @param to - The new rate.
+ * @param scale - The new render scale.
  * @param mode - The new mode.
  * @param reason - Why.
  * @param at - When, on the page clock.
@@ -421,16 +450,19 @@ function requestRate(ctx: TimeCtx): void {
 function switchRate(
   ctx: TimeCtx,
   to: number,
+  scale: number,
   mode: RateMode,
   reason: RateReason,
   at: number
 ): void {
   const { rate } = ctx.state;
 
-  if (to === rate.fps && mode === rate.mode) return;
+  if (to === rate.fps && scale === rate.scale && mode === rate.mode) return;
 
   const g = rate.governor;
   const from = rate.fps;
+  const fromScale = rate.scale;
+  const scaleOnly = to === from && mode === rate.mode;
   const evidence = evidenceOf(g, reason);
 
   if (g !== undefined) {
@@ -441,6 +473,7 @@ function switchRate(
   }
 
   rate.fps = to;
+  rate.scale = scale;
   rate.mode = mode;
   rate.reason = reason;
   rate.snapshot = snapshotOf(rate);
@@ -453,8 +486,16 @@ function switchRate(
     displayHz: rate.display.hz,
     thermal: g?.thermal ?? null,
     window: evidence,
-    dwellMs: g?.dwellMs ?? 0
+    dwellMs: g?.dwellMs ?? 0,
+    scale
   });
+  if (scale !== fromScale) {
+    ctx.log.info("time: render scale", { from: fromScale, to: scale, reason });
+  }
+
+  // A change of the scale alone leaves the panel as it is.
+  if (scaleOnly) return;
+
   ctx.log.info("time: frame rate", { from, to, reason });
   requestRate(ctx);
 }
@@ -473,7 +514,7 @@ function applyThermal(ctx: TimeCtx, g: Governor): void {
 
   const to = thermalTarget(g.ladder, g.thermal, rate.fps);
 
-  if (to < rate.fps) switchRate(ctx, to, "auto", "thermal", nowOf());
+  if (to < rate.fps) switchRate(ctx, to, rate.scale, "auto", "thermal", nowOf());
 }
 
 /**
@@ -530,7 +571,7 @@ function learnDisplay(ctx: TimeCtx, hz: number, at: number): void {
   if (!g.ladder.includes(rate.fps)) {
     const to = g.ladder.find(step => step <= rate.fps) ?? g.ladder.at(-1) ?? rate.fps;
 
-    switchRate(ctx, to, "auto", "display", at);
+    switchRate(ctx, to, rate.scale, "auto", "display", at);
   }
 
   if (first) applyThermal(ctx, g);
@@ -661,41 +702,71 @@ function shouldDrop(g: Governor): boolean {
 }
 
 /**
- * Tells whether the return window has room to step up: no heat, the dwell passed, 90 drawn frames in three seconds
- * with at most one late and a tenth heavy.
+ * Tells whether the late frames of the drop window are GPU-bound: fewer than half of them kept the main thread longer
+ * than their frame.
+ *
+ * @param g - The governor.
+ * @returns True when the scale, not the rate, should give.
+ */
+function gpuBound(g: Governor): boolean {
+  return 2 * g.dropBusy < g.dropMissed;
+}
+
+/**
+ * Tells whether the return window has room to step up: no heat, the dwell passed (twice the dwell for a step of the
+ * scale), 90 drawn frames in three seconds with at most one late, and for a step of the rate a tenth heavy at most.
  *
  * @param g - The governor.
  * @param at - The page time of the sample.
- * @returns True when the rate may return one step.
+ * @param scaleStep - The step up is one of the render scale: it costs the GPU, not the main thread.
+ * @returns True when the rule may return one step.
  */
-function canReturn(g: Governor, at: number): boolean {
+function canReturn(g: Governor, at: number, scaleStep: boolean): boolean {
   return (
     thermalRank(g.thermal) < HEAT_LIMIT_RANK &&
-    at - g.switchedAt >= g.dwellMs &&
+    at - g.switchedAt >= (scaleStep ? SCALE_DWELL_FACTOR * g.dwellMs : g.dwellMs) &&
     g.returnDrawn >= RETURN_MIN_FRAMES &&
     g.returnMissed <= RETURN_MAX_MISSES &&
-    g.returnHeavy <= Math.floor(RETURN_HEAVY_SHARE * g.returnDrawn)
+    (scaleStep || g.returnHeavy <= Math.floor(RETURN_HEAVY_SHARE * g.returnDrawn))
   );
 }
 
 /**
- * Decides on the windows after a sample: down one step when late intervals reach `max(8, 10 %)` of the second's,
- * up one step after the dwell with 90 steady drawn frames in three seconds, at most one late and a tenth heavy, and
- * no heat.
+ * Decides on the windows after a sample. Down one step when late intervals reach `max(8, 10 %)` of the second's: the
+ * render scale when the window is GPU-bound and a lower scale is allowed, the rate otherwise. Up one step in the
+ * reverse of the way down, with 90 steady drawn frames in three seconds, at most one late and no heat: the rate first,
+ * at the scale it dropped at, after the dwell and with a tenth heavy at most, then the scale after twice the dwell. A
+ * probe of the higher rate so never starts at full scale, and its failure changes no resolution.
  *
  * @param ctx - Domain context of the time plugin.
  * @param g - The governor.
  * @param at - The page time of the sample.
  */
 function decide(ctx: TimeCtx, g: Governor, at: number): void {
-  const { fps } = ctx.state.rate;
-  const lower = stepBelow(g.ladder, fps);
+  const { fps, scale } = ctx.state.rate;
+
+  if (shouldDrop(g)) {
+    const smaller = gpuBound(g) ? stepBelow(g.scales, scale) : undefined;
+    const lower = stepBelow(g.ladder, fps);
+
+    if (smaller !== undefined) switchRate(ctx, fps, smaller, "auto", "missed", at);
+    else if (lower !== undefined) switchRate(ctx, lower, scale, "auto", "missed", at);
+
+    return;
+  }
+
   const higher = stepAbove(g.ladder, fps);
 
-  if (lower !== undefined && shouldDrop(g)) {
-    switchRate(ctx, lower, "auto", "missed", at);
-  } else if (higher !== undefined && canReturn(g, at)) {
-    switchRate(ctx, higher, "auto", "headroom", at);
+  if (higher !== undefined && canReturn(g, at, false)) {
+    switchRate(ctx, higher, scale, "auto", "headroom", at);
+
+    return;
+  }
+
+  const larger = stepAbove(g.scales, scale);
+
+  if (larger !== undefined && canReturn(g, at, true)) {
+    switchRate(ctx, fps, larger, "auto", "headroom", at);
   }
 }
 
@@ -719,18 +790,21 @@ export function judgeFrame(ctx: TimeCtx, g: Governor, intervalMs: number, at: nu
 
   if (!isSample(ctx, g, intervalMs)) return;
 
-  // Grade the interval: late past the miss line, heavy for the step above.
+  // Grade the interval: late past the miss line, heavy for the step above, and busy when late after more main-thread
+  // time than its frame. The work runs from the frame's timestamp, so a stall that held the callback (a GC, a handler)
+  // is in it; a light frame that came late waited for the GPU.
   const { fps } = ctx.state.rate;
   const higher = stepAbove(g.ladder, fps);
   const missed = intervalMs > missLineMs(fps, ctx.state.rate.display.hz ?? fps);
   const heavy = higher !== undefined && g.lastWorkMs > (RETURN_WORK_SHARE * SECOND_MS) / higher;
+  const busy = missed && g.lastWorkMs > SECOND_MS / fps;
 
   // Write it into the ring and count it in both windows.
   const slot = g.written % RING;
 
   evict(g, at);
   g.sampleAt[slot] = at;
-  g.sampleFlags[slot] = (missed ? MISSED : 0) | (heavy ? HEAVY : 0);
+  g.sampleFlags[slot] = (missed ? MISSED : 0) | (heavy ? HEAVY : 0) | (busy ? BUSY : 0);
   g.written += 1;
   g.dropDrawn += 1;
   g.returnDrawn += 1;
@@ -741,6 +815,7 @@ export function judgeFrame(ctx: TimeCtx, g: Governor, intervalMs: number, at: nu
   }
 
   if (heavy) g.returnHeavy += 1;
+  if (busy) g.dropBusy += 1;
 
   // The rule decides on the windows.
   decide(ctx, g, at);
@@ -767,6 +842,48 @@ export function closeFrame(ctx: TimeCtx, g: Governor, workMs: number): void {
   g.lastProbed = rate.probedNow;
   g.lastFps = rate.fps;
   g.lastWorkMs = Math.max(0, workMs - agentMs);
+}
+
+/**
+ * Starts the governor over for a new scene: the back-off of failed returns goes back to the base dwell, both windows
+ * are emptied and the next interval is skipped, so the new screen is judged on its own frames. The rate and the scale
+ * stay. Nothing without a governor.
+ *
+ * @param rate - The rate state.
+ */
+export function sceneRate(rate: RateState): void {
+  const g = rate.governor;
+
+  if (g === undefined) return;
+
+  resetDwell(g);
+  g.skipNext = true;
+  emptyWindows(g);
+}
+
+/**
+ * Sets the render scales the rule may step through, down to `floor`. A scale under the new floor goes up to it at
+ * once, quietly: the caller draws at what it decided. Nothing without a governor.
+ *
+ * @param rate - The rate state.
+ * @param floor - The lowest scale the renderer allows; 1 allows none.
+ * @returns The frame rate after the call.
+ */
+export function allowScale(rate: RateState, floor: number): Readonly<FrameRate> {
+  const g = rate.governor;
+
+  if (g === undefined) return rate.snapshot;
+
+  g.scales = scaleStepsOf(floor);
+
+  const lowest = g.scales.at(-1) ?? 1;
+
+  if (rate.scale < lowest) {
+    rate.scale = lowest;
+    rate.snapshot = snapshotOf(rate);
+  }
+
+  return rate.snapshot;
 }
 
 /**
@@ -826,12 +943,12 @@ function resumeAuto(ctx: TimeCtx): void {
   const g = ctx.state.rate.governor;
 
   if (g === undefined) {
-    switchRate(ctx, maxFps, "fixed", "auto", nowOf());
+    switchRate(ctx, maxFps, 1, "fixed", "auto", nowOf());
 
     return;
   }
 
-  switchRate(ctx, autoRate(g, maxFps), "auto", "auto", nowOf());
+  switchRate(ctx, autoRate(g, maxFps), 1, "auto", "auto", nowOf());
 }
 
 /**
@@ -854,7 +971,7 @@ export function setRateChoice(ctx: TimeCtx, choice: RateChoice): Readonly<FrameR
   const { rate } = ctx.state;
 
   if (value !== "auto") {
-    switchRate(ctx, Math.min(value, ctx.config.maxFps), "forced", "forced", nowOf());
+    switchRate(ctx, Math.min(value, ctx.config.maxFps), 1, "forced", "forced", nowOf());
   } else if (rate.mode === "forced") {
     resumeAuto(ctx);
   }

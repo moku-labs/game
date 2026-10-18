@@ -10,18 +10,21 @@
 import { alloc } from "../../../../../tests/perf/alloc";
 import type { Api as FlowApi } from "../../../flow/types";
 import type { Api as ModelApi, Snapshot } from "../../../model/types";
+import { FakeRectangle, FakeTexture } from "../../../renderer/__tests__/fake-pixi";
 import { Parent, Sprite, Transform } from "../../../renderer/components";
 import { CALM_AFTER } from "../../../renderer/kept/record";
-import type { ViewportSize } from "../../../renderer/types";
+import type { PixiFilter, PixiTexture, ViewportSize } from "../../../renderer/types";
 import type { Time } from "../../../time/types";
 import { createModules } from "../../../world/api";
 import { withDeps } from "../../../world/lifecycle";
 import type { AnyComponentValue, Entity, WorldPhase } from "../../../world/types";
 import { Alpha, Blur, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
+import type { FilterInstance } from "../../filters/types";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
+import { Frosted, Under } from "../filter-fixtures";
 import { createMockEffects, type MockEffects } from "../unit/mock-effects";
 
 /** Calls before a window: the code under measure reaches its optimized tier first, as on a phone after a few seconds. */
@@ -407,4 +410,158 @@ export function particlesFixture(emitting: boolean): ParticlesFixture {
   for (let frame = 0; frame < 200; frame += 1) mock.frame(FRAME_MS);
 
   return { mock, run: phaseRunner(mock, "animate"), hosts };
+}
+
+/** A Pixi filter system as an apply sees it. */
+type Manager = Parameters<PixiFilter["apply"]>[0];
+
+/**
+ * A pooled texture of the fake module: a 390 × 844 frame on a 1024 × 2048 backing at two pixels per CSS px, as Pixi's
+ * pool hands one out for the box of the panels.
+ *
+ * @returns The texture.
+ */
+function pooledTexture(): PixiTexture {
+  return new FakeTexture({
+    source: {
+      width: 512,
+      height: 1024,
+      destroyed: false,
+      resolution: 2,
+      pixelWidth: 1024,
+      pixelHeight: 2048
+    },
+    frame: new FakeRectangle(0, 0, 390, 844)
+  }) as unknown as PixiTexture;
+}
+
+/**
+ * Pixi's `TexturePool` as a fixture draws through it: every request answered with one kept texture, every return
+ * taken back silently. The fake of the unit tests records every request: those would be the fake's bytes.
+ *
+ * @returns The pool.
+ */
+function quietPool(): { getOptimalTexture: () => PixiTexture; returnTexture: () => void } {
+  const texture = pooledTexture();
+
+  return { getOptimalTexture: () => texture, returnTexture: () => undefined };
+}
+
+/** A started mock with the two backdrop views of the frosted panels, and what each perf case runs. */
+export type BackdropFixture = {
+  /** One drawn frame of the backdrop without inputs: Pixi's pop calls its apply once. */
+  applyUnder: () => void;
+  /** One drawn frame of the backdrop whose chain starts from back: its apply draws the chain, then its body. */
+  applyFrosted: () => void;
+  /** One run of the `sync` phase: the filter sync. */
+  run: () => void;
+  /** The view whose `Under` a tween moves. */
+  tweened: Entity;
+  /** The value the world holds for its `Under`, writable: a tween case moves it in place. */
+  under: { spread: number };
+};
+
+/**
+ * The instance of a kind on a view of the mock.
+ *
+ * @param mock - The started mock.
+ * @param entity - The view.
+ * @param id - The kind id.
+ * @returns The instance.
+ */
+function instanceOn(mock: MockEffects, entity: Entity, id: string): FilterInstance {
+  const instance = mock.state.views.get(entity)?.instances.get(id);
+
+  if (instance === undefined) throw new Error(`perf fixture: no ${id} on the view`);
+
+  return instance;
+}
+
+/**
+ * Starts a mock with the two backdrop filters on two views of panels, as the frosted panels of a memory screen, over
+ * a quiet pool, and hands back the apply of each as Pixi's pop calls it inside a drawn frame (the back it copied at
+ * the canvas's resolution, the view's input and the canvas as the output), and the `sync` phase.
+ *
+ * @returns The fixture.
+ */
+export function backdropFixture(): BackdropFixture {
+  const mock = createMockEffects();
+
+  mock.renderer.resolution = 2;
+  mock.features.push({ name: "perf", description: { filters: [Under, Frosted] } });
+  plainRenderer(mock);
+  Reflect.set(mock.pixi.module, "TexturePool", quietPool());
+  mock.start();
+
+  const under = mock.spawn([
+    Sprite({ texture: "board.cell", width: 350, height: 200 }),
+    Transform(),
+    Under()
+  ]);
+  const frosted = mock.spawn([
+    Sprite({ texture: "board.cell", width: 350, height: 200 }),
+    Transform(),
+    Frosted()
+  ]);
+
+  mock.renderer.displays.add(under);
+  mock.renderer.displays.add(frosted);
+
+  for (let frame = 0; frame < 3; frame += 1) mock.frame(FRAME_MS);
+
+  const back = pooledTexture();
+  const input = pooledTexture();
+  const output = pooledTexture();
+  const manager = {
+    activeBackTexture: back,
+    applyFilter: (): void => undefined
+  } as unknown as Manager;
+  const underFilter = instanceOn(mock, under, "fixture.under").filter;
+  const frostedFilter = instanceOn(mock, frosted, "fixture.frosted").filter;
+  const value = mock.world.ecs.get(under, Under) as { spread: number } | undefined;
+
+  if (value === undefined) throw new Error("perf fixture: the first view has no Under");
+
+  mock.world.ecs.set(under, Under, { spread: STRENGTHS[0] });
+
+  return {
+    applyUnder: (): void => underFilter.apply(manager, input, output, false),
+    applyFrosted: (): void => frostedFilter.apply(manager, input, output, false),
+    run: phaseRunner(mock, "sync"),
+    tweened: under,
+    under: value
+  };
+}
+
+/**
+ * The write of a tween on the `spread` of the backdrop without inputs, alone: the fraction moves in place, as in
+ * `tweenWrite`.
+ *
+ * @param fixture - A fixture of `backdropFixture`.
+ * @returns The write.
+ */
+export function backdropWrite(fixture: BackdropFixture): () => void {
+  const { under } = fixture;
+  let frame = 0;
+
+  return (): void => {
+    frame += 1;
+    under.spread = (frame & 1) === 0 ? STRENGTHS[0] : STRENGTHS[1];
+  };
+}
+
+/**
+ * The step of a tween on the `spread` of the backdrop without inputs: the write, then the `sync` phase.
+ *
+ * @param fixture - A fixture of `backdropFixture`.
+ * @returns The step.
+ */
+export function backdropStep(fixture: BackdropFixture): () => void {
+  const write = backdropWrite(fixture);
+  const { run } = fixture;
+
+  return (): void => {
+    write();
+    run();
+  };
 }

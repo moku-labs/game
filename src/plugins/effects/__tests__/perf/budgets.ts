@@ -25,6 +25,18 @@ export const BUDGET = {
   filtersFadeResting: 0,
   // M4: an `Alpha` at resolution 0.5 fading between two fractions: its resolution is not written again. New.
   filtersFadeHalf: 0,
+  // Change 2026-10-18-memory-render, B1: the apply of a backdrop without inputs in a drawn frame: `sampleBack`'s scale
+  // and clamp compared with the back Pixi copied, then the body drawn. New.
+  backdropApply: 0,
+  // B1: the apply of a backdrop whose chain starts from back: three places drawn from the back into pooled textures,
+  // the last one bound, the body drawn, the textures given back. Before the fix: 152 B, for any filter with inputs
+  // (the list of taken textures cut with `length = 0` gave up its store, and the next apply grew a new one). Now 0.
+  backdropChainApply: 0,
+  // B1: the `spread` of a backdrop tweened, the tween's own write subtracted: its view synced, its slot compared (a
+  // backdrop's chains are read for what the slot says it blurs). 16: the tweened fraction, boxed once when the sync
+  // stores it in the uniform group, because here the stored value keeps it unboxed (the `Glow` case boxes it in the
+  // write); a filter of ours that is no backdrop, of the same uniforms, measures the same 16. New.
+  backdropTween: 16,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the
   // frame's delta boxed into each step call). Now 0: nothing is written for a still host.

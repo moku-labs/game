@@ -22,7 +22,8 @@ const change: RateChange = {
   displayHz: 120,
   thermal: "none",
   window: { drawn: 41, missed: 9, heavy: 0 },
-  dwellMs: 5000
+  dwellMs: 5000,
+  scale: 1
 };
 
 describe("the rate line", () => {
@@ -48,6 +49,25 @@ describe("the rate line", () => {
   });
 });
 
+describe("the scale line", () => {
+  // Bug: the log of a phone run never says when the canvas drew at another resolution for the rate, nor why.
+  it("a time:rate that moves the render scale is also a scale line; one that keeps it is not", async () => {
+    const agent = await startAgent();
+    const lines = agent.listen();
+
+    agent.mock.hooks["time:rate"]({ ...change, from: 120, to: 120, scale: 0.85 });
+    agent.mock.hooks["time:rate"]({ ...change, scale: 0.85 });
+
+    expect(linesOf(lines, "event").filter(line => line.name === "scale")).toEqual([
+      expect.objectContaining({
+        kind: "event",
+        name: "scale",
+        detail: { from: 1, to: 0.85, reason: "missed", fps: 120 }
+      })
+    ]);
+  });
+});
+
 describe("the header", () => {
   it("carries the rate the loop runs at", async () => {
     const rate: Readonly<FrameRate> = Object.freeze({
@@ -58,7 +78,8 @@ describe("the header", () => {
       ladder: Object.freeze([120, 60]),
       thermal: null,
       asked: null,
-      heldBy: null
+      heldBy: null,
+      scale: 1
     });
     const agent = await startAgent();
 

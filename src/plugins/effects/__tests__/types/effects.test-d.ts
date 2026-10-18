@@ -153,6 +153,22 @@ defineFilter("fx.soft", {
 // @ts-expect-error — a fallback is another filter made by defineFilter
 defineFilter("fx.soft", { wgsl: "", glsl: "", fallback: Blur });
 
+// A backdrop's chain may start from what was drawn under the view, and nowhere but there or the view's input.
+defineFilter("fx.frost", {
+  wgsl: "",
+  glsl: "",
+  backdrop: true,
+  inputs: { blur: { from: "back", stages: [Small], chain: () => [] } }
+});
+
+defineFilter("fx.frost", {
+  wgsl: "",
+  glsl: "",
+  backdrop: true,
+  // @ts-expect-error — an input starts from "input" or "back"
+  inputs: { blur: { from: "front", stages: [Small], chain: () => [] } }
+});
+
 expectTypeOf<FilterDefinition["inputs"]>().toEqualTypeOf<readonly FilterInputDefinition[]>();
 expectTypeOf<FilterSlot>().toHaveProperty("inputs");
 expectTypeOf<{ filter: PixiFilter; passes: number }>().toMatchTypeOf<FilterSlot>();

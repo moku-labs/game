@@ -129,11 +129,11 @@ app.scenes.current(); // "home"
 | 8 | `named` = the scene's `bundle` and its `bundles` of the committed state. A throw rejects before any load |
 | 9 | `assets.load` for every name at once, all awaited, raced against the node's abort signal. The first failure rejects |
 | 10 | Aborted: return. Nothing was touched, the old scene is still there |
-| 11 | One synchronous block: `setLayers` → `unmount` what only the old scene lists → `mount` the new scene's list (a projection both list stays, see below) → `current` → `world.ecs.setScene(id)` → `named` → `assets.sceneBundles(named)` → `time.wake()` → `scenes:changed` |
+| 11 | One synchronous block: `setLayers` → `unmount` what only the old scene lists → `mount` the new scene's list (a projection both list stays, see below) → `current` → `world.ecs.setScene(id)` → `named` → `assets.sceneBundles(named)` → `time.wake()` → `time.sceneChanged()` → `scenes:changed` |
 
 **The scene of the systems.** `world.ecs.setScene(id)` in the block above tells the world which scene is mounted, so a system with `scenes: ["board"]` runs while the board is mounted, and while it leaves: the world keeps the scene before as leaving until nothing carries `Exiting` any more (world README, "When a system runs"). A failed or aborted switch returns before the block, so the world keeps the old scene.
 
-**The re-read.** At any other node (no target, or the mounted scene: a rest node, a live transit node, an over node) a mounted scene with `bundles` is read again from the committed state. The same list, in the same order: nothing happens. Another list: every name is awaited, then `named` is replaced and `assets.sceneBundles(named)` is told. No mount, no `scenes:changed`, no `time.wake()`. An abort keeps the old list. A scene without `bundles` is never re-read, and a transit node of a fast walk neither switches nor re-reads.
+**The re-read.** At any other node (no target, or the mounted scene: a rest node, a live transit node, an over node) a mounted scene with `bundles` is read again from the committed state. The same list, in the same order: nothing happens. Another list: every name is awaited, then `named` is replaced and `assets.sceneBundles(named)` is told. No mount, no `scenes:changed`, no `time.wake()`, no `time.sceneChanged()`. An abort keeps the old list. A scene without `bundles` is never re-read, and a transit node of a fast walk neither switches nor re-reads.
 
 | Case | Behaviour |
 |---|---|
@@ -222,7 +222,7 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
 | `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"` |
-| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate |
+| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle

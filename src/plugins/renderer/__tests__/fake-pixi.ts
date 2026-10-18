@@ -1616,6 +1616,48 @@ export class FakeBitmapTextPipe {
   }
 }
 
+/**
+ * The fake of Pixi's `GpuRenderTargetAdaptor`: the lazy canvas pass subclasses it. The fake application builds no
+ * WebGPU system, so none is ever made.
+ */
+export class FakeGpuRenderTargetAdaptor {}
+
+/** The fake of Pixi's `GpuRenderTargetSystem`, which the lazy canvas pass subclasses and swaps. */
+export class FakeGpuRenderTargetSystem {
+  public static extension = { type: [WEBGPU_SYSTEM], name: "renderTarget" };
+
+  /**
+   * Keeps the renderer, as Pixi's systems do.
+   *
+   * @param renderer - The renderer.
+   */
+  public constructor(public readonly renderer: unknown) {}
+}
+
+/** The fake of Pixi's `GpuStencilSystem`, which the lazy canvas pass registers again after its render target system. */
+export class FakeGpuStencilSystem {
+  public static extension = { type: [WEBGPU_SYSTEM], name: "stencil" };
+
+  /**
+   * Keeps the renderer, as Pixi's systems do.
+   *
+   * @param renderer - The renderer.
+   */
+  public constructor(public readonly renderer: unknown) {}
+}
+
+/** The fake of Pixi's `PipelineSystem`, which the lazy canvas pass subclasses and swaps. */
+export class FakePipelineSystem {
+  public static extension = { type: [WEBGPU_SYSTEM], name: "pipeline" };
+
+  /**
+   * Keeps the renderer, as Pixi's systems do.
+   *
+   * @param renderer - The renderer.
+   */
+  public constructor(public readonly renderer: unknown) {}
+}
+
 /** The fake of Pixi's `RenderGroupPipe`: one per renderer, under the same name for every backend. */
 export class FakeRenderGroupPipe {
   public static extension = { type: [WEBGL_PIPES, WEBGPU_PIPES], name: "renderGroup" };
@@ -1706,8 +1748,8 @@ export const fakeExtensions: FakeExtensions = {
   },
 
   /**
-   * Empties the registry and registers Pixi's own seven counted classes and its bitmap text pipe,
-   * as importing Pixi does.
+   * Empties the registry and registers Pixi's own seven counted classes, its bitmap text and render-group pipes and the
+   * three WebGPU systems the lazy canvas pass swaps, as importing Pixi does.
    */
   reset(): void {
     fakeExtensions.lists.clear();
@@ -1720,7 +1762,10 @@ export const fakeExtensions: FakeExtensions = {
       FakeGlTextureSystem,
       FakeBatcherPipe,
       FakeBitmapTextPipe,
-      FakeRenderGroupPipe
+      FakeRenderGroupPipe,
+      FakeGpuRenderTargetSystem,
+      FakeGpuStencilSystem,
+      FakePipelineSystem
     );
   }
 };
@@ -2216,6 +2261,10 @@ export function createFakePixi(
     Geometry: FakeGeometry,
     ExtensionType: FakeExtensionType,
     RenderGroupPipe: FakeRenderGroupPipe,
+    GpuRenderTargetAdaptor: FakeGpuRenderTargetAdaptor,
+    GpuRenderTargetSystem: FakeGpuRenderTargetSystem,
+    GpuStencilSystem: FakeGpuStencilSystem,
+    PipelineSystem: FakePipelineSystem,
     Shader: FakeShader,
     Matrix: FakeMatrix,
     compileHighShaderGpuProgram: fakeShaderCompiler.compile,

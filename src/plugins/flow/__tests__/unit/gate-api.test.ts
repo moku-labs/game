@@ -55,6 +55,8 @@ const createFakeTime = (): FakeTime => {
     setRate: vi.fn(),
     frameDrawn: vi.fn(),
     frameProbed: vi.fn(),
+    allowScale: vi.fn(),
+    sceneChanged: vi.fn(),
     isPaused: () => false,
     isRunning: () => flags.running,
     step: vi.fn(),

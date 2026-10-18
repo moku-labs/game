@@ -34,8 +34,10 @@ Callbacks of one phase run in registration order. A callback registered during a
 | `measure(listener)` | Agent builds: hands `listener` what `time` measured of every frame, after `render` (see "Measuring a frame"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `agentClock()` | Agent builds: the page clock for measurement (`performance.now()`); `undefined` otherwise. `world` times its systems with it. Never for game logic. |
 | `chargeAgent(ms)` | For engine plugins. Agent builds: charges the editor's own work (its overlay, its page agent) to the frame running now, so the adaptive frame rate leaves it out. The renderer's monitor calls it when an agent span closes. Nothing otherwise. |
-| `rate()` | The loop's frame rate: `{ fps, mode, reason, displayHz, ladder, thermal, asked, heldBy }` (`Time.FrameRate`). One frozen object, the same until something in it changes: cheap to read every frame. See [The rate asked and the rate run](#the-rate-asked-and-the-rate-run). |
+| `rate()` | The loop's frame rate: `{ fps, mode, reason, displayHz, ladder, thermal, asked, heldBy, scale }` (`Time.FrameRate`). One frozen object, the same until something in it changes: cheap to read every frame. See [The rate asked and the rate run](#the-rate-asked-and-the-rate-run). |
 | `setRate(choice)` | `"auto"`, 30, 60 or 120. A number forces the cap (never above `maxFps`); the adaptive rule and the heat leave it alone. `"auto"` gives the rate back: the top of the ladder (a step lower under heat), or `maxFps` without `adaptive`. An equal choice changes nothing. Answers `rate()`; anything else throws `[game] time.setRate takes "auto", 30, 60 or 120.` |
+| `allowScale(floor)` | For engine plugins: the renderer lets the adaptive rule step the render scale down to `floor` before it drops the rate (see "The render scale"); 1 allows none. A scale under the new floor goes up to it at once, without `time:rate`. Answers `rate()`. Nothing without `adaptive`. |
+| `sceneChanged()` | For engine plugins: `scenes` tells the adaptive rule that a new scene stands. The back-off starts over at 5 s, both windows are emptied and the next interval is skipped. The rate and the scale stay. |
 | `frameDrawn()` | For engine plugins: the renderer's `render` phase reports a frame Pixi drew. Only drawn frames count for the adaptive rate. One assignment; a stepped frame forgets it. |
 | `frameProbed()` | For engine plugins: the frame also drew warm-up probes. It is drawn, but never a sample of the adaptive rate. One assignment; a stepped frame forgets it. |
 
@@ -133,21 +135,40 @@ work fits the longer frame, so the rule reads the work instead: a frame is heavy
 work (from its start to the end of its `render` phase, never after the measure listeners) is over
 half of the higher rate's frame, 4.17 ms toward 120. No GPU time is an input: a store build has no
 GPU timer, and GPU ms rises at 60 against 120 on a phone that clocks its GPU down. The return is a
-probe judged by the drop rule on its own intervals: a drop within 10 s of a return is a failed
-return and doubles the dwell (5, 10, 20, 40, 80, then 120 s at most); a returned rate held for 60 s
-resets it to 5 s at the next drop. A GPU-bound screen whose JS is light costs one short probe per
-dwell. The windows are emptied at every switch, so evidence of one rate never judges another. In an
-agent build the overlay's own span (`chargeAgent`) is left out of a frame's work, but it stays in
-the frame interval: force the rate with `game.frameRate` for a clean A/B run.
+probe judged by the drop rule on its own intervals: the first drop after a return judges it. Held
+less than 60 s it failed and doubles the dwell (5, 10, 20, 40, 80, then 120 s at most), held longer
+it resets the dwell to 5 s; the steps down that follow the same failure leave it. A new scene
+(`sceneChanged()`) starts the back-off over and judges the new screen on its own frames. Without a
+render scale, a GPU-bound screen whose JS is light costs one short probe per dwell. The windows are
+emptied at every switch, so evidence of one rate never judges another. In an agent build the
+overlay's own span (`chargeAgent`) is left out of a frame's work, but it stays in the frame interval:
+force the rate with `game.frameRate` for a clean A/B run.
+
+**The render scale.** When the renderer allows it (`allowScale(floor)`, from its `adaptiveScale`:
+down to 0.75 on a phone by default), a late window that is GPU-bound gives the scale first: down one
+step of 1, 0.85, 0.75, 0.6 and 0.5 instead of the rate, also at the lowest rate (60 that cannot
+hold), and the rate only once the scale is at its floor. A window is GPU-bound when fewer than half
+of its late frames were busy on the main thread, a frame busy when its work took longer than its
+frame (8.33 ms at 120). The work runs from the frame's timestamp, so a GC or a handler that held the
+callback is in it; a frame that fit its frame and still came late waited for the GPU. A busy window
+skips the scale and drops the rate, since fewer pixels do not help the main thread. Up in the reverse
+of the way down: the rate first, at the scale it dropped at, after the dwell (so a probe of 120 never
+starts at full scale and its failure changes no resolution), then the scale, a step after twice the
+dwell (a change of the scale redraws the canvas and retakes the kept pictures), with the return's
+evidence but without the heavy check. When frames too heavy for the higher rate block it, the scale
+comes back at the lower rate.
+A forced rate and `setRate("auto")` start at scale 1. A change of the scale alone is a `time:rate`
+with `from` equal to `to`, logs `time: render scale` and asks the shell for nothing.
 
 **Heat.** On the native shell the thermal status `moderate` drops one step at once, `severe` and
 above drop to the floor, and both block every return while they last. A status that falls back
 returns nothing by itself: the return rule decides. A forced rate stays.
 
 **Every switch** emits `time:rate` (`Time.RateChange`: `from`, `to`, `reason`, `mode`, `displayHz`,
-`thermal`, the `window` evidence and the `dwellMs`), logs `time: frame rate` with `{ from, to,
-reason }`, asks the shell for the new panel rate and, in an agent build, is a `rate` line of the
-renderer's performance log.
+`thermal`, the `window` evidence, the `dwellMs` and the `scale`), logs `time: frame rate` with `{ from, to,
+reason }` (`time: render scale` with `{ from, to, reason }` when the scale moved), asks the shell for the new
+panel rate and, in an agent build, is a `rate` line of the renderer's performance log (and a `scale` line when the
+scale moved).
 
 **Off in a headless app and on a fake clock**: `defineGameApp` writes `adaptive: false` for both,
 so a test runs as it always did; the page passes the device clock and keeps the game's
@@ -166,8 +187,8 @@ export default defineGameApp({
   pluginConfigs: { time: { maxFps: 120, adaptive: { floor: 60 } } }
 });
 
-app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null }
-app.time.setRate(60); // the player's "60": forced until setRate("auto")
+app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null, scale: 0.75 }
+app.time.setRate(60); // the player's "60": forced until setRate("auto"), at scale 1
 ```
 
 ### The rate asked and the rate run
@@ -187,12 +208,12 @@ never reported as held when the panel cannot hold it.
 
 ```ts
 // maxFps 120 without adaptive, on a 60 Hz phone:
-app.time.rate(); // { fps: 60, mode: "fixed", reason: "start", displayHz: 60, ladder: [], thermal: null, asked: 120, heldBy: "panel" }
+app.time.rate(); // { fps: 60, mode: "fixed", reason: "start", displayHz: 60, ladder: [], thermal: null, asked: 120, heldBy: "panel", scale: 1 }
 // the editor pins 60 on a 120 Hz phone:
-app.time.setRate(60); // { fps: 60, mode: "forced", …, asked: 60, heldBy: null }
+app.time.setRate(60); // { fps: 60, mode: "forced", …, asked: 60, heldBy: null, scale: 1 }
 ```
 
-`time:rate` (`RateChange`) is unchanged: its `from` and `to` are the loop's cap.
+`time:rate` (`RateChange`): its `from` and `to` are the loop's cap, its `scale` the render scale after the change.
 
 ## Configuration
 
@@ -213,7 +234,7 @@ createApp({ pluginConfigs: { time: { maxFps: 30, idleFps: 0 } } });
 | Event | Payload | When |
 |---|---|---|
 | `time:thermal` | `ThermalReading` (`{ status, headroom, at, android }`, a missing field `null`) | The native shell reported a thermal reading, in an agent build or with `adaptive`. Never per frame. |
-| `time:rate` | `RateChange` (`{ from, to, reason, mode, displayHz, thermal, window, dwellMs }`) | The loop's frame rate or its mode changed: the adaptive rule, the display, the heat or `setRate`. Never per frame, never at start. |
+| `time:rate` | `RateChange` (`{ from, to, reason, mode, displayHz, thermal, window, dwellMs, scale }`) | The loop's frame rate, its mode or the render scale changed: the adaptive rule, the display, the heat or `setRate`. Never per frame, never at start. |
 
 Frame work is never an event.
 

@@ -249,6 +249,8 @@ export function createMockRenderer(
     // The warm-up draws probes for its first frames (F4): the tests of other behaviour leave it off, the warm-up
     // tests turn it on.
     warm: 0,
+    // The phone check of the engine's default asks `matchMedia` once more: the tests of the scale turn it on.
+    adaptiveScale: false,
     ...options.config
   };
   const state = createRendererState({ config });
@@ -313,6 +315,7 @@ export function createMockRenderer(
     },
     rate: () => rate.now,
     setRate: vi.fn(),
+    allowScale: () => rate.now,
     frameDrawn: () => {
       rate.drawn += 1;
     },

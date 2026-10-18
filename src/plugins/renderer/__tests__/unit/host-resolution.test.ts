@@ -55,9 +55,14 @@ function frame(mock: MockRenderer): void {
 
 describe("targetResolution", () => {
   it("takes the override over the device pixels under the cap", () => {
-    expect(targetResolution({ dpr: 2.81, cap: 2, override: undefined })).toBe(2);
-    expect(targetResolution({ dpr: 1.5, cap: 2, override: undefined })).toBe(1.5);
-    expect(targetResolution({ dpr: 2.81, cap: 2, override: 1.75 })).toBe(1.75);
+    expect(targetResolution({ dpr: 2.81, cap: 2, override: undefined, scale: 1 })).toBe(2);
+    expect(targetResolution({ dpr: 1.5, cap: 2, override: undefined, scale: 1 })).toBe(1.5);
+    expect(targetResolution({ dpr: 2.81, cap: 2, override: 1.75, scale: 1 })).toBe(1.75);
+  });
+
+  it("draws the device pixels under the cap at the render scale, and the override over both", () => {
+    expect(targetResolution({ dpr: 2.81, cap: 2, override: undefined, scale: 0.75 })).toBe(1.5);
+    expect(targetResolution({ dpr: 2.81, cap: 2, override: 1.75, scale: 0.75 })).toBe(1.75);
   });
 });
 

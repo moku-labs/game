@@ -104,6 +104,8 @@ const createFakeApp = (options: AppOptions = {}) => {
       setRate: vi.fn(),
       frameDrawn: vi.fn(),
       frameProbed: vi.fn(),
+      allowScale: vi.fn(),
+      sceneChanged: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => false,
       step: (deltaMs: number): void => {
