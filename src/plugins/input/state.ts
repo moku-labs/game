@@ -17,6 +17,7 @@ export function createInputState(_ctx: { readonly config: Readonly<Config> }): S
     phase: "idle",
     pointerId: undefined,
     moved: false,
+    caught: false,
     entity: undefined,
     key: undefined,
     start: { x: 0, y: 0 },

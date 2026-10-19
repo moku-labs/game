@@ -10,6 +10,8 @@ import {
   Draggable,
   DropTarget,
   Pressable,
+  Scrollable,
+  type ScrollableValue,
   Swipeable,
   Tappable,
   Touchable,
@@ -111,6 +113,35 @@ export function acceptTrace(ctx: InputCtx, point: Point): (entity: Entity) => bo
 }
 
 /**
+ * Builds the accept function of a catch: a `Scrollable` that moves now and is not on its way out.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @returns The accept function `hitTest` calls per candidate.
+ */
+export function acceptMovingScroll(ctx: InputCtx): (entity: Entity) => boolean {
+  const { ecs } = ctx.deps.world;
+
+  return entity => !ecs.has(entity, Exiting) && ecs.get(entity, Scrollable)?.moving === true;
+}
+
+/**
+ * Builds the accept function of a hand-off: a `Scrollable` that moves on `axis` and is not on its
+ * way out.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param axis - The dominant axis of the pan.
+ * @returns The accept function `hitTest` calls per candidate.
+ */
+export function acceptScroll(
+  ctx: InputCtx,
+  axis: ScrollableValue["axis"]
+): (entity: Entity) => boolean {
+  const { ecs } = ctx.deps.world;
+
+  return entity => !ecs.has(entity, Exiting) && ecs.get(entity, Scrollable)?.axis === axis;
+}
+
+/**
  * The topmost view that takes the press at a point.
  *
  * @param ctx - Domain context of the input plugin.
@@ -120,6 +151,37 @@ export function acceptTrace(ctx: InputCtx, point: Point): (entity: Entity) => bo
  */
 export function findPressed(ctx: InputCtx, x: number, y: number): Entity | undefined {
   return ctx.deps.renderer.sync.hitTest(x, y, entity => acceptPress(ctx, entity));
+}
+
+/**
+ * The topmost scroll at a point that moves now: a finger that lands on it stops it.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param x - Reference x.
+ * @param y - Reference y.
+ * @returns The scroll, or `undefined` when none under the point moves.
+ */
+export function findMovingScroll(ctx: InputCtx, x: number, y: number): Entity | undefined {
+  return ctx.deps.renderer.sync.hitTest(x, y, acceptMovingScroll(ctx));
+}
+
+/**
+ * The topmost scroll at a point that moves on an axis: a nested scroll is drawn over its parent,
+ * so this is the innermost one.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param x - Reference x.
+ * @param y - Reference y.
+ * @param axis - The dominant axis of the pan.
+ * @returns The scroll, or `undefined` when none under the point moves on that axis.
+ */
+export function findScroll(
+  ctx: InputCtx,
+  x: number,
+  y: number,
+  axis: ScrollableValue["axis"]
+): Entity | undefined {
+  return ctx.deps.renderer.sync.hitTest(x, y, acceptScroll(ctx, axis));
 }
 
 /**
