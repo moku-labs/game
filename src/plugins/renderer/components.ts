@@ -117,14 +117,20 @@ export type ParentValue = { entity: Entity };
 export type DisplayValue = { object: unknown };
 
 /**
- * A filled rounded rectangle or a triangle, anchored at the top left of the `Transform`. `kind`
- * picks the outline: `"rect"` (the default) or `"triangle"`, which fills its `w × h` box pointing
- * right (rotate the element for another direction) and ignores `radius`. `fillAlpha` is the alpha
- * of the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape and the
- * entity's children: a disabled button at 0.6 draws its icon at 0.6 too. `dash` is the
- * dash length of the stroke in reference units, with gaps of half a dash; 0 strokes a solid line.
- * `clip` masks the children of the entity to the shape, always solid, which is how `ui` draws a
- * scroll and an overflow. The shape itself is never masked, so its stroke is drawn whole.
+ * A filled rounded rectangle, a triangle or an arc, anchored at the top left of the `Transform`. `kind` picks the
+ * outline: `"rect"` (the default), `"triangle"`, which fills its `w × h` box pointing right (rotate the element for
+ * another direction) and ignores `radius`, or `"arc"`. `fillAlpha` is the alpha of the fill alone: 0 draws only the
+ * stroke, a ring. `alpha` fades the whole shape and the entity's children: a disabled button at 0.6 draws its icon at
+ * 0.6 too. `dash` is the dash length of the stroke in reference units, with gaps of half a dash; 0 strokes a solid
+ * line. `clip` masks the children of the entity to the shape, always solid, which is how `ui` draws a scroll and an
+ * overflow. The shape itself is never masked, so its stroke is drawn whole. An arc is a stroke on the circle inscribed
+ * in the box: its diameter is `min(w, h) − strokeWidth`, centred, so the stroke stays inside the box. It starts at 12
+ * o'clock and runs clockwise over `sweep` of the circle (0 to 1, clamped): 0 draws nothing, 1 a closed ring. `cap` ends
+ * an open arc round or flat (`"butt"`). Both are optional: left out, `sweep` is 1 and `cap` is `"round"`
+ * (`arcDefaults`). Only an arc reads them; a rectangle or a triangle ignores them. An arc draws only its stroke, in
+ * `stroke`, `strokeWidth` and `alpha`: `fill`, `fillAlpha`, `radius` and `dash` are ignored, and `clip` masks the
+ * children to its box. The path is built again only when a field it is drawn from changes: a still arc costs nothing a
+ * frame, a new `fill` builds no arc again.
  *
  * @example
  * ```ts
@@ -140,10 +146,12 @@ export type DisplayValue = { object: unknown };
  * // The play glyph of a watch button, and a dashed focus ring: 10 u dashes, 5 u gaps.
  * const play: ShapeValue = { ...ring, kind: "triangle", w: 36, h: 40, fillAlpha: 1, strokeWidth: 0 };
  * const focus: ShapeValue = { ...ring, w: 200, h: 80, stroke: 0x3a2212, strokeWidth: 4, dash: 10 };
+ * // The time left on a slot's timer: 42 % of a ring 25.8 u across in a 28 u box, from 12 o'clock clockwise, round ends.
+ * const timer: ShapeValue = { ...ring, kind: "arc", w: 28, h: 28, stroke: 0xc8a15a, strokeWidth: 2.2, sweep: 0.42 };
  * ```
  */
 export type ShapeValue = {
-  kind: "rect" | "triangle";
+  kind: "rect" | "triangle" | "arc";
   w: number;
   h: number;
   fill: number;
@@ -154,7 +162,24 @@ export type ShapeValue = {
   strokeWidth: number;
   dash: number;
   clip: boolean;
+  /** The share of the circle an arc sweeps, 0 to 1, from 12 o'clock clockwise; clamped. Only an arc reads it: 1 left out. */
+  sweep?: number;
+  /** How an open arc ends: `"round"` or `"butt"` (flat at its end). Only an arc reads it: `"round"` left out. */
+  cap?: "round" | "butt";
 };
+
+/**
+ * What an arc draws with when its `Shape` leaves `sweep` or `cap` out: the whole ring, round ends.
+ *
+ * @example
+ * ```ts
+ * arcDefaults.sweep; // 1
+ * ```
+ */
+export const arcDefaults: Readonly<{ sweep: number; cap: "round" | "butt" }> = Object.freeze({
+  sweep: 1,
+  cap: "round"
+});
 
 /**
  * What `sprite()` takes: the two things every visual needs, and the four that have defaults.
@@ -302,9 +327,10 @@ export const Parent = /*#__PURE__*/ component("Parent", { entity: 0 });
 export const Display = /*#__PURE__*/ component("Display", displayDefaults);
 
 /**
- * A filled rounded rectangle or a right-pointing triangle, drawn with Pixi `Graphics` and redrawn
- * only when a field changed. `fillAlpha: 0` draws only the stroke, `dash` above 0 dashes it.
- * `clip: true` masks the children of the entity to the shape.
+ * A filled rounded rectangle, a right-pointing triangle or an arc (`kind: "arc"`, a stroke from 12 o'clock clockwise
+ * over `sweep` of the circle in its box), drawn with Pixi `Graphics` and redrawn only when a field changed.
+ * `fillAlpha: 0` draws only the stroke, `dash` above 0 dashes it. `clip: true` masks the children of the entity to the
+ * shape.
  */
 export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
 

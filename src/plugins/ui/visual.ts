@@ -5,6 +5,7 @@
  * import each other's run-time code.
  */
 import {
+  arcDefaults,
   NineSlice,
   Shape,
   Sprite,
@@ -79,7 +80,8 @@ function contentOf(props: Record<string, unknown>): string {
 /**
  * The visual component of an element: a sprite for an image or an icon, the text for a text, the
  * nine-slice of its style (outlined when the style sets `debug`), or a rounded rectangle, a
- * triangle with `shape: "triangle"`, its stroke dashed with `dash`. A clipping element (`scroll`,
+ * triangle with `shape: "triangle"`, its stroke dashed with `dash`, or an arc with `shape: "arc"`
+ * over the `sweep` of its style, ended by its `cap`. A clipping element (`scroll`,
  * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
  * clips too, and a nine-slice field draws its slices and clips to them. A style with a stroke and
  * no fill draws only the stroke, a ring. A container with no fill and no stroke gets a rectangle that draws
@@ -142,22 +144,32 @@ export function visualOf(element: Element): AnyComponentValue[] {
   const filled = style.fill !== undefined || style.stroke !== undefined;
   const invisible = isContainer(type) && !filled;
 
+  const shape = {
+    kind: style.shape ?? "rect",
+    w: rect.w,
+    h: rect.h,
+    fill: style.fill ?? Shape.defaults.fill,
+    // No `fill` paints nothing inside: a stroke-only ring, or a button whose label is all it shows.
+    fillAlpha: style.fill === undefined ? 0 : Shape.defaults.fillAlpha,
+    // The alpha fades the children too: a container that draws nothing keeps its style's.
+    alpha,
+    radius: style.radius ?? 0,
+    stroke: style.stroke ?? Shape.defaults.stroke,
+    strokeWidth: invisible ? 0 : (style.strokeWidth ?? 0),
+    dash: style.dash ?? 0,
+    // A text field clips its value to its box, so a long one never leaves it.
+    clip: clip || type === "input"
+  };
+
+  // An arc writes its share and its ends, both, so the share of an earlier render never stays on it; a rectangle or a
+  // triangle writes neither and ignores what an earlier arc left.
+  if (shape.kind !== "arc") return [Shape(shape)];
+
   return [
     Shape({
-      kind: style.shape ?? "rect",
-      w: rect.w,
-      h: rect.h,
-      fill: style.fill ?? Shape.defaults.fill,
-      // No `fill` paints nothing inside: a stroke-only ring, or a button whose label is all it shows.
-      fillAlpha: style.fill === undefined ? 0 : Shape.defaults.fillAlpha,
-      // The alpha fades the children too: a container that draws nothing keeps its style's.
-      alpha,
-      radius: style.radius ?? 0,
-      stroke: style.stroke ?? Shape.defaults.stroke,
-      strokeWidth: invisible ? 0 : (style.strokeWidth ?? 0),
-      dash: style.dash ?? 0,
-      // A text field clips its value to its box, so a long one never leaves it.
-      clip: clip || type === "input"
+      ...shape,
+      sweep: style.sweep ?? arcDefaults.sweep,
+      cap: style.cap ?? arcDefaults.cap
     })
   ];
 }

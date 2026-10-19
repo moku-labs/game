@@ -11,6 +11,8 @@ import { Layer } from "../../../world/ecs/define";
 import type { Entity, SystemTiming } from "../../../world/types";
 import {
   HudPart,
+  Shape,
+  type ShapeValue,
   Sprite,
   type SpriteValue,
   Transform,
@@ -207,6 +209,61 @@ export function storedSprite(mock: MockRenderer, entity: Entity): SpriteValue {
   if (value === undefined) throw new Error("perf fixture: the entity has no Sprite");
 
   return value as SpriteValue;
+}
+
+/** A started renderer with slot timers: twelve rings, and the stored `Shape` of the one a frame syncs. */
+export type ArcStage = {
+  mock: MockRenderer;
+  /** The `Shape` the world holds for the synced ring, writable in place. */
+  ring: ShapeValue;
+};
+
+/**
+ * Starts the mock renderer (a release build's pass) with the twelve slot timers of the A26 ward: rings of 28 u, a
+ * stroke of 2.2, each over its own share of time left. The pass that builds them has run and every change set is
+ * cleared; then one ring's change mark is made once, so every pass after it syncs that ring: compares it and, when a
+ * window writes a field in place, builds it again.
+ *
+ * @returns The stage.
+ */
+export async function startArcs(): Promise<ArcStage> {
+  const mock = createMockRenderer();
+
+  await mock.start();
+  mock.world.projection.setLayers([{ name: "items", sort: "none" }]);
+
+  const entities: Entity[] = [];
+
+  for (let index = 0; index < 12; index += 1) {
+    entities.push(
+      mock.world.ecs.spawn(OWNER, [
+        Layer({ name: "items" }),
+        Transform({ x: (index % 4) * 40, y: Math.floor(index / 4) * 40 }),
+        Shape({
+          kind: "arc",
+          w: 28,
+          h: 28,
+          stroke: 0xc8_a1_5a,
+          strokeWidth: 2.2,
+          sweep: (index + 1) / 12
+        })
+      ])
+    );
+  }
+
+  mock.modules.sync.pass();
+  mock.world.clearChanges();
+
+  const entity = entities[5] ?? 0;
+
+  mock.world.ecs.set(entity, Shape, { sweep: 0.42 });
+  mock.modules.sync.pass();
+
+  const ring = mock.world.ecs.get(entity, Shape);
+
+  if (ring === undefined) throw new Error("perf fixture: the ring has no Shape");
+
+  return { mock, ring: ring as ShapeValue };
 }
 
 /**

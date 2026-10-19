@@ -2,7 +2,7 @@
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
-import type { OverlayValue } from "../components";
+import type { OverlayValue, ShapeValue } from "../components";
 import type { Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { FilterCache, KeptState } from "../kept/types";
@@ -108,7 +108,7 @@ export type HitBox = { x: number; y: number; width: number; height: number };
 export type DrawnShape = {
   /** Drawn white, coloured by the object's tint (no stroke); false for a shape painted in its own colours. */
   tinted: boolean;
-  kind: "rect" | "triangle";
+  kind: ShapeValue["kind"];
   w: number;
   h: number;
   fill: number;
@@ -117,13 +117,17 @@ export type DrawnShape = {
   stroke: number;
   strokeWidth: number;
   dash: number;
+  /** An arc's `sweep` as the value held it, `undefined` when left out. */
+  sweep: number | undefined;
+  /** An arc's `cap` as the value held it, `undefined` when left out. */
+  cap: ShapeValue["cap"];
 };
 
 /**
  * The fields of the clip rectangle last drawn into a view's mask: an equal value draws no mask again. Private to
  * `sync`.
  */
-export type ClipDrawn = { kind: "rect" | "triangle"; w: number; h: number; radius: number };
+export type ClipDrawn = { kind: ShapeValue["kind"]; w: number; h: number; radius: number };
 
 /**
  * What `sync` knows about one drawn entity.

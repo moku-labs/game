@@ -174,7 +174,7 @@ export const Frost = defineFilter("Frost", {
 [Frost.filter.backdrop, Frost.filter.cache, Frost.filter.inputs[0]?.from]; // [true, "screen", "back"]
 ```
 
-- A backdrop is drawn live in every frame, never kept as a picture (its category is `"screen"`; `cache` may only be left out or `false`); a change of what is drawn under it is a change of that view and draws the frame, also on demand. The kept cache also refuses any filter with `blendRequired`.
+- A backdrop is drawn live in every frame, never kept as a picture (its category is `"screen"`; `cache` may only be left out or `false`); a change of what is drawn under it is a change of that view and draws the frame, also on demand. The kept cache also refuses any filter with `blendRequired`. Inside the range an `Overlay` keeps as one picture it runs no pass while the picture stands: it is drawn into the picture when it is taken, and live again in the frame the overlay is gone (renderer README, "Overlays and the HUD").
 - It has no padding: Pixi copies the padded box, and a copy past the canvas edge fails on the GPU. A padded filter beside it on the same view (`Glow`, `Outline`) pads the copy too: keep the backdrop's view to itself.
 - A stage is no backdrop (it reads the step before it). A fallback may be one only for a backdrop; a fallback that is none draws over the view's own pixels alone.
 - Its slot says it blurs (`blurs`) only for an input from the view's own input: a chain from back blurs the scene under the view, not the view, so an overlay over it holds no loops for it.

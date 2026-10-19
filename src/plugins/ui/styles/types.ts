@@ -130,6 +130,8 @@ export type PositionStyle = {
  * // The play glyph of the Watch button, and a dashed ring around a slot.
  * const play: VisualStyle = { shape: "triangle", fill: 0xfffbe8 };
  * const slot: VisualStyle = { stroke: 0x3a2212, strokeWidth: 4, dash: 10, radius: 24 };
+ * // The slot timer: the time left as 42 % of a ring, from 12 o'clock clockwise, with round ends.
+ * const timer: VisualStyle = { shape: "arc", stroke: 0xc8a15a, strokeWidth: 2.2, sweep: 0.42, cap: "round" };
  * ```
  */
 export type VisualStyle<Asset extends string = string> = {
@@ -140,12 +142,21 @@ export type VisualStyle<Asset extends string = string> = {
   alpha?: number;
   /**
    * The shape of the rectangle an element without a nine-slice is drawn with: `"rect"` (the
-   * default) or `"triangle"`, which fills the box pointing right and ignores `radius`. Turn the
-   * element with `rotation` for another direction.
+   * default), `"triangle"`, which fills the box pointing right and ignores `radius` (turn the
+   * element with `rotation` for another direction), or `"arc"`, a `stroke` of `strokeWidth` on the
+   * circle inscribed in the box (`min(width, height) − strokeWidth` across, centred) from 12 o'clock
+   * clockwise over `sweep` of it. An arc draws no `fill` and ignores `radius` and `dash`.
    */
-  shape?: "rect" | "triangle";
+  shape?: "rect" | "triangle" | "arc";
   /** The dash length of the stroke in reference units, with gaps of half a dash; 0 is solid. */
   dash?: number;
+  /**
+   * The share of the circle an arc sweeps, from 0 to 1 (1 by default): 0 draws nothing, 1 a
+   * closed ring; a value outside is clamped. A new value in a render draws the arc again once.
+   */
+  sweep?: number;
+  /** How an open arc ends: `"round"` (the default) or `"butt"`, flat at its end. */
+  cap?: "round" | "butt";
   /**
    * The asset key of a nine-slice drawn at the rect instead of the rounded rectangle. Any tag
    * but `image`, `icon` and `text` takes it; a clipping element (`scroll`, `overflow: "hidden"`)

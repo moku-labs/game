@@ -86,5 +86,8 @@ export const BUDGET = {
   lazyCanvasDraw: 0,
   // B3: what a frame that starts with a filter adds over Pixi's own frame. New, measured −344 B: the empty canvas pass
   // Pixi begins at render start, its descriptor and attachment objects, is never begun.
-  lazyCanvasFrame: 0
+  lazyCanvasFrame: 0,
+  // Change 2026-10-19-glass-arc, A2: a pass that syncs a still slot-timer ring (its Shape in the change set, nothing of
+  // it changed). New, measured 0 B: the drawn fields are compared and no path is built; a sweep that moves builds it.
+  arcStill: 0
 } as const;

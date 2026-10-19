@@ -187,10 +187,26 @@ describe("the delta 6 vocabulary", () => {
     expectTypeOf(
       defineStyle({ is: { focus: { scale: 1.1 } } }).is.focus.scale
     ).toEqualTypeOf<1.1>();
-    // @ts-expect-error — a shape is "rect" or "triangle".
+    // @ts-expect-error — a shape is "rect", "triangle" or "arc".
     defineStyle({ shape: "circle" });
     // @ts-expect-error — the draw order is a number.
     defineStyle({ zIndex: "top" });
+  });
+
+  it("takes an arc with its sweep and its ends, and refuses ends an arc does not draw", () => {
+    const timer = defineStyle({
+      shape: "arc",
+      stroke: 0xc8_a1_5a,
+      strokeWidth: 2.2,
+      sweep: 0.42,
+      cap: "butt"
+    });
+
+    expectTypeOf(timer.cap).toEqualTypeOf<"butt">();
+    // @ts-expect-error — an arc ends "round" or "butt".
+    defineStyle({ shape: "arc", cap: "square" });
+    // @ts-expect-error — the sweep is a share of the circle, a number.
+    defineStyle({ shape: "arc", sweep: "42%" });
   });
 
   it("gives a button the escape prop, the snapshot the focus flag and the config the ring", () => {
