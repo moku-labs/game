@@ -3,8 +3,9 @@
  * strip of A Memory Missing's board (a 306 u window over a 696 u track, stops 0, 318 and 390,
  * opened on 318, and the pinned column that closes to a 390 u window with stops 0 and 306), a
  * free strip with no stops, a vertical list, a windowed list, an x strip inside a y list, a
- * windowed list on the x axis, and a scroll whose axis changes. The finger lands the way `input`
- * lands it: `Pressed` on the scroll and the `Pointer` resource. Real flow runner, plain Bun, inert
+ * windowed list on the x axis, a scroll whose axis changes, and a strip opened on 318 whose track
+ * starts too short for it and grows. The finger lands the way `input` lands it: `Pressed` on the
+ * scroll and the `Pointer` resource. Real flow runner, plain Bun, inert
  * renderer, real Yoga.
  */
 import { createApp, defineGame, projection, type } from "../../../index";
@@ -37,6 +38,12 @@ const PINNED_STOPS = [0, 318, 390];
 
 /** The stops of the strip once the pinned column closed. */
 const OPEN_STOPS = [0, 306];
+
+/** The track of the growing strip before it grows: 200 u past its window. */
+const SHORT_TRACK = PINNED + 200;
+
+/** The track of the growing strip after its second growth: 690 u past its window. */
+export const LONG_TRACK = TRACK + 300;
 
 /** The track of the free strip: it scrolls 2694 u. */
 export const FREE_TRACK = 3000;
@@ -114,6 +121,27 @@ export const TurnScreen = defineComponent("TurnScreen", {
 });
 
 /**
+ * A strip opened on `offset={318}` whose track first runs only 200 u past its window, the way a
+ * text runs short before its font arrives: `grow` gives it the board's track (`max` 390),
+ * `growMore` a longer one (`max` 690), `farther` sets the offset prop to 600.
+ */
+export const GrowScreen = defineComponent("GrowScreen", {
+  local: { track: SHORT_TRACK, at: 318 },
+  view: (_props: object, local) => (
+    <column key="growRoot" style={rootStyle}>
+      <scroll key="growing" axis="x" offset={local.at} style={{ width: PINNED, height: 120 }}>
+        <row key="growTrack" style={{ width: local.track, height: 120 }} />
+      </scroll>
+      <row key="growControls" style={{ width: 1080, height: 100 }}>
+        <button key="grow" local={{ track: TRACK }} style={controlStyle} />
+        <button key="growMore" local={{ track: LONG_TRACK }} style={controlStyle} />
+        <button key="farther" local={{ at: 600 }} style={controlStyle} />
+      </row>
+    </column>
+  )
+});
+
+/**
  * The rows of a list: `count` rows of `ROW`.
  *
  * @param prefix - The start of every row key.
@@ -150,6 +178,7 @@ function screenOf(name: string, view: () => DescriptionNode) {
 export const scrollScreens = [
   screenOf("strip", () => <StripScreen key="stripScreen" />),
   screenOf("turn", () => <TurnScreen key="turnScreen" />),
+  screenOf("grow", () => <GrowScreen key="growScreen" />),
   screenOf("free", () => (
     <column key="freeRoot" style={rootStyle}>
       <scroll key="free" axis="x" style={{ width: PINNED, height: 120 }}>
@@ -228,7 +257,7 @@ const main = defineFlow("main", {
 export const scrollFeature = defineFeature("scroll", {
   flows: [main],
   projections: scrollScreens,
-  ui: [StripScreen, TurnScreen]
+  ui: [StripScreen, TurnScreen, GrowScreen]
 });
 
 /** Yields the microtask queue to the loop, the way a test waits without a timer. */

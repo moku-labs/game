@@ -237,7 +237,7 @@ they are drawn, and no solve runs.
 |---|---|
 | `axis` | `"x"` or `"y"` (default). Read when the scroll spawns: another axis on a later render keeps the first, with one warning `ui:scroll-axis-fixed` `{ key, axis }`. `"x"` with `rows` throws `[game] A windowed scroll moves on y only.` |
 | `snap` | stops, as offsets from the start; each is kept inside `0..max`. A release glides to the stop nearest to `offset + v × 260` (`v` the offset's velocity in units a ms) |
-| `offset` | where the scroll stands, from the start, kept inside `0..max`; 0 when left out. Its first drawn frame stands there. A new value on a later render glides there; the same value does nothing, so a scroll the player moved stays |
+| `offset` | where the scroll stands, from the start, kept inside `0..max`; 0 when left out. Its first drawn frame stands there. A new value on a later render glides there; the same value does nothing, so a scroll the player moved stays. A scroll that stands at its prop, or glides to it, follows it through a new `max`: a prop the first range was too short for (a text measured before its font arrived) is reached once the content grows. A press and `app.ui.scroll` end that until the next new value |
 
 All numbers are reference units and milliseconds of `time` (`time.delta`): a time scale and a pause
 apply.
@@ -264,7 +264,8 @@ apply.
   are whole units, `0..max`. It is written in a frame where the offset, `max` or `moving` changed, and
   once with `moving: false` when the scroll stops; a still frame writes nothing. `moving` is true
   while the finger holds it, it flings or it glides. While a scroll moves, `time.wake()` keeps the
-  frames coming.
+  frames coming; at a time scale of 0 it asks for none, and a fling or a glide goes on where it
+  stands once time runs again.
 - The internal `Scroll` keeps the offset the way the windowed range is cut with: `Scroll.offset =
   −ScrollState.offset`, `Scroll.min = −max`. The internal `Scrollable` `{ axis, moving }` is what
   `input` reads for the hand-off and the catch. A game reads neither.

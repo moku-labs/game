@@ -21,7 +21,7 @@ import {
   Traceable
 } from "./components";
 import { abortDrag, grab, letGoOfLeavers, moveHeld, moveHover, release } from "./drag";
-import { findMovingScroll, findPressed, findScroll } from "./hit";
+import { findPressed, movingScrollOf, scrollOnAxisOf } from "./hit";
 import { clearPointerOver, endsHover, isHover, movePointerOver, syncCursor } from "./hover";
 import { attach, detach, record } from "./pointer";
 import { abortTrace, beginTrace, endTrace, extendTrace, traceLost } from "./trace";
@@ -133,9 +133,10 @@ function press(ctx: InputCtx, entity: Entity): void {
  * Takes the pointer and looks for the view under it. The pointer is taken even where no view is.
  * While the finger rests (`rests`) the next finger that goes down takes the pointer over and this
  * press is cancelled; once it starts a gesture — a drag, a move past the tap slop, a long press, a
- * trace — a second finger stays ignored. A moving scroll under the finger takes the press before
- * any view: the finger stops it, and the press is caught. A view that carries `Traceable` starts
- * a trace instead of a press: it is not tagged `Pressed`.
+ * trace — a second finger stays ignored. When the view under the finger sits in a moving scroll,
+ * that scroll takes the press: the finger stops it, and the press is caught. A view drawn over a
+ * moving scroll from another root, a HUD or a popup button, keeps its press. A view that carries
+ * `Traceable` starts a trace instead of a press: it is not tagged `Pressed`.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -155,7 +156,11 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
   pointer.justPressed = true;
   capture(ctx, true);
 
-  const scroll = findMovingScroll(ctx, point.x, point.y);
+  const entity = findPressed(ctx, point.x, point.y);
+
+  if (entity === undefined) return;
+
+  const scroll = movingScrollOf(ctx, entity);
 
   if (scroll !== undefined) {
     ctx.state.caught = true;
@@ -164,9 +169,6 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
     return;
   }
 
-  const entity = findPressed(ctx, point.x, point.y);
-
-  if (entity === undefined) return;
   if (ecs.has(entity, Traceable)) {
     beginTrace(ctx, entity, point);
 
@@ -181,12 +183,12 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
 }
 
 /**
- * The press just left the tap slop: it goes to the scroll it pans, the topmost `Scrollable` under
- * the start point that moves on the dominant axis of the move. The view under the finger loses
- * `Pressed`, and the press is marked caught: it is a scroll gesture now, so its release answers
- * nothing, also when the finger came back inside the slop. A draggable or swipeable view keeps its
- * gesture, a caught press keeps its scroll, and with no scroll of that axis the press stays where
- * it is.
+ * The press just left the tap slop: it goes to the scroll it pans, the innermost `Scrollable` of
+ * the pressed view's own `Parent` chain (the view itself included) that moves on the dominant axis
+ * of the move. The view loses `Pressed`, and the press is marked caught: it is a scroll gesture
+ * now, so its release answers nothing, also when the finger came back inside the slop. A
+ * draggable or swipeable view keeps its gesture, a caught press keeps its scroll, and a view that
+ * sits in no scroll of that axis keeps its press, also a popup button drawn over a list.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - Where the finger is, in reference units.
@@ -198,7 +200,7 @@ function handOff(ctx: InputCtx, point: Point): void {
   if (entity === undefined || caught) return;
   if (ecs.has(entity, Draggable) || ecs.has(entity, Swipeable)) return;
 
-  const scroll = findScroll(ctx, start.x, start.y, axisOf(start, point));
+  const scroll = scrollOnAxisOf(ctx, entity, axisOf(start, point));
 
   if (scroll === undefined || scroll === entity) return;
 
@@ -336,6 +338,22 @@ function rests(ctx: InputCtx): boolean {
 }
 
 /**
+ * Tells whether a sample takes the press past the tap slop for the first time: the press has not
+ * moved yet and the finger is farther than `tapSlopPx` from the start.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param point - Where the finger is, in reference units.
+ * @returns True in the one sample that turns the press into a moved one.
+ */
+function leavesSlop(ctx: InputCtx, point: Point): boolean {
+  return (
+    ctx.state.phase === "pressed" &&
+    !ctx.state.moved &&
+    distance(ctx.state.start, point) > ctx.config.tapSlopPx
+  );
+}
+
+/**
  * Feeds one raw sample to the machine. A leave does nothing here. A sample of another pointer is
  * dropped while a pointer is followed: the second finger is ignored. One exception: a press while
  * the followed pointer rests takes the pointer over and cancels the resting press, so a resting
@@ -372,11 +390,7 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
     }
     case "move": {
       if (isHover(ctx, pointer, sample)) return point;
-      if (
-        ctx.state.phase === "pressed" &&
-        !ctx.state.moved &&
-        distance(ctx.state.start, point) > ctx.config.tapSlopPx
-      ) {
+      if (leavesSlop(ctx, point)) {
         ctx.state.moved = true;
         handOff(ctx, point);
       }

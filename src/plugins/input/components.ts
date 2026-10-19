@@ -187,9 +187,9 @@ export const PointerOver = /*#__PURE__*/ tag("PointerOver");
 
 /**
  * On every ui scroll container, internal: ui writes it, input reads it, a game never sees it. A
- * press that leaves the tap slop along `axis` goes from the view under the finger to the topmost
- * scroll of that axis; a finger that lands on a scroll that is `moving` stops it and answers
- * nothing.
+ * press that leaves the tap slop along `axis` goes from the pressed view to the innermost scroll
+ * of that axis the view hangs in by its `Parent` chain; a finger that lands on a view inside a
+ * scroll that is `moving` stops it and answers nothing.
  */
 export const Scrollable = /*#__PURE__*/ component("Scrollable", scrollableDefaults);
 

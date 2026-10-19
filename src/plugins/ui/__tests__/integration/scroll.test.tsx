@@ -13,6 +13,7 @@ import {
   FREE_TRACK,
   find,
   frames,
+  LONG_TRACK,
   logged,
   mount,
   moveTo,
@@ -239,6 +240,32 @@ describe("S2, S3: the release", () => {
 
     expect(stateOf(app, "free")?.offset).toBeGreaterThan(flung ?? 0);
   });
+
+  it("asks for no frame while a time scale of 0 holds a fling, and ends the fling once time runs again", async () => {
+    // Bug caught: at time scale 0 the fling never ends, so the scroll step wakes the loop every
+    // frame and a game slowed to a stop draws at the full frame rate for ever.
+    const app = await start("free");
+
+    press(app, "free", 500, 900);
+    moveTo(app, 460, 900);
+    moveTo(app, 420, 900);
+    release(app, "free");
+    app.time.setScale(0);
+    frames(app, 1);
+
+    const wakes = app.time.wakes();
+
+    frames(app, 5);
+
+    expect(app.time.wakes()).toBe(wakes);
+    expect(app.world.ecs.get(find(app, "free"), Scrollable)).toEqual({ axis: "x", moving: true });
+
+    app.time.setScale(1);
+    frames(app, 300);
+
+    expect(stateOf(app, "free")?.moving).toBe(false);
+    expect(app.world.ecs.get(find(app, "free"), Scrollable)).toEqual({ axis: "x", moving: false });
+  });
 });
 
 describe("S4: snap", () => {
@@ -337,6 +364,52 @@ describe("S5: the offset prop", () => {
     frames(app, 40);
 
     expect(stateOf(app, "strip")).toEqual({ offset: 0, max: 390, moving: false });
+  });
+
+  it("reaches an offset prop the first range was too short for once the content grows, until the player moves it", async () => {
+    // Bug caught: the prop is clamped against the first solve's max and lost, so a strip opened
+    // on 318 whose track runs short until its font arrives stays on 200 for good.
+    const app = await start("grow");
+
+    expect(stateOf(app, "growing")).toEqual({ offset: 200, max: 200, moving: false });
+
+    tapLocal(app, "grow");
+
+    expect(stateOf(app, "growing")).toEqual({ offset: 318, max: TRACK - PINNED, moving: false });
+    expect(poseOf(app, "growing")?.x).toBe(-318);
+
+    // The player drags it to 100 and lets go still: from then on a new range leaves it there.
+    press(app, "growing", 500, 900);
+    moveTo(app, 718, 900);
+    rest(app);
+    release(app, "growing");
+    tapLocal(app, "growMore");
+
+    expect(stateOf(app, "growing")).toEqual({
+      offset: 100,
+      max: LONG_TRACK - PINNED,
+      moving: false
+    });
+  });
+
+  it("glides on to a new offset prop when the range grows under the glide", async () => {
+    // Bug caught: a glide to a prop past the end keeps the end it was clamped to when the content
+    // grows under it, so the strip stops short of its prop.
+    const app = await start("grow");
+
+    tapLocal(app, "grow");
+    tapLocal(app, "farther");
+
+    expect(stateOf(app, "growing")).toMatchObject({ max: TRACK - PINNED, moving: true });
+
+    tapLocal(app, "growMore");
+    frames(app, 60);
+
+    expect(stateOf(app, "growing")).toEqual({
+      offset: 600,
+      max: LONG_TRACK - PINNED,
+      moving: false
+    });
   });
 
   it("leaves a strip the finger holds with the finger when a render brings a new offset prop", async () => {

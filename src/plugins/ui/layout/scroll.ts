@@ -41,6 +41,12 @@ const VELOCITY_MS = 100;
 /** A finger that stood still for longer than this before its release lets go with no velocity, in ms. */
 const STILL_MS = 50;
 
+/** The numbers of one sample in the ring: where the finger was on the axis, and when. */
+const SAMPLE_STRIDE = 2;
+
+/** The fewest samples a release velocity is read from. */
+const MIN_SAMPLES = 2;
+
 /**
  * Keeps an offset inside the scrollable range: never below the end of the content, never above
  * the top.
@@ -215,9 +221,24 @@ function glideTo(motion: ScrollMotion, target: number): void {
 }
 
 /**
+ * Where a sample of the press starts in the ring: `back` samples before the newest one, 0 being
+ * the newest. The position is at the index, the time right after it.
+ *
+ * @param state - The layout state, which keeps the samples of the press.
+ * @param back - How many samples before the newest; 0 to the number of slots minus 1.
+ * @returns The index of the sample in `scrollRing`.
+ */
+function slotBefore(state: LayoutState, back: number): number {
+  const slots = state.scrollRing.length / SAMPLE_STRIDE;
+
+  return ((state.scrollHead + slots - 1 - back) % slots) * SAMPLE_STRIDE;
+}
+
+/**
  * Follows the finger on a held scroll. The first frame of a press, a hand-off included, takes the
- * finger where it is as the start and stops a fling or a glide where it stands; the offset then
- * moves against the finger, inside 0 to `max`. Every frame adds the finger's sample to the ring.
+ * finger where it is as the start, stops a fling or a glide where it stands, and ends the scroll's
+ * standing at its `offset` prop; the offset then moves against the finger, inside 0 to `max`.
+ * Every frame adds the finger's sample to the ring.
  *
  * @param state - The layout state, which keeps the samples of the press.
  * @param container - The held scroll.
@@ -232,27 +253,31 @@ function hold(
 ): void {
   const at = motion.axis === "x" ? pointer.x : pointer.y;
   const ring = state.scrollRing;
-  const slots = ring.length / 2;
+  const slots = ring.length / SAMPLE_STRIDE;
 
+  // A new press starts here: the finger where it is, the offset where the scroll stands, an empty
+  // ring. The player moves the scroll now, so it no longer follows its `offset` prop.
   if (motion.mode !== "held" || state.scrolling !== container.entity) {
     motion.mode = "held";
     motion.velocity = 0;
     motion.pointer = at;
     motion.start = motion.offset;
+    motion.atProp = false;
     state.scrolling = container.entity;
     state.scrollSamples = 0;
     state.scrollMoved = state.scrollClock;
   }
 
+  // The offset moves against the finger, inside the range.
   motion.offset = within(motion.start - (at - motion.pointer), motion.max);
 
   // Per frame: the sample goes into the ring in place; the finger moved when it left the last one.
-  const last = ((state.scrollHead + slots - 1) % slots) * 2;
+  if (state.scrollSamples > 0 && ring[slotBefore(state, 0)] !== at) {
+    state.scrollMoved = state.scrollClock;
+  }
 
-  if (state.scrollSamples > 0 && ring[last] !== at) state.scrollMoved = state.scrollClock;
-
-  ring[state.scrollHead * 2] = at;
-  ring[state.scrollHead * 2 + 1] = state.scrollClock;
+  ring[state.scrollHead * SAMPLE_STRIDE] = at;
+  ring[state.scrollHead * SAMPLE_STRIDE + 1] = state.scrollClock;
   state.scrollHead = (state.scrollHead + 1) % slots;
   state.scrollSamples = Math.min(slots, state.scrollSamples + 1);
 }
@@ -267,22 +292,24 @@ function hold(
  */
 function releaseVelocity(state: LayoutState): number {
   const ring = state.scrollRing;
-  const slots = ring.length / 2;
   const now = state.scrollClock;
 
-  if (state.scrollSamples < 2 || now - state.scrollMoved > STILL_MS) return 0;
+  // A single sample, or a finger that stood still before it lifted, carries no velocity.
+  if (state.scrollSamples < MIN_SAMPLES || now - state.scrollMoved > STILL_MS) return 0;
 
-  const newest = ((state.scrollHead + slots - 1) % slots) * 2;
+  // Back from the newest sample to the oldest one of the last 100 ms.
+  const newest = slotBefore(state, 0);
   let oldest = newest;
 
   for (let back = 1; back < state.scrollSamples; back += 1) {
-    const slot = ((state.scrollHead + 2 * slots - 1 - back) % slots) * 2;
+    const slot = slotBefore(state, back);
 
     if ((ring[slot + 1] ?? 0) < now - VELOCITY_MS) break;
 
     oldest = slot;
   }
 
+  // The finger's move over that span, against the finger: the offset grows as the finger goes back.
   const span = (ring[newest + 1] ?? 0) - (ring[oldest + 1] ?? 0);
 
   return span > 0 ? ((ring[oldest] ?? 0) - (ring[newest] ?? 0)) / span : 0;
@@ -430,29 +457,46 @@ function show(
   const scroll = ecs.get(container.entity, Scroll);
   const shown = ecs.get(container.entity, ScrollState);
   const scrollable = ecs.get(container.entity, Scrollable);
+  const rangeMoved =
+    scroll !== undefined && (scroll.offset !== 0 - offset || scroll.min !== 0 - motion.max);
+  const stateMoved =
+    shown !== undefined &&
+    (shown.offset !== offset || shown.max !== motion.max || shown.moving !== moving);
 
-  if (scroll !== undefined && (scroll.offset !== 0 - offset || scroll.min !== 0 - motion.max)) {
+  // The windowed range is cut from `Scroll`, in offsets of 0 and below.
+  if (rangeMoved) {
     patches.scroll.offset = 0 - offset;
     patches.scroll.min = 0 - motion.max;
     ecs.set(container.entity, Scroll, patches.scroll);
   }
 
-  if (
-    shown !== undefined &&
-    (shown.offset !== offset || shown.max !== motion.max || shown.moving !== moving)
-  ) {
+  // A game reads `ScrollState`: it is written only when it says something new.
+  if (stateMoved) {
     patches.state.offset = offset;
     patches.state.max = motion.max;
     patches.state.moving = moving;
     ecs.set(container.entity, ScrollState, patches.state);
   }
 
+  // `input` reads `moving` to let a finger catch the scroll: written when it starts or stops.
   if (scrollable !== undefined && scrollable.moving !== moving) {
     patches.scrollable.moving = moving;
     ecs.set(container.entity, Scrollable, patches.scrollable);
   }
 
   moveContent(ctx, state, container, content, motion);
+}
+
+/**
+ * Tells whether a scroll has nothing to do this frame: its first solve has not placed it yet, or
+ * it stands still and no finger is on it.
+ *
+ * @param motion - Its motion.
+ * @param pressed - Whether a finger is on it.
+ * @returns True when the frame leaves it alone.
+ */
+function isIdle(motion: ScrollMotion, pressed: boolean): boolean {
+  return !motion.placed || (!pressed && motion.mode === "still");
 }
 
 /**
@@ -485,7 +529,7 @@ function stepOne(
 
   const motion = container.scroll;
 
-  if (motion === undefined || !motion.placed || (!pressed && motion.mode === "still")) return false;
+  if (motion === undefined || isIdle(motion, pressed)) return false;
 
   const content = contentOf(container, lookup);
 
@@ -505,7 +549,9 @@ function stepOne(
 /**
  * Moves every scroll container by the frame: with the finger while it is pressed, then in a
  * fling or a glide after it lets go. Time is the frame's `delta`, so a time scale and a pause
- * apply. While a scroll moves, `time.wake()` keeps the frames coming.
+ * apply. While a scroll moves, `time.wake()` keeps the frames coming; at a time scale of 0 no
+ * frame is asked for: a fling or a glide stands where it is and goes on once time runs again,
+ * and a finger's samples wake the loop themselves.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the samples of the press.
@@ -529,11 +575,15 @@ export function stepScroll(
     if (stepOne(ctx, state, container, lookup, pointer, time)) moving = true;
   }
 
-  if (moving) ctx.deps.time.wake();
+  if (moving && time.delta > 0) ctx.deps.time.wake();
 }
 
 /**
- * Takes a new range: the offset keeps inside it at once, and so does a running glide.
+ * Takes a new range: the offset keeps inside it at once, and so does a running glide. A scroll
+ * that follows its `offset` prop goes on following it in the new range: standing, it stands at
+ * the prop at once; gliding to it, it glides on to it from where it is. So a prop the first range
+ * was too short for is reached once the content grows, a text measured again when its font
+ * arrives.
  *
  * @param motion - The motion of the scroll.
  * @param max - The largest offset the solve gives it now.
@@ -545,12 +595,17 @@ function resize(motion: ScrollMotion, max: number): void {
   motion.offset = within(motion.offset, max);
   motion.from = within(motion.from, max);
   motion.to = within(motion.to, max);
+
+  if (!motion.atProp) return;
+
+  if (motion.mode === "glide") glideTo(motion, motion.seen);
+  else motion.offset = within(motion.seen, max);
 }
 
 /**
- * Puts a scroll the solve just spawned at its `offset` prop, inside its range. Its spawn waits in
- * the queue of the phase: these values replace the queued ones at the flush, before the first
- * draw.
+ * Puts a scroll the solve just spawned at its `offset` prop, inside its range, and lets it follow
+ * the prop from there. Its spawn waits in the queue of the phase: these values replace the queued
+ * ones at the flush, before the first draw.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param container - The scroll element, live since this solve.
@@ -562,6 +617,7 @@ function place(ctx: UiCtx, container: Element, content: Element, motion: ScrollM
   const rest = content.rest;
 
   motion.placed = true;
+  motion.atProp = true;
   motion.max = maxOf(container, content, motion.axis);
   motion.seen = askedOffsetOf(container);
   motion.offset = within(motion.seen, motion.max);
@@ -579,7 +635,8 @@ function place(ctx: UiCtx, container: Element, content: Element, motion: ScrollM
 
 /**
  * Settles a placed scroll on what the solve and the render of this frame gave it: a new range at
- * once, then a glide to a new `offset` prop, which a scroll the finger holds only remembers.
+ * once, then a glide to a new `offset` prop, which the scroll follows from then on. A scroll the
+ * finger holds only remembers the prop.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
@@ -601,7 +658,10 @@ function settle(
   if (asked !== motion.seen) {
     motion.seen = asked;
 
-    if (motion.mode !== "held") glideTo(motion, asked);
+    if (motion.mode !== "held") {
+      glideTo(motion, asked);
+      motion.atProp = true;
+    }
   }
 
   show(ctx, state, container, content, motion);
@@ -672,8 +732,9 @@ export function clampScroll(
 }
 
 /**
- * Puts a placed scroll at an offset at once, inside its range: a fling or a glide stops, and
- * `ScrollState` says it stands. A finger that holds it goes on from there.
+ * Puts a placed scroll at an offset at once, inside its range: a fling or a glide stops, the
+ * scroll no longer follows its `offset` prop, and `ScrollState` says it stands. A finger that
+ * holds it goes on from there.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
@@ -695,6 +756,7 @@ export function scrollTo(
   if (motion === undefined || !motion.placed || content === undefined) return false;
 
   motion.offset = within(Number.isNaN(to) ? motion.offset : to, motion.max);
+  motion.atProp = false;
   stop(motion);
   show(ctx, state, container, content, motion);
   ctx.deps.time.wake();

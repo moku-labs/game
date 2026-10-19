@@ -37,11 +37,6 @@ export type LocalWriteValue = { patch: Record<string, unknown> };
 
 /**
  * The scroll state of a container. Internal: the engine writes it, a game never does.
- *
- * @example
- * ```ts
- * const value: ScrollValue = { axis: "y", offset: -120, min: -480 };
- * ```
  */
 export type ScrollValue = { axis: string; offset: number; min: number };
 

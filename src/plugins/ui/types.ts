@@ -254,7 +254,7 @@ export type UiApi = {
    * test, an agent or a visual test (the `game.scroll` command, the step `{ scroll: { key, to } }`).
    *
    * @param key - The `key` prop of the `scroll` element.
-   * @param to - How far from the start, in reference units.
+   * @param to - How far from the start, in reference units. `NaN` leaves the scroll where it is.
    * @returns True when a live scroll took it; false with one warning `ui:scroll-without-scroll`
    *   when no live `scroll` has the key.
    * @example

@@ -47,10 +47,6 @@ function scrollPatches(): ScrollPatches {
  * Creates the layout branch of the ui state. Everything starts empty: Yoga arrives in `onStart`.
  *
  * @returns The module state.
- * @example
- * ```ts
- * createLayoutState().nodes; // 0
- * ```
  */
 export function createLayoutState(): LayoutState {
   return {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Transform } from "../../../renderer/components";
+import { Parent, Transform } from "../../../renderer/components";
 import { Exiting } from "../../../world/ecs/define";
 import { createInputApi } from "../../api";
 import {
@@ -56,7 +56,8 @@ function scrollOf(
 
 /**
  * A strip of shop items: an x scroll at (0..400, 0..100) and one button in it at (20..120,
- * 20..80), drawn over the scroll. The plugin is started.
+ * 20..80), drawn over the scroll and hung under it by `Parent`, the way ui hangs a child under its
+ * scroll. The plugin is started.
  */
 function buttonInScroll(
   mock: MockInput,
@@ -69,15 +70,35 @@ function buttonInScroll(
     { x: 0, y: 0, width: 400, height: 100 },
     extra
   );
-  const button = mock.spawn([Tappable({ intent: "buy", payload: { id: "s1" } })], {
-    projection: "shop.items",
-    key: "s1"
-  });
+  const button = mock.spawn(
+    [Tappable({ intent: "buy", payload: { id: "s1" } }), Parent({ entity: strip })],
+    { projection: "shop.items", key: "s1" }
+  );
 
   mock.boxes.push({ entity: button, x: 20, y: 20, width: 100, height: 60 });
   mock.start();
 
   return { scroll: strip, button };
+}
+
+/**
+ * A popup button drawn over a scroll from another root: its box lies over the scroll's, pushed
+ * last so it is the topmost, and no `Parent` hangs it under the scroll. The plugin is started.
+ */
+function popupOverScroll(
+  mock: MockInput,
+  scroll: Partial<ScrollableValue>
+): { scroll: number; button: number } {
+  const list = scrollOf(mock, scroll, { x: 0, y: 0, width: 400, height: 400 });
+  const button = mock.spawn([Tappable({ intent: "close", payload: {} })], {
+    projection: "popup.rename",
+    key: "close"
+  });
+
+  mock.boxes.push({ entity: button, x: 20, y: 20, width: 100, height: 60 });
+  mock.start();
+
+  return { scroll: list, button };
 }
 
 describe("the hand-off of a press to the scroll it pans", () => {
@@ -156,8 +177,10 @@ describe("the hand-off of a press to the scroll it pans", () => {
     // one, or a later move of the same press hands it on again.
     const mock = createMockInput();
     const page = scrollOf(mock, { axis: "y" }, { x: 0, y: 0, width: 400, height: 400 });
-    const strip = scrollOf(mock, { axis: "x" }, { x: 0, y: 100, width: 400, height: 100 });
-    const button = mock.spawn([Tappable({ intent: "buy" })]);
+    const strip = scrollOf(mock, { axis: "x" }, { x: 0, y: 100, width: 400, height: 100 }, [
+      Parent({ entity: page })
+    ]);
+    const button = mock.spawn([Tappable({ intent: "buy" }), Parent({ entity: strip })]);
 
     mock.boxes.push({ entity: button, x: 20, y: 120, width: 100, height: 60 });
     mock.start();
@@ -200,14 +223,35 @@ describe("the hand-off of a press to the scroll it pans", () => {
     expect(mock.state.entity).toBe(button);
   });
 
+  it("leaves the press on a popup button drawn over a y list when the finger drifts past the slop along y", () => {
+    // Bug caught: the hand-off hit-tests the start point and finds the list under the modal, so a
+    // finger that drifts on the popup's button pans the list behind it and the button never answers.
+    const mock = createMockInput();
+    const { scroll, button } = popupOverScroll(mock, { axis: "y" });
+
+    record(mock.state, down(60, 50));
+    record(mock.state, moved(60, 70));
+    mock.frame();
+
+    expect(mock.has(button, Pressed)).toBe(true);
+    expect(mock.has(scroll, Pressed)).toBe(false);
+    expect(mock.state.caught).toBe(false);
+
+    // Back inside the slop: the button still answers its tap.
+    record(mock.state, up(61, 52));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "close", payload: {} }]);
+  });
+
   it("lets a Draggable inside a scroll drag", () => {
     // Bug caught: the hand-off takes the press of a draggable item, so the item never lifts.
     const mock = createMockInput();
     const scroll = scrollOf(mock, { axis: "x" }, { x: 0, y: 0, width: 400, height: 100 });
-    const item = mock.spawn([Draggable({}), Transform({ x: 20, y: 20 })], {
-      projection: "board.items",
-      key: "i5"
-    });
+    const item = mock.spawn(
+      [Draggable({}), Transform({ x: 20, y: 20 }), Parent({ entity: scroll })],
+      { projection: "board.items", key: "i5" }
+    );
 
     mock.boxes.push({ entity: item, x: 20, y: 20, width: 100, height: 60 });
     mock.start();
@@ -226,7 +270,10 @@ describe("the hand-off of a press to the scroll it pans", () => {
     // Bug caught: the hand-off takes the press of a swipeable cell, so the swipe answers nothing.
     const mock = createMockInput();
     const scroll = scrollOf(mock, { axis: "x" }, { x: 0, y: 0, width: 400, height: 100 });
-    const cell = mock.spawn([Swipeable({ intent: "swap", payload: { cell: "c2" } })]);
+    const cell = mock.spawn([
+      Swipeable({ intent: "swap", payload: { cell: "c2" } }),
+      Parent({ entity: scroll })
+    ]);
 
     mock.boxes.push({ entity: cell, x: 20, y: 20, width: 100, height: 60 });
     mock.start();
@@ -279,6 +326,28 @@ describe("a finger on a moving scroll", () => {
     expect(tapped).toEqual([button]);
   });
 
+  it("leaves a tap on a button of another root drawn over a moving scroll to that button", () => {
+    // Bug caught: the catch hit-tests for a moving scroll before the view on top, skips the HUD or
+    // popup button drawn over a flinging list, and the list eats the tap on that button.
+    const mock = createMockInput();
+    const { scroll, button } = popupOverScroll(mock, { axis: "y", moving: true });
+    const tapped: number[] = [];
+
+    createInputApi(mock.ctx).onTap(entity => tapped.push(entity));
+
+    record(mock.state, down(60, 50));
+    mock.frame();
+
+    expect(mock.has(button, Pressed)).toBe(true);
+    expect(mock.has(scroll, Pressed)).toBe(false);
+
+    record(mock.state, up(60, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "close", payload: {} }]);
+    expect(tapped).toEqual([button]);
+  });
+
   it("keeps the press on the caught scroll when the finger then pans along another scroll's axis", () => {
     // Bug caught: a finger that stopped the page jumps to the strip under it as soon as it moves
     // sideways, so one press drives two scrolls.
@@ -288,7 +357,9 @@ describe("a finger on a moving scroll", () => {
       { axis: "y", moving: true },
       { x: 0, y: 0, width: 400, height: 400 }
     );
-    const strip = scrollOf(mock, { axis: "x" }, { x: 0, y: 100, width: 400, height: 100 });
+    const strip = scrollOf(mock, { axis: "x" }, { x: 0, y: 100, width: 400, height: 100 }, [
+      Parent({ entity: page })
+    ]);
 
     mock.start();
     record(mock.state, down(60, 150));
