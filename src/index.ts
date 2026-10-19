@@ -393,7 +393,7 @@ export type { DescriptionNode } from "./plugins/world/projection/types";
 export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
 export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
-export { Box, DebugTrigger, LocalWrite, popup } from "./plugins/ui/components";
+export { Box, DebugTrigger, LocalWrite, popup, ScrollState } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";
 export { defineStyle } from "./plugins/ui/styles/define";
 export { resolve } from "./plugins/ui/styles/resolve";

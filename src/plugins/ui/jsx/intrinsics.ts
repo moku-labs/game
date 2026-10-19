@@ -45,8 +45,53 @@ export type ImageTexture = string & Brand<"ImageTexture">;
 export type IconName = string & Brand<"IconName">;
 /** How an image or an icon fills its rect: inside it, over it (cropped), or stretched. */
 export type ImageFit = ("contain" | "cover" | "fill") & Brand<"ImageFit">;
-/** The axis a scroll container moves on. `"x"` throws until V4. */
+/**
+ * The axis a scroll container moves on: `"y"`, the default, or `"x"`. Fixed when the scroll
+ * spawns: another axis on a later render keeps the first one, with one warning
+ * `ui:scroll-axis-fixed`. A windowed scroll moves on `"y"` only: `"x"` with `rows` throws.
+ *
+ * @example
+ * ```tsx
+ * // The order strip of the board moves sideways; the cards in it lay out in a row.
+ * <scroll key="strip" axis="x" style={{ width: 306, height: 120 }}>
+ *   <row key="track" style={{ width: 696, height: 120 }} />
+ * </scroll>;
+ * // ScrollState of the strip: { offset: 0, max: 390, moving: false }
+ * ```
+ */
 export type ScrollAxis = ("x" | "y") & Brand<"ScrollAxis">;
+
+/**
+ * The stops a scroll comes to rest on, as offsets from the start, kept inside 0 to `max`. A
+ * release glides to the stop nearest to where its velocity carries in 260 ms, on the curve
+ * `1 − (1 − p)³`, in `min(620, 260 + distance × 1.1)` ms; without `snap` it flings.
+ *
+ * @example
+ * ```tsx
+ * // Three stops: the events, the orders, the end. A slow release at offset 300 glides to 318.
+ * <scroll key="strip" axis="x" snap={[0, 318, 390]} style={{ width: 306, height: 120 }}>
+ *   <row key="track" style={{ width: 696, height: 120 }} />
+ * </scroll>;
+ * ```
+ */
+export type ScrollSnap = readonly number[] & Brand<"ScrollSnap">;
+
+/**
+ * How far a scroll stands from its start, in reference units, kept inside 0 to `max`; 0 when
+ * left out. The first frame draws it there. A later render with another value glides there on
+ * the curve and in the time of `snap`; the same value changes nothing, so a scroll the finger
+ * moved stays where it was left.
+ *
+ * @example
+ * ```tsx
+ * // The strip opens on the orders; closing the pinned column moves the game to 306.
+ * <scroll key="strip" axis="x" offset={318} snap={[0, 318, 390]} style={{ width: 306, height: 120 }}>
+ *   <row key="track" style={{ width: 696, height: 120 }} />
+ * </scroll>;
+ * // first drawn frame: the content stands 318 u left of its rest, the orders in view
+ * ```
+ */
+export type ScrollOffset = number & Brand<"ScrollOffset">;
 /** How many rows a windowed scroll has. */
 export type ScrollRows = number & Brand<"ScrollRows">;
 /** The height of every row, in reference units; above 0. */
@@ -208,11 +253,14 @@ type ScrollWindowForm = {
 
 /**
  * What a scroll container takes: children for a short list, or `rows`, `rowHeight` and `row` for
- * a long one, whose rows exist only in the window.
+ * a long one, whose rows exist only in the window; the `axis` it moves on, the `snap` stops a
+ * release glides to, and the `offset` it stands at.
  *
  * @example
  * ```ts
  * const props: ScrollProps = { axis: "y" };
+ * // The order strip: sideways, three stops, opened on the orders.
+ * const strip: ScrollProps = { axis: "x", snap: [0, 318, 390], offset: 318 };
  * // 1000 orders of 120 u in a 1600 u list: rows 0 to 18 exist at offset 0.
  * const orders: ScrollProps = {
  *   style: { height: 1600 },
@@ -222,10 +270,11 @@ type ScrollWindowForm = {
  * };
  * ```
  */
-export type ScrollProps = CommonProperties & { axis?: ScrollAxis } & (
-    | ScrollChildForm
-    | ScrollWindowForm
-  );
+export type ScrollProps = CommonProperties & {
+  axis?: ScrollAxis;
+  snap?: ScrollSnap;
+  offset?: ScrollOffset;
+} & (ScrollChildForm | ScrollWindowForm);
 
 /**
  * What a text field takes. `local` is required: every keystroke writes that field of the local

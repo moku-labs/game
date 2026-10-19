@@ -203,6 +203,11 @@ export type State = {
   pointerId: number | undefined;
   /** The followed pointer left the tap slop since its press: it started a gesture and keeps the pointer. */
   moved: boolean;
+  /**
+   * The press belongs to a scroll: it landed on a moving one and stopped it, or it was handed to
+   * one past the tap slop. Its release answers nothing and runs no `onTap` listener.
+   */
+  caught: boolean;
   /** The pressed or held entity. */
   entity: Entity | undefined;
   /** The projection key of `entity`, read once at press time. */

@@ -35,6 +35,8 @@ A `scroll` takes children for a short list. A long list takes the windowed form:
 
 Row state belongs in the model: a row that leaves the window loses its local state. The full rules are in the [ui README](../src/plugins/ui/README.md#scroll-windowing).
 
+A `scroll` moves on `axis` `"y"` (the default) or `"x"` (children form only). It follows the finger, keeps moving after a quick release and slows down, and stops hard at both ends. `snap={[0, 318, 390]}` makes it glide to the stop nearest where a release was heading; `offset={318}` is where it stands on its first frame, and a new `offset` value glides there. A press that starts on a button inside it scrolls once the finger leaves the tap slop, and a finger on a moving scroll only stops it. The engine writes `ScrollState { offset, max, moving }` on the scroll's entity whenever it moves, so a system reads it (find your scroll by a marker in its `components`). A test sets it with `app.ui.scroll("strip", 0)`; a visual test with the step `{ scroll: { key: "strip", to: 0 } }`.
+
 Children draw and are hit in markup order at equal `zIndex`, also a child a condition mounts again; the roots of a scene draw in the order of its `projections` (the `ui` layer sorts by `Order`). `hosts` names the projections a container holds: their world views hang under it from the slot's first frame, and a JSX projection named there is laid out in the slot's content box: `<stack key="rowSlot" hosts={["orders.row"]} style={{ width: 600, height: 200 }} />`. The rules are in the [ui README](../src/plugins/ui/README.md#draw-order).
 
 ```tsx

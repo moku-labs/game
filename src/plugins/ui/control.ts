@@ -1,8 +1,9 @@
 /**
- * @file ui plugin — the two ui commands of the `/control` door: a tap on a keyed element or on a
- * view, and the text typed into a field. The tap goes through `app.input`, so the gate decides;
- * the text goes through `app.ui.fill`, which writes a component's local and answers nothing. The
- * session stays clean. Dev builds and `--debug` builds (not `--debug=read`): each body starts with the inline
+ * @file ui plugin — the three ui commands of the `/control` door: a tap on a keyed element or on a
+ * view, the text typed into a field, and a scroll put at an offset. The tap goes through
+ * `app.input`, so the gate decides; the text goes through `app.ui.fill`, which writes a
+ * component's local and answers nothing, and the offset through `app.ui.scroll`. The session
+ * stays clean. Dev builds and `--debug` builds (not `--debug=read`): each body starts with the inline
  * control guard of a route command, so a bundler `define` of `false` drops it, and logs the
  * `moku:dev` marker.
  */
@@ -22,6 +23,9 @@ type TapApp = ControlApp & {
 
 /** What the fill command needs of an app: the control app and the fill of ui. */
 type FillApp = ControlApp & { readonly ui: Pick<UiApi, "fill"> };
+
+/** What the scroll command needs of an app: the control app and the scroll of ui. */
+type ScrollApp = ControlApp & { readonly ui: Pick<UiApi, "scroll"> };
 
 /**
  * Finds the entity of a keyed ui element on screen.
@@ -105,5 +109,37 @@ export const fillCommand = defineCommand({
     app.log.debug("moku:dev", { command: "game.fill", key });
 
     return app.ui.fill(key, value);
+  }
+});
+
+/**
+ * Scrolls a `scroll` element by its key to an offset from its start, the way `app.ui.scroll`
+ * does: at once, kept inside its range, a fling or a glide stopped. Answers what `scroll`
+ * answers: false for a key that is no live `scroll`. A visual test writes it as the step
+ * `{ scroll: { key, to } }`.
+ *
+ * @example
+ * ```ts
+ * // The board rests: show the order strip on its events before the checkpoint.
+ * (await run(app, commands.scroll, { key: "strip", to: 0 })).value; // true
+ * (await run(app, commands.scroll, { key: "nothing", to: 0 })).value; // false
+ * ```
+ */
+export const scrollCommand = defineCommand({
+  id: "game.scroll",
+  title: "Scroll",
+  input: { key: "string", to: "number" },
+  effect: "route",
+  run: (app: ScrollApp, { key, to }) => {
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
+
+    app.log.debug("moku:dev", { command: "game.scroll", key });
+
+    return app.ui.scroll(key, to);
   }
 });

@@ -1,7 +1,8 @@
 /**
  * @file input plugin — behaviour as data: the six gesture components, the tags a game system
- * reads and the `Pointer` resource. Pure: no ctx, no state, no DOM. Made with the
- * `component()`, `tag()` and `resource()` helpers of `world`, so nothing has to be registered.
+ * reads, the `Pointer` resource and the internal `Scrollable` ui puts on a scroll. Pure: no ctx,
+ * no state, no DOM. Made with the `component()`, `tag()` and `resource()` helpers of `world`, so
+ * nothing has to be registered.
  */
 import type { Json } from "../model/types";
 import { component, resource, tag } from "../world/ecs/define";
@@ -63,6 +64,19 @@ export type PointerValue = {
   /** The `pointerId` the resource follows; `-1` at rest. */
   id: number;
 };
+
+/**
+ * How a scroll container moves, as input reads it: the axis it moves on, and whether it moves
+ * now — held, flinging or gliding.
+ *
+ * @example
+ * ```ts
+ * const value: ScrollableValue = { axis: "x", moving: true };
+ * ```
+ */
+export type ScrollableValue = { axis: "x" | "y"; moving: boolean };
+
+const scrollableDefaults: ScrollableValue = { axis: "y", moving: false };
 
 /**
  * Fresh defaults for a component that names an intent. A function, so each component type gets
@@ -170,6 +184,14 @@ export const Pressed = /*#__PURE__*/ tag("Pressed");
  * `Hovered`, which marks the drop target under a drag.
  */
 export const PointerOver = /*#__PURE__*/ tag("PointerOver");
+
+/**
+ * On every ui scroll container, internal: ui writes it, input reads it, a game never sees it. A
+ * press that leaves the tap slop along `axis` goes from the pressed view to the innermost scroll
+ * of that axis the view hangs in by its `Parent` chain; a finger that lands on a view inside a
+ * scroll that is `moving` stops it and answers nothing.
+ */
+export const Scrollable = /*#__PURE__*/ component("Scrollable", scrollableDefaults);
 
 /**
  * Where the one pointer is, in reference units. Written once per frame by the frame step. `id`

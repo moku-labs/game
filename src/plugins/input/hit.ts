@@ -1,21 +1,28 @@
 /**
  * @file input plugin — who is under the finger. Every lookup goes through `renderer.sync.hitTest`,
  * which answers `undefined` without a DOM, and every accept function refuses a view that is
- * already playing its exit. A trace takes a cell only inside a circle smaller than its box.
+ * already playing its exit. A trace takes a cell only inside a circle smaller than its box. The
+ * scroll a press belongs to is found up the pressed view's own `Parent` chain, never under the
+ * point: a view drawn over a scroll from another root keeps its press.
  */
-import { localPoseOf } from "../renderer/sync/pose";
+import { localPoseOf, parentOf } from "../renderer/sync/pose";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
 import {
   Draggable,
   DropTarget,
   Pressable,
+  Scrollable,
+  type ScrollableValue,
   Swipeable,
   Tappable,
   Touchable,
   Traceable
 } from "./components";
 import type { InputCtx, Point, Target } from "./types";
+
+/** How deep a `Parent` chain is followed; deeper is treated as a loop. */
+const MAX_DEPTH = 32;
 
 /**
  * Resolves what `app.input.*` was pointed at. A `{ projection, key }` goes through
@@ -120,6 +127,58 @@ export function acceptTrace(ctx: InputCtx, point: Point): (entity: Entity) => bo
  */
 export function findPressed(ctx: InputCtx, x: number, y: number): Entity | undefined {
   return ctx.deps.renderer.sync.hitTest(x, y, entity => acceptPress(ctx, entity));
+}
+
+/**
+ * The innermost scroll a view sits in that moves now: the view itself or the nearest ancestor of
+ * its `Parent` chain that carries a `Scrollable` with `moving` true and is not on its way out. A
+ * finger that lands on the view stops that scroll. A view of another root drawn over the scroll,
+ * a HUD button or a popup, hangs in no chain of it, so it keeps its press. Reads only, allocates
+ * nothing.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The view the hit test found under the finger.
+ * @returns The scroll, or `undefined` when no scroll the view sits in moves.
+ */
+export function movingScrollOf(ctx: InputCtx, entity: Entity): Entity | undefined {
+  const { ecs } = ctx.deps.world;
+  let current = entity;
+
+  for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
+    if (ecs.get(current, Scrollable)?.moving === true && !ecs.has(current, Exiting)) return current;
+
+    current = parentOf(ecs, current);
+  }
+
+  return undefined;
+}
+
+/**
+ * The innermost scroll of an axis a pressed view sits in: the view itself or the nearest ancestor
+ * of its `Parent` chain that carries a `Scrollable` of that axis and is not on its way out. A list
+ * under a modal is in no chain of the modal's button, so a drift on that button never pans it.
+ * Reads only, allocates nothing.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The pressed view.
+ * @param axis - The dominant axis of the pan.
+ * @returns The scroll, or `undefined` when the view sits in no scroll of that axis.
+ */
+export function scrollOnAxisOf(
+  ctx: InputCtx,
+  entity: Entity,
+  axis: ScrollableValue["axis"]
+): Entity | undefined {
+  const { ecs } = ctx.deps.world;
+  let current = entity;
+
+  for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
+    if (ecs.get(current, Scrollable)?.axis === axis && !ecs.has(current, Exiting)) return current;
+
+    current = parentOf(ecs, current);
+  }
+
+  return undefined;
 }
 
 /**

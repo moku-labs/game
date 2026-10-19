@@ -208,6 +208,8 @@ describe("extrasOf", () => {
         "Touchable",
         "LocalWrite",
         "Scroll",
+        "Scrollable",
+        "ScrollState",
         "Escapable",
         "Exiting",
         "Pressed",

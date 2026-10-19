@@ -5,6 +5,7 @@
 import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import { Text } from "../../text/components";
+import type { Time } from "../../time/types";
 import type { Motion, ViewHandle } from "../../world/projection/types";
 import type { MotionCause } from "../../world/types";
 import { Box } from "../components";
@@ -17,7 +18,7 @@ import { iconLineMoved, installMeasure, markMeasured, remeasureShown } from "./m
 import { liftRest, play, playExtraChange, repose, startLoop, writeRest } from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
-import { clampScroll, stepScroll } from "./scroll";
+import { clampScroll, scrollTo, settleScroll, stepScroll } from "./scroll";
 import { contentRectOf, solveRoot } from "./solve";
 import type {
   ElementLookup,
@@ -46,7 +47,9 @@ function textSourceOf(ctx: UiCtx): TextSource {
 }
 
 /**
- * Writes the style of an element onto its node and keeps its measure function in step.
+ * Writes the style of an element onto its node and keeps its measure function in step. An `x`
+ * scroll lays its content out the way a row does: along `x`, as wide as it is, as tall as the
+ * scroll.
  *
  * @param state - The layout state.
  * @param source - What a text element is measured through.
@@ -57,7 +60,9 @@ function writeStyle(state: LayoutState, source: TextSource, element: Element): v
 
   if (node === undefined || state.yoga === undefined) return;
 
-  applyStyleToNode(state.yoga, node, element.style, element.type, element.parentType);
+  const tag = element.scroll?.axis === "x" ? "row" : element.type;
+
+  applyStyleToNode(state.yoga, node, element.style, tag, element.parentType);
   installMeasure(state, node, element, source);
 }
 
@@ -159,11 +164,20 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     settled: (element: Element): boolean => canDespawn(element),
 
-    scroll: (containers: readonly Element[], lookup: ElementLookup): void =>
-      stepScroll(ctx, state, containers, lookup),
+    scroll: (containers: readonly Element[], lookup: ElementLookup, time: Readonly<Time>): void =>
+      stepScroll(ctx, state, containers, lookup, time),
+
+    settleScroll: (
+      containers: readonly Element[],
+      lookup: ElementLookup,
+      time: Readonly<Time>
+    ): void => settleScroll(ctx, state, containers, lookup, time),
 
     clampScroll: (container: Element, contentHeight: number, lookup: ElementLookup): number =>
-      clampScroll(ctx, container, contentHeight, lookup),
+      clampScroll(ctx, state, container, contentHeight, lookup),
+
+    scrollTo: (container: Element, to: number, lookup: ElementLookup): boolean =>
+      scrollTo(ctx, state, container, to, lookup),
 
     windowOf,
 

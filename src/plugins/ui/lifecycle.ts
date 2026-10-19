@@ -103,8 +103,22 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
   const projection = ctx.deps.world.projection;
 
   ctx.state.layout.cleanups.push(
-    ecs.system(system({ name: "ui.reconcile", phase: "layout", query: [], run: jsx.reconcile })),
-    ecs.system(system({ name: "ui.solve", phase: "layout", query: [], run: jsx.solve })),
+    ecs.system(
+      system({
+        name: "ui.reconcile",
+        phase: "layout",
+        query: [],
+        run: (_rows, frame) => jsx.reconcile(frame.time)
+      })
+    ),
+    ecs.system(
+      system({
+        name: "ui.solve",
+        phase: "layout",
+        query: [],
+        run: (_rows, frame) => jsx.solve(frame.time)
+      })
+    ),
     ecs.onAdded(Tree, entity => {
       const place = projection.keyOf(entity);
 
@@ -177,11 +191,14 @@ export async function startUi(ctx: KernelSlice): Promise<void> {
  * @param state - The plugin state, the only thing a teardown context carries.
  */
 export function stopUi(state: State): void {
+  // Close what `onStart` opened: the systems, hooks, handlers and listeners, the ui entities, and
+  // the hidden input of the text fields.
   for (const off of state.layout.cleanups) off();
 
   state.layout.cleanups.length = 0;
   stopFields(state.jsx);
 
+  // Free every Yoga node, children detached first: `free()` on an attached node throws.
   for (const node of state.layout.byEntity.values()) {
     for (let index = node.getChildCount() - 1; index >= 0; index -= 1) {
       // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
@@ -195,10 +212,12 @@ export function stopUi(state: State): void {
     node.free();
   }
 
+  // Forget everything the modules kept, so a second start begins empty.
   state.layout.byEntity.clear();
   state.layout.nodes = 0;
   state.layout.yoga = undefined;
   state.layout.scrolling = undefined;
+  state.layout.scrollSamples = 0;
   state.layout.iconLine = undefined;
   state.jsx.components.clear();
   state.jsx.roots.clear();

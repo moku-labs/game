@@ -11,7 +11,8 @@
  * `board.cells` (drop targets) and `board.items` (draggable), the JSX projection `board.badge`
  * keyed by the cell of the item, and the JSX projection `orders.row` over it. The popup `Shop`
  * opens from the ward and over the board. `order.overlap`, mounted by hand, holds two overlapping
- * buttons, the first one shown by a local flag.
+ * buttons, the first one shown by a local flag; `drawn.shelf`, mounted by hand, an x scroll with a
+ * shop button inside a y scroll.
  *
  * The app draws on the fake Pixi, or on the real one with a stand-in GPU (`startDrawnApp({ stage })`),
  * where the tree oracle of the renderer's tests can read every frame the helpers step.
@@ -299,6 +300,40 @@ export const overlapScreen = projection({
   view: () => <Overlap key="overlap" />
 });
 
+/**
+ * A page with a shelf in it, mounted by hand: a y scroll of 600 u at (0, 100) whose first child
+ * is an x scroll of 600 × 200 over a 1200 u track. The first tile of the track, 200 × 200 at
+ * (0, 100), is a button that opens the shop.
+ */
+export const shelfScreen = projection({
+  name: "drawn.shelf",
+  layer: "ui",
+  from: (): ScreenItem => ({ id: "shelf" }),
+  view: () => (
+    <stack key="shelfRoot" style={{ width: 1080, height: 1920 }}>
+      <scroll
+        key="shelfPage"
+        style={{
+          position: "absolute",
+          top: 100,
+          left: 0,
+          width: 1080,
+          height: 600,
+          reason: "page"
+        }}
+      >
+        <column key="shelfPageBody" style={{ width: 1080, height: 1200 }}>
+          <scroll key="shelf" axis="x" style={{ width: 600, height: 200 }}>
+            <row key="shelfTrack" style={{ width: 1200, height: 200 }}>
+              <button key="shelfBuy" intent="shop" style={{ width: 200, height: 200 }} />
+            </row>
+          </scroll>
+        </column>
+      </scroll>
+    </stack>
+  )
+});
+
 /** The ward. The hud is listed first: only the layers put the scene root under it. */
 export const wardSceneDef = defineScene("ward", {
   bundle: "ward",
@@ -381,7 +416,8 @@ export const drawnFeature = defineFeature("drawn", {
     boardBack,
     boardBadge,
     ordersRow,
-    overlapScreen
+    overlapScreen,
+    shelfScreen
   ],
   ui: [Shop, Overlap],
   strings: { en: english }

@@ -1,11 +1,12 @@
 /**
- * @file ui/jsx — the module factory: the three public readers, `fill`, the frame half the
+ * @file ui/jsx — the module factory: the three public readers, `fill`, `scroll`, the frame half the
  * lifecycle registers, the keyboard focus and the text fields. Built last, with `styles` and
  * `layout` injected.
  */
 import type { KeyInput, RawSample } from "../../input/types";
 import { rootPoseOf } from "../../renderer/sync/pose";
 import { Text } from "../../text/components";
+import type { Time } from "../../time/types";
 import type { Entity, LayerSpec } from "../../world/types";
 import type { UiCtx } from "../types";
 import { createFields } from "./fields";
@@ -16,7 +17,15 @@ import { coverPopup, reclaimPopup, releasePopup } from "./popups";
 import { createReconciler, type JsxModules } from "./reconcile";
 import { applyTap } from "./tap";
 import { readTree, sortedRoots } from "./tree";
-import type { AnyComponentDefinition, Finding, JsxModule, PopupLink, Root, UiNode } from "./types";
+import type {
+  AnyComponentDefinition,
+  Element,
+  Finding,
+  JsxModule,
+  PopupLink,
+  Root,
+  UiNode
+} from "./types";
 
 /** The layer names of the scene in draw order, and the name of its HUD layer. */
 type SceneLayers = { names: readonly string[]; hud: string | undefined };
@@ -53,7 +62,8 @@ function sceneLayersOf(ctx: UiCtx): () => SceneLayers {
  *
  * @param ctx - Domain context of the ui plugin.
  * @param modules - The styles and layout modules, injected in that order.
- * @returns The module: `tree`, `find` and `lint` reach the game, the rest the frame.
+ * @returns The module: `tree`, `find`, `lint`, `fill` and `scroll` reach the game, the rest the
+ *   frame.
  */
 export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const state = ctx.state.jsx;
@@ -69,6 +79,7 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const focus = createFocus(ctx, frame.markPointer, topRoot, fields);
   const resolvedOf = (entity: Entity): string | undefined =>
     ctx.deps.world.ecs.get(entity, Text)?.resolved;
+  const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
   const find = (key: string): Entity | undefined => {
     for (const root of sortedRoots(state, layerNames())) {
       const entity = state.byKey.get(root.entity)?.get(key);
@@ -103,6 +114,28 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
       return true;
     },
 
+    // A placed scroll takes the offset at once. Any other key is one warning: only a scroll
+    // carries the motion `scrollTo` moves, and a scroll its first solve has not placed yet has no
+    // range to keep the offset in.
+    scroll: (key: string, to: number): boolean => {
+      const entity = find(key);
+      const element = entity === undefined ? undefined : lookup(entity);
+
+      if (element?.scroll === undefined) {
+        ctx.log.warn("ui:scroll-without-scroll", { key });
+
+        return false;
+      }
+
+      if (!modules.layout.scrollTo(element, to, lookup)) {
+        ctx.log.warn("ui:scroll-before-solve", { key });
+
+        return false;
+      }
+
+      return true;
+    },
+
     open: fields.open,
 
     pointer: (sample: RawSample): void => fields.pointer(sample),
@@ -113,8 +146,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     // The focus follows the solved rects, and drops when its element or its root left; the text
     // fields draw their parts and lift the edited one above the keyboard.
-    solve: (): void => {
-      frame.solve();
+    solve: (time?: Readonly<Time>): void => {
+      frame.solve(time);
       focus.refresh();
       fields.place();
     },

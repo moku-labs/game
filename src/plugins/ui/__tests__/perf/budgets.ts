@@ -33,5 +33,19 @@ export const BUDGET = {
    * poses in place). The pressed look changes the fill only, so no motion starts. The line keeps
    * 50 B over the measure for the drift of two windows.
    */
-  pressRelease: 3900
+  pressRelease: 3900,
+  /**
+   * The scroll step (change 2026-10-19-horizontal-scroll) over the order strip, an x scroll of
+   * 306 u, while the finger holds it and moves 3.7 u a frame: the sample into the ring, the
+   * follow, and `Scroll`, `ScrollState` and the content's `Transform` written. 0 B: the patches
+   * are kept in the layout state and every number written is a whole unit, so `Object.assign`
+   * boxes none; the exact offset stays on the element's motion record.
+   */
+  scrollHeld: 0,
+  /** The same strip flinging at 1.3 u a ms, a 16.7 ms frame: the decay and the three writes. 0 B. */
+  scrollFling: 0,
+  /** The same strip in a glide from 900 to 1100 over 400 ms: the eased offset and the three writes. 0 B. */
+  scrollGlide: 0,
+  /** The same strip standing: one tag check and nothing written. 0 B. */
+  scrollStill: 0
 } as const;
