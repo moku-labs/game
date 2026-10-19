@@ -652,7 +652,14 @@ export type JsxModule = {
    * @param time - The frame's `Time`.
    */
   reconcile(time?: Readonly<Time>): void;
-  solve(): void;
+  /**
+   * The second system of phase `layout`. `time` is the frame's: a scroll the solve leaves moving
+   * wakes the loop only while it runs. Called without it, as a test steps the system by hand, it
+   * wakes none.
+   *
+   * @param time - The frame's `Time`.
+   */
+  solve(time?: Readonly<Time>): void;
   register(definition: AnyComponentDefinition): void;
   /**
    * Swaps the registered definition of that name, or adds it; the dev hot swap calls it.

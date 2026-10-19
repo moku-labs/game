@@ -2138,8 +2138,10 @@ export function createReconciler(
    * the hosting of the hosts that came. The hints released since the last frame step are dropped
    * at its end, so the `change.Box` and `change.Transform` hooks the solve plays get the hint the
    * reconcile routed, and the next frame starts with none.
+   *
+   * @param time - The frame's `Time`: a scroll left moving asks for a frame only while it runs.
    */
-  function solve(): void {
+  function solve(time: Readonly<Time> = NO_TIME): void {
     const viewport = modules.styles.viewport();
 
     // Per frame: the viewport box is the reconciler's scratch; the solve keeps no reference to it.
@@ -2153,7 +2155,7 @@ export function createReconciler(
 
     // A solve may give a scroll a new range and a render a new `offset` prop; a scroll that came in
     // this solve stands at its prop before it is first drawn.
-    if (changed || rendered > 0) modules.layout.settleScroll(scrollContainers(), lookup);
+    if (changed || rendered > 0) modules.layout.settleScroll(scrollContainers(), lookup, time);
 
     rendered = 0;
 

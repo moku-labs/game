@@ -8,6 +8,7 @@
  * scroll and the `Pointer` resource. Real flow runner, plain Bun, inert
  * renderer, real Yoga.
  */
+import type { Log } from "@moku-labs/common/browser";
 import { createApp, defineGame, projection, type } from "../../../index";
 import { animPlugin } from "../../anim";
 import { assetsPlugin } from "../../assets";
@@ -427,7 +428,7 @@ export function release(app: ScrollApp, key: string): void {
  * @param event - The event name.
  * @returns The payloads, in order.
  */
-export function logged(app: ScrollApp, event: string): unknown[] {
+export function logged(app: ScrollApp, event: string): Array<Log.LogEntry["data"]> {
   return app.log
     .trace()
     .filter(entry => entry.event === event)

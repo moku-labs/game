@@ -6,6 +6,7 @@
 import type { KeyInput, RawSample } from "../../input/types";
 import { rootPoseOf } from "../../renderer/sync/pose";
 import { Text } from "../../text/components";
+import type { Time } from "../../time/types";
 import type { Entity, LayerSpec } from "../../world/types";
 import type { UiCtx } from "../types";
 import { createFields } from "./fields";
@@ -113,14 +114,21 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
       return true;
     },
 
-    // A live scroll takes the offset at once; any other key is one warning: only a scroll carries
-    // the motion `scrollTo` moves.
+    // A placed scroll takes the offset at once. Any other key is one warning: only a scroll
+    // carries the motion `scrollTo` moves, and a scroll its first solve has not placed yet has no
+    // range to keep the offset in.
     scroll: (key: string, to: number): boolean => {
       const entity = find(key);
       const element = entity === undefined ? undefined : lookup(entity);
 
-      if (element === undefined || !modules.layout.scrollTo(element, to, lookup)) {
+      if (element?.scroll === undefined) {
         ctx.log.warn("ui:scroll-without-scroll", { key });
+
+        return false;
+      }
+
+      if (!modules.layout.scrollTo(element, to, lookup)) {
+        ctx.log.warn("ui:scroll-before-solve", { key });
 
         return false;
       }
@@ -138,8 +146,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     // The focus follows the solved rects, and drops when its element or its root left; the text
     // fields draw their parts and lift the edited one above the keyboard.
-    solve: (): void => {
-      frame.solve();
+    solve: (time?: Readonly<Time>): void => {
+      frame.solve(time);
       focus.refresh();
       fields.place();
     },

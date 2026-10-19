@@ -1,7 +1,8 @@
 /**
  * @file flow/doors — the base commands: every command of the engine, keyed by a short name. Each
  * descriptor lives with the plugin that owns its data; this module only gathers them. Imported
- * by the door `src/control.ts` only, so no plugin reaches it and no import cycle forms.
+ * by the door `src/control.ts` and by `src/visual/steps.ts`, where a command becomes a visual
+ * step, never by a plugin, so no import cycle forms.
  */
 import { reducedMotionCommand } from "../../anim/control";
 import { muteCommand } from "../../audio/control";

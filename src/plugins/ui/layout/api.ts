@@ -167,8 +167,11 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
     scroll: (containers: readonly Element[], lookup: ElementLookup, time: Readonly<Time>): void =>
       stepScroll(ctx, state, containers, lookup, time),
 
-    settleScroll: (containers: readonly Element[], lookup: ElementLookup): void =>
-      settleScroll(ctx, state, containers, lookup),
+    settleScroll: (
+      containers: readonly Element[],
+      lookup: ElementLookup,
+      time: Readonly<Time>
+    ): void => settleScroll(ctx, state, containers, lookup, time),
 
     clampScroll: (container: Element, contentHeight: number, lookup: ElementLookup): number =>
       clampScroll(ctx, state, container, contentHeight, lookup),

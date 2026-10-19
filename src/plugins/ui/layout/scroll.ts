@@ -671,18 +671,21 @@ function settle(
  * Settles every scroll on what the solve and the render of this frame gave it. A scroll the solve
  * just spawned takes its place at its `offset` prop. A placed one keeps inside a new range at
  * once, a running glide's target too, and glides to a new `offset` prop; the same value on a
- * re-render does nothing, and a scroll the finger holds only remembers it.
+ * re-render does nothing, and a scroll the finger holds only remembers it. A scroll left moving
+ * wakes the loop the way `stepScroll` does: not at a time scale of 0, where it stands.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
  * @param containers - The live scroll elements.
  * @param lookup - How a child entity becomes its element.
+ * @param time - The frame's `Time`.
  */
 export function settleScroll(
   ctx: UiCtx,
   state: LayoutState,
   containers: readonly Element[],
-  lookup: ElementLookup
+  lookup: ElementLookup,
+  time: Readonly<Time>
 ): void {
   let moving = false;
 
@@ -698,7 +701,7 @@ export function settleScroll(
     if (motion.mode !== "still") moving = true;
   }
 
-  if (moving) ctx.deps.time.wake();
+  if (moving && time.delta > 0) ctx.deps.time.wake();
 }
 
 /**

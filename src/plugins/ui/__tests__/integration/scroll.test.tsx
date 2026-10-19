@@ -6,7 +6,7 @@ import { run } from "../../../flow/doors/run";
 import { sources } from "../../../flow/doors/sources";
 import { Pointer, Pressed, Scrollable } from "../../../input/components";
 import { Transform } from "../../../renderer/components";
-import { system } from "../../../world/ecs/define";
+import { system, Tree } from "../../../world/ecs/define";
 import { Box, Scroll, ScrollState } from "../../components";
 import {
   contentOf,
@@ -243,8 +243,11 @@ describe("S2, S3: the release", () => {
 
   it("asks for no frame while a time scale of 0 holds a fling, and ends the fling once time runs again", async () => {
     // Bug caught: at time scale 0 the fling never ends, so the scroll step wakes the loop every
-    // frame and a game slowed to a stop draws at the full frame rate for ever.
+    // frame and a game slowed to a stop draws at the full frame rate for ever. And: a render while
+    // the fling is held settles the scroll and wakes the loop anyway, so every re-render of a
+    // paused screen asks for frames it cannot use.
     const app = await start("free");
+    const root = app.world.projection.entityOf("free", "freeItem") ?? -1;
 
     press(app, "free", 500, 900);
     moveTo(app, 460, 900);
@@ -256,6 +259,16 @@ describe("S2, S3: the release", () => {
     const wakes = app.time.wakes();
 
     frames(app, 5);
+
+    expect(app.time.wakes()).toBe(wakes);
+
+    // The same tree again: the root renders, the solve settles the held fling.
+    const tree = app.world.ecs.get(root, Tree);
+
+    if (tree === undefined) throw new Error("the free screen has no tree");
+
+    app.world.ecs.set(root, Tree, { node: tree.node });
+    frames(app, 1);
 
     expect(app.time.wakes()).toBe(wakes);
     expect(app.world.ecs.get(find(app, "free"), Scrollable)).toEqual({ axis: "x", moving: true });

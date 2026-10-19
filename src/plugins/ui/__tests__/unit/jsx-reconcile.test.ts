@@ -1081,6 +1081,27 @@ describe("refreshAll", () => {
   });
 });
 
+// ─── app.ui.scroll ─────────────────────────────────────────────
+
+describe("scroll", () => {
+  // Bug: a scroll the solve has not placed yet answers with the warning of a key that names no
+  // scroll, so the caller looks for another key instead of waiting for the frame's solve.
+  it("warns ui:scroll-before-solve for a live scroll the layout has not placed, and ui:scroll-without-scroll for another element", () => {
+    const h = harness();
+    const jsx = createJsxApi(h.ctx, { styles: h.styles, layout: h.layout });
+
+    // The layout of spies never settles a scroll, so `list` stays where its spawn left it.
+    h.mount(list(10, 80));
+
+    expect(jsx.scroll("list", 0)).toBe(false);
+    expect(jsx.scroll("r0", 0)).toBe(false);
+    expect(vi.mocked(h.ctx.log.warn).mock.calls).toEqual([
+      ["ui:scroll-before-solve", { key: "list" }],
+      ["ui:scroll-without-scroll", { key: "r0" }]
+    ]);
+  });
+});
+
 // ─── the draw order of an element (spec 16 U1) ─────────────────
 
 describe("the draw order of an element", () => {

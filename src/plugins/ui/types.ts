@@ -255,8 +255,10 @@ export type UiApi = {
    *
    * @param key - The `key` prop of the `scroll` element.
    * @param to - How far from the start, in reference units. `NaN` leaves the scroll where it is.
-   * @returns True when a live scroll took it; false with one warning `ui:scroll-without-scroll`
-   *   when no live `scroll` has the key.
+   * @returns True when a live scroll took it. False in two cases, each with one warning `{ key }`:
+   *   `ui:scroll-without-scroll` when no live `scroll` has the key, and `ui:scroll-before-solve`
+   *   when the `scroll` came in this frame and its first solve has not placed it yet: call it
+   *   again after the frame.
    * @example
    * ```ts
    * // A test shows the order strip on its events: the strip is 306 u over a 696 u track.

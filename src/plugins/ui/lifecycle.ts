@@ -111,7 +111,14 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
         run: (_rows, frame) => jsx.reconcile(frame.time)
       })
     ),
-    ecs.system(system({ name: "ui.solve", phase: "layout", query: [], run: jsx.solve })),
+    ecs.system(
+      system({
+        name: "ui.solve",
+        phase: "layout",
+        query: [],
+        run: (_rows, frame) => jsx.solve(frame.time)
+      })
+    ),
     ecs.onAdded(Tree, entity => {
       const place = projection.keyOf(entity);
 

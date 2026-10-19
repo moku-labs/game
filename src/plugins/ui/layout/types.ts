@@ -137,7 +137,7 @@ export type LayoutModule = {
   /** Moves every scroll by the frame: the finger, a fling or a glide. */
   scroll(containers: readonly Element[], lookup: ElementLookup, time: Readonly<Time>): void;
   /** After a solve or a render: the first place of a new scroll, a new range, a new `offset` prop. */
-  settleScroll(containers: readonly Element[], lookup: ElementLookup): void;
+  settleScroll(containers: readonly Element[], lookup: ElementLookup, time: Readonly<Time>): void;
   clampScroll(container: Element, contentHeight: number, lookup: ElementLookup): number;
   /** Puts a live scroll at an offset at once; false when it has not been placed yet. */
   scrollTo(container: Element, to: number, lookup: ElementLookup): boolean;
