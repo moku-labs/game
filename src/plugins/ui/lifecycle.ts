@@ -103,7 +103,14 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
   const projection = ctx.deps.world.projection;
 
   ctx.state.layout.cleanups.push(
-    ecs.system(system({ name: "ui.reconcile", phase: "layout", query: [], run: jsx.reconcile })),
+    ecs.system(
+      system({
+        name: "ui.reconcile",
+        phase: "layout",
+        query: [],
+        run: (_rows, frame) => jsx.reconcile(frame.time)
+      })
+    ),
     ecs.system(system({ name: "ui.solve", phase: "layout", query: [], run: jsx.solve })),
     ecs.onAdded(Tree, entity => {
       const place = projection.keyOf(entity);
@@ -199,6 +206,7 @@ export function stopUi(state: State): void {
   state.layout.nodes = 0;
   state.layout.yoga = undefined;
   state.layout.scrolling = undefined;
+  state.layout.scrollSamples = 0;
   state.layout.iconLine = undefined;
   state.jsx.components.clear();
   state.jsx.roots.clear();

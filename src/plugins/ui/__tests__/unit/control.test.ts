@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../../../index";
 import { run } from "../../../flow/doors/run";
 import type { Target } from "../../../input/types";
-import { fillCommand, tapCommand } from "../../control";
+import { fillCommand, scrollCommand, tapCommand } from "../../control";
 
 // ---------------------------------------------------------------------------
 // Unit test: the ui command of the /control door over a stub input and a
@@ -188,6 +188,56 @@ describe("game.fill", () => {
     expect(app.log.trace().at(-1)).toMatchObject({
       event: "moku:dev",
       data: { command: "game.fill", key: "nothing" }
+    });
+  });
+});
+
+/**
+ * An app whose screen holds one scroll under the key "strip", with a scroll that records where it
+ * was sent and answers true for that key only.
+ *
+ * @returns The app the command runs on and the scrolls made.
+ */
+function strip(): {
+  app: ReturnType<typeof createApp> & { ui: { scroll(key: string, to: number): boolean } };
+  scrolled: Array<[string, number]>;
+} {
+  const scrolled: Array<[string, number]> = [];
+  const scroll = (key: string, to: number): boolean => {
+    scrolled.push([key, to]);
+
+    return key === "strip";
+  };
+
+  return { app: { ...createApp(), ui: { scroll } }, scrolled };
+}
+
+describe("game.scroll", () => {
+  it("refuses outside a dev build", () => {
+    // Bug caught: the command runs on a release page, where no command may change the game.
+    const { app, scrolled } = strip();
+
+    expect(() => scrollCommand.run(app, { key: "strip", to: 0 })).toThrow("dev builds only");
+    expect(scrolled).toEqual([]);
+  });
+
+  it("scrolls through ui.scroll and answers what it answers", async () => {
+    // Bug caught: the command sends another key or offset, or answers true for a key with no scroll.
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, scrolled } = strip();
+
+    const ran = await run(app, scrollCommand, { key: "strip", to: 318 });
+    const missed = await run(app, scrollCommand, { key: "nothing", to: 0 });
+
+    expect(ran.value).toBe(true);
+    expect(missed.value).toBe(false);
+    expect(scrolled).toEqual([
+      ["strip", 318],
+      ["nothing", 0]
+    ]);
+    expect(app.log.trace().at(-1)).toMatchObject({
+      event: "moku:dev",
+      data: { command: "game.scroll", key: "nothing" }
     });
   });
 });

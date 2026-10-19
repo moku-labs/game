@@ -150,7 +150,7 @@ export const inputProjection = projection({
   )
 });
 
-/** A screen with a horizontal scroll, which arrives after V3. */
+/** A screen with a windowed scroll on the x axis: a window of rows moves on y only. */
 export const sidewaysProjection = projection({
   name: "sideways",
   layer: "ui",
@@ -158,7 +158,16 @@ export const sidewaysProjection = projection({
     { id: "sideways", coins: player.coins }
   ],
   key: (item: { id: string }) => item.id,
-  view: () => <scroll key="sidewaysBox" axis="x" style={{ width: 100, height: 40 }} />
+  view: () => (
+    <scroll
+      key="sidewaysBox"
+      axis="x"
+      rows={3}
+      rowHeight={40}
+      row={index => <row key={`side${index}`} style={{ width: 100, height: 40 }} />}
+      style={{ width: 100, height: 40 }}
+    />
+  )
 });
 
 /** A component whose view throws, so the old subtree has to stay. */

@@ -1,11 +1,12 @@
 /**
- * @file ui/jsx — the windowed scroll: its props read and checked, the node a row callback answers
- * made into one keyed slot, and the spacers that stand for the rows that do not exist. Pure: the
- * range step in `range.ts` logs what these functions report.
+ * @file ui/jsx — the props of a scroll: its axis and the motion record it spawns with, the
+ * windowed form read and checked, the node a row callback answers made into one keyed slot, and
+ * the spacers that stand for the rows that do not exist. Pure: the range step in `range.ts` logs
+ * what these functions report.
  */
 import type { ResolvedStyle } from "../styles/types";
 import { flatten } from "./flatten";
-import type { DescriptionNode, JsxChild } from "./types";
+import type { DescriptionNode, JsxChild, ScrollMotion } from "./types";
 
 /** The overscan of a windowed scroll that names none: P18's margin of five rows. */
 const DEFAULT_OVERSCAN = 5;
@@ -139,8 +140,9 @@ export function windowFormOf(node: DescriptionNode): WindowForm | undefined {
 
 /**
  * Refuses the props of a scroll its windowed form cannot take: some but not all of `rows`,
- * `rowHeight` and `row`, or a row height that is not above 0. Called before anything is spawned or
- * patched, so a refused scroll leaves no half-made element.
+ * `rowHeight` and `row`, a row height that is not above 0, or `axis: "x"`, since the rows of a
+ * window stand one below the other. Called before anything is spawned or patched, so a refused
+ * scroll leaves no half-made element.
  *
  * @param node - The node being placed.
  * @throws {Error} For a windowed scroll whose props do not hold.
@@ -150,7 +152,56 @@ export function windowFormOf(node: DescriptionNode): WindowForm | undefined {
  * ```
  */
 export function checkWindow(node: DescriptionNode): void {
-  if (node.type === "scroll") windowFormOf(node);
+  if (node.type !== "scroll") return;
+
+  if (windowFormOf(node) !== undefined && axisOf(node) === "x") {
+    throw new Error(
+      '[game] A windowed scroll moves on y only.\n  Drop axis "x" or use the children form.'
+    );
+  }
+}
+
+/**
+ * The axis a scroll moves on: `"x"` when its props say so, else `"y"`.
+ *
+ * @param node - The node of a scroll.
+ * @returns The axis.
+ * @example
+ * ```ts
+ * axisOf({ type: "scroll", props: { axis: "x" }, children: [] }); // "x"
+ * ```
+ */
+export function axisOf(node: DescriptionNode): ScrollMotion["axis"] {
+  return node.props.axis === "x" ? "x" : "y";
+}
+
+/**
+ * The motion record a scroll spawns with: its axis, still at the start, not placed yet. The
+ * first solve puts it at its `offset` prop.
+ *
+ * @param node - The node of the scroll that enters.
+ * @returns A new record.
+ * @example
+ * ```ts
+ * scrollMotionOf({ type: "scroll", props: { axis: "x" }, children: [] }).mode; // "still"
+ * ```
+ */
+export function scrollMotionOf(node: DescriptionNode): ScrollMotion {
+  return {
+    axis: axisOf(node),
+    mode: "still",
+    offset: 0,
+    max: 0,
+    velocity: 0,
+    from: 0,
+    to: 0,
+    duration: 0,
+    elapsed: 0,
+    pointer: 0,
+    start: 0,
+    seen: 0,
+    placed: false
+  };
 }
 
 /**

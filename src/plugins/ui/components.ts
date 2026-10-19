@@ -46,6 +46,19 @@ export type LocalWriteValue = { patch: Record<string, unknown> };
 export type ScrollValue = { axis: string; offset: number; min: number };
 
 /**
+ * Where a scroll container stands, as a game reads it: how far it is scrolled from the start,
+ * the largest offset it can reach, both in whole reference units, and whether it moves now (the
+ * finger holds it, or it flings or glides). `offset` runs from 0 to `max`.
+ *
+ * @example
+ * ```ts
+ * // The order strip of the board, 306 u wide over a 696 u track, resting on the orders.
+ * const value: ScrollStateValue = { offset: 318, max: 390, moving: false };
+ * ```
+ */
+export type ScrollStateValue = { offset: number; max: number; moving: boolean };
+
+/**
  * Who owns every entity `ui` spawns. The projection module checks it before it hands out a view
  * handle, so only `ui` may move a ui element.
  */
@@ -70,6 +83,32 @@ export const LocalWrite = /*#__PURE__*/ component("LocalWrite", localWriteDefaul
  * On a scroll container. Internal to `ui`: not exported from the package root.
  */
 export const Scroll = /*#__PURE__*/ component("Scroll", { axis: "y", offset: 0, min: 0 });
+
+/**
+ * On every scroll container: where it stands and whether it moves, for a game system and the
+ * read door. `ui` writes it in a frame where the offset or `max` changed, and once more with
+ * `moving: false` when it stops; a game reads it and never writes it.
+ *
+ * @example
+ * ```ts
+ * // A board system dims the events of the order strip while it rests on the orders.
+ * export const stripMist = system({
+ *   name: "board.stripMist",
+ *   phase: "animate",
+ *   query: [ScrollState, OrderStrip],
+ *   run: entities => {
+ *     for (const [entity, scroll] of entities) {
+ *       // scroll: { offset: 318, max: 390, moving: false }
+ *     }
+ *   }
+ * });
+ * ```
+ */
+export const ScrollState = /*#__PURE__*/ component("ScrollState", {
+  offset: 0,
+  max: 0,
+  moving: false
+});
 
 /**
  * On the root entity of a popup kept beneath another popup (`popup(..., { over })`). Internal to

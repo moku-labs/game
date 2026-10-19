@@ -388,7 +388,8 @@ function stepFrames(app: SplashApp, frames: number): void {
 }
 
 /**
- * Drags the credits 200 u up and lets go.
+ * Drags the credits 200 u up and lets go. The finger rests 48 ms before it lifts, 64 by the
+ * release frame: more than 50 ms, so the list stops where it was let go instead of flinging.
  *
  * @param app - The running app.
  */
@@ -401,6 +402,7 @@ function scrollCredits(app: SplashApp): void {
   app.time.step(16);
   pointer.y = 300;
   app.time.step(16);
+  stepFrames(app, 3);
   app.world.ecs.untag(container, Pressed);
   app.time.step(16);
 }

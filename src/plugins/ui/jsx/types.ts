@@ -9,6 +9,7 @@ import type { Message } from "../../i18n/types";
 import type { KeyInput, RawSample } from "../../input/types";
 import type { Json } from "../../model/types";
 import type { TransformValue } from "../../renderer/components";
+import type { Time } from "../../time/types";
 import type {
   ChangeHook,
   Motion,
@@ -201,6 +202,32 @@ export type ScrollWindow = {
 };
 
 /**
+ * How a scroll container moves, kept on its element: the axis it spawned with, what moves it now
+ * (the finger `"held"`, a `"fling"` after a release, a `"glide"` to a stop or to a new `offset`
+ * prop, or nothing, `"still"`), and the numbers of that motion in offsets from the start, 0 to
+ * `max`. `offset` is exact: the components get it in whole units. `velocity` is in units a ms,
+ * positive toward `max`. A glide runs from `from` to `to` over `duration` ms, `elapsed` of them
+ * gone. `pointer` and `start` are the finger on the axis and the offset where the press began.
+ * `seen` is the `offset` prop of the last render, 0 when it is left out; `placed` turns true when
+ * the first solve put the scroll at it. Plain numbers written in place: a frame allocates nothing.
+ */
+export type ScrollMotion = {
+  axis: "x" | "y";
+  mode: "still" | "held" | "fling" | "glide";
+  offset: number;
+  max: number;
+  velocity: number;
+  from: number;
+  to: number;
+  duration: number;
+  elapsed: number;
+  pointer: number;
+  start: number;
+  seen: number;
+  placed: boolean;
+};
+
+/**
  * What the style of an element was resolved on besides its own node: the epoch of the jsx state,
  * and the row height when the element is a row of a windowed scroll. While both stand, and the
  * raw `style` and the state flags say what they said, the resolved style is kept.
@@ -217,7 +244,7 @@ export type StyleBasis = { epoch: number; rowHeight: number | undefined };
  * `change` hook of each of them returned; `warnedOwned` the names of the `components` values the
  * element owns that were already logged. A windowed scroll carries its `window` and the one-time
  * warnings of its props in `warned`; `scrolledIn` marks an element a range change of a windowed
- * scroll created: it plays no `enter` hook. A text or an icon that sizes itself keeps in
+ * scroll created: it plays no `enter` hook. A scroll carries its `scroll` motion from its enter. A text or an icon that sizes itself keeps in
  * `measuredSize` what its measure function last answered, before Yoga's clamp: a bound text whose
  * new string measures the same asks for no solve. `basis` is what `style` was resolved on, set
  * once the style is on the layout node and the components are written; an element without one is
@@ -261,6 +288,7 @@ export type Element = {
   warned: Set<string>;
   scrolledIn: boolean;
   window?: ScrollWindow;
+  scroll?: ScrollMotion;
   measuredSize?: { width: number; height: number };
   basis?: StyleBasis;
 };
@@ -601,18 +629,25 @@ export type ButtonProps = CommonProps & { escape?: boolean } & (
 export type PointerFlag = "pressed" | "hover" | "focus";
 
 /**
- * jsx module shape, injected onto the plugin API. `tree`, `find`, `lint` and `fill` are the public
- * half.
+ * jsx module shape, injected onto the plugin API. `tree`, `find`, `lint`, `fill` and `scroll` are
+ * the public half.
  */
 export type JsxModule = {
   tree(): UiNode;
   find(key: string): Entity | undefined;
   lint(): readonly Finding[];
   fill(key: string, value: string): boolean;
+  scroll(key: string, to: number): boolean;
   open(): void;
   pointer(sample: RawSample): void;
   tapped(entity: Entity): void;
-  reconcile(): void;
+  /**
+   * The first system of phase `layout`. `time` is the frame's: the scrolls move by its `delta`.
+   * Called without it, as a test steps the system by hand, they move by 0 ms.
+   *
+   * @param time - The frame's `Time`.
+   */
+  reconcile(time?: Readonly<Time>): void;
   solve(): void;
   register(definition: AnyComponentDefinition): void;
   /**

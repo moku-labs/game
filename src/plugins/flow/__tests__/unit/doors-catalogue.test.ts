@@ -58,6 +58,7 @@ describe("the base catalogue", () => {
       "debug",
       "reducedMotion",
       "fill",
+      "scroll",
       "timeScale",
       "frameRate",
       "mute",

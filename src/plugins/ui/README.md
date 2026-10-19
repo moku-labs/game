@@ -6,9 +6,9 @@ rect from one Yoga solve per change.
 
 | Module | Owns |
 |---|---|
-| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()`, the tap counter of `DebugTrigger` |
+| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()`, `scroll()`, the tap counter of `DebugTrigger` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
-| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, scroll and the range of a windowed scroll, the `popup` and `guide` handlers |
+| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, the scroll on both axes (finger, fling, snap, offset, range) and the range of a windowed scroll, the `popup` and `guide` handlers |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
 
 | Member | Answers |
@@ -17,6 +17,7 @@ rect from one Yoga solve per change.
 | `app.ui.find(key)` | the entity of a keyed element, live only |
 | `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
+| `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key. Works headless. See [Scroll](#scroll) |
 
 Config:
 
@@ -54,7 +55,7 @@ component is set, so `changed()` names none of its components.
 | `style`, `state`, a pointer or focus flag, a covered root | its style is resolved again and its components are written. Its layout node is written and its root solves once when a rect may move, and for a new `style` prop |
 | `content` | its layout node is written and measured again, its root solves once, its components are written |
 | `bind`, `texture`, `name`, `fit`, `intent`, `payload`, `local`, `escape`, `components`, `motion` | its components are written. No style pass, no solve |
-| `hosts`, the props of a windowed `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
+| `hosts`, the props of a windowed `scroll`, the `snap` and `offset` of a `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
 | the viewport (size, orientation, safe area), a dev hot swap | every element is patched in full once: style, layout node, components |
 | the locale, a font that arrives after the mount | no element is patched and no view runs. The texts `text` resolves again are measured in that frame; when the line of the `body` style moved, every `icon` without a size is too, on a screen with no text as well. A root solves once when a size in it changed |
 
@@ -87,7 +88,7 @@ draw adds 0 to both, solves nothing and sets no component.
 | any other tag | a rounded `Shape`, drawing nothing on a container with no fill and no stroke (no fill, stroke width 0, the alpha of its style); with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash) | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
-| `scroll` | `Shape` with `clip`; children for a short list, or `rows`, `rowHeight`, `overscan`, `row` for a long one, see [Scroll windowing](#scroll-windowing) | `Touchable`, `Scroll` |
+| `scroll` | `Shape` with `clip`; children for a short list, or `rows`, `rowHeight`, `overscan`, `row` for a long one, see [Scroll](#scroll) and [Scroll windowing](#scroll-windowing) | `Touchable`, `Scroll`, `Scrollable`, `ScrollState` |
 | `input` | as any other tag, with `clip` on the `Shape` or on the `NineSlice` of `style.nineSlice`; four ui-owned children draw the text, the caret, the selection and the IME underline, see [Text input](#text-input) | `Touchable` |
 | any tag | `components` adds extra components to the element's entity, see [Extra components](#extra-components) | |
 
@@ -106,7 +107,8 @@ renderer applies it once, on the element's wrapper (see the renderer README).
 
 A live element follows its state: a button that becomes disabled loses `Tappable` and
 `LocalWrite` and keeps `Touchable`, so it stops answering the gate; enabled again, it answers.
-`Scroll` is only ever added: hover, a press or a new rect never resets the offset.
+`Scroll`, `Scrollable` and `ScrollState` are only ever added: hover, a press, a new look or a new
+rect never resets where a scroll stands.
 
 `overflow: "hidden"` clips the children to the rect through `Shape.clip`, as a scroll does. A
 clipping element keeps its `Shape` and draws no nine-slice: an entity has one visual. Put the
@@ -168,8 +170,8 @@ on a `layer`: a `<layer components={[Blur(...)]} />` blurs its own children only
 - Of two values of one type, the last wins.
 
 The element owns `Transform`, `Box`, `Layer`, `Order`, `Parent`, `Sprite`, `NineSlice`, `Shape`,
-`Text`, `Tappable`, `Touchable`, `LocalWrite`, `Scroll`, `Escapable`, `Exiting`, `Pressed` and
-`PointerOver`. A value of one of these types is dropped, never written, and logged once per
+`Text`, `Tappable`, `Touchable`, `LocalWrite`, `Scroll`, `Scrollable`, `ScrollState`, `Escapable`,
+`Exiting`, `Pressed` and `PointerOver`. A value of one of these types is dropped, never written, and logged once per
 element and name. Nothing throws: the element keeps its own component and the screen draws.
 
 ```tsx
@@ -209,6 +211,73 @@ A hint no element takes is dropped; the buffer is empty at the end of every fram
 
 ```ts
 fx.emit(hint("coins.fly", { projection: "hud", key: "coinPillText", ms: 400 }));
+```
+
+## Scroll
+
+A `scroll` moves its content on one axis: `axis: "y"`, the default, or `"x"`. The children form
+takes both; the windowed form moves on `y` only. The content is one element the scroll holds: a
+column of the children on `y`, a row of them on `x`, as tall as the scroll on `x` and as wide on
+`y`. It moves by one `Transform` write on the axis, so its children keep their rects, are hit where
+they are drawn, and no solve runs.
+
+```tsx
+// The order strip of the board: a 306 u window over a 696 u track, three stops, opened on the orders.
+<scroll key="strip" axis="x" snap={[0, 318, 390]} offset={318} style={{ width: 306, height: 120 }}
+        components={[OrderStrip()]}>
+  <row key="track" style={{ width: 696, height: 120 }}>
+    {events.map(event => <EventTile key={event.id} event={event} />)}
+    <OrderCard key="order" order={order} />
+  </row>
+</scroll>
+// ScrollState of the strip from its first drawn frame: { offset: 318, max: 390, moving: false }
+```
+
+| Prop | Meaning |
+|---|---|
+| `axis` | `"x"` or `"y"` (default). Read when the scroll spawns: another axis on a later render keeps the first, with one warning `ui:scroll-axis-fixed` `{ key, axis }`. `"x"` with `rows` throws `[game] A windowed scroll moves on y only.` |
+| `snap` | stops, as offsets from the start; each is kept inside `0..max`. A release glides to the stop nearest to `offset + v × 260` (`v` the offset's velocity in units a ms) |
+| `offset` | where the scroll stands, from the start, kept inside `0..max`; 0 when left out. Its first drawn frame stands there. A new value on a later render glides there; the same value does nothing, so a scroll the player moved stays |
+
+All numbers are reference units and milliseconds of `time` (`time.delta`): a time scale and a pause
+apply.
+
+- **The finger.** While the scroll carries `Pressed` the offset follows the finger on the axis, and
+  ignores the other one. The first frame of a press, a hand-off from a child included (see the input
+  README), takes the finger where it is as the start, and a fling or a glide stops where it stands.
+  A finger that lands on a moving scroll only stops it: `input` gives the scroll that press, and it
+  answers nothing.
+- **The release.** The velocity comes from the last five samples of the finger, of the last 100 ms,
+  kept in a ring in the layout state; a finger that stood still for more than 50 ms lets go with
+  none. Without `snap` the scroll flings: `offset += v × dt`, `v ×= 0.998^dt`, until `|v|` is under
+  0.02 units a ms. With `snap` it glides to the stop, on `1 − (1 − p)³` over
+  `min(620, 260 + distance × 1.1)` ms; no glide when it stands on the stop already.
+- **The range.** Every solve gives a scroll its `max`: its content past its window on the axis, or
+  `rows × rowHeight` past its height when windowed, in whole units. A new `max` keeps the offset
+  inside it at once, and a running glide's target too: when the pinned column of the board closes,
+  the window grows 306 → 390 (`max` 390 → 306) while the game sets `snap` to `[0, 306]` and
+  `offset` to 306 in the same render, and the strip stands on 306.
+- **Hard edges.** The offset never passes 0 or `max`; a fling that reaches an edge ends there, and
+  nothing passes the rest of a move to a scroll around it.
+- **`ScrollState`** `{ offset, max, moving }` is on the scroll's entity, public: a game system queries
+  it next to its own marker component, and the read door (`game.explain`) lists it. `offset` and `max`
+  are whole units, `0..max`. It is written in a frame where the offset, `max` or `moving` changed, and
+  once with `moving: false` when the scroll stops; a still frame writes nothing. `moving` is true
+  while the finger holds it, it flings or it glides. While a scroll moves, `time.wake()` keeps the
+  frames coming.
+- The internal `Scroll` keeps the offset the way the windowed range is cut with: `Scroll.offset =
+  −ScrollState.offset`, `Scroll.min = −max`. The internal `Scrollable` `{ axis, moving }` is what
+  `input` reads for the hand-off and the catch. A game reads neither.
+- **No allocation.** A held, flinging, gliding or still frame allocates nothing: the exact numbers
+  live on the element's motion record and in the layout state, written in place, and the components
+  get whole units through patches kept in the layout state (`__tests__/perf/scroll.perf.ts`).
+
+```ts
+// A test, an agent or a visual test puts the strip on its events at once.
+app.ui.scroll("strip", 0); // true: ScrollState { offset: 0, max: 390, moving: false }
+app.ui.scroll("nothing", 0); // false, with the warning "ui:scroll-without-scroll"
+// A visual test: the step is the `game.scroll` command of the catalogue.
+steps: [{ scroll: { key: "strip", to: 0 } }, { checkpoint: "strip-events" }];
 ```
 
 ## Scroll windowing
@@ -261,7 +330,7 @@ Yoga nodes. Every row has the same height, so the range is arithmetic and the sc
 - A list that shrinks below its window clamps the window and the offset in the same frame.
 - Some but not all of `rows`, `rowHeight` and `row` throws `[game] A windowed scroll needs rows,
   rowHeight and row.`; children next to `row` are ignored with one warning
-  `ui:scroll-children-ignored`. `axis: "x"` still throws.
+  `ui:scroll-children-ignored`. `axis: "x"` throws `[game] A windowed scroll moves on y only.`
 
 The child form, a `scroll` with children and no `rows`, is unchanged: keep it for short lists.
 
@@ -433,7 +502,8 @@ So nothing a mount does is written a second time, and a game needs no extra code
   restored state, also when the screen is the same item as before and no view of a projection
   runs again.
 - What a mount does not bring is gone with the old tree, as after a remount of the scene: the
-  local state of a component, a scroll offset, the keyboard focus, a text being edited, a hover.
+  local state of a component, a scroll offset (a scroll stands at its `offset` prop again), the
+  keyboard focus, a text being edited, a hover.
 - The entity of an element is another one after a restore. Ask `ui.find(key)` again.
 - A view hosted in a slot hangs under the new slot in the frame that builds it, as after a mount.
 - Every element enters with the cause `"mount"`: a `when: "change"` motion stands at rest.
@@ -620,15 +690,16 @@ read(app, sources.locate, { key: "nothing" }); // undefined: no live element has
 read(app, sources.locate, { target: { projection: "board.items", key: "c7" } }); // { x, y, w, h }
 ```
 
-`control.ts` holds the two ui commands of the editor's write door, `@moku-labs/game/control`,
+`control.ts` holds the three ui commands of the editor's write door, `@moku-labs/game/control`,
 dev builds only. `tap` goes through `app.input`, so the gate decides; `fill` goes through
-`app.ui.fill`, which writes a component's `local` and answers nothing. The session stays clean
-(effect `route`). They need an app with `input` and `ui`.
+`app.ui.fill`, which writes a component's `local` and answers nothing; `scroll` goes through
+`app.ui.scroll`. The session stays clean (effect `route`). They need an app with `input` and `ui`.
 
 | Key in `commands` | id | Input | Does |
 |---|---|---|---|
 | `tap` | `game.tap` | `{ key: "string?", target: "json?" }`, exactly one | `input.tap` on the ui element with that `key` (through `ui.find`) or on the view `target: { projection, key }` |
 | `fill` | `game.fill` | `{ key: "string", value: "string" }` | `ui.fill(key, value)`: types into the text field with that `key`; answers `false` for a key that is no live `input` |
+| `scroll` | `game.scroll` | `{ key: "string", to: "number" }` | `ui.scroll(key, to)`: puts the `scroll` with that `key` at `to` at once; answers `false` for a key that is no live `scroll`. A visual test writes it as the step `{ scroll: { key, to } }` |
 
 ```ts
 import { commands, run } from "@moku-labs/game/control";
@@ -638,6 +709,8 @@ import { commands, run } from "@moku-labs/game/control";
 // The Rename popup rests: type the name, then submit it with the Enter key.
 (await run(app, commands.fill, { key: "nameField", value: "Alex" })).value; // true
 await run(app, commands.key, { key: "Enter" }); // the gate takes { intent: "save", payload: { name: "Alex" } }
+// The board rests: show the order strip on its events.
+(await run(app, commands.scroll, { key: "strip", to: 0 })).value; // true
 ```
 
 ## Hot swap (dev)

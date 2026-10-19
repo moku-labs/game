@@ -8,7 +8,7 @@
  * `text` resolved again (`remeasure.ts`).
  */
 import { printOf } from "../../anim/motion";
-import { PointerOver, Pressed, Tappable, Touchable } from "../../input/components";
+import { PointerOver, Pressed, Scrollable, Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
 import {
   NineSlice,
@@ -20,6 +20,7 @@ import {
   type TransformValue
 } from "../../renderer/components";
 import { Text } from "../../text/components";
+import type { Time } from "../../time/types";
 import { Exiting, Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
 import type {
   AnyComponentType,
@@ -29,7 +30,15 @@ import type {
   MotionCause,
   MotionHandle
 } from "../../world/types";
-import { Box, Escapable, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
+import {
+  Box,
+  Escapable,
+  LocalWrite,
+  Scroll,
+  ScrollState,
+  UI_OWNER,
+  UiCounters
+} from "../components";
 import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "../styles/types";
@@ -53,9 +62,10 @@ import type {
   JsxState,
   PointerFlag,
   PopupLink,
-  Root
+  Root,
+  ScrollMotion
 } from "./types";
-import { checkWindow, isOwnKey } from "./window";
+import { axisOf, checkWindow, isOwnKey, scrollMotionOf } from "./window";
 
 /** What the modules injected into `jsx` are. */
 export type JsxModules = { styles: StylesModule; layout: LayoutModule };
@@ -65,9 +75,20 @@ const VISUALS: readonly AnyComponentType[] = [Sprite, NineSlice, Shape, Text];
 
 /**
  * The input components of an element and the Escape marker; a disabled or covered button drops
- * the answering one and the marker.
+ * the answering one and the marker. A scroll's three hold its runtime state.
  */
-const INPUTS: readonly AnyComponentType[] = [Tappable, Touchable, LocalWrite, Scroll, Escapable];
+const INPUTS: readonly AnyComponentType[] = [
+  Tappable,
+  Touchable,
+  LocalWrite,
+  Scroll,
+  Scrollable,
+  ScrollState,
+  Escapable
+];
+
+/** The components of a scroll that hold where it stands: added once, never patched by a render. */
+const SCROLL_STATE: ReadonlySet<string> = namesOf([Scroll, Scrollable, ScrollState]);
 
 /**
  * One list of the visual and the input types. Its own function, because lint rule L5 refuses a
@@ -85,6 +106,15 @@ const LIVE_TYPES: readonly AnyComponentType[] = concatTypes(VISUALS, INPUTS);
 
 /** The owned fields of a type that gives none to a plugin: one list, never a new one. */
 const NO_OWNED: readonly string[] = [];
+
+/** The time of a reconcile a test steps by hand: no ms pass, so no scroll moves. */
+const NO_TIME: Readonly<Time> = Object.freeze({
+  delta: 0,
+  elapsed: 0,
+  scale: 1,
+  frame: 0,
+  idle: false
+});
 
 /**
  * Tells whether a list of component values holds one of a type.
@@ -134,6 +164,9 @@ export const ELEMENT_OWNED: ReadonlySet<string> = namesOf([
 
 /** The style of a scroll's content: one object, so a render never reads as a new style. */
 const CONTENT_STYLE: Style = Object.freeze({ origin: "topLeft" });
+
+/** The style of an x scroll's content: its children stand side by side. */
+const CONTENT_ROW_STYLE: Style = Object.freeze({ origin: "topLeft", direction: "row" });
 
 /**
  * The props, besides `style`, `state` and `content`, that a live element is written from: `bind`,
@@ -200,12 +233,13 @@ function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
 /**
  * The children one element is diffed against. A scroll container holds exactly one of them: the
  * content the finger moves, which keeps the rects of its own children and carries them along. Its
- * pivot is its top-left corner, so the scroll step writes its offset straight into `y`; it lays
- * its children out as a column. The content of a windowed scroll holds the slots of its window,
- * the two spacers and the rows, instead of the markup's children.
+ * pivot is its top-left corner, so the scroll step writes its offset straight into `x` or `y`; it
+ * lays its children out as a column, or as a row on the `x` axis. The content of a windowed scroll
+ * holds the slots of its window, the two spacers and the rows, instead of the markup's children.
  *
  * @param node - The node the markup wrote.
  * @param slots - The slots of a windowed scroll, top spacer to bottom spacer.
+ * @param axis - The axis of a scroll, the one it spawned with.
  * @returns The children of the element.
  * @example
  * ```ts
@@ -214,11 +248,14 @@ function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
  */
 export function childrenOf(
   node: DescriptionNode,
-  slots?: DescriptionNode[]
+  slots?: DescriptionNode[],
+  axis: ScrollMotion["axis"] = "y"
 ): readonly DescriptionNode[] {
   if (node.type !== "scroll") return node.children;
 
-  return [{ type: CONTENT, props: { style: CONTENT_STYLE }, children: slots ?? node.children }];
+  const style = axis === "x" ? CONTENT_ROW_STYLE : CONTENT_STYLE;
+
+  return [{ type: CONTENT, props: { style }, children: slots ?? node.children }];
 }
 
 /**
@@ -302,20 +339,16 @@ function styleOf(node: DescriptionNode): Style | undefined {
 }
 
 /**
- * Refuses the tags that cannot be placed: a text field that names no local field, a horizontal
- * scroll, and a windowed scroll whose props do not hold.
+ * Refuses the tags that cannot be placed: a text field that names no local field, and a windowed
+ * scroll whose props do not hold.
  *
  * @param node - The node being placed.
- * @throws {Error} For an `input` tag without `local`, for a horizontal scroll and for a windowed
- *   scroll whose props do not hold.
+ * @throws {Error} For an `input` tag without `local`, and for a windowed scroll whose props do
+ *   not hold.
  */
 function checkTag(node: DescriptionNode): void {
   if (node.type === "input" && typeof node.props.local !== "string") {
     throw new Error('[game] An input needs a local field.\n  Write <input local="name" />.');
-  }
-
-  if (node.type === "scroll" && node.props.axis === "x") {
-    throw new Error('[game] Horizontal scroll arrives after V3.\n  Use axis "y".');
   }
 
   checkWindow(node);
@@ -346,9 +379,10 @@ function answerOf(node: DescriptionNode): AnyComponentValue[] {
 /**
  * The input components of an element: a button answers the gate, writes local state, or only
  * swallows the tap; a panel swallows the tap too, so nothing under it answers; a text field takes
- * the tap that starts its editing; a scroll container takes the press that moves its content. A button of a covered popup answers nothing,
- * so only the top popup answers the gate. A button with the `escape` prop that answers also
- * carries `Escapable`, the control the Escape key taps.
+ * the tap that starts its editing; a scroll container takes the press that moves its content and
+ * carries where it stands, on the axis it spawned with. A button of a covered popup answers
+ * nothing, so only the top popup answers the gate. A button with the `escape` prop that answers
+ * also carries `Escapable`, the control the Escape key taps.
  *
  * @param element - The element to make touchable.
  * @returns The component values.
@@ -356,7 +390,11 @@ function answerOf(node: DescriptionNode): AnyComponentValue[] {
 function inputOf(element: Element): AnyComponentValue[] {
   const { type, node, is } = element;
 
-  if (type === "scroll") return [Touchable(), Scroll({ axis: "y" })];
+  if (type === "scroll") {
+    const axis = element.scroll?.axis ?? "y";
+
+    return [Touchable(), Scroll({ axis }), Scrollable({ axis, moving: false }), ScrollState()];
+  }
   if (type === "panel" || type === "input") return [Touchable()];
   if (type !== "button") return [];
   if (is.disabled || is.covered) return [Touchable()];
@@ -625,6 +663,8 @@ export function createReconciler(
   let slotsVersion = -1;
   let slotsRoots = -1;
   let placedUnder: ReadonlyArray<LayerSpec> | undefined;
+  // The roots the reconcile of this frame diffed: a render may bring a scroll a new `offset` prop.
+  let rendered = 0;
 
   /**
    * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
@@ -731,12 +771,20 @@ export function createReconciler(
     registerKey(root, element);
 
     if (element.type === "input") fields.enter(element);
-    if (element.type === "scroll") state.scrolls.add(entity);
+    if (element.type === "scroll") {
+      state.scrolls.add(entity);
+      element.scroll = scrollMotionOf(node);
+    }
 
     modules.layout.attach(element);
     // The style is on the layout node: from here an equal description keeps it.
     element.basis = { epoch: state.epoch, rowHeight: range.rowHeightOf(parent, node) };
-    diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
+    diffChildren(
+      root,
+      element,
+      childrenOf(node, range.slotsFor(element), element.scroll?.axis),
+      instance
+    );
     root.needsSolve = true;
 
     return entity;
@@ -911,11 +959,12 @@ export function createReconciler(
   /**
    * Writes the visual and input components of a live element again. A visual or an input the
    * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
-   * back, and a button that became disabled stops answering the gate. `Scroll` is only ever added:
-   * its offset belongs to the finger, and a new look or a new rect never resets it. The look
-   * written is recorded as the rest of the visual, so the rest the world holds is always the one
-   * the element is drawn with: a restore brings it back to exactly that. The extras of the
-   * `components` prop are diffed last. Every call is one write pass of `UiCounters`.
+   * back, and a button that became disabled stops answering the gate. `Scroll`, `Scrollable` and
+   * `ScrollState` are only ever added: where a scroll stands belongs to the finger and the scroll
+   * step, and a new look or a new rect never resets it. The look written is recorded as the rest
+   * of the visual, so the rest the world holds is always the one the element is drawn with: a
+   * restore brings it back to exactly that. The extras of the `components` prop are diffed last.
+   * Every call is one write pass of `UiCounters`.
    *
    * @param element - The element that changed.
    */
@@ -934,7 +983,7 @@ export function createReconciler(
       if (isDropped && ecs.has(element.entity, type)) ecs.remove(element.entity, type);
     }
 
-    // Add the ones the entity lacks; patch the fields of the rest, but never a tag or `Scroll`.
+    // Add the ones the entity lacks; patch the fields of the rest, but never a tag or a scroll's state.
     for (const value of visuals) writeValue(element, value);
     for (const value of inputs) writeValue(element, value);
 
@@ -946,7 +995,8 @@ export function createReconciler(
 
   /**
    * Writes one visual or input value onto a live element: added when the entity lacks it, else
-   * its fields patched, but never a tag or `Scroll`, and never a field its type gives to a plugin.
+   * its fields patched, but never a tag or the state of a scroll, and never a field its type gives
+   * to a plugin.
    *
    * @param element - The live element.
    * @param value - The value of this render.
@@ -958,7 +1008,7 @@ export function createReconciler(
       return;
     }
 
-    if (value.value === true || value.type === Scroll) return;
+    if (value.value === true || SCROLL_STATE.has(value.type.componentName)) return;
 
     const owned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
 
@@ -1061,6 +1111,7 @@ export function createReconciler(
     instance: string | undefined
   ): void {
     checkWindow(node);
+    warnAxis(element, node);
 
     const change = compare(root, element, node);
     const motion = node.props.motion as ElementMotion | undefined;
@@ -1093,7 +1144,29 @@ export function createReconciler(
       element.basis = { epoch: state.epoch, rowHeight: change.rowHeight };
     }
 
-    diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
+    diffChildren(
+      root,
+      element,
+      childrenOf(node, range.slotsFor(element), element.scroll?.axis),
+      instance
+    );
+  }
+
+  /**
+   * Warns once when a render gives a live scroll another `axis`: it keeps the one it spawned with.
+   *
+   * @param element - The element being patched.
+   * @param node - The node of this render.
+   */
+  function warnAxis(element: Element, node: DescriptionNode): void {
+    const axis = element.scroll?.axis;
+
+    if (axis === undefined || axis === axisOf(node) || element.warned.has("scroll-axis-fixed")) {
+      return;
+    }
+
+    element.warned.add("scroll-axis-fixed");
+    ctx.log.warn("ui:scroll-axis-fixed", { key: element.key ?? element.identity, axis });
   }
 
   /**
@@ -1983,8 +2056,10 @@ export function createReconciler(
    * again, the roots a scene placed again, the popups that may leave, the pull of the text being
    * typed, the scroll offsets and the windowed ranges, the bound texts that show a string of
    * another size, the viewport, the dirty roots and the hosted views.
+   *
+   * @param time - The frame's `Time`: the scrolls move by its `delta`.
    */
-  function reconcile(): void {
+  function reconcile(time: Readonly<Time> = NO_TIME): void {
     // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
@@ -2001,11 +2076,11 @@ export function createReconciler(
     // The text being typed reaches the local of its component before the roots re-render.
     fields.pull();
 
-    // Move the scroll containers with the finger, then cut the windowed ranges at that offset,
-    // before any root is diffed.
+    // Move the scroll containers with the finger, a fling or a glide, then cut the windowed ranges
+    // at that offset, before any root is diffed.
     const containers = scrollContainers();
 
-    modules.layout.scroll(containers, lookup);
+    modules.layout.scroll(containers, lookup, time);
     range.step(containers);
 
     // A text that `text` wrote this frame and that measures to another size now asks its root
@@ -2024,6 +2099,8 @@ export function createReconciler(
     if (viewportChanged) state.epoch += 1;
 
     const count = dirtyRoots(viewportChanged);
+
+    rendered = count;
 
     for (let index = 0; index < count; index += 1) {
       const root = dirtyList[index];
@@ -2057,9 +2134,10 @@ export function createReconciler(
   /**
    * The second system of phase `layout`: every root takes its slot, then one solve per marked
    * root, a root in a slot after the root of its slot and in its content box, then the rects, the
-   * rest poses and the hooks, and the hosting of the hosts that came. The hints released since the last frame step are dropped at its end, so
-   * the `change.Box` and `change.Transform` hooks the solve plays get the hint the reconcile
-   * routed, and the next frame starts with none.
+   * rest poses and the hooks, the scrolls settled on what the solve and the render gave them, and
+   * the hosting of the hosts that came. The hints released since the last frame step are dropped
+   * at its end, so the `change.Box` and `change.Transform` hooks the solve plays get the hint the
+   * reconcile routed, and the next frame starts with none.
    */
   function solve(): void {
     const viewport = modules.styles.viewport();
@@ -2072,6 +2150,12 @@ export function createReconciler(
     const changed = layOutRoots(viewportBox);
 
     if (changed) ctx.deps.time.wake();
+
+    // A solve may give a scroll a new range and a render a new `offset` prop; a scroll that came in
+    // this solve stands at its prop before it is first drawn.
+    if (changed || rendered > 0) modules.layout.settleScroll(scrollContainers(), lookup);
+
+    rendered = 0;
 
     // Land the overlays whose enter is over: the renderer reads it in this frame.
     settleOverlays(ctx, state, modules.layout);

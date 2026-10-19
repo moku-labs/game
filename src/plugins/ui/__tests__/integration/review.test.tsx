@@ -38,7 +38,9 @@ function mount(app: StackApp, names: readonly string[]): void {
 }
 
 /**
- * Drags a scroll container from one pointer height to another.
+ * Drags a scroll container from one pointer height to another. The finger rests 48 ms before it
+ * lifts, 64 by the release frame: more than 50 ms, so the list stops where it was let go instead
+ * of flinging.
  *
  * @param app - The running app.
  * @param container - The scroll container.
@@ -52,6 +54,9 @@ function drag(app: StackApp, container: number, from: number, to: number): void 
   app.world.ecs.tag(container, Pressed);
   app.time.step(16);
   pointer.y = to;
+  app.time.step(16);
+  app.time.step(16);
+  app.time.step(16);
   app.time.step(16);
   app.world.ecs.untag(container, Pressed);
   app.time.step(16);

@@ -7,6 +7,9 @@ import { stepScroll } from "../../layout/scroll";
 import { createLayoutState } from "../../layout/state";
 import type { UiCtx } from "../../types";
 
+/** One frame of 16 ms, as the scroll step gets it from the system. */
+const FRAME = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false };
+
 /**
  * Builds one root record for the order tests.
  *
@@ -227,7 +230,8 @@ describe("stepScroll", () => {
       scrollCtx(true, { axis: "y", offset: 0, min: 0 }, set),
       state,
       [container],
-      () => undefined
+      () => undefined,
+      FRAME
     );
 
     expect(set).not.toHaveBeenCalled();
@@ -237,7 +241,8 @@ describe("stepScroll", () => {
       scrollCtx(false, { axis: "y", offset: 0, min: 0 }, set),
       state,
       [elementOf({ children: [2] })],
-      () => elementOf({ entity: 2 })
+      () => elementOf({ entity: 2 }),
+      FRAME
     );
 
     expect(state.scrolling).toBeUndefined();
@@ -247,8 +252,12 @@ describe("stepScroll", () => {
     const state = createLayoutState();
     const set = vi.fn();
 
-    stepScroll(scrollCtx(true, undefined, set), state, [elementOf({ children: [2] })], () =>
-      elementOf({ entity: 2 })
+    stepScroll(
+      scrollCtx(true, undefined, set),
+      state,
+      [elementOf({ children: [2] })],
+      () => elementOf({ entity: 2 }),
+      FRAME
     );
 
     expect(set).not.toHaveBeenCalled();

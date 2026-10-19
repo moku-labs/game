@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, it } from "vitest";
+import type { VisualStep } from "../../../../visual/types";
 import { defineMotion } from "../../../anim/motion";
 import type { Descriptor, NodeFx } from "../../../flow/fx/types";
 import type { Answer } from "../../../flow/gate/types";
@@ -420,5 +421,40 @@ describe("the snapshot of a windowed scroll", () => {
     expectTypeOf<UiNode["window"]>().toEqualTypeOf<
       { first: number; last: number; rows: number } | undefined
     >();
+  });
+});
+
+describe("the scroll on both axes", () => {
+  it("takes axis, snap and offset in the child form, and refuses stops or an offset that are no numbers", () => {
+    const strip: UiIntrinsicElements["scroll"] = {
+      axis: "x",
+      snap: [0, 318, 390],
+      offset: 318,
+      children: []
+    };
+    // @ts-expect-error — a stop is an offset in reference units, not a name.
+    const named: UiIntrinsicElements["scroll"] = { axis: "x", snap: ["events", "orders"] };
+    // @ts-expect-error — the offset is a number of reference units.
+    const worded: UiIntrinsicElements["scroll"] = { axis: "x", offset: "orders" };
+    // @ts-expect-error — a scroll moves on x or y.
+    const diagonal: UiIntrinsicElements["scroll"] = { axis: "xy" };
+
+    expectTypeOf([strip, named, worded, diagonal]).not.toBeUndefined();
+  });
+
+  it("steers a scroll by key and offset, from the API and from a visual step", () => {
+    const api = {} as UiApi;
+    const steps: VisualStep[] = [
+      { scroll: { key: "strip", to: 0 } },
+      { checkpoint: "strip-events" }
+    ];
+
+    expectTypeOf(api.scroll("strip", 0)).toEqualTypeOf<boolean>();
+    // @ts-expect-error — the offset is a number of reference units, not a stop name.
+    api.scroll("strip", "events");
+    // @ts-expect-error — the step needs the offset.
+    const half: VisualStep = { scroll: { key: "strip" } };
+
+    expectTypeOf([...steps, half]).toEqualTypeOf<VisualStep[]>();
   });
 });

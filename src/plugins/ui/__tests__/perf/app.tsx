@@ -2,8 +2,9 @@
  * @file ui plugin — the app of the perf tests and benches. Not a test file. Ten JSX roots at rest:
  * the board, a root of 200 elements drawn by one component whose view counts its runs; the inset,
  * a JSX projection laid out in a slot of the board; and eight small HUD roots. Three host elements
- * of the board name two world projections each, forty sprite views per projection. Real flow,
- * world, text and Yoga; inert renderer, headless.
+ * of the board name two world projections each, forty sprite views per projection. The scroll
+ * files mount one more root, an order strip. Real flow, world, text and Yoga; inert renderer,
+ * headless.
  */
 import { createApp, defineGame, projection, Sprite, Transform, type } from "../../../../index";
 import { animPlugin } from "../../../anim";
@@ -181,13 +182,34 @@ const main = defineFlow("main", {
   edges: { home: { tick: "home" } }
 });
 
+/**
+ * The order strip of the scroll windows, mounted by the scroll perf files only: an x scroll of
+ * 306 u over a 20 000 u track, so a fling or a glide has room to run.
+ */
+const stripScreen = projection({
+  name: "strip",
+  layer: "ui",
+  from: (): Item => ({ id: "strip" }),
+  view: () => (
+    <scroll key="perfStrip" axis="x" style={{ width: 306, height: 120 }}>
+      <row key="perfTrack" style={{ width: 20_000, height: 120 }} />
+    </scroll>
+  )
+});
+
 /** Every projection the fixture mounts. */
 export const MOUNTED: readonly string[] = [...PIECES, "board", "inset", "hud"];
 
 /** The feature of the fixture. */
 const perfFeature = defineFeature("perf", {
   flows: [main],
-  projections: [...PIECES.map(name => pieceProjection(name)), boardScreen, insetScreen, hudScreen],
+  projections: [
+    ...PIECES.map(name => pieceProjection(name)),
+    boardScreen,
+    insetScreen,
+    hudScreen,
+    stripScreen
+  ],
   ui: [Board],
   strings: { en: english }
 });

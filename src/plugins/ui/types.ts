@@ -160,7 +160,7 @@ export type UiCtx = KernelSlice & { readonly deps: Deps };
 /**
  * ui plugin API, `app.ui`. The screen is one more projection, so three members read it the way a
  * test reads the board: a snapshot, a key lookup and a list of findings; the fourth types into a
- * text field.
+ * text field, the fifth scrolls a `scroll`.
  *
  * @example
  * ```ts
@@ -246,6 +246,27 @@ export type UiApi = {
    * ```
    */
   fill(key: string, value: string): boolean;
+
+  /**
+   * Scrolls a `scroll` element to an offset from its start, at once: the offset is kept inside 0
+   * to `max`, a fling or a glide stops, and `ScrollState` reads the new offset with
+   * `moving: false`. A finger that holds the scroll goes on from there. Works headless, for a
+   * test, an agent or a visual test (the `game.scroll` command, the step `{ scroll: { key, to } }`).
+   *
+   * @param key - The `key` prop of the `scroll` element.
+   * @param to - How far from the start, in reference units.
+   * @returns True when a live scroll took it; false with one warning `ui:scroll-without-scroll`
+   *   when no live `scroll` has the key.
+   * @example
+   * ```ts
+   * // A test shows the order strip on its events: the strip is 306 u over a 696 u track.
+   * app.ui.scroll("strip", 0); // true
+   * app.world.ecs.get(app.ui.find("strip") ?? 0, ScrollState); // { offset: 0, max: 390, moving: false }
+   * app.ui.scroll("strip", 999); // true: it stands on the end, offset 390
+   * app.ui.scroll("nothing", 0); // false, with the warning "ui:scroll-without-scroll"
+   * ```
+   */
+  scroll(key: string, to: number): boolean;
 };
 
 export type { ElementChange, ElementMotion, Finding, UiNode } from "./jsx/types";

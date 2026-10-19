@@ -40,7 +40,12 @@ describe("scroll", () => {
 
     expect(app.world.ecs.has(container, Touchable)).toBe(true);
     expect(app.world.ecs.get(container, Shape)?.clip).toBe(true);
-    expect(app.world.ecs.get(container, Scroll)).toEqual({ axis: "y", offset: 0, min: 0 });
+    // The first solve gives the scroll its whole range: 200 u over eight rows of 80.
+    expect(app.world.ecs.get(container, Scroll)).toEqual({
+      axis: "y",
+      offset: 0,
+      min: 200 - 8 * 80
+    });
 
     pointer.y = 500;
     app.world.ecs.tag(container, Pressed);
@@ -143,7 +148,7 @@ describe("the two tags that throw", () => {
     await app.stop();
   });
 
-  it("refuses a horizontal scroll", async () => {
+  it("refuses a windowed scroll on the x axis", async () => {
     const app = await startUiApp();
 
     mount(app, "sideways");

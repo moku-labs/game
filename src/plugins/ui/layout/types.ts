@@ -7,6 +7,7 @@ import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import type { Message } from "../../i18n/types";
 import type { Size } from "../../text/types";
+import type { Time } from "../../time/types";
 import type { Motion, ViewHandle } from "../../world/projection/types";
 import type { Ease, Entity, MotionCause, ReducedMotion } from "../../world/types";
 import type { Element, JsxModule } from "../jsx/types";
@@ -56,7 +57,23 @@ export type TextSource = {
 };
 
 /**
+ * The patches the scroll step writes with, one object each, filled in place: a frame builds none.
+ * Every number in them is a whole reference unit.
+ */
+export type ScrollPatches = {
+  scroll: { offset: number; min: number };
+  state: { offset: number; max: number; moving: boolean };
+  scrollable: { moving: boolean };
+  x: { x: number };
+  y: { y: number };
+};
+
+/**
  * layout module state. `nodes` is attach minus detach: Yoga 3.2.1 has no instance counter.
+ * `scrolling` is the scroll the finger holds; `scrollClock` the ms the scroll step has run, the
+ * clock of the samples; `scrollRing` the last pointer samples of the press on its axis, a
+ * position and a time each, `scrollHead` the slot the next one takes and `scrollSamples` how
+ * many it holds; `scrollMoved` when the finger last moved.
  */
 export type LayoutState = {
   yoga: Yoga | undefined;
@@ -65,7 +82,12 @@ export type LayoutState = {
   measured: number;
   solves: number;
   scrolling: Entity | undefined;
-  scrollStart: { pointerY: number; offset: number };
+  scrollClock: number;
+  scrollRing: Float64Array;
+  scrollHead: number;
+  scrollSamples: number;
+  scrollMoved: number;
+  scrollPatches: ScrollPatches;
   /** One line of the `body` style as the icons were last measured with it; none before that. */
   iconLine: number | undefined;
   order: number;
@@ -112,8 +134,13 @@ export type LayoutModule = {
   /** Plays a hook on the element's handle and keeps its motion with the element's handles (the level of an overlay). */
   playTrack(element: Element, hook: (view: ViewHandle<unknown>) => Motion): void;
   settled(element: Element): boolean;
-  scroll(containers: readonly Element[], lookup: ElementLookup): void;
+  /** Moves every scroll by the frame: the finger, a fling or a glide. */
+  scroll(containers: readonly Element[], lookup: ElementLookup, time: Readonly<Time>): void;
+  /** After a solve or a render: the first place of a new scroll, a new range, a new `offset` prop. */
+  settleScroll(containers: readonly Element[], lookup: ElementLookup): void;
   clampScroll(container: Element, contentHeight: number, lookup: ElementLookup): number;
+  /** Puts a live scroll at an offset at once; false when it has not been placed yet. */
+  scrollTo(container: Element, to: number, lookup: ElementLookup): boolean;
   windowOf(
     offset: number,
     viewportHeight: number,

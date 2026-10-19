@@ -43,9 +43,10 @@ const config: Config = {
 };
 
 /**
- * Ui plugin: `app.ui.tree()`, `app.ui.find(...)`, `app.ui.lint()`, `app.ui.fill(...)`, the
- * text field `<input local>`, the components `Box`, `LocalWrite` and
- * `DebugTrigger`, and the helpers `defineComponent`, `defineStyle`, `defineTokens` and `popup`.
+ * Ui plugin: `app.ui.tree()`, `app.ui.find(...)`, `app.ui.lint()`, `app.ui.fill(...)`,
+ * `app.ui.scroll(...)`, the text field `<input local>`, the components `Box`, `LocalWrite`,
+ * `DebugTrigger` and `ScrollState`, and the helpers `defineComponent`, `defineStyle`,
+ * `defineTokens` and `popup`.
  *
  * @example
  * ```ts
