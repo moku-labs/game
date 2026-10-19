@@ -121,16 +121,33 @@ Shape({ fillAlpha: "0" });
 
 // ─── Shape: a kind that stays a union, and a dash length ──────
 
-expectTypeOf<ShapeValue["kind"]>().toEqualTypeOf<"rect" | "triangle">();
+expectTypeOf<ShapeValue["kind"]>().toEqualTypeOf<"rect" | "triangle" | "arc">();
 expectTypeOf<ShapeValue["dash"]>().toEqualTypeOf<number>();
-expectTypeOf(Shape.defaults.kind).toEqualTypeOf<"rect" | "triangle">();
+expectTypeOf(Shape.defaults.kind).toEqualTypeOf<"rect" | "triangle" | "arc">();
 
 // The play glyph of a watch button, and a dashed focus ring.
 Shape({ w: 36, h: 40, kind: "triangle", fill: 0xff_ff_ff });
 Shape({ w: 200, h: 80, radius: 16, fillAlpha: 0, stroke: 0x3a_22_12, strokeWidth: 4, dash: 10 });
 
-// @ts-expect-error — a shape is a rect or a triangle
+// @ts-expect-error — a shape is a rect, a triangle or an arc
 Shape({ kind: "circle" });
+
+// ─── Shape: an arc's ends stay a union ────────────────────────
+
+// The time left on a slot's timer: 42 % of a ring with round ends.
+Shape({
+  kind: "arc",
+  w: 28,
+  h: 28,
+  stroke: 0xc8_a1_5a,
+  strokeWidth: 2.2,
+  sweep: 0.42,
+  cap: "round"
+});
+expectTypeOf<ShapeValue["cap"]>().toEqualTypeOf<"round" | "butt" | undefined>();
+
+// @ts-expect-error — an arc ends round or butt; Pixi's "square" would draw past its sweep
+Shape({ kind: "arc", cap: "square" });
 
 // ─── the renderer API keeps its types ─────────────────────────
 

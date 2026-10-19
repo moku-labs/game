@@ -666,8 +666,14 @@ export type FakeDrawOp = {
   radius: number;
 };
 
-/** A fill or a stroke style the fake graphics recorded. */
-export type FakePaint = { color: number; alpha?: number; width?: number; pixelLine?: boolean };
+/** A fill or a stroke style the fake graphics recorded; `cap` ends an open line, as Pixi's stroke style. */
+export type FakePaint = {
+  color: number;
+  alpha?: number;
+  width?: number;
+  pixelLine?: boolean;
+  cap?: "round" | "butt";
+};
 
 /** A fake Pixi graphics: it records what was drawn and how often it was cleared. */
 export class FakeGraphics extends FakeContainer {

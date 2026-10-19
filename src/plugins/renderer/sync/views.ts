@@ -52,7 +52,7 @@ import {
   release
 } from "./pools";
 import { isLeaving, parentOf } from "./pose";
-import { drawShapePath, strokeShape } from "./shape-path";
+import { drawShapePath, isEmptyArc, paintShape } from "./shape-path";
 import { anchoredBoxInto, boxInto, createSpriteLayout, layoutSpriteInto } from "./sizing";
 import {
   clearFrames,
@@ -805,7 +805,9 @@ function sameShape(
     drawn.radius === value.radius &&
     drawn.stroke === value.stroke &&
     drawn.strokeWidth === value.strokeWidth &&
-    drawn.dash === value.dash
+    drawn.dash === value.dash &&
+    drawn.sweep === value.sweep &&
+    drawn.cap === value.cap
   );
 }
 
@@ -824,9 +826,9 @@ function copyShape(
   tinted: boolean
 ): DrawnShape {
   if (drawn === undefined) {
-    const { kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash } = value;
+    const { kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash, sweep, cap } = value;
 
-    return { tinted, kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash };
+    return { tinted, kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash, sweep, cap };
   }
 
   const copy = drawn;
@@ -841,12 +843,15 @@ function copyShape(
   copy.stroke = value.stroke;
   copy.strokeWidth = value.strokeWidth;
   copy.dash = value.dash;
+  copy.sweep = value.sweep;
+  copy.cap = value.cap;
 
   return copy;
 }
 
 /**
- * Tells whether a shape draws nothing: no stroke, and no fill alpha or no area. Pure.
+ * Tells whether a shape draws nothing: no stroke, and no fill alpha or no area; an arc with no stroke, no sweep or no
+ * circle inside its stroke. Pure.
  *
  * @param value - The shape value.
  * @returns True for a shape whose `Graphics` would hold no instruction.
@@ -856,6 +861,8 @@ function copyShape(
  * ```
  */
 function isEmptyShape(value: Readonly<ShapeValue>): boolean {
+  if (value.kind === "arc") return isEmptyArc(value);
+
   return value.strokeWidth <= 0 && (value.fillAlpha <= 0 || value.w <= 0 || value.h <= 0);
 }
 
@@ -881,8 +888,7 @@ function drawShape(
 
   if (!sameShape(view.drawn, value, tinted)) {
     markView(sctx, entity);
-    drawShapePath(object, value, value.fillAlpha, tinted ? WHITE : value.fill);
-    strokeShape(object, value);
+    paintShape(object, value, tinted ? WHITE : value.fill);
     sctx.ctx.state.sync.redraws += 1;
     view.drawn = copyShape(view.drawn, value, tinted);
   }
