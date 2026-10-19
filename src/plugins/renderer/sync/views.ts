@@ -781,8 +781,28 @@ function copyClip(drawn: ClipDrawn | undefined, value: Readonly<ShapeValue>): Cl
 }
 
 /**
+ * Tells whether an arc was drawn with this value already: only what its stroke is built from, its
+ * box, its stroke, its share and its ends. A new fill, fill alpha, radius or dash builds nothing.
+ *
+ * @param drawn - What the graphics was last drawn with, an arc too.
+ * @param value - The arc now.
+ * @returns True when nothing has to be drawn.
+ */
+function sameArc(drawn: DrawnShape, value: Readonly<ShapeValue>): boolean {
+  return (
+    drawn.w === value.w &&
+    drawn.h === value.h &&
+    drawn.stroke === value.stroke &&
+    drawn.strokeWidth === value.strokeWidth &&
+    drawn.sweep === value.sweep &&
+    drawn.cap === value.cap
+  );
+}
+
+/**
  * Tells whether a shape's graphics was drawn with this value already: the path, the fill and the
- * stroke. Its alpha, its clip and the fill of a tinted shape (its tint) are written apart.
+ * stroke; for an arc only its stroke. Its alpha, its clip and the fill of a tinted shape (its tint)
+ * are written apart.
  *
  * @param drawn - What the graphics was last drawn with.
  * @param value - The shape value now.
@@ -794,11 +814,11 @@ function sameShape(
   value: Readonly<ShapeValue>,
   tinted: boolean
 ): boolean {
+  if (drawn === undefined || drawn.tinted !== tinted || drawn.kind !== value.kind) return false;
+  if (value.kind === "arc") return sameArc(drawn, value);
+
   return (
-    drawn !== undefined &&
-    drawn.tinted === tinted &&
     (tinted || drawn.fill === value.fill) &&
-    drawn.kind === value.kind &&
     drawn.w === value.w &&
     drawn.h === value.h &&
     drawn.fillAlpha === value.fillAlpha &&

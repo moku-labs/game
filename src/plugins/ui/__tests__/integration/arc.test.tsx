@@ -5,7 +5,10 @@ import { assetsPlugin } from "../../../assets";
 import { i18nPlugin } from "../../../i18n";
 import { inputPlugin } from "../../../input";
 import { rendererPlugin } from "../../../renderer";
+import { FakeGraphics } from "../../../renderer/__tests__/fake-pixi";
 import { Shape } from "../../../renderer/components";
+import { paintShape } from "../../../renderer/sync/shape-path";
+import type { PixiGraphics } from "../../../renderer/types";
 import { scenesPlugin } from "../../../scenes";
 import { textPlugin } from "../../../text";
 import { worldPlugin } from "../../../world";
@@ -35,13 +38,25 @@ const ring = defineStyle({
   height: 28
 });
 
-/** The timer: 42 of 100 seconds left, and a button that lets the clock run on to 50 left. */
+/**
+ * The timer: 42 of 100 seconds left, a button that lets the clock run on to 50 left, one that turns the ring into a
+ * rectangle, and one that turns it back into a ring that names no share (`left` below 0).
+ */
 const Timer = defineComponent("Timer", {
-  local: { left: 42 },
+  local: { left: 42, rect: false },
   view: (_props: object, local) => (
     <column key="timerRoot" style={{ width: 400, height: 400 }}>
-      <stack key="slotTimer" style={{ ...ring, sweep: local.left / 100 }} />
+      <stack
+        key="slotTimer"
+        style={{
+          ...ring,
+          shape: local.rect ? "rect" : "arc",
+          ...(local.left < 0 ? {} : { sweep: local.left / 100 })
+        }}
+      />
       <button key="rewind" local={{ left: 50 }} style={{ width: 60, height: 60 }} />
+      <button key="toRect" local={{ rect: true }} style={{ width: 60, height: 60 }} />
+      <button key="toRing" local={{ rect: false, left: -1 }} style={{ width: 60, height: 60 }} />
     </column>
   )
 });
@@ -135,6 +150,37 @@ describe("an arc in the style vocabulary", () => {
       sweep: 0.5,
       cap: "round"
     });
+
+    await app.stop();
+  });
+
+  // Bug: a ring that follows a rectangle keeps the share an earlier arc left on the merged `Shape` instead of a whole
+  // ring, or a rectangle that follows an arc draws the arc's stroke from the share left on it.
+  it("writes sweep 1 again for a ring after a rectangle, and the rectangle between draws as a rectangle", async () => {
+    const app = await start();
+    const timer = app.ui.find("slotTimer") ?? 0;
+
+    app.input.tap(app.ui.find("toRect") ?? 0);
+    app.time.step(10);
+    app.time.step(10);
+
+    const rect = app.world.ecs.get(timer, Shape);
+
+    expect(rect).toMatchObject({ kind: "rect", w: 28, h: 28, sweep: 0.42 });
+
+    const graphics = new FakeGraphics();
+
+    if (rect !== undefined) paintShape(graphics as unknown as PixiGraphics, rect, 0xff_ff_ff);
+
+    expect(graphics.ops).toEqual([{ op: "rect", x: 0, y: 0, width: 28, height: 28, radius: 0 }]);
+    expect(graphics.strokes).toMatchObject([{ color: 0xc8_a1_5a, width: 2.2 }]);
+
+    app.input.tap(app.ui.find("toRing") ?? 0);
+    app.time.step(10);
+    app.time.step(10);
+
+    expect(app.ui.find("slotTimer")).toBe(timer);
+    expect(app.world.ecs.get(timer, Shape)).toMatchObject({ kind: "arc", sweep: 1, cap: "round" });
 
     await app.stop();
   });

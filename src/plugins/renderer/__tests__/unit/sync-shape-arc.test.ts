@@ -194,6 +194,31 @@ describe("the sync of an arc", () => {
     expect(graphics.strokes).toEqual([{ color: 0xc8_a1_5a, width: 10, cap: "butt" }]);
   });
 
+  // Bug: an arc is built again for a field it never draws (fill, fill alpha, radius, dash), or not for its stroke.
+  it("builds an arc again for a new stroke, never for a new fill, fill alpha, radius or dash", async () => {
+    const mock = await started();
+    const timer = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ ...RING, sweep: 0.42 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, timer);
+
+    mock.world.ecs.set(timer, Shape, { fill: 0x10_20_30, fillAlpha: 0.5, radius: 12, dash: 6 });
+    mock.modules.sync.pass();
+
+    expect(graphics.clears).toBe(1);
+
+    mock.world.ecs.set(timer, Shape, { stroke: 0x33_66_99 });
+    mock.modules.sync.pass();
+
+    expect(graphics.clears).toBe(2);
+    expect(graphics.strokes).toEqual([{ color: 0x33_66_99, width: 10, cap: "round" }]);
+  });
+
   // Bug: an arc that draws nothing (sweep 0, no stroke width) stays in Pixi's build, or stays out of it once it draws.
   it("takes an arc that draws nothing out of the build, and puts it back when it sweeps again", async () => {
     const mock = await started();

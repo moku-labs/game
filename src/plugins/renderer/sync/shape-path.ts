@@ -282,7 +282,7 @@ export function isEmptyArc(value: Readonly<ShapeValue>): boolean {
 /**
  * Strokes an arc: from 12 o'clock clockwise over its share of the circle, in segments as many as its angle needs (48
  * for a ring, at least 2), ended by its `cap`. A full ring is closed and has no ends. Nothing for an empty arc. Drawn
- * only when the shape changed: never a path of a frame.
+ * only when the shape changed: never rebuilt per frame.
  *
  * @param object - The graphics, cleared.
  * @param value - The shape value, an arc.

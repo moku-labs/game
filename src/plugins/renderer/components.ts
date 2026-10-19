@@ -119,17 +119,18 @@ export type DisplayValue = { object: unknown };
 /**
  * A filled rounded rectangle, a triangle or an arc, anchored at the top left of the `Transform`. `kind` picks the
  * outline: `"rect"` (the default), `"triangle"`, which fills its `w × h` box pointing right (rotate the element for
- * another direction) and ignores `radius`, or `"arc"`, a stroke on the circle inscribed in the box: its diameter is
- * `min(w, h) − strokeWidth`, centred, so the stroke stays inside the box. An arc starts at 12 o'clock and runs
- * clockwise over `sweep` of the circle (0 to 1, clamped): 0 draws nothing, 1 a closed ring. `cap` ends an open arc
- * round or flat (`"butt"`). Both are optional and read only by an arc: left out, `sweep` is 1 and `cap` is `"round"`
- * (`arcDefaults`), and a rectangle or a triangle never carries them. An arc draws only its stroke, in `stroke`, `strokeWidth` and `alpha`: `fill`,
- * `fillAlpha`, `radius` and `dash` are ignored, and `clip` masks the children to its box. `fillAlpha` is the alpha of
- * the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape and the entity's children: a disabled
- * button at 0.6 draws its icon at 0.6 too. `dash` is the dash length of the stroke in reference units, with gaps of
- * half a dash; 0 strokes a solid line. `clip` masks the children of the entity to the shape, always solid, which is
- * how `ui` draws a scroll and an overflow. The shape itself is never masked, so its stroke is drawn whole. The path is
- * built again only when a field changes: a still arc costs nothing a frame.
+ * another direction) and ignores `radius`, or `"arc"`. `fillAlpha` is the alpha of the fill alone: 0 draws only the
+ * stroke, a ring. `alpha` fades the whole shape and the entity's children: a disabled button at 0.6 draws its icon at
+ * 0.6 too. `dash` is the dash length of the stroke in reference units, with gaps of half a dash; 0 strokes a solid
+ * line. `clip` masks the children of the entity to the shape, always solid, which is how `ui` draws a scroll and an
+ * overflow. The shape itself is never masked, so its stroke is drawn whole. An arc is a stroke on the circle inscribed
+ * in the box: its diameter is `min(w, h) − strokeWidth`, centred, so the stroke stays inside the box. It starts at 12
+ * o'clock and runs clockwise over `sweep` of the circle (0 to 1, clamped): 0 draws nothing, 1 a closed ring. `cap` ends
+ * an open arc round or flat (`"butt"`). Both are optional: left out, `sweep` is 1 and `cap` is `"round"`
+ * (`arcDefaults`). Only an arc reads them; a rectangle or a triangle ignores them. An arc draws only its stroke, in
+ * `stroke`, `strokeWidth` and `alpha`: `fill`, `fillAlpha`, `radius` and `dash` are ignored, and `clip` masks the
+ * children to its box. The path is built again only when a field it is drawn from changes: a still arc costs nothing a
+ * frame, a new `fill` builds no arc again.
  *
  * @example
  * ```ts
