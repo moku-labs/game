@@ -82,18 +82,20 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 }
 
 /**
- * Opens the two systems of phase `layout`, the `ui.enter` system of phase `sync`, which plays the
- * enter hooks after the game's systems (F48), the seven world hooks of `Tree`, `Box`, `Pressed` and
- * `PointerOver`, the two that tell the hosting step a view lost its `Parent` or its `Held` (a
- * view freed so may hang under its host again), the listener that asks for every root to be built again after a restore or a
- * load, the two effect handlers, the hint listener that buffers every released hint for
- * the `change` hooks of the next frame step, the three tap listeners (the `LocalWrite` patch, the
- * pointer tap that clears the keyboard focus, and the tap that starts or ends the editing of a
- * text field), the pointer door that opens the keyboard inside the DOM listener, the key listener
- * of the focus and `LocalWrite` as an input control, so the cursor shows a hand over a local-state
- * button. On an agent page also the tap counter of `DebugTrigger` and its check of a view that takes
- * no press. Every remover goes into the state, so the teardown closes exactly these, and gives every
- * hosted view its layer back before the ui entities go.
+ * Opens the two systems of phase `layout`, the system `ui.enter` of phase `sync`, the seven world
+ * hooks of `Tree`, `Box`, `Pressed` and `PointerOver`, the two that tell the hosting step a view
+ * lost its `Parent` or its `Held` (a view freed so may hang under its host again), the listener
+ * that asks for every root to be built again after a restore or a load, the two effect handlers,
+ * the hint listener that buffers every released hint for the `change` hooks of the next frame
+ * step, the three tap listeners (the `LocalWrite` patch, the pointer tap that clears the keyboard
+ * focus, and the tap that starts or ends the editing of a text field), the pointer door that opens
+ * the keyboard inside the DOM listener, the key listener of the focus and `LocalWrite` as an input
+ * control, so the cursor shows a hand over a local-state button. On an agent page also the tap
+ * counter of `DebugTrigger` and its check of a view that takes no press.
+ *
+ * The `Box` hook only queues an element; `ui.enter` plays its enter hook after the game's systems
+ * of the frame and before it is drawn (F48). Every remover goes into the state, so the teardown
+ * closes exactly these, and gives every hosted view its layer back before the ui entities go.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param jsx - The jsx module.

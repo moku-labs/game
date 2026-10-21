@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { component, system } from "../../ecs/define";
+import { DRAWS_SYSTEM } from "../../ecs/systems";
 import type { Owner, WorldPhase } from "../../ecs/types";
 import { createMockWorld } from "./mock-world";
 
@@ -50,13 +51,13 @@ describe("ecs systems", () => {
 
     world.api.ecs.spawn(test, [Marker()]);
     world.api.ecs.system(recorder("game.sync", "sync", order));
-    world.api.ecs.system(recorder("renderer.sync", "sync", order));
+    world.api.ecs.system(recorder(DRAWS_SYSTEM, "sync", order));
     world.api.ecs.system(recorder("ui.enter", "sync", order));
     world.api.ecs.system(recorder("layout-a", "layout", order));
     world.start();
     world.frame();
 
-    expect(order).toEqual(["layout-a", "game.sync", "ui.enter", "renderer.sync"]);
+    expect(order).toEqual(["layout-a", "game.sync", "ui.enter", DRAWS_SYSTEM]);
   });
 
   it("refuses a duplicate system name and returns a remover", () => {
