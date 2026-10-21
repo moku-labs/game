@@ -162,14 +162,13 @@ describe('a text of a wrap "box" style in a row that shrinks it', () => {
     const title = app.world.ecs.get(app.ui.find("cardTitle") ?? 0, Text);
 
     expect(title?.resolved).toBe("A title of the body style");
-    expect(title?.box).toBeUndefined();
+    expect(Object.keys(title ?? {})).not.toContain("box");
 
     await app.stop();
   });
 
-  // The bug: a text that fits keeps the box of the lines it had, or carries a box at all, which every
-  // saved and described value of a game then shows (demos baselines, 0.15.16).
-  it("stays on one line when the name fits the room, with no box", async () => {
+  // The bug: a name that fits now keeps the box of the lines it had and is drawn wrapped there.
+  it("stays on one line when the name fits the room, its box back to 0", async () => {
     const app = await mountCard();
 
     tap(app, "shorten");
@@ -178,7 +177,7 @@ describe('a text of a wrap "box" style in a row that shrinks it', () => {
 
     expect(name.w).toBe(77);
     expect(name.h).toBe(linesHigh(1));
-    expect(boxOf(app)).toBeUndefined();
+    expect(boxOf(app)).toBe(0);
 
     await app.stop();
   });

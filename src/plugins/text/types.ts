@@ -105,14 +105,14 @@ export type CountdownValue = { until: number; left: number };
  * `bind`, `anchor` and `alpha`, and reads `resolved`. `alpha` fades every run, shadow and icon of
  * the block together, 1 by default; a change is written in place and a tween can drive it. `box`
  * is the width a style with `wrap: "box"` wraps at: `ui` writes the laid-out width of the text
- * element there; with no box (`undefined`, left out of every saved or described value) or 0 it is
- * one line. A style that wraps otherwise ignores it.
+ * element there, only on a text that wrapped at it, so a saved or described value has none; with no
+ * box or 0 it is one line. A style that wraps otherwise ignores it.
  *
  * @example
  * ```ts
  * const value: TextValue = {
  *   content: "+5", style: "body", bind: undefined, anchor: { x: 0.5, y: 0.5 }, alpha: 1,
- *   box: undefined, resolved: "+5"
+ *   resolved: "+5"
  * };
  * // The hint of an empty name field, at half alpha.
  * const hint: TextValue = { ...value, content: "Your name", alpha: 0.5, resolved: "Your name" };
@@ -129,7 +129,7 @@ export type TextValue = {
   bind: TextBind | undefined;
   anchor: Point;
   alpha: number;
-  box: number | undefined;
+  box?: number;
   resolved: string;
 };
 

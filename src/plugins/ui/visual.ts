@@ -78,6 +78,23 @@ function contentOf(props: Record<string, unknown>): string {
 }
 
 /**
+ * The box a text wraps at: its laid-out width while it wraps at it, 0 once it fits again, so a
+ * text that wrapped draws on one line, and no field on a text that never wrapped.
+ *
+ * @param element - The text element, with its rect known.
+ * @returns `{ box }`, or nothing.
+ */
+function boxOf(element: Element): { box?: number } {
+  if (element.measuredWidth !== undefined) {
+    element.boxed = true;
+
+    return { box: element.rect.w };
+  }
+
+  return element.boxed === true ? { box: 0 } : {};
+}
+
+/**
  * The visual component of an element: a sprite for an image or an icon, the text for a text (with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
  * when the style sets `debug`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
@@ -121,8 +138,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
         style: styleKey,
         bind: node.props.bind as undefined,
         anchor: { x: 0, y: 0 },
-        // The laid-out width, for a text of a style with `wrap: "box"` that wrapped at its box.
-        box: element.measuredWidth === undefined ? undefined : rect.w
+        // The laid-out width, only on a text of a style with `wrap: "box"` that wrapped at its box:
+        // any other text carries no box, so a saved or described value has none.
+        ...boxOf(element)
       })
     ];
   }

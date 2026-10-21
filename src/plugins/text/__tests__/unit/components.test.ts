@@ -25,15 +25,15 @@ describe("Text", () => {
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
       alpha: 1,
-      box: undefined,
       resolved: ""
     });
   });
 
-  // The bug: a box of 0 on every label is written into every saved, inspected and described value,
-  // so every game's visual baselines change though none of its texts wraps at a box (F50, 0.15.16).
-  it("leaves the box out of the value a game's describe saves until ui lays the text out", () => {
-    expect(JSON.stringify(Text({ content: "+5" }).value)).not.toContain('"box"');
+  // The bug: a box on every label, 0 or undefined, is written into every saved, inspected and
+  // described value (a field that is undefined drops the whole component from the snapshot), so
+  // every game's visual baselines change though none of its texts wraps at a box (F50, 0.15.16).
+  it("carries no box field until ui lays the text out at one", () => {
+    expect(Object.keys(Text({ content: "+5" }).value)).not.toContain("box");
   });
 
   it("draws at full alpha unless the game fades it", () => {
@@ -47,7 +47,6 @@ describe("Text", () => {
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
       alpha: 1,
-      box: undefined,
       resolved: ""
     });
   });
@@ -104,7 +103,6 @@ describe("label", () => {
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
       alpha: 1,
-      box: undefined,
       resolved: ""
     });
     expect(transform.type).toBe(Transform);
