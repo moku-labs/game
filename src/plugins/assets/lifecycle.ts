@@ -1,5 +1,5 @@
 /**
- * @file assets plugin — lifecycle: the five registrations of `onInit`, the boot of `onStart`
+ * @file assets plugin — lifecycle: the six registrations of `onInit`, the boot of `onStart`
  * and the teardown that frees every texture and cancels every fetch.
  */
 import { flowPlugin } from "../flow";
@@ -9,7 +9,7 @@ import { rendererPlugin } from "../renderer";
 import { isSceneDefinition } from "../scenes/bundles";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
-import { Exiting } from "../world/ecs/define";
+import { Exiting, system } from "../world/ecs/define";
 import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
 import { releaseAssets, releaseLeftBundles, releaseSceneLeft } from "./budget";
@@ -147,9 +147,10 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
 
 /**
  * Connects the plugin in `onInit`: the `load` stage of `onEnter`, the handler of the `load`
- * effect, the texture provider of `renderer`, and the start and the end of an exit in `world`,
- * counted so a leaving scene's bundles go when the last exit ends (F51). The five removers go to
- * the state, because `onStop` has nothing but the state.
+ * effect, the texture provider of `renderer`, the start and the end of an exit in `world`, counted,
+ * and the system `assets.leave` of phase `sync`, which lets a leaving scene's bundles go once its
+ * elements played their exit (F51). The six removers go to the state, because `onStop` has nothing
+ * but the state.
  *
  * @param ctx - Kernel context of the assets plugin.
  */
@@ -164,14 +165,23 @@ export function connectAssets(ctx: KernelSlice): void {
       { runInFast: true }
     ),
     assets.deps.renderer.sync.textures.provide(key => lookupTexture(assets, key)),
-    // The world's exits are counted; when the last one ends, the bundles a leaving scene named may go (F51).
+    // The world's exits are counted (F51).
     assets.deps.world.ecs.onAdded(Exiting, () => {
       assets.state.exiting += 1;
     }),
     assets.deps.world.ecs.onRemoved(Exiting, () => {
       assets.state.exiting -= 1;
-      releaseSceneLeft(assets);
-    })
+    }),
+    // In phase `sync`, after the reconcile of `layout` tagged what leaves: a leaving scene with
+    // nothing left exiting lets its bundles go (F51b).
+    assets.deps.world.ecs.system(
+      system({
+        name: "assets.leave",
+        phase: "sync",
+        query: [],
+        run: () => releaseSceneLeft(assets)
+      })
+    )
   );
 }
 
@@ -246,11 +256,6 @@ function readFeatures(ctx: AssetsCtx): void {
  * @param ctx - Kernel context of the assets plugin.
  * @returns A promise that resolves once the boot tier is there.
  * @throws {Error} In a browser, when the manifest or a boot bundle cannot be read.
- * @example
- * ```ts
- * await startAssets(ctx);
- * ctx.state.io; // the configured io, the browser io, or undefined while headless
- * ```
  */
 export async function startAssets(ctx: KernelSlice): Promise<void> {
   const assets = withDeps(ctx);
@@ -263,16 +268,11 @@ export async function startAssets(ctx: KernelSlice): Promise<void> {
 
 /**
  * Frees everything in `onStop`: the preload and every running load are aborted, every texture is
- * destroyed, the five registrations are removed and the registries are emptied, the companions
+ * destroyed, the six registrations are removed and the registries are emptied, the companions
  * too. A teardown context carries the state and nothing else, so no other plugin is called here:
  * no companion's `unload` either, its plugin stopped before this one.
  *
  * @param state - The plugin state.
- * @example
- * ```ts
- * releaseAll(state);
- * state.records.size; // 0, and every texture went back to the GPU
- * ```
  */
 export function releaseAll(state: State): void {
   state.queue?.controller.abort();

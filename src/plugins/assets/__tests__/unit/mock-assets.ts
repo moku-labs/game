@@ -296,17 +296,21 @@ export type FakeWorld = {
   startExit(entity: Entity): void;
   /** Takes the tag off one entity and calls the `onRemoved(Exiting)` listeners. */
   endExit(entity: Entity): void;
+  /** Runs the systems registered on the fake, as one phase `sync` does. */
+  sync(): void;
   api: WorldApi;
 };
 
 /**
- * Creates the fake `world`: `ecs.onAdded` and `ecs.onRemoved` keep their listener, and the fake's two calls run them.
+ * Creates the fake `world`: `ecs.onAdded`, `ecs.onRemoved` and `ecs.system` keep what they get, and the fake's calls run
+ * them.
  *
  * @returns The fake world.
  */
 function createFakeWorld(): FakeWorld {
   const added: Array<(entity: Entity) => void> = [];
   const removed: Array<(entity: Entity) => void> = [];
+  const systems: Array<{ run: () => void }> = [];
   const keep = (list: Array<(entity: Entity) => void>, listener: (entity: Entity) => void) => {
     list.push(listener);
 
@@ -322,10 +326,20 @@ function createFakeWorld(): FakeWorld {
     endExit: entity => {
       for (const listener of removed) listener(entity);
     },
+    sync: () => {
+      for (const entry of systems) entry.run();
+    },
     api: {
       ecs: {
         onAdded: (_tag: unknown, listener: (entity: Entity) => void) => keep(added, listener),
-        onRemoved: (_tag: unknown, listener: (entity: Entity) => void) => keep(removed, listener)
+        onRemoved: (_tag: unknown, listener: (entity: Entity) => void) => keep(removed, listener),
+        system: (definition: { run: () => void }) => {
+          systems.push(definition);
+
+          return () => {
+            systems.splice(systems.indexOf(definition), 1);
+          };
+        }
       }
     } as unknown as WorldApi
   };

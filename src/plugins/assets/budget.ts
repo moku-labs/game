@@ -269,9 +269,10 @@ export function isHeld(
 }
 
 /**
- * Unloads every loaded `"leave"` bundle nobody holds any more, with the reason `"leave"`; a
- * leaving scene holds its bundles only while anything carries `Exiting`. A running load is never
- * aborted by it, and a `"budget"` bundle is never touched. Headless it does nothing.
+ * Unloads every loaded `"leave"` bundle nobody holds any more, with the reason `"leave"`. A
+ * leaving scene's bundles stay held: `releaseSceneLeft` lets them go, after the reconcile that
+ * starts their exit (F51b). A running load is never aborted by it, and a `"budget"` bundle is never
+ * touched. Headless it does nothing.
  *
  * @param ctx - Domain context of the plugin.
  */
@@ -279,8 +280,6 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
   const state = ctx.state;
 
   if (state.io === undefined) return;
-  // A leaving scene whose elements all played their exit holds nothing any more.
-  if (state.sceneLeaving.length > 0 && state.exiting === 0) state.sceneLeaving = [];
 
   const onStack = featuresOnStack(ctx);
 
@@ -311,9 +310,10 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
 /**
  * Lets the bundles a leaving scene named go once nothing carries `Exiting` any more: each loaded
  * `"leave"` bundle among them that nothing else holds is unloaded with the reason `"leave"`, at
- * once, not at the next rest. A bundle of another release stays, as it would have. The world calls
- * it through `onRemoved(Exiting)`, so the check costs a length read while no scene leaves, and
- * a count read while one does.
+ * once, not at the next rest. A bundle of another release stays, as it would have. The system
+ * `assets.leave` calls it in every phase `sync`: after the reconcile of `layout`, which tags the
+ * leaving elements `Exiting` in the frame after the switch, so the hold never ends before the leave
+ * begins (F51b). It costs a length read while no scene leaves, and a count read while one does.
  *
  * @param ctx - Domain context of the plugin.
  */

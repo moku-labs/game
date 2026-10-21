@@ -42,7 +42,7 @@ function tick(): Promise<void> {
 }
 
 describe("connectAssets", () => {
-  it("registers the enter callback, the load handler, the texture provider and the exits of the world", () => {
+  it("registers the enter callback, the load handler, the texture provider, the exits of the world and assets.leave", () => {
     const mock = createMockAssets({ manifest });
 
     mock.connect();
@@ -50,7 +50,7 @@ describe("connectAssets", () => {
     expect(mock.flow.enter.map(entry => entry.stage)).toEqual(["load"]);
     expect(mock.flow.handlers.get("load")?.runInFast).toBe(true);
     expect(mock.renderer.providers).toHaveLength(1);
-    expect(mock.ctx.state.removers).toHaveLength(5);
+    expect(mock.ctx.state.removers).toHaveLength(6);
   });
 
   it("answers the renderer's provider with a loaded texture", async () => {
@@ -451,7 +451,7 @@ describe("the release at a rest", () => {
     ]);
   });
 
-  it("keeps a bundle the still mounted scene names, and releases it at the rest after the scene stopped naming it", async () => {
+  it("keeps a bundle the still mounted scene names, and releases it at the first sync after the scene stopped naming it", async () => {
     const mock = await episodeGame();
 
     await enter(mock, wardNode);
@@ -463,10 +463,15 @@ describe("the release at a rest", () => {
 
     expect(mock.api.isLoaded("ep01")).toBe(true);
 
-    // The lobby is mounted now; the next rest lets ep01 go.
+    // The lobby is mounted now: the ward's bundle is a leaving scene's, held at the rest (F51b), and the first sync
+    // that finds nothing leaving lets it go.
     mock.api.sceneBundles(["homebg"]);
     rest(mock);
     await enter(mock, idle);
+
+    expect(mock.api.isLoaded("ep01")).toBe(true);
+
+    mock.world.sync();
 
     expect(mock.api.isLoaded("ep01")).toBe(false);
   });
