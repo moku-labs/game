@@ -816,8 +816,30 @@ export function startTrack(
   countPlaying(actx.deps.world.ecs, entity, 1);
   actx.deps.time.wake();
   warnIfCrowded(actx);
+  if (landsAtStart(track, options)) writeFields(actx, track, true);
 
   return track;
+}
+
+/**
+ * Tells whether a track writes its target as it starts: an absolute one of 0 ms with no delay,
+ * no repeat and no keys, started so by its caller (not cut by reduced motion). A rest pose a
+ * caller sets in phase `layout` so lands with the fields written beside it in that frame (F47);
+ * the next frame step ends it, where its `Animation` count lands too.
+ *
+ * @param track - The track that starts.
+ * @param options - What its caller asked for.
+ * @returns True when it lands now.
+ */
+function landsAtStart(track: Track, options: TrackOptions): boolean {
+  return (
+    options.ms === 0 &&
+    track.delayMs === 0 &&
+    !track.additive &&
+    !track.driven &&
+    track.repeatsLeft === 0 &&
+    track.segments === undefined
+  );
 }
 
 /**

@@ -433,7 +433,10 @@ A system of phase `input` that plays through `res(AnimPlayer)` runs before this 
 moves in `animate` of the same frame.
 
 Additive tracks advance before the absolute ones, so the absolute owner of a field writes the sum
-of this frame's offsets. Determinism: no `Date.now`, no `performance.now`, no `Math.random`, no
+of this frame's offsets. An absolute track of 0 ms with no delay, no repeat and no keys writes its
+target, with this frame's offsets, the moment it starts, so a pose set in phase `layout` is drawn
+in that frame; the next step ends it. A track cut to 0 ms by reduced motion still lands at its
+first step. Determinism: no `Date.now`, no `performance.now`, no `Math.random`, no
 timers, no `pixi.js` import.
 
 ## Retarget and offsets

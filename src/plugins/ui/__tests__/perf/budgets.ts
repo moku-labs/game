@@ -47,5 +47,10 @@ export const BUDGET = {
   /** The same strip in a glide from 900 to 1100 over 400 ms: the eased offset and the three writes. 0 B. */
   scrollGlide: 0,
   /** The same strip standing: one tag check and nothing written. 0 B. */
-  scrollStill: 0
+  scrollStill: 0,
+  /**
+   * F42 (change 2026-10-21-exit-restore-fixes): `still` of one leaving element per frame, three motions held, one of
+   * them endless (a hot pulse). Was an `every` with an arrow; now an array `for…of` and a set lookup. 0 B.
+   */
+  exitStill: 0
 } as const;

@@ -2156,8 +2156,8 @@ export function createReconciler(
   /**
    * The second system of phase `layout`: every root takes its slot, then one solve per marked
    * root, a root in a slot after the root of its slot and in its content box, then the rects, the
-   * rest poses and the hooks, the scrolls settled on what the solve and the render gave them, and
-   * the hosting of the hosts that came. The hints released since the last frame step are dropped
+   * rest poses and the hooks, the scrolls settled on what the solve and the render gave them, the
+   * hosting of the hosts that came, and a sweep of what left with nothing to wait for. The hints released since the last frame step are dropped
    * at its end, so the `change.Box` and `change.Transform` hooks the solve plays get the hint the
    * reconcile routed, and the next frame starts with none.
    *
@@ -2190,6 +2190,10 @@ export function createReconciler(
       hostViews(ctx, state, state.risen);
       state.risen.clear();
     }
+
+    // An element that left in this frame's reconcile with nothing to wait for (no exit hook, a hook that played
+    // nothing) goes before this frame is drawn, not at the next reconcile (F46). Per frame: two size reads.
+    if (state.exiting.size > 0 || state.removing.size > 0) sweep();
 
     state.hints.length = 0;
     writeCounters();
