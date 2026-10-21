@@ -89,5 +89,8 @@ export const BUDGET = {
   lazyCanvasFrame: 0,
   // Change 2026-10-19-glass-arc, A2: a pass that syncs a still slot-timer ring (its Shape in the change set, nothing of
   // it changed). New, measured 0 B: the drawn fields are compared and no path is built; a sweep that moves builds it.
-  arcStill: 0
+  arcStill: 0,
+  // Change 2026-10-20-overlay-hold, H2: the asks of 20 endless loops under a resting sheet with `hold: true` over a
+  // sharp ward. New, measured 0 B: the owner's record read from the map and one boolean written on the range.
+  loopsHeldHold: 0
 } as const;

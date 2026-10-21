@@ -7,8 +7,9 @@ import type { Api, OverlayReport } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only (spec 22, LEAD-FIXES-4 item 5). `tsc --noEmit` is the runner: every `@ts-expect-error` below must
-// be an error, and nothing else may be. What a game can get wrong: a `cover` that does not exist, the engine's own
-// level written by hand, a HUD key the game did not declare, a HUD layer that says anything but "overlays".
+// be an error, and nothing else may be. What a game can get wrong: a `cover` that does not exist, a `hold` that is no
+// boolean, the engine's own level written by hand, a HUD key the game did not declare, a HUD layer that says anything
+// but "overlays".
 // ---------------------------------------------------------------------------
 
 Overlay({ cover: "opaque" });
@@ -25,7 +26,12 @@ Overlay({ level: 1 });
 // @ts-expect-error — so is the landing.
 Overlay({ landed: true });
 
-expectTypeOf<keyof OverlayValue>().toEqualTypeOf<"dim" | "dimColor" | "cover" | "hud" | "fade">();
+expectTypeOf<keyof OverlayValue>().toEqualTypeOf<
+  "dim" | "dimColor" | "cover" | "hud" | "fade" | "hold"
+>();
+
+// @ts-expect-error — hold is a switch, true or false.
+Overlay({ hold: "yes" });
 
 HudPart({ key: "anything" });
 
@@ -34,6 +40,7 @@ const kit = componentsFor<"ui.coin", "energy" | "gems">();
 
 kit.HudPart({ key: "energy" });
 kit.Overlay({ dim: 0.56, hud: ["energy", "gems"] });
+kit.Overlay({ dim: 0.56, hold: true, hud: ["energy", "gems"] });
 kit.Overlay({ hud: "none" });
 
 // @ts-expect-error — "energi" is not a HUD key of the game.

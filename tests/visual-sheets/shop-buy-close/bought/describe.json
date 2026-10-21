@@ -1077,6 +1077,7 @@
           "dim": 0.56,
           "dimColor": 1774640,
           "fade": 270,
+          "hold": false,
           "hud": [
             "energy",
             "gems"

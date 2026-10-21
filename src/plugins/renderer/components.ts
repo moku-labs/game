@@ -206,8 +206,11 @@ export type SpriteOptions = {
  *
  * @example
  * ```ts
- * // The shop: the board dims to 56 %, the energy and the gems stay shown above the dim, the dim takes 270 ms.
- * const shop: OverlayValue = { dim: 0.56, dimColor: 0x1b1430, cover: "none", hud: ["energy", "gems"], fade: 270 };
+ * // The shop: the board dims to 56 %, the energy and the gems stay shown above the dim, the dim takes 270 ms, and the
+ * // glints of the board under it rest while the shop stands.
+ * const shop: OverlayValue = {
+ *   dim: 0.56, dimColor: 0x1b1430, cover: "none", hud: ["energy", "gems"], fade: 270, hold: true
+ * };
  * ```
  */
 export type OverlayValue = {
@@ -224,6 +227,12 @@ export type OverlayValue = {
    * with a motion is followed for its own length. 0 follows at once.
    */
   fade: number;
+  /**
+   * True: the endless loops under the overlay (glows, glints, breathing) write nothing while it stands, as under an
+   * opaque cover or a blurred picture; their phase follows time, so nothing jumps when it leaves. Real changes under it
+   * still draw.
+   */
+  hold: boolean;
 };
 
 /**
@@ -253,7 +262,8 @@ const overlayDefaults: OverlayValue = {
   dimColor: 0x00_00_00,
   cover: "none",
   hud: "all",
-  fade: 250
+  fade: 250,
+  hold: false
 };
 
 const displayDefaults: DisplayValue = { object: undefined };
@@ -338,12 +348,15 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * Marks the view an overlay is drawn from. Everything drawn before the root of that view is kept as one picture while
  * the overlay is there, and drawn again in the same frame anything in it changes; `cover: "opaque"` draws nothing
  * under it while it is fully shown. The engine draws its dim and fades the HUD parts it does not keep, with the root's
- * own enter and exit motion (`fade` when it has none).
+ * own enter and exit motion (`fade` when it has none). `hold: true` holds the endless loops of what lies under it
+ * while it stands, so a dimmed sheet over a sharp scene draws no frame at rest.
  *
  * @example
  * ```tsx
  * // The case file: opaque once it has faded in, the ward under it is not drawn until it starts to leave.
  * <panel key="caseSheet" motion={sheetFade} components={[Overlay({ cover: "opaque" })]} />
+ * // The shop: the ward dims to 56 % and its glints rest while the shop stands; the energy and the gems stay shown.
+ * <stack key="shopDimLayer" components={[Overlay({ dim: 0.56, hold: true, hud: ["energy", "gems"] })]} />
  * ```
  */
 export const Overlay = /*#__PURE__*/ component("Overlay", overlayDefaults);
