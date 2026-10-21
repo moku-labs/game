@@ -28,7 +28,7 @@ const textDefaults: TextValue = {
   bind: undefined,
   anchor: { x: 0.5, y: 0.5 },
   alpha: 1,
-  box: 0,
+  box: undefined,
   resolved: ""
 };
 
@@ -119,7 +119,7 @@ export type LabelOptions = {
  * ```ts
  * label({ text: "+5", style: "board.float", at: { x: 90, y: 180 } });
  * // [Text({ content: "+5", style: "board.float", bind: undefined,
- * //   anchor: { x: 0.5, y: 0.5 }, alpha: 1, box: 0, resolved: "" }),
+ * //   anchor: { x: 0.5, y: 0.5 }, alpha: 1, box: undefined, resolved: "" }),
  * //  Transform({ x: 90, y: 180, rotation: 0, scale: 1 })]
  * ```
  */

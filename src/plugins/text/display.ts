@@ -504,7 +504,7 @@ function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
   const style = styleOf(ctx, value.style);
 
   // An empty label has nothing to wrap: ui lays it out 0 wide.
-  if (style.wrap === "box" && value.box <= 0 && value.resolved !== "") {
+  if (style.wrap === "box" && (value.box ?? 0) <= 0 && value.resolved !== "") {
     warnOnce(ctx, `wrap-box:${value.style}`, 'text: wrap "box" outside layout', {
       style: value.style
     });
