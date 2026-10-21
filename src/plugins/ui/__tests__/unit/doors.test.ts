@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../../../index";
 import { read } from "../../../flow/doors/read";
+import { Parent, Shape, Transform, type TransformValue } from "../../../renderer/components";
 import type { HitBox } from "../../../renderer/sync/types";
 import type { Api as RendererApi } from "../../../renderer/types";
 import type { Point } from "../../../renderer/viewport/types";
 import type { Api as WorldApi } from "../../../world/types";
+import { Box } from "../../components";
 import { locateSource, uiSource } from "../../inspect";
+import { restTransform } from "../../layout/motion";
 import type { UiApi, UiNode } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -66,8 +69,74 @@ const shortScreen = node(undefined, { x: 0, y: 0, w: 0, h: 0 }, [
   node("bar", { x: 0, y: 0, w: 1080, h: 120 }, [node("settings", { x: 10, y: 10, w: 100, h: 100 })])
 ]);
 
-/** The keys `ui.find` answers for: every key of the short screen. */
-const onScreen = new Set(["sheet", "ok", "inner", "deep", "bar", "settings"]);
+/** One element of the hand-built world: its rect, its fit, its parent, a scroll offset on y, a clip. */
+type Placed = {
+  rect: UiNode["rect"];
+  fit?: number;
+  parent?: string;
+  scrollY?: number;
+  clip?: boolean;
+};
+
+/**
+ * The short screen as ui writes it into the world, and a 400 x 200 u list at (0, 1000) scrolled
+ * by 150 u, which clips its rows: row `r0` is scrolled out, `r1` half in, `r2` whole.
+ */
+const placed: Record<string, Placed> = {
+  sheet: { rect: { x: 40, y: -300, w: 1000, h: 2400 }, fit: 0.75 },
+  ok: { rect: { x: 440, y: 1900, w: 200, h: 100 }, parent: "sheet" },
+  inner: { rect: { x: 140, y: 100, w: 800, h: 800 }, fit: 0.5, parent: "sheet" },
+  deep: { rect: { x: 540, y: 500, w: 100, h: 100 }, parent: "inner" },
+  bar: { rect: { x: 0, y: 0, w: 1080, h: 120 } },
+  settings: { rect: { x: 10, y: 10, w: 100, h: 100 }, parent: "bar" },
+  list: { rect: { x: 0, y: 1000, w: 400, h: 200 }, clip: true },
+  rows: { rect: { x: 0, y: 1000, w: 400, h: 400 }, parent: "list", scrollY: 150 },
+  r0: { rect: { x: 0, y: 1000, w: 400, h: 80 }, parent: "rows" },
+  r1: { rect: { x: 0, y: 1080, w: 400, h: 80 }, parent: "rows" },
+  r2: { rect: { x: 0, y: 1160, w: 400, h: 80 }, parent: "rows" }
+};
+
+/** The entity of every placed key, from 1, and of `leaving`, which has no `Box`. */
+const entities = new Map([...Object.keys(placed), "leaving"].map((key, index) => [key, index + 1]));
+
+/** The key of every entity. */
+const keys = new Map([...entities].map(([key, entity]) => [entity, key]));
+
+/**
+ * The rest pose ui writes for a placed element, moved by its scroll offset.
+ *
+ * @param element - The element.
+ * @returns Its local `Transform`.
+ */
+function poseOf(element: Placed): TransformValue {
+  const parent = element.parent === undefined ? undefined : placed[element.parent]?.rect;
+  const pose = restTransform(element.rect, parent, {}, element.fit);
+
+  return { ...pose, y: pose.y - (element.scrollY ?? 0) };
+}
+
+/**
+ * Reads a component of the hand-built world.
+ *
+ * @param entity - The entity.
+ * @param type - The component.
+ * @returns Its value, or `undefined`.
+ */
+function getOf(entity: number, type: unknown): unknown {
+  const element = placed[keys.get(entity) ?? ""];
+
+  if (element === undefined) return undefined;
+  if (type === Box) return element.rect;
+  if (type === Transform) return poseOf(element);
+  if (type === Parent) {
+    return element.parent === undefined ? undefined : { entity: entities.get(element.parent) };
+  }
+  if (type === Shape && element.clip === true) {
+    return { kind: "rect", w: element.rect.w, h: element.rect.h, clip: true };
+  }
+
+  return undefined;
+}
 
 /** The one view of the world the target tests address: a coin of the board, entity 7. */
 const coin = { projection: "board.items", key: "i5", entity: 7 } as const;
@@ -92,7 +161,7 @@ function phone(scale = 390 / 1080, drawn = true) {
     ...base,
     ui: {
       tree: (): UiNode => shortScreen,
-      find: (key: string): number | undefined => (onScreen.has(key) ? 1 : undefined),
+      find: (key: string): number | undefined => entities.get(key),
       lint: () => []
     },
     renderer: {
@@ -105,6 +174,7 @@ function phone(scale = 390 / 1080, drawn = true) {
       }
     },
     world: {
+      ecs: { get: getOf },
       projection: {
         entityOf: (projection: string, key: string): number | undefined =>
           projection === coin.projection && key === coin.key ? coin.entity : undefined
@@ -172,14 +242,27 @@ describe("game.locate", () => {
     expect(read(app, locateSource, { key: "nothing" })).toBeUndefined();
   });
 
-  it("answers undefined for a key ui finds but the snapshot does not hold", () => {
-    const app = phone();
+  it("answers undefined for a key ui finds with no laid-out box", () => {
+    expect(read(phone(), locateSource, { key: "leaving" })).toBeUndefined();
+  });
 
-    onScreen.add("leaving");
+  it("moves a row by the offset its scroll writes and cuts it to the scroll's clip (F39)", () => {
+    // Bug caught: locate gave the layout box, so a row scrolled out of its list was still found
+    // where the list draws another one, and the editor's picker picked it there.
+    const app = phone(1);
 
-    expect(read(app, locateSource, { key: "leaving" })).toBeUndefined();
+    expect(read(app, locateSource, { key: "r0" })).toBeUndefined();
+    expect(read(app, locateSource, { key: "r1" })).toEqual({ x: 8, y: 1000, w: 400, h: 10 });
+    expect(read(app, locateSource, { key: "r2" })).toEqual({ x: 8, y: 1010, w: 400, h: 80 });
+  });
 
-    onScreen.delete("leaving");
+  it("never cuts the clipping element by its own clip", () => {
+    expect(read(phone(1), locateSource, { key: "list" })).toEqual({
+      x: 8,
+      y: 1000,
+      w: 400,
+      h: 200
+    });
   });
 
   it("maps the drawn box of a view, named by its target, to CSS px of the page", () => {

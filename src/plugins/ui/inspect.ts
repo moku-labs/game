@@ -6,59 +6,105 @@ import { defineSource } from "../flow/doors/define";
 import type { HeadlessApp } from "../flow/headless";
 import type { ProjectionTarget } from "../input/target";
 import { readTarget } from "../input/target";
+import { NineSlice, Shape } from "../renderer/components";
+import { parentOf, rootPoseOf } from "../renderer/sync/pose";
 import type { Api as RendererApi } from "../renderer/types";
-import type { Api as WorldApi } from "../world/types";
+import type { Entity, Api as WorldApi } from "../world/types";
+import { Box } from "./components";
 import type { UiApi, UiNode } from "./types";
-import { scaleByFits } from "./visual";
+import { drawnRect as poseRect } from "./visual";
+
+/** How deep a parent chain is followed for clips; deeper is treated as a loop. */
+const MAX_DEPTH = 32;
 
 /** A rect: left, top, width and height. */
 type Rect = UiNode["rect"];
 
-/** The keyed node first, then every node above it up to the root. */
-type Chain = [UiNode, ...UiNode[]];
-
-/** What the key form needs of an app: the ui and the renderer's viewport. */
-type KeyApp = HeadlessApp & { readonly ui: UiApi; readonly renderer: RendererApi };
-
-/** What `game.locate` needs of an app: the ui, the renderer and the world's projection keys. */
-type LocateApp = KeyApp & { readonly world: WorldApi };
+/** What `game.locate` needs of an app: the ui, the renderer's viewport and the world's poses and projection keys. */
+type LocateApp = HeadlessApp & {
+  readonly ui: UiApi;
+  readonly renderer: RendererApi;
+  readonly world: WorldApi;
+};
 
 /**
- * Finds a keyed node and the nodes above it.
+ * Where a box of an entity's own space lands in root space: `0, 0, w, h` through its root pose,
+ * which composes every `Transform` up its `Parent` chain (a scroll's offset, a fit, a slot, a
+ * motion). The rotation is left out, as the guide does.
  *
- * @param node - Where the search starts.
- * @param key - The key of the element.
- * @returns The node and its ancestors, nearest first, or `undefined` when no node has the key.
+ * @param ecs - The world read.
+ * @param entity - The entity.
+ * @param w - The width of the box in the entity's own units.
+ * @param h - The height of the box.
+ * @returns The rect in root coordinates.
  */
-function chainTo(node: UiNode, key: string): Chain | undefined {
-  if (node.key === key) return [node];
-
-  for (const child of node.children) {
-    const chain = chainTo(child, key);
-
-    if (chain !== undefined) {
-      chain.push(node);
-
-      return chain;
-    }
-  }
-
-  return undefined;
+function rootBoxOf(ecs: WorldApi["ecs"], entity: Entity, w: number, h: number): Rect {
+  return poseRect(rootPoseOf(ecs, entity), { x: 0, y: 0, w, h });
 }
 
 /**
- * Where an element is drawn at rest, in root coordinates. Its rect in the snapshot is natural,
- * so every fitted node on the way up, the element itself included, scales it about its centre,
- * the way ui draws a `fit: "contain"`.
+ * The box an entity clips its children to, the way the renderer masks them: the `width × height`
+ * of a clipping `NineSlice`, the `w × h` of a clipping `Shape`, in root coordinates.
  *
- * @param chain - The element and its ancestors, nearest first.
- * @returns The drawn rect.
+ * @param ecs - The world read.
+ * @param entity - The entity.
+ * @returns The clip in root coordinates, or `undefined` when the entity clips nothing.
  */
-function drawnRect(chain: Chain): Rect {
-  return scaleByFits(
-    chain[0].rect,
-    chain.map(node => ({ rect: node.rect, fit: node.fitScale ?? 1 }))
-  );
+function clipOf(ecs: WorldApi["ecs"], entity: Entity): Rect | undefined {
+  const panel = ecs.get(entity, NineSlice);
+
+  if (panel?.clip === true) return rootBoxOf(ecs, entity, panel.width, panel.height);
+
+  const shape = ecs.get(entity, Shape);
+
+  return shape?.clip === true ? rootBoxOf(ecs, entity, shape.w, shape.h) : undefined;
+}
+
+/**
+ * The part of a rect inside another.
+ *
+ * @param rect - The rect to cut.
+ * @param clip - The rect it is cut to.
+ * @returns The overlap, or `undefined` when they do not overlap.
+ */
+function intersect(rect: Rect, clip: Rect): Rect | undefined {
+  const x = Math.max(rect.x, clip.x);
+  const y = Math.max(rect.y, clip.y);
+  const right = Math.min(rect.x + rect.w, clip.x + clip.w);
+  const bottom = Math.min(rect.y + rect.h, clip.y + clip.h);
+
+  return right > x && bottom > y ? { x, y, w: right - x, h: bottom - y } : undefined;
+}
+
+/**
+ * Where an element is drawn, in root coordinates: its `Box` size through its root pose, cut by
+ * every clipping entity above it (a `scroll`, an `overflow: "hidden"`), as the renderer masks it.
+ * Its own clip masks only its children, so it never cuts the element itself.
+ *
+ * @param ecs - The world read.
+ * @param entity - The element's entity.
+ * @returns The drawn rect, or `undefined` when no part of it shows: cut away by a clip, or drawn
+ *   at no size (an element entering from scale 0), as `renderer.sync.boundsOf` answers a view.
+ */
+function drawnRectOf(ecs: WorldApi["ecs"], entity: Entity): Rect | undefined {
+  const box = ecs.get(entity, Box);
+
+  if (box === undefined) return undefined;
+
+  const own = rootBoxOf(ecs, entity, box.w, box.h);
+  let drawn: Rect | undefined = own.w > 0 && own.h > 0 ? own : undefined;
+
+  for (
+    let above = parentOf(ecs, entity), depth = 0;
+    above !== 0 && drawn !== undefined && depth < MAX_DEPTH;
+    above = parentOf(ecs, above), depth += 1
+  ) {
+    const clip = clipOf(ecs, above);
+
+    if (clip !== undefined) drawn = intersect(drawn, clip);
+  }
+
+  return drawn;
 }
 
 /**
@@ -81,19 +127,21 @@ function onPage(renderer: RendererApi, rect: Rect): Rect {
 }
 
 /**
- * Where a live ui element is on the page: its layout box, scaled by every fitted element above
- * it, through the viewport.
+ * Where a live ui element is on the page: where it is drawn (its layout box through its root pose,
+ * so a scroll's offset, a fit and a slot move it), cut by every clipping element above it,
+ * through the viewport.
  *
- * @param app - The app with ui and renderer.
+ * @param app - The app with ui, renderer and world.
  * @param key - The `key` prop of the element.
- * @returns The rect in CSS px, or `undefined` when no live element has the key.
+ * @returns The rect in CSS px, or `undefined` when no live element has the key or a clip above
+ *   hides all of it.
  */
-function locateKey(app: KeyApp, key: string): Rect | undefined {
-  // eslint-disable-next-line unicorn/no-array-callback-reference, unicorn/prefer-array-some -- `ui.find` takes a key, not a callback.
-  const onScreen = app.ui.find(key) !== undefined;
-  const chain = onScreen ? chainTo(app.ui.tree(), key) : undefined;
+function locateKey(app: LocateApp, key: string): Rect | undefined {
+  // eslint-disable-next-line unicorn/no-array-callback-reference -- `ui.find` takes a key, not a callback.
+  const entity = app.ui.find(key);
+  const drawn = entity === undefined ? undefined : drawnRectOf(app.world.ecs, entity);
 
-  return chain === undefined ? undefined : onPage(app.renderer, drawnRect(chain));
+  return drawn === undefined ? undefined : onPage(app.renderer, drawn);
 }
 
 /**
@@ -133,9 +181,9 @@ export const uiSource = defineSource({
 
 /**
  * Where something is on the page, in CSS px, by either of the two addresses the doors use: a ui
- * element by its `key` (its layout box, scaled by every fitted element above it, so a bare button
- * with no fill has one), or a view by its `target` projection key (the box the renderer draws for
- * it). Both go through the viewport, so the numbers are what Playwright clicks. In reference units
+ * element by its `key` (its layout box through its drawn pose, so a scroll's offset and a fit move
+ * it and a bare button with no fill has one, cut by every clip above it), or a view by its `target`
+ * projection key (the box the renderer draws for it). Both go through the viewport, so the numbers are what Playwright clicks. In reference units
  * while the renderer is inert; a view has no drawn box then.
  *
  * @example

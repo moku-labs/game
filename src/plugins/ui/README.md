@@ -671,10 +671,15 @@ version line of the settings, usually.
 1. Exactly one of `key` and `target`, else it throws `[game] game.locate takes a key or a target.`
    `target` is read the way `game.tap` reads it.
 2. `key`: only a live element counts. When `app.ui.find(key)` has no entity, the answer is
-   `undefined`. It starts from the element's `rect` in `tree()`: its layout box from Yoga, not the
-   Pixi bounds, so a bare button with no fill, such as a text link, has a rect too. Every fitted
-   element on the way up, the element itself included, scales that rect by its `fitScale` about
-   the centre of its own rect, the way `fit: "contain"` draws it.
+   `undefined`. It starts from the element's `Box` size, its layout box from Yoga, not the Pixi
+   bounds, so a bare button with no fill, such as a text link, has a rect too. The box goes through
+   the element's root pose (`rootPoseOf`, the `Transform`s of its `Parent` chain): a fit, a slot,
+   the offset a `scroll` writes on its content and a motion of an ancestor move it where it is
+   drawn; the rotation is left out. Every clipping entity above it (a `scroll`, an
+   `overflow: "hidden"`, a `Shape` or `NineSlice` with `clip`) cuts it to its clip box, as the
+   renderer masks it; an element's own clip never cuts itself. `undefined` when a clip hides all
+   of it, so a tile scrolled out of its strip is found nowhere, and while it is drawn at no size
+   (entering from scale 0), as `boundsOf` answers a view.
 3. `target`: `world.projection.entityOf(projection, key)`, then the box the renderer draws for that
    entity (`renderer.sync.boundsOf`). `undefined` when the view is not live or has no drawn box, as
    always while the renderer is inert.

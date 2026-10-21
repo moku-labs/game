@@ -36,6 +36,8 @@ function fitOnSe(app: App): void {
   app.time.step(16);
   vi.spyOn(app.renderer.viewport, "size").mockReturnValue(SE);
   app.time.step(16);
+  // The board's pose follows its new fit a frame after the solve: locate reads the drawn pose.
+  app.time.step(16);
 }
 
 /**
