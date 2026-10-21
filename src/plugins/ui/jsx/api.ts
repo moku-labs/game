@@ -198,7 +198,9 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     markPointer: frame.markPointer,
 
-    playEnter: frame.playEnter,
+    queueEnter: frame.queueEnter,
+
+    playEntered: frame.playEntered,
 
     converged: frame.converged,
 

@@ -476,6 +476,28 @@ the same loop (the same keys, cycle and reduced-motion rule) is the same loop: i
 declare a motion at module level: a dev build names an element whose loop was rebuilt by three
 renders in a row (`ui:motion-rebuilt`), and a hand-written loop of a new reference restarts.
 
+An element's `enter` hook (and the `loop` beside it) plays in phase `sync` of the frame the element
+comes, in the system `ui.enter`: after every system of the game, before `renderer.sync` draws the
+frame. So a game system of any phase has seen the new entity and what it wrote is there for the
+hook to read, and the element is never drawn at its rest pose by mistake: its first drawn frame
+shows the pose the hook started from. A picture that grows out of a thumbnail in a scrolled list
+starts where the thumbnail is drawn when a `sync` system adds the list's `ScrollState.offset` to
+what the hook reads (F48):
+
+```ts
+const growScroll = system({
+  name: "casefile.growScroll",
+  phase: "sync",
+  query: [GrowFrom],
+  run: (rows, { world }) => {
+    const [list] = world.query(CaseList, ScrollState);
+    for (const [entity, from] of rows) {
+      if (!from.scrolled) world.set(entity, GrowFrom, { dy: from.dy - (list?.[2].offset ?? 0), scrolled: true });
+    }
+  }
+});
+```
+
 `ui` tells the `enter` and `exit` hooks why they play, as their fourth argument: `"mount"` when the
 element comes or goes with its screen (a scene mount or unmount, a restore, a load), `"change"` when
 a commit adds it to or removes it from a live tree, and for every element of a popup. A

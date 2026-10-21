@@ -275,6 +275,10 @@ Before each system runs, the phase checks it: a system whose query has no entity
 whose `scenes` is mounted or leaving, is skipped in its slot; it walks nothing and marks nothing,
 and `ctx.resumed` is true on its next run ("When a system runs", below).
 
+A phase runs its systems in registration order, with one exception: `renderer.sync` is always the
+last of phase `sync`, so a system registered after the renderer started (the ui's `ui.enter`, a
+feature added later) still writes before the frame is drawn.
+
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
 `ctx.log.error("world:system-failed", …)` and skipped for this frame; the frame goes on. A dev

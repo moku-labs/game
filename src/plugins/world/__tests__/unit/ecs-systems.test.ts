@@ -42,6 +42,23 @@ describe("ecs systems", () => {
     expect(order).toEqual(["input-b", "input-a", "animate-a", "layout-a", "sync-a"]);
   });
 
+  // Bug (F48): a sync system registered after the renderer started ran after `renderer.sync`, so what it wrote (the
+  // start pose of a ui enter hook) was drawn a frame late.
+  it("keeps renderer.sync the last system of phase sync", () => {
+    const world = createMockWorld();
+    const order: string[] = [];
+
+    world.api.ecs.spawn(test, [Marker()]);
+    world.api.ecs.system(recorder("game.sync", "sync", order));
+    world.api.ecs.system(recorder("renderer.sync", "sync", order));
+    world.api.ecs.system(recorder("ui.enter", "sync", order));
+    world.api.ecs.system(recorder("layout-a", "layout", order));
+    world.start();
+    world.frame();
+
+    expect(order).toEqual(["layout-a", "game.sync", "ui.enter", "renderer.sync"]);
+  });
+
   it("refuses a duplicate system name and returns a remover", () => {
     const world = createMockWorld();
     const order: string[] = [];

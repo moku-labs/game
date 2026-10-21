@@ -1,6 +1,6 @@
 /**
  * @file ui plugin — the fixtures of the perf tests and benches. Not a test file. The perf app is
- * started and brought to rest outside any measured window, and the two systems of phase `layout`
+ * started and brought to rest outside any measured window, and the three systems, the `Box` hook
  * and the two `Pressed` hooks `ui` registered on the world are handed out, so a window calls
  * exactly the engine's code: no frame of another plugin, no spy.
  */
@@ -9,6 +9,7 @@ import { alloc } from "../../../../../tests/perf/alloc";
 import { Pointer, Pressed } from "../../../input/components";
 import type { Time } from "../../../time/types";
 import type { AnySystem, Entity, SystemContext } from "../../../world/types";
+import { Box } from "../../components";
 import type { Element, ScrollMotion } from "../../jsx/types";
 import type { stepScroll } from "../../layout/scroll";
 import type { ElementLookup, LayoutState } from "../../layout/types";
@@ -46,8 +47,8 @@ const NO_ROWS: readonly [] = Object.freeze([]);
  */
 const SYSTEM_FRAME = Object.freeze({ time: FRAME }) as unknown as SystemContext;
 
-/** A `Pressed` hook of `ui`: it takes the entity the tag was added to or removed from. */
-type PressHook = (entity: Entity, value: true) => void;
+/** A `Box` or `Pressed` hook of `ui`: it takes the entity the value was added to or removed from, and reads no value. */
+type WorldHook = (entity: Entity, value: true) => void;
 
 /** The started perf app and the `ui` steps a window calls. */
 export type PerfUi = {
@@ -56,6 +57,10 @@ export type PerfUi = {
   reconcile: Step;
   /** The system `ui.solve` of phase `layout`. */
   solve: Step;
+  /** The system `ui.enter` of phase `sync`, which plays the enter hooks queued since the last frame. */
+  enter: Step;
+  /** What `ui` does when a `Box` lands on an entity: it queues the element's enter for `enter`. */
+  boxed: (entity: Entity) => void;
   /** What `ui` does when `Pressed` lands on an entity: the pointer went down on it. */
   press: (entity: Entity) => void;
   /** What `ui` does when `Pressed` leaves an entity: the pointer came up. */
@@ -72,24 +77,26 @@ export async function startPerfUi(): Promise<PerfUi> {
   const app = createPerfApp();
   const ecs = app.world.ecs;
   const systems = new Map<string, Step>();
-  const hooks: { press?: PressHook; release?: PressHook } = {};
+  const hooks: { boxed?: WorldHook; press?: WorldHook; release?: WorldHook } = {};
   const register = ecs.system;
   const onAdded = ecs.onAdded;
   const onRemoved = ecs.onRemoved;
 
   vi.spyOn(ecs, "system").mockImplementation((definition: AnySystem) => {
-    // The two systems of ui run with no rows and read the frame's time of their context only.
+    // The three systems of ui run with no rows and read the frame's time of their context only.
     systems.set(definition.name, () => definition.run(NO_ROWS, SYSTEM_FRAME));
 
     return register(definition);
   });
   vi.spyOn(ecs, "onAdded").mockImplementation((watched, fn) => {
-    if (watched === Pressed) hooks.press = fn as PressHook;
+    if (watched === Pressed) hooks.press = fn as WorldHook;
+    // The spy sees the tag overload's parameter type; the world hands it a component as well.
+    if ((watched as unknown) === Box) hooks.boxed = fn as WorldHook;
 
     return onAdded(watched, fn);
   });
   vi.spyOn(ecs, "onRemoved").mockImplementation((watched, fn) => {
-    if (watched === Pressed) hooks.release = fn as PressHook;
+    if (watched === Pressed) hooks.release = fn as WorldHook;
 
     return onRemoved(watched, fn);
   });
@@ -100,21 +107,26 @@ export async function startPerfUi(): Promise<PerfUi> {
 
   const reconcile = systems.get("ui.reconcile");
   const solve = systems.get("ui.solve");
-  const { press, release } = hooks;
+  const enter = systems.get("ui.enter");
+  const { boxed, press, release } = hooks;
 
   if (
     reconcile === undefined ||
     solve === undefined ||
+    enter === undefined ||
+    boxed === undefined ||
     press === undefined ||
     release === undefined
   ) {
-    throw new Error("perf: ui registered no layout systems or no Pressed hooks");
+    throw new Error("perf: ui registered no layout or sync systems or no Box or Pressed hooks");
   }
 
   return {
     app,
     reconcile,
     solve,
+    enter,
+    boxed: (entity: Entity): void => boxed(entity, true),
     press: (entity: Entity): void => press(entity, true),
     release: (entity: Entity): void => release(entity, true)
   };

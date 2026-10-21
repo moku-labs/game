@@ -52,5 +52,10 @@ export const BUDGET = {
    * F42 (change 2026-10-21-exit-restore-fixes): `still` of one leaving element per frame, three motions held, one of
    * them endless (a hot pulse). Was an `every` with an arrow; now an array `for…of` and a set lookup. 0 B.
    */
-  exitStill: 0
+  exitStill: 0,
+  /**
+   * F48 (change 2026-10-21-hooks-after-sync): one element queued by its `Box` hook, then the system `ui.enter`
+   * of phase `sync` drains the queue. The queue is one array emptied in place, walked by index. 0 B.
+   */
+  enterQueue: 0
 } as const;
