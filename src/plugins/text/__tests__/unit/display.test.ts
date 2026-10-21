@@ -976,4 +976,16 @@ describe('the display adapter — wrap "box"', () => {
       ['text: wrap "box" outside layout', { style: "boxed" }]
     ]);
   });
+
+  // The bug: an empty box label inside a layout is laid out 0 wide and warns it is outside one.
+  it("says nothing for an empty box label", () => {
+    const mock = drawing();
+
+    boxed(mock);
+    build(mock, value({ resolved: "", style: "boxed", anchor: zero }));
+
+    const calls = vi.mocked(mock.log.warn).mock.calls;
+
+    expect(calls.filter(call => call[0] === 'text: wrap "box" outside layout')).toEqual([]);
+  });
 });

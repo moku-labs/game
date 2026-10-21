@@ -503,7 +503,8 @@ function buildRun(
 function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
   const style = styleOf(ctx, value.style);
 
-  if (style.wrap === "box" && value.box <= 0) {
+  // An empty label has nothing to wrap: ui lays it out 0 wide.
+  if (style.wrap === "box" && value.box <= 0 && value.resolved !== "") {
     warnOnce(ctx, `wrap-box:${value.style}`, 'text: wrap "box" outside layout', {
       style: value.style
     });
@@ -686,6 +687,8 @@ function isCurrent(
   next: Readonly<TextValue>
 ): boolean {
   const drawn = ctx.state.drawn.get(container);
+  // A box moves only the lines of a `"box"` style.
+  const boxStands = previous.box === next.box || drawn?.style.wrap !== "box";
 
   return (
     previous.resolved === next.resolved &&
@@ -693,7 +696,7 @@ function isCurrent(
     samePoint(previous.anchor, next.anchor) &&
     drawn?.style === styleOf(ctx, next.style) &&
     drawn.generation === ctx.state.generation &&
-    (previous.box === next.box || drawn.style.wrap !== "box")
+    boxStands
   );
 }
 

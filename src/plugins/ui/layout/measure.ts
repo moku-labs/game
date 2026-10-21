@@ -307,13 +307,34 @@ export function markMeasured(state: LayoutState, element: Element): void {
 }
 
 /**
+ * The width a text that was measured inside a bound width is laid out at now: its node's content
+ * width from the last solve. Yoga may serve a width it measured before from its own cache without
+ * calling the measure function, so the width that function was offered last can be another one.
+ *
+ * @param state - The layout state, for the edge enums of Yoga.
+ * @param node - The node of the text.
+ * @param element - The text element.
+ * @returns The content width, or `undefined` when the text was measured unbounded.
+ */
+function laidOutWidth(state: LayoutState, node: YogaNode, element: Element): number | undefined {
+  const yoga = state.yoga;
+
+  if (element.measuredWidth === undefined || yoga === undefined) return undefined;
+
+  const padding =
+    node.getComputedPadding(yoga.EDGE_LEFT) + node.getComputedPadding(yoga.EDGE_RIGHT);
+
+  return node.getComputedWidth() - padding;
+}
+
+/**
  * Marks the node of a text dirty when what it draws now measures to another size than the node was
  * laid out with. `text` writes `Text` when the shown string of a bound label changes, and for
  * every label it resolves again: a message after a new locale, any label when its font arrives or
  * its style is swapped. So a text without `bind` is measured again too, and a counter that rolls
- * through digits of one width asks for no solve. A text is measured at the width its measure
- * function was last offered, so one that wraps at its box compares the same lines. A text with a
- * fixed size has no measure function and is left alone.
+ * through digits of one width asks for no solve. A text whose width was bounded is measured at
+ * the width it is laid out at now, so one that wraps at its box compares the same lines. A text
+ * with a fixed size has no measure function and is left alone.
  *
  * @param state - The layout state, for the node of the element.
  * @param element - An element whose `Text` changed this frame.
@@ -327,7 +348,7 @@ export function remeasureShown(state: LayoutState, element: Element, source: Tex
   if (node === undefined || before === undefined) return false;
   if (!needsMeasure(element)) return false;
 
-  const size = naturalSize(element, source, element.measuredWidth);
+  const size = naturalSize(element, source, laidOutWidth(state, node, element));
 
   if (size.width === before.width && size.height === before.height) return false;
 

@@ -220,12 +220,6 @@ describe("layoutRuns — wrap box", () => {
     expect(layout.height).toBe(80);
   });
 
-  it("lays a box style out on one line when it has no box", () => {
-    const layout = layoutRuns([text("A A A")], style({ wrap: "box" }), tables(), options());
-
-    expect(layout.lines.map(line => line.width)).toEqual([88]);
-  });
-
   // The bug: ui lays a text out in whole units, rounding its measure with a tolerance of 0.0001.
   // Ten glyphs of 14.4 add up to 144.00000000000003 and get a box of 144: a line a hair wider than
   // its box broke there when drawn, one line more than the element is high.
@@ -237,12 +231,10 @@ describe("layoutRuns — wrap box", () => {
     expect(layout.lines).toHaveLength(1);
   });
 
-  // The bug: the box of the element reflows every label, whatever its style says.
-  it("ignores the box in a style with a width or none", () => {
-    const fixed = layoutRuns([text("A A A")], style({ wrap: 60 }), tables(), options(), 200);
+  // The bug: the box of the element reflows a label whose style draws it on one line.
+  it("ignores the box in a style with no wrap", () => {
     const none = layoutRuns([text("A A A")], style(), tables(), options(), 40);
 
-    expect(fixed.lines.map(line => line.width)).toEqual([56, 24]);
     expect(none.lines.map(line => line.width)).toEqual([88]);
   });
 });

@@ -580,14 +580,7 @@ function stepBound(
   // The unit stands still: no string is built. A label that was marked is written once as it is;
   // a label of a `"box"` style that ui laid out at another box is measured at it.
   if (seen !== undefined && isShown(seen, text, unit, format, frame)) {
-    if (marked) {
-      warnWithoutDigits(ctx, text.style);
-      showAgain(ctx, entity, text);
-      seen.box = text.box;
-    } else if (boxMoved(ctx, seen, text)) {
-      keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
-      seen.box = text.box;
-    }
+    standStill(ctx, entity, text, seen, marked);
 
     return;
   }
@@ -598,6 +591,35 @@ function stepBound(
 
   showBound(ctx, entity, text, next, value);
   remember(ctx, entity, text, frame, unit);
+}
+
+/**
+ * One frame of a bound label whose unit stands still: a marked one is written once as it is, one of
+ * a `"box"` style that ui laid out at another box is measured at it. Either way the box is noted.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ * @param seen - What was resolved for the label last.
+ * @param marked - Whether the label was marked this frame.
+ */
+function standStill(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  seen: SeenText,
+  marked: boolean
+): void {
+  if (marked) {
+    warnWithoutDigits(ctx, text.style);
+    showAgain(ctx, entity, text);
+  } else if (boxMoved(ctx, seen, text)) {
+    keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
+  } else {
+    return;
+  }
+
+  seen.box = text.box;
 }
 
 /**

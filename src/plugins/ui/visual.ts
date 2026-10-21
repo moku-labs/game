@@ -79,9 +79,9 @@ function contentOf(props: Record<string, unknown>): string {
 
 /**
  * The visual component of an element: a sprite for an image or an icon, the text for a text (with
- * its laid-out width as the box a `"box"` style wraps at), the
- * nine-slice of its style (outlined when the style sets `debug`), or a rounded rectangle, a
- * triangle with `shape: "triangle"`, its stroke dashed with `dash`, or an arc with `shape: "arc"`
+ * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
+ * when the style sets `debug`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
+ * stroke dashed with `dash`, or an arc with `shape: "arc"`
  * over the `sweep` of its style, ended by its `cap`. A clipping element (`scroll`,
  * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
  * clips too, and a nine-slice field draws its slices and clips to them. A style with a stroke and

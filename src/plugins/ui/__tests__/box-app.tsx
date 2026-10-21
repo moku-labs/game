@@ -1,7 +1,7 @@
 /**
  * @file ui plugin — the app of the wrap "box" tests (F50): a card row of a fixed 300 wide, a side
  * of a fixed width, and a cell that shrinks to the room the side leaves. The cell holds a name in
- * a text style with `wrap: "box"`. Two buttons widen the side and shorten the name. Real flow,
+ * a text style with `wrap: "box"`. Buttons widen the side, narrow it back and shorten the name. Real flow,
  * world, text and Yoga; plain Bun, inert renderer, no font loaded: a glyph of the 32 px style is
  * 19.2 wide and a line 38.4 high.
  */
@@ -57,6 +57,7 @@ export const Card = defineComponent("Card", {
         </column>
       </row>
       <button key="widen" local={{ side: 150 }} style={control} />
+      <button key="narrow" local={{ side: 100 }} style={control} />
       <button key="shorten" local={{ long: false }} style={control} />
     </column>
   )

@@ -130,6 +130,31 @@ describe('a text of a wrap "box" style in a row that shrinks it', () => {
     await app.stop();
   });
 
+  // The bug: the name keeps the four lines of the narrower room after the side narrows back, or
+  // the remeasure of its rewritten box keeps solving the root.
+  it("wraps back at the room it had before when the side narrows again, then rests", async () => {
+    const app = await mountCard();
+
+    tap(app, "widen");
+    tap(app, "narrow");
+    app.time.step(16);
+
+    const counters = app.world.ecs.resource(UiCounters);
+    const solves = counters.solves;
+    const name = rectOf(app, "cardName");
+
+    expect(name.w).toBe(200);
+    expect(name.h).toBe(linesHigh(3));
+    expect(boxOf(app)).toBe(name.w);
+
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(counters.solves).toBe(solves);
+
+    await app.stop();
+  });
+
   it("stays on one line when the name fits the room", async () => {
     const app = await mountCard();
 
