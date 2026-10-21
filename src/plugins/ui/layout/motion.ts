@@ -171,15 +171,23 @@ function noteTrack(span: MotionSpan, options: TweenOptions | RestOptions | undef
   span.reduced = options.reduced;
 }
 
+/** What a watched hook did: whether one of its tracks repeats forever. */
+type Watch = { forever: boolean };
+
 /**
- * The view handle of a hook whose tracks are measured: every call goes to the real handle, `tween` and `toRest` note
- * their track first.
+ * The view handle of a watched hook: every call goes to the real handle; `tween` notes whether its track repeats
+ * forever, and with a span `tween` and `toRest` note their track for the level of an overlay.
  *
  * @param handle - The real handle.
- * @param span - The span being measured.
- * @returns The measuring handle.
+ * @param span - The span being measured, or nothing.
+ * @param watch - Where a track that repeats forever is noted.
+ * @returns The watching handle.
  */
-function spanned(handle: ViewHandle<unknown>, span: MotionSpan): ViewHandle<unknown> {
+function watched(
+  handle: ViewHandle<unknown>,
+  span: MotionSpan | undefined,
+  watch: Watch
+): ViewHandle<unknown> {
   return {
     entity: handle.entity,
     key: handle.key,
@@ -192,12 +200,13 @@ function spanned(handle: ViewHandle<unknown>, span: MotionSpan): ViewHandle<unkn
       to: Partial<NumericFields<Value>>,
       options: TweenOptions
     ) => {
-      noteTrack(span, options);
+      if (options.repeat === "forever") watch.forever = true;
+      if (span !== undefined) noteTrack(span, options);
 
       return handle.tween(component, to, options);
     },
     toRest: <Value extends object>(component: ComponentType<Value>, options?: RestOptions) => {
-      noteTrack(span, options);
+      if (span !== undefined) noteTrack(span, options);
 
       return handle.toRest(component, options);
     },
@@ -208,8 +217,9 @@ function spanned(handle: ViewHandle<unknown>, span: MotionSpan): ViewHandle<unkn
 
 /**
  * Runs one motion hook and keeps the handle it returned, so the exit sweep knows when the
- * element is still playing. Without a hook the value the solve wrote stands; a throwing hook is
- * logged and the same happens.
+ * element is still playing. A motion whose hook started a track that repeats forever is also
+ * noted as endless: the sweep never waits for it. Without a hook the value the solve wrote stands;
+ * a throwing hook is logged and the same happens.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element the hook belongs to.
@@ -230,11 +240,14 @@ export function play(
   if (handle === undefined) return undefined;
 
   try {
-    const motion = hook(span === undefined ? handle : spanned(handle, span));
+    const watch: Watch = { forever: false };
+    const motion = hook(watched(handle, span, watch));
 
     if (motion === undefined) return undefined;
 
     element.handles.push(motion);
+    // A motion over a track that repeats forever never ends: no exit waits for it (F42).
+    if (watch.forever) noteEndless(element, motion);
 
     return motion;
   } catch (error) {
@@ -242,6 +255,17 @@ export function play(
 
     return undefined;
   }
+}
+
+/**
+ * Notes a motion that never ends on its element, the set made with the first one.
+ *
+ * @param element - The element the motion plays on.
+ * @param motion - The endless motion.
+ */
+function noteEndless(element: Element, motion: MotionHandle): void {
+  element.endless ??= new Set();
+  element.endless.add(motion);
 }
 
 /** A `change` hook of an extra component, as `ui` calls it: the values before and after. */
@@ -273,8 +297,13 @@ export function playExtraChange(
   values: { previous: object; next: object },
   hint: Hint | undefined
 ): boolean {
-  element.extraHandles.get(name)?.cancel();
-  element.extraHandles.delete(name);
+  const last = element.extraHandles.get(name);
+
+  if (last !== undefined) {
+    last.cancel();
+    element.endless?.delete(last);
+    element.extraHandles.delete(name);
+  }
 
   const hook = element.motion?.change?.[name] as ExtraChange | undefined;
 
@@ -321,13 +350,21 @@ export function startLoop(ctx: UiCtx, element: Element): void {
 
 /**
  * Tells whether every motion of an element has finished, which is when an exiting element may
- * be despawned.
+ * be despawned. A motion over a track that repeats forever never finishes, so it does not count:
+ * waiting for it would keep the element for the life of the page (F42).
  *
  * @param element - The element to ask about.
- * @returns True when nothing is still playing.
+ * @returns True when nothing that can end is still playing.
  */
 export function still(element: Element): boolean {
-  return element.handles.every(handle => !handle.active());
+  const { handles, endless } = element;
+
+  // Per exiting element and frame: an array `for…of`, no closure.
+  for (const handle of handles) {
+    if (handle.active() && endless?.has(handle) !== true) return false;
+  }
+
+  return true;
 }
 
 /**

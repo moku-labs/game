@@ -1458,7 +1458,28 @@ export function createReconciler(
       despawnTree(element);
     }
 
-    // Drop a removed root once its element tree is gone, and close its popup.
+    dropRemovedRoots();
+  }
+
+  /**
+   * Despawns every exiting element at once, finished or not, and drops the roots that were leaving:
+   * what a restore or a load does, as a page reload would (F42).
+   */
+  function dropLeaving(): void {
+    for (const entity of state.exiting) {
+      const element = state.elements.get(entity);
+
+      if (element === undefined) state.exiting.delete(entity);
+      else despawnTree(element);
+    }
+
+    dropRemovedRoots();
+  }
+
+  /**
+   * Drops every removed root whose element tree is gone, and closes its popup.
+   */
+  function dropRemovedRoots(): void {
     for (const entity of state.removing) {
       const root = state.roots.get(entity);
 
@@ -1884,11 +1905,12 @@ export function createReconciler(
    * element stands exactly as if its root had just been mounted with the restored state: a new
    * entity with the components of the description, then its `enter` hook, then its loop. What a
    * mount does not bring is gone with the old tree: the local state of a component, a scroll
-   * offset, the keyboard focus, a text being edited, a hover. A root that is leaving keeps
-   * leaving.
+   * offset, the keyboard focus, a text being edited, a hover. An element or a root that is
+   * leaving is dropped at once, as a page reload drops it.
    */
   function remountRoots(): void {
     state.remount = false;
+    dropLeaving();
 
     for (const root of state.roots.values()) {
       if (state.removing.has(root.entity)) continue;
