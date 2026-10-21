@@ -489,6 +489,11 @@ export type JsxState = {
   fields: Map<Entity, Field>;
   text: TextState;
   hints: Hint[];
+  /**
+   * The elements whose `Box` came since the last `sync`: their enter hooks play there, after the game's systems
+   * (F48). The first `count` slots are the queue; the array keeps its length, so a frame allocates nothing.
+   */
+  entering: { list: Entity[]; count: number };
   scrolls: Set<Entity>;
   windowRenders: number;
   /** True from a restore or a load until the next reconcile built every root again. */
@@ -684,7 +689,13 @@ export type JsxModule = {
   releaseHosted(): void;
   applyTap(entity: Entity): void;
   markPointer(entity: Entity, flag: PointerFlag, on: boolean): void;
-  playEnter(entity: Entity): void;
+  /** Keeps an element whose `Box` was just attached for `playEntered`. */
+  queueEnter(entity: Entity): void;
+  /**
+   * Plays the enter hooks of the elements queued since the last call, in the order they came. The
+   * `ui.enter` system calls it in phase `sync`, after the game's systems and before the frame is drawn.
+   */
+  playEntered(): void;
   /**
    * Asks for every root to be built again by the next reconcile, after the world brought the
    * elements to their rest pose and ended every track on them: a restore or a load.

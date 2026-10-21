@@ -82,7 +82,8 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 }
 
 /**
- * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
+ * Opens the two systems of phase `layout`, the `ui.enter` system of phase `sync`, which plays the
+ * enter hooks after the game's systems (F48), the seven world hooks of `Tree`, `Box`, `Pressed` and
  * `PointerOver`, the two that tell the hosting step a view lost its `Parent` or its `Held` (a
  * view freed so may hang under its host again), the listener that asks for every root to be built again after a restore or a
  * load, the two effect handlers, the hint listener that buffers every released hint for
@@ -119,13 +120,21 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
         run: (_rows, frame) => jsx.solve(frame.time)
       })
     ),
+    ecs.system(
+      system({
+        name: "ui.enter",
+        phase: "sync",
+        query: [],
+        run: () => jsx.playEntered()
+      })
+    ),
     ecs.onAdded(Tree, entity => {
       const place = projection.keyOf(entity);
 
       jsx.mountRoot(entity, place?.projection ?? "ui", ecs.get(entity, Layer)?.name ?? "ui");
     }),
     ecs.onRemoved(Tree, entity => jsx.unmountRoot(entity)),
-    ecs.onAdded(Box, entity => jsx.playEnter(entity)),
+    ecs.onAdded(Box, entity => jsx.queueEnter(entity)),
     projection.onConverged(jsx.converged),
     ecs.onAdded(Pressed, entity => jsx.markPointer(entity, "pressed", true)),
     ecs.onRemoved(Pressed, entity => jsx.markPointer(entity, "pressed", false)),
@@ -234,6 +243,8 @@ export function stopUi(state: State): void {
   state.jsx.scrolls.clear();
   state.jsx.remount = false;
   state.jsx.hints.length = 0;
+  state.jsx.entering.list.length = 0;
+  state.jsx.entering.count = 0;
   state.jsx.debugTaps.length = 0;
   state.jsx.debugWarned = false;
   // The ring entities went with the ui owner above.

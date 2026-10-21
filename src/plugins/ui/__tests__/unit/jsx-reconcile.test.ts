@@ -420,7 +420,8 @@ function harness() {
       frame.reconcile();
       frame.solve();
 
-      for (const live of state.jsx.elements.keys()) frame.playEnter(live);
+      for (const live of state.jsx.elements.keys()) frame.queueEnter(live);
+      frame.playEntered();
 
       vi.clearAllMocks();
     },

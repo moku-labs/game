@@ -1865,10 +1865,44 @@ export function createReconciler(
   }
 
   /**
-   * Plays the enter hook of an element whose spawn has just been applied. The world calls it from
-   * the `Box` hook, at the flush of phase `layout`, so the entity carries every component and the
-   * first `sync` has not run: the element is never drawn at its rest pose by mistake. A row a
-   * range change scrolled in is not new: it plays no `enter` hook, only its loop starts.
+   * Keeps an element whose spawn has just been applied: the world calls it from the `Box` hook, at
+   * the flush of phase `layout`. Its enter hook waits for `playEntered`, so the game's systems see
+   * the entity first (F48).
+   *
+   * @param entity - The entity the `Box` was attached to.
+   */
+  function queueEnter(entity: Entity): void {
+    const entering = state.entering;
+
+    // A slot past the end grows the array once; later frames write into the slots it kept.
+    if (entering.count < entering.list.length) entering.list[entering.count] = entity;
+    else entering.list.push(entity);
+
+    entering.count += 1;
+  }
+
+  /**
+   * Plays the enter hooks queued since the last call, in the order the elements came. The `ui.enter`
+   * system calls it in phase `sync`: after the game's systems, which may have written what a hook
+   * reads (a list's scroll), and before `renderer.sync`, so an element is never drawn at its rest
+   * pose by mistake. An element despawned in between plays nothing.
+   */
+  function playEntered(): void {
+    const entering = state.entering;
+
+    // Per frame: an index loop over the kept slots, the count read every turn, as a hook may queue another element.
+    for (let index = 0; index < entering.count; index += 1) {
+      const entity = entering.list[index];
+
+      if (entity !== undefined) playEnter(entity);
+    }
+
+    entering.count = 0;
+  }
+
+  /**
+   * Plays the enter hook of an element whose spawn has been applied, once. A row a range change
+   * scrolled in is not new: it plays no `enter` hook, only its loop starts.
    *
    * @param entity - The entity the `Box` was attached to.
    */
@@ -2316,5 +2350,15 @@ export function createReconciler(
     if (!moved) modules.layout.repose(element, parentRect(element), false);
   }
 
-  return { reconcile, solve, mountRoot, unmountRoot, markPointer, playEnter, sweep, converged };
+  return {
+    reconcile,
+    solve,
+    mountRoot,
+    unmountRoot,
+    markPointer,
+    queueEnter,
+    playEntered,
+    sweep,
+    converged
+  };
 }

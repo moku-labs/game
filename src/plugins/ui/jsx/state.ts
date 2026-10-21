@@ -82,6 +82,7 @@ export function createJsxState(): JsxState {
     fields: emptyMap(),
     text: createTextState(),
     hints: [],
+    entering: { list: [], count: 0 },
     scrolls: emptySet(),
     windowRenders: 0,
     remount: false,
