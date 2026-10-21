@@ -577,7 +577,7 @@ export type State = {
   useCounter: number;
   /** Keys already reported missing, so one key warns and starts its background load once. */
   warned: Set<string>;
-  /** `onEnter`, the `load` handler and the texture provider. */
+  /** `onEnter`, the `load` handler, the texture provider, and the start and the end of an exit in `world`. */
   removers: Array<() => void>;
   /** The `files` map of the stamp the dev hot swap applied last. `undefined` until the first swap. */
   stamps: Readonly<Record<string, string>> | undefined;
@@ -590,6 +590,8 @@ export type State = {
    * leaving scene's pictures stay until its elements played their exit (F51).
    */
   sceneLeaving: string[];
+  /** How many entities carry `Exiting` now, counted from the world's `onAdded` and `onRemoved` of the tag. */
+  exiting: number;
   /** Registered companions, in registration order. */
   companions: BundleCompanion[];
   /** A live rest was announced; the arriving node's `load` stage runs the release. */

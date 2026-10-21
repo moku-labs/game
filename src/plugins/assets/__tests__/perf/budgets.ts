@@ -10,6 +10,6 @@ export const NOISE = 1;
 export const BUDGET = {
   // No scene leaves: one length read.
   nothingLeaves: 0,
-  // A scene leaves and an element still plays its exit: the check stops at the first exiting entity.
+  // A scene leaves and an element still plays its exit: one count read.
   stillExiting: 0
 } as const;

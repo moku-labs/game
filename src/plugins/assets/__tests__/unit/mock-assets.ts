@@ -290,44 +290,45 @@ function createFakeModel(): FakeModel {
   return fake;
 }
 
-/** The fake `world`: the entities that carry `Exiting`, and the end of one exit. */
+/** The fake `world`: the start and the end of an exit, as the world tells its `Exiting` listeners. */
 export type FakeWorld = {
-  exiting: Entity[];
-  /** Takes the tag off one entity and calls the `onRemoved(Exiting)` listeners, as the world does. */
+  /** Tags one entity `Exiting` and calls the `onAdded(Exiting)` listeners. */
+  startExit(entity: Entity): void;
+  /** Takes the tag off one entity and calls the `onRemoved(Exiting)` listeners. */
   endExit(entity: Entity): void;
   api: WorldApi;
 };
 
 /**
- * Creates the fake `world`: `ecs.query` answers the exiting entities, `ecs.onRemoved` keeps the listener.
+ * Creates the fake `world`: `ecs.onAdded` and `ecs.onRemoved` keep their listener, and the fake's two calls run them.
  *
  * @returns The fake world.
  */
 function createFakeWorld(): FakeWorld {
-  const listeners: Array<(entity: Entity) => void> = [];
-  const fake: FakeWorld = {
-    exiting: [],
-    endExit: entity => {
-      fake.exiting = fake.exiting.filter(other => other !== entity);
-      for (const listener of listeners) listener(entity);
-    },
-    api: undefined as unknown as WorldApi
+  const added: Array<(entity: Entity) => void> = [];
+  const removed: Array<(entity: Entity) => void> = [];
+  const keep = (list: Array<(entity: Entity) => void>, listener: (entity: Entity) => void) => {
+    list.push(listener);
+
+    return () => {
+      list.splice(list.indexOf(listener), 1);
+    };
   };
 
-  fake.api = {
-    ecs: {
-      query: () => fake.exiting.map(entity => [entity]),
-      onRemoved: (_tag: unknown, listener: (entity: Entity) => void) => {
-        listeners.push(listener);
-
-        return () => {
-          listeners.splice(listeners.indexOf(listener), 1);
-        };
+  return {
+    startExit: entity => {
+      for (const listener of added) listener(entity);
+    },
+    endExit: entity => {
+      for (const listener of removed) listener(entity);
+    },
+    api: {
+      ecs: {
+        onAdded: (_tag: unknown, listener: (entity: Entity) => void) => keep(added, listener),
+        onRemoved: (_tag: unknown, listener: (entity: Entity) => void) => keep(removed, listener)
       }
-    }
-  } as unknown as WorldApi;
-
-  return fake;
+    } as unknown as WorldApi
+  };
 }
 
 /**

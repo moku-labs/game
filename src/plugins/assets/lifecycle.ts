@@ -1,5 +1,5 @@
 /**
- * @file assets plugin — lifecycle: the four registrations of `onInit`, the boot of `onStart`
+ * @file assets plugin — lifecycle: the five registrations of `onInit`, the boot of `onStart`
  * and the teardown that frees every texture and cancels every fetch.
  */
 import { flowPlugin } from "../flow";
@@ -147,16 +147,11 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
 
 /**
  * Connects the plugin in `onInit`: the `load` stage of `onEnter`, the handler of the `load`
- * effect, the texture provider of `renderer`, and the end of an exit in `world`, where a leaving
- * scene's bundles may go (F51). The four removers go to the state, because `onStop` has nothing
- * but the state.
+ * effect, the texture provider of `renderer`, and the start and the end of an exit in `world`,
+ * counted so a leaving scene's bundles go when the last exit ends (F51). The five removers go to
+ * the state, because `onStop` has nothing but the state.
  *
  * @param ctx - Kernel context of the assets plugin.
- * @example
- * ```ts
- * connectAssets(ctx);
- * ctx.state.removers.length; // 4
- * ```
  */
 export function connectAssets(ctx: KernelSlice): void {
   const assets = withDeps(ctx);
@@ -169,8 +164,14 @@ export function connectAssets(ctx: KernelSlice): void {
       { runInFast: true }
     ),
     assets.deps.renderer.sync.textures.provide(key => lookupTexture(assets, key)),
-    // The last element of a leaving scene played its exit: the bundles that scene named may go (F51).
-    assets.deps.world.ecs.onRemoved(Exiting, () => releaseSceneLeft(assets))
+    // The world's exits are counted; when the last one ends, the bundles a leaving scene named may go (F51).
+    assets.deps.world.ecs.onAdded(Exiting, () => {
+      assets.state.exiting += 1;
+    }),
+    assets.deps.world.ecs.onRemoved(Exiting, () => {
+      assets.state.exiting -= 1;
+      releaseSceneLeft(assets);
+    })
   );
 }
 
@@ -262,7 +263,7 @@ export async function startAssets(ctx: KernelSlice): Promise<void> {
 
 /**
  * Frees everything in `onStop`: the preload and every running load are aborted, every texture is
- * destroyed, the four registrations are removed and the registries are emptied, the companions
+ * destroyed, the five registrations are removed and the registries are emptied, the companions
  * too. A teardown context carries the state and nothing else, so no other plugin is called here:
  * no companion's `unload` either, its plugin stopped before this one.
  *
@@ -299,6 +300,7 @@ export function releaseAll(state: State): void {
   state.sceneId = undefined;
   state.sceneNamed = [];
   state.sceneLeaving = [];
+  state.exiting = 0;
   state.restPending = false;
   state.stamps = undefined;
   state.swapping = undefined;

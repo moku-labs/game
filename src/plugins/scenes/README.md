@@ -215,13 +215,14 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 
 ## Dependencies
 
-`flow`, `world`, `assets`, `time`, `model`. No edge to `renderer`: the layers go through `world.projection`, which `renderer.sync` reads.
+`flow`, `world`, `assets`, `time`, `model`, `renderer`. The layers go through `world.projection`, which `renderer.sync` reads; `renderer` is used only for the performance log.
 
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
 | `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
+| `renderer` | `monitor.event("scene", …)`: the performance log of an agent build names the switch |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 

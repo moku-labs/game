@@ -4,7 +4,6 @@
  * never a clock.
  */
 
-import { Exiting } from "../world/ecs/define";
 import { unloadCompanions } from "./companions";
 import { isPermanent } from "./tiers";
 import type { AssetsCtx, AssetsIo, Events, LoadedAssets, ManifestBundle, State } from "./types";
@@ -281,7 +280,7 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
 
   if (state.io === undefined) return;
   // A leaving scene whose elements all played their exit holds nothing any more.
-  if (state.sceneLeaving.length > 0 && !anyExiting(ctx)) state.sceneLeaving = [];
+  if (state.sceneLeaving.length > 0 && state.exiting === 0) state.sceneLeaving = [];
 
   const onStack = featuresOnStack(ctx);
 
@@ -302,11 +301,6 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
  *
  * @param state - The plugin state.
  * @param named - The bundles the mounted scene names now.
- * @example
- * ```ts
- * // The memory named ep01.memory; the board names nothing of it.
- * nameSceneBundles(state, ["board"]); // state.sceneLeaving: ["ep01.memory", "ui.memory"]
- * ```
  */
 export function nameSceneBundles(state: State, named: readonly string[]): void {
   const leaving = state.sceneLeaving.filter(name => !named.includes(name));
@@ -320,30 +314,18 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
 }
 
 /**
- * Tells whether an element of the world still plays its exit.
- *
- * @param ctx - Domain context of the plugin.
- * @returns True while anything carries `Exiting`.
- */
-function anyExiting(ctx: AssetsCtx): boolean {
-  // The first row answers: a `for…of` that returns at once walks no further.
-  for (const row of ctx.deps.world.ecs.query(Exiting)) if (row.length > 0) return true;
-
-  return false;
-}
-
-/**
  * Lets the bundles a leaving scene named go once nothing carries `Exiting` any more: each loaded
  * `"leave"` bundle among them that nothing else holds is unloaded with the reason `"leave"`, at
  * once, not at the next rest. A bundle of another release stays, as it would have. The world calls
- * it through `onRemoved(Exiting)`, so the check costs a length read while no scene leaves.
+ * it through `onRemoved(Exiting)`, so the check costs a length read while no scene leaves, and
+ * a count read while one does.
  *
  * @param ctx - Domain context of the plugin.
  */
 export function releaseSceneLeft(ctx: AssetsCtx): void {
   const state = ctx.state;
 
-  if (state.sceneLeaving.length === 0 || anyExiting(ctx)) return;
+  if (state.sceneLeaving.length === 0 || state.exiting > 0) return;
 
   const names = state.sceneLeaving;
 

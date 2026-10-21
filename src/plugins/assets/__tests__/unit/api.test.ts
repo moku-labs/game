@@ -384,7 +384,7 @@ describe("the bundles of a leaving scene (F51)", () => {
     await mock.start();
     await mock.api.load("board.chains");
     mock.api.sceneBundles(["board.chains"]);
-    mock.world.exiting = [7];
+    mock.world.startExit(7);
     mock.api.sceneBundles(["board"]);
     releaseLeftBundles(mock.assetsCtx);
 
@@ -400,7 +400,8 @@ describe("the bundles of a leaving scene (F51)", () => {
     await mock.api.load("board");
     await mock.api.load("board.chains");
     mock.api.sceneBundles(["board", "board.chains"]);
-    mock.world.exiting = [7, 8];
+    mock.world.startExit(7);
+    mock.world.startExit(8);
     mock.api.sceneBundles([]);
 
     // One element still leaves: nothing goes.
@@ -420,7 +421,7 @@ describe("the bundles of a leaving scene (F51)", () => {
     await mock.start();
     await mock.api.load("board.chains");
     mock.api.sceneBundles(["board.chains"]);
-    mock.world.exiting = [7];
+    mock.world.startExit(7);
     mock.api.sceneBundles([]);
     mock.api.sceneBundles(["board.chains"]);
     mock.world.endExit(7);

@@ -303,7 +303,10 @@ export type Element = {
   posed?: PosedEnter | undefined;
 };
 
-/** One `set` of an enter hook: the fields it wrote, and the values they had before. */
+/**
+ * One `set` of an enter hook: the fields it wrote, and the values they had before. A hook may write any component of
+ * the game, so the fields are kept by name, as records.
+ */
 export type PoseWrite = {
   component: ComponentType<Record<string, unknown>>;
   wrote: Record<string, unknown>;

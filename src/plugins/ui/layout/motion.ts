@@ -17,7 +17,7 @@ import type {
 import type { ComponentType } from "../../world/types";
 import { UI_OWNER } from "../components";
 import { asError } from "../errors";
-import type { Element, PosedEnter } from "../jsx/types";
+import type { Element, PosedEnter, PoseWrite } from "../jsx/types";
 import type { Origin, ResolvedStyle } from "../styles/types";
 import type { UiCtx } from "../types";
 import { CONTENT, samePose, visualOf } from "../visual";
@@ -242,18 +242,8 @@ function recording(handle: ViewHandle<unknown>, posed: PosedEnter): ViewHandle<u
     },
     rest: <Value extends object>(component: ComponentType<Value>) => handle.rest(component),
     set: <Value extends object>(component: ComponentType<Value>, patch: Partial<Value>) => {
-      const current = handle.get(component) as Readonly<Record<string, unknown>> | undefined;
-
       wrote(component);
-      // A component the entity does not carry yet has nothing to go back to: a replay writes it again.
-      if (current !== undefined) {
-        const values: Record<string, unknown> = { ...patch };
-        const before: Record<string, unknown> = {};
-
-        for (const field of Object.keys(values)) before[field] = current[field];
-        posed.writes.push({ component: asAnyComponent(component), wrote: values, before });
-      }
-
+      keepWrite(posed, asAnyComponent(component), patch, handle.get(component));
       handle.set(component, patch);
     },
     tween: <Value extends object>(
@@ -273,6 +263,31 @@ function recording(handle: ViewHandle<unknown>, posed: PosedEnter): ViewHandle<u
     all: (handles: readonly Motion[]) => handle.all(handles),
     peer: (key: string) => handle.peer(key)
   };
+}
+
+/**
+ * Keeps one `set` of an enter hook with the values its fields had before it. A component the
+ * entity does not carry yet has nothing to go back to: a replay writes it again.
+ *
+ * @param posed - Where the write is kept.
+ * @param component - The component the hook wrote.
+ * @param patch - The fields it wrote.
+ * @param current - The component's value before the write, if the entity carries it.
+ */
+function keepWrite(
+  posed: PosedEnter,
+  component: ComponentType<Record<string, unknown>>,
+  patch: object,
+  current: object | undefined
+): void {
+  if (current === undefined) return;
+
+  const wrote: Record<string, unknown> = { ...patch };
+  const was = current as Readonly<Record<string, unknown>>;
+  const before: Record<string, unknown> = {};
+
+  for (const field of Object.keys(wrote)) before[field] = was[field];
+  posed.writes.push({ component, wrote, before });
 }
 
 /**
@@ -304,6 +319,7 @@ export function poseEnter(ctx: UiCtx, element: Element, span?: MotionSpan): void
 
   const posed: PosedEnter = { motion: undefined, reads: [], written: [], writes: [], span };
 
+  // The hook plays as it would in `ui.enter`, through a handle that notes what it read and wrote.
   posed.motion = play(
     ctx,
     element,
@@ -333,17 +349,34 @@ export function poseEnter(ctx: UiCtx, element: Element, span?: MotionSpan): void
 function readChanged(ctx: UiCtx, element: Element, posed: PosedEnter): boolean {
   const ecs = ctx.deps.world.ecs;
 
+  // A component the hook read and did not write: only a game system can have changed it since.
   for (const read of posed.reads) {
     if (posed.written.includes(read.component.componentName)) continue;
-
-    const now = ecs.get(element.entity, read.component);
-
-    if (now === undefined) return Object.keys(read.seen).length > 0;
-
-    const fields = new Set([...Object.keys(read.seen), ...Object.keys(now)]);
-
-    for (const field of fields) if (now[field] !== read.seen[field]) return true;
+    if (fieldsDiffer(read.seen, ecs.get(element.entity, read.component))) return true;
   }
+
+  return false;
+}
+
+/**
+ * Tells whether a component's value is not the one a play saw: a field differs, one came or went,
+ * or the component itself went.
+ *
+ * @param seen - The fields as the play saw them.
+ * @param now - The value now, or nothing when the entity lost the component.
+ * @returns True when they differ.
+ * @example
+ * ```ts
+ * fieldsDiffer({ dy: 300 }, { dy: 180 }); // true
+ * ```
+ */
+function fieldsDiffer(seen: Readonly<Record<string, unknown>>, now: object | undefined): boolean {
+  if (now === undefined) return Object.keys(seen).length > 0;
+
+  const value = now as Readonly<Record<string, unknown>>;
+  const fields = new Set([...Object.keys(seen), ...Object.keys(value)]);
+
+  for (const field of fields) if (value[field] !== seen[field]) return true;
 
   return false;
 }
@@ -358,37 +391,53 @@ function readChanged(ctx: UiCtx, element: Element, posed: PosedEnter): boolean {
  * @param posed - What the play at the `Box` kept.
  */
 function undoPosed(ctx: UiCtx, element: Element, posed: PosedEnter): void {
-  const motion = posed.motion;
+  // The play's motion stops and leaves the element's handles: no exit waits for it.
+  forgetMotion(element, posed.motion);
 
-  if (motion !== undefined) {
-    motion.cancel();
+  // What its `set` calls wrote goes back, the latest first.
+  for (const write of posed.writes.toReversed()) revertWrite(ctx, element, write);
+}
 
-    const at = element.handles.indexOf(motion);
+/**
+ * Cancels the motion of a play that is undone and takes it out of the element's handles.
+ *
+ * @param element - The element.
+ * @param motion - The motion the play returned, if any.
+ */
+function forgetMotion(element: Element, motion: MotionHandle | undefined): void {
+  if (motion === undefined) return;
 
-    if (at !== -1) element.handles.splice(at, 1);
-    element.endless?.delete(motion);
-  }
+  motion.cancel();
 
+  const at = element.handles.indexOf(motion);
+
+  if (at !== -1) element.handles.splice(at, 1);
+  element.endless?.delete(motion);
+}
+
+/**
+ * Gives one `set` of an undone play back: each field still holding what it wrote gets the value it
+ * had before.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element.
+ * @param write - The write to take back.
+ */
+function revertWrite(ctx: UiCtx, element: Element, write: PoseWrite): void {
   const ecs = ctx.deps.world.ecs;
+  const current = ecs.get(element.entity, write.component);
 
-  for (let index = posed.writes.length - 1; index >= 0; index -= 1) {
-    const write = posed.writes[index];
-    const current = write === undefined ? undefined : ecs.get(element.entity, write.component);
+  if (current === undefined) return;
 
-    if (write === undefined || current === undefined) continue;
+  const kept = Object.keys(write.wrote).filter(field => current[field] === write.wrote[field]);
 
-    const back: Record<string, unknown> = {};
-    let any = false;
+  if (kept.length === 0) return;
 
-    for (const field of Object.keys(write.wrote)) {
-      if (current[field] !== write.wrote[field]) continue;
-
-      back[field] = write.before[field];
-      any = true;
-    }
-
-    if (any) ecs.set(element.entity, write.component, back);
-  }
+  ecs.set(
+    element.entity,
+    write.component,
+    Object.fromEntries(kept.map(field => [field, write.before[field]]))
+  );
 }
 
 /**

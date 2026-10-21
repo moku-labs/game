@@ -4,7 +4,6 @@
  * whether the bundles a leaving scene named may go (F51).
  */
 import { alloc } from "../../../../../tests/perf/alloc";
-import type { Entity } from "../../../world/types";
 import { releaseSceneLeft } from "../../budget";
 import { createMockAssets } from "../unit/mock-assets";
 
@@ -13,9 +12,6 @@ const WARM_CALLS = 30_000;
 
 /** Calls of a window. */
 const CALLS = 100_000;
-
-/** What the fake world's query answers while one element still leaves: the same rows every call. */
-const ONE_EXITING: ReadonlyArray<readonly [Entity]> = [[7]];
 
 /**
  * The heap bytes one call keeps: the call run until V8 optimized it, outside the window, then `alloc` over a window
@@ -50,7 +46,7 @@ export function exitEndStillExiting(): () => void {
   const mock = createMockAssets();
 
   mock.ctx.state.sceneLeaving = ["board.chains"];
-  (mock.world.api.ecs as { query: () => Iterable<readonly [Entity]> }).query = () => ONE_EXITING;
+  mock.ctx.state.exiting = 2;
 
   return () => releaseSceneLeft(mock.assetsCtx);
 }
