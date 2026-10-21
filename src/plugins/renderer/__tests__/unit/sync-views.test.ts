@@ -185,6 +185,32 @@ describe("sync views", () => {
     );
   });
 
+  // Bug (F44): a restore hangs a hosted view under the rebuilt host in the frame the old host goes; the view was
+  // named an orphan of the old host, and drawn nowhere until the next pass.
+  it("hangs a child that moved to another parent in the frame its old parent left, and names nothing", async () => {
+    const mock = await started();
+    const old = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    const next = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+
+    mock.modules.sync.pass();
+
+    const child = mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: old })]);
+
+    mock.modules.sync.pass();
+    mock.world.ecs.despawn(old);
+    mock.world.ecs.set(child, Parent, { entity: next });
+    mock.modules.sync.pass();
+
+    const childObject = mock.ctx.state.sync.views.get(child)?.object;
+    const nextView = mock.ctx.state.sync.views.get(next);
+
+    expect(childObject?.parent).toBe(nextView?.wrapper ?? nextView?.object);
+    expect(mock.log.warn).not.toHaveBeenCalledWith(
+      "renderer: parent left before its children",
+      expect.anything()
+    );
+  });
+
   it("does not draw a child whose parent draws nothing", async () => {
     const mock = await started();
     const child = mock.world.ecs.spawn(owner, [

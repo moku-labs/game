@@ -358,6 +358,44 @@ describe("the views a slot hosts, in the frame the slot comes (F14, K4)", () => 
     expect(await dropOnSecondCell(app, pixi)).toBe("c2");
   });
 
+  // Bug (F44, A Memory Missing's reward cheat): a restore dropped the old host of the field before its views were
+  // hung under the new one: `renderer: parent left before its children` named every cell and item.
+  it("moves the hosted views to the rebuilt field through a restore without an orphan warning", async () => {
+    const warned: string[] = [];
+    const warn = console.warn;
+
+    vi.spyOn(console, "warn").mockImplementation(
+      (entry: { event?: string }, ...rest: unknown[]) => {
+        if (typeof entry === "object" && entry !== null && typeof entry.event === "string") {
+          warned.push(entry.event);
+        } else {
+          warn(entry, ...rest);
+        }
+      }
+    );
+
+    const { app } = await startWatched();
+
+    await enterBoard(app);
+
+    const restored = app.flow.restore(app.flow.bookmark());
+    const undrawn: number[] = [];
+
+    for (let frame = 0; frame < 6; frame += 1) {
+      await tick();
+      step(app);
+
+      for (const entity of hostedViews(app)) if (!isDrawn(app, entity)) undrawn.push(frame);
+    }
+
+    await restored;
+
+    expect(warned.filter(event => event === "renderer: parent left before its children")).toEqual(
+      []
+    );
+    expect(undrawn).toEqual([]);
+  });
+
   it("drags after the shop popup opens over the board and closes", async () => {
     const { app, pixi } = await startWatched();
 

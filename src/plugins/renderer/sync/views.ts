@@ -1395,7 +1395,9 @@ function displayObjectOf(sctx: SyncCtx, entity: Entity): PixiContainer | undefin
 
 /**
  * Detaches the children of a parent that left, and names the ones that stay. A child that leaves in the same teardown
- * is no orphan: its view goes in this very pass (it waits in `removed`), or it plays its exit (`Exiting`).
+ * is no orphan: its view goes in this very pass (it waits in `removed`), or it plays its exit (`Exiting`). Nor is a
+ * child whose `Parent` names another entity, or none, by now: it moved in the same frame (a hosted view a restore
+ * hung under the rebuilt host, F44), and the later steps of this pass hang it where it belongs.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The parent entity.
@@ -1417,7 +1419,9 @@ function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): voi
     detach(object);
     // A child that stays waits for the parent's next view (a new `Display`, a visual that comes back).
     state.orphans.add(child);
-    if (!state.removed.has(child) && !isLeaving(ecs, child)) orphans.push(child);
+    if (!state.removed.has(child) && !isLeaving(ecs, child) && parentOf(ecs, child) === entity) {
+      orphans.push(child);
+    }
   }
 
   if (orphans.length > 0) {
