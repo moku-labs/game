@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Part } from "../../../i18n/types";
 import { component } from "../../../world/ecs/define";
-import { bind, builtInStyles, Countdown, Text } from "../../components";
+import { bind, builtInStyles, Countdown, defineTextStyles, Text } from "../../components";
 import { drawsWith, markDirty } from "../../resolve";
 import type { TextBind } from "../../types";
 import { miniFontJson } from "../fixtures/mini-font";
@@ -211,6 +211,76 @@ describe("the layout system — a bound number", () => {
     expect(mock.log.warn).toHaveBeenCalledWith("text: bind on a style without digits", {
       style: "body"
     });
+  });
+});
+
+/** A started plugin with a style that wraps at its box and one that wraps at 250. */
+function carded(): MockText {
+  const mock = createMockText({
+    messages,
+    features: [
+      {
+        name: "card",
+        description: {
+          textStyles: defineTextStyles({
+            "card.name": { font: "ui.font-body", size: 32, fill: 1, wrap: "box" },
+            "card.note": { font: "ui.font-body", size: 32, fill: 1, wrap: 250 }
+          })
+        }
+      }
+    ]
+  });
+
+  mock.start();
+
+  return mock;
+}
+
+describe("the layout system — wrap box", () => {
+  // No font: a glyph is 19.2 wide and a line 38.4 high. "11 11 11" is 153.6 wide on one line.
+
+  // The bug: ui lays a box label out at another width after the system ran, and the label keeps
+  // the size of its old box.
+  it("lays a box label out again when ui writes it another box, in the same frame", () => {
+    const mock = carded();
+
+    place(mock, 1, { content: "11 11 11", style: "card.name", box: 80 });
+
+    expect(mock.state.measured.get(1)?.height).toBeCloseTo(115.2, 5);
+
+    mock.world.api.ecs.set(1, Text, { box: 200 });
+    mock.afterLayout();
+
+    expect(mock.state.measured.get(1)?.width).toBeCloseTo(153.6, 5);
+    expect(mock.state.measured.get(1)?.height).toBeCloseTo(38.4, 5);
+  });
+
+  // The bug: a resize resolves every label on the screen again, each message formatted anew.
+  it("resolves a label of another style no more when only its box moved", () => {
+    const mock = carded();
+
+    place(mock, 1, { content: { key: "hud.orders" }, style: "card.note", box: 80 });
+    mock.world.api.ecs.set(1, Text, { box: 200 });
+    mock.afterLayout();
+    mock.step();
+
+    expect(mock.i18n.formatted).toEqual(["hud.orders"]);
+  });
+
+  // The bug: a bound label whose number stands still keeps the size of its old box.
+  it("lays a bound box label out again at a new box while its number stands still", () => {
+    const mock = carded();
+
+    mock.world.put(1, Counter, { value: 12_345_678 });
+    place(mock, 1, { style: "card.name", bind: bind(Counter, "value"), box: 100 });
+
+    expect(mock.state.measured.get(1)?.height).toBeCloseTo(76.8, 5);
+
+    mock.world.api.ecs.set(1, Text, { box: 200 });
+    mock.step();
+
+    expect(mock.world.read(1, Text)?.resolved).toBe("12345678");
+    expect(mock.state.measured.get(1)?.height).toBeCloseTo(38.4, 5);
   });
 });
 

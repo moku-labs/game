@@ -25,6 +25,7 @@ describe("Text", () => {
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
       alpha: 1,
+      box: 0,
       resolved: ""
     });
   });
@@ -40,6 +41,7 @@ describe("Text", () => {
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
       alpha: 1,
+      box: 0,
       resolved: ""
     });
   });
@@ -96,6 +98,7 @@ describe("label", () => {
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
       alpha: 1,
+      box: 0,
       resolved: ""
     });
     expect(transform.type).toBe(Transform);
@@ -209,8 +212,21 @@ describe("defineTextStyles", () => {
     expect(() =>
       defineTextStyles({ "hud.title": { font: "ui.font-body", size: 32, fill: 0, wrap: 0 } })
     ).toThrow(
-      '[game] Text style "hud.title" has wrap 0.\n' + '  Use a width in reference px or "none".'
+      '[game] Text style "hud.title" has wrap 0.\n' +
+        '  Use a width in reference px, "box" or "none".'
     );
+    expect(() =>
+      defineTextStyles({ "hud.title": { font: "ui.font-body", size: 32, fill: 0, wrap: -1 } })
+    ).toThrow('[game] Text style "hud.title" has wrap -1.');
+  });
+
+  // The bug: "box" is compared as a width and refused, or stored as something else.
+  it('keeps wrap "box", the width the ui layout gives the text', () => {
+    const styles = defineTextStyles({
+      "card.name": { font: "ui.font-body", size: 32, fill: 0, wrap: "box" }
+    });
+
+    expect(styles.map["card.name"]?.wrap).toBe("box");
   });
 });
 
@@ -259,6 +275,14 @@ describe("readStyle", () => {
 
     expect(style?.size).toBe(32);
     expect(style?.shadow).toBeUndefined();
+  });
+
+  // The bug: a hot-swapped style with a wrap that is no width, no "box" and no "none" is kept, and
+  // its labels wrap at a string.
+  it("refuses a wrap that is a word other than box or none", () => {
+    expect(() =>
+      readStyle("hud.note", { font: "ui.font-body", size: 32, fill: 0, wrap: "auto" })
+    ).toThrow('[game] Text style "hud.note" has wrap auto.');
   });
 
   it("answers nothing for an entry that is not a style", () => {

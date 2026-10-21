@@ -25,6 +25,11 @@ export const BUDGET = {
    */
   reconcileIdle: 0,
   /**
+   * F50 (change 2026-10-21-text-wrap-box): the same idle frame with eight more names that wrap at
+   * the box their row leaves them, three lines each. Nothing is measured or solved again: 0 B.
+   */
+  reconcileBoxIdle: 0,
+  /**
    * U3: a press and a release on one button of the 200-element board, each with the reconcile and
    * the solve of its frame. Was 872 602 B at HEAD: both frames re-ran the board's view and diffed
    * all of it. Now 3 849 B, the restyle of the one button, twice: its style resolved (a new

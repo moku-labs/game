@@ -47,6 +47,27 @@ function started(): MockText {
   return mock;
 }
 
+/** A started plugin with a style that wraps at its box and one that wraps at 250. */
+function carded(): MockText {
+  const mock = createMockText({
+    features: [
+      {
+        name: "card",
+        description: {
+          textStyles: defineTextStyles({
+            "card.name": { font: "ui.font-body", size: 32, fill: 1, wrap: "box" },
+            "card.note": { font: "ui.font-body", size: 32, fill: 1, wrap: 250 }
+          })
+        }
+      }
+    ]
+  });
+
+  mock.start();
+
+  return mock;
+}
+
 describe("measure", () => {
   it("answers the fallback size while no font is loaded", () => {
     const mock = started();
@@ -86,6 +107,34 @@ describe("measure", () => {
     expect(mock.api.measure("12", "nope")).toEqual(mock.api.measure("12", "body"));
     expect(mock.api.measure("1", "nope")).toEqual(mock.api.measure("1", "body"));
     expect(warningsOf(mock, "text: unknown style")).toHaveLength(1);
+  });
+
+  // The bug: the width ui hands over is dropped, or the cache answers the layout of another width.
+  // The numbers are the TextApi example: 19.2 a glyph and 38.4 a line on the 0.6 em fallback.
+  it("wraps a box style at the width it is handed, and lays it on one line without one", () => {
+    const mock = carded();
+    const narrow = mock.api.measure("Aleksandra Kucherenko", "card.name", 200);
+    const wide = mock.api.measure("Aleksandra Kucherenko", "card.name", 450);
+    const free = mock.api.measure("Aleksandra Kucherenko", "card.name");
+
+    expect(narrow.width).toBeCloseTo(192, 5);
+    expect(narrow.height).toBeCloseTo(76.8, 5);
+    expect(wide.width).toBeCloseTo(403.2, 5);
+    expect(wide.height).toBeCloseTo(38.4, 5);
+    expect(free.width).toBeCloseTo(403.2, 5);
+    expect(free.height).toBeCloseTo(38.4, 5);
+  });
+
+  // The bug: a style with a width of its own wraps at the width of its element, or caches one
+  // layout per width the layout tries.
+  it("ignores the width for a style with a width of its own", () => {
+    const mock = carded();
+    const own = mock.api.measure("Aleksandra Kucherenko", "card.note");
+
+    expect(mock.api.measure("Aleksandra Kucherenko", "card.note", 100)).toEqual(own);
+    expect(mock.api.measure("Aleksandra Kucherenko", "card.note", 500)).toEqual(own);
+    expect(own.height).toBeCloseTo(76.8, 5);
+    expect(mock.state.cache.size).toBe(1);
   });
 
   it("lays the same content and style out once", () => {

@@ -211,6 +211,34 @@ describe("layoutRuns — many lines", () => {
   });
 });
 
+describe("layoutRuns — wrap box", () => {
+  // The bug: a "box" style ignores the width ui laid its text out at, or lays it out at a box of 0.
+  it("wraps a box style at the box it is handed", () => {
+    const layout = layoutRuns([text("A A A")], style({ wrap: "box" }), tables(), options(), 60);
+
+    expect(layout.lines.map(line => line.width)).toEqual([56, 24]);
+    expect(layout.height).toBe(80);
+  });
+
+  // The bug: ui lays a text out in whole units, rounding its measure with a tolerance of 0.0001.
+  // Ten glyphs of 14.4 add up to 144.00000000000003 and get a box of 144: a line a hair wider than
+  // its box broke there when drawn, one line more than the element is high.
+  it("keeps a line a hair over a whole-unit box on that line", () => {
+    const small = style({ wrap: "box", size: 24 });
+    const layout = layoutRuns([text("AAAAAAAAAA")], small, new Map(), options(), 144);
+
+    expect(layout.width).toBeGreaterThan(144);
+    expect(layout.lines).toHaveLength(1);
+  });
+
+  // The bug: the box of the element reflows a label whose style draws it on one line.
+  it("ignores the box in a style with no wrap", () => {
+    const none = layoutRuns([text("A A A")], style(), tables(), options(), 40);
+
+    expect(none.lines.map(line => line.width)).toEqual([88]);
+  });
+});
+
 describe("layoutRuns — the headless fallback", () => {
   it("advances 0.6 em per glyph and 1.2 em per line, and names the font once", () => {
     const written = options();

@@ -6,7 +6,7 @@
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiSprite, PixiTexture } from "../renderer/types";
 import { fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
-import { drawsWith, layoutFor, markDirty, styleOf, warnFor } from "./resolve";
+import { drawsWith, layoutFor, markDirty, styleOf, warnFor, warnOnce } from "./resolve";
 import type {
   DrawnLabel,
   IconRun,
@@ -493,15 +493,26 @@ function buildRun(
 
 /**
  * The style and the laid-out block of one component value, under the generation of this moment.
+ * A `"box"` style wraps at the box `ui` wrote; with none (a label outside a ui layout) it is one
+ * line, and a dev warning says so once per style.
  *
  * @param ctx - Domain context of the text plugin.
  * @param value - The component value.
  * @returns What the container is filled from.
  */
 function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
+  const style = styleOf(ctx, value.style);
+
+  // An empty label has nothing to wrap: ui lays it out 0 wide.
+  if (style.wrap === "box" && value.box <= 0 && value.resolved !== "") {
+    warnOnce(ctx, `wrap-box:${value.style}`, 'text: wrap "box" outside layout', {
+      style: value.style
+    });
+  }
+
   return {
-    style: styleOf(ctx, value.style),
-    layout: layoutFor(ctx, value.resolved, value.style),
+    style,
+    layout: layoutFor(ctx, value.resolved, value.style, value.box),
     generation: ctx.state.generation
   };
 }
@@ -659,8 +670,9 @@ function samePoint(first: Point, second: Point): boolean {
 /**
  * Tells whether a container already shows a value: the string, the style name and the anchor it
  * was last updated with, drawn with the style object that is current and under the generation
- * that is current. A replaced style is a new object under the same name. A font or an icon a dev
- * hot swap replaced moves the generation, because the objects hold textures that are destroyed.
+ * that is current, and for a `"box"` style at the same box. A replaced style is a new object under
+ * the same name. A font or an icon a dev hot swap replaced moves the generation, because the
+ * objects hold textures that are destroyed. The box of any other style changes nothing drawn.
  *
  * @param ctx - Domain context of the text plugin.
  * @param container - The container of this label.
@@ -675,13 +687,16 @@ function isCurrent(
   next: Readonly<TextValue>
 ): boolean {
   const drawn = ctx.state.drawn.get(container);
+  // A box moves only the lines of a `"box"` style.
+  const boxStands = previous.box === next.box || drawn?.style.wrap !== "box";
 
   return (
     previous.resolved === next.resolved &&
     previous.style === next.style &&
     samePoint(previous.anchor, next.anchor) &&
     drawn?.style === styleOf(ctx, next.style) &&
-    drawn.generation === ctx.state.generation
+    drawn.generation === ctx.state.generation &&
+    boxStands
   );
 }
 

@@ -101,6 +101,13 @@ without `bind` is measured again the same way when `text` resolves it again: a m
 locale, any text when its font arrives. An `icon` without a `width` and `height` is square on one
 line of the `body` text style, and is measured again when that line moves.
 
+A text whose style has `wrap: "box"` wraps at the width its element is laid out at: it is measured
+at the width Yoga offers (exact or at most; one line when the width is not bounded), so its element
+is as high as its lines, and `ui` writes its laid-out width into `Text.box`, which `text` draws it
+at. It is measured again at the same width, so a still screen solves nothing. Shrink is 0 by
+default: a row only leaves the text less room than its one line when the boxes on the way to it
+have `shrink: 1`, `<column style={{ shrink: 1 }}><text style="card.name" … /></column>`.
+
 `style.alpha` fades the element and everything inside it: a disabled button at `alpha: 0.6`
 draws its icon and its label at 0.6 too, and a column at `alpha: 0` hides its children. The
 renderer applies it once, on the element's wrapper (see the renderer README).

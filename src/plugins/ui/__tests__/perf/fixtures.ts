@@ -133,6 +133,22 @@ export async function startPerfUi(): Promise<PerfUi> {
 }
 
 /**
+ * Starts the perf app and mounts the names that wrap at their box, then runs frames until they
+ * rest: the spawn, the frame that writes their `Text` once more, and one more.
+ *
+ * @returns The app and its `ui` steps, the names at rest.
+ */
+export async function startBoxPerf(): Promise<PerfUi> {
+  const ui = await startPerfUi();
+
+  ui.app.world.projection.mount(["boxes"], { kind: "plugin", name: "perf" });
+
+  for (let frame = 0; frame < 3; frame += 1) ui.app.time.step(16);
+
+  return ui;
+}
+
+/**
  * The heap bytes one call of a step keeps: the step run until V8 optimized what it calls, outside
  * the window, then `alloc` over a window of `calls`.
  *

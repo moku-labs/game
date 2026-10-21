@@ -24,10 +24,10 @@ export function createTextApi(ctx: KernelSlice): TextApi {
   };
 
   return {
-    measure: (content, style) => {
+    measure: (content, style, width = 0) => {
       const tctx = text();
 
-      return sizeOf(layoutFor(tctx, sourceOf(tctx, content), style));
+      return sizeOf(layoutFor(tctx, sourceOf(tctx, content), style, width));
     },
     hasGlyph: (char, style) => hasGlyphOf(text(), char, style),
     styles: () => Object.freeze([...ctx.state.styles.keys()]),
