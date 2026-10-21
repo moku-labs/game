@@ -5,7 +5,7 @@
  * ends with all three.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Blur, Transform } from "../../src";
+import { Blur, Overlay, Transform } from "../../src";
 import { startingPlayer, startingSession } from "../fixtures/sheets-game/state";
 import { closeSheets, findKey, openSheets, type Sheets } from "./sheets-helpers";
 
@@ -424,6 +424,71 @@ describe("overlays across the engine", () => {
     expect(frames).toBeLessThanOrEqual(12);
     expect(sheets.app.renderer.sync.loopsHeld(glint)).toBe(true);
     expect(await sheets.frames(60)).toBe(0);
+  });
+
+  // Bug (A Memory Missing, F41): with its frost baked into a picture the ward under the shop is sharp, so the range is
+  // not blurred, the glints write in every frame and the ward is drawn under a resting shop (94 of 125 frames in the
+  // game). A shop that holds its loops, from the live fallback on, lets the ward rest; one without hold changes nothing.
+  it("draws frames of a resting shop over a sharp ward, and none once the shop holds its loops", async () => {
+    const sheets = await open();
+    const ecs = sheets.app.world.ecs;
+
+    ecs.set(findKey(sheets.app, "wardFrost") ?? 0, Blur, { enabled: false });
+    await sheets.frames(2);
+    await openBy(sheets, "shopButton");
+    await landAll(sheets);
+    await sheets.frames(40);
+
+    expect(await sheets.frames(125)).toBeGreaterThan(0);
+
+    ecs.set(findKey(sheets.app, "shopDimLayer") ?? 0, Overlay, { hold: true });
+    await sheets.frames(40);
+
+    expect(sheets.reports()).toMatchObject([{ phase: "shown", mode: "freeze", kept: true }]);
+    expect(await sheets.frames(125)).toBe(0);
+  });
+
+  // Bug: the glints held under a shop with hold do not write again once it is gone, or their clock stood still while
+  // they were held: the ward shows them where the shop came, not where time puts them.
+  it("draws no frame of a shop with hold over a sharp ward at rest, and the glints stand where time puts them once it is gone", async () => {
+    const sheets = await open();
+    const ecs = sheets.app.world.ecs;
+    const glint = findKey(sheets.app, "glintA") ?? 0;
+    const turn = (): number | undefined => ecs.get(glint, Transform)?.rotation;
+    let frames = 0;
+    let drawn = 0;
+    const step = async (): Promise<void> => {
+      frames += 1;
+      drawn += (await sheets.frame()) ? 1 : 0;
+    };
+
+    ecs.set(findKey(sheets.app, "wardFrost") ?? 0, Blur, { enabled: false });
+
+    const sampled = turn();
+
+    sheets.press("shopButton");
+
+    while (frames < 60 && findKey(sheets.app, "shopDimLayer") === undefined) await step();
+
+    ecs.set(findKey(sheets.app, "shopDimLayer") ?? 0, Overlay, { hold: true });
+
+    while (frames < 60 && sheets.reports()[0]?.phase !== "shown") await step();
+    for (let index = 0; index < 20; index += 1) await step();
+
+    expect(sheets.reports()).toMatchObject([{ phase: "shown", mode: "freeze", kept: true }]);
+
+    // Two seconds at rest.
+    drawn = 0;
+    for (let index = 0; index < 125; index += 1) await step();
+    expect(drawn).toBe(0);
+
+    sheets.press("shopDim");
+
+    while (frames < FOUR_TWINKLES) await step();
+
+    // The glint stands where its loop is at this time: the turn it had four whole twinkles ago.
+    expect(sheets.reports()).toEqual([]);
+    expect(turn()).toBeCloseTo(sampled ?? Number.NaN, 6);
   });
 
   it("goes back to the live views when the sheet is gone, and the picture is freed", async () => {

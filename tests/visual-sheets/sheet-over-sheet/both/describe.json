@@ -1071,6 +1071,7 @@
           "dim": 0.4,
           "dimColor": 0,
           "fade": 250,
+          "hold": false,
           "hud": "none"
         },
         "OverlayLevel": {
@@ -1317,6 +1318,7 @@
           "dim": 0.56,
           "dimColor": 1774640,
           "fade": 270,
+          "hold": false,
           "hud": [
             "energy",
             "gems"

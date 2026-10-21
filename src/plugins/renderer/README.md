@@ -36,7 +36,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `NineSlice({ texture, width, height, alpha, tint, debug, clip })` | `"", 0, 0, 1, 0xffffff, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
-| `Overlay({ dim, dimColor, cover, hud, fade })` | `0, 0x000000, "none", "all", 250` | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep. See "Overlays and the HUD". |
+| `Overlay({ dim, dimColor, cover, hud, fade, hold })` | `0, 0x000000, "none", "all", 250, false` | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep. `hold: true` holds the endless loops under it while it stands. See "Overlays and the HUD". |
 | `HudPart({ key })` | `""` | A view of the HUD layer an overlay keeps shown or lets fade, by `key`. |
 | `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip, sweep?, cap? })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false`; `sweep` and `cap` absent (an arc reads them as `1` and `"round"`, `arcDefaults`) | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. With `kind: "arc"` a stroke on the circle inscribed in the box, `min(w, h) − strokeWidth` across and centred, so the stroke stays inside the box: from 12 o'clock clockwise over `sweep` of the circle (clamped to 0..1; 0 draws nothing and leaves the build, 1 is a closed ring with no ends), ended by `cap` (`"round"` or `"butt"`), in `stroke`, `strokeWidth` and `alpha`; `sweep` and `cap` are optional: only an arc reads them; a rectangle or a triangle ignores them. It is stroked in segments as many as its angle needs (48 for a ring). An arc draws no fill and ignores `radius` and `dash`; its `clip` masks the children to its box. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape and the entity's children (see the alpha rule under "Layers, sort and lift"). `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. The path is built again only when a field it is drawn from changed: a still arc costs nothing a frame, a new `sweep` builds it once, a new `fill` does not build it. Motions tween only the numeric fields (`sweep` among them), never `kind` or `cap`. |
 
@@ -863,7 +863,7 @@ the same flush.
 
 ## Overlays and the HUD
 
-A game marks the view an overlay is drawn from with `Overlay({ dim, dimColor, cover, hud, fade })`
+A game marks the view an overlay is drawn from with `Overlay({ dim, dimColor, cover, hud, fade, hold })`
 in its `components`, and tags the views of its HUD with `HudPart({ key })`. A scene declares its HUD
 layer with `{ above: "overlays" }` (`scenes`). `Overlay`, `HudPart` and `OverlayLevel` are engine
 component names: a game component of the same name is the kernel's duplicate-name error. Only an
@@ -903,15 +903,25 @@ in the same frame.
 (adapter marks included), a view that moves out of it or goes, a resize, a restore, the outline
 switch, takes it again in the same frame, and that frame is drawn. A change above the overlay or in
 the HUD takes nothing. A range that changes in three frames in a row is drawn live, and kept again
-after eight calm frames. Endless loops are held only under an opaque cover or a blurred picture
-(a filter with `blurs` on an entry or on a view in it that covers the viewport frame, so a window
+after eight calm frames. Endless loops are held only under an opaque cover, a blurred picture or an
+overlay with `hold: true` (a blurred picture: a filter with `blurs` on an entry or on a view in it that covers the viewport frame, so a window
 wider or taller than the frame answers as the phone does; measured at every take, and in every
 frame the fallback draws the range live, so a frost that comes on later is seen): they write nothing,
 their phase follows time, and they write once in the frame after landing and after the first exit
 frame, which takes the picture again with them. A blurred range the fallback draws live keeps its
 loops held until its overlay leaves, so only a real change counts against the eight calm frames
 (a frost that moved, a resize) and the picture comes back while the loops run on; the loops of a
-sharp range are never held, and keep it live.
+sharp range are not held unless its overlay has `hold`, and keep it live.
+
+**Holding the loops (`hold`).** A dimmed sheet over a sharp scene (a frost baked into a picture, say)
+is not blurred, so the loops under it write and the scene is drawn under the resting sheet.
+`Overlay({ dim: 0.56, hold: true })` holds the endless loops of its range as a blurred picture does:
+they write nothing while it stands, their phase follows time, and they write once after landing and
+at the first exit frame, so nothing jumps when it leaves. Only the `hold` of the overlay that owns
+the range, the top one, counts. Finite tracks, motions, flights and new views under it still write
+and take the picture again. It is off by default: under a light dim a frozen scene can be seen, so a
+game asks for it. `tests/integration/overlay-sheets.test.ts` holds it: a shop over a sharp ward
+draws 0 of 125 frames at rest with `hold`, and every frame without.
 
 **A backdrop in the range.** A `backdrop: true` filter (effects README, "Backdrop") inside a range that is
 shown as its picture runs no pass in a drawn frame: its view lies under a node `"freeze"` hides, so Pixi
@@ -944,7 +954,8 @@ hit as before.
 
 **Warnings** (dev, once per entity): `renderer:overlay-ignored` (a view `ui` does not own),
 `renderer:overlay-above-hud` (an overlay in or above the HUD layer), `renderer:hud-part-outside` (a
-`HudPart` outside the HUD layer), `renderer:overlay-value` (a value out of range, clamped). A refused
+`HudPart` outside the HUD layer), `renderer:overlay-value` (a value out of range, clamped; a `hold`
+that is no boolean reads as `false`). A refused
 picture logs `renderer:overlay-live` at debug level and draws the range live. An agent build writes
 the `overlay` event line (`OverlayEventDetail`: `what` ∈ `open`, `landed`, `leave`, `gone`, `live`,
 `kept`).

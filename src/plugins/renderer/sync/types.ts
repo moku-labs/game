@@ -899,10 +899,10 @@ export type SyncApi = {
 
   /**
    * Tells whether the endless cosmetic loops of an entity should write nothing now: its view lies under an opaque
-   * overlay that hides it, or in the kept picture of an overlay that blurs what is under it, or the player cannot see
-   * it at all — it or a view above it is at alpha 0, or it is a leaf wholly off the screen. A loop that writes nothing
-   * keeps its phase from time and stands where it would have been when it writes again. The seam of `anim`: finite
-   * tracks never ask. Inert, and for an entity without a view: false.
+   * overlay that hides it, or in the kept picture of an overlay that blurs what is under it or has `hold: true`, or
+   * the player cannot see it at all — it or a view above it is at alpha 0, or it is a leaf wholly off the screen. A
+   * loop that writes nothing keeps its phase from time and stands where it would have been when it writes again. The
+   * seam of `anim`: finite tracks never ask. Inert, and for an entity without a view: false.
    *
    * @param entity - The entity a loop is about to write.
    * @param reveals - What the loop writes that could show the view again: `"alpha"` (its alpha), `"place"` (where it
@@ -915,6 +915,8 @@ export type SyncApi = {
    * ctx.require(rendererPlugin).sync.loopsHeld(track.entity, "alpha"); // false: the blink's next write may show it
    * // the same sprite's forever tint loop, which reveals nothing:
    * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // true: nothing of it is drawn, the loop's clock runs on
+   * // a forever twinkle of a ward glint under the landed shop, `Overlay({ dim: 0.56, hold: true })`:
+   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // true: the shop holds the loops under it
    * ```
    */
   loopsHeld(entity: Entity, reveals?: "alpha" | "place" | "both"): boolean;

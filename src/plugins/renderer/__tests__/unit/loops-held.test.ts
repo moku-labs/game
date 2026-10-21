@@ -1,14 +1,15 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HudPart, Shape, Transform } from "../../components";
+import { HudPart, Overlay, Shape, Transform } from "../../components";
 import type { FilterSlot } from "../../sync/types";
 import { createMockRenderer } from "../mock-renderer";
 import { endStage, type OverlayStage, startOverlayStage } from "../overlay-harness";
 
 // ---------------------------------------------------------------------------
 // Unit test: `renderer.sync.loopsHeld(entity)` (spec 22 O9.2): true for a view an opaque cover hides and for a view in
-// the held picture of a blurred range (and it touches the range); false under a dim-only overlay over a sharp scene,
-// above the overlay, in the HUD layer, and with no overlay. Blurred is read from the slots' `blurs`.
+// the held picture of a blurred range or of a range whose owner has `hold: true` (and both touch the range); false
+// under a dim-only overlay over a sharp scene without `hold`, above the overlay, in the HUD layer, and with no
+// overlay. Blurred is read from the slots' `blurs`.
 // ---------------------------------------------------------------------------
 
 const running: OverlayStage[] = [];
@@ -92,6 +93,71 @@ describe("loopsHeld", () => {
     stage.frames(2);
 
     expect(stage.drawn.mock.api.sync.loopsHeld(glint)).toBe(false);
+  });
+
+  // Bug (F41): a dimmed sheet over a sharp scene lets the loops under it write in every frame, so the scene is drawn
+  // under a resting sheet; or the hold reaches past the sheet, or does not touch the range, so the loops never write
+  // their catch-up frame when it leaves and stand where they were held.
+  it("holds a view under a landed dim-only overlay with hold over a sharp scene and touches the range; not a view above it, nor in its first exit frame", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const glint = stage.view({ order: 1 });
+    const shop = stage.overlay({ dim: 0.56, hold: true }, { order: 2 });
+    const above = stage.view({ order: 3 });
+
+    stage.level(shop, 1, true);
+    stage.frames(2);
+
+    const range = stage.drawn.mock.ctx.state.sync.overlay.active;
+
+    expect(range).toMatchObject({ owner: shop, kept: true, blurred: false, touched: false });
+    expect([sync.loopsHeld(glint), sync.loopsHeld(above)]).toEqual([true, false]);
+    expect(range?.touched).toBe(true);
+
+    stage.leave(shop);
+    stage.frame();
+
+    expect(sync.loopsHeld(glint)).toBe(false);
+  });
+
+  // Bug: the hold of a sheet under the top one holds the loops of a range it does not own (the top sheet never asked),
+  // or the top sheet's hold is missed because the sheet under it has none.
+  it("reads only the hold of the range's owner, the top sheet", async () => {
+    const stage = await stageOf();
+    const ecs = stage.drawn.mock.world.ecs;
+    const sync = stage.drawn.mock.api.sync;
+    const glint = stage.view({ order: 1 });
+    const shop = stage.overlay({ dim: 0.56 }, { order: 2 });
+    const settings = stage.overlay({ dim: 0.3, hold: true }, { order: 4 });
+
+    stage.level(shop, 1, true);
+    stage.level(settings, 1, true);
+    stage.frames(2);
+
+    expect(stage.drawn.mock.ctx.state.sync.overlay.active?.owner).toBe(settings);
+    expect(sync.loopsHeld(glint)).toBe(true);
+
+    ecs.set(shop, Overlay, { hold: true });
+    ecs.set(settings, Overlay, { hold: false });
+    stage.frame();
+
+    expect(sync.loopsHeld(glint)).toBe(false);
+  });
+
+  // Bug: a game in plain JS writes `hold: "yes"` and the truthy string holds the loops, with no word in the log.
+  it("reads a hold that is no boolean as false, with one dev warning", async () => {
+    const stage = await stageOf({ dev: true });
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const glint = stage.view({ order: 1 });
+    const shop = stage.overlay({ dim: 0.56, hold: "yes" as unknown as boolean }, { order: 2 });
+
+    stage.level(shop, 1, true);
+    stage.frames(3);
+
+    expect(stage.drawn.mock.api.sync.loopsHeld(glint)).toBe(false);
+    expect(warn.mock.calls.filter(([code]) => code === "renderer:overlay-value")).toEqual([
+      ["renderer:overlay-value", { entity: shop, field: "hold" }]
+    ]);
   });
 
   it("reads blurred from the slots' blurs, also for a kept view whose filters hang on its stand-in; two passes alone are not blurred", async () => {

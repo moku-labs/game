@@ -955,6 +955,7 @@
           "dim": 0.4,
           "dimColor": 0,
           "fade": 270,
+          "hold": false,
           "hud": "all"
         },
         "OverlayLevel": {

@@ -415,6 +415,41 @@ export async function unseenBoard(moving = false): Promise<() => void> {
   };
 }
 
+/**
+ * A resting sheet that holds the loops under it (change 2026-10-20-overlay-hold, H2), over the real Pixi of the overlay
+ * stage: 20 sharp views of the ward under a landed dim-only overlay with `hold: true`, its range a kept picture that is
+ * not blurred. A frame asks for every view what its endless loop asks, and each answer is the owner's hold. The frames
+ * that build it and land the sheet have run.
+ *
+ * @returns One frame: the asks of the loops.
+ */
+export async function heldRangeBoard(): Promise<() => void> {
+  const stage = await startOverlayStage();
+  const { sync } = stage.drawn.mock.modules;
+  const asked: Entity[] = [];
+
+  for (let index = 0; index < 20; index += 1) {
+    asked.push(stage.view({ order: 1, x: (index % 5) * 200, y: Math.floor(index / 5) * 200 }));
+  }
+
+  const shop = stage.overlay({ dim: 0.56, hold: true }, { order: 2 });
+
+  stage.level(shop, 1, true);
+  stage.frames(2);
+
+  const range = stage.drawn.mock.ctx.state.sync.overlay.active;
+
+  if (range?.kept !== true || range.blurred || asked.some(entity => !sync.loopsHeld(entity))) {
+    throw new Error(
+      "perf fixture: the sheet with hold does not hold the loops of its kept, sharp range"
+    );
+  }
+
+  return () => {
+    for (const entity of asked) sync.loopsHeld(entity);
+  };
+}
+
 /** A started kept board: the stage, its kept views with their alpha filters, and a view that is no kept one. */
 type KeptBoard = {
   stage: Awaited<ReturnType<typeof startOverlayStage>>;
