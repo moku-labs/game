@@ -334,6 +334,7 @@ function harness() {
     contentRect: element => ({ x: 0, y: 0, w: element.rect.w, h: element.rect.h }),
     commit: vi.fn(),
     enter: vi.fn(),
+    pose: vi.fn(),
     loop,
     change: () => false,
     changeExtra: () => false,

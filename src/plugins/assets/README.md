@@ -24,7 +24,7 @@ only uses the texture *type*.
 | `audio(key): { bytes, mime } \| undefined` | A loaded sound: its bytes, undecoded, and the MIME type of its container, `"audio/mpeg"` for an `.mp3` and `"audio/mp4"` for an `.m4a`. `audio` decodes the bytes once, or streams them from a `blob:` URL built with `mime`, and drops them when `assets:bundle-unloaded` names the key. Same silent miss as `font`. |
 | `usage(): { textureMb, budgetMb, bundles }` | Loaded bundles only, sorted by name. `lastUsed` is the use counter, never a clock. |
 | `has(bundle): boolean` | Whether the manifest carries the bundle, loaded or not; the same live and headless. A strings-only sub-feature has a file-less bundle, so `has` is true for it; a code-only sub-feature has none. |
-| `sceneBundles(named): void` | Called by `scenes` after every switch and every re-read whose list changed: the bundles the mounted scene names (its `bundle`, then its `bundles(state)`). Each call replaces the list. A listed bundle is held: never a budget victim, never released by `release: "leave"`. A game never calls it. |
+| `sceneBundles(named): void` | Called by `scenes` after every switch and every re-read whose list changed: the bundles the mounted scene names (its `bundle`, then its `bundles(state)`). Each call replaces the list. A listed bundle is held: never a budget victim, never released by `release: "leave"`. A bundle the list named before and names no more stays held while anything carries `Exiting` (F51). A game never calls it. |
 | `companions.add(companion): () => void` | Adds a `BundleCompanion` (see Companions). Returns the remover; a second removal does nothing. Bundles loaded before are not replayed, so a plugin adds it in `onInit`. |
 
 ```ts
@@ -263,15 +263,18 @@ and the `feature`-tier bundles of its flow's feature. A node without a scene kee
 node before it. A `bundles` that throws fails the `load` stage, and flow rolls the node back.
 
 **`release: "leave"`.** A loaded `"leave"` bundle is unloaded with reason `"leave"` once nothing
-holds it. Held: pinned, named by the mounted scene (the last `sceneBundles` list), its feature on
+holds it. Held: pinned, named by the mounted scene (the last `sceneBundles` list), named by a
+scene that left while anything still carries `Exiting` (its elements play their exit), its feature on
 the stack (a frame — the outer frames of a sub-flow too — whose node's owner in
 `flow.describe()` is that feature; a node of the parent does not hold the child's bundle), or a
 permanent tier. `flow:rest` fires before the arriving node's stages, while its bundles are not
 pinned yet, so a live rest only marks the release; the arriving node's `load` stage runs it right
 after it pinned its own bundles. A bundle the arriving scene names is therefore never released on
 the rest that leads into it; a bundle only the outgoing scene named stays one rest longer (that
-scene is still mounted) and leaves at the next rest, after `scenes` reported the new list. A fast
-walk marks nothing; a transit node marks nothing. A running load is never aborted by the release.
+scene is still mounted) and leaves at the next rest, after `scenes` reported the new list. A bundle
+a leaving scene named is not released while its elements play their exit, at a rest or not: when
+the last `Exiting` goes, each loaded `"leave"` bundle of that scene nobody else holds is released at
+once, without waiting for a rest (F51). A fast walk marks nothing; a transit node marks nothing. A running load is never aborted by the release.
 The preload fetches a `"leave"` bundle only while it is held, so entering its feature from outside
 waits for its load. `"leave"` adds a way out, never a protection: the budget may still evict the
 bundle, and `app.assets.unload` works as for any other.
@@ -586,6 +589,8 @@ again every frame (`changes: "frame"`), because a bundle loads without a model c
   cap lifts as the picture changes.
 - `modelPlugin` — `store.snapshot()`: the committed `player` and `session` a scene's `bundles`
   reads for the node being entered and for the preload.
+- `worldPlugin` — `ecs.onRemoved(Exiting)` and `ecs.query(Exiting)`: the bundles a leaving scene
+  named go when its elements played their exit.
 - Module import, not a plugin dependency: `namedBundles` and `isSceneDefinition` of
   `scenes/bundles.ts`. `scenes` calls `sceneBundles`; `i18n` calls `companions.add`, `has` and
   `isLoaded`, only when `assets` is composed.

@@ -117,8 +117,16 @@ export type LayoutModule = {
    */
   contentRect(element: Element): Rect;
   commit(element: Element, parent: Rect | undefined): void;
-  /** Plays the enter hook and starts the loop; `span` notes the longest finite track the hook started. */
+  /**
+   * Plays the enter hook, unless its play at the `Box` stands, and starts the loop; `span` notes the longest finite
+   * track the hook started.
+   */
   enter(element: Element, span?: MotionSpan): void;
+  /**
+   * Plays the enter hook at the element's `Box`, so the game's systems of `sync` see its start pose (F49); `enter`
+   * keeps the play, or plays the hook again when a system changed what it read (F48).
+   */
+  pose(element: Element, span?: MotionSpan): void;
   loop(element: Element): void;
   change(element: Element, previous: Rect, hint?: Hint): boolean;
   changeExtra(

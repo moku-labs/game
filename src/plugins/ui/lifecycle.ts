@@ -93,8 +93,9 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
  * control, so the cursor shows a hand over a local-state button. On an agent page also the tap
  * counter of `DebugTrigger` and its check of a view that takes no press.
  *
- * The `Box` hook only queues an element; `ui.enter` plays its enter hook after the game's systems
- * of the frame and before it is drawn (F48). Every remover goes into the state, so the teardown
+ * The `Box` hook plays an element's enter hook and queues it, so the game's systems see its start
+ * pose (F49); `ui.enter` starts its loop after them and before the frame is drawn, and plays the
+ * hook again when a system changed what it read (F48). Every remover goes into the state, so the teardown
  * closes exactly these, and gives every hosted view its layer back before the ui entities go.
  *
  * @param ctx - Domain context of the ui plugin.

@@ -17,8 +17,9 @@ import type {
   ProjectionMotion,
   ViewHandle
 } from "../../world/projection/types";
-import type { AnyComponentValue, Entity, MotionCause } from "../../world/types";
+import type { AnyComponentValue, ComponentType, Entity, MotionCause } from "../../world/types";
 import type { BoxValue } from "../components";
+import type { MotionSpan } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style } from "../styles/types";
 import type { ElementComponents } from "./intrinsics";
 
@@ -298,6 +299,34 @@ export type Element = {
   basis?: StyleBasis;
   /** The motions of its hooks that started a `repeat: "forever"` track; made with the first one. */
   endless?: Set<MotionHandle>;
+  /** What its enter hook did at the `Box`, until `ui.enter` keeps the play or plays it again (F49). */
+  posed?: PosedEnter | undefined;
+};
+
+/**
+ * One `set` of an enter hook: the fields it wrote, and the values they had before. A hook may write any component of
+ * the game, so the fields are kept by name, as records.
+ */
+export type PoseWrite = {
+  component: ComponentType<Record<string, unknown>>;
+  wrote: Record<string, unknown>;
+  before: Record<string, unknown>;
+};
+
+/**
+ * What the play of an enter hook at the `Box` kept: the motion it returned, the components it read
+ * (with their fields as they stood after the play), the names of the components it wrote, its
+ * `set` writes, and the span noted for an overlay.
+ */
+export type PosedEnter = {
+  motion: MotionHandle | undefined;
+  reads: Array<{
+    component: ComponentType<Record<string, unknown>>;
+    seen: Record<string, unknown>;
+  }>;
+  written: string[];
+  writes: PoseWrite[];
+  span: MotionSpan | undefined;
 };
 
 /**
@@ -490,8 +519,8 @@ export type JsxState = {
   text: TextState;
   hints: Hint[];
   /**
-   * The elements whose `Box` came since the last `sync`: their enter hooks play there, after the game's systems
-   * (F48). The first `count` slots are the queue; the array keeps its length, so a frame allocates nothing.
+   * The elements whose `Box` came since the last `sync`: their enter hooks played at the `Box` (F49) and are settled
+   * there, after the game's systems, played again when a system changed what a hook read (F48). The first `count` slots are the queue; the array keeps its length, so a frame allocates nothing.
    */
   entering: { list: Entity[]; count: number };
   scrolls: Set<Entity>;
@@ -690,13 +719,13 @@ export type JsxModule = {
   applyTap(entity: Entity): void;
   markPointer(entity: Entity, flag: PointerFlag, on: boolean): void;
   /**
-   * Keeps an element whose `Box` was just attached for `playEntered`.
+   * Plays the enter hook of an element whose `Box` was just attached, and keeps it for `playEntered`.
    *
    * @param entity - The entity the `Box` was attached to.
    */
   queueEnter(entity: Entity): void;
   /**
-   * Plays the enter hooks of the elements queued since the last call, in the order they came. The
+   * Settles the enter hooks of the elements queued since the last call, in the order they came. The
    * `ui.enter` system calls it in phase `sync`, after the game's systems and before the frame is drawn.
    */
   playEntered(): void;
