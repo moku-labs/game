@@ -99,17 +99,14 @@ describe("the labels the layout flush brings", () => {
     expect(mock.world.read(1, Text)?.resolved).toBe("");
   });
 
-  it("does not resolve a label whose content changed: that waits for the next layout phase", () => {
+  // Bug (F45): `ui` writes a new content after the layout system ran, and the label showed the old line for a frame.
+  it("resolves a label whose content changed after the layout system ran, in that frame", () => {
     const mock = afterSystem();
 
     mock.world.put(1, Text, Text({ content: "7" }).value);
     mock.afterLayout();
     mock.world.api.ecs.set(1, Text, { content: "8" });
     mock.afterLayout();
-
-    expect(mock.world.read(1, Text)?.resolved).toBe("7");
-
-    mock.step();
 
     expect(mock.world.read(1, Text)?.resolved).toBe("8");
   });
