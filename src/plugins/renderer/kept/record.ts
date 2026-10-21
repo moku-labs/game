@@ -601,8 +601,9 @@ function writeTakeKeys(
 
 /**
  * Takes or retakes the picture of a record: stages 1, 2 (when its first filter has inputs) and 3, at the phase of this
- * frame. Refused, and the view drawn live, for a `Display` in the subtree without `onDemand`, empty bounds, a picture
- * over 4096 device pixels, or a budget that has no room (P6.3, warned once).
+ * frame. The bounds are cut to the filter area of the top when it holds one (F43). Refused, and the view drawn live,
+ * for a `Display` in the subtree without `onDemand`, empty bounds, a picture over 4096 device pixels, or a budget that
+ * has no room (P6.3, warned once).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.

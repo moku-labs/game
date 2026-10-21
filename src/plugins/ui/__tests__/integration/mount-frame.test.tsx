@@ -80,6 +80,7 @@ afterEach(async () => {
   }
 
   hostCalls.length = 0;
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 

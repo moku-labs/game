@@ -110,4 +110,18 @@ describe("the labels the layout flush brings", () => {
 
     expect(mock.world.read(1, Text)?.resolved).toBe("8");
   });
+
+  // The other side: a frame where no label changed writes no Text (an idle screen stays idle).
+  it("writes nothing for a label whose content stands still", () => {
+    const mock = afterSystem();
+
+    mock.world.put(1, Text, Text({ content: "7" }).value);
+    mock.afterLayout();
+    mock.step();
+    mock.world.writes.length = 0;
+    mock.world.api.ecs.set(1, Text, { alpha: 0.5 });
+    mock.afterLayout();
+
+    expect(mock.world.writes.filter(write => "resolved" in write.patch)).toEqual([]);
+  });
 });

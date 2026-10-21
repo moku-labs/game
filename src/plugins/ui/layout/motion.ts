@@ -370,8 +370,9 @@ export function still(element: Element): boolean {
 /**
  * Moves the rest `Transform` of an element to where its rect, style and fit put it now. A live
  * element plays its `change.Transform` motion when it has one, else takes the pose through a
- * 0 ms rest track, which writes the pose as it starts, so its pivot and its position land in the
- * same frame, and ends at the next frame step, where an additive loop re-bases on the new rest; an element that has not spawned yet only records it, and so does one whose
+ * 0 ms rest track. That track writes the pose as it starts, so the pivot and the position land in
+ * the same frame, and ends at the next frame step, where an additive loop re-bases on the new
+ * rest. An element that has not spawned yet only records it, and so does one whose
  * `change.Box` motion already played. The content of a scroll keeps its `Transform` and records
  * no rest with the world: the scroll step owns it.
  *
