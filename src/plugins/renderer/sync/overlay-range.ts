@@ -857,9 +857,9 @@ function holdsLoops(state: SyncState, range: ActiveRange): boolean {
 
 /**
  * Tells whether the endless loops of a view should write nothing (the overlay cases of `loopsHeld`, O9.2): its view
- * lies in a range an opaque overlay covers, or in a held picture of a blurred range, or in a blurred range the
- * fallback draws live; the last two touch the range, so the held loops write once at landing and at the first exit
- * frame.
+ * lies in a range an opaque overlay covers, or in a held picture of a range that is blurred or whose owner has
+ * `hold: true`, or in such a range the fallback draws live; all but the cover touch the range, so the held loops
+ * write once at landing and at the first exit frame. Only the owner's `hold` counts: the range is the owner's.
  *
  * @param state - The sync state.
  * @param entity - The entity a loop is about to write.
@@ -876,7 +876,9 @@ export function rangeHolds(state: SyncState, entity: Entity): boolean {
   if (view === undefined || root === undefined) return false;
   if (!inRange(range.set, view.wrapper ?? view.object, root)) return false;
   if (range.reason === "cover") return true;
-  if (!range.blurred) return false;
+  const ownerHolds = state.overlay.records.get(range.owner)?.value.hold === true;
+
+  if (!range.blurred && !ownerHolds) return false;
 
   range.touched = true;
 

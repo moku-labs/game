@@ -67,7 +67,8 @@ function isKeyList(value: unknown): value is readonly string[] {
 
 /**
  * Copies the marker into the record's own value, clamped (O1): `dim` into [0, 1], `fade` to 0 or more, an unknown
- * `cover` as `"none"`, a `hud` that is not `"all"`, `"none"` or a key list as `"all"`; one dev warning per field.
+ * `cover` as `"none"`, a `hud` that is not `"all"`, `"none"` or a key list as `"all"`, a `hold` that is no boolean as
+ * `false`; one dev warning per field.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The marked entity.
@@ -84,17 +85,20 @@ function clampInto(
   const fade = Number.isFinite(raw.fade) ? Math.max(0, raw.fade) : 0;
   const cover = raw.cover === "opaque" ? "opaque" : "none";
   const hud = raw.hud === "all" || raw.hud === "none" || isKeyList(raw.hud) ? raw.hud : "all";
+  const hold = raw.hold === true;
 
   if (dim !== raw.dim) warnOnce(sctx, "renderer:overlay-value", entity, { field: "dim" });
   if (fade !== raw.fade) warnOnce(sctx, "renderer:overlay-value", entity, { field: "fade" });
   if (cover !== raw.cover) warnOnce(sctx, "renderer:overlay-value", entity, { field: "cover" });
   if (hud !== raw.hud) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hud" });
+  if (hold !== raw.hold) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hold" });
 
   into.dim = dim;
   into.dimColor = Number.isFinite(raw.dimColor) ? raw.dimColor : 0;
   into.cover = cover;
   into.hud = hud;
   into.fade = fade;
+  into.hold = hold;
 }
 
 /**
