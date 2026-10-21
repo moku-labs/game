@@ -11,6 +11,7 @@ import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
+import { worldPlugin } from "../world";
 import { createAssetsApi } from "./api";
 import { createHandlers } from "./handlers";
 import { connectAssets, releaseAll, startAssets } from "./lifecycle";
@@ -41,7 +42,7 @@ const config: Config = {
  * ```
  */
 export const assetsPlugin = /*#__PURE__*/ createPlugin("assets", {
-  depends: [flowPlugin, rendererPlugin, timePlugin, modelPlugin],
+  depends: [flowPlugin, rendererPlugin, timePlugin, modelPlugin, worldPlugin],
   config,
   events: (register: RegisterFunction) =>
     register.map<Events>({

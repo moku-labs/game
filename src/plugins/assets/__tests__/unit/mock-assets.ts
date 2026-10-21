@@ -21,6 +21,7 @@ import type { Json, Api as ModelApi } from "../../../model/types";
 import type { Api as RendererApi, SliceFrame, TextureProvider } from "../../../renderer/types";
 import type { SceneDefinition, SceneState } from "../../../scenes/types";
 import type { Api as TimeApi } from "../../../time/types";
+import type { Entity, Api as WorldApi } from "../../../world/types";
 import { createAssetsApi } from "../../api";
 import { connectAssets, startAssets, withDeps } from "../../lifecycle";
 import { createAssetsState } from "../../state";
@@ -254,6 +255,7 @@ export type MockAssets = {
   renderer: FakeRenderer;
   time: FakeTime;
   model: FakeModel;
+  world: FakeWorld;
   connect(): void;
   start(): Promise<void>;
 };
@@ -286,6 +288,47 @@ function createFakeModel(): FakeModel {
   } as unknown as ModelApi;
 
   return fake;
+}
+
+/** The fake `world`: the start and the end of an exit, as the world tells its `Exiting` listeners. */
+export type FakeWorld = {
+  /** Tags one entity `Exiting` and calls the `onAdded(Exiting)` listeners. */
+  startExit(entity: Entity): void;
+  /** Takes the tag off one entity and calls the `onRemoved(Exiting)` listeners. */
+  endExit(entity: Entity): void;
+  api: WorldApi;
+};
+
+/**
+ * Creates the fake `world`: `ecs.onAdded` and `ecs.onRemoved` keep their listener, and the fake's two calls run them.
+ *
+ * @returns The fake world.
+ */
+function createFakeWorld(): FakeWorld {
+  const added: Array<(entity: Entity) => void> = [];
+  const removed: Array<(entity: Entity) => void> = [];
+  const keep = (list: Array<(entity: Entity) => void>, listener: (entity: Entity) => void) => {
+    list.push(listener);
+
+    return () => {
+      list.splice(list.indexOf(listener), 1);
+    };
+  };
+
+  return {
+    startExit: entity => {
+      for (const listener of added) listener(entity);
+    },
+    endExit: entity => {
+      for (const listener of removed) listener(entity);
+    },
+    api: {
+      ecs: {
+        onAdded: (_tag: unknown, listener: (entity: Entity) => void) => keep(added, listener),
+        onRemoved: (_tag: unknown, listener: (entity: Entity) => void) => keep(removed, listener)
+      }
+    } as unknown as WorldApi
+  };
 }
 
 /**
@@ -429,7 +472,9 @@ export function createMockAssets(
   const renderer = createFakeRenderer(io);
   const time = createFakeTime();
   const model = createFakeModel();
+  const world = createFakeWorld();
   const apis: Record<string, unknown> = {
+    world: world.api,
     flow: flow.api,
     renderer: renderer.api,
     time: time.api,
@@ -459,6 +504,7 @@ export function createMockAssets(
     renderer,
     time,
     model,
+    world,
     connect: (): void => connectAssets(ctx),
     start: (): Promise<void> => startAssets(ctx)
   };

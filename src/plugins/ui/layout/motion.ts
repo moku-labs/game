@@ -17,7 +17,7 @@ import type {
 import type { ComponentType } from "../../world/types";
 import { UI_OWNER } from "../components";
 import { asError } from "../errors";
-import type { Element } from "../jsx/types";
+import type { Element, PosedEnter, PoseWrite } from "../jsx/types";
 import type { Origin, ResolvedStyle } from "../styles/types";
 import type { UiCtx } from "../types";
 import { CONTENT, samePose, visualOf } from "../visual";
@@ -213,6 +213,259 @@ function watched(
     all: (handles: readonly Motion[]) => handle.all(handles),
     peer: (key: string) => handle.peer(key)
   };
+}
+
+/**
+ * A handle that keeps what an enter hook read and wrote: the components it read with `get`, the
+ * components it wrote, and every `set` with the values it wrote over. Everything goes on to the
+ * real handle.
+ *
+ * @param handle - The handle the hook plays on.
+ * @param posed - Where it is kept.
+ * @returns The recording handle.
+ */
+function recording(handle: ViewHandle<unknown>, posed: PosedEnter): ViewHandle<unknown> {
+  const wrote = (component: ComponentType<object>): void => {
+    if (!posed.written.includes(component.componentName))
+      posed.written.push(component.componentName);
+  };
+
+  return {
+    entity: handle.entity,
+    key: handle.key,
+    get: <Value extends object>(component: ComponentType<Value>) => {
+      const known = posed.reads.some(read => read.component === (component as unknown));
+
+      if (!known) posed.reads.push({ component: asAnyComponent(component), seen: {} });
+
+      return handle.get(component);
+    },
+    rest: <Value extends object>(component: ComponentType<Value>) => handle.rest(component),
+    set: <Value extends object>(component: ComponentType<Value>, patch: Partial<Value>) => {
+      wrote(component);
+      keepWrite(posed, asAnyComponent(component), patch, handle.get(component));
+      handle.set(component, patch);
+    },
+    tween: <Value extends object>(
+      component: ComponentType<Value>,
+      to: Partial<NumericFields<Value>>,
+      options: TweenOptions
+    ) => {
+      wrote(component);
+
+      return handle.tween(component, to, options);
+    },
+    toRest: <Value extends object>(component: ComponentType<Value>, options?: RestOptions) => {
+      wrote(component);
+
+      return handle.toRest(component, options);
+    },
+    all: (handles: readonly Motion[]) => handle.all(handles),
+    peer: (key: string) => handle.peer(key)
+  };
+}
+
+/**
+ * Keeps one `set` of an enter hook with the values its fields had before it. A component the
+ * entity does not carry yet has nothing to go back to: a replay writes it again.
+ *
+ * @param posed - Where the write is kept.
+ * @param component - The component the hook wrote.
+ * @param patch - The fields it wrote.
+ * @param current - The component's value before the write, if the entity carries it.
+ */
+function keepWrite(
+  posed: PosedEnter,
+  component: ComponentType<Record<string, unknown>>,
+  patch: object,
+  current: object | undefined
+): void {
+  if (current === undefined) return;
+
+  const wrote: Record<string, unknown> = { ...patch };
+  const was = current as Readonly<Record<string, unknown>>;
+  const before: Record<string, unknown> = {};
+
+  for (const field of Object.keys(wrote)) before[field] = was[field];
+  posed.writes.push({ component, wrote, before });
+}
+
+/**
+ * A component type as the record of an enter play keeps it.
+ *
+ * @param component - The component type a hook used.
+ * @returns The same type, read as a record of fields.
+ */
+function asAnyComponent<Value extends object>(
+  component: ComponentType<Value>
+): ComponentType<Record<string, unknown>> {
+  return component as unknown as ComponentType<Record<string, unknown>>;
+}
+
+/**
+ * Plays the enter hook of an element at its `Box`, before the game's systems of phase `sync` see
+ * the element, so they see its start pose (F49). What the hook read and wrote is kept on the
+ * element: `enterPosed` plays it again in `ui.enter` when a game system changed a component it
+ * read (F48), and keeps this play otherwise.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element whose `Box` was just attached.
+ * @param span - Notes the longest finite track the hook starts, for the level of an overlay.
+ */
+export function poseEnter(ctx: UiCtx, element: Element, span?: MotionSpan): void {
+  const hook = element.motion?.enter;
+
+  if (hook === undefined) return;
+
+  const posed: PosedEnter = { motion: undefined, reads: [], written: [], writes: [], span };
+
+  // The hook plays as it would in `ui.enter`, through a handle that notes what it read and wrote.
+  posed.motion = play(
+    ctx,
+    element,
+    view => hook(recording(view, posed), element.node, undefined, element.cause),
+    span
+  );
+  element.posed = posed;
+
+  // What a game system may change before `ui.enter`: a component the hook read and did not write itself.
+  const ecs = ctx.deps.world.ecs;
+
+  for (const read of posed.reads) {
+    if (posed.written.includes(read.component.componentName)) continue;
+
+    read.seen = { ...ecs.get(element.entity, read.component) };
+  }
+}
+
+/**
+ * Tells whether a game system changed a component the enter hook read at the `Box`.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element.
+ * @param posed - What the play at the `Box` kept.
+ * @returns True when a field the hook could have read is not what it was.
+ */
+function readChanged(ctx: UiCtx, element: Element, posed: PosedEnter): boolean {
+  const ecs = ctx.deps.world.ecs;
+
+  // A component the hook read and did not write: only a game system can have changed it since.
+  for (const read of posed.reads) {
+    if (posed.written.includes(read.component.componentName)) continue;
+    if (fieldsDiffer(read.seen, ecs.get(element.entity, read.component))) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tells whether a component's value is not the one a play saw: a field differs, one came or went,
+ * or the component itself went.
+ *
+ * @param seen - The fields as the play saw them.
+ * @param now - The value now, or nothing when the entity lost the component.
+ * @returns True when they differ.
+ * @example
+ * ```ts
+ * fieldsDiffer({ dy: 300 }, { dy: 180 }); // true
+ * ```
+ */
+function fieldsDiffer(seen: Readonly<Record<string, unknown>>, now: object | undefined): boolean {
+  if (now === undefined) return Object.keys(seen).length > 0;
+
+  const value = now as Readonly<Record<string, unknown>>;
+  const fields = new Set([...Object.keys(seen), ...Object.keys(value)]);
+
+  for (const field of fields) if (value[field] !== seen[field]) return true;
+
+  return false;
+}
+
+/**
+ * Undoes the play at the `Box` before the hook plays again: its motion is cancelled and forgotten,
+ * and a field still holding what a `set` wrote gets its value from before. A field written since
+ * keeps the new value. The later writes go back first, so the first one's value is what stays.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element.
+ * @param posed - What the play at the `Box` kept.
+ */
+function undoPosed(ctx: UiCtx, element: Element, posed: PosedEnter): void {
+  // The play's motion stops and leaves the element's handles: no exit waits for it.
+  forgetMotion(element, posed.motion);
+
+  // What its `set` calls wrote goes back, the latest first.
+  for (const write of posed.writes.toReversed()) revertWrite(ctx, element, write);
+}
+
+/**
+ * Cancels the motion of a play that is undone and takes it out of the element's handles.
+ *
+ * @param element - The element.
+ * @param motion - The motion the play returned, if any.
+ */
+function forgetMotion(element: Element, motion: MotionHandle | undefined): void {
+  if (motion === undefined) return;
+
+  motion.cancel();
+
+  const at = element.handles.indexOf(motion);
+
+  if (at !== -1) element.handles.splice(at, 1);
+  element.endless?.delete(motion);
+}
+
+/**
+ * Gives one `set` of an undone play back: each field still holding what it wrote gets the value it
+ * had before.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element.
+ * @param write - The write to take back.
+ */
+function revertWrite(ctx: UiCtx, element: Element, write: PoseWrite): void {
+  const ecs = ctx.deps.world.ecs;
+  const current = ecs.get(element.entity, write.component);
+
+  if (current === undefined) return;
+
+  const kept = Object.keys(write.wrote).filter(field => current[field] === write.wrote[field]);
+
+  if (kept.length === 0) return;
+
+  ecs.set(
+    element.entity,
+    write.component,
+    Object.fromEntries(kept.map(field => [field, write.before[field]]))
+  );
+}
+
+/**
+ * Settles the enter hook an element played at its `Box`, in `ui.enter`: when a game system of
+ * `sync` changed a component the hook read, the play is undone and the hook plays again on what
+ * the system wrote (F48); otherwise the play stands, and an overlay's span gets what it noted.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element whose enter plays now.
+ * @param span - Where the longest finite track is noted, for the level of an overlay.
+ * @returns True when the play at the `Box` stands; false when there was none, or it was undone.
+ */
+export function enterPosed(ctx: UiCtx, element: Element, span?: MotionSpan): boolean {
+  const posed = element.posed;
+
+  if (posed === undefined) return false;
+
+  element.posed = undefined;
+
+  if (readChanged(ctx, element, posed)) {
+    undoPosed(ctx, element, posed);
+
+    return false;
+  }
+
+  if (span !== undefined && posed.span !== undefined) Object.assign(span, posed.span);
+
+  return true;
 }
 
 /**

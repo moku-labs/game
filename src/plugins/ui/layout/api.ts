@@ -15,7 +15,16 @@ import { applyStyleToNode, layoutChanged } from "./apply";
 import { beginExit, canDespawn } from "./exit";
 import { createGuideHandler } from "./guide";
 import { iconLineMoved, installMeasure, markMeasured, remeasureShown } from "./measure";
-import { liftRest, play, playExtraChange, repose, startLoop, writeRest } from "./motion";
+import {
+  enterPosed,
+  liftRest,
+  play,
+  playExtraChange,
+  poseEnter,
+  repose,
+  startLoop,
+  writeRest
+} from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
 import { clampScroll, scrollTo, settleScroll, stepScroll } from "./scroll";
@@ -126,10 +135,12 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
           ? undefined
           : (view: ViewHandle<unknown>) => hook(view, element.node, undefined, element.cause);
 
-      play(ctx, element, played, span);
+      if (!enterPosed(ctx, element, span)) play(ctx, element, played, span);
       // The loop is for the element's life, not its arrival: it starts whatever the cause.
       startLoop(ctx, element);
     },
+
+    pose: (element: Element, span?: MotionSpan): void => poseEnter(ctx, element, span),
 
     loop: (element: Element): void => startLoop(ctx, element),
 

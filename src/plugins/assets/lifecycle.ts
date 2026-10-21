@@ -1,5 +1,5 @@
 /**
- * @file assets plugin — lifecycle: the three registrations of `onInit`, the boot of `onStart`
+ * @file assets plugin — lifecycle: the five registrations of `onInit`, the boot of `onStart`
  * and the teardown that frees every texture and cancels every fetch.
  */
 import { flowPlugin } from "../flow";
@@ -8,9 +8,11 @@ import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
 import { isSceneDefinition } from "../scenes/bundles";
 import { timePlugin } from "../time";
+import { worldPlugin } from "../world";
+import { Exiting } from "../world/ecs/define";
 import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
-import { releaseAssets, releaseLeftBundles } from "./budget";
+import { releaseAssets, releaseLeftBundles, releaseSceneLeft } from "./budget";
 import { bundlesOfNode } from "./preload";
 import { bootTiers, loadBundle } from "./tiers";
 import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "./types";
@@ -19,17 +21,18 @@ import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "
 type RunContext = { mode: "live" | "fast"; signal: AbortSignal };
 
 /**
- * Resolves the dependency APIs `flow`, `renderer`, `time` and `model` with `ctx.require`.
+ * Resolves the dependency APIs `flow`, `renderer`, `time`, `model` and `world` with `ctx.require`.
  *
  * @param ctx - Kernel context of the assets plugin.
- * @returns The four dependency APIs.
+ * @returns The five dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     flow: ctx.require(flowPlugin),
     renderer: ctx.require(rendererPlugin),
     time: ctx.require(timePlugin),
-    model: ctx.require(modelPlugin)
+    model: ctx.require(modelPlugin),
+    world: ctx.require(worldPlugin)
   };
 }
 
@@ -144,15 +147,11 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
 
 /**
  * Connects the plugin in `onInit`: the `load` stage of `onEnter`, the handler of the `load`
- * effect and the texture provider of `renderer`. The three removers go to the state, because
- * `onStop` has nothing but the state.
+ * effect, the texture provider of `renderer`, and the start and the end of an exit in `world`,
+ * counted so a leaving scene's bundles go when the last exit ends (F51). The five removers go to
+ * the state, because `onStop` has nothing but the state.
  *
  * @param ctx - Kernel context of the assets plugin.
- * @example
- * ```ts
- * connectAssets(ctx);
- * ctx.state.removers.length; // 3
- * ```
  */
 export function connectAssets(ctx: KernelSlice): void {
   const assets = withDeps(ctx);
@@ -164,7 +163,15 @@ export function connectAssets(ctx: KernelSlice): void {
       (descriptor, run) => runLoadEffect(assets, descriptor, run),
       { runInFast: true }
     ),
-    assets.deps.renderer.sync.textures.provide(key => lookupTexture(assets, key))
+    assets.deps.renderer.sync.textures.provide(key => lookupTexture(assets, key)),
+    // The world's exits are counted; when the last one ends, the bundles a leaving scene named may go (F51).
+    assets.deps.world.ecs.onAdded(Exiting, () => {
+      assets.state.exiting += 1;
+    }),
+    assets.deps.world.ecs.onRemoved(Exiting, () => {
+      assets.state.exiting -= 1;
+      releaseSceneLeft(assets);
+    })
   );
 }
 
@@ -256,7 +263,7 @@ export async function startAssets(ctx: KernelSlice): Promise<void> {
 
 /**
  * Frees everything in `onStop`: the preload and every running load are aborted, every texture is
- * destroyed, the three registrations are removed and the registries are emptied, the companions
+ * destroyed, the five registrations are removed and the registries are emptied, the companions
  * too. A teardown context carries the state and nothing else, so no other plugin is called here:
  * no companion's `unload` either, its plugin stopped before this one.
  *
@@ -292,6 +299,8 @@ export function releaseAll(state: State): void {
   state.current = undefined;
   state.sceneId = undefined;
   state.sceneNamed = [];
+  state.sceneLeaving = [];
+  state.exiting = 0;
   state.restPending = false;
   state.stamps = undefined;
   state.swapping = undefined;
