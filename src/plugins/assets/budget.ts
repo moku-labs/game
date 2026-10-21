@@ -270,8 +270,8 @@ export function isHeld(
 
 /**
  * Unloads every loaded `"leave"` bundle nobody holds any more, with the reason `"leave"`; a
- * leaving scene holds its bundles only while anything carries `Exiting`. A running load is never aborted by it, and a `"budget"` bundle is never touched. Headless it does
- * nothing.
+ * leaving scene holds its bundles only while anything carries `Exiting`. A running load is never
+ * aborted by it, and a `"budget"` bundle is never touched. Headless it does nothing.
  *
  * @param ctx - Domain context of the plugin.
  */
@@ -284,14 +284,7 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
 
   const onStack = featuresOnStack(ctx);
 
-  for (const [name, record] of state.records) {
-    const entry = state.manifest.bundles[name];
-
-    if (record.status !== "loaded" || entry?.release !== "leave") continue;
-    if (isHeld(ctx, name, entry, onStack)) continue;
-
-    unloadBundle(ctx, name, "leave");
-  }
+  for (const name of state.records.keys()) unloadIfLeft(ctx, name, onStack);
 }
 
 /**
@@ -303,12 +296,14 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
  * @param named - The bundles the mounted scene names now.
  */
 export function nameSceneBundles(state: State, named: readonly string[]): void {
+  // A name the new list drops stays held as a leaving scene's; one it takes back is not leaving.
   const leaving = state.sceneLeaving.filter(name => !named.includes(name));
 
   for (const name of state.sceneNamed) {
     if (!named.includes(name) && !leaving.includes(name)) leaving.push(name);
   }
 
+  // The new list is the mounted scene's.
   state.sceneLeaving = leaving;
   state.sceneNamed = [...named];
 }
@@ -335,12 +330,21 @@ export function releaseSceneLeft(ctx: AssetsCtx): void {
 
   const onStack = featuresOnStack(ctx);
 
-  for (const name of names) {
-    const entry = state.manifest.bundles[name];
+  for (const name of names) unloadIfLeft(ctx, name, onStack);
+}
 
-    if (state.records.get(name)?.status !== "loaded" || entry?.release !== "leave") continue;
-    if (isHeld(ctx, name, entry, onStack)) continue;
+/**
+ * Unloads one bundle with the reason `"leave"` when it is a loaded `"leave"` bundle nobody holds.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param name - Name of the bundle.
+ * @param onStack - The features on the stack, from `featuresOnStack`.
+ */
+function unloadIfLeft(ctx: AssetsCtx, name: string, onStack: ReadonlySet<string>): void {
+  const entry = ctx.state.manifest.bundles[name];
 
-    unloadBundle(ctx, name, "leave");
-  }
+  if (ctx.state.records.get(name)?.status !== "loaded" || entry?.release !== "leave") return;
+  if (isHeld(ctx, name, entry, onStack)) return;
+
+  unloadBundle(ctx, name, "leave");
 }
