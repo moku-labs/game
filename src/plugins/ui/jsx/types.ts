@@ -689,7 +689,11 @@ export type JsxModule = {
   releaseHosted(): void;
   applyTap(entity: Entity): void;
   markPointer(entity: Entity, flag: PointerFlag, on: boolean): void;
-  /** Keeps an element whose `Box` was just attached for `playEntered`. */
+  /**
+   * Keeps an element whose `Box` was just attached for `playEntered`.
+   *
+   * @param entity - The entity the `Box` was attached to.
+   */
   queueEnter(entity: Entity): void;
   /**
    * Plays the enter hooks of the elements queued since the last call, in the order they came. The

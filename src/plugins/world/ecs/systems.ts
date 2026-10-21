@@ -39,8 +39,11 @@ export type SystemTiming = {
 /** The one phase that runs in every mode, because `renderer.sync` lives in it. */
 const ALWAYS = "sync";
 
-/** The system that hands the world to Pixi: the last of its phase, so a frame draws what every system wrote. */
-const DRAWS = "renderer.sync";
+/**
+ * The name of the system that hands the world to Pixi: the last of its phase, so a frame draws what every system
+ * wrote. The renderer registers its system under this name.
+ */
+export const DRAWS_SYSTEM = "renderer.sync";
 
 /** Rows a timing table holds before it first grows. */
 const TIMING_ROWS = 16;
@@ -152,8 +155,9 @@ function storeSlots(count: number): Array<ComponentStore | undefined> {
 }
 
 /**
- * Registers a system at the end of its phase list, before `renderer.sync` in phase `sync`, and returns the remover. Its query and its
- * `scenes` are read here, once: a later change to the definition is not seen. A dev build checks
+ * Registers a system at the end of its phase list and returns the remover. In phase `sync` it goes
+ * before `renderer.sync`, which stays last. Its query and its `scenes` are read here, once: a
+ * later change to the definition is not seen. A dev build checks
  * the `scenes` against the scenes the features declare, once the world started.
  *
  * @param ctx - Domain context of the world plugin.
@@ -193,7 +197,7 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void
     walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan)
   };
   const list = state.systems[definition.phase];
-  const draws = list.findIndex(known => known.definition.name === DRAWS);
+  const draws = list.findIndex(known => known.definition.name === DRAWS_SYSTEM);
 
   // A system registered after the renderer started runs before its pass, not a frame late:
   // the ui's enter hooks are one (F48), a feature added later another.
