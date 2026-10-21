@@ -63,7 +63,7 @@ await fx(load("board.chains")); // { loaded: ["board.chains"], mb: 1.25 }
 |---|---|
 | Default | A feature or sub-feature without `assets.ts` has one bundle, named as the feature, tier `"feature"`, all files of `assets/`: `features/episodes/ep02/` gives the bundle `ep02`. A sub-feature with `strings/` and no file still has it (file-less), so its lazy strings travel with it. |
 | Names | A bundle name is the feature name, or starts with `feature.`. Anything else is a scanner error. A sub-feature's name is its inner folder name: `features/episodes/ep01/assets.ts` declares `ep01` and `ep01.*`, never `episodes.ep01`, and its parent cannot declare `ep01`. |
-| `release` | `"budget"` (the default, written as nothing) or `"leave"`: also unloaded at the next rest once its feature left (Preload and budget). `"leave"` on `boot` or `core` is a scanner error; any other value too. `defineBundles` copies it. |
+| `release` | `"budget"` (the default, written as nothing) or `"leave"`: also unloaded at the next rest once its feature left, or once a scene that named it finished its exit (Preload and budget). `"leave"` on `boot` or `core` is a scanner error; any other value too. `defineBundles` copies it. |
 | `mipmaps` | `true` (every texture of the bundle) or globs relative to `assets/` (`["items/**"]`); a glob of one bundle marks its own files only, and a glob that matches no texture is a note. Any other value is a scanner error. A mipmapped texture is uploaded with its full chain, costs about a third more and stays loose in a pack. `defineBundles` copies the list. |
 | `files` | A bundle with `files` takes the matching files out of the feature's default bundle. A file matched by two bundles is a scanner error naming both bundles. |
 | Layers | A folder under the root scanned like one more feature, under a mapped name: `--layer shared=ui` (`layers: { shared: "ui" }` for `scanAssets`) reads `shared/assets.ts` and `shared/assets/` exactly as `features/ui/` would be read, so every key and bundle stays `ui.*`. The layer's `assets.ts` names its bundles after the mapped name. |
@@ -350,7 +350,7 @@ a built game and headless.
 |---|---|
 | `assets:bundle-progress` | `{ bundle, loaded, total }` |
 | `assets:bundle-loaded` | `{ bundle, tier, mb, reason: "boot" \| "enter" \| "request" \| "preload" }` |
-| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request" \| "leave", keys }`; `"leave"`: its feature left (`release: "leave"`) |
+| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request" \| "leave", keys }`; `"leave"`: its feature left, or a scene that named it finished its exit (`release: "leave"`) |
 | `assets:replaced` | `{ bundle, keys }`, dev builds only |
 
 `assets:bundle-progress` is for the game: no engine plugin listens to it. A splash screen fills
@@ -411,7 +411,7 @@ work.
 | `paths.ts` | The paths of the manifest for the hot swap: `indexPaths`, `refusalOf` (why the page reloads instead) and `batchesOf` (the changed files by bundle). |
 | `swap.ts` | The replace itself: `createSwap` (the handler behind `ui:hot-swap`), one bundle after another. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
-| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`, `releaseAssets` (slices, then pages, then font pages). |
+| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`, `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |

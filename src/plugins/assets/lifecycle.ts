@@ -172,8 +172,8 @@ export function connectAssets(ctx: KernelSlice): void {
     assets.deps.world.ecs.onRemoved(Exiting, () => {
       assets.state.exiting -= 1;
     }),
-    // In phase `sync`, after the reconcile of `layout` tagged what leaves: a leaving scene with nothing left
-    // exiting lets its bundles go (F51b).
+    // In phase `sync`, after the reconcile of `layout` tagged what leaves: a leaving scene with
+    // nothing left exiting lets its bundles go (F51b).
     assets.deps.world.ecs.system(
       system({
         name: "assets.leave",
@@ -256,11 +256,6 @@ function readFeatures(ctx: AssetsCtx): void {
  * @param ctx - Kernel context of the assets plugin.
  * @returns A promise that resolves once the boot tier is there.
  * @throws {Error} In a browser, when the manifest or a boot bundle cannot be read.
- * @example
- * ```ts
- * await startAssets(ctx);
- * ctx.state.io; // the configured io, the browser io, or undefined while headless
- * ```
  */
 export async function startAssets(ctx: KernelSlice): Promise<void> {
   const assets = withDeps(ctx);
@@ -278,11 +273,6 @@ export async function startAssets(ctx: KernelSlice): Promise<void> {
  * no companion's `unload` either, its plugin stopped before this one.
  *
  * @param state - The plugin state.
- * @example
- * ```ts
- * releaseAll(state);
- * state.records.size; // 0, and every texture went back to the GPU
- * ```
  */
 export function releaseAll(state: State): void {
   state.queue?.controller.abort();

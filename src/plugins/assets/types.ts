@@ -577,7 +577,10 @@ export type State = {
   useCounter: number;
   /** Keys already reported missing, so one key warns and starts its background load once. */
   warned: Set<string>;
-  /** `onEnter`, the `load` handler, the texture provider, and the start and the end of an exit in `world`. */
+  /**
+   * `onEnter`, the `load` handler, the texture provider, the start and the end of an exit in `world`, and the system
+   * `assets.leave` of phase `sync`.
+   */
   removers: Array<() => void>;
   /** The `files` map of the stamp the dev hot swap applied last. `undefined` until the first swap. */
   stamps: Readonly<Record<string, string>> | undefined;
@@ -661,7 +664,7 @@ export type Events = {
   "assets:bundle-progress": { bundle: string; loaded: number; total: number };
   /**
    * The textures of a bundle were destroyed. `keys` names every asset that went with it. `reason`
-   * "leave": its feature left (release "leave").
+   * "leave": its feature left, or a scene that named it finished its exit (release "leave").
    */
   "assets:bundle-unloaded": {
     bundle: string;
