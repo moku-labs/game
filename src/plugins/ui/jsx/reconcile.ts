@@ -1375,11 +1375,14 @@ export function createReconciler(
   function subtreeSettled(element: Element): boolean {
     if (!modules.layout.settled(element)) return false;
 
-    return element.children.every(child => {
+    // Per exiting element and frame (two sweeps while anything leaves): an array `for…of`, no closure.
+    for (const child of element.children) {
       const childElement = state.elements.get(child);
 
-      return childElement === undefined || subtreeSettled(childElement);
-    });
+      if (childElement !== undefined && !subtreeSettled(childElement)) return false;
+    }
+
+    return true;
   }
 
   /**
