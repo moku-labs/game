@@ -56,6 +56,7 @@ export const Card = defineComponent("Card", {
           <text key="cardName" style="card.name" content={local.long ? LONG_NAME : SHORT_NAME} />
         </column>
       </row>
+      <text key="cardTitle" style="body" content="A title of the body style" />
       <button key="widen" local={{ side: 150 }} style={control} />
       <button key="narrow" local={{ side: 100 }} style={control} />
       <button key="shorten" local={{ long: false }} style={control} />

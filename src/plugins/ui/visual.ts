@@ -121,8 +121,8 @@ export function visualOf(element: Element): AnyComponentValue[] {
         style: styleKey,
         bind: node.props.bind as undefined,
         anchor: { x: 0, y: 0 },
-        // The laid-out width: a style with `wrap: "box"` wraps there, any other ignores it.
-        box: rect.w
+        // The laid-out width, for a text of a style with `wrap: "box"` that wrapped at its box.
+        box: element.measuredWidth === undefined ? undefined : rect.w
       })
     ];
   }
