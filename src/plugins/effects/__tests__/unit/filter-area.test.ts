@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Entity } from "../../../world/types";
+import { Sprite, Transform } from "../../../renderer/components";
+import type { AnyComponentValue, Entity } from "../../../world/types";
 import { Alpha, Blur } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import type { FilterArea, FilterComponent, FilterValueOf } from "../../filters/types";
@@ -236,5 +237,47 @@ describe("the area of a filtered view", () => {
     mock.frame();
 
     expect(areasOf(mock, view)).toEqual([[90, 90, 20, 20], undefined, [90, 90, 20, 20]]);
+  });
+});
+
+/**
+ * A full-screen sprite of the reference size.
+ *
+ * @returns Its components.
+ */
+function screenSprite(): AnyComponentValue[] {
+  return [Sprite({ texture: "splash.ward", width: 1080, height: 1920 }), Transform()];
+}
+
+describe("the full-screen budget of a view with an area (F43)", () => {
+  // Bug (A Memory Missing, splash): the lens fills only its disc, but its full-screen sprite counted as a
+  // full-screen filter, and `effects:full-screen-filters {count: 2}` fired at every boot.
+  it("a full-screen sprite whose filters draw only a disc is not a full-screen filter", () => {
+    const { Lens } = lensFilter();
+    const mock = started([Lens] as never);
+
+    mock.spawn([...screenSprite(), Blur()]);
+    mock.spawn([...screenSprite(), Lens({ cx: 540, cy: 960, reach: 150 })]);
+    mock.frame();
+    mock.frame();
+
+    expect(mock.log.warn).not.toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
+  });
+
+  // The other side: an area that covers the viewport, times the view's scale, still counts.
+  it("an area that covers the viewport at the view's scale still counts", () => {
+    const { Lens } = lensFilter();
+    const mock = started([Lens] as never);
+
+    mock.spawn([...screenSprite(), Blur()]);
+    mock.spawn([
+      Sprite({ texture: "splash.ward", width: 540, height: 960 }),
+      Transform({ scale: 2 }),
+      Lens({ cx: 270, cy: 480, reach: 480 })
+    ]);
+    mock.frame();
+    mock.frame();
+
+    expect(mock.log.warn).toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
   });
 });

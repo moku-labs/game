@@ -187,3 +187,35 @@ describe("anim/tween — writes only what changed", () => {
     expect(away.mock.world.ecs.get(away.entity, Transform)?.x).toBe(40);
   });
 });
+
+describe("anim/tween — a 0 ms track lands as it starts (F47)", () => {
+  // Bug (A Memory Missing, inspect plate): ui writes a new rest pose through a 0 ms track in phase layout; the track
+  // wrote the position at the next frame step while the pivot was written at once, and the plate jumped for a frame.
+  it("writes its target when it starts, and the next frame step ends it and its Animation", () => {
+    const context = setup([Transform({ x: 0, y: 0 })]);
+    const { mock, driver, entity } = context;
+
+    beginFrame(mock.actx);
+    driver.track(entity, Transform, { x: 40, y: 20 }, { ms: 0 }, open);
+
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 40, y: 20 });
+
+    step(context, 16, Transform);
+    step(context, 16, Transform);
+
+    expect(mock.world.ecs.get(entity, Animation)).toBeUndefined();
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 40, y: 20 });
+  });
+
+  // The other side: a delayed or a timed track still waits for its frame steps.
+  it("leaves a 0 ms track with a delay, and a timed one, to the frame steps", () => {
+    const context = setup([Transform({ x: 0, y: 0 })]);
+    const { mock, driver, entity } = context;
+
+    beginFrame(mock.actx);
+    driver.track(entity, Transform, { x: 40 }, { ms: 0, delayMs: 32 }, open);
+    driver.track(entity, Transform, { y: 20 }, { ms: 100 }, open);
+
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 0, y: 0 });
+  });
+});

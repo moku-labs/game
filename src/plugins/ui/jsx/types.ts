@@ -257,7 +257,8 @@ export type StyleBasis = { epoch: number; rowHeight: number | undefined };
  * `cause` is why the element appeared: `"mount"` when it came with the first build of its root and
  * the root came by a mount, `"change"` otherwise; its `enter` hook is told. `rebuilds` counts the
  * patches in a row that brought a loop of another reference that is not really another loop: a
- * dev build names the element once it reaches three.
+ * dev build names the element once it reaches three. `endless` holds the motions a hook returned
+ * after it started a track that repeats forever: they never end, so no exit waits for them (F42).
  */
 export type Element = {
   entity: Entity;
@@ -295,6 +296,8 @@ export type Element = {
   scroll?: ScrollMotion;
   measuredSize?: { width: number; height: number };
   basis?: StyleBasis;
+  /** The motions of its hooks that started a `repeat: "forever"` track; made with the first one. */
+  endless?: Set<MotionHandle>;
 };
 
 /**

@@ -219,7 +219,9 @@ describe("a label ui spawns, in its spawn frame", () => {
 });
 
 describe("a label whose content changes", () => {
-  it("still resolves in the layout phase after the one that wrote it", async () => {
+  // Bug (F45, A Memory Missing's typewriter): `ui` writes the new content after the layout system of `text` ran, so
+  // `Text.resolved` held the old line for a frame and the frame drew it.
+  it("resolves in the frame ui writes it, before that frame is drawn", async () => {
     const app = await startApp();
 
     app.world.projection.mount(["spawn.line"], { kind: "plugin", name: "test" });
@@ -234,10 +236,6 @@ describe("a label whose content changes", () => {
     app.time.step(16);
 
     expect(app.world.ecs.get(entityOf(app, "line"), Text)?.content).toBe("b");
-    expect(resolvedOf(app, "line")).toBe("a");
-
-    app.time.step(16);
-
     expect(resolvedOf(app, "line")).toBe("b");
 
     await app.stop();
