@@ -52,6 +52,7 @@ export function createAssetsState(): State {
     stamps: undefined,
     swapping: undefined,
     sceneNamed: [],
+    sceneLeaving: [],
     companions: [],
     restPending: false
   };

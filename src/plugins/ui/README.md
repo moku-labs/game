@@ -476,13 +476,19 @@ the same loop (the same keys, cycle and reduced-motion rule) is the same loop: i
 declare a motion at module level: a dev build names an element whose loop was rebuilt by three
 renders in a row (`ui:motion-rebuilt`), and a hand-written loop of a new reference restarts.
 
-An element's `enter` hook (and the `loop` beside it) plays in phase `sync` of the frame the element
-comes, in the system `ui.enter`: after every system of the game, before `renderer.sync` draws the
-frame. So a game system of any phase has seen the new entity and what it wrote is there for the
-hook to read, and the element is never drawn at its rest pose by mistake: its first drawn frame
-shows the pose the hook started from. A picture that grows out of a thumbnail in a scrolled list
-starts where the thumbnail is drawn when a `sync` system adds the list's `ScrollState.offset` to
-what the hook reads (F48):
+An element's `enter` hook plays at the element's `Box`, at the flush of phase `layout`, before any
+`sync` system of the game sees the entity: a system of `sync` (a gate that reads the element's
+alpha, say) sees the start pose the hook wrote, the pose the frame draws, never the rest pose
+(F49). The hook keeps a note of the components it read with `view.get`. In phase `sync`, in the
+system `ui.enter` (after every system of the game, before `renderer.sync` draws the frame), the
+loop starts, and when a game system changed a component the hook read and did not write itself,
+that play is undone (its motion cancelled, each field its `set` wrote given back the value it had,
+unless something wrote it since) and the hook plays again on what the system wrote. So the
+element's first drawn frame shows the pose the hook started from, and a hook may read what a
+system wrote in that frame. A hook that reads nothing a system changes plays once; one that does
+plays twice in that frame, so keep side effects out of an `enter` hook. A picture that grows out
+of a thumbnail in a scrolled list starts where the thumbnail is drawn when a `sync` system adds
+the list's `ScrollState.offset` to what the hook reads (F48):
 
 ```ts
 const growScroll = system({

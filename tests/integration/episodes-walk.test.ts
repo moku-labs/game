@@ -108,7 +108,7 @@ describe("episodes-walk — the headless app", () => {
 });
 
 describe("episodes-walk — the screen app", () => {
-  it("entering an episode loads its bundle and its strings together; leaving releases both at the second rest after the ward stopped naming it", async () => {
+  it("entering an episode loads its bundle and its strings together; leaving releases both once the ward's exit is over", async () => {
     const { app, unloaded } = await toWard("ep01");
     const ofEp01 = (): Unloaded[] => unloaded.filter(event => event.bundle === "ep01");
 
@@ -116,19 +116,18 @@ describe("episodes-walk — the screen app", () => {
     expect(app.assets.isLoaded("ep01")).toBe(true);
     expect(app.i18n.has("ep01.title")).toBe(true);
 
-    // The first rest after the ward: the ward scene was still mounted when pick's load stage ran.
+    // The picker names only "episodes": the ward's bundle goes when its elements played their exit (F51), not at a
+    // later rest.
     await answer(app, "leave", "episodes/pick");
-
-    expect(app.assets.isLoaded("ep01")).toBe(true);
-    expect(app.i18n.has("ep01.title")).toBe(true);
-    expect(ofEp01()).toEqual([]);
-
-    // The second rest: the picker scene names only "episodes".
-    await answer(app, "back", "home");
 
     expect(app.assets.isLoaded("ep01")).toBe(false);
     expect(app.i18n.has("ep01.title")).toBe(false);
     expect(ofEp01()).toEqual([expect.objectContaining({ bundle: "ep01", reason: "leave" })]);
+
+    // The next rest has nothing more to let go.
+    await answer(app, "back", "home");
+
+    expect(ofEp01()).toHaveLength(1);
 
     await app.stop();
   });

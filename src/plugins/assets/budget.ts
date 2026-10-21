@@ -4,6 +4,7 @@
  * never a clock.
  */
 
+import { Exiting } from "../world/ecs/define";
 import { unloadCompanions } from "./companions";
 import { isPermanent } from "./tiers";
 import type { AssetsCtx, AssetsIo, Events, LoadedAssets, ManifestBundle, State } from "./types";
@@ -52,7 +53,7 @@ export function pickVictim(state: State): string | undefined {
 
     if (record.status !== "loaded" || entry === undefined) continue;
     if (state.pinned.has(name) || isPermanent(entry.tier)) continue;
-    if (state.sceneNamed.includes(name)) continue;
+    if (state.sceneNamed.includes(name) || state.sceneLeaving.includes(name)) continue;
     if (state.queue?.bundles.includes(name) === true) continue;
     if (record.lastUsed >= smallest) continue;
 
@@ -241,8 +242,9 @@ export function featuresOnStack(ctx: AssetsCtx): ReadonlySet<string> {
 
 /**
  * Tells whether a bundle must stay where the game stands now: it is pinned (a bundle of the node
- * entered last), the mounted scene names it (the last list `sceneBundles` received), its feature
- * is in `onStack`, or its tier is permanent.
+ * entered last), the mounted scene names it (the last list `sceneBundles` received), a leaving
+ * scene named it and its elements still play their exit, its feature is in `onStack`, or its tier
+ * is permanent.
  *
  * @param ctx - Domain context of the plugin.
  * @param name - Name of the bundle.
@@ -261,14 +263,15 @@ export function isHeld(
   return (
     state.pinned.has(name) ||
     state.sceneNamed.includes(name) ||
+    state.sceneLeaving.includes(name) ||
     onStack.has(entry.feature) ||
     isPermanent(entry.tier)
   );
 }
 
 /**
- * Unloads every loaded `"leave"` bundle nobody holds any more, with the reason `"leave"`. A
- * running load is never aborted by it, and a `"budget"` bundle is never touched. Headless it does
+ * Unloads every loaded `"leave"` bundle nobody holds any more, with the reason `"leave"`; a
+ * leaving scene holds its bundles only while anything carries `Exiting`. A running load is never aborted by it, and a `"budget"` bundle is never touched. Headless it does
  * nothing.
  *
  * @param ctx - Domain context of the plugin.
@@ -277,6 +280,8 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
   const state = ctx.state;
 
   if (state.io === undefined) return;
+  // A leaving scene whose elements all played their exit holds nothing any more.
+  if (state.sceneLeaving.length > 0 && !anyExiting(ctx)) state.sceneLeaving = [];
 
   const onStack = featuresOnStack(ctx);
 
@@ -284,6 +289,74 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
     const entry = state.manifest.bundles[name];
 
     if (record.status !== "loaded" || entry?.release !== "leave") continue;
+    if (isHeld(ctx, name, entry, onStack)) continue;
+
+    unloadBundle(ctx, name, "leave");
+  }
+}
+
+/**
+ * Takes the list the mounted scene names now. A bundle the list named before and names no more
+ * stays held as a leaving scene's, until nothing carries `Exiting` (F51); a name the list takes
+ * again is the mounted scene's once more.
+ *
+ * @param state - The plugin state.
+ * @param named - The bundles the mounted scene names now.
+ * @example
+ * ```ts
+ * // The memory named ep01.memory; the board names nothing of it.
+ * nameSceneBundles(state, ["board"]); // state.sceneLeaving: ["ep01.memory", "ui.memory"]
+ * ```
+ */
+export function nameSceneBundles(state: State, named: readonly string[]): void {
+  const leaving = state.sceneLeaving.filter(name => !named.includes(name));
+
+  for (const name of state.sceneNamed) {
+    if (!named.includes(name) && !leaving.includes(name)) leaving.push(name);
+  }
+
+  state.sceneLeaving = leaving;
+  state.sceneNamed = [...named];
+}
+
+/**
+ * Tells whether an element of the world still plays its exit.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns True while anything carries `Exiting`.
+ */
+function anyExiting(ctx: AssetsCtx): boolean {
+  // The first row answers: a `for…of` that returns at once walks no further.
+  for (const row of ctx.deps.world.ecs.query(Exiting)) if (row.length > 0) return true;
+
+  return false;
+}
+
+/**
+ * Lets the bundles a leaving scene named go once nothing carries `Exiting` any more: each loaded
+ * `"leave"` bundle among them that nothing else holds is unloaded with the reason `"leave"`, at
+ * once, not at the next rest. A bundle of another release stays, as it would have. The world calls
+ * it through `onRemoved(Exiting)`, so the check costs a length read while no scene leaves.
+ *
+ * @param ctx - Domain context of the plugin.
+ */
+export function releaseSceneLeft(ctx: AssetsCtx): void {
+  const state = ctx.state;
+
+  if (state.sceneLeaving.length === 0 || anyExiting(ctx)) return;
+
+  const names = state.sceneLeaving;
+
+  state.sceneLeaving = [];
+
+  if (state.io === undefined) return;
+
+  const onStack = featuresOnStack(ctx);
+
+  for (const name of names) {
+    const entry = state.manifest.bundles[name];
+
+    if (state.records.get(name)?.status !== "loaded" || entry?.release !== "leave") continue;
     if (isHeld(ctx, name, entry, onStack)) continue;
 
     unloadBundle(ctx, name, "leave");

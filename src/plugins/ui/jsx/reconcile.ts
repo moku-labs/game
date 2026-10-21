@@ -1867,7 +1867,8 @@ export function createReconciler(
   /**
    * Keeps an element whose spawn has just been applied: the world calls it from the `Box` hook, at
    * the flush of phase `layout`. Its enter hook waits for `playEntered`, so the game's systems see
-   * the entity first (F48).
+   * the entity first (F48). The hook itself plays at once, so they see the start pose it writes (F49);
+   * `ui.enter` plays it again when one of them changed what it read.
    *
    * @param entity - The entity the `Box` was attached to.
    */
@@ -1879,6 +1880,13 @@ export function createReconciler(
     else entering.list.push(entity);
 
     entering.count += 1;
+
+    const element = state.elements.get(entity);
+
+    // Its hook plays now, so the game's systems see the element as it will be drawn (F49).
+    if (element !== undefined && !element.entered && !element.scrolledIn) {
+      modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
+    }
   }
 
   /**

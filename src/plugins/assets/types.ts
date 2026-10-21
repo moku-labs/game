@@ -10,6 +10,7 @@ import type { Api as ModelApi } from "../model/types";
 import type { PixiTexture, Api as RendererApi, SliceFrame } from "../renderer/types";
 import type { SceneDefinition } from "../scenes/types";
 import type { Api as TimeApi } from "../time/types";
+import type { Api as WorldApi } from "../world/types";
 
 /**
  * When a bundle is loaded. `boot` and `core` stay for the whole session, `scene` and `feature`
@@ -302,7 +303,10 @@ export type ManifestBundle = {
    */
   dir?: string;
   tier: Tier;
-  /** `"leave"`: unloaded at the next rest once its feature left. Absent: `"budget"`. */
+  /**
+   * `"leave"`: unloaded at the next rest once its feature left, or once the exit of a scene that named it is over.
+   * Absent: `"budget"`.
+   */
   release?: "leave";
   mb: number;
   pages?: readonly AtlasPage[];
@@ -581,6 +585,11 @@ export type State = {
   swapping: Promise<void> | undefined;
   /** The list the mounted scene names, from the last `sceneBundles` call. */
   sceneNamed: readonly string[];
+  /**
+   * The bundles a scene named before and the list names no more: held while anything carries `Exiting`, so a
+   * leaving scene's pictures stay until its elements played their exit (F51).
+   */
+  sceneLeaving: string[];
   /** Registered companions, in registration order. */
   companions: BundleCompanion[];
   /** A live rest was announced; the arriving node's `load` stage runs the release. */
@@ -795,7 +804,9 @@ export type Api = {
   /**
    * Tells assets which bundles the mounted scene names: its `bundle`, then what its `bundles(state)` returned.
    * Each call replaces the list before it. A bundle in the list is never a victim of the budget and is not
-   * released by `release: "leave"` while it stays in the list. Called by `scenes`; a game never calls it.
+   * released by `release: "leave"` while it stays in the list. A bundle the list named before and names no more
+   * stays held while anything carries `Exiting`, so a leaving scene's pictures stay until its elements played their
+   * exit; then a `"leave"` one goes at once (F51). Called by `scenes`; a game never calls it.
    *
    * @param named - The bundle names of the mounted scene, the scene bundle first.
    * @example
@@ -803,6 +814,8 @@ export type Api = {
    * // scenes, right after it mounted the ward for episode 1 (and after a re-read that changed the list).
    * ctx.require(assetsPlugin).sceneBundles(["ui", "ep01"]);
    * // ep01 (release "leave") now stays while the ward shows it, even after the ep01 flow left the stack
+   * ctx.require(assetsPlugin).sceneBundles(["board"]);
+   * // the board is mounted: ep01 stays until the ward's elements played their exit, then goes
    * ```
    */
   sceneBundles(named: readonly string[]): void;
@@ -853,7 +866,13 @@ export type Api = {
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { flow: FlowApi; renderer: RendererApi; time: TimeApi; model: ModelApi };
+export type Deps = {
+  flow: FlowApi;
+  renderer: RendererApi;
+  time: TimeApi;
+  model: ModelApi;
+  world: WorldApi;
+};
 
 /**
  * What the kernel context offers before the deps are attached.
@@ -887,7 +906,8 @@ export type HotSwap = GlobalEvents["ui:hot-swap"];
 /**
  * When a bundle leaves besides the budget. `"budget"` (default): only the LRU unloads it when memory
  * runs out. `"leave"`: also unloaded at the next rest once no node of its feature is on the stack
- * and no mounted scene names it.
+ * and no mounted scene names it; a scene that named it and left holds it until its elements played
+ * their exit, and then it goes at once.
  *
  * @example
  * ```ts

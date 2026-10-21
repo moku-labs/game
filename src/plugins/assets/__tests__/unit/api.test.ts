@@ -375,6 +375,61 @@ describe("sceneBundles", () => {
   });
 });
 
+describe("the bundles of a leaving scene (F51)", () => {
+  // Bug: the next rest released what the scene before named while its elements still played their exit.
+  it("holds what the scene before named while anything carries Exiting, at a rest too", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board.chains"]);
+    mock.world.exiting = [7];
+    mock.api.sceneBundles(["board"]);
+    releaseLeftBundles(mock.assetsCtx);
+
+    expect(mock.ctx.state.sceneLeaving).toEqual(["board.chains"]);
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+  });
+
+  it("lets a leave bundle go at once when the last exit ends, and keeps a budget bundle", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board");
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board", "board.chains"]);
+    mock.world.exiting = [7, 8];
+    mock.api.sceneBundles([]);
+
+    // One element still leaves: nothing goes.
+    mock.world.endExit(7);
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+
+    mock.world.endExit(8);
+    expect(mock.ctx.state.sceneLeaving).toEqual([]);
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
+    expect(mock.api.isLoaded("board")).toBe(true);
+  });
+
+  it("keeps a name the next list takes back: it is the mounted scene's again", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board.chains"]);
+    mock.world.exiting = [7];
+    mock.api.sceneBundles([]);
+    mock.api.sceneBundles(["board.chains"]);
+    mock.world.endExit(7);
+
+    expect(mock.ctx.state.sceneLeaving).toEqual([]);
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+  });
+});
+
 describe("companions.add", () => {
   it("calls the companion on every load until its remover ran, and a second removal does nothing", async () => {
     const mock = createMockAssets({ manifest });

@@ -221,7 +221,7 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
 | `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `ecs.setScene` of the mounted scene |
-| `assets` | `load(bundle)`; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"` |
+| `assets` | `load(bundle)`; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 

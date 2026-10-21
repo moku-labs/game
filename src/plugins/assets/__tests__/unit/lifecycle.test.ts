@@ -42,7 +42,7 @@ function tick(): Promise<void> {
 }
 
 describe("connectAssets", () => {
-  it("registers the enter callback, the load handler and the texture provider", () => {
+  it("registers the enter callback, the load handler, the texture provider and the end of an exit", () => {
     const mock = createMockAssets({ manifest });
 
     mock.connect();
@@ -50,7 +50,7 @@ describe("connectAssets", () => {
     expect(mock.flow.enter.map(entry => entry.stage)).toEqual(["load"]);
     expect(mock.flow.handlers.get("load")?.runInFast).toBe(true);
     expect(mock.renderer.providers).toHaveLength(1);
-    expect(mock.ctx.state.removers).toHaveLength(3);
+    expect(mock.ctx.state.removers).toHaveLength(4);
   });
 
   it("answers the renderer's provider with a loaded texture", async () => {
