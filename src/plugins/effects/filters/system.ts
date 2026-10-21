@@ -750,16 +750,22 @@ function boxCovers(
 }
 
 /**
- * Tells whether a filtered view covers the whole viewport: the box its sprite, its nine-slice or
- * its shape declares, times its scale, covers the reference size on both axes. A sprite without a
- * size declares none. Read from components, never from Pixi bounds.
+ * Tells whether a filtered view covers the whole viewport. A view whose enabled filters declare an
+ * area draws only there: that area, times the view's scale, covers the reference size on both axes
+ * (F43, a lens over a full-screen sprite is not full screen). Otherwise the box its sprite, its
+ * nine-slice or its shape declares, times its scale, does. A sprite without a size declares none.
+ * Read from components and the area handed over last, never from Pixi bounds.
  *
  * @param ectx - Domain context of the effects plugin.
- * @param entity - The entity.
+ * @param view - The view's record.
  * @param size - The viewport size.
  * @returns True for a full-screen view.
  */
-function coversScreen(ectx: EffectsCtx, entity: Entity, size: ViewportSize): boolean {
+function coversScreen(ectx: EffectsCtx, view: FilteredView, size: ViewportSize): boolean {
+  const { entity, areaSent } = view;
+
+  if (areaSent.some) return boxCovers(ectx, entity, areaSent.width, areaSent.height, size);
+
   const ecs = ectx.deps.world.ecs;
   const sprite = ecs.get(entity, Sprite);
 
@@ -855,7 +861,7 @@ function countFullScreen(ectx: EffectsCtx, size: ViewportSize): number {
 
   for (const view of ectx.state.viewList) {
     if (view.gone) continue;
-    if (hasEnabledFilter(ectx, view) && coversScreen(ectx, view.entity, size)) count += 1;
+    if (hasEnabledFilter(ectx, view) && coversScreen(ectx, view, size)) count += 1;
   }
 
   return count;

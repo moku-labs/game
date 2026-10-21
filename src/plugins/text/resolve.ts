@@ -724,13 +724,14 @@ export function createTextSystem(ctx: TextCtx, frame: TextFrame): AnySystem {
 }
 
 /**
- * Resolves the labels whose `Text` came after the layout system ran. `ui` adds a label in its
- * solve, and the flush at the end of phase `layout` attaches it with the rest of its batch, a bound
- * component included; this runs right after that flush and before phase `sync`, so the renderer
- * builds the label with its string, and lists it, so the next system run writes its `Text` once
- * more for the remeasure of `ui`. A label whose content changed is not among them: it resolves in
- * the next layout phase, as before. While the world is not live its layout phase did not run: the
- * list is dropped, and the labels, marked, wait for the next live run, as every label does.
+ * Resolves the labels whose `Text` came or changed after the layout system ran. `ui` adds a label in
+ * its solve, and the flush at the end of phase `layout` attaches it with the rest of its batch, a
+ * bound component included; this runs right after that flush and before phase `sync`, so the
+ * renderer builds the label with its string, and lists it, so the next system run writes its `Text`
+ * once more for the remeasure of `ui`. A label whose content or style `ui` changed in its reconcile
+ * is resolved here too, in the frame of the change (F45): `ui` measured its content itself, so it is
+ * not listed. While the world is not live its layout phase did not run: the list is dropped, and the
+ * labels, marked, wait for the next live run, as every label does.
  *
  * @param ctx - Domain context of the text plugin.
  * @param frame - What the system's runs share.
@@ -738,16 +739,30 @@ export function createTextSystem(ctx: TextCtx, frame: TextFrame): AnySystem {
 export function resolveAdded(ctx: TextCtx, frame: TextFrame): void {
   const added = ctx.state.added;
 
-  // Per frame: one length read while no label came with the flush.
-  if (added.length === 0) return;
+  // Per frame: one length read while no label came with the flush. The mode is read only when a
+  // label waits: `world` asks the flow for it, which builds its state.
+  if (added.length > 0) {
+    // The layout phase did not run: the labels are marked, and the next live run resolves them.
+    if (ctx.deps.world.ecs.mode() !== "live") {
+      added.length = 0;
 
-  // The layout phase did not run: the labels are marked, and the next live run resolves them.
-  if (ctx.deps.world.ecs.mode() !== "live") {
-    added.length = 0;
+      return;
+    }
 
-    return;
+    resolveCame(ctx, frame, added);
   }
 
+  resolveChanged(ctx, frame);
+}
+
+/**
+ * Resolves the labels whose `Text` came with the layout flush, and lists them for the remeasure.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param frame - What the system's runs share.
+ * @param added - The labels that came.
+ */
+function resolveCame(ctx: TextCtx, frame: TextFrame, added: Entity[]): void {
   frame.now = Number.NaN;
   frame.locale = ctx.deps.i18n.locale();
 
@@ -762,6 +777,32 @@ export function resolveAdded(ctx: TextCtx, frame: TextFrame): void {
   }
 
   forgetAdded(added);
+}
+
+/**
+ * Resolves the labels of this frame's `changed(Text)` whose content or style moved since they were
+ * resolved: `ui` writes `Text` after the layout system. The labels this frame resolved already
+ * stand on what they show; a bound label shows its value, as in the system.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param frame - What the system's runs share; the locale of this frame is already in it.
+ */
+function resolveChanged(ctx: TextCtx, frame: TextFrame): void {
+  const ecs = ctx.deps.world.ecs;
+  let live = false;
+
+  // Per frame: the world's own change list, walked in place; empty on a still frame.
+  for (const entity of ecs.changed(Text)) {
+    const text = ecs.get(entity, Text);
+
+    if (text === undefined || !isStale(ctx, entity, text, frame)) continue;
+
+    // A world that is not live ran no layout phase: the next live run of the system resolves it.
+    if (!live && ecs.mode() !== "live") return;
+
+    live = true;
+    stepText(ctx, entity, text, frame);
+  }
 }
 
 /**

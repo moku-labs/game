@@ -148,6 +148,8 @@ export type FakeWorld = {
   /** What `ecs.mode()` answers: `"live"` until a case pauses the world. */
   mode: "live" | "paused" | "fast";
   writes: Array<{ entity: Entity; component: string; patch: Record<string, unknown> }>;
+  /** Empties the change lists of the frame. */
+  clearChanges(): void;
   /** Writes a component value and fires the `onAdded` listeners of that component. */
   put(entity: Entity, component: ComponentHandle<object>, value: object): void;
   /** Removes a component and fires the `onRemoved` listeners. */
@@ -157,8 +159,9 @@ export type FakeWorld = {
 };
 
 /**
- * Creates the fake world: one store per component name, the six `ecs` members `text` calls, and
- * the structural listeners it registers.
+ * Creates the fake world: one store per component name, the `ecs` members `text` calls, the
+ * structural listeners it registers, and the change lists of the frame (every `set` and `put`,
+ * emptied when the next frame steps).
  *
  * @returns The fake world.
  */
@@ -170,6 +173,14 @@ function createFakeWorld(): FakeWorld {
   const systems: AnySystem[] = [];
   const writes: FakeWorld["writes"] = [];
   const fake = { mode: "live" as FakeWorld["mode"] };
+  const changes = new Map<string, Set<Entity>>();
+
+  const markChanged = (name: string, entity: Entity): void => {
+    const list = changes.get(name) ?? new Set<Entity>();
+
+    list.add(entity);
+    changes.set(name, list);
+  };
 
   const storeOf = (name: string): Map<Entity, Record<string, unknown>> => {
     const store = stores.get(name) ?? new Map<Entity, Record<string, unknown>>();
@@ -227,7 +238,11 @@ function createFakeWorld(): FakeWorld {
 
       writes.push({ entity, component: component.componentName, patch });
       storeOf(component.componentName).set(entity, { ...stored, ...patch });
+      markChanged(component.componentName, entity);
     },
+    changed: (component: { componentName: string }): Iterable<Entity> => [
+      ...(changes.get(component.componentName) ?? [])
+    ],
     has: (entity: Entity, component: { componentName: string }): boolean =>
       storeOf(component.componentName).has(entity),
     typeOf: (name: string): AnyComponent | undefined => types.get(name),
@@ -267,9 +282,11 @@ function createFakeWorld(): FakeWorld {
       fake.mode = mode;
     },
     writes,
+    clearChanges: (): void => changes.clear(),
     put: (entity: Entity, component: ComponentHandle<object>, value: object): void => {
       types.set(component.componentName, component as unknown as AnyComponent);
       storeOf(component.componentName).set(entity, { ...value } as Record<string, unknown>);
+      markChanged(component.componentName, entity);
 
       for (const fn of listeners(added, component.componentName)) fn(entity, value);
     },
@@ -562,6 +579,9 @@ export function createMockText(
     start: (): void => startText(kernel as unknown as Parameters<typeof startText>[0]),
     stop: (): void => stopText(state),
     step: (): void => {
+      // A new frame: the change lists of the last one are gone, as phase `signals` empties them.
+      world.clearChanges();
+
       for (const definition of world.systems) {
         definition.run(
           world.api.ecs.query(...definition.query) as Iterable<readonly unknown[]>,

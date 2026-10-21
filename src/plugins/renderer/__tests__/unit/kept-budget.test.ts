@@ -172,3 +172,37 @@ describe("the budget of the kept pictures", () => {
     expect(drawn.mock.ctx.state.kept.bytes).toBe(0);
   });
 });
+
+describe("the budget of a kept picture with a filter area (F43)", () => {
+  // Bug (A Memory Missing, splash lens): a full-screen picture whose filter draws only a disc was sized and
+  // budgeted at its whole box (25.5 MB refused instead of ~0.6 MB).
+  it("sizes the picture of a view with an area at that area, not at its box", async () => {
+    const drawn = await withRoomFor(2);
+    const entity = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 400, h: 400 }));
+
+    drawn.mock.api.sync.filters.set(entity, [
+      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+    ]);
+    drawn.mock.api.sync.filters.area(entity, [100, 100, 40, 40]);
+    drawn.frames(3);
+
+    expect(isKept(drawn, entity)).toBe(true);
+    expect(drawn.mock.ctx.state.kept.byEntity.get(entity)?.bytes).toBe(PICTURE_BYTES);
+  });
+
+  // The other side: with no area the picture still takes the whole box.
+  it("sizes the picture of a view without an area at its box", async () => {
+    const drawn = await startDrawn({ onDemand: false });
+
+    running.push(drawn);
+
+    const entity = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 400, h: 400 }));
+
+    drawn.mock.api.sync.filters.set(entity, [
+      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+    ]);
+    drawn.frames(3);
+
+    expect(drawn.mock.ctx.state.kept.byEntity.get(entity)?.bytes).toBe(2 * 400 * 400 * 4);
+  });
+});

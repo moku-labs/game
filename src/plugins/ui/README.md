@@ -192,7 +192,10 @@ When the hook returns a motion, nothing is written directly: the track brings th
 where it is. Without a hook, or when it returns nothing or throws (`ui:motion-failed`), the fields
 are written directly as before. A field the component type gives to a plugin (`Countdown.left`) is
 never written by a render, and its rest keeps the entity's value. The motion of an extra counts
-for the exit: an element that leaves while its counter rolls despawns when the roll ended.
+for the exit: an element that leaves while its counter rolls despawns when the roll ended. An
+element whose exit waits for nothing (no `exit` hook, a hook that played nothing, a `when:
+"change"` hook under `"mount"`) despawns in the frame of the reconcile that took it away, before
+that frame is drawn: a keyed swap in one slot never shows both elements.
 
 ```tsx
 // the coin counter is the number of the pill, nothing else exists for it
@@ -441,9 +444,9 @@ lands, so the unscaled element sits on its rect.
 `lint()` ignores it. A popup plaque tilted by 1.5 degrees: `{ rotation: -0.026, origin: "top" }`.
 
 When a state change moves the rest pose, the element plays its `change.Transform` motion when it
-has one, else the pose applies through a 0 ms rest track (delta 6): it lands on the next frame
-step, and an additive loop running on the element re-bases on the new rest. A headless test
-steps once after a variant change before it reads the drawn `Transform`. A new rect plays
+has one, else the pose applies through a 0 ms rest track (delta 6): it writes the new pose in the
+frame of the change, its pivot and its position together, and ends at the next frame step, where
+an additive loop running on the element re-bases on the new rest. A new rect plays
 `change.Box` when there is one.
 
 The `motion` prop is a `Ui.ElementMotion`. Its two `change` hooks get typed values: `Transform`

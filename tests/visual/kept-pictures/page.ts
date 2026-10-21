@@ -100,6 +100,19 @@ const Lamp = defineFilter("visual.lamp", {
 }`
 });
 
+/** A window filter that draws only its 120 × 120 area, as A Memory Missing's lens draws only its disc (F43). */
+const Window = defineFilter("visual.window", {
+  wgsl: `@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  let c = textureSample(uTexture, uSampler, uv);
+  return vec4<f32>(c.rgb * 0.8, c.a);
+}`,
+  glsl: `void main() {
+  vec4 c = texture(uTexture, vTextureCoord);
+  finalColor = vec4(c.rgb * 0.8, c.a);
+}`,
+  area: () => [100, 60, 120, 120]
+});
+
 const drift = system({
   name: "visual.drift",
   phase: "animate",
@@ -130,7 +143,11 @@ const main = kit.defineScene("main", {
   layers: { main: { sort: "order" } },
   projections: []
 });
-const feature = kit.defineFeature("visual", { scenes: [main], systems: [drift], filters: [Lamp] });
+const feature = kit.defineFeature("visual", {
+  scenes: [main],
+  systems: [drift],
+  filters: [Lamp, Window]
+});
 
 /** The manifest of the page: the mini game's `ui` bundle without its files, so the scene loads nothing. */
 const manifest: Assets.Manifest = {
@@ -404,6 +421,16 @@ async function play(): Promise<KeptPicturesResult> {
   );
 
   scenes.push(await measure(app, "placed filter", [lamp]));
+
+  // A filter with an area over a wider view: the picture takes only the area (F43), drawn as live.
+  const framed = spawn(
+    Transform({ x: 40, y: 40 }),
+    Shape({ w: 360, h: 260, fill: 0x22_44_66 }),
+    Window()
+  );
+
+  child(framed, Transform({ x: 120, y: 40 }), Shape({ w: 40, h: 200, fill: 0xff_40_40 }));
+  scenes.push(await measure(app, "filter with an area", [framed]));
 
   // A nested kept view: a glowing badge inside a blurred card.
   const card = spawn(

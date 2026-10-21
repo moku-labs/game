@@ -72,6 +72,11 @@ export function recordRest(ctx: UiCtx, element: Element, value: AnyComponentValu
  * @param name - The component name of the extra.
  */
 export function cancelExtra(element: Element, name: string): void {
-  element.extraHandles.get(name)?.cancel();
+  const last = element.extraHandles.get(name);
+
+  if (last === undefined) return;
+
+  last.cancel();
+  element.endless?.delete(last);
   element.extraHandles.delete(name);
 }

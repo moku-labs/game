@@ -1395,7 +1395,9 @@ function displayObjectOf(sctx: SyncCtx, entity: Entity): PixiContainer | undefin
 
 /**
  * Detaches the children of a parent that left, and names the ones that stay. A child that leaves in the same teardown
- * is no orphan: its view goes in this very pass (it waits in `removed`), or it plays its exit (`Exiting`).
+ * is no orphan: its view goes in this very pass (it waits in `removed`), or it plays its exit (`Exiting`). Nor is a
+ * child whose `Parent` names another entity, or none, by now: it moved in the same frame (a hosted view a restore
+ * hung under the rebuilt host, F44), and the later steps of this pass hang it where it belongs.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The parent entity.
@@ -1403,7 +1405,6 @@ function displayObjectOf(sctx: SyncCtx, entity: Entity): PixiContainer | undefin
  */
 function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): void {
   const state = sctx.ctx.state.sync;
-  const ecs = sctx.ctx.deps.world.ecs;
   const orphans: Entity[] = [];
 
   for (const [child, childView] of state.views) {
@@ -1417,12 +1418,33 @@ function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): voi
     detach(object);
     // A child that stays waits for the parent's next view (a new `Display`, a visual that comes back).
     state.orphans.add(child);
-    if (!state.removed.has(child) && !isLeaving(ecs, child)) orphans.push(child);
+
+    // Named only when it neither leaves nor moved to another parent in the same frame (F44).
+    if (isLostOrphan(sctx, child, entity)) orphans.push(child);
   }
 
   if (orphans.length > 0) {
     sctx.ctx.log.warn("renderer: parent left before its children", { parent: entity, orphans });
   }
+}
+
+/**
+ * Tells whether a child of a parent that left is an orphan worth a warning: it does not go in this pass, it plays no
+ * exit, and its `Parent` still names the parent that left.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param child - The child entity.
+ * @param parent - The parent that left.
+ * @returns True when the child stays behind with no parent.
+ */
+function isLostOrphan(sctx: SyncCtx, child: Entity, parent: Entity): boolean {
+  const ecs = sctx.ctx.deps.world.ecs;
+
+  return (
+    !sctx.ctx.state.sync.removed.has(child) &&
+    !isLeaving(ecs, child) &&
+    parentOf(ecs, child) === parent
+  );
 }
 
 /**
