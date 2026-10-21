@@ -103,16 +103,23 @@ export type CountdownValue = { until: number; left: number };
 /**
  * What the `Text` component holds. `resolved` is engine-owned: a game writes `content`, `style`,
  * `bind`, `anchor` and `alpha`, and reads `resolved`. `alpha` fades every run, shadow and icon of
- * the block together, 1 by default; a change is written in place and a tween can drive it.
+ * the block together, 1 by default; a change is written in place and a tween can drive it. `box`
+ * is the width a style with `wrap: "box"` wraps at: `ui` writes the laid-out width of the text
+ * element there, 0 means no box and one line. A style that wraps otherwise ignores it.
  *
  * @example
  * ```ts
  * const value: TextValue = {
  *   content: "+5", style: "body", bind: undefined, anchor: { x: 0.5, y: 0.5 }, alpha: 1,
- *   resolved: "+5"
+ *   box: 0, resolved: "+5"
  * };
  * // The hint of an empty name field, at half alpha.
  * const hint: TextValue = { ...value, content: "Your name", alpha: 0.5, resolved: "Your name" };
+ * // A player name in a "card.name" style with wrap "box", laid out 200 wide by ui: two lines.
+ * const name: TextValue = {
+ *   ...value, content: "Aleksandra Kucherenko", style: "card.name", box: 200,
+ *   resolved: "Aleksandra Kucherenko"
+ * };
  * ```
  */
 export type TextValue = {
@@ -121,6 +128,7 @@ export type TextValue = {
   bind: TextBind | undefined;
   anchor: Point;
   alpha: number;
+  box: number;
   resolved: string;
 };
 
@@ -135,14 +143,17 @@ export type TextValue = {
 export type TextAlign = "left" | "center" | "right";
 
 /**
- * The wrap width of a style in reference pixels, or `"none"` for one line per `\n` segment.
+ * The wrap width of a style in reference pixels; `"box"` for the width the `ui` layout gave the
+ * text element, one line outside a layout; or `"none"` for one line per `\n` segment.
  *
  * @example
  * ```ts
  * const wrap: TextWrap = 480;
+ * // A name that wraps at the room its row leaves it: the boxes on the way need `shrink: 1`.
+ * const name: TextWrap = "box";
  * ```
  */
-export type TextWrap = number | "none";
+export type TextWrap = number | "box" | "none";
 
 /**
  * The drop shadow of a style as the plugin stores it: a copy of every glyph run in `color`, at
@@ -328,13 +339,15 @@ export type LayoutOptions = { warn: Warn };
  * What was resolved for one entity last, so the frame step knows whether anything moved. `unit`
  * is what the shown string of a bound label was built from: the rounded value for `"int"`, whole
  * seconds for a time format. `bindRef` is the bind object `bind` was keyed from, so the key is
- * built once per attached bind and a frame compares one reference.
+ * built once per attached bind and a frame compares one reference. `box` is the `Text.box` the
+ * label was laid out at: a label of a `"box"` style is laid out again when it moves.
  *
  * @example
  * ```ts
  * const left = bind(Countdown, "left", { format: "mm:ss" });
  * const seen: SeenText = {
- *   content: "", style: "digits", bindRef: left, bind: "Countdown.left:mm:ss", locale: "ru", unit: 95
+ *   content: "", style: "digits", bindRef: left, bind: "Countdown.left:mm:ss", locale: "ru",
+ *   unit: 95, box: 0
  * };
  * ```
  */
@@ -345,6 +358,7 @@ export type SeenText = {
   bind: string | undefined;
   locale: string;
   unit: number | undefined;
+  box: number;
 };
 
 /**
@@ -380,7 +394,7 @@ export type State = {
   bindTypes: Map<string, AnyComponent | undefined>;
   /** The measured size of every live label, for `ui`. */
   measured: Map<Entity, Size>;
-  /** Layout per `style + resolved`, oldest dropped first. */
+  /** Layout per `style + resolved`, and the box width for a `"box"` style; oldest dropped first. */
   cache: Map<string, TextLayout>;
   /** What every live label container was last filled from, by container. */
   drawn: WeakMap<object, DrawnLabel>;
@@ -423,10 +437,13 @@ export type TextApi = {
   /**
    * The size of a piece of text in reference pixels, from the advance table of the style's font.
    * A `Message` is formatted in the current locale first. Never touches a canvas, so the answer
-   * is the same in a browser and in plain Bun. Cached per style and resolved string.
+   * is the same in a browser and in plain Bun. Cached per style and resolved string, and per
+   * width for a `"box"` style.
    *
    * @param content - A plain string, or what `tr` returned.
    * @param style - A registered style name. An unknown one warns once and measures as `body`.
+   * @param width - The width a style with `wrap: "box"` wraps at, in reference pixels. Left out
+   *   (or 0) the block is one line. A style that wraps otherwise ignores it.
    * @returns The width and height of the block.
    * @example
    * ```ts
@@ -434,9 +451,12 @@ export type TextApi = {
    * const text = ctx.require(textPlugin);
    *
    * text.measure("120", "digits"); // { width: 57.6, height: 38.4 } on the 0.6 em fallback
+   * // "card.name" is a 32 px style with wrap "box": the width Yoga offers wraps it.
+   * text.measure("Aleksandra Kucherenko", "card.name", 200); // { width: 192, height: 76.8 }
+   * text.measure("Aleksandra Kucherenko", "card.name"); // { width: 403.2, height: 38.4 }
    * ```
    */
-  measure(content: string | Message, style: string): Size;
+  measure(content: string | Message, style: string, width?: number): Size;
 
   /**
    * Whether the font of a style has a glyph for one character, the lookup Pixi draws by. A

@@ -43,5 +43,17 @@ export const BUDGET = {
    * `Text` is written once more, with no field, so `ui` measures the string they show. New with
    * change 2026-10-18-hud-blink: one frozen empty patch for every write, nothing kept.
    */
-  textRewrite: 0
+  textRewrite: 0,
+  /**
+   * F50 (change 2026-10-21-text-wrap-box): the idle phase with the 80 plain labels in a style that
+   * wraps at its box, each laid out at a box of its own. A label whose box stands costs one more
+   * number compare and keeps nothing.
+   */
+  textResolveBoxIdle: 0,
+  /**
+   * F50: the display adapter's update of a `"box"` label written again with what it shows, as `ui`
+   * writes a text whose rect moved and whose width stood. `isCurrent` compares the box as one more
+   * number; nothing is laid out or kept.
+   */
+  textAdapterCurrent: 0
 } as const;

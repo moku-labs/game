@@ -46,12 +46,13 @@ export type RowRange = { first: number; last: number };
 export type ElementLookup = (entity: Entity) => Element | undefined;
 
 /**
- * What a text element is measured through: the advance table of `text`, the string `text`
- * resolved for an entity (`undefined` before the entity carries its `Text`), and the duration
+ * What a text element is measured through: the advance table of `text`, at the width Yoga offers
+ * for a style that wraps at its box (`undefined` when the width is not bounded); the string `text`
+ * resolved for an entity (`undefined` before the entity carries its `Text`); and the duration
  * words of `i18n`, for a bound `"duration"` before its first resolve.
  */
 export type TextSource = {
-  measure(content: string | Message, style: string): Size;
+  measure(content: string | Message, style: string, width?: number): Size;
   resolved(entity: Entity): string | undefined;
   duration(ms: number): string;
 };

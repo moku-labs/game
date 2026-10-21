@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PixiTexture } from "../../../renderer/types";
 import { defineTextStyles, Text } from "../../components";
 import type { TextStyle, TextStyles, TextValue } from "../../types";
@@ -901,5 +901,79 @@ describe("the alpha of a Text on an MSDF font", () => {
 
     expect(object.alpha).toBe(0.3);
     expect(object.children.map(child => child.alpha)).toEqual(before);
+  });
+});
+
+/** A style that wraps at its box, with the defaults of `body`, registered by a case that needs it. */
+function boxed(mock: MockText): void {
+  mock.state.styles.set("boxed", { ...centred, align: "left", wrap: "box" });
+}
+
+describe('the display adapter — wrap "box"', () => {
+  // No font is loaded here: a glyph is 19.2 px and a line 38.4 px; "11 11 11" is 153.6 px wide.
+
+  it("draws a box label wrapped at its box, a line under the other", () => {
+    const mock = drawing();
+
+    boxed(mock);
+
+    const object = build(
+      mock,
+      value({ resolved: "11 11 11", style: "boxed", anchor: zero, box: 80 })
+    );
+
+    expect(object.children.map(child => textOf(child))).toEqual(["11", "11", "11"]);
+    expect(object.children.map(child => rounded(child.x, child.y))).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 38.4 },
+      { x: 0, y: 76.8 }
+    ]);
+  });
+
+  // The bug: ui lays the label out at another width, and it keeps the lines of its old box.
+  it("redraws a box label whose box changed", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+
+    boxed(mock);
+
+    const previous = value({ resolved: "11 11 11", style: "boxed", anchor: zero, box: 80 });
+    const object = build(mock, previous);
+    const answer = entry?.adapter.update(object, previous, { ...previous, box: 200 });
+
+    expect(answer).toBe(true);
+    expect(object.children.map(child => textOf(child))).toEqual(["11 11 11"]);
+  });
+
+  // The bug: a resize redraws every label on the screen, whatever its style says.
+  it("leaves a label whose style has a width of its own alone when its box changed", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+
+    wrapping(mock);
+
+    const previous = value({ resolved: "11 11 11", style: "wrapped", anchor: zero, box: 80 });
+    const object = build(mock, previous);
+    const before = [...object.children];
+    const answer = entry?.adapter.update(object, previous, { ...previous, box: 200 });
+
+    expect(answer).toBe(false);
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+  });
+
+  // The bug: a box label outside a ui layout wraps at 0, glyph by glyph, and nobody is told.
+  it("draws a box label with no box on one line, and says so once per style", () => {
+    const mock = drawing();
+
+    boxed(mock);
+    build(mock, value({ resolved: "11 11 11", style: "boxed", anchor: zero }));
+
+    const object = build(mock, value({ resolved: "11 11", style: "boxed", anchor: zero }));
+    const calls = vi.mocked(mock.log.warn).mock.calls;
+
+    expect(object.children.map(child => textOf(child))).toEqual(["11 11"]);
+    expect(calls.filter(call => call[0] === 'text: wrap "box" outside layout')).toEqual([
+      ['text: wrap "box" outside layout', { style: "boxed" }]
+    ]);
   });
 });

@@ -40,7 +40,7 @@ import { loadYogaModule } from "./yoga";
  */
 function textSourceOf(ctx: UiCtx): TextSource {
   return {
-    measure: (content, style) => ctx.deps.text.measure(content, style),
+    measure: (content, style, width) => ctx.deps.text.measure(content, style, width),
     resolved: entity => ctx.deps.world.ecs.get(entity, Text)?.resolved,
     duration: ms => ctx.deps.i18n.duration(ms)
   };

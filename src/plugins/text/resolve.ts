@@ -85,24 +85,43 @@ export function styleOf(ctx: TextCtx, name: string): TextStyle {
 }
 
 /**
+ * Tells whether a style wraps at the box of its text element. An unknown name is drawn as `body`,
+ * so it answers for `body`. Two map reads, no warning: the frame step asks it.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param styleName - The style name a component wrote.
+ * @returns True for a style with `wrap: "box"`.
+ */
+function wrapsAtBox(ctx: TextCtx, styleName: string): boolean {
+  const style = ctx.state.styles.get(styleName) ?? ctx.state.styles.get("body");
+
+  return style?.wrap === "box";
+}
+
+/**
  * The layout of one resolved string in one style, from the cache or freshly laid out. The cache
- * is what makes `measure` cheap enough for `ui` to ask per invalidation.
+ * is what makes `measure` cheap enough for `ui` to ask per invalidation. A `"box"` style with a
+ * box is cached per width too; any other style ignores the box and keeps one layout.
  *
  * @param ctx - Domain context of the text plugin.
  * @param resolved - The tagged string.
  * @param styleName - The style name.
+ * @param box - The width a `"box"` style wraps at; 0 for one line.
  * @returns The lines and the size of the block.
  */
-export function layoutFor(ctx: TextCtx, resolved: string, styleName: string): TextLayout {
-  const key = `${styleName}${CACHE_SEPARATOR}${resolved}`;
+export function layoutFor(ctx: TextCtx, resolved: string, styleName: string, box = 0): TextLayout {
+  const width = box > 0 && wrapsAtBox(ctx, styleName) ? box : 0;
+  const key =
+    width > 0
+      ? `${styleName}${CACHE_SEPARATOR}${width}${CACHE_SEPARATOR}${resolved}`
+      : `${styleName}${CACHE_SEPARATOR}${resolved}`;
   const hit = ctx.state.cache.get(key);
 
   if (hit !== undefined) return hit;
 
   const warn = warnFor(ctx);
-  const layout = layoutRuns(parseTags(resolved, warn), styleOf(ctx, styleName), ctx.state.tables, {
-    warn
-  });
+  const runs = parseTags(resolved, warn);
+  const layout = layoutRuns(runs, styleOf(ctx, styleName), ctx.state.tables, { warn }, width);
 
   if (ctx.state.cache.size >= CACHE_LIMIT) {
     const oldest = ctx.state.cache.keys().next().value;
@@ -380,7 +399,8 @@ function remember(
       bindRef: text.bind,
       bind: bindKeyOf(text.bind),
       locale: frame.locale,
-      unit
+      unit,
+      box: text.box
     });
 
     return;
@@ -395,6 +415,26 @@ function remember(
   seen.style = text.style;
   seen.locale = frame.locale;
   seen.unit = unit;
+  seen.box = text.box;
+}
+
+/**
+ * Tells whether a label of a `"box"` style was laid out at another box than it carries now. The
+ * box of a label of any other style is only noted: it draws the same at every width, so a resize
+ * resolves nothing. A label whose box stands costs one compare.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param seen - What was resolved for the label last.
+ * @param text - Its component value.
+ * @returns True when the label has to be laid out at its new box.
+ */
+function boxMoved(ctx: TextCtx, seen: SeenText, text: Readonly<TextValue>): boolean {
+  if (seen.box === text.box) return false;
+  if (wrapsAtBox(ctx, text.style)) return true;
+
+  seen.box = text.box;
+
+  return false;
 }
 
 /**
@@ -429,14 +469,13 @@ function keepSize(ctx: TextCtx, entity: Entity, layout: TextLayout): void {
  * @returns True when nothing has to be formatted or written.
  */
 function isShown(
-  seen: SeenText | undefined,
+  seen: SeenText,
   text: Readonly<TextValue>,
   unit: number | undefined,
   format: TextFormat,
   frame: TextFrame
 ): boolean {
   return (
-    seen !== undefined &&
     seen.unit === unit &&
     seen.style === text.style &&
     isSameBind(seen, text.bind) &&
@@ -472,7 +511,7 @@ function showBound(
   }
 
   if (changed || !ctx.state.measured.has(entity)) {
-    keepSize(ctx, entity, layoutFor(ctx, next, text.style));
+    keepSize(ctx, entity, layoutFor(ctx, next, text.style, text.box));
   }
 }
 
@@ -488,7 +527,7 @@ function showBound(
  */
 function showAgain(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): void {
   ctx.deps.world.ecs.set(entity, Text, { resolved: text.resolved });
-  keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style));
+  keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
 }
 
 /**
@@ -512,8 +551,9 @@ function warnWithoutDigits(ctx: TextCtx, styleName: string): void {
  * One frame of a bound label: the value read every frame, the string built and written only
  * when its unit moved. A label that stands still costs a read and a few compares and keeps
  * nothing: no tag is parsed, no key is built. A marked label that stands still is written once
- * with the string it shows. The style is checked for digits only when the label is written, so
- * a label on a wrong style builds no warning key per frame.
+ * with the string it shows; one of a `"box"` style that ui laid out at another box is measured at
+ * it. The style is checked for digits only when the label is written, so a label on a wrong style
+ * builds no warning key per frame.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
@@ -537,12 +577,17 @@ function stepBound(
   const marked = ctx.state.dirty.delete(entity);
   const seen = ctx.state.seen.get(entity);
 
-  // The unit stands still: no string is built. A label that was marked is written once as it is.
-  if (isShown(seen, text, unit, format, frame)) {
-    if (!marked) return;
-
-    warnWithoutDigits(ctx, text.style);
-    showAgain(ctx, entity, text);
+  // The unit stands still: no string is built. A label that was marked is written once as it is;
+  // a label of a `"box"` style that ui laid out at another box is measured at it.
+  if (seen !== undefined && isShown(seen, text, unit, format, frame)) {
+    if (marked) {
+      warnWithoutDigits(ctx, text.style);
+      showAgain(ctx, entity, text);
+      seen.box = text.box;
+    } else if (boxMoved(ctx, seen, text)) {
+      keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
+      seen.box = text.box;
+    }
 
     return;
   }
@@ -556,8 +601,9 @@ function stepBound(
 }
 
 /**
- * Tells whether a label has to be resolved again. Change sets are cleared every frame and `ui`
- * writes `Text` after this system, so the comparison is against what was seen, not `changed`.
+ * Tells whether a label has to be resolved again: its content, style, bind or locale moved, or
+ * ui laid a label of a `"box"` style out at another box. Change sets are cleared every frame and
+ * `ui` writes `Text` after this system, so the comparison is against what was seen, not `changed`.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
@@ -581,7 +627,8 @@ function isStale(
     seen.content !== text.content ||
     seen.style !== text.style ||
     !isSameBind(seen, text.bind) ||
-    seen.locale !== frame.locale
+    seen.locale !== frame.locale ||
+    boxMoved(ctx, seen, text)
   );
 }
 
@@ -604,7 +651,7 @@ function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame
 
   const resolved = resolveContent(ctx, entity, text);
 
-  keepSize(ctx, entity, layoutFor(ctx, resolved, text.style));
+  keepSize(ctx, entity, layoutFor(ctx, resolved, text.style, text.box));
   ctx.state.dirty.delete(entity);
   remember(ctx, entity, text, frame);
 }

@@ -3,10 +3,18 @@
  * the board, a root of 200 elements drawn by one component whose view counts its runs; the inset,
  * a JSX projection laid out in a slot of the board; and eight small HUD roots. Three host elements
  * of the board name two world projections each, forty sprite views per projection. The scroll
- * files mount one more root, an order strip. Real flow, world, text and Yoga; inert renderer,
- * headless.
+ * files mount one more root, an order strip; the box files one more, a list of names that wrap at
+ * their box. Real flow, world, text and Yoga; inert renderer, headless.
  */
-import { createApp, defineGame, projection, Sprite, Transform, type } from "../../../../index";
+import {
+  createApp,
+  defineGame,
+  defineTextStyles,
+  projection,
+  Sprite,
+  Transform,
+  type
+} from "../../../../index";
 import { animPlugin } from "../../../anim";
 import { assetsPlugin } from "../../../assets";
 import { i18nPlugin } from "../../../i18n";
@@ -197,6 +205,36 @@ const stripScreen = projection({
   )
 });
 
+/** The rows of the box screen. */
+const NAMES = 8;
+
+/**
+ * The names of the box files (F50), mounted by them only: eight rows of 300, each a fixed side of
+ * 100 and a cell that shrinks to the 200 left, holding a name in a style that wraps at its box.
+ * Every name is three lines there: "Anna Maria", "Lopez", "Garcia 0".
+ */
+const boxesScreen = projection({
+  name: "boxes",
+  layer: "ui",
+  from: (): Item => ({ id: "boxes" }),
+  view: () => (
+    <column key="boxesRoot" style={{ width: 400, height: 1200 }}>
+      {Array.from({ length: NAMES }, (_unused, index) => (
+        <row key={`boxRow${index}`} style={{ width: 300 }}>
+          <stack key={`boxSide${index}`} style={{ width: 100, height: 40 }} />
+          <column key={`boxCell${index}`} style={{ shrink: 1 }}>
+            <text
+              key={`boxName${index}`}
+              style="perf.name"
+              content={`Anna Maria Lopez Garcia ${index}`}
+            />
+          </column>
+        </row>
+      ))}
+    </column>
+  )
+});
+
 /** Every projection the fixture mounts. */
 export const MOUNTED: readonly string[] = [...PIECES, "board", "inset", "hud"];
 
@@ -208,9 +246,13 @@ const perfFeature = defineFeature("perf", {
     boardScreen,
     insetScreen,
     hudScreen,
-    stripScreen
+    stripScreen,
+    boxesScreen
   ],
   ui: [Board],
+  textStyles: defineTextStyles({
+    "perf.name": { font: "ui.font-body", size: 32, fill: 0xff_ff_ff, wrap: "box" }
+  }),
   strings: { en: english }
 });
 

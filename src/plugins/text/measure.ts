@@ -20,6 +20,13 @@ const FALLBACK_ADVANCE = 0.6;
 /** Line height of a style whose font is not loaded, as a share of the style size. */
 const FALLBACK_LINE = 1.2;
 
+/**
+ * How much wider than its box a line of a `"box"` style may be. `ui` lays a text out in whole units
+ * and rounds its measure with this tolerance, so a line that adds up to a hair over a whole unit
+ * (ten glyphs of 14.4 are 144.00000000000003) stays on the line the measure kept it on.
+ */
+const BOX_SLACK = 0.0001;
+
 /** Splits a run's text into words, runs of spaces and line breaks, separators kept. */
 const TOKENS = /(\n| +)/;
 
@@ -622,13 +629,35 @@ function emptyKeys(): Set<string> {
 }
 
 /**
+ * The width a block of a style wraps at: the width of the style, the box for a `"box"` style that
+ * has one, or nothing for one line per `\n` segment.
+ *
+ * @param style - The style of the label.
+ * @param box - The laid-out width of the text element; 0 when it has none.
+ * @returns The wrap width in reference pixels, or `undefined` for no wrapping.
+ * @example
+ * ```ts
+ * wrapOf({ ...bodyStyle, wrap: "box" }, 0); // undefined: no box, one line
+ * ```
+ */
+function wrapOf(style: TextStyle, box: number): number | undefined {
+  if (style.wrap === "none") return undefined;
+  if (style.wrap !== "box") return style.wrap;
+
+  return box > 0 ? box + BOX_SLACK : undefined;
+}
+
+/**
  * Lays a block of runs out: the lines, the width of the widest one and the total height. The
- * alignment of the style changes nothing here; it moves the lines when they are drawn.
+ * alignment of the style changes nothing here; it moves the lines when they are drawn. A style
+ * with `wrap: "box"` wraps at `box`, the width `ui` laid its text element out at, and is one line
+ * without one; any other style ignores `box`.
  *
  * @param runs - What `parseTags` made of the resolved string.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded, by font key.
  * @param options - Where a warning goes.
+ * @param box - The width a `"box"` style wraps at, in reference pixels; 0 for none.
  * @returns The lines and the size of the block in reference pixels.
  * @example
  * ```ts
@@ -640,13 +669,15 @@ export function layoutRuns(
   runs: readonly Run[],
   style: TextStyle,
   tables: Map<string, AdvanceTable>,
-  options: LayoutOptions
+  options: LayoutOptions,
+  box = 0
 ): TextLayout {
   const once = onceOnly(options);
+  const wrap = wrapOf(style, box);
   const lines =
-    style.wrap === "none"
+    wrap === undefined
       ? layoutFixed(runs, style, tables, once)
-      : layoutWrapped(runs, { style, tables, options: once }, style.wrap);
+      : layoutWrapped(runs, { style, tables, options: once }, wrap);
   let width = 0;
 
   for (const line of lines) width = Math.max(width, line.width);

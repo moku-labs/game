@@ -7,7 +7,9 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
 
 - **Config:** `fonts: { body, digits }`, the two boot fonts behind the built-in styles. No glyph
   is drawn or measured in place of a missing one (see Missing glyphs).
-- **API:** `measure(content, style)`, `hasGlyph(char, style)`, `styles()`. `hasGlyph` answers
+- **API:** `measure(content, style, width?)`, `hasGlyph(char, style)`, `styles()`. `width` is
+  the width a `wrap: "box"` style wraps at (`ui` passes the width Yoga offers); without it such a
+  style measures one line, and any other style ignores it. `hasGlyph` answers
   whether the loaded font of a style has a character, the lookup Pixi draws by; it is true while
   the font is not loaded. `ui` measures a text field's caret over the characters it is true for.
   `replaceStyles(styles)` is the dev hot swap of a saved styles file, called by `ui`: every style
@@ -31,6 +33,22 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `stroke` and `strokeWidth` draw an outline: 8 white copies of each glyph run (12 when
   `strokeWidth` is 6 or more) on a circle of radius `strokeWidth`, tinted `stroke`. An outline
   never changes what `measure` answers.
+- **Wrap:** `wrap` is one of three, `"none"` by default.
+
+  | `wrap` | lines |
+  |---|---|
+  | `"none"` | one line per `\n` segment |
+  | a width, `480` | wrapped at that many reference px |
+  | `"box"` | wrapped at the laid-out width of its `ui` text element, which `ui` writes into `Text.box`; one line outside a ui layout, with a dev warning `text: wrap "box" outside layout` once per style |
+
+  Words break between them; a word wider than the wrap breaks between its glyphs. A `"box"` text
+  is measured at the width Yoga offers, so its element is as high as its lines, and is drawn again
+  only when its box changes: a still frame compares one number per label and allocates nothing. A
+  box is laid out per width and string, a number or `"none"` style once per string. Shrink is 0
+  by default in `ui`: put `shrink: 1` on the boxes on the way to the text, or the row grows past
+  its room instead of the text wrapping. A line may be 0.0001 px wider than its box, the tolerance
+  `ui` rounds a measure to whole units with. Any other wrap, `0` or `-1`, is refused when the
+  style is defined.
 - **Tags:** `<b>`, `<i>`, `<color=#rrggbb>`, `<icon=key>`, `\<`, `\n`. An unknown tag stays
   literal and is reported once.
 - **Icons:** `<icon=key>` is one glyph, square at the line height and as wide as the line is high

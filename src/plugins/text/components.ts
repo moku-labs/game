@@ -17,7 +17,8 @@ import type {
   TextStyle,
   TextStyleInput,
   TextStyles,
-  TextValue
+  TextValue,
+  TextWrap
 } from "./types";
 
 /** What a `Text` starts as. Its own const, because a component takes a typed defaults object. */
@@ -27,6 +28,7 @@ const textDefaults: TextValue = {
   bind: undefined,
   anchor: { x: 0.5, y: 0.5 },
   alpha: 1,
+  box: 0,
   resolved: ""
 };
 
@@ -34,7 +36,8 @@ const textDefaults: TextValue = {
  * Words on the screen: a string or a message, the style it is drawn in, and the string `text`
  * resolved out of it. A game writes `content`, `style`, `bind`, `anchor` and `alpha`; `resolved`
  * is engine-owned and `ui` and the tests read it. `alpha` (1 by default) fades the whole block and
- * is patched in place, so a tween on it rebuilds nothing.
+ * is patched in place, so a tween on it rebuilds nothing. `box` (0 by default) is the width a
+ * style with `wrap: "box"` wraps at; `ui` writes the laid-out width of a text element there.
  */
 export const Text = /*#__PURE__*/ component("Text", textDefaults, { owned: ["resolved"] });
 
@@ -116,7 +119,7 @@ export type LabelOptions = {
  * ```ts
  * label({ text: "+5", style: "board.float", at: { x: 90, y: 180 } });
  * // [Text({ content: "+5", style: "board.float", bind: undefined,
- * //   anchor: { x: 0.5, y: 0.5 }, alpha: 1, resolved: "" }),
+ * //   anchor: { x: 0.5, y: 0.5 }, alpha: 1, box: 0, resolved: "" }),
  * //  Transform({ x: 90, y: 180, rotation: 0, scale: 1 })]
  * ```
  */
@@ -151,19 +154,34 @@ function shadowOf(input: TextStyleInput["shadow"]): TextShadow | undefined {
 }
 
 /**
- * Fills the defaults of one style and refuses a wrap that is neither a width nor `"none"`.
+ * Tells whether a wrap is one a style can carry: a width above zero, `"box"` or `"none"`. A style
+ * read back from a feature may carry anything, so a word is checked as well as a number.
+ *
+ * @param wrap - The wrap a style names, as it was stored.
+ * @returns False for a number that is not above zero, and for anything else.
+ * @example
+ * ```ts
+ * isWrap("box"); // true
+ * ```
+ */
+function isWrap(wrap: unknown): wrap is TextWrap {
+  return typeof wrap === "number" ? wrap > 0 : wrap === "box" || wrap === "none";
+}
+
+/**
+ * Fills the defaults of one style and refuses a wrap that is not a width, `"box"` or `"none"`.
  *
  * @param name - The style name, for the error.
  * @param input - What the game wrote.
  * @returns The style with every field filled.
- * @throws {Error} When `wrap` is a number that is not greater than zero.
+ * @throws {Error} When `wrap` is a number that is not greater than zero, or another word.
  */
 function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
   const wrap = input.wrap ?? "none";
 
-  if (wrap !== "none" && wrap <= 0) {
+  if (!isWrap(wrap)) {
     throw new Error(
-      `[game] Text style "${name}" has wrap ${wrap}.\n  Use a width in reference px or "none".`
+      `[game] Text style "${name}" has wrap ${wrap}.\n  Use a width in reference px, "box" or "none".`
     );
   }
 
@@ -189,7 +207,7 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
  *
  * @param map - Style name to what that style looks like.
  * @returns The registration a feature carries.
- * @throws {Error} When a style names a wrap that is not a width and not `"none"`.
+ * @throws {Error} When a style names a wrap that is not a width, `"box"` or `"none"`.
  * @example
  * ```ts
  * defineTextStyles({ "hud.digits": { font: "ui.font-digits", size: 40, fill: 0xffe082 } });

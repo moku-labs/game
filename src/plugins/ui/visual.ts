@@ -78,7 +78,8 @@ function contentOf(props: Record<string, unknown>): string {
 }
 
 /**
- * The visual component of an element: a sprite for an image or an icon, the text for a text, the
+ * The visual component of an element: a sprite for an image or an icon, the text for a text (with
+ * its laid-out width as the box a `"box"` style wraps at), the
  * nine-slice of its style (outlined when the style sets `debug`), or a rounded rectangle, a
  * triangle with `shape: "triangle"`, its stroke dashed with `dash`, or an arc with `shape: "arc"`
  * over the `sweep` of its style, ended by its `cap`. A clipping element (`scroll`,
@@ -119,7 +120,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
         content: contentOf(node.props),
         style: styleKey,
         bind: node.props.bind as undefined,
-        anchor: { x: 0, y: 0 }
+        anchor: { x: 0, y: 0 },
+        // The laid-out width: a style with `wrap: "box"` wraps there, any other ignores it.
+        box: rect.w
       })
     ];
   }

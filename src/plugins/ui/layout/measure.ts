@@ -3,8 +3,9 @@
  * invalidation; the answer comes from the advance table of `text`, never from a canvas. A text
  * with `bind` is sized by the string `text` shows for it. The node of a text is marked dirty when
  * `text` wrote it and it measures to another size: a new shown string, a new locale, a font that
- * arrived. An icon without a size is square on one line of the `body` style; the line it was
- * measured with is kept, so a move of it is seen without a text.
+ * arrived. A text whose style wraps at its box is measured at the width Yoga offers, and measured
+ * again at that same width. An icon without a size is square on one line of the `body` style; the
+ * line it was measured with is kept, so a move of it is seen without a text.
  */
 import type { MeasureFunction, Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Message } from "../../i18n/types";
@@ -166,28 +167,45 @@ export function shownOf(element: Element, source: TextSource): string | undefine
 
 /**
  * The size a text or an icon takes before Yoga clamps it: an icon is square on one line of its
- * text style, a bound text measures the string it shows, any other text its content. The size is
- * rounded up to whole units. Yoga rounds a node with a measure function outward but sizes its
- * parent from the unrounded length, so a fractional size would run into the parent's padding.
+ * text style, a bound text measures the string it shows, any other text its content, wrapped at
+ * `width` when its style wraps at its box. The size is rounded up to whole units. Yoga rounds a
+ * node with a measure function outward but sizes its parent from the unrounded length, so a
+ * fractional size would run into the parent's padding.
  *
  * @param element - The text or icon element.
  * @param source - What it is measured through.
+ * @param width - The width Yoga offers, or `undefined` when it bounds none.
  * @returns The width and the height, in whole units.
  */
-function naturalSize(element: Element, source: TextSource): Size {
+function naturalSize(element: Element, source: TextSource, width: number | undefined): Size {
   const { content, style } = contentOf(element);
 
   // An icon is one line of its style squared; a text is the string it shows.
   const size =
     element.type === "icon"
       ? squareOf(source.measure(LINE_SAMPLE, style))
-      : source.measure(shownOf(element, source) ?? content, style);
+      : source.measure(shownOf(element, source) ?? content, style, width);
 
   // Whole units, so Yoga sizes the parent from the same length it draws the text at.
   return {
     width: Math.ceil(size.width - WHOLE_EPSILON),
     height: Math.ceil(size.height - WHOLE_EPSILON)
   };
+}
+
+/**
+ * The width Yoga bounds a measure with: what it offers in an exact or an at-most mode, nothing in
+ * an undefined one, where a text is as wide as one line of it.
+ *
+ * @param yoga - The loaded Yoga module, for the measure modes.
+ * @param width - What Yoga offered on the width.
+ * @param mode - How to read that width.
+ * @returns The width, or `undefined` when none is bounded.
+ */
+function offeredWidth(yoga: Yoga, width: number, mode: number): number | undefined {
+  if (mode === yoga.MEASURE_MODE_UNDEFINED || !Number.isFinite(width)) return undefined;
+
+  return width;
 }
 
 /**
@@ -233,7 +251,8 @@ export function clampToMode(
 
 /**
  * Installs the measure function of a text element, or drops it when the text is fixed. The
- * function keeps the size it answered on the element, for `remeasureShown`.
+ * function keeps the size it answered and the width it was offered on the element, for
+ * `remeasureShown`.
  *
  * @param state - The layout state, for the Yoga module and the `measured` counter.
  * @param node - The node of the element.
@@ -258,10 +277,12 @@ export function installMeasure(
   }
 
   const measureFunction: MeasureFunction = (width, widthMode, height, heightMode) => {
-    const size = naturalSize(element, source);
+    const offered = offeredWidth(yoga, width, widthMode);
+    const size = naturalSize(element, source, offered);
 
     state.measured += 1;
     element.measuredSize = size;
+    element.measuredWidth = offered;
 
     // An icon carries no `Text`, so nothing names it when its line moves: keep the line the
     // icons were measured with, for `iconLineMoved`.
@@ -290,8 +311,9 @@ export function markMeasured(state: LayoutState, element: Element): void {
  * laid out with. `text` writes `Text` when the shown string of a bound label changes, and for
  * every label it resolves again: a message after a new locale, any label when its font arrives or
  * its style is swapped. So a text without `bind` is measured again too, and a counter that rolls
- * through digits of one width asks for no solve. A text with a fixed size has no measure function
- * and is left alone.
+ * through digits of one width asks for no solve. A text is measured at the width its measure
+ * function was last offered, so one that wraps at its box compares the same lines. A text with a
+ * fixed size has no measure function and is left alone.
  *
  * @param state - The layout state, for the node of the element.
  * @param element - An element whose `Text` changed this frame.
@@ -305,7 +327,7 @@ export function remeasureShown(state: LayoutState, element: Element, source: Tex
   if (node === undefined || before === undefined) return false;
   if (!needsMeasure(element)) return false;
 
-  const size = naturalSize(element, source);
+  const size = naturalSize(element, source, element.measuredWidth);
 
   if (size.width === before.width && size.height === before.height) return false;
 

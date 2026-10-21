@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { resolveFixture } from "./fixtures";
+import { currentLabelFixture, resolveFixture } from "./fixtures";
 
 // X1: one call is one frame of the text system over 100 labels (80 plain, 20 bound), the world
 // walk included, then the clear of phase `signals`.
@@ -49,5 +49,24 @@ describe("text resolve: heap per frame", () => {
 
     await annotate(`text resolve, 20 labels written once more: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.textRewrite + NOISE_BYTES);
+  }, 60_000);
+
+  // F50: a still screen of names that wrap at their box re-lays nothing and keeps nothing.
+  it("an idle frame over 80 labels wrapped at their box stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(resolveFixture("nothing", "phase", "box"), CALLS);
+
+    await annotate(`text resolve, idle, 80 wrapped at their box: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textResolveBoxIdle + NOISE_BYTES);
+  }, 60_000);
+
+  it("the update of a box label that shows its value already stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(currentLabelFixture(), CALLS);
+
+    await annotate(`text adapter, box label written again as it is: ${bytes} B a call`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textAdapterCurrent + NOISE_BYTES);
   }, 60_000);
 });
