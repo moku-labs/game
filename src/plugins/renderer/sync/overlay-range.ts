@@ -876,7 +876,9 @@ export function rangeHolds(state: SyncState, entity: Entity): boolean {
   if (view === undefined || root === undefined) return false;
   if (!inRange(range.set, view.wrapper ?? view.object, root)) return false;
   if (range.reason === "cover") return true;
-  if (!range.blurred && state.overlay.records.get(range.owner)?.value.hold !== true) return false;
+  const ownerHolds = state.overlay.records.get(range.owner)?.value.hold === true;
+
+  if (!range.blurred && !ownerHolds) return false;
 
   range.touched = true;
 

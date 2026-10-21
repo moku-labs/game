@@ -6,6 +6,7 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as FlowApi, TypeTag } from "../flow/types";
+import type { SyncApi } from "../renderer/sync/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Ease, Entity, MotionHandle, Api as WorldApi } from "../world/types";
 import type { RunningTimeline, Step } from "./timeline/types";
@@ -338,7 +339,7 @@ export type State = {
    * nothing while its clock runs on (spec 22 O9), told what the loop reveals (spec 26 R1.7). `undefined` before the
    * start and after the stop: nothing is held.
    */
-  loopsHeld: ((entity: Entity, reveals?: "alpha" | "place" | "both") => boolean) | undefined;
+  loopsHeld: SyncApi["loopsHeld"] | undefined;
 };
 
 /**
