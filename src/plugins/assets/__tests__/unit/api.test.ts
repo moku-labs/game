@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { lookupTexture } from "../../api";
-import { releaseLeftBundles } from "../../budget";
+import { releaseLeftBundles, releaseSceneLeft } from "../../budget";
 import { loadBundle } from "../../tiers";
 import type { Manifest } from "../../types";
 import { createMockAssets, leaving, manifestOf, packedManifest } from "./mock-assets";
@@ -355,7 +355,7 @@ describe("audio", () => {
 });
 
 describe("sceneBundles", () => {
-  it("replaces the list of the mounted scene with a copy: only what the last call named is held", async () => {
+  it("replaces the list of the mounted scene with a copy: a name the last call left out goes once nothing leaves", async () => {
     const mock = createMockAssets({ manifest: leaving(manifest, "board", "board.chains") });
 
     await mock.start();
@@ -368,6 +368,7 @@ describe("sceneBundles", () => {
     mock.api.sceneBundles(["board"]);
     named.length = 0;
     releaseLeftBundles(mock.assetsCtx);
+    releaseSceneLeft(mock.assetsCtx);
 
     expect(mock.ctx.state.sceneNamed).toEqual(["board"]);
     expect(mock.api.isLoaded("board")).toBe(true);
@@ -392,7 +393,7 @@ describe("the bundles of a leaving scene (F51)", () => {
     expect(mock.api.isLoaded("board.chains")).toBe(true);
   });
 
-  it("lets a leave bundle go at once when the last exit ends, and keeps a budget bundle", async () => {
+  it("lets a leave bundle go at the first sync after the last exit ended, and keeps a budget bundle", async () => {
     const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
 
     mock.connect();
@@ -406,9 +407,11 @@ describe("the bundles of a leaving scene (F51)", () => {
 
     // One element still leaves: nothing goes.
     mock.world.endExit(7);
+    mock.world.sync();
     expect(mock.api.isLoaded("board.chains")).toBe(true);
 
     mock.world.endExit(8);
+    mock.world.sync();
     expect(mock.ctx.state.sceneLeaving).toEqual([]);
     expect(mock.api.isLoaded("board.chains")).toBe(false);
     expect(mock.api.isLoaded("board")).toBe(true);
@@ -425,9 +428,36 @@ describe("the bundles of a leaving scene (F51)", () => {
     mock.api.sceneBundles([]);
     mock.api.sceneBundles(["board.chains"]);
     mock.world.endExit(7);
+    mock.world.sync();
 
     expect(mock.ctx.state.sceneLeaving).toEqual([]);
     expect(mock.api.isLoaded("board.chains")).toBe(true);
+  });
+});
+
+describe("the bundles of a leaving scene whose exit has not started yet (F51b)", () => {
+  // Bug: the rest that mounts the next scene released what the scene before named while nothing carried Exiting yet;
+  // its elements were tagged by the reconcile of the next frame, so the hold ended before the leave began.
+  it("holds a dropped name at the rest, and lets it go at a sync that finds nothing leaving", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board.chains"]);
+    mock.api.sceneBundles(["board"]);
+    releaseLeftBundles(mock.assetsCtx);
+
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+
+    // The reconcile of the next frame tags the leaving element: the sync after it keeps the bundle.
+    mock.world.startExit(7);
+    mock.world.sync();
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+
+    mock.world.endExit(7);
+    mock.world.sync();
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
   });
 });
 

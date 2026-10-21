@@ -586,8 +586,8 @@ export type State = {
   /** The list the mounted scene names, from the last `sceneBundles` call. */
   sceneNamed: readonly string[];
   /**
-   * The bundles a scene named before and the list names no more: held while anything carries `Exiting`, so a
-   * leaving scene's pictures stay until its elements played their exit (F51).
+   * The bundles a scene named before and the list names no more: held until a phase `sync` finds nothing carrying
+   * `Exiting`, so a leaving scene's pictures stay until its elements played their exit (F51, F51b).
    */
   sceneLeaving: string[];
   /** How many entities carry `Exiting` now, counted from the world's `onAdded` and `onRemoved` of the tag. */
@@ -807,8 +807,9 @@ export type Api = {
    * Tells assets which bundles the mounted scene names: its `bundle`, then what its `bundles(state)` returned.
    * Each call replaces the list before it. A bundle in the list is never a victim of the budget and is not
    * released by `release: "leave"` while it stays in the list. A bundle the list named before and names no more
-   * stays held while anything carries `Exiting`, so a leaving scene's pictures stay until its elements played their
-   * exit; then a `"leave"` one goes at once (F51). Called by `scenes`; a game never calls it.
+   * stays held until a phase `sync` finds nothing carrying `Exiting`, so a leaving scene's pictures stay until its
+   * elements played their exit, also when the exit starts only in the frame after the switch; then a `"leave"` one
+   * goes (F51, F51b). Called by `scenes`; a game never calls it.
    *
    * @param named - The bundle names of the mounted scene, the scene bundle first.
    * @example
@@ -909,7 +910,7 @@ export type HotSwap = GlobalEvents["ui:hot-swap"];
  * When a bundle leaves besides the budget. `"budget"` (default): only the LRU unloads it when memory
  * runs out. `"leave"`: also unloaded at the next rest once no node of its feature is on the stack
  * and no mounted scene names it; a scene that named it and left holds it until its elements played
- * their exit, and then it goes at once.
+ * their exit, and it goes at the next phase `sync` after that.
  *
  * @example
  * ```ts

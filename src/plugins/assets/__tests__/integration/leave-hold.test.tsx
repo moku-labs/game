@@ -101,24 +101,95 @@ const feature = defineFeature("hold", {
   strings: { en: english }
 });
 
+/**
+ * The other way a game draws the memory, as A Memory Missing does: one root both scenes list, which shows the memory
+ * while the session is there. Leaving it, the root stays mounted, and the memory's elements start their exit only at
+ * the next reconcile, after the rest that mounts the board.
+ */
+const storyRoot = projection({
+  name: "hold.story",
+  layer: "story",
+  from: (_player: unknown, session: { place?: string }) => ({
+    id: "story",
+    place: session.place ?? "memory"
+  }),
+  view: (item: { place: string }) => (
+    <stack key="storyRoot" style={{ width: 1080, height: 1920 }}>
+      {item.place === "memory" ? (
+        <stack key="memoryPicture" motion={fadeOut} style={{ width: 400, height: 400 }}>
+          <button key="storyDoor" intent="board" style={{ width: 200, height: 200 }} />
+        </stack>
+      ) : undefined}
+    </stack>
+  )
+});
+
+const storyMemory = defineScene("memory", {
+  bundle: "memory",
+  bundles: () => ["ep.memory"],
+  layers: { story: {} },
+  projections: [storyRoot]
+});
+const storyBoard = defineScene("board", {
+  bundle: "board",
+  layers: { story: {} },
+  projections: [storyRoot]
+});
+// The board is mounted at its scene stage, the release a rest marked runs at its load stage, and only then its run
+// commits the way out of the memory: the memory's elements start their exit at the next reconcile.
+const toBoard = defineNode({
+  scene: "board",
+  outcomes: { gone: type() },
+  run: ({ session, out }) => {
+    (session as { place?: string }).place = "board";
+
+    return out.gone();
+  }
+});
+const storyMain = defineFlow("main", {
+  nodes: { memory, toBoard, board },
+  start: "memory",
+  outcomes: {},
+  edges: { memory: { board: "toBoard" }, toBoard: { gone: "board" }, board: { again: "board" } }
+});
+const storyFeature = defineFeature("hold", {
+  flows: [storyMain],
+  scenes: [storyMemory, storyBoard],
+  projections: [storyRoot],
+  strings: { en: english }
+});
+
 const running: Array<{ stop(): Promise<void> }> = [];
 
+/** A game to start: its feature and its main flow. */
+type Game = { feature: unknown; flow: unknown };
+
+/** The game of the separate memory root. */
+const SEPARATE: Game = { feature, flow: main };
+
 /**
- * Starts the game on the memory.
+ * Starts a game on the memory.
  *
+ * @param game - The feature and its main flow; the game of the separate memory root by default.
+ * @param game.feature - The feature.
+ * @param game.flow - Its main flow.
  * @returns The running app, the frame driver and whether anything still leaves.
  */
-async function startMemory() {
+async function startMemory(game: Game = SEPARATE) {
   installFakeDom({ width: 1080, height: 1920 });
 
   const pixi = createFakePixi();
   const app = createApp({
-    plugins: [...screen, feature],
+    plugins: [...screen, game.feature as typeof feature],
     pluginConfigs: {
       assets: { manifest },
-      flow: { mainFlow: main },
+      flow: { mainFlow: game.flow as typeof main },
       i18n: { locale: "en", fallback: "en" },
-      model: { initialPlayer: { visits: 0 }, initialSession: { visits: 0 }, seed: 1 },
+      model: {
+        initialPlayer: { visits: 0 },
+        initialSession: { visits: 0, place: "memory" },
+        seed: 1
+      },
       renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
     }
   });
@@ -181,5 +252,27 @@ describe("the bundles of a leaving scene (F51)", () => {
     expect(game.leaving()).toBe(false);
     expect(app.assets.isLoaded("ep.memory")).toBe(false);
     expect(app.assets.isLoaded("board")).toBe(true);
+  });
+
+  // Bug (A Memory Missing, F51b): the memory's root stays mounted; its elements are tagged `Exiting` by the reconcile
+  // of the frame after the rest that mounts the board, and that rest's release ran first: nothing carried `Exiting`,
+  // the hold ended before the leave began, and the leaving pictures fetched the bundle again.
+  it("keeps the bundles when the leave starts only at the reconcile after the rest that mounts the board", async () => {
+    const game = await startMemory({ feature: storyFeature, flow: storyMain });
+    const { app } = game;
+
+    expect(app.assets.isLoaded("ep.memory")).toBe(true);
+
+    app.input.tap(app.ui.find("storyDoor") ?? 0);
+    await game.frames(4);
+
+    expect(app.flow.state().path).toBe("board");
+    expect(game.leaving()).toBe(true);
+    expect(app.assets.isLoaded("ep.memory")).toBe(true);
+
+    await game.frames(50);
+
+    expect(game.leaving()).toBe(false);
+    expect(app.assets.isLoaded("ep.memory")).toBe(false);
   });
 });
