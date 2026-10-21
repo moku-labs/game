@@ -840,7 +840,9 @@ number the quad reproduces the live frame texel for texel at rest; otherwise (th
 which a blurred output does not show and the oracle's tolerance covers; `cache: false` on that filter
 or `keptMb: 0` draws it live.
 
-Budget. `renderer.keptMb` MiB at 4 bytes a texel. A take that would pass it evicts the pictures not
+Budget. `renderer.keptMb` MiB at 4 bytes a texel. A view whose filters declare an `area` is taken at that
+area, cut from its bounds: its filters draw nothing outside it, so a full-screen lens with a disc area
+costs the disc, not the screen. A take that would pass it evicts the pictures not
 drawn in this frame, the least recently drawn first; an evicted view draws live and its textures are
 destroyed. A take that still does not fit is refused, the view drawn live, `renderer:kept-budget`
 logged once per run, and it is not offered again until it fits. Every texture is registered with

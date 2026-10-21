@@ -269,7 +269,7 @@ Every Pixi filter the engine builds, ours and the core kinds, a `Blur` on both i
 | `phone` | `"auto"` | Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart` |
 | `blur` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to. Shallow merge: a game that sets `blur` gives both fields |
 
-More than one full-screen view with an enabled filter warns `effects:full-screen-filters` once per crossing. A view is full-screen when the box its `Sprite`, `NineSlice` or `Shape` declares, times its `Transform.scale`, covers the viewport. The count is taken again only on a frame a filtered view was synced or forgotten, the viewport changed size, or the `Transform`, `Sprite`, `NineSlice` or `Shape` of a filtered view changed; otherwise the last count stands.
+More than one full-screen view with an enabled filter warns `effects:full-screen-filters` once per crossing. A view is full-screen when the box its `Sprite`, `NineSlice` or `Shape` declares, times its `Transform.scale`, covers the viewport; when its enabled filters declare an `area`, that area (their union) takes the place of the box, so a lens over a full-screen sprite counts only when its area covers the viewport. The count is taken again only on a frame a filtered view was synced or forgotten, the viewport changed size, or the `Transform`, `Sprite`, `NineSlice` or `Shape` of a filtered view changed; otherwise the last count stands.
 
 ## API — `app.effects`
 
