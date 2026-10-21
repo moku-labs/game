@@ -601,8 +601,9 @@ function writeTakeKeys(
 
 /**
  * Takes or retakes the picture of a record: stages 1, 2 (when its first filter has inputs) and 3, at the phase of this
- * frame. Refused, and the view drawn live, for a `Display` in the subtree without `onDemand`, empty bounds, a picture
- * over 4096 device pixels, or a budget that has no room (P6.3, warned once).
+ * frame. The bounds are cut to the filter area of the top when it holds one (F43). Refused, and the view drawn live,
+ * for a `Display` in the subtree without `onDemand`, empty bounds, a picture over 4096 device pixels, or a budget that
+ * has no room (P6.3, warned once).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -625,7 +626,8 @@ function takePicture(
   // A game's own object it may write unseen without `onDemand`, and an empty subtree, are never kept.
   if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return false;
 
-  const local = top.getLocalBounds();
+  // A filter area bounds what the filters draw, so it bounds the picture too (F43): same pixels, a smaller texture.
+  const local = clippedToArea(top.getLocalBounds(), top.filterArea);
 
   if (isEmptyBounds(local)) return false;
 
@@ -662,6 +664,35 @@ function takePicture(
   writeSeen(record, now);
 
   return ok;
+}
+
+/** Local bounds as the kept geometry reads them. */
+type LocalBox = { minX: number; minY: number; maxX: number; maxY: number };
+
+/**
+ * The local bounds of a top cut to its filter area, both in the top's own units: its filters draw nothing outside
+ * the area. With no area the bounds are returned as they are. Pure.
+ *
+ * @param bounds - The top's local bounds.
+ * @param area - The filter area on the top, or none.
+ * @returns The bounds the picture takes.
+ * @example
+ * ```ts
+ * clippedToArea({ minX: 0, minY: 0, maxX: 400, maxY: 400 }, { x: 100, y: 100, width: 40, height: 40 }); // { minX: 100, minY: 100, maxX: 140, maxY: 140 }
+ * ```
+ */
+function clippedToArea(
+  bounds: Readonly<LocalBox>,
+  area: Readonly<{ x: number; y: number; width: number; height: number }> | null | undefined
+): Readonly<LocalBox> {
+  if (area === null || area === undefined) return bounds;
+
+  return {
+    minX: Math.max(bounds.minX, area.x),
+    minY: Math.max(bounds.minY, area.y),
+    maxX: Math.min(bounds.maxX, area.x + area.width),
+    maxY: Math.min(bounds.maxY, area.y + area.height)
+  };
 }
 
 /**

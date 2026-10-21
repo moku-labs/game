@@ -60,10 +60,11 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   them with their string and their glyphs. `ui` measured them before they were resolved, so the
   next system run writes their `Text` once more, with no field: the change reaches the remeasure
   of `ui` in that layout phase, and a bound label whose listed value measures otherwise than its
-  string gets its size. A label whose content changed is not among them: it resolves in the next
-  layout phase, as before. A system of phase `sync` that writes `resolved` itself (a typing
-  effect) so finds a spawned label resolved in its first run, and a label whose content a
-  re-render of `ui` changed one frame after that re-render. A label that comes while the world is
+  string gets its size. The same step resolves a label whose content or style `ui` changed in
+  its reconcile, after the system ran: it shows the new string in the frame of the change (`ui`
+  measured that content itself, so it is not written once more). A system of phase `sync` that
+  writes `resolved` itself (a typing effect) so finds a spawned label resolved in its first run,
+  and a label whose content a re-render of `ui` changed in the frame of that re-render. A label that comes while the world is
   paused or fast is not listed: it is resolved by the next live run of the system, as before.
 - **Countdown:** `Countdown({ until })` plus `bind(Countdown, "left", { format })` on the same
   entity. `until` is a moment of `clock` in epoch ms. `left` is engine-owned: computed from one

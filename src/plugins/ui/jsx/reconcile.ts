@@ -1375,11 +1375,14 @@ export function createReconciler(
   function subtreeSettled(element: Element): boolean {
     if (!modules.layout.settled(element)) return false;
 
-    return element.children.every(child => {
+    // Per exiting element and frame (two sweeps while anything leaves): an array `for…of`, no closure.
+    for (const child of element.children) {
       const childElement = state.elements.get(child);
 
-      return childElement === undefined || subtreeSettled(childElement);
-    });
+      if (childElement !== undefined && !subtreeSettled(childElement)) return false;
+    }
+
+    return true;
   }
 
   /**
@@ -1458,7 +1461,28 @@ export function createReconciler(
       despawnTree(element);
     }
 
-    // Drop a removed root once its element tree is gone, and close its popup.
+    dropRemovedRoots();
+  }
+
+  /**
+   * Despawns every exiting element at once, finished or not, and drops the roots that were leaving:
+   * what a restore or a load does, as a page reload would (F42).
+   */
+  function dropLeaving(): void {
+    for (const entity of state.exiting) {
+      const element = state.elements.get(entity);
+
+      if (element === undefined) state.exiting.delete(entity);
+      else despawnTree(element);
+    }
+
+    dropRemovedRoots();
+  }
+
+  /**
+   * Drops every removed root whose element tree is gone, and closes its popup.
+   */
+  function dropRemovedRoots(): void {
     for (const entity of state.removing) {
       const root = state.roots.get(entity);
 
@@ -1884,11 +1908,12 @@ export function createReconciler(
    * element stands exactly as if its root had just been mounted with the restored state: a new
    * entity with the components of the description, then its `enter` hook, then its loop. What a
    * mount does not bring is gone with the old tree: the local state of a component, a scroll
-   * offset, the keyboard focus, a text being edited, a hover. A root that is leaving keeps
-   * leaving.
+   * offset, the keyboard focus, a text being edited, a hover. An element or a root that is
+   * leaving is dropped at once, as a page reload drops it.
    */
   function remountRoots(): void {
     state.remount = false;
+    dropLeaving();
 
     for (const root of state.roots.values()) {
       if (state.removing.has(root.entity)) continue;
@@ -2134,8 +2159,8 @@ export function createReconciler(
   /**
    * The second system of phase `layout`: every root takes its slot, then one solve per marked
    * root, a root in a slot after the root of its slot and in its content box, then the rects, the
-   * rest poses and the hooks, the scrolls settled on what the solve and the render gave them, and
-   * the hosting of the hosts that came. The hints released since the last frame step are dropped
+   * rest poses and the hooks, the scrolls settled on what the solve and the render gave them, the
+   * hosting of the hosts that came, and a sweep of what left with nothing to wait for. The hints released since the last frame step are dropped
    * at its end, so the `change.Box` and `change.Transform` hooks the solve plays get the hint the
    * reconcile routed, and the next frame starts with none.
    *
@@ -2168,6 +2193,10 @@ export function createReconciler(
       hostViews(ctx, state, state.risen);
       state.risen.clear();
     }
+
+    // An element that left in this frame's reconcile with nothing to wait for (no exit hook, a hook that played
+    // nothing) goes before this frame is drawn, not at the next reconcile (F46). Per frame: two size reads.
+    if (state.exiting.size > 0 || state.removing.size > 0) sweep();
 
     state.hints.length = 0;
     writeCounters();
