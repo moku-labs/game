@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { read } from "../../../flow/doors/read";
 import { Parent, Shape, Transform } from "../../../renderer/components";
 import { Order } from "../../../world/ecs/define";
 import { Box, UiCounters } from "../../components";
+import { locateSource } from "../../inspect";
 import type { UiNode } from "../../types";
 import { mountScreens, rowChanges, type SlotApp, startSlotApp, tick } from "../slot-app";
 
@@ -246,6 +248,27 @@ describe("a JSX projection in a slot (spec 16 U3)", () => {
     const app = await mountedSlot();
 
     expect(nodeOf(app.ui.tree(), "slotButton")?.rect).toEqual({ x: 130, y: 420, w: 100, h: 100 });
+
+    await app.stop();
+  });
+
+  it("locates a slotted element through the slot's pose, where it is drawn (F39)", async () => {
+    // Guards the pose path: a slotted root hangs under the slot through `Parent`, so its root pose
+    // applies the slot once, the place `tree()` reports, neither twice nor not at all.
+    const app = await mountedSlot();
+
+    await tick();
+    app.time.step(16);
+
+    const { viewport } = app.renderer;
+    const topLeft = viewport.toScreen({ x: 130, y: 420 });
+    const bottomRight = viewport.toScreen({ x: 230, y: 520 });
+    const rect = read(app, locateSource, { key: "slotButton" });
+
+    expect(rect?.x).toBeCloseTo(topLeft.x, 5);
+    expect(rect?.y).toBeCloseTo(topLeft.y, 5);
+    expect(rect?.w).toBeCloseTo(bottomRight.x - topLeft.x, 5);
+    expect(rect?.h).toBeCloseTo(bottomRight.y - topLeft.y, 5);
 
     await app.stop();
   });
