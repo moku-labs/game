@@ -177,7 +177,7 @@ export function shownOf(element: Element, source: TextSource): string | undefine
  * @param width - The width Yoga offers, or `undefined` when it bounds none.
  * @returns The width and the height, in whole units.
  */
-function naturalSize(element: Element, source: TextSource, width: number | undefined): Size {
+function naturalSize(element: Element, source: TextSource, width?: number): Size {
   const { content, style } = contentOf(element);
 
   // An icon is one line of its style squared; a text is the string it shows.
@@ -206,6 +206,32 @@ function offeredWidth(yoga: Yoga, width: number, mode: number): number | undefin
   if (mode === yoga.MEASURE_MODE_UNDEFINED || !Number.isFinite(width)) return undefined;
 
   return width;
+}
+
+/**
+ * The width a text wrapped at: the width Yoga offered, when the text measures to another size
+ * there than on one line, which only a style with `wrap: "box"` does. A text that fits, any other
+ * style and an icon wrapped at none, so `ui` writes no box on them and a described or saved `Text`
+ * carries none.
+ *
+ * @param element - The text or icon element.
+ * @param source - What it is measured through.
+ * @param offered - The width Yoga offered, or `undefined` when it bounded none.
+ * @param size - What the element measured at `offered`.
+ * @returns The width, or `undefined` when the text did not wrap at it.
+ */
+function wrappedAt(
+  element: Element,
+  source: TextSource,
+  offered: number | undefined,
+  size: Size
+): number | undefined {
+  if (offered === undefined || element.type !== "text") return undefined;
+
+  const line = naturalSize(element, source);
+  const wrapped = line.width !== size.width || line.height !== size.height;
+
+  return wrapped ? offered : undefined;
 }
 
 /**
@@ -282,7 +308,7 @@ export function installMeasure(
 
     state.measured += 1;
     element.measuredSize = size;
-    element.measuredWidth = offered;
+    element.measuredWidth = wrappedAt(element, source, offered, size);
 
     // An icon carries no `Text`, so nothing names it when its line moves: keep the line the
     // icons were measured with, for `iconLineMoved`.

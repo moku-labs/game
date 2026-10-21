@@ -155,7 +155,20 @@ describe('a text of a wrap "box" style in a row that shrinks it', () => {
     await app.stop();
   });
 
-  it("stays on one line when the name fits the room", async () => {
+  // The bug: ui writes its laid-out width on every text, so every saved and described value of a
+  // game changes though none of its styles wraps at a box (demos baselines, 0.15.16).
+  it("writes no box on a text of a style that does not wrap at its box", async () => {
+    const app = await mountCard();
+    const title = app.world.ecs.get(app.ui.find("cardTitle") ?? 0, Text);
+
+    expect(title?.resolved).toBe("A title of the body style");
+    expect(Object.keys(title ?? {})).not.toContain("box");
+
+    await app.stop();
+  });
+
+  // The bug: a name that fits now keeps the box of the lines it had and is drawn wrapped there.
+  it("stays on one line when the name fits the room, its box back to 0", async () => {
     const app = await mountCard();
 
     tap(app, "shorten");
@@ -164,7 +177,7 @@ describe('a text of a wrap "box" style in a row that shrinks it', () => {
 
     expect(name.w).toBe(77);
     expect(name.h).toBe(linesHigh(1));
-    expect(boxOf(app)).toBe(name.w);
+    expect(boxOf(app)).toBe(0);
 
     await app.stop();
   });

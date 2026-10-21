@@ -252,8 +252,8 @@ export type StyleBasis = { epoch: number; rowHeight: number | undefined };
  * scroll created: it plays no `enter` hook. A scroll carries its `scroll` motion from its enter. A text or an icon that sizes itself keeps in
  * `measuredSize` what its measure function last answered, before Yoga's clamp: a bound text whose
  * new string measures the same asks for no solve. `measuredWidth` is the width Yoga offered that
- * call, `undefined` when it bounded none: a text of a `"box"` style is measured again at it, so the
- * lines it wraps into are compared, not one line. `basis` is what `style` was resolved on, set
+ * call when the text wrapped at it (only a `"box"` style does), `undefined` otherwise: such a text
+ * is measured again at its laid-out width and gets a `Text.box`, any other gets none. `basis` is what `style` was resolved on, set
  * once the style is on the layout node and the components are written; an element without one is
  * patched in full at its next patch. `index` is its place among the element children of its parent
  * at the last diff (0 for a root element): with its `zIndex` it gives the child its `Order`.
@@ -299,6 +299,8 @@ export type Element = {
   scroll?: ScrollMotion;
   measuredSize?: { width: number; height: number };
   measuredWidth?: number | undefined;
+  /** True once the text wrapped at its box: from then on `ui` writes its box, 0 when it fits. */
+  boxed?: boolean;
   basis?: StyleBasis;
   /** The motions of its hooks that started a `repeat: "forever"` track; made with the first one. */
   endless?: Set<MotionHandle>;

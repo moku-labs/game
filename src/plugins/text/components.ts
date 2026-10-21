@@ -28,7 +28,6 @@ const textDefaults: TextValue = {
   bind: undefined,
   anchor: { x: 0.5, y: 0.5 },
   alpha: 1,
-  box: 0,
   resolved: ""
 };
 
@@ -36,7 +35,7 @@ const textDefaults: TextValue = {
  * Words on the screen: a string or a message, the style it is drawn in, and the string `text`
  * resolved out of it. A game writes `content`, `style`, `bind`, `anchor` and `alpha`; `resolved`
  * is engine-owned and `ui` and the tests read it. `alpha` (1 by default) fades the whole block and
- * is patched in place, so a tween on it rebuilds nothing. `box` (0 by default) is the width a
+ * is patched in place, so a tween on it rebuilds nothing. `box` (none by default) is the width a
  * style with `wrap: "box"` wraps at; `ui` writes the laid-out width of a text element there.
  */
 export const Text = /*#__PURE__*/ component("Text", textDefaults, { owned: ["resolved"] });
@@ -119,7 +118,7 @@ export type LabelOptions = {
  * ```ts
  * label({ text: "+5", style: "board.float", at: { x: 90, y: 180 } });
  * // [Text({ content: "+5", style: "board.float", bind: undefined,
- * //   anchor: { x: 0.5, y: 0.5 }, alpha: 1, box: 0, resolved: "" }),
+ * //   anchor: { x: 0.5, y: 0.5 }, alpha: 1, resolved: "" }),
  * //  Transform({ x: 90, y: 180, rotation: 0, scale: 1 })]
  * ```
  */
