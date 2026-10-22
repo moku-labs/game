@@ -363,8 +363,9 @@ export type TexturesApi = {
    * ```ts
    * // `assets.warm("ep01.memory")`: the bundle is loaded; its 6 textures go to the GPU while the board still shows.
    * const renderer = ctx.require(rendererPlugin);
-   * const uploaded = await renderer.sync.textures.upload(record.textures); // true 6 drawn frames later (uploads: 1)
-   * await renderer.sync.textures.upload(record.textures); // true at once: they are on this device already
+   * const textures = [...record.textures.values(), ...record.pages.values()];
+   * const uploaded = await renderer.sync.textures.upload(textures); // true 6 drawn frames later (uploads: 1)
+   * await renderer.sync.textures.upload(textures); // true at once: they are on this device already
    * ```
    */
   upload(textures: readonly PixiTexture[]): Promise<boolean>;

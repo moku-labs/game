@@ -121,8 +121,10 @@ export function createHollowClass(pixi: PixiModule): HollowClass {
     /** The cut lines down, scratch of the next write. */
     private readonly down: Cuts = { start: 0, near: 0, far: 0, end: 0 };
 
+    /** The panel's width the positions are laid out for. */
     private boxWidth = 0;
 
+    /** The panel's height the positions are laid out for. */
     private boxHeight = 0;
 
     /** False while Pixi's constructor writes the first texture: the geometry does not exist yet. */
@@ -300,6 +302,9 @@ export function createHollowClass(pixi: PixiModule): HollowClass {
     public override destroy(
       options?: Parameters<InstanceType<PixiModule["Mesh"]>["destroy"]>[0]
     ): void {
+      // A second destroy finds no geometry: Pixi's own containers answer it by doing nothing.
+      if (this.destroyed) return;
+
       const geometry = this.geometry;
 
       super.destroy(options);
@@ -345,6 +350,8 @@ export function createHollowClass(pixi: PixiModule): HollowClass {
       const texture = this.texture;
       const width = texture.width;
       const height = texture.height;
+
+      // The texture's frame in uv, trim included.
       const trim: Trim | undefined = texture.trim;
       const x = trim?.x ?? 0;
       const y = trim?.y ?? 0;
@@ -352,10 +359,12 @@ export function createHollowClass(pixi: PixiModule): HollowClass {
       const v0 = y / height;
       const u1 = (x + (trim?.width ?? width)) / width;
       const v1 = (y + (trim?.height ?? height)) / height;
+
       // One texel in uv, Pixi's own arithmetic: the uvs come out bit for bit as a filled panel's.
       const texelU = 1 / width;
       const texelV = 1 / height;
 
+      // The four cut lines each way, then the grid's uvs.
       across.start = u0;
       across.near = u0 + texelU * borders.left;
       across.far = u1 - texelU * borders.right;

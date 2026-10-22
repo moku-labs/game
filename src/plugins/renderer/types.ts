@@ -366,7 +366,8 @@ export type Config = {
    * @example
    * ```ts
    * // The memory screen's 6 textures, warmed while the board still shows: 3 drawn frames at 2 a frame.
-   * createApp({ pluginConfigs: { renderer: { mount: "#game", uploads: 2 } } });
+   * const app = createApp({ pluginConfigs: { renderer: { mount: "#game", uploads: 2 } } });
+   * await app.start();
    * await app.assets.warm("ep01.memory"); // resolves after the third drawn frame
    * ```
    */

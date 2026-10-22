@@ -301,6 +301,8 @@ export function releaseAll(state: State): void {
   state.featureOfFlow.clear();
   state.pinned.clear();
   state.warned.clear();
+  state.warmed.clear();
+  state.readyFailed.clear();
   state.companions.length = 0;
   state.current = undefined;
   state.sceneId = undefined;

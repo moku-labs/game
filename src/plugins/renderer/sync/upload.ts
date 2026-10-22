@@ -71,7 +71,9 @@ function enqueue(upload: UploadState, source: PixiTextureSource, waiter: UploadW
 export function uploadTextures(sctx: SyncCtx, textures: readonly PixiTexture[]): Promise<boolean> {
   const { upload } = sctx.ctx.state.sync;
 
-  if (sctx.ctx.config.uploads === 0 || !sctx.deps.host.ready()) return Promise.resolve(false);
+  const cannotUpload = sctx.ctx.config.uploads === 0 || !sctx.deps.host.ready();
+
+  if (cannotUpload) return Promise.resolve(false);
 
   const waiter: UploadWaiter = { left: 0, resolve: unanswered };
 
@@ -139,6 +141,7 @@ export function uploadStep(sctx: SyncCtx): boolean {
   const budget = sctx.ctx.config.uploads;
   let made = 0;
 
+  // Upload queued sources until the frame's budget is spent or the queue runs out.
   while (made < budget && upload.head < upload.queue.length) {
     const source = upload.queue[upload.head];
 
@@ -154,6 +157,7 @@ export function uploadStep(sctx: SyncCtx): boolean {
     settle(upload, source);
   }
 
+  // Sources still wait: ask for the next frame. Else the queue empties for the next call.
   if (upload.head < upload.queue.length) {
     sctx.deps.demand.request();
 

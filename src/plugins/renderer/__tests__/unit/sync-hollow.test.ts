@@ -226,4 +226,20 @@ describe("the rim-only nine-slice", () => {
     expect(plain(uvs)).toEqual(plain(pixiSlicing(wider, slicing).uvs));
     expect(panel.texture).toBe(wider);
   });
+
+  // Bug: a second destroy read the geometry Pixi had already dropped and threw, where Pixi's own containers do nothing.
+  it("does nothing on a second destroy", () => {
+    const panel = hollowOf(textureOf(200, 100), {
+      left: 48,
+      top: 40,
+      right: 32,
+      bottom: 24,
+      width: 600,
+      height: 320
+    });
+
+    panel.destroy();
+
+    expect(() => panel.destroy()).not.toThrow();
+  });
 });
