@@ -110,8 +110,7 @@ describe("nine-slice in the style", () => {
       alpha: 0.9,
       tint: 0xff_ee_dd,
       debug: false,
-      clip: false,
-      hollow: false
+      clip: false
     });
     expect(app.world.ecs.has(sliced, Shape)).toBe(false);
     expect(app.world.ecs.get(entityOf(app, "slicedRow"), NineSlice)?.texture).toBe("ui.strip");
@@ -173,7 +172,8 @@ describe("nine-slice in the style", () => {
   });
 
   // Bug: `hollow` of the style never reaches `NineSlice`, so the frame fills its centre; or it is
-  // written only when set, so the panel stays hollow after the variant that made it so ends.
+  // written only when set, so the panel stays hollow after the variant that made it so ends; or a
+  // panel never hollow carries the field and every game's describe changes (demos merge-game, ticktoe).
   it("draws the rim alone while the style is hollow, and the whole panel again after", async () => {
     const app = await startUiApp();
 
@@ -181,7 +181,7 @@ describe("nine-slice in the style", () => {
 
     const frost = entityOf(app, "frost");
 
-    expect(app.world.ecs.get(frost, NineSlice)?.hollow).toBe(false);
+    expect(app.world.ecs.get(frost, NineSlice)).not.toHaveProperty("hollow");
 
     app.world.ecs.tag(frost, PointerOver);
     app.time.step(16);

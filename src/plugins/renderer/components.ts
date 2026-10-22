@@ -75,7 +75,7 @@ export type SpriteValue = {
  * ```ts
  * const value: NineSliceValue = {
  *   texture: "ui.panel", width: 600, height: 320, alpha: 1, tint: 0xffffff, debug: false,
- *   clip: false, hollow: false
+ *   clip: false
  * };
  * // The board tray, outlined while its insets are checked.
  * const tray: NineSliceValue = {
@@ -102,7 +102,8 @@ export type NineSliceValue = {
   /**
    * Draws the rim alone: the four corners and the four edges of the slicing, never the centre cell, so a frame or a
    * glass panel whose middle is empty fills no pixel there. The hit box stays the whole `width × height`, and `debug`
-   * and `clip` work as on a filled panel. `false` by default.
+   * and `clip` work as on a filled panel. Absent by default, read as `false`, so a panel that never sets it keeps the
+   * values it had before the field existed.
    *
    * @example
    * ```ts
@@ -111,7 +112,7 @@ export type NineSliceValue = {
    * world.ecs.spawn(owner, [Layer({ name: "ui" }), Transform(), NineSlice({ texture: "glass.frost", width: 960, height: 1400, hollow: true })]);
    * ```
    */
-  hollow: boolean;
+  hollow?: boolean;
 };
 
 /**
@@ -330,21 +331,23 @@ export const Transform = /*#__PURE__*/ component("Transform", transformDefaults)
  */
 export const Sprite = /*#__PURE__*/ component("Sprite", spriteDefaults);
 
-/**
- * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
- * the slice outline over it. `clip: true` masks the children of the entity to the panel box.
- * `hollow: true` draws its rim alone, never the centre cell.
- */
-export const NineSlice = /*#__PURE__*/ component("NineSlice", {
+/** What a `NineSlice` starts as, `hollow` left out. Its own const, because a component takes a typed defaults object. */
+const nineSliceDefaults: NineSliceValue = {
   texture: "",
   width: 0,
   height: 0,
   alpha: 1,
   tint: 0xff_ff_ff,
   debug: false,
-  clip: false,
-  hollow: false
-});
+  clip: false
+};
+
+/**
+ * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
+ * the slice outline over it. `clip: true` masks the children of the entity to the panel box.
+ * `hollow: true` draws its rim alone, never the centre cell.
+ */
+export const NineSlice = /*#__PURE__*/ component("NineSlice", nineSliceDefaults);
 
 /**
  * The entity this view moves with. `0` means no parent.

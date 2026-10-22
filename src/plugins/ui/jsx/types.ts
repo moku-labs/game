@@ -301,6 +301,8 @@ export type Element = {
   measuredWidth?: number | undefined;
   /** True once the text wrapped at its box: from then on `ui` writes its box, 0 when it fits. */
   boxed?: boolean;
+  /** True once its nine-slice was hollow: from then on `ui` writes `hollow`, false when the style drops it. */
+  hollowed?: boolean;
   basis?: StyleBasis;
   /** The motions of its hooks that started a `repeat: "forever"` track; made with the first one. */
   endless?: Set<MotionHandle>;

@@ -78,6 +78,25 @@ function contentOf(props: Record<string, unknown>): string {
 }
 
 /**
+ * Whether a nine-slice draws its rim alone: `true` while its style says so, `false` once it did and
+ * no longer does, and no field on a panel that was never hollow, so a game's describe and saved
+ * values stay as they were without it.
+ *
+ * @param element - The element framed by the nine-slice.
+ * @param hollow - The style's `hollow`.
+ * @returns `{ hollow }`, or nothing.
+ */
+function hollowOf(element: Element, hollow: boolean | undefined): { hollow?: boolean } {
+  if (hollow === true) {
+    element.hollowed = true;
+
+    return { hollow: true };
+  }
+
+  return element.hollowed === true ? { hollow: false } : {};
+}
+
+/**
  * The box a text wraps at: its laid-out width while it wraps at it, 0 once it fits again, so a
  * text that wrapped draws on one line, and no field on a text that never wrapped.
  *
@@ -158,8 +177,8 @@ export function visualOf(element: Element): AnyComponentValue[] {
         debug: style.debug ?? false,
         // A text field framed by slices clips its value to them, so a long one never leaves it.
         clip: type === "input",
-        // Written in every render, so a variant that made it hollow never leaves it hollow after.
-        hollow: style.hollow ?? false
+        // Only on a panel that was hollow once: a variant that made it hollow never leaves it hollow after.
+        ...hollowOf(element, style.hollow)
       })
     ];
   }

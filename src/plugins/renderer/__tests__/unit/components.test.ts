@@ -25,16 +25,16 @@ describe("renderer components", () => {
     });
   });
 
-  it("gives NineSlice a zero size, full alpha, a white tint, no debug outline, no clip and a filled centre", () => {
-    expect(NineSlice().value).toEqual({
+  // Bug (demos merge-game, ticktoe): a default `hollow: false` showed in every game's describe, so every baseline changed.
+  it("gives NineSlice a zero size, full alpha, a white tint, no debug outline, no clip and no hollow field", () => {
+    expect(NineSlice().value).toStrictEqual({
       texture: "",
       width: 0,
       height: 0,
       alpha: 1,
       tint: 0xff_ff_ff,
       debug: false,
-      clip: false,
-      hollow: false
+      clip: false
     });
   });
 
