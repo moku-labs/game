@@ -3,7 +3,8 @@
  * every visible node, also one the engine hides with `renderable = false` (alpha 0, a cover, an overlay's range, a
  * kept child's top), which Pixi then never draws (F58). This walk skips a node as Pixi's live filter bounds do
  * (`localDisplayStatus`, `measurable`), keeps masks and bounds areas, and allocates nothing once its per-depth
- * matrices and bounds exist.
+ * matrices and bounds exist. Those and the answered bounds are module scratch, as `NOW` of `record.ts`: one walk at a
+ * time, and the next walk writes the answer again.
  */
 import type { PixiBounds, PixiContainer, PixiMatrix, PixiModule } from "../types";
 
@@ -60,6 +61,16 @@ function maskedAt(pixi: PixiModule, depth: number): PixiBounds {
   MASKED[depth] = made;
 
   return made;
+}
+
+/**
+ * Tells whether Pixi skips a node and its subtree: hidden, not renderable, culled, or not measured (a mask).
+ *
+ * @param node - A node under the top.
+ * @returns True when it adds nothing.
+ */
+function skipped(node: PixiContainer): boolean {
+  return node.localDisplayStatus !== SHOWN || !node.measurable;
 }
 
 /**
@@ -121,17 +132,19 @@ function addDrawn(
   depth: number,
   top: PixiContainer
 ): void {
+  if (depth > 0 && skipped(node)) return;
+
+  // The node's matrix in the top's space: the top's is the identity.
   const matrix = matrixAt(pixi, depth);
 
   if (depth === 0) {
     matrix.identity();
   } else {
-    if (node.localDisplayStatus !== SHOWN || !node.measurable) return;
-
     node.updateLocalTransform();
     matrix.appendFrom(node.localTransform, matrixAt(pixi, depth - 1));
   }
 
+  // A node with no effects adds what it draws straight.
   const effects = node.effects ?? [];
 
   if (effects.length === 0) {
@@ -140,6 +153,7 @@ function addDrawn(
     return;
   }
 
+  // A masked node gathers what it draws apart, then its masks cut it.
   const masked = maskedAt(pixi, depth);
 
   addContent(pixi, node, masked, depth, top);

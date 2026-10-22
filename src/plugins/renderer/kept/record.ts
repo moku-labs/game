@@ -691,7 +691,7 @@ function takePicture(
   const across = cutSpan(now.tx + box.x0, now.tx + box.x1, width, Ps);
   const down = cutSpan(now.ty + box.y0, now.ty + box.y1, height, Ps);
 
-  if (!(across.end > across.start && down.end > down.start)) return false;
+  if (isEmptySpan(across) || isEmptySpan(down)) return false;
 
   const x = gridSpan(across.start, across.end, now.rs);
   const y = gridSpan(down.start, down.end, now.rs);
@@ -715,11 +715,11 @@ function takePicture(
   }
 
   record.refused = 0;
-  record.cut =
-    across.start > now.tx + box.x0 ||
-    across.end < now.tx + box.x1 ||
-    down.start > now.ty + box.y0 ||
-    down.end < now.ty + box.y1;
+  // Cut when the canvas took a side off the box.
+  const cutAcross = across.start > now.tx + box.x0 || across.end < now.tx + box.x1;
+  const cutDown = down.start > now.ty + box.y0 || down.end < now.ty + box.y1;
+
+  record.cut = cutAcross || cutDown;
   record.key[KEY.sw] = width;
   record.key[KEY.sh] = height;
   writeTakeKeys(record, now, { x, y, w1, h1 });
@@ -730,6 +730,22 @@ function takePicture(
   writeSeen(record, now);
 
   return ok;
+}
+
+/**
+ * Tells whether a span holds nothing: its end is not after its start. Pure.
+ *
+ * @param span - The span.
+ * @param span.start - Its start.
+ * @param span.end - Its end.
+ * @returns True when it is empty.
+ * @example
+ * ```ts
+ * isEmptySpan({ start: -10, end: -10 }); // true
+ * ```
+ */
+function isEmptySpan(span: { start: number; end: number }): boolean {
+  return span.end <= span.start;
 }
 
 /** Local bounds as the kept geometry reads them. */
@@ -1214,10 +1230,10 @@ function refresh(
 
   // A stack of alphas owes nothing: its quad takes the new alpha (F54).
   if (drawsDirect(NOW)) {
-    if (!record.direct) {
-      goDirect(kctx, record);
-      account(kctx, record);
-    }
+    if (record.direct) return;
+
+    goDirect(kctx, record);
+    account(kctx, record);
 
     return;
   }
