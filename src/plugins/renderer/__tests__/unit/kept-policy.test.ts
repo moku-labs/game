@@ -140,7 +140,11 @@ function keptNow(drawn: Drawn, entity: Entity): boolean {
  * @param x - Its x.
  * @returns The entity, kept.
  */
-function kept(drawn: Drawn, slot: FilterSlot = slotOf(new pixi.AlphaFilter()), x = 100): Entity {
+function kept(
+  drawn: Drawn,
+  slot: FilterSlot = slotOf(new pixi.ColorMatrixFilter()),
+  x = 100
+): Entity {
   const entity = filtered(drawn, slot, x);
 
   drawn.frames(2);
@@ -151,7 +155,7 @@ function kept(drawn: Drawn, slot: FilterSlot = slotOf(new pixi.AlphaFilter()), x
 describe("taking a picture", () => {
   it("a filtered view that stood still for two drawn frames is drawn from a picture from the third", async () => {
     const drawn = await open();
-    const entity = filtered(drawn, slotOf(new pixi.AlphaFilter()));
+    const entity = filtered(drawn, slotOf(new pixi.ColorMatrixFilter()));
 
     drawn.frame();
 
@@ -173,7 +177,7 @@ describe("taking a picture", () => {
 
   it("a view that changes every frame is never taken", async () => {
     const drawn = await open();
-    const entity = filtered(drawn, slotOf(new pixi.AlphaFilter()));
+    const entity = filtered(drawn, slotOf(new pixi.ColorMatrixFilter()));
     const child = drawn.mock.world.ecs.spawn(OWNER, [
       Transform({ x: 4, y: 4 }),
       Shape({ w: 8, h: 8 }),
@@ -213,7 +217,7 @@ describe("taking a picture", () => {
       Parent({ entity })
     ]);
 
-    drawn.mock.api.sync.filters.set(entity, [slotOf(new pixi.AlphaFilter())]);
+    drawn.mock.api.sync.filters.set(entity, [slotOf(new pixi.ColorMatrixFilter())]);
     drawn.frames(3);
 
     expect(keptNow(drawn, entity)).toBe(true);
@@ -267,7 +271,7 @@ describe("a picture retaken at another size", () => {
 describe("only the stage whose key changed is redone", () => {
   it("a filter value change redoes stage 3 only", async () => {
     const drawn = await open();
-    const filter = new pixi.AlphaFilter();
+    const filter = new pixi.ColorMatrixFilter();
     const entity = kept(drawn, slotOf(filter));
     const from = drawn.stage.targets().length;
 
@@ -287,7 +291,7 @@ describe("only the stage whose key changed is redone", () => {
     const stove = drawn.spawn(Transform({ x: 100, y: 100 }), Display({ object: flame }));
     const lamp = drawn.spawn(Transform({ x: 300, y: 100 }), Shape({ w: 8, h: 8 }));
 
-    drawn.mock.api.sync.filters.set(stove, [slotOf(new pixi.AlphaFilter())]);
+    drawn.mock.api.sync.filters.set(stove, [slotOf(new pixi.ColorMatrixFilter())]);
 
     // A lamp that moves every frame keeps the frames drawn.
     for (let frame = 1; frame <= 4; frame += 1) {
@@ -328,7 +332,7 @@ describe("what is never kept", () => {
       Parent({ entity: panel })
     ]);
 
-    drawn.mock.api.sync.filters.set(icon, [slotOf(new pixi.AlphaFilter())]);
+    drawn.mock.api.sync.filters.set(icon, [slotOf(new pixi.ColorMatrixFilter())]);
     drawn.frames(3);
 
     expect(keptNow(drawn, icon)).toBe(true);
@@ -347,15 +351,15 @@ describe("what is never kept", () => {
 
   it("a screen filter, a slot without a category, a filter with blendRequired or a non-normal blend mode makes no picture", async () => {
     const drawn = await open();
-    const backdrop = new pixi.AlphaFilter();
-    const added = new pixi.AlphaFilter();
+    const backdrop = new pixi.ColorMatrixFilter();
+    const added = new pixi.ColorMatrixFilter();
 
     backdrop.blendRequired = true;
     added.blendMode = "add";
 
     const entities = [
-      kept(drawn, slotOf(new pixi.AlphaFilter(), { cache: "screen" }), 100),
-      kept(drawn, { filter: new pixi.AlphaFilter(), passes: 1 }, 200),
+      kept(drawn, slotOf(new pixi.ColorMatrixFilter(), { cache: "screen" }), 100),
+      kept(drawn, { filter: new pixi.ColorMatrixFilter(), passes: 1 }, 200),
       kept(drawn, slotOf(backdrop), 300),
       kept(drawn, slotOf(added), 400)
     ];
@@ -386,11 +390,11 @@ describe("what is never kept", () => {
     ]);
 
     // The panel's filter is drawn live in every frame: its own slot names no category.
-    drawn.mock.api.sync.filters.set(panel, [{ filter: new pixi.AlphaFilter(), passes: 1 }]);
+    drawn.mock.api.sync.filters.set(panel, [{ filter: new pixi.ColorMatrixFilter(), passes: 1 }]);
     drawn.mock.api.sync.filters.set(lamp, [
-      slotOf(new pixi.AlphaFilter(), { cache: "placed", origin: new Float32Array(2) })
+      slotOf(new pixi.ColorMatrixFilter(), { cache: "placed", origin: new Float32Array(2) })
     ]);
-    drawn.mock.api.sync.filters.set(icon, [slotOf(new pixi.AlphaFilter())]);
+    drawn.mock.api.sync.filters.set(icon, [slotOf(new pixi.ColorMatrixFilter())]);
     drawn.frames(4);
 
     expect(keptNow(drawn, lamp)).toBe(false);
@@ -408,7 +412,7 @@ describe("what is never kept", () => {
         Display({ object: new pixi.Graphics().rect(0, 0, 20, 20).fill(0xff_00_00) }),
         Parent({ entity: panel })
       ]);
-      drawn.mock.api.sync.filters.set(panel, [slotOf(new pixi.AlphaFilter())]);
+      drawn.mock.api.sync.filters.set(panel, [slotOf(new pixi.ColorMatrixFilter())]);
 
       for (let frame = 1; frame <= 5; frame += 1) {
         drawn.mock.world.ecs.set(lamp, Transform, { x: 600 + frame });
@@ -435,8 +439,8 @@ describe("nested pictures, new tops, dropped views", () => {
       Parent({ entity: icon })
     ]);
 
-    drawn.mock.api.sync.filters.set(panel, [slotOf(new pixi.AlphaFilter())]);
-    drawn.mock.api.sync.filters.set(icon, [slotOf(new pixi.AlphaFilter())]);
+    drawn.mock.api.sync.filters.set(panel, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.mock.api.sync.filters.set(icon, [slotOf(new pixi.ColorMatrixFilter())]);
     drawn.frames(3);
 
     // The inner take changed what the outer picture holds: the outer stands still from then on.
@@ -481,7 +485,7 @@ describe("nested pictures, new tops, dropped views", () => {
 
     const entity = drawn.spawn(Transform({ x: 100, y: 100 }), Display({ object: panel }));
 
-    drawn.mock.api.sync.filters.set(entity, [slotOf(new pixi.AlphaFilter())]);
+    drawn.mock.api.sync.filters.set(entity, [slotOf(new pixi.ColorMatrixFilter())]);
     for (let frame = 0; frame < 4; frame += 1) step();
 
     const object = topOf(drawn, entity);
@@ -530,7 +534,7 @@ describe("nested pictures, new tops, dropped views", () => {
 
   it("taking and releasing are atomic: in every drawn frame the view or its quad is drawn, never both, never neither", async () => {
     const drawn = await open();
-    const entity = filtered(drawn, slotOf(new pixi.AlphaFilter()));
+    const entity = filtered(drawn, slotOf(new pixi.ColorMatrixFilter()));
     const child = drawn.mock.world.ecs.spawn(OWNER, [
       Transform({ x: 4, y: 4 }),
       Shape({ w: 8, h: 8 }),
@@ -580,7 +584,7 @@ describe("the debug switch", () => {
   it("debug.kept(false) draws every view live in the next drawn frame; true lets them be taken again", async () => {
     const drawn = await open(true);
     const lamp = drawn.spawn(Transform({ x: 600, y: 100 }), Shape({ w: 8, h: 8 }));
-    const entity = filtered(drawn, slotOf(new pixi.AlphaFilter()));
+    const entity = filtered(drawn, slotOf(new pixi.ColorMatrixFilter()));
     /** Moves the lamp, so frames are drawn. */
     const glide = (frames: number): void => {
       for (let frame = 0; frame < frames; frame += 1) {
@@ -610,7 +614,7 @@ describe("placed filters and settling", () => {
   it("a placed filter's origin is the picture's canvas origin in the picture and 0 drawn live", async () => {
     const drawn = await open();
     const origin = new Float32Array(2);
-    const entity = kept(drawn, slotOf(new pixi.AlphaFilter(), { cache: "placed", origin }));
+    const entity = kept(drawn, slotOf(new pixi.ColorMatrixFilter(), { cache: "placed", origin }));
 
     expect([...origin]).toEqual([100, 100]);
 
@@ -624,7 +628,7 @@ describe("placed filters and settling", () => {
   it("a placed view that moves redoes stage 3 only, and nothing at rest", async () => {
     const drawn = await open();
     const origin = new Float32Array(2);
-    const entity = kept(drawn, slotOf(new pixi.AlphaFilter(), { cache: "placed", origin }));
+    const entity = kept(drawn, slotOf(new pixi.ColorMatrixFilter(), { cache: "placed", origin }));
     const from = drawn.stage.targets().length;
 
     for (let frame = 1; frame <= 5; frame += 1) {
@@ -646,7 +650,7 @@ describe("placed filters and settling", () => {
   it("a settle retake happens once at rest after a fractional move, and asks for that frame", async () => {
     const drawn = await open(true);
     const lamp = drawn.spawn(Transform({ x: 600, y: 100 }), Shape({ w: 8, h: 8 }));
-    const entity = filtered(drawn, slotOf(new pixi.AlphaFilter()));
+    const entity = filtered(drawn, slotOf(new pixi.ColorMatrixFilter()));
 
     for (let frame = 1; frame <= 3; frame += 1) {
       drawn.mock.world.ecs.set(lamp, Transform, { x: 600 + frame });
@@ -670,7 +674,7 @@ describe("placed filters and settling", () => {
   it("a whole-texel move owes no settle", async () => {
     const drawn = await open(true);
     const lamp = drawn.spawn(Transform({ x: 600, y: 100 }), Shape({ w: 8, h: 8 }));
-    const entity = filtered(drawn, slotOf(new pixi.AlphaFilter()));
+    const entity = filtered(drawn, slotOf(new pixi.ColorMatrixFilter()));
 
     for (let frame = 1; frame <= 3; frame += 1) {
       drawn.mock.world.ecs.set(lamp, Transform, { x: 600 + frame });

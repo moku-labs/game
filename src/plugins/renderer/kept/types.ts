@@ -161,6 +161,16 @@ export type KeptRecord = {
   settle: boolean;
   /** Bytes a refused take asked for; the record is not offered again until they fit (P6.3). */
   refused: number;
+  /**
+   * The picture was cut to the canvas at its take (F53): a move or another canvas size would show what it left out,
+   * so either takes it again.
+   */
+  cut: boolean;
+  /**
+   * The quad draws the subtree picture itself at the stack's alpha, with no stage 3 (F54): every enabled filter is an
+   * `AlphaFilter` at the canvas resolution.
+   */
+  direct: boolean;
   /** A view of kind `"Display"` hangs in the subtree; `undefined` until a take attempt walks it (P4.1). */
   displays: boolean | undefined;
 };

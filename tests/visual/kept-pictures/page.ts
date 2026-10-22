@@ -17,6 +17,7 @@
 import { defineGameApp } from "../../../src/app";
 import type { Assets, World } from "../../../src/index";
 import {
+  Alpha,
   Blur,
   ColorMatrix,
   component,
@@ -489,6 +490,38 @@ async function play(): Promise<KeptPicturesResult> {
   );
 
   scenes.push(await measure(app, "shape at alpha 0.5", [ghost]));
+
+  // Two overlapping cards faded as one layer by an Alpha: the quad draws the subtree picture itself at 0.5 (F54).
+  const group = spawn(
+    Transform({ x: 80, y: 80 }),
+    Shape({ w: 160, h: 120, fill: 0x33_88_ff }),
+    Alpha({ alpha: 0.5 })
+  );
+
+  child(group, Transform({ x: 80, y: 60 }), Shape({ w: 160, h: 120, fill: 0xff_88_33 }));
+  scenes.push(await measure(app, "alpha group", [group]));
+
+  // A glowing strip wider than the canvas: the picture keeps the canvas and the glow's padding around it (F53).
+  const strip = spawn(
+    Transform({ x: -300, y: 200 }),
+    Shape({ w: 1100, h: 60, fill: 0x88_ff_33 }),
+    Glow({ strength: 3, distance: 12 })
+  );
+
+  scenes.push(await measure(app, "wider than the canvas", [strip]));
+
+  // A glowing card with a child hidden at alpha 0 and a clipped list whose four rows all hang under its mask (F58, F57).
+  const list = spawn(
+    Transform({ x: 60, y: 60 }),
+    Shape({ w: 200, h: 140, fill: 0x22_22_44, clip: true }),
+    Glow({ strength: 2, distance: 8 })
+  );
+
+  for (const row of [0, 1, 2, 3]) {
+    child(list, Transform({ x: 10, y: 10 + row * 50 }), Shape({ w: 260, h: 40, fill: 0xff_cc_00 }));
+  }
+  child(list, Transform({ x: 300, y: 300 }), Shape({ w: 60, h: 60, fill: 0xff_00_00, alpha: 0 }));
+  scenes.push(await measure(app, "clipped list, hidden child", [list]));
 
   const warnings = app.log
     .trace()

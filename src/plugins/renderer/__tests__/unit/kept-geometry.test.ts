@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cutSpan,
   fitsTexture,
   gridSpan,
   linearBounds,
@@ -64,6 +65,17 @@ describe("the picture grid", () => {
     // A whole texel of the stack's half-resolution grid is two canvas texels at r = 1: still on both.
     expect(onGrid(2, 0.5, 1)).toBe(true);
     expect(onGrid(1, 0.5, 1)).toBe(false);
+  });
+
+  // Bug F53: the cut must keep what lies within the padding off the canvas, as the live pass pads after its cut; a
+  // cut at the canvas edge drops a glow just off the screen, a cut wider than the padding keeps texels for nothing.
+  it("cuts a span to the canvas and the padding around it, exactly", () => {
+    expect(cutSpan(-40, 120, 100, 10)).toEqual({ start: -10, end: 110 });
+    expect(cutSpan(-10, 110, 100, 10)).toEqual({ start: -10, end: 110 });
+    // Wholly past the padding: empty.
+    const off = cutSpan(-50, -11, 100, 10);
+
+    expect(off.end > off.start).toBe(false);
   });
 
   it("a picture above 4096 device pixels is not taken, nor an empty one", () => {

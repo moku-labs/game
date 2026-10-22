@@ -59,7 +59,7 @@ function keep(drawn: Drawn, x: number): Entity {
   const entity = drawn.spawn(Transform({ x, y: 100 }), Shape({ w: 40, h: 40 }));
 
   drawn.mock.api.sync.filters.set(entity, [
-    { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+    { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
   ]);
   drawn.frames(3);
 
@@ -181,7 +181,7 @@ describe("the budget of a kept picture with a filter area (F43)", () => {
     const entity = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 400, h: 400 }));
 
     drawn.mock.api.sync.filters.set(entity, [
-      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+      { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
     ]);
     drawn.mock.api.sync.filters.area(entity, [100, 100, 40, 40]);
     drawn.frames(3);
@@ -199,7 +199,7 @@ describe("the budget of a kept picture with a filter area (F43)", () => {
     const entity = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 400, h: 400 }));
 
     drawn.mock.api.sync.filters.set(entity, [
-      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+      { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
     ]);
     drawn.frames(3);
 

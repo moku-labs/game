@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
-import { bytesPerCall, keptBoard } from "./fixtures";
+import { bytesPerCall, keptBoard, keptFadeBoard } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the flush of the kept cache in a drawn frame where none of its pictures changed (E5 of change
@@ -18,6 +18,12 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for 10 kept views stepped in a frame with a mark elsewhere", async () => {
     expect(bytesPerCall(await keptBoard(10, true), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptFlushStepped + NOISE
+    );
+  });
+
+  it("allocates nothing while one of 10 kept views fades through a stack of alphas (F54)", async () => {
+    expect(bytesPerCall(await keptFadeBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptFade + NOISE
     );
   });
 });
