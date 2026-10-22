@@ -29,7 +29,8 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * batched distance-field text `host` installs: Pixi's `Batcher` with its geometry and buffers, the bitmap text pipe
  * and the batcher pipe it subclasses, and the WGSL and GLSL shader pieces of the batch's SDF shader, and the WebGPU
  * render target system with its adaptor, the pipeline system and the stencil system the lazy canvas pass of `host`
- * subclasses or registers again (`host/render-pass.ts`). The module object
+ * subclasses or registers again (`host/render-pass.ts`), and the mesh and its geometry the rim-only nine-slice of
+ * `sync` is drawn with (`sync/hollow.ts`). The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
  * Pixi in its bundle.
  *
@@ -79,6 +80,8 @@ export type PixiModule = Pick<
   | "GpuTextureSystem"
   | "Graphics"
   | "Matrix"
+  | "Mesh"
+  | "MeshGeometry"
   | "NineSliceSprite"
   | "NoiseFilter"
   | "Particle"
@@ -136,6 +139,11 @@ export type PixiSprite = InstanceType<PixiModule["Sprite"]>;
 export type PixiNineSliceSprite = InstanceType<PixiModule["NineSliceSprite"]>;
 
 /**
+ * A Pixi mesh: what the rim-only nine-slice of a `NineSlice` with `hollow: true` is drawn with.
+ */
+export type PixiMesh = InstanceType<PixiModule["Mesh"]>;
+
+/**
  * A Pixi graphics object: what a `Shape` component is drawn with, and what clips its children.
  */
 export type PixiGraphics = InstanceType<PixiModule["Graphics"]>;
@@ -144,6 +152,12 @@ export type PixiGraphics = InstanceType<PixiModule["Graphics"]>;
  * A Pixi texture. `assets` owns its lifetime; the renderer only makes and destroys it on request.
  */
 export type PixiTexture = InstanceType<PixiModule["Texture"]>;
+
+/**
+ * The source of a Pixi texture: the pixels the GPU holds once, shared by every slice of an atlas page. What the
+ * upload queue of `sync.textures.upload` hands to Pixi's texture system.
+ */
+export type PixiTextureSource = PixiTexture["source"];
 
 /**
  * A texture Pixi renders into: what a kept picture is drawn into, engine-owned and destroyed by the engine.
@@ -282,6 +296,8 @@ export type AdaptiveScale = {
  * createApp({ pluginConfigs: { renderer: { mount: "#game", keptMb: 32 } } }); // a game with small art
  * // A short splash: two probe draws a frame create the pipelines sooner.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", onDemand: true, warm: 2 } } });
+ * // A desktop game with a fast GPU: `assets.warm` puts two textures a drawn frame on the GPU instead of one.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", uploads: 2 } } });
  * // A game whose art must stay sharp: the adaptive frame rate drops the rate, never the resolution.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", adaptiveScale: false } } });
  * ```
@@ -340,6 +356,21 @@ export type Config = {
    * created in the first frame that draws with it, as before. A whole number from 0 to 16; default 1.
    */
   warm: number;
+  /**
+   * Textures `sync.textures.upload` (what `assets.warm` calls) puts on the GPU per drawn frame, before the stage pass,
+   * so the frame that first shows them does not upload them all at once. One upload costs about 9 ms on a Galaxy A26
+   * whatever its size (median, 41 ms at worst): the show frame of 6 cold textures (9.4 MB) took 55 ms there, 8 ms with
+   * them uploaded before. So the budget counts textures, not bytes. 0 turns the queue off: `upload` answers false and
+   * the first draw of a texture uploads it, as before. A whole number from 0 to 8; default 1.
+   *
+   * @example
+   * ```ts
+   * // The memory screen's 6 textures, warmed while the board still shows: 3 drawn frames at 2 a frame.
+   * createApp({ pluginConfigs: { renderer: { mount: "#game", uploads: 2 } } });
+   * await app.assets.warm("ep01.memory"); // resolves after the third drawn frame
+   * ```
+   */
+  uploads: number;
   /**
    * The render scale of the adaptive frame rate on a GPU-bound screen: `{ floor: 0.75, devices: "phone" }` by default,
    * `false` keeps the resolution. Needs `time.adaptive`. A player's `monitor.setResolution` wins over it. Every change

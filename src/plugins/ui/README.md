@@ -15,7 +15,7 @@ rect from one Yoga solve per change.
 |---|---|
 | `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key, `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
-| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
+| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 | `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key, `false` and the warning `ui:scroll-before-solve` `{ key }` when the `scroll` came in this frame and its first solve has not placed it yet. Works headless. See [Scroll](#scroll) |
 
@@ -85,6 +85,7 @@ draw adds 0 to both, solves nothing and sets no component.
 | `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
 | `text` | `Text`; a string `style` is the text style key; `bind={bind(Counter, "value")}` shows a numeric field of a component the element carries (only `bind()` makes a bind) | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug` | as below |
+| any other tag with `style.nineSlice` and `style.hollow: true` | the same `NineSlice` with `hollow: true`: the rim alone, the centre left unfilled; the hit box stays the whole rect | as below |
 | any other tag | a rounded `Shape`, drawing nothing on a container with no fill and no stroke (no fill, stroke width 0, the alpha of its style); with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash). `style.shape: "arc"` draws only the `stroke` of `strokeWidth` on the circle inscribed in the box (`min(width, height) − strokeWidth` across, centred), from 12 o'clock clockwise over `style.sweep` of it (0 to 1, default 1, clamped: 0 draws nothing, 1 a closed ring), its ends `style.cap` (`"round"`, the default, or `"butt"`); `fill`, `radius` and `dash` do nothing on an arc. An arc writes `sweep` and `cap` into its `Shape` in every render; a rectangle or a triangle writes neither, so after an arc they stay on its `Shape`: only an arc reads them; a rectangle or a triangle ignores them. A render with another `sweep` patches the `Shape`, and the arc is built again once: `<stack key="slotTimer" style={{ ...ring, sweep: left / total }} />` | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
@@ -140,6 +141,17 @@ renderer: `app.renderer.sync.debug.nineSlice(true)` or `pluginConfigs.renderer.d
 
 ```tsx
 <panel key="board" style={{ nineSlice: "ui.panel-signboard", padding: 72, debug: true }} />
+```
+
+`style.hollow: true` draws the nine-slice of the style as its rim alone, written into
+`NineSlice.hollow` (`false` by default, written in every render, so a variant that sets it ends
+with it). For a frame or a glass panel whose middle is empty the GPU fills only the rim: the
+centre's pixels are not drawn on any frame the panel is drawn. A tap in the middle still lands on
+the element. Without `nineSlice` it does nothing, and `lint()` reports it as
+`hollow-without-nine-slice`.
+
+```tsx
+<stack key="memFrost" style={{ nineSlice: "glass.frost", hollow: true, width: 960, height: 1400 }} />
 ```
 
 ## Extra components

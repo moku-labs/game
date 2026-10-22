@@ -110,7 +110,8 @@ describe("nine-slice in the style", () => {
       alpha: 0.9,
       tint: 0xff_ee_dd,
       debug: false,
-      clip: false
+      clip: false,
+      hollow: false
     });
     expect(app.world.ecs.has(sliced, Shape)).toBe(false);
     expect(app.world.ecs.get(entityOf(app, "slicedRow"), NineSlice)?.texture).toBe("ui.strip");
@@ -167,6 +168,30 @@ describe("nine-slice in the style", () => {
 
     expect(app.world.ecs.has(swapper, NineSlice)).toBe(false);
     expect(app.world.ecs.get(swapper, Shape)?.fill).toBe(0x11_11_11);
+
+    await app.stop();
+  });
+
+  // Bug: `hollow` of the style never reaches `NineSlice`, so the frame fills its centre; or it is
+  // written only when set, so the panel stays hollow after the variant that made it so ends.
+  it("draws the rim alone while the style is hollow, and the whole panel again after", async () => {
+    const app = await startUiApp();
+
+    mount(app, "showcase");
+
+    const frost = entityOf(app, "frost");
+
+    expect(app.world.ecs.get(frost, NineSlice)?.hollow).toBe(false);
+
+    app.world.ecs.tag(frost, PointerOver);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(frost, NineSlice)).toMatchObject({ texture: "ui.card", hollow: true });
+
+    app.world.ecs.untag(frost, PointerOver);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(frost, NineSlice)?.hollow).toBe(false);
 
     await app.stop();
   });

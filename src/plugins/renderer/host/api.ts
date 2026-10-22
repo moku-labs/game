@@ -8,6 +8,7 @@ import type {
   PixiMatrix,
   PixiModule,
   PixiRenderTexture,
+  PixiTextureSource,
   RendererCtx,
   RendererKind
 } from "../types";
@@ -126,6 +127,14 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       else app.renderer.render({ container, target, clear: true });
 
       return true;
+    },
+
+    initSource: (source: PixiTextureSource): void => {
+      const app = state.app;
+
+      if (!state.ready || app === undefined) return;
+
+      app.renderer.texture.initSource(source);
     },
 
     clearsCanvas: (): boolean =>

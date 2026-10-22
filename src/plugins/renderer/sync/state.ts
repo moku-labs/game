@@ -2,7 +2,7 @@
  * @file renderer/sync — state factory.
  */
 import { createOverdrawState } from "./overdraw";
-import type { DebugSwitches, OverlayState, SyncState, WarmState } from "./types";
+import type { DebugSwitches, OverlayState, SyncState, UploadState, WarmState } from "./types";
 
 /**
  * Creates an empty collection. It lives in its own non-exported function because lint rule L5
@@ -90,8 +90,18 @@ function createWarmState(): WarmState {
 }
 
 /**
+ * Creates the empty upload queue: nothing queued, nobody waiting, nothing uploaded. Its own non-exported function, as
+ * `emptyMap`.
+ *
+ * @returns The upload branch of the sync state.
+ */
+function createUploadState(): UploadState {
+  return { queue: [], head: 0, waiting: emptyMap(), done: emptyWeakSet() };
+}
+
+/**
  * Creates the initial sync state: no root, no layers, no view, no orphan, no pool, no provider, no filter, no
- * filter area, no slice, no hidden mask, no overlay, no warm-up, no redraw counted and no unseen walk kept.
+ * filter area, no slice, no hidden mask, no overlay, no warm-up, no upload, no redraw counted and no unseen walk kept.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -132,6 +142,8 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     areas: emptyMap(),
     viewlessEntries: false,
     warm: createWarmState(),
+    upload: createUploadState(),
+    hollowClass: undefined,
     filterKinds: emptyWeakMap(),
     filterOwners: emptyWeakMap(),
     objectHidden: emptyWeakMap(),

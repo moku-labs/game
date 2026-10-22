@@ -406,6 +406,21 @@ export type LoadBundles<Key extends string> = (
 ) => Descriptor<LoadResult | undefined>;
 
 /**
+ * The `ready` descriptor helper bound to the bundle keys of one game (F52). The descriptor resolves
+ * `true` when every bundle is loaded and on the GPU, `false` while the node should rest until the
+ * inbox event `ready`, or `undefined` in an app without `assets`.
+ *
+ * @example
+ * ```ts
+ * const readyGameBundle: ReadyBundles<"board" | "board.chains"> = ready;
+ * readyGameBundle("board"); // { kind: "ready", payload: { bundles: ["board"] } }
+ * ```
+ */
+export type ReadyBundles<Key extends string> = (
+  bundle: Key | readonly Key[]
+) => Descriptor<boolean | undefined>;
+
+/**
  * What the `load` effect resolves with, so a loading node can write its own progress.
  *
  * @example
@@ -506,6 +521,13 @@ export type BundleRecord = LoadedAssets & {
 export type PreloadQueue = { bundles: string[]; controller: AbortController };
 
 /**
+ * One warm of a bundle (F60): the promise every caller of `warm` joins, and `done` once it
+ * resolved, so the `ready` effect answers without waiting. Dropped when the bundle unloads, and
+ * when the warm fails, so the next call tries again.
+ */
+export type WarmEntry = { promise: Promise<void>; done: boolean };
+
+/**
  * What the keys watch of `moku-game dev` knows about the asset files of a game: the default export
  * of the generated `.moku/assets-stamp.ts`. The dev hot swap compares it with the map it applied
  * last and replaces the files whose stamp differs.
@@ -578,8 +600,8 @@ export type State = {
   /** Keys already reported missing, so one key warns and starts its background load once. */
   warned: Set<string>;
   /**
-   * `onEnter`, the `load` handler, the texture provider, the start and the end of an exit in `world`, and the system
-   * `assets.leave` of phase `sync`.
+   * `onEnter`, the `load` and `ready` handlers, the texture provider, the start and the end of an exit in `world`,
+   * and the system `assets.leave` of phase `sync`.
    */
   removers: Array<() => void>;
   /** The `files` map of the stamp the dev hot swap applied last. `undefined` until the first swap. */
@@ -599,6 +621,13 @@ export type State = {
   companions: BundleCompanion[];
   /** A live rest was announced; the arriving node's `load` stage runs the release. */
   restPending: boolean;
+  /**
+   * Bundles whose warm for a `ready` effect failed (not an abort): `ready` counts them as there, so a node never
+   * hangs on them, until a later load of the bundle succeeds (F52).
+   */
+  readyFailed: Set<string>;
+  /** One running or finished warm per bundle, joined by a second `warm`; dropped when the bundle unloads (F60). */
+  warmed: Map<string, WarmEntry>;
 };
 
 /**
@@ -710,6 +739,28 @@ export type Api = {
    * ```
    */
   load(bundle: string): Promise<void>;
+
+  /**
+   * Puts the textures of a bundle on the GPU before a scene shows them (F60): loads the bundle when
+   * it is not loaded, then hands every texture and atlas page of it to
+   * `renderer.sync.textures.upload`, which uploads `renderer.uploads` of them a drawn frame. A
+   * second call joins the running or finished warm of the same bundle; an unload forgets it, so a
+   * reload warms again. It resolves also when the renderer could not upload (no device,
+   * `uploads: 0`, a stop): the first draw uploads then, as before. Headless it resolves at once,
+   * as `load` does. The `ready` effect waits for it.
+   *
+   * @param bundle - Name of a bundle of the manifest.
+   * @returns A promise that resolves once the bundle is loaded and its textures went to the GPU.
+   * @throws {Error} When the manifest has no such bundle, and when a file fails to load.
+   * @example
+   * ```ts
+   * // Outside a node: the board's art goes to the GPU while the menu still shows.
+   * await app.assets.warm("ep01.board"); // the board's textures are on the GPU, 1 per drawn frame
+   * app.assets.isLoaded("ep01.board"); // true
+   * await app.assets.warm("ep01.board"); // at once: the same warm, nothing is uploaded twice
+   * ```
+   */
+  warm(bundle: string): Promise<void>;
 
   /**
    * Destroys the textures of a bundle and tells `renderer` that its keys are gone; every

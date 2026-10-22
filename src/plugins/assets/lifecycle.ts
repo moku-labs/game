@@ -1,5 +1,5 @@
 /**
- * @file assets plugin — lifecycle: the six registrations of `onInit`, the boot of `onStart`
+ * @file assets plugin — lifecycle: the seven registrations of `onInit`, the boot of `onStart`
  * and the teardown that frees every texture and cancels every fetch.
  */
 import { flowPlugin } from "../flow";
@@ -14,6 +14,7 @@ import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
 import { releaseAssets, releaseLeftBundles, releaseSceneLeft } from "./budget";
 import { bundlesOfNode } from "./preload";
+import { answerReady } from "./ready";
 import { bootTiers, loadBundle } from "./tiers";
 import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "./types";
 
@@ -47,7 +48,7 @@ export function withDeps(ctx: KernelSlice): AssetsCtx {
 }
 
 /**
- * Reads the bundle names out of a `load` descriptor.
+ * Reads the bundle names out of a `load` or a `ready` descriptor.
  *
  * @param descriptor - What the node awaited.
  * @returns The bundle names, in the order the node listed them.
@@ -146,11 +147,11 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
 }
 
 /**
- * Connects the plugin in `onInit`: the `load` stage of `onEnter`, the handler of the `load`
- * effect, the texture provider of `renderer`, the start and the end of an exit in `world`, counted,
- * and the system `assets.leave` of phase `sync`, which lets a leaving scene's bundles go once its
- * elements played their exit (F51). The six removers go to the state, because `onStop` has nothing
- * but the state.
+ * Connects the plugin in `onInit`: the `load` stage of `onEnter`, the handlers of the `load` and
+ * the `ready` effects (F52), both run in fast mode too, the texture provider of `renderer`, the
+ * start and the end of an exit in `world`, counted, and the system `assets.leave` of phase `sync`,
+ * which lets a leaving scene's bundles go once its elements played their exit (F51). The seven
+ * removers go to the state, because `onStop` has nothing but the state.
  *
  * @param ctx - Kernel context of the assets plugin.
  */
@@ -162,6 +163,11 @@ export function connectAssets(ctx: KernelSlice): void {
     assets.deps.flow.fx.handle(
       "load",
       (descriptor, run) => runLoadEffect(assets, descriptor, run),
+      { runInFast: true }
+    ),
+    assets.deps.flow.fx.handle(
+      "ready",
+      descriptor => answerReady(assets, bundlesOfDescriptor(descriptor)),
       { runInFast: true }
     ),
     assets.deps.renderer.sync.textures.provide(key => lookupTexture(assets, key)),
@@ -268,7 +274,7 @@ export async function startAssets(ctx: KernelSlice): Promise<void> {
 
 /**
  * Frees everything in `onStop`: the preload and every running load are aborted, every texture is
- * destroyed, the six registrations are removed and the registries are emptied, the companions
+ * destroyed, the seven registrations are removed and the registries are emptied, the companions
  * too. A teardown context carries the state and nothing else, so no other plugin is called here:
  * no companion's `unload` either, its plugin stopped before this one.
  *

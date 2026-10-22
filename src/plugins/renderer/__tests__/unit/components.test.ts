@@ -25,7 +25,7 @@ describe("renderer components", () => {
     });
   });
 
-  it("gives NineSlice a zero size, full alpha, a white tint, no debug outline and no clip", () => {
+  it("gives NineSlice a zero size, full alpha, a white tint, no debug outline, no clip and a filled centre", () => {
     expect(NineSlice().value).toEqual({
       texture: "",
       width: 0,
@@ -33,7 +33,8 @@ describe("renderer components", () => {
       alpha: 1,
       tint: 0xff_ff_ff,
       debug: false,
-      clip: false
+      clip: false,
+      hollow: false
     });
   });
 

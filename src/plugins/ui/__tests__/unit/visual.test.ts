@@ -72,7 +72,8 @@ describe("visualOf", () => {
         alpha: 0.5,
         tint: 0x80_80_80,
         debug: false,
-        clip: false
+        clip: false,
+        hollow: false
       });
     }
   });

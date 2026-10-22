@@ -5,6 +5,7 @@
 import { nameSceneBundles, unloadBundle, usedMb } from "./budget";
 import { addCompanion } from "./companions";
 import { withDeps } from "./lifecycle";
+import { warmBundle } from "./ready";
 import { ignoreFailure, isPermanent, loadBundle, touch } from "./tiers";
 import type {
   Api,
@@ -177,6 +178,7 @@ export function createAssetsApi(ctx: KernelSlice): Api {
 
   return {
     load: (bundle: string): Promise<void> => loadBundle(assets, bundle, undefined, "request"),
+    warm: (bundle: string): Promise<void> => warmBundle(assets, bundle),
     unload: (bundle: string): void => unload(assets, bundle),
     isLoaded: (bundle: string): boolean => isLoaded(assets, bundle),
     texture: (key: string): Texture | undefined => lookupTexture(assets, key),

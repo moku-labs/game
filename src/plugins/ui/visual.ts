@@ -97,7 +97,7 @@ function boxOf(element: Element): { box?: number } {
 /**
  * The visual component of an element: a sprite for an image or an icon, the text for a text (with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
- * when the style sets `debug`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
+ * when the style sets `debug`, its rim alone when it sets `hollow`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
  * stroke dashed with `dash`, or an arc with `shape: "arc"`
  * over the `sweep` of its style, ended by its `cap`. A clipping element (`scroll`,
  * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
@@ -157,7 +157,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
         tint,
         debug: style.debug ?? false,
         // A text field framed by slices clips its value to them, so a long one never leaves it.
-        clip: type === "input"
+        clip: type === "input",
+        // Written in every render, so a variant that made it hollow never leaves it hollow after.
+        hollow: style.hollow ?? false
       })
     ];
   }

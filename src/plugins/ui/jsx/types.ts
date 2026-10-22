@@ -628,6 +628,7 @@ export type Finding = {
     | "text-overflow"
     | "absolute-without-reason"
     | "nine-slice-clipped"
+    | "hollow-without-nine-slice"
     | "z-index-on-root";
   key: string;
   detail: string;

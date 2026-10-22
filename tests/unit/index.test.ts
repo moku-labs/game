@@ -44,6 +44,7 @@ describe("root index", () => {
     expect(kit.sprite).toBe(engine.sprite);
     expect(kit.defineBundles).toBe(engine.defineBundles);
     expect(kit.load).toBe(engine.load);
+    expect(kit.ready).toBe(engine.ready);
     expect(kit.defineScene).toBe(engine.defineScene);
     expect(kit.Sprite).toBe(engine.Sprite);
     expect(kit.NineSlice).toBe(engine.NineSlice);
@@ -87,6 +88,7 @@ describe("root index", () => {
       "play",
       "popup",
       "projection",
+      "ready",
       "sfx",
       "sprite",
       "system",

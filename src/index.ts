@@ -50,6 +50,7 @@
  * | renderer | monitor | { budgetMs: "rate", frames: 1024, stillFrames: 60, stillMpx: 0.25, churnPerSecond: 4, churnSeconds: 3, churnAfterTrimMs: 1000 }, the performance log of an agent build, the thresholds of its `problem` rules and `sections`, the sections it starts with (`MonitorSections`, every one on when left out); shallow merge: a game that sets `monitor` gives `budgetMs` and `frames`, a threshold it leaves out keeps its default, a section it leaves out is on |
  * | renderer | keptMb | 64, MiB the kept pictures may hold: a filtered view that did not change is drawn from its picture, the least recently drawn goes first; 0 keeps none |
  * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
+ * | renderer | uploads | 1, texture sources `sync.textures.upload` puts on the GPU a drawn frame (~9 ms each on the A26); 0 turns the queue off |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
  * | input | dragStartPx | 8 |
@@ -359,7 +360,7 @@ export {
   Traced
 } from "./plugins/input/components";
 // assets and scenes: declarations
-export { defineBundles, load } from "./plugins/assets/bundles";
+export { defineBundles, load, ready } from "./plugins/assets/bundles";
 export { defineScene } from "./plugins/scenes/define";
 // anim: choreography as data, the motion sugar, its components, the AnimPlayer resource of systems
 export { Animation, AnimPlayer, Frames } from "./plugins/anim/components";

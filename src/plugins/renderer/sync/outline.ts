@@ -29,27 +29,34 @@ const CYAN = 0x00_ff_ff;
 const RED = 0xff_00_00;
 
 /**
- * The slice widths a texture asks for, in the units it is drawn in: its default borders divided
- * by the resolution of its source. A texture without borders gets 0 on every side, never Pixi's 10.
+ * Writes the slice widths a texture asks for, in the units it is drawn in: its default borders divided
+ * by the resolution of its source. A texture without borders gets 0 on every side, never Pixi's 10. Written in place,
+ * so a nine-slice write allocates nothing.
  *
  * @param texture - The texture a nine-slice draws, or `undefined` while nothing can draw.
- * @returns The four widths.
+ * @param out - The widths to write.
+ * @returns `out`.
  */
-export function bordersOf(texture: PixiTexture | undefined): SliceBorders {
+export function bordersInto(texture: PixiTexture | undefined, out: SliceBorders): SliceBorders {
   const borders = texture?.defaultBorders;
 
   if (texture === undefined || borders === undefined) {
-    return { left: 0, top: 0, right: 0, bottom: 0 };
+    out.left = 0;
+    out.top = 0;
+    out.right = 0;
+    out.bottom = 0;
+
+    return out;
   }
 
   const resolution = texture.source.resolution > 0 ? texture.source.resolution : 1;
 
-  return {
-    left: borders.left / resolution,
-    top: borders.top / resolution,
-    right: borders.right / resolution,
-    bottom: borders.bottom / resolution
-  };
+  out.left = borders.left / resolution;
+  out.top = borders.top / resolution;
+  out.right = borders.right / resolution;
+  out.bottom = borders.bottom / resolution;
+
+  return out;
 }
 
 /**

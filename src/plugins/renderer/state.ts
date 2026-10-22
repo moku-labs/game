@@ -16,6 +16,9 @@ const RING_FRAMES = { min: 64, max: 16_384 } as const;
 /** The most probe draws of the warm-up a drawn frame may make. */
 const MAX_WARM = 16;
 
+/** The most textures the upload queue may put on the GPU in one drawn frame: about 9 ms each on a Galaxy A26. */
+const MAX_UPLOADS = 8;
+
 /**
  * Tells a finite number of at least 0 from anything else a config can hold.
  *
@@ -100,14 +103,14 @@ function checkAdaptiveScale(adaptiveScale: unknown): void {
 
 /**
  * Checks the numbers of the config a game can get wrong, at `createApp`, in every build: the
- * resolution cap, the pool trim, the adaptive render scale, the performance monitor, the budget of the kept pictures
- * and the probe draws of the warm-up.
+ * resolution cap, the pool trim, the adaptive render scale, the performance monitor, the budget of the kept pictures,
+ * the probe draws of the warm-up and the textures uploaded per drawn frame.
  *
  * @param config - The resolved plugin config.
  * @throws {Error} When `maxResolution` is not a number above 0, `poolTrim` or `adaptiveScale` fails its check,
  *   `monitor.budgetMs` is neither `"rate"` nor a number above 0, `monitor.frames` is not a whole
- *   number from 64 to 16384, `keptMb` is not a finite number of at least 0, or `warm` is not a
- *   whole number from 0 to 16.
+ *   number from 64 to 16384, `keptMb` is not a finite number of at least 0, `warm` is not a
+ *   whole number from 0 to 16, or `uploads` is not a whole number from 0 to 8.
  */
 function checkConfig(config: Readonly<Config>): void {
   const { maxResolution, keptMb } = config;
@@ -144,6 +147,15 @@ function checkConfig(config: Readonly<Config>): void {
   if (!Number.isInteger(warm) || warm < 0 || warm > MAX_WARM) {
     throw new Error(
       `[game] renderer.warm is ${String(warm)}.\n  Give the probe draws per frame, a whole number from 0 to 16.`
+    );
+  }
+
+  const { uploads } = config;
+
+  if (!Number.isInteger(uploads) || uploads < 0 || uploads > MAX_UPLOADS) {
+    throw new Error(
+      `[game] renderer.uploads is ${String(uploads)}.\n` +
+        "  Give the textures uploaded per drawn frame, a whole number from 0 to 8."
     );
   }
 }

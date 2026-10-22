@@ -33,7 +33,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 |---|---|---|
 | `Transform({ x, y, rotation, scale, pivot })` | `0, 0, 0, 1, { x: 0, y: 0 }` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. `pivot` is the local point the view turns and scales around; `x`, `y` is where it lands. |
 | `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. `alpha` fades the quad and the entity's children. |
-| `NineSlice({ texture, width, height, alpha, tint, debug, clip })` | `"", 0, 0, 1, 0xffffff, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. |
+| `NineSlice({ texture, width, height, alpha, tint, debug, clip, hollow })` | `"", 0, 0, 1, 0xffffff, false, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. `hollow: true` draws the rim alone, the eight border cells and never the centre (see "Hollow nine-slices"); the hit box stays the whole panel. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
 | `Overlay({ dim, dimColor, cover, hud, fade, hold })` | `0, 0x000000, "none", "all", 250, false` | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep. `hold: true` holds the endless loops under it while it stands. See "Overlays and the HUD". |
@@ -179,7 +179,8 @@ internal markup: select them by nothing, set the properties instead.
 | `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Throws while the renderer does not draw. |
 | `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
 | `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. Before a source goes, the `change` listeners of the source and of its style are removed: Pixi 8.22 keeps batch bind groups forever, and each would warn `[BindGroup] ... destroyed while still bound to a shader`. |
-| `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once. No-op while inert. |
+| `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once (sprites, nine-slices, hollow nine-slices). No-op while inert. |
+| `textures.upload(textures)` | Puts the textures' sources on the GPU before a screen shows them, `renderer.uploads` a drawn frame (see "Uploading textures before they show"). Answers `true` once every source went through Pixi's `initSource`, at once when they all did on this device; `false` at once while nothing draws (headless, a lost device) or with `uploads: 0`, and `false` when the renderer stops or the device is lost first. `assets.warm` calls it. |
 | `displays.provide(Component, adapter)` | A plugin above says how its own component becomes a display object: `create` on the first pass after it appeared, `update` on every change, `destroy` when it leaves. Stored while inert, never called there. Returns the remover. |
 | `fonts.install(key, fnt, texture)` | Installs a BMFont file (text, XML or JSON) and its page texture under an asset key. Throws while the renderer does not draw. |
 | `fonts.installed(key)` | Whether that font key is installed in this application. |
@@ -287,6 +288,30 @@ handed. In an agent build the end of a run writes a `warm` event line (`{ draws 
 game's own `Display` objects with custom shaders (hand their filters to `filters.warm`; their
 meshes are not covered), blend modes other than normal and add, MSAA. `renderer.warm: 0` turns it
 off: every pipeline is created in the first frame that draws with it, as before.
+
+### Uploading textures before they show
+
+A texture reaches the GPU at its first draw: Pixi makes its GPU texture and uploads the pixels inside
+that frame. On a Galaxy A26 (Chrome, WebGPU, Pixi 8.22) one upload costs about 9 ms whatever its size
+(median; 41 ms at worst), so the frame that first showed the 6 textures (9.4 MB) of the memory screen
+took 55 ms, and 8 ms once they were on the GPU before. `sync.textures.upload(textures)` (F60) moves
+that work into the frames before the screen mounts: each texture's source is queued once (the slices
+of one atlas page share its source, so the page goes once), and the render phase of a drawn frame
+hands up to `renderer.uploads` of them to Pixi's public `renderer.texture.initSource`, right after
+the warm-up's probes and before the stage pass. While sources wait it asks for the next frame, so a
+screen drawing on demand keeps drawing until the queue is empty; an empty queue costs one compare a
+frame and allocates nothing. Each call answers `true` after its last source, at once when every
+source is on this device already. A source whose upload throws is logged once
+(`renderer:upload-failed`, a warning) and counted done: its first draw uploads it, as before. A
+source destroyed while it waits is skipped. A stop or a lost WebGPU device answers every waiting call
+`false` and forgets what was uploaded: the new device holds none of it.
+
+```ts
+// `assets.warm("ep01.memory")`: the bundle is loaded, its textures go up one a drawn frame.
+const renderer = ctx.require(rendererPlugin);
+await renderer.sync.textures.upload(record.textures); // true 6 drawn frames later (uploads: 1)
+await renderer.sync.textures.upload(record.textures); // true at once: they are on this device
+```
 
 ### `invalidate` — `app.renderer.invalidate(entity)`
 
@@ -668,6 +693,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |
+| `uploads` | `number` | `1` | Texture sources `sync.textures.upload` puts on the GPU per drawn frame (see "Uploading textures before they show"). One upload costs about 9 ms on a Galaxy A26 whatever its size, so the budget counts textures, not bytes. `0` turns the queue off: `upload` answers `false` and the first draw uploads, as before. Not a whole number from 0 to 8 throws at `createApp`. |
 | `adaptiveScale` | `{ floor, devices } \| false` | `{ floor: 0.75, devices: "phone" }` | The render scale of the adaptive frame rate on a GPU-bound screen (see "Resolution"): the steps 1, 0.85, 0.75, 0.6 and 0.5 down to `floor` (one of them; 1 allows none), on `"phone"` only or on `"all"` devices. Needs `time.adaptive`. `false` keeps the resolution. Shallow merge: a game that sets it gives both fields. Anything else throws at `createApp`. |
 
 ```ts
@@ -687,7 +713,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame renders the kept pictures first (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -1100,6 +1126,31 @@ With `NineSlice.debug` or the global switch on, the view's wrapper gets a `Graph
 at `L·s`, `w − R·s`, `T·s`, `h − B·s`, where `s = min(1, w / (L + R), h / (T + B))` is the factor Pixi
 shrinks overlapping corners by. Cyan normally, red when `s < 1` or the texture is missing. It is
 destroyed when debug goes off, when the view returns to the pool and when the renderer stops.
+
+### Hollow nine-slices
+
+`NineSlice({ hollow: true })` (F59) draws a frame or a glass panel whose centre is empty without
+filling the centre: `ui` maps `style.hollow` to it. It is drawn by the engine's own class over Pixi's
+public `Mesh` and `MeshGeometry` (`sync/hollow.ts`): the 16 vertices of the 4 × 4 grid of the cut
+lines and a static buffer of 48 indices, the eight border cells with the centre cell left out. It
+takes the numbers of a `NineSliceSprite` (the four slice widths, `width`, `height`, `tint`,
+`texture`), so the write of a `NineSlice` drives either object, and it computes its positions and
+uvs as Pixi's `NineSliceGeometry` does for a filled panel: corners that would overlap shrink by the
+same factor `s` as the outline shows, the uvs cut the texture's frame (its trim) at the unscaled
+borders. A size or a border that changes rewrites the positions in the geometry's own array, a
+border or a texture the uvs; a still panel writes nothing and a resize allocates nothing. A mesh of 16
+vertices batches with the sprites around it: one draw, and the centre's pixels are never filled.
+
+The hit box, the debug outline and the clip are a filled panel's: a tap in the empty centre lands on
+the panel. A hollow panel is pooled apart from the filled ones (`NineSlice.hollow:<key>`), and an
+unloaded key destroys both pools with their geometry. A live view whose `hollow` flips swaps its
+object on that write: the view gets its wrapper, the other kind takes the old object's place in it,
+out of its pool or new, and the old object goes back to its own pool; the pose, the alpha, the
+filters, the clip, the outline and the children stay with the view.
+
+```tsx
+<stack key="memFrost" style={{ nineSlice: "glass.frost", hollow: true, width: 960, height: 1400 }} />
+```
 
 ### Bitmap-font baseline
 

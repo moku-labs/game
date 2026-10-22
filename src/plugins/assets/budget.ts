@@ -99,9 +99,9 @@ export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): v
 }
 
 /**
- * Frees one loaded bundle: the textures are destroyed, every companion drops what travels with
- * it, `renderer` is told that its keys are gone and the event goes out. A bundle that is not
- * loaded is left alone.
+ * Frees one loaded bundle: the textures are destroyed, its warm is forgotten, every companion drops
+ * what travels with it, `renderer` is told that its keys are gone and the event goes out. A bundle
+ * that is not loaded is left alone.
  *
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
@@ -118,6 +118,8 @@ export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: UnloadReaso
 
   record.status = "idle";
   record.lastUsed = 0;
+  // Its textures are gone from the GPU: a reload warms again (F60).
+  state.warmed.delete(bundle);
 
   unloadCompanions(ctx, state.companions, bundle);
 

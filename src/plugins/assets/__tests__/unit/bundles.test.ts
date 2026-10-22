@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineBundles, load } from "../../bundles";
+import { defineBundles, load, ready } from "../../bundles";
 import type { BundleSpec } from "../../types";
 
 describe("defineBundles", () => {
@@ -83,5 +83,25 @@ describe("defineBundles edge cases", () => {
 describe("load edge cases", () => {
   it("accepts an empty list", () => {
     expect(load([])).toEqual({ kind: "load", payload: { bundles: [] } });
+  });
+});
+
+describe("ready", () => {
+  // Bug: a single name is not wrapped in a list, so the handler reads no bundle and answers true at once.
+  it("makes the descriptor of one bundle, a list of one", () => {
+    expect(ready("ep01.memory")).toEqual({
+      kind: "ready",
+      payload: { bundles: ["ep01.memory"] }
+    });
+  });
+
+  // Bug: the descriptor holds the caller's array, so a later push changes what a journal replays.
+  it("copies a list of bundles", () => {
+    const wanted = ["ep01.memory"];
+    const descriptor = ready(wanted);
+
+    wanted.push("ui");
+
+    expect(descriptor).toEqual({ kind: "ready", payload: { bundles: ["ep01.memory"] } });
   });
 });

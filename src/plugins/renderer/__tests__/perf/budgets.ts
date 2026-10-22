@@ -92,5 +92,15 @@ export const BUDGET = {
   arcStill: 0,
   // Change 2026-10-20-overlay-hold, H2: the asks of 20 endless loops under a resting sheet with `hold: true` over a
   // sharp ward. New, measured 0 B: the owner's record read from the map and one boolean written on the range.
-  loopsHeldHold: 0
+  loopsHeldHold: 0,
+  // Change 2026-10-22-ready-warm-hollow, F60: the upload step of a drawn frame with nothing queued. New, measured 0 B:
+  // two numbers compared.
+  uploadIdle: 0,
+  // F59: a pass that syncs a hollow frame whose value stood (its NineSlice in the change set, nothing of it changed).
+  // New, measured 0 B: the borders, the outline's shape and the clip's box of the write are written in place (before,
+  // a nine-slice write made a texture answer, a borders object, a hit box, an outline shape and a clip value).
+  hollowStill: 0,
+  // F59: a hollow frame whose width changes every pass, as a size tween. New, measured 0 B: its 16 positions are
+  // rewritten in the geometry's own array.
+  hollowResize: 0
 } as const;

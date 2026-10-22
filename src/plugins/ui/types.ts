@@ -207,11 +207,12 @@ export type UiApi = {
   find(key: string): Entity | undefined;
 
   /**
-   * Reads the live screen against the five rules: a tap target under `tapTargetPt` at the size
+   * Reads the live screen against the six rules: a tap target under `tapTargetPt` at the size
    * it is drawn (a `fit: "contain"` on it or above it shrinks it), a text that does not fit its
    * box in some registered locale, an absolute element with no `reason`, a clipping element
-   * (`scroll`, `overflow: "hidden"`) whose style names a nine-slice it never draws, and a root
-   * element whose style sets a `zIndex` it ignores. Never throws; empty when nothing is mounted.
+   * (`scroll`, `overflow: "hidden"`) whose style names a nine-slice it never draws, a style that
+   * is `hollow` with no nine-slice to hollow, and a root element whose style sets a `zIndex` it
+   * ignores. Never throws; empty when nothing is mounted.
    *
    * @returns One finding per rule and element.
    * @example
@@ -220,6 +221,8 @@ export type UiApi = {
    * app.ui.lint(); // [{ rule: "tap-target", key: "cell", detail: "39 x 39 pt" }]
    * // A list styled with a nine-slice: the clip keeps it from drawing.
    * app.ui.lint(); // [{ rule: "nine-slice-clipped", key: "orders", detail: "scroll" }]
+   * // A frame made hollow before its nine-slice was named: there is no rim to draw.
+   * app.ui.lint(); // [{ rule: "hollow-without-nine-slice", key: "memFrost", detail: "stack" }]
    * // A screen root that asks to be drawn over the others: the layer decides that.
    * app.ui.lint(); // [{ rule: "z-index-on-root", key: "board", detail: "zIndex 2" }]
    * ```

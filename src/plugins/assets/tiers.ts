@@ -520,8 +520,9 @@ function reportSettled(ctx: AssetsCtx, progress: Progress, signal: AbortSignal):
 }
 
 /**
- * Publishes a loaded bundle: what was loaded moves into the record, `renderer` re-resolves the
- * keys, the event goes out, the frame loop wakes and the budget is enforced.
+ * Publishes a loaded bundle: what was loaded moves into the record, a failure `ready` remembered
+ * is forgotten, `renderer` re-resolves the keys, the event goes out, the frame loop wakes and the
+ * budget is enforced.
  *
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
@@ -545,6 +546,8 @@ function finish(
   record.status = "loaded";
   record.inflight = undefined;
   touch(ctx.state, record);
+  // A failure `ready` counted as there is over: the next `ready` waits for this bundle's warm (F52).
+  ctx.state.readyFailed.delete(bundle);
 
   ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
 

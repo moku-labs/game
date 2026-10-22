@@ -11,6 +11,8 @@ import { Layer } from "../../../world/ecs/define";
 import type { Entity, SystemTiming } from "../../../world/types";
 import {
   HudPart,
+  NineSlice,
+  type NineSliceValue,
   Shape,
   type ShapeValue,
   Sprite,
@@ -264,6 +266,59 @@ export async function startArcs(): Promise<ArcStage> {
   if (ring === undefined) throw new Error("perf fixture: the ring has no Shape");
 
   return { mock, ring: ring as ShapeValue };
+}
+
+/** A started renderer with hollow frames: twelve rim-only panels, and the stored `NineSlice` of the one a frame syncs. */
+export type HollowStage = {
+  mock: MockRenderer;
+  /** The `NineSlice` the world holds for the synced panel, writable in place. */
+  panel: NineSliceValue;
+};
+
+/**
+ * Starts the mock renderer (a release build's pass) with twelve hollow frames of a 300 × 300 texture cut 48 across
+ * and 40 down, as the glass panels of the memory screen. The pass that builds them has run and every change set is
+ * cleared; then one panel's change mark is made once, so every pass after it syncs that panel: compares every field
+ * and, when a window writes its size in place, rewrites its vertices.
+ *
+ * @returns The stage.
+ */
+export async function startHollows(): Promise<HollowStage> {
+  const mock = createMockRenderer();
+  const frost = new FakeTexture({
+    source: { width: 300, height: 300, destroyed: false },
+    defaultBorders: { left: 48, top: 40, right: 48, bottom: 40 }
+  });
+
+  await mock.start();
+  mock.api.sync.textures.provide(() => frost as never);
+  mock.world.projection.setLayers([{ name: "items", sort: "none" }]);
+
+  const entities: Entity[] = [];
+
+  for (let index = 0; index < 12; index += 1) {
+    entities.push(
+      mock.world.ecs.spawn(OWNER, [
+        Layer({ name: "items" }),
+        Transform({ x: (index % 3) * 320, y: Math.floor(index / 3) * 420 }),
+        NineSlice({ texture: "glass.frost", width: 300, height: 400, hollow: true })
+      ])
+    );
+  }
+
+  mock.modules.sync.pass();
+  mock.world.clearChanges();
+
+  const entity = entities[5] ?? 0;
+
+  mock.world.ecs.set(entity, NineSlice, { alpha: 0.9 });
+  mock.modules.sync.pass();
+
+  const panel = mock.world.ecs.get(entity, NineSlice);
+
+  if (panel === undefined) throw new Error("perf fixture: the panel has no NineSlice");
+
+  return { mock, panel: panel as NineSliceValue };
 }
 
 /**

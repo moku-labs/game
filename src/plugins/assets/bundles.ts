@@ -1,9 +1,16 @@
 /**
- * @file assets plugin — the two authoring helpers. Pure: they produce plain data, so a game
- * imports them from the package root and a node writes `await fx(load("board.chains"))`.
+ * @file assets plugin — the authoring helpers. Pure: they produce plain data, so a game imports
+ * them from the package root and a node writes `await fx(load("board.chains"))`.
  */
 import type { Descriptor } from "../flow/types";
-import type { BundleMap, BundleSpec, DefineBundles, LoadBundles, LoadResult } from "./types";
+import type {
+  BundleMap,
+  BundleSpec,
+  DefineBundles,
+  LoadBundles,
+  LoadResult,
+  ReadyBundles
+} from "./types";
 
 /**
  * Copies one bundle spec, its lists too, so the copy shares nothing with the caller's object.
@@ -78,18 +85,47 @@ export function load(bundle: string | readonly string[]): Descriptor<LoadResult 
 }
 
 /**
- * Binds `defineBundles` and `load` to one game's bundle keys. Type-only: the same functions.
+ * Creates the effect a node awaits to rest on bundles and stay answerable (F52). The handler of the
+ * kind `"ready"` is registered by this plugin and runs in fast mode too. It answers `true` when every
+ * bundle is loaded and its textures went to the GPU (`assets.warm`), or its last load failed, so a
+ * node never hangs on it. Otherwise it starts what is missing, answers `false`, and posts the world
+ * event `ready` into `flow.inbox` once all of it settled: the node rests on `inbox: ["ready"]`
+ * meanwhile, and Back still answers. A headless `assets` answers `true`; an app without `assets`,
+ * such as the headless app of `game.headless()`, resolves `undefined`, hence `=== false`. A name
+ * the manifest lacks throws, as for `load`.
  *
- * @returns The two helpers whose keys are checked by the compiler.
+ * @param bundle - One bundle name, or a list of them.
+ * @returns The descriptor a transit node awaits.
  * @example
  * ```ts
- * const { load } = bundlesFor<"board" | "board.chains">();
+ * ready("ep01.memory"); // { kind: "ready", payload: { bundles: ["ep01.memory"] } }
+ * // The transit node in front of the rest node `wait` (inbox: ["elapsed", "ready"]):
+ * if ((await fx(ready(["ep01.memory", "ui"]))) === false) return out.wait(); // false: still loading
+ * return out.open(); // true: loaded and on the GPU
+ * ```
+ */
+export function ready(bundle: string | readonly string[]): Descriptor<boolean | undefined> {
+  const bundles = typeof bundle === "string" ? [bundle] : [...bundle];
+
+  return { kind: "ready", payload: { bundles } };
+}
+
+/**
+ * Binds `defineBundles`, `load` and `ready` to one game's bundle keys. Type-only: the same
+ * functions.
+ *
+ * @returns The three helpers whose keys are checked by the compiler.
+ * @example
+ * ```ts
+ * const { load, ready } = bundlesFor<"board" | "board.chains">();
  * load("board.chains"); // { kind: "load", payload: { bundles: ["board.chains"] } }
+ * ready("board"); // { kind: "ready", payload: { bundles: ["board"] } }
  * ```
  */
 export function bundlesFor<Bundle extends string>(): {
   defineBundles: DefineBundles<Bundle>;
   load: LoadBundles<Bundle>;
+  ready: ReadyBundles<Bundle>;
 } {
-  return { defineBundles, load };
+  return { defineBundles, load, ready };
 }
