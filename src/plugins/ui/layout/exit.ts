@@ -26,13 +26,15 @@ const EXIT_WAITS_FOREVER = "ui:exit-waits-forever";
  * @param element - The element that left the description.
  * @param cause - Why it leaves: a `when: "change"` hook plays nothing for `"mount"`, and the next sweep takes it.
  * @param span - Notes the longest finite track the exit hook starts, for the level of an overlay.
+ * @param stands - The element stands and goes with the exit over it: its own exit hook does not play (F55b).
  */
 export function beginExit(
   ctx: UiCtx,
   state: LayoutState,
   element: Element,
   cause: MotionCause,
-  span?: MotionSpan
+  span?: MotionSpan,
+  stands = false
 ): void {
   detachNode(state, element);
   element.dropKey?.();
@@ -43,7 +45,7 @@ export function beginExit(
   ctx.deps.world.ecs.tag(element.entity, Exiting);
   element.handles = keptExtras(ctx, element);
 
-  const hook = element.motion?.exit;
+  const hook = stands ? undefined : element.motion?.exit;
 
   play(
     ctx,

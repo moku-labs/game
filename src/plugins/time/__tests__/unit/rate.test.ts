@@ -21,6 +21,16 @@ const AT_120 = 1000 / 120;
 const FLOOR_30 = { config: { adaptive: { floor: 30 } } } as const;
 
 /**
+ * A screen near the line at 120: eight late intervals a second, under the drop line (12) on their own.
+ *
+ * @param s - The script.
+ * @param seconds - How long.
+ */
+function nearLine(s: Script, seconds: number): void {
+  for (let index = 0; index < seconds * 120; index += 1) s.gap(index % 15 === 0 ? 17 : AT_120);
+}
+
+/**
  * Light frames that keep each rate on time: 8.3 ms apart at 120, 20 ms apart below.
  *
  * @param s - The script.
@@ -53,7 +63,17 @@ function droppedTo60(options: Parameters<typeof createScript>[0] = {}): {
 }
 
 /**
- * One second of light frames at 120, then `late` intervals of 12.6 ms in a row, then light frames again.
+ * Tells whether the drop window is late now: it turned late and has not cleared.
+ *
+ * @param s - The script.
+ * @returns True while the window is late.
+ */
+function lateNow(s: Script): boolean {
+  return !Number.isNaN(s.governor().lateSince);
+}
+
+/**
+ * One second of light frames at 120, then `late` intervals of 12.6 ms in a row.
  *
  * @param late - How many late intervals.
  * @returns The script.
@@ -63,7 +83,6 @@ function burst(late: number): Script {
 
   s.play(2000);
   s.gaps(12.6, late);
-  s.gaps(AT_120, 120);
 
   return s;
 }
@@ -72,9 +91,9 @@ function burst(late: number): Script {
  * A still screen that draws now and then: each drawn frame comes 16.7 ms late, then three undrawn frames.
  *
  * @param late - How many drawn frames.
- * @returns The rate after them.
+ * @returns True when the drop window is late after them.
  */
-function sparse(late: number): number {
+function sparse(late: number): boolean {
   const s = createScript();
 
   s.play(2000);
@@ -86,7 +105,7 @@ function sparse(late: number): number {
     s.gaps(AT_120, 2, { drawn: false });
   }
 
-  return s.api.rate().fps;
+  return lateNow(s);
 }
 
 /**
@@ -94,9 +113,9 @@ function sparse(late: number): number {
  *
  * @param gapMs - The interval.
  * @param at60 - Drop to 60 first.
- * @returns The rate after them.
+ * @returns True when the drop window is late after them, or dropped on it.
  */
-function twelveOf(gapMs: number, at60: boolean): number {
+function twelveOf(gapMs: number, at60: boolean): boolean {
   const s = at60 ? droppedTo60(FLOOR_30).s : createScript();
 
   if (at60) s.gaps(1000 / 60, 60);
@@ -104,7 +123,8 @@ function twelveOf(gapMs: number, at60: boolean): number {
 
   s.gaps(gapMs, 12);
 
-  return s.api.rate().fps;
+  // At 60, within 3 s of the drop, a late window drops at once.
+  return lateNow(s) || s.api.rate().fps < (at60 ? 60 : 120);
 }
 
 /**
@@ -203,9 +223,9 @@ describe("what counts as a sample", () => {
     const drawn = createScript();
 
     still.play(1200);
-    still.gaps(50, 40, { drawn: false });
+    still.gaps(50, 60, { drawn: false });
     drawn.play(1200);
-    drawn.gaps(50, 40);
+    drawn.gaps(50, 60);
 
     expect(still.api.rate().fps).toBe(120);
     expect(still.changes()).toEqual([]);
@@ -243,8 +263,10 @@ describe("what counts as a sample", () => {
     short.gap(400);
     short.gaps(16.7, 7);
 
-    expect(hidden.api.rate().fps).toBe(120);
-    expect(short.api.rate().fps).toBe(60);
+    expect(hidden.governor().dropMissed).toBe(7);
+    expect(short.governor().dropMissed).toBe(8);
+    expect(lateNow(hidden)).toBe(false);
+    expect(lateNow(short)).toBe(true);
   });
 
   it("the first interval after a switch is not judged", () => {
@@ -302,40 +324,63 @@ describe("what counts as a sample", () => {
 });
 
 describe("the drop", () => {
-  it("drops 120 → 60 when 12 of the second's drawn intervals are late, not at 11 (p90 of a full window)", () => {
-    const twelve = burst(12);
+  it("the window turns late when 12 of the second's drawn intervals are late, not at 11 (p90 of a full window)", () => {
+    expect(lateNow(burst(11))).toBe(false);
+    expect(lateNow(burst(12))).toBe(true);
+  });
 
-    expect(burst(11).api.rate().fps).toBe(120);
-    expect(twelve.api.rate()).toMatchObject({ fps: 60, mode: "auto", reason: "missed" });
-    expect(twelve.changes()).toHaveLength(1);
-    expect(twelve.changes()[0]).toMatchObject({
+  it("a burst of late intervals shorter than the hold never drops the rate (F64)", () => {
+    const s = burst(40);
+
+    s.gaps(AT_120, 240);
+
+    expect(s.api.rate().fps).toBe(120);
+    expect(s.changes()).toEqual([]);
+    expect(lateNow(s)).toBe(false);
+  });
+
+  it("drops 120 → 60 once the window has been late for 2 s, not before", () => {
+    const s = createScript();
+
+    s.play(2000);
+    s.gaps(12.6, 12);
+
+    const lateAt = s.last();
+
+    while (s.changes().length === 0) s.gap(12.6);
+
+    expect(s.last() - lateAt).toBeGreaterThanOrEqual(2000);
+    expect(s.last() - lateAt).toBeLessThan(2000 + 12.6);
+    expect(s.api.rate()).toMatchObject({ fps: 60, mode: "auto", reason: "missed" });
+    expect(s.changes()).toHaveLength(1);
+    expect(s.changes()[0]).toMatchObject({
       from: 120,
       to: 60,
       reason: "missed",
       mode: "auto",
       displayHz: 120,
       thermal: null,
-      window: { missed: 12, heavy: 0 },
+      window: { heavy: 0 },
       dwellMs: 5000
     });
-    expect(twelve.changes()[0]?.window.drawn).toBeGreaterThan(110);
-    expect(twelve.log.info).toHaveBeenCalledWith("time: frame rate", {
+    expect(s.changes()[0]?.window.missed).toBe(s.changes()[0]?.window.drawn);
+    expect(s.log.info).toHaveBeenCalledWith("time: frame rate", {
       from: 120,
       to: 60,
       reason: "missed"
     });
   });
 
-  it("drops a sparse window at 8 late intervals, not at 7", () => {
-    expect(sparse(7)).toBe(120);
-    expect(sparse(8)).toBe(60);
+  it("a sparse window turns late at 8 late intervals, not at 7", () => {
+    expect(sparse(7)).toBe(false);
+    expect(sparse(8)).toBe(true);
   });
 
   it("a late interval is one past the half-period line", () => {
-    expect(twelveOf(12.4, false)).toBe(120);
-    expect(twelveOf(12.6, false)).toBe(60);
-    expect(twelveOf(20.8, true)).toBe(60);
-    expect(twelveOf(25, true)).toBe(40);
+    expect(twelveOf(12.4, false)).toBe(false);
+    expect(twelveOf(12.6, false)).toBe(true);
+    expect(twelveOf(20.8, true)).toBe(false);
+    expect(twelveOf(25, true)).toBe(true);
   });
 
   it("one mount of three 58 ms frames never drops the rate", () => {
@@ -346,6 +391,25 @@ describe("the drop", () => {
     s.play(2000);
 
     expect(s.api.rate().fps).toBe(120);
+  });
+
+  it("a mount burst on a screen near the line keeps 120; a sustained slow run drops it once (F64)", () => {
+    const near = createScript();
+    const slow = createScript();
+
+    near.play(2000);
+    nearLine(near, 2);
+    // A mount: three long frames and two late ones after it, a window of 13 late in the second.
+    near.gaps(58, 3);
+    near.gaps(12.6, 2);
+    nearLine(near, 4);
+    slow.play(2000);
+    slow.gaps(17, 300);
+
+    expect(near.api.rate().fps).toBe(120);
+    expect(near.changes()).toHaveLength(0);
+    expect(slow.api.rate().fps).toBe(60);
+    expect(slow.changes()).toHaveLength(1);
   });
 
   it("never drops below the floor", () => {
@@ -494,7 +558,7 @@ describe("the dwell", () => {
     expect(dwells(s)).toEqual([5000, 10_000, 5000]);
   });
 
-  it("an alternation of heavy and light seconds never flaps past the dwell back-off", () => {
+  it("an alternation of heavy and light 3 s spans never flaps past the dwell back-off", () => {
     const s = createScript();
 
     s.play(2000);
@@ -502,7 +566,7 @@ describe("the dwell", () => {
     const start = s.last();
 
     while (s.last() < start + 600_000) {
-      const heavy = Math.floor((s.last() - start) / 1000) % 2 === 0;
+      const heavy = Math.floor((s.last() - start) / 3000) % 2 === 0;
 
       if (s.api.rate().fps === 120) s.gap(heavy ? 17 : AT_120);
       else s.gap(20);

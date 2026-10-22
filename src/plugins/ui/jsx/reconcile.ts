@@ -1339,41 +1339,56 @@ export function createReconciler(
    *
    * @param element - The element that left the description.
    * @param cause - Why it leaves: `"change"` for a commit, `"mount"` when it goes with its screen.
+   * @param leads - The element is the top of a root that goes with its screen.
    */
-  function exitElement(element: Element, cause: MotionCause): void {
+  function exitElement(element: Element, cause: MotionCause, leads = false): void {
     forgetSubtree(element);
     forgetInstances(state, element.identity);
     state.exiting.add(element.entity);
-    exitSubtree(element, cause);
+    exitSubtree(element, cause, false, leads);
   }
 
   /**
    * Plays the exit hook of an element and of everything under it, each told why it leaves. A child
-   * keeps its rect and its `Exiting` tag until the whole subtree stopped moving.
+   * keeps its rect and its `Exiting` tag until the whole subtree stopped moving. Under the top of a
+   * root that goes with its screen and plays an exit of its own, the elements stand and go with it
+   * (F55b): an exit of theirs would change the subtree in every frame of the top's, so a kept
+   * picture of it would be drawn live through its filters.
    *
    * @param element - The element that leaves, or one of its children.
    * @param cause - Why the subtree leaves.
+   * @param stands - The element stands under an exit that leads the leave: its own hook does not play.
+   * @param leads - The element is the top of a root that goes with its screen.
    */
-  function exitSubtree(element: Element, cause: MotionCause): void {
+  function exitSubtree(
+    element: Element,
+    cause: MotionCause,
+    stands: boolean,
+    leads: boolean
+  ): void {
     dropHost(state, element.entity);
     state.scrolls.delete(element.entity);
 
+    // Its own exit, unless it stands under the one that leads.
     if (overlayOf(element) === undefined) {
-      modules.layout.exit(element, cause);
+      modules.layout.exit(element, cause, undefined, stands);
     } else {
       // The level of an overlay goes back with its exit motion, so the dim and the HUD are back before it goes.
       const span = createSpan();
 
-      modules.layout.exit(element, cause, span);
+      modules.layout.exit(element, cause, span, stands);
       exitOverlay(ctx, modules.layout, element, span);
     }
 
     if (element.type === "input") fields.exit(element);
 
+    // Under a top that plays its exit with its screen, the children stand (F55b).
+    const under = stands || (leads && !modules.layout.settled(element));
+
     for (const child of element.children) {
       const childElement = state.elements.get(child);
 
-      if (childElement !== undefined) exitSubtree(childElement, cause);
+      if (childElement !== undefined) exitSubtree(childElement, cause, under, false);
     }
   }
 
@@ -2333,7 +2348,7 @@ export function createReconciler(
     hostsMoved(state);
 
     if (element !== undefined) {
-      exitElement(element, cause);
+      exitElement(element, cause, cause === "mount");
       // Its own exit is the leave of a root that goes with its screen; with none, its children's are (F55).
       const leadsItsLeave = cause === "mount" && !modules.layout.settled(element);
 

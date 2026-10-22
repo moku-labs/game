@@ -65,7 +65,7 @@ export type RateMode = "fixed" | "auto" | "forced";
 
 /**
  * Why the rate is what it is, the reason of the last change: `"start"` (nothing changed it yet), `"display"` (the
- * display rate became known or changed), `"missed"` (drawn frames came late), `"headroom"` (a return after steady
+ * display rate became known or changed), `"missed"` (drawn frames came late for 2 s in a row, at once within 3 s of a step of the rule), `"headroom"` (a return after steady
  * room), `"thermal"` (the native shell reported heat), `"forced"` / `"auto"` (`setRate`).
  *
  * @example
@@ -342,7 +342,7 @@ export type Config = {
   /**
    * Adaptive frame rate. `false` (the default): the loop runs at `maxFps`, as before. With `{ floor }` the loop runs
    * at the highest divisor of the display's refresh rate at or below `maxFps`, drops to the next divisor when drawn
-   * frames come late, and returns when there is room again; never below `floor`. Off in a headless app and on a fake
+   * frames come late for 2 s in a row (one late burst, a mount or an upload, never drops it), and returns when there is room again; never below `floor`. Off in a headless app and on a fake
    * clock.
    */
   adaptive: false | AdaptiveRate;
@@ -512,6 +512,8 @@ export type Governor = {
   returnMissed: number;
   /** Heavy samples in the return window. */
   returnHeavy: number;
+  /** When the drop window last turned late and stayed late; NaN while it is not. */
+  lateSince: number;
   /** When the rate or its mode last changed. */
   switchedAt: number;
   /** When the rule last returned a step up; -Infinity before the first return. */
@@ -747,7 +749,7 @@ export type Api = {
    * ```ts
    * // The settings screen shows the rate the game runs at on this phone.
    * app.time.rate(); // { fps: 120, mode: "auto", reason: "start", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null, scale: 1 }
-   * // on the memory screen of a weak phone, a second later:
+   * // on the memory screen of a weak phone, a few seconds later (late for 2 s, then the scale and the rate step down):
    * app.time.rate(); // { fps: 60, mode: "auto", reason: "missed", displayHz: 120, ladder: [120, 60], thermal: "none", asked: null, heldBy: null, scale: 0.75 }
    * // a game with maxFps 120 and no adaptive, on a 60 Hz phone:
    * app.time.rate(); // { fps: 60, mode: "fixed", reason: "start", displayHz: 60, ladder: [], thermal: null, asked: 120, heldBy: "panel", scale: 1 }
@@ -794,7 +796,7 @@ export type Api = {
    * ```ts
    * // The renderer on a phone, at start:
    * ctx.require(timePlugin).allowScale(0.75); // { fps: 120, …, scale: 1 }
-   * // on the memory screen of a weak phone, half a second later:
+   * // on the memory screen of a weak phone, a few seconds later (late for 2 s in a row):
    * app.time.rate(); // { fps: 120, mode: "auto", reason: "missed", …, scale: 0.75 }
    * // the player picked a resolution in the settings: the renderer takes the scale away from the rule
    * ctx.require(timePlugin).allowScale(1); // { fps: 120, …, scale: 1 }

@@ -54,6 +54,7 @@ export function createTextState(): State {
     rewrite: [],
     generation: 0,
     warned: emptySet(),
+    laidOut: emptySet(),
     removers: []
   };
 }

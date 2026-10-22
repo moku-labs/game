@@ -213,4 +213,5 @@ export function stopText(state: State): void {
   state.added.length = 0;
   state.rewrite.length = 0;
   state.warned.clear();
+  state.laidOut.clear();
 }

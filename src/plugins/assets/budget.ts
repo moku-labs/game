@@ -11,6 +11,9 @@ import type { AssetsCtx, AssetsIo, Events, LoadedAssets, ManifestBundle, State }
 /** How many of the heaviest entries the over-budget warning names. */
 const HEAVIEST = 5;
 
+/** No feature holds a bundle: the stack as a leaving scene's non-`feature` bundle sees it. */
+const NO_FEATURES: ReadonlySet<string> = Object.freeze(new Set<string>());
+
 /** One row of the over-budget warning: a loose file by its key, or a page as `page "<id>"`. */
 type Heavy = { key: string; mb: number };
 
@@ -312,16 +315,20 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
 /**
  * Lets the bundles a leaving scene named go once nothing carries `Exiting` any more: each loaded
  * `"leave"` bundle among them that nothing else holds is unloaded with the reason `"leave"`, at
- * once, not at the next rest. A bundle of another release stays, as it would have. The system
- * `assets.leave` calls it in every phase `sync`: after the reconcile of `layout`, which tags the
- * leaving elements `Exiting` in the frame after the switch, so the hold never ends before the leave
- * begins (F51b). It costs a length read while no scene leaves, and a count read while one does.
+ * once, not at the next rest. Its feature on the stack holds only a `feature`-tier bundle, which
+ * lives with its feature's flow: a scene's bundle goes with the scene, also while another scene of
+ * its feature shows (the splash's 7.5 MiB under the ward). A bundle of another release stays, as
+ * it would have. The system `assets.leave` calls it in every phase `sync`: after the reconcile of
+ * `layout`, which tags the leaving elements `Exiting` in the frame after the switch, so the hold
+ * never ends before the leave begins (F51b). It costs a length read while no scene leaves, and a
+ * count read while one does.
  *
  * @param ctx - Domain context of the plugin.
  */
 export function releaseSceneLeft(ctx: AssetsCtx): void {
   const state = ctx.state;
 
+  // Nothing left, or its elements still play their exit.
   if (state.sceneLeaving.length === 0 || state.exiting > 0) return;
 
   const names = state.sceneLeaving;
@@ -330,9 +337,14 @@ export function releaseSceneLeft(ctx: AssetsCtx): void {
 
   if (state.io === undefined) return;
 
+  // Only a `feature`-tier bundle lives with its feature on the stack; a scene's goes with the scene.
   const onStack = featuresOnStack(ctx);
 
-  for (const name of names) unloadIfLeft(ctx, name, onStack);
+  for (const name of names) {
+    const tier = state.manifest.bundles[name]?.tier;
+
+    unloadIfLeft(ctx, name, tier === "feature" ? onStack : NO_FEATURES);
+  }
 }
 
 /**

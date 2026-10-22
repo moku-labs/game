@@ -252,25 +252,25 @@ describe("the back-off of a failed return", () => {
     const s = createScript();
 
     s.play(2000);
-    screen(s, 12, 1000);
+    screen(s, 12, 3000);
     screen(s, 4, 6000);
     expect(s.api.rate().fps).toBe(120);
 
     screen(s, 4, 20_000);
-    screen(s, 12, 1000);
+    screen(s, 12, 3000);
 
     expect(dwells(s)).toEqual([5000, 10_000]);
   });
 
-  it("under an alternation of heavy and light seconds the switches thin out to the longest dwell", () => {
+  it("under an alternation of heavy and light 3 s spans the switches thin out to the longest dwell", () => {
     const s = scaled();
     const start = s.last();
     const steps: Step[] = [];
 
     while (s.last() < start + 600_000) {
-      const heavy = Math.floor((s.last() - start) / 1000) % 2 === 0;
+      const heavy = Math.floor((s.last() - start) / 3000) % 2 === 0;
 
-      steps.push(...screen(s, heavy ? 20 : 4, 1000 - ((s.last() - start) % 1000)));
+      steps.push(...screen(s, heavy ? 20 : 4, 3000 - ((s.last() - start) % 3000)));
     }
 
     // 120 fails in every heavy second, even at 0.75: each failed return doubles the dwell before the next one, up to

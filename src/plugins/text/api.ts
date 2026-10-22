@@ -27,6 +27,9 @@ export function createTextApi(ctx: KernelSlice): TextApi {
     measure: (content, style, width = 0) => {
       const tctx = text();
 
+      // A width is a layout's: a label of this style is laid out, also when it fits and gets no box (F65).
+      if (width > 0) tctx.state.laidOut.add(style);
+
       return sizeOf(layoutFor(tctx, sourceOf(tctx, content), style, width));
     },
     hasGlyph: (char, style) => hasGlyphOf(text(), char, style),

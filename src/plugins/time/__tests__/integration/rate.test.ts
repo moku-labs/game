@@ -110,7 +110,9 @@ describe("the adaptive frame rate in an app", () => {
 
     const [drop, probe, again] = switches;
 
-    expect(drop?.at).toBeLessThan(1500 + 300);
+    // The window turns late within 300 ms and must stay late for 2 s (F64).
+    expect(drop?.at).toBeGreaterThanOrEqual(1500 + 2000);
+    expect(drop?.at).toBeLessThan(1500 + 2300);
     expect((probe?.at ?? 0) - (drop?.at ?? 0)).toBeGreaterThanOrEqual(5000);
     expect((probe?.at ?? 0) - (drop?.at ?? 0)).toBeLessThan(5100);
     expect((again?.at ?? 0) - (probe?.at ?? 0)).toBeLessThan(300);

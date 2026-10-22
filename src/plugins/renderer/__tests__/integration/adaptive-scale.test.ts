@@ -68,7 +68,7 @@ describe("the adaptive render scale in an app", () => {
     const seen: Array<[number, number]> = [];
     let busyUntil = 0;
 
-    for (let at = VSYNC; at < 4000; at += VSYNC) {
+    for (let at = VSYNC; at < 6000; at += VSYNC) {
       // The GPU still draws the last frame: the browser hands out no frame.
       if (at < busyUntil - 1e-6) continue;
 

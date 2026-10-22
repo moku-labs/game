@@ -166,8 +166,8 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     lift: (element: Element, units: number): void => liftRest(ctx, element, units),
 
-    exit: (element: Element, cause: MotionCause, span?: MotionSpan): void =>
-      beginExit(ctx, state, element, cause, span),
+    exit: (element: Element, cause: MotionCause, span?: MotionSpan, stands?: boolean): void =>
+      beginExit(ctx, state, element, cause, span, stands),
 
     playTrack: (element: Element, hook: (view: ViewHandle<unknown>) => Motion): void => {
       play(ctx, element, hook);

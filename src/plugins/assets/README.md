@@ -246,7 +246,7 @@ it is.
 |---|---|---|
 | `boot` | awaited in `onStart` | no |
 | `core` | started in `onStart`, not awaited | no |
-| `scene` | with the scene the node names | yes |
+| `scene` | with the scene the node names | yes: by the budget; with `release: "leave"` also once the scene left |
 | `feature` | with any node of the feature's flow | yes |
 | `lazy` | only on request | yes |
 
@@ -338,7 +338,9 @@ after it pinned its own bundles. A bundle the arriving scene names is therefore 
 the rest that leads into it. A bundle only the outgoing scene named is not released at a rest at
 all: it is a leaving scene's, held while its elements play their exit (F51). The system
 `assets.leave` of phase `sync` lets each loaded `"leave"` bundle of a leaving scene that nobody else
-holds go at the first `sync` that finds nothing carrying `Exiting`. It runs after the reconcile of
+holds go at the first `sync` that finds nothing carrying `Exiting`; there its feature on the stack
+holds only a `feature`-tier bundle, so a scene's bundle goes with its scene also while another scene
+of the same feature shows. It runs after the reconcile of
 `layout`, so an exit that starts only in the frame after the switch (a root both scenes list, whose
 memory leaves when the state moves on) still holds the bundle (F51b); a scene that leaves with no
 exit lets it go in the frame after the switch. A fast walk marks nothing; a transit node marks

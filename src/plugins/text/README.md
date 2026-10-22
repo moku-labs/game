@@ -39,7 +39,7 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   |---|---|
   | `"none"` | one line per `\n` segment |
   | a width, `480` | wrapped at that many reference px |
-  | `"box"` | wrapped at the laid-out width of its `ui` text element, which `ui` writes into `Text.box`; one line outside a ui layout, with a dev warning `text: wrap "box" outside layout` once per style |
+  | `"box"` | wrapped at the laid-out width of its `ui` text element, which `ui` writes into `Text.box`; one line outside a ui layout, with a dev warning `text: wrap "box" outside layout` once per style; a style a layout measured at a width (`measure(content, style, width)`) never warns: its label with no box fits its row (F65) |
 
   Words break between them; a word wider than the wrap breaks between its glyphs. A `"box"` text
   is measured at the width Yoga offers, so its element is as high as its lines, and is drawn again
