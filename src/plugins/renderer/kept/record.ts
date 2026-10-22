@@ -7,7 +7,9 @@
 import type { FilterSlot, SyncState, SyncWriters, View } from "../sync/types";
 import type { PixiContainer, PixiFilter, PixiModule } from "../types";
 import { makeRoom, warnRefused } from "./budget";
+import { drawnBounds } from "./drawn-bounds";
 import {
+  cutSpan,
   fitsTexture,
   gridSpan,
   KEY,
@@ -360,6 +362,8 @@ export function createRecord(
     bytes: 0,
     settle: false,
     refused: 0,
+    cut: false,
+    direct: false,
     displays: undefined
   };
   const { state } = kctx;
@@ -626,18 +630,32 @@ function takePicture(
   // A game's own object it may write unseen without `onDemand`, and an empty subtree, are never kept.
   if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return false;
 
-  // A filter area bounds what the filters draw, so it bounds the picture too (F43): same pixels, a smaller texture.
-  const local = clippedToArea(top.getLocalBounds(), top.filterArea);
+  // What Pixi draws of the subtree, no node it skips (F58); a filter area bounds what the filters draw, so it bounds
+  // the picture too (F43): same pixels, a smaller texture.
+  const drawn = drawnBounds(pixi, top);
+
+  if (!drawn.isValid) return false;
+
+  const local = clippedToArea(drawn, top.filterArea);
 
   if (isEmptyBounds(local)) return false;
 
-  // The picture's box on the grid of the stack resolution, and its padding; both textures must fit.
+  // The picture's box on the canvas, cut to it as the live pass cuts its target (F53), on the grid of the stack
+  // resolution, and its padding; both textures must fit.
   const box = linearBounds(now.a, now.b, now.c, now.d, local);
-  const x = gridSpan(now.tx + box.x0, now.tx + box.x1, now.rs);
-  const y = gridSpan(now.ty + box.y0, now.ty + box.y1, now.rs);
+  const screen = kctx.host.screen();
+  const width = screen?.width ?? Number.POSITIVE_INFINITY;
+  const height = screen?.height ?? Number.POSITIVE_INFINITY;
+  const Ps = paddingOnGrid(now.P, now.rs);
+  const across = cutSpan(now.tx + box.x0, now.tx + box.x1, width, Ps);
+  const down = cutSpan(now.ty + box.y0, now.ty + box.y1, height, Ps);
+
+  if (!(across.end > across.start && down.end > down.start)) return false;
+
+  const x = gridSpan(across.start, across.end, now.rs);
+  const y = gridSpan(down.start, down.end, now.rs);
   const w1 = x.texels / now.rs;
   const h1 = y.texels / now.rs;
-  const Ps = paddingOnGrid(now.P, now.rs);
 
   if (!fitsTexture(w1, h1, now.rs) || !fitsTexture(w1 + 2 * Ps, h1 + 2 * Ps, now.r)) return false;
 
@@ -656,6 +674,13 @@ function takePicture(
   }
 
   record.refused = 0;
+  record.cut =
+    across.start > now.tx + box.x0 ||
+    across.end < now.tx + box.x1 ||
+    down.start > now.ty + box.y0 ||
+    down.end < now.ty + box.y1;
+  record.key[KEY.sw] = width;
+  record.key[KEY.sh] = height;
   writeTakeKeys(record, now, { x, y, w1, h1 });
 
   const ok = renderStages(kctx, pixi, matrices, record, view, now);
@@ -1028,6 +1053,19 @@ function noteMove(kctx: KeptCtx, record: KeptRecord): void {
 }
 
 /**
+ * Tells whether the canvas has another size than at the take.
+ *
+ * @param kctx - The kept context.
+ * @param key - The record's key.
+ * @returns True when it does.
+ */
+function canvasChanged(kctx: KeptCtx, key: Float64Array): boolean {
+  const screen = kctx.host.screen();
+
+  return screen !== undefined && (screen.width !== key[KEY.sw] || screen.height !== key[KEY.sh]);
+}
+
+/**
  * A kept record's frame (P4.3): a stage-1 change retakes (three in a row go live and calm); otherwise a new chain
  * version redoes stages 2 and 3, a filter value, the resolution, the padding or (placed) a move stage 3; at rest after
  * an off-grid move one settle retake is owed.
@@ -1053,9 +1091,16 @@ function stepKept(
     return;
   }
 
-  record.churn = 0;
-
   const moved = NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
+
+  // A picture cut to the canvas shows what it left out once it moves or the canvas changes size (F53).
+  if (record.cut && (moved || canvasChanged(kctx, key))) {
+    churn(kctx, pixi, matrices, record, view);
+
+    return;
+  }
+
+  record.churn = 0;
 
   if (!moved && record.settle) {
     retakeOrGoLive(kctx, pixi, matrices, record, view);
