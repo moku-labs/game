@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { frameAt } from "../../monitor/ring";
+import { FAKE_PNG } from "../fake-pixi";
 import { createMockRenderer } from "../mock-renderer";
 import { type AgentRenderer, startAgent } from "../perf-harness";
 
@@ -58,6 +59,36 @@ describe("beginAgent and endAgent", () => {
 
     expect(frameAt(agent.mock.api.monitor.frames(), 0)?.phases.agent).toBe(2);
     expect(agent.mock.charged).toEqual([2]);
+  });
+});
+
+describe("a capture's picture (F62)", () => {
+  it("is taken after the frame, not inside it, and charged to the agent", async () => {
+    const agent = await startAgent({ config: { monitor: budget } });
+    const extract = agent.mock.pixi.last().renderer.extract;
+    const encode = extract.base64;
+
+    // A slow phone: the draw and read-back of the extract takes 180 ms of the page clock.
+    extract.base64 = (options: unknown) => {
+      agent.clock.now += 180;
+      return encode(options);
+    };
+    agent.clock.now = 100;
+    const pending = agent.mock.api.capture();
+
+    agent.frame({ workMs: 2 });
+
+    expect(extract.calls).toHaveLength(0);
+    expect(agent.mock.charged).toEqual([]);
+
+    await expect(pending).resolves.toEqual({ png: FAKE_PNG });
+
+    expect(extract.calls).toHaveLength(1);
+    expect(agent.mock.charged).toEqual([180]);
+
+    agent.frame({ workMs: 2 });
+
+    expect(frameAt(agent.mock.api.monitor.frames(), 0)?.phases.agent).toBe(180);
   });
 });
 

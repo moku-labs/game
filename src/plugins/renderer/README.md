@@ -579,14 +579,17 @@ WebGL pass has no stencil count and no GPU time of its own. A WebKit page report
   shared systems of both backends (8.22); it draws the stage into a texture over `app.screen`,
   cleared with `config.background`. The captures due on one frame with the same layers and legend
   share one extract. `onStop` answers a capture still waiting with `undefined`.
-- **Timing.** A picture is taken right after the next drawn frame (`monitor.end()`), at once while
-  the clock is paused. A capture still waiting when the game pauses is served by the
+- **Timing.** A picture is of the next drawn frame: `monitor.end()` decides which captures are due
+  and reads what they keep of the frame (the legend, the game time); the extract runs in a task of
+  its own right after that frame (`setTimeout` 0), before the next frame changes the stage, inside
+  the agent span (`beginAgent`/`endAgent`), so its draw and read-back are the agent's phase and
+  never game frame time (F62). At once while the clock is paused. A capture still waiting when the game pauses is served by the
   `lifecycle:changed` hook (`paused: true`) one microtask later, so a pause inside a frame lets
   that frame end first: a plain capture is taken at once, a running sheet steps what is left of its
   spacing, or nothing when an earlier sheet served on the same pause stepped past it. The hook
   carries the same positive dev or agent guard as the draw-call counter, so a production build drops it with
-  the capture code. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame, in the same call as the extract's
-  synchronous render; only the PNG encode comes later. Every option draws on the picture after the
+  the capture code. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame; the extract's
+  synchronous render follows right after it, and only the PNG encode comes later. Every option draws on the picture after the
   extract, on an `OffscreenCanvas` 2D context (`monitor/picture.ts`): the player never sees a toggle
   or a badge.
 - **`layers`** draws only these layers of the scene. Every name must be in
