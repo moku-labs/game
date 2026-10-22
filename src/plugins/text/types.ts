@@ -441,7 +441,9 @@ export type TextApi = {
    * The size of a piece of text in reference pixels, from the advance table of the style's font.
    * A `Message` is formatted in the current locale first. Never touches a canvas, so the answer
    * is the same in a browser and in plain Bun. Cached per style and resolved string, and per
-   * width for a `"box"` style.
+   * width for a `"box"` style. A call with a width is a layout's (`ui.layout` is the caller it is
+   * meant for): it marks the style as laid out, so a label of it with no box (one that fits its
+   * row) no longer warns `wrap "box" outside layout` (F65).
    *
    * @param content - A plain string, or what `tr` returned.
    * @param style - A registered style name. An unknown one warns once and measures as `body`.

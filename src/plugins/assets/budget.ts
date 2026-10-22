@@ -11,6 +11,9 @@ import type { AssetsCtx, AssetsIo, Events, LoadedAssets, ManifestBundle, State }
 /** How many of the heaviest entries the over-budget warning names. */
 const HEAVIEST = 5;
 
+/** No feature holds a bundle: the stack as a leaving scene's non-`feature` bundle sees it. */
+const NO_FEATURES: ReadonlySet<string> = Object.freeze(new Set<string>());
+
 /** One row of the over-budget warning: a loose file by its key, or a page as `page "<id>"`. */
 type Heavy = { key: string; mb: number };
 
@@ -336,12 +339,11 @@ export function releaseSceneLeft(ctx: AssetsCtx): void {
 
   // Only a `feature`-tier bundle lives with its feature on the stack; a scene's goes with the scene.
   const onStack = featuresOnStack(ctx);
-  const noFeatures: ReadonlySet<string> = emptyNames();
 
   for (const name of names) {
     const tier = state.manifest.bundles[name]?.tier;
 
-    unloadIfLeft(ctx, name, tier === "feature" ? onStack : noFeatures);
+    unloadIfLeft(ctx, name, tier === "feature" ? onStack : NO_FEATURES);
   }
 }
 

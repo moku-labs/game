@@ -492,6 +492,28 @@ function buildRun(
 }
 
 /**
+ * Tells whether a label of a `"box"` style is drawn outside a ui layout: it has no box, it is not
+ * empty (ui lays an empty one out 0 wide), and no layout measured its style at a width (a laid-out
+ * label that fits its row gets no box, F65).
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param style - The style of the label.
+ * @param value - The component value.
+ * @returns True when the label wraps at no box for want of a layout.
+ */
+function isOutsideLayout(
+  ctx: TextCtx,
+  style: Readonly<TextStyle>,
+  value: Readonly<TextValue>
+): boolean {
+  if (style.wrap !== "box") return false;
+
+  const hasNoBox = (value.box ?? 0) <= 0;
+
+  return hasNoBox && value.resolved !== "" && !ctx.state.laidOut.has(value.style);
+}
+
+/**
  * The style and the laid-out block of one component value, under the generation of this moment.
  * A `"box"` style wraps at the box `ui` wrote; with none it is one line, and a dev warning says
  * so once per style unless a layout measured that style at a width (a label that fits its row).
@@ -503,14 +525,7 @@ function buildRun(
 function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
   const style = styleOf(ctx, value.style);
 
-  // An empty label has nothing to wrap: ui lays it out 0 wide. A style a layout measured at a width is laid out: a
-  // label of it with no box fits its row (F65).
-  if (
-    style.wrap === "box" &&
-    (value.box ?? 0) <= 0 &&
-    value.resolved !== "" &&
-    !ctx.state.laidOut.has(value.style)
-  ) {
+  if (isOutsideLayout(ctx, style, value)) {
     warnOnce(ctx, `wrap-box:${value.style}`, 'text: wrap "box" outside layout', {
       style: value.style
     });
