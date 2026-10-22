@@ -29,11 +29,14 @@ const { defineNode, defineFlow, defineFeature } = defineGame<{
   strings: { "hold.title": Record<string, never> };
 }>();
 
-/** The scene bundles, and the memory's own pictures, which leave with it. None has files to fetch. */
+/**
+ * The scene bundles, and the memory's own pictures, which leave with it. The memory's scene bundle is shaped as A
+ * Memory Missing's splash is: tier `scene`, released on leave. None has files to fetch.
+ */
 const manifest: Manifest = {
   version: 2,
   bundles: {
-    memory: { feature: "hold", tier: "lazy", mb: 0, files: [] },
+    memory: { feature: "hold", tier: "scene", release: "leave", mb: 0, files: [] },
     board: { feature: "hold", tier: "lazy", mb: 0, files: [] },
     "ep.memory": { feature: "ep", tier: "lazy", release: "leave", mb: 0, files: [] }
   }
@@ -252,6 +255,28 @@ describe("the bundles of a leaving scene (F51)", () => {
     expect(game.leaving()).toBe(false);
     expect(app.assets.isLoaded("ep.memory")).toBe(false);
     expect(app.assets.isLoaded("board")).toBe(true);
+  });
+
+  // Bug (A Memory Missing, the splash): a scene's own `scene`-tier bundle stayed loaded under the next screens (7.5
+  // MiB of the 192 the A26 counts). Released on leave, it goes once the scene that named it finished its exit.
+  it("lets the scene's own bundle go, tier scene and released on leave, once its exit is over", async () => {
+    const game = await startMemory();
+    const { app } = game;
+
+    expect(app.assets.isLoaded("memory")).toBe(true);
+
+    app.input.tap(app.ui.find("door") ?? 0);
+    await game.frames(4);
+
+    expect(app.flow.state().path).toBe("board");
+    expect(game.leaving()).toBe(true);
+    expect(app.assets.isLoaded("memory")).toBe(true);
+
+    await game.frames(50);
+
+    expect(game.leaving()).toBe(false);
+    expect(app.assets.isLoaded("memory")).toBe(false);
+    expect(app.assets.usage().bundles.map(bundle => bundle.name)).not.toContain("memory");
   });
 
   // Bug (A Memory Missing, F51b): the memory's root stays mounted; its elements are tagged `Exiting` by the reconcile

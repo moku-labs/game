@@ -312,7 +312,10 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
 /**
  * Lets the bundles a leaving scene named go once nothing carries `Exiting` any more: each loaded
  * `"leave"` bundle among them that nothing else holds is unloaded with the reason `"leave"`, at
- * once, not at the next rest. A bundle of another release stays, as it would have. The system
+ * once, not at the next rest. Its feature on the stack holds only a `feature`-tier bundle, which
+ * lives with its feature's flow: a scene's bundle goes with the scene, also while another scene of
+ * its feature shows (the splash's 7.5 MiB under the ward). A bundle of another release stays, as
+ * it would have. The system
  * `assets.leave` calls it in every phase `sync`: after the reconcile of `layout`, which tags the
  * leaving elements `Exiting` in the frame after the switch, so the hold never ends before the leave
  * begins (F51b). It costs a length read while no scene leaves, and a count read while one does.
@@ -331,8 +334,13 @@ export function releaseSceneLeft(ctx: AssetsCtx): void {
   if (state.io === undefined) return;
 
   const onStack = featuresOnStack(ctx);
+  const noFeatures: ReadonlySet<string> = emptyNames();
 
-  for (const name of names) unloadIfLeft(ctx, name, onStack);
+  for (const name of names) {
+    const tier = state.manifest.bundles[name]?.tier;
+
+    unloadIfLeft(ctx, name, tier === "feature" ? onStack : noFeatures);
+  }
 }
 
 /**
