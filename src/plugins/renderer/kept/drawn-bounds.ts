@@ -11,6 +11,9 @@ import type { PixiBounds, PixiContainer, PixiMatrix, PixiModule } from "../types
 /** Every flag of a node's display status: visible, renderable, not culled (Pixi's `localDisplayStatus`). */
 const SHOWN = 0b111;
 
+/** The effects of a node that holds none. */
+const NO_EFFECTS: NonNullable<PixiContainer["effects"]> = [];
+
 /** The matrix of each depth of the walk, from the top's space to the node's. Grown once, then reused. */
 const MATRICES: PixiMatrix[] = [];
 
@@ -145,7 +148,7 @@ function addDrawn(
   }
 
   // A node with no effects adds what it draws straight.
-  const effects = node.effects ?? [];
+  const effects = node.effects ?? NO_EFFECTS;
 
   if (effects.length === 0) {
     addContent(pixi, node, into, depth, top);

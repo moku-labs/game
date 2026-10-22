@@ -678,14 +678,13 @@ function ensureClipped(
   clipped.label = `children#${entity}`;
   clipped.sortableChildren = true;
 
-  // Walked from the end: each move takes the child out of the list walked, so a forward walk skips every other one
-  // (F57). Inserting at the front keeps their order.
-  for (let index = wrapper.children.length - 1; index >= 0; index -= 1) {
-    const child = wrapper.children[index];
+  // Each move takes the child out of the list walked: the index moves on only past a node that stays, or a walk
+  // that always moved on would skip every other child (F57).
+  let index = 0;
 
-    if (child !== undefined && child !== view.object && child !== view.outline) {
-      clipped.addChildAt(child, 0);
-    }
+  for (let child = wrapper.children[0]; child !== undefined; child = wrapper.children[index]) {
+    if (child === view.object || child === view.outline) index += 1;
+    else clipped.addChild(child);
   }
 
   wrapper.addChild(clipped);
