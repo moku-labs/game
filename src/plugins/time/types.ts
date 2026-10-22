@@ -512,6 +512,8 @@ export type Governor = {
   returnMissed: number;
   /** Heavy samples in the return window. */
   returnHeavy: number;
+  /** When the drop window last turned late and stayed late; NaN while it is not. */
+  lateSince: number;
   /** When the rate or its mode last changed. */
   switchedAt: number;
   /** When the rule last returned a step up; -Infinity before the first return. */

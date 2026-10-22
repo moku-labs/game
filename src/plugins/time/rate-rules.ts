@@ -42,6 +42,18 @@ export const DROP_MIN_MISSES = 8;
 /** …and at least this share of the window's drawn intervals: the p90 rule written as a count. */
 export const DROP_SHARE = 0.1;
 
+/**
+ * The drop window stays late this long before the rate drops, ms (F64): longer than the window, so one burst of late
+ * frames (a mount, an upload, a GC) never drops the rate by itself; only a sustained slow run does.
+ */
+export const DROP_HOLD_MS = 2000;
+
+/**
+ * A step of the rule (a return or a drop) is followed this long by drops that need no hold: a failed probe ends at
+ * once and a descent under way goes on, ms.
+ */
+export const PROBE_MS = 3000;
+
 /** Page time the return rule looks back, ms. */
 export const RETURN_WINDOW_MS = 3000;
 

@@ -125,8 +125,11 @@ after a switch and after a `resume()`, a forced rate. A stepped frame never feed
 `max(8, ceil(10 %))`. Late is past `1000 / fps + 500 / displayHz`: at 120 on a 120 Hz panel a frame
 that took two vsyncs (16.7 ms) is late, at 60 one that took three (25 ms). The p90 of the window is
 over the line exactly when more than a tenth of it is: counting needs no sort. A full second at 120
-needs 12 late intervals, a short tap animation of 30 drawn frames needs 8, a mount hitch of one to
-three long frames never drops it. Never below `floor`.
+needs 12 late intervals, a short tap animation of 30 drawn frames needs 8. The window must stay late
+for 2 s in a row before the rate drops (F64): a burst of late frames shorter than a second (a mount,
+an upload, a GC) leaves the window late for about a second at most and never drops the rate, even on
+a screen that already runs near the line; a sustained slow run drops it once. Within 3 s of a step
+of the rule itself (a return, or a drop of a descent under way) the first late window is enough. Never below `floor`.
 
 **Up** one step, never more, when the dwell since the last switch has passed (5 s at first), the
 last three seconds hold at least 90 drawn frames, at most one late interval, at most a tenth of

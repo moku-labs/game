@@ -24,6 +24,7 @@ import {
   DISPLAY_RATES,
   DISPLAY_SHARE,
   DISPLAY_WINDOW_TICKS,
+  DROP_HOLD_MS,
   DROP_MIN_MISSES,
   DROP_SHARE,
   DROP_WINDOW_MS,
@@ -35,6 +36,7 @@ import {
   ladderOf,
   loopRateOf,
   missLineMs,
+  PROBE_MS,
   RETURN_HEAVY_SHARE,
   RETURN_MAX_MISSES,
   RETURN_MIN_FRAMES,
@@ -166,6 +168,7 @@ function createGovernor(floor: number): Governor {
     returnDrawn: 0,
     returnMissed: 0,
     returnHeavy: 0,
+    lateSince: Number.NaN,
     switchedAt: Number.NEGATIVE_INFINITY,
     lastReturnAt: Number.NEGATIVE_INFINITY,
     climbed: false,
@@ -267,6 +270,7 @@ function emptyWindows(g: Governor): void {
   g.returnDrawn = 0;
   g.returnMissed = 0;
   g.returnHeavy = 0;
+  g.lateSince = Number.NaN;
 }
 
 /**
@@ -692,13 +696,38 @@ function isSample(ctx: TimeCtx, g: Governor, intervalMs: number): boolean {
 }
 
 /**
- * Tells whether the drop window is late enough to step down: late intervals reach `max(8, 10 %)` of the second's.
+ * Tells whether the drop window is late: late intervals reach `max(8, 10 %)` of the second's.
  *
  * @param g - The governor.
+ * @returns True when the window is late.
+ */
+function isLate(g: Governor): boolean {
+  return g.dropMissed >= Math.max(DROP_MIN_MISSES, Math.ceil(DROP_SHARE * g.dropDrawn));
+}
+
+/**
+ * Tells whether the rate should step down (F64): the drop window has been late for 2 s in a row, so one burst of late
+ * frames never drops it. Within 3 s of a step of the rule itself the first late window is enough: a return on
+ * probation that fails, and the next step of a descent already under way. Notes when the window turned late.
+ *
+ * @param ctx - Domain context of the time plugin.
+ * @param g - The governor.
+ * @param at - The page time of the sample.
  * @returns True when the rate should drop one step.
  */
-function shouldDrop(g: Governor): boolean {
-  return g.dropMissed >= Math.max(DROP_MIN_MISSES, Math.ceil(DROP_SHARE * g.dropDrawn));
+function shouldDrop(ctx: TimeCtx, g: Governor, at: number): boolean {
+  if (!isLate(g)) {
+    g.lateSince = Number.NaN;
+
+    return false;
+  }
+
+  if (Number.isNaN(g.lateSince)) g.lateSince = at;
+
+  const { reason } = ctx.state.rate;
+  const ruleStep = reason === "missed" || reason === "headroom";
+
+  return (ruleStep && at - g.switchedAt < PROBE_MS) || at - g.lateSince >= DROP_HOLD_MS;
 }
 
 /**
@@ -732,8 +761,8 @@ function canReturn(g: Governor, at: number, scaleStep: boolean): boolean {
 }
 
 /**
- * Decides on the windows after a sample. Down one step when late intervals reach `max(8, 10 %)` of the second's: the
- * render scale when the window is GPU-bound and a lower scale is allowed, the rate otherwise. Up one step in the
+ * Decides on the windows after a sample. Down one step when late intervals reach `max(8, 10 %)` of the second's for
+ * 2 s in a row (at once within 3 s of a step of the rule): the render scale when the window is GPU-bound and a lower scale is allowed, the rate otherwise. Up one step in the
  * reverse of the way down, with 90 steady drawn frames in three seconds, at most one late and no heat: the rate first,
  * at the scale it dropped at, after the dwell and with a tenth heavy at most, then the scale after twice the dwell. A
  * probe of the higher rate so never starts at full scale, and its failure changes no resolution.
@@ -745,7 +774,7 @@ function canReturn(g: Governor, at: number, scaleStep: boolean): boolean {
 function decide(ctx: TimeCtx, g: Governor, at: number): void {
   const { fps, scale } = ctx.state.rate;
 
-  if (shouldDrop(g)) {
+  if (shouldDrop(ctx, g, at)) {
     const smaller = gpuBound(g) ? stepBelow(g.scales, scale) : undefined;
     const lower = stepBelow(g.ladder, fps);
 
@@ -754,6 +783,9 @@ function decide(ctx: TimeCtx, g: Governor, at: number): void {
 
     return;
   }
+
+  // A late window that has not held yet waits: it neither drops nor returns.
+  if (!Number.isNaN(g.lateSince)) return;
 
   const higher = stepAbove(g.ladder, fps);
 
