@@ -90,6 +90,38 @@ describe("a capture's picture (F62)", () => {
 
     expect(frameAt(agent.mock.api.monitor.frames(), 0)?.phases.agent).toBe(180);
   });
+
+  it("answers undefined and closes the agent span when the read fails after the frame", async () => {
+    const agent = await startAgent({ config: { monitor: budget } });
+    const extract = agent.mock.pixi.last().renderer.extract;
+
+    // The device is lost between the frame and the picture's task: Pixi throws inside the extract.
+    extract.base64 = () => {
+      agent.clock.now += 40;
+      throw new Error("device lost");
+    };
+    agent.clock.now = 100;
+    const pending = agent.mock.api.capture();
+
+    agent.frame({ workMs: 2 });
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(agent.mock.charged).toEqual([40]);
+    expect(agent.pc.perf.agentStart).toBeNaN();
+  });
+
+  it("answers undefined without opening the span when the renderer stops before the picture's task", async () => {
+    const agent = await startAgent({ config: { monitor: budget } });
+    const extract = agent.mock.pixi.last().renderer.extract;
+    const pending = agent.mock.api.capture();
+
+    agent.frame({ workMs: 2 });
+    agent.mock.stop();
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(extract.calls).toHaveLength(0);
+    expect(agent.mock.charged).toEqual([]);
+  });
 });
 
 describe("the agent's work and the spike rules", () => {

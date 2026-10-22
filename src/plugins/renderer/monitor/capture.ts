@@ -316,24 +316,38 @@ function takeShot(mctx: MonitorCtx, take: Take): Promise<Shot | undefined> {
 
 /**
  * Runs the picture of a frame in a task of its own right after that frame, inside the agent span:
- * the draw and read-back of an extract (some 200 ms on a slow phone) is charged to the agent and
- * leaves the game's frame alone (F62). The task comes before the next frame, so the stage is the
- * one drawn.
+ * the synchronous part of the extract, Pixi's draw of the stage and its read-back (some 200 ms on a
+ * slow phone), is charged to the agent and leaves the game's frame alone (F62). The span closes
+ * when that part returns: the PNG encode that follows runs in the browser's own task and is no
+ * page work to charge. The task comes before the next frame, so the stage is the one drawn. A
+ * renderer stopped or lost by then answers `undefined` without opening the span (`cancelCaptures`
+ * no longer sees a capture handed to this task). A picture that throws at once rejects the shot.
  *
+ * @param mctx - Domain context of the capture.
  * @param span - The agent span.
  * @param picture - Takes the picture.
  * @returns The shot.
  */
 function afterFrame(
+  mctx: MonitorCtx,
   span: CaptureSpan,
   picture: () => Promise<Shot | undefined>
 ): Promise<Shot | undefined> {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     afterTask(() => {
+      if (!mctx.deps.host.ready()) {
+        // eslint-disable-next-line unicorn/no-useless-undefined -- `undefined` is the shot of a stopped renderer; the promise needs a value.
+        resolve(undefined);
+
+        return;
+      }
+
       span.begin();
 
       try {
         resolve(picture());
+      } catch (error) {
+        reject(error);
       } finally {
         span.end();
       }
@@ -449,7 +463,7 @@ function shotsOfFrame(
     if (shot === undefined) {
       const facts = factsOf(mctx, take);
 
-      shot = afterFrame(span, () => pictureOf(mctx, take, facts));
+      shot = afterFrame(mctx, span, () => pictureOf(mctx, take, facts));
       taken.set(kind, shot);
     }
 
@@ -526,7 +540,8 @@ export function servePaused(state: MonitorState, time: TimeApi): void {
 }
 
 /**
- * Answers every capture still waiting with `undefined`. Works on the state alone, for `onStop`.
+ * Answers every capture still waiting with `undefined`. Works on the state alone, for `onStop`. A
+ * capture whose picture task is already queued answers `undefined` by itself (`afterFrame`).
  *
  * @param state - The monitor branch of the plugin state.
  */
