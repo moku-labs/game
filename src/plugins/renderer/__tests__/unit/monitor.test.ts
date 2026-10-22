@@ -46,9 +46,12 @@ async function started(): Promise<MockRenderer> {
 }
 
 /**
- * Lets the promise callbacks queued so far run.
+ * Lets the promise callbacks queued so far run, and the pictures a frame left for the task right
+ * after it (F62).
  */
 async function settle(): Promise<void> {
+  for (let index = 0; index < 5; index += 1) await Promise.resolve();
+  await new Promise(resolve => setTimeout(resolve, 0));
   for (let index = 0; index < 5; index += 1) await Promise.resolve();
 }
 

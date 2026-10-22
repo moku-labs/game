@@ -149,7 +149,7 @@ describe("the pass counter of every build", () => {
     const entity = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
 
     drawn.mock.api.sync.filters.set(entity, [
-      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+      { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
     ]);
     drawn.frame();
 

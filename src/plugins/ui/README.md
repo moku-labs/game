@@ -529,6 +529,11 @@ a commit adds it to or removes it from a live tree, and for every element of a p
 `defineMotion({ when: "change" })` plays nothing for `"mount"`: the element stands at rest from its
 first drawn frame, and leaves with no exit when its scene goes. A default motion plays for both.
 
+A root that goes with its screen ends with the exit of its top element (F55). When the top plays an
+exit, the whole tree goes the frame that exit ends: a longer exit under it is cut, so it never
+holds the root, nor the bundles of the scene that left. When the top plays none, the root waits
+for the exits under it, as a removal in a live tree does.
+
 ```tsx
 <row key="card" motion={order.ready ? swayWide : swayGentle} />
 ```

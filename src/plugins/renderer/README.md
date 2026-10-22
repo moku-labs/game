@@ -604,14 +604,17 @@ WebGL pass has no stencil count and no GPU time of its own. A WebKit page report
   shared systems of both backends (8.22); it draws the stage into a texture over `app.screen`,
   cleared with `config.background`. The captures due on one frame with the same layers and legend
   share one extract. `onStop` answers a capture still waiting with `undefined`.
-- **Timing.** A picture is taken right after the next drawn frame (`monitor.end()`), at once while
-  the clock is paused. A capture still waiting when the game pauses is served by the
+- **Timing.** A picture is of the next drawn frame: `monitor.end()` decides which captures are due
+  and reads what they keep of the frame (the legend, the game time); the extract runs in a task of
+  its own right after that frame (`setTimeout` 0), before the next frame changes the stage, inside
+  the agent span (`beginAgent`/`endAgent`), so its draw and read-back are the agent's phase and
+  never game frame time (F62). At once while the clock is paused. A capture still waiting when the game pauses is served by the
   `lifecycle:changed` hook (`paused: true`) one microtask later, so a pause inside a frame lets
   that frame end first: a plain capture is taken at once, a running sheet steps what is left of its
   spacing, or nothing when an earlier sheet served on the same pause stepped past it. The hook
   carries the same positive dev or agent guard as the draw-call counter, so a production build drops it with
-  the capture code. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame, in the same call as the extract's
-  synchronous render; only the PNG encode comes later. Every option draws on the picture after the
+  the capture code. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame; the extract's
+  synchronous render follows right after it, and only the PNG encode comes later. Every option draws on the picture after the
   extract, on an `OffscreenCanvas` 2D context (`monitor/picture.ts`): the player never sees a toggle
   or a badge.
 - **`layers`** draws only these layers of the scene. Every name must be in
@@ -834,14 +837,29 @@ the same pixels): no extra frame, no retake. It stays with the view until the vi
 while the view is drawn live, so a view that pulses wraps once. A filtered view that never stands
 still gets none. A visual that blends otherwise than normally keeps its view live, as a top does.
 
+What a picture holds. Only what Pixi draws of the subtree: a node with `renderable = false` (hidden at
+alpha 0, by a cover, by an overlay's range, a kept child's own top) and its subtree add nothing to the
+bounds, masks cut them, as in Pixi's live filter bounds (F58). The box is cut to the canvas and the
+padding of the filters around it, as Pixi's live pass cuts its target to the viewport (F53): a view
+wider than the screen keeps the part on it. A picture cut so is taken again when its view moves or the
+canvas changes size, so what it left out never shows; as any churn, the third such change in a row draws
+it live until it stood still for 8 frames.
+
+A stack of alphas draws direct (F54): when every enabled filter is an `AlphaFilter` (an `Alpha`) at
+the renderer's resolution, the quad draws the subtree picture itself at the product of their alphas,
+as Pixi's alpha pass draws its input. There is no filter output (half the bytes) and no stage 3: a fade
+writes the quad's alpha and renders nothing, where it cost a pass into the output every frame. An
+`Alpha` with a `resolution` of its own, or any other filter beside it, keeps the filter output.
+
 What each stage depends on, and the only stage redone when it changes:
 
 | Change | Redone |
 |---|---|
 | A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, its world scale or rotation, the stack resolution | stages 1, 2, 3 |
 | What the chain of the first filter with inputs draws (`inputs.version()`) | stages 2, 3 |
-| A filter value (`effects` calls `invalidate` before the write), the renderer resolution, the padding, a `"placed"` filter's move | stage 3 |
-| A move of the view itself | nothing: the quad moves |
+| A filter value (`effects` calls `invalidate` before the write), the renderer resolution, the padding, a `"placed"` filter's move | stage 3; for a stack of alphas nothing: the quad's alpha |
+| A move of the view itself | nothing: the quad moves; a picture cut to the canvas: stages 1, 2, 3 |
+| The canvas size, for a picture cut to it | stages 1, 2, 3 |
 
 Moving and changing. A view that moves keeps its picture: only the quad's position is written. A move
 of a fraction of a texel draws the quad off its grid (sampled linearly) while it moves; at rest it is

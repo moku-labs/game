@@ -508,6 +508,8 @@ export type JsxState = {
   byKey: Map<Entity, Map<string, Entity>>;
   instances: Map<string, Instance>;
   exiting: Set<Entity>;
+  /** The tops of roots that left with their screen and whose own exit plays: each goes when that exit ends (F55). */
+  leading: Set<Entity>;
   removing: Set<Entity>;
   hosts: Set<Entity>;
   hosted: Map<Entity, Entity>;

@@ -7,6 +7,7 @@
  */
 import type { Api as TimeApi } from "../../time/types";
 import type { PixiContainer, Point } from "../types";
+import { afterTask } from "./clock";
 import { diffPicture, legendPicture, numberLegend, pictureRect, sheetPicture } from "./picture";
 import type {
   Captured,
@@ -265,19 +266,93 @@ function measureLegend(mctx: MonitorCtx, layers: readonly string[] | undefined):
 }
 
 /**
- * Takes the picture of the frame just drawn. The legend and the extract's render happen now,
- * synchronously, so both show this frame; only the encoding of the PNG comes later.
+ * What a picture keeps of its frame, read on that frame: the legend and the game time.
+ */
+type FrameFacts = { legend: LegendEntry[] | undefined; elapsed: number };
+
+/**
+ * Reads what a picture keeps of the frame just drawn: the legend, when asked, and the game time.
+ *
+ * @param mctx - Domain context of the capture.
+ * @param take - The layers drawn and whether the legend is measured.
+ * @returns The facts of this frame.
+ */
+function factsOf(mctx: MonitorCtx, take: Take): FrameFacts {
+  return {
+    legend: take.legend ? measureLegend(mctx, take.layers) : undefined,
+    elapsed: mctx.ctx.deps.time.snapshot().elapsed
+  };
+}
+
+/**
+ * Draws the stage into a PNG for facts already read. Pixi draws and reads back synchronously
+ * inside the call; only the encoding of the PNG comes later.
+ *
+ * @param mctx - Domain context of the capture.
+ * @param take - The layers drawn.
+ * @param facts - The legend and the game time of the frame.
+ * @returns The shot, or `undefined` when Pixi could not read the frame.
+ */
+async function pictureOf(
+  mctx: MonitorCtx,
+  take: Take,
+  facts: FrameFacts
+): Promise<Shot | undefined> {
+  const png = await mctx.deps.host.extract(hiddenLayers(mctx, take.layers));
+
+  return png === undefined ? undefined : { png, legend: facts.legend, elapsed: facts.elapsed };
+}
+
+/**
+ * Takes the picture of the stage now: the paused paths, where no frame runs.
  *
  * @param mctx - Domain context of the capture.
  * @param take - The layers drawn and whether the legend is measured.
  * @returns The shot, or `undefined` when Pixi could not read the frame.
  */
-async function takeShot(mctx: MonitorCtx, take: Take): Promise<Shot | undefined> {
-  const legend = take.legend ? measureLegend(mctx, take.layers) : undefined;
-  const elapsed = mctx.ctx.deps.time.snapshot().elapsed;
-  const png = await mctx.deps.host.extract(hiddenLayers(mctx, take.layers));
+function takeShot(mctx: MonitorCtx, take: Take): Promise<Shot | undefined> {
+  return pictureOf(mctx, take, factsOf(mctx, take));
+}
 
-  return png === undefined ? undefined : { png, legend, elapsed };
+/**
+ * Runs the picture of a frame in a task of its own right after that frame, inside the agent span:
+ * the synchronous part of the extract, Pixi's draw of the stage and its read-back (some 200 ms on a
+ * slow phone), is charged to the agent and leaves the game's frame alone (F62). The span closes
+ * when that part returns: the PNG encode that follows runs in the browser's own task and is no
+ * page work to charge. The task comes before the next frame, so the stage is the one drawn. A
+ * renderer stopped or lost by then answers `undefined` without opening the span (`cancelCaptures`
+ * no longer sees a capture handed to this task). A picture that throws at once rejects the shot.
+ *
+ * @param mctx - Domain context of the capture.
+ * @param span - The agent span.
+ * @param picture - Takes the picture.
+ * @returns The shot.
+ */
+function afterFrame(
+  mctx: MonitorCtx,
+  span: CaptureSpan,
+  picture: () => Promise<Shot | undefined>
+): Promise<Shot | undefined> {
+  return new Promise((resolve, reject) => {
+    afterTask(() => {
+      if (!mctx.deps.host.ready()) {
+        // eslint-disable-next-line unicorn/no-useless-undefined -- `undefined` is the shot of a stopped renderer; the promise needs a value.
+        resolve(undefined);
+
+        return;
+      }
+
+      span.begin();
+
+      try {
+        resolve(picture());
+      } catch (error) {
+        reject(error);
+      } finally {
+        span.end();
+      }
+    });
+  });
 }
 
 /**
@@ -368,19 +443,29 @@ function laterShot(
 
 /**
  * A cache for one drawn frame: the captures due on it with the same layers and legend share one
- * shot, so one frame costs one extract per kind of picture.
+ * shot, so one frame costs one extract per kind of picture. The facts of a shot are read on the
+ * frame; its picture is taken right after it (`afterFrame`).
  *
  * @param mctx - Domain context of the capture.
+ * @param span - The agent span the pictures are taken in.
  * @returns Takes the shot of a kind, or hands back the one taken already.
  */
-function shotsOfFrame(mctx: MonitorCtx): (take: Take) => Promise<Shot | undefined> {
+function shotsOfFrame(
+  mctx: MonitorCtx,
+  span: CaptureSpan
+): (take: Take) => Promise<Shot | undefined> {
   const taken = new Map<string, Promise<Shot | undefined>>();
 
   return (take: Take): Promise<Shot | undefined> => {
     const kind = `${String(take.legend)} ${JSON.stringify(take.layers ?? [])}`;
-    const shot = taken.get(kind) ?? takeShot(mctx, take);
+    let shot = taken.get(kind);
 
-    taken.set(kind, shot);
+    if (shot === undefined) {
+      const facts = factsOf(mctx, take);
+
+      shot = afterFrame(mctx, span, () => pictureOf(mctx, take, facts));
+      taken.set(kind, shot);
+    }
 
     return shot;
   };
@@ -405,18 +490,26 @@ function waitOn(state: MonitorState, request: PictureRequest): void {
 }
 
 /**
+ * The span the capture's own work is measured in: the monitor's agent span in an agent build,
+ * nothing otherwise.
+ */
+export type CaptureSpan = { readonly begin: () => void; readonly end: () => void };
+
+/**
  * Hands the frame just drawn to the captures waiting for it. Called at the end of every drawn
- * frame.
+ * frame. What a picture keeps of the frame is read now; the picture itself is taken right after
+ * the frame, charged to the agent (F62).
  *
  * @param mctx - Domain context of the capture.
+ * @param span - The agent span the pictures are taken in.
  */
-export function serveCaptures(mctx: MonitorCtx): void {
+export function serveCaptures(mctx: MonitorCtx, span: CaptureSpan): void {
   const state = mctx.ctx.state.monitor;
 
   if (state.captures.length === 0) return;
 
   const waiting = state.captures.splice(0);
-  const shots = shotsOfFrame(mctx);
+  const shots = shotsOfFrame(mctx, span);
 
   for (const request of waiting) {
     if (request.due()) {
@@ -447,7 +540,8 @@ export function servePaused(state: MonitorState, time: TimeApi): void {
 }
 
 /**
- * Answers every capture still waiting with `undefined`. Works on the state alone, for `onStop`.
+ * Answers every capture still waiting with `undefined`. Works on the state alone, for `onStop`. A
+ * capture whose picture task is already queued answers `undefined` by itself (`afterFrame`).
  *
  * @param state - The monitor branch of the plugin state.
  */

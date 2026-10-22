@@ -47,11 +47,14 @@ export const KEY = {
   qc: 25,
   qd: 26,
   qtx: 27,
-  qty: 28
+  qty: 28,
+  /** The canvas size at the take, CSS px: a picture cut to it is taken again when it changes (F53). */
+  sw: 29,
+  sh: 30
 } as const;
 
 /** Numbers a key holds. */
-export const KEY_SIZE = 29;
+export const KEY_SIZE = 31;
 
 /** Numbers of a 2D affine matrix: `a`, `b`, `c`, `d`, `tx`, `ty`. */
 export const MATRIX_CELLS = 6;
@@ -117,6 +120,30 @@ export function gridSpan(
   const first = Math.floor(start * resolution);
 
   return { first, texels: Math.ceil(end * resolution) - first };
+}
+
+/**
+ * A span on the canvas cut to the canvas and the padding around it (F53). Pixi's live filter pass cuts its target to
+ * the viewport and pads it after, so it draws what lies within the padding of the canvas too: a glow just off the
+ * screen still reaches in. A span wholly outside comes back empty: its end is not after its start.
+ *
+ * @param start - The span's start on the canvas, CSS px.
+ * @param end - Its end.
+ * @param size - The canvas size on that axis, CSS px.
+ * @param padding - The padding of the filters, CSS px.
+ * @returns The part of the span kept.
+ * @example
+ * ```ts
+ * cutSpan(-40, 120, 100, 10); // { start: -10, end: 110 }
+ * ```
+ */
+export function cutSpan(
+  start: number,
+  end: number,
+  size: number,
+  padding: number
+): { start: number; end: number } {
+  return { start: Math.max(start, -padding), end: Math.min(end, size + padding) };
 }
 
 /**

@@ -7,7 +7,9 @@
 import type { FilterSlot, SyncState, SyncWriters, View } from "../sync/types";
 import type { PixiContainer, PixiFilter, PixiModule } from "../types";
 import { makeRoom, warnRefused } from "./budget";
+import { drawnBounds } from "./drawn-bounds";
 import {
+  cutSpan,
   fitsTexture,
   gridSpan,
   KEY,
@@ -48,8 +50,12 @@ const DRAWN_ANYWAY = ["freeze", "kept"] as const;
 /** The tint of a container that tints nothing. */
 const WHITE = 0xff_ff_ff;
 
-/** What a stack of filters draws with this frame. Reused: one object for the module. */
-type Stack = { enabled: number; rs: number; P: number };
+/**
+ * What a stack of filters draws with this frame: how many are enabled, their smallest resolution, their padding, and
+ * the alpha they multiply by when every enabled one is an `AlphaFilter` (NaN otherwise). Reused: one object for the
+ * module.
+ */
+type Stack = { enabled: number; rs: number; P: number; alpha: number };
 
 /** The numbers of one frame of a record: the stack and the top's world transform. */
 type Numbers = Stack & {
@@ -63,7 +69,19 @@ type Numbers = Stack & {
 };
 
 /** The numbers of the record being stepped. One object: a step allocates nothing. */
-const NOW: Numbers = { enabled: 0, rs: 1, P: 0, r: 1, a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+const NOW: Numbers = {
+  enabled: 0,
+  rs: 1,
+  P: 0,
+  alpha: Number.NaN,
+  r: 1,
+  a: 1,
+  b: 0,
+  c: 0,
+  d: 1,
+  tx: 0,
+  ty: 0
+};
 
 /** What a record draws: its life, the passes of the flush so far, its quad's translation and whether the quad shows. */
 type Drawing = {
@@ -97,17 +115,24 @@ function resolutionOf(filter: PixiFilter, resolution: number): number {
 }
 
 /**
- * Reads what the enabled filters of a stack draw with: how many, the smallest resolution, and the padding sum Pixi
- * pads by (whole pixels).
+ * Reads what the enabled filters of a stack draw with: how many, the smallest resolution, the padding sum Pixi
+ * pads by (whole pixels), and the alpha they multiply by while every one is an `AlphaFilter`.
  *
  * @param slots - The record's slots.
  * @param resolution - The renderer resolution.
+ * @param alphaFilter - Pixi's `AlphaFilter` class.
  * @param into - Where the numbers go.
  */
-function readStack(slots: readonly FilterSlot[], resolution: number, into: Stack): void {
+function readStack(
+  slots: readonly FilterSlot[],
+  resolution: number,
+  alphaFilter: PixiModule["AlphaFilter"],
+  into: Stack
+): void {
   let enabled = 0;
   let rs = Number.POSITIVE_INFINITY;
   let padding = 0;
+  let alpha = 1;
 
   // per drawn frame and record: `effects` hands its lists frozen, and `for…of` over a frozen array allocates (88 B).
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
@@ -119,11 +144,25 @@ function readStack(slots: readonly FilterSlot[], resolution: number, into: Stack
     enabled += 1;
     rs = Math.min(rs, resolutionOf(filter, resolution));
     padding += filter.padding;
+    alpha *= filter instanceof alphaFilter ? filter.alpha : Number.NaN;
   }
 
   into.enabled = enabled;
   into.rs = enabled === 0 ? resolution : rs;
   into.P = Math.trunc(padding);
+  into.alpha = alpha;
+}
+
+/**
+ * Tells whether a stack draws as its subtree picture at an alpha (F54): every enabled filter an `AlphaFilter`, no
+ * padding, at the renderer resolution. The quad then draws the picture itself at that alpha, as Pixi's alpha pass
+ * draws its input: no stage 3, no pass when the alpha changes.
+ *
+ * @param now - This frame's numbers.
+ * @returns True when it does.
+ */
+function drawsDirect(now: Numbers): boolean {
+  return !Number.isNaN(now.alpha) && now.P === 0 && now.rs === now.r;
 }
 
 /**
@@ -360,6 +399,8 @@ export function createRecord(
     bytes: 0,
     settle: false,
     refused: 0,
+    cut: false,
+    direct: false,
     displays: undefined
   };
   const { state } = kctx;
@@ -535,7 +576,11 @@ function neededBytes(
   box: { w1: number; h1: number; Ps: number }
 ): number {
   const { w1, h1, Ps } = box;
-  let bytes = textureBytes(w1, h1, now.rs) + textureBytes(w1 + 2 * Ps, h1 + 2 * Ps, now.r);
+  let bytes = textureBytes(w1, h1, now.rs);
+
+  // A stack drawn direct keeps no filter output.
+  if (!drawsDirect(now)) bytes += textureBytes(w1 + 2 * Ps, h1 + 2 * Ps, now.r);
+
   const first = firstInputs(record.slots);
 
   if (first !== undefined) {
@@ -626,18 +671,32 @@ function takePicture(
   // A game's own object it may write unseen without `onDemand`, and an empty subtree, are never kept.
   if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return false;
 
-  // A filter area bounds what the filters draw, so it bounds the picture too (F43): same pixels, a smaller texture.
-  const local = clippedToArea(top.getLocalBounds(), top.filterArea);
+  // What Pixi draws of the subtree, no node it skips (F58); a filter area bounds what the filters draw, so it bounds
+  // the picture too (F43): same pixels, a smaller texture.
+  const drawn = drawnBounds(pixi, top);
+
+  if (!drawn.isValid) return false;
+
+  const local = clippedToArea(drawn, top.filterArea);
 
   if (isEmptyBounds(local)) return false;
 
-  // The picture's box on the grid of the stack resolution, and its padding; both textures must fit.
+  // The picture's box on the canvas, cut to it as the live pass cuts its target (F53), on the grid of the stack
+  // resolution, and its padding; both textures must fit.
   const box = linearBounds(now.a, now.b, now.c, now.d, local);
-  const x = gridSpan(now.tx + box.x0, now.tx + box.x1, now.rs);
-  const y = gridSpan(now.ty + box.y0, now.ty + box.y1, now.rs);
+  const screen = kctx.host.screen();
+  const width = screen?.width ?? Number.POSITIVE_INFINITY;
+  const height = screen?.height ?? Number.POSITIVE_INFINITY;
+  const Ps = paddingOnGrid(now.P, now.rs);
+  const across = cutSpan(now.tx + box.x0, now.tx + box.x1, width, Ps);
+  const down = cutSpan(now.ty + box.y0, now.ty + box.y1, height, Ps);
+
+  if (isEmptySpan(across) || isEmptySpan(down)) return false;
+
+  const x = gridSpan(across.start, across.end, now.rs);
+  const y = gridSpan(down.start, down.end, now.rs);
   const w1 = x.texels / now.rs;
   const h1 = y.texels / now.rs;
-  const Ps = paddingOnGrid(now.P, now.rs);
 
   if (!fitsTexture(w1, h1, now.rs) || !fitsTexture(w1 + 2 * Ps, h1 + 2 * Ps, now.r)) return false;
 
@@ -656,6 +715,13 @@ function takePicture(
   }
 
   record.refused = 0;
+  // Cut when the canvas took a side off the box.
+  const cutAcross = across.start > now.tx + box.x0 || across.end < now.tx + box.x1;
+  const cutDown = down.start > now.ty + box.y0 || down.end < now.ty + box.y1;
+
+  record.cut = cutAcross || cutDown;
+  record.key[KEY.sw] = width;
+  record.key[KEY.sh] = height;
   writeTakeKeys(record, now, { x, y, w1, h1 });
 
   const ok = renderStages(kctx, pixi, matrices, record, view, now);
@@ -664,6 +730,22 @@ function takePicture(
   writeSeen(record, now);
 
   return ok;
+}
+
+/**
+ * Tells whether a span holds nothing: its end is not after its start. Pure.
+ *
+ * @param span - The span.
+ * @param span.start - Its start.
+ * @param span.end - Its end.
+ * @returns True when it is empty.
+ * @example
+ * ```ts
+ * isEmptySpan({ start: -10, end: -10 }); // true
+ * ```
+ */
+function isEmptySpan(span: { start: number; end: number }): boolean {
+  return span.end <= span.start;
 }
 
 /** Local bounds as the kept geometry reads them. */
@@ -739,6 +821,18 @@ function renderStages(
   const first = firstInputs(record.slots);
   let ok = renderStage1(kctx, pixi, matrices, record);
 
+  // A stack of alphas draws the picture itself (F54): no pre-pass, no filter output.
+  if (drawsDirect(now)) {
+    goDirect(kctx, record);
+    account(kctx, record);
+
+    if (!ok && live) putFiltersBack(kctx, record, view);
+
+    return ok;
+  }
+
+  record.direct = false;
+
   if (ok && first !== undefined) {
     renderStage2(kctx, pixi, matrices, record, {
       inputs: first.inputs,
@@ -752,13 +846,40 @@ function renderStages(
   ok = ok && renderStage3(kctx, pixi, matrices, record, now);
   account(kctx, record);
 
-  if (!ok && live) {
-    // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
-    if (record.standIn !== undefined) record.standIn.filters = null;
-    kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark, record.top);
-  }
+  if (!ok && live) putFiltersBack(kctx, record, view);
 
   return ok;
+}
+
+/**
+ * Puts the filters of a live record whose take failed back on its top: it draws live again.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @param view - Its view.
+ */
+function putFiltersBack(kctx: KeptCtx, record: KeptRecord, view: View): void {
+  // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
+  if (record.standIn !== undefined) record.standIn.filters = null;
+  kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark, record.top);
+}
+
+/**
+ * Lets a record draw its subtree picture itself (F54): the pre-pass results and the filter output go, and the quad
+ * shows the picture at the stack's alpha from now on.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ */
+function goDirect(kctx: KeptCtx, record: KeptRecord): void {
+  if (record.s2Of !== undefined) releaseInputs(kctx, record);
+
+  if (record.s3 !== undefined) {
+    dropTexture(kctx, record.s3);
+    record.s3 = undefined;
+  }
+
+  record.direct = true;
 }
 
 /**
@@ -806,7 +927,9 @@ function placeQuad(
 ): void {
   const { top, key } = record;
   const parent = top.parent;
-  const output = record.s3 ?? pixi.Texture.EMPTY;
+  // A stack of alphas shows the subtree picture itself at their alpha (F54), any other stack its filter output.
+  const output = (record.direct ? record.s1 : record.s3) ?? pixi.Texture.EMPTY;
+  const alpha = record.direct ? NOW.alpha : 1;
 
   // The quad: made once, drawing the filter output.
   if (record.quad === undefined || record.quad.destroyed) {
@@ -827,10 +950,11 @@ function placeQuad(
 
   if (quad.zIndex !== top.zIndex) quad.zIndex = top.zIndex;
   if (quad.blendMode !== top.blendMode) quad.blendMode = top.blendMode;
+  if (quad.alpha !== alpha) quad.alpha = alpha;
 
   // The filter output at its canvas place `O + Δ`, brought into the parent's space with an identity world scale.
   const inverse = parent.getGlobalTransform(matrices.parent, false).invert();
-  const Ps = key[KEY.Ps] ?? 0;
+  const Ps = record.direct ? 0 : (key[KEY.Ps] ?? 0);
   const x = (key[KEY.X0] ?? 0) - Ps + NOW.tx - (key[KEY.tx] ?? 0);
   const y = (key[KEY.Y0] ?? 0) - Ps + NOW.ty - (key[KEY.ty] ?? 0);
   const { local } = matrices;
@@ -1028,6 +1152,19 @@ function noteMove(kctx: KeptCtx, record: KeptRecord): void {
 }
 
 /**
+ * Tells whether the canvas has another size than at the take.
+ *
+ * @param kctx - The kept context.
+ * @param key - The record's key.
+ * @returns True when it does.
+ */
+function canvasChanged(kctx: KeptCtx, key: Float64Array): boolean {
+  const screen = kctx.host.screen();
+
+  return screen !== undefined && (screen.width !== key[KEY.sw] || screen.height !== key[KEY.sh]);
+}
+
+/**
  * A kept record's frame (P4.3): a stage-1 change retakes (three in a row go live and calm); otherwise a new chain
  * version redoes stages 2 and 3, a filter value, the resolution, the padding or (placed) a move stage 3; at rest after
  * an off-grid move one settle retake is owed.
@@ -1053,9 +1190,16 @@ function stepKept(
     return;
   }
 
-  record.churn = 0;
-
   const moved = NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
+
+  // A picture cut to the canvas shows what it left out once it moves or the canvas changes size (F53).
+  if (record.cut && (moved || canvasChanged(kctx, key))) {
+    churn(kctx, pixi, matrices, record, view);
+
+    return;
+  }
+
+  record.churn = 0;
 
   if (!moved && record.settle) {
     retakeOrGoLive(kctx, pixi, matrices, record, view);
@@ -1083,6 +1227,17 @@ function refresh(
   record: KeptRecord
 ): void {
   const { key } = record;
+
+  // A stack of alphas owes nothing: its quad takes the new alpha (F54).
+  if (drawsDirect(NOW)) {
+    if (record.direct) return;
+
+    goDirect(kctx, record);
+    account(kctx, record);
+
+    return;
+  }
+
   const first = firstInputs(record.slots);
   const inputs = first?.inputs;
   // Stage 2 is owed for a new chain, a new chain version, or a new subtree picture under it.
@@ -1108,6 +1263,7 @@ function refresh(
   }
   if (!stageThreeOwed) return;
 
+  record.direct = false;
   renderStage3(kctx, pixi, matrices, record, NOW);
   account(kctx, record);
   if (!stageTwoOwed) kctx.state.refreshesOpen += 1;
@@ -1209,7 +1365,7 @@ export function stepRecord(
   // What the record draws before this frame: a change of it is a change of every picture above it (P4.5).
   noteDrawing(kctx, record, BEFORE);
   NOW.r = kctx.host.resolution();
-  readStack(record.slots, NOW.r, NOW);
+  readStack(record.slots, NOW.r, pixi.AlphaFilter, NOW);
 
   if (eligible(kctx, record, view, NOW)) stepEligible(kctx, pixi, matrices, record, view);
   else stepIneligible(kctx, record, view);

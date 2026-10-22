@@ -1448,6 +1448,7 @@ export function createReconciler(
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
     state.exiting.delete(element.entity);
+    state.leading.delete(element.entity);
     state.overlays.delete(element.entity);
     state.elements.delete(element.entity);
     ecs.despawn(element.entity);
@@ -1467,7 +1468,12 @@ export function createReconciler(
         continue;
       }
 
-      if (!subtreeSettled(element)) continue;
+      // A root that left with its screen goes with its own exit: a longer one under it is cut (F55).
+      const settled = state.leading.has(entity)
+        ? modules.layout.settled(element)
+        : subtreeSettled(element);
+
+      if (!settled) continue;
 
       despawnTree(element);
     }
@@ -2308,7 +2314,8 @@ export function createReconciler(
    * Starts the teardown of a root: every element exits with its motion, then the sweep frees the
    * nodes and despawns the root entity. A popup leaves by an event; a projection root leaves the
    * way its view did, which the world still answers in its removal hook: `"mount"` with its scene,
-   * a load or a restore.
+   * a load or a restore. A root that goes with its screen ends with the exit of its top element
+   * when that plays one, so a longer exit under it does not hold it and its bundles (F55).
    *
    * @param entity - The root entity.
    */
@@ -2325,7 +2332,13 @@ export function createReconciler(
     // A root that leaves gives its slot up at the next solve.
     hostsMoved(state);
 
-    if (element !== undefined) exitElement(element, cause);
+    if (element !== undefined) {
+      exitElement(element, cause);
+      // Its own exit is the leave of a root that goes with its screen; with none, its children's are (F55).
+      const leadsItsLeave = cause === "mount" && !modules.layout.settled(element);
+
+      if (leadsItsLeave) state.leading.add(element.entity);
+    }
 
     ctx.deps.time.wake();
   }
