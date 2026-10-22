@@ -11,7 +11,9 @@
  * quad, followed back to the stand-in and the top it was drawn from; it fails when the top's
  * subtree or the stand-in's filters differ from what was rendered, when the top is drawn too, when
  * the quad is not where the picture lands, and when a top hidden for its picture is shown by no
- * quad. A sprite that shows a picture of a container directly is a range picture: its leaves must
+ * quad. A sprite beside the container whose picture it shows is a quad drawn direct (a stack of
+ * alphas, F54), checked as a quad with no stand-in. Any other sprite that shows a picture of a
+ * container directly is a range picture: its leaves must
  * not be drawn live beside it, its nodes must be as they were rendered, and it must not be in its
  * own picture. It imports nothing of the kept module either.
  */
@@ -557,7 +559,11 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
       const rendered = pictureRenders.get(sprite.texture);
 
       if (standIn !== undefined) checkQuad(sprite, standIn);
-      else if (rendered !== undefined) {
+      else if (rendered !== undefined && rendered.container.parent === sprite.parent) {
+        // A quad that draws its top's subtree picture itself (a stack of alphas, F54): beside its top, no stand-in.
+        checkQuad(sprite, { standIn: sprite, filters: filtersText(sprite), transform: IDENTITY });
+        pictured.add(rendered.container);
+      } else if (rendered !== undefined) {
         checkRange(sprite, rendered);
         noteRange(rendered, inRanges);
       }
@@ -580,10 +586,29 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
 
       const quad = node instanceof pixi.Sprite ? standInRenders.get(node.texture) : undefined;
       const top = quad === undefined ? undefined : pictureRenders.get(quad.standIn.texture);
+      // A quad drawn direct (F54) shows its top's picture itself, beside the top.
+      const direct = node instanceof pixi.Sprite ? pictureRenders.get(node.texture) : undefined;
 
       if (top !== undefined) inRanges.add(top.container);
+      if (direct !== undefined && direct.container.parent === (node as Pixi.Sprite).parent) {
+        inRanges.add(direct.container);
+      }
     }
   };
+
+  /**
+   * Tells whether a node is a quad drawn direct (F54) of a top's picture, shown at alpha 0.
+   *
+   * @param node - A sibling of the top.
+   * @param top - The top.
+   * @returns True when it is.
+   */
+  const fadedOut = (node: Pixi.Container, top: Pixi.Container): boolean =>
+    node instanceof pixi.Sprite &&
+    node.visible &&
+    node.renderable &&
+    node.alpha <= 0 &&
+    pictureRenders.get(node.texture)?.container === top;
 
   /**
    * Tells whether a top hidden for its picture would be seen without it, while neither a quad nor a range picture
@@ -596,6 +621,8 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
   const unseenTop = (top: Pixi.Container, inRanges: ReadonlySet<object>): boolean => {
     if (top.destroyed || top.renderable || throughTops.has(top) || inRanges.has(top)) return false;
     if (top.parent === null || !top.visible || top.alpha <= 0) return false;
+    // A quad drawn direct at its stack's alpha 0 (F54) shows the top as the alpha pass would: not at all.
+    if (top.parent.children.some(sibling => fadedOut(sibling, top))) return false;
 
     for (let at: Pixi.Container | null = top.parent; at !== app.stage; at = at.parent) {
       if (at === null || !at.visible || !at.renderable || at.alpha <= 0) return false;
