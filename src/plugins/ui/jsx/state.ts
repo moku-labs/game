@@ -61,6 +61,7 @@ export function createJsxState(): JsxState {
     byKey: emptyMap(),
     instances: emptyMap(),
     exiting: emptySet(),
+    leading: emptySet(),
     removing: emptySet(),
     hosts: emptySet(),
     hosted: emptyMap(),
