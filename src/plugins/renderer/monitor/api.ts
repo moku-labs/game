@@ -9,6 +9,7 @@
 import type { Json } from "../../model/types";
 import type { ThermalReading } from "../../time/types";
 import type { MonitorModule, RendererCtx } from "../types";
+import type { CaptureSpan } from "./capture";
 import { cancelCaptures, captureFrame, serveCaptures } from "./capture";
 import { pageNow } from "./clock";
 import { openFrame } from "./commit";
@@ -149,6 +150,22 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     if (pc === undefined) sinks.inFrame = false;
   };
 
+  /**
+   * The agent span: `beginAgent` and `endAgent`, also the span the captures are taken in.
+   */
+  const agentSpan: CaptureSpan = {
+    begin: (): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        beginAgent(pc.perf);
+      }
+    },
+    end: (): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        endAgent(pc);
+      }
+    }
+  };
+
   return {
     stats: (): RenderStats => {
       const usage = deps.host.textures();
@@ -238,17 +255,9 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       }
     },
 
-    beginAgent: (): void => {
-      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
-        beginAgent(pc.perf);
-      }
-    },
+    beginAgent: agentSpan.begin,
 
-    endAgent: (): void => {
-      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
-        endAgent(pc);
-      }
-    },
+    endAgent: agentSpan.end,
 
     sections: (next?: Partial<MonitorSections>): Readonly<MonitorSections> => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
@@ -316,7 +325,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       }
 
       // A capture waits for a drawn frame; a waiting capture makes the frame drawn.
-      if (drawn) serveCaptures(mctx);
+      if (drawn) serveCaptures(mctx, agentSpan);
     },
 
     waiting: (): boolean => state.captures.length > 0,
