@@ -1369,6 +1369,7 @@ export function createReconciler(
     dropHost(state, element.entity);
     state.scrolls.delete(element.entity);
 
+    // Its own exit, unless it stands under the one that leads.
     if (overlayOf(element) === undefined) {
       modules.layout.exit(element, cause, undefined, stands);
     } else {
@@ -1381,6 +1382,7 @@ export function createReconciler(
 
     if (element.type === "input") fields.exit(element);
 
+    // Under a top that plays its exit with its screen, the children stand (F55b).
     const under = stands || (leads && !modules.layout.settled(element));
 
     for (const child of element.children) {

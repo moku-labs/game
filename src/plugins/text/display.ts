@@ -493,8 +493,8 @@ function buildRun(
 
 /**
  * The style and the laid-out block of one component value, under the generation of this moment.
- * A `"box"` style wraps at the box `ui` wrote; with none (a label outside a ui layout) it is one
- * line, and a dev warning says so once per style.
+ * A `"box"` style wraps at the box `ui` wrote; with none it is one line, and a dev warning says
+ * so once per style unless a layout measured that style at a width (a label that fits its row).
  *
  * @param ctx - Domain context of the text plugin.
  * @param value - The component value.
@@ -503,8 +503,14 @@ function buildRun(
 function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
   const style = styleOf(ctx, value.style);
 
-  // An empty label has nothing to wrap: ui lays it out 0 wide.
-  if (style.wrap === "box" && (value.box ?? 0) <= 0 && value.resolved !== "") {
+  // An empty label has nothing to wrap: ui lays it out 0 wide. A style a layout measured at a width is laid out: a
+  // label of it with no box fits its row (F65).
+  if (
+    style.wrap === "box" &&
+    (value.box ?? 0) <= 0 &&
+    value.resolved !== "" &&
+    !ctx.state.laidOut.has(value.style)
+  ) {
     warnOnce(ctx, `wrap-box:${value.style}`, 'text: wrap "box" outside layout', {
       style: value.style
     });

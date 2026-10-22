@@ -419,6 +419,8 @@ export type State = {
   generation: number;
   /** Warning keys already written, so a style, a tag, a glyph or a font warns once. */
   warned: Set<string>;
+  /** The `"box"` styles a layout measured at a width: a label of one with no box fits its row, it is not outside a layout (F65). */
+  laidOut: Set<string>;
   /** The system, the step after the layout flush, the two world hooks and the display adapter. */
   removers: Array<() => void>;
 };

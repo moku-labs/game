@@ -726,8 +726,10 @@ function shouldDrop(ctx: TimeCtx, g: Governor, at: number): boolean {
 
   const { reason } = ctx.state.rate;
   const ruleStep = reason === "missed" || reason === "headroom";
+  const afterRuleStep = ruleStep && at - g.switchedAt < PROBE_MS;
+  const heldLate = at - g.lateSince >= DROP_HOLD_MS;
 
-  return (ruleStep && at - g.switchedAt < PROBE_MS) || at - g.lateSince >= DROP_HOLD_MS;
+  return afterRuleStep || heldLate;
 }
 
 /**
@@ -761,8 +763,8 @@ function canReturn(g: Governor, at: number, scaleStep: boolean): boolean {
 }
 
 /**
- * Decides on the windows after a sample. Down one step when late intervals reach `max(8, 10 %)` of the second's for
- * 2 s in a row (at once within 3 s of a step of the rule): the render scale when the window is GPU-bound and a lower scale is allowed, the rate otherwise. Up one step in the
+ * Decides on the windows after a sample. Down one step when late intervals reach `max(8, 10 %)` of the second's
+ * for 2 s in a row (at once within 3 s of a step of the rule): the render scale when the window is GPU-bound and a lower scale is allowed, the rate otherwise. Up one step in the
  * reverse of the way down, with 90 steady drawn frames in three seconds, at most one late and no heat: the rate first,
  * at the scale it dropped at, after the dwell and with a tenth heavy at most, then the scale after twice the dwell. A
  * probe of the higher rate so never starts at full scale, and its failure changes no resolution.

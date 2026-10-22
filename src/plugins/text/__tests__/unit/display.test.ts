@@ -977,6 +977,21 @@ describe('the display adapter — wrap "box"', () => {
     ]);
   });
 
+  // The bug (F65): a box label ui laid out fits its row, gets no box, and warns it is outside a layout.
+  it("says nothing for a box label of a style ui laid out at a width, though it fits and has no box", () => {
+    const mock = drawing();
+
+    boxed(mock);
+    // ui's measure of the laid-out text: the width Yoga offered.
+    mock.api.measure("11", "boxed", 200);
+
+    const object = build(mock, value({ resolved: "11", style: "boxed", anchor: zero }));
+    const calls = vi.mocked(mock.log.warn).mock.calls;
+
+    expect(object.children.map(child => textOf(child))).toEqual(["11"]);
+    expect(calls.filter(call => call[0] === 'text: wrap "box" outside layout')).toEqual([]);
+  });
+
   // The bug: an empty box label inside a layout is laid out 0 wide and warns it is outside one.
   it("says nothing for an empty box label", () => {
     const mock = drawing();

@@ -315,16 +315,17 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
  * once, not at the next rest. Its feature on the stack holds only a `feature`-tier bundle, which
  * lives with its feature's flow: a scene's bundle goes with the scene, also while another scene of
  * its feature shows (the splash's 7.5 MiB under the ward). A bundle of another release stays, as
- * it would have. The system
- * `assets.leave` calls it in every phase `sync`: after the reconcile of `layout`, which tags the
- * leaving elements `Exiting` in the frame after the switch, so the hold never ends before the leave
- * begins (F51b). It costs a length read while no scene leaves, and a count read while one does.
+ * it would have. The system `assets.leave` calls it in every phase `sync`: after the reconcile of
+ * `layout`, which tags the leaving elements `Exiting` in the frame after the switch, so the hold
+ * never ends before the leave begins (F51b). It costs a length read while no scene leaves, and a
+ * count read while one does.
  *
  * @param ctx - Domain context of the plugin.
  */
 export function releaseSceneLeft(ctx: AssetsCtx): void {
   const state = ctx.state;
 
+  // Nothing left, or its elements still play their exit.
   if (state.sceneLeaving.length === 0 || state.exiting > 0) return;
 
   const names = state.sceneLeaving;
@@ -333,6 +334,7 @@ export function releaseSceneLeft(ctx: AssetsCtx): void {
 
   if (state.io === undefined) return;
 
+  // Only a `feature`-tier bundle lives with its feature on the stack; a scene's goes with the scene.
   const onStack = featuresOnStack(ctx);
   const noFeatures: ReadonlySet<string> = emptyNames();
 
