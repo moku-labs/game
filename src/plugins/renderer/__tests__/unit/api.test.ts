@@ -47,7 +47,8 @@ describe("renderer api", () => {
       "destroy",
       "invalidate",
       "provide",
-      "slice"
+      "slice",
+      "upload"
     ]);
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
     expect(Object.keys(mock.api.sync.filters).toSorted()).toEqual(["area", "set", "warm"]);

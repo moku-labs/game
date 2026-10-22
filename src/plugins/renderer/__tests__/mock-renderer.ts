@@ -249,6 +249,8 @@ export function createMockRenderer(
     // The warm-up draws probes for its first frames (F4): the tests of other behaviour leave it off, the warm-up
     // tests turn it on.
     warm: 0,
+    // The upload queue of `textures.upload` (F60), as the engine's default: idle until a test hands it textures.
+    uploads: 1,
     // The phone check of the engine's default asks `matchMedia` once more: the tests of the scale turn it on.
     adaptiveScale: false,
     ...options.config

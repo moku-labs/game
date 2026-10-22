@@ -1,5 +1,6 @@
+import type { Descriptor } from "../../../flow/types";
 import { bundlesFor, defineBundles } from "../../bundles";
-import type { BundleCompanion } from "../../types";
+import type { BundleCompanion, LoadResult } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only: `tsc --noEmit` is the runner, and every `@ts-expect-error`
@@ -26,6 +27,17 @@ game.defineBundles({ ep01: { tier: "lazy", release: "leave" } });
 
 // @ts-expect-error — a game-bound defineBundles takes the bundle keys the scanner wrote only
 game.defineBundles({ ep02: { tier: "lazy" } });
+
+game.ready(["ep01", "ep01.extra"]);
+
+// @ts-expect-error — a game-bound ready takes the bundle keys the scanner wrote only
+game.ready("ep02");
+
+/** What `await fx(ready(...))` resolves with: `undefined` in an app without assets, hence `=== false`. */
+export const answer: Descriptor<boolean | undefined> = game.ready("ep01");
+
+// @ts-expect-error — `ready` is no `load`: it resolves a boolean, not a LoadResult
+export const loaded: Descriptor<LoadResult | undefined> = game.ready("ep01");
 
 export const awaited: BundleCompanion = { load: async () => undefined, unload: () => undefined };
 

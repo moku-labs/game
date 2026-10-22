@@ -17,7 +17,6 @@ import type {
   PixiContainer,
   PixiGraphics,
   PixiModule,
-  PixiNineSliceSprite,
   PixiSprite,
   PixiTexture,
   Point
@@ -34,9 +33,10 @@ import {
 } from "./filters";
 import { clearFonts } from "./fonts";
 import { clearHidden, setHidden, writeRenderable } from "./hidden";
+import { makeHollow } from "./hollow";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
-import { bordersOf, drawOutline, type OutlineShape } from "./outline";
+import { bordersInto, drawOutline, type OutlineShape, type SliceBorders } from "./outline";
 import { noteLeaving } from "./overlay-range";
 import { stopOverlays } from "./overlay-state";
 import {
@@ -46,10 +46,12 @@ import {
   dropMask,
   dropOutline,
   isGraphics,
+  isHollow,
   isNineSlice,
   isSprite,
   poolKeyOf,
-  release
+  release,
+  releaseObject
 } from "./pools";
 import { isLeaving, parentOf } from "./pose";
 import { drawShapePath, isEmptyArc, paintShape } from "./shape-path";
@@ -71,11 +73,13 @@ import type {
   DisplayEntry,
   DrawnShape,
   HitBox,
+  SliceLike,
   SyncCtx,
   SyncState,
   View,
   ViewKind
 } from "./types";
+import { stopUploads } from "./upload";
 import { stopWarm } from "./warm";
 
 /**
@@ -84,6 +88,8 @@ import { stopWarm } from "./warm";
 type Visual = {
   kind: ViewKind;
   textureKey: string;
+  /** A `NineSlice` with `hollow: true`: the engine's rim-only object draws it (F59). */
+  hollow: boolean;
   /** The registration behind an adapter view; `undefined` for a built-in one. */
   display: DisplayEntry | undefined;
 };
@@ -113,6 +119,15 @@ const PLACEHOLDER_BOX = Object.freeze({ width: PLACEHOLDER_SIZE, height: PLACEHO
  * sync pass).
  */
 const LAYOUT = createSpriteLayout();
+
+/** The slice widths of the nine-slice being written: per write, reused, as `LAYOUT`. */
+const BORDERS: SliceBorders = { left: 0, top: 0, right: 0, bottom: 0 };
+
+/** What the outline of the nine-slice being written is drawn from, written in place, as `LAYOUT`. */
+const OUTLINE: OutlineShape = { entity: 0, width: 0, height: 0, borders: BORDERS, missing: false };
+
+/** The box a clipping nine-slice masks its children with, as the shape value `applyClip` reads, written in place. */
+const NINE_CLIP: ShapeValue = { ...Shape.defaults };
 
 /**
  * The depth of a wrapper's own visual among the wrapper's children: a child at `Order` 0 or more draws above it, one
@@ -231,18 +246,28 @@ export function visualOf(sctx: SyncCtx, entity: Entity): Visual | undefined {
   const nine = ecs.get(entity, NineSlice);
 
   if (sprite !== undefined) {
-    found.push({ kind: "Sprite", textureKey: sprite.texture, display: undefined });
+    found.push({ kind: "Sprite", textureKey: sprite.texture, hollow: false, display: undefined });
   }
 
   if (nine !== undefined) {
-    found.push({ kind: "NineSlice", textureKey: nine.texture, display: undefined });
+    found.push({
+      kind: "NineSlice",
+      textureKey: nine.texture,
+      hollow: nine.hollow === true,
+      display: undefined
+    });
   }
 
-  if (ecs.has(entity, Shape)) found.push({ kind: "Shape", textureKey: "", display: undefined });
-  if (ecs.has(entity, Display)) found.push({ kind: "Display", textureKey: "", display: undefined });
+  if (ecs.has(entity, Shape)) {
+    found.push({ kind: "Shape", textureKey: "", hollow: false, display: undefined });
+  }
+
+  if (ecs.has(entity, Display)) {
+    found.push({ kind: "Display", textureKey: "", hollow: false, display: undefined });
+  }
 
   for (const entry of adaptersOn(sctx, entity)) {
-    found.push({ kind: "adapter", textureKey: "", display: entry });
+    found.push({ kind: "adapter", textureKey: "", hollow: false, display: entry });
   }
 
   if (found.length > 1) {
@@ -268,28 +293,8 @@ function retargetKey(state: SyncState, entity: Entity, view: View, key: string):
 
   untrackKey(state, entity, view.textureKey);
   view.textureKey = key;
-  view.poolKey = poolKeyOf(view.kind, key);
+  view.poolKey = poolKeyOf(view.kind, key, isHollow(view.object));
   if (key !== "") trackKey(state, entity, key);
-}
-
-/**
- * Resolves a key and says whether the placeholder had to step in.
- *
- * @param sctx - Domain context of the sync module.
- * @param key - The asset key.
- * @returns The texture to draw and whether it is the placeholder.
- */
-function textureFor(
-  sctx: SyncCtx,
-  key: string
-): { texture: PixiTexture | undefined; missing: boolean } {
-  const resolved = resolveTexture(sctx, key);
-
-  if (resolved !== undefined) return { texture: resolved, missing: false };
-
-  warnMissing(sctx, key);
-
-  return { texture: placeholderTexture(sctx), missing: true };
 }
 
 /**
@@ -570,12 +575,12 @@ function applyOutline(
 }
 
 /**
- * Writes one number of a nine-slice only when it differs from what Pixi holds: Pixi rebuilds the
- * panel on every write of a width, even an equal one.
+ * Writes one number of a nine-slice only when it differs from what the object holds: Pixi rebuilds the
+ * panel on every write of a width, even an equal one, and the rim-only object rewrites its vertices.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
- * @param object - The nine-slice sprite.
+ * @param object - Pixi's nine-slice sprite, or the engine's rim-only one.
  * @param field - Which number.
  * @param value - The new number.
  * @returns True when it was written.
@@ -583,7 +588,7 @@ function applyOutline(
 function writeSlice(
   sctx: SyncCtx,
   entity: Entity,
-  object: PixiNineSliceSprite,
+  object: SliceLike,
   field: "leftWidth" | "topHeight" | "rightWidth" | "bottomHeight" | "width" | "height" | "tint",
   value: number
 ): boolean {
@@ -598,7 +603,9 @@ function writeSlice(
 /**
  * Writes the `NineSlice` component onto its display object and recomputes the hit box. Pixi reads
  * a texture's borders only in the constructor, so they are copied here on every write: a pooled
- * object, a new key and a reloaded bundle all get the insets of the texture they draw now.
+ * object, a new key and a reloaded bundle all get the insets of the texture they draw now. A `hollow` that flipped
+ * swaps the view's object first (F59). The hit box is the whole panel, hollow or not. A write that changes nothing,
+ * or only the size, allocates nothing: the borders, the outline's shape and the clip's box are written in place.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -606,15 +613,25 @@ function writeSlice(
  */
 export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void {
   const value = sctx.ctx.deps.world.ecs.get(entity, NineSlice);
+
+  if (value === undefined || !isNineSlice(view.object)) return;
+  // F59: the other object draws the panel from this write on.
+  if (isHollow(view.object) !== (value.hollow === true)) swapSlice(sctx, entity, view);
+
   const object = view.object;
 
-  if (value === undefined || !isNineSlice(object)) return;
+  if (!isNineSlice(object)) return;
 
   retargetKey(sctx.ctx.state.sync, entity, view, value.texture);
 
-  // Resolve the texture and its borders.
-  const { texture, missing } = textureFor(sctx, value.texture);
-  const borders = bordersOf(texture);
+  // Resolve the texture and its borders; per write: no result object.
+  const resolved = resolveTexture(sctx, value.texture);
+  const missing = resolved === undefined;
+
+  if (missing) warnMissing(sctx, value.texture);
+
+  const texture = resolved ?? placeholderTexture(sctx);
+  const borders = bordersInto(texture, BORDERS);
 
   // Write the texture, the insets, the tint, the alpha and the size: each only when it differs.
   view.placeholder = missing;
@@ -638,20 +655,67 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
   changed = writeSlice(sctx, entity, object, "height", value.height) || changed;
 
   // Record the hit box, then keep the outline and the clip in step.
-  view.hitBox = { x: 0, y: 0, width: value.width, height: value.height };
-  applyOutline(
-    sctx,
-    view,
-    { entity, width: value.width, height: value.height, borders, missing },
-    value.debug,
-    changed
-  );
-  applyClip(sctx, entity, view, {
-    ...Shape.defaults,
-    w: value.width,
-    h: value.height,
-    clip: value.clip
-  });
+  writeHitBox(view.hitBox, value.width, value.height);
+  OUTLINE.entity = entity;
+  OUTLINE.width = value.width;
+  OUTLINE.height = value.height;
+  OUTLINE.missing = missing;
+  applyOutline(sctx, view, OUTLINE, value.debug, changed);
+  NINE_CLIP.w = value.width;
+  NINE_CLIP.h = value.height;
+  NINE_CLIP.clip = value.clip;
+  applyClip(sctx, entity, view, NINE_CLIP);
+}
+
+/**
+ * A new nine-slice object of one kind: the engine's rim-only mesh, or Pixi's `NineSliceSprite`; both of the white
+ * texture until the first write.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param pixi - The Pixi module.
+ * @param hollow - True for the rim-only object.
+ * @returns The object.
+ */
+function newSlice(sctx: SyncCtx, pixi: PixiModule, hollow: boolean): PixiContainer {
+  return hollow
+    ? makeHollow(sctx.ctx.state.sync, pixi)
+    : new pixi.NineSliceSprite({ texture: pixi.Texture.WHITE });
+}
+
+/**
+ * Gives a nine-slice view whose `hollow` flipped the other object (F59), on the write that flipped it: the view gets
+ * its wrapper first (it keeps the pose, the alpha, the filters, the clip and the outline), then the other kind takes
+ * the old object's place in it, out of its pool or new, and the old object goes back to its own pool. The entity, its
+ * children and its hit box stay as they were; the caller writes the new object in full.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view, drawn by a nine-slice object.
+ */
+function swapSlice(sctx: SyncCtx, entity: Entity, view: View): void {
+  const pixi = sctx.deps.host.pixi();
+  const wrapper = ensureWrapper(sctx, entity);
+
+  if (pixi === undefined || wrapper === undefined) return;
+
+  const state = sctx.ctx.state.sync;
+  const old = view.object;
+  const hollow = !isHollow(old);
+  const poolKey = poolKeyOf("NineSlice", view.textureKey, hollow);
+  const next = acquire(state, poolKey) ?? newSlice(sctx, pixi, hollow);
+
+  // Structural: another object draws the panel.
+  markView(sctx, entity);
+  next.label = old.label;
+  next.zIndex = old.zIndex;
+  wrapper.addChildAt(next, Math.max(0, wrapper.children.indexOf(old)));
+  state.entityOf.delete(old);
+  state.entityOf.set(next, entity);
+  view.object = next;
+  releaseObject(sctx, old, view.poolKey);
+  view.poolKey = poolKey;
+  writeRenderable(view);
+  applyTransform(sctx, entity, view);
 }
 
 /**
@@ -1259,6 +1323,7 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
  * @param visual - Which component gives the entity its object, and its texture key.
  * @param visual.kind - Which component gives the entity its object.
  * @param visual.textureKey - The asset key the object draws.
+ * @param visual.hollow - True for the rim-only object of a hollow `NineSlice`.
  * @returns The object, or `undefined` while inert.
  */
 function makeObject(sctx: SyncCtx, entity: Entity, visual: Visual): BuiltObject | undefined {
@@ -1273,14 +1338,17 @@ function makeObject(sctx: SyncCtx, entity: Entity, visual: Visual): BuiltObject 
   if (pixi === undefined) return undefined;
   if (visual.display !== undefined) return adapterObject(sctx, entity, visual.display);
 
-  const pooled = acquire(sctx.ctx.state.sync, poolKeyOf(visual.kind, visual.textureKey));
+  const pooled = acquire(
+    sctx.ctx.state.sync,
+    poolKeyOf(visual.kind, visual.textureKey, visual.hollow)
+  );
 
   if (pooled !== undefined) return { object: pooled, value: undefined };
   if (visual.kind === "Sprite")
     return { object: new pixi.Sprite(pixi.Texture.WHITE), value: undefined };
   if (visual.kind === "Shape") return { object: new pixi.Graphics(), value: undefined };
 
-  return { object: new pixi.NineSliceSprite({ texture: pixi.Texture.WHITE }), value: undefined };
+  return { object: newSlice(sctx, pixi, visual.hollow), value: undefined };
 }
 
 /**
@@ -1338,7 +1406,7 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
   const view: View = {
     object,
     kind: visual.kind,
-    poolKey: poolKeyOf(visual.kind, visual.textureKey),
+    poolKey: poolKeyOf(visual.kind, visual.textureKey, visual.hollow),
     layer: "",
     textureKey: visual.textureKey,
     wrapper: undefined,
@@ -1496,8 +1564,9 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 }
 
 /**
- * Drops every view, every layer, every pool, every filter slot and filter area, and the warm-up (its waiting promises
- * answer false, its probe tree is destroyed). Works on the state alone,
+ * Drops every view, every layer, every pool, every filter slot and filter area, the warm-up (its waiting promises
+ * answer false, its probe tree is destroyed) and the upload queue (its waiting calls answer false). Works on the state
+ * alone,
  * because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
  * destroyed, and leaves without the filters, the filter area and the hidden reasons the renderer gave it.
  *
@@ -1553,6 +1622,7 @@ export function stopSync(state: SyncState): void {
   state.areas.clear();
   state.viewlessEntries = false;
   stopWarm(state);
+  stopUploads(state);
   state.held.clear();
   state.redraws = 0;
   state.overdraw.listeners.length = 0;

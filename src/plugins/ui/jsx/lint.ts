@@ -1,5 +1,5 @@
 /**
- * @file ui/jsx — `lint()`: five rules read off the live screen. It never throws and answers an
+ * @file ui/jsx — `lint()`: six rules read off the live screen. It never throws and answers an
  * empty list when nothing is mounted.
  */
 import type { Message, Part } from "../../i18n/types";
@@ -140,6 +140,24 @@ export function nineSliceClipped(element: Element): Finding | undefined {
 }
 
 /**
+ * Reports an element whose style is `hollow` but names no nine-slice: only a nine-slice has a
+ * centre to leave out, so the field does nothing there. `hollow: false` asks for nothing either way.
+ *
+ * @param element - The element to check.
+ * @returns The finding, or `undefined`.
+ * @example
+ * ```ts
+ * hollowWithoutNineSlice({ key: "memFrost", type: "stack", style: { hollow: true } } as Element);
+ * // { rule: "hollow-without-nine-slice", key: "memFrost", detail: "stack" }
+ * ```
+ */
+export function hollowWithoutNineSlice(element: Element): Finding | undefined {
+  if (element.style.hollow !== true || element.style.nineSlice !== undefined) return undefined;
+
+  return { rule: "hollow-without-nine-slice", key: nameOf(element), detail: element.type };
+}
+
+/**
  * Reports a root element whose style sets a `zIndex`: a root draws at the order of its layer,
  * so the value is ignored.
  *
@@ -162,7 +180,7 @@ export function zIndexOnRoot(element: Element): Finding | undefined {
 }
 
 /**
- * Runs the five rules over every live element.
+ * Runs the six rules over every live element.
  *
  * @param ctx - Domain context of the ui plugin.
  * @returns One finding per rule and element, in element order.
@@ -179,6 +197,7 @@ export function runLint(ctx: UiCtx): readonly Finding[] {
       textOverflow(ctx, element),
       absoluteWithoutReason(element),
       nineSliceClipped(element),
+      hollowWithoutNineSlice(element),
       zIndexOnRoot(element)
     ]) {
       if (finding !== undefined) findings.push(finding);

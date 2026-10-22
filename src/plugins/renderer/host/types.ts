@@ -8,6 +8,7 @@ import type {
   PixiMatrix,
   PixiModule,
   PixiRenderTexture,
+  PixiTextureSource,
   RendererKind
 } from "../types";
 import type { ResolutionReason } from "./resolution";
@@ -378,6 +379,16 @@ export type HostInternal = {
    * @returns True when it called Pixi.
    */
   renderProbe(container: PixiContainer, target?: PixiRenderTexture): boolean;
+
+  /**
+   * Puts a texture source on the GPU now with Pixi's public `renderer.texture.initSource(source)`: the GPU texture is
+   * made and the pixels are uploaded, once; a source Pixi made already costs a lookup. Called by the upload queue of
+   * `sync` before the stage pass of a drawn frame. A no-op while nothing draws. What Pixi throws is thrown on: the
+   * caller logs it and counts the source done.
+   *
+   * @param source - The source of a texture `assets` loaded.
+   */
+  initSource(source: PixiTextureSource): void;
 
   /**
    * Tells whether the stage pass clears the canvas before it draws (`renderer.background.clearBeforeRender`, Pixi's

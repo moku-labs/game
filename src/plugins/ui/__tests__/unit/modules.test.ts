@@ -388,6 +388,38 @@ describe("nameOf", () => {
   });
 });
 
+// ─── a hollow style with nothing to hollow ────────────────────
+
+describe("lint of a hollow style", () => {
+  // Bug: `hollow` on a style with no nine-slice draws nothing different and nobody is told, or a
+  // hollow frame that does name its nine-slice is reported.
+  it("names an element that is hollow with no nine-slice, and not one with a nine-slice", async () => {
+    const { runLint } = await import("../../jsx/lint");
+    const bare = elementOf({ entity: 1, key: "frostBare", type: "stack", style: { hollow: true } });
+    const framed = elementOf({
+      entity: 2,
+      key: "frost",
+      type: "stack",
+      style: { nineSlice: "glass.frost", hollow: true }
+    });
+    // No element is tappable and none is a text: the other rules read nothing more.
+    const ctx = {
+      config: { tapTargetPt: 44 },
+      state: {
+        jsx: { elements: new Map([bare, framed].map(element => [element.entity, element])) }
+      },
+      deps: {
+        renderer: { viewport: { size: () => ({ scale: 1 }) } },
+        world: { ecs: { has: () => false } }
+      }
+    } as unknown as UiCtx;
+
+    expect(runLint(ctx)).toEqual([
+      { rule: "hollow-without-nine-slice", key: "frostBare", detail: "stack" }
+    ]);
+  });
+});
+
 // ─── the component registry ───────────────────────────────────
 
 describe("the component registry", () => {

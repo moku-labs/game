@@ -22,6 +22,7 @@ import type {
   PixiRenderTexture,
   PixiSprite,
   PixiTexture,
+  PixiTextureSource,
   RendererCtx
 } from "../types";
 import type { Point, ViewportApi, ViewportInternal } from "../viewport/types";
@@ -344,6 +345,30 @@ export type TexturesApi = {
    * ```
    */
   invalidate(keys: readonly string[]): void;
+
+  /**
+   * Puts textures on the GPU before a screen shows them: each texture's source is queued once and uploaded with Pixi's
+   * `renderer.texture.initSource` before the stage pass of a drawn frame, `renderer.uploads` a frame (one by default),
+   * and the renderer asks for the next frame while sources wait. The slices of one atlas page share its source, so the
+   * page is uploaded once. On a Galaxy A26 one upload costs about 9 ms whatever its size: the frame that showed 6 cold
+   * textures took 55 ms, 8 ms once they were uploaded before. Answers `true` once every source of this call went
+   * through, at once when they all did on this device; `false` at once while nothing draws (headless, a lost device)
+   * or with `uploads: 0`, and `false` when the renderer stops or the device is lost before the queue reached them. A
+   * source whose upload throws is logged (`renderer:upload-failed`) and counted done: its first draw uploads it, as
+   * before. A source destroyed while it waits is skipped. The renderer never destroys a texture it was handed.
+   *
+   * @param textures - The textures; `assets` hands every texture and page of a bundle it loaded.
+   * @returns Whether every source is on the GPU.
+   * @example
+   * ```ts
+   * // `assets.warm("ep01.memory")`: the bundle is loaded; its 6 textures go to the GPU while the board still shows.
+   * const renderer = ctx.require(rendererPlugin);
+   * const textures = [...record.textures.values(), ...record.pages.values()];
+   * const uploaded = await renderer.sync.textures.upload(textures); // true 6 drawn frames later (uploads: 1)
+   * await renderer.sync.textures.upload(textures); // true at once: they are on this device already
+   * ```
+   */
+  upload(textures: readonly PixiTexture[]): Promise<boolean>;
 };
 
 /**
@@ -1030,6 +1055,15 @@ export type SyncInternal = {
   warmStep(): boolean;
 
   /**
+   * Uploads up to `renderer.uploads` queued texture sources (F60), in a drawn frame, right after the warm-up's probes
+   * and before the stage pass. Asks for the next frame while sources wait. One compare and no allocation while the
+   * queue is empty.
+   *
+   * @returns True when it uploaded a source in this frame: the frame is then no sample of the adaptive rate.
+   */
+  uploadStep(): boolean;
+
+  /**
    * Subscribes to the end of a warm-up run: the queue became empty (the monitor of an agent build writes the `warm`
    * event line). Emptied by `stopSync`.
    *
@@ -1170,6 +1204,61 @@ export type WarmState = {
   reported: Set<unknown>;
   listeners: WarmListener[];
 };
+
+/**
+ * One call of `textures.upload` that waits: how many of its sources are still queued, and its answer. Not public.
+ */
+export type UploadWaiter = { left: number; resolve: (ok: boolean) => void };
+
+/**
+ * The texture upload queue (F60): the sources not yet uploaded from `head` on, emptied when the head reaches the end
+ * (the warm-up's pattern); for each queued source the calls that wait for it; the sources uploaded on this device. A
+ * step with an empty queue reads two numbers. Not public.
+ */
+export type UploadState = {
+  /** The sources to upload, from `head` on; each queued once. */
+  queue: PixiTextureSource[];
+  head: number;
+  /**
+   * The calls each queued source is waited for by, in call order: a source in it is in the queue, and every call that
+   * waits is in it under one of its sources. Answered `false` when the renderer stops or the device is lost.
+   */
+  waiting: Map<PixiTextureSource, UploadWaiter[]>;
+  /**
+   * The sources that went through `initSource` on this device, or threw there: a call naming only these answers at
+   * once.
+   */
+  done: WeakSet<PixiTextureSource>;
+};
+
+/**
+ * What a nine-slice view's object offers `sync`, whichever class draws it: Pixi's `NineSliceSprite`, or the engine's
+ * rim-only mesh of a `hollow` one (`hollow.ts`). The six numbers rebuild the panel when written, the tint and the
+ * texture are written as on a sprite. Not public.
+ */
+export type SliceLike = PixiContainer & {
+  leftWidth: number;
+  topHeight: number;
+  rightWidth: number;
+  bottomHeight: number;
+  width: number;
+  height: number;
+  tint: number;
+  texture: PixiTexture;
+};
+
+/**
+ * The engine's rim-only nine-slice (F59): a Pixi `Mesh` of 16 vertices and 48 indices, the eight border cells of the
+ * slicing and never the centre, driven through the same numbers as a `NineSliceSprite`. `hollow` tells it apart. Not
+ * public.
+ */
+export type HollowSlice = SliceLike & { readonly hollow: true };
+
+/**
+ * The class of the rim-only nine-slice, made once over the Pixi module the renderer loaded (Pixi arrives lazily, so
+ * the class cannot be declared at import). Built with the texture it draws first. Not public.
+ */
+export type HollowClass = new (texture: PixiTexture) => HollowSlice;
 
 /**
  * Where the overlay step's event lines go: the monitor's `event`. Private to the renderer.
@@ -1402,6 +1491,10 @@ export type SyncState = {
   viewlessEntries: boolean;
   /** The pipeline warm-up (F4). */
   warm: WarmState;
+  /** The texture upload queue (F60). */
+  upload: UploadState;
+  /** The class of the rim-only nine-slice (F59), made at the first hollow view over the loaded Pixi module. */
+  hollowClass: HollowClass | undefined;
   /**
    * The kind of each Pixi filter a slot named, for the performance log of an agent build; a
    * blur's two passes are filters of their own and are in it too. Empty in a production build.

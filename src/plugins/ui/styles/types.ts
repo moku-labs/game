@@ -163,6 +163,20 @@ export type VisualStyle<Asset extends string = string> = {
    * keeps its rectangle, which carries the clip.
    */
   nineSlice?: Asset;
+  /**
+   * Draws the nine-slice of the style as its rim alone: the eight border pieces, never the
+   * centre, so a frame or a glass panel with an empty middle fills no pixel there. `false` by
+   * default. Does nothing without `nineSlice`; `lint()` reports it as
+   * `hollow-without-nine-slice`. A tap in the middle still lands on the element.
+   *
+   * @example
+   * ```tsx
+   * // The frost frame of the memory screen: its rim is drawn, its centre shows the board under it.
+   * <stack key="memFrost" style={{ nineSlice: "glass.frost", hollow: true, width: 960, height: 1400 }} />;
+   * app.world.ecs.get(app.ui.find("memFrost") ?? 0, NineSlice)?.hollow; // true
+   * ```
+   */
+  hollow?: boolean;
   /** Multiplies the colour of a nine-slice or an image. */
   tint?: number;
   /**

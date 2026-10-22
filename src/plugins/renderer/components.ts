@@ -68,7 +68,8 @@ export type SpriteValue = {
  * strokes the bounds and the four cut lines over the panel: cyan, red when the corners overlap or
  * the texture is missing. `clip` masks the children of the entity to the `width × height` box,
  * the same rule as `Shape.clip`: the mask is a filled rectangle and is never drawn, and the panel
- * itself is never masked. `alpha` fades the panel and the entity's children.
+ * itself is never masked. `alpha` fades the panel and the entity's children. `hollow` draws the
+ * rim alone: the eight border pieces, never the centre.
  *
  * @example
  * ```ts
@@ -84,6 +85,10 @@ export type SpriteValue = {
  * const field: NineSliceValue = {
  *   ...value, texture: "ui.field", width: 480, height: 96, clip: true
  * };
+ * // The frost frame of the memory screen: its rim is drawn, its empty centre costs no pixel.
+ * const frost: NineSliceValue = {
+ *   ...value, texture: "glass.frost", width: 960, height: 1400, hollow: true
+ * };
  * ```
  */
 export type NineSliceValue = {
@@ -94,6 +99,20 @@ export type NineSliceValue = {
   tint: number;
   debug: boolean;
   clip: boolean;
+  /**
+   * Draws the rim alone: the four corners and the four edges of the slicing, never the centre cell, so a frame or a
+   * glass panel whose middle is empty fills no pixel there. The hit box stays the whole `width × height`, and `debug`
+   * and `clip` work as on a filled panel. Absent by default, read as `false`, so a panel that never sets it keeps the
+   * values it had before the field existed.
+   *
+   * @example
+   * ```ts
+   * // A 960 x 1400 frame over the memory board, its slices 48 u wide: 8 rim pieces are drawn, the 864 x 1304 centre
+   * // is not, and a tap in the middle still lands on the frame's entity.
+   * world.ecs.spawn(owner, [Layer({ name: "ui" }), Transform(), NineSlice({ texture: "glass.frost", width: 960, height: 1400, hollow: true })]);
+   * ```
+   */
+  hollow?: boolean;
 };
 
 /**
@@ -312,11 +331,8 @@ export const Transform = /*#__PURE__*/ component("Transform", transformDefaults)
  */
 export const Sprite = /*#__PURE__*/ component("Sprite", spriteDefaults);
 
-/**
- * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
- * the slice outline over it. `clip: true` masks the children of the entity to the panel box.
- */
-export const NineSlice = /*#__PURE__*/ component("NineSlice", {
+/** What a `NineSlice` starts as, `hollow` left out. Its own const, because a component takes a typed defaults object. */
+const nineSliceDefaults: NineSliceValue = {
   texture: "",
   width: 0,
   height: 0,
@@ -324,7 +340,14 @@ export const NineSlice = /*#__PURE__*/ component("NineSlice", {
   tint: 0xff_ff_ff,
   debug: false,
   clip: false
-});
+};
+
+/**
+ * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
+ * the slice outline over it. `clip: true` masks the children of the entity to the panel box.
+ * `hollow: true` draws its rim alone, never the centre cell.
+ */
+export const NineSlice = /*#__PURE__*/ component("NineSlice", nineSliceDefaults);
 
 /**
  * The entity this view moves with. `0` means no parent.

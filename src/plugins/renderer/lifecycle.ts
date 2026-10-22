@@ -48,7 +48,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * takes the same path: the backing store changes, the frame and the scale do not), then the
  * overlay step (spec 22), then `kept` reads the marks before `demand` decides whether the frame is
  * drawn and clears them; a drawn frame draws the probes of the warm-up onto the canvas first (F4: the
- * stage pass clears them, in the same task, so they never show), then the kept pictures
+ * stage pass clears them, in the same task, so they never show), then uploads the queued texture sources (F60), then
+ * the kept pictures
  * (`kept.flush`, so the canvas stays one pass, E7), then the stage, then the pixel leg of the kept
  * oracle; `demand` settles the
  * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
@@ -98,6 +99,9 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
     // F4: probes drawn onto the canvas, then wiped by the stage pass below; never a pixel on screen.
     const probed = modules.sync.warmStep();
 
+    // F60: the queued texture sources go to the GPU, `renderer.uploads` of them, before the frame that shows them.
+    const uploaded = modules.sync.uploadStep();
+
     // The pictures before the stage pass: every render a picture needs is done when the canvas is drawn.
     modules.kept.flush();
 
@@ -107,7 +111,8 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
 
     if (rendered) {
       ctx.deps.time.frameDrawn();
-      if (probed) ctx.deps.time.frameProbed();
+      // A frame of probes or uploads is load work, no sample of the adaptive rate.
+      if (probed || uploaded) ctx.deps.time.frameProbed();
     }
 
     modules.kept.after();

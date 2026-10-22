@@ -17,6 +17,7 @@ only uses the texture *type*.
 | Method | Behaviour |
 |---|---|
 | `load(bundle): Promise<void>` | Loads every file of the bundle and waits for its companions. Already loaded: resolves at once. Loading: joins the running load. Unknown bundle: rejects with `[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".` Headless: resolves at once, state untouched. |
+| `warm(bundle): Promise<void>` | Puts the bundle's textures on the GPU before a scene shows them (F60). Loads it first when it is not loaded (`loadBundle(…, "request")`), then hands every texture and atlas page of its record to `renderer.sync.textures.upload`, which uploads `renderer.uploads` of them a drawn frame (one by default), and resolves after the upload answered. An upload answer `false` (no device, `uploads: 0`, a stop) still resolves: the first draw uploads, as before. A second call joins the running or finished warm (`state.warmed`); the unload of the bundle forgets it, so a reload warms again; a failed warm is forgotten too, so the next call tries again. Unknown bundle: rejects as `load` does. A failed load rejects. Headless: resolves at once, whatever the name, as `load` does. |
 | `unload(bundle): void` | Destroys the textures through `io.destroyTexture`, calls every companion's `unload`, calls `renderer.sync.textures.invalidate` with the keys of the bundle, emits `assets:bundle-unloaded` with reason `"request"`. A pinned bundle and the tiers `boot` and `core` are refused with a `ctx.log.warn`. A running load is aborted. |
 | `isLoaded(bundle): boolean` | `status === "loaded"`. Headless: `true` for every bundle of the manifest. |
 | `texture(key): Texture \| undefined` | The texture of a loaded key; touches the use counter of its bundle. A key of a bundle that is not loaded: `undefined`, one dev warning naming key and bundle, and a background `load` of that bundle. Headless: `undefined`. |
@@ -33,15 +34,23 @@ const assets = ctx.require(assetsPlugin);
 await assets.load("board");
 assets.texture("board.cell"); // the Pixi texture
 assets.usage(); // { textureMb: 3.5, budgetMb: 192, bundles: [{ name: "board", ... }] }
+
+// Outside a node: the board's art goes to the GPU while the menu still shows.
+await app.assets.warm("ep01.board"); // the board's textures are on the GPU, 1 per drawn frame
 ```
+
+Why `warm`: a texture reaches the GPU at its first draw, inside the frame that shows it. On a Galaxy
+A26 (Chrome, WebGPU, Pixi 8.22) one upload costs about 9 ms whatever its size: the frame that showed
+the 6 cold textures (9.4 MB) of A Memory Missing's memory screen took 55 ms, and 8 ms once they were
+uploaded before. `warm` moves that work into the frames before the scene mounts.
 
 `load` has no `signal` parameter. Internal callers — the enter callback, the `load` effect and the
 preload queue — call `loadBundle(ctx, bundle, signal, reason)` of `tiers.ts` directly.
 
 ## Authoring helpers
 
-Both are pure and exported from the package root; `defineGame` returns them typed by the game's
-`BundleKey`, so a name the scanner never saw does not compile.
+All three are pure and exported from the package root; `defineGame` returns them typed by the
+game's `BundleKey`, so a name the scanner never saw does not compile.
 
 ```ts
 // features/board/assets.ts
@@ -57,6 +66,9 @@ export const ep01Assets = defineBundles({
 
 // a loading node
 await fx(load("board.chains")); // { loaded: ["board.chains"], mb: 1.25 }
+
+// a transit node in front of a rest node: true when the memory is loaded and on the GPU
+await fx(ready("ep01.memory")); // { kind: "ready", payload: { bundles: ["ep01.memory"] } } as data
 ```
 
 | Rule | Detail |
@@ -67,6 +79,59 @@ await fx(load("board.chains")); // { loaded: ["board.chains"], mb: 1.25 }
 | `mipmaps` | `true` (every texture of the bundle) or globs relative to `assets/` (`["items/**"]`); a glob of one bundle marks its own files only, and a glob that matches no texture is a note. Any other value is a scanner error. A mipmapped texture is uploaded with its full chain, costs about a third more and stays loose in a pack. `defineBundles` copies the list. |
 | `files` | A bundle with `files` takes the matching files out of the feature's default bundle. A file matched by two bundles is a scanner error naming both bundles. |
 | Layers | A folder under the root scanned like one more feature, under a mapped name: `--layer shared=ui` (`layers: { shared: "ui" }` for `scanAssets`) reads `shared/assets.ts` and `shared/assets/` exactly as `features/ui/` would be read, so every key and bundle stays `ui.*`. The layer's `assets.ts` names its bundles after the mapped name. |
+
+### Resting on a load: `ready`
+
+`load` awaited inside a node holds the node until the bundle is there, so Back does nothing while it
+runs. `ready(bundle | bundles)` (F52) lets the node rest instead and stay answerable. Its handler,
+registered in `onInit` next to `load` and run in fast mode too (a fast walk gets the answer the live
+game would), answers in this order:
+
+| Case | Answer |
+|---|---|
+| Headless (no io) | `true`, before any name check, as the `load` effect does. |
+| A name the manifest lacks | Throws `[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".` |
+| Every bundle there | `true` at once; nothing is posted. A bundle is there when it is loaded **and** warmed (`warm` resolved for it), or when its last warm for `ready` failed. |
+| Otherwise | `false`. It starts `warm` for each bundle that is not there (loading it first), and posts `{ type: "ready" }` into `flow.inbox` once every one of them settled. |
+
+A bundle the preload or a node entry brought but nobody warmed is not there: it answers `false` once
+and posts `ready` after its upload. A warm that rejects (not an abort) puts the bundle in
+`state.readyFailed` and logs `ctx.log.warn("assets:ready-failed", { bundle, error })`; the next
+`ready` counts it as there, so a broken file never hangs a node, and a later successful load of the
+bundle takes it out again. An abort (an unload, a stop) marks nothing: the next `ready` starts the
+bundle again. The posting does not wait on the node's signal: the warm is shared work, and the inbox
+keeps only the latest `ready`, so a stale event costs at most one more question of the transit node.
+An app without `assets`, such as the headless app of `game.headless()`, has no handler: the effect
+resolves `undefined`, which the recipe reads as "there", hence `=== false`.
+
+The recipe: a rest node waits for `ready` (and here for `elapsed` too) and answers Back; a transit
+node, entered from it on either event, asks again.
+
+```ts
+import { ready, schedule } from "@moku-labs/game";
+
+const wait = defineNode({
+  rest: true,
+  inbox: ["elapsed", "ready"],
+  outcomes: { elapsed: type<{ now: number }>(), ready: type(), close: type(), back: type() }
+});
+
+// transit node `resume`, entered from wait on `elapsed` or `ready`:
+const resume = defineNode({
+  outcomes: { wait: type(), open: type() },
+  run: async ({ fx, now, out }) => {
+    if (now < dueAt) {
+      fx.start(schedule(dueAt));
+
+      return out.wait();
+    }
+
+    if ((await fx(ready(bundlesOfView(view)))) === false) return out.wait();
+
+    return out.open();
+  }
+});
+```
 
 ## Configuration
 
@@ -353,6 +418,9 @@ a built game and headless.
 | `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request" \| "leave", keys }`; `"leave"`: its feature left, or a scene that named it finished its exit (`release: "leave"`) |
 | `assets:replaced` | `{ bundle, keys }`, dev builds only |
 
+No plugin event belongs to `ready`: it posts the world event `{ type: "ready" }` into `flow.inbox`,
+which a rest node takes when its `inbox` lists `"ready"` (see "Resting on a load: `ready`").
+
 `assets:bundle-progress` is for the game: no engine plugin listens to it. A splash screen fills
 its loading bar from it.
 
@@ -389,10 +457,10 @@ hooks: ctx => ({
 
 ## Headless
 
-No `io` and a renderer that does not draw: the manifest is read and nothing else. `load` resolves
-at once, `isLoaded` is `true` for every bundle of the manifest, `texture` is `undefined`, the
-`load` effect resolves `{ loaded: [], mb: 0 }`, and there is no preload, no event and no budget
-work.
+No `io` and a renderer that does not draw: the manifest is read and nothing else. `load` and `warm`
+resolve at once, `isLoaded` is `true` for every bundle of the manifest, `texture` is `undefined`, the
+`load` effect resolves `{ loaded: [], mb: 0 }`, the `ready` effect answers `true`, and there is no
+preload, no event and no budget work.
 
 ## Files
 
@@ -403,15 +471,16 @@ work.
 | `state.ts` | `createAssetsState`. |
 | `api.ts` | `createAssetsApi`, `lookupTexture` (the function the texture provider stands on) and the silent lookups behind `font` and `audio`. |
 | `handlers.ts` | The `flow:rest` hook and the dev `ui:hot-swap` hook. |
-| `lifecycle.ts` | `connectAssets` (onInit), `startAssets` (onStart), `releaseAll` (onStop), the enter callback and the `load` effect. |
-| `bundles.ts` | `defineBundles` and the `load` descriptor. |
+| `lifecycle.ts` | `connectAssets` (onInit), `startAssets` (onStart), `releaseAll` (onStop), the enter callback, the `load` effect and the registration of the `ready` effect. |
+| `bundles.ts` | `defineBundles`, the `load` and `ready` descriptors and `bundlesFor`. |
+| `ready.ts` | `warmBundle` (the body of `warm`: load, then `renderer.sync.textures.upload`, one warm per bundle in `state.warmed`) and `answerReady` (the handler of the `ready` effect, `state.readyFailed`, the inbox event `ready`). |
 | `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, and the megabyte arithmetic `textureMb` and `sumMb`. |
 | `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`, and the loaders of one file: `loadImage`, `loadFont`, `loadSound`. |
 | `stamp.ts` | The stamp of the keys watch: the type guard `isAssetStamps`, `stampsOf` (the stamp out of a `ui:hot-swap`) and `changedPaths`. |
 | `paths.ts` | The paths of the manifest for the hot swap: `indexPaths`, `refusalOf` (why the page reloads instead) and `batchesOf` (the changed files by bundle). |
 | `swap.ts` | The replace itself: `createSwap` (the handler behind `ui:hot-swap`), one bundle after another. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
-| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`, `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
+| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle` (it forgets the bundle's warm), `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
@@ -585,9 +654,11 @@ again every frame (`changes: "frame"`), because a bundle loads without a model c
 
 ## Dependencies
 
-- `flowPlugin` — `onEnter("load")`, `fx.handle("load", …, { runInFast: true })`, `features.all()`,
+- `flowPlugin` — `onEnter("load")`, `fx.handle("load", …, { runInFast: true })`,
+  `fx.handle("ready", …, { runInFast: true })`, `inbox.post({ type: "ready" })`, `features.all()`,
   `describe()` (also the node owners of the release), `state()` (also the stack and the mode).
-- `rendererPlugin` — `sync.textures.provide / create / slice / destroy / invalidate`, `host.ready()`.
+- `rendererPlugin` — `sync.textures.provide / create / slice / destroy / invalidate / upload`,
+  `host.ready()`.
 - `timePlugin` — `wake()` when a load settles or a dev hot swap replaced files, so the idle frame
   cap lifts as the picture changes.
 - `modelPlugin` — `store.snapshot()`: the committed `player` and `session` a scene's `bundles`

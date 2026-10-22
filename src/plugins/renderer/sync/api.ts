@@ -46,6 +46,7 @@ import type {
   View,
   WarmListener
 } from "./types";
+import { stopUploads, uploadStep, uploadTextures } from "./upload";
 import {
   applyNineSlice,
   applyShape,
@@ -691,6 +692,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     deps.kept.reset();
     // The dims and the range go with the tree; the overlays are found again in the new one (spec 22 O5.6).
     forgetOverlays(state);
+    // The device goes with the tree: its waiting uploads answer false, and a new one holds none of the sources (F60).
+    stopUploads(state);
     state.held.clear();
 
     for (const view of state.views.values()) {
@@ -797,7 +800,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
         for (const key of keys) state.invalidated.add(key);
         dropPooled(state, keys);
-      }
+      },
+
+      upload: (textures: readonly PixiTexture[]): Promise<boolean> => uploadTextures(sctx, textures)
     },
 
     displays: {
@@ -884,6 +889,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     drainOverlayEvents: (monitor: OverlayEventSink): void => drainOverlayEvents(sctx, monitor),
 
     warmStep: (): boolean => warmStep(sctx),
+
+    uploadStep: (): boolean => uploadStep(sctx),
 
     onWarm: (fn: WarmListener): void => {
       state.warm.listeners.push(fn);

@@ -170,6 +170,31 @@ describe("nine-slice in the style", () => {
 
     await app.stop();
   });
+
+  // Bug: `hollow` of the style never reaches `NineSlice`, so the frame fills its centre; or it is
+  // written only when set, so the panel stays hollow after the variant that made it so ends; or a
+  // panel never hollow carries the field and every game's describe changes (demos merge-game, ticktoe).
+  it("draws the rim alone while the style is hollow, and the whole panel again after", async () => {
+    const app = await startUiApp();
+
+    mount(app, "showcase");
+
+    const frost = entityOf(app, "frost");
+
+    expect(app.world.ecs.get(frost, NineSlice)).not.toHaveProperty("hollow");
+
+    app.world.ecs.tag(frost, PointerOver);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(frost, NineSlice)).toMatchObject({ texture: "ui.card", hollow: true });
+
+    app.world.ecs.untag(frost, PointerOver);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(frost, NineSlice)?.hollow).toBe(false);
+
+    await app.stop();
+  });
 });
 
 describe("images", () => {

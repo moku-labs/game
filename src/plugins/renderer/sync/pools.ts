@@ -2,10 +2,10 @@
  * @file renderer/sync — the pools. A released object keeps its class and its texture key, so the
  * next entity with the same look gets it back without an allocation.
  */
-import type { PixiContainer, PixiGraphics, PixiNineSliceSprite, PixiSprite } from "../types";
+import type { PixiContainer, PixiGraphics, PixiSprite } from "../types";
 import { clearArea, clearFilters } from "./filters";
 import { clearHidden } from "./hidden";
-import type { SyncCtx, SyncState, View, ViewKind } from "./types";
+import type { HollowSlice, SliceLike, SyncCtx, SyncState, View, ViewKind } from "./types";
 
 /**
  * Tells whether a display object is a sprite. A `NineSliceSprite` carries the slice widths and
@@ -29,13 +29,24 @@ export function isGraphics(object: PixiContainer): object is PixiGraphics {
 }
 
 /**
- * Tells whether a display object is a nine-slice sprite.
+ * Tells whether a display object draws a nine-slice: Pixi's `NineSliceSprite`, or the engine's rim-only mesh of a
+ * `hollow` one. Both carry the slice widths.
  *
  * @param object - The display object.
- * @returns True for a nine-slice sprite.
+ * @returns True for either nine-slice object.
  */
-export function isNineSlice(object: PixiContainer): object is PixiNineSliceSprite {
+export function isNineSlice(object: PixiContainer): object is SliceLike {
   return "leftWidth" in object;
+}
+
+/**
+ * Tells whether a display object is the engine's rim-only nine-slice (F59).
+ *
+ * @param object - The display object.
+ * @returns True for the hollow mesh, false for Pixi's `NineSliceSprite` and every other object.
+ */
+export function isHollow(object: PixiContainer): object is HollowSlice {
+  return "hollow" in object;
 }
 
 /**
@@ -105,18 +116,20 @@ export function dropOutline(view: View): void {
 }
 
 /**
- * The pool an object belongs to: its class and the texture it draws.
+ * The pool an object belongs to: its class and the texture it draws. A rim-only nine-slice has a pool of its own, so
+ * a filled panel never gets a hollow object back, nor the other way round.
  *
  * @param kind - Which component gave the entity its display object.
  * @param textureKey - The asset key.
+ * @param hollow - True for the rim-only object of a `NineSlice` with `hollow: true`.
  * @returns The pool key.
  * @example
  * ```ts
- * poolKeyOf("Sprite", "board.cell"); // "Sprite:board.cell"
+ * poolKeyOf("NineSlice", "glass.frost", true); // "NineSlice.hollow:glass.frost"
  * ```
  */
-export function poolKeyOf(kind: ViewKind, textureKey: string): string {
-  return `${kind}:${textureKey}`;
+export function poolKeyOf(kind: ViewKind, textureKey: string, hollow: boolean): string {
+  return hollow ? `${kind}.hollow:${textureKey}` : `${kind}:${textureKey}`;
 }
 
 /**
@@ -127,10 +140,18 @@ export function poolKeyOf(kind: ViewKind, textureKey: string): string {
  * @param view - The view whose object goes back to its pool; its wrapper is gone already.
  */
 export function resetObject(view: View): void {
-  const object = view.object;
-
-  detach(object);
+  detach(view.object);
   clearHidden(view);
+  resetNode(view.object);
+}
+
+/**
+ * Brings a detached object back to a fresh one's pose and look: drawn, opaque, unmoved, white for a sprite and a
+ * graphics.
+ *
+ * @param object - The object, out of the tree.
+ */
+function resetNode(object: PixiContainer): void {
   object.visible = true;
   object.alpha = 1;
   object.rotation = 0;
@@ -189,8 +210,6 @@ function oldestPool(state: SyncState): PixiContainer[] | undefined {
  * @param view - The view that left.
  */
 export function release(sctx: SyncCtx, view: View): void {
-  const state = sctx.ctx.state.sync;
-
   // Strip what the renderer added to the view: mask, debug outline and filters.
   dropMask(view);
   dropOutline(view);
@@ -226,19 +245,56 @@ export function release(sctx: SyncCtx, view: View): void {
 
   // The renderer's own object goes back to its pool, reset for its next life: without a render group the kept
   // cache made of it (spec 23 P9.3).
+  dropGroup(sctx, view.object);
+  resetObject(view);
+  store(sctx, view.object, view.poolKey);
+}
+
+/**
+ * Puts an object a view no longer draws with back into a pool, while the view goes on with another one: the
+ * nine-slice whose `hollow` flipped (F59). Reset as `release` resets a view's object; its view keeps its hidden
+ * reasons, which hang on the view's wrapper.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param object - The object, still in the view's wrapper.
+ * @param poolKey - The pool it belongs to.
+ */
+export function releaseObject(sctx: SyncCtx, object: PixiContainer, poolKey: string): void {
+  dropGroup(sctx, object);
+  detach(object);
+  resetNode(object);
+  store(sctx, object, poolKey);
+}
+
+/**
+ * Takes away the render group the kept cache made of an object (spec 23 P9.3), before it is pooled.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param object - The object.
+ */
+function dropGroup(sctx: SyncCtx, object: PixiContainer): void {
   const groups = sctx.ctx.state.kept.madeGroups;
 
-  if (groups.has(view.object)) {
-    view.object.disableRenderGroup();
-    groups.delete(view.object);
-  }
+  if (!groups.has(object)) return;
 
-  resetObject(view);
+  object.disableRenderGroup();
+  groups.delete(object);
+}
 
-  const pool = state.pools.get(view.poolKey) ?? emptyPool();
+/**
+ * Pushes a reset object into its pool and evicts the one that waited longest while the pools hold more than
+ * `poolLimit`.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param object - The reset object.
+ * @param poolKey - Its pool.
+ */
+function store(sctx: SyncCtx, object: PixiContainer, poolKey: string): void {
+  const state = sctx.ctx.state.sync;
+  const pool = state.pools.get(poolKey) ?? emptyPool();
 
-  pool.push(view.object);
-  state.pools.set(view.poolKey, pool);
+  pool.push(object);
+  state.pools.set(poolKey, pool);
   state.pooled += 1;
 
   // Past the limit, the object that has waited longest is destroyed.
@@ -254,23 +310,33 @@ export function release(sctx: SyncCtx, view: View): void {
 
 /**
  * Destroys the pooled objects that draw one of these keys, so a bundle that left frees its GPU
- * memory instead of waiting for a reuse that resolves nothing.
+ * memory instead of waiting for a reuse that resolves nothing: sprites, nine-slices and rim-only nine-slices.
  *
  * @param state - The sync branch of the plugin state.
  * @param keys - The asset keys that went stale.
  */
 export function dropPooled(state: SyncState, keys: readonly string[]): void {
   for (const key of keys) {
-    for (const kind of ["Sprite", "NineSlice"] as const) {
-      const pool = state.pools.get(poolKeyOf(kind, key));
-
-      if (pool === undefined) continue;
-
-      for (const object of pool) object.destroy({ texture: false });
-      state.pooled -= pool.length;
-      state.pools.delete(poolKeyOf(kind, key));
-    }
+    dropPool(state, poolKeyOf("Sprite", key, false));
+    dropPool(state, poolKeyOf("NineSlice", key, false));
+    dropPool(state, poolKeyOf("NineSlice", key, true));
   }
+}
+
+/**
+ * Destroys one pool and everything in it.
+ *
+ * @param state - The sync branch of the plugin state.
+ * @param poolKey - The pool.
+ */
+function dropPool(state: SyncState, poolKey: string): void {
+  const pool = state.pools.get(poolKey);
+
+  if (pool === undefined) return;
+
+  for (const object of pool) object.destroy({ texture: false });
+  state.pooled -= pool.length;
+  state.pools.delete(poolKey);
 }
 
 /**

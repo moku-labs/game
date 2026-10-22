@@ -78,6 +78,25 @@ function contentOf(props: Record<string, unknown>): string {
 }
 
 /**
+ * Whether a nine-slice draws its rim alone: `true` while its style says so, `false` once it did and
+ * no longer does, and no field on a panel that was never hollow, so a game's describe and saved
+ * values stay as they were without it.
+ *
+ * @param element - The element framed by the nine-slice.
+ * @param hollow - The style's `hollow`.
+ * @returns `{ hollow }`, or nothing.
+ */
+function hollowOf(element: Element, hollow: boolean | undefined): { hollow?: boolean } {
+  if (hollow === true) {
+    element.hollowed = true;
+
+    return { hollow: true };
+  }
+
+  return element.hollowed === true ? { hollow: false } : {};
+}
+
+/**
  * The box a text wraps at: its laid-out width while it wraps at it, 0 once it fits again, so a
  * text that wrapped draws on one line, and no field on a text that never wrapped.
  *
@@ -97,7 +116,7 @@ function boxOf(element: Element): { box?: number } {
 /**
  * The visual component of an element: a sprite for an image or an icon, the text for a text (with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
- * when the style sets `debug`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
+ * when the style sets `debug`, its rim alone when it sets `hollow`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
  * stroke dashed with `dash`, or an arc with `shape: "arc"`
  * over the `sweep` of its style, ended by its `cap`. A clipping element (`scroll`,
  * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
@@ -157,7 +176,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
         tint,
         debug: style.debug ?? false,
         // A text field framed by slices clips its value to them, so a long one never leaves it.
-        clip: type === "input"
+        clip: type === "input",
+        // Only on a panel that was hollow once: a variant that made it hollow never leaves it hollow after.
+        ...hollowOf(element, style.hollow)
       })
     ];
   }

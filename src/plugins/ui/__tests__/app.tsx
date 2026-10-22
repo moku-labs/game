@@ -330,6 +330,10 @@ export const showcaseProjection = projection({
           is: { hover: { nineSlice: "ui.strip" } }
         }}
       />
+      <stack
+        key="frost"
+        style={{ width: 200, height: 200, nineSlice: "ui.card", is: { hover: { hollow: true } } }}
+      />
       <button
         key="bouncy"
         intent="openSettings"

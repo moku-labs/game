@@ -656,6 +656,96 @@ export class FakeNineSliceSprite extends FakeContainer {
   }
 }
 
+/** One attribute buffer of a fake mesh geometry: it counts its `update` calls and allocates nothing for them. */
+export class FakeMeshBuffer {
+  /** How often the buffer was marked for an upload, as Pixi's `Buffer.update`. */
+  public updates = 0;
+
+  /** Marks the buffer for an upload: counted. */
+  public update(): void {
+    this.updates += 1;
+  }
+}
+
+/** What a fake mesh geometry is built with: Pixi's `MeshGeometry` options. */
+export type FakeMeshGeometryOptions = {
+  positions: Float32Array;
+  uvs: Float32Array;
+  indices: Uint32Array;
+  topology?: string;
+};
+
+/**
+ * The fake of Pixi's `MeshGeometry`: it keeps the very arrays it was built with, so a test reads the positions, uvs and
+ * indices a mesh wrote in place, and counts the updates of its two attribute buffers.
+ */
+export class FakeMeshGeometry {
+  /** Every geometry the fake made, in creation order. */
+  public static readonly made: FakeMeshGeometry[] = [];
+
+  public readonly positions: Float32Array;
+  public readonly uvs: Float32Array;
+  public readonly indices: Uint32Array;
+  public readonly topology: string;
+  public destroyed = false;
+  /** The buffer of `aPosition`. */
+  public readonly positionBuffer = new FakeMeshBuffer();
+  /** The buffer of `aUV`. */
+  public readonly uvBuffer = new FakeMeshBuffer();
+
+  public constructor(options: FakeMeshGeometryOptions) {
+    this.positions = options.positions;
+    this.uvs = options.uvs;
+    this.indices = options.indices;
+    this.topology = options.topology ?? "triangle-list";
+    FakeMeshGeometry.made.push(this);
+  }
+
+  /**
+   * One attribute buffer, as Pixi's `Geometry.getBuffer`.
+   *
+   * @param name - `"aPosition"` or `"aUV"`.
+   * @returns The buffer.
+   */
+  public getBuffer(name: string): FakeMeshBuffer {
+    return name === "aPosition" ? this.positionBuffer : this.uvBuffer;
+  }
+
+  /** Frees the geometry, as Pixi's `destroy`. */
+  public destroy(): void {
+    this.destroyed = true;
+  }
+}
+
+/**
+ * The fake of Pixi's `Mesh`: a container over a geometry and a texture. The texture is an accessor, as on Pixi's mesh,
+ * so a subclass that overrides it is called from the constructor as Pixi calls it.
+ */
+export class FakeMesh extends FakeContainer {
+  public tint = 0xff_ff_ff;
+  public readonly geometry: FakeMeshGeometry;
+  private held: FakeTexture = FakeTexture.WHITE;
+
+  public constructor(options: { geometry: FakeMeshGeometry; texture?: FakeTexture }) {
+    super();
+    this.geometry = options.geometry;
+    this.texture = options.texture ?? FakeTexture.WHITE;
+  }
+
+  /**
+   * The texture the mesh draws.
+   *
+   * @returns The texture.
+   */
+  public get texture(): FakeTexture {
+    return this.held;
+  }
+
+  public set texture(value: FakeTexture) {
+    this.held = value;
+  }
+}
+
 /** One path the fake graphics was asked to draw. A `moveTo` or `lineTo` has no size. */
 export type FakeDrawOp = {
   op: "rect" | "roundRect" | "moveTo" | "lineTo" | "closePath" | "beginPath";
@@ -1230,12 +1320,23 @@ export class FakeGpuTextureSystem {
   }
 }
 
-/** The fake of Pixi's `GlTextureSystem`: `onSourceUpdate` uploads a source. */
+/** The fake of Pixi's `GlTextureSystem`: `initSource` binds a source once, `onSourceUpdate` uploads a source. */
 export class FakeGlTextureSystem {
   public static extension = { type: [WEBGL_SYSTEM], name: "texture" };
 
   /** The sources uploaded, in order. */
   public readonly uploaded: FakeUploadSource[] = [];
+  /** The sources `initSource` was handed, in order. */
+  public readonly initialized: object[] = [];
+
+  /**
+   * Binds a source, which makes its GL texture, as Pixi's `initSource` does: recorded.
+   *
+   * @param source - The source.
+   */
+  public initSource(source: object): void {
+    this.initialized.push(source);
+  }
 
   /**
    * Uploads a source.
@@ -1917,6 +2018,26 @@ export function createFakeGlContext(): FakeGlContext {
   return context;
 }
 
+/** The texture system of a fake renderer: `initSource`, and the GPU texture sources, as Pixi's `managedTextures`. */
+export type FakeRendererTextures = (FakeGpuTextureSystem | FakeGlTextureSystem) & {
+  managedTextures: FakeManagedSource[];
+};
+
+/**
+ * Builds the texture system of a fake renderer from the registry, as Pixi's renderer builds its systems at init.
+ *
+ * @param kind - The backend.
+ * @returns The system, with no GPU source listed.
+ */
+function createTextureSystem(kind: "webgpu" | "webgl"): FakeRendererTextures {
+  const named = fakeExtensions.named(kind === "webgpu" ? WEBGPU_SYSTEM : WEBGL_SYSTEM, "texture");
+  const System = (named ?? FakeGpuTextureSystem) as unknown as new () =>
+    | FakeGpuTextureSystem
+    | FakeGlTextureSystem;
+
+  return Object.assign(new System(), { managedTextures: [] as FakeManagedSource[] });
+}
+
 /** What the fake renderer recorded. */
 export type FakeRenderer = FakeDrawTarget & {
   name: "webgpu" | "webgl";
@@ -1929,8 +2050,11 @@ export type FakeRenderer = FakeDrawTarget & {
   gpu?: { device: FakeGpuDevice };
   /** The WebGL2 context, as Pixi's `WebGLRenderer.gl`; only a WebGL renderer has one. */
   gl?: FakeGlContext;
-  /** The GPU texture sources, as Pixi's `renderer.texture.managedTextures`. */
-  texture: { managedTextures: FakeManagedSource[] };
+  /**
+   * Pixi's texture system, built at init from the class the extension registry holds for the backend, as Pixi builds
+   * its systems (the counting class of a dev or debug build too), with the GPU texture sources it lists.
+   */
+  texture: FakeRendererTextures;
   /**
    * Pixi's extract system: `base64` records its options and answers `FAKE_PNG`; `pixels` records
    * its options and answers a copy of `picture`, what the stage looks like now.
@@ -2083,7 +2207,7 @@ export class FakeApplication {
       renders: 0,
       frameDraws: 0,
       resizes: [],
-      texture: { managedTextures: [] },
+      texture: createTextureSystem(FakeApplication.settings.kind),
       extract: {
         calls: [],
         base64: (options: unknown) => {
@@ -2220,6 +2344,7 @@ export function createFakePixi(
     scene: { ...emptyScene(), ...options.scene }
   };
   FakeBitmapFont.made.length = 0;
+  FakeMeshGeometry.made.length = 0;
   fakeCache.entries.clear();
   fakeExtensions.reset();
   fakeShaderCompiler.compiled.length = 0;
@@ -2230,6 +2355,8 @@ export function createFakePixi(
     Container: FakeContainer,
     Sprite: FakeSprite,
     NineSliceSprite: FakeNineSliceSprite,
+    Mesh: FakeMesh,
+    MeshGeometry: FakeMeshGeometry,
     Texture: FakeTexture,
     TexturePool: new FakeTexturePool(),
     Rectangle: FakeRectangle,

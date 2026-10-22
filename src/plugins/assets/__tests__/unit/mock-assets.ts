@@ -15,7 +15,8 @@ import type {
   FlowState,
   FxHandler,
   GraphNode,
-  Stage
+  Stage,
+  WorldEvent
 } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
 import type { Api as RendererApi, SliceFrame, TextureProvider } from "../../../renderer/types";
@@ -220,6 +221,8 @@ export type FakeRenderer = {
   ready: boolean;
   invalidated: string[][];
   providers: TextureProvider[];
+  /** `sync.textures.upload`: answers `true` at once unless a test scripts another answer. */
+  upload: Mock<(textures: readonly Texture[]) => Promise<boolean>>;
   api: RendererApi;
 };
 
@@ -238,6 +241,8 @@ export type FakeFlow = {
   features: Array<{ name: string; description: FeatureDescription }>;
   enter: Array<{ stage: Stage; callback: EnterCallback }>;
   handlers: Map<string, { run: FxHandler; runInFast: boolean }>;
+  /** What `inbox.post` received, in order. */
+  posted: WorldEvent[];
   api: FlowApi;
 };
 
@@ -365,7 +370,7 @@ function createMockLog(): Log.LogApi {
 }
 
 /**
- * Creates the fake `renderer`: no Pixi, only the five texture members and `host.ready()`.
+ * Creates the fake `renderer`: no Pixi, only the six texture members and `host.ready()`.
  *
  * @param io - The fake io whose texture factory the renderer hands out.
  * @returns The fake renderer and its recordings.
@@ -375,6 +380,7 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
     ready: false,
     invalidated: [],
     providers: [],
+    upload: vi.fn(async () => true),
     api: undefined as unknown as RendererApi
   };
 
@@ -398,7 +404,8 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
         destroy: io.destroyTexture,
         invalidate: (keys: readonly string[]): void => {
           fake.invalidated.push([...keys]);
-        }
+        },
+        upload: (textures: readonly Texture[]): Promise<boolean> => fake.upload(textures)
       }
     },
     monitor: { event: vi.fn() }
@@ -408,7 +415,7 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
 }
 
 /**
- * Creates the fake `flow`: the five members `assets` calls, each backed by a field a test writes.
+ * Creates the fake `flow`: the six members `assets` calls, each backed by a field a test writes.
  *
  * @returns The fake flow and its recordings.
  */
@@ -421,6 +428,7 @@ function createFakeFlow(): FakeFlow {
     features: [],
     enter: [],
     handlers: new Map(),
+    posted: [],
     api: undefined as unknown as FlowApi
   };
 
@@ -445,6 +453,11 @@ function createFakeFlow(): FakeFlow {
       };
     },
     features: { all: () => fake.features },
+    inbox: {
+      post: (event: WorldEvent): void => {
+        fake.posted.push(event);
+      }
+    },
     fx: {
       handle: (kind: string, run: FxHandler, options?: { runInFast?: boolean }): (() => void) => {
         fake.handlers.set(kind, { run, runInFast: options?.runInFast === true });

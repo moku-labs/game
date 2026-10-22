@@ -46,6 +46,7 @@ const config: Config = {
   onDemand: false,
   keptMb: 64,
   warm: 1,
+  uploads: 1,
   adaptiveScale: { floor: 0.75, devices: "phone" }
 };
 

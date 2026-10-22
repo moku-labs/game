@@ -18,6 +18,7 @@ const config: Config = {
   onDemand: false,
   keptMb: 64,
   warm: 1,
+  uploads: 1,
   adaptiveScale: { floor: 0.75, devices: "phone" }
 };
 
@@ -157,6 +158,22 @@ describe("renderer state: the probe draws of the warm-up", () => {
 
     expect(() => createRendererState({ config: { ...config, warm: 0 } })).not.toThrow();
     expect(() => createRendererState({ config: { ...config, warm: 16 } })).not.toThrow();
+  });
+});
+
+describe("renderer state: the textures uploaded per drawn frame", () => {
+  // Bug: a fraction or a huge count reaches the upload step: 1.5 uploads a frame, or 40 uploads of ~9 ms in one frame.
+  it("refuses an uploads that is not a whole number from 0 to 8, and takes 0 and 8", () => {
+    for (const uploads of [-1, 1.5, 9, Number.NaN, "1"]) {
+      expect(() =>
+        createRendererState({ config: { ...config, uploads: uploads as never } })
+      ).toThrow(
+        `[game] renderer.uploads is ${String(uploads)}.\n  Give the textures uploaded per drawn frame, a whole number from 0 to 8.`
+      );
+    }
+
+    expect(() => createRendererState({ config: { ...config, uploads: 0 } })).not.toThrow();
+    expect(() => createRendererState({ config: { ...config, uploads: 8 } })).not.toThrow();
   });
 });
 
