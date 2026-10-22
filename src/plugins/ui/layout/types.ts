@@ -138,8 +138,11 @@ export type LayoutModule = {
   ): boolean;
   repose(element: Element, parent: Rect | undefined, hooked: boolean, hint?: Hint): void;
   lift(element: Element, units: number): void;
-  /** Starts the exit, telling the hook why the element leaves; `span` notes the longest finite track the exit hook started. */
-  exit(element: Element, cause: MotionCause, span?: MotionSpan): void;
+  /**
+   * Starts the exit, telling the hook why the element leaves; `span` notes the longest finite track the exit hook
+   * started; `stands` plays no hook: the element goes with the exit over it.
+   */
+  exit(element: Element, cause: MotionCause, span?: MotionSpan, stands?: boolean): void;
   /** Plays a hook on the element's handle and keeps its motion with the element's handles (the level of an overlay). */
   playTrack(element: Element, hook: (view: ViewHandle<unknown>) => Motion): void;
   settled(element: Element): boolean;

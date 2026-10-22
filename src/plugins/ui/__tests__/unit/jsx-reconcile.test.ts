@@ -823,7 +823,12 @@ describe("a prop outside the comparison", () => {
 
     expect(h.entity("bar")).toBe(-1);
     expect(h.entity("strip")).not.toBe(old);
-    expect(h.layout.exit).toHaveBeenCalledExactlyOnceWith(h.state.jsx.elements.get(old), "change");
+    expect(h.layout.exit).toHaveBeenCalledExactlyOnceWith(
+      h.state.jsx.elements.get(old),
+      "change",
+      undefined,
+      false
+    );
     expect(h.resolveElement).toHaveBeenCalledTimes(1);
   });
 
