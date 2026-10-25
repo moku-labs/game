@@ -13,6 +13,7 @@ import {
   HudPart,
   NineSlice,
   type NineSliceValue,
+  Parent,
   Shape,
   type ShapeValue,
   Sprite,
@@ -636,6 +637,50 @@ export async function keptBoard(count: number, marked = false): Promise<() => vo
         kept.collect();
         kept.flush();
       };
+}
+
+/**
+ * The board of `keptBoard` with one more filtered view that holds a glow (F68): a panel whose child sprite blends
+ * `"add"`, so the cache draws the panel live and remembers why. A view elsewhere is marked every frame, so every record
+ * steps, the glowing one included, whose refusal stands without a walk of its subtree.
+ *
+ * @param count - The kept views.
+ * @returns One frame of the cache: the mark, the collect and the flush.
+ */
+export async function keptBlendBoard(count: number): Promise<() => void> {
+  const { stage, other } = await startKeptBoard(count);
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const card = stage.view({ order: 1, x: 900, y: 200 });
+
+  stage.drawn.mock.world.ecs.spawn(OWNER, [
+    Parent({ entity: card }),
+    Transform({ x: 10, y: 10 }),
+    Sprite({ texture: "fx.glow", width: 40, height: 40, blend: "add" })
+  ]);
+  stage.frame();
+  sync.filters.set(
+    card,
+    Object.freeze([
+      {
+        filter: new pixi.AlphaFilter() as unknown as PixiFilter,
+        passes: 1,
+        cache: "local" as const
+      }
+    ])
+  );
+  stage.frames(8);
+
+  const record = stage.drawn.mock.ctx.state.kept.byEntity.get(card);
+
+  if (record?.mode !== "live" || !record.blended) {
+    throw new Error("perf fixture: the glowing view of the board is not drawn live");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
 }
 
 /**

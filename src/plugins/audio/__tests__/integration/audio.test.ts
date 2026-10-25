@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp, defineGame, screen, type } from "../../../../index";
+import { createApp, defineGame, hint, screen, type } from "../../../../index";
 import type {
   AssetsIo,
   DecodedImage,
@@ -13,7 +13,13 @@ import { defineScene } from "../../../scenes/define";
 import { music } from "../../descriptors";
 import { audioPlugin } from "../../index";
 import type { Config } from "../../types";
-import { createFakeContext, type FakeContext, installFakeWindow } from "../fake-audio-context";
+import {
+  createFakeContext,
+  type FakeContext,
+  type FakeSource,
+  installFakeWindow,
+  keyOf
+} from "../fake-audio-context";
 import { installFakeAudio, installFakeNavigator, installFakeUrl } from "../fake-media";
 
 // ---------------------------------------------------------------------------
@@ -39,6 +45,20 @@ function sfx(key: string): Descriptor {
   return { kind: "sfx", payload: { key }, cosmetic: true };
 }
 
+/** The line of the narrator `anim`'s `sfx(key, { id: "voice", fadeMs: 150 })` builds. */
+const voiceLine: Descriptor = {
+  kind: "sfx",
+  payload: { key: "story.line1", bus: "sfx", id: "voice", fadeMs: 150 },
+  cosmetic: true
+};
+
+/** The descriptor `anim`'s `stopSfx("voice", { fadeMs: 200 })` builds. */
+const stopVoice: Descriptor = {
+  kind: "stopSfx",
+  payload: { id: "voice", fadeMs: 200 },
+  cosmetic: true
+};
+
 /** One `.mp3` of the manifest. */
 function sound(key: string, file: string): ManifestFile {
   return {
@@ -58,8 +78,12 @@ const manifest: Manifest = {
     board: {
       feature: "board",
       tier: "scene",
-      mb: 0.008,
-      files: [sound("board.theme", "theme"), sound("orders.complete", "complete")]
+      mb: 0.012,
+      files: [
+        sound("board.theme", "theme"),
+        sound("orders.complete", "complete"),
+        sound("story.line1", "line1")
+      ]
     }
   }
 };
@@ -108,7 +132,35 @@ const deliver = defineNode({
 const board = defineNode({
   rest: true,
   scene: "board",
-  outcomes: { louder: type(), quiet: type() }
+  outcomes: { louder: type(), quiet: type(), speak: type(), hush: type(), whisper: type() }
+});
+
+const speak = defineNode({
+  outcomes: { done: type() },
+  run: ({ fx, out }) => {
+    fx.start(voiceLine);
+
+    return out.done();
+  }
+});
+
+const hush = defineNode({
+  outcomes: { done: type() },
+  run: ({ fx, out }) => {
+    fx.start(stopVoice);
+
+    return out.done();
+  }
+});
+
+const whisper = defineNode({
+  outcomes: { done: type() },
+  run: ({ fx, out }) => {
+    // Released after the edge committed: the narrator stops at the default fade.
+    fx.emit(hint("stopSfx", { id: "voice" }));
+
+    return out.done();
+  }
 });
 
 const louder = defineNode({
@@ -131,14 +183,17 @@ const quiet = defineNode({
 });
 
 const main = defineFlow("main", {
-  nodes: { home, deliver, board, louder, quiet },
+  nodes: { home, deliver, board, louder, quiet, speak, hush, whisper },
   start: "home",
   edges: {
     home: { play: "deliver" },
     deliver: { done: "board" },
-    board: { louder: "louder", quiet: "quiet" },
+    board: { louder: "louder", quiet: "quiet", speak: "speak", hush: "hush", whisper: "whisper" },
     louder: { done: "board" },
-    quiet: { done: "board" }
+    quiet: { done: "board" },
+    speak: { done: "board" },
+    hush: { done: "board" },
+    whisper: { done: "board" }
   }
 });
 
@@ -151,6 +206,9 @@ const boardFeature = defineFeature("board", {
 async function tick(times = 120): Promise<void> {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
 }
+
+/** The app `startApp` resolves with. */
+type App = Awaited<ReturnType<typeof startApp>>;
 
 /** Starts the screen set plus `audio`, with or without the fake context. */
 async function startApp(context?: FakeContext, journal = 0, extra: Partial<Config> = {}) {
@@ -338,6 +396,99 @@ describe("audio plugin integration — a live walk with a context", () => {
 
     expect(context.closes).toBe(1);
     expect(app.audio.unlocked()).toBe(false);
+  });
+});
+
+/** Unlocks the context, walks to the board and lets the narrator start his line. */
+async function speaking(context: FakeContext, journal = 0) {
+  const fakeWindow = installFakeWindow();
+  const app = await startApp(context, journal);
+
+  fakeWindow.dispatch("pointerdown");
+  await tick();
+  expect(app.flow.gate.answer({ intent: "play" })).toBe(true);
+  await tick();
+  expect(app.flow.gate.answer({ intent: "speak" })).toBe(true);
+  await tick();
+
+  return app;
+}
+
+/** The source of the narrator's line, and the gain of its own. */
+function lineOf(context: FakeContext): { source: FakeSource | undefined; gain: unknown } {
+  const source = context.sources.find(candidate => keyOf(candidate.buffer)?.includes("line1.mp3"));
+
+  return { source, gain: source?.connectedTo };
+}
+
+describe("audio plugin integration — a sound with an id and its stop", () => {
+  it.each([
+    [
+      "fx.start(stopSfx) in a node",
+      2.2,
+      (app: App): boolean => app.flow.gate.answer({ intent: "hush" })
+    ],
+    [
+      "a released stopSfx hint",
+      2.12,
+      (app: App): boolean => app.flow.gate.answer({ intent: "whisper" })
+    ],
+    [
+      "fx.dispatch, as an animation step does",
+      2.05,
+      (app: App): boolean => {
+        app.flow.fx.dispatch({
+          kind: "stopSfx",
+          payload: { id: "voice", fadeMs: 50 },
+          cosmetic: true
+        });
+
+        return true;
+      }
+    ]
+  ] as const)("fades the narrator's line out and stops it: %s", async (_route, end, stop) => {
+    // Bug caught: one of the three ways a game stops a sound never reaches the handler.
+    const context = createFakeContext();
+    const app = await speaking(context);
+    const line = lineOf(context);
+    const gain = context.gains.find(candidate => candidate === line.gain);
+
+    expect(line.source?.startedAt).toBe(0);
+    expect(gain?.connectedTo).toBe(context.gains[2]);
+
+    context.currentTime = 2;
+    expect(stop(app)).toBe(true);
+    await tick();
+
+    expect(line.source?.stoppedAt).toBe(end);
+    expect(gain?.gain.ramps.at(-1)).toEqual([0, end]);
+    expect(app.flow.state().path).toBe("board");
+
+    await app.stop();
+  });
+
+  it("cuts the line at once with app.audio.stop and fadeMs 0, and the journal keeps it with its id", async () => {
+    // Bug caught: `app.audio.stop` is not wired to the plugin's stop, or ignores `fadeMs: 0`.
+    const context = createFakeContext();
+    const app = await speaking(context, 200);
+    const line = lineOf(context);
+    const gain = context.gains.find(candidate => candidate === line.gain);
+
+    expect(app.audio.journal().at(-1)).toStrictEqual({
+      key: "story.line1",
+      bus: "sfx",
+      kind: "sfx",
+      id: "voice",
+      at: app.time.snapshot().elapsed
+    });
+
+    app.audio.stop("voice", { fadeMs: 0 });
+
+    expect(line.source?.stoppedAt).toBe(0);
+    expect(gain?.gain.ramps.at(-1)).toEqual([0, 0]);
+    expect(app.audio.journal().at(-1)?.key).toBe("story.line1");
+
+    await app.stop();
   });
 });
 

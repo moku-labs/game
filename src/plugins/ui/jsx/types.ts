@@ -303,6 +303,8 @@ export type Element = {
   boxed?: boolean;
   /** True once its nine-slice was hollow: from then on `ui` writes `hollow`, false when the style drops it. */
   hollowed?: boolean;
+  /** True once its image or nine-slice blended: from then on `ui` writes `blend`, `"normal"` when the style drops it. */
+  blended?: boolean;
   basis?: StyleBasis;
   /** The motions of its hooks that started a `repeat: "forever"` track; made with the first one. */
   endless?: Set<MotionHandle>;

@@ -1,12 +1,15 @@
 /**
- * @file audio plugin — the two effect handlers and the decode cache. A sound is a new source
- * every time; music is one looping track on its own gain, which is what cross-fades. At
- * `music: "decode"` the track is a buffer source, at `music: "stream"` a media element.
+ * @file audio plugin — the three effect handlers and the decode cache. A sound is a new source
+ * every time, and a sound with an id also gets a gain of its own (`named.ts`), which is what the
+ * next sound with that id and `stopSfx` fade. Music is one looping track on its own gain, which is
+ * what cross-fades. At `music: "decode"` the track is a buffer source, at `music: "stream"` a
+ * media element.
  */
 import type { Descriptor, Hint } from "../flow/types";
 import type { Json } from "../model/types";
 import { isBus, ramp } from "./graph";
 import { recordSound } from "./journal";
+import { claimNamed, startNamed, stopNamed, waitingKey } from "./named";
 import {
   canStream,
   disposeStream,
@@ -18,6 +21,7 @@ import {
 import type {
   AudioContextLike,
   AudioCtx,
+  Bus,
   MusicRequest,
   MusicSwitch,
   SfxRequest,
@@ -49,18 +53,52 @@ function fieldOf(payload: Json | undefined, field: string): Json | undefined {
 }
 
 /**
- * Reads the key and the bus out of the `sfx` descriptor `anim` builds.
+ * Reads the fade of a descriptor that ends a named sound.
  *
  * @param descriptor - The descriptor the handler was called with.
+ * @param fadeMs - The configured fade, used when the descriptor names none.
+ * @returns The fade, in milliseconds.
+ */
+function fadeOf(descriptor: Descriptor | Hint, fadeMs: number): number {
+  return validFade(fieldOf(descriptor.payload, "fadeMs"), fadeMs);
+}
+
+/**
+ * Takes a fade a descriptor named only when the clock can schedule it: a finite number, 0 or more.
+ * `NaN` or a negative fade would make the ramp and the stop throw inside the handler.
+ *
+ * @param fade - The `fadeMs` the payload carries.
+ * @param fallback - The configured fade.
+ * @returns The fade, in milliseconds.
+ * @example
+ * ```ts
+ * validFade(-5, 120); // 120
+ * ```
+ */
+function validFade(fade: Json | undefined, fallback: number): number {
+  return typeof fade === "number" && Number.isFinite(fade) && fade >= 0 ? fade : fallback;
+}
+
+/**
+ * Reads the key, the bus, the id and the fade out of the `sfx` descriptor `anim` builds.
+ *
+ * @param descriptor - The descriptor the handler was called with.
+ * @param fadeMs - The configured fade of a named sound, used when the descriptor names none.
  * @returns The request, or `undefined` when the descriptor names no key.
  */
-function sfxOf(descriptor: Descriptor | Hint): SfxRequest | undefined {
+function sfxOf(descriptor: Descriptor | Hint, fadeMs: number): SfxRequest | undefined {
   const key = fieldOf(descriptor.payload, "key");
   const bus = fieldOf(descriptor.payload, "bus");
+  const id = fieldOf(descriptor.payload, "id");
 
   if (typeof key !== "string") return undefined;
 
-  return { key, bus: typeof bus === "string" ? bus : DEFAULT_BUS };
+  return {
+    key,
+    bus: typeof bus === "string" ? bus : DEFAULT_BUS,
+    id: typeof id === "string" ? id : undefined,
+    fadeMs: fadeOf(descriptor, fadeMs)
+  };
 }
 
 /**
@@ -72,12 +110,11 @@ function sfxOf(descriptor: Descriptor | Hint): SfxRequest | undefined {
  */
 export function musicOf(descriptor: Descriptor | Hint, fadeMs: number): MusicRequest {
   const key = fieldOf(descriptor.payload, "key");
-  const fade = fieldOf(descriptor.payload, "fadeMs");
 
   return {
     // eslint-disable-next-line unicorn/no-null -- `null` is the seam: it stops the music.
     key: typeof key === "string" ? key : null,
-    fadeMs: typeof fade === "number" ? fade : fadeMs
+    fadeMs: validFade(fieldOf(descriptor.payload, "fadeMs"), fadeMs)
   };
 }
 
@@ -154,9 +191,10 @@ async function bufferOf(ctx: AudioCtx, key: string): Promise<AudioBuffer | undef
 /**
  * Plays one sound: the handler of the kind `"sfx"`. Every play is its own source, so the same key
  * twice in one frame is heard twice, and the promise resolves when the sound STARTED. The handler
- * ignores its signal: a sound that began plays to its end. While a gesture's `resume()` is
- * pending the sound waits in `pendingSfx`, one per key. A locked context no gesture is resuming
- * drops it: the start attempt of the unlock queues nothing.
+ * ignores its signal: a sound that began plays to its end, unless a sound with its id or a stop
+ * ends it. While a gesture's `resume()` is pending the sound waits in `pendingSfx`, one per id
+ * and one per key without an id. A locked context no gesture is resuming drops it: the start
+ * attempt of the unlock queues nothing.
  *
  * @param ctx - Domain context of the plugin.
  * @param descriptor - The `sfx` descriptor `anim` built.
@@ -166,12 +204,12 @@ export async function playSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): Pro
 
   if (state.context === undefined) return;
 
-  const request = sfxOf(descriptor);
+  const request = sfxOf(descriptor, ctx.config.sfxFadeMs);
 
   if (request === undefined) return;
 
   if (!state.unlocked) {
-    if (state.resuming) state.pendingSfx.set(request.key, request);
+    queueWhileResuming(state, request);
 
     return;
   }
@@ -180,11 +218,76 @@ export async function playSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): Pro
 }
 
 /**
- * Starts one source of a sound on its bus. `playSfx` calls it for a live play and the unlock for
- * every sound that waited for the resume.
+ * Keeps a sound fired while the context is locked, one per key and one per id, when a gesture's
+ * `resume()` is on its way. A locked context nobody resumes drops it.
+ *
+ * @param state - The plugin state.
+ * @param request - The sound that was fired.
+ */
+function queueWhileResuming(state: State, request: SfxRequest): void {
+  if (!state.resuming) return;
+
+  state.pendingSfx.set(request.id === undefined ? request.key : waitingKey(request.id), request);
+}
+
+/**
+ * Ends the sound under one id: the handler of the kind `"stopSfx"`, for an effect, an animation
+ * step and a released hint alike. A descriptor without an id ends nothing.
  *
  * @param ctx - Domain context of the plugin.
- * @param request - The key and the bus of the sound.
+ * @param descriptor - The `stopSfx` descriptor `anim` built.
+ */
+export function stopNamedSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): void {
+  const id = fieldOf(descriptor.payload, "id");
+
+  if (typeof id !== "string") return;
+
+  stopNamed(ctx.state, id, fadeOf(descriptor, ctx.config.sfxFadeMs));
+}
+
+/**
+ * Plays a sound under its id: the sound that has the id fades out over the fade of this one, and
+ * this one starts through its own gain once its buffer is there, unless a later sound with the id
+ * or a stop took its place while it decoded. A file that is missing frees the id.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param request - The key, the fade and the id of the sound.
+ * @param sound - The id and the bus, both checked.
+ * @param sound.id - The id the sound plays under.
+ * @param sound.bus - The bus it goes to.
+ */
+async function playNamed(
+  ctx: AudioCtx,
+  request: SfxRequest,
+  sound: { id: string; bus: Bus }
+): Promise<void> {
+  const state = ctx.state;
+  const { id, bus } = sound;
+  const entry = claimNamed(state, id, request.fadeMs / 1000);
+  const buffer = await bufferOf(ctx, request.key);
+
+  // A later sound with this id, or a stop, took its place: it starts nothing.
+  if (state.named.get(id) !== entry) return;
+
+  const context = state.context;
+  const gain = state.buses[bus].gain;
+
+  if (buffer === undefined || context === undefined || gain === undefined) {
+    state.named.delete(id);
+
+    return;
+  }
+
+  startNamed(state, context, { id, entry, buffer, bus: gain });
+  recordSound(ctx, { key: request.key, bus, kind: "sfx", id });
+}
+
+/**
+ * Starts one source of a sound on its bus. `playSfx` calls it for a live play and the unlock for
+ * every sound that waited for the resume. A sound with an id goes through `playNamed`.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param request - The key, the bus, the id and the fade of the sound.
  */
 export async function playRequest(ctx: AudioCtx, request: SfxRequest): Promise<void> {
   const state = ctx.state;
@@ -194,6 +297,12 @@ export async function playRequest(ctx: AudioCtx, request: SfxRequest): Promise<v
 
   if (!isBus(state, request.bus)) {
     ctx.log.warn("audio: unknown bus", { bus: request.bus });
+
+    return;
+  }
+
+  if (request.id !== undefined) {
+    await playNamed(ctx, request, { id: request.id, bus: request.bus });
 
     return;
   }

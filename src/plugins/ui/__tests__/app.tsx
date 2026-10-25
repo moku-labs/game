@@ -340,6 +340,11 @@ export const showcaseProjection = projection({
         style={{ width: 100, height: 100, is: { hover: { scale: 1.2 } } }}
         motion={buttonMotion}
       />
+      <image
+        key="glow"
+        texture="ui.coin"
+        style={{ width: 64, height: 64, alpha: 0.8, is: { hover: { blend: "screen" } } }}
+      />
     </column>
   )
 });

@@ -142,7 +142,14 @@ const FILTERS = [
 ];
 
 /** The content subjects of the renderer. */
-const CONTENT = ["sprite", "graphics", "particles-normal", "particles-add"];
+const CONTENT = [
+  "sprite",
+  "sprite-add",
+  "sprite-screen",
+  "graphics",
+  "particles-normal",
+  "particles-add"
+];
 
 /** A running splash, and the probes of every frame. */
 type Splash = Watched & {

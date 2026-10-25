@@ -77,6 +77,7 @@
  * | ui | textInput | { caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35, composingUnderline: 3, keyboardMargin: 16 }; shallow merge |
  * | audio | buses | { master: 1, music: 0.6, sfx: 1 }; shallow merge: a game that sets `buses` gives all three fields |
  * | audio | musicFadeMs | 600 |
+ * | audio | sfxFadeMs | 120 |
  * | audio | volumes | undefined, the buses stay at `buses` |
  * | audio | context | undefined, the real AudioContext |
  * | audio | journal | 0, no started sound is kept |
@@ -289,7 +290,7 @@ export {
   sprite,
   Transform
 } from "./plugins/renderer/components";
-export type { HudPartValue, OverlayValue } from "./plugins/renderer/components";
+export type { HudPartValue, OverlayValue, SpriteBlend } from "./plugins/renderer/components";
 // renderer: the performance log of an agent build, its frame ring and the record of one frame
 export {
   MONITOR_SECTIONS,
@@ -381,6 +382,7 @@ export {
   spawn,
   spawned,
   stagger,
+  stopSfx,
   tween,
   use,
   wait

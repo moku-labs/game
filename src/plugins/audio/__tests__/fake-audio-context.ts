@@ -32,16 +32,24 @@ export type FakeGain = {
   disconnect(): void;
 };
 
-/** A recorded buffer source. `startedAt` and `stoppedAt` are the arguments the plugin passed. */
+/**
+ * A recorded buffer source. `startedAt` and `stoppedAt` are the arguments the plugin passed.
+ * `ended` holds the `"ended"` listeners the plugin added; `end()` is the source reaching its end,
+ * which a test calls because the fake clock never runs: every listener is called once and removed,
+ * as `{ once: true }` asks.
+ */
 export type FakeSource = {
   buffer: AudioBuffer | undefined;
   loop: boolean;
   connectedTo: unknown;
   startedAt: number | undefined;
   stoppedAt: number | undefined;
+  ended: Array<() => void>;
   connect(target: unknown): void;
   start(when?: number): void;
   stop(when?: number): void;
+  addEventListener(type: string, listener: () => void, options?: unknown): void;
+  end(): void;
 };
 
 /** A recorded media element source: the element it reads and where its output goes. */
@@ -171,6 +179,7 @@ function createFakeSource(): FakeSource {
     connectedTo: undefined,
     startedAt: undefined,
     stoppedAt: undefined,
+    ended: [],
     connect: (target: unknown): void => {
       source.connectedTo = target;
     },
@@ -179,6 +188,12 @@ function createFakeSource(): FakeSource {
     },
     stop: (when?: number): void => {
       source.stoppedAt = when ?? 0;
+    },
+    addEventListener: (type: string, listener: () => void): void => {
+      if (type === "ended") source.ended.push(listener);
+    },
+    end: (): void => {
+      for (const listener of source.ended.splice(0)) listener();
     }
   };
 

@@ -133,7 +133,8 @@ export function poolKeyOf(kind: ViewKind, textureKey: string, hollow: boolean): 
 }
 
 /**
- * Brings the object of a view that left back to the state a fresh one has: detached, drawn, opaque, unmoved, white.
+ * Brings the object of a view that left back to the state a fresh one has: detached, drawn, opaque, unmoved, blending
+ * normally, white.
  * Its hidden reasons go with `clearHidden`, so a pooled object never brings the reason of the view it belonged to; a
  * sprite and a graphics lose their tint (a fill-only shape is coloured by it, spec 26 R2.1).
  *
@@ -146,14 +147,15 @@ export function resetObject(view: View): void {
 }
 
 /**
- * Brings a detached object back to a fresh one's pose and look: drawn, opaque, unmoved, white for a sprite and a
- * graphics.
+ * Brings a detached object back to a fresh one's pose and look: drawn, opaque, unmoved, blending as its parent (no
+ * glow of the view it drew for), white for a sprite and a graphics.
  *
  * @param object - The object, out of the tree.
  */
 function resetNode(object: PixiContainer): void {
   object.visible = true;
   object.alpha = 1;
+  object.blendMode = "inherit";
   object.rotation = 0;
   object.zIndex = 0;
   object.position.set(0, 0);

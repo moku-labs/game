@@ -24,16 +24,38 @@ import type {
   WarmVariant
 } from "./types";
 
+/** A member of the probe tree that holds a content subject's object. */
+type FixedNode =
+  | "sprite"
+  | "spriteAdd"
+  | "spriteScreen"
+  | "graphics"
+  | "particlesNormal"
+  | "particlesAdd";
+
 /** The side of every probe, in CSS pixels: the smallest thing that still draws a triangle. */
 const PROBE_SIZE = 4;
 
 /** The content subjects the renderer warms itself, in queue order; the text follows once a font is installed. */
 const CONTENT: readonly WarmSubject[] = Object.freeze([
   "sprite",
+  "sprite-add",
+  "sprite-screen",
   "graphics",
   "particles-normal",
   "particles-add"
 ]);
+
+/** The probe object of each content subject the tree holds from its first warm frame on. */
+const FIXED_NODES: Readonly<Record<Exclude<WarmSubject, "text" | PixiFilter>, FixedNode>> =
+  Object.freeze({
+    sprite: "sprite",
+    "sprite-add": "spriteAdd",
+    "sprite-screen": "spriteScreen",
+    graphics: "graphics",
+    "particles-normal": "particlesNormal",
+    "particles-add": "particlesAdd"
+  });
 
 /** Every target a WebGPU pipeline is keyed by. */
 const ALL_VARIANTS: readonly WarmVariant[] = Object.freeze([
@@ -63,17 +85,19 @@ function particleProperties(): Record<string, boolean> {
 
 /**
  * A 4 × 4 sprite of Pixi's white texture: the batch pipeline of sprites, nine-slices, plain bitmap text and batched
- * graphics.
+ * graphics, with the blend of a `Sprite` or a `NineSlice` glow (part of a WebGPU pipeline's key).
  *
  * @param pixi - The module that draws.
- * @returns The sprite.
+ * @param blend - `"normal"` (Pixi's own mode left as it is), `"add"` or `"screen"`.
+ * @returns The sprite, labelled `renderer.warm.sprite`, or `renderer.warm.sprite-<blend>` for a glow.
  */
-function whiteSprite(pixi: PixiModule): PixiSprite {
+function whiteSprite(pixi: PixiModule, blend: "normal" | "add" | "screen" = "normal"): PixiSprite {
   const sprite = new pixi.Sprite(pixi.Texture.WHITE);
 
-  sprite.label = "renderer.warm.sprite";
+  sprite.label = blend === "normal" ? "renderer.warm.sprite" : `renderer.warm.sprite-${blend}`;
   sprite.width = PROBE_SIZE;
   sprite.height = PROBE_SIZE;
+  if (blend !== "normal") sprite.blendMode = blend;
 
   return sprite;
 }
@@ -144,6 +168,8 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     holder,
     list: [],
     sprite: whiteSprite(pixi),
+    spriteAdd: whiteSprite(pixi, "add"),
+    spriteScreen: whiteSprite(pixi, "screen"),
     graphics,
     particlesNormal: particlesOf(pixi, "normal"),
     particlesAdd: particlesOf(pixi, "add"),
@@ -171,6 +197,8 @@ function dropObjects(warm: WarmState): void {
     objects.clipFrame,
     objects.holder,
     objects.sprite,
+    objects.spriteAdd,
+    objects.spriteScreen,
     objects.graphics,
     objects.particlesNormal,
     objects.particlesAdd,
@@ -388,37 +416,23 @@ function nodeOf(
   objects: WarmObjects,
   subject: WarmSubject
 ): PixiContainer | undefined {
-  switch (subject) {
-    case "sprite": {
-      return objects.sprite;
-    }
-    case "graphics": {
-      return objects.graphics;
-    }
-    case "particles-normal": {
-      return objects.particlesNormal;
-    }
-    case "particles-add": {
-      return objects.particlesAdd;
-    }
-    case "text": {
-      if (warm.textFont === undefined) return undefined;
+  if (typeof subject !== "string") {
+    objects.list[0] = subject;
+    objects.holder.filters = objects.list;
 
-      objects.text ??= new pixi.BitmapText({
-        label: "renderer.warm.text",
-        text: "0",
-        style: { fontFamily: warm.textFont, fontSize: 16 }
-      });
-
-      return objects.text;
-    }
-    default: {
-      objects.list[0] = subject;
-      objects.holder.filters = objects.list;
-
-      return objects.holder;
-    }
+    return objects.holder;
   }
+
+  if (subject !== "text") return objects[FIXED_NODES[subject]];
+  if (warm.textFont === undefined) return undefined;
+
+  objects.text ??= new pixi.BitmapText({
+    label: "renderer.warm.text",
+    text: "0",
+    style: { fontFamily: warm.textFont, fontSize: 16 }
+  });
+
+  return objects.text;
 }
 
 /**

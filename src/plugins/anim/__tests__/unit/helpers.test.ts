@@ -13,6 +13,7 @@ import {
   play,
   sequence,
   sfx,
+  stopSfx,
   tween,
   use,
   wait
@@ -47,8 +48,9 @@ describe("anim/timeline frame maths", () => {
 });
 
 describe("anim/timeline step guards", () => {
-  it("tells the two descriptor steps from the rest", () => {
+  it("tells the three descriptor steps from the rest", () => {
     expect(isFxStep(sfx("board.merge"))).toBe(true);
+    expect(isFxStep(stopSfx("voice"))).toBe(true);
     expect(isFxStep(wait(10))).toBe(false);
   });
 });

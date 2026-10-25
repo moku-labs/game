@@ -26,7 +26,7 @@ export type AnimKit<Asset extends string> = {
     target: Target,
     options: { keys: readonly Asset[]; fps: number; loop?: boolean }
   ) => Step;
-  sfx: (key: Asset, options?: { bus?: string }) => SfxDescriptor;
+  sfx: (key: Asset, options?: { bus?: string; id?: string; fadeMs?: number }) => SfxDescriptor;
   play: typeof play;
   Frames: Narrowed<FramesValue, Partial<Omit<FramesValue, "keys">> & { keys?: readonly Asset[] }>;
 };
