@@ -125,6 +125,9 @@ const ASSET_FILE = /\.(?:png|webp|fnt|mp3|m4a)$/i;
 /** A strings file: a `.json` directly in a `strings/` folder. */
 const STRINGS_FILE = /(?:^|\/)strings\/[^/]+\.json$/;
 
+/** The bundle description of a feature or a layer: its `assets.ts` (`defineBundles`). */
+const DESCRIPTION_FILE = /(?:^|\/)assets\.ts$/;
+
 /**
  * Lists one folder of the walk.
  *
@@ -140,7 +143,8 @@ function entriesOf(folder: string): Dirent[] {
 }
 
 /**
- * Tells whether a file is an input of the scan: an asset file, or a strings file.
+ * Tells whether a file is an input of the scan: an asset file, a strings file, or a bundle
+ * description (`assets.ts`), whose tiers and releases go into the manifest.
  *
  * @param file - The path relative to the game, with `/`.
  * @returns True for a file the watch stamps.
@@ -150,12 +154,12 @@ function entriesOf(folder: string): Dirent[] {
  * ```
  */
 function isInput(file: string): boolean {
-  return ASSET_FILE.test(file) || STRINGS_FILE.test(file);
+  return ASSET_FILE.test(file) || STRINGS_FILE.test(file) || DESCRIPTION_FILE.test(file);
 }
 
 /**
  * Reads one folder of the walk and the folders below it, outside the skipped ones: every asset
- * file and every strings file joins the inputs with its stamp. Symlinks are not followed.
+ * file, strings file and bundle description joins the inputs with its stamp. Symlinks are not followed.
  *
  * @param root - The real game folder.
  * @param folder - The folder, relative to the game; `""` is the game folder.
