@@ -159,7 +159,8 @@ function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionM
  * callback records the frame history before it clears the change sets; in an agent build the
  * timing table starts with the page clock of `time` and the `input` callback zeroes it each
  * frame. The resource `Now` gets `clock.now()` once here and first thing in every `input`
- * callback, so every system of a frame reads one moment. `onStart` has no access to the
+ * callback, so every system of a frame reads one moment; a running scene build counts its frame
+ * budget from that moment too. `onStart` has no access to the
  * plugin's own API, so it builds its own module objects — they are views on `ctx.state`, which is
  * the one place the modules keep their data.
  *
@@ -186,8 +187,12 @@ export function connectWorld(ctx: KernelSlice): void {
   worldCtx.state.ecs.offFrame.push(
     ecs.onOwnerLeft(owner => projection.ownerLeft(owner)),
     time.onFrame("input", frame => {
+      const now = clock.now();
+
       // Read each frame, never kept: after `ecs.clear()` the resource is a new object.
-      ecs.resource(Now).now = clock.now();
+      ecs.resource(Now).now = now;
+      // The building budget of the frame counts from the same moment.
+      projection.startFrame(now);
       // The time per system of the frame starts from 0, in place: no allocation.
       worldCtx.state.ecs.timing?.ms.fill(0);
       projection.reconcileIfDirty();
@@ -217,8 +222,8 @@ export function connectWorld(ctx: KernelSlice): void {
 
 /**
  * Empties the world in `onStop`: the frame callbacks and the hint listener are removed, then
- * every track, view, queued view, entity and resource is dropped, and the scenes and the frame
- * history are reset.
+ * every track, view, queued view, entity and resource is dropped, a running scene build and the
+ * `onBuild` checks with them, and the scenes and the frame history are reset.
  * No `onRemoved` fires, because `renderer` stopped earlier and destroyed its own objects.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
@@ -246,6 +251,8 @@ export function clearWorld(state: State): void {
   state.projection.membershipVersion += 1;
   state.projection.moving = false;
   state.projection.owedLoops = 0;
+  delete state.projection.building;
+  state.projection.buildChecks.length = 0;
 
   state.ecs.generations.length = 0;
   state.ecs.free.length = 0;

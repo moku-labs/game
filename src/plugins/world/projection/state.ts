@@ -25,7 +25,8 @@ function emptyWeakMap<Key extends WeakKey, Value>(): WeakMap<Key, Value> {
 
 /**
  * Creates the initial projection state: nothing registered, nothing mounted, no layer list, no
- * running track and no driver, so every motion is instant until `anim` installs one.
+ * running track and no driver, so every motion is instant until `anim` installs one. No build
+ * runs: `building` is absent.
  *
  * @returns The projection branch of the plugin state.
  */
@@ -51,6 +52,7 @@ export function createProjectionState(): ProjectionState {
     membershipVersion: 0,
     moving: false,
     owedLoops: 0,
-    sweptDespawns: 0
+    sweptDespawns: 0,
+    buildChecks: []
   };
 }

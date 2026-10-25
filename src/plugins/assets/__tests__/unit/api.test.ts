@@ -376,6 +376,43 @@ describe("sceneBundles", () => {
   });
 });
 
+describe("sceneComing (F61 S2)", () => {
+  // Bug: the coming list outlived the commit, so the scene after next could never let the bundle go.
+  it("is cleared by sceneBundles: after the commit a dropped name goes once nothing leaves", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    await mock.start();
+    await mock.api.load("board.chains");
+    mock.api.sceneComing(["board.chains"]);
+    mock.api.sceneBundles(["board.chains"]);
+    mock.api.sceneBundles([]);
+    releaseSceneLeft(mock.assetsCtx);
+
+    expect(mock.ctx.state.sceneComing).toEqual([]);
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
+  });
+
+  // Bug: a discarded build kept holding its bundles, or the list grew instead of being replaced.
+  it("is replaced by each call: sceneComing([]) on a discard lets the coming bundles go", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board", "board.chains") });
+
+    await mock.start();
+    await mock.api.load("board");
+    await mock.api.load("board.chains");
+    mock.api.sceneComing(["board", "board.chains"]);
+    mock.api.sceneComing(["board"]);
+    releaseLeftBundles(mock.assetsCtx);
+
+    expect(mock.api.isLoaded("board")).toBe(true);
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
+
+    mock.api.sceneComing([]);
+    releaseLeftBundles(mock.assetsCtx);
+
+    expect(mock.api.isLoaded("board")).toBe(false);
+  });
+});
+
 describe("the bundles of a leaving scene (F51)", () => {
   // Bug: the next rest released what the scene before named while its elements still played their exit.
   it("holds what the scene before named while anything carries Exiting, at a rest too", async () => {

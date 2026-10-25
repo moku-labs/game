@@ -77,5 +77,21 @@ export const BUDGET = {
    * half on a leaving one: 0 B. The same 40 systems without `scenes` ran at 1 193 000 frames/s
    * before the check and run at 731 000 with it: about 13 ns a system.
    */
-  skipCheck: 0
+  skipCheck: 0,
+  /** F61 S2: `projection.left()` with no build: one field read. New: 0 B. */
+  buildLeftIdle: 0,
+  /** F61 S2: `projection.left()` while a build runs: a clock read and a subtraction. New: 0 B. */
+  buildLeft: 0,
+  /** F61 S2: `projection.isBuilding(entity)` with no build: one field read. New: 0 B. */
+  buildIsBuildingIdle: 0,
+  /** F61 S2: `projection.isBuilding(entity)` while a build of 300 views runs: one `Set` lookup. New: 0 B. */
+  buildIsBuilding: 0,
+  /** F61 S2: `projection.built()` with no build: one field read. New: 0 B. */
+  buildBuiltIdle: 0,
+  /** F61 S2: `projection.built()` over two `onBuild` checks that answer true. New: 0 B. */
+  buildBuilt: 0,
+  /** F61 S2: the frame start of phase `input` with no build: one field read. New: 0 B. */
+  buildStartFrameIdle: 0,
+  /** F61 S2: the frame start of phase `input` while a build runs: one number written. New: 0 B. */
+  buildStartFrame: 0
 } as const;

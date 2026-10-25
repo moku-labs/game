@@ -158,15 +158,23 @@ app.world.ecs.snapshot().entities[0];
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
 | `membershipVersion(): number` | Moves every time a view enters the live views, leaves them, or is forgotten after its despawn, and on a clear. `ui` hosts the views of a projection again only when it moved. Allocates nothing. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. A view's `keyOf` is the frozen address it keeps for its life: the same object every call. |
-| `causeOf(entity)` | Why the view's motion hooks play: `"mount"` when the view came or goes with its screen (a scene mount, a load, a restore), `"change"` when a commit changed a live screen; also answers for a view that just left, until the next sweep. A world projection passes the same value to `enter`/`exit` as their fourth argument. |
+| `causeOf(entity)` | Why the view's motion hooks play: `"mount"` when the view came or goes with its screen (a scene mount, a load, a restore), `"change"` when a commit changed a live screen, `"discard"` when `discard()` dropped the scene build it belonged to; also answers for a view that just left, until the next sweep. A world projection passes the same value to `enter`/`exit` as their fourth argument; a discarded view plays no exit, so a game's hook never sees `"discard"`. |
 | `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
-| `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
+| `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is neither mounted nor being built. A projection the running build mounts answers its building views, so a host of the coming scene can take them before the swap (`isBuilding` tells them apart). `ui` uses it to host a projection inside a slot. |
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. A driver may report what its additive tracks add right now with the optional `offsetsOf(entity, component)`: the world then compares the value under a loop with the rest pose. |
 | `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
 | `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home, and where a restore and a load put it. The owner records the pose it draws the element with, every time that changes. The pose of an entity that is gone is dropped in the next live frame. |
 | `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. A key whose entity is gone is dropped in the next live frame, also when the remover was never called. |
 | `onConverged(listener)` | Calls the listener after a reconcile a restore or a load caused, when every view and every element stands on its rest pose and every track on them is ended. `ui` builds its roots again after it, so each element stands as freshly mounted. The remover is safe to call twice. |
 | `rerunAll()` | Marks every mounted projection dirty and forces `view` for every item. |
+| `build(names, owner, layers, budgetMs): boolean` | Starts building the next scene aside (`scenes`, on a live switch with a drawing renderer). See [Building the next scene aside](#building-the-next-scene-aside). |
+| `built(): boolean` | True while a build runs and every `onBuild` check answers true; false without a build. `scenes` polls it once a frame. |
+| `commit()` | The swap: the building projections become mounted. `scenes` calls it right after `setLayers(coming)` and `unmount(leaving)`. Does nothing without a build. |
+| `discard()` | The abort: every entity of the build is despawned with no motion. Does nothing without a build. |
+| `left(): number` | Milliseconds of building budget left in this frame; `Infinity` without a build. Allocates nothing. |
+| `isBuilding(entity): boolean` | Whether an entity belongs to the running build. One set lookup, allocates nothing. |
+| `onBuild(check)` | Registers "my part of the build is done" (`ui`, `renderer`); the remover is safe to call twice. |
+| `adopt(entity)` | Marks an entity another plugin spawned for a building root as building (`ui`'s elements). Nothing without a build. |
 
 The authoring helpers are pure and exported from the package root:
 `component`, `tag`, `resource`, `mut`, `system`, `projection`, and `Layer`, `Order`, `Exiting`,
@@ -183,12 +191,63 @@ system keeps its own state in a resource. `snapshot()` leaves a value that is no
 const Looks = resource("boardLooks", () => ({ shown: new Map<Entity, { look: string }>() }));
 ```
 
+#### Building the next scene aside
+
+A live switch on a drawing renderer builds the next scene while the old one stays current, drawn and
+alive (spec 31, F61 S2). The world keeps the build in a table of its own, so a projection name never
+has two records:
+
+```ts
+// `scenes`, at the build start: the coming list, its layers, 4 ms a frame for ui and renderer.
+const projection = ctx.deps.world.projection;
+projection.build(["board.back", "board.items", "hud"], ctx.state.owner, scene.layers, 4); // true
+
+// ui and renderer, every build frame: the building work fits in what is left of the frame.
+projection.left(); // 3: 1 ms of the 4 ms is spent
+projection.isBuilding(boardItem); // true: hold it, do not draw it, do not hit it
+
+// `scenes`, in its `signals` callback: the frame `built()` first answers true is the swap.
+projection.built(); // true
+projection.setLayers(scene.layers);
+projection.unmount(["ward.beds"]);
+projection.commit(); // the board is mounted, nothing is building
+```
+
+- **`build`** answers `false` and touches nothing when a listed projection is mounted now under
+  other layer rules (the coming list declares its `layer` or `lift` otherwise): the caller mounts in
+  one block instead. Otherwise every name and its layers are checked against the coming list, as
+  `mount` checks them; a projection the current scene mounts and the coming list declares alike
+  (F23) is not touched; every other one is mounted at once, direct, against the committed state, and
+  its views are flagged building right after their spawn (`onAdded` fires inside the spawn, before
+  any flag can). A screen root draws at the `Order` of its place in the coming list from the start.
+  `entityOf` does not answer for a building view, `keyOf`, `causeOf` and `entitiesOf` do. A second
+  `build` while one runs throws `[game] A scene is already being built.`; an unknown name or an
+  undeclared layer throws before anything is built; a `view` that throws is not logged as in a
+  mount: every entity the build spawned is despawned and the throw goes on, so `enterScene` rejects
+  with the old scene standing.
+- **During the build** nothing of it moves: no hook runs, and the loops of its views wait. A commit
+  of the store reaches the building projections too, direct, so the coming scene shows the latest
+  state and a new key enters flagged building.
+- **`left()`** is `budgetMs` minus the game clock time since the frame started: world reads
+  `clock.now()` first thing in its `input` callback, the moment `Now` gets. The clock counts whole
+  milliseconds. Negative once the frame spent more; a caller still does one unit a frame.
+- **`built()`** is true when a build runs and every `onBuild` check answers true. A registration
+  stays across builds.
+- **`commit()`** moves the building projections into the mounted ones at the places a `mount` of
+  the same list gives them, a kept one takes its new place, and every moved and kept projection
+  takes the layer list `setLayers` stored just before, so the next scene compares it by identity.
+  The loops of the moved views start in the next live sweep, the swap frame.
+- **`discard()`** despawns every view of the build with the cause `"discard"` and no exit, then every
+  entity `adopt` marked, and drops the table. The mounted projections, the layer list and the
+  scene are untouched, so a later `mount` of the same names works as before.
+
 #### `Now` — the frame's moment
 
 `Now` (`{ now }`, exported from the package root) is the moment of the frame on the game's clock:
 `world` writes `clock.now()` into it once when it starts and first thing in every `input` callback,
 before the reconcile and the systems of `input`, headless too. Every system of a frame reads the same
-moment, the one a node gets as `now`, so a fake clock makes it exact in tests. A write by a system is
+moment, the one a node gets as `now`, so a fake clock makes it exact in tests. A running scene build
+counts its frame budget (`left()`) from the same moment. A write by a system is
 overwritten at the next frame. It is `0` only before the world started, and after the internal
 `ecs.clear()` until the next frame. `snapshot().resources` holds it as `Now: { now }`.
 
@@ -573,8 +632,9 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
-  views, registered keys, recorded rest poses, the `onConverged` listeners, the despawn queue,
-  entities and resources, forgets the mounted scene, and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
+  views, registered keys, recorded rest poses, the `onConverged` listeners, a running scene build
+  and the `onBuild` checks, the despawn queue, entities and resources, forgets the mounted scene,
+  and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Doors
 

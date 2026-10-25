@@ -16,7 +16,7 @@ import type { AnySystem, Entity, Owner, WorldPhase } from "../../ecs/types";
 import { withDeps } from "../../lifecycle";
 import type { MotionHandle, Track, TweenDriver } from "../../projection/types";
 import type { EcsModule, ProjectionModule } from "../../types";
-import { type Item, mountBoard } from "../unit/board";
+import { BOARD, type Item, LAYERS, MOUNT_OWNER, mountBoard } from "../unit/board";
 import { createMockWorld, type MockWorld } from "../unit/mock-world";
 
 /** The first term of the walk fixture: every entity carries it. */
@@ -71,10 +71,11 @@ const RUNNING: MotionHandle = {
 };
 
 /** Where a fixture puts what it reads, so no read is optimised away. */
-const sink: { entity: Entity; value: unknown; flag: boolean } = {
+const sink: { entity: Entity; value: unknown; flag: boolean; ms: number } = {
   entity: 0,
   value: undefined,
-  flag: false
+  flag: false,
+  ms: 0
 };
 
 /**
@@ -650,5 +651,56 @@ export function recordedFrameFixture(): () => void {
 
     recordFrame(ctx, frame);
     clearAllChanges(state);
+  };
+}
+
+/** The frame calls of a scene build (F61 S2) that ui, renderer, scenes and world make every frame. */
+export type BuildCalls = {
+  left(): void;
+  isBuilding(): void;
+  built(): void;
+  startFrame(): void;
+};
+
+/**
+ * `projection.left()`, `isBuilding(entity)`, `built()` and the frame start of phase `input`, with or without a
+ * running build. The building world holds a build of 300 board items and two `onBuild` checks that answer true, as
+ * ui and renderer register them; `isBuilding` asks about one of its views. The idle world built nothing.
+ *
+ * @param building - Whether a build runs.
+ * @returns One call of each.
+ */
+export function buildCallsFixture(building: boolean): BuildCalls {
+  const world = createMockWorld();
+
+  mountBoard(world, []);
+  world.api.projection.unmount([BOARD]);
+  world.model.player = { items: boardItems(ENTITIES) };
+  world.api.projection.onBuild(() => true);
+  world.api.projection.onBuild(() => sink.ms < Number.POSITIVE_INFINITY);
+  if (building) world.api.projection.build([BOARD], MOUNT_OWNER, LAYERS, 4);
+
+  const { projection } = stableModules(world);
+  const entity = projection.entitiesOf(BOARD)[0] ?? 0;
+  const now = world.clock.now();
+
+  // The building calls must measure the building path, not the idle one.
+  if (projection.isBuilding(entity) !== building || projection.built() !== building) {
+    throw new Error("buildCallsFixture: the build did not start as asked");
+  }
+
+  return {
+    left: (): void => {
+      sink.ms = projection.left();
+    },
+    isBuilding: (): void => {
+      sink.flag = projection.isBuilding(entity);
+    },
+    built: (): void => {
+      sink.flag = projection.built();
+    },
+    startFrame: (): void => {
+      projection.startFrame(now);
+    }
   };
 }

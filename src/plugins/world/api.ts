@@ -93,8 +93,8 @@ function exposeEcs(ecs: EcsModule, projection: ProjectionModule): EcsApi {
 }
 
 /**
- * Reduces the projection module to what `scenes`, `input`, `i18n` and the `/inspect` door call.
- * The frame methods and the dirty flag stay with the plugin root.
+ * Reduces the projection module to what `scenes`, `input`, `i18n`, `ui`, `renderer` and the
+ * `/inspect` door call. The frame methods and the dirty flag stay with the plugin root.
  *
  * @param projection - The full projection module.
  * @returns The public projection API.
@@ -122,7 +122,15 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     restOf: projection.restOf,
     registerKey: projection.registerKey,
     onConverged: projection.onConverged,
-    rerunAll: projection.rerunAll
+    rerunAll: projection.rerunAll,
+    build: projection.build,
+    built: projection.built,
+    commit: projection.commit,
+    discard: projection.discard,
+    left: projection.left,
+    isBuilding: projection.isBuilding,
+    onBuild: projection.onBuild,
+    adopt: projection.adopt
   };
 }
 

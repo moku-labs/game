@@ -25,7 +25,8 @@ only uses the texture *type*.
 | `audio(key): { bytes, mime } \| undefined` | A loaded sound: its bytes, undecoded, and the MIME type of its container, `"audio/mpeg"` for an `.mp3` and `"audio/mp4"` for an `.m4a`. `audio` decodes the bytes once, or streams them from a `blob:` URL built with `mime`, and drops them when `assets:bundle-unloaded` names the key. Same silent miss as `font`. |
 | `usage(): { textureMb, budgetMb, bundles }` | Loaded bundles only, sorted by name. `lastUsed` is the use counter, never a clock. |
 | `has(bundle): boolean` | Whether the manifest carries the bundle, loaded or not; the same live and headless. A strings-only sub-feature has a file-less bundle, so `has` is true for it; a code-only sub-feature has none. |
-| `sceneBundles(named): void` | Called by `scenes` after every switch and every re-read whose list changed: the bundles the mounted scene names (its `bundle`, then its `bundles(state)`). Each call replaces the list. A listed bundle is held: never a budget victim, never released by `release: "leave"`. A bundle the list named before and names no more stays held until a phase `sync` finds nothing carrying `Exiting` (F51, F51b). A game never calls it. |
+| `sceneBundles(named): void` | Called by `scenes` after every switch and every re-read whose list changed: the bundles the mounted scene names (its `bundle`, then its `bundles(state)`). Each call replaces the list. A listed bundle is held: never a budget victim, never released by `release: "leave"`. A bundle the list named before and names no more stays held until a phase `sync` finds nothing carrying `Exiting` (F51, F51b). It empties the coming list (`sceneComing`): the coming scene is the mounted one now. A game never calls it. |
+| `sceneComing(named): void` | Called by `scenes` at the build start of a live switch, while the scene before stays mounted (F61 S2): the bundles the scene being built names. Each call replaces the list. A listed bundle is held as a mounted scene's: never a budget victim, never released by `release: "leave"`. The next `sceneBundles` empties it; a discarded build calls `sceneComing([])`. A game never calls it. |
 | `companions.add(companion): () => void` | Adds a `BundleCompanion` (see Companions). Returns the remover; a second removal does nothing. Bundles loaded before are not replayed, so a plugin adds it in `onInit`. |
 
 ```ts
@@ -319,7 +320,7 @@ fast walk skips the preload.
 
 `enforceBudget` runs after every load and at every rest node: while `usedMb > textureBudgetMb` it
 unloads the bundle with the smallest use counter that is not pinned, not named by the mounted
-scene (`sceneBundles`), not `boot` or `core`, not loading and not in the queue, with reason
+scene (`sceneBundles`), a leaving scene or the scene being built (`sceneComing`), not `boot` or `core`, not loading and not in the queue, with reason
 `"budget"`. It does not read `release`. When nothing may go it writes one warning
 naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
 `page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
@@ -330,7 +331,8 @@ and the `feature`-tier bundles of its flow's feature. A node without a scene kee
 node before it. A `bundles` that throws fails the `load` stage, and flow rolls the node back.
 
 **`release: "leave"`.** A loaded `"leave"` bundle is unloaded with reason `"leave"` once nothing
-holds it. Held: pinned, named by the mounted scene (the last `sceneBundles` list), named by a
+holds it. Held: pinned, named by the mounted scene (the last `sceneBundles` list), named by the
+scene being built aside (the last `sceneComing` list, from the build start to the swap), named by a
 scene that left while anything still carries `Exiting` (its elements play their exit), its feature on
 the stack (a frame — the outer frames of a sub-flow too — whose node's owner in
 `flow.describe()` is that feature; a node of the parent does not hold the child's bundle), or a
@@ -484,7 +486,7 @@ preload, no event and no budget work.
 | `paths.ts` | The paths of the manifest for the hot swap: `indexPaths`, `refusalOf` (why the page reloads instead) and `batchesOf` (the changed files by bundle). |
 | `swap.ts` | The replace itself: `createSwap` (the handler behind `ui:hot-swap`), one bundle after another. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
-| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle` (it forgets the bundle's warm), `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
+| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle` (it forgets the bundle's warm), `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `nameComingBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
@@ -671,7 +673,7 @@ again every frame (`changes: "frame"`), because a bundle loads without a model c
   `ecs.system` registers `assets.leave` (phase `sync`), where the bundles a leaving scene named go
   once its elements played their exit.
 - Module import, not a plugin dependency: `namedBundles` and `isSceneDefinition` of
-  `scenes/bundles.ts`. `scenes` calls `sceneBundles`; `i18n` calls `companions.add`, `has` and
+  `scenes/bundles.ts`. `scenes` calls `sceneBundles` and `sceneComing`; `i18n` calls `companions.add`, `has` and
   `isLoaded`, only when `assets` is composed.
 
 The global `ui:hot-swap` is hooked with no `depends` on `ui`.

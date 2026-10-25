@@ -440,6 +440,31 @@ describe("releaseLeftBundles", () => {
   });
 });
 
+describe("the bundles of a scene being built (F61 S2)", () => {
+  // Bug: the rest before the swap released a "leave" bundle the scene being built aside names.
+  it('keeps a "leave" bundle of the coming scene from releaseLeftBundles', async () => {
+    const mock = await episodeAt([]);
+
+    mock.api.sceneComing(["ep01"]);
+    releaseLeftBundles(mock.assetsCtx);
+
+    expect(loaded(mock)).toEqual(["ep01", "keeper"]);
+  });
+
+  // Bug: budget pressure during the build evicted a bundle the coming scene is about to draw.
+  it("never evicts a coming bundle under budget pressure", async () => {
+    const mock = await loadAll();
+
+    mock.api.sceneComing(["alpha"]);
+    mock.config.textureBudgetMb = 0.13;
+    enforceBudget(mock.assetsCtx);
+
+    expect(mock.api.isLoaded("alpha")).toBe(true);
+    expect(mock.api.isLoaded("beta")).toBe(false);
+    expect(mock.api.isLoaded("gamma")).toBe(false);
+  });
+});
+
 describe("unloadBundle and the companions", () => {
   it("calls each companion's unload once, after the textures went and before the event", async () => {
     const mock = await loadAll();

@@ -2,7 +2,7 @@
  * @file assets plugin — API factory. `app.assets`: the members over the state, all of them
  * answering at once while headless.
  */
-import { nameSceneBundles, unloadBundle, usedMb } from "./budget";
+import { nameComingBundles, nameSceneBundles, unloadBundle, usedMb } from "./budget";
 import { addCompanion } from "./companions";
 import { withDeps } from "./lifecycle";
 import { warmBundle } from "./ready";
@@ -186,6 +186,7 @@ export function createAssetsApi(ctx: KernelSlice): Api {
     audio: (key: string): AudioAsset | undefined => loadedRecord(assets, key)?.audio.get(key),
     usage: (): Usage => usage(assets),
     sceneBundles: (named: readonly string[]): void => nameSceneBundles(ctx.state, named),
+    sceneComing: (named: readonly string[]): void => nameComingBundles(ctx.state, named),
     has: (bundle: string): boolean => Object.hasOwn(ctx.state.manifest.bundles, bundle),
     companions: {
       add: (companion: BundleCompanion): (() => void) => addCompanion(ctx.state, companion)

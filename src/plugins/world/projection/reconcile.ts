@@ -124,6 +124,8 @@ function hintFor(
  * play the `enter` hook and the `loop` hook when the reconcile plays motions. The loop is not
  * kept with the view's handles: a change cancels those, and the loop runs until the view dies.
  * A direct reconcile plays neither hook. The view then owes its loop, which the sweep starts.
+ * A view of a projection the running build mounts is flagged building right after its spawn: the
+ * spawn fires `onAdded` inside the call, so no flag can come before it.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -157,16 +159,20 @@ function enterEntry(
     entry.direct ? "mount" : "change"
   );
 
+  const state = pctx.ctx.state.projection;
+  const building = state.building;
+
   mounted.live.set(entry.key, view);
-  pctx.ctx.state.projection.byEntity.set(entity, view);
-  pctx.ctx.state.projection.membershipVersion += 1;
+  state.byEntity.set(entity, view);
+  state.membershipVersion += 1;
+  if (building?.mounted.get(spec.name) === mounted) building.entities.add(entity);
 
   const hook = spec.motion?.enter;
   const loop = spec.motion?.loop;
 
   if (entry.direct) {
     view.loopOwed = true;
-    pctx.ctx.state.projection.owedLoops += 1;
+    state.owedLoops += 1;
 
     return;
   }
@@ -701,6 +707,8 @@ function reconcileOne(
 
     exitGone(pctx, spec, mounted, next, entry, counts);
   } catch (error) {
+    if (options.strict === true) throw error;
+
     pctx.ctx.log.error("world:projection-failed", { projection: spec.name }, asError(error));
 
     return;
@@ -747,8 +755,47 @@ function isCurrent(mounted: Mounted, snapshot: Snapshot, options: ReconcileOptio
 }
 
 /**
- * Runs one reconcile over every mounted projection, or over the named ones only. A converging
- * one then brings the elements other plugins own home and tells their owners.
+ * Reconciles the projections of one table against the snapshot: every one, or the named ones only.
+ * A projection whose last reconcile read the same trees is passed over as `skipBy` decides; `runWith`
+ * is how the others run.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param table - The mounted projections, or the ones a build mounts aside.
+ * @param snapshot - The model snapshot of this reconcile.
+ * @param skipBy - The options of the reconcile that was asked for.
+ * @param runWith - The options each projection of this table is reconciled with.
+ * @param counts - The counters of this reconcile.
+ * @param used - The hints that reached an entry.
+ */
+function reconcileTable(
+  pctx: ProjectionCtx,
+  table: ReadonlyMap<string, Mounted>,
+  snapshot: Snapshot,
+  skipBy: ReconcileOptions,
+  runWith: ReconcileOptions,
+  counts: Counts,
+  used: Set<Hint>
+): void {
+  const specs = pctx.ctx.state.projection.specs;
+
+  for (const [name, mounted] of table) {
+    if (skipBy.names !== undefined && !skipBy.names.includes(name)) continue;
+
+    const spec = specs.get(name);
+
+    if (spec === undefined || isCurrent(mounted, snapshot, skipBy)) continue;
+
+    counts.projections += 1;
+    reconcileOne(pctx, spec, mounted, snapshot, runWith, counts, used);
+  }
+}
+
+/**
+ * Runs one reconcile over every mounted projection, or over the named ones only, or over the table
+ * the options name. A reconcile of every mounted projection reaches the projections a running build
+ * mounts aside too, direct, so a store change during the build reaches the coming scene and none of
+ * its views plays a motion unseen. A converging one then brings the elements other plugins own home
+ * and tells their owners.
  *
  * @param pctx - Domain context of the projection module.
  * @param options - Which projections, play or direct, whether `view` is forced, whether every
@@ -760,16 +807,14 @@ export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void 
   const snapshot = pctx.ctx.deps.model.store.snapshot();
   const counts = emptyCounts();
   const used = emptyHintSet();
+  const building = state.building;
 
-  for (const [name, mounted] of state.mounted) {
-    if (options.names !== undefined && !options.names.includes(name)) continue;
+  reconcileTable(pctx, options.table ?? state.mounted, snapshot, options, options, counts, used);
 
-    const spec = state.specs.get(name);
+  if (building !== undefined && options.table === undefined && options.names === undefined) {
+    const aside = { ...options, direct: true };
 
-    if (spec === undefined || isCurrent(mounted, snapshot, options)) continue;
-
-    counts.projections += 1;
-    reconcileOne(pctx, spec, mounted, snapshot, options, counts, used);
+    reconcileTable(pctx, building.mounted, snapshot, options, aside, counts, used);
   }
 
   if (options.converge) {

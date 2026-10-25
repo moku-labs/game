@@ -40,7 +40,7 @@ export function usedMb(state: State): number {
 
 /**
  * Picks the bundle that leaves next: the loaded one with the smallest use counter that is not
- * pinned, not named by the mounted scene, not permanent and not in the preload queue. Its
+ * pinned, not named by the mounted, a leaving or the coming scene, not permanent and not in the preload queue. Its
  * `release` is not read: a `"leave"` bundle is a candidate like any other.
  *
  * @param state - The plugin state.
@@ -56,6 +56,7 @@ export function pickVictim(state: State): string | undefined {
     if (record.status !== "loaded" || entry === undefined) continue;
     if (state.pinned.has(name) || isPermanent(entry.tier)) continue;
     if (state.sceneNamed.includes(name) || state.sceneLeaving.includes(name)) continue;
+    if (state.sceneComing.includes(name)) continue;
     if (state.queue?.bundles.includes(name) === true) continue;
     if (record.lastUsed >= smallest) continue;
 
@@ -246,9 +247,9 @@ export function featuresOnStack(ctx: AssetsCtx): ReadonlySet<string> {
 
 /**
  * Tells whether a bundle must stay where the game stands now: it is pinned (a bundle of the node
- * entered last), the mounted scene names it (the last list `sceneBundles` received), a leaving
- * scene named it and its elements still play their exit, its feature is in `onStack`, or its tier
- * is permanent.
+ * entered last), the mounted scene names it (the last list `sceneBundles` received), the scene
+ * being built names it (the last list `sceneComing` received), a leaving scene named it and its
+ * elements still play their exit, its feature is in `onStack`, or its tier is permanent.
  *
  * @param ctx - Domain context of the plugin.
  * @param name - Name of the bundle.
@@ -268,6 +269,7 @@ export function isHeld(
     state.pinned.has(name) ||
     state.sceneNamed.includes(name) ||
     state.sceneLeaving.includes(name) ||
+    state.sceneComing.includes(name) ||
     onStack.has(entry.feature) ||
     isPermanent(entry.tier)
   );
@@ -294,7 +296,7 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
 /**
  * Takes the list the mounted scene names now. A bundle the list named before and names no more
  * stays held as a leaving scene's, until nothing carries `Exiting` (F51); a name the list takes
- * again is the mounted scene's once more.
+ * again is the mounted scene's once more. The coming list empties: its scene is the mounted one.
  *
  * @param state - The plugin state.
  * @param named - The bundles the mounted scene names now.
@@ -307,9 +309,21 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
     if (!named.includes(name) && !leaving.includes(name)) leaving.push(name);
   }
 
-  // The new list is the mounted scene's.
+  // The new list is the mounted scene's; the scene that was coming is mounted now.
   state.sceneLeaving = leaving;
   state.sceneNamed = [...named];
+  state.sceneComing = [];
+}
+
+/**
+ * Takes the list the scene being built aside names: each call replaces the one before, and `[]`
+ * ends the hold of a discarded build. `nameSceneBundles` empties it at the swap (F61 S2).
+ *
+ * @param state - The plugin state.
+ * @param named - The bundles the coming scene names.
+ */
+export function nameComingBundles(state: State, named: readonly string[]): void {
+  state.sceneComing = [...named];
 }
 
 /**
