@@ -14,11 +14,15 @@ import type { StepCommand, VisualApp, VisualStep } from "./types";
 export type StepInput = Readonly<Record<string, Json | undefined>>;
 
 /**
+ * A checkpoint step taken apart: its name, and whether it lands every motion before the snapshot
+ * (`finish`, true unless the step says `finish: false`, F87).
+ */
+export type CheckpointEntry = { kind: "checkpoint"; name: string; finish: boolean };
+
+/**
  * One step taken apart: a checkpoint by its name, or a command by its short name with its input.
  */
-export type StepEntry =
-  | { kind: "checkpoint"; name: string }
-  | { kind: "command"; name: StepCommand; input: StepInput };
+export type StepEntry = CheckpointEntry | { kind: "command"; name: StepCommand; input: StepInput };
 
 /**
  * A command of the catalogue as the runner calls it: by its short name, with the input the step
@@ -92,8 +96,46 @@ function stepNames(): string {
 }
 
 /**
- * Takes one step apart and checks its shape: exactly one key, either `checkpoint` or a step
- * command with an input object. The checkpoint name is checked by the caller.
+ * Takes a checkpoint step apart: its name, a string, and `finish`, a boolean when it is there; no
+ * other key.
+ *
+ * @param at - The test and the step, for the message.
+ * @param fields - The step.
+ * @returns The checkpoint.
+ * @throws {Error} When the name is not a string, `finish` not a boolean, or another key is there.
+ * @example
+ * ```ts
+ * checkpointEntry('[game] Visual test "fade", step 2', { checkpoint: "glow", finish: false }); // { kind: "checkpoint", name: "glow", finish: false }
+ * ```
+ */
+function checkpointEntry(at: string, fields: Readonly<Record<string, unknown>>): CheckpointEntry {
+  const { checkpoint: name, finish = true, ...others } = fields;
+
+  if (Object.keys(others).length > 0) {
+    throw new Error(
+      `${at} is not one command.\n  A checkpoint takes its name and finish, like { checkpoint: "name", finish: false }.`
+    );
+  }
+
+  if (typeof name !== "string") {
+    throw new TypeError(
+      `${at}: the checkpoint name is not a string.\n  Write the checkpoint as { checkpoint: "name" }.`
+    );
+  }
+
+  if (typeof finish !== "boolean") {
+    throw new TypeError(
+      `${at}: finish of the checkpoint "${name}" is not a boolean.\n  Write finish: false to keep the motions running, or leave it out.`
+    );
+  }
+
+  return { kind: "checkpoint", name, finish };
+}
+
+/**
+ * Takes one step apart and checks its shape: a checkpoint (its name, and `finish` when it is
+ * there), or exactly one step command with an input object. The checkpoint name is checked by the
+ * caller.
  *
  * @param test - The test name, for the message.
  * @param step - The step.
@@ -111,6 +153,8 @@ export function stepEntry(test: string, step: VisualStep, index: number): StepEn
   const [name, ...others] = Object.keys(fields);
   const at = `[game] Visual test "${test}", step ${index + 1}`;
 
+  if (Object.hasOwn(fields, "checkpoint")) return checkpointEntry(at, fields);
+
   if (name === undefined || others.length > 0) {
     throw new Error(
       `${at} is not one command.\n  Write one command by its short name, or { checkpoint: "name" }.`
@@ -118,14 +162,6 @@ export function stepEntry(test: string, step: VisualStep, index: number): StepEn
   }
 
   const value = fields[name];
-
-  if (name === "checkpoint") {
-    if (typeof value === "string") return { kind: "checkpoint", name: value };
-
-    throw new Error(
-      `${at}: the checkpoint name is not a string.\n  Write the checkpoint as { checkpoint: "name" }.`
-    );
-  }
 
   if (!isStepCommand(name)) {
     throw new Error(

@@ -89,7 +89,8 @@ export function checkVisualTest(name: string, steps: readonly VisualStep[]): voi
 /**
  * Defines a visual test: where it starts, what `game.restore` loads, and its steps. A step is a
  * `/control` command by its short name with that command's input, or `{ checkpoint: name }`,
- * where the runner saves `state.json` and `describe.json` next to the test. `walk` runs fast: a
+ * where the runner lands every motion and saves `state.json` and `describe.json` next to the test;
+ * `{ checkpoint: name, finish: false }` keeps the motions running for the snapshot. `walk` runs fast: a
  * popup its last node opens never mounts, so the step before a checkpoint that shows a node's
  * result is `answer` or `tap`. With `webgl: true` the test also runs in the WebGL leg
  * (`--webgl`), whose pictures go to `screen.webgl.webp`: set it on a screen with a custom filter.

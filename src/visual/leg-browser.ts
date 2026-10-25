@@ -25,7 +25,7 @@ import {
   pageStep,
   pageVerify
 } from "./page-script";
-import { stepEntry } from "./steps";
+import { type CheckpointEntry, stepEntry } from "./steps";
 import type {
   CheckpointResult,
   ChromeBrowser,
@@ -478,17 +478,19 @@ async function checkScreen(
  * headless leg wrote, the picture against the baseline of the leg's backend.
  *
  * @param play - The test being played.
- * @param name - The checkpoint name.
+ * @param entry - The checkpoint: its name, and whether it lands the motions.
  * @param where - The step, for the message.
  * @returns What the browser leg found there.
  * @throws {Error} When the page did not settle, gave no picture, or broke.
  */
-async function checkpoint(play: Play, name: string, where: string): Promise<PixelFound> {
+async function checkpoint(play: Play, entry: CheckpointEntry, where: string): Promise<PixelFound> {
   const { test, run } = play;
+  const { name } = entry;
   const shot = await callPage(play.page, pageCheckpoint, {
     test: test.name,
     where,
-    settleFrames: run.settleFrames
+    settleFrames: run.settleFrames,
+    finish: entry.finish
   });
 
   if (shot.screen === undefined) {
@@ -537,7 +539,7 @@ async function playSteps(play: Play, found: Map<string, PixelFound>): Promise<vo
     const where = `step ${index + 1} (${entry.kind === "checkpoint" ? "checkpoint" : entry.name})`;
 
     if (entry.kind === "checkpoint") {
-      found.set(entry.name, await checkpoint(play, entry.name, where));
+      found.set(entry.name, await checkpoint(play, entry, where));
       continue;
     }
 

@@ -224,6 +224,27 @@ describe("the headless leg", () => {
     expect(seen.read).toBe(0);
   });
 
+  // F87: every checkpoint landed its motions, so a hint that fades out at the end of its animation never showed on a
+  // snapshot. With finish: false the snapshot keeps the motions where the same frames left them.
+  it("keeps the motions running at a checkpoint with finish: false: the popup is caught mid-swing", async () => {
+    const kept = openPopup(7, [{ tap: { key: "open" } }, { checkpoint: "open", finish: false }]);
+
+    await runHeadlessLeg(setup, [kept], runInto());
+
+    const running = await baseline("open-popup", "open", "describe.json");
+    const swinging = JSON.stringify(running);
+
+    expect(swinging).toContain('"Animation":{"playing":1}');
+    expect(swinging).toContain('"scale":0.8001111111111111');
+
+    await runHeadlessLeg(setup, [openPopup(7)], runInto(true));
+
+    const landed = JSON.stringify(await baseline("open-popup", "open", "describe.json"));
+
+    expect(landed).not.toContain('"Animation"');
+    expect(landed).toContain('"scale":1');
+  });
+
   it("ends a test at a failing step, naming the step and the command", async () => {
     const test = openPopup(7, [
       { checkpoint: "home" },

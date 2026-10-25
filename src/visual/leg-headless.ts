@@ -10,7 +10,7 @@ import { describeOf, stateOf } from "./capture";
 import { stableJson } from "./compare";
 import { baselineFile, checkBaseline } from "./files";
 import { frames, settle } from "./settle";
-import { runStep, stepEntry } from "./steps";
+import { type CheckpointEntry, runStep, stepEntry } from "./steps";
 import type {
   CheckpointResult,
   VisualApp,
@@ -146,18 +146,24 @@ async function settleAt(play: Play, where: string): Promise<void> {
 }
 
 /**
- * Plays a checkpoint: settle, land every track and loop, two frames, then read and compare.
+ * Plays a checkpoint: settle, land every track and loop unless it says `finish: false`, two
+ * frames, then read and compare.
  *
  * @param play - The test being played.
- * @param name - The checkpoint name.
+ * @param entry - The checkpoint: its name, and whether it lands the motions.
  * @param where - The step, for the message.
  * @returns The outcome of the checkpoint; `pixels` is skipped in this leg.
  */
-async function checkpoint(play: Play, name: string, where: string): Promise<CheckpointResult> {
+async function checkpoint(
+  play: Play,
+  entry: CheckpointEntry,
+  where: string
+): Promise<CheckpointResult> {
   const { app, test, run: options } = play;
+  const { name } = entry;
 
   await settleAt(play, where);
-  app.anim.finishAll();
+  if (entry.finish) app.anim.finishAll();
   await frames(app, REST_FRAMES);
 
   const file = (kind: string): string => baselineFile(options.dir, test.name, name, kind);
@@ -197,7 +203,7 @@ async function playSteps(play: Play, checkpoints: CheckpointResult[]): Promise<v
     const where = `step ${index + 1} (${entry.kind === "checkpoint" ? "checkpoint" : entry.name})`;
 
     if (entry.kind === "checkpoint") {
-      checkpoints.push(await checkpoint(play, entry.name, where));
+      checkpoints.push(await checkpoint(play, entry, where));
       continue;
     }
 
