@@ -1,10 +1,10 @@
 /**
  * @file scenes plugin — the switch, run inside the awaited `flow.onEnter("scene")` callback. It
  * loads every bundle the scene names first and touches the world in one synchronous block, so the
- * renderer never sees a scene half built. In live mode it also waits for the textures of those
- * bundles to reach the GPU, `renderer.uploads` a drawn frame while the old scene is still on screen,
- * so the frame that shows the new scene uploads nothing: on a Galaxy A26 the first switch to a board
- * took one frame of 284 ms with 8 uploads in it (F61). At a node of the mounted scene it re-reads what the
+ * renderer never sees a scene half built. In live mode it then waits until the textures of those
+ * bundles are on the GPU. The upload queue sends `renderer.uploads` of them per drawn frame while
+ * the old scene is still on screen, so the frame that shows the new scene uploads nothing. On a
+ * Galaxy A26 the first switch to a board took one frame of 284 ms with 8 uploads in it (F61). At a node of the mounted scene it re-reads what the
  * scene names and awaits a bundle that is new, without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
@@ -257,7 +257,7 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition, named: readonly string[])
  * Switches to another scene: it reads what the scene names from the committed state, awaits all
  * of it and only then builds the scene. In live mode it waits between the two for the textures of
  * those bundles to reach the GPU; a fast walk does not, so tests and restores keep their pace. An
- * aborted node returns without touching anything.
+ * aborted node, or a plugin stopped during the wait, returns without touching anything.
  *
  * @param ctx - Domain context of the plugin.
  * @param target - Id of the scene to mount.
@@ -278,9 +278,14 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
 
   await untilAborted(ctx, named, run.signal);
 
-  if (run.mode === "live" && !run.signal.aborted) await untilWarmed(ctx, named, run.signal);
+  const warmsFirst = run.mode === "live" && !run.signal.aborted;
 
-  if (run.signal.aborted) return;
+  if (warmsFirst) await untilWarmed(ctx, named, run.signal);
+
+  // A stop resolves a waiting warm instead of rejecting it, before `flow` aborts the node.
+  const stopped = ctx.state.teardown === undefined;
+
+  if (run.signal.aborted || stopped) return;
 
   apply(ctx, scene, named);
 }

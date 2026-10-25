@@ -238,6 +238,89 @@ describe("the switch around the bundle load", () => {
     expect(mock.state.current).toBe("home");
   });
 
+  // Bug: the switch mounts before the textures of the new scene are on the GPU (F61).
+  it("warms every named bundle in live mode and mounts only once the warm answered", async () => {
+    const mock = startedMock();
+    const warm = Promise.withResolvers<void>();
+
+    mock.assets.warm.gate = warm.promise;
+
+    const entering = mock.enter({ scene: "board" });
+
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+    expect(mock.assets.warm.calls).toEqual(["board"]);
+    expect(mock.world.calls).toEqual([]);
+
+    warm.resolve();
+    await entering;
+
+    expect(mock.state.current).toBe("board");
+  });
+
+  // Bug: a fast walk (a restore, a test) waits for uploads it never shows.
+  it("does not warm on a fast rest node", async () => {
+    const mock = startedMock();
+
+    mock.assets.warm.gate = new Promise<void>(() => undefined);
+    await mock.enter({ rest: true, scene: "board" }, { mode: "fast" });
+
+    expect(mock.assets.warm.calls).toEqual([]);
+    expect(mock.state.current).toBe("board");
+  });
+
+  // Bug: a failed warm rolls the node back, though the bundle is loaded and its first draw uploads it.
+  it("warns on a warm that fails and switches anyway", async () => {
+    const mock = startedMock();
+    const error = new Error("unloaded");
+
+    mock.assets.warm.gate = Promise.reject(error);
+    await mock.enter({ scene: "board" });
+
+    expect(mock.state.current).toBe("board");
+    expect(mock.log.warn).toHaveBeenCalledWith(
+      "scenes: a bundle's textures were not uploaded before the switch",
+      { bundle: "board", error }
+    );
+  });
+
+  // Bug: a node aborted while the textures upload hangs, or mounts the scene it left.
+  it("returns and touches nothing when the node was aborted during the warm", async () => {
+    const mock = startedMock();
+    const controller = new AbortController();
+
+    mock.assets.warm.gate = new Promise<void>(() => undefined);
+
+    const entering = mock.enter({ scene: "board" }, { signal: controller.signal });
+
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    controller.abort();
+    await entering;
+
+    expect(mock.assets.warm.calls).toEqual(["board"]);
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.state.current).toBeUndefined();
+  });
+
+  // Bug: a stop answers the waiting warm, and the switch mounts on a stopped plugin during teardown.
+  it("mounts nothing when the plugin stopped while the warm waited", async () => {
+    const mock = startedMock();
+    const warm = Promise.withResolvers<void>();
+
+    mock.assets.warm.gate = warm.promise;
+
+    const entering = mock.enter({ scene: "board" });
+
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    mock.stop();
+    warm.resolve();
+    await entering;
+
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.state.current).toBeUndefined();
+    expect(mock.emitted).toEqual([]);
+  });
+
   it("logs a load that fails after the abort instead of throwing it", async () => {
     const mock = startedMock();
     const controller = new AbortController();

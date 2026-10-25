@@ -33,6 +33,8 @@ export type FakeAssets = {
   /** Releases the held loads of one bundle and keeps the others held. */
   releaseBundle(bundle: string): void;
   fail(error: unknown): void;
+  /** Every bundle `warm` was called with, and how a test steers it: `gate` is what each warm returns. */
+  warm: { calls: string[]; gate: Promise<void> };
   api: AssetsApi;
 };
 
@@ -132,7 +134,7 @@ export function nodeOf(node: Partial<NodeInfo>): NodeInfo {
 }
 
 /**
- * Creates the fake `assets`: `load`, which resolves at once unless a test gates it, and `warm`, which always does.
+ * Creates the fake `assets`: `load`, which resolves at once unless a test gates it, and `warm`, which records the bundle and returns `warm.gate`.
  *
  * @returns The fake assets and its recordings.
  */
@@ -141,6 +143,7 @@ function createFakeAssets(): FakeAssets {
   const control = { gated: false };
   const held: HeldLoad[] = [];
   const named: string[][] = [];
+  const warm = { calls: [] as string[], gate: Promise.resolve() };
 
   const api = {
     load: async (bundle: string): Promise<void> => {
@@ -152,8 +155,12 @@ function createFakeAssets(): FakeAssets {
         });
       }
     },
-    // Nothing is drawn here: the warm of a loaded bundle answers at once.
-    warm: (): Promise<void> => Promise.resolve(),
+    // Nothing is drawn here: the warm of a loaded bundle answers at once unless a test sets `gate`.
+    warm: (bundle: string): Promise<void> => {
+      warm.calls.push(bundle);
+
+      return warm.gate;
+    },
     unload: () => undefined,
     isLoaded: () => true,
     texture: () => undefined,
@@ -180,6 +187,7 @@ function createFakeAssets(): FakeAssets {
     fail: (error: unknown): void => {
       for (const entry of held.splice(0)) entry.reject(error);
     },
+    warm,
     api
   };
 }

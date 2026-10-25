@@ -129,7 +129,7 @@ app.scenes.current(); // "home"
 | 8 | `named` = the scene's `bundle` and its `bundles` of the committed state. A throw rejects before any load |
 | 9 | `assets.load` for every name at once, all awaited, raced against the node's abort signal. The first failure rejects |
 | 10 | Live mode only: `assets.warm` for every name at once, all awaited, raced against the abort. The textures go to the GPU `renderer.uploads` a drawn frame while the old scene is still on screen, so the frame that shows the new scene uploads nothing (F61: on a Galaxy A26 the first switch to a board took one frame of 284 ms with 8 uploads in it). Textures already on the GPU, headless, no device or `uploads: 0` answer at once. A warm that fails is a warning, never a rejection. A fast walk skips this step |
-| 11 | Aborted: return. Nothing was touched, the old scene is still there |
+| 11 | Aborted, or the plugin stopped during the warm (a stop answers a waiting upload instead of rejecting it): return. Nothing was touched, the old scene is still there |
 | 12 | One synchronous block: `setLayers` → `unmount` what only the old scene lists → `mount` the new scene's list (a projection both list stays, see below) → `current` → `world.ecs.setScene(id)` → `named` → `assets.sceneBundles(named)` → `time.wake()` → `time.sceneChanged()` → `scenes:changed` |
 
 **The scene of the systems.** `world.ecs.setScene(id)` in the block above tells the world which scene is mounted, so a system with `scenes: ["board"]` runs while the board is mounted, and while it leaves: the world keeps the scene before as leaving until nothing carries `Exiting` any more (world README, "When a system runs"). A failed or aborted switch returns before the block, so the world keeps the old scene.
