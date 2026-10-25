@@ -119,4 +119,17 @@ describe("defineVisualTest", () => {
       '[game] Visual test "popup", step 1: the checkpoint name is not a string.\n  Write the checkpoint as { checkpoint: "name" }.'
     );
   });
+
+  it("takes finish: false on a checkpoint, and refuses a finish that is not a boolean (F87)", () => {
+    const kept = defineVisualTest("popup", {
+      start,
+      steps: [{ checkpoint: "open", finish: false }]
+    });
+    const wrong = { checkpoint: "open", finish: "no" } as unknown as VisualStep;
+
+    expect(kept.steps).toEqual([{ checkpoint: "open", finish: false }]);
+    expect(() => defineVisualTest("popup", { start, steps: [wrong] })).toThrow(
+      '[game] Visual test "popup", step 1: finish of the checkpoint "open" is not a boolean.\n  Write finish: false to keep the motions running, or leave it out.'
+    );
+  });
 });

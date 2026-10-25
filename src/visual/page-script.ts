@@ -488,17 +488,20 @@ export async function pageStep(
 }
 
 /**
- * Plays a checkpoint in the page: settle, land every track and loop, two stepped frames, then the
+ * Plays a checkpoint in the page: settle, land every track and loop unless the step says
+ * `finish: false` (F87), two stepped frames, then the
  * picture of the whole canvas as lossless WebP and the state through the doors. The game is
  * paused, so the picture is the stage after the last stepped frame. With the frame check on, a
  * missed frame or mark logged in the meantime fails the checkpoint.
  *
- * @param argument - The test and the step, and the most frames to settle.
+ * @param argument - The test and the step, the most frames to settle, and whether to land the
+ *   motions.
  * @param argument.settleFrames - The most frames to settle.
+ * @param argument.finish - True to land every motion before the picture.
  * @returns The state and the picture, or why the checkpoint failed.
  */
 export async function pageCheckpoint(
-  argument: Place & { settleFrames: number }
+  argument: Place & { settleFrames: number; finish: boolean }
 ): Promise<PageAnswer<PageShot>> {
   try {
     const handles = pageHandles();
@@ -507,7 +510,9 @@ export async function pageCheckpoint(
 
     if (unsettled !== undefined) return { ok: false, error: unsettled };
 
-    game.anim.finishAll();
+    // Land the motions unless the step keeps them running, then the two frames of the headless leg.
+    if (argument.finish) game.anim.finishAll();
+
     await pageTick(handles);
     await pageTick(handles);
 
