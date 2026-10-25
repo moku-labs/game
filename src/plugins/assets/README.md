@@ -42,7 +42,9 @@ await app.assets.warm("ep01.board"); // the board's textures are on the GPU, 1 p
 Why `warm`: a texture reaches the GPU at its first draw, inside the frame that shows it. On a Galaxy
 A26 (Chrome, WebGPU, Pixi 8.22) one upload costs about 9 ms whatever its size: the frame that showed
 the 6 cold textures (9.4 MB) of A Memory Missing's memory screen took 55 ms, and 8 ms once they were
-uploaded before. `warm` moves that work into the frames before the scene mounts.
+uploaded before. `warm` moves that work into the frames before the scene mounts. A live scene
+switch warms the bundles of the new scene by itself (scenes README, the switch); a game calls `warm`
+for what shows without a switch, such as a popup over the mounted scene.
 
 `load` has no `signal` parameter. Internal callers — the enter callback, the `load` effect and the
 preload queue — call `loadBundle(ctx, bundle, signal, reason)` of `tiers.ts` directly.

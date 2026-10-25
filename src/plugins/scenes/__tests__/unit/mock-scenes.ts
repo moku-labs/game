@@ -132,7 +132,7 @@ export function nodeOf(node: Partial<NodeInfo>): NodeInfo {
 }
 
 /**
- * Creates the fake `assets`: one member, `load`, which resolves at once unless a test gates it.
+ * Creates the fake `assets`: `load`, which resolves at once unless a test gates it, and `warm`, which always does.
  *
  * @returns The fake assets and its recordings.
  */
@@ -152,6 +152,8 @@ function createFakeAssets(): FakeAssets {
         });
       }
     },
+    // Nothing is drawn here: the warm of a loaded bundle answers at once.
+    warm: (): Promise<void> => Promise.resolve(),
     unload: () => undefined,
     isLoaded: () => true,
     texture: () => undefined,

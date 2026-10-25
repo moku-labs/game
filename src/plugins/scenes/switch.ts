@@ -1,7 +1,10 @@
 /**
  * @file scenes plugin — the switch, run inside the awaited `flow.onEnter("scene")` callback. It
  * loads every bundle the scene names first and touches the world in one synchronous block, so the
- * renderer never sees a scene half built. At a node of the mounted scene it re-reads what the
+ * renderer never sees a scene half built. In live mode it also waits for the textures of those
+ * bundles to reach the GPU, `renderer.uploads` a drawn frame while the old scene is still on screen,
+ * so the frame that shows the new scene uploads nothing: on a Galaxy A26 the first switch to a board
+ * took one frame of 284 ms with 8 uploads in it (F61). At a node of the mounted scene it re-reads what the
  * scene names and awaits a bundle that is new, without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
@@ -24,6 +27,34 @@ function whenAborted(signal: AbortSignal): Promise<void> {
 
     signal.addEventListener("abort", () => resolve(), { once: true });
   });
+}
+
+/**
+ * Waits for the textures of loaded bundles to reach the GPU, or for the abort. It never rejects:
+ * a warm that fails (an unload during it) is logged and the switch goes on, its first draw
+ * uploads as before. Headless, without a device or with `uploads: 0` the warms answer at once,
+ * and textures already on the GPU are not waited for.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param bundles - The bundles the scene being entered names, all of them loaded.
+ * @param signal - The abort signal of the node.
+ * @returns A promise that resolves when every warm settled or the node was aborted.
+ */
+async function untilWarmed(
+  ctx: ScenesCtx,
+  bundles: readonly string[],
+  signal: AbortSignal
+): Promise<void> {
+  const warms = bundles.map(bundle =>
+    ctx.deps.assets.warm(bundle).catch((error: unknown) => {
+      ctx.log.warn("scenes: a bundle's textures were not uploaded before the switch", {
+        bundle,
+        error
+      });
+    })
+  );
+
+  await Promise.race([Promise.all(warms), whenAborted(signal)]);
 }
 
 /**
@@ -224,7 +255,9 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition, named: readonly string[])
 
 /**
  * Switches to another scene: it reads what the scene names from the committed state, awaits all
- * of it and only then builds the scene. An aborted node returns without touching anything.
+ * of it and only then builds the scene. In live mode it waits between the two for the textures of
+ * those bundles to reach the GPU; a fast walk does not, so tests and restores keep their pace. An
+ * aborted node returns without touching anything.
  *
  * @param ctx - Domain context of the plugin.
  * @param target - Id of the scene to mount.
@@ -244,6 +277,8 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
   const named = namedBundles(scene, committedState(ctx));
 
   await untilAborted(ctx, named, run.signal);
+
+  if (run.mode === "live" && !run.signal.aborted) await untilWarmed(ctx, named, run.signal);
 
   if (run.signal.aborted) return;
 
