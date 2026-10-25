@@ -24,20 +24,52 @@ export type ErasedFields = AnyComponent extends ComponentType<infer Value> ? Val
 
 /**
  * A sound, owned by `anim` and handled by `audio`. It is a `flow` descriptor and a timeline step
- * at once: `fx(sfx("board.merge"))` in a node, or `sfx("board.merge")` inside a `sequence`.
+ * at once: `fx(sfx("board.merge"))` in a node, or `sfx("board.merge")` inside a `sequence`. A
+ * sound with an `id` is named: a second one with the same id fades the first out over `fadeMs`,
+ * and `stopSfx(id)` stops it. The payload carries `id` and `fadeMs` only when they were given.
  *
  * @example
  * ```ts
  * const descriptor: SfxDescriptor = {
- *   kind: "sfx", payload: { key: "board.merge", bus: "sfx" }, cosmetic: true
+ *   kind: "sfx", payload: { key: "voice.hello", bus: "voice", id: "voice", fadeMs: 200 }, cosmetic: true
  * };
  * ```
  */
 export type SfxDescriptor = {
   readonly kind: "sfx";
-  readonly payload: { readonly key: string; readonly bus: string };
+  readonly payload: {
+    readonly key: string;
+    readonly bus: string;
+    /** Name of the sound: one sound per id plays, and `stopSfx(id)` stops it. */
+    readonly id?: string;
+    /** Fade of the sound with the same id this one replaces; `audio`'s `sfxFadeMs` when absent. */
+    readonly fadeMs?: number;
+  };
   readonly cosmetic: true;
   /** Never set: `await fx(sfx(...))` resolves nothing. */
+  readonly $result?: () => void;
+};
+
+/**
+ * Stops the named sound an `sfx(key, { id })` started, owned by `anim` and handled by `audio`.
+ * Like `sfx` it is a descriptor and a timeline step at once; an id nothing plays is silent.
+ *
+ * @example
+ * ```ts
+ * const descriptor: StopSfxDescriptor = {
+ *   kind: "stopSfx", payload: { id: "voice", fadeMs: 200 }, cosmetic: true
+ * };
+ * ```
+ */
+export type StopSfxDescriptor = {
+  readonly kind: "stopSfx";
+  readonly payload: {
+    readonly id: string;
+    /** Fade-out of the sound; `audio`'s `sfxFadeMs` when absent. */
+    readonly fadeMs?: number;
+  };
+  readonly cosmetic: true;
+  /** Never set: `await fx(stopSfx(...))` resolves nothing. */
   readonly $result?: () => void;
 };
 
@@ -72,7 +104,7 @@ export type HapticDescriptor = {
 };
 
 /**
- * The two descriptors `anim` owns. As a step, the descriptor is dispatched through
+ * The three descriptors `anim` owns. As a step, the descriptor is dispatched through
  * `flow.fx.dispatch` when the step is reached; a kind nobody handles is silent.
  *
  * @example
@@ -80,7 +112,7 @@ export type HapticDescriptor = {
  * const step: FxStep = { kind: "haptic", payload: { kind: "light" }, cosmetic: true };
  * ```
  */
-export type FxStep = SfxDescriptor | HapticDescriptor;
+export type FxStep = SfxDescriptor | StopSfxDescriptor | HapticDescriptor;
 
 /**
  * The descriptor `play(animation, slots)` builds. The payload names the animation, so the

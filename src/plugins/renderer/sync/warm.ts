@@ -30,6 +30,8 @@ const PROBE_SIZE = 4;
 /** The content subjects the renderer warms itself, in queue order; the text follows once a font is installed. */
 const CONTENT: readonly WarmSubject[] = Object.freeze([
   "sprite",
+  "sprite-add",
+  "sprite-screen",
   "graphics",
   "particles-normal",
   "particles-add"
@@ -63,17 +65,19 @@ function particleProperties(): Record<string, boolean> {
 
 /**
  * A 4 × 4 sprite of Pixi's white texture: the batch pipeline of sprites, nine-slices, plain bitmap text and batched
- * graphics.
+ * graphics, with the blend of a `Sprite` or a `NineSlice` glow (part of a WebGPU pipeline's key).
  *
  * @param pixi - The module that draws.
- * @returns The sprite.
+ * @param blend - `"normal"` (Pixi's own mode left as it is), `"add"` or `"screen"`.
+ * @returns The sprite, labelled `renderer.warm.sprite`, or `renderer.warm.sprite-<blend>` for a glow.
  */
-function whiteSprite(pixi: PixiModule): PixiSprite {
+function whiteSprite(pixi: PixiModule, blend: "normal" | "add" | "screen" = "normal"): PixiSprite {
   const sprite = new pixi.Sprite(pixi.Texture.WHITE);
 
-  sprite.label = "renderer.warm.sprite";
+  sprite.label = blend === "normal" ? "renderer.warm.sprite" : `renderer.warm.sprite-${blend}`;
   sprite.width = PROBE_SIZE;
   sprite.height = PROBE_SIZE;
+  if (blend !== "normal") sprite.blendMode = blend;
 
   return sprite;
 }
@@ -144,6 +148,8 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     holder,
     list: [],
     sprite: whiteSprite(pixi),
+    spriteAdd: whiteSprite(pixi, "add"),
+    spriteScreen: whiteSprite(pixi, "screen"),
     graphics,
     particlesNormal: particlesOf(pixi, "normal"),
     particlesAdd: particlesOf(pixi, "add"),
@@ -171,6 +177,8 @@ function dropObjects(warm: WarmState): void {
     objects.clipFrame,
     objects.holder,
     objects.sprite,
+    objects.spriteAdd,
+    objects.spriteScreen,
     objects.graphics,
     objects.particlesNormal,
     objects.particlesAdd,
@@ -391,6 +399,12 @@ function nodeOf(
   switch (subject) {
     case "sprite": {
       return objects.sprite;
+    }
+    case "sprite-add": {
+      return objects.spriteAdd;
+    }
+    case "sprite-screen": {
+      return objects.spriteScreen;
     }
     case "graphics": {
       return objects.graphics;

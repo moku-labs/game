@@ -203,6 +203,24 @@ describe("scenes:changed", () => {
 
     expect(context.sources).toHaveLength(1);
   });
+
+  it("leaves a sound with an id playing across the change", async () => {
+    // Bug caught: entering the next scene cuts the narrator mid-line (the owner chose "no").
+    const { mock, context } = started();
+
+    await mock.fx("sfx", {
+      kind: "sfx",
+      payload: { key: "story.line1", bus: "sfx", id: "voice" },
+      cosmetic: true
+    });
+    mock.hooks["scenes:changed"]({ from: "board", to: "shop", music: "home.theme" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(context.sources[0]?.stoppedAt).toBeUndefined();
+    expect(context.gains[3]?.gain.ramps).toEqual([]);
+    expect(mock.state.named.get("voice")?.source).toBe(context.sources[0]);
+  });
 });
 
 describe("assets:bundle-unloaded", () => {

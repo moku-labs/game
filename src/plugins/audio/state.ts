@@ -9,6 +9,7 @@ import type {
   Config,
   MusicSwitch,
   MusicTrack,
+  NamedSound,
   RetiringTrack,
   SfxRequest,
   State
@@ -36,9 +37,18 @@ function emptyWarned(): Set<string> {
 /**
  * Creates the queue of sounds fired while the unlock is pending.
  *
- * @returns An empty queue, keyed by asset key.
+ * @returns An empty queue, keyed by `"#" + id` or by asset key.
  */
 function emptyPending(): Map<string, SfxRequest> {
+  return new Map();
+}
+
+/**
+ * Creates the map of the sounds that play under an id.
+ *
+ * @returns An empty map, keyed by id.
+ */
+function emptyNamed(): Map<string, NamedSound> {
   return new Map();
 }
 
@@ -90,6 +100,7 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     unlocked: false,
     resuming: false,
     pendingSfx: emptyPending(),
+    named: emptyNamed(),
     decoded: emptyCache(),
     warned: emptyWarned(),
     warnedVolumes: false,

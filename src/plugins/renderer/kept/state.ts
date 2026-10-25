@@ -25,6 +25,15 @@ function emptyMap<Key, Value>(): Map<Key, Value> {
 }
 
 /**
+ * Creates an empty set. Same reason as `emptyRecords`.
+ *
+ * @returns An empty set.
+ */
+function emptySet(): Set<string> {
+  return new Set();
+}
+
+/**
  * Creates an empty weak set. Same reason as `emptyRecords`.
  *
  * @returns An empty weak set.
@@ -61,6 +70,7 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     on: allowed && config.debug.kept !== false,
     allowed,
     warnedBudget: false,
+    warnedBlend: emptySet(),
     verifySkipped: 0,
     bypassed: false,
     flushPasses: 0,
@@ -163,6 +173,7 @@ export function stopKept(state: KeptState): void {
   state.flushPasses = 0;
   state.drawnPictures = 0;
   state.warnedBudget = false;
+  state.warnedBlend.clear();
   state.verifySkipped = 0;
   state.bypassed = false;
 }

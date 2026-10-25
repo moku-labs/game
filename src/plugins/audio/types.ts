@@ -183,6 +183,11 @@ export type Config = {
   buses: { master: number; music: number; sfx: number };
   /** Cross-fade of a music switch, in real milliseconds of the context clock. */
   musicFadeMs: number;
+  /**
+   * Fade of a named sound, an `sfx` with `id`, in real milliseconds of the context clock: when a
+   * new sound with its id replaces it and names no `fadeMs`, or a stop names none.
+   */
+  sfxFadeMs: number;
   /** Reads the player's choice from the committed player. `undefined`: the buses stay at `buses`. */
   volumes: Volumes | undefined;
   /** Context factory, the test seam. `undefined`: `new AudioContext()` when the global exists, otherwise headless. */
@@ -197,17 +202,20 @@ export type Config = {
 
 /**
  * One sound that started: a play of an `sfx` or a music track that began. `at` is the elapsed
- * game time in milliseconds, `app.time.snapshot().elapsed` at the start.
+ * game time in milliseconds, `app.time.snapshot().elapsed` at the start. `id` is there only for
+ * an `sfx` started with one.
  *
  * @example
  * ```ts
  * const entry: SoundEntry = { key: "ui.click", bus: "sfx", kind: "sfx", at: 1600 };
+ * const line: SoundEntry = { key: "story.line1", bus: "sfx", kind: "sfx", id: "voice", at: 2400 };
  * ```
  */
 export type SoundEntry = {
   readonly key: string;
   readonly bus: Bus;
   readonly kind: "sfx" | "music";
+  readonly id?: string;
   readonly at: number;
 };
 
@@ -251,6 +259,16 @@ export type MusicTrack = {
 export type MusicSwitch = { key: string };
 
 /**
+ * The sound that plays, or still decodes, under one id. The entry object is the token, as a
+ * `MusicSwitch` is: a sound whose entry is no longer the one `named` holds when its buffer arrives
+ * starts nothing. `gain` and `source` stay `undefined` until the sound started.
+ */
+export type NamedSound = {
+  gain: GainNode | undefined;
+  source: AudioBufferSourceNode | undefined;
+};
+
+/**
  * audio plugin state.
  */
 export type State = {
@@ -262,8 +280,13 @@ export type State = {
   unlocked: boolean;
   /** A gesture called `resume()` and it has not settled yet. The start attempt never sets it. */
   resuming: boolean;
-  /** Sounds fired while `resuming`, one per key; played when the context runs, dropped when it does not. */
+  /**
+   * Sounds fired while `resuming`: one per id, under `"#" + id`, and one per key for a sound
+   * without an id. Played when the context runs, dropped when it does not.
+   */
   pendingSfx: Map<string, SfxRequest>;
+  /** The sound that plays, or decodes, under each id; an entry leaves when its sound ends or stops. */
+  named: Map<string, NamedSound>;
   /** Per key, evicted per key on `assets:bundle-unloaded` and `assets:replaced`. */
   decoded: Map<string, Promise<AudioBuffer>>;
   /** Asset keys that already got their one warning. */
@@ -275,7 +298,7 @@ export type State = {
   musicPending: MusicSwitch | undefined;
   /** Removes the two window listeners of the unlock. */
   unlock: (() => void) | undefined;
-  /** The removers of the two fx handlers. */
+  /** The removers of the three fx handlers. */
   removers: Array<() => void>;
   /** The `navigator.audioSession` that took `config.session`; `stop` writes `"auto"` back to it. */
   session: AudioSessionLike | undefined;
@@ -289,8 +312,9 @@ export type State = {
 };
 
 /**
- * audio plugin API, `app.audio`. Three buses and the unlock flag: what a game changes about sound
- * it commits to the player state, which this plugin applies on the next commit.
+ * audio plugin API, `app.audio`. Three buses, the unlock flag, the journal and the stop of a named
+ * sound: what a game changes about sound it commits to the player state, which this plugin applies
+ * on the next commit.
  *
  * @example
  * ```ts
@@ -404,6 +428,24 @@ export type AudioApi = {
    * ```
    */
   journal(): readonly SoundEntry[];
+
+  /**
+   * Fades out and ends the sound that plays under one id, an `sfx` started with `{ id }`. The
+   * same stop as the effect kind `stopSfx`: a sound with that id still decoding never starts, one
+   * waiting for the unlock is dropped, and an id nothing plays under changes nothing. Headless it
+   * does nothing.
+   *
+   * @param id - The id the sound was started with, `"voice"` for `sfx(key, { id: "voice" })`.
+   * @param options - How the sound ends.
+   * @param options.fadeMs - Length of the fade in real milliseconds; `config.sfxFadeMs` when absent, `0` cuts it at once.
+   * @example
+   * ```ts
+   * // A test composed with `journal: 200` cuts the narrator's line before it checks the next screen.
+   * app.audio.journal().at(-1); // { key: "story.line1", bus: "sfx", kind: "sfx", id: "voice", at: 0 }
+   * app.audio.stop("voice", { fadeMs: 0 }); // the line ends now and stays in the journal
+   * ```
+   */
+  stop(id: string, options?: { fadeMs?: number }): void;
 };
 
 /**
@@ -453,9 +495,10 @@ export type BundleUnloaded = AssetsEvents["assets:bundle-unloaded"];
 export type AssetsReplaced = AssetsEvents["assets:replaced"];
 
 /**
- * What one play of a sound asks for: the key and the bus the sound goes to.
+ * What one play of a sound asks for: the key, the bus the sound goes to, the id it plays under
+ * (`undefined`: none), and the fade in milliseconds of the sound with that id it replaces.
  */
-export type SfxRequest = { key: string; bus: string };
+export type SfxRequest = { key: string; bus: string; id: string | undefined; fadeMs: number };
 
 /**
  * What one music switch asks for: the key, or `null` to fade the current track out.

@@ -4,7 +4,8 @@ import { bytesPerCall, startHollows } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: a hollow frame (F59 of change 2026-10-22-ready-warm-hollow) synced every pass, as a view in the change set is:
-// standing still it writes nothing, and resized it rewrites its vertices in the arrays it has.
+// standing still it writes nothing, and resized it rewrites its vertices in the arrays it has; a rim drawn with a blend
+// (F68) compares it and writes nothing either.
 // ---------------------------------------------------------------------------
 
 describe("a hollow nine-slice", () => {
@@ -28,5 +29,17 @@ describe("a hollow nine-slice", () => {
         mock.modules.sync.pass();
       })
     ).toBeLessThanOrEqual(BUDGET.hollowResize + NOISE);
+  });
+
+  // Bug: the blend of a glass rim is written, or compared through an object, at every sync.
+  it("allocates nothing a frame when it blends screen (F68)", async () => {
+    const { mock, panel } = await startHollows();
+
+    // In place, as the stored value: the first pass writes it, every pass after compares it.
+    panel.blend = "screen";
+
+    expect(bytesPerCall(() => mock.modules.sync.pass())).toBeLessThanOrEqual(
+      BUDGET.hollowBlendStill + NOISE
+    );
   });
 });

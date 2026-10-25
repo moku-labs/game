@@ -11,12 +11,12 @@ afterEach(() => {
 });
 
 describe("startAudio", () => {
-  it("registers both fx handlers, neither of them for fast mode", () => {
+  it("registers the three fx handlers, none of them for fast mode", () => {
     const mock = createMockAudio();
 
     mock.start();
 
-    expect(mock.flow.registered.map(entry => entry.kind)).toEqual(["sfx", "music"]);
+    expect(mock.flow.registered.map(entry => entry.kind)).toEqual(["sfx", "stopSfx", "music"]);
     expect(mock.flow.registered.every(entry => entry.runInFast)).toBe(false);
   });
 
@@ -61,7 +61,7 @@ describe("startAudio", () => {
 });
 
 describe("stopAudio", () => {
-  it("removes both handlers, the window listeners, and closes the context", async () => {
+  it("removes the three handlers, the window listeners, and closes the context", async () => {
     const fakeWindow = installFakeWindow();
     const context = createFakeContext();
     const mock = createMockAudio({ context });
@@ -69,7 +69,7 @@ describe("stopAudio", () => {
     mock.start();
     await mock.stop();
 
-    expect(mock.flow.removed).toEqual(["sfx", "music"]);
+    expect(mock.flow.removed).toEqual(["sfx", "stopSfx", "music"]);
     expect(fakeWindow.listeners).toHaveLength(0);
     expect(context.closes).toBe(1);
     expect(mock.state.context).toBeUndefined();
@@ -88,6 +88,24 @@ describe("stopAudio", () => {
     expect(context.sources[0]?.stoppedAt).toBe(0);
     expect(mock.state.music).toBeUndefined();
     expect(mock.state.decoded.size).toBe(0);
+  });
+
+  it("stops every named sound at once and forgets the ids", async () => {
+    // Bug caught: the narrator's line plays on after the app stopped, or its id stays taken.
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    mock.state.unlocked = true;
+    await mock.fx("sfx", {
+      kind: "sfx",
+      payload: { key: "story.line1", bus: "sfx", id: "voice" },
+      cosmetic: true
+    });
+    await mock.stop();
+
+    expect(context.sources[0]?.stoppedAt).toBe(0);
+    expect(mock.state.named.size).toBe(0);
   });
 
   it("closes nothing headless", async () => {

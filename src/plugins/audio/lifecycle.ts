@@ -7,7 +7,8 @@ import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
 import { applyAllGains, buildGraph } from "./graph";
-import { musicOf, playMusic, playSfx, stopMusic } from "./playback";
+import { stopAllNamed } from "./named";
+import { musicOf, playMusic, playSfx, stopMusic, stopNamedSfx } from "./playback";
 import { applySession, resetSession } from "./session";
 import { disposeStream } from "./stream";
 import type { AudioContextLike, AudioCtx, Config, Deps, KernelSlice, State } from "./types";
@@ -64,8 +65,8 @@ function createContext(config: Config): AudioContextLike | undefined {
 }
 
 /**
- * Starts the plugin in `onStart`: the audio session first, before any sound exists, then both
- * effect handlers, then the context with its graph and its unlock. The unlock asks the context to
+ * Starts the plugin in `onStart`: the audio session first, before any sound exists, then the
+ * three effect handlers, then the context with its graph and its unlock. The unlock asks the context to
  * run at once: a shell that lets audio play is unlocked with no touch, and a browser that wants a
  * gesture gets the two listeners. The handlers are registered even headless, so a node that
  * awaits a sound resolves in plain Bun exactly as it does in a browser.
@@ -81,6 +82,7 @@ export function startAudio(ctx: KernelSlice): void {
 
   state.removers.push(
     fx.handle("sfx", descriptor => playSfx(audio, descriptor), { runInFast: false }),
+    fx.handle("stopSfx", descriptor => stopNamedSfx(audio, descriptor), { runInFast: false }),
     fx.handle(
       "music",
       descriptor => playMusic(audio, musicOf(descriptor, ctx.config.musicFadeMs)),
@@ -101,9 +103,9 @@ export function startAudio(ctx: KernelSlice): void {
 }
 
 /**
- * Frees everything `onStart` opened: the two handler registrations, the two window listeners, the
- * music track, every streamed track still fading with its timer, the journal, the audio session
- * and the context itself. The tracks are freed before the close, while their nodes can still
+ * Frees everything `onStart` opened: the three handler registrations, the two window listeners,
+ * the music track, every named sound, every streamed track still fading with its timer, the
+ * journal, the audio session and the context itself. The tracks are freed before the close, while their nodes can still
  * disconnect. A browser caps how many contexts a page may hold, so the close is the point of this
  * teardown.
  *
@@ -115,6 +117,7 @@ export async function stopAudio(state: State): Promise<void> {
 
   removeUnlock(state);
   stopMusic(state);
+  stopAllNamed(state);
 
   for (const entry of state.retiring) disposeStream(state, entry.stream);
 

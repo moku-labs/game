@@ -54,6 +54,9 @@ api.setVolume("voice", 1);
 // @ts-expect-error — "voice" is not one of the three buses.
 api.muted("voice");
 
+// @ts-expect-error — the option is `fadeMs`: a misspelt one must not fall back to the default fade.
+api.stop("voice", { fade: 200 });
+
 const volumes: Volumes = () => ({ music: 0.5, master: 1 });
 
 expectTypeOf(volumes).toMatchTypeOf<Config["volumes"]>();

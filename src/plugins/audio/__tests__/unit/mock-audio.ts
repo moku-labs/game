@@ -160,6 +160,7 @@ function defaultConfig(): Config {
   return {
     buses: { master: 1, music: 0.6, sfx: 1 },
     musicFadeMs: 600,
+    sfxFadeMs: 120,
     volumes: undefined,
     context: undefined,
     journal: 0,

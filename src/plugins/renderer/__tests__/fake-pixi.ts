@@ -624,10 +624,17 @@ export class FakeBitmapText extends FakeContainer {
   }
 }
 
+/**
+ * Pixi's own blend mode of a view the renderer writes: `"inherit"` until written, as Pixi's `localBlendMode` starts. On
+ * the view classes, not on `FakeContainer`: the particle container of the effects fake declares its own.
+ */
+const INHERIT_BLEND = "inherit";
+
 /** A fake Pixi sprite. */
 export class FakeSprite extends FakeContainer {
   public texture: FakeTexture;
   public tint = 0xff_ff_ff;
+  public blendMode = INHERIT_BLEND;
   public anchor = new FakePoint(0.5, 0.5);
 
   public constructor(texture: FakeTexture = FakeTexture.WHITE) {
@@ -645,6 +652,7 @@ export class FakeNineSliceSprite extends FakeContainer {
   public width = 0;
   public height = 0;
   public tint = 0xff_ff_ff;
+  public blendMode = INHERIT_BLEND;
   public leftWidth: number | undefined = undefined;
   public topHeight: number | undefined = undefined;
   public rightWidth: number | undefined = undefined;
@@ -723,6 +731,7 @@ export class FakeMeshGeometry {
  */
 export class FakeMesh extends FakeContainer {
   public tint = 0xff_ff_ff;
+  public blendMode = INHERIT_BLEND;
   public readonly geometry: FakeMeshGeometry;
   private held: FakeTexture = FakeTexture.WHITE;
 
@@ -768,6 +777,7 @@ export type FakePaint = {
 /** A fake Pixi graphics: it records what was drawn and how often it was cleared. */
 export class FakeGraphics extends FakeContainer {
   public tint = 0xff_ff_ff;
+  public blendMode = INHERIT_BLEND;
   /** How often the object was cleared, which is how often the renderer redrew it. */
   public clears = 0;
   public ops: FakeDrawOp[] = [];

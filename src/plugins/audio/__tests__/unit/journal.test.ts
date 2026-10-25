@@ -44,6 +44,24 @@ describe("audio journal", () => {
     ]);
   });
 
+  it("records the id of a sound that has one, and no id key on any other", async () => {
+    // Bug caught: every entry gets `id: undefined`, so the describe baselines of every game change.
+    const mock = unlocked(10);
+
+    mock.time.elapsed = 400;
+    await mock.fx("sfx", {
+      kind: "sfx",
+      payload: { key: "story.line1", bus: "sfx", id: "voice" },
+      cosmetic: true
+    });
+    await mock.fx("sfx", sfx("ui.click"));
+
+    expect(mock.api.journal()).toStrictEqual([
+      { key: "story.line1", bus: "sfx", kind: "sfx", id: "voice", at: 400 },
+      { key: "ui.click", bus: "sfx", kind: "sfx", at: 400 }
+    ]);
+  });
+
   it("records a music start on the music bus, and not a switch to the same key", async () => {
     const mock = unlocked(10);
 

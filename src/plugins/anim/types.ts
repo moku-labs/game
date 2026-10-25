@@ -566,6 +566,7 @@ export type {
   RunningTimeline,
   SfxDescriptor,
   Step,
+  StopSfxDescriptor,
   TimelineRuntime
 } from "./timeline/types";
 export type { StepMotion, Track } from "./tween/types";

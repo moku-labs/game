@@ -22,6 +22,7 @@ import type { Config } from "./types";
 const config: Config = {
   buses: { master: 1, music: 0.6, sfx: 1 },
   musicFadeMs: 600,
+  sfxFadeMs: 120,
   volumes: undefined,
   context: undefined,
   journal: 0,
@@ -30,8 +31,8 @@ const config: Config = {
 };
 
 /**
- * Audio plugin: `app.audio`, the handlers of the effect kinds `sfx` and `music`, and the three
- * buses a game drives from its player state.
+ * Audio plugin: `app.audio`, the handlers of the effect kinds `sfx`, `stopSfx` and `music`, and
+ * the three buses a game drives from its player state.
  *
  * @example
  * ```ts

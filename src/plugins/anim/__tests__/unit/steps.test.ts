@@ -15,6 +15,7 @@ import {
   set,
   sfx,
   stagger,
+  stopSfx,
   tween,
   use,
   wait
@@ -123,6 +124,50 @@ describe("anim/timeline step builders", () => {
       payload: { kind: "light" },
       cosmetic: true
     });
+  });
+
+  it("keeps the payload of a sound without an id exactly { key, bus }", () => {
+    const payload = sfx("board.merge", { bus: "ui" }).payload;
+
+    expect(payload).toStrictEqual({ key: "board.merge", bus: "ui" });
+    expect("id" in payload).toBe(false);
+    expect("fadeMs" in payload).toBe(false);
+  });
+
+  it("writes the id and the fade of a named sound only when they are given", () => {
+    const named = sfx("voice.hello", { bus: "voice", id: "voice", fadeMs: 200 });
+
+    expect(named.payload).toStrictEqual({
+      key: "voice.hello",
+      bus: "voice",
+      id: "voice",
+      fadeMs: 200
+    });
+    expect(Object.isFrozen(named.payload)).toBe(true);
+    expect(sfx("voice.hello", { id: "voice" }).payload).toStrictEqual({
+      key: "voice.hello",
+      bus: "sfx",
+      id: "voice"
+    });
+    expect(sfx("voice.hello", { fadeMs: 0 }).payload).toStrictEqual({
+      key: "voice.hello",
+      bus: "sfx",
+      fadeMs: 0
+    });
+  });
+
+  it("builds a frozen stopSfx descriptor, the fade only when given", () => {
+    const stop = stopSfx("voice", { fadeMs: 200 });
+
+    expect(stop).toStrictEqual({
+      kind: "stopSfx",
+      payload: { id: "voice", fadeMs: 200 },
+      cosmetic: true
+    });
+    expect(Object.isFrozen(stop)).toBe(true);
+    expect(Object.isFrozen(stop.payload)).toBe(true);
+    expect(stopSfx("voice").payload).toStrictEqual({ id: "voice" });
+    expect(stopSfx("voice", { fadeMs: 0 }).payload).toStrictEqual({ id: "voice", fadeMs: 0 });
   });
 
   it("lists the seven haptic kinds in one frozen list, each a haptic step", () => {

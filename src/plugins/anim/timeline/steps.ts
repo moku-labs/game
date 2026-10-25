@@ -23,7 +23,8 @@ import type {
   HapticKind,
   PlayDescriptor,
   SfxDescriptor,
-  Step
+  Step,
+  StopSfxDescriptor
 } from "./types";
 
 /**
@@ -394,21 +395,69 @@ export function spawned(id: string): { spawned: string } {
 
 /**
  * A sound. `anim` owns the descriptor because it sits below `audio`; `audio` owns the handler,
- * and a game without `audio` plays nothing and hears no error.
+ * and a game without `audio` plays nothing and hears no error. A sound with an `id` is named:
+ * one sound plays per id, a new one with the same id fades the old one out over `fadeMs`, and
+ * `stopSfx(id)` stops it. The payload carries `id` and `fadeMs` only when they are given, so a
+ * sound without them stays `{ key, bus }`.
  *
  * @param key - Asset key of the sound.
- * @param options - The bus to play it on.
+ * @param options - The bus, the name and the fade.
  * @param options.bus - `"sfx"` when omitted.
+ * @param options.id - Name of the sound; one sound per id plays.
+ * @param options.fadeMs - Fade of the sound with the same id this one replaces; `audio`'s
+ *   `sfxFadeMs` when omitted.
  * @returns The descriptor, usable as a timeline step and as `fx(...)` in a node.
  * @example
  * ```ts
  * sfx("board.merge"); // { kind: "sfx", payload: { key: "board.merge", bus: "sfx" }, cosmetic: true }
+ * sfx("voice.hello", { bus: "voice", id: "voice", fadeMs: 200 });
+ * // { kind: "sfx", payload: { key: "voice.hello", bus: "voice", id: "voice", fadeMs: 200 }, cosmetic: true }
  * ```
  */
-export function sfx(key: string, options?: { bus?: string }): SfxDescriptor {
+export function sfx(
+  key: string,
+  options?: { bus?: string; id?: string; fadeMs?: number }
+): SfxDescriptor {
+  const payload: { key: string; bus: string; id?: string; fadeMs?: number } = {
+    key,
+    bus: options?.bus ?? DEFAULT_BUS
+  };
+
+  if (options?.id !== undefined) payload.id = options.id;
+  if (options?.fadeMs !== undefined) payload.fadeMs = options.fadeMs;
+
   return Object.freeze({
     kind: "sfx" as const,
-    payload: Object.freeze({ key, bus: options?.bus ?? DEFAULT_BUS }),
+    payload: Object.freeze(payload),
+    cosmetic: true as const
+  });
+}
+
+/**
+ * Stops the named sound `sfx(key, { id })` started, fading it out over `fadeMs`. `audio` owns the
+ * handler; an id nothing plays is silent. It works as `fx.start(stopSfx("voice"))` in a node, as a
+ * step a timeline reaches, and as the hint `hint("stopSfx", { id: "voice" })`. A timeline that is
+ * finished or cut fires no effect, this one included: a game that must stop the voice then stops
+ * it from the node.
+ *
+ * @param id - The id the sound was played with.
+ * @param options - The fade.
+ * @param options.fadeMs - Fade-out in ms; `audio`'s `sfxFadeMs` when omitted.
+ * @returns The descriptor, usable as a timeline step and as `fx(...)` in a node.
+ * @example
+ * ```ts
+ * stopSfx("voice", { fadeMs: 200 }); // { kind: "stopSfx", payload: { id: "voice", fadeMs: 200 }, cosmetic: true }
+ * stopSfx("voice"); // { kind: "stopSfx", payload: { id: "voice" }, cosmetic: true }
+ * ```
+ */
+export function stopSfx(id: string, options?: { fadeMs?: number }): StopSfxDescriptor {
+  const payload: { id: string; fadeMs?: number } = { id };
+
+  if (options?.fadeMs !== undefined) payload.fadeMs = options.fadeMs;
+
+  return Object.freeze({
+    kind: "stopSfx" as const,
+    payload: Object.freeze(payload),
     cosmetic: true as const
   });
 }
@@ -522,16 +571,17 @@ export function defineAnimation<Tags extends SlotTags>(
 }
 
 /**
- * Tells whether a step is one of the two descriptors `anim` owns.
+ * Tells whether a step is one of the three descriptors `anim` owns.
  *
  * @param step - The step that was reached.
- * @returns True for an `sfx` or a `haptic` step.
+ * @returns True for an `sfx`, a `stopSfx` or a `haptic` step.
  * @example
  * ```ts
  * isFxStep(haptic("light")); // true
+ * isFxStep(stopSfx("voice")); // true
  * isFxStep(wait(10)); // false
  * ```
  */
 export function isFxStep(step: Step): step is FxStep {
-  return step.kind === "sfx" || step.kind === "haptic";
+  return step.kind === "sfx" || step.kind === "stopSfx" || step.kind === "haptic";
 }

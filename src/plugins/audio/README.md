@@ -26,14 +26,41 @@ createApp({
 });
 ```
 
-## The two effect kinds
+## The three effect kinds
 
 | Kind | Built by | Behaviour |
 |---|---|---|
-| `sfx` | `anim`'s `sfx(key, { bus? })` | A new `AudioBufferSourceNode` per play into its bus. Two plays in one frame are heard twice. The promise resolves when `start()` was called; the handler's `signal` is ignored, because a sound that began plays to its end |
+| `sfx` | `anim`'s `sfx(key, { bus?, id?, fadeMs? })` | A new `AudioBufferSourceNode` per play into its bus. Two plays in one frame are heard twice. The promise resolves when `start()` was called; the handler's `signal` is ignored, because a sound that began plays to its end. With `id` the sound is named (see Named sounds): it plays through a gain of its own, and it fades out the sound that had its `id`, over `fadeMs`, else `sfxFadeMs`. Without `id` nothing of that happens |
+| `stopSfx` | `anim`'s `stopSfx(id, { fadeMs? })` | Fades out and ends the sound named `id`, over `fadeMs`, else `sfxFadeMs`. A sound with that `id` still decoding never starts, one waiting for the unlock is dropped. An `id` nothing plays under changes nothing |
 | `music` | `music(key \| null, { fadeMs? })` of this plugin | One looping track on its own gain into the `music` bus: a buffer source at `music: "decode"`, an `<audio>` element at `music: "stream"`. The same key does nothing, a new key cross-fades, `null` fades out. A key still on its way counts as the same key; any other request replaces it, and the replaced switch starts nothing |
 
-Both handlers are registered with `{ runInFast: false }`: a fast walk never waits for a sound. A game without `audio` has no handler for either kind, and `flow` resolves the effect with `undefined` at once — so the same node code runs in a game that carries no audio at all.
+All three handlers are registered with `{ runInFast: false }`: a fast walk never waits for a sound. A game without `audio` has no handler for any of the kinds, and `flow` resolves the effect with `undefined` at once — so the same node code runs in a game that carries no audio at all. A handler serves an awaited effect, `fx.start`, an animation step (`AnimPlayer` hands its steps to `fx.dispatch`) and a released hint (`fx.emit(hint("stopSfx", { id }))`) alike.
+
+## Named sounds
+
+A sound that has to end before its end — the narrator's line, a looped hum — gets an `id`. The next
+sound with that `id` replaces it with a fade, and `stopSfx` or `app.audio.stop` ends it.
+
+```ts
+// features/story/lines.ts — one narrator: a new line fades the old one out over 150 ms
+const lineSound = (key: AssetKey) => sfx(key, { id: "voice", fadeMs: 150 });
+
+// a node: the player skipped the scene, the narrator stops over 200 ms
+fx.start(stopSfx("voice", { fadeMs: 200 }));
+
+// a test: cut the line at once
+app.audio.stop("voice", { fadeMs: 0 });
+```
+
+- The fade is the gain ramp the music uses, on the context clock: the gain of the sound goes to 0
+  over the fade and its source stops at the end of it. A sound replaced or stopped while its file
+  still decodes never starts, as a replaced music switch.
+- While the unlock resumes the context, one sound per `id` waits (the latest), next to one per key for
+  the sounds without one; a stop of the `id` drops the waiting one.
+- A scene change and a restore leave named sounds alone: a line plays on into the next scene until a
+  sound with its `id` or a stop ends it. `onStop` stops every named sound at once.
+- Cost: one `GainNode` per named sound, made when it starts and disconnected when it ends or its fade
+  is over; nothing per frame. A sound without an `id` costs what it cost before.
 
 ## Volumes come from the player, not from a call
 
@@ -47,7 +74,7 @@ no cast. At run time it returns the callback as it is (`Audio.VolumesFor<Player>
 pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.music, sfx: player.settings.sfx })) } }
 ```
 
-`setVolume`, `volume`, `mute` and `muted` stay for tests and dev tools. `muted(bus)` answers the stored flag; a pause does not change it. With `volumes` configured, the next commit overwrites what `setVolume` set.
+`setVolume`, `volume`, `mute`, `muted` and `stop` stay for tests and dev tools. `muted(bus)` answers the stored flag; a pause does not change it. With `volumes` configured, the next commit overwrites what `setVolume` set.
 
 ## Config
 
@@ -55,6 +82,7 @@ pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.m
 |---|---|---|
 | `buses` | `{ master: 1, music: 0.6, sfx: 1 }` | Start gain of each bus, 0..1 |
 | `musicFadeMs` | `600` | Cross-fade of a music switch, in real milliseconds |
+| `sfxFadeMs` | `120` | Fade of a named sound, in real milliseconds: when a sound with its `id` replaces it, or a stop ends it, and neither names `fadeMs` |
 | `volumes` | `undefined` | Reads the player's choice from the committed player. Absent: the buses stay at `buses` |
 | `context` | `undefined` | Context factory, the test seam. Absent: `new AudioContext()` where the global exists |
 | `journal` | `0` | How many started sounds `journal()` keeps. `0`: off |
@@ -63,14 +91,16 @@ pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.m
 
 ## The graph and the clock
 
-`master` goes into `context.destination`, `music` and `sfx` into `master`, and a music track has its own gain into `music`. Every change is `gain.setValueAtTime(current, now)` then `gain.linearRampToValueAtTime(target, now + seconds)` on the **context** clock, never on `time`: a paused game must not freeze a fade-out, and a fade is not game state. The one edge to `time` is the stamp of the journal.
+`master` goes into `context.destination`, `music` and `sfx` into `master`, a music track has its own gain into `music`, and a named sound its own gain into its bus. Every change is `gain.setValueAtTime(current, now)` then `gain.linearRampToValueAtTime(target, now + seconds)` on the **context** clock, never on `time`: a paused game must not freeze a fade-out, and a fade is not game state. The one edge to `time` is the stamp of the journal.
 
 ## The journal
 
-With `journal` above 0 every sound that started is kept in a ring of that size: each `sfx` play and each music track that began, as `{ key, bus, kind, at }`, where `at` is `app.time.snapshot().elapsed`. A sound dropped before the unlock, a missing file and a switch to the track that already plays leave no entry. `app.audio.journal()` returns the list itself, oldest first: it is frozen, and every new sound replaces it with a new frozen list, so a list read earlier never changes. `onStop` resets it to a frozen empty list. Tests and the dev page set `journal: 200`.
+With `journal` above 0 every sound that started is kept in a ring of that size: each `sfx` play and each music track that began, as `{ key, bus, kind, at }`, where `at` is `app.time.snapshot().elapsed`. A named sound adds its `id`; every other entry has no `id` key at all. A sound dropped before the unlock, a missing file and a switch to the track that already plays leave no entry. `app.audio.journal()` returns the list itself, oldest first: it is frozen, and every new sound replaces it with a new frozen list, so a list read earlier never changes. `onStop` resets it to a frozen empty list. Tests and the dev page set `journal: 200`.
 
 ```ts
-app.audio.journal(); // [{ key: "orders.complete", bus: "sfx", kind: "sfx", at: 1600 }]
+app.audio.journal();
+// [{ key: "orders.complete", bus: "sfx", kind: "sfx", at: 1600 },
+//  { key: "story.line1", bus: "sfx", kind: "sfx", id: "voice", at: 2400 }]
 ```
 
 ## The unlock
@@ -128,7 +158,7 @@ At `"stream"` every level goes through the track gain, never `element.volume`, w
 
 ## Headless
 
-Without a context (plain Bun, no `AudioContext`) no element and no URL is ever made, and both handlers are still registered, so every `await fx(sfx(…))` resolves at once. Every member keeps its state and does nothing: `setVolume` stores, `volume` reads it back, `mute` stores the flag, `muted` reads it back, `unlocked()` is `false`. The hooks write state only — `model:committed` still updates the stored volumes, and the scene's music key is still remembered.
+Without a context (plain Bun, no `AudioContext`) no element and no URL is ever made, and the three handlers are still registered, so every `await fx(sfx(…))` and `await fx(stopSfx(…))` resolves at once. Every member keeps its state and does nothing: `setVolume` stores, `volume` reads it back, `mute` stores the flag, `muted` reads it back, `stop` does nothing, `unlocked()` is `false`. The hooks write state only — `model:committed` still updates the stored volumes, and the scene's music key is still remembered.
 
 ## Doors
 

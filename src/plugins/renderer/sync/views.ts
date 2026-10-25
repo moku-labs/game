@@ -298,6 +298,55 @@ function retargetKey(state: SyncState, entity: Entity, view: View, key: string):
 }
 
 /**
+ * The Pixi blend mode a `blend` of a `Sprite` or a `NineSlice` draws with: `"add"` and `"screen"` as they are, Pixi's
+ * own blends of the sprite batch; `"inherit"`, what a fresh object holds, for `"normal"` and a value without the field.
+ * Any other string (Pixi's advanced modes, `"multiply"`, a typo) is never handed to Pixi, which would draw an advanced
+ * mode through a filter pass of its own: it draws normally, and each such value is warned once per run.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param blend - The component's `blend`, as a game wrote it.
+ * @returns The Pixi blend mode.
+ */
+function blendModeOf(sctx: SyncCtx, blend: string | undefined): "inherit" | "add" | "screen" {
+  if (blend === undefined || blend === "normal") return "inherit";
+  if (blend === "add" || blend === "screen") return blend;
+
+  const warned = sctx.ctx.state.sync.blendWarned;
+
+  // per sync of a refused value: a set lookup, no detail object after the first.
+  if (!warned.has(blend)) {
+    warned.add(blend);
+    sctx.ctx.log.warn("renderer:blend-unknown", { blend });
+  }
+
+  return "inherit";
+}
+
+/**
+ * Writes the blend of a sprite or a nine-slice on its own object, never on the wrapper: a glow blends its own pixels,
+ * not its children's. Only a mode that differs from what Pixi holds is written, the entity marked before: Pixi rebuilds
+ * the instructions of the render group on a new mode.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param object - The view's own object: the sprite, or the nine-slice, filled or hollow.
+ * @param blend - The component's `blend`.
+ */
+function writeBlend(
+  sctx: SyncCtx,
+  entity: Entity,
+  object: PixiContainer,
+  blend: string | undefined
+): void {
+  const mode = blendModeOf(sctx, blend);
+
+  if (object.blendMode === mode) return;
+
+  markView(sctx, entity);
+  object.blendMode = mode;
+}
+
+/**
  * Writes the texture and the tint of a sprite, each only when it differs from what Pixi holds.
  *
  * @param sctx - Domain context of the sync module.
@@ -461,7 +510,7 @@ export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: numb
 
 /**
  * Writes the `Sprite` component onto its display object: the texture, or its crop for a `"cover"`
- * sprite, the stretch into the box, and the box as the hit box, the anchor applied. The stretch and
+ * sprite, the blend, the stretch into the box, and the box as the hit box, the anchor applied. The stretch and
  * the hit box are written into the view's own objects. A new stretch of a view without a wrapper
  * changes the object's own units, so its filter area is written again (B4); a write that keeps it (an
  * alpha tween, a tint) writes no area.
@@ -489,7 +538,7 @@ export function applySprite(sctx: SyncCtx, entity: Entity, view: View): boolean 
 }
 
 /**
- * The body of `applySprite`: the texture or its crop, the stretch, the anchor and the hit box.
+ * The body of `applySprite`: the texture or its crop, the blend, the stretch, the anchor and the hit box.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -510,6 +559,8 @@ function writeSprite(sctx: SyncCtx, entity: Entity, view: View): void {
 
   view.placeholder = texture === undefined;
   applyAlpha(sctx, entity, view, value);
+  // On the placeholder too: a glow turned off while its new key is missing draws normally.
+  writeBlend(sctx, entity, object, value.blend);
 
   if (texture === undefined) {
     showCover(sctx, entity, view, "");
@@ -604,8 +655,9 @@ function writeSlice(
  * Writes the `NineSlice` component onto its display object and recomputes the hit box. Pixi reads
  * a texture's borders only in the constructor, so they are copied here on every write: a pooled
  * object, a new key and a reloaded bundle all get the insets of the texture they draw now. A `hollow` that flipped
- * swaps the view's object first (F59). The hit box is the whole panel, hollow or not. A write that changes nothing,
- * or only the size, allocates nothing: the borders, the outline's shape and the clip's box are written in place.
+ * swaps the view's object first (F59), and the blend is written on the object drawn now. The hit box is the whole
+ * panel, hollow or not. A write that changes nothing, or only the size, allocates nothing: the borders, the outline's
+ * shape and the clip's box are written in place.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -651,6 +703,8 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
   changed =
     writeSlice(sctx, entity, object, "tint", missing ? PLACEHOLDER_TINT : value.tint) || changed;
   applyAlpha(sctx, entity, view, value);
+  // On the object drawn now: after a `hollow` flip, the one `swapSlice` hung.
+  writeBlend(sctx, entity, object, value.blend);
   changed = writeSlice(sctx, entity, object, "width", value.width) || changed;
   changed = writeSlice(sctx, entity, object, "height", value.height) || changed;
 
@@ -1612,6 +1666,7 @@ export function stopSync(state: SyncState): void {
   state.byKey.clear();
   state.invalidated.clear();
   state.warned.clear();
+  state.blendWarned.clear();
   state.added.clear();
   state.removed.clear();
   state.reparented.clear();
