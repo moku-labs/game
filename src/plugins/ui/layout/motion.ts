@@ -534,7 +534,7 @@ function noteEndless(element: Element, motion: MotionHandle): void {
   element.endless.add(motion);
 }
 
-/** A `change` hook of an extra component, as `ui` calls it: the values before and after. */
+/** A `change` hook of an extra component or of the visual, as `ui` calls it: the values before and after. */
 type ExtraChange = (
   view: ViewHandle<unknown>,
   previous: object,
@@ -543,14 +543,15 @@ type ExtraChange = (
 ) => Motion;
 
 /**
- * Plays the `change` hook of one extra component whose fields changed. The motion the last change
- * of that name started is cancelled first, so its value stays where it is and the new motion
- * starts from there; the new motion is kept with the element's handles, so an exit waits for it.
- * An element held for the swap of a scene build plays none: the caller writes the fields.
+ * Plays the `change` hook of one extra component whose fields changed, or of the visual whose
+ * numbers moved (F85). The motion the last change of that name started is cancelled first, so its
+ * value stays where it is and the new motion starts from there; the new motion is kept with the
+ * element's handles, so an exit waits for it. An element held for the swap of a scene build plays
+ * none: the caller writes the fields.
  *
  * @param ctx - Domain context of the ui plugin.
- * @param element - The element that carries the extra.
- * @param name - The component name of the extra.
+ * @param element - The element that carries the component.
+ * @param name - The component name of the extra or the visual.
  * @param values - The value of the last render and of this one.
  * @param values.previous - The value of the last render.
  * @param values.next - The value of this render.

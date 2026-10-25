@@ -76,9 +76,12 @@ export type ElementChange<Value> = (
 /**
  * The motion hooks of one element: the hook triple of `world.projection`, which `defineMotion`
  * of `anim` returns. `ui` plays the `change` hooks of `Box` (the rects), of `Transform` (the rest
- * poses) and of every extra component of the `components` prop (its values before and after). A
- * hook for any other component name is accepted, so every `defineMotion` result fits, and `ui`
- * never plays it. Every hook gets the hint routed to the element's key in that frame step.
+ * poses), of the visual the element is drawn with (`Shape`, `Sprite`, `NineSlice` or `Text`: its
+ * values before and after, when a render or a restyle moves a number of it) and of every extra
+ * component of the `components` prop (its values before and after). A hook for any other
+ * component name is accepted, so every `defineMotion` result fits; `ui` never plays it, and a dev
+ * build names it once (`ui:change-never-plays`). Every hook gets the hint routed to the element's
+ * key in that frame step.
  *
  * @example
  * ```ts
@@ -246,7 +249,8 @@ export type StyleBasis = { epoch: number; rowHeight: number | undefined };
  * last written for it. `loop` is the motion of the running `loop` hook, kept apart from
  * `handles`: it never ends, so the exit sweep must not wait for it. `extras` holds the values of
  * the `components` prop added last time, by component name; `extraHandles` the motion the last
- * `change` hook of each of them returned; `warnedOwned` the names of the `components` values the
+ * `change` hook of each of them and of the visual returned; `look` the value of the visual last
+ * written, which its `change` hook gets as the value before; `warnedOwned` the names of the `components` values the
  * element owns that were already logged. A windowed scroll carries its `window` and the one-time
  * warnings of its props in `warned`; `scrolledIn` marks an element a range change of a windowed
  * scroll created: it plays no `enter` hook. A scroll carries its `scroll` motion from its enter. A text or an icon that sizes itself keeps in
@@ -310,6 +314,12 @@ export type Element = {
   endless?: Set<MotionHandle>;
   /** What its enter hook did at the `Box`, until `ui.enter` keeps the play or plays it again (F49). */
   posed?: PosedEnter | undefined;
+  /** The value of its visual last written: what a `change` hook of the visual gets as the value before (F85). */
+  look?: AnyComponentValue | undefined;
+  /** The write pass in which a `change` hook of its visual last returned a motion. */
+  lookPass?: number | undefined;
+  /** The value of its visual before that pass: a second write in the pass plays the hook from it. */
+  lookFrom?: object | undefined;
 };
 
 /**

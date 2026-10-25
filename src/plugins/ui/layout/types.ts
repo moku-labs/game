@@ -130,6 +130,10 @@ export type LayoutModule = {
   pose(element: Element, span?: MotionSpan): void;
   loop(element: Element): void;
   change(element: Element, previous: Rect, hint?: Hint): boolean;
+  /**
+   * Plays the `change` hook of an extra or of the visual by its component name, after the motion
+   * the last change of that name started was cancelled; true when the hook returned a motion.
+   */
   changeExtra(
     element: Element,
     name: string,

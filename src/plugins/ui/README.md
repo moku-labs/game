@@ -250,12 +250,55 @@ The hint is routed the way the world routes it to projection views: `ui` buffers
 hint, and while a root reconciles, an element gets the first hint whose payload has a top-level
 value equal to its key, narrowed to its root when the payload names a `projection` (the projection
 of a screen, the component of a popup). An unkeyed element gets none. The same hint reaches every
-`change` hook of that element in that frame step: the extras, `change.Box` and `change.Transform`.
-A hint no element takes is dropped; the buffer is empty at the end of every frame step.
+`change` hook of that element in that frame step: the extras, the visual, `change.Box` and
+`change.Transform`. A hint no element takes is dropped; the buffer is empty at the end of every
+frame step.
 
 ```ts
 fx.emit(hint("coins.fly", { projection: "hud", key: "coinPillText", ms: 400 }));
 ```
+
+### `change` hooks of the visual
+
+The visual an element is drawn with (`Shape`, `Sprite`, `NineSlice` or `Text`, see
+[What an element is drawn with](#what-an-element-is-drawn-with)) plays its `change` hook the way
+an extra does. When a render or a restyle (a pointer or focus flag, a new rect) moves a number of
+it (`sweep`, `alpha`, `fillAlpha`, `w`, `h`, any numeric field) and the element's `motion.change`
+has a hook of that name, `ui` records the new look as the rest of the visual, cancels the motion
+the last change of that name started (the value stays where it is), and plays the hook with
+`(view, previous, next, hint)`: the look the element was last written with and this one. When the
+hook returns a motion, the numbers are not written: the track brings them home from where they
+stand (a hook that tweens one of them brings the others home too, with `view.toRest`), and the
+fields that are no number (`kind`, `cap`, `clip`, a texture) are written at once. A render whose
+solve then moves the rect (a bar that grows) plays the hook once more in that frame, again from
+the look before the render, with the new size.
+
+Without a hook, when it returns nothing or throws (`ui:motion-failed`), and on an element held for
+the swap of a scene built aside, the look is written whole, as before. A look whose other fields
+alone moved writes them and plays nothing, and a look that says what it said writes nothing, so a
+running motion survives a restyle that changes nothing of it. The motion counts for the exit, as
+an extra's does. A visual traded for another (a variant's nine-slice) takes its motion with it.
+
+```tsx
+// The XP arc of the level ring walks to a new share in 520 ms instead of jumping.
+const arcMotion: Ui.ElementMotion = {
+  change: {
+    Shape: (view, previous: { sweep?: number }, next: { sweep?: number }) => {
+      if (previous.sweep === next.sweep) return undefined;
+      view.set(Shape, { sweep: previous.sweep ?? 1 });
+      return view.toRest(Shape, { ms: 520, ease: "out" });
+    }
+  }
+};
+<stack key="xpArc" style={{ ...ring, shape: "arc", sweep: xp / xpToNext }} motion={arcMotion} />
+// a commit from 0 to a quarter of the level: Shape.sweep runs 0 → 0.25 over 520 ms
+```
+
+A dev build names, once per element and hook name, a `change` hook `ui` never plays:
+`ui:change-never-plays` `{ key, name }` for a name that is not `Box`, not `Transform`, not the
+visual the element is drawn with and not an extra of its `components` prop (`change.Shape` on an
+`image`, which draws a `Sprite`; `change.Alpha` with no `Alpha` among its extras). It is read when
+the element mounts and when its `motion` prop changes, against what it carries then.
 
 ## Scroll
 
@@ -491,8 +534,11 @@ an additive loop running on the element re-bases on the new rest. A new rect pla
 `change.Box` when there is one.
 
 The `motion` prop is a `Ui.ElementMotion`. Its two `change` hooks get typed values: `Transform`
-the rest poses before and after, `Box` the rects. A hook for any other component name is
-accepted, so every `defineMotion` result fits, and `ui` never plays it. One hook alone is a
+the rest poses before and after, `Box` the rects. A hook of the visual the element is drawn with
+(see [`change` hooks of the visual](#change-hooks-of-the-visual)) and a hook of an extra (see
+[`change` hooks for extras](#change-hooks-for-extras)) play too, with the values before and
+after. A hook for any other component name is accepted, so every `defineMotion` result fits; `ui`
+never plays it, and a dev build names it once (`ui:change-never-plays`). One hook alone is a
 `Ui.ElementChange<Value>`.
 
 ```ts
@@ -550,6 +596,21 @@ element comes or goes with its screen (a scene mount or unmount, a restore, a lo
 a commit adds it to or removes it from a live tree, and for every element of a popup. A
 `defineMotion({ when: "change" })` plays nothing for `"mount"`: the element stands at rest from its
 first drawn frame, and leaves with no exit when its scene goes. A default motion plays for both.
+
+An element a render replaces leaves the way a removed one does (F83, F84): the top of a root whose
+view returns a tree of another key or tag, a child of another key or tag, the element a component's
+view returns under another key or tag. The old element starts its exit with the cause `"change"`
+and every element under it plays its own; it leaves `app.ui.find` at once, before the new one
+enters, so the new element takes every key the two share, and `find` and `tree()` agree. A
+component whose view returned another element keeps its local state.
+
+```tsx
+// The ward's view: a waiting root, then a ready root of another key; both hold the button "wardNext".
+view: item => (item.ready ? <stack key="wardReady">{next}</stack> : <stack key="wardWait">{next}{card}</stack>)
+// the commit that makes it ready: "wardWait" exits ("change") and its card plays its own exit,
+// app.ui.find("wardWait") is undefined at once, app.ui.tree().key is "wardReady",
+// app.ui.find("wardNext") is the new root's button
+```
 
 A root that goes with its screen ends with the exit of its top element (F55). When the top plays an
 exit, the elements under it play none of their own: they stand and go with the top, the frame its

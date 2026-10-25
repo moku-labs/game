@@ -49,6 +49,7 @@ import type { Fields } from "./fields";
 import { hintOf } from "./hints";
 import { dropHost, hostsMoved, hostsOf, hostViews, slotFor, slotOf, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
+import { lookMoved, otherFields, warnIdleChanges } from "./look";
 import { childOrder, SIBLING_SPAN } from "./order";
 import { createSpan, enterOverlay, exitOverlay, overlayOf, settleOverlays } from "./overlay";
 import { settlePopups } from "./popups";
@@ -627,6 +628,17 @@ function entitySet(entities: Iterable<Entity>): Set<Entity> {
 }
 
 /**
+ * Collects the identities of the children of one render. Its own function, because lint rule L5
+ * refuses a collection built inside an exported declaration.
+ *
+ * @param identities - The identities, in markup order.
+ * @returns The identities as a set.
+ */
+function identitySet(identities: readonly string[]): ReadonlySet<string> {
+  return new Set(identities);
+}
+
+/**
  * Tells whether an element whose `Box` just came arrives with an enter: new, and not a row a
  * range change scrolled in.
  *
@@ -681,6 +693,10 @@ export function createReconciler(
   const isAside = (entity: Entity): boolean => ctx.deps.world.projection.isBuilding(entity);
   // The reconcile of this frame found a committed build: its solve gives the held enters their start pose.
   let released = false;
+  // The write pass: one per reconcile with its solve, one per pointer restyle. A visual written twice
+  // in one pass (a render, then the solve that moves its rect) plays its `change` hook from the look
+  // before the pass (F85).
+  let pass = 0;
 
   /**
    * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
@@ -782,7 +798,8 @@ export function createReconciler(
       extraHandles: handleMap(),
       warnedOwned: nameSet(),
       warned: nameSet(),
-      scrolledIn: range.isMoving()
+      scrolledIn: range.isMoving(),
+      look: undefined
     };
 
     state.styled += 1;
@@ -980,12 +997,13 @@ export function createReconciler(
   /**
    * Writes the visual and input components of a live element again. A visual or an input the
    * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
-   * back, and a button that became disabled stops answering the gate. `Scroll`, `Scrollable` and
-   * `ScrollState` are only ever added: where a scroll stands belongs to the finger and the scroll
-   * step, and a new look or a new rect never resets it. The look written is recorded as the rest
-   * of the visual, so the rest the world holds is always the one the element is drawn with: a
-   * restore brings it back to exactly that. The extras of the `components` prop are diffed last.
-   * Every call is one write pass of `UiCounters`.
+   * back, and a button that became disabled stops answering the gate; a visual traded away takes
+   * the motion of its `change` hook with it. `Scroll`, `Scrollable` and `ScrollState` are only ever
+   * added: where a scroll stands belongs to the finger and the scroll step, and a new look or a new
+   * rect never resets it. The look is recorded as the rest of the visual before it is written, so
+   * the rest the world holds is always the one the element is drawn with (a restore brings it back
+   * to exactly that) and a `change` hook of the visual brings it home with `toRest`. The extras of
+   * the `components` prop are diffed last. Every call is one write pass of `UiCounters`.
    *
    * @param element - The element that changed.
    */
@@ -1001,17 +1019,88 @@ export function createReconciler(
     for (const type of LIVE_TYPES) {
       const isDropped = !carries(visuals, type) && !carries(inputs, type);
 
-      if (isDropped && ecs.has(element.entity, type)) ecs.remove(element.entity, type);
+      if (isDropped && ecs.has(element.entity, type)) {
+        cancelExtra(element, type.componentName);
+        ecs.remove(element.entity, type);
+      }
     }
 
-    // Add the ones the entity lacks; patch the fields of the rest, but never a tag or a scroll's state.
-    for (const value of visuals) writeValue(element, value);
-    for (const value of inputs) writeValue(element, value);
-
-    // The look just written is the rest of the visual.
+    // The look about to be written is the rest of the visual.
     for (const value of visuals) recordRest(ctx, element, value);
 
+    // Add the ones the entity lacks; patch the fields of the rest, but never a tag or a scroll's state.
+    for (const value of visuals) writeVisual(element, value);
+    for (const value of inputs) writeValue(element, value);
+
     writeExtras(element);
+  }
+
+  /**
+   * Writes the visual of a live element. Without a `change` hook of its name, or for a visual
+   * traded in, it is written like every other value. With one, the value is compared with the look
+   * the element was last written with (F85): the same look writes nothing, so a running motion of
+   * the hook survives a render that changes nothing of it; a look whose numbers moved plays the
+   * hook with the look before and this one and the routed hint, after the motion the last change of
+   * that name started was cancelled. When the hook returns a motion the track brings the numbers
+   * home and only the other fields are written; with none, or for an element held for the swap of a
+   * scene build, the value is written whole. A look whose other fields alone moved writes them.
+   *
+   * @param element - The live element.
+   * @param value - The visual of this render.
+   */
+  function writeVisual(element: Element, value: AnyComponentValue): void {
+    const look = element.look;
+    const name = value.type.componentName;
+
+    element.look = value;
+
+    // Per restyle: one property read decides for an element with no `change` hook of its visual.
+    const isHooked = element.motion?.change?.[name] !== undefined;
+    const isTraded = look === undefined || look.type !== value.type || look.value === true;
+
+    if (!isHooked || isTraded || value.value === true || !ecs.has(element.entity, value.type)) {
+      writeValue(element, value);
+
+      return;
+    }
+
+    const moved = lookMoved(value.type, look.value, value.value);
+
+    if (moved === "none") return;
+    if (moved === "others") {
+      writeOthers(element, value.value, value.type);
+
+      return;
+    }
+
+    // A second write in one pass plays from the look before the first: its motion never ran.
+    const from =
+      element.lookPass === pass && element.lookFrom !== undefined ? element.lookFrom : look.value;
+    const values = { previous: from, next: value.value };
+
+    if (!modules.layout.changeExtra(element, name, values, hintOf(state, element))) {
+      writeValue(element, value);
+
+      return;
+    }
+
+    element.lookPass = pass;
+    element.lookFrom = from;
+    writeOthers(element, value.value, value.type);
+  }
+
+  /**
+   * Writes the fields of a visual that are no number, while a `change` hook brings the numbers
+   * home, never a field its type gives to a plugin.
+   *
+   * @param element - The live element.
+   * @param value - The fields of the visual of this render.
+   * @param type - Its component type.
+   */
+  function writeOthers(element: Element, value: object, type: AnyComponentType): void {
+    const others = otherFields(value, ecs.typeOf(type.componentName)?.owned ?? NO_OWNED);
+
+    if (others !== undefined) ecs.set(element.entity, asHandle(type), others);
   }
 
   /**
@@ -1137,6 +1226,7 @@ export function createReconciler(
     const change = compare(root, element, node);
     const motion = node.props.motion as ElementMotion | undefined;
     const loopChanged = !sameLoop(element.motion?.loop, motion?.loop);
+    const motionChanged = motion !== element.motion;
 
     // The guard is inline and positive: a release build drops the count (spec 16 U5.2).
     if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
@@ -1164,6 +1254,11 @@ export function createReconciler(
       rewrite(root, element, change);
       element.basis = { epoch: state.epoch, rowHeight: change.rowHeight };
     }
+
+    // A dev build names a `change` hook of a new motion the element will not play.
+    const isDev = typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
+
+    if (isDev && motionChanged && element.live) warnIdleChanges(ctx, element);
 
     diffChildren(
       root,
@@ -1244,13 +1339,16 @@ export function createReconciler(
   }
 
   /**
-   * Places one node: enter, patch, or exit and enter when the type at that key changed.
+   * Places one node: enter, patch, or exit and enter when the element at its identity is another
+   * one now: a component whose view returned another tag or another key. The old element leaves
+   * first, with its exit, so the new one takes the keys they share; the component itself stays and
+   * keeps its local state.
    *
    * @param root - The root being reconciled.
    * @param parent - The parent element, or nothing.
    * @param node - The node the markup wrote.
    * @param index - Its position among its siblings.
-   * @param parentIdentity - The identity of the parent element.
+   * @param identity - Its identity: `identityOf` the parent, the node and the index.
    * @param instance - The identity of the nearest component instance.
    * @returns The entity of the element, or `undefined` when a component view threw.
    */
@@ -1259,11 +1357,10 @@ export function createReconciler(
     parent: Element | undefined,
     node: DescriptionNode,
     index: number,
-    parentIdentity: string,
+    identity: string,
     instance?: string
   ): Entity | undefined {
     // Expand a component into its view; the view it produced takes the key of the component node.
-    const identity = identityOf(parentIdentity, node, index);
     const expanded = expand(node, identity);
     const view = expanded.node;
     const owner = expanded.instance ?? instance;
@@ -1272,24 +1369,41 @@ export function createReconciler(
 
     if (effective === undefined) return state.byIdentity.get(identity);
 
-    // Patch the element at this identity when the type held; otherwise replace it.
+    // Patch the element at this identity when its tag and its key held; otherwise replace it.
     const existing = state.byIdentity.get(identity);
     const element = existing === undefined ? undefined : state.elements.get(existing);
-    const isSameType = element !== undefined && element.type === effective.type;
+    const isSame =
+      element !== undefined && element.type === effective.type && element.key === effective.key;
 
-    if (isSameType) {
+    if (isSame) {
       patch(root, element, effective, owner);
 
       return element.entity;
     }
 
-    if (element !== undefined) exitElement(element, "change");
+    if (element !== undefined) replaceElement(element, identity);
 
     return enter(root, parent, effective, identity, owner, index);
   }
 
   /**
-   * Diffs the children of one element and re-places them once when the list changed.
+   * Exits the element a component's view returned before, at the component's own identity. The
+   * instances under it are forgotten with it; the component's own instance stays: the local state
+   * belongs to the component, which is still there.
+   *
+   * @param element - The element the view returned before.
+   * @param identity - The identity of the component node.
+   */
+  function replaceElement(element: Element, identity: string): void {
+    const own = state.instances.get(identity);
+
+    exitElement(element, "change");
+    if (own !== undefined) state.instances.set(identity, own);
+  }
+
+  /**
+   * Diffs the children of one element and re-places them once when the list changed. The old
+   * children the render leaves out start their exit before any new child enters.
    *
    * @param root - The root being reconciled.
    * @param parent - The element whose children are diffed.
@@ -1302,28 +1416,31 @@ export function createReconciler(
     nodes: readonly DescriptionNode[],
     instance: string | undefined
   ): void {
+    // The old children this render leaves out leave first, so a key a new child shares with one of
+    // them, or with an element under it, is the new child's (F84).
+    const identities = nodes.map((node, index) => identityOf(parent.identity, node, index));
+
+    leaveOut(parent, identities);
+
     // Diff each child of this render; a component that threw before its first view has no entity.
     const next: Entity[] = [];
 
     for (const [index, node] of nodes.entries()) {
-      const entity = diffNode(root, parent, node, index, parent.identity, instance);
+      const identity = identities[index] ?? identityOf(parent.identity, node, index);
+      const entity = diffNode(root, parent, node, index, identity, instance);
 
       if (entity !== undefined) next.push(entity);
     }
 
-    // Start the exit of every old child this render left out. A row that a range change took out
-    // of a windowed scroll is not removed: it is dropped at once, with no exit motion.
+    // An old child no entity of this render took (one of two siblings under one key) leaves now.
     const kept = entitySet(next);
-    const dropsRows = range.dropsRowsOf(parent);
 
     for (const old of parent.children) {
-      if (kept.has(old)) continue;
+      if (kept.has(old) || state.exiting.has(old)) continue;
 
       const element = state.elements.get(old);
 
-      if (element === undefined) continue;
-      if (dropsRows) range.dropRow(element);
-      else exitElement(element, "change");
+      if (element !== undefined) removeChild(parent, element);
     }
 
     // Keep the new list; the same children in the same order need no new placement.
@@ -1342,6 +1459,39 @@ export function createReconciler(
       next.map(entity => state.elements.get(entity)).filter(element => isElement(element))
     );
     root.needsSolve = true;
+  }
+
+  /**
+   * Takes out every old child of an element whose identity no node of this render has: its exit
+   * starts, and everything under it plays its own, before a new child enters.
+   *
+   * @param parent - The element whose children are diffed.
+   * @param identities - The identities of the children of this render, in markup order.
+   */
+  function leaveOut(parent: Element, identities: readonly string[]): void {
+    let listed: ReadonlySet<string> | undefined;
+
+    for (const [index, old] of parent.children.entries()) {
+      const element = state.elements.get(old);
+
+      // A child that kept its place keeps its identity there: no set is built for a list that holds.
+      if (element === undefined || identities[index] === element.identity) continue;
+
+      listed ??= identitySet(identities);
+      if (!listed.has(element.identity)) removeChild(parent, element);
+    }
+  }
+
+  /**
+   * Removes one child a render left out: its exit starts. A row that a range change took out of a
+   * windowed scroll is not removed: it is dropped at once, with no exit motion.
+   *
+   * @param parent - The element whose children are diffed.
+   * @param element - The child that leaves.
+   */
+  function removeChild(parent: Element, element: Element): void {
+    if (range.dropsRowsOf(parent)) range.dropRow(element);
+    else exitElement(element, "change");
   }
 
   /**
@@ -1607,9 +1757,19 @@ export function createReconciler(
     for (const value of element.extras.values()) recordRest(ctx, element, value);
     // An overlay's level and landing are the engine's: they start at 0, and its enter (at `Box`) moves them.
     if (overlayOf(element) !== undefined) ecs.add(element.entity, OverlayLevel());
-    for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
+
+    for (const value of componentsOf(element, root)) {
+      ecs.add(element.entity, value);
+      // The look a `change` hook of the visual gets as the value before, at its first change.
+      if (VISUALS.includes(value.type)) element.look = value;
+    }
 
     element.live = true;
+
+    // A dev build names a `change` hook the element will not play. The guard is inline: a release build drops it.
+    if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+      warnIdleChanges(ctx, element);
+    }
 
     // A host that comes now hosts its views in this solve, so they are first drawn under it (spec 16 U2.1).
     if (state.hosts.has(element.entity)) state.risen.add(element.entity);
@@ -2074,15 +2234,22 @@ export function createReconciler(
   /**
    * Reconciles one root from the node its `Tree` carries. Its first build reads how the root came,
    * from the world's view record, which exists by now; the elements entered by this diff take that
-   * cause, and the elements of any later diff take `"change"` (spec 16 U4).
+   * cause, and the elements of any later diff take `"change"` (spec 16 U4). A tree whose top has
+   * another identity, another key or tag, replaces the root element: the old one exits first.
    *
    * @param root - The root to reconcile.
    */
   function reconcileRoot(root: Root): void {
-    const identity = String(root.entity);
+    const identity = identityOf(String(root.entity), root.tree, 0);
     const first = root.element === undefined;
 
     if (first) root.cause ??= ctx.deps.world.projection.causeOf(root.entity) ?? "change";
+
+    // A tree whose top names another key or tag is another element: the old top leaves first, with
+    // its exit and out of `find`, and the new one enters with the keys they share (F83).
+    const previous = root.element === undefined ? undefined : lookup(root.element);
+
+    if (previous !== undefined && previous.identity !== identity) exitElement(previous, "change");
 
     state.building = first ? root.cause : "change";
 
@@ -2290,6 +2457,7 @@ export function createReconciler(
     // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
+    pass += 1;
 
     // The roots a scene build committed take their slots in this frame's solve.
     settleAside();
@@ -2537,8 +2705,9 @@ export function createReconciler(
 
     if (element === undefined) return;
 
-    // Per press: the flag flips in place; the flags object is the element's own.
+    // Per press: the flag flips in place; the flags object is the element's own. A restyle is a write pass of its own.
     element.is[flag] = on;
+    pass += 1;
 
     const style = styleFor(parentOf(element), element.node, element.is);
     const root = state.roots.get(element.root);

@@ -83,5 +83,14 @@ export const BUDGET = {
    * Spec 31: `ui.reconcile` and `ui.solve` of a frame while the names are built aside: the walk
    * that looks for a committed root asks the world about the one root built aside. 0 B.
    */
-  reconcileBuilding: 0
+  reconcileBuilding: 0,
+  /**
+   * F85 (change 2026-10-25-f83-f85-ui-exits-shape): the check every write of an element with a
+   * `change` hook of its visual asks first, on each of the four visuals (the XP arc's `Shape`, a
+   * coin `Sprite`, a panel `NineSlice`, a label `Text`, fractional numbers in all), none moved.
+   * Its first form, one `for…in` over any value, kept 96 B on the arc alone: a generic read of a
+   * fractional number boxes it, 16 B each. Each visual now has a comparator that reads its fields
+   * by name, one shape of value per read site, so the numbers are compared unboxed. 0 B.
+   */
+  lookMoved: 0
 } as const;
