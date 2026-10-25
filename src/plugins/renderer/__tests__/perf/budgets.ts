@@ -37,6 +37,9 @@ export const BUDGET = {
   demandMarks: 0,
   // The same with `onDemand`, every mark judged for the decision. Before 2 720 B.
   demandMarksOnDemand: 0,
+  // F69: the dev missed-mark check of a skipped frame, 300 views, 5 stale listed writes. Before: a map of every view's
+  // objects built per frame. Now the owner comes from sync's back references.
+  demandMissedMarks: 0,
   // Q2: before 768 B (the filter table walked with entry arrays, a closure per view, every tree walked again). Now the
   // count is kept until a change moves `passesVersion`; a still read compares the filters' `enabled` and reads one number.
   renderPassesStill: 0,

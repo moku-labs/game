@@ -54,22 +54,22 @@ describe("the dev missed-mark check", () => {
   });
 
   it("warns nothing for a write marked since the last drawn frame", () => {
-    const { ctx, stage, views, log, demand } = strayWrite();
+    const { ctx, stage, log, demand } = strayWrite();
 
     ctx.state.demand.sinceDraw.add(7);
-    checkMissedMarks(ctx, ctx.state.demand, stage, views, demand.shown);
+    checkMissedMarks(ctx, ctx.state.demand, stage, demand.shown);
 
     expect(log.warn).not.toHaveBeenCalled();
   });
 
   it("warns nothing for a write under a hidden ancestor (F6)", () => {
-    const { ctx, stage, views, log, demand, flame } = strayWrite();
+    const { ctx, stage, log, demand, flame } = strayWrite();
     const parent = new pixi.Container();
 
     stage.addChild(parent);
     parent.addChild(flame);
     parent.alpha = 0;
-    checkMissedMarks(ctx, ctx.state.demand, stage, views, demand.shown);
+    checkMissedMarks(ctx, ctx.state.demand, stage, demand.shown);
 
     expect(log.warn).not.toHaveBeenCalled();
   });
@@ -104,6 +104,37 @@ describe("the dev missed-mark check", () => {
 
     // Pixi's own label of a graphics it was given no other.
     expect(log.warn).toHaveBeenCalledWith("renderer:missed-mark", { entity: 4, label: "Graphics" });
+  });
+
+  it("names the view whose wrapper holds a written mask, and the child view for a write into a child (F69)", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const { demand, view, stage, log, ctx } = demandAlone({ renderGroup: true });
+    const card = view(3, box(100, 100));
+    const wrapper = new pixi.Container();
+    const mask = box(100, 100);
+    const clipped = new pixi.Container();
+    const pin = box(10, 10);
+
+    // As sync hangs a clipping parent: its object, its mask and its masked container in its wrapper.
+    stage.addChild(wrapper);
+    wrapper.addChild(card.object, mask, clipped);
+    card.wrapper = wrapper;
+    card.mask = mask;
+    card.clipped = clipped;
+    ctx.state.sync.viewOfTop.delete(card.object);
+    ctx.state.sync.viewOfTop.set(wrapper, card);
+    view(9, pin, clipped);
+    demand.settle(demand.decide(false));
+    pixi.updateRenderGroupTransforms(Reflect.get(stage, "renderGroup"), true);
+    mask.x = 4;
+    pin.x = 4;
+    demand.decide(false);
+    demand.settle(false);
+
+    expect(log.warn).toHaveBeenCalledTimes(2);
+    expect(log.warn).toHaveBeenCalledWith("renderer:missed-mark", { entity: 3, label: "Graphics" });
+    expect(log.warn).toHaveBeenCalledWith("renderer:missed-mark", { entity: 9, label: "Graphics" });
   });
 
   it("switches itself off with one debug line on a Pixi without render group lists", () => {

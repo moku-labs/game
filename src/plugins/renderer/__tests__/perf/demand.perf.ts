@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
-import { bytesPerCall, markedFrame } from "./fixtures";
+import { bytesPerCall, idleMissedMarks, markedFrame } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the change marks of a frame and the decision that empties them (audit row 20, change
@@ -17,6 +17,14 @@ describe("the marks of a frame", () => {
   it("allocate nothing for 20 marks and the decision with onDemand, each mark judged", async () => {
     expect(bytesPerCall(await markedFrame(20, true))).toBeLessThanOrEqual(
       BUDGET.demandMarksOnDemand + NOISE
+    );
+  });
+});
+
+describe("the dev missed-mark check (F69)", () => {
+  it("allocates nothing on a skipped frame of 300 views with 5 stale listed writes", () => {
+    expect(bytesPerCall(idleMissedMarks(300))).toBeLessThanOrEqual(
+      BUDGET.demandMissedMarks + NOISE
     );
   });
 });

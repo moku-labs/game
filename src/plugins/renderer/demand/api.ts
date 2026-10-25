@@ -251,7 +251,7 @@ export function createDemandApi(
     ) {
       const stage = host.stage();
 
-      if (stage !== undefined) checkMissedMarks(ctx, state, stage, views, shown);
+      if (stage !== undefined) checkMissedMarks(ctx, state, stage, shown);
     }
 
     if (
