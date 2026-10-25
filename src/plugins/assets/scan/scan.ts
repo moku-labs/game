@@ -452,9 +452,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Imports the optional `assets.ts` of a feature. Node strips the types of a `.ts` file, so the
- * description a game writes runs as it stands. The URL carries the file's size and mtime: a long-lived
- * process (the keys watch of `dev` and the editor) reads a saved description again instead of the
- * module it cached, while one scan, or scans with nothing saved, import it once.
+ * description a game writes runs as it stands. The URL carries the file's size and mtime: a
+ * long-lived process (the keys watch of `dev` and the editor) reads a saved description again
+ * instead of the module it cached, while one scan, or scans with nothing saved, import it once.
  *
  * @param file - Absolute path of the description.
  * @returns Its exports, or `undefined` when the feature brought none.

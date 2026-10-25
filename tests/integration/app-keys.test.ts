@@ -189,6 +189,7 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
         (JSON.parse(read(root, "generated/manifest.json")) as { bundles: Record<string, unknown> })
           .bundles.ui;
 
+      expect(read(root, DESCRIPTION)).toContain('{ tier: "boot" }');
       await watched(root);
       writeFileSync(
         description,
