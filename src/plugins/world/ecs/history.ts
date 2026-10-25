@@ -2,7 +2,9 @@
  * @file world/ecs — the frame history of a dev build: one shadow copy of the world as JSON and a
  * ring with the change records of the last frames, so `diff` can say what changed between two
  * frames. Records cost memory only when something changes: 120 full snapshots of a big board
- * would not fit a phone.
+ * would not fit a phone. A slot keeps its record objects and their copied values when the ring
+ * comes round to it again, and a copy is written into the object it replaces, so a frame that
+ * changes what an earlier frame changed allocates nothing (F70).
  *
  * Only `recordFrame` starts a history, and `lifecycle.ts` calls it behind the inline dev guard,
  * so a production bundle drops the recorder and `history` stays `undefined`. The other writers
@@ -32,6 +34,12 @@ const MARKED_ROWS = 32;
 
 /** The share of changed rows at or under which marked rows count as wasted: one in twenty. */
 const CHANGED_SHARE = 1 / 20;
+
+/** The rounding of the rows a frame `world:mut-unchanged` reports: one decimal. */
+const TENTHS = 10;
+
+/** The rounding of the changed share it reports: two decimals. */
+const HUNDREDTHS = 100;
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "the component was not there".
 const absent: Json = null;
@@ -177,7 +185,83 @@ function sameObject(left: { [key: string]: Json }, right: { [key: string]: Json 
 }
 
 /**
- * The slot of one frame, written fresh when the ring still holds an older frame at its index.
+ * Copies a JSON value into the object or array it replaces, when that one has the same kind and,
+ * for an array, the same length; otherwise into a new one. A primitive is its own copy.
+ *
+ * @param source - The value to copy.
+ * @param into - The earlier copy it replaces, if there is one.
+ * @returns The copy: `into` itself when it could take the value.
+ * @example
+ * ```ts
+ * copyJson({ x: 2 }, { x: 1 }); // { x: 2 }: the second object, written in place
+ * ```
+ */
+function copyJson(source: Json, into?: Json): Json {
+  if (typeof source !== "object" || source === null) return source;
+
+  if (Array.isArray(source)) {
+    const count = source.length;
+    const reusable = Array.isArray(into) && into.length === count;
+    const target: Json[] = reusable ? into : Array.from({ length: count }, () => absent);
+
+    for (let index = 0; index < count; index += 1) {
+      target[index] = copyJson(source[index] ?? absent, target[index]);
+    }
+
+    return target;
+  }
+
+  const plain = typeof into === "object" && into !== null && !Array.isArray(into);
+  const target: { [key: string]: Json } = plain ? into : {};
+
+  for (const key in source) target[key] = copyJson(source[key] ?? absent, target[key]);
+
+  for (const key in target) {
+    if (!Object.hasOwn(source, key)) delete target[key];
+  }
+
+  return target;
+}
+
+/**
+ * Writes one record into the next record object of a slot: the spare one left by the frame that
+ * held the slot before, or a new one. `from` and `to` are copied into the values that record held.
+ *
+ * @param slot - The slot of this frame.
+ * @param id - The entity.
+ * @param owner - Its owner.
+ * @param component - The component name.
+ * @param from - The value before, `absent` for none.
+ * @param to - The value after, `absent` for none.
+ */
+function writeChange(
+  slot: HistorySlot,
+  id: Entity,
+  owner: Owner,
+  component: string,
+  from: Json,
+  to: Json
+): void {
+  const spare = slot.changes[slot.count];
+
+  slot.count += 1;
+
+  if (spare === undefined) {
+    slot.changes.push({ id, owner, component, from: copyJson(from), to: copyJson(to) });
+
+    return;
+  }
+
+  spare.id = id;
+  spare.owner = owner;
+  spare.component = component;
+  spare.from = copyJson(from, spare.from);
+  spare.to = copyJson(to, spare.to);
+}
+
+/**
+ * The slot of one frame, emptied for it when the ring still holds an older frame at its index:
+ * its record objects stay, as spares.
  *
  * @param history - The frame history.
  * @param frame - The frame number.
@@ -189,7 +273,16 @@ function slotFor(history: History, frame: number): HistorySlot {
 
   if (known?.frame === frame) return known;
 
-  const fresh: HistorySlot = { frame, changes: [], spawned: [], despawned: [] };
+  if (known !== undefined) {
+    known.frame = frame;
+    known.count = 0;
+    if (known.spawned.length > 0) known.spawned.length = 0;
+    if (known.despawned.length > 0) known.despawned.length = 0;
+
+    return known;
+  }
+
+  const fresh: HistorySlot = { frame, changes: [], count: 0, spawned: [], despawned: [] };
 
   history.slots[index] = fresh;
 
@@ -222,7 +315,7 @@ function copiedComponents(state: EcsState, entity: Entity): Map<string, Json> {
   const copies = emptyComponents();
 
   for (const [name, value] of Object.entries(componentsOf(state, entity).components)) {
-    copies.set(name, structuredClone(value));
+    copies.set(name, copyJson(value));
   }
 
   return copies;
@@ -273,7 +366,7 @@ function recordSpawn(
   };
 
   for (const [component, value] of entry.components) {
-    slot.changes.push({ id: entity, owner: entry.owner, component, from: absent, to: value });
+    writeChange(slot, entity, entry.owner, component, absent, value);
   }
 
   slot.spawned.push(entity);
@@ -305,7 +398,7 @@ function recordComponent(
   if (value === undefined) {
     if (before === undefined) return false;
 
-    slot.changes.push({ id: entity, owner: entry.owner, component, from: before, to: absent });
+    writeChange(slot, entity, entry.owner, component, before, absent);
     entry.components.delete(component);
 
     return true;
@@ -313,16 +406,11 @@ function recordComponent(
 
   if (before !== undefined && sameJson(before, value)) return false;
 
-  const copy = structuredClone(value);
+  writeChange(slot, entity, entry.owner, component, before ?? absent, value);
 
-  slot.changes.push({
-    id: entity,
-    owner: entry.owner,
-    component,
-    from: before ?? absent,
-    to: copy
-  });
-  entry.components.set(component, copy);
+  const copy = copyJson(value, before);
+
+  if (copy !== before) entry.components.set(component, copy);
 
   return true;
 }
@@ -339,9 +427,10 @@ function markCountOf(history: History, component: string): MarkCount {
 
   if (known !== undefined) return known;
 
-  const count: MarkCount = { marked: 0, changed: 0 };
+  const count: MarkCount = { component, marked: 0, changed: 0 };
 
   history.marks.set(component, count);
+  history.markList.push(count);
 
   return count;
 }
@@ -398,29 +487,46 @@ function recordChangedEntities(ctx: WorldCtx, history: History, frame: number): 
  * @param history - The frame history.
  */
 function judgeMarks(ctx: WorldCtx, history: History): void {
-  for (const [component, count] of history.marks) {
+  // By index over the list: this runs once a window, unoptimized, where any iterator allocates.
+  for (let index = 0; index < history.markList.length; index += 1) {
+    const count = history.markList[index];
+
+    if (count === undefined) continue;
+
+    const component = count.component;
     const rowsPerFrame = count.marked / history.markFrames;
     const wasted = rowsPerFrame >= MARKED_ROWS && count.changed <= count.marked * CHANGED_SHARE;
 
-    if (wasted && !history.warned.has(component)) {
-      const systems = mutSystemsOf(ctx.state.ecs, component);
-
-      if (systems.length > 0) {
-        history.warned.add(component);
-        ctx.log.warn("world:mut-unchanged", {
-          component,
-          rowsPerFrame: Math.round(rowsPerFrame * 10) / 10,
-          changedShare: Math.round((count.changed / count.marked) * 100) / 100,
-          systems
-        });
-      }
-    }
+    if (wasted && !history.warned.has(component)) warnWasted(ctx, history, count, rowsPerFrame);
 
     count.marked = 0;
     count.changed = 0;
   }
 
   history.markFrames = 0;
+}
+
+/**
+ * Names one wasteful component once, when a registered system writes it with `mut()`: its rows a frame to one decimal,
+ * its changed share to two.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param history - The frame history.
+ * @param count - The component's counts over the window.
+ * @param rowsPerFrame - Its marked rows a frame.
+ */
+function warnWasted(ctx: WorldCtx, history: History, count: MarkCount, rowsPerFrame: number): void {
+  const systems = mutSystemsOf(ctx.state.ecs, count.component);
+
+  if (systems.length === 0) return;
+
+  history.warned.add(count.component);
+  ctx.log.warn("world:mut-unchanged", {
+    component: count.component,
+    rowsPerFrame: Math.round(rowsPerFrame * TENTHS) / TENTHS,
+    changedShare: Math.round((count.changed / count.marked) * HUNDREDTHS) / HUNDREDTHS,
+    systems
+  });
 }
 
 /**
@@ -458,6 +564,7 @@ export function recordFrame(ctx: WorldCtx, frame: number): void {
     newest: undefined,
     started: undefined,
     marks: emptyMarks(),
+    markList: [],
     markFrames: 0,
     warned: emptyNames()
   };
@@ -488,7 +595,7 @@ export function recordDespawn(ctx: WorldCtx, entity: Entity): void {
   const slot = slotFor(history, openFrame(ctx, history));
 
   for (const [component, value] of entry.components) {
-    slot.changes.push({ id: entity, owner: entry.owner, component, from: value, to: absent });
+    writeChange(slot, entity, entry.owner, component, value, absent);
   }
 
   slot.despawned.push(entity);
@@ -510,13 +617,14 @@ export function recordRemoval(ctx: WorldCtx, entity: Entity, component: string):
 
   if (history === undefined || entry === undefined || before === undefined) return;
 
-  slotFor(history, openFrame(ctx, history)).changes.push({
-    id: entity,
-    owner: entry.owner,
+  writeChange(
+    slotFor(history, openFrame(ctx, history)),
+    entity,
+    entry.owner,
     component,
-    from: before,
-    to: absent
-  });
+    before,
+    absent
+  );
   entry.components.delete(component);
 }
 
@@ -536,6 +644,7 @@ export function resetHistory(state: EcsState): void {
   history.newest = undefined;
   history.started = undefined;
   history.marks.clear();
+  history.markList.length = 0;
   history.markFrames = 0;
   history.warned.clear();
 }
@@ -548,7 +657,11 @@ export function resetHistory(state: EcsState): void {
  * @param slot - The next slot of the window.
  */
 function foldSlot(folded: Map<Entity, Folded>, slot: HistorySlot): void {
-  for (const change of slot.changes) {
+  for (let index = 0; index < slot.count; index += 1) {
+    const change = slot.changes[index];
+
+    if (change === undefined) continue;
+
     const entry = folded.get(change.id) ?? {
       id: change.id,
       owner: change.owner,
@@ -590,7 +703,10 @@ function entityDiffOf(entry: Folded): EntityDiff[] {
   const components: Record<string, ComponentChange> = {};
 
   for (const [component, pair] of entry.pairs) {
-    if (!sameJson(pair.from, pair.to)) components[component] = pair;
+    // The records keep their values for reuse: the diff hands out copies of its own.
+    if (!sameJson(pair.from, pair.to)) {
+      components[component] = { from: copyJson(pair.from), to: copyJson(pair.to) };
+    }
   }
 
   if (Object.keys(components).length === 0) return [];

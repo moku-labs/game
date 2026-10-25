@@ -11,7 +11,8 @@ import { KEY, onGrid } from "./geometry";
 import type { KeptCtx, KeptRecord, RangeRecord } from "./types";
 
 /**
- * Tells whether a kept record's quad stands off its picture's grid: it is moving, and sampled linearly (P2.5).
+ * Tells whether a kept record's quad stands off its picture's grid: it is moving, or drawn scaled to another linear part
+ * than at the take (F67), and sampled linearly (P2.5).
  *
  * @param kctx - The kept context.
  * @param record - The record, kept.
@@ -24,7 +25,12 @@ function offGrid(kctx: KeptCtx, record: KeptRecord): boolean {
   const r = kctx.host.resolution();
 
   return (
-    !onGrid(world.tx - (key[KEY.tx] ?? 0), rs, r) || !onGrid(world.ty - (key[KEY.ty] ?? 0), rs, r)
+    world.a !== key[KEY.a] ||
+    world.b !== key[KEY.b] ||
+    world.c !== key[KEY.c] ||
+    world.d !== key[KEY.d] ||
+    !onGrid(world.tx - (key[KEY.tx] ?? 0), rs, r) ||
+    !onGrid(world.ty - (key[KEY.ty] ?? 0), rs, r)
   );
 }
 

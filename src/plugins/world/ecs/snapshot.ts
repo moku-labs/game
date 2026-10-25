@@ -23,11 +23,36 @@ export function isJson(value: unknown): value is Json {
   if (typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
     return true;
   }
-  if (Array.isArray(value)) return value.every(entry => isJson(entry));
+  if (Array.isArray(value)) return isJsonArray(value);
   if (typeof value !== "object") return false;
   if (Object.getPrototypeOf(value) !== Object.prototype) return false;
 
-  return Object.values(value).every(entry => isJson(entry));
+  // Index and `for…in` loops: the frame history asks for every changed row of a dev build (F70).
+  for (const key in value) {
+    if (Object.hasOwn(value, key) && !isJson(Reflect.get(value, key))) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Tells whether every entry of an array is plain JSON. A hole is skipped, as `every` skips it.
+ *
+ * @param value - The array to check.
+ * @returns True when every entry is plain JSON.
+ * @example
+ * ```ts
+ * isJsonArray([1, "a", [true]]); // true
+ * ```
+ */
+function isJsonArray(value: readonly unknown[]): boolean {
+  const count = value.length;
+
+  for (let index = 0; index < count; index += 1) {
+    if (index in value && !isJson(value[index])) return false;
+  }
+
+  return true;
 }
 
 /**

@@ -60,7 +60,7 @@ function frames(world: MockWorld, count: number): void {
 function changesAt(world: MockWorld, frame: number): HistoryChange[] | undefined {
   const slot = world.ctx.state.ecs.history?.slots[frame % HISTORY_FRAMES];
 
-  return slot?.frame === frame ? slot.changes : undefined;
+  return slot?.frame === frame ? slot.changes.slice(0, slot.count) : undefined;
 }
 
 /**
@@ -291,6 +291,35 @@ describe("the frame history", () => {
     expect(changesAt(world, 3)?.[0]).toMatchObject({ from: { x: 2, y: 0 }, to: { x: 3, y: 0 } });
   });
 
+  it("records a value of another shape into a reused record: keys and entries the new value lacks are gone (F70)", () => {
+    const world = recording();
+    const entity = world.api.ecs.spawn(owner, [Payload({ data: { coins: 0 } })]);
+    // The first turn of the ring writes two gems and a key the second turn drops; the second writes one gem.
+    const shape = (turn: number): object =>
+      turn < HISTORY_FRAMES
+        ? { coins: turn, gems: [turn, turn], extra: true }
+        : { coins: turn, gems: [turn] };
+
+    world.frame();
+
+    for (let turn = 0; turn < HISTORY_FRAMES * 2; turn += 1) {
+      world.api.ecs.set(entity, Payload, { data: shape(turn) });
+      world.frame();
+    }
+
+    const last = HISTORY_FRAMES * 2 + 1;
+
+    expect(changesAt(world, last)).toEqual([
+      {
+        id: entity,
+        owner,
+        component: "Payload",
+        from: { data: { coins: last - 3, gems: [last - 3] } },
+        to: { data: { coins: last - 2, gems: [last - 2] } }
+      }
+    ]);
+  });
+
   it("gives every frame a slot and clears the old slot at that index first", () => {
     const world = recording();
     const entity = spawnAt(world, 1);
@@ -325,6 +354,26 @@ describe("the frame history", () => {
 });
 
 describe("ecs.diff", () => {
+  it("hands out values of its own: a diff stays as read when the ring reuses its records (F70)", () => {
+    const world = recording();
+    const entity = spawnAt(world, 1);
+
+    world.frame();
+    world.api.ecs.set(entity, Position, { x: 2 });
+    world.frame();
+
+    const read = world.api.ecs.diff(1, 2);
+
+    for (let frame = 0; frame < HISTORY_FRAMES + 2; frame += 1) {
+      world.api.ecs.set(entity, Position, { x: 10 + frame, y: 7 });
+      world.frame();
+    }
+
+    expect(read.entities[0]?.components).toEqual({
+      Position: { from: { x: 1, y: 0 }, to: { x: 2, y: 0 } }
+    });
+  });
+
   it("folds the window: the first from, the last to, spawned, despawned and changed", () => {
     const world = recording();
     const stays = spawnAt(world, 1);

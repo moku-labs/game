@@ -38,10 +38,18 @@ describe("viewport safe area", () => {
 
     const { start, end } = probes();
 
-    expect(start.style.width).toBe("var(--moku-safe-left, env(safe-area-inset-left, 0px))");
-    expect(start.style.height).toBe("var(--moku-safe-top, env(safe-area-inset-top, 0px))");
-    expect(end.style.width).toBe("var(--moku-safe-right, env(safe-area-inset-right, 0px))");
-    expect(end.style.height).toBe("var(--moku-safe-bottom, env(safe-area-inset-bottom, 0px))");
+    expect(start.style.width).toBe(
+      "var(--moku-safe-left, var(--moku-device-safe-left, env(safe-area-inset-left, 0px)))"
+    );
+    expect(start.style.height).toBe(
+      "var(--moku-safe-top, var(--moku-device-safe-top, env(safe-area-inset-top, 0px)))"
+    );
+    expect(end.style.width).toBe(
+      "var(--moku-safe-right, var(--moku-device-safe-right, env(safe-area-inset-right, 0px)))"
+    );
+    expect(end.style.height).toBe(
+      "var(--moku-safe-bottom, var(--moku-device-safe-bottom, env(safe-area-inset-bottom, 0px)))"
+    );
   });
 
   it("makes no probe and watches nothing where there is no document", () => {

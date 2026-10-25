@@ -670,12 +670,15 @@ export type HistoryChange = {
  *
  * @example
  * ```ts
- * const quiet: HistorySlot = { frame: 96, changes: [], spawned: [], despawned: [] };
+ * const quiet: HistorySlot = { frame: 96, changes: [], count: 0, spawned: [], despawned: [] };
  * ```
  */
 export type HistorySlot = {
   frame: number;
+  /** The records of this frame are the first `count`; the ones after them are spares kept for reuse. */
   changes: HistoryChange[];
+  /** How many of `changes` belong to this frame. */
+  count: number;
   spawned: Entity[];
   despawned: Entity[];
 };
@@ -700,6 +703,8 @@ export type History = {
   started: number | undefined;
   /** Rows marked and rows that changed, per component, over the current window of frames. */
   marks: Map<string, MarkCount>;
+  /** The same counts in the order they were made, walked when a window closes: no iterator a frame. */
+  markList: MarkCount[];
   /** Recorded frames in the current window; the counts are judged and zeroed at `HISTORY_FRAMES`. */
   markFrames: number;
   /** The components `world:mut-unchanged` already named: each is named once. */
@@ -709,7 +714,7 @@ export type History = {
 /**
  * Rows of one component marked changed in a window of frames, and how many of them changed.
  */
-export type MarkCount = { marked: number; changed: number };
+export type MarkCount = { component: string; marked: number; changed: number };
 
 /**
  * The entities marked changed for one component in the current frame, each once, in mark order.

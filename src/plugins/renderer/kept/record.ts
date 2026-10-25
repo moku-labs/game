@@ -44,6 +44,12 @@ export const CHURN_LIMIT = 3;
 /** Drawn frames a view that churned stands still before it is taken again. */
 export const CALM_AFTER = 8;
 
+/**
+ * How far a kept picture is drawn scaled from the scale it was taken at, either way (F67): past it the texels would
+ * blur or shimmer, and the picture is taken again at the new scale.
+ */
+export const SCALED_LIMIT = 2;
+
 /** The reasons an ancestor may be hidden by and still draw the view: an overlay's range, a kept ancestor's picture. */
 const DRAWN_ANYWAY = ["freeze", "kept"] as const;
 
@@ -908,9 +914,75 @@ function account(kctx: KeptCtx, record: KeptRecord): void {
 }
 
 /**
+ * The quad of a picture whose top's world transform has another linear part than at the take (F67): the picture is
+ * drawn through `W · W₀⁻¹`, this frame's world transform after the inverse of the one it was taken at, so it scales,
+ * turns and moves with an ancestor's zoom as the live subtree would.
+ *
+ * @param key - The record's key.
+ * @param Ps - The padding of the picture the quad shows.
+ * @param inverse - The inverse of the parent's world transform.
+ * @param local - Where the quad's local transform goes.
+ */
+function scaledQuad(
+  key: Float64Array,
+  Ps: number,
+  inverse: KeptMatrices["local"],
+  local: KeptMatrices["local"]
+): void {
+  const a0 = key[KEY.a] ?? 1;
+  const b0 = key[KEY.b] ?? 0;
+  const c0 = key[KEY.c] ?? 0;
+  const d0 = key[KEY.d] ?? 1;
+  const det = a0 * d0 - b0 * c0;
+  // `L = L₁ · L₀⁻¹`, Pixi's order: x' = a·x + c·y, y' = b·x + d·y.
+  const la = (NOW.a * d0 - NOW.c * b0) / det;
+  const lb = (NOW.b * d0 - NOW.d * b0) / det;
+  const lc = (NOW.c * a0 - NOW.a * c0) / det;
+  const ld = (NOW.d * a0 - NOW.b * c0) / det;
+  // The picture's corner, relative to the translation it was taken at, carried by `L` to this frame's translation.
+  const px = (key[KEY.X0] ?? 0) - Ps - (key[KEY.tx] ?? 0);
+  const py = (key[KEY.Y0] ?? 0) - Ps - (key[KEY.ty] ?? 0);
+  const x = la * px + lc * py + NOW.tx;
+  const y = lb * px + ld * py + NOW.ty;
+
+  local.a = inverse.a * la + inverse.c * lb;
+  local.b = inverse.b * la + inverse.d * lb;
+  local.c = inverse.a * lc + inverse.c * ld;
+  local.d = inverse.b * lc + inverse.d * ld;
+  local.tx = inverse.a * x + inverse.c * y + inverse.tx;
+  local.ty = inverse.b * x + inverse.d * y + inverse.ty;
+}
+
+/**
+ * Tells whether a kept picture may be drawn scaled to this frame's linear part instead of taken again (F67): its
+ * subtree and its stack resolution are as at the take, its filters follow the view (not its canvas place), it was not
+ * cut to the canvas, and the area scale stays within `SCALED_LIMIT` of the take's either way.
+ *
+ * @param record - The record, kept.
+ * @returns True when the quad may scale.
+ */
+function scalable(record: KeptRecord): boolean {
+  const { key } = record;
+
+  const unscalable = record.dirtyS1 || record.cut || record.category === "placed";
+
+  if (unscalable || key[KEY.rs] !== NOW.rs) return false;
+
+  const taken = Math.abs(
+    (key[KEY.a] ?? 1) * (key[KEY.d] ?? 1) - (key[KEY.b] ?? 0) * (key[KEY.c] ?? 0)
+  );
+  const now = Math.abs(NOW.a * NOW.d - NOW.b * NOW.c);
+  const limit = SCALED_LIMIT * SCALED_LIMIT;
+
+  const withinLimit = now <= taken * limit && now * limit >= taken;
+
+  return taken > 0 && now > 0 && withinLimit;
+}
+
+/**
  * Places the quad of a kept record (P3.5, P2.4): beside its top in the same parent, at the top's depth, drawing the
- * filter output at its canvas place `O + Δ` with an identity world scale; shown while the top is visible and no
- * cover or alpha hides it. Every value is compared before it is written.
+ * filter output at its canvas place `O + Δ` with an identity world scale, or scaled to this frame's linear part when
+ * it differs from the take's (F67); shown while the top is visible and no cover or alpha hides it. Every value is compared before it is written.
  *
  * @param sync - The writers of `sync`: its reader of the hidden reasons.
  * @param pixi - The module that draws.
@@ -952,20 +1024,26 @@ function placeQuad(
   if (quad.blendMode !== top.blendMode) quad.blendMode = top.blendMode;
   if (quad.alpha !== alpha) quad.alpha = alpha;
 
-  // The filter output at its canvas place `O + Δ`, brought into the parent's space with an identity world scale.
+  // The filter output at its canvas place `O + Δ`, brought into the parent's space: with an identity world scale, or
+  // through `W · W₀⁻¹` when the linear part moved since the take (F67).
   const inverse = parent.getGlobalTransform(matrices.parent, false).invert();
   const Ps = record.direct ? 0 : (key[KEY.Ps] ?? 0);
-  const x = (key[KEY.X0] ?? 0) - Ps + NOW.tx - (key[KEY.tx] ?? 0);
-  const y = (key[KEY.Y0] ?? 0) - Ps + NOW.ty - (key[KEY.ty] ?? 0);
   const { local } = matrices;
 
-  // Written field by field, not through `set`: a computed double handed to a call is boxed, and this runs every frame.
-  local.a = inverse.a;
-  local.b = inverse.b;
-  local.c = inverse.c;
-  local.d = inverse.d;
-  local.tx = inverse.a * x + inverse.c * y + inverse.tx;
-  local.ty = inverse.b * x + inverse.d * y + inverse.ty;
+  if (linearDiffers(key, NOW, KEY.a, KEY.rs)) {
+    scaledQuad(key, Ps, inverse, local);
+  } else {
+    const x = (key[KEY.X0] ?? 0) - Ps + NOW.tx - (key[KEY.tx] ?? 0);
+    const y = (key[KEY.Y0] ?? 0) - Ps + NOW.ty - (key[KEY.ty] ?? 0);
+
+    // Written field by field, not through `set`: a computed double handed to a call is boxed, and this runs every frame.
+    local.a = inverse.a;
+    local.b = inverse.b;
+    local.c = inverse.c;
+    local.d = inverse.d;
+    local.tx = inverse.a * x + inverse.c * y + inverse.tx;
+    local.ty = inverse.b * x + inverse.d * y + inverse.ty;
+  }
 
   if (storeMatrix(key, KEY.qa, local)) quad.setFromMatrix(local);
 
@@ -1183,14 +1261,21 @@ function stepKept(
   view: View
 ): void {
   const { key } = record;
+  // The linear part moved since the last frame: the view turns or scales under an ancestor's zoom.
+  const turned = linearDiffers(key, NOW, KEY.seenA, KEY.seenRs);
+  const scaled = linearDiffers(key, NOW, KEY.a, KEY.rs);
 
-  if (record.dirtyS1 || linearDiffers(key, NOW, KEY.a, KEY.rs)) {
+  writeSeen(record, NOW);
+
+  const retake = record.dirtyS1 || (scaled && !scalable(record));
+
+  if (retake) {
     churn(kctx, pixi, matrices, record, view);
 
     return;
   }
 
-  const moved = NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
+  const moved = turned || NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
 
   // A picture cut to the canvas shows what it left out once it moves or the canvas changes size (F53).
   if (record.cut && (moved || canvasChanged(kctx, key))) {
@@ -1210,6 +1295,12 @@ function stepKept(
   refresh(kctx, pixi, matrices, record);
 
   if (moved) noteMove(kctx, record);
+
+  // A picture drawn scaled is sampled off its grid: one settle retake is owed at rest, in a frame asked for.
+  if (scaled && !record.settle) {
+    record.settle = true;
+    kctx.demand.request();
+  }
 }
 
 /**

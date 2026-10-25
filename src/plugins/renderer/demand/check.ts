@@ -5,22 +5,17 @@
  * its shape, so a Pixi that renames them switches the check off instead of throwing.
  */
 import type { Entity } from "../../world/types";
-import type { View } from "../sync/types";
 import type { PixiContainer, RendererCtx } from "../types";
 import type { DemandState } from "./types";
 
 /** One of Pixi's change lists: its entries, and how many of them are live. */
 type ChangeList = { list: readonly unknown[]; index: number };
 
-/** What the check reads of one Pixi render group. */
-type ChangeGroup = {
-  /** The transform changes, one list per depth inside the group. */
-  depths: readonly unknown[];
-  /** The view changes: a texture, a redrawn path, a new particle step. */
-  renderables: ChangeList;
-  /** The render groups nested in this one. */
-  nested: readonly unknown[];
-};
+/**
+ * The deepest level inside one render group whose transform list the check reads. Pixi keys the lists by depth in an
+ * object, and a `for…in` over it allocates its keys on every pass; the levels are read by number instead.
+ */
+const DEEPEST = 128;
 
 /** Why the check switched itself off, for its one debug line. */
 const NO_LISTS = "Pixi's render group has no change lists";
@@ -41,97 +36,46 @@ function isChangeList(value: unknown): value is ChangeList {
 }
 
 /**
- * Reads the change lists of a render group, when it has the shape Pixi 8 gives it.
+ * Whether a render group and every group nested in it have the change lists Pixi 8 gives them. Reads, never allocates.
  *
- * @param value - The render group, or what stands in its place.
- * @returns The lists, or `undefined` when the shape is not Pixi's.
+ * @param group - The render group, or what stands in its place.
+ * @returns False when one of them has no lists of Pixi's shape.
  */
-function groupOf(value: unknown): ChangeGroup | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+function hasLists(group: unknown): group is object {
+  if (typeof group !== "object" || group === null) return false;
 
-  const depths: unknown = Reflect.get(value, "childrenToUpdate");
-  const renderables: unknown = Reflect.get(value, "childrenRenderablesToUpdate");
-  const nested: unknown = Reflect.get(value, "renderGroupChildren");
+  const depths: unknown = Reflect.get(group, "childrenToUpdate");
 
-  if (typeof depths !== "object" || depths === null || !isChangeList(renderables)) {
-    return undefined;
-  }
+  if (typeof depths !== "object" || depths === null) return false;
+  if (!isChangeList(Reflect.get(group, "childrenRenderablesToUpdate"))) return false;
 
-  return {
-    depths: Object.values(depths),
-    renderables,
-    nested: Array.isArray(nested) ? nested : []
-  };
-}
+  const nested: unknown = Reflect.get(group, "renderGroupChildren");
 
-/**
- * Collects the live entries of one change list.
- *
- * @param listed - The list.
- * @param into - Where the nodes go.
- */
-function collect(listed: ChangeList, into: object[]): void {
-  for (let at = 0; at < listed.index; at += 1) {
-    const node = listed.list[at];
+  if (!Array.isArray(nested)) return true;
 
-    if (typeof node === "object" && node !== null) into.push(node);
-  }
-}
-
-/**
- * Collects every node Pixi listed as changed in a render group and the groups nested in it.
- *
- * @param group - The render group.
- * @param into - Where the nodes go.
- * @returns False when a nested group has no lists of Pixi's shape.
- */
-function listedNodes(group: ChangeGroup, into: object[]): boolean {
-  for (const depth of group.depths) if (isChangeList(depth)) collect(depth, into);
-
-  collect(group.renderables, into);
-
-  for (const child of group.nested) {
-    const nested = groupOf(child);
-
-    if (nested === undefined || !listedNodes(nested, into)) return false;
-  }
+  for (const child of nested) if (!hasLists(child)) return false;
 
   return true;
 }
 
 /**
- * The entity behind every display object the renderer owns for it: the object, the wrapper, the masked container and
- * the mask. Built once per check, dev builds only.
- *
- * @param views - The views by entity.
- * @returns The reverse map.
- */
-function ownersOf(views: ReadonlyMap<Entity, View>): Map<object, Entity> {
-  const owners = new Map<object, Entity>();
-
-  for (const [entity, view] of views) {
-    owners.set(view.object, entity);
-    if (view.wrapper !== undefined) owners.set(view.wrapper, entity);
-    if (view.clipped !== undefined) owners.set(view.clipped, entity);
-    if (view.mask !== undefined) owners.set(view.mask, entity);
-  }
-
-  return owners;
-}
-
-/**
- * The entity a listed node belongs to: the node itself or the nearest parent that is a view's object, wrapper, masked
- * container or mask. The stage, the root and a layer belong to none.
+ * The entity a listed node belongs to: the node itself or the nearest parent that is a view's object or top, read
+ * from sync's back references. A masked container and a mask hang in their view's wrapper, so the walk meets the top.
+ * The stage, the root and a layer belong to none.
  *
  * @param node - The listed node.
- * @param owners - The reverse map of `ownersOf`.
+ * @param sync - Sync's state.
  * @returns The entity, or `undefined`.
  */
-function ownerOf(node: object, owners: ReadonlyMap<object, Entity>): Entity | undefined {
+function ownerOf(node: object, sync: RendererCtx["state"]["sync"]): Entity | undefined {
   for (let at: unknown = node; typeof at === "object" && at !== null; ) {
-    const entity = owners.get(at);
+    const entity = sync.entityOf.get(at);
 
     if (entity !== undefined) return entity;
+
+    const top = sync.viewOfTop.get(at as PixiContainer);
+
+    if (top !== undefined) return sync.entityOf.get(top.object);
 
     at = Reflect.get(at, "parent");
   }
@@ -140,54 +84,114 @@ function ownerOf(node: object, owners: ReadonlyMap<object, Entity>): Entity | un
 }
 
 /**
+ * Warns about one listed node when it belongs to a shown view nobody marked since the last drawn frame.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param state - The demand state.
+ * @param shown - The shown predicate.
+ * @param node - The listed node.
+ */
+function visit(
+  ctx: RendererCtx,
+  state: DemandState,
+  shown: (entity: Entity) => boolean,
+  node: unknown
+): void {
+  if (typeof node !== "object" || node === null) return;
+
+  const entity = ownerOf(node, ctx.state.sync);
+
+  if (entity === undefined) return;
+
+  const known = state.sinceDraw.has(entity) || state.check.warned.has(entity);
+
+  if (known) return;
+
+  if (!shown(entity)) return;
+
+  state.check.warned.add(entity);
+
+  const label: unknown = Reflect.get(node, "label");
+
+  ctx.log.warn("renderer:missed-mark", {
+    entity,
+    label: typeof label === "string" ? label : ""
+  });
+}
+
+/**
+ * Visits the live entries of one change list.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param state - The demand state.
+ * @param shown - The shown predicate.
+ * @param listed - The list.
+ */
+function visitList(
+  ctx: RendererCtx,
+  state: DemandState,
+  shown: (entity: Entity) => boolean,
+  listed: unknown
+): void {
+  if (!isChangeList(listed)) return;
+
+  for (let at = 0; at < listed.index; at += 1) visit(ctx, state, shown, listed.list[at]);
+}
+
+/**
+ * Visits every node Pixi listed as changed in a render group and the groups nested in it, whose shapes `hasLists`
+ * checked.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param state - The demand state.
+ * @param shown - The shown predicate.
+ * @param group - The render group.
+ */
+function visitGroup(
+  ctx: RendererCtx,
+  state: DemandState,
+  shown: (entity: Entity) => boolean,
+  group: object
+): void {
+  const depths = Reflect.get(group, "childrenToUpdate") as Record<number, unknown>;
+
+  for (let depth = 0; depth <= DEEPEST; depth += 1) visitList(ctx, state, shown, depths[depth]);
+
+  visitList(ctx, state, shown, Reflect.get(group, "childrenRenderablesToUpdate"));
+
+  const nested: unknown = Reflect.get(group, "renderGroupChildren");
+
+  if (!Array.isArray(nested)) return;
+
+  for (const child of nested) visitGroup(ctx, state, shown, child as object);
+}
+
+/**
  * Warns `renderer:missed-mark` once per listed, shown, unmarked view of a skipped frame: something wrote into a
  * display object the renderer never heard of. A view marked since the last drawn frame is skipped, and so is a view
  * that is not shown (Pixi lists the changes of hidden views too). Lists keep their entries across skipped frames until
- * Pixi renders, and an entity warns once per run, so one stray write warns once.
+ * Pixi renders, and an entity warns once per run, so one stray write warns once. The owner of a node comes from sync's
+ * back references, so no map of every view is built per frame (F69), and a pass that warns nothing allocates nothing.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param state - The demand state.
  * @param stage - The stage root.
- * @param views - The views by entity.
  * @param shown - The shown predicate.
  */
 export function checkMissedMarks(
   ctx: RendererCtx,
   state: DemandState,
   stage: PixiContainer,
-  views: ReadonlyMap<Entity, View>,
   shown: (entity: Entity) => boolean
 ): void {
-  const group = groupOf(Reflect.get(stage, "renderGroup"));
-  const nodes: object[] = [];
+  const group: unknown = Reflect.get(stage, "renderGroup");
 
-  if (group === undefined || !listedNodes(group, nodes)) {
+  if (!hasLists(group)) {
     state.check.off = true;
     ctx.log.debug("renderer:demand-check-off", { reason: NO_LISTS });
 
     return;
   }
 
-  if (nodes.length === 0) return;
-
-  const owners = ownersOf(views);
-
-  for (const node of nodes) {
-    const entity = ownerOf(node, owners);
-
-    if (entity === undefined || state.sinceDraw.has(entity) || state.check.warned.has(entity)) {
-      continue;
-    }
-
-    if (!shown(entity)) continue;
-
-    state.check.warned.add(entity);
-
-    const label: unknown = Reflect.get(node, "label");
-
-    ctx.log.warn("renderer:missed-mark", {
-      entity,
-      label: typeof label === "string" ? label : ""
-    });
-  }
+  visitGroup(ctx, state, shown, group);
 }

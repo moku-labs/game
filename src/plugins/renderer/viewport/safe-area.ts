@@ -1,17 +1,23 @@
 /**
  * @file renderer/viewport — the safe area: two hidden probes whose size is the insets, each a
- * `--moku-safe-*` custom property that falls back to `env(safe-area-inset-*)`, read with
- * `getComputedStyle` and cut down to the part that really covers the frame.
+ * `--moku-safe-*` custom property that falls back to `--moku-device-safe-*` (the editor's device
+ * preset, E-I1), then to `env(safe-area-inset-*)`, read with `getComputedStyle` and cut down to the
+ * part that really covers the frame.
  */
 import type { Rect, SafeArea, SafeAreaProbes } from "./types";
 
 const NONE: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
 
-/** The sizes of the probes: the public contract a page, a game or the native shell sets. */
-const TOP = "var(--moku-safe-top, env(safe-area-inset-top, 0px))";
-const RIGHT = "var(--moku-safe-right, env(safe-area-inset-right, 0px))";
-const BOTTOM = "var(--moku-safe-bottom, env(safe-area-inset-bottom, 0px))";
-const LEFT = "var(--moku-safe-left, env(safe-area-inset-left, 0px))";
+/**
+ * The sizes of the probes: the public contract. A page, a game or the native shell sets `--moku-safe-*`; the editor sets
+ * `--moku-device-safe-*` from its device preset, which a page's own value still overrides.
+ */
+const TOP = "var(--moku-safe-top, var(--moku-device-safe-top, env(safe-area-inset-top, 0px)))";
+const RIGHT =
+  "var(--moku-safe-right, var(--moku-device-safe-right, env(safe-area-inset-right, 0px)))";
+const BOTTOM =
+  "var(--moku-safe-bottom, var(--moku-device-safe-bottom, env(safe-area-inset-bottom, 0px)))";
+const LEFT = "var(--moku-safe-left, var(--moku-device-safe-left, env(safe-area-inset-left, 0px)))";
 
 /**
  * What `clipToFrame` needs to decide how much of an inset lands on the drawn frame.

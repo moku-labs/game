@@ -88,6 +88,8 @@ export function demandAlone(
   const stage = new pixi.Container({ isRenderGroup: options.renderGroup === true });
   const screen = new pixi.Rectangle(0, 0, 1080, 1920);
   const views = new Map<Entity, View>();
+  const entityOf = new Map<object, Entity>();
+  const viewOfTop = new WeakMap<PixiContainer, View>();
   const time = { wakes: 0 };
   const hostState: DemandAlone["host"] = { ready: true, renders: 0, picture: undefined };
   const log = { warn: vi.fn(), debug: vi.fn(), error: vi.fn(), info: vi.fn() };
@@ -107,7 +109,7 @@ export function demandAlone(
     config: { onDemand: options.onDemand ?? true, background: 0 },
     state: {
       demand: createDemandState(),
-      sync: { root: stage, views },
+      sync: { root: stage, views, entityOf, viewOfTop },
       kept: createKeptState({ keptMb: 64, debug: {} })
     },
     log,
@@ -127,6 +129,8 @@ export function demandAlone(
 
       parent.addChild(object);
       views.set(entity, view);
+      entityOf.set(object, entity);
+      viewOfTop.set(object, view);
 
       return view;
     }

@@ -22,6 +22,7 @@ import {
 } from "../../components";
 import { commitFrame } from "../../monitor/commit";
 import type { PixiFilter } from "../../types";
+import { box, demandAlone } from "../demand-harness";
 import { FakeFilter, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 import { startOverlayStage } from "../overlay-harness";
@@ -635,4 +636,68 @@ export async function keptBoard(count: number, marked = false): Promise<() => vo
         kept.collect();
         kept.flush();
       };
+}
+
+/**
+ * The board of `keptBoard` under a camera zoom (F67): every frame the root above the kept views scales by a step, in
+ * turn 1.1 and 1.2, as a glide changes a camera layer's scale, and a view elsewhere is marked. Every record steps and
+ * draws its picture scaled; none is retaken.
+ *
+ * @param count - The kept views.
+ * @returns One frame of the zoom: the scale, the mark, the collect and the flush.
+ */
+export async function keptZoomBoard(count: number): Promise<() => void> {
+  const { stage, other } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const root = stage.drawn.mock.ctx.state.sync.root;
+
+  if (root === undefined) throw new Error("perf fixture: the zoom board has no root");
+
+  let near = false;
+
+  return () => {
+    near = !near;
+    root.scale.set(near ? 1.2 : 1.1);
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * A skipped frame of a dev build with `onDemand` and 300 views over real Pixi render groups, as the case-sheet of
+ * A Memory Missing stands idle: after the last drawn frame five views were written without a mark, warned, and stay in
+ * Pixi's change lists, because a skipped frame renders nothing. Each call is the after-frame step of one more skipped frame (F69).
+ *
+ * @param count - How many views the stage holds.
+ * @returns One skipped frame's after-frame step.
+ */
+export function idleMissedMarks(count = 300): () => void {
+  vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+  const alone = demandAlone({ renderGroup: true });
+  const objects: pixi.Graphics[] = [];
+
+  for (let entity = 1; entity <= count; entity += 1) {
+    const object = box((entity % 20) * 50, Math.floor(entity / 20) * 50, 40);
+
+    objects.push(object);
+    alone.view(entity, object);
+  }
+
+  alone.demand.settle(alone.demand.decide(false));
+  // The drawn frame: Pixi's own transform pass empties the change lists, as a render does.
+  pixi.updateRenderGroupTransforms(Reflect.get(alone.stage, "renderGroup"), true);
+
+  for (let at = 0; at < 5; at += 1) {
+    const object = objects[at * 60];
+
+    if (object !== undefined) object.x += 1;
+  }
+
+  alone.demand.settle(false);
+
+  return () => {
+    alone.demand.settle(false);
+  };
 }
