@@ -8,6 +8,7 @@
  * enters the package.
  */
 import type { AnimApi } from "../plugins/anim/types";
+import type { Api as ClockApi } from "../plugins/clock/types";
 import type { commands } from "../plugins/flow/doors/commands";
 import type { ControlApp, InputOf } from "../plugins/flow/doors/types";
 import type { HeadlessApp, Repro } from "../plugins/flow/headless";
@@ -104,6 +105,8 @@ export type VisualApp = ControlApp & {
   readonly model: ModelApi;
   readonly input: InputApi;
   readonly lifecycle: LifecycleApi;
+  /** The clock: the pixel leg puts its moment on the page, so both legs see one `clock.now()`. */
+  readonly clock: ClockApi;
 };
 
 /**

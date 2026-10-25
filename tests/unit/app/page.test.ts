@@ -17,6 +17,7 @@ import type {
 } from "../../../src/app/types";
 import { commands, run } from "../../../src/control";
 import { read, sources, watch } from "../../../src/inspect";
+import { VISUAL_CLOCK } from "../../../src/plugins/clock/fake";
 import { memory } from "../../../src/plugins/model/store/providers/memory";
 import game from "../../fixtures/mini-game/index";
 import ready from "../../fixtures/mini-game/tests/scenarios/ready";
@@ -707,5 +708,38 @@ describe("startPage: leaving the page", () => {
     await vi.waitFor(() => expect(flushes(save)).toBe(before + 2));
 
     expect(seen).toEqual([{ flushes: before, running: true }]);
+  });
+});
+
+describe("startPage: the clock of a visual test's page (F86)", () => {
+  it("a dev page the pixel leg opened runs on a fake clock at the leg's moment, still across frames", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    vi.stubGlobal(VISUAL_CLOCK, 1_000_000);
+
+    const { app } = await open();
+
+    expect(app.clock.now()).toBe(1_000_000);
+
+    for (let frame = 0; frame < 120; frame += 1) app.time.step(1000 / 60);
+
+    // As the headless leg's clock: game time moved two seconds, the clock did not.
+    expect(app.clock.now()).toBe(1_000_000);
+    expect(app.time.snapshot().elapsed).toBeGreaterThan(1900);
+  });
+
+  it("a production page keeps the device clock, whatever the global says", async () => {
+    vi.stubGlobal(VISUAL_CLOCK, 1_000_000);
+
+    const { app } = await open();
+
+    expect(app.clock.now()).toBeGreaterThan(1_000_000_000_000);
+  });
+
+  it("a dev page no pixel leg opened keeps the device clock", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const { app } = await open();
+
+    expect(app.clock.now()).toBeGreaterThan(1_000_000_000_000);
   });
 });
