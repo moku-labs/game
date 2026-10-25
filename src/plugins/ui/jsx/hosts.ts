@@ -12,7 +12,7 @@ import type { Entity } from "../../world/types";
 import type { ElementLookup, Rect } from "../layout/types";
 import type { UiCtx } from "../types";
 import { drawnRect, visualRectOf } from "../visual";
-import type { DescriptionNode, Element, JsxState, Root } from "./types";
+import type { AsideOf, DescriptionNode, Element, JsxState, Root } from "./types";
 
 /** What an element that hosts nothing answers: one frozen list, never a new one. */
 const NO_HOSTS: readonly string[] = Object.freeze([]);
@@ -122,6 +122,9 @@ function ownerOf(state: JsxState, name: string): Entity | undefined {
 /**
  * Gives the host as parent to every view of one projection that has no parent and is not held
  * by a drag. The parent is queued while the phase runs, so ownership is decided by name first.
+ * A host of the scene `world` builds aside takes only the views of that build, and a live host
+ * none of them, until the swap (spec 31): a live view under a hidden host would vanish from the
+ * screen, a coming one under a live host would be drawn before its scene.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The jsx state.
@@ -130,9 +133,11 @@ function ownerOf(state: JsxState, name: string): Entity | undefined {
  */
 function parentViews(ctx: UiCtx, state: JsxState, name: string, host: Entity): void {
   const ecs = ctx.deps.world.ecs;
+  const projection = ctx.deps.world.projection;
+  const aside = projection.isBuilding(host);
 
-  for (const view of ctx.deps.world.projection.entitiesOf(name)) {
-    if (ecs.has(view, Held)) continue;
+  for (const view of projection.entitiesOf(name)) {
+    if (ecs.has(view, Held) || projection.isBuilding(view) !== aside) continue;
     // A parent the full step of this frame took back is still there until the flush: the view is free (H3).
     if (ecs.has(view, Parent) && !state.released.has(view)) continue;
 
@@ -286,21 +291,31 @@ function keptSlot(state: JsxState, root: Root): Entity | undefined {
 
 /**
  * Tells whether a host element may take a root as its slot: it names the root's projection, it is
- * not leaving, and it is not an element of that root itself.
+ * not leaving, it is not an element of that root itself, and both stand on the same side of a
+ * scene build (spec 31): a root built aside never takes a slot in a live root of the old scene,
+ * and a live root none in a root built aside. A kept host takes its coming guest after the swap.
  *
  * @param state - The jsx state.
  * @param root - The root.
  * @param host - An entity of the host set.
+ * @param isAside - Whether an entity belongs to the scene `world` builds aside.
  * @returns The host element, or `undefined` when it cannot take the root.
  */
-export function slotFor(state: JsxState, root: Root, host: Entity): Element | undefined {
+export function slotFor(
+  state: JsxState,
+  root: Root,
+  host: Entity,
+  isAside: AsideOf
+): Element | undefined {
   const element = state.elements.get(host);
 
   if (element === undefined || state.exiting.has(host) || element.root === root.entity) {
     return undefined;
   }
 
-  return hostsOf(element.node).includes(root.name) ? element : undefined;
+  if (!hostsOf(element.node).includes(root.name)) return undefined;
+
+  return isAside(element.root) === isAside(root.entity) ? element : undefined;
 }
 
 /**
@@ -310,9 +325,10 @@ export function slotFor(state: JsxState, root: Root, host: Entity): Element | un
  *
  * @param state - The jsx state.
  * @param root - The root.
+ * @param isAside - Whether an entity belongs to the scene `world` builds aside.
  * @returns The slot, or `undefined` for a root laid out on the viewport.
  */
-export function slotOf(state: JsxState, root: Root): Entity | undefined {
+export function slotOf(state: JsxState, root: Root, isAside: AsideOf): Entity | undefined {
   if (root.popup !== undefined) return undefined;
 
   const kept = keptSlot(state, root);
@@ -320,7 +336,7 @@ export function slotOf(state: JsxState, root: Root): Entity | undefined {
   if (kept !== undefined) return kept;
 
   for (const host of state.hosts) {
-    if (slotFor(state, root, host) !== undefined) return host;
+    if (slotFor(state, root, host, isAside) !== undefined) return host;
   }
 
   return undefined;

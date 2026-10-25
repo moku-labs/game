@@ -180,7 +180,8 @@ export function zIndexOnRoot(element: Element): Finding | undefined {
 }
 
 /**
- * Runs the six rules over every live element.
+ * Runs the six rules over every live element on the screen: an element of a root `world` builds
+ * aside is not on it before the swap (spec 31).
  *
  * @param ctx - Domain context of the ui plugin.
  * @returns One finding per rule and element, in element order.
@@ -190,7 +191,7 @@ export function runLint(ctx: UiCtx): readonly Finding[] {
   const scale = ctx.deps.renderer.viewport.size().scale;
 
   for (const element of ctx.state.jsx.elements.values()) {
-    if (!element.live) continue;
+    if (!element.live || ctx.deps.world.projection.isBuilding(element.root)) continue;
 
     for (const finding of [
       tapTarget(ctx, element, scale),

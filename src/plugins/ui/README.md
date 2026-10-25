@@ -14,8 +14,8 @@ rect from one Yoga solve per change.
 | Member | Answers |
 |---|---|
 | `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key, `value` on a text field, `window` on a windowed scroll, children |
-| `app.ui.find(key)` | the entity of a keyed element, live only |
-| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
+| `app.ui.find(key)` | the entity of a keyed element, live only, never one of a scene built aside |
+| `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 | `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key, `false` and the warning `ui:scroll-before-solve` `{ key }` when the `scroll` came in this frame and its first solve has not placed it yet. Works headless. See [Scroll](#scroll) |
 
@@ -33,8 +33,9 @@ Emits the global `ui:hot-swap` in a dev build only, listens to nothing. Depends 
 `await import("yoga-layout/load")` in `onStart`; nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
 the cursor shows a hand over a local-state button, one `input.onKey` listener for the focus, one
 `input.onPointer` listener for the text fields, one `flow.fx.onHint` listener that hands released
-hints to the `change` hooks of elements, and on a page the hidden input of the text fields;
-`onStop` removes all of them. A dev build also installs the [hot swap](#hot-swap-dev) handler.
+hints to the `change` hooks of elements, `ui`'s part of a scene build through
+`world.projection.onBuild` (see [A scene built aside](#a-scene-built-aside)), and on a page the
+hidden input of the text fields; `onStop` removes all of them. A dev build also installs the [hot swap](#hot-swap-dev) handler.
 
 ## What a re-render costs
 
@@ -699,6 +700,54 @@ in the same frame. A slot takes a projection with one root, or roots that place 
 - The rects of a slotted root are in the slot's units. Every reader converts them to root
   coordinates: the focus ring, a text field, a guide hole and `tree()` (so the `ui` and `locate`
   doors and the `tap` and `drag` commands land where the element is drawn).
+- While a scene is built aside, a host and a slot take nothing across the line: a live host no
+  view or root of the build, a host of the build no live one. A kept host takes its coming guest in
+  the frame after the swap. See [A scene built aside](#a-scene-built-aside).
+
+## A scene built aside
+
+On a live switch with a drawing renderer `scenes` builds the next scene while the old one stays
+current, drawn and alive (spec 31). `world.projection.build` mounts the coming projections aside
+and flags their views building (`isBuilding`); a view whose `view` returns JSX becomes a root of
+the build. `ui` reconciles and solves it like any root, in the frame after the build starts, and:
+
+- marks every element it spawns for it as the build's (`world.projection.adopt`) right after the
+  spawn, before the element gets a visual, and the parts of its text fields with them: the renderer
+  holds their views, and a discard takes them with the rest;
+- holds its motions: no `enter` hook plays at the `Box`, and the element stays in the queue of
+  `ui.enter`, in its order, until the swap. A change before the swap (a text measured again, a
+  store commit) plays no `change` hook and no track: the element takes its rect, its pose and its
+  extras at once, so its `enter` starts from where it stands. In the first frame after the commit
+  the held enters play in the order of a mount: their hooks write the start pose at the end of that
+  frame's solve, where a `Box` lands, so the game's systems of `sync` see it (F49), and `ui.enter`
+  keeps the play or plays it again (F48) and starts the loops and the level of an overlay, the
+  frame the scene is first drawn;
+- leaves it out of `app.ui.find`, `app.ui.tree()` (so the `ui` and `locate` doors), `app.ui.lint()`
+  and the keyboard focus. The `render` door reads the renderer, which draws no view of the build;
+- lays it out on the viewport, or in a host of the build, never in a slot of a live root. The
+  reconcile after the commit gives the slots out again;
+- drops an element or a root of the build that leaves before the swap at once, with no exit. A
+  discard (`causeOf` answers `"discard"`) drops every root of the build that way, so the world
+  stands as it did before the build.
+
+`ui`'s part of the build, registered with `world.projection.onBuild`, is done when no root of the
+build is dirty (its tree not diffed yet, or the layout engine not loaded) and none waits for its
+solve. A root whose first diff threw (`ui:root-failed`) does not hold the swap. The check walks the
+roots and allocates nothing; with no build the reconcile pays one number a frame.
+
+```ts
+// The ward stays on the screen while the board is built aside, in one frame.
+app.world.projection.build(["ward", "board"], owner, [{ name: "ui", sort: "order" }], 4); // true
+app.time.step(16);
+app.ui.find("boardPlay"); // undefined: built, not on the screen
+app.ui.tree().key; // "wardRoot"
+
+// The swap, as `scenes` makes it, then the first frame of the board.
+app.world.projection.setLayers([{ name: "ui", sort: "order" }]);
+app.world.projection.commit();
+app.ui.find("boardPlay"); // the button's entity: on the screen from the next frame
+app.time.step(16); // the held enters of the board play now
+```
 
 ## Doors
 
@@ -712,7 +761,9 @@ one with `ui`, `renderer` and `world`.
 | `locate` | `game.locate` | `{ key: "string?", target: "json?" }`, exactly one | frame | `{ x, y, w, h }` of the element with that `key` or of the view `target: { projection, key }`, in CSS px of the page, or `undefined` |
 
 `game.locate` answers where something is drawn, by either address the doors use. It replaces
-`game.rect`, which answered the key form only; `{ key }` answers the same numbers.
+`game.rect`, which answered the key form only; `{ key }` answers the same numbers. Neither shows a
+scene built aside before its swap: `tree()` and `find()` leave it out, and `world` answers no
+`entityOf` for a building view.
 
 ## Debug trigger
 

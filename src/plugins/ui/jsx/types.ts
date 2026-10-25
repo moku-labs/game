@@ -350,6 +350,13 @@ export type PopupLink = {
 };
 
 /**
+ * Tells whether an entity belongs to the scene `world` builds aside (spec 31): what
+ * `world.projection.isBuilding` answers. The readers leave such a root out, and a host and a slot
+ * take nothing across the line until the swap.
+ */
+export type AsideOf = (entity: Entity) => boolean;
+
+/**
  * One reconciled tree: a projection view or a popup, with the flags the frame step reads.
  * `covered` is true while the root is kept under another popup; every element of the root then
  * resolves `is.covered`. `cause` is how the root came, read at its first build: `"change"` for a
@@ -374,6 +381,12 @@ export type Root = {
   slot: Entity | undefined;
   slotRect: { x: number; y: number; w: number; h: number } | undefined;
   pending?: boolean;
+  /**
+   * Present from the reconcile that found the root in the scene `world` builds aside (spec 31)
+   * until the reconcile that finds it committed, which gives the slots out again. Absent on every
+   * other root.
+   */
+  aside?: true;
 };
 
 /**
@@ -532,6 +545,7 @@ export type JsxState = {
   /**
    * The elements whose `Box` came since the last `sync`: their enter hooks played at the `Box` (F49) and are settled
    * there, after the game's systems, played again when a system changed what a hook read (F48). The first `count` slots are the queue; the array keeps its length, so a frame allocates nothing.
+   * An element of a scene `world` builds aside stays queued, its hook unplayed, until the swap (spec 31).
    */
   entering: { list: Entity[]; count: number };
   scrolls: Set<Entity>;
@@ -553,6 +567,8 @@ export type JsxState = {
   debugWarned: boolean;
   /** Elements that carry `Overlay`, from their enter to their despawn (spec 22 O4.5). */
   overlays: Set<Entity>;
+  /** How many roots carry `aside`, as the last reconcile counted them: 0 while no scene is built aside. */
+  asideRoots: number;
 };
 
 /**
@@ -746,6 +762,14 @@ export type JsxModule = {
    * elements to their rest pose and ended every track on them: a restore or a load.
    */
   converged(): void;
+  /**
+   * The part of a scene build `ui` does, as `world.projection.onBuild` asks it: true when no root
+   * of the scene built aside is dirty, waits for its solve or waits for the layout engine. Walks
+   * the roots and allocates nothing.
+   *
+   * @returns True when every root built aside is reconciled and solved.
+   */
+  asideBuilt(): boolean;
   key(input: KeyInput): boolean;
   blur(): void;
 };

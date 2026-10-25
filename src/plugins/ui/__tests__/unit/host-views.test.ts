@@ -84,6 +84,8 @@ function harness() {
   // The membership version the world counts: a test moves it as the world would.
   const membership = { version: 0 };
   const views: Entity[] = [];
+  // The entities of the scene the fake world builds aside.
+  const building = new Set<Entity>();
   const entitiesOf = vi.fn((name: string): readonly Entity[] => (name === PIECES ? views : []));
   const keyOf = vi.fn((view: Entity) =>
     views.includes(view) ? { projection: PIECES, key: String(view) } : undefined
@@ -104,7 +106,12 @@ function harness() {
         parents.delete(entity);
       }
     },
-    projection: { entitiesOf, keyOf, membershipVersion: (): number => membership.version }
+    projection: {
+      entitiesOf,
+      keyOf,
+      membershipVersion: (): number => membership.version,
+      isBuilding: (entity: Entity): boolean => building.has(entity)
+    }
   } as unknown as WorldApi;
   const state: JsxState = createJsxState();
   const ctx = { deps: { world }, state: { jsx: state } } as unknown as UiCtx;
@@ -112,7 +119,7 @@ function harness() {
   state.elements.set(HOST, hostElement());
   trackHost(state, hostElement());
 
-  return { ctx, state, views, parents, membership, entitiesOf, keyOf };
+  return { ctx, state, views, parents, membership, building, entitiesOf, keyOf };
 }
 
 describe("hostViews", () => {
@@ -162,6 +169,24 @@ describe("hostViews", () => {
     hostViews(h.ctx, h.state);
 
     expect(h.parents.get(4)).toBe(HOST);
+  });
+
+  // Bug: a live host hangs a view of the coming scene under it, so it is drawn before its scene.
+  it("hosts a view of a scene built aside only after the swap", () => {
+    const h = harness();
+
+    h.views.push(1, 2);
+    h.building.add(2);
+    hostViews(h.ctx, h.state);
+
+    expect([h.parents.get(1), h.parents.has(2)]).toEqual([HOST, false]);
+
+    // The commit clears every building flag and moves the membership.
+    h.building.clear();
+    h.membership.version += 1;
+    hostViews(h.ctx, h.state);
+
+    expect(h.parents.get(2)).toBe(HOST);
   });
 
   it("releases a view once its host stops naming its projection", () => {

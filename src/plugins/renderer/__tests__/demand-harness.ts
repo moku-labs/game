@@ -68,7 +68,8 @@ export function viewOf(object: PixiContainer): View {
     clipDrawn: undefined,
     hiddenSelf: 0,
     hiddenTop: 0,
-    hud: 1
+    hud: 1,
+    held: false
   };
 }
 

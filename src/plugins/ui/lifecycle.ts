@@ -90,8 +90,9 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
  * step, the three tap listeners (the `LocalWrite` patch, the pointer tap that clears the keyboard
  * focus, and the tap that starts or ends the editing of a text field), the pointer door that opens
  * the keyboard inside the DOM listener, the key listener of the focus and `LocalWrite` as an input
- * control, so the cursor shows a hand over a local-state button. On an agent page also the tap
- * counter of `DebugTrigger` and its check of a view that takes no press.
+ * control, so the cursor shows a hand over a local-state button, and `ui`'s part of a scene build
+ * (`onBuild`: the roots built aside are reconciled and solved, spec 31). On an agent page also the
+ * tap counter of `DebugTrigger` and its check of a view that takes no press.
  *
  * The `Box` hook plays an element's enter hook and queues it, so the game's systems see its start
  * pose (F49); `ui.enter` starts its loop after them and before the frame is drawn, and plays the
@@ -139,6 +140,7 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ecs.onRemoved(Tree, entity => jsx.unmountRoot(entity)),
     ecs.onAdded(Box, entity => jsx.queueEnter(entity)),
     projection.onConverged(jsx.converged),
+    projection.onBuild(jsx.asideBuilt),
     ecs.onAdded(Pressed, entity => jsx.markPointer(entity, "pressed", true)),
     ecs.onRemoved(Pressed, entity => jsx.markPointer(entity, "pressed", false)),
     ecs.onAdded(PointerOver, entity => jsx.markPointer(entity, "hover", true)),
@@ -245,6 +247,7 @@ export function stopUi(state: State): void {
   state.jsx.released.clear();
   state.jsx.scrolls.clear();
   state.jsx.remount = false;
+  state.jsx.asideRoots = 0;
   state.jsx.hints.length = 0;
   state.jsx.entering.list.length = 0;
   state.jsx.entering.count = 0;

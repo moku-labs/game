@@ -62,5 +62,26 @@ export const BUDGET = {
    * F48 (change 2026-10-21-hooks-after-sync): one element queued by its `Box` hook, then the system `ui.enter`
    * of phase `sync` drains the queue. The queue is one array emptied in place, walked by index. 0 B.
    */
-  enterQueue: 0
+  enterQueue: 0,
+  /**
+   * Spec 31 (change 2026-10-25-f61-sliced-mount): `ui`'s part of a scene build, asked once a frame
+   * while a build runs, over the ten roots at rest and no root built aside. Two flags a root, the
+   * world asked about none. 0 B.
+   */
+  asideBuiltIdle: 0,
+  /**
+   * Spec 31: the same part while the names of the box files are built aside, solved: the world
+   * asked about the one root that has work left, none. 0 B.
+   */
+  asideBuiltBuilding: 0,
+  /**
+   * Spec 31: `ui.enter` while every element of the names waits for the swap: each one looked up
+   * in the world's build and written back in place in the queue. 0 B.
+   */
+  enterHeld: 0,
+  /**
+   * Spec 31: `ui.reconcile` and `ui.solve` of a frame while the names are built aside: the walk
+   * that looks for a committed root asks the world about the one root built aside. 0 B.
+   */
+  reconcileBuilding: 0
 } as const;

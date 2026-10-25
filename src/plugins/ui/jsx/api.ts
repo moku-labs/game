@@ -69,10 +69,12 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const state = ctx.state.jsx;
   const sceneLayers = sceneLayersOf(ctx);
   const layerNames = (): readonly string[] => sceneLayers().names;
+  // The roots of a scene built aside are not on the screen yet: `tree`, `find` and the focus leave them out.
+  const isAside = (entity: Entity): boolean => ctx.deps.world.projection.isBuilding(entity);
   const topRoot = (): Root | undefined => {
     const scene = sceneLayers();
 
-    return focusRoot(state, scene.names, scene.hud);
+    return focusRoot(state, scene.names, scene.hud, isAside);
   };
   const fields = createFields(ctx, { layout: modules.layout, topRoot });
   const frame = createReconciler(ctx, modules, fields);
@@ -81,7 +83,7 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
     ctx.deps.world.ecs.get(entity, Text)?.resolved;
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
   const find = (key: string): Entity | undefined => {
-    for (const root of sortedRoots(state, layerNames())) {
+    for (const root of sortedRoots(state, layerNames(), isAside)) {
       const entity = state.byKey.get(root.entity)?.get(key);
 
       if (entity !== undefined && !state.exiting.has(entity)) return entity;
@@ -92,7 +94,13 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
   return {
     tree: (): UiNode =>
-      readTree(state, layerNames(), resolvedOf, slot => rootPoseOf(ctx.deps.world.ecs, slot)),
+      readTree(
+        state,
+        layerNames(),
+        resolvedOf,
+        slot => rootPoseOf(ctx.deps.world.ecs, slot),
+        isAside
+      ),
 
     find,
 
@@ -203,6 +211,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
     playEntered: frame.playEntered,
 
     converged: frame.converged,
+
+    asideBuilt: frame.asideBuilt,
 
     key: (input: KeyInput): boolean => focus.key(input),
 

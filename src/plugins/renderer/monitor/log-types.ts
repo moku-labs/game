@@ -612,10 +612,13 @@ export type PerfLongFrameLine = PerfLine<"longFrame"> &
  * it on the 2b debug build; `"pool-trim"` is the pool trim of spec 25, detail `PoolTrimDetail`; `"warm"` is the end of
  * a pipeline warm-up run of spec 27, detail `WarmDetail`; `"sections"` is a switch of the monitor's sections, detail
  * `{ on, off }`: the names of the sections on and off, in the order of `MONITOR_SECTIONS`; `"scale"` is a move of the
- * render scale of the adaptive frame rate, detail `{ from, to, reason, fps }`).
+ * render scale of the adaptive frame rate, detail `{ from, to, reason, fps }`; `"scene:build"` is the start of a
+ * scene built aside on a live switch (spec 31), detail `{ from, to }`, and the `"scene"` line of its commit carries
+ * `buildFrames` and `buildMs` too).
  */
 export type PerfEventName =
   | "scene"
+  | "scene:build"
   | "overlay"
   | "bundle"
   | "compile"

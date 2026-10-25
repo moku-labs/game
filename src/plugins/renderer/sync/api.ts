@@ -9,9 +9,19 @@ import type { Unseen } from "../demand/types";
 import type { PixiContainer, PixiFilter, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { provideDisplay, updateAdapterView } from "./adapters";
 import { boundsOf, hitBoxOf, layerOf } from "./bounds";
+import {
+  attachHeld,
+  buildReady,
+  buildRuns,
+  dropAside,
+  heldWaiting,
+  sortAside,
+  stepAside
+} from "./build";
 import { eachEntity, isEmptyList } from "./each";
 import { applySwitched, forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
+import { forgetBuild } from "./held";
 import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
 import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
@@ -26,6 +36,7 @@ import {
 import { forgetOverlays } from "./overlay-state";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { parentOf } from "./pose";
+import { predrawStep } from "./predraw";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
 import { checkTree } from "./tree-check";
@@ -362,12 +373,13 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   const onAdapter = (entity: Entity): void => stepOn(STEP.adapter, entity);
 
   /**
-   * A new `Display` object of the game replaces the old view outright, unless this pass built it.
+   * A new `Display` object of the game replaces the old view outright, unless this pass built it, or it waits aside
+   * for its view (spec 31): the chunk that makes it reads the new object.
    *
    * @param entity - The entity.
    */
   const onDisplay = (entity: Entity): void => {
-    if (built.has(entity)) return;
+    if (built.has(entity) || state.aside.waiting.has(entity)) return;
 
     guard(entity, () => {
       dropView(sctx, entity);
@@ -478,7 +490,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
   /**
    * Tells whether the pass has nothing to do: nothing waits to be built, dropped, hung or resolved again, the layer list
-   * is the one built, and no watched component of any entity changed. A still frame returns on this, before any work.
+   * is the one built, no held view waits for its swap, and no watched component of any entity changed. A still frame
+   * returns on this, before any work. The aside queue of a scene build is not read: its work is the build step's.
    *
    * @returns True when the pass would change nothing.
    */
@@ -491,7 +504,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       state.invalidated.size > 0 ||
       state.viewlessEntries ||
       state.outlinesStale ||
-      ctx.deps.world.projection.layers() !== state.layerList
+      ctx.deps.world.projection.layers() !== state.layerList ||
+      heldWaiting(sctx)
     ) {
       return false;
     }
@@ -559,7 +573,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Takes the entities that are waiting to be built out of the change set. Called only when one waits.
+   * Takes the entities that are waiting to be built out of the change set. Called only when one waits. While a scene is
+   * built aside, its entities go to the aside queue instead (spec 31): world flags them right after their spawn, so
+   * they are sorted here, not when their components came.
    *
    * @returns The entities of this pass, so the change step skips what the build just wrote.
    */
@@ -567,6 +583,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     const built = copyOf(state.added);
 
     state.added.clear();
+    if (buildRuns(sctx)) sortAside(sctx, built);
 
     return built;
   };
@@ -634,14 +651,11 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * One pass: removed, layers, added, changed, orphans, invalidated. A despawned entity takes its filter
-   * slots with it, also when its view left in an earlier pass; a live one keeps them for its next
-   * view. A still frame (nothing changed, nothing waits) returns before any work and makes nothing.
+   * The live half of a pass: removed, layers, the held views of a build that ended, added, changed, orphans,
+   * invalidated. A despawned entity takes its filter slots with it, also when its view left in an earlier pass; a live
+   * one keeps them for its next view.
    */
-  const pass = (): void => {
-    // per frame: a still frame stops here, with no set, no closure and no iterator made.
-    if (still()) return;
-
+  const livePass = (): void => {
     // A pass that works may hang, wrap, move or drop views: the render passes are counted again (Q2), and the walks of
     // `shown` the loops ask for are taken again (E4).
     state.passesVersion += 1;
@@ -650,6 +664,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       for (const entity of state.removed) {
         guard(entity, () => dropView(sctx, entity));
         forgetLeft(state, ctx.deps.world.ecs, entity);
+        dropAside(state, entity);
       }
 
       state.removed.clear();
@@ -662,6 +677,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       deps.demand.whole("layers");
       deps.host.sceneChanged();
     }
+
+    // The swap of a scene build (spec 31): under the layer list just applied, every held view in one block.
+    attachHeld(sctx);
 
     built = state.added.size === 0 ? nothingBuilt : buildParentFirst(takeAdded());
     // The tree check runs in a dev or an agent build only; the guard is inline so a release build drops it (U2.5).
@@ -681,6 +699,17 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     built = nothingBuilt;
 
     if (touched !== undefined) checkTree(sctx, touched);
+  };
+
+  /**
+   * One pass: the live half unless the frame is still, then the build step of a scene built aside (spec 31). A still
+   * frame with no build (nothing changed, nothing waits) does no work and makes nothing.
+   */
+  const pass = (): void => {
+    // per frame: a still frame skips the live half, with no set, no closure and no iterator made.
+    if (!still()) livePass();
+
+    stepAside(sctx, report);
   };
 
   /**
@@ -717,6 +746,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     clearFrames(state);
     destroyPools(state);
     clearLayers(state);
+    // A rebuild holds every building view again, with the tree it builds.
+    forgetBuild(state);
     state.root = undefined;
     state.passesVersion += 1;
   };
@@ -890,6 +921,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     warmStep: (): boolean => warmStep(sctx),
 
+    predrawStep: (): boolean => predrawStep(sctx),
+
     uploadStep: (): boolean => uploadStep(sctx),
 
     onWarm: (fn: WarmListener): void => {
@@ -952,7 +985,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         ecs.onRemoved(Display, markRemoved),
         ecs.onRemoved(Parent, markReparented),
         ...watchOverlays(sctx),
-        ecs.system(createSyncSystem(pass))
+        ecs.system(createSyncSystem(pass)),
+        // The renderer's part of a scene build: every building view made and pre-drawn (spec 31).
+        ctx.deps.world.projection.onBuild(() => buildReady(sctx))
       );
 
       rebuildAll();

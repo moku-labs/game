@@ -21,7 +21,9 @@ import {
   Transform,
   type TransformValue
 } from "../../components";
+import { withDeps } from "../../lifecycle";
 import { commitFrame } from "../../monitor/commit";
+import type { SyncCtx } from "../../sync/types";
 import type { PixiFilter } from "../../types";
 import { box, demandAlone } from "../demand-harness";
 import { FakeFilter, FakeTexture } from "../fake-pixi";
@@ -156,10 +158,15 @@ export type SpriteStage = {
  *
  * @param count - The sprites.
  * @param onDemand - `renderer.onDemand`: a frame is drawn only for a reason.
+ * @param renderTextures - True to give the fake Pixi `RenderTexture` (a scene build's pre-draw draws with it).
  * @returns The stage.
  */
-export async function startSprites(count: number, onDemand = false): Promise<SpriteStage> {
-  const mock = createMockRenderer({ config: { onDemand } });
+export async function startSprites(
+  count: number,
+  onDemand = false,
+  renderTextures = false
+): Promise<SpriteStage> {
+  const mock = createMockRenderer({ config: { onDemand }, renderTextures });
   const texture = new FakeTexture({ source: { width: 64, height: 64, destroyed: false } });
 
   await mock.start();
@@ -745,4 +752,39 @@ export function idleMissedMarks(count = 300): () => void {
   return () => {
     alone.demand.settle(false);
   };
+}
+
+/** A started renderer whose scene build waits for the swap, and the domain context its sync module reads. */
+export type WaitingBuild = { mock: MockRenderer; sctx: SyncCtx };
+
+/**
+ * A board of 300 sprite views on screen while the next scene is built aside (spec 31): `count` building views made and
+ * pre-drawn, held, waiting for the commit. The world's clock stands, so the budget of a frame is never spent and one
+ * pass and one pre-draw step do the whole build.
+ *
+ * @param count - How many building views wait.
+ * @returns The started renderer and the sync context.
+ */
+export async function waitingBuild(count: number): Promise<WaitingBuild> {
+  const { mock } = await startSprites(300, false, true);
+
+  mock.world.projection.build([], OWNER, [{ name: "items", sort: "none" }], 4);
+
+  for (let index = 0; index < count; index += 1) {
+    const entity = mock.world.ecs.spawn(OWNER, [
+      Layer({ name: "items" }),
+      Transform({ x: index * 10 }),
+      Sprite({ texture: "board.cell", width: 64, height: 64 })
+    ]);
+
+    mock.world.projection.adopt(entity);
+  }
+
+  mock.modules.sync.pass();
+  mock.world.clearChanges();
+  mock.modules.sync.predrawStep();
+
+  const { host, viewport, demand, kept } = mock.modules;
+
+  return { mock, sctx: { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } } };
 }

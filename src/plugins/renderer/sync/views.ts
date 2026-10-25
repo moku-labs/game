@@ -32,6 +32,7 @@ import {
   moveFilters
 } from "./filters";
 import { clearFonts } from "./fonts";
+import { forgetBuild, holds, holdView } from "./held";
 import { clearHidden, setHidden, writeRenderable } from "./hidden";
 import { makeHollow } from "./hollow";
 import { labelOf } from "./labels";
@@ -1319,7 +1320,9 @@ function keepOrphan(sctx: SyncCtx, entity: Entity, view: View, parentEntity: Ent
 /**
  * Hangs a view where it belongs: under its parent, or in the container of the layer it names.
  * An entity with no layer and no parent is not drawn. A view whose parent has no view yet waits
- * as an orphan, detached, so it is never drawn in a layer while its parent waits.
+ * as an orphan, detached, so it is never drawn in a layer while its parent waits. A view of a scene
+ * build with no parent, or with a live parent, is held: it hangs nowhere until the commit (spec 31),
+ * and no wrapper is made on the live parent before it.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -1333,6 +1336,15 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
   markView(sctx, entity);
   // A view that leaves an overlay's range changes its picture: judged where it was.
   noteLeaving(state, view);
+
+  if (holds(sctx, entity, parentEntity)) {
+    holdView(sctx, entity, view, parentEntity === 0 ? layerNameOf(sctx, entity) : "");
+
+    return;
+  }
+
+  // Hung in the stage or under a building parent now: its slot in the held list goes stale.
+  if (view.held) view.held = false;
 
   if (parentEntity !== 0) {
     const host = childHostOf(sctx, parentEntity);
@@ -1477,7 +1489,8 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     clipDrawn: undefined,
     hiddenSelf: 0,
     hiddenTop: 0,
-    hud: 1
+    hud: 1,
+    held: false
   };
 
   object.label = labelOf(sctx, nameOf(visual), entity);
@@ -1619,9 +1632,8 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 
 /**
  * Drops every view, every layer, every pool, every filter slot and filter area, the warm-up (its waiting promises
- * answer false, its probe tree is destroyed) and the upload queue (its waiting calls answer false). Works on the state
- * alone,
- * because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
+ * answer false, its probe tree is destroyed), the upload queue (its waiting calls answer false) and the queues of a
+ * scene build with the pre-draw's target. Works on the state alone, because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
  * destroyed, and leaves without the filters, the filter area and the hidden reasons the renderer gave it.
  *
  * @param state - The sync branch of the plugin state.
@@ -1679,6 +1691,8 @@ export function stopSync(state: SyncState): void {
   stopWarm(state);
   stopUploads(state);
   state.held.clear();
+  // The scene build's queues: the views they named are gone with the maps above, the pre-draw target goes here.
+  forgetBuild(state);
   state.redraws = 0;
   state.overdraw.listeners.length = 0;
 

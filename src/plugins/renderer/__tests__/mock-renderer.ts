@@ -39,6 +39,14 @@ import { createFakePixi, type FakePixi, type FakeScene } from "./fake-pixi";
 /** One `time.onFrame` registration. */
 export type FrameRegistration = { phase: Phase; callback: FrameCallback };
 
+/** The real world of the mock, with the two drivers its own frame callbacks would run. */
+export type MockWorld = WorldApi & {
+  /** Empties the change sets, as the end of a world frame does. */
+  clearChanges(): void;
+  /** Starts the frame of a scene build at the world clock's now, as world's `input` callback does (`left()`). */
+  startFrame(): void;
+};
+
 /** The mock renderer: the modules, the fakes behind them and the drivers a test uses. */
 export type MockRenderer = {
   ctx: KernelSlice;
@@ -46,7 +54,7 @@ export type MockRenderer = {
   /** The hooks of the plugin, called by hand: the mock has no kernel to emit. */
   hooks: ReturnType<typeof createHandlers>;
   modules: Modules;
-  world: WorldApi & { clearChanges(): void };
+  world: MockWorld;
   log: Log.LogApi;
   emitted: Array<{ name: string; payload: unknown }>;
   pixi: FakePixi;
@@ -58,6 +66,8 @@ export type MockRenderer = {
   time: TimeApi;
   /** Sets what the fake `clock.now()` answers, in milliseconds. */
   setNow(ms: number): void;
+  /** Sets what the world's own clock answers, in milliseconds: the build start and `projection.left()` read it. */
+  setWorldNow(ms: number): void;
   /** Sets the game time `time.snapshot().elapsed` answers, in milliseconds. */
   setElapsed(ms: number): void;
   /** Sets what the fake `time.isPaused()` answers. */
@@ -143,20 +153,24 @@ function noRemover(): () => void {
  * @param log - The mock log.
  * @param systems - What the fake `systemTimes()` answers.
  * @param systems.timing - The timing table, or `undefined`.
- * @returns The world API plus the internal change-set clear.
+ * @param clock - What the world's clock answers: 0 unless a test of a scene build moves it.
+ * @param clock.now - The milliseconds it answers.
+ * @returns The world API plus the internal change-set clear and the frame start of a build.
  */
 function createWorld(
   timeApi: TimeApi,
   flowApi: FlowApi,
   log: Log.LogApi,
-  systems: { timing: SystemTiming | undefined }
-): WorldApi & { clearChanges(): void } {
+  systems: { timing: SystemTiming | undefined },
+  clock: { now: number }
+): MockWorld {
   const modelApi = {
     store: { snapshot: emptySnapshot },
     rng: { peek: vi.fn() }
   } as unknown as ModelApi;
-  // World writes the frame's moment into its `Now` resource (spec 15): a still clock is enough here.
-  const worldClock = { now: () => 0 } as unknown as ClockApi;
+  // World writes the frame's moment into its `Now` resource (spec 15): a still clock is enough here, moved only by the
+  // tests of a scene build, whose budget world counts from it.
+  const worldClock = { now: () => clock.now } as unknown as ClockApi;
   const apis: Record<string, unknown> = {
     time: timeApi,
     model: modelApi,
@@ -181,7 +195,8 @@ function createWorld(
     ecs: modules.ecs,
     projection: modules.projection,
     systemTimes: () => systems.timing,
-    clearChanges: () => modules.ecs.clearChanges()
+    clearChanges: () => modules.ecs.clearChanges(),
+    startFrame: () => modules.projection.startFrame(clock.now)
   };
 }
 
@@ -200,6 +215,8 @@ function createWorld(
  * @param options.orientation - The orientation the game is designed for.
  * @param options.referenceLong - The long side the layout needs inside the safe area.
  * @param options.scene - What every WebGPU frame of the fake Pixi draws.
+ * @param options.renderTextures - True to give the fake Pixi `RenderTexture`: the pre-draw of a scene build draws, and
+ *   the kept cache keeps.
  * @returns The context, the modules, the fakes and the drivers.
  */
 export function createMockRenderer(
@@ -215,11 +232,13 @@ export function createMockRenderer(
     orientation?: "portrait" | "landscape";
     referenceLong?: number;
     scene?: Partial<FakeScene>;
+    renderTextures?: boolean;
   } = {}
 ): MockRenderer {
   const pixi = createFakePixi({
     kind: options.kind ?? "webgpu",
     failInit: options.failInit ?? false,
+    renderTextures: options.renderTextures === true,
     ...(options.scene === undefined ? {} : { scene: options.scene })
   });
   const dom =
@@ -342,7 +361,8 @@ export function createMockRenderer(
     isPaused: () => false
   } as unknown as LifecycleApi;
 
-  const world = createWorld(timeApi, flowApi, log, systems);
+  const worldTime = { now: 0 };
+  const world = createWorld(timeApi, flowApi, log, systems, worldTime);
   const apis: Record<string, unknown> = {
     time: timeApi,
     lifecycle: lifecycleApi,
@@ -407,6 +427,9 @@ export function createMockRenderer(
     time: timeApi,
     setNow: (ms: number): void => {
       clock.now = ms;
+    },
+    setWorldNow: (ms: number): void => {
+      worldTime.now = ms;
     },
     setElapsed: (ms: number): void => {
       time.elapsed = ms;

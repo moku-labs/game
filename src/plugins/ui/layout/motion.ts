@@ -126,6 +126,19 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
 }
 
 /**
+ * Tells whether an element waits for the swap of a scene `world` builds aside (spec 31): it has not
+ * entered, and it belongs to the build. Its hooks wait for its enter at the swap; a change before
+ * it plays no motion and is written at once, so the enter starts from where it stands.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element a hook would play on.
+ * @returns True while its motions are held.
+ */
+export function isHeld(ctx: UiCtx, element: Element): boolean {
+  return !element.entered && ctx.deps.world.projection.isBuilding(element.entity);
+}
+
+/**
  * Asks the projection for the handle of a ui-owned entity. A foreign owner is an error in the
  * log and the caller writes the value directly.
  *
@@ -533,6 +546,7 @@ type ExtraChange = (
  * Plays the `change` hook of one extra component whose fields changed. The motion the last change
  * of that name started is cancelled first, so its value stays where it is and the new motion
  * starts from there; the new motion is kept with the element's handles, so an exit waits for it.
+ * An element held for the swap of a scene build plays none: the caller writes the fields.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element that carries the extra.
@@ -560,7 +574,7 @@ export function playExtraChange(
 
   const hook = element.motion?.change?.[name] as ExtraChange | undefined;
 
-  if (hook === undefined) return false;
+  if (hook === undefined || isHeld(ctx, element)) return false;
 
   const motion = play(ctx, element, view => hook(view, values.previous, values.next, hint));
 
@@ -626,8 +640,9 @@ export function still(element: Element): boolean {
  * 0 ms rest track. That track writes the pose as it starts, so the pivot and the position land in
  * the same frame, and ends at the next frame step, where an additive loop re-bases on the new
  * rest. An element that has not spawned yet only records it, and so does one whose
- * `change.Box` motion already played. The content of a scroll keeps its `Transform` and records
- * no rest with the world: the scroll step owns it.
+ * `change.Box` motion already played. An element held for the swap of a scene build takes the
+ * pose at once, with no hook and no track (spec 31). The content of a scroll keeps its `Transform`
+ * and records no rest with the world: the scroll step owns it.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element whose rect, style or fit may have changed.
@@ -655,6 +670,13 @@ export function repose(
   ctx.deps.world.projection.setRest(element.entity, Transform, next);
 
   if (!element.live || hooked) return;
+
+  // Held for the swap: the pose is written as `applyFirst` writes it, and the enter starts from it.
+  if (isHeld(ctx, element)) {
+    ctx.deps.world.ecs.set(element.entity, Transform, { ...next, pivot: { ...next.pivot } });
+
+    return;
+  }
 
   const hook = element.motion?.change?.Transform;
 

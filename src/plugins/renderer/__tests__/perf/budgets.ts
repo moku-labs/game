@@ -124,5 +124,14 @@ export const BUDGET = {
   hollowResize: 0,
   // F68: a hollow frame blending `"screen"` synced every pass. New, measured 0.002 B a pass, under the 1 B the helper
   // tolerates: the blend is compared, never written while it stands.
-  hollowBlendStill: 0
+  hollowBlendStill: 0,
+  // F61 S2: a still pass over 300 views while 40 held views of a scene build wait for the swap, made and pre-drawn.
+  // New: the held list's first slot asked of world, the empty aside queue read, a frame asked for.
+  buildPassWaiting: 0,
+  // F61 S2: the pre-draw step of a drawn frame with no build. New: two numbers read.
+  predrawIdle: 0,
+  // F61 S2: the pre-draw step while the pre-drawn held views wait for the swap. New: the queue's ends compared.
+  predrawWaiting: 0,
+  // F61 S2: the renderer's readiness check of `world.projection.built()` while the views wait for the swap. New.
+  buildReadyWaiting: 0
 } as const;

@@ -18,7 +18,7 @@ import type { FocusRing, UiCtx } from "../types";
 import type { Fields } from "./fields";
 import { rootRectOf } from "./hosts";
 import { sortedRoots } from "./tree";
-import type { DrawnRing, Element, JsxState, PointerFlag, Root } from "./types";
+import type { AsideOf, DrawnRing, Element, JsxState, PointerFlag, Root } from "./types";
 
 /** Where the halo draws inside the layer of the focused root: above the root, under the next. */
 const HALO_ORDER = 0.5;
@@ -59,19 +59,22 @@ export function readingOrder(first: Rect, second: Rect): number {
 /**
  * The root the keyboard works in: the first uncovered popup in reader order, else the last screen
  * root, the one in the top layer. A root of the HUD layer never takes it: the HUD draws above every
- * overlay, so the top sheet under it does. A root on its way out does not count.
+ * overlay, so the top sheet under it does. A root on its way out does not count, nor one of the
+ * scene `world` builds aside: nothing of it is on the screen before the swap.
  *
  * @param state - The jsx state.
  * @param layers - The layer names of the scene, in draw order.
  * @param hud - The name of the scene's HUD layer (`above: "overlays"`), none without one.
+ * @param isAside - Whether an entity belongs to the scene built aside; none leaves no root out.
  * @returns The root, or `undefined` when nothing is mounted.
  */
 export function focusRoot(
   state: JsxState,
   layers: readonly string[],
-  hud?: string
+  hud?: string,
+  isAside?: AsideOf
 ): Root | undefined {
-  const roots = sortedRoots(state, layers).filter(
+  const roots = sortedRoots(state, layers, isAside).filter(
     root => root.element !== undefined && !state.removing.has(root.entity)
   );
   const popup = roots.find(root => root.popup !== undefined && !root.covered);

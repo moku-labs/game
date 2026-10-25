@@ -676,6 +676,11 @@ export function createReconciler(
   let placedUnder: ReadonlyArray<LayerSpec> | undefined;
   // The roots the reconcile of this frame diffed: a render may bring a scroll a new `offset` prop.
   let rendered = 0;
+  // Whether an entity belongs to the scene `world` builds aside (spec 31). Asked every time: the
+  // commit clears it with no word to `ui`.
+  const isAside = (entity: Entity): boolean => ctx.deps.world.projection.isBuilding(entity);
+  // The reconcile of this frame found a committed build: its solve gives the held enters their start pose.
+  let released = false;
 
   /**
    * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
@@ -714,7 +719,9 @@ export function createReconciler(
   }
 
   /**
-   * Creates one element and its subtree.
+   * Creates one element and its subtree. An element of a root built aside is marked as the build's
+   * right after its spawn, before `applyFirst` gives it a visual: the renderer holds its view, and a
+   * discard takes it with the rest (spec 31).
    *
    * @param root - The root being reconciled.
    * @param parent - The parent element, or nothing for a root element.
@@ -735,6 +742,9 @@ export function createReconciler(
     checkTag(node);
 
     const entity = ecs.spawn(UI_OWNER, []);
+
+    if (isAside(root.entity)) ctx.deps.world.projection.adopt(entity);
+
     const is = isFlagsOf(node, {
       pressed: false,
       hover: false,
@@ -1335,13 +1345,20 @@ export function createReconciler(
   }
 
   /**
-   * Starts the exit of an element and of everything under it.
+   * Starts the exit of an element and of everything under it. An element of a root built aside was
+   * never seen: it goes at once, with no exit (spec 31).
    *
    * @param element - The element that left the description.
    * @param cause - Why it leaves: `"change"` for a commit, `"mount"` when it goes with its screen.
    * @param leads - The element is the top of a root that goes with its screen.
    */
   function exitElement(element: Element, cause: MotionCause, leads = false): void {
+    if (isAside(element.root)) {
+      dropElement(element);
+
+      return;
+    }
+
     forgetSubtree(element);
     forgetInstances(state, element.identity);
     state.exiting.add(element.entity);
@@ -1467,6 +1484,18 @@ export function createReconciler(
     state.overlays.delete(element.entity);
     state.elements.delete(element.entity);
     ecs.despawn(element.entity);
+  }
+
+  /**
+   * Drops an element and everything under it at once, with no exit: its identity, its key and the
+   * local state of its components are forgotten, its nodes freed and its entities despawned.
+   *
+   * @param element - An element of a root built aside that leaves before the swap.
+   */
+  function dropElement(element: Element): void {
+    forgetSubtree(element);
+    forgetInstances(state, element.identity);
+    despawnTree(element);
   }
 
   /**
@@ -1679,7 +1708,7 @@ export function createReconciler(
    */
   function warnTaken(root: Root, slot: Entity): void {
     for (const host of state.hosts) {
-      const element = host === slot ? undefined : slotFor(state, root, host);
+      const element = host === slot ? undefined : slotFor(state, root, host, isAside);
       const once = `slot-taken:${root.name}`;
 
       if (element === undefined || element.warned.has(once)) continue;
@@ -1722,7 +1751,7 @@ export function createReconciler(
     for (const root of state.roots.values()) {
       if (state.removing.has(root.entity)) continue;
 
-      const slot = isCyclic(root) ? undefined : slotOf(state, root);
+      const slot = isCyclic(root) ? undefined : slotOf(state, root, isAside);
       const dev = typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
 
       if (dev && slot !== undefined) warnTaken(root, slot);
@@ -1900,7 +1929,9 @@ export function createReconciler(
    * Keeps an element whose spawn has just been applied: the world calls it from the `Box` hook, at
    * the flush of phase `layout`. Its enter hook waits for `playEntered`, so the game's systems see
    * the entity first (F48). The hook itself plays at once, so they see the start pose it writes (F49);
-   * `ui.enter` plays it again when one of them changed what it read.
+   * `ui.enter` plays it again when one of them changed what it read. An element of a scene built
+   * aside plays nothing here: its enter waits for the swap, and `poseReleased` plays it at the same
+   * point of the swap frame (spec 31).
    *
    * @param entity - The entity the `Box` was attached to.
    */
@@ -1916,7 +1947,27 @@ export function createReconciler(
     const element = state.elements.get(entity);
 
     // Its hook plays now, so the game's systems see the element as it will be drawn (F49).
-    if (arrives(element)) {
+    if (arrives(element) && !isAside(entity)) {
+      modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
+    }
+  }
+
+  /**
+   * Plays the enter hooks of the elements a committed build released, at the end of the swap
+   * frame's solve, the point of the frame where a `Box` lands: the game's systems of `sync` see the
+   * start pose they write, as after a mount (F49), and `ui.enter` keeps the play or plays it again
+   * (F48). An element of a build still running, one that played already and a row a range change
+   * scrolled in play nothing here.
+   */
+  function poseReleased(): void {
+    const entering = state.entering;
+
+    for (let index = 0; index < entering.count; index += 1) {
+      const entity = entering.list[index];
+      const element = entity === undefined ? undefined : state.elements.get(entity);
+
+      if (!arrives(element) || element.posed !== undefined || isAside(element.entity)) continue;
+
       modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
     }
   }
@@ -1925,19 +1976,31 @@ export function createReconciler(
    * Plays the enter hooks queued since the last call, in the order the elements came. The `ui.enter`
    * system calls it in phase `sync`: after the game's systems, which may have written what a hook
    * reads (a list's scroll), and before `renderer.sync`, so an element is never drawn at its rest
-   * pose by mistake. An element despawned in between plays nothing.
+   * pose by mistake. An element despawned in between plays nothing. An element of a scene built
+   * aside stays queued, in its order, and plays in the first call after the swap (spec 31): its
+   * enter, posed by `poseReleased` in that frame's solve, its loop and the level of an overlay
+   * start in the frame the scene is first drawn.
    */
   function playEntered(): void {
     const entering = state.entering;
+    let held = 0;
 
-    // Per frame: an index loop over the kept slots, the count read every turn, as a hook may queue another element.
+    // Per frame: an index loop over the kept slots, the count read every turn, as a hook may queue another
+    // element. A held one moves to the front of the same array.
     for (let index = 0; index < entering.count; index += 1) {
       const entity = entering.list[index];
 
-      if (entity !== undefined) playEnter(entity);
+      if (entity === undefined) continue;
+
+      if (isAside(entity)) {
+        entering.list[held] = entity;
+        held += 1;
+      } else {
+        playEnter(entity);
+      }
     }
 
-    entering.count = 0;
+    entering.count = held;
   }
 
   /**
@@ -2124,10 +2187,17 @@ export function createReconciler(
   /**
    * Reconciles one dirty root: reads its current tree and projection name, then diffs it. The root
    * stays dirty while the layout engine is not loaded, and a failure is logged for this root only.
+   * A root of the scene `world` builds aside is reconciled like any other and counted, so the
+   * reconcile after the swap finds it (spec 31).
    *
    * @param root - A root with work this frame.
    */
   function reconcileDirtyRoot(root: Root): void {
+    if (root.aside === undefined && isAside(root.entity)) {
+      root.aside = true;
+      state.asideRoots += 1;
+    }
+
     // Take the tree and the name the projection holds now.
     const tree = ecs.get(root.entity, WORLD_TREE);
     const place = ctx.deps.world.projection.keyOf(root.entity);
@@ -2157,10 +2227,62 @@ export function createReconciler(
   }
 
   /**
-   * The first of the two systems of phase `layout`: the sweep, the roots a restore asked to build
-   * again, the roots a scene placed again, the popups that may leave, the pull of the text being
-   * typed, the scroll offsets and the windowed ranges, the bound texts that show a string of
-   * another size, the viewport, the dirty roots and the hosted views.
+   * Finds the roots the last scene build committed: a root counted aside that `world` builds no more
+   * loses its mark, the slots are given out again, so a kept host takes its coming guest in the
+   * swap frame, and this frame's solve poses the held enters (spec 31). A root a discard dropped is
+   * gone from the registry and is not counted.
+   */
+  function settleAside(): void {
+    // Per frame: one number while no scene is built aside.
+    if (state.asideRoots === 0) return;
+
+    let left = 0;
+    let committed = false;
+
+    for (const root of state.roots.values()) {
+      if (root.aside === undefined) continue;
+
+      if (isAside(root.entity)) {
+        left += 1;
+      } else {
+        delete root.aside;
+        committed = true;
+      }
+    }
+
+    state.asideRoots = left;
+
+    if (!committed) return;
+
+    hostsMoved(state);
+    released = true;
+  }
+
+  /**
+   * The part of a scene build `ui` does, which `world` asks through `onBuild` (spec 31): done when no
+   * root of the build is dirty (its tree not diffed yet, or the layout engine not loaded) and none
+   * waits for its solve. A root whose first diff threw has no element to solve and does not hold
+   * the swap.
+   *
+   * @returns True when every root built aside is reconciled and solved.
+   */
+  function asideBuilt(): boolean {
+    // Per call: two flags per root; the world is asked about a root with work left only.
+    for (const root of state.roots.values()) {
+      const solves =
+        root.needsSolve && root.element !== undefined && lookup(root.element) !== undefined;
+
+      if ((root.dirty || solves) && isAside(root.entity)) return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * The first of the two systems of phase `layout`: the sweep, the roots a scene build committed, the
+   * roots a restore asked to build again, the roots a scene placed again, the popups that may leave,
+   * the pull of the text being typed, the scroll offsets and the windowed ranges, the bound texts
+   * that show a string of another size, the viewport, the dirty roots and the hosted views.
    *
    * @param time - The frame's `Time`: the scrolls move by its `delta`.
    */
@@ -2168,6 +2290,9 @@ export function createReconciler(
     // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
+
+    // The roots a scene build committed take their slots in this frame's solve.
+    settleAside();
 
     // After a restore or a load every root is built again, the way a mount builds it.
     if (state.remount) remountRoots();
@@ -2240,7 +2365,8 @@ export function createReconciler(
    * The second system of phase `layout`: every root takes its slot, then one solve per marked
    * root, a root in a slot after the root of its slot and in its content box, then the rects, the
    * rest poses and the hooks, the scrolls settled on what the solve and the render gave them, the
-   * hosting of the hosts that came, and a sweep of what left with nothing to wait for. The hints released since the last frame step are dropped
+   * hosting of the hosts that came, a sweep of what left with nothing to wait for, and, in the swap
+   * frame of a scene build, the start pose of the enters it held. The hints released since the last frame step are dropped
    * at its end, so the `change.Box` and `change.Transform` hooks the solve plays get the hint the
    * reconcile routed, and the next frame starts with none.
    *
@@ -2277,6 +2403,12 @@ export function createReconciler(
     // An element that left in this frame's reconcile with nothing to wait for (no exit hook, a hook that played
     // nothing) goes before this frame is drawn, not at the next reconcile (F46). Per frame: two size reads.
     if (state.exiting.size > 0 || state.removing.size > 0) sweep();
+
+    // The swap frame of a scene build: the held enters take their start pose where a `Box` would land.
+    if (released) {
+      released = false;
+      poseReleased();
+    }
 
     state.hints.length = 0;
     writeCounters();
@@ -2336,7 +2468,9 @@ export function createReconciler(
    * nodes and despawns the root entity. A popup leaves by an event; a projection root leaves the
    * way its view did, which the world still answers in its removal hook: `"mount"` with its scene,
    * a load or a restore. A root that goes with its screen ends with the exit of its top element
-   * when that plays one, so a longer exit under it does not hold it and its bundles (F55).
+   * when that plays one, so a longer exit under it does not hold it and its bundles (F55). A root of
+   * a scene built aside was never seen: a discard (`"discard"`), or its key leaving before the swap,
+   * drops it at once with no exit (spec 31).
    *
    * @param entity - The root entity.
    */
@@ -2348,6 +2482,12 @@ export function createReconciler(
     const element = root.element === undefined ? undefined : lookup(root.element);
     const cause =
       root.popup === undefined ? (ctx.deps.world.projection.causeOf(entity) ?? "change") : "change";
+
+    if (cause === "discard" || isAside(entity)) {
+      dropRoot(root, element);
+
+      return;
+    }
 
     state.removing.add(entity);
     // A root that leaves gives its slot up at the next solve.
@@ -2362,6 +2502,23 @@ export function createReconciler(
     }
 
     ctx.deps.time.wake();
+  }
+
+  /**
+   * Drops a root of a scene built aside at once: its elements are forgotten and despawned with no
+   * exit, and the root leaves the registry. The world despawns the root entity itself: it is its
+   * view, on its way out.
+   *
+   * @param root - The root.
+   * @param element - Its root element, if it has one.
+   */
+  function dropRoot(root: Root, element: Element | undefined): void {
+    if (element !== undefined) dropElement(element);
+
+    state.roots.delete(root.entity);
+    state.byKey.delete(root.entity);
+    // A host it held lets its views go at the next hosting step.
+    hostsMoved(state);
   }
 
   /**
@@ -2412,6 +2569,7 @@ export function createReconciler(
     queueEnter,
     playEntered,
     sweep,
-    converged
+    converged,
+    asideBuilt
   };
 }
