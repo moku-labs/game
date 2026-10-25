@@ -159,10 +159,14 @@ function resetNode(object: PixiContainer): void {
   object.position.set(0, 0);
   object.pivot.set(0, 0);
   object.scale.set(1);
-  if (isSprite(object) || isGraphics(object)) object.tint = 0xff_ff_ff;
-  // A graphics comes back with no path: an empty shape draws none (spec 26 B7), so an old one would stay in its
-  // parent's bounds (F61 spike: 13 drawn containers grew).
-  if (isGraphics(object)) object.clear();
+  if (isSprite(object)) object.tint = 0xff_ff_ff;
+
+  if (isGraphics(object)) {
+    object.tint = 0xff_ff_ff;
+    // A graphics comes back with no path: an empty shape draws none (spec 26 B7), so an old one would stay in its
+    // parent's bounds (F61 spike: 13 drawn containers grew).
+    object.clear();
+  }
 }
 
 /**

@@ -426,7 +426,9 @@ nothing is written, no loose component is settled, no hint is used and `changed`
 `world:reconciled` does not count the view. So a `from` that maps or spreads may build a new
 object on every commit and its views keep their motions; a game needs no frozen item table for
 that. A direct reconcile projects a new object as before: its rest pose is written and it counts
-as changed.
+as changed. A play reconcile skips a projection whose last reconcile read the same `player` and
+`session` trees: `from` does not run, and it is not counted in `projections`. That is the frame
+after a scene mounted its projections direct from the state its node committed.
 
 **A rollback.** A rollback commits the state of the last rest point. The failed node committed
 nothing, so no item is new and no entry brings back a view the node moved with a motion or a
