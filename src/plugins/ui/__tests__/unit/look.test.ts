@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { bind, component } from "../../../../index";
 import { NineSlice, Shape, Sprite, Transform } from "../../../renderer/components";
 import { Text } from "../../../text/components";
-import { lookMoved } from "../../jsx/look";
+import { type LookWriter, lookMoved, writeLook } from "../../jsx/look";
+import type { Element } from "../../jsx/types";
 
 // ---------------------------------------------------------------------------
 // Unit: the look check of the visual `change` hooks (F85). Each of the four visuals is compared
@@ -32,6 +33,7 @@ describe("lookMoved", () => {
 
     expect(moved({ w: 64 })).toBe("numbers");
     expect(moved({ sweep: 0.5 })).toBe("numbers");
+    expect(moved({ sweep: 0.5, cap: "butt" })).toBe("both");
     expect(moved({ cap: "butt" })).toBe("others");
     expect(moved({ clip: true })).toBe("others");
     expect(moved({})).toBe("none");
@@ -90,5 +92,68 @@ describe("lookMoved", () => {
     const pose = Transform().value;
 
     expect(lookMoved(Transform, pose, pose)).toBe("numbers");
+  });
+});
+
+/** What a recording writer saw: the plays with their values, the whole writes and the other-field writes. */
+type Seen = { plays: Array<[object, object]>; wholes: number; others: number };
+
+/**
+ * A writer that records every play and write, its play answering `motion`.
+ *
+ * @param motion - Whether the hook returns a motion.
+ * @returns The writer and what it saw.
+ */
+function recordingWriter(motion: boolean): { writer: LookWriter; seen: Seen } {
+  const seen: Seen = { plays: [], wholes: 0, others: 0 };
+  const writer: LookWriter = {
+    pass: 1,
+    values: { previous: {}, next: {} },
+    play: (_element, _name, values) => {
+      seen.plays.push([values.previous, values.next]);
+
+      return motion;
+    },
+    whole: () => {
+      seen.wholes += 1;
+    },
+    others: () => {
+      seen.others += 1;
+    }
+  };
+
+  return { writer, seen };
+}
+
+/**
+ * Writes the arc's look again with a patch, as the reconciler does for a hooked element.
+ *
+ * @param patch - What this render moved.
+ * @param motion - Whether the hook returns a motion.
+ * @returns What the writer saw.
+ */
+function write(patch: object, motion = true): Seen {
+  const { writer, seen } = recordingWriter(motion);
+  const next = Shape({ ...arc, ...patch });
+  const element = { lookPass: undefined, lookFrom: undefined } as unknown as Element;
+
+  writeLook(writer, element, next, arc, next.value);
+
+  return seen;
+}
+
+describe("writeLook", () => {
+  // Bug: a sweep-only change writes the arc's other fields again, or a new cap waits for the motion.
+  it("plays for numbers, and writes the other fields only when they moved too", () => {
+    expect(write({ sweep: 0.5 })).toMatchObject({ wholes: 0, others: 0 });
+    expect(write({ sweep: 0.5 }).plays).toHaveLength(1);
+    expect(write({ sweep: 0.5, cap: "butt" })).toMatchObject({ wholes: 0, others: 1 });
+    expect(write({ cap: "butt" })).toEqual({ plays: [], wholes: 0, others: 1 });
+    expect(write({})).toEqual({ plays: [], wholes: 0, others: 0 });
+  });
+
+  // Bug: a hook that answers no motion leaves the numbers of the old look on the element.
+  it("writes the look whole when the hook returns no motion", () => {
+    expect(write({ sweep: 0.5, cap: "butt" }, false)).toMatchObject({ wholes: 1, others: 0 });
   });
 });

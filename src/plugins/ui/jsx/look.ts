@@ -1,7 +1,8 @@
 /**
  * @file ui/jsx — the look of a live element in motion (F85): what a render moved in the value of
- * its visual, the fields written directly while a `change` hook of the visual brings the numbers
- * home, and the `change` hooks of an element `ui` never plays, which a dev build names.
+ * its visual, the write that follows (nothing, the other fields, the hook's play or the whole
+ * look), the fields written directly while a `change` hook of the visual brings the numbers home,
+ * and the `change` hooks of an element `ui` never plays, which a dev build names.
  */
 import type { Message } from "../../i18n/types";
 import {
@@ -14,20 +15,113 @@ import {
 } from "../../renderer/components";
 import { Text } from "../../text/components";
 import type { TextBind, TextValue } from "../../text/types";
-import type { AnyComponentType } from "../../world/types";
+import type { AnyComponentType, AnyComponentValue } from "../../world/types";
 import type { UiCtx } from "../types";
 import type { Element } from "./types";
 
 /**
- * What a render moved in the value of a visual: `"numbers"` when a numeric field changed (what
- * else changed with it is written beside the motion), `"others"` when only other fields did, and
- * `"none"` when it says what it said.
+ * What a render moved in the value of a visual: `"numbers"` when numeric fields alone changed,
+ * `"both"` when other fields changed with them (those are written beside the motion), `"others"`
+ * when only other fields did, and `"none"` when it says what it said.
  */
-export type LookMove = "none" | "numbers" | "others";
+export type LookMove = "none" | "numbers" | "both" | "others";
+
+/** The values before and after a `change` hook of the visual is played with. */
+export type LookValues = { previous: object; next: object };
+
+/**
+ * What `writeLook` needs from the reconciler: the write pass, one values object it fills in place
+ * for each play, and the three writes. A second write of a look in one pass (a render, then the
+ * solve that moves its rect) plays from the look before the first.
+ */
+export type LookWriter = {
+  /** The write pass now: one per reconcile with its solve, one per pointer restyle. */
+  pass: number;
+  /** The values a play is handed: one object written in place, so a play builds none. */
+  readonly values: LookValues;
+  /** Plays the `change` hook of that name; true when it returned a motion. */
+  play(element: Element, name: string, values: Readonly<LookValues>): boolean;
+  /** Writes the value whole. */
+  whole(element: Element, value: AnyComponentValue): void;
+  /** Writes the fields of the value that are no number. */
+  others(element: Element, type: AnyComponentType, next: object): void;
+};
+
+/**
+ * What moved, from whether the numbers and the other fields of a look did.
+ *
+ * @param numbers - A numeric field moved.
+ * @param others - Another field moved.
+ * @returns What moved.
+ * @example
+ * ```ts
+ * moveOf(true, false); // "numbers"
+ * ```
+ */
+function moveOf(numbers: boolean, others: boolean): LookMove {
+  if (numbers) return others ? "both" : "numbers";
+
+  return others ? "others" : "none";
+}
+
+/**
+ * Writes the visual of a live element whose `change` hook of that visual may play (F85). The look
+ * of this render is compared with the one the element was last written with: the same look writes
+ * nothing, so a running motion of the hook survives a render that changes nothing of it; other
+ * fields alone are written at once; a look whose numbers moved plays the hook with the look before
+ * and this one. When the hook returns a motion the track brings the numbers home and the other
+ * fields are written only when they moved too; with none the look is written whole. ui's part of
+ * a numbers-only change allocates nothing (`__tests__/perf/look-write.perf.ts`).
+ *
+ * @param writer - The reconciler's side: the pass, the values, the play and the writes.
+ * @param element - The live element; its `lookPass` and `lookFrom` note a play of this pass.
+ * @param value - The visual of this render.
+ * @param previous - The look the element was last written with.
+ * @param next - The fields of the visual of this render.
+ */
+export function writeLook(
+  writer: LookWriter,
+  element: Element,
+  value: AnyComponentValue,
+  previous: object,
+  next: object
+): void {
+  const moved = lookMoved(value.type, previous, next);
+
+  if (moved === "none") return;
+
+  // Other fields alone: written at once, no hook. Their patch is built per such change
+  // (`otherFields`): a new texture, a cap, a kind, which a render rarely moves.
+  if (moved === "others") {
+    writer.others(element, value.type, next);
+
+    return;
+  }
+
+  // A number moved. A second write in one pass plays from the look before the first: its motion never ran.
+  const from =
+    element.lookPass === writer.pass && element.lookFrom !== undefined
+      ? element.lookFrom
+      : previous;
+
+  writer.values.previous = from;
+  writer.values.next = next;
+
+  if (!writer.play(element, value.type.componentName, writer.values)) {
+    writer.whole(element, value);
+
+    return;
+  }
+
+  element.lookPass = writer.pass;
+  element.lookFrom = from;
+
+  if (moved === "both") writer.others(element, value.type, next);
+}
 
 /**
  * Compares the value of a visual a live element was last written with and the value of this
- * render: `"numbers"` when a numeric field moved, else `"others"` when another one did. Every
+ * render: whether its numeric fields moved, its other fields, both or none. Every
  * visual has its own comparator that reads its fields by name, so each read site meets one shape
  * of value and a fractional number is compared unboxed: per write of an element with a `change`
  * hook of its visual, 0 B (`__tests__/perf/look-moved.perf.ts`). A field the new value leaves out
@@ -77,11 +171,10 @@ function shapeMoved(before: Readonly<ShapeValue>, after: Readonly<ShapeValue>): 
     before.strokeWidth !== after.strokeWidth ||
     before.dash !== after.dash;
   const arcs = before.kind === "arc" && after.kind === "arc";
+  const others =
+    before.kind !== after.kind || before.clip !== after.clip || (arcs && before.cap !== after.cap);
 
-  if (numbers || (arcs && before.sweep !== after.sweep)) return "numbers";
-  if (before.kind !== after.kind || before.clip !== after.clip) return "others";
-
-  return arcs && before.cap !== after.cap ? "others" : "none";
+  return moveOf(numbers || (arcs && before.sweep !== after.sweep), others);
 }
 
 /**
@@ -102,9 +195,6 @@ function spriteMoved(before: Readonly<SpriteValue>, after: Readonly<SpriteValue>
     before.alpha !== after.alpha ||
     before.width !== after.width ||
     before.height !== after.height;
-
-  if (numbers) return "numbers";
-
   const others =
     before.texture !== after.texture ||
     before.fit !== after.fit ||
@@ -112,7 +202,7 @@ function spriteMoved(before: Readonly<SpriteValue>, after: Readonly<SpriteValue>
     before.anchor.y !== after.anchor.y ||
     (after.blend !== undefined && before.blend !== after.blend);
 
-  return others ? "others" : "none";
+  return moveOf(numbers, others);
 }
 
 /**
@@ -136,9 +226,6 @@ function nineSliceMoved(
     before.height !== after.height ||
     before.alpha !== after.alpha ||
     before.tint !== after.tint;
-
-  if (numbers) return "numbers";
-
   const others =
     before.texture !== after.texture ||
     before.debug !== after.debug ||
@@ -146,7 +233,7 @@ function nineSliceMoved(
     (after.hollow !== undefined && before.hollow !== after.hollow) ||
     (after.blend !== undefined && before.blend !== after.blend);
 
-  return others ? "others" : "none";
+  return moveOf(numbers, others);
 }
 
 /**
@@ -164,9 +251,7 @@ function nineSliceMoved(
  */
 function textMoved(before: Readonly<TextValue>, after: Readonly<TextValue>): LookMove {
   const boxes = "box" in before && "box" in after;
-
-  if (before.alpha !== after.alpha || (boxes && before.box !== after.box)) return "numbers";
-
+  const numbers = before.alpha !== after.alpha || (boxes && before.box !== after.box);
   const others =
     (!boxes && "box" in after) ||
     before.style !== after.style ||
@@ -175,7 +260,7 @@ function textMoved(before: Readonly<TextValue>, after: Readonly<TextValue>): Loo
     (before.content !== after.content && !sameMessage(before.content, after.content)) ||
     (before.bind !== after.bind && !sameBind(before.bind, after.bind));
 
-  return others ? "others" : "none";
+  return moveOf(numbers, others);
 }
 
 /**
@@ -208,19 +293,16 @@ function sameMessage(before: string | Message, after: string | Message): boolean
  * sameArguments({ n: 5 }, { n: 6 }); // false
  * ```
  */
-function sameArguments(before: object | undefined, after: object | undefined): boolean {
+function sameArguments(before: Message["params"], after: Message["params"]): boolean {
   if (before === after) return true;
   if (before === undefined || after === undefined) return false;
 
-  const was = before as Readonly<Record<string, unknown>>;
-  const now = after as Readonly<Record<string, unknown>>;
-
-  for (const name in now) {
-    if (!(name in was) || was[name] !== now[name]) return false;
+  for (const name in after) {
+    if (!(name in before) || before[name] !== after[name]) return false;
   }
 
-  for (const name in was) {
-    if (!(name in now)) return false;
+  for (const name in before) {
+    if (!(name in after)) return false;
   }
 
   return true;
@@ -234,7 +316,7 @@ function sameArguments(before: object | undefined, after: object | undefined): b
  * @returns True when both show the same.
  * @example
  * ```ts
- * sameBind(bind(Counter, "value"), bind(Counter, "value")); // true
+ * sameBind({ component: "Counter", field: "value", format: "int" }, { component: "Counter", field: "value", format: "mm:ss" }); // false
  * ```
  */
 function sameBind(before: TextBind | undefined, after: TextBind | undefined): boolean {
@@ -279,6 +361,8 @@ export function otherFields(
  * Names, once per element and hook name, every `change` hook of an element `ui` never plays: not
  * `Box`, not `Transform`, not the visual it is drawn with, not an extra of its `components` prop.
  * Read when the element mounts and when its `motion` prop changes, against what it carries then.
+ * Its effect is the log and the note: each such hook is logged at warn as `ui:change-never-plays`
+ * `{ key, name }` and noted in the element's `warned`, which keeps it from being named again.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The live element, its visual and its extras written.

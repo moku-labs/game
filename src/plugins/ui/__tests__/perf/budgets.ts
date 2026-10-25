@@ -92,5 +92,12 @@ export const BUDGET = {
    * fractional number boxes it, 16 B each. Each visual now has a comparator that reads its fields
    * by name, one shape of value per read site, so the numbers are compared unboxed. 0 B.
    */
-  lookMoved: 0
+  lookMoved: 0,
+  /**
+   * F85: ui's part of a render that moves the XP arc's sweep, its element hooked by `change.Shape`:
+   * the look check, the values handed to the play (one object of the reconciler, filled in place)
+   * and the notes of the pass. A numbers-only change writes no other fields, so no patch is built;
+   * the hook's own motion is not in the window. 0 B.
+   */
+  lookWrite: 0
 } as const;

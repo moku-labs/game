@@ -49,7 +49,7 @@ import type { Fields } from "./fields";
 import { hintOf } from "./hints";
 import { dropHost, hostsMoved, hostsOf, hostViews, slotFor, slotOf, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
-import { lookMoved, otherFields, warnIdleChanges } from "./look";
+import { type LookWriter, otherFields, warnIdleChanges, writeLook } from "./look";
 import { childOrder, SIBLING_SPAN } from "./order";
 import { createSpan, enterOverlay, exitOverlay, overlayOf, settleOverlays } from "./overlay";
 import { settlePopups } from "./popups";
@@ -104,6 +104,9 @@ function concatTypes(...lists: ReadonlyArray<readonly AnyComponentType[]>): AnyC
 
 /** Every type a live element may carry and drop again: the visuals, then the inputs. */
 const LIVE_TYPES: readonly AnyComponentType[] = concatTypes(VISUALS, INPUTS);
+
+/** What the values of a look write hold before the first play: no look. */
+const NO_LOOK: object = Object.freeze({});
 
 /** The owned fields of a type that gives none to a plugin: one list, never a new one. */
 const NO_OWNED: readonly string[] = [];
@@ -693,10 +696,16 @@ export function createReconciler(
   const isAside = (entity: Entity): boolean => ctx.deps.world.projection.isBuilding(entity);
   // The reconcile of this frame found a committed build: its solve gives the held enters their start pose.
   let released = false;
-  // The write pass: one per reconcile with its solve, one per pointer restyle. A visual written twice
-  // in one pass (a render, then the solve that moves its rect) plays its `change` hook from the look
-  // before the pass (F85).
-  let pass = 0;
+  // The reconciler's side of a look write (F85): the write pass (one per reconcile with its solve,
+  // one per pointer restyle), one values object filled in place for every play, and the writes.
+  const lookWriter: LookWriter = {
+    pass: 0,
+    values: { previous: NO_LOOK, next: NO_LOOK },
+    play: (element, name, values) =>
+      modules.layout.changeExtra(element, name, values, hintOf(state, element)),
+    whole: (element, value) => writeValue(element, value),
+    others: (element, type, next) => writeOthers(element, next, type)
+  };
 
   /**
    * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
@@ -1037,56 +1046,36 @@ export function createReconciler(
 
   /**
    * Writes the visual of a live element. Without a `change` hook of its name, or for a visual
-   * traded in, it is written like every other value. With one, the value is compared with the look
-   * the element was last written with (F85): the same look writes nothing, so a running motion of
-   * the hook survives a render that changes nothing of it; a look whose numbers moved plays the
-   * hook with the look before and this one and the routed hint, after the motion the last change of
-   * that name started was cancelled. When the hook returns a motion the track brings the numbers
-   * home and only the other fields are written; with none, or for an element held for the swap of a
-   * scene build, the value is written whole. A look whose other fields alone moved writes them.
+   * traded in, it is written like every other value. With one, the look decides what is written
+   * (`writeLook`, F85): nothing for the same look, the other fields alone, or the hook's play, after
+   * which the track brings the numbers home; an element held for the swap of a scene build plays
+   * none and is written whole.
    *
    * @param element - The live element.
    * @param value - The visual of this render.
    */
   function writeVisual(element: Element, value: AnyComponentValue): void {
     const look = element.look;
-    const name = value.type.componentName;
 
     element.look = value;
 
     // Per restyle: one property read decides for an element with no `change` hook of its visual.
-    const isHooked = element.motion?.change?.[name] !== undefined;
-    const isTraded = look === undefined || look.type !== value.type || look.value === true;
+    const isHooked = element.motion?.change?.[value.type.componentName] !== undefined;
+    // The look before, when it is one of this visual: a visual traded in has none to start from.
+    const previous = look === undefined || look.type !== value.type ? true : look.value;
+    const next = value.value;
+    // Written whole, as before F85: no hook can play, nothing to compare, or a value the entity lacks.
+    const writesWhole =
+      !isHooked || previous === true || next === true || !ecs.has(element.entity, value.type);
 
-    if (!isHooked || isTraded || value.value === true || !ecs.has(element.entity, value.type)) {
+    if (writesWhole) {
       writeValue(element, value);
 
       return;
     }
 
-    const moved = lookMoved(value.type, look.value, value.value);
-
-    if (moved === "none") return;
-    if (moved === "others") {
-      writeOthers(element, value.value, value.type);
-
-      return;
-    }
-
-    // A second write in one pass plays from the look before the first: its motion never ran.
-    const from =
-      element.lookPass === pass && element.lookFrom !== undefined ? element.lookFrom : look.value;
-    const values = { previous: from, next: value.value };
-
-    if (!modules.layout.changeExtra(element, name, values, hintOf(state, element))) {
-      writeValue(element, value);
-
-      return;
-    }
-
-    element.lookPass = pass;
-    element.lookFrom = from;
-    writeOthers(element, value.value, value.type);
+    // A hook may play: the look of this render against the one before decides the write.
+    writeLook(lookWriter, element, value, previous, next);
   }
 
   /**
@@ -2457,7 +2446,7 @@ export function createReconciler(
     // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
-    pass += 1;
+    lookWriter.pass += 1;
 
     // The roots a scene build committed take their slots in this frame's solve.
     settleAside();
@@ -2707,7 +2696,7 @@ export function createReconciler(
 
     // Per press: the flag flips in place; the flags object is the element's own. A restyle is a write pass of its own.
     element.is[flag] = on;
-    pass += 1;
+    lookWriter.pass += 1;
 
     const style = styleFor(parentOf(element), element.node, element.is);
     const root = state.roots.get(element.root);
