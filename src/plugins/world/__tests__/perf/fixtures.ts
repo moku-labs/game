@@ -11,6 +11,7 @@ import type { Time } from "../../../time/types";
 import { createModules } from "../../api";
 import { clearAllChanges, markChanged } from "../../ecs/changes";
 import { component, Exiting, mut, Now, system } from "../../ecs/define";
+import { recordFrame } from "../../ecs/history";
 import type { AnySystem, Entity, Owner, WorldPhase } from "../../ecs/types";
 import { withDeps } from "../../lifecycle";
 import type { MotionHandle, Track, TweenDriver } from "../../projection/types";
@@ -611,4 +612,42 @@ export function settled(fn: () => void): () => void {
   for (let call = 0; call < SETTLE; call += 1) fn();
 
   return fn;
+}
+
+/**
+ * One recorded frame of a dev build (F70): 100 entities carry a `Spot`, 20 of them move a little and are marked, as a
+ * glide or an idle tween writes them, then the recorder of phase `signals` reads the marks and the change sets are
+ * cleared. The recording started before the measure.
+ *
+ * @returns One frame of writes, its record and the clear.
+ */
+export function recordedFrameFixture(): () => void {
+  const world = createMockWorld();
+  const state = world.ctx.state.ecs;
+  const entities: Entity[] = [];
+
+  for (let index = 0; index < 100; index += 1) {
+    entities.push(world.api.ecs.spawn(OWNER, [Spot()]));
+  }
+
+  const store = state.stores.get("Spot");
+  let frame = 1;
+
+  recordFrame(world.ctx, frame);
+  clearAllChanges(state);
+
+  return (): void => {
+    frame += 1;
+
+    for (let index = 0; index < 20; index += 1) {
+      const entity = entities[index * 5] ?? 0;
+      const spot = store?.get(entity) as { x: number } | undefined;
+
+      if (spot !== undefined) spot.x = frame % 1000;
+      markChanged(state, "Spot", entity);
+    }
+
+    recordFrame(world.ctx, frame);
+    clearAllChanges(state);
+  };
 }
