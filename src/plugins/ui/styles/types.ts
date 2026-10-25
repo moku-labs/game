@@ -177,6 +177,23 @@ export type VisualStyle<Asset extends string = string> = {
    * ```
    */
   hollow?: boolean;
+  /**
+   * How an image or icon, or the nine-slice of the style, lays its pixels over what is drawn
+   * under it: `"add"` adds its colour (a spark, a flare), `"screen"` lightens with it (a soft
+   * glow; on a dark background it matches CSS `mix-blend-mode: screen`). Absent, it covers by
+   * alpha. It blends the element's own quad alone, never its children, and does nothing on a
+   * rectangle, a shape or a text. Written into `Sprite.blend` or `NineSlice.blend`; a variant that
+   * drops it draws the element normally again. No render pass: each switch between blends in draw
+   * order costs one more draw call. Inside a kept picture the view is drawn live.
+   *
+   * @example
+   * ```tsx
+   * // The glow behind the reward chest: it lightens the board under it instead of covering it.
+   * <image key="glow" texture="art.glow" style={{ blend: "screen", alpha: 0.8 }} />;
+   * app.world.ecs.get(app.ui.find("glow") ?? 0, Sprite)?.blend; // "screen"
+   * ```
+   */
+  blend?: "add" | "screen";
   /** Multiplies the colour of a nine-slice or an image. */
   tint?: number;
   /**

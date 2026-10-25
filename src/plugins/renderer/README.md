@@ -32,8 +32,8 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | Component | Defaults | Meaning |
 |---|---|---|
 | `Transform({ x, y, rotation, scale, pivot })` | `0, 0, 0, 1, { x: 0, y: 0 }` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. `pivot` is the local point the view turns and scales around; `x`, `y` is where it lands. |
-| `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. `alpha` fades the quad and the entity's children. |
-| `NineSlice({ texture, width, height, alpha, tint, debug, clip, hollow })` | `"", 0, 0, 1, 0xffffff, false, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. `hollow: true` draws the rim alone, the eight border cells and never the centre (see "Hollow nine-slices"); the hit box stays the whole panel. |
+| `Sprite({ texture, tint, alpha, anchor, width, height, fit, blend? })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"`; `blend` absent (read as `"normal"`) | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. `alpha` fades the quad and the entity's children. `blend: "add"` or `"screen"` lays the quad over what is under it (see "Blend"). |
+| `NineSlice({ texture, width, height, alpha, tint, debug, clip, hollow?, blend? })` | `"", 0, 0, 1, 0xffffff, false, false`; `hollow` and `blend` absent (read as `false` and `"normal"`) | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. `hollow: true` draws the rim alone, the eight border cells and never the centre (see "Hollow nine-slices"); the hit box stays the whole panel. `blend: "add"` or `"screen"` lays the panel, filled or hollow, over what is under it (see "Blend"). |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
 | `Overlay({ dim, dimColor, cover, hud, fade, hold })` | `0, 0x000000, "none", "all", 250, false` | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep. `hold: true` holds the endless loops under it while it stands. See "Overlays and the HUD". |
@@ -69,6 +69,35 @@ sprite that shows it. It is freed when the last of them lets go (it leaves, or i
 `fit` changes), with its base texture (`textures.destroy`), or when the renderer stops. A resized
 cover sprite therefore keeps one crop, not one per size. A key without a texture draws the magenta
 placeholder at the box, 64 x 64 on an axis without a size.
+
+### Blend
+
+`blend` on a `Sprite` or a `NineSlice` (F68) says how its own pixels lie over what is drawn under it:
+
+| `blend` | Drawn | Pixi |
+|---|---|---|
+| absent, `"normal"` | Covers by alpha, as before the field existed. | `"inherit"` |
+| `"screen"` | Lightens what is under it; on a dark background it matches CSS `mix-blend-mode: screen`. | `"screen"` |
+| `"add"` | Adds its colours to what is under it: brighter than `"screen"`. | `"add"` |
+
+```ts
+world.ecs.spawn(owner, [Layer({ name: "fx" }), Transform({ x: 540, y: 960 }), Sprite({ texture: "fx.glow", alpha: 0.8, blend: "screen" })]);
+```
+
+The field is optional and in no defaults object: a view that never sets it is described and saved as before. `"normal"`
+is there so a patch can turn a glow off (`ui` writes it when a variant drops `style.blend`). Any other string, Pixi's
+advanced modes and `"multiply"` included, is never handed to Pixi: the view draws normally and
+`renderer:blend-unknown` (`{ blend }`) is warned once per value per run. The blend goes on the view's own object, never
+on its wrapper, so a glow's children draw normally. It is written only when it differs from what Pixi holds, the entity
+marked before: Pixi rebuilds the instructions of the render group on a new blend, and a blend that stands costs a
+string compare a sync.
+
+Cost. Both are native blends of Pixi 8.22's sprite batch: no render pass, no filter. Sprites of equal blend next to each
+other in draw order share a draw call; each switch between blends in draw order costs one more (normal, add, add,
+normal, screen, screen, normal draws five batches; measured on Pixi's own `BatcherPipe`, `SpritePipe` and
+`BlendModePipe` in `__tests__/unit/sync-blend-pixi.test.ts`). The warm-up draws a white probe sprite with each blend
+(`sprite-add`, `sprite-screen`), so a glow's pipelines are made while the game loads. A pooled object comes back
+blending `"inherit"`. A filtered view with a blended node inside is never kept as a picture (see "Kept pictures").
 
 ### Pivot
 
@@ -258,7 +287,8 @@ draws (default 1), then the kept pictures, then the stage pass, which clears the
 task, so a probe never shows. One probe draw is one subject in one target:
 
 - the subjects: a 4 × 4 sprite of `Texture.WHITE` (the batch pipeline of sprites, nine-slices and
-  plain bitmap text), a `Graphics` with `batchMode: "no-batch"`, a `ParticleContainer` with the
+  plain bitmap text), the same sprite blending `"add"` and `"screen"` (`sprite-add`, `sprite-screen`: a glow's
+  pipelines, see "Blend"), a `Graphics` with `batchMode: "no-batch"`, a `ParticleContainer` with the
   normal and the add blend, a `BitmapText` in the first font installed (queued when it arrives,
   ahead of the filters still waiting), and every filter handed to `filters.warm` (`effects` hands it
   every checked definition, every stage of its inputs and every Pixi-core kind once the shader
@@ -288,7 +318,8 @@ is drawn but never a sample of the adaptive rate. A restore queues everything ag
 device; `onStop` answers waiting promises `false` and destroys the probe tree, never a filter it was
 handed. In an agent build the end of a run writes a `warm` event line (`{ draws }`); a run a throw ended writes none. Not warmed: a
 game's own `Display` objects with custom shaders (hand their filters to `filters.warm`; their
-meshes are not covered), blend modes other than normal and add, MSAA. `renderer.warm: 0` turns it
+meshes are not covered), blend modes other than normal, add and screen (a particle container: normal and add),
+MSAA. `renderer.warm: 0` turns it
 off: every pipeline is created in the first frame that draws with it, as before.
 
 ### Uploading textures before they show
@@ -878,6 +909,14 @@ under a filtered ancestor, a view hidden for the player, a picture over 4096 dev
 and without `onDemand` a subtree holding a `Display` view: a game that never turned `onDemand` on
 never promised to call `renderer.invalidate` before writing into its own Pixi objects.
 
+A node under the top that blends otherwise than normally (a `Sprite` or `NineSlice` glow, F68, or any Pixi blend of a
+game's own object) is not kept either: rendered into the picture it would blend with the picture's empty texture, not
+with what is drawn under the view, and the glow would cover the board instead of lighting it. The view is drawn live,
+its first refusal warned once per top (`renderer:kept-blend`, `{ picture: label }`), and a kept view whose child turns
+to a glow goes live in that frame instead of being retaken. The walk over the subtree is made at a take, by index, and
+allocates nothing; a refusal is remembered on the record until something under the top changes, so a view that stays
+refused walks nothing a frame (0 B a frame, `kept-flush.perf.ts`).
+
 The grid. Every texture works on the pixel grid of Pixi's live filter pass: the subtree picture on the
 grid of the stack's resolution (`min` of the enabled filters', `"inherit"` the renderer's), the
 output at the renderer's. When the renderer resolution over the stack resolution (`r / rs`) is a whole
@@ -1064,7 +1103,8 @@ as before: an empty box takes presses, an alpha below 0.01 does not. A view at a
 hides a view by alpha 0 and needs no flag; a `Display` object is the game's and is never hidden for its alpha. They
 leave the bounds Pixi draws and filters with (the fast global bounds of a filter's area, the renderable bounds), so a
 `Dim` over a strip of empty boxes measures the strip; Pixi 8.22's `Container.getBounds()` checks only `visible` and
-still counts them. A pooled object comes back drawable and, for a `Graphics`, white: a fill-only shape is drawn white and coloured
+still counts them. A pooled object comes back drawable, blending `"inherit"` and, for a `Graphics`, white: a fill-only
+shape is drawn white and coloured
 by its tint, so a colour change rewrites the tint, never the path (a shape with a stroke is painted in its colours).
 
 Endless loops of a view the player cannot see — at alpha 0, under a view at alpha 0, or a leaf wholly off the screen

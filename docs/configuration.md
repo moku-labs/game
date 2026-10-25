@@ -69,6 +69,7 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `ui` | `breakpoints` | `{ tall, wide }` | `{ tall: 2, wide: 1.5 }` | Aspect thresholds of the `when` style variants |
 | `audio` | `buses` | `{ master, music, sfx }` | `{ master: 1, music: 0.6, sfx: 1 }` | Start gain of each bus, 0..1 |
 | `audio` | `musicFadeMs` | `number` | `600` | Cross-fade of a music switch, in real milliseconds |
+| `audio` | `sfxFadeMs` | `number` | `120` | Fade of a named sound (`sfx(key, { id })`), in real milliseconds, when a sound with its id replaces it or a stop names no `fadeMs` |
 | `audio` | `volumes` | `(player) => Partial<Record<Bus, number>> \| undefined` | `undefined` | Reads the player's choice from the committed player on every `model:committed`. Absent: the buses stay at `buses` |
 | `audio` | `context` | `() => AudioContext \| undefined` | `undefined` | The context factory, a test seam. Absent: `new AudioContext()` where the global exists |
 | `audio` | `music` | `"decode" \| "stream"` | `"decode"` | How a music track plays. `"decode"`: one AudioBuffer, gapless loop, about 58 MB per 150 s track. `"stream"`: an `<audio>` element, about 12 MB, a loop gap of 5 to 49 ms in Chromium and about 0.4 s in WebKit. MP3 or AAC only |

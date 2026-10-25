@@ -11,6 +11,12 @@ mock.modules.sync.pass();
 mock.world.ecs.set(entity, Sprite, { alpha: 0.5 });
 
 const sprite = storedSprite(mock, entity);
+const glows = await startSprites(20);
+const glowEntity = glows.entities[10] ?? 0;
+
+glows.mock.world.ecs.set(glowEntity, Sprite, { alpha: 0.5, blend: "add" });
+
+const glow = storedSprite(glows.mock, glowEntity);
 
 describe("a sprite's alpha tween", () => {
   bench(
@@ -18,6 +24,15 @@ describe("a sprite's alpha tween", () => {
     () => {
       sprite.alpha = sprite.alpha === 0.5 ? 0.6 : 0.5;
       mock.modules.sync.pass();
+    },
+    BENCH_OPTIONS
+  );
+
+  bench(
+    "one frame of the tween, the sprite blending add (F68)",
+    () => {
+      glow.alpha = glow.alpha === 0.5 ? 0.6 : 0.5;
+      glows.mock.modules.sync.pass();
     },
     BENCH_OPTIONS
   );

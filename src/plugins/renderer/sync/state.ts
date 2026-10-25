@@ -130,6 +130,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     slices: emptyWeakSet(),
     invalidated: emptySet(),
     warned: emptySet(),
+    blendWarned: emptySet(),
     added: emptySet(),
     removed: emptySet(),
     reparented: emptySet(),

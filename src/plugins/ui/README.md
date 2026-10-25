@@ -82,9 +82,9 @@ draw adds 0 to both, solves nothing and sets no component.
 
 | Tag | Visual | Input |
 |---|---|---|
-| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
+| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha`, `style.blend` | none |
 | `text` | `Text`; a string `style` is the text style key; `bind={bind(Counter, "value")}` shows a numeric field of a component the element carries (only `bind()` makes a bind) | none |
-| any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug` | as below |
+| any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug`, `style.blend` | as below |
 | any other tag with `style.nineSlice` and `style.hollow: true` | the same `NineSlice` with `hollow: true`: the rim alone, the centre left unfilled; the hit box stays the whole rect | as below |
 | any other tag | a rounded `Shape`, drawing nothing on a container with no fill and no stroke (no fill, stroke width 0, the alpha of its style); with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash). `style.shape: "arc"` draws only the `stroke` of `strokeWidth` on the circle inscribed in the box (`min(width, height) − strokeWidth` across, centred), from 12 o'clock clockwise over `style.sweep` of it (0 to 1, default 1, clamped: 0 draws nothing, 1 a closed ring), its ends `style.cap` (`"round"`, the default, or `"butt"`); `fill`, `radius` and `dash` do nothing on an arc. An arc writes `sweep` and `cap` into its `Shape` in every render; a rectangle or a triangle writes neither, so after an arc they stay on its `Shape`: only an arc reads them; a rectangle or a triangle ignores them. A render with another `sweep` patches the `Shape`, and the arc is built again once: `<stack key="slotTimer" style={{ ...ring, sweep: left / total }} />` | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
@@ -152,6 +152,27 @@ the element. Without `nineSlice` it does nothing, and `lint()` reports it as
 
 ```tsx
 <stack key="memFrost" style={{ nineSlice: "glass.frost", hollow: true, width: 960, height: 1400 }} />
+```
+
+`style.blend: "add"` or `"screen"` lays an `image`, an `icon` or the nine-slice of the style over
+what is drawn under it, written into `Sprite.blend` or `NineSlice.blend` (see "Blend" in the
+renderer README). `"add"` adds its colour, for a spark or a flare; `"screen"` lightens with it, for
+a soft glow (on a dark background it matches CSS `mix-blend-mode: screen`). Without it the element
+covers by alpha. An element that never blended carries no `blend` field, so a game's describe and
+saved values stay as they were; once it blended, a render or a variant that drops the blend writes
+`"normal"`, and the glow turns off. The rest the element records carries the same value, so a
+restore draws the look the element has. It blends the element's own quad alone, never its children,
+and does nothing on a rectangle, a shape or a text; no `lint()` rule reports that.
+
+| Cost | |
+|---|---|
+| Render passes | 0: both are native blends of the sprite batch, no filter |
+| Draw calls | quads of one blend next to each other in draw order share one; each switch between blends in draw order costs one more |
+| Kept pictures | a filtered view with a blended element inside is drawn live, never kept as a picture (`renderer:kept-blend`, once) |
+
+```tsx
+<image key="glow" texture="art.glow" style={{ blend: "screen", alpha: 0.8 }} />
+<button key="claim" intent="claim" style={{ nineSlice: "ui.button", is: { hover: { blend: "add" } } }} />
 ```
 
 ## Extra components

@@ -108,6 +108,18 @@ NineSlice({ texture: "ui.field", width: 480, height: 96, clip: true });
 // @ts-expect-error — clip is on or off
 NineSlice({ clip: "yes" });
 
+// ─── blend: a glow lays its pixels over what is under it (F68) ────────
+
+Sprite({ texture: "board.bg-forest-meadow", blend: "screen" });
+kit.NineSlice({ blend: "add" });
+NineSlice({ blend: "normal" });
+
+// @ts-expect-error — Pixi's other modes are not offered: normal, add or screen
+Sprite({ blend: "multiply" });
+
+// @ts-expect-error — the nine-slice takes the same three
+kit.NineSlice({ blend: "overlay" });
+
 // ─── Shape: the fill has its own alpha ────────────────────────
 
 expectTypeOf<ShapeValue["fillAlpha"]>().toEqualTypeOf<number>();

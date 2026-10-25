@@ -1,8 +1,9 @@
 /**
  * @file renderer/kept — one cached view: whether it may be kept, the keys of its stages, its two lives and the policy
  * between them (P4). A view that stood still for two drawn frames is taken; a kept view whose subtree changes in three
- * drawn frames in a row goes live until it stood still for eight; a move only moves the quad. Taking and releasing
- * happen inside the flush, before the stage pass, both halves in the same frame (K3).
+ * drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A view with a node under
+ * its top that blends otherwise than normally is never taken (F68). Taking and releasing happen inside the flush,
+ * before the stage pass, both halves in the same frame (K3).
  */
 import type { FilterSlot, SyncState, SyncWriters, View } from "../sync/types";
 import type { PixiContainer, PixiFilter, PixiModule } from "../types";
@@ -315,18 +316,86 @@ function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): 
   const stage = kctx.host.stage();
 
   return (
-    kctx.state.on &&
-    !kctx.state.bypassed &&
+    keepingOn(kctx) &&
     stage !== undefined &&
     stack.enabled > 0 &&
     plainFilters(record.slots) &&
-    top.visible &&
-    top.alpha > 0 &&
-    plainBlend(top.blendMode) &&
-    plainBlend(view.object.blendMode) &&
+    drawsAsPicture(top, view) &&
     topDrawn(kctx.sync, view) &&
     ancestorsPlain(kctx, record, stage)
   );
+}
+
+/**
+ * Tells whether the kept cache may keep anything this frame: switched on and not bypassed.
+ *
+ * @param kctx - The kept context.
+ * @returns True when pictures may be kept.
+ */
+function keepingOn(kctx: KeptCtx): boolean {
+  return kctx.state.on && !kctx.state.bypassed;
+}
+
+/**
+ * Tells whether a top and its visual draw as a picture does: the top visible and not faded out, both blending
+ * normally (the visual sits inside the wrapper of a kept bare view, D4).
+ *
+ * @param top - The record's top.
+ * @param view - Its view.
+ * @returns True when they do.
+ */
+function drawsAsPicture(top: PixiContainer, view: View): boolean {
+  return (
+    top.visible && top.alpha > 0 && plainBlend(top.blendMode) && plainBlend(view.object.blendMode)
+  );
+}
+
+/**
+ * Tells whether a node under a top blends otherwise than normally, at any depth (F68): drawn into a picture, it would
+ * blend with the picture's empty texture, not with what is drawn under the view, and a glow would cover the board under
+ * it instead of lighting it. Recursive, by index over `children`: allocates nothing.
+ *
+ * @param node - The top, or a node under it; its own blend is not read (`eligible` reads the top's and the visual's).
+ * @returns True when a node under it blends otherwise.
+ */
+function blendsBelow(node: PixiContainer): boolean {
+  const { children } = node;
+
+  // per take attempt: a walk of the subtree, no iterator.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+
+    if (child !== undefined && (!plainBlend(child.blendMode) || blendsBelow(child))) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tells whether a record's subtree holds a node that blends otherwise than normally, and remembers a yes (`blended`):
+ * a refused record is not walked again until a change under its top clears it (`stepRecord`). The first refusal of a
+ * top is warned once per run, by its label.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @returns True when the record may not be taken.
+ */
+function blendedBelow(kctx: KeptCtx, record: KeptRecord): boolean {
+  if (record.blended) return true;
+  if (!blendsBelow(record.top)) return false;
+
+  record.blended = true;
+
+  const { warnedBlend } = kctx.state;
+  const label = labelOf(record.top);
+
+  if (!warnedBlend.has(label)) {
+    warnedBlend.add(label);
+    kctx.ctx.log.warn("renderer:kept-blend", { picture: label });
+  }
+
+  return true;
 }
 
 /**
@@ -407,7 +476,8 @@ export function createRecord(
     refused: 0,
     cut: false,
     direct: false,
-    displays: undefined
+    displays: undefined,
+    blended: false
   };
   const { state } = kctx;
 
@@ -653,8 +723,8 @@ function writeTakeKeys(
 /**
  * Takes or retakes the picture of a record: stages 1, 2 (when its first filter has inputs) and 3, at the phase of this
  * frame. The bounds are cut to the filter area of the top when it holds one (F43). Refused, and the view drawn live,
- * for a `Display` in the subtree without `onDemand`, empty bounds, a picture over 4096 device pixels, or a budget that
- * has no room (P6.3, warned once).
+ * for a `Display` in the subtree without `onDemand`, a node under the top that blends otherwise (F68, warned once per
+ * top), empty bounds, a picture over 4096 device pixels, or a budget that has no room (P6.3, warned once).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -676,6 +746,8 @@ function takePicture(
 
   // A game's own object it may write unseen without `onDemand`, and an empty subtree, are never kept.
   if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return false;
+  // A glow under the top would blend with the picture's empty texture: a retake goes live (F68).
+  if (blendedBelow(kctx, record)) return false;
 
   // What Pixi draws of the subtree, no node it skips (F58); a filter area bounds what the filters draw, so it bounds
   // the picture too (F43): same pixels, a smaller texture.
@@ -1131,7 +1203,8 @@ function wrapBare(kctx: KeptCtx, record: KeptRecord, view: View): void {
 
 /**
  * A live record's frame (P4.2): still frames are counted; at two (eight after churning) the record is taken, a bare
- * view in a wrapper of its own (D4).
+ * view in a wrapper of its own (D4). A record with a node under its top that blends otherwise stays live, before any
+ * wrap (F68).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1155,6 +1228,8 @@ function stepLive(
   if (record.still < (record.calm ? CALM_AFTER : TAKE_AFTER)) return;
   // A refused take is not offered again until it fits (P6.3): no thrash.
   if (record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget) return;
+  // A glow under the top stays live, remembered until the subtree changes (F68).
+  if (blendedBelow(kctx, record)) return;
 
   wrapBare(kctx, record, view);
 
@@ -1438,7 +1513,8 @@ export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
 
 /**
  * One drawn frame of a record, inside the flush: eligibility, the keys of this frame, the policy of its life, the quad
- * of a kept one; the dirty flags are cleared.
+ * of a kept one; the dirty flags are cleared. A change under the top forgets a blended node found before: the next
+ * take walks the subtree again (F68).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1455,6 +1531,10 @@ export function stepRecord(
 ): void {
   // What the record draws before this frame: a change of it is a change of every picture above it (P4.5).
   noteDrawing(kctx, record, BEFORE);
+
+  // The subtree changed: a glow found under the top may be gone (F68).
+  if (record.dirtyS1) record.blended = false;
+
   NOW.r = kctx.host.resolution();
   readStack(record.slots, NOW.r, pixi.AlphaFilter, NOW);
 

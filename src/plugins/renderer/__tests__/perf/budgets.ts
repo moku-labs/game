@@ -32,6 +32,12 @@ export const BUDGET = {
   // R2: before 1 344 B (a layout, its stretch, anchor and box objects, the texture answer, the cover answer, the hit
   // box, and the alpha boxed into its call). Now written into the view and one scratch layout.
   spriteAlphaTween: 0,
+  // F68: the same tween of a sprite blending `"add"`. New, measured 0 B: the blend is read as the string Pixi holds and
+  // compared, never written while it stands.
+  spriteBlendTween: 0,
+  // F68: the same tween of a sprite whose blend is refused (`"multiply"`). New, measured 0 B: warned at the first sync,
+  // then one set lookup a sync.
+  spriteBlendRefused: 0,
   // Audit row 20: before 2 720 B (six mark sets grown again every frame and given a new table at every `clear()`).
   // Now the marks sit in dense lists stamped with the decision's number, emptied by a new number.
   demandMarks: 0,
@@ -78,6 +84,10 @@ export const BUDGET = {
   keptFade: 16,
   // F67: 10 kept views drawn scaled under a camera zoom, a view elsewhere marked. Before: three retakes, then live.
   keptZoom: 0,
+  // F68: 10 kept views and a filtered view with a glow inside, drawn live, every record stepped (a mark elsewhere). New,
+  // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
+  // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.
+  keptBlend: 0,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
   filterSwitchStill: 0,
@@ -111,5 +121,8 @@ export const BUDGET = {
   hollowStill: 0,
   // F59: a hollow frame whose width changes every pass, as a size tween. New, measured 0 B: its 16 positions are
   // rewritten in the geometry's own array.
-  hollowResize: 0
+  hollowResize: 0,
+  // F68: a hollow frame blending `"screen"` synced every pass. New, measured 0.002 B a pass, under the 1 B the helper
+  // tolerates: the blend is compared, never written while it stands.
+  hollowBlendStill: 0
 } as const;

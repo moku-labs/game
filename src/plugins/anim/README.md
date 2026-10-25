@@ -50,7 +50,10 @@ tween(target, Component, to, { ms, ease?, delayMs?, additive?, space?, reduced? 
 frames(target, { keys, fps, loop? })    // writes Sprite.texture, one key per frame
 spawn(id, components, { layer?, order? }) // a temporary entity, made when the step is reached
 spawned(id)                             // the target of an entity a spawn step of this timeline made
-sfx(key, { bus? })   haptic(kind)       // descriptors anim owns; audio and platform own the handlers
+sfx(key, { bus?, id?, fadeMs? })        // a sound; with an id one sound plays per id (see below)
+stopSfx(id, { fadeMs? })                // stops the named sound of that id
+haptic(kind)                            // sfx, stopSfx, haptic: descriptors anim owns; audio and
+                                        // platform own the handlers
 HAPTIC_KINDS                            // the kinds haptic takes: light, medium, heavy, selection,
                                         // success, warning, error; HapticKind is the same list as a type
 use(animation, slots, tools?)           // nests one animation; pass the outer tools when it reads `at`
@@ -62,6 +65,16 @@ cubicBezier(x1, y1, x2, y2)             // the CSS timing function as an `ease`:
 ```
 
 A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.
+
+`sfx`, `stopSfx` and `haptic` are frozen plain descriptors, usable as `fx.start(...)` in a node and
+as steps a timeline reaches; there they go through `flow.fx.dispatch`. A timeline that is finished
+or cut fires no effect, `stopSfx` included: a game that must stop a voice then stops it from the
+node, `fx.start(stopSfx("voice"))`. The hint form is `hint("stopSfx", { id: "voice" })`.
+
+`sfx(key, { id })` names a sound: `audio` plays one sound per id, a new one with the same id fades
+the old one out over `fadeMs` (`audio`'s `sfxFadeMs` when omitted), and `stopSfx(id, { fadeMs? })`
+stops it. The payload carries `id` and `fadeMs` only when they are given, so `sfx("board.merge")` is
+still `{ kind: "sfx", payload: { key: "board.merge", bus: "sfx" }, cosmetic: true }`.
 
 `defineGame` spreads the kit of `anim`: `defineAnimation`, `play`, and `frames`, `sfx` and the
 `Frames` component with their keys narrowed to the game's asset keys. `Frames({ keys: ["nope"] })`

@@ -1124,11 +1124,14 @@ export type AreaEntry = {
 };
 
 /**
- * What one probe draw of the warm-up draws: a content subject of the renderer (the batch pipeline of sprites, the
- * graphics pipe's own, particles with either blend, distance-field text), or a filter handed to `filters.warm`.
+ * What one probe draw of the warm-up draws: a content subject of the renderer (the batch pipeline of sprites, with the
+ * normal, the add and the screen blend, the graphics pipe's own, particles with either blend, distance-field text), or
+ * a filter handed to `filters.warm`.
  */
 export type WarmSubject =
   | "sprite"
+  | "sprite-add"
+  | "sprite-screen"
   | "graphics"
   | "particles-normal"
   | "particles-add"
@@ -1169,6 +1172,10 @@ export type WarmObjects = {
   /** The one-entry list `holder.filters` is set from. */
   list: PixiFilter[];
   sprite: PixiSprite;
+  /** The 4 × 4 white sprite of `sprite`, blending `"add"`: the batch pipeline of an added glow. */
+  spriteAdd: PixiSprite;
+  /** The 4 × 4 white sprite of `sprite`, blending `"screen"`: the batch pipeline of a screened glow. */
+  spriteScreen: PixiSprite;
   graphics: PixiGraphics;
   particlesNormal: PixiContainer;
   particlesAdd: PixiContainer;
@@ -1459,6 +1466,8 @@ export type SyncState = {
   invalidated: Set<string>;
   /** Keys already reported missing, so one key warns once. */
   warned: Set<string>;
+  /** The `blend` values of a `Sprite` or a `NineSlice` already refused (`renderer:blend-unknown`), so each warns once. */
+  blendWarned: Set<string>;
   added: Set<Entity>;
   removed: Set<Entity>;
   /** Entities whose `Parent` was removed: `world` marks no change then, only `onRemoved` fires. */

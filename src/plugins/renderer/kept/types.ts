@@ -173,6 +173,11 @@ export type KeptRecord = {
   direct: boolean;
   /** A view of kind `"Display"` hangs in the subtree; `undefined` until a take attempt walks it (P4.1). */
   displays: boolean | undefined;
+  /**
+   * A walk found a node under the top that blends otherwise than normally (F68): the record is not taken, and the walk
+   * is not taken again until a frame that sets `dirtyS1` (a change under the top) clears it.
+   */
+  blended: boolean;
 };
 
 /** One picture of an overlay's range (P7), keyed by the owner overlay's entity. */
@@ -234,6 +239,8 @@ export type KeptState = {
   allowed: boolean;
   /** One warning per run for a budget refusal. */
   warnedBudget: boolean;
+  /** The labels of the tops already warned for a blended node under them (`renderer:kept-blend`), once each per run. */
+  warnedBlend: Set<string>;
   /** The pixel leg of the oracle (P13.2): frames skipped for being off-grid, for the verify log. */
   verifySkipped: number;
   /** True while `bypass(true)` draws everything live for an extract. */

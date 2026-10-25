@@ -40,10 +40,25 @@ export type TransformValue = {
 export type SpriteFit = "fill" | "contain" | "cover";
 
 /**
+ * How a sprite or a nine-slice lays its own pixels over what is drawn under it. `"normal"` covers it by alpha, as a
+ * view without the field does. `"screen"` lightens it: on a dark background it matches CSS `mix-blend-mode: screen`.
+ * `"add"` adds the colours, brighter than `"screen"`. Both draw in the sprite batch, with no extra pass; each switch
+ * between blends in draw order costs one more draw call.
+ *
+ * @example
+ * ```ts
+ * // The glow of the memory card: lightens the ward under it as the design's screen does.
+ * const glow: SpriteBlend = "screen";
+ * world.ecs.spawn(owner, [Layer({ name: "fx" }), Transform({ x: 540, y: 960 }), Sprite({ texture: "fx.glow", blend: glow })]);
+ * ```
+ */
+export type SpriteBlend = "normal" | "add" | "screen";
+
+/**
  * One textured quad. `texture` is an asset key; `defineGame` narrows it to the game's keys.
  * `width` and `height` are the box in reference units; 0 on an axis keeps the texture's own size
  * there. `anchor` is the point of the box that sits on the `Transform`. `alpha` fades the quad
- * and the entity's children.
+ * and the entity's children. `blend` lays the quad over what is under it with `"add"` or `"screen"`.
  *
  * @example
  * ```ts
@@ -51,6 +66,8 @@ export type SpriteFit = "fill" | "contain" | "cover";
  *   texture: "board.bg-forest-meadow", tint: 0xffffff, alpha: 1, anchor: { x: 0, y: 0 },
  *   width: 1080, height: 1920, fit: "cover"
  * };
+ * // A spark over the board: its pixels add to the board's.
+ * const spark: SpriteValue = { ...value, texture: "fx.spark", width: 96, height: 96, blend: "add" };
  * ```
  */
 export type SpriteValue = {
@@ -61,6 +78,22 @@ export type SpriteValue = {
   width: number;
   height: number;
   fit: SpriteFit;
+  /**
+   * How the quad lays its pixels over what is drawn under it: `"add"` adds them, `"screen"` lightens with them (CSS
+   * `mix-blend-mode: screen` on a dark background), `"normal"` covers by alpha. It blends the quad alone, never the
+   * entity's children. Absent by default, read as `"normal"`, so a sprite that never sets it keeps the values it had
+   * before the field existed; `"normal"` is there so a patch can turn a glow off. Any other string draws normally and is
+   * warned once (`renderer:blend-unknown`). A filtered view with a blended node inside is drawn live, never kept as a
+   * picture (`renderer:kept-blend`, once).
+   *
+   * @example
+   * ```ts
+   * // The glow behind the found memory lightens the ward under it, then turns off.
+   * const glow = world.ecs.spawn(owner, [Layer({ name: "fx" }), Transform({ x: 540, y: 960 }), Sprite({ texture: "fx.glow", alpha: 0.8, blend: "screen" })]);
+   * world.ecs.set(glow, Sprite, { blend: "normal" });
+   * ```
+   */
+  blend?: SpriteBlend;
 };
 
 /**
@@ -69,7 +102,8 @@ export type SpriteValue = {
  * the texture is missing. `clip` masks the children of the entity to the `width × height` box,
  * the same rule as `Shape.clip`: the mask is a filled rectangle and is never drawn, and the panel
  * itself is never masked. `alpha` fades the panel and the entity's children. `hollow` draws the
- * rim alone: the eight border pieces, never the centre.
+ * rim alone: the eight border pieces, never the centre. `blend` lays the panel over what is under it
+ * with `"add"` or `"screen"`.
  *
  * @example
  * ```ts
@@ -113,6 +147,19 @@ export type NineSliceValue = {
    * ```
    */
   hollow?: boolean;
+  /**
+   * How the panel lays its pixels over what is drawn under it, as `Sprite.blend`: `"add"` adds them, `"screen"`
+   * lightens with them, `"normal"` covers by alpha. It blends the panel alone, filled or hollow, never the entity's
+   * children. Absent by default, read as `"normal"`, so a panel that never sets it keeps the values it had before the
+   * field existed.
+   *
+   * @example
+   * ```ts
+   * // The frost rim of the memory screen lightens the ward behind it; the centre stays empty.
+   * world.ecs.spawn(owner, [Layer({ name: "ui" }), Transform(), NineSlice({ texture: "glass.frost", width: 960, height: 1400, hollow: true, blend: "screen" })]);
+   * ```
+   */
+  blend?: SpriteBlend;
 };
 
 /**
@@ -327,11 +374,14 @@ export const Transform = /*#__PURE__*/ component("Transform", transformDefaults)
 
 /**
  * One textured quad. `texture` is an asset key, resolved through the texture providers; a size
- * and a `fit` draw it into a box.
+ * and a `fit` draw it into a box. `blend: "add"` or `"screen"` lays it over what is under it.
  */
 export const Sprite = /*#__PURE__*/ component("Sprite", spriteDefaults);
 
-/** What a `NineSlice` starts as, `hollow` left out. Its own const, because a component takes a typed defaults object. */
+/**
+ * What a `NineSlice` starts as, `hollow` and `blend` left out. Its own const, because a component takes a typed defaults
+ * object.
+ */
 const nineSliceDefaults: NineSliceValue = {
   texture: "",
   width: 0,
@@ -345,7 +395,8 @@ const nineSliceDefaults: NineSliceValue = {
 /**
  * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
  * the slice outline over it. `clip: true` masks the children of the entity to the panel box.
- * `hollow: true` draws its rim alone, never the centre cell.
+ * `hollow: true` draws its rim alone, never the centre cell. `blend: "add"` or `"screen"` lays it over what is under
+ * it.
  */
 export const NineSlice = /*#__PURE__*/ component("NineSlice", nineSliceDefaults);
 

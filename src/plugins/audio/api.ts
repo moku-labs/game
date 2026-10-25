@@ -1,9 +1,10 @@
 /**
- * @file audio plugin — API factory. Three buses, the unlock flag and the journal of started sounds. Nothing here
- * is persisted; a game keeps the player's choice in the player state and `config.volumes` applies
- * it on the next commit.
+ * @file audio plugin — API factory. Three buses, the unlock flag, the journal of started sounds and the stop of a
+ * named sound. Nothing here is persisted; a game keeps the player's choice in the player state and
+ * `config.volumes` applies it on the next commit.
  */
 import { applyGain, isBus } from "./graph";
+import { stopNamed } from "./named";
 import type { AudioApi, Bus, KernelSlice, SoundEntry, State } from "./types";
 
 /**
@@ -53,7 +54,7 @@ export function setBusVolume(state: State, bus: Bus, value: number): void {
 }
 
 /**
- * Creates the audio API: the three buses, the unlock flag and the journal.
+ * Creates the audio API: the three buses, the unlock flag, the journal and the stop of a named sound.
  *
  * @param ctx - Kernel context of the audio plugin.
  * @returns The plugin API.
@@ -72,6 +73,8 @@ export function createAudioApi(ctx: KernelSlice): AudioApi {
     },
     muted: (bus: Bus): boolean => state.buses[busOf(state, bus)].muted,
     unlocked: (): boolean => state.unlocked,
-    journal: (): readonly SoundEntry[] => state.journal
+    journal: (): readonly SoundEntry[] => state.journal,
+    stop: (id: string, options?: { fadeMs?: number }): void =>
+      stopNamed(state, id, options?.fadeMs ?? ctx.config.sfxFadeMs)
   };
 }

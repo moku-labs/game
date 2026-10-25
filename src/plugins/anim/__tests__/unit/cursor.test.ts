@@ -12,6 +12,7 @@ import {
   sequence,
   set,
   sfx,
+  stopSfx,
   tween,
   use,
   wait
@@ -101,7 +102,7 @@ describe("anim/timeline cursor", () => {
 
     const entity = spawnTestEntity(mock, [Transform()]);
     const handle = playOn(mock, entity, () =>
-      sequence(mark("a"), sfx("board.merge"), haptic("light"), mark("b"))
+      sequence(mark("a"), sfx("board.merge"), haptic("light"), stopSfx("voice"), mark("b"))
     );
 
     handle.finish();
@@ -118,12 +119,15 @@ describe("anim/timeline cursor", () => {
 
     const entity = spawnTestEntity(mock, [Transform()]);
 
-    playOn(mock, entity, () => sequence(sfx("board.merge"), haptic("light")));
+    playOn(mock, entity, () =>
+      sequence(sfx("board.merge"), haptic("light"), stopSfx("voice", { fadeMs: 200 }))
+    );
     mock.frame(16);
 
     expect(mock.dispatched).toEqual([
       { kind: "sfx", payload: { key: "board.merge", bus: "sfx" }, cosmetic: true },
-      { kind: "haptic", payload: { kind: "light" }, cosmetic: true }
+      { kind: "haptic", payload: { kind: "light" }, cosmetic: true },
+      { kind: "stopSfx", payload: { id: "voice", fadeMs: 200 }, cosmetic: true }
     ]);
   });
 

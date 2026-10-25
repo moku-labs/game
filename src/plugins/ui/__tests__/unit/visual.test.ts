@@ -97,6 +97,26 @@ describe("visualOf", () => {
     expect(plain?.value).toMatchObject({ debug: false });
   });
 
+  // Bug: `blend` of the style reaches neither the Sprite of an image nor the NineSlice of a panel
+  // (or only one of the two), so a glow is drawn as a plain quad that covers what is under it.
+  it("writes the blend of the style into the Sprite of an image and the NineSlice of a panel", () => {
+    const [glow] = visualOf(
+      elementOf({
+        type: "image",
+        style: { blend: "screen", alpha: 0.8 },
+        node: { type: "image", props: { texture: "art.glow" }, children: [] }
+      })
+    );
+    const [halo] = visualOf(
+      elementOf({ type: "stack", style: { nineSlice: "glass.frost", blend: "add" } })
+    );
+
+    expect(glow?.type.componentName).toBe("Sprite");
+    expect(glow?.value).toMatchObject({ texture: "art.glow", alpha: 0.8, blend: "screen" });
+    expect(halo?.type.componentName).toBe("NineSlice");
+    expect(halo?.value).toMatchObject({ texture: "glass.frost", blend: "add" });
+  });
+
   it("sizes an image to its rect with the fit of its prop, contain by default", () => {
     const contained = visualOf(
       elementOf({

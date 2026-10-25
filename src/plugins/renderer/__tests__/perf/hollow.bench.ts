@@ -4,6 +4,9 @@ import { startHollows } from "./fixtures";
 
 const still = await startHollows();
 const resized = await startHollows();
+const screened = await startHollows();
+
+screened.panel.blend = "screen";
 
 describe("a hollow nine-slice", () => {
   bench(
@@ -18,6 +21,12 @@ describe("a hollow nine-slice", () => {
       resized.panel.width = resized.panel.width === 300 ? 301 : 300;
       resized.mock.modules.sync.pass();
     },
+    BENCH_OPTIONS
+  );
+
+  bench(
+    "one pass that syncs a hollow frame blending screen (F68)",
+    () => screened.mock.modules.sync.pass(),
     BENCH_OPTIONS
   );
 });
