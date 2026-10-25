@@ -452,21 +452,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Imports the optional `assets.ts` of a feature. Node strips the types of a `.ts` file, so the
- * description a game writes runs as it stands.
+ * description a game writes runs as it stands. The URL carries the file's size and mtime: a
+ * long-lived process (the keys watch of `dev` and the editor) reads a saved description again
+ * instead of the module it cached, while one scan, or scans with nothing saved, import it once.
  *
  * @param file - Absolute path of the description.
  * @returns Its exports, or `undefined` when the feature brought none.
  * @throws {Error} When the file exists but cannot be imported.
  */
 async function importDescription(file: string): Promise<Record<string, unknown> | undefined> {
-  const exists = await stat(file).then(
-    entry => entry.isFile(),
-    () => false
-  );
+  const entry = await stat(file).catch(() => {});
 
-  if (!exists) return undefined;
+  if (entry === undefined || !entry.isFile()) return undefined;
 
-  return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as Record<string, unknown>;
+  // Whole microseconds and the size: Bun reads a `.` in the query as a loader name.
+  const url = `${pathToFileURL(file).href}?saved=${entry.size}-${Math.round(entry.mtimeMs * 1000)}`;
+
+  return (await import(/* @vite-ignore */ url)) as Record<string, unknown>;
 }
 
 /**
