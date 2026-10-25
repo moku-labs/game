@@ -169,7 +169,9 @@ and alive, and swaps it in one frame (spec 31, F61 S2). What a game sees:
   0.15 s after the tap.
 - **The old scene stays.** Until the swap `app.scenes.current()` answers the old scene, nothing of
   the new one is drawn, hit, found with `ui.find` or shown by the `ui`, `locate` and `render` doors,
-  and its `enter` motions and hooks wait. The gate stays closed, as during the bundle wait: the
+  and its `enter` motions and hooks wait. The projections only the old scene lists keep what they
+  showed when the switch began, as in a one-block switch: the state of the next node never reaches
+  them, and they leave with the swap. The gate stays closed, as during the bundle wait: the
   first tap after the switch lands on a complete scene.
 - **The swap.** The first frame `world.projection.built()` answers true, the `signals` callback of
   the build runs the block of step 13 with `projection.commit()` in the place of `mount`, in the same

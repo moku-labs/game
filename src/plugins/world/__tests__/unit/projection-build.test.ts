@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Order } from "../../ecs/define";
+import { Order, Tree } from "../../ecs/define";
 import type { Entity } from "../../ecs/types";
 import { projection } from "../../projection/define";
 import type {
@@ -114,6 +114,17 @@ function commitBoard(world: MockWorld): void {
  */
 function rootOf(world: MockWorld, name: string): Entity {
   return world.api.projection.entitiesOf(name)[0] ?? 0;
+}
+
+/**
+ * The props of the description node the one root of a screen projection drew last.
+ *
+ * @param world - The world.
+ * @param name - The screen projection.
+ * @returns The props, or `undefined` for a projection with no root.
+ */
+function propsOf(world: MockWorld, name: string): object | undefined {
+  return world.api.ecs.get(rootOf(world, name), Tree)?.node.props;
 }
 
 /**
@@ -482,5 +493,102 @@ describe("a commit of the store during a build", () => {
     expect(items.map(entity => world.api.projection.keyOf(entity)?.key)).toEqual(["a", "b", "c"]);
     expect(items.every(entity => world.api.projection.isBuilding(entity))).toBe(true);
     expect(enter).not.toHaveBeenCalled();
+  });
+
+  // Bug: the scene on screen reads the next node's state while the next scene is built: a ward that leaves shows a
+  // state it was never drawn for (its buttons fade back in, the dim of its connection goes before the ward does),
+  // which a one-block switch, where it left in the same block as the commit, never showed.
+  it("leaves a projection the coming list drops as it stood, while one both lists name follows the store", () => {
+    const world = wardWorld();
+
+    buildBoard(world);
+    world.model.player = { items: ITEMS, hud: { coins: 9 } };
+    world.commit();
+    world.frame(16);
+
+    expect(propsOf(world, "ward")).toEqual({ coins: 5 });
+    expect(propsOf(world, "hud")).toEqual({ coins: 9 });
+  });
+
+  // Bug: after an abort the scene that stays current keeps the state of the build start until a later commit.
+  it("reconciles the projection it held in the frame after a discard", () => {
+    const world = wardWorld();
+
+    buildBoard(world);
+    world.model.player = { items: ITEMS, hud: { coins: 9 } };
+    world.commit();
+    world.frame(16);
+    world.api.projection.discard();
+    world.frame(16);
+
+    expect(propsOf(world, "ward")).toEqual({ coins: 9 });
+  });
+
+  // Bug: a forced rerun the build passed a projection over for (a new locale during the build), after a plain change,
+  // comes back as a plain change: the held projection, whose item did not change, never runs its view again after the
+  // discard and keeps the old words.
+  it("forces the reconcile after a discard when it passed a projection over for a forced one", () => {
+    const world = wardWorld();
+    const words = { now: "hello" };
+    // One item for every read: only a forced reconcile runs the view of an item that is the same as before.
+    const item = { id: "words" };
+
+    world.api.projection.register(
+      projection({
+        name: "ward.words",
+        layer: "ui",
+        from: () => item,
+        view: (): DescriptionNode => ({ type: "box", props: { words: words.now }, children: [] })
+      }) as AnyProjectionSpec
+    );
+    world.api.projection.mount(["ward.words"], MOUNT_OWNER);
+    buildBoard(world);
+    world.commit();
+    world.frame(16);
+    words.now = "hallo";
+    world.api.projection.rerunAll();
+    world.frame(16);
+    world.api.projection.discard();
+    world.frame(16);
+
+    expect(propsOf(world, "ward.words")).toEqual({ words: "hallo" });
+  });
+
+  // Bug: a build that passed no projection over hands the store changes back anyway: the load of the first scene's
+  // build reconciles every projection again, direct, in the swap frame, which ends the motions the swap starts and
+  // makes ui build its roots again.
+  it("hands nothing back to the swap frame when it passed no projection over", () => {
+    const world = createMockWorld({ reconciledEvent: true });
+
+    world.model.player = { items: ITEMS, hud: { coins: 5 } };
+    world.api.projection.register(screen("hud", "ui"));
+    world.api.projection.register(screen("board.back", "board"));
+    world.api.projection.register(boardItems());
+    world.start();
+    world.api.projection.build(BOARD_NAMES, MOUNT_OWNER, BOARD_LAYERS, 4);
+    world.commit("load", ["player", "session"]);
+    world.frame(16);
+    world.api.projection.setLayers(BOARD_LAYERS);
+    world.api.projection.commit();
+    world.emitted.length = 0;
+    world.frame(16);
+
+    expect(world.emitted.filter(event => event.name === "world:reconciled")).toEqual([]);
+  });
+
+  // Bug: a projection mounted beside the scenes' lists, which the swap does not unmount, stays on the state of the
+  // build start after the commit, since no commit of the store comes.
+  it("reconciles a held projection the swap left mounted in the frame after the commit", () => {
+    const world = wardWorld();
+
+    buildBoard(world);
+    world.model.player = { items: ITEMS, hud: { coins: 9 } };
+    world.commit();
+    world.frame(16);
+    world.api.projection.setLayers(BOARD_LAYERS);
+    world.api.projection.commit();
+    world.frame(16);
+
+    expect(propsOf(world, "ward")).toEqual({ coins: 9 });
   });
 });

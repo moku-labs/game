@@ -791,11 +791,27 @@ function reconcileTable(
 }
 
 /**
+ * Tells whether a mounted projection is not on a list: one a reconcile limited to the list passes over.
+ *
+ * @param mounted - The mounted projections.
+ * @param names - The list, the coming scene's.
+ * @returns True when one is left out.
+ */
+function passesOver(mounted: ReadonlyMap<string, Mounted>, names: readonly string[]): boolean {
+  for (const name of mounted.keys()) {
+    if (!names.includes(name)) return true;
+  }
+
+  return false;
+}
+
+/**
  * Runs one reconcile over every mounted projection, or over the named ones only, or over the table
  * the options name. A reconcile of every mounted projection reaches the projections a running build
  * mounts aside too, direct, so a store change during the build reaches the coming scene and none of
- * its views plays a motion unseen. A converging one then brings the elements other plugins own home
- * and tells their owners.
+ * its views plays a motion unseen; the mounted projections the coming scene drops are passed over
+ * until the build ends. A converging one then brings the elements other plugins own home and tells
+ * their owners.
  *
  * @param pctx - Domain context of the projection module.
  * @param options - Which projections, play or direct, whether `view` is forced, whether every
@@ -808,10 +824,19 @@ export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void 
   const counts = emptyCounts();
   const used = emptyHintSet();
   const building = state.building;
+  const whole = options.table === undefined && options.names === undefined;
+  // While a scene is built aside, a mounted projection the coming list drops keeps what it shows: it leaves at the
+  // commit as it stood when the switch began, as in a one-block switch, which unmounts it in the block that commits
+  // the next node. The projections both lists name follow the store.
+  const skipBy = whole && building !== undefined ? { ...options, names: building.names } : options;
 
-  reconcileTable(pctx, options.table ?? state.mounted, snapshot, options, options, counts, used);
+  if (whole && building !== undefined && passesOver(state.mounted, building.names)) {
+    building.held = options.force || building.held === "rerun" ? "rerun" : "change";
+  }
 
-  if (building !== undefined && options.table === undefined && options.names === undefined) {
+  reconcileTable(pctx, options.table ?? state.mounted, snapshot, skipBy, options, counts, used);
+
+  if (whole && building !== undefined) {
     const aside = { ...options, direct: true };
 
     reconcileTable(pctx, building.mounted, snapshot, options, aside, counts, used);

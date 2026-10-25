@@ -674,6 +674,12 @@ export type Building = {
   frameStart: number;
   /** Milliseconds per frame the building work may take. */
   budgetMs: number;
+  /**
+   * Whether a reconcile passed over a mounted projection the coming list drops, which keeps what it showed when the
+   * switch began: `"change"`, or `"rerun"` when that reconcile forced `view`. The commit and the discard then mark the
+   * world dirty, so one still mounted reads the store in the next frame. Absent while none was passed over.
+   */
+  held?: "change" | "rerun";
 };
 
 /**

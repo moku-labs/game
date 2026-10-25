@@ -227,7 +227,13 @@ projection.commit(); // the board is mounted, nothing is building
   with the old scene standing.
 - **During the build** nothing of it moves: no hook runs, and the loops of its views wait. A commit
   of the store reaches the building projections too, direct, so the coming scene shows the latest
-  state and a new key enters flagged building.
+  state and a new key enters flagged building. It reaches the mounted projections both lists name
+  as before. A mounted projection the coming list does not name reads no new state: it leaves at
+  the commit as it stood when the switch began, as in a one-block switch, which unmounts it in the
+  block that commits the next node (a ward whose buttons stepped back for a wait does not bring
+  them back for the frames of the build). When a reconcile passed one over, the commit and the
+  discard mark the world dirty, so one still mounted then (the old scene after an abort) reads the
+  store in the next frame; a forced rerun it missed is forced again.
 - **`left()`** is `budgetMs` minus the game clock time since the frame started: world reads
   `clock.now()` first thing in its `input` callback, the moment `Now` gets. The clock counts whole
   milliseconds. Negative once the frame spent more; a caller still does one unit a frame.

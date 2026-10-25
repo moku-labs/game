@@ -411,6 +411,29 @@ describe("sceneComing (F61 S2)", () => {
 
     expect(mock.api.isLoaded("board")).toBe(false);
   });
+
+  // Bug: a bundle the scene on screen no longer names went at the sync of a build frame, with nothing exiting: the
+  // world holds that scene as it stood until the swap, so its pictures still draw, ask for the bundle and load it
+  // again (the memory's window over the ward). It goes after the swap, once nothing leaves.
+  it("holds what the scene on screen dropped while a scene is built aside, until the swap", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board");
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board", "board.chains"]);
+    mock.api.sceneBundles(["board"]);
+    mock.api.sceneComing(["ui"]);
+    mock.world.sync();
+
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+
+    mock.api.sceneBundles(["ui"]);
+    mock.world.sync();
+
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
+  });
 });
 
 describe("the bundles of a leaving scene (F51)", () => {

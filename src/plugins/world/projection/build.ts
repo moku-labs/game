@@ -3,11 +3,12 @@
  * coming list names are mounted into a table of their own, flagged building, while the current
  * scene stays mounted; the commit moves them in at the swap, the discard drops them on an abort.
  */
+import type { Root } from "../../model/types";
 import type { Entity, Owner } from "../ecs/types";
 import { emptyMounted, orderIn, placeNames, reconcileFresh, sortMount } from "./mount";
 import { despawnView } from "./queue";
 import { reconcile } from "./reconcile";
-import type { Building, LayerSpec, ProjectionCtx } from "./types";
+import type { Building, Dirty, LayerSpec, ProjectionCtx } from "./types";
 
 /**
  * Creates the empty table of a build: nothing mounted aside and nothing spawned yet.
@@ -35,6 +36,40 @@ function emptyBuilding(
     frameStart: timing.now,
     budgetMs: timing.budgetMs
   };
+}
+
+/**
+ * Creates the empty set of dirty roots. It lives in its own non-exported function because lint
+ * rule L5 refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty set of roots.
+ */
+function emptyRoots(): Set<Root> {
+  return new Set();
+}
+
+/**
+ * Marks the world dirty at the end of a build that passed mounted projections over (`held`), so the
+ * next frame's reconcile reaches the ones still mounted: their last reconcile read an older state,
+ * every other projection read this one and is passed over. A build that held a forced reconcile
+ * forces the next one too. A build that held nothing marks nothing.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param building - The build that ends.
+ */
+function handBack(pctx: ProjectionCtx, building: Building): void {
+  const state = pctx.ctx.state.projection;
+  const held = building.held;
+
+  if (held === undefined) return;
+
+  const dirty: Dirty = state.dirty ?? { causes: [], roots: emptyRoots(), force: false };
+
+  dirty.causes.push(held === "rerun" ? "rerun" : "edge");
+  dirty.roots.add("player");
+  dirty.roots.add("session");
+  dirty.force ||= held === "rerun";
+  state.dirty = dirty;
 }
 
 /**
@@ -137,6 +172,7 @@ export function commitBuild(pctx: ProjectionCtx): void {
   state.owedLoops += 1;
   state.membershipVersion += 1;
   reconcileFresh(pctx, missing);
+  handBack(pctx, building);
 }
 
 /**
@@ -166,4 +202,5 @@ export function discardBuild(pctx: ProjectionCtx): void {
   }
 
   delete state.building;
+  handBack(pctx, building);
 }

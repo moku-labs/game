@@ -334,16 +334,19 @@ export function nameComingBundles(state: State, named: readonly string[]): void 
  * its feature shows (the splash's 7.5 MiB under the ward). A bundle of another release stays, as
  * it would have. The system `assets.leave` calls it in every phase `sync`: after the reconcile of
  * `layout`, which tags the leaving elements `Exiting` in the frame after the switch, so the hold
- * never ends before the leave begins (F51b). It costs a length read while no scene leaves, and a
- * count read while one does.
+ * never ends before the leave begins (F51b). While a scene is built aside (the coming list is
+ * set; a scene names its own bundle, so the list of a build is never empty) the leave has not
+ * begun: the world holds the scene on screen as it stood until the swap, and what it draws still
+ * needs its bundles. It costs two length reads while no scene leaves, and a count read while one
+ * does.
  *
  * @param ctx - Domain context of the plugin.
  */
 export function releaseSceneLeft(ctx: AssetsCtx): void {
   const state = ctx.state;
 
-  // Nothing left, or its elements still play their exit.
-  if (state.sceneLeaving.length === 0 || state.exiting > 0) return;
+  // Nothing left, its elements still play their exit, or the scene that drops it has not begun to leave.
+  if (state.sceneLeaving.length === 0 || state.exiting > 0 || state.sceneComing.length > 0) return;
 
   const names = state.sceneLeaving;
 
