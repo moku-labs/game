@@ -22,7 +22,7 @@ import type {
   SlotValues,
   Target
 } from "../types";
-import { checkRepeat, checkSegments, checkSequence } from "./checks";
+import { checkRepeat, checkSegments, checkSequence, checkWalkSpace } from "./checks";
 import type {
   ExternalPlayer,
   FxStep,
@@ -269,10 +269,12 @@ function frozenSegment(segment: { at: number; ease?: Ease; to: object }): TrackS
  * By default the fields are local: they are written into the target's own `Transform`. With
  * `space: "root"` the `x`, `y`, `rotation` and `scale` of a `Transform` are a root pose, the space
  * `at()` answers in, and are turned into the space of the target's `Parent` when the track starts.
- * That aims a hosted view, such as a board item inside the board slot, at another element. A
- * field the step does not name stays where it is, so under a turned parent name `x` and `y`
- * together. A target without a parent, and a component other than `Transform`, move as in the
- * local space.
+ * That aims a hosted view at another element: an order's board item inside the scaled board slot
+ * flies onto the order card with `{ x: at(card).x, y: at(card).y, scale: at(card).scale }` in the
+ * root space, covers the card at the card's size, and its `Transform` stays slot-local. A field
+ * the step does not name stays where it is, so under a turned parent name `x` and `y` together. A
+ * target without a parent, and a component other than `Transform`, move as in the local space. An
+ * additive walk names offsets, so it stays in the local space.
  *
  * @param target - The projection key or the entity to animate.
  * @param component - The component to animate.
@@ -293,38 +295,17 @@ function frozenSegment(segment: { at: number; ease?: Ease; to: object }): TrackS
  *   by itself, so it comes last in a `sequence`.
  * @returns The tween step; `segments` and `repeat` are in it only when given.
  * @throws {Error} When the segments are empty, an `at` is outside 0..1 or out of order, the last
- *   segment ends before 1, or the repeat is not a whole number of 0 or more.
+ *   segment ends before 1, an additive walk names the root space, or the repeat is not a whole
+ *   number of 0 or more.
  * @example
  * ```ts
- * // An order is delivered: the board item flies out of the scaled board slot onto the order card.
- * const deliverFly = defineAnimation("orders.deliverFly", {
- *   slots: { item: type<Target>(), card: type<Target>() },
- *   build: ({ item, card }, { at }) =>
- *     tween(item, Transform, { x: at(card).x, y: at(card).y, scale: at(card).scale }, {
- *       ms: 400, ease: "inCubic", space: "root"
- *     })
- * });
- * app.anim.play(deliverFly, {
- *   item: { projection: "board.items", key: "i1" },
- *   card: { projection: "hud", key: "card0" }
- * });
- * // 400 ms later the item covers the card at the card's size; its Transform stays slot-local
- *
- * // A ready chest hops 14 up and back every 2.4 s, as offsets over its pose, until it is cancelled.
- * const chestBounce = defineAnimation("board.chestBounce", {
- *   slots: { chest: type<Target>() },
- *   build: ({ chest }) =>
- *     tween(chest, Transform, { y: 0, scale: 0 }, {
- *       ms: 2400, additive: true, repeat: "forever",
- *       segments: [
- *         { at: 0.08, ease: "out", to: { y: -14, scale: 0.06 } },
- *         { at: 0.22, ease: "in", to: { y: 0, scale: 0 } },
- *         { at: 1, to: { y: 0, scale: 0 } }
- *       ]
- *     })
- * });
- * const bounce = res(AnimPlayer).play(chestBounce, { chest: entity });
- * // 192 ms later the chest stands 14 higher at 1.06 of its scale
+ * // A ready chest (entity 1048576) hops 14 up and back every 2.4 s, as offsets over its pose.
+ * const chestBounce = defineAnimation("board.chestBounce", { slots: { chest: type<Target>() },
+ *   build: ({ chest }) => tween(chest, Transform, { y: 0, scale: 0 }, { ms: 2400, additive: true,
+ *     repeat: "forever", segments: [{ at: 0.08, ease: "out", to: { y: -14, scale: 0.06 } },
+ *       { at: 0.22, ease: "in", to: { y: 0, scale: 0 } }, { at: 1, to: { y: 0, scale: 0 } }] }) });
+ * const bounce = res(AnimPlayer).play(chestBounce, { chest: 1_048_576 });
+ * // 192 ms later the chest stands 14 higher, its scale 0.06 larger; it bounces until cancelled
  * bounce.cancel(); // it stands on its own pose again
  * ```
  */
@@ -359,6 +340,7 @@ export function tween<Value extends object>(
 
   if (options.segments !== undefined) {
     checkSegments(erased.componentName, options.segments);
+    checkWalkSpace(erased.componentName, step.additive, step.space);
     step.segments = Object.freeze(options.segments.map(segment => frozenSegment(segment)));
   }
 

@@ -772,6 +772,9 @@ export function startTrack(
   const instant = cut && repeats !== Number.POSITIVE_INFINITY;
   const keys = keysOf(entity, component.componentName, target);
   const names = Object.keys(target);
+  // A view's loop stands on its first key under reduced motion; a timeline's would hold its play
+  // open on a still pose for ever, so it is not started.
+  const bornEnded = names.length === 0 || (cut && driven && repeats === Number.POSITIVE_INFINITY);
   const track: Track = {
     id: actx.state.nextId,
     entity,
@@ -795,9 +798,7 @@ export function startTrack(
     additive: options.additive === true,
     driven,
     bornFrame: actx.state.frame,
-    // A view's loop stands on its first key under reduced motion; a timeline's would hold its play
-    // open on a still pose for ever, so it is not started.
-    ended: names.length === 0 || (cut && driven && repeats === Number.POSITIVE_INFINITY),
+    ended: bornEnded,
     segments: options.segments,
     repeatsLeft: instant ? 0 : repeats,
     held: false,
@@ -937,16 +938,7 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
   const fraction = track.ms <= 0 ? 1 : Math.min(run / track.ms, 1);
   const final = fraction >= 1 && (track.repeatsLeft === 0 || track.ms <= 0);
 
-  // An endless loop of a view the player cannot see writes nothing; its clock ran on, so it writes the phase of the
-  // time when it is shown again (spec 22 O9, spec 26 R1.7). A timeline's endless track asks too (F76); a finite one,
-  // which a node may wait for, never does. Bases and offsets stay.
-  if (
-    !final &&
-    track.repeatsLeft === Number.POSITIVE_INFINITY &&
-    actx.state.loopsHeld?.(track.entity, track.reveals) === true
-  ) {
-    return 0;
-  }
+  if (isHeldLoop(actx, track, final)) return 0;
 
   clock[1] = fraction;
   writeFields(actx, track, final);
@@ -955,6 +947,25 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
   endTrack(actx, track);
 
   return Math.max(0, run - track.ms);
+}
+
+/**
+ * Tells whether an endless loop writes nothing this frame because the player cannot see it.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that advances.
+ * @param final - Whether this step lands the track.
+ * @returns True when the loop is held.
+ */
+function isHeldLoop(actx: AnimCtx, track: Track, final: boolean): boolean {
+  // An endless loop of a view the player cannot see writes nothing; its clock ran on, so it writes the phase of the
+  // time when it is shown again (spec 22 O9, spec 26 R1.7). A timeline's endless track asks too (F76); a finite one,
+  // which a node may wait for, never does. Bases and offsets stay.
+  return (
+    !final &&
+    track.repeatsLeft === Number.POSITIVE_INFINITY &&
+    actx.state.loopsHeld?.(track.entity, track.reveals) === true
+  );
 }
 
 /**

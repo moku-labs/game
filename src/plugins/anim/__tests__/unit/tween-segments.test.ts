@@ -122,6 +122,24 @@ describe("anim/timeline tween — segments and repeat as data", () => {
   ])("throws for %s when the step is built", (_case, extra, message) => {
     expect(tweenWith(extra)).toThrow(message);
   });
+
+  it("refuses an additive walk in the root space, whose offsets would be turned as root positions", () => {
+    // The bug: each offset is turned as a root pose, so a chest under a slot at root y 500 jumps
+    // about 500 at its first segment instead of hopping 14.
+    const hop = {
+      ms: 2400,
+      additive: true,
+      segments: [
+        { at: 0.08, to: { y: -14 } },
+        { at: 1, to: { y: 0 } }
+      ]
+    };
+
+    expect(() => tween(chest, Transform, { y: 0 }, { ...hop, space: "root" })).toThrow(
+      '[game] An additive tween of Transform walks segments in the root space.\n  Use space "local" for an additive walk.'
+    );
+    expect(() => tween(chest, Transform, { y: 0 }, { ...hop, space: "local" })).not.toThrow();
+  });
 });
 
 /** An animation whose tree is the bounce alone, nested by `use`. */

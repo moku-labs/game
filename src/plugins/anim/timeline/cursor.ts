@@ -252,9 +252,12 @@ function landingOf(
  */
 function writeTween(cctx: CursorCtx, step: Extract<Step, { kind: "tween" }>): void {
   const landing = landingOf(step);
-  const entity = landing === undefined ? undefined : targetOf(cctx, step);
 
-  if (entity !== undefined && landing !== undefined)
+  if (landing === undefined) return;
+
+  const entity = targetOf(cctx, step);
+
+  if (entity !== undefined)
     cctx.rt.write(entity, step.component, inSpace(cctx, entity, step, landing));
 }
 

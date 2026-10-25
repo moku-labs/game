@@ -282,11 +282,13 @@ tween(target, Component, to, {
 - The options are frozen into the step when it is built, each segment and its `to` copied, and they
   are in the step data only when given: a step without them reads as before.
 - With `space: "root"` every segment target is turned into the space of the target's `Parent` when
-  the track starts, like `to`.
+  the track starts, like `to`. An additive walk names offsets, not positions, so it stays in the
+  local space: `additive: true` with `segments` and `space: "root"` throws when the step is built.
 - Errors when the step is built, in the house format: an empty list, an `at` outside 0..1 (or not a
   number), `at` not strictly ascending, a last segment before `at: 1`
-  (`[game] A tween of Transform ends its last segment at 0.5.`), and a `repeat` that is negative, not
-  whole or not a number.
+  (`[game] A tween of Transform ends its last segment at 0.5.`), an additive walk in the root space
+  (`[game] An additive tween of Transform walks segments in the root space.`), and a `repeat` that
+  is negative, not whole or not a number.
 - `sequence` refuses a step that never ends with another step after it, since that step would never
   play: a forever tween, a `parallel` or a `sequence` that holds one, a `use` of one.
   `[game] Step 1 of a sequence never ends, so the steps after it would never play.` Last in a
@@ -372,6 +374,7 @@ app.anim.play(deliverFly, {
 - A field the step does not name stays where it is. Under a turned parent, name `x` and `y`
   together.
 - A target without a `Parent`, and a component other than `Transform`, move as in the local space.
+- An additive keyframe walk refuses the root space: its segments name offsets.
 - The step data carries the space: `{ kind: "tween", ..., space: "root" }`.
 
 ## Spawned entities
