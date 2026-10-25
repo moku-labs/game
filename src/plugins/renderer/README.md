@@ -142,14 +142,16 @@ inset is a change of size. Each size is a CSS custom property that falls back to
 
 | Inset | Declared as |
 |---|---|
-| top | `var(--moku-safe-top, env(safe-area-inset-top, 0px))` |
-| right | `var(--moku-safe-right, env(safe-area-inset-right, 0px))` |
-| bottom | `var(--moku-safe-bottom, env(safe-area-inset-bottom, 0px))` |
-| left | `var(--moku-safe-left, env(safe-area-inset-left, 0px))` |
+| top | `var(--moku-safe-top, var(--moku-device-safe-top, env(safe-area-inset-top, 0px)))` |
+| right | `var(--moku-safe-right, var(--moku-device-safe-right, env(safe-area-inset-right, 0px)))` |
+| bottom | `var(--moku-safe-bottom, var(--moku-device-safe-bottom, env(safe-area-inset-bottom, 0px)))` |
+| left | `var(--moku-safe-left, var(--moku-device-safe-left, env(safe-area-inset-left, 0px)))` |
 
-A page, a game or the native shell sets the properties on `:root`; any CSS length works, `env()`,
-`max()` and `calc()` included, in CSS pixels of the page. A negative value counts as 0. With no
-property set the insets are `env(safe-area-inset-*)`.
+A page, a game or the native shell sets `--moku-safe-*` on `:root`; any CSS length works, `env()`,
+`max()` and `calc()` included, in CSS pixels of the page. A negative value counts as 0. The editor
+sets `--moku-device-safe-*` from the device preset it shows the game in, so a notch of a preset
+reaches the layout; a page's own `--moku-safe-*` still wins over it. With neither property set the
+insets are `env(safe-area-inset-*)`.
 
 ```css
 /* The game's page or @moku-labs/native: keep 24 px clear at the top on a phone that reports no notch. */

@@ -253,7 +253,7 @@ await startPage(game, config, {
 8. In dev, starts the agents, each with `{ app, name, modules }`.
 9. Follows the page out, after the agents: an agent's own `pagehide` listener runs first, on the running game. On `pagehide` it flushes the save, and stops the app when the page is really left (`persisted` false); a page kept in the back/forward cache keeps its app running. A stop that fails is logged as `[game] The page did not stop cleanly.`
 
-A shell that knows the insets better than the WebView (a status bar the Android WebView reports late or not at all) sets the four CSS custom properties `--moku-safe-top`, `--moku-safe-right`, `--moku-safe-bottom` and `--moku-safe-left` on `:root` and sends the window event `moku-native:insets`; each left unset falls back to `env(safe-area-inset-*, 0px)`, and the next frame lays out with them.
+A shell that knows the insets better than the WebView (a status bar the Android WebView reports late or not at all) sets the four CSS custom properties `--moku-safe-top`, `--moku-safe-right`, `--moku-safe-bottom` and `--moku-safe-left` on `:root` and sends the window event `moku-native:insets`; each left unset falls back to `--moku-device-safe-*` (the editor's device preset), then to `env(safe-area-inset-*, 0px)`, and the next frame lays out with them.
 
 Every problem goes to the app's log. An unknown scenario logs `[game] No scenario "x".` and the page starts from the starting player.
 
