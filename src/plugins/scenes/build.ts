@@ -8,8 +8,25 @@
 import { swapIn } from "./swap";
 import type { SceneBuild, SceneDefinition, ScenesCtx } from "./types";
 
+/** Half a second in ms: half of a frame interval is this over the frame rate. */
+const HALF_SECOND_MS = 500;
+
 /** The budget of a frame when `time` answers no frame rate to halve: half a 60 Hz frame, ms. */
-const FALLBACK_BUDGET_MS = 500 / 60;
+const FALLBACK_BUDGET_MS = HALF_SECOND_MS / 60;
+
+/**
+ * Tells whether a value is a number a frame can count with: finite and above 0. Pure.
+ *
+ * @param value - The value.
+ * @returns True for a finite number above 0.
+ * @example
+ * ```ts
+ * isPositiveFinite(Number.NaN); // false
+ * ```
+ */
+export function isPositiveFinite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
 
 /**
  * Does nothing: the listeners of a build that commits at once, before it registered any.
@@ -45,7 +62,7 @@ function budgetOf(ctx: ScenesCtx): number {
 
   const { fps } = ctx.deps.time.rate();
 
-  return Number.isFinite(fps) && fps > 0 ? 500 / fps : FALLBACK_BUDGET_MS;
+  return isPositiveFinite(fps) ? HALF_SECOND_MS / fps : FALLBACK_BUDGET_MS;
 }
 
 /**

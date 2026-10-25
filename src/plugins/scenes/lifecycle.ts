@@ -9,7 +9,7 @@ import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
-import { dropBuild } from "./build";
+import { dropBuild, isPositiveFinite } from "./build";
 import { isSceneDefinition } from "./bundles";
 import { enterScene } from "./switch";
 import type { Config, Deps, KernelSlice, ScenesCtx, State } from "./types";
@@ -96,7 +96,7 @@ export function checkConfig(config: Readonly<Config>): void {
   const value: unknown = config.buildMs;
 
   if (value === "auto") return;
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) return;
+  if (isPositiveFinite(value)) return;
 
   throw new Error(
     `[game] scenes.buildMs is ${String(value)}.\n` +

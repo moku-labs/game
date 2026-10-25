@@ -242,7 +242,7 @@ export type SceneOwner = Owner & { kind: "plugin"; name: "scenes" };
  *
  * @example
  * ```ts
- * // The default: half of each frame, read at the start of every build: 8.33… ms at 60 Hz, 4.16… ms at 120 Hz.
+ * // The default: half of each frame, read at the start of every build: 8.33… ms at 60 Hz, 4.17 ms at 120 Hz.
  * const config: Config = { buildMs: "auto" };
  *
  * // A game on a slow phone gives the next scene a fixed 3 ms of each frame: the switch takes more frames.
