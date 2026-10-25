@@ -25,7 +25,8 @@ export type EffectsKit<Asset extends string, EmitterId extends string> = {
     id: EmitterId,
     config: Omit<EmitterConfig, "textures"> & { readonly textures: readonly Asset[] }
   ) => EmitterDefinition;
-  Emitter: Narrowed<EmitterValue, { effect?: EmitterId; active?: boolean }>;
+  // `""`, the default, draws nothing: a game clears an emitter with it (F81).
+  Emitter: Narrowed<EmitterValue, { effect?: EmitterId | ""; active?: boolean }>;
   Displacement: Narrowed<
     DisplacementValue,
     Partial<Omit<DisplacementValue, "map">> & { map?: Asset }

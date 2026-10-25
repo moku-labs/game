@@ -297,7 +297,7 @@ app.effects.stats().renderPasses; // 9; stats().filters stays 8
 
 ## Typed ids
 
-`GameTypes.emitters` types `Emitter.effect` and the id of `defineEmitter`; the game's asset keys type `textures` and `Displacement.map`. `defineGame` spreads `effectsFor<Assets, EmitterIdOf<Types>>()`; the root exports accept any string.
+`GameTypes.emitters` types `Emitter.effect` and the id of `defineEmitter`; `Emitter.effect` also takes `""`, its default, which draws nothing, and `defineEmitter` never does (F81); the game's asset keys type `textures` and `Displacement.map`. `defineGame` spreads `effectsFor<Assets, EmitterIdOf<Types>>()`; the root exports accept any string.
 
 ## Headless
 

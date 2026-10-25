@@ -4,7 +4,7 @@
  * the component schema. Every source only reads; `game.diff` answers in a dev build only, because
  * only a dev build keeps the frame history.
  */
-import { defineSource } from "../flow/doors/define";
+import { defineSource, inputSchema } from "../flow/doors/define";
 import type { HeadlessApp } from "../flow/headless";
 import type { Api, Entity, EntitySnapshot, Explained } from "./types";
 
@@ -37,7 +37,7 @@ function carries(entity: EntitySnapshot, component: string): boolean {
 export const entitiesSource = defineSource({
   id: "game.entities",
   title: "Entities",
-  input: { owner: "string?", component: "string?" },
+  input: inputSchema(["owner", "string?"], ["component", "string?"]),
   changes: "frame",
   read: (app: WorldApp, { owner, component }) =>
     app.world.ecs
@@ -97,7 +97,7 @@ export const projectionsSource = defineSource({
 export const explainSource = defineSource({
   id: "game.explain",
   title: "Entity",
-  input: { entity: "number" },
+  input: inputSchema(["entity", "number"]),
   changes: "frame",
   read: (app: WorldApp, { entity }): Explained | undefined => {
     const row = app.world.ecs.snapshot().entities.find(candidate => candidate.id === entity);
@@ -133,7 +133,7 @@ export const explainSource = defineSource({
 export const diffSource = defineSource({
   id: "game.diff",
   title: "Frame diff",
-  input: { from: "number", to: "number" },
+  input: inputSchema(["from", "number"], ["to", "number"]),
   changes: "frame",
   read: (app: WorldApp, { from, to }) => app.world.ecs.diff(from, to)
 });

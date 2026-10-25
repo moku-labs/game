@@ -40,6 +40,10 @@ kit.Emitter({ effect: "fx.starsBurst" });
 kit.Emitter({ effect: "fx.steam", active: false });
 // @ts-expect-error — "fx.nope" is not one of the game's emitter ids
 kit.Emitter({ effect: "fx.nope" });
+// The empty id, the default, draws nothing and is always allowed (F81); it names no emitter to define.
+kit.Emitter({ effect: "" });
+// @ts-expect-error — "" is not one of the game's emitter ids
+kit.defineEmitter("", { textures: ["fx.star"], burst: 40 });
 
 expectTypeOf(
   kit.defineEmitter("fx.starsBurst", { textures: ["fx.star", "fx.sparkle"], burst: 40 })

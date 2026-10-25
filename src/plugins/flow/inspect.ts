@@ -4,7 +4,7 @@
  * every app. Production-safe: every source only reads.
  */
 import type { Log } from "@moku-labs/common/browser";
-import { defineSource } from "./doors/define";
+import { defineSource, inputSchema } from "./doors/define";
 import { cheatsOf, isTainted } from "./doors/session";
 import type { HeadlessApp } from "./headless";
 import type { FlowState, Position } from "./types";
@@ -95,7 +95,7 @@ export const positionSource = defineSource({
 export const historySource = defineSource({
   id: "game.history",
   title: "History",
-  input: { last: "number?" },
+  input: inputSchema(["last", "number?"]),
   changes: "edge",
   read: (app: HeadlessApp, { last }) => {
     const entries = app.flow.history();
@@ -151,7 +151,7 @@ export const cheatsSource = defineSource({
 export const logSource = defineSource({
   id: "game.log",
   title: "Log",
-  input: { level: "string?" },
+  input: inputSchema(["level", "string?"]),
   changes: "frame",
   read: (app: HeadlessApp & { readonly log: Log.LogApi }, { level }) => {
     const entries = app.log.trace();
