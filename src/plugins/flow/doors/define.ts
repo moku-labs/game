@@ -48,7 +48,7 @@ type SchemaOf<Entries extends readonly InputEntry[]> = {
 export function inputSchema<const Entries extends readonly InputEntry[]>(
   ...entries: Entries
 ): SchemaOf<Entries> {
-  const schema: Record<string, string> = Object.create(null);
+  const schema: Record<string, InputEntry[1]> = Object.create(null);
 
   for (const [name, kind] of entries) schema[name] = kind;
 

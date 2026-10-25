@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { commands } from "../../src/control";
 import { sources } from "../../src/inspect";
 import { Transform } from "../../src/plugins/renderer/components";
@@ -36,6 +36,13 @@ function bytesPerCall(fn: () => void): number {
   return alloc(fn, CALLS);
 }
 
+/** The first value written, and what each write adds: fractions V8 cannot keep as small integers. */
+const FIRST = 0.25;
+const STEP = 0.125;
+
+/** Where the value wraps back to `FIRST`. */
+const WRAP_AT = 1000;
+
 /** The moving value, in a typed array: a double kept there is never boxed, so the windows count the targets alone. */
 const counter = new Float64Array(1);
 
@@ -45,15 +52,20 @@ const counter = new Float64Array(1);
  * @returns The number.
  */
 function next(): number {
-  counter[0] = (counter[0] ?? 0) > 1000 ? 0.25 : (counter[0] ?? 0) + 0.125;
+  const last = counter[0] ?? 0;
+  const value = last > WRAP_AT ? FIRST : last + STEP;
 
-  return counter[0] ?? 0;
+  counter[0] = value;
+
+  return value;
 }
 
 describe("door shapes (F77): writes into game data after the doors loaded, heap bytes per call", () => {
   // The doors are loaded and the component schema is built, as the editor's palette reads it.
-  expect(Object.keys(sources).length + Object.keys(commands).length).toBeGreaterThan(0);
-  expect(schemaOf([Transform]).length).toBe(1);
+  beforeAll(() => {
+    expect(Object.keys(sources).length + Object.keys(commands).length).toBeGreaterThan(0);
+    expect(schemaOf([Transform])).toHaveLength(1);
+  });
 
   // Bug: the `game.at` source's input `{ x: "number", y: "number" }` turns every `{ x, y }` tagged.
   it("a point literal keeps its numbers unboxed", () => {
