@@ -2,7 +2,7 @@
  * @file audio plugin — the audio sources of the `/inspect` door: the journal of started sounds
  * and the mute flag of the master bus. Production-safe: they only read.
  */
-import { defineSource } from "../flow/doors/define";
+import { defineSource, inputSchema } from "../flow/doors/define";
 import { notInstalled } from "../flow/doors/dev";
 import type { HeadlessApp } from "../flow/headless";
 import type { AudioApi } from "./types";
@@ -22,7 +22,7 @@ import type { AudioApi } from "./types";
 export const soundsSource = defineSource({
   id: "game.sounds",
   title: "Sounds",
-  input: { last: "number?" },
+  input: inputSchema(["last", "number?"]),
   changes: "frame",
   read: (app: HeadlessApp & { readonly audio?: AudioApi }, { last }) => {
     if (app.audio === undefined) throw notInstalled("game.sounds", "audioPlugin");
