@@ -148,3 +148,67 @@ export function checkSequence(steps: readonly Step[]): void {
     }
   }
 }
+
+/**
+ * Tells whether a step loops a frame list for ever: a `frames` step with `loop`, or a `parallel`,
+ * a `sequence` or a `use` that holds one where it never lets go.
+ *
+ * @param step - The step to look into.
+ * @returns True when a looping frame list keeps the step from ending.
+ * @example
+ * ```ts
+ * loopsFrames(frames(1_048_576, { keys: ["fx.spark-1"], fps: 12, loop: true })); // true
+ * ```
+ */
+function loopsFrames(step: Step): boolean {
+  switch (step.kind) {
+    case "frames": {
+      return step.loop;
+    }
+    case "parallel": {
+      return step.steps.some(child => loopsFrames(child));
+    }
+    case "sequence": {
+      const last = step.steps.at(-1);
+
+      return last !== undefined && loopsFrames(last);
+    }
+    case "use": {
+      return loopsFrames(step.step);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/**
+ * Tells whether a step tree holds a `sequence` whose step before the last loops a frame list for
+ * ever, so the steps after it never play. A forever `tween` there already throws when it is built;
+ * a looping `frames` only warns, while games written before the rule are fixed.
+ *
+ * @param step - The root of the tree.
+ * @returns True when a looping frame list blocks the rest of a sequence somewhere in the tree.
+ * @example
+ * ```ts
+ * loopBlocksSequence(sequence(frames(1_048_576, { keys: ["fx.spark-1"], fps: 12, loop: true }), mark("lit"))); // true
+ * ```
+ */
+export function loopBlocksSequence(step: Step): boolean {
+  switch (step.kind) {
+    case "sequence": {
+      const blocked = step.steps.slice(0, -1).some(child => loopsFrames(child));
+
+      return blocked || step.steps.some(child => loopBlocksSequence(child));
+    }
+    case "parallel": {
+      return step.steps.some(child => loopBlocksSequence(child));
+    }
+    case "use": {
+      return loopBlocksSequence(step.step);
+    }
+    default: {
+      return false;
+    }
+  }
+}
