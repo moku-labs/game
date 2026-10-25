@@ -744,7 +744,8 @@ function repeatsOf(repeat: number | "forever" | undefined): number {
  * keyframe segments walks them over `ms` and books every field they name; one with `repeat`
  * walks again when a run ends. With reduced motion on, every track but a loop takes 0 ms, its
  * delay and its repeats dropped: it lands on its target at its first frame step. A track started
- * with `reduced: "keep"` keeps its length, its delay and its repeats.
+ * with `reduced: "keep"` keeps its length, its delay and its repeats. A timeline's loop under
+ * reduced motion does not play at all: it is born ended, writes nothing, and its step goes on.
  *
  * @param actx - Domain context of the anim plugin.
  * @param entity - The entity to animate.
@@ -767,9 +768,13 @@ export function startTrack(
   const target = targetOf(to, options.segments);
   const repeats = repeatsOf(options.repeat);
   const keep = options.reduced === "keep";
-  const instant = actx.state.reducedMotion && !keep && repeats !== Number.POSITIVE_INFINITY;
+  const cut = actx.state.reducedMotion && !keep;
+  const instant = cut && repeats !== Number.POSITIVE_INFINITY;
   const keys = keysOf(entity, component.componentName, target);
   const names = Object.keys(target);
+  // A view's loop stands on its first key under reduced motion; a timeline's would hold its play
+  // open on a still pose for ever, so it is not started.
+  const bornEnded = names.length === 0 || (cut && driven && repeats === Number.POSITIVE_INFINITY);
   const track: Track = {
     id: actx.state.nextId,
     entity,
@@ -793,7 +798,7 @@ export function startTrack(
     additive: options.additive === true,
     driven,
     bornFrame: actx.state.frame,
-    ended: names.length === 0,
+    ended: bornEnded,
     segments: options.segments,
     repeatsLeft: instant ? 0 : repeats,
     held: false,
@@ -933,16 +938,7 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
   const fraction = track.ms <= 0 ? 1 : Math.min(run / track.ms, 1);
   const final = fraction >= 1 && (track.repeatsLeft === 0 || track.ms <= 0);
 
-  // An endless loop of a view the player cannot see writes nothing; its clock ran on, so it writes the phase of the
-  // time when it is shown again (spec 22 O9, spec 26 R1.7). A timeline's own track never asks. Bases and offsets stay.
-  if (
-    !final &&
-    !track.driven &&
-    track.repeatsLeft === Number.POSITIVE_INFINITY &&
-    actx.state.loopsHeld?.(track.entity, track.reveals) === true
-  ) {
-    return 0;
-  }
+  if (isHeldLoop(actx, track, final)) return 0;
 
   clock[1] = fraction;
   writeFields(actx, track, final);
@@ -954,7 +950,28 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
 }
 
 /**
- * Writes the exact target of a track and ends it. Muted fields are left alone here too.
+ * Tells whether an endless loop writes nothing this frame because the player cannot see it.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that advances.
+ * @param final - Whether this step lands the track.
+ * @returns True when the loop is held.
+ */
+function isHeldLoop(actx: AnimCtx, track: Track, final: boolean): boolean {
+  // An endless loop of a view the player cannot see writes nothing; its clock ran on, so it writes the phase of the
+  // time when it is shown again (spec 22 O9, spec 26 R1.7). A timeline's endless track asks too (F76); a finite one,
+  // which a node may wait for, never does. Bases and offsets stay.
+  return (
+    !final &&
+    track.repeatsLeft === Number.POSITIVE_INFINITY &&
+    actx.state.loopsHeld?.(track.entity, track.reveals) === true
+  );
+}
+
+/**
+ * Writes the exact target of a track and ends it. Muted fields are left alone here too. A
+ * timeline's loop has no end to land on: it lands on its first key, the pose its walk starts
+ * from, which is where a cut or a fast walk leaves it (F75).
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track to finish.
@@ -962,8 +979,10 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
 export function finishTrack(actx: AnimCtx, track: Track): void {
   if (track.ended) return;
 
-  track.clock[1] = 1;
-  writeFields(actx, track, true);
+  const final = !track.driven || track.repeatsLeft !== Number.POSITIVE_INFINITY;
+
+  track.clock[1] = final ? 1 : 0;
+  writeFields(actx, track, final);
   endTrack(actx, track);
 }
 

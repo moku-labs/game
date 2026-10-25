@@ -179,7 +179,7 @@ describe("anim — what an endless loop reveals (spec 26 R1.7)", () => {
     ]).toEqual(["place", "alpha", "both", "place", undefined, "both"]);
   });
 
-  it("an endless track asks with what it reveals; a finite track and a timeline's endless track never ask", () => {
+  it("an endless track asks with what it reveals, a timeline's own included (F76); a finite track never asks", () => {
     const { mock, driver, entity } = setup();
 
     driver.track(entity, Transform, { x: 100 }, { ms: 100, ease: "linear", repeat: 3 }, open);
@@ -196,14 +196,18 @@ describe("anim — what an endless loop reveals (spec 26 R1.7)", () => {
     );
 
     step.advance(25);
+    // The frame step leaves a timeline's track to its step: it asks once, from its own advance.
     mock.frame(25);
 
-    expect(mock.asks).toEqual([]);
+    expect(mock.asks).toEqual([{ entity, reveals: "place" }]);
 
     driver.track(entity, Transform, { rotation: 1 }, { ms: 100, repeat: "forever" }, open);
     mock.frame(25);
 
-    expect(mock.asks).toEqual([{ entity, reveals: "place" }]);
+    expect(mock.asks).toEqual([
+      { entity, reveals: "place" },
+      { entity, reveals: "place" }
+    ]);
   });
 
   it("an endless Frames loop asks with its place: a new frame may change the sprite's size", () => {

@@ -5,6 +5,7 @@
  */
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
+import { AnimPlayer } from "../../components";
 import { createRuntime } from "../../lifecycle";
 import { advanceTimelines } from "../../timeline/play";
 import {
@@ -259,6 +260,102 @@ export function timelinesFixture(): () => void {
  */
 export function waitingTimelinesFixture(): () => void {
   return playTen(pause);
+}
+
+/** A bounce that moves every frame: up 7.5 and back with a breath of the scale, as offsets. */
+const BOUNCE = [
+  { at: 0.5, to: { y: -7.5, scale: 0.05 } },
+  { at: 1, to: { y: 0, scale: 0 } }
+];
+
+/** The pause of a bounce: offsets that stand at 0 for the whole run, as a chest between two hops. */
+const PAUSE = [{ at: 1, to: { y: 0, scale: 0 } }];
+
+/**
+ * An endless additive bounce of `y` and `scale` over the given segments, as a system plays it.
+ *
+ * @param id - Animation id.
+ * @param segments - The segments of one run.
+ * @returns The animation.
+ */
+function bounceOf(id: string, segments: typeof BOUNCE) {
+  return defineAnimation(id, {
+    slots,
+    build: ({ it }) =>
+      tween(
+        it,
+        Transform,
+        { y: 0, scale: 0 },
+        { ms: 1000, ease: "inOut", additive: true, repeat: "forever", segments }
+      )
+  });
+}
+
+/** Every view is seen: the loops write. */
+function seen(): boolean {
+  return false;
+}
+
+/** No view is seen: an overlay covers them all. */
+function unseen(): boolean {
+  return true;
+}
+
+/**
+ * Starts the mock world and plays an endless bounce ten times through the `AnimPlayer` resource,
+ * each on its own entity, as a system starts a chest's bounce once.
+ *
+ * @param segments - The segments of the bounce.
+ * @param held - The answer of `renderer.sync.loopsHeld` for every view.
+ * @returns One frame step of the timelines.
+ */
+function bounceTen(segments: typeof BOUNCE, held: () => boolean): () => void {
+  const mock = createMockAnim();
+
+  mock.start();
+  // The stand-in renderer of the mock records every ask; the fixture answers without a record.
+  mock.state.loopsHeld = held;
+
+  const rt = createRuntime(mock.actx);
+  const bounce = bounceOf("perf.bounce", segments);
+
+  for (let index = 0; index < TIMELINES; index++) {
+    const entity = spawnTestEntity(mock, [Transform({ x: index, y: index })]);
+
+    mock.world.ecs.resource(AnimPlayer).play(bounce, { it: entity });
+  }
+
+  return warmed((): void => {
+    beginFrame(mock.actx);
+    advanceTimelines(mock.actx, rt, FRAME_MS);
+  });
+}
+
+/**
+ * Ten endless bounces a system played, every frame moving `y` and `scale` of each: 20 fields.
+ *
+ * @returns One frame step of the timelines.
+ */
+export function bouncesFixture(): () => void {
+  return bounceTen(BOUNCE, seen);
+}
+
+/**
+ * Ten endless bounces in their pause: every frame walks every track and writes nothing.
+ *
+ * @returns One frame step of the timelines.
+ */
+export function restingBouncesFixture(): () => void {
+  return bounceTen(PAUSE, seen);
+}
+
+/**
+ * Ten endless bounces of views nobody sees: every frame asks the renderer and writes nothing.
+ *
+ * @returns One frame step of the timelines.
+ */
+export function heldBouncesFixture(): () => void {
+  return bounceTen(BOUNCE, unseen);
 }
 
 /** How far the time of the easing fixture moves per call: no round step, so it visits every interval. */

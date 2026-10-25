@@ -2,7 +2,7 @@
  * @file renderer plugin — the renderer sources of the `/inspect` door: the frame counters, and what
  * lies under a point of the page. Production-safe: both only read.
  */
-import { defineSource } from "../flow/doors/define";
+import { defineSource, inputSchema } from "../flow/doors/define";
 import type { HeadlessApp } from "../flow/headless";
 import { Layer } from "../world/ecs/define";
 import type { Entity, Api as WorldApi } from "../world/types";
@@ -67,7 +67,7 @@ export const renderSource = defineSource({
 export const atSource = defineSource({
   id: "game.at",
   title: "Under a point",
-  input: { x: "number", y: "number" },
+  input: inputSchema(["x", "number"], ["y", "number"]),
   changes: "frame",
   read: (
     app: HeadlessApp & { readonly renderer: Api; readonly world: WorldApi },

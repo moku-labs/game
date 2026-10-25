@@ -289,6 +289,8 @@ export const giveCoins = defineCommand({
 // read(app, sources.cheats); // [{ id: "dice.giveCoins", input: { coins: 100 }, frame: 0 }]
 ```
 
+An input schema written as a literal with the keys of data the game writes every frame, such as `input: { x: "number", y: "number" }`, shares V8's hidden shape with every `{ x, y }` of the game and stores strings where they store numbers. V8 then keeps those fields tagged, and each fractional write into a point boxes a heap number of 16 B, even in a frame where no door runs (F77). The base catalogue builds its schemas without a prototype for that reason. A game's own `.dev` door is loaded only by the dev page, a debug page and the tests, but on those pages it costs the same, so give such a schema other keys (`{ px: "number", py: "number" }`) or build it with `Object.create(null)`.
+
 ### Overlay commands
 
 The editor's overlay on a debug page has no buttons of its own: it lists the commands a game marked with `overlay`.
