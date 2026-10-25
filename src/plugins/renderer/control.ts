@@ -5,7 +5,7 @@
  * and logs the `moku:dev` marker. A capture with `diff` writes the state, so it also takes the
  * control guard: a `--debug=read` page refuses it.
  */
-import { defineCommand } from "../flow/doors/define";
+import { defineCommand, inputSchema } from "../flow/doors/define";
 import { controlReadOnly, controlRefused } from "../flow/doors/dev";
 import { recordCheat } from "../flow/doors/session";
 import type { ControlApp } from "../flow/doors/types";
@@ -357,7 +357,12 @@ async function captureDiff(
 export const captureCommand = defineCommand({
   id: "game.capture",
   title: "Capture",
-  input: { legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" },
+  input: inputSchema(
+    ["legend", "boolean?"],
+    ["layers", "json?"],
+    ["sheet", "json?"],
+    ["diff", "json?"]
+  ),
   effect: "read",
   run: (app: CaptureApp, input) => {
     if (
@@ -417,12 +422,12 @@ export const captureCommand = defineCommand({
 export const debugCommand = defineCommand({
   id: "game.debug",
   title: "Debug drawing",
-  input: {
-    nineSlice: "boolean?",
-    verifyFrames: "boolean?",
-    kept: "boolean?",
-    overdraw: "boolean?"
-  },
+  input: inputSchema(
+    ["nineSlice", "boolean?"],
+    ["verifyFrames", "boolean?"],
+    ["kept", "boolean?"],
+    ["overdraw", "boolean?"]
+  ),
   effect: "cosmetic",
   run: (app: RendererApp, { nineSlice, verifyFrames, kept, overdraw }) => {
     if (

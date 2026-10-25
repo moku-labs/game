@@ -73,7 +73,9 @@ function schemaOfType(type: Registered): ComponentSchema {
     return { name, kind: "component", json: false, fields: {}, defaults: notJson, owned };
   }
 
-  const fields: Record<string, FieldKind> = {};
+  // No prototype (F77): an object built field by field from `{}` with strings in it shares V8's
+  // hidden shape with the game's objects built the same way, and turns their number fields tagged.
+  const fields: Record<string, FieldKind> = Object.create(null);
 
   for (const [field, value] of Object.entries(defaults)) fields[field] = fieldKind(value);
 

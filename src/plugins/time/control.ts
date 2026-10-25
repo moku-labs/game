@@ -3,7 +3,7 @@
  * time scale and force the frame rate. Dev and debug builds: every body starts with the inline agent guard of a cosmetic
  * command, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
  */
-import { defineCommand } from "../flow/doors/define";
+import { defineCommand, inputSchema } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
 import type { RateChoice } from "./types";
@@ -54,7 +54,7 @@ function checkScale(scale: number): void {
 export const stepCommand = defineCommand({
   id: "game.step",
   title: "Step frames",
-  input: { frames: "number", deltaMs: "number?" },
+  input: inputSchema(["frames", "number"], ["deltaMs", "number?"]),
   effect: "cosmetic",
   run: (app: ControlApp, { frames, deltaMs = FRAME_MS }) => {
     if (
@@ -86,7 +86,7 @@ export const stepCommand = defineCommand({
 export const timeScaleCommand = defineCommand({
   id: "game.timeScale",
   title: "Time scale",
-  input: { scale: "number" },
+  input: inputSchema(["scale", "number"]),
   effect: "cosmetic",
   run: (app: ControlApp, { scale }) => {
     if (
@@ -121,7 +121,7 @@ export const timeScaleCommand = defineCommand({
 export const frameRateCommand = defineCommand({
   id: "game.frameRate",
   title: "Frame rate",
-  input: { fps: "number?" },
+  input: inputSchema(["fps", "number?"]),
   effect: "cosmetic",
   run: (app: ControlApp, { fps }) => {
     if (

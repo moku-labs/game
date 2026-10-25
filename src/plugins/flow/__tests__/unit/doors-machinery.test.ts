@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
-import { defineCommand, defineSource } from "../../doors/define";
+import { defineCommand, defineSource, inputSchema } from "../../doors/define";
 import {
   controlReadOnly,
   controlRefused,
@@ -225,6 +225,36 @@ const refusedShapes = () => [
     run: runNothing
   })
 ];
+
+describe("inputSchema (F77)", () => {
+  // Bug: a schema with an Object prototype is a literal-shaped object again and shares V8's hidden shape with game data.
+  it("builds the schema without a prototype, which defineSource freezes", () => {
+    const at = defineSource({
+      id: "test.at",
+      title: "At",
+      input: inputSchema(["x", "number"], ["y", "number?"]),
+      changes: "frame",
+      read: (_app: HeadlessApp, { x, y }) => x + (y ?? 0)
+    });
+
+    expect(Object.getPrototypeOf(at.input)).toBeNull();
+    expect({ ...at.input }).toEqual({ x: "number", y: "number?" });
+    expect(Object.isFrozen(at.input)).toBe(true);
+  });
+
+  // Bug: the schema's type widens, so a door's input stops being checked (`{ x: number; y?: number }` becomes `any`).
+  it("keeps the input type of the literal it replaces, optional fields included", () => {
+    const schema = inputSchema(["key", "string"], ["shift", "boolean?"]);
+
+    expectTypeOf<InputOf<typeof schema>>().toEqualTypeOf<
+      InputOf<{ readonly key: "string"; readonly shift: "boolean?" }>
+    >();
+    expectTypeOf<InputOf<typeof schema>>().toEqualTypeOf<{
+      key: string;
+      shift?: boolean | undefined;
+    }>();
+  });
+});
 
 describe("defineCommand with an overlay marker", () => {
   /** What the overlay toggle of the test reads and writes. */

@@ -3,7 +3,7 @@
  * `effects.diagnostics`. Dev and debug builds: the body starts with the inline guard of a cosmetic command, so a
  * bundler `define` of `false` drops it, and logs the `moku:dev` marker.
  */
-import { defineCommand } from "../flow/doors/define";
+import { defineCommand, inputSchema } from "../flow/doors/define";
 import { controlRefused, notInstalled } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
 import type { EffectsApi } from "./types";
@@ -25,7 +25,7 @@ import type { EffectsApi } from "./types";
 export const filterCommand = defineCommand({
   id: "game.filter",
   title: "Filter kind on or off",
-  input: { kind: "string", on: "boolean" },
+  input: inputSchema(["kind", "string"], ["on", "boolean"]),
   effect: "cosmetic",
   run: (app: ControlApp & { readonly effects?: EffectsApi }, { kind, on }) => {
     if (
