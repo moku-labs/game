@@ -75,9 +75,9 @@ export const BUDGET = {
   // F54: new. A kept view of alphas whose alpha changes every frame writes its quad's alpha and renders nothing; before,
   // a stage-3 pass into its filter output every frame. Measured 16 B a frame, all of it Pixi's `AlphaFilter.alpha`
   // setter the fixture calls as `effects` does (0 B without that write); the mark, the collect and the flush add nothing.
+  keptFade: 16,
   // F67: 10 kept views drawn scaled under a camera zoom, a view elsewhere marked. Before: three retakes, then live.
   keptZoom: 0,
-  keptFade: 16,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
   filterSwitchStill: 0,

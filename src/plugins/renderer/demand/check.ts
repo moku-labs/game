@@ -101,9 +101,11 @@ function visit(
 
   const entity = ownerOf(node, ctx.state.sync);
 
-  if (entity === undefined || state.sinceDraw.has(entity) || state.check.warned.has(entity)) {
-    return;
-  }
+  if (entity === undefined) return;
+
+  const known = state.sinceDraw.has(entity) || state.check.warned.has(entity);
+
+  if (known) return;
 
   if (!shown(entity)) return;
 

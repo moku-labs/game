@@ -35,6 +35,12 @@ const MARKED_ROWS = 32;
 /** The share of changed rows at or under which marked rows count as wasted: one in twenty. */
 const CHANGED_SHARE = 1 / 20;
 
+/** The rounding of the rows a frame `world:mut-unchanged` reports: one decimal. */
+const TENTHS = 10;
+
+/** The rounding of the changed share it reports: two decimals. */
+const HUNDREDTHS = 100;
+
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "the component was not there".
 const absent: Json = null;
 
@@ -195,10 +201,8 @@ function copyJson(source: Json, into?: Json): Json {
 
   if (Array.isArray(source)) {
     const count = source.length;
-    const target: Json[] =
-      Array.isArray(into) && into.length === count
-        ? into
-        : Array.from({ length: count }, () => absent);
+    const reusable = Array.isArray(into) && into.length === count;
+    const target: Json[] = reusable ? into : Array.from({ length: count }, () => absent);
 
     for (let index = 0; index < count; index += 1) {
       target[index] = copyJson(source[index] ?? absent, target[index]);
@@ -207,8 +211,8 @@ function copyJson(source: Json, into?: Json): Json {
     return target;
   }
 
-  const target: { [key: string]: Json } =
-    typeof into === "object" && into !== null && !Array.isArray(into) ? into : {};
+  const plain = typeof into === "object" && into !== null && !Array.isArray(into);
+  const target: { [key: string]: Json } = plain ? into : {};
 
   for (const key in source) target[key] = copyJson(source[key] ?? absent, target[key]);
 
@@ -493,25 +497,36 @@ function judgeMarks(ctx: WorldCtx, history: History): void {
     const rowsPerFrame = count.marked / history.markFrames;
     const wasted = rowsPerFrame >= MARKED_ROWS && count.changed <= count.marked * CHANGED_SHARE;
 
-    if (wasted && !history.warned.has(component)) {
-      const systems = mutSystemsOf(ctx.state.ecs, component);
-
-      if (systems.length > 0) {
-        history.warned.add(component);
-        ctx.log.warn("world:mut-unchanged", {
-          component,
-          rowsPerFrame: Math.round(rowsPerFrame * 10) / 10,
-          changedShare: Math.round((count.changed / count.marked) * 100) / 100,
-          systems
-        });
-      }
-    }
+    if (wasted && !history.warned.has(component)) warnWasted(ctx, history, count, rowsPerFrame);
 
     count.marked = 0;
     count.changed = 0;
   }
 
   history.markFrames = 0;
+}
+
+/**
+ * Names one wasteful component once, when a registered system writes it with `mut()`: its rows a frame to one decimal,
+ * its changed share to two.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param history - The frame history.
+ * @param count - The component's counts over the window.
+ * @param rowsPerFrame - Its marked rows a frame.
+ */
+function warnWasted(ctx: WorldCtx, history: History, count: MarkCount, rowsPerFrame: number): void {
+  const systems = mutSystemsOf(ctx.state.ecs, count.component);
+
+  if (systems.length === 0) return;
+
+  history.warned.add(count.component);
+  ctx.log.warn("world:mut-unchanged", {
+    component: count.component,
+    rowsPerFrame: Math.round(rowsPerFrame * TENTHS) / TENTHS,
+    changedShare: Math.round((count.changed / count.marked) * HUNDREDTHS) / HUNDREDTHS,
+    systems
+  });
 }
 
 /**

@@ -964,9 +964,9 @@ function scaledQuad(
 function scalable(record: KeptRecord): boolean {
   const { key } = record;
 
-  if (record.dirtyS1 || record.cut || record.category === "placed" || key[KEY.rs] !== NOW.rs) {
-    return false;
-  }
+  const unscalable = record.dirtyS1 || record.cut || record.category === "placed";
+
+  if (unscalable || key[KEY.rs] !== NOW.rs) return false;
 
   const taken = Math.abs(
     (key[KEY.a] ?? 1) * (key[KEY.d] ?? 1) - (key[KEY.b] ?? 0) * (key[KEY.c] ?? 0)
@@ -974,13 +974,15 @@ function scalable(record: KeptRecord): boolean {
   const now = Math.abs(NOW.a * NOW.d - NOW.b * NOW.c);
   const limit = SCALED_LIMIT * SCALED_LIMIT;
 
-  return taken > 0 && now > 0 && now <= taken * limit && now * limit >= taken;
+  const withinLimit = now <= taken * limit && now * limit >= taken;
+
+  return taken > 0 && now > 0 && withinLimit;
 }
 
 /**
  * Places the quad of a kept record (P3.5, P2.4): beside its top in the same parent, at the top's depth, drawing the
- * filter output at its canvas place `O + Δ` with an identity world scale; shown while the top is visible and no
- * cover or alpha hides it. Every value is compared before it is written.
+ * filter output at its canvas place `O + Δ` with an identity world scale, or scaled to this frame's linear part when
+ * it differs from the take's (F67); shown while the top is visible and no cover or alpha hides it. Every value is compared before it is written.
  *
  * @param sync - The writers of `sync`: its reader of the hidden reasons.
  * @param pixi - The module that draws.
@@ -1022,7 +1024,8 @@ function placeQuad(
   if (quad.blendMode !== top.blendMode) quad.blendMode = top.blendMode;
   if (quad.alpha !== alpha) quad.alpha = alpha;
 
-  // The filter output at its canvas place `O + Δ`, brought into the parent's space with an identity world scale.
+  // The filter output at its canvas place `O + Δ`, brought into the parent's space: with an identity world scale, or
+  // through `W · W₀⁻¹` when the linear part moved since the take (F67).
   const inverse = parent.getGlobalTransform(matrices.parent, false).invert();
   const Ps = record.direct ? 0 : (key[KEY.Ps] ?? 0);
   const { local } = matrices;
@@ -1264,7 +1267,9 @@ function stepKept(
 
   writeSeen(record, NOW);
 
-  if (record.dirtyS1 || (scaled && !scalable(record))) {
+  const retake = record.dirtyS1 || (scaled && !scalable(record));
+
+  if (retake) {
     churn(kctx, pixi, matrices, record, view);
 
     return;
