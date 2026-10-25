@@ -313,6 +313,8 @@ export type State = {
   frame: number;
   /** True while the track count is over `maxTracks`, so the warning is one per crossing. */
   overMaxTracks: boolean;
+  /** The animations already warned for a looping `frames` step that blocks the rest of a `sequence` (dev). */
+  warnedLoops: Set<string>;
   /** The live reduced-motion switch. The frozen `Config.reducedMotion` only seeds it. */
   reducedMotion: boolean;
   /** Remover of `world.projection.setDriver`. */

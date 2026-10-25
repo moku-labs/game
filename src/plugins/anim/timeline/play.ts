@@ -18,9 +18,10 @@ import type {
   SlotValues,
   Target
 } from "../types";
+import { loopBlocksSequence } from "./checks";
 import { advanceCursor, cancelCursor, createCursor, finishCursor, resolveTargets } from "./cursor";
 import { assertUniqueSpawns } from "./spawn";
-import type { CursorCtx, RunningTimeline, TimelineRuntime } from "./types";
+import type { CursorCtx, RunningTimeline, Step, TimelineRuntime } from "./types";
 
 /**
  * Resolves a target to an entity: a projection key through `world.projection.entityOf`, which
@@ -149,6 +150,22 @@ function endTimeline(actx: AnimCtx, running: RunningTimeline, finished: boolean)
 }
 
 /**
+ * Warns once per animation, in a dev build, when a looping `frames` step stands before another step of a `sequence`:
+ * the steps after it never play. A warning, not an error, while the games written before the rule are fixed.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param animation - The id of the animation that is played.
+ * @param step - Its built step tree.
+ */
+function warnLoopBlocks(actx: AnimCtx, animation: string, step: Step): void {
+  if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return;
+  if (actx.state.warnedLoops.has(animation) || !loopBlocksSequence(step)) return;
+
+  actx.state.warnedLoops.add(animation);
+  actx.log.warn("anim:loop-blocks-sequence", { animation });
+}
+
+/**
  * Builds the step tree of an animation with the given targets and starts it. The build runs here,
  * once per play, so the same animation may play twice at once, each play with its own spawn table.
  * Every `{ projection, key }` target is resolved here, once: each step writes the entity that held
@@ -173,6 +190,7 @@ export function startTimeline<Tags extends SlotTags>(
   });
 
   assertUniqueSpawns(definition.id, step);
+  warnLoopBlocks(actx, definition.id, step);
 
   const id = actx.state.nextId;
 

@@ -292,7 +292,9 @@ tween(target, Component, to, {
 - `sequence` refuses a step that never ends with another step after it, since that step would never
   play: a forever tween, a `parallel` or a `sequence` that holds one, a `use` of one.
   `[game] Step 1 of a sequence never ends, so the steps after it would never play.` Last in a
-  sequence, or anywhere in a `parallel`, it is fine.
+  sequence, or anywhere in a `parallel`, it is fine. A looping `frames` step there never ends either:
+  a dev build warns `anim:loop-blocks-sequence` with `{ animation }` once per animation as it plays,
+  and the play runs on. It becomes an error once the games are fixed.
 - A finish (`finish()`, `finishAll()`, the abort of a node) lands a forever step on its start pose: the
   pose its walk starts from, so an additive bounce leaves the view where it stands, and a forever step
   that never started writes nothing. A counted repeat lands on its end, as before. A keyframe step
