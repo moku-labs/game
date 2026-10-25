@@ -10,7 +10,7 @@ import type {
   ProjectionMotion,
   ViewHandle
 } from "../../projection/types";
-import type { Item } from "./board";
+import type { Item, Player } from "./board";
 import {
   BOARD,
   boardItems,
@@ -187,6 +187,30 @@ describe("projection reconcile", () => {
     expect(world.emitted).toHaveLength(1);
     expect(world.api.ecs.get(world.api.projection.entityOf(BOARD, "a") ?? 0, Level)).toEqual({
       level: 3
+    });
+  });
+
+  it("does not reconcile again in play mode a projection a mount just built from the same state", () => {
+    const world = createMockWorld({ reconciledEvent: true });
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+
+    const from = vi.fn((player: Player) => player.items);
+
+    world.api.projection.register({
+      ...boardItems(),
+      name: "board.extra",
+      from
+    } as AnyProjectionSpec);
+    // A commit marks the frame dirty, then a scene mounts a projection direct from that very state.
+    commitItems(world, [{ id: "a", level: 2, x: 0, y: 0 }]);
+    world.api.projection.mount([BOARD, "board.extra"], MOUNT_OWNER);
+    from.mockClear();
+    world.frame();
+
+    expect(from).not.toHaveBeenCalled();
+    expect(world.api.ecs.get(world.api.projection.entityOf(BOARD, "a") ?? 0, Level)).toEqual({
+      level: 2
     });
   });
 

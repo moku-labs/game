@@ -35,6 +35,9 @@ const Tally = component("Tally", { value: 0 });
 /** The entity of the one root the harness mounts. */
 const ROOT = 1000;
 
+/** The entity of a second projection root, laid out in a slot of the first. */
+const ROW = 3000;
+
 /** The entity of a popup root that lies over it, in the covered test. */
 const COVERER = 2000;
 
@@ -374,6 +377,7 @@ function harness() {
     ctx,
     state,
     frame,
+    store,
     world,
     layout,
     styles,
@@ -736,6 +740,25 @@ describe("a style object changed in place between two renders", () => {
 });
 
 // ─── what an unchanged element still does ──────────────────────
+
+describe("a root that learns its projection at its first reconcile", () => {
+  it("takes the slot that hosts it, though the slots were given out before", () => {
+    const h = harness();
+
+    h.mount(screen({ bar: { hosts: ["slot.row"] } }));
+    // The `Tree` hook fires inside the spawn, before the world knows the key: the root is mounted
+    // as `ui`, and a solve gives the slots out before its first reconcile reads its name.
+    h.store.set(ROW, new Map([["Tree", { node: { type: "stack", props: {}, children: [] } }]]));
+    h.frame.mountRoot(ROW, "ui", "ui");
+    h.frame.solve();
+    h.ctx.deps.world.projection.keyOf = (entity: Entity) =>
+      entity === ROW ? { projection: "slot.row", key: "row" } : undefined;
+    h.frame.reconcile();
+    h.frame.solve();
+
+    expect(h.state.jsx.roots.get(ROW)?.slot).toBe(h.entity("bar"));
+  });
+});
 
 describe("a prop outside the comparison", () => {
   it("still tracks the `hosts` of an element that is written no more", () => {

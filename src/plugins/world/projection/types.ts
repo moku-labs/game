@@ -3,7 +3,7 @@
  * the tween driver seam and the module API.
  */
 import type { Hint } from "../../flow/types";
-import type { Json, Root } from "../../model/types";
+import type { Json, Root, Snapshot } from "../../model/types";
 import type {
   AnyComponent,
   AnyComponentValue,
@@ -534,6 +534,11 @@ export type Mounted = {
    * identity: a `mount` under the same list is a second mount of one scene, a `mount` under a new one keeps it.
    */
   layers: ReadonlyArray<LayerSpec>;
+  /**
+   * The state of its last reconcile: a play reconcile against the same `player` and `session` trees changes nothing
+   * and is passed over (the frame after a scene mounted it direct). Absent before the first reconcile.
+   */
+  seen?: Snapshot;
 };
 
 /**

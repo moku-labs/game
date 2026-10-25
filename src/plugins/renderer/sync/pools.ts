@@ -147,7 +147,7 @@ export function resetObject(view: View): void {
 
 /**
  * Brings a detached object back to a fresh one's pose and look: drawn, opaque, unmoved, white for a sprite and a
- * graphics.
+ * graphics, and a graphics without a path.
  *
  * @param object - The object, out of the tree.
  */
@@ -160,6 +160,9 @@ function resetNode(object: PixiContainer): void {
   object.pivot.set(0, 0);
   object.scale.set(1);
   if (isSprite(object) || isGraphics(object)) object.tint = 0xff_ff_ff;
+  // A graphics comes back with no path: an empty shape draws none (spec 26 B7), so an old one would stay in its
+  // parent's bounds (F61 spike: 13 drawn containers grew).
+  if (isGraphics(object)) object.clear();
 }
 
 /**
