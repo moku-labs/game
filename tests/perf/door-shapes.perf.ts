@@ -88,4 +88,14 @@ describe("door shapes (F77): writes into game data after the doors loaded, heap 
 
     expect(bytesPerCall(move)).toBeLessThanOrEqual(NOISE);
   });
+
+  // Bug: the ui `scroll` command's input `{ key: "string", to: "number" }` turns every `{ key, to }` tagged.
+  it("a key-to literal keeps its number unboxed", () => {
+    const scroll = { key: "list", to: 0.5 };
+    const move = (): void => {
+      scroll.to = next();
+    };
+
+    expect(bytesPerCall(move)).toBeLessThanOrEqual(NOISE);
+  });
 });

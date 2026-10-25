@@ -7,7 +7,7 @@
  * control guard of a route command, so a bundler `define` of `false` drops it, and logs the
  * `moku:dev` marker.
  */
-import { defineCommand } from "../flow/doors/define";
+import { defineCommand, inputSchema } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
 import { readTarget } from "../input/target";
@@ -60,7 +60,7 @@ function elementOf(ui: Pick<UiApi, "find">, key: string): Entity {
 export const tapCommand = defineCommand({
   id: "game.tap",
   title: "Tap",
-  input: { key: "string?", target: "json?" },
+  input: inputSchema(["key", "string?"], ["target", "json?"]),
   effect: "route",
   run: (app: TapApp, { key, target }) => {
     if (
@@ -96,7 +96,7 @@ export const tapCommand = defineCommand({
 export const fillCommand = defineCommand({
   id: "game.fill",
   title: "Fill",
-  input: { key: "string", value: "string" },
+  input: inputSchema(["key", "string"], ["value", "string"]),
   effect: "route",
   run: (app: FillApp, { key, value }) => {
     if (
@@ -128,7 +128,7 @@ export const fillCommand = defineCommand({
 export const scrollCommand = defineCommand({
   id: "game.scroll",
   title: "Scroll",
-  input: { key: "string", to: "number" },
+  input: inputSchema(["key", "string"], ["to", "number"]),
   effect: "route",
   run: (app: ScrollApp, { key, to }) => {
     if (

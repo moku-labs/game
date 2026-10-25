@@ -2,7 +2,7 @@
  * @file ui plugin — the ui sources of the `/inspect` door: the live screen as data, and where an
  * element or a view is on the page. Production-safe: every one only reads.
  */
-import { defineSource } from "../flow/doors/define";
+import { defineSource, inputSchema } from "../flow/doors/define";
 import type { HeadlessApp } from "../flow/headless";
 import type { ProjectionTarget } from "../input/target";
 import { readTarget } from "../input/target";
@@ -174,7 +174,7 @@ function locateTarget(app: LocateApp, target: ProjectionTarget): Rect | undefine
 export const uiSource = defineSource({
   id: "game.ui",
   title: "UI tree",
-  input: {},
+  input: inputSchema(),
   changes: "frame",
   read: (app: HeadlessApp & { readonly ui: UiApi }) => app.ui.tree()
 });
@@ -198,7 +198,7 @@ export const uiSource = defineSource({
 export const locateSource = defineSource({
   id: "game.locate",
   title: "Locate",
-  input: { key: "string?", target: "json?" },
+  input: inputSchema(["key", "string?"], ["target", "json?"]),
   changes: "frame",
   read: (app: LocateApp, { key, target }): Rect | undefined => {
     if (key !== undefined && target === undefined) return locateKey(app, key);
