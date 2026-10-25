@@ -5,7 +5,7 @@
  * target names the entity that held the key when the timeline started, for every step.
  */
 import { Sprite } from "../../renderer/components";
-import type { Entity } from "../../world/types";
+import type { Entity, TrackOptions, TrackSegment } from "../../world/types";
 import { asComponent } from "../components";
 import type { StepMotion } from "../tween/types";
 import type { Target } from "../types";
@@ -143,45 +143,122 @@ function startTween(
 
   if (entity === undefined) return undefined;
 
-  return cctx.rt.start(entity, step.component, tweenTargetOf(cctx, entity, step), {
+  return cctx.rt.start(
+    entity,
+    step.component,
+    inSpace(cctx, entity, step, step.to),
+    trackOptionsOf(cctx, entity, step)
+  );
+}
+
+/**
+ * The options a `tween` step starts its track with. The keyframe segments and the repeat are
+ * passed only when the step has them, the segment targets turned like `to` in the root space.
+ *
+ * @param cctx - What the cursor carries down the tree.
+ * @param entity - The entity the step moves.
+ * @param step - The tween step.
+ * @returns The track options.
+ */
+function trackOptionsOf(
+  cctx: CursorCtx,
+  entity: Entity,
+  step: Extract<Step, { kind: "tween" }>
+): TrackOptions {
+  const options: TrackOptions = {
     ms: step.ms,
     ease: step.ease,
     delayMs: step.delayMs,
     additive: step.additive,
     reduced: step.reduced
-  });
+  };
+  const segments = step.segments;
+
+  if (segments !== undefined) {
+    options.segments =
+      step.space === "root"
+        ? segments.map(segment => ({ ...segment, to: inSpace(cctx, entity, step, segment.to) }))
+        : segments;
+  }
+
+  if (step.repeat !== undefined) options.repeat = step.repeat;
+
+  return options;
 }
 
 /**
- * The target fields of a `tween` step for one entity: as written in the local space, turned into
- * the space of the entity's parent in the root space.
+ * Target fields of a `tween` step for one entity: as written in the local space, turned into the
+ * space of the entity's parent in the root space.
  *
  * @param cctx - What the cursor carries down the tree.
  * @param entity - The entity the step moves.
  * @param step - The tween step.
+ * @param fields - Its `to`, the target of one of its segments, or where it lands.
  * @returns The fields the track or the write aims at.
  */
-function tweenTargetOf(
+function inSpace(
   cctx: CursorCtx,
   entity: Entity,
-  step: Extract<Step, { kind: "tween" }>
+  step: Extract<Step, { kind: "tween" }>,
+  fields: Readonly<Record<string, number>>
 ): Record<string, number> {
-  if (step.space === "root") return cctx.rt.toLocal(entity, step.component, step.to);
+  if (step.space === "root") return cctx.rt.toLocal(entity, step.component, fields);
 
-  return { ...step.to };
+  return { ...fields };
 }
 
 /**
- * Writes the target of a `tween` step that never started, in the space the step names.
+ * The last value each field reaches over a list of segments.
+ *
+ * @param segments - The segments of a step.
+ * @returns One value per field any segment names.
+ * @example
+ * ```ts
+ * lastValues([{ at: 0.5, to: { y: 10, rotation: 2 } }, { at: 1, to: { y: 0 } }]); // { y: 0, rotation: 2 }
+ * ```
+ */
+function lastValues(segments: readonly TrackSegment[]): Record<string, number> {
+  const values: Record<string, number> = {};
+
+  for (const segment of segments) Object.assign(values, segment.to);
+
+  return values;
+}
+
+/**
+ * Where a `tween` step that never started lands when it is finished: its target, and for a
+ * keyframe walk every field its segments name too, at the last value they give it. A step that
+ * repeats forever lands on its start pose, where it already stands, and an additive walk names
+ * offsets that end with it: neither writes anything.
+ *
+ * @param step - The tween step.
+ * @returns The fields to write, or `undefined` when the step writes nothing.
+ */
+function landingOf(
+  step: Extract<Step, { kind: "tween" }>
+): Readonly<Record<string, number>> | undefined {
+  if (step.repeat === "forever") return undefined;
+  if (step.segments === undefined) return step.to;
+  if (step.additive) return undefined;
+
+  return { ...lastValues(step.segments), ...step.to };
+}
+
+/**
+ * Writes where a `tween` step that never started lands, in the space the step names.
  *
  * @param cctx - What the cursor carries down the tree.
  * @param step - The tween step.
  */
 function writeTween(cctx: CursorCtx, step: Extract<Step, { kind: "tween" }>): void {
+  const landing = landingOf(step);
+
+  if (landing === undefined) return;
+
   const entity = targetOf(cctx, step);
 
   if (entity !== undefined)
-    cctx.rt.write(entity, step.component, tweenTargetOf(cctx, entity, step));
+    cctx.rt.write(entity, step.component, inSpace(cctx, entity, step, landing));
 }
 
 /**
@@ -497,7 +574,9 @@ export function advanceCursor(cctx: CursorCtx, cursor: Cursor, deltaMs: number):
 /**
  * Ends one step at its own end: a track writes its exact target, a step that never started writes
  * it at once, the marks are jumped in tree order, no effect is fired and nothing is spawned: the
- * timeline despawns its entities as it ends, so a skipped spawn would only flash.
+ * timeline despawns its entities as it ends, so a skipped spawn would only flash. A track that
+ * repeats forever has no end: it lands on its start pose, and one that never started writes
+ * nothing.
  *
  * @param cctx - What the cursor carries down the tree.
  * @param cursor - The cursor of the step.

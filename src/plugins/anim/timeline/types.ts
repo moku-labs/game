@@ -4,7 +4,7 @@
  */
 import type { Json } from "../../model/types";
 import type { AnyComponent, AnyComponentValue, ComponentType } from "../../world/ecs/types";
-import type { Ease, Entity, ReducedMotion, TrackOptions } from "../../world/types";
+import type { Ease, Entity, ReducedMotion, TrackOptions, TrackSegment } from "../../world/types";
 import type { StepMotion } from "../tween/types";
 import type { Target } from "../types";
 import type { HAPTIC_KINDS } from "./steps";
@@ -163,6 +163,16 @@ export type Step =
       readonly space: "local" | "root";
       /** `"keep"`: reduced motion plays the track as written; `"cut"` lands it at once. */
       readonly reduced: ReducedMotion;
+      /**
+       * The keyframe segments the track walks over `ms`, frozen; only on a step built with them.
+       * In the root space each segment's target is turned local when the track starts, like `to`.
+       */
+      readonly segments?: readonly TrackSegment[];
+      /**
+       * The runs after the first one, or `"forever"` for a step that never ends by itself; only on
+       * a step built with it.
+       */
+      readonly repeat?: number | "forever";
     }
   | {
       readonly kind: "set";
