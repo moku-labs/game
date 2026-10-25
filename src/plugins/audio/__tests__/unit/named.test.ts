@@ -191,6 +191,20 @@ describe("stopSfx and app.audio.stop", () => {
     expect(mock.state.named.size).toBe(0);
   });
 
+  it("take config.sfxFadeMs for a fadeMs the clock cannot schedule", async () => {
+    // Bug caught: a negative or NaN fadeMs reaches linearRampToValueAtTime and stop(), which throw
+    // inside the handler, so the voice never stops.
+    const { context, ...mock } = unlocked({ sfxFadeMs: 250 });
+
+    await mock.fx("sfx", sfx("story.line1", { id: "voice" }));
+    await mock.fx("sfx", sfx("story.wind", { id: "ambience" }));
+    context.currentTime = 5;
+    await mock.fx("stopSfx", stopSfx("voice", -5));
+    await mock.fx("stopSfx", stopSfx("ambience", Number.NaN));
+
+    expect(context.sources.map(source => source.stoppedAt)).toEqual([5.25, 5.25]);
+  });
+
   it("change nothing for an id nothing plays under, or a stop without an id", async () => {
     // Bug caught: a stop of an unknown id throws, or fades the sound of another id.
     const { context, ...mock } = unlocked();

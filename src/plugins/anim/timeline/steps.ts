@@ -410,8 +410,8 @@ export function spawned(id: string): { spawned: string } {
  * @example
  * ```ts
  * sfx("board.merge"); // { kind: "sfx", payload: { key: "board.merge", bus: "sfx" }, cosmetic: true }
- * sfx("voice.hello", { bus: "voice", id: "voice", fadeMs: 200 });
- * // { kind: "sfx", payload: { key: "voice.hello", bus: "voice", id: "voice", fadeMs: 200 }, cosmetic: true }
+ * sfx("voice.hello", { id: "voice", fadeMs: 200 });
+ * // { kind: "sfx", payload: { key: "voice.hello", bus: "sfx", id: "voice", fadeMs: 200 }, cosmetic: true }
  * ```
  */
 export function sfx(

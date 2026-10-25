@@ -24,6 +24,15 @@ import type {
   WarmVariant
 } from "./types";
 
+/** A member of the probe tree that holds a content subject's object. */
+type FixedNode =
+  | "sprite"
+  | "spriteAdd"
+  | "spriteScreen"
+  | "graphics"
+  | "particlesNormal"
+  | "particlesAdd";
+
 /** The side of every probe, in CSS pixels: the smallest thing that still draws a triangle. */
 const PROBE_SIZE = 4;
 
@@ -36,6 +45,17 @@ const CONTENT: readonly WarmSubject[] = Object.freeze([
   "particles-normal",
   "particles-add"
 ]);
+
+/** The probe object of each content subject the tree holds from its first warm frame on. */
+const FIXED_NODES: Readonly<Record<Exclude<WarmSubject, "text" | PixiFilter>, FixedNode>> =
+  Object.freeze({
+    sprite: "sprite",
+    "sprite-add": "spriteAdd",
+    "sprite-screen": "spriteScreen",
+    graphics: "graphics",
+    "particles-normal": "particlesNormal",
+    "particles-add": "particlesAdd"
+  });
 
 /** Every target a WebGPU pipeline is keyed by. */
 const ALL_VARIANTS: readonly WarmVariant[] = Object.freeze([
@@ -396,43 +416,23 @@ function nodeOf(
   objects: WarmObjects,
   subject: WarmSubject
 ): PixiContainer | undefined {
-  switch (subject) {
-    case "sprite": {
-      return objects.sprite;
-    }
-    case "sprite-add": {
-      return objects.spriteAdd;
-    }
-    case "sprite-screen": {
-      return objects.spriteScreen;
-    }
-    case "graphics": {
-      return objects.graphics;
-    }
-    case "particles-normal": {
-      return objects.particlesNormal;
-    }
-    case "particles-add": {
-      return objects.particlesAdd;
-    }
-    case "text": {
-      if (warm.textFont === undefined) return undefined;
+  if (typeof subject !== "string") {
+    objects.list[0] = subject;
+    objects.holder.filters = objects.list;
 
-      objects.text ??= new pixi.BitmapText({
-        label: "renderer.warm.text",
-        text: "0",
-        style: { fontFamily: warm.textFont, fontSize: 16 }
-      });
-
-      return objects.text;
-    }
-    default: {
-      objects.list[0] = subject;
-      objects.holder.filters = objects.list;
-
-      return objects.holder;
-    }
+    return objects.holder;
   }
+
+  if (subject !== "text") return objects[FIXED_NODES[subject]];
+  if (warm.textFont === undefined) return undefined;
+
+  objects.text ??= new pixi.BitmapText({
+    label: "renderer.warm.text",
+    text: "0",
+    style: { fontFamily: warm.textFont, fontSize: 16 }
+  });
+
+  return objects.text;
 }
 
 /**

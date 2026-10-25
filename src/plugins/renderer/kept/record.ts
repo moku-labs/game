@@ -316,17 +316,37 @@ function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): 
   const stage = kctx.host.stage();
 
   return (
-    kctx.state.on &&
-    !kctx.state.bypassed &&
+    keepingOn(kctx) &&
     stage !== undefined &&
     stack.enabled > 0 &&
     plainFilters(record.slots) &&
-    top.visible &&
-    top.alpha > 0 &&
-    plainBlend(top.blendMode) &&
-    plainBlend(view.object.blendMode) &&
+    drawsAsPicture(top, view) &&
     topDrawn(kctx.sync, view) &&
     ancestorsPlain(kctx, record, stage)
+  );
+}
+
+/**
+ * Tells whether the kept cache may keep anything this frame: switched on and not bypassed.
+ *
+ * @param kctx - The kept context.
+ * @returns True when pictures may be kept.
+ */
+function keepingOn(kctx: KeptCtx): boolean {
+  return kctx.state.on && !kctx.state.bypassed;
+}
+
+/**
+ * Tells whether a top and its visual draw as a picture does: the top visible and not faded out, both blending
+ * normally (the visual sits inside the wrapper of a kept bare view, D4).
+ *
+ * @param top - The record's top.
+ * @param view - Its view.
+ * @returns True when they do.
+ */
+function drawsAsPicture(top: PixiContainer, view: View): boolean {
+  return (
+    top.visible && top.alpha > 0 && plainBlend(top.blendMode) && plainBlend(view.object.blendMode)
   );
 }
 
@@ -1511,8 +1531,10 @@ export function stepRecord(
 ): void {
   // What the record draws before this frame: a change of it is a change of every picture above it (P4.5).
   noteDrawing(kctx, record, BEFORE);
+
   // The subtree changed: a glow found under the top may be gone (F68).
   if (record.dirtyS1) record.blended = false;
+
   NOW.r = kctx.host.resolution();
   readStack(record.slots, NOW.r, pixi.AlphaFilter, NOW);
 

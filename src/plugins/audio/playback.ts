@@ -60,9 +60,23 @@ function fieldOf(payload: Json | undefined, field: string): Json | undefined {
  * @returns The fade, in milliseconds.
  */
 function fadeOf(descriptor: Descriptor | Hint, fadeMs: number): number {
-  const fade = fieldOf(descriptor.payload, "fadeMs");
+  return validFade(fieldOf(descriptor.payload, "fadeMs"), fadeMs);
+}
 
-  return typeof fade === "number" ? fade : fadeMs;
+/**
+ * Takes a fade a descriptor named only when the clock can schedule it: a finite number, 0 or more.
+ * `NaN` or a negative fade would make the ramp and the stop throw inside the handler.
+ *
+ * @param fade - The `fadeMs` the payload carries.
+ * @param fallback - The configured fade.
+ * @returns The fade, in milliseconds.
+ * @example
+ * ```ts
+ * validFade(-5, 120); // 120
+ * ```
+ */
+function validFade(fade: Json | undefined, fallback: number): number {
+  return typeof fade === "number" && Number.isFinite(fade) && fade >= 0 ? fade : fallback;
 }
 
 /**
@@ -96,12 +110,11 @@ function sfxOf(descriptor: Descriptor | Hint, fadeMs: number): SfxRequest | unde
  */
 export function musicOf(descriptor: Descriptor | Hint, fadeMs: number): MusicRequest {
   const key = fieldOf(descriptor.payload, "key");
-  const fade = fieldOf(descriptor.payload, "fadeMs");
 
   return {
     // eslint-disable-next-line unicorn/no-null -- `null` is the seam: it stops the music.
     key: typeof key === "string" ? key : null,
-    fadeMs: typeof fade === "number" ? fade : fadeMs
+    fadeMs: validFade(fieldOf(descriptor.payload, "fadeMs"), fadeMs)
   };
 }
 
@@ -196,17 +209,25 @@ export async function playSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): Pro
   if (request === undefined) return;
 
   if (!state.unlocked) {
-    if (state.resuming) {
-      state.pendingSfx.set(
-        request.id === undefined ? request.key : waitingKey(request.id),
-        request
-      );
-    }
+    queueWhileResuming(state, request);
 
     return;
   }
 
   await playRequest(ctx, request);
+}
+
+/**
+ * Keeps a sound fired while the context is locked, one per key and one per id, when a gesture's
+ * `resume()` is on its way. A locked context nobody resumes drops it.
+ *
+ * @param state - The plugin state.
+ * @param request - The sound that was fired.
+ */
+function queueWhileResuming(state: State, request: SfxRequest): void {
+  if (!state.resuming) return;
+
+  state.pendingSfx.set(request.id === undefined ? request.key : waitingKey(request.id), request);
 }
 
 /**

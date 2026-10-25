@@ -31,7 +31,7 @@ export type ErasedFields = AnyComponent extends ComponentType<infer Value> ? Val
  * @example
  * ```ts
  * const descriptor: SfxDescriptor = {
- *   kind: "sfx", payload: { key: "voice.hello", bus: "voice", id: "voice", fadeMs: 200 }, cosmetic: true
+ *   kind: "sfx", payload: { key: "voice.hello", bus: "sfx", id: "voice", fadeMs: 200 }, cosmetic: true
  * };
  * ```
  */
