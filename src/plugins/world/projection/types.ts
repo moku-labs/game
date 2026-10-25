@@ -1195,16 +1195,28 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // `scenes` leaves the ward, whose HUD draws in `ui` sorted by order.
-   * const projection = ctx.deps.world.projection;
+   * const projection = ctx.require(worldPlugin).projection;
    *
    * // The shop sorts `ui` otherwise: nothing is built, `scenes` mounts the shop in one block.
-   * projection.build(["hud", "shop.shelf"], ctx.state.owner, [{ name: "ui", sort: "none" }], 4); // false
+   * projection.build(
+   *   ["hud", "shop.shelf"],
+   *   { kind: "plugin", name: "scenes" },
+   *   [{ name: "ui", sort: "none" }],
+   *   4
+   * ); // false
    *
    * // The board declares `ui` alike: the HUD stays, the board items are built aside.
-   * const board = [{ name: "items", sort: "y" }, { name: "ui", sort: "order" }] as const;
-   * projection.build(["board.items", "hud"], ctx.state.owner, board, 4); // true
+   * projection.build(
+   *   ["board.items", "hud"],
+   *   { kind: "plugin", name: "scenes" },
+   *   [{ name: "items", sort: "y" }, { name: "ui", sort: "order" }],
+   *   4
+   * ); // true
    * projection.entityOf("board.items", "i7"); // undefined until the commit
-   * projection.build(["shop.shelf"], ctx.state.owner, board, 4); // throws: A scene is already being built
+   *
+   * // A second build before the commit or the discard of the first:
+   * projection.build(["shop.shelf"], { kind: "plugin", name: "scenes" }, [{ name: "ui", sort: "none" }], 4);
+   * // throws: A scene is already being built
    * ```
    */
   build(
@@ -1222,7 +1234,7 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // `scenes`, in its `signals` callback while the board builds:
-   * const projection = ctx.deps.world.projection;
+   * const projection = ctx.require(worldPlugin).projection;
    * projection.built(); // false on the first build frame: the renderer still creates views
    * projection.built(); // true two frames later: commit now
    * ```
@@ -1239,7 +1251,7 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // `scenes`, in the frame `built()` first answers true: the layers, the leaving list out, the build in.
-   * const projection = ctx.deps.world.projection;
+   * const projection = ctx.require(worldPlugin).projection;
    * projection.setLayers([{ name: "items", sort: "y" }, { name: "ui", sort: "order" }]);
    * projection.unmount(["ward.beds"]);
    * projection.commit();
@@ -1258,7 +1270,7 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // `scenes`: a restore aborted the node while the board was built.
-   * const projection = ctx.deps.world.projection;
+   * const projection = ctx.require(worldPlugin).projection;
    * projection.discard();
    * projection.causeOf(1_048_600); // "discard", until the next sweep
    * projection.isBuilding(1_048_600); // false
@@ -1275,7 +1287,7 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // A renderer build step creates held views while the frame has budget, at least one a frame.
-   * const projection = ctx.deps.world.projection;
+   * const projection = ctx.require(worldPlugin).projection;
    * projection.left(); // 3: 1 ms of the 4 ms budget is spent
    * projection.left(); // -1 after 4 ms more of views: the rest waits for the next frame
    * ```
@@ -1291,7 +1303,7 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // The renderer pass sorts the views of the coming scene out of its live work.
-   * const projection = ctx.deps.world.projection;
+   * const projection = ctx.require(worldPlugin).projection;
    * projection.isBuilding(1_048_600); // true: a board item the build spawned
    * projection.isBuilding(1_048_576); // false: a ward bed on screen
    * ```
@@ -1307,7 +1319,7 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // The renderer, at start: its part is done when no building view waits for its Pixi object.
-   * const off = ctx.deps.world.projection.onBuild(() => state.aside.count === 0);
+   * const off = ctx.require(worldPlugin).projection.onBuild(() => state.aside.count === 0);
    *
    * off(); // onStop: the renderer is gone
    * ```
@@ -1323,7 +1335,7 @@ export type ProjectionApi = {
    * @example
    * ```ts
    * // `ui` spawns an element of a building root and marks it right away.
-   * const world = ctx.deps.world;
+   * const world = ctx.require(worldPlugin);
    * const button = world.ecs.spawn({ kind: "plugin", name: "ui" }, []);
    * world.projection.adopt(button);
    * world.projection.isBuilding(button); // true until the commit

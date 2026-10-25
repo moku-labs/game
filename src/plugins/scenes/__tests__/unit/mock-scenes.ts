@@ -15,7 +15,7 @@ import type { Json, Api as ModelApi } from "../../../model/types";
 import type { FrameCallback, Phase, Api as TimeApi } from "../../../time/types";
 import type { LayerSpec, Owner, Api as WorldApi, WorldMode } from "../../../world/types";
 import { createScenesApi } from "../../api";
-import { startScenes, stopScenes, withDeps } from "../../lifecycle";
+import { checkConfig, startScenes, stopScenes, withDeps } from "../../lifecycle";
 import { createScenesState } from "../../state";
 import type { Config, KernelSlice, RunContext, ScenesApi, ScenesCtx, State } from "../../types";
 
@@ -64,6 +64,10 @@ export type FakeWorld = {
   unmounted: string[][];
   /** Set by a test: `mount` throws it once, the way an unknown projection does. */
   mountError: unknown;
+  /** Set by a test: `setLayers` throws it once, the way a bad layer list does. */
+  setLayersError: unknown;
+  /** Set by a test: `unmount` throws it once, the way a throwing removal hook does. */
+  unmountError: unknown;
   /** Every scene `ecs.setScene` was told, in order. */
   scenes: string[];
   /** What `ecs.mode()` answers: `"fast"` while the flow walks fast. */
@@ -72,7 +76,8 @@ export type FakeWorld = {
    * The build of the next scene, steered by a test: `answer` is what `build` answers (false is a
    * projection mounted under other layer rules), `error` is thrown once by `build`, the way a
    * throwing `view` is, `done` is what `built()` answers while a build runs, `commitError` is
-   * thrown once by `commit`. `running` tells whether a build runs.
+   * thrown once by `commit`. `running` tells whether a build runs; `build` throws while one runs, as
+   * the world does.
    */
   building: {
     answer: boolean;
@@ -132,6 +137,8 @@ export type MockScenes = {
    * `time:wake`, `emit:scenes:changed` or `monitor:scene`: the order of the swap.
    */
   journal: string[];
+  /** Runs `onInit`: the config check. */
+  init(): void;
   start(): void;
   stop(): void;
   /** Calls the registered `onEnter("scene")` callback, the way the runner does. */
@@ -274,6 +281,8 @@ function createFakeWorld(journal: string[]): FakeWorld {
     mounted: [],
     unmounted: [],
     mountError: undefined,
+    setLayersError: undefined,
+    unmountError: undefined,
     scenes: [],
     mode: "live",
     building: {
@@ -302,10 +311,12 @@ function createFakeWorld(journal: string[]): FakeWorld {
     projection: {
       setLayers: (list: ReadonlyArray<LayerSpec>): void => {
         record("setLayers");
+        throwOnce(fake, "setLayersError");
         fake.layers.push([...list]);
       },
       unmount: (names: readonly string[]): void => {
         record("unmount");
+        throwOnce(fake, "unmountError");
         fake.unmounted.push([...names]);
       },
       mount: (names: readonly string[], owner: Owner): void => {
@@ -320,6 +331,9 @@ function createFakeWorld(journal: string[]): FakeWorld {
         budgetMs: number
       ): boolean => {
         record("build");
+
+        if (fake.building.running) throw new Error("[game] A scene is already being built.");
+
         fake.building.calls.push({ names: [...names], owner, layers: [...layers], budgetMs });
         throwOnce(fake.building, "error");
         fake.building.running = fake.building.answer;
@@ -509,6 +523,7 @@ export function createMockScenes(config?: Config): MockScenes {
     model,
     renderer,
     journal,
+    init: (): void => checkConfig(ctx.config),
     start: (): void => startScenes(ctx),
     stop: (): void => stopScenes({ state }),
     enter: async (node: Partial<NodeInfo>, run: Partial<RunContext> = {}): Promise<void> => {

@@ -317,6 +317,43 @@ describe("a scene built aside that does not stand", () => {
     expect("build" in mock.state).toBe(false);
   });
 
+  // Bug: a `setLayers` or an `unmount` that throws in the commit frame, before `commit()`, leaves the world's build
+  // table set and the coming bundles held: every later live switch throws "A scene is already being built".
+  it.each([
+    "setLayersError",
+    "unmountError"
+  ] as const)("a swap whose %s throws discards the build, holds nothing and lets the next build run", async field => {
+    const mock = await onHome();
+    const { entering } = await enterBoard(mock);
+
+    mock.world[field] = new Error("[game] the swap failed.");
+    mock.world.building.done = true;
+    mock.time.frame();
+
+    await expect(entering).rejects.toThrow("[game] the swap failed.");
+    expect(mock.world.api.projection.built()).toBe(false);
+    expect(mock.assets.coming).toEqual([["board"], []]);
+
+    await mock.enter({ rest: true, scene: "board" });
+
+    expect(mock.world.building.calls).toHaveLength(2);
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug: the one-block mount of a build given up throws and the coming bundles stay held for good.
+  it("a one-block mount that throws after the world went fast holds no coming bundles", async () => {
+    const mock = await onHome();
+    const { entering } = await enterBoard(mock);
+
+    mock.world.mode = "fast";
+    mock.world.mountError = new Error("[game] Projection is not registered.");
+    mock.time.frame();
+
+    await expect(entering).rejects.toThrow("[game] Projection is not registered.");
+    expect(mock.world.api.projection.built()).toBe(false);
+    expect(mock.assets.coming.at(-1)).toEqual([]);
+  });
+
   // Bug: a stop during the build keeps the frame callback, which commits on a stopped app, or leaves the switch
   // pending, so the runner's stop waits for it.
   it("a stop during the build removes the frame callback and lets the switch return", async () => {

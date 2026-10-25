@@ -656,6 +656,34 @@ describe("a scene built aside: frames", () => {
     expect(calls).toEqual([0, 1, 1, 1, 1, 1, 0]);
   });
 
+  // Bug: the pieces of the pre-draw count as passes of the frame they are drawn in: `stats().renderPasses` of every
+  // build frame on a phone reads one pass per piece more than the screen costs, and a budget or a test reads a scene
+  // that draws dearer than it does.
+  it("counts no pass of the frame for the pieces of the pre-draw", async () => {
+    const mock = createMockRenderer({ renderTextures: true, scene: { passes: 1 } });
+
+    await mock.start();
+    mock.api.sync.textures.provide(() => texture as never);
+    mock.world.projection.setLayers(WARD);
+    frame(mock);
+
+    expect(mock.api.stats().renderPasses).toBe(1);
+
+    const renderer = mock.pixi.last().renderer;
+
+    startBuild(mock);
+    spawnBuilding(mock, boardTop(1));
+    spawnBuilding(mock, boardTop(2));
+
+    const renders = renderer.renders;
+
+    frame(mock);
+
+    // The stage and the two held tops were rendered; only the stage is a pass of the frame.
+    expect(renderer.renders - renders).toBe(3);
+    expect(mock.api.stats().renderPasses).toBe(1);
+  });
+
   // Bug: the hit test finds the coming scene's views before the swap (a tap lands on the board under the ward), or the
   // old one's after it.
   it("hits the old scene's view over a building view until the commit, the new one after", async () => {

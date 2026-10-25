@@ -62,6 +62,7 @@ export function buildNames(
 ): boolean {
   const state = pctx.ctx.state.projection;
 
+  // One build table at a time: a second build would mount over the first one's records.
   if (state.building !== undefined) {
     throw new Error(
       "[game] A scene is already being built.\n" +
@@ -71,19 +72,25 @@ export function buildNames(
 
   const { fresh, again } = sortMount(pctx, names, layers);
 
+  // A projection mounted under other layer rules would need two records under one name: refuse before any write.
   if (again.length > 0) return false;
 
   const now = pctx.ctx.deps.clock.now();
   const building = emptyBuilding(names, layers, owner, { budgetMs, now });
 
+  // Only the projections the current scene does not mount alike get a record aside; the kept ones stay as they are.
   for (const spec of fresh) {
     building.mounted.set(spec.name, emptyMounted(owner, orderIn(names, spec.name), layers));
   }
 
   state.building = building;
 
+  // Set before the reconcile, so `isBuilding` answers for the views it spawns. A list of kept projections only has
+  // nothing to spawn: the build runs with an empty table and the commit only places the list.
   if (fresh.length === 0) return true;
 
+  // The views are spawned now, direct; a `view` that throws must leave no entity of the build behind, so the table is
+  // discarded and the throw goes on to the caller.
   try {
     reconcile(pctx, {
       table: building.mounted,

@@ -259,7 +259,7 @@ HUD that is not shared does not blink either.
 |---|---|---|---|
 | `buildMs` | `number` | `4` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work: about half a 120 Hz frame. At 60 Hz the build takes a few more frames |
 
-A value that is not a finite number above 0 throws at start:
+A value that is not a finite number above 0 throws in `onInit`, so `createApp` throws:
 
 ```
 [game] scenes.buildMs is 0.
@@ -291,7 +291,7 @@ A scene is data in a feature. A transition effect is V3 work of `anim`.
 
 ## Lifecycle
 
-`onStart` checks `buildMs`, reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
+`onInit` checks `buildMs`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
 
 ## Not in V2
 

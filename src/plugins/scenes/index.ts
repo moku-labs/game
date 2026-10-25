@@ -16,7 +16,7 @@ import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createScenesApi } from "./api";
-import { startScenes, stopScenes } from "./lifecycle";
+import { checkConfig, startScenes, stopScenes } from "./lifecycle";
 import { createScenesState } from "./state";
 import type { Config, Events } from "./types";
 
@@ -56,6 +56,7 @@ export const scenesPlugin = /*#__PURE__*/ createPlugin("scenes", {
     register.map<Events>({ "scenes:changed": "The mounted scene changed" }),
   createState: createScenesState,
   api: createScenesApi,
+  onInit: ({ config }) => checkConfig(config),
   onStart: startScenes,
   // @no-resource-check — onStop removes the onEnter callback; world.onStop clears the entities.
   onStop: ({ state }) => stopScenes({ state })

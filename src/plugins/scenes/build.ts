@@ -31,7 +31,8 @@ function agentNow(ctx: ScenesCtx): number {
  * Ends the build with the swap: its listeners go and the record is dropped, then the swap of a
  * one-block switch runs, with the commit in the mount's place, or, for `"mount"`, after the build
  * was discarded, with the mount itself. A swap that throws rejects the switch, so `flow` rolls the
- * node back.
+ * node back; the build is discarded and the coming bundles are held no more first, so the next
+ * switch can build again.
  *
  * @param ctx - Domain context of the plugin.
  * @param build - The running build.
@@ -46,6 +47,10 @@ function endBuild(ctx: ScenesCtx, build: SceneBuild, how: "commit" | "mount"): v
   try {
     swapIn(ctx, build.scene, build.named, how === "commit" ? build : undefined);
   } catch (error) {
+    // A `setLayers` or an `unmount` that threw before `commit()` leaves the world's build table set: without the
+    // discard every later live switch throws "A scene is already being built". Both calls do nothing when done.
+    ctx.deps.world.projection.discard();
+    ctx.deps.assets.sceneComing([]);
     build.reject(error);
 
     return;
@@ -97,6 +102,56 @@ function abortBuild(ctx: ScenesCtx, build: SceneBuild): void {
 }
 
 /**
+ * Creates the record of a build that starts now, its listeners not registered yet.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param scene - The scene being built.
+ * @param named - The bundles it names, as they were awaited.
+ * @param settle - The callbacks of the switch's promise.
+ * @param settle.resolve - Settles the switch.
+ * @param settle.reject - Rejects the switch.
+ * @returns The record, at frame 0, with no listeners to remove.
+ */
+function startBuildRecord(
+  ctx: ScenesCtx,
+  scene: SceneDefinition,
+  named: readonly string[],
+  settle: { resolve: () => void; reject: (error: unknown) => void }
+): SceneBuild {
+  return {
+    scene,
+    named,
+    from: ctx.state.current,
+    frames: 0,
+    startedAt: agentNow(ctx),
+    off: noListeners,
+    resolve: settle.resolve,
+    reject: settle.reject
+  };
+}
+
+/**
+ * Registers the listeners of a running build: the `signals` callback that asks every frame
+ * whether it is done, and the abort of its node, which discards it. `build.off` removes both; the
+ * build becomes the plugin's running one.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param build - The build that starts waiting for its frames.
+ * @param signal - The abort signal of the node, not aborted.
+ */
+function watchBuild(ctx: ScenesCtx, build: SceneBuild, signal: AbortSignal): void {
+  const onAbort = (): void => abortBuild(ctx, build);
+  const offFrame = ctx.deps.time.onFrame("signals", () => stepBuild(ctx, build));
+
+  signal.addEventListener("abort", onAbort, { once: true });
+  build.off = (): void => {
+    offFrame();
+    signal.removeEventListener("abort", onAbort);
+  };
+  ctx.state.build = build;
+}
+
+/**
  * Starts the build of a scene aside and answers the promise of the switch. The world mounts what
  * only the coming scene lists, against the committed state; the coming bundles are held from now.
  * When nothing is left for `ui` and the renderer the commit runs at once, with no frame between.
@@ -132,24 +187,17 @@ export function buildAside(
   // After `build`, not before: a build that throws or refuses leaves the coming list untouched.
   ctx.deps.assets.sceneComing(named);
 
-  const from = ctx.state.current;
-
+  // Inline and positive: the performance log of an agent build names the build start; a production `define` folds
+  // the guard and the call goes.
   if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    const from = ctx.state.current;
+
     // eslint-disable-next-line unicorn/no-null -- the log is JSON: no scene before is `null`.
     ctx.deps.renderer.monitor.event("scene:build", { from: from ?? null, to: scene.id });
   }
 
   return new Promise<void>((resolve, reject) => {
-    const build: SceneBuild = {
-      scene,
-      named,
-      from,
-      frames: 0,
-      startedAt: agentNow(ctx),
-      off: noListeners,
-      resolve,
-      reject
-    };
+    const build = startBuildRecord(ctx, scene, named, { resolve, reject });
 
     // A build with nothing left for ui and the renderer swaps now: fake-clock tests keep their frames.
     if (projection.built()) {
@@ -158,15 +206,7 @@ export function buildAside(
       return;
     }
 
-    const onAbort = (): void => abortBuild(ctx, build);
-    const offFrame = ctx.deps.time.onFrame("signals", () => stepBuild(ctx, build));
-
-    signal.addEventListener("abort", onAbort, { once: true });
-    build.off = (): void => {
-      offFrame();
-      signal.removeEventListener("abort", onAbort);
-    };
-    ctx.state.build = build;
+    watchBuild(ctx, build, signal);
   });
 }
 

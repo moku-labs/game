@@ -1,6 +1,7 @@
 /**
- * @file scenes plugin — lifecycle: the scenes read out of the feature descriptions in `onStart`,
- * the one `onEnter` registration, and the teardown that removes exactly that registration.
+ * @file scenes plugin — lifecycle: the config checked in `onInit`, the scenes read out of the
+ * feature descriptions in `onStart`, the one `onEnter` registration, and the teardown that removes
+ * exactly that registration.
  */
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
@@ -84,13 +85,14 @@ function readScenes(ctx: ScenesCtx): void {
 }
 
 /**
- * Refuses a building budget a frame cannot count down: not a number, not finite, or not above 0.
- * A game written in plain JS passes anything, so the config is a boundary.
+ * Refuses a building budget a frame cannot count down, in `onInit`, so `createApp` throws: not a
+ * number, not finite, or not above 0. A game written in plain JS passes anything, so the config is
+ * a boundary.
  *
  * @param config - The resolved config of the plugin.
  * @throws {Error} When `buildMs` is not a finite number above 0.
  */
-function checkConfig(config: Readonly<Config>): void {
+export function checkConfig(config: Readonly<Config>): void {
   const value: unknown = config.buildMs;
 
   if (typeof value === "number" && Number.isFinite(value) && value > 0) return;
@@ -102,12 +104,11 @@ function checkConfig(config: Readonly<Config>): void {
 }
 
 /**
- * Starts the plugin in `onStart`: it checks the config, collects the scenes of the features and
- * registers the one callback that switches them, on the `scene` stage of entering a node.
+ * Starts the plugin in `onStart`: it collects the scenes of the features and registers the one
+ * callback that switches them, on the `scene` stage of entering a node.
  *
  * @param ctx - Kernel context of the scenes plugin.
- * @throws {Error} When `buildMs` is not a finite number above 0, and when two features declare
- *   the same scene id.
+ * @throws {Error} When two features declare the same scene id.
  * @example
  * ```ts
  * startScenes(ctx);
@@ -115,8 +116,6 @@ function checkConfig(config: Readonly<Config>): void {
  * ```
  */
 export function startScenes(ctx: KernelSlice): void {
-  checkConfig(ctx.config);
-
   const scenes = withDeps(ctx);
 
   readScenes(scenes);

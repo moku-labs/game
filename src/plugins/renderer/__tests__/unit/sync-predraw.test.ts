@@ -2,9 +2,9 @@ import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer, Order } from "../../../world/ecs/define";
 import type { AnyComponentValue, Entity, LayerSpec } from "../../../world/types";
-import { Parent, Sprite, Transform } from "../../components";
+import { Parent, Shape, Sprite, Transform } from "../../components";
 import { PREDRAW_NODES } from "../../sync/predraw";
-import type { Config, PixiContainer } from "../../types";
+import type { Config, PixiContainer, PixiFilter } from "../../types";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 import { type RenderCall, type StagePixi, stagePixi } from "../stage-pixi";
 
@@ -178,6 +178,20 @@ function inside(node: PixiContainer, root: pixi.Container): boolean {
 }
 
 /**
+ * Tells whether a subtree holds a node drawn through a filter or a mask.
+ *
+ * @param node - The root of the subtree.
+ * @returns True when one node in it carries filters or a mask.
+ */
+function holdsEffect(node: pixi.Container): boolean {
+  const mask: unknown = node.mask;
+
+  if ((node.filters?.length ?? 0) > 0 || (mask !== null && mask !== undefined)) return true;
+
+  return node.children.some(child => holdsEffect(child));
+}
+
+/**
  * The display object of an entity's view.
  *
  * @param mock - The mock renderer.
@@ -230,6 +244,68 @@ describe("the pre-draw of a scene built aside", () => {
       expect(pieces.some(call => inside(objectOf(run.mock, leaf), call.container))).toBe(true);
     }
 
+    expect(run.mock.world.projection.built()).toBe(true);
+  });
+
+  // Bug: a filtered subtree of the coming scene is pre-drawn: a filter pass per piece in every build frame, and Pixi's
+  // filter stack opened in a render of its own, which the warm-up never does (a throw there unbalances it for good).
+  it("pre-draws a held top with a filtered child without the filtered subtree, and counts no pass for it", async () => {
+    const run = await startStage();
+    const before = run.mock.api.sync.renderPasses();
+
+    run.mock.world.projection.build([], owner, BOARD, 4);
+
+    const big = bigTop(run.mock, 1);
+    const [first, filtered, last] = big.groups;
+
+    if (first === undefined || filtered === undefined || last === undefined)
+      throw new Error("no groups");
+
+    run.mock.api.sync.filters.set(filtered.entity, [
+      { filter: new pixi.AlphaFilter() as unknown as PixiFilter, passes: 1 }
+    ]);
+    run.frame();
+
+    const pieces = run.pieces().map(call => call.container);
+    const filteredTop = objectOf(run.mock, filtered.entity).parent;
+
+    expect(pieces.filter(piece => holdsEffect(piece))).toEqual([]);
+    expect(pieces.filter(piece => filteredTop !== null && inside(piece, filteredTop))).toEqual([]);
+    expect(pieces).toContain(objectOf(run.mock, first.entity).parent);
+    expect(pieces).toContain(objectOf(run.mock, last.entity).parent);
+    expect(run.mock.api.sync.renderPasses()).toBe(before);
+    expect(run.mock.world.projection.built()).toBe(true);
+  });
+
+  // Bug: a clipped subtree is pre-drawn: its mask is pushed on Pixi's stencil stack in a render of its own, or the mask
+  // itself is drawn as a piece.
+  it("pre-draws a clipping top without its masked children and without its mask", async () => {
+    const run = await startStage();
+
+    run.mock.world.projection.build([], owner, BOARD, 4);
+
+    const clip = spawnBuilding(run.mock, [
+      Layer({ name: "board" }),
+      Transform(),
+      Shape({ w: 200, h: 100, clip: true })
+    ]);
+
+    for (let child = 0; child < 3; child += 1) {
+      spawnBuilding(run.mock, [
+        Transform({ x: child * 50 }),
+        Sprite({ texture: "board.cell" }),
+        Parent({ entity: clip })
+      ]);
+    }
+
+    run.frame();
+
+    const pieces = run.pieces().map(call => call.container);
+    const labels = pieces.map(piece => piece.label);
+
+    expect(pieces.filter(piece => holdsEffect(piece))).toEqual([]);
+    expect(labels).not.toContain(`clip#${clip}`);
+    expect(pieces).toContain(objectOf(run.mock, clip));
     expect(run.mock.world.projection.built()).toBe(true);
   });
 

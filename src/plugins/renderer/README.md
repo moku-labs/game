@@ -782,8 +782,14 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
   nodes, by node count, not by level; at least one piece a frame, more while `left()` is above 0.
   Pixi builds the geometry, the text and the uploads of a piece then, so the swap frame draws them
   faster (A26 estimate: about half the first draw). Pixi makes a rendered container a render group;
-  the pre-draw takes the groups it made away again. A piece is drawn only while it still hangs in the
-  top it was cut from: a top that changed since is cut again. A piece that throws ends the pre-draw
+  the pre-draw takes the groups it made away again. A subtree that carries a filter or a mask (and a
+  clip's mask beside the container it clips) is never a piece, nor in one: drawn alone it would cost a
+  filter pass per piece and open Pixi's filter or mask stack in a render of its own, which the warm-up
+  never does either. It is drawn first at the swap, as without the pre-draw; its neighbours without
+  one are still pre-drawn. The pieces are no passes of the frame: the monitor's counters
+  (`stats().renderPasses`, the pass log of an agent build) are paused around each one, and the
+  estimate (`sync.renderPasses()`) never counts a held view. A piece is drawn only while it still hangs
+  in the top it was cut from: a top that changed since is cut again. A piece that throws ends the pre-draw
   of the build (`renderer:predraw-failed`, an error) and the swap draws as without it. The pre-draw
   is skipped after a failed warm-up on this device (`warm.failed`: Pixi's filter stack may be
   unbalanced) and without a device.

@@ -893,9 +893,9 @@ export type Api = {
    * @example
    * ```ts
    * // scenes, at the build start of the switch from the ward to the board of episode 1.
-   * ctx.deps.assets.sceneComing(["board", "ep01"]);
+   * ctx.require(assetsPlugin).sceneComing(["board", "ep01"]);
    * // a rest or budget pressure during the build leaves board and ep01 loaded
-   * ctx.deps.assets.sceneComing([]);
+   * ctx.require(assetsPlugin).sceneComing([]);
    * // the build was discarded: board and ep01 are held no more
    * ```
    */
