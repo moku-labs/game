@@ -510,7 +510,9 @@ export async function pageCheckpoint(
 
     if (unsettled !== undefined) return { ok: false, error: unsettled };
 
+    // Land the motions unless the step keeps them running, then the two frames of the headless leg.
     if (argument.finish) game.anim.finishAll();
+
     await pageTick(handles);
     await pageTick(handles);
 

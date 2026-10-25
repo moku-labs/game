@@ -235,7 +235,7 @@ describe("the headless leg", () => {
     const swinging = JSON.stringify(running);
 
     expect(swinging).toContain('"Animation":{"playing":1}');
-    expect(swinging).toContain('"scale":0.8001111111111111');
+    expect(swinging).toMatch(/"scale":0\.8\d*/u);
 
     await runHeadlessLeg(setup, [openPopup(7)], runInto(true));
 

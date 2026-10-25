@@ -622,6 +622,7 @@ export async function runBrowserLeg(
     );
   }
 
+  // The page of every test: its size, its URL, and the moment the headless leg's clock stands at (F86).
   const chromium = await load();
   const options = pageSize(setup, page);
   const target = { url: rendererUrl(page.url, run.renderer), moment: setup.app().clock.now() };

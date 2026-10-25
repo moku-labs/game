@@ -142,7 +142,8 @@ function checkpointEntry(at: string, fields: Readonly<Record<string, unknown>>):
  * @param index - Its index in the steps, from 0.
  * @returns The checkpoint or the command with its input.
  * @throws {Error} When the step holds no key or more than one, names something that is not a
- *   step, gives a command no input object, or a checkpoint no string.
+ *   step, gives a command no input object, or a checkpoint no string name or a `finish` that is
+ *   not a boolean.
  * @example
  * ```ts
  * stepEntry("reward-popup", { tap: { key: "play" } }, 0); // { kind: "command", name: "tap", input: { key: "play" } }

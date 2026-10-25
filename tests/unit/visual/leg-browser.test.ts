@@ -544,6 +544,33 @@ describe("runBrowserLeg", () => {
     );
   });
 
+  // F87: the page landed every motion whatever the step said, so its picture never matched a finish: false snapshot.
+  it("hands finish: false of a checkpoint to the page: the page lands no motion", async () => {
+    const { game } = await pageGame({ screen: () => pngOf(4, 4) });
+    const landed = { count: 0 };
+
+    vi.stubGlobal("game", {
+      ...game,
+      anim: {
+        ...game.anim,
+        finishAll: () => {
+          landed.count += 1;
+          game.anim.finishAll();
+        }
+      }
+    });
+
+    const { chromium } = fakeChromium();
+    const kept = defineVisualTest("open-popup", {
+      start: { player: { coins: 7 }, checkpoint: "home" },
+      steps: [{ tap: { key: "open" } }, { checkpoint: "open", finish: false }]
+    });
+    const results = await bothLegs([kept], chromium);
+
+    expect(results[0]?.error).toBeUndefined();
+    expect(landed.count).toBe(0);
+  });
+
   it("ends a test whose step does not settle in the page", async () => {
     const { game } = await pageGame();
     const stuck = { on: false };
