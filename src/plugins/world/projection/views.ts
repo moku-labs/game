@@ -62,9 +62,10 @@ function isNode(output: ViewOutput): output is DescriptionNode {
 /**
  * Runs `view(item)` and collects its output by component name. A view that describes a screen
  * returns one node, which becomes the `Tree` of the entity, and `ui` reconciles it from there;
- * the root draws at the `Order` of its place in the mounted list, written before `Tree` because the
- * ecs fires `onAdded` in list order and the `Tree` hook of `ui` reads it. `Order` is part of the
- * view's rest, so a new node compares it by value and writes nothing.
+ * the root draws at the `Order` of its place in the mounted list (or the list of the running build,
+ * which mounts it aside), written before `Tree` because the ecs fires `onAdded` in list order and the
+ * `Tree` hook of `ui` reads it. `Order` is part of the view's rest, so a new node compares it by value
+ * and writes nothing.
  * `Layer` is the projection's own component: a view that returns it is reported and ignored.
  *
  * @param pctx - Domain context of the projection module.
@@ -81,7 +82,10 @@ export function collectView(
   const layerName = pctx.deps.components.Layer.componentName;
   const output = spec.view(item);
   const { Order, Tree } = pctx.deps.components;
-  const order = pctx.ctx.state.projection.mounted.get(spec.name)?.order ?? 0;
+  const state = pctx.ctx.state.projection;
+  // A name is in one table only: the build mounts aside only what the current scene does not mount.
+  const order =
+    (state.mounted.get(spec.name) ?? state.building?.mounted.get(spec.name))?.order ?? 0;
   const produced = isNode(output) ? [Order({ value: order }), Tree({ node: output })] : output;
 
   for (const value of produced) {

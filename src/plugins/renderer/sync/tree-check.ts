@@ -34,7 +34,7 @@ function expectedHostOf(sctx: SyncCtx, entity: Entity, parent: Entity): PixiCont
 
 /**
  * Checks where the views of the given entities hang and reports every one that hangs elsewhere than the ECS says,
- * once per entity. An orphan hangs nowhere on purpose and is skipped.
+ * once per entity. An orphan and a held view of a scene build (spec 31) hang nowhere on purpose and are skipped.
  *
  * @param sctx - Domain context of the sync module.
  * @param entities - The entities a pass built, hung again or took out of the orphans.
@@ -46,7 +46,14 @@ export function checkTree(sctx: SyncCtx, entities: Iterable<Entity>): void {
   for (const entity of entities) {
     const view = state.views.get(entity);
 
-    if (view === undefined || state.orphans.has(entity) || state.mismatched.has(entity)) continue;
+    if (
+      view === undefined ||
+      view.held ||
+      state.orphans.has(entity) ||
+      state.mismatched.has(entity)
+    ) {
+      continue;
+    }
 
     const parent = parentOf(ecs, entity);
     const host = (view.wrapper ?? view.object).parent;

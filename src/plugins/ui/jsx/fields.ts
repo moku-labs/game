@@ -14,7 +14,7 @@ import {
   type TransformValue
 } from "../../renderer/components";
 import { Text } from "../../text/components";
-import type { Entity } from "../../world/types";
+import type { AnyComponentValue, Entity } from "../../world/types";
 import { UI_OWNER } from "../components";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { TextInputLook, UiCtx } from "../types";
@@ -570,7 +570,8 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
 
   /**
    * Spawns the four parts of a field, each a child of the field: its pose, its `Parent`, its
-   * visual, in that order, as an element is spawned.
+   * visual, in that order, as an element is spawned. The parts of a field of a scene built aside
+   * are the build's too, as the field is: held with it and dropped by a discard (spec 31).
    *
    * @param entity - The field entity.
    * @param values - What the parts draw.
@@ -578,13 +579,21 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
    */
   function spawnParts(entity: Entity, values: PartValues): FieldParts {
     const ecs = ctx.deps.world.ecs;
+    const projection = ctx.deps.world.projection;
     const parent = Parent({ entity });
-    const box = (part: BoxPart): Entity =>
-      ecs.spawn(UI_OWNER, [Transform(part.pose), parent, Shape(part.shape)]);
+    const aside = projection.isBuilding(entity);
+    const spawn = (components: readonly AnyComponentValue[]): Entity => {
+      const part = ecs.spawn(UI_OWNER, components);
+
+      if (aside) projection.adopt(part);
+
+      return part;
+    };
+    const box = (part: BoxPart): Entity => spawn([Transform(part.pose), parent, Shape(part.shape)]);
 
     return {
       selection: box(values.selection),
-      text: ecs.spawn(UI_OWNER, [
+      text: spawn([
         Transform(values.text.pose),
         parent,
         Text({

@@ -130,9 +130,10 @@ app.scenes.current(); // "home"
 | 9 | `assets.load` for every name at once, all awaited, raced against the node's abort signal. The first failure rejects |
 | 10 | Live mode only: `assets.warm` for every name at once, all awaited, raced against the abort. The textures go to the GPU `renderer.uploads` a drawn frame while the old scene is still on screen, so the frame that shows the new scene uploads nothing (F61: on a Galaxy A26 the first switch to a board took one frame of 284 ms with 8 uploads in it). Textures already on the GPU, headless, no device or `uploads: 0` answer at once. A warm that fails is a warning, never a rejection. A fast walk skips this step |
 | 11 | Aborted, or the plugin stopped during the warm (a stop answers a waiting upload instead of rejecting it): return. Nothing was touched, the old scene is still there |
-| 12 | One synchronous block: `setLayers` → `unmount` what only the old scene lists → `mount` the new scene's list (a projection both list stays, see below) → `current` → `world.ecs.setScene(id)` → `named` → `assets.sceneBundles(named)` → `time.wake()` → `time.sceneChanged()` → `scenes:changed` |
+| 12 | Live mode, the world running live and a drawing renderer (`renderer.host.ready()`): the scene is built aside, see [The next scene built aside](#the-next-scene-built-aside). It ends in the block of step 13, with `projection.commit()` in the place of `mount` |
+| 13 | One synchronous block: `setLayers` → `unmount` what only the old scene lists → `mount` the new scene's list (a projection both list stays, see below) → `current` → `world.ecs.setScene(id)` → `named` → `assets.sceneBundles(named)` → `time.wake()` → `time.sceneChanged()` → `scenes:changed` |
 
-**The scene of the systems.** `world.ecs.setScene(id)` in the block above tells the world which scene is mounted, so a system with `scenes: ["board"]` runs while the board is mounted, and while it leaves: the world keeps the scene before as leaving until nothing carries `Exiting` any more (world README, "When a system runs"). A failed or aborted switch returns before the block, so the world keeps the old scene.
+**The scene of the systems.** `world.ecs.setScene(id)` in the block of step 13 tells the world which scene is mounted, so a system with `scenes: ["board"]` runs while the board is mounted, and while it leaves: the world keeps the scene before as leaving until nothing carries `Exiting` any more (world README, "When a system runs"). A failed or aborted switch returns before the block, so the world keeps the old scene.
 
 **The re-read.** At any other node (no target, or the mounted scene: a rest node, a live transit node, an over node) a mounted scene with `bundles` is read again from the committed state. The same list, in the same order: nothing happens. Another list: every name is awaited, then `named` is replaced and `assets.sceneBundles(named)` is told. No mount, no `scenes:changed`, no `time.wake()`, no `time.sceneChanged()`. An abort keeps the old list. A scene without `bundles` is never re-read, and a transit node of a fast walk neither switches nor re-reads.
 
@@ -144,6 +145,7 @@ app.scenes.current(); // "home"
 | Abort during the load | The callback returns. A rejection would be a node failure; `flow` handles the abort itself |
 | Bundle load fails | The callback rejects. `flow` rolls back, emits `flow:error` and re-enters the rest node, whose scene is still mounted |
 | `mount` throws | Same path as a failed load |
+| A `view` throws in the build start of a live switch | Same path: the world drops what the build spawned first, so nothing is mounted |
 | Shared projection in both scenes | Stays mounted when both declare its layers alike: the same entities, no exit and no enter, its motions run on, and its screen roots move to their place in the new list. Declared otherwise: unmounted and mounted again ("A projection both scenes list") |
 | Fast walk | Transit nodes only record. The switch happens once per rest point, and a headless run really mounts |
 | `restore`, rollback, deep link | Same path: the node is entered and the scene is built from the declaration. A restore target that names no scene keeps the current scene, so checkpoints name theirs |
@@ -153,6 +155,61 @@ app.scenes.current(); // "home"
 | Leaving a scene | `unmount` flushes the motions and the despawn queue of every projection only the old scene lists, at once |
 
 A load that fails after the abort is logged with `ctx.log.warn` and never thrown: nobody waits for it any more.
+
+## The next scene built aside
+
+A live switch with a drawing renderer builds the next scene while the old one stays current, drawn
+and alive, and swaps it in one frame (spec 31, F61 S2). What a game sees:
+
+- **The switch ends later.** The steps up to the warm are as before. Then the logic of the coming
+  scene (its projections' `view`, the elements and the layout of its JSX) runs in one block, and the
+  renderer makes its Pixi views over the next frames, off the stage, in the budget of each frame
+  after the live work: `buildMs`, by default half of the frame interval the loop runs at when the
+  build starts (8.33 ms at 60 Hz, 4.17 ms at 120 Hz). Their first draw is the swap frame. On a phone
+  the swap comes some frames later than the old one-block switch did, up to about 0.15 s after the
+  tap.
+- **The old scene stays.** Until the swap `app.scenes.current()` answers the old scene, nothing of
+  the new one is drawn, hit, found with `ui.find` or shown by the `ui`, `locate` and `render` doors,
+  and its `enter` motions and hooks wait. The projections only the old scene lists keep what they
+  showed when the switch began, as in a one-block switch: the state of the next node never reaches
+  them, and they leave with the swap. The gate stays closed, as during the bundle wait: the
+  first tap after the switch lands on a complete scene.
+- **The swap.** The first frame `world.projection.built()` answers true, the `signals` callback of
+  the build runs the block of step 13 with `projection.commit()` in the place of `mount`, in the same
+  order, and `scenes:changed` is emitted there. The next frame is the swap frame: the old roots play
+  their exit, the held enters of the new scene start and every view of it is hung in one block. A
+  build with nothing left for `ui` and the renderer (a scene of kept projections only) commits at
+  once, inside the switch, with no frame between.
+- **The coming bundles are held** from the build start (`assets.sceneComing(named)`), so neither the
+  budget nor a `"leave"` release takes them while the old scene is up; `assets.sceneBundles` stays at
+  the swap, so the old scene's bundles stay held until its exit is over (F51b).
+- **An abort** of the node during the build (a restore, the inbox, a stop of the runner) discards
+  it: the world despawns what it made with no motion, the coming list is emptied and the switch
+  returns. The current scene, the layers, the scene of the world's systems, the named bundles and
+  the mounted projections were never touched. A stop of the plugin drops the frame callback and
+  lets the switch return; `world.onStop` clears the rest.
+- **One block instead.** A fast walk (a restore, a test walk), a world that runs fast or paused by
+  the time the build would start (the restore of a repro enters its checkpoint live and walks its
+  route fast), a renderer without a device (headless, a lost device) and a switch where a
+  projection both scenes list is declared on other layer rules (the world answers `build` with
+  false, see "A projection both scenes list") take the one-block path. The last one is warned in a
+  dev build, `scenes:build-skipped` with the scene and its projections. A world that stops running
+  live during a build skips its `layout` phase, where `ui` lays the coming scene out: the build is
+  discarded and the scene mounted in one block, so a walk that waits for the gate never waits for
+  good.
+
+```ts
+// The default: half of each frame, read at the start of every build (8.33 ms at 60 Hz, 4.17 ms at 120 Hz).
+createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { buildMs: "auto" } } });
+
+// A game on a slow phone gives the next scene a fixed 3 ms of each frame: the switch takes a frame or two more.
+createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { buildMs: 3 } } });
+```
+
+**Tests of a game.** A live-renderer test that steps a fixed number of frames after a switch, or
+awaits the gate without stepping frames, sees the switch later: step frames until `scenes:changed`
+or the gate opens. "Drawn in the first frame after the switch" reads "drawn in the first frame after
+the commit". A headless test and a fast walk keep their timing.
 
 **Known limit.** When a scene stays mounted and the committed state changes what `bundles` names (a restore of another episode while the ward is up), the projections reconcile on `model:committed` before the scene stage awaits the new bundle, so the new art may be missing for the frames of that load (the texture lookup of `assets` warns and loads it). A switch never shows a scene before its bundles are in.
 
@@ -204,32 +261,43 @@ HUD that is not shared does not blink either.
 
 ## Configuration
 
-None. A scene is data in a feature. A transition effect is V3 work of `anim`, so a key here would have no reader.
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is half of the frame interval the loop runs at, `500 / time.rate().fps`, read once at the build start: 8.33 ms at 60 Hz, 4.17 ms at 120 Hz (half a 60 Hz frame if `time` answers no rate). A number is a fixed budget |
+
+A value that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
+
+```
+[game] scenes.buildMs is 0.
+  Give "auto" or the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4.
+```
+
+A scene is data in a feature. A transition effect is V3 work of `anim`.
 
 ## Events
 
 | Event | Payload | When |
 |---|---|---|
-| `scenes:changed` | `{ from, to, music }` | After the mounts, once per real switch |
+| `scenes:changed` | `{ from, to, music }` | After the mounts, once per real switch; at the commit of a scene built aside |
 
 `music` is the new scene's key, so `audio` needs no lookup API: it fades the old track out and the new one in straight from the payload. A scene without music carries `undefined`. Nobody answers the event.
 
 ## Dependencies
 
-`flow`, `world`, `assets`, `time`, `model`, `renderer`. The layers go through `world.projection`, which `renderer.sync` reads; `renderer` is used only for the performance log.
+`flow`, `world`, `assets`, `time`, `model`, `renderer`. The layers go through `world.projection`, which `renderer.sync` reads; `renderer` tells whether it draws, which picks the path of a switch, and keeps the performance log.
 
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
-| `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `ecs.setScene` of the mounted scene |
-| `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
-| `renderer` | `monitor.event("scene", …)`: the performance log of an agent build names the switch |
-| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over |
+| `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
+| `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
+| `renderer` | `host.ready()`, which picks the path of a live switch; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
+| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard; `rate().fps` at a build start, for the budget of `"auto"`; `agentClock()`, the page clock of a build's `buildMs` in an agent build |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle
 
-`onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
+`onInit` checks `buildMs`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
 
 ## Not in V2
 

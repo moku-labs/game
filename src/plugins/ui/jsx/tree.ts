@@ -9,7 +9,7 @@ import type { Entity } from "../../world/types";
 import type { Rect } from "../layout/types";
 import { drawnRect } from "../visual";
 import { fieldValue } from "./fields";
-import type { Element, JsxState, Root, UiNode } from "./types";
+import type { AsideOf, Element, JsxState, Root, UiNode } from "./types";
 import { isOwnKey } from "./window";
 
 /** Reads the string `text` resolved for an entity: `Text.resolved`, empty before its first frame. */
@@ -158,18 +158,22 @@ function nodeOf(
 /**
  * Every mounted root in the order a reader meets them: the popup roots first, the highest `Order`
  * of them first, then the projection roots in the layer order of the scene, and by their `Order`
- * inside one layer, bottom first, as they draw.
+ * inside one layer, bottom first, as they draw. A root of the scene `world` builds aside is left
+ * out until the swap: nothing of it is on the screen yet (spec 31).
  *
  * @param state - The jsx state.
  * @param layers - The layer names of the scene, in draw order.
+ * @param isAside - Whether an entity belongs to the scene built aside; none leaves no root out.
  * @returns The roots, sorted.
  * @example
  * ```ts
  * sortedRoots({ roots: new Map() } as unknown as JsxState, ["ui"]); // []
  * ```
  */
-export function sortedRoots(state: JsxState, layers: readonly string[]): Root[] {
-  const roots = [...state.roots.values()];
+export function sortedRoots(state: JsxState, layers: readonly string[], isAside?: AsideOf): Root[] {
+  const roots = [...state.roots.values()].filter(
+    root => isAside === undefined || !isAside(root.entity)
+  );
   const popups = roots.filter(root => root.popup !== undefined);
   const screens = roots.filter(root => root.popup === undefined);
   const indexOf = (root: Root): number => {
@@ -205,13 +209,15 @@ function placeOf(
 }
 
 /**
- * Reads every mounted root, popups first, then the projection roots in layer order. The rects of a
- * root laid out in a slot are reported in root coordinates, through the root pose of its slot.
+ * Reads every mounted root, popups first, then the projection roots in layer order, and none of the
+ * scene `world` builds aside. The rects of a root laid out in a slot are reported in root
+ * coordinates, through the root pose of its slot.
  *
  * @param state - The jsx state.
  * @param layers - The layer names of the scene, in draw order.
  * @param resolvedOf - Reads the string `text` resolved for an entity; none in a read without a world.
  * @param slotPose - The root pose of a slot, `rootPoseOf` of `renderer`; none in a read without a world.
+ * @param isAside - Whether an entity belongs to the scene `world` builds aside: such a root is not read.
  * @returns One root node, or every root under a `screen` node.
  * @example
  * ```ts
@@ -222,11 +228,12 @@ export function readTree(
   state: JsxState,
   layers: readonly string[] = [],
   resolvedOf?: ResolvedOf,
-  slotPose?: (slot: Entity) => TransformValue
+  slotPose?: (slot: Entity) => TransformValue,
+  isAside?: AsideOf
 ): UiNode {
   const nodes: UiNode[] = [];
 
-  for (const root of sortedRoots(state, layers)) {
+  for (const root of sortedRoots(state, layers, isAside)) {
     const element = root.element === undefined ? undefined : state.elements.get(root.element);
 
     if (element !== undefined)

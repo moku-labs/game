@@ -6,6 +6,7 @@ import type { Hint } from "../../flow/types";
 import type { Root } from "../../model/types";
 import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
+import { buildNames, commitBuild, discardBuild } from "./build";
 import { cancelTracks, forgetEndedTracks, forgetJoined, runningComponents } from "./driver";
 import {
   cancelHandles,
@@ -260,7 +261,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       const mounted = state.mounted.has(spec.name);
 
-      if (mounted) checkLayers(pctx, spec);
+      if (mounted) checkLayers(spec, state.layers);
       state.specs.set(spec.name, spec);
       if (mounted) forceRerun();
     },
@@ -383,7 +384,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.mounted.get(projection)?.live.get(key)?.entity ?? state.keys.get(projection)?.get(key),
 
     entitiesOf: (name: string): readonly Entity[] => {
-      const mounted = state.mounted.get(name);
+      const mounted = state.mounted.get(name) ?? state.building?.mounted.get(name);
 
       return mounted === undefined ? [] : liveEntities(mounted);
     },
@@ -457,6 +458,61 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     rerunAll: forceRerun,
 
+    build: (
+      names: readonly string[],
+      owner: Owner,
+      layers: ReadonlyArray<LayerSpec>,
+      budgetMs: number
+    ): boolean => buildNames(pctx, names, owner, layers, budgetMs),
+
+    built: (): boolean => {
+      if (state.building === undefined) return false;
+
+      for (const check of state.buildChecks) {
+        if (!check()) return false;
+      }
+
+      return true;
+    },
+
+    commit: (): void => {
+      commitBuild(pctx);
+    },
+
+    discard: (): void => {
+      discardBuild(pctx);
+    },
+
+    left: (): number => {
+      const building = state.building;
+
+      if (building === undefined) return Number.POSITIVE_INFINITY;
+
+      return building.budgetMs - (ctx.deps.clock.now() - building.frameStart);
+    },
+
+    isBuilding: (entity: Entity): boolean => state.building?.entities.has(entity) === true,
+
+    onBuild: (check: () => boolean): (() => void) => {
+      state.buildChecks.push(check);
+
+      return (): void => {
+        const at = state.buildChecks.indexOf(check);
+
+        if (at !== -1) state.buildChecks.splice(at, 1);
+      };
+    },
+
+    adopt: (entity: Entity): void => {
+      state.building?.entities.add(entity);
+    },
+
+    startFrame: (now: number): void => {
+      const building = state.building;
+
+      if (building !== undefined) building.frameStart = now;
+    },
+
     markDirty: (roots: readonly Root[], cause: Cause): void => {
       const dirty = state.dirty ?? emptyDirty();
 
@@ -512,6 +568,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     },
 
     clear: (): void => {
+      discardBuild(pctx);
       // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
       for (const mounted of [...state.mounted.values()]) clearMounted(pctx, mounted);
       state.mounted.clear();

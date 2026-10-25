@@ -17,6 +17,7 @@ import { createGuideHandler } from "./guide";
 import { iconLineMoved, installMeasure, markMeasured, remeasureShown } from "./measure";
 import {
   enterPosed,
+  isHeld,
   liftRest,
   play,
   playExtraChange,
@@ -144,10 +145,11 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     loop: (element: Element): void => startLoop(ctx, element),
 
+    // An element held for the swap of a scene build plays no `change.Box` (spec 31).
     change: (element: Element, previous: Rect, hint?: Hint): boolean => {
       const hook = element.motion?.change?.Box;
 
-      if (hook === undefined) return false;
+      if (hook === undefined || isHeld(ctx, element)) return false;
 
       play(ctx, element, view => hook(view, previous, element.rect, hint));
 

@@ -14,7 +14,7 @@ import type { Element, ScrollMotion } from "../../jsx/types";
 import type { stepScroll } from "../../layout/scroll";
 import type { ElementLookup, LayoutState } from "../../layout/types";
 import type { UiCtx } from "../../types";
-import { createPerfApp, type PerfApp, settlePerfApp } from "./app";
+import { createPerfApp, MOUNTED, type PerfApp, settlePerfApp } from "./app";
 
 /** Calls before a window, so the engine's code reaches its optimized tier first. */
 const WARM_CALLS = 30_000;
@@ -65,6 +65,8 @@ export type PerfUi = {
   press: (entity: Entity) => void;
   /** What `ui` does when `Pressed` leaves an entity: the pointer came up. */
   release: (entity: Entity) => void;
+  /** `ui`'s part of a scene build, the check it registered with `world.projection.onBuild`. */
+  built: () => boolean;
 };
 
 /**
@@ -78,9 +80,11 @@ export async function startPerfUi(): Promise<PerfUi> {
   const ecs = app.world.ecs;
   const systems = new Map<string, Step>();
   const hooks: { boxed?: WorldHook; press?: WorldHook; release?: WorldHook } = {};
+  const checks: Array<() => boolean> = [];
   const register = ecs.system;
   const onAdded = ecs.onAdded;
   const onRemoved = ecs.onRemoved;
+  const onBuild = app.world.projection.onBuild;
 
   vi.spyOn(ecs, "system").mockImplementation((definition: AnySystem) => {
     // The three systems of ui run with no rows and read the frame's time of their context only.
@@ -100,6 +104,11 @@ export async function startPerfUi(): Promise<PerfUi> {
 
     return onRemoved(watched, fn);
   });
+  vi.spyOn(app.world.projection, "onBuild").mockImplementation(check => {
+    checks.push(check);
+
+    return onBuild(check);
+  });
 
   await app.start();
   vi.restoreAllMocks();
@@ -109,6 +118,8 @@ export async function startPerfUi(): Promise<PerfUi> {
   const solve = systems.get("ui.solve");
   const enter = systems.get("ui.enter");
   const { boxed, press, release } = hooks;
+  // The renderer registers a part of its own: ui's is the reconciler's `asideBuilt`.
+  const built = checks.find(check => check.name === "asideBuilt");
 
   if (
     reconcile === undefined ||
@@ -116,9 +127,12 @@ export async function startPerfUi(): Promise<PerfUi> {
     enter === undefined ||
     boxed === undefined ||
     press === undefined ||
-    release === undefined
+    release === undefined ||
+    built === undefined
   ) {
-    throw new Error("perf: ui registered no layout or sync systems or no Box or Pressed hooks");
+    throw new Error(
+      "perf: ui registered no layout or sync systems, no Box or Pressed hooks or no part of a build"
+    );
   }
 
   return {
@@ -128,7 +142,8 @@ export async function startPerfUi(): Promise<PerfUi> {
     enter,
     boxed: (entity: Entity): void => boxed(entity, true),
     press: (entity: Entity): void => press(entity, true),
-    release: (entity: Entity): void => release(entity, true)
+    release: (entity: Entity): void => release(entity, true),
+    built
   };
 }
 
@@ -142,6 +157,28 @@ export async function startBoxPerf(): Promise<PerfUi> {
   const ui = await startPerfUi();
 
   ui.app.world.projection.mount(["boxes"], { kind: "plugin", name: "perf" });
+
+  for (let frame = 0; frame < 3; frame += 1) ui.app.time.step(16);
+
+  return ui;
+}
+
+/**
+ * Starts the perf app and builds the names of the box files aside, as a live switch builds the
+ * next scene (spec 31): every mounted projection is kept, and the names are reconciled and solved
+ * while their enters wait in the queue for the swap.
+ *
+ * @returns The app and its `ui` steps, the names built and held.
+ */
+export async function startAsidePerf(): Promise<PerfUi> {
+  const ui = await startPerfUi();
+  const projection = ui.app.world.projection;
+
+  const owner = { kind: "plugin", name: "perf" } as const;
+
+  if (!projection.build([...MOUNTED, "boxes"], owner, projection.layers(), 4)) {
+    throw new Error("perf: the names were not built aside");
+  }
 
   for (let frame = 0; frame < 3; frame += 1) ui.app.time.step(16);
 

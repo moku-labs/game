@@ -84,14 +84,16 @@ export type Motion = MotionHandle | void;
 /**
  * Why a motion hook plays: `"mount"` when the view or element comes or goes with its screen (a scene mount or
  * unmount, a load, a restore, a paused or fast world), `"change"` when a commit changed a live screen (a new key,
- * a key that left, a new element in a live tree, a popup).
+ * a key that left, a new element in a live tree, a popup). `"discard"` when an aborted scene build dropped the view
+ * before it was ever drawn (`projection.discard()`): it plays no exit, so a game's hook never sees it; the removal
+ * hook of `ui` reads it through `causeOf` and drops the root at once.
  *
  * @example
  * ```ts
  * const cause: MotionCause = "change";
  * ```
  */
-export type MotionCause = "mount" | "change";
+export type MotionCause = "mount" | "change" | "discard";
 
 /**
  * What reduced motion does to one track: `"cut"` (the default) lands it on its target at the next frame step, or holds
@@ -646,6 +648,38 @@ export type ProjectionState = {
    * key, so the next sweep looks.
    */
   sweptDespawns: number;
+  /** The running build of the next scene; absent when none runs, never written as `undefined`. */
+  building?: Building;
+  /** The `onBuild` checks: every one answers true before `built()` does. Kept across builds. */
+  buildChecks: Array<() => boolean>;
+};
+
+/**
+ * The build of the next scene aside (spec 31): its projections mounted into a table of their own, so a name never has
+ * two records in `mounted`, and every entity the build spawned, so `isBuilding` answers with one lookup. Absent while
+ * no build runs.
+ */
+export type Building = {
+  /** The projection list of the coming scene, in its order: the places of its screen roots. */
+  names: readonly string[];
+  /** The layer list of the coming scene, as the caller handed it: the build checked the names against it. */
+  layers: ReadonlyArray<LayerSpec>;
+  /** Who owns the entities of the projections the build mounts. */
+  owner: Owner;
+  /** The projections only the coming list names, mounted aside until the commit moves them into `mounted`. */
+  mounted: Map<string, Mounted>;
+  /** Every entity of the build: the views it spawned and the entities `adopt` marked. */
+  entities: Set<Entity>;
+  /** The game clock at the start of this frame (world's `input` phase), or at the build start in its own frame. */
+  frameStart: number;
+  /** Milliseconds per frame the building work may take. */
+  budgetMs: number;
+  /**
+   * Whether a reconcile passed over a mounted projection the coming list drops, which keeps what it showed when the
+   * switch began: `"change"`, or `"rerun"` when that reconcile forced `view`. The commit and the discard then mark the
+   * world dirty, so one still mounted reads the store in the next frame. Absent while none was passed over.
+   */
+  held?: "change" | "rerun";
 };
 
 /**
@@ -727,6 +761,16 @@ export type ReconcileOptions = {
    * settle; a direct one writes the rest pose after the flush.
    */
   settle: boolean;
+  /**
+   * The table of mounted projections to reconcile: `mounted` when left out, the table of the running build for the
+   * build start. A reconcile of `mounted` that is not limited by `names` reconciles the building table too, direct.
+   */
+  table?: Map<string, Mounted>;
+  /**
+   * Whether a throw of an entry (a `view` that throws) leaves the reconcile instead of being logged: the build start
+   * drops what it spawned and throws it on.
+   */
+  strict?: boolean;
 };
 
 /**
@@ -937,8 +981,8 @@ export type ProjectionApi = {
 
   /**
    * How the view of an entity came, or how it is leaving: `"mount"` when a direct reconcile or an unmount moved it,
-   * `"change"` when a live commit did. A despawned view still answers until the next sweep, so a hook on its removal
-   * can ask. `undefined` for an entity no projection made.
+   * `"change"` when a live commit did, `"discard"` when `discard()` dropped the build it belonged to. A despawned view
+   * still answers until the next sweep, so a hook on its removal can ask. `undefined` for an entity no projection made.
    *
    * @param entity - A view, or a view in its removal hook.
    * @returns The cause, or `undefined`.
@@ -1005,11 +1049,12 @@ export type ProjectionApi = {
 
   /**
    * The live view entities of a mounted projection, in the order of its model keys. A view that
-   * plays its exit is left out, and so is an element registered with `registerKey`. Every call
-   * hands out a new array.
+   * plays its exit is left out, and so is an element registered with `registerKey`. A projection
+   * the running build mounts answers its building views (`isBuilding` tells them apart), so a host
+   * of the coming scene can take them before the swap. Every call hands out a new array.
    *
    * @param name - Name of the projection.
-   * @returns The entities, or `[]` when the projection is not mounted.
+   * @returns The entities, or `[]` when the projection is neither mounted nor being built.
    * @example
    * ```ts
    * // `ui` hosts the board inside a slot and parents every board item to it on reconcile.
@@ -1135,6 +1180,174 @@ export type ProjectionApi = {
    * ```
    */
   rerunAll(): void;
+
+  /**
+   * Starts building the next scene aside, while the current one stays mounted, drawn and alive. The projections only
+   * the coming list names are mounted at once, direct, against the committed state, into a table of their own: their
+   * views are spawned and flagged building (`isBuilding`), and their screen roots take the `Order` of their place in
+   * the coming list. `entityOf` does not answer for them until `commit`. A projection the current scene mounts and
+   * the coming list declares alike (F23) is not touched now. Answers `false` and touches nothing when a listed
+   * projection is mounted now under other layer rules: building it beside its live twin would need two records under
+   * one name, so the caller takes the one-block path (`setLayers`, `unmount`, `mount`). Nothing is built when the call
+   * throws: the entities a throwing `view` left behind are despawned first.
+   *
+   * @param names - The projection list of the coming scene, in its order.
+   * @param owner - Who owns the entities of the projections the build mounts.
+   * @param layers - The layer list of the coming scene: the names are checked against it, not the current list.
+   * @param budgetMs - Milliseconds per frame the building work of the other plugins may take, read through `left`.
+   * @returns True when the build runs, false when a listed projection is mounted now under other layer rules.
+   * @throws {Error} When a build already runs, for an unknown name, for a `layer` or `lift` the coming list does not
+   *   declare, and when a `view` throws.
+   * @example
+   * ```ts
+   * // `scenes` leaves the ward, whose HUD draws in `ui` sorted by order.
+   * const projection = ctx.require(worldPlugin).projection;
+   *
+   * // The shop sorts `ui` otherwise: nothing is built, `scenes` mounts the shop in one block.
+   * projection.build(
+   *   ["hud", "shop.shelf"],
+   *   { kind: "plugin", name: "scenes" },
+   *   [{ name: "ui", sort: "none" }],
+   *   4
+   * ); // false
+   *
+   * // The board declares `ui` alike: the HUD stays, the board items are built aside.
+   * projection.build(
+   *   ["board.items", "hud"],
+   *   { kind: "plugin", name: "scenes" },
+   *   [{ name: "items", sort: "y" }, { name: "ui", sort: "order" }],
+   *   4
+   * ); // true
+   * projection.entityOf("board.items", "i7"); // undefined until the commit
+   *
+   * // A second build before the commit or the discard of the first:
+   * projection.build(["shop.shelf"], { kind: "plugin", name: "scenes" }, [{ name: "ui", sort: "none" }], 4);
+   * // throws: A scene is already being built
+   * ```
+   */
+  build(
+    names: readonly string[],
+    owner: Owner,
+    layers: ReadonlyArray<LayerSpec>,
+    budgetMs: number
+  ): boolean;
+
+  /**
+   * Whether the running build is done: true when a build runs and every `onBuild` check answers true, false without a
+   * build. A caller polls it once a frame; it is never an event.
+   *
+   * @returns True when the build can be committed.
+   * @example
+   * ```ts
+   * // `scenes`, in its `signals` callback while the board builds:
+   * const projection = ctx.require(worldPlugin).projection;
+   * projection.built(); // false on the first build frame: the renderer still creates views
+   * projection.built(); // true two frames later: commit now
+   * ```
+   */
+  built(): boolean;
+
+  /**
+   * The swap of a build: its projections become mounted, each at the `Order` of its place in the coming list as
+   * `mount` would write it, a kept projection (F23) takes its new place, every building flag clears and the table is
+   * dropped. Each moved and kept projection takes the layer list `setLayers` stored just before, so the next scene
+   * compares it by identity as after a `mount`. The loops of the moved views start in the next live sweep. Does nothing
+   * without a build.
+   *
+   * @example
+   * ```ts
+   * // `scenes`, in the frame `built()` first answers true: the layers, the leaving list out, the build in.
+   * const projection = ctx.require(worldPlugin).projection;
+   * projection.setLayers([{ name: "items", sort: "y" }, { name: "ui", sort: "order" }]);
+   * projection.unmount(["ward.beds"]);
+   * projection.commit();
+   * projection.entityOf("board.items", "i7"); // 1048600: mounted now
+   * projection.built(); // false: nothing builds any more
+   * ```
+   */
+  commit(): void;
+
+  /**
+   * Drops the running build: every entity it spawned, its views and the entities `adopt` marked, is despawned at once
+   * with no motion, and the table is dropped. A dropped view leaves with the cause `"discard"`, which a removal hook
+   * reads through `causeOf`. The mounted projections, the layer list and the scene of the world are not touched. Does
+   * nothing without a build.
+   *
+   * @example
+   * ```ts
+   * // `scenes`: a restore aborted the node while the board was built.
+   * const projection = ctx.require(worldPlugin).projection;
+   * projection.discard();
+   * projection.causeOf(1_048_600); // "discard", until the next sweep
+   * projection.isBuilding(1_048_600); // false
+   * ```
+   */
+  discard(): void;
+
+  /**
+   * Milliseconds of building budget left in this frame: the build's `budgetMs` minus the game clock time since the
+   * frame started (read at the start of world's `input` phase). The clock counts whole milliseconds. Negative once
+   * the frame spent more; `Infinity` with no build. Allocates nothing.
+   *
+   * @returns The milliseconds left, or `Infinity`.
+   * @example
+   * ```ts
+   * // A renderer build step creates held views while the frame has budget, at least one a frame.
+   * const projection = ctx.require(worldPlugin).projection;
+   * projection.left(); // 3: 1 ms of the 4 ms budget is spent
+   * projection.left(); // -1 after 4 ms more of views: the rest waits for the next frame
+   * ```
+   */
+  left(): number;
+
+  /**
+   * Whether an entity belongs to the running build: a view it spawned, or an entity `adopt` marked. One set lookup;
+   * false with no build and after the commit. Allocates nothing.
+   *
+   * @param entity - The entity to ask about.
+   * @returns True for an entity of the running build.
+   * @example
+   * ```ts
+   * // The renderer pass sorts the views of the coming scene out of its live work.
+   * const projection = ctx.require(worldPlugin).projection;
+   * projection.isBuilding(1_048_600); // true: a board item the build spawned
+   * projection.isBuilding(1_048_576); // false: a ward bed on screen
+   * ```
+   */
+  isBuilding(entity: Entity): boolean;
+
+  /**
+   * Registers one part of the build that has to be done before the swap: `built()` answers true only when every
+   * registered check does. A registration stays across builds.
+   *
+   * @param check - Answers true when the caller's part of the running build is done.
+   * @returns The remover; calling it twice is safe.
+   * @example
+   * ```ts
+   * // The renderer, at start: its part is done when no building view waits for its Pixi object.
+   * const off = ctx.require(worldPlugin).projection.onBuild(() => state.aside.count === 0);
+   *
+   * off(); // onStop: the renderer is gone
+   * ```
+   */
+  onBuild(check: () => boolean): () => void;
+
+  /**
+   * Marks an entity another plugin spawned for a building root as building, so `isBuilding` answers for the whole
+   * tree and `discard` despawns it with the rest. Does nothing with no build; the commit clears the mark with every
+   * other.
+   *
+   * @param entity - The entity to mark.
+   * @example
+   * ```ts
+   * // `ui` spawns an element of a building root and marks it right away.
+   * const world = ctx.require(worldPlugin);
+   * const button = world.ecs.spawn({ kind: "plugin", name: "ui" }, []);
+   * world.projection.adopt(button);
+   * world.projection.isBuilding(button); // true until the commit
+   * ```
+   */
+  adopt(entity: Entity): void;
 };
 
 /**
@@ -1153,6 +1366,14 @@ export type ProjectionInternal = {
    * Reconciles when the world is dirty. Runs at the start of `time` phase `input`.
    */
   reconcileIfDirty(): void;
+
+  /**
+   * Records the moment a frame starts, for the budget `left()` counts down. Runs first in `time`
+   * phase `input`, with the moment `Now` gets; a frame without a build only reads a field.
+   *
+   * @param now - The game clock at the start of the frame.
+   */
+  startFrame(now: number): void;
 
   /**
    * Empties the hint buffer. Runs once per frame, reconcile or not.

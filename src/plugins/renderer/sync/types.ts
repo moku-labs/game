@@ -176,6 +176,12 @@ export type View = {
   hiddenTop: number;
   /** The HUD factor an overlay fades this view with (a `HudPart`), 1 for every other view (spec 22 O7). */
   hud: number;
+  /**
+   * A held top of a scene build (spec 31): a view of the next scene with no parent, or with a live parent, built while
+   * the current scene stays drawn. It hangs nowhere in the stage, is listed in `SyncState.heldViews`, and is attached
+   * in the pass after the commit.
+   */
+  held: boolean;
 };
 
 /**
@@ -978,8 +984,10 @@ export type SyncInternal = {
   rebuildAll(): void;
 
   /**
-   * One pass over the change sets: removed, layers, added, changed, the views that lost their `Parent`, the orphans
-   * whose parent has a view now, the adapters' values, the invalidated keys and the nine-slice switch.
+   * One pass over the change sets: removed, layers, the held views of a scene build that was committed, added, changed,
+   * the views that lost their `Parent`, the orphans whose parent has a view now, the adapters' values, the invalidated
+   * keys and the nine-slice switch; then, while a scene is built aside, the views of its aside queue under the build
+   * budget (spec 31).
    */
   pass(): void;
 
@@ -1053,6 +1061,14 @@ export type SyncInternal = {
    * @returns True when it drew a probe in this frame: the frame is then no sample of the adaptive rate.
    */
   warmStep(): boolean;
+
+  /**
+   * The render phase's half of a scene build (spec 31): tells whether the pass made views of the build aside in this
+   * frame, and clears the count, so a frame the pass did not run in reads false. A field read and no allocation.
+   *
+   * @returns True when this frame did building work: such a frame is no sample of the adaptive rate.
+   */
+  takeBuildWork(): boolean;
 
   /**
    * Uploads up to `renderer.uploads` queued texture sources (F60), in a drawn frame, right after the warm-up's probes
@@ -1434,6 +1450,33 @@ export type OverlayState = {
 export type SyncCounts = { views: number; pooled: number };
 
 /**
+ * The building entities whose view waits to be made (spec 31): sorted out of `added` by the pass while a scene is
+ * built aside, made in chunks after the live pass under `world.projection.left()`. The queue is dense, from `head` to
+ * `count`, in the order the pass sorted them, and emptied when the head reaches the end. Private to `sync`.
+ */
+export type AsideQueue = {
+  entities: Entity[];
+  count: number;
+  head: number;
+  /** The entities of the queue that have no view yet: a parent that waits here is made before its child. */
+  waiting: Set<Entity>;
+  /** The views the pass made aside in the current frame, read and cleared by the render phase (`takeBuildWork`). */
+  made: number;
+};
+
+/**
+ * The held tops of a scene build, in the order they were made (spec 31): dense, from 0 to `count`. A slot whose view
+ * went, or that hangs under a building parent by now, is stale and skipped. Not `held`, the unseen cache of the
+ * loops. Private to `sync`.
+ */
+export type HeldViews = {
+  entities: Entity[];
+  count: number;
+  /** The dev check named a building view under the stage in this build: named once. */
+  reported: boolean;
+};
+
+/**
  * sync module state.
  */
 export type SyncState = {
@@ -1539,6 +1582,10 @@ export type SyncState = {
   passes: PassCount;
   /** The name of the scene's HUD layer (`above: "overlays"`), kept with the layers; `undefined` without one. */
   hudLayer: string | undefined;
+  /** The building entities waiting for their view (spec 31). */
+  aside: AsideQueue;
+  /** The held tops of the scene build, attached in the pass after its commit (spec 31). */
+  heldViews: HeldViews;
   cleanups: Array<() => void>;
 };
 

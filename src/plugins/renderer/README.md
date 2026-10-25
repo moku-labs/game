@@ -359,7 +359,7 @@ await renderer.sync.textures.upload(record.textures); // true at once: they are 
 | `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
-| `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
+| `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `scene:build` at the start of a scene built aside, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
 | `monitor.beginAgent()`, `monitor.endAgent()` | For engine plugins and the editor's page agent. Agent builds: bracket the agent's own work, measured as the `agent` phase, left out of the spike rule and handed to `time.chargeAgent`. A nested begin and a lone end are ignored. |
 | `monitor.setResolution(n \| undefined)` | Every build: draws at `n` from the next frame; `undefined` goes back to the policy (see "Resolution"). Answers the resolution of the next frame. |
 | `monitor.counts.register(name, read)` | Agent builds: adds a count to the live object counts, read once a second (see "Live object counts"). A name registered again gets the new reader. At most 16: the 17th throws `[game] Monitor count table is full (16).` The remover; the renderer's `onStop` drops every count. Nothing kept without the flag. |
@@ -747,12 +747,50 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 
 | `time` phase | What `renderer` does |
 |---|---|
-| `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
+| `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views of a scene build that was committed, added views, changed components, invalidated texture keys; then, while a scene is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
 | `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
+
+## The next scene built aside
+
+On a live switch with a drawing renderer, `scenes` builds the next scene while the old one stays
+current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as building
+(`world.projection.isBuilding`). The renderer's part:
+
+- **Aside queue.** World flags a view right after its spawn, and `onAdded` fires inside the spawn, so
+  the pass sorts the building entities out of its added set (one `isBuilding` lookup each) into an
+  aside queue. After the live half of the pass, their views are made in chunks while
+  `world.projection.left()` is above 0, at least one a frame, the clock read after the first view and
+  every 8 after it. A chunk carries the queued parents of its views first, as the one-block build
+  does (U2.3), so a child made in a later frame still hangs under its parent.
+- **Held views.** A made view of the build with no parent, or with a live parent (a kept projection,
+  a `ui` slot host), is held: it hangs nowhere in the stage, its live parent gets no wrapper for it,
+  and it waits in the held list, in the order it was made. A building view under a building parent
+  hangs in the parent's tree, which is held as a whole. Layer containers the coming scene declares
+  are made only by the commit's layer list. The hit test walks the stage, so it never finds a held
+  view: a tap during the build hits the old scene, and the pass estimate (`sync.renderPasses()`) never
+  counts one. Nothing draws a held view before the swap: its first draw is in the swap frame.
+- **Still frames.** `still()` does not read the aside queue, and the aside work leaves
+  `passesVersion` where it was: the held views are drawn nowhere, so the live scene's unseen walks
+  (E4) and render passes (Q2) are not taken again in every build frame.
+- **Frames.** While views wait to be made or attached, the renderer asks for the next frame
+  (`"request"`), and a frame that made views is told to `time` with `frameProbed()`: load work,
+  never a sample of the adaptive rate.
+- **Readiness.** The renderer registers its part of `world.projection.built()` with `onBuild` at
+  start: no building entity waits in the added set or the aside queue.
+- **The swap.** In the pass after the commit, the coming layer list is applied first, then every held
+  top is attached in one block, in the order it was made, and sorted by the rule of its layer: the
+  tree is the one a one-block build of the same scene makes. A discard despawns the build: its held
+  views are dropped and pooled like any removed view, and none is attached.
+- **Dev check.** In a dev or agent build every build frame checks that no view of a building entity
+  hangs under the stage; one that does is warned once per build, `renderer:building-drawn` with the
+  entities.
+
+Headless, fast mode and a renderer without a device keep the one-block switch: `scenes` takes it
+when `host.ready()` is false.
 
 ## Render on demand
 

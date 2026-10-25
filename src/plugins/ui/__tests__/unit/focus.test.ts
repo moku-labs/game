@@ -42,6 +42,16 @@ function stateOf(roots: Root[], removing: number[] = []): JsxState {
   } as unknown as JsxState;
 }
 
+/**
+ * Tells the root of the board from every other: the board is the scene built aside.
+ *
+ * @param entity - A root entity.
+ * @returns True for the board's root.
+ */
+function isBoard(entity: number): boolean {
+  return entity === 2;
+}
+
 describe("readingOrder", () => {
   it("reads the upper rect first, and on the same top the left one", () => {
     const rects = [
@@ -101,6 +111,15 @@ describe("focusRoot", () => {
     expect(focusRoot(stateOf([ward, shop, resources, toast]), layers, "hud")?.entity).toBe(2);
     expect(focusRoot(stateOf([ward, resources, toast]), layers, "hud")?.entity).toBe(1);
     expect(focusRoot(stateOf([resources]), layers, "hud")).toBeUndefined();
+  });
+
+  // Bug: the coming scene's root sorts last, its layer not in the list yet, and takes Tab and Escape
+  // while it is built aside, unseen.
+  it("never gives the keyboard to a root of a scene built aside", () => {
+    const ward = rootOf({ entity: 1, layer: "ui" });
+    const board = rootOf({ entity: 2, layer: "board" });
+
+    expect(focusRoot(stateOf([ward, board]), ["ui"], undefined, isBoard)?.entity).toBe(1);
   });
 
   // Bug: a scene with no HUD layer loses its top root to the HUD rule, by the name of a layer.

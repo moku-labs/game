@@ -181,22 +181,34 @@ async function open() {
 }
 
 /**
- * Waits until the graph rests at a node with its gate open.
+ * Waits until the graph rests at a node with its gate open. A turn that does not open it steps a
+ * frame, checked by the oracle: a live switch with a drawing renderer builds its scene aside over
+ * frames and opens the gate after the commit (spec 31), so the next frame is the first one after
+ * the commit.
  *
- * @param app - The app.
- * @param app.flow - Its flow.
- * @param app.flow.state - Where the graph is.
- * @param app.flow.gate - Its gate.
- * @param app.flow.gate.state - Whether the gate is open.
+ * @param fixture - The running fixture.
+ * @param fixture.app - Its app.
+ * @param fixture.app.flow - Its flow.
+ * @param fixture.app.flow.state - Where the graph is.
+ * @param fixture.app.flow.gate - Its gate.
+ * @param fixture.app.flow.gate.state - Whether the gate is open.
+ * @param fixture.watched - Its frame driver.
  * @param path - The path of the rest node.
  */
 async function arrive(
-  app: { flow: { state(): { path: string }; gate: { state(): { open: boolean } } } },
+  fixture: {
+    app: { flow: { state(): { path: string }; gate: { state(): { open: boolean } } } };
+    watched: Watched;
+  },
   path: string
 ): Promise<void> {
+  const { flow } = fixture.app;
+  const rests = (): boolean => flow.state().path === path && flow.gate.state().open;
+
   for (let attempt = 0; attempt < 400; attempt += 1) {
-    if (app.flow.state().path === path && app.flow.gate.state().open) return;
+    if (rests()) return;
     await new Promise(resolve => setTimeout(resolve, 0));
+    if (!rests()) await fixture.watched.frames(1);
   }
 
   throw new Error(`The flow did not rest at "${path}".`);
@@ -208,16 +220,18 @@ describe("a view built in the same pass as its parent, before it", () => {
   it.each([
     "start",
     "entry"
-  ])("hangs under the root that spawned it in its hook, in the first frame, and is hit (%s)", async way => {
+  ])("hangs under the root that spawned it in its hook, in the first frame after the commit, and is hit (%s)", async way => {
     const fixture = await open();
+
+    await arrive(fixture, "hub");
 
     if (way === "entry") {
       await fixture.watched.frames(1);
       fixture.app.flow.gate.answer({ intent: "leave" });
-      await arrive(fixture.app, "away");
+      await arrive(fixture, "away");
       await fixture.watched.frames(1);
       fixture.app.flow.gate.answer({ intent: "back" });
-      await arrive(fixture.app, "hub");
+      await arrive(fixture, "hub");
     }
 
     await fixture.watched.frames(1);

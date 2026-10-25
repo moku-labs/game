@@ -49,8 +49,7 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * overlay step (spec 22), then `kept` reads the marks before `demand` decides whether the frame is
  * drawn and clears them; a drawn frame draws the probes of the warm-up onto the canvas first (F4: the
  * stage pass clears them, in the same task, so they never show), then uploads the queued texture sources (F60), then
- * the kept pictures
- * (`kept.flush`, so the canvas stays one pass, E7), then the stage, then the pixel leg of the kept
+ * the kept pictures (`kept.flush`, so the canvas stays one pass, E7), then the stage, then the pixel leg of the kept
  * oracle; `demand` settles the
  * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
  * waiting capture; last, `host` trims Pixi's texture pool when a rest or a scene change is due. The display objects
@@ -61,7 +60,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * last picture (WebGPU presents a canvas texture only when one is rendered; a WebGL canvas keeps
  * what it composited until the next draw). A drawn frame is reported to `time` for the adaptive
  * frame rate, and only when Pixi drew it: an inert or lost host reports none. A frame that also drew
- * probes is reported as probed: it created pipelines, so it is never a sample of the rate.
+ * probes, uploaded sources or made views of the next scene aside is reported as probed: it did load work, so it is
+ * never a sample of the rate.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param modules - The six modules.
@@ -102,6 +102,9 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
     // F60: the queued texture sources go to the GPU, `renderer.uploads` of them, before the frame that shows them.
     const uploaded = modules.sync.uploadStep();
 
+    // F61: the pass made views of a scene build aside this frame.
+    const built = modules.sync.takeBuildWork();
+
     // The pictures before the stage pass: every render a picture needs is done when the canvas is drawn.
     modules.kept.flush();
 
@@ -111,8 +114,8 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
 
     if (rendered) {
       ctx.deps.time.frameDrawn();
-      // A frame of probes or uploads is load work, no sample of the adaptive rate.
-      if (probed || uploaded) ctx.deps.time.frameProbed();
+      // A frame of probes, uploads or building work is load work, no sample of the adaptive rate.
+      if (probed || uploaded || built) ctx.deps.time.frameProbed();
     }
 
     modules.kept.after();

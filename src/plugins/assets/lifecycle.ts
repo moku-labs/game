@@ -308,6 +308,7 @@ export function releaseAll(state: State): void {
   state.sceneId = undefined;
   state.sceneNamed = [];
   state.sceneLeaving = [];
+  state.sceneComing = [];
   state.exiting = 0;
   state.restPending = false;
   state.stamps = undefined;

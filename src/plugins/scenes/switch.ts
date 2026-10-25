@@ -1,15 +1,18 @@
 /**
  * @file scenes plugin — the switch, run inside the awaited `flow.onEnter("scene")` callback. It
- * loads every bundle the scene names first and touches the world in one synchronous block, so the
- * renderer never sees a scene half built. In live mode it then waits until the textures of those
- * bundles are on the GPU. The upload queue sends `renderer.uploads` of them per drawn frame while
- * the old scene is still on screen, so the frame that shows the new scene uploads nothing. On a
- * Galaxy A26 the first switch to a board took one frame of 284 ms with 8 uploads in it (F61). At a
- * node of the mounted scene it re-reads what the scene names and awaits a bundle that is new,
- * without mounting again.
+ * loads every bundle the scene names first, so the renderer never sees a scene half built. In
+ * live mode it then waits until the textures of those bundles are on the GPU. The upload queue
+ * sends `renderer.uploads` of them per drawn frame while the old scene is still on screen, so the
+ * frame that shows the new scene uploads nothing. On a Galaxy A26 the first switch to a board
+ * took one frame of 284 ms with 8 uploads in it (F61). Then a live switch with a drawing renderer
+ * builds the scene aside and swaps it in one frame (`build.ts`); a fast walk and a headless app
+ * touch the world in one synchronous block (`swap.ts`). At a node of the mounted scene it
+ * re-reads what the scene names and awaits a bundle that is new, without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
+import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
+import { swapIn } from "./swap";
 import type { RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
 /**
@@ -201,64 +204,67 @@ function overTargetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string |
 }
 
 /**
- * The projections of the scene that leaves which the scene that comes does not list. A projection
- * both list stays mounted: the layers of a projection are the ones its spec names, and both scenes
- * declare them, so its views stay in the same layer containers.
+ * Tells whether a switch builds the next scene aside: a live switch while the world runs live and
+ * the renderer draws. A fast walk (a restore, a test walk) and a renderer without a device build
+ * in one block, as a walk or a headless app sees no frame between. So does a node entered live
+ * while the world runs fast or paused by now: a restore of a repro enters its node live and walks
+ * fast from there, and a world that skips its `layout` phase never lays the coming scene out.
  *
- * @param previous - The scene that leaves.
- * @param scene - The scene that comes.
- * @returns The names to unmount, in the order the leaving scene lists them.
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal.
+ * @returns True when the switch builds aside.
  */
-function leavingOf(previous: SceneDefinition, scene: SceneDefinition): readonly string[] {
-  return previous.projections.filter(name => !scene.projections.includes(name));
+function buildsAside(ctx: ScenesCtx, run: RunContext): boolean {
+  return (
+    run.mode === "live" && ctx.deps.world.ecs.mode() === "live" && ctx.deps.renderer.host.ready()
+  );
 }
 
 /**
- * Builds the scene in one synchronous block: the layers, then the projections only the old scene
- * lists out, then the list of the new scene in (a projection both list stays and takes its new
- * place), the new scene to the world's systems, then the list the scene names to `assets`, then
- * the frame loop out of its idle cap and the adaptive frame rate told of the new screen, and only then the event.
+ * Builds the scene: aside on a live switch with a drawing renderer, resolving at the commit or
+ * the abort; in one block otherwise, and when the world refuses to build it aside because a
+ * projection both scenes list is declared on other layer rules (named in a dev build).
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundles are there.
  * @param named - The bundles the scene names, as they were awaited.
+ * @param run - The runner's mode and signal, not aborted.
+ * @returns A promise that resolves once the scene stands, or the node was aborted.
+ * @throws {Error} Whatever the mount or the build threw: a `view` or an unknown projection.
  */
-function apply(ctx: ScenesCtx, scene: SceneDefinition, named: readonly string[]): void {
-  const state = ctx.state;
-  const projection = ctx.deps.world.projection;
-  const from = state.current;
-  const previous = from === undefined ? undefined : state.scenes.get(from);
+async function standUp(
+  ctx: ScenesCtx,
+  scene: SceneDefinition,
+  named: readonly string[],
+  run: RunContext
+): Promise<void> {
+  if (buildsAside(ctx, run)) {
+    const building = buildAside(ctx, scene, named, run.signal);
 
-  projection.setLayers(scene.layers);
+    if (building !== undefined) {
+      await building;
 
-  if (previous !== undefined) projection.unmount(leavingOf(previous, scene));
+      return;
+    }
 
-  projection.mount(scene.projections, state.owner);
-  state.current = scene.id;
-  // The systems with `scenes` run on the new scene from the next phase; the old one leaves.
-  ctx.deps.world.ecs.setScene(scene.id);
-  state.named = named;
-  ctx.deps.assets.sceneBundles(named);
-  // A fresh picture is drawn at the full frame rate, even when the loop had gone idle.
-  ctx.deps.time.wake();
-  // The adaptive frame rate judges the new screen on its own frames, its back-off started over.
-  ctx.deps.time.sceneChanged();
-
-  ctx.emit("scenes:changed", { from, to: scene.id, music: scene.music });
-
-  // Inline and positive: the performance log of an agent build names the switch; a production
-  // `define` folds the guard and the call goes.
-  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
-    // eslint-disable-next-line unicorn/no-null -- the log is JSON: no scene before is `null`.
-    ctx.deps.renderer.monitor.event("scene", { from: from ?? null, to: scene.id });
+    if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+      ctx.log.warn("scenes:build-skipped", {
+        scene: scene.id,
+        from: ctx.state.current,
+        projections: scene.projections
+      });
+    }
   }
+
+  swapIn(ctx, scene, named);
 }
 
 /**
  * Switches to another scene: it reads what the scene names from the committed state, awaits all
  * of it and only then builds the scene. In live mode it waits between the two for the textures of
  * those bundles to reach the GPU; a fast walk does not, so tests and restores keep their pace. An
- * aborted node, or a plugin stopped during the wait, returns without touching anything.
+ * aborted node, or a plugin stopped during the wait, returns without touching anything. A live
+ * switch with a drawing renderer resolves at the commit of the scene built aside, frames later.
  *
  * @param ctx - Domain context of the plugin.
  * @param target - Id of the scene to mount.
@@ -288,7 +294,7 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
 
   if (run.signal.aborted || stopped) return;
 
-  apply(ctx, scene, named);
+  await standUp(ctx, scene, named, run);
 }
 
 /**
@@ -332,8 +338,8 @@ async function reread(ctx: ScenesCtx, run: RunContext): Promise<void> {
  * @param run - The runner's mode and signal.
  * @returns A promise that resolves once the scene stands, or at once when nothing changed.
  * @throws {Error} For a scene id no feature declared, and for a `bundles` that throws or returns
- *   something that is not a list of names. A failed load and a failed `mount` also reject, so
- *   `flow` rolls the node back with the old scene still mounted.
+ *   something that is not a list of names. A failed load, a failed `mount` and a build whose
+ *   `view` throws also reject, so `flow` rolls the node back with the old scene still mounted.
  */
 export async function enterScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): Promise<void> {
   const target = node.over ? overTargetOf(ctx, node, run) : targetOf(ctx, node, run);

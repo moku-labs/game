@@ -4,7 +4,12 @@ import { Parent, Shape, Sprite } from "../../../renderer/components";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { bind, Text } from "../../../text/components";
 import { component, Layer, Order, Tree } from "../../../world/ecs/define";
-import type { AnyComponentType, AnyComponentValue, Entity } from "../../../world/types";
+import type {
+  AnyComponentType,
+  AnyComponentValue,
+  Entity,
+  MotionCause
+} from "../../../world/types";
 import { LocalWrite, type UiCountersValue } from "../../components";
 import { createJsxApi } from "../../jsx/api";
 import { componentsOf, createReconciler } from "../../jsx/reconcile";
@@ -217,7 +222,13 @@ function harness() {
     /** What the fake `layout.remeasure` answers: whether the text takes another size. */
     resized: false,
     /** What the fake `layout.iconLineMoved` answers: whether the line of the icons moved. */
-    lineMoved: false
+    lineMoved: false,
+    /** The entities of the scene the fake world builds aside: a test empties it for the commit. */
+    building: new Set<Entity>(),
+    /** What the fake `causeOf` answers for every entity. */
+    cause: undefined as MotionCause | undefined,
+    /** For every `adopt`, whether the entity carried no component yet. */
+    adoptedBare: [] as boolean[]
   };
 
   const ecs = {
@@ -272,11 +283,17 @@ function harness() {
         projection: {
           registerKey: () => nothing,
           keyOf: () => undefined,
-          causeOf: () => undefined,
+          causeOf: () => world.cause,
           entitiesOf: () => [],
           layers: () => [],
           membershipVersion: () => 0,
-          setRest
+          setRest,
+          isBuilding: (entity: Entity): boolean => world.building.has(entity),
+          adopt: (entity: Entity): void => {
+            world.adoptedBare.push(store.get(entity)?.size === 0);
+            world.building.add(entity);
+          },
+          onBuild: () => nothing
         }
       },
       renderer: { viewport: { size: () => world.viewport } },
@@ -429,6 +446,34 @@ function harness() {
       frame.playEntered();
 
       vi.clearAllMocks();
+    },
+
+    /**
+     * Mounts the screen as the root of a scene the world builds aside: the root entity is the
+     * build's before `ui` sees it, then a frame runs its reconcile, its solve, the `Box` of every
+     * element and `ui.enter`. The spies are left as they are.
+     *
+     * @param node - The description of the first render.
+     */
+    mountAside: (node: DescriptionNode): void => {
+      world.building.add(ROOT);
+      store.set(ROOT, new Map([["Tree", { node }]]));
+      types.set("Tree", Tree);
+      frame.mountRoot(ROOT, "screen", "ui");
+      frame.reconcile();
+      frame.solve();
+
+      for (const live of state.jsx.elements.keys()) frame.queueEnter(live);
+      frame.playEntered();
+    },
+
+    /**
+     * One frame of the two layout systems and `ui.enter`, as the loop runs them.
+     */
+    frameStep: (): void => {
+      frame.reconcile();
+      frame.solve();
+      frame.playEntered();
     },
 
     /**
@@ -1179,5 +1224,153 @@ describe("the draw order of an element", () => {
       { value: 0 },
       undefined
     ]);
+  });
+});
+
+// ─── a root of the scene the world builds aside (spec 31) ───────
+
+describe("a root of a scene built aside", () => {
+  // Bug: an enter of the coming scene plays while nobody sees it, or never plays after the swap.
+  it("holds every enter until the swap and plays each one in the first frame after it", () => {
+    const h = harness();
+
+    h.mountAside(screen());
+    h.frameStep();
+
+    expect(h.layout.pose).not.toHaveBeenCalled();
+    expect(h.layout.enter).not.toHaveBeenCalled();
+
+    // The commit clears every building flag; the next frame is the swap.
+    h.world.building.clear();
+    h.frameStep();
+
+    expect(h.layout.enter).toHaveBeenCalledTimes(ELEMENTS);
+    expect(h.state.jsx.entering.count).toBe(0);
+  });
+
+  // Bug: an element adopted after its visual came is drawn by the renderer before its scene.
+  it("marks every element as the build's before it carries a component", () => {
+    const h = harness();
+
+    h.mountAside(screen());
+
+    expect(h.world.adoptedBare).toEqual(Array.from({ length: ELEMENTS }, () => true));
+  });
+
+  // Bug: an element that left the coming scene plays its exit unseen and holds its entity.
+  it("drops an element that leaves before the swap at once, with no exit", () => {
+    const h = harness();
+
+    h.mountAside(screen());
+
+    const bar = h.entity("bar");
+
+    h.render({ ...screen(), children: screen().children.slice(1) });
+
+    expect(h.layout.exit).not.toHaveBeenCalled();
+    expect(h.store.has(bar)).toBe(false);
+    expect(h.state.jsx.exiting.size).toBe(0);
+  });
+
+  // Bug: a coming root is drawn in the slot of a live root before its scene, or never takes the
+  // slot after the swap because the slots are not given out again.
+  it("takes no slot in a live root before the swap, and takes it in the frame after", () => {
+    const h = harness();
+
+    h.mount(screen({ bar: { hosts: ["slot.row"] } }));
+    h.world.building.add(ROW);
+    h.ctx.deps.world.projection.keyOf = (entity: Entity) =>
+      entity === ROW ? { projection: "slot.row", key: "row" } : undefined;
+    h.store.set(ROW, new Map([["Tree", { node: { type: "stack", props: {}, children: [] } }]]));
+    h.frame.mountRoot(ROW, "slot.row", "ui");
+    h.frameStep();
+
+    expect(h.state.jsx.roots.get(ROW)?.slot).toBeUndefined();
+
+    h.world.building.clear();
+    h.frameStep();
+
+    expect(h.state.jsx.roots.get(ROW)?.slot).toBe(h.entity("bar"));
+  });
+});
+
+describe("the part of a scene build ui does", () => {
+  // Bug: the swap comes before the coming root is diffed or solved, so it is drawn half built.
+  it("is done only once every root built aside is reconciled and solved", () => {
+    const h = harness();
+
+    h.world.building.add(ROOT);
+    h.store.set(ROOT, new Map([["Tree", { node: screen() }]]));
+    h.frame.mountRoot(ROOT, "screen", "ui");
+
+    const answers = [h.frame.asideBuilt()];
+
+    h.frame.reconcile();
+    answers.push(h.frame.asideBuilt());
+    h.frame.solve();
+    answers.push(h.frame.asideBuilt());
+
+    expect(answers).toEqual([false, false, true]);
+  });
+
+  // Bug: a live root that re-renders every frame holds the swap forever.
+  it("is not held by a live root with work left", () => {
+    const h = harness();
+
+    h.mount(screen());
+    h.root().dirty = true;
+    h.root().needsSolve = true;
+
+    expect(h.frame.asideBuilt()).toBe(true);
+  });
+
+  // Bug: a coming root whose view throws holds the swap forever: it has nothing to solve.
+  it("is not held by a root built aside whose first diff threw", () => {
+    const h = harness();
+
+    h.world.building.add(ROOT);
+    h.store.set(ROOT, new Map([["Tree", { node: { type: "input", props: {}, children: [] } }]]));
+    h.frame.mountRoot(ROOT, "screen", "ui");
+    h.frame.reconcile();
+    h.frame.solve();
+
+    expect(h.ctx.log.error).toHaveBeenCalledWith(
+      "ui:root-failed",
+      { root: "screen" },
+      expect.any(Error)
+    );
+    expect(h.frame.asideBuilt()).toBe(true);
+  });
+});
+
+describe("the end of a root built aside before the swap", () => {
+  // Bug: a discard plays the exits of a scene nobody saw and leaves its elements behind.
+  it("drops a discarded root at once: no exit plays and every element is despawned", () => {
+    const h = harness();
+
+    h.mountAside(screen());
+
+    const elements = [...h.state.jsx.elements.keys()];
+
+    // The world's discard: the flags go, the view leaves with the cause "discard".
+    h.world.building.clear();
+    h.world.cause = "discard";
+    h.frame.unmountRoot(ROOT);
+
+    expect(h.layout.exit).not.toHaveBeenCalled();
+    expect(elements.filter(entity => h.store.has(entity))).toEqual([]);
+    expect([h.state.jsx.roots.has(ROOT), h.state.jsx.elements.size]).toEqual([false, 0]);
+  });
+
+  // Bug: a coming root whose key left before the swap plays its exit unseen and waits for it.
+  it("drops a root that leaves while it is still built aside at once", () => {
+    const h = harness();
+
+    h.mountAside(screen());
+    h.world.cause = "mount";
+    h.frame.unmountRoot(ROOT);
+
+    expect(h.layout.exit).not.toHaveBeenCalled();
+    expect([h.state.jsx.roots.has(ROOT), h.state.jsx.removing.size]).toEqual([false, 0]);
   });
 });

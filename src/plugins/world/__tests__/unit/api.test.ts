@@ -37,16 +37,24 @@ const ECS_MEMBERS = [
 const ECS_INTERNALS = ["onOwnerLeft", "runPhase", "flush", "clearChanges", "clear"];
 
 const PROJECTION_MEMBERS = [
+  "adopt",
+  "build",
+  "built",
   "causeOf",
+  "commit",
+  "discard",
   "entitiesOf",
   "entityOf",
+  "isBuilding",
   "keyOf",
   "layers",
+  "left",
   "lift",
   "membershipVersion",
   "motionsOf",
   "mount",
   "mute",
+  "onBuild",
   "onConverged",
   "register",
   "registerKey",
@@ -64,6 +72,7 @@ const PROJECTION_MEMBERS = [
 const PROJECTION_INTERNALS = [
   "markDirty",
   "reconcileIfDirty",
+  "startFrame",
   "dropHints",
   "pushHint",
   "sweep",

@@ -363,3 +363,23 @@ describe("scenes plugin integration — the static check of flow", () => {
     await app.stop();
   });
 });
+
+describe("scenes plugin integration — the config", () => {
+  // Bug: a bad budget is checked only at `app.start()` (or never), so a game learns of it on the first switch.
+  it("refuses a buildMs of 0 at createApp", () => {
+    expect(() =>
+      createApp({
+        plugins: [...screen, boardFeature],
+        pluginConfigs: {
+          flow: { mainFlow: main },
+          model: {
+            initialPlayer: { buttons: [], cells: [], items: [] },
+            initialSession: { visits: 0 },
+            seed: 1
+          },
+          scenes: { buildMs: 0 }
+        }
+      })
+    ).toThrow("[game] scenes.buildMs is 0.");
+  });
+});

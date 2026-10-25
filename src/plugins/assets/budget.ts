@@ -40,7 +40,7 @@ export function usedMb(state: State): number {
 
 /**
  * Picks the bundle that leaves next: the loaded one with the smallest use counter that is not
- * pinned, not named by the mounted scene, not permanent and not in the preload queue. Its
+ * pinned, not named by the mounted, a leaving or the coming scene, not permanent and not in the preload queue. Its
  * `release` is not read: a `"leave"` bundle is a candidate like any other.
  *
  * @param state - The plugin state.
@@ -56,6 +56,7 @@ export function pickVictim(state: State): string | undefined {
     if (record.status !== "loaded" || entry === undefined) continue;
     if (state.pinned.has(name) || isPermanent(entry.tier)) continue;
     if (state.sceneNamed.includes(name) || state.sceneLeaving.includes(name)) continue;
+    if (state.sceneComing.includes(name)) continue;
     if (state.queue?.bundles.includes(name) === true) continue;
     if (record.lastUsed >= smallest) continue;
 
@@ -246,9 +247,9 @@ export function featuresOnStack(ctx: AssetsCtx): ReadonlySet<string> {
 
 /**
  * Tells whether a bundle must stay where the game stands now: it is pinned (a bundle of the node
- * entered last), the mounted scene names it (the last list `sceneBundles` received), a leaving
- * scene named it and its elements still play their exit, its feature is in `onStack`, or its tier
- * is permanent.
+ * entered last), the mounted scene names it (the last list `sceneBundles` received), the scene
+ * being built names it (the last list `sceneComing` received), a leaving scene named it and its
+ * elements still play their exit, its feature is in `onStack`, or its tier is permanent.
  *
  * @param ctx - Domain context of the plugin.
  * @param name - Name of the bundle.
@@ -268,6 +269,7 @@ export function isHeld(
     state.pinned.has(name) ||
     state.sceneNamed.includes(name) ||
     state.sceneLeaving.includes(name) ||
+    state.sceneComing.includes(name) ||
     onStack.has(entry.feature) ||
     isPermanent(entry.tier)
   );
@@ -294,7 +296,7 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
 /**
  * Takes the list the mounted scene names now. A bundle the list named before and names no more
  * stays held as a leaving scene's, until nothing carries `Exiting` (F51); a name the list takes
- * again is the mounted scene's once more.
+ * again is the mounted scene's once more. The coming list empties: its scene is the mounted one.
  *
  * @param state - The plugin state.
  * @param named - The bundles the mounted scene names now.
@@ -307,9 +309,21 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
     if (!named.includes(name) && !leaving.includes(name)) leaving.push(name);
   }
 
-  // The new list is the mounted scene's.
+  // The new list is the mounted scene's; the scene that was coming is mounted now.
   state.sceneLeaving = leaving;
   state.sceneNamed = [...named];
+  state.sceneComing = [];
+}
+
+/**
+ * Takes the list the scene being built aside names: each call replaces the one before, and `[]`
+ * ends the hold of a discarded build. `nameSceneBundles` empties it at the swap (F61 S2).
+ *
+ * @param state - The plugin state.
+ * @param named - The bundles the coming scene names.
+ */
+export function nameComingBundles(state: State, named: readonly string[]): void {
+  state.sceneComing = [...named];
 }
 
 /**
@@ -320,16 +334,19 @@ export function nameSceneBundles(state: State, named: readonly string[]): void {
  * its feature shows (the splash's 7.5 MiB under the ward). A bundle of another release stays, as
  * it would have. The system `assets.leave` calls it in every phase `sync`: after the reconcile of
  * `layout`, which tags the leaving elements `Exiting` in the frame after the switch, so the hold
- * never ends before the leave begins (F51b). It costs a length read while no scene leaves, and a
- * count read while one does.
+ * never ends before the leave begins (F51b). While a scene is built aside (the coming list is
+ * set; a scene names its own bundle, so the list of a build is never empty) the leave has not
+ * begun: the world holds the scene on screen as it stood until the swap, and what it draws still
+ * needs its bundles. It costs two length reads while no scene leaves, and a count read while one
+ * does.
  *
  * @param ctx - Domain context of the plugin.
  */
 export function releaseSceneLeft(ctx: AssetsCtx): void {
   const state = ctx.state;
 
-  // Nothing left, or its elements still play their exit.
-  if (state.sceneLeaving.length === 0 || state.exiting > 0) return;
+  // Nothing left, its elements still play their exit, or the scene that drops it has not begun to leave.
+  if (state.sceneLeaving.length === 0 || state.exiting > 0 || state.sceneComing.length > 0) return;
 
   const names = state.sceneLeaving;
 

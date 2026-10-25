@@ -238,15 +238,54 @@ export type SceneState<Player extends Json = Json, Session extends Json = Json> 
 export type SceneOwner = Owner & { kind: "plugin"; name: "scenes" };
 
 /**
- * scenes plugin config: none. A scene is data in a feature, and a transition effect is V3 work
- * of `anim`, so a key here would have no reader.
+ * scenes plugin config. A scene is data in a feature; the one key is the budget of a live switch.
  *
  * @example
  * ```ts
- * const config: Config = {};
+ * // The default: half of each frame, read at the start of every build: 8.33… ms at 60 Hz, 4.17 ms at 120 Hz.
+ * const config: Config = { buildMs: "auto" };
+ *
+ * // A game on a slow phone gives the next scene a fixed 3 ms of each frame: the switch takes more frames.
+ * const fixed: Config = { buildMs: 3 };
  * ```
  */
-export type Config = Record<string, never>;
+export type Config = {
+  /**
+   * Milliseconds per frame the next scene's building work may take on a live switch with a
+   * drawing renderer: a finite number above 0, or `"auto"` (the default) for half of the frame
+   * interval the loop runs at, `500 / time.rate().fps`, read once at the build start.
+   */
+  buildMs: number | "auto";
+};
+
+/**
+ * The running build of the next scene (spec 31): what the commit needs, and how to stop
+ * listening. Absent while no build runs.
+ */
+export type SceneBuild = {
+  /** The scene being built. */
+  scene: SceneDefinition;
+  /** The bundles it names, as they were awaited. */
+  named: readonly string[];
+  /** The scene current at the build start, the one that leaves at the commit. */
+  from: string | undefined;
+  /** Frames the build waited in so far. */
+  frames: number;
+  /** The building budget of a frame the build runs with, ms: `buildMs`, or what `"auto"` gave at its start. */
+  budgetMs: number;
+  /** The page clock of an agent build at the build start, ms; 0 in a build without the flag. */
+  startedAt: number;
+  /** Removes the frame callback and the abort listener of the build. */
+  off: () => void;
+  /** Settles the switch once the build is committed, discarded or dropped by a stop. */
+  resolve: () => void;
+  /**
+   * Rejects the switch when the commit threw.
+   *
+   * @param error - What the commit threw.
+   */
+  reject: (error: unknown) => void;
+};
 
 /**
  * scenes plugin state.
@@ -272,6 +311,11 @@ export type State = {
   owner: SceneOwner;
   /** The remover of the `onEnter` callback: set in `onStart`, run in `onStop`. */
   teardown: (() => void) | undefined;
+  /**
+   * The build of the next scene on a live switch, from its start to its commit or discard.
+   * Absent otherwise: deleted, never written as `undefined`.
+   */
+  build?: SceneBuild;
 };
 
 /**
@@ -348,7 +392,10 @@ export type Deps = {
   assets: AssetsApi;
   time: TimeApi;
   model: ModelApi;
-  /** The performance log of an agent build names every switch. */
+  /**
+   * Whether the renderer draws, which chooses the path of a switch, and the performance log of
+   * an agent build that names every switch.
+   */
   renderer: RendererApi;
 };
 

@@ -615,6 +615,11 @@ export type State = {
    * `Exiting`, so a leaving scene's pictures stay until its elements played their exit (F51, F51b).
    */
   sceneLeaving: string[];
+  /**
+   * The bundles of the scene being built aside, from the last `sceneComing` call: held like `sceneNamed` from the
+   * build start until `sceneBundles` names them at the swap, or until a discarded build empties the list (F61 S2).
+   */
+  sceneComing: string[];
   /** How many entities carry `Exiting` now, counted from the world's `onAdded` and `onRemoved` of the tag. */
   exiting: number;
   /** Registered companions, in registration order. */
@@ -863,7 +868,8 @@ export type Api = {
    * released by `release: "leave"` while it stays in the list. A bundle the list named before and names no more
    * stays held until a phase `sync` finds nothing carrying `Exiting`, so a leaving scene's pictures stay until its
    * elements played their exit, also when the exit starts only in the frame after the switch; then a `"leave"` one
-   * goes (F51, F51b). Called by `scenes`; a game never calls it.
+   * goes (F51, F51b). It empties the list of `sceneComing`: the coming scene is now the mounted one. Called by
+   * `scenes`; a game never calls it.
    *
    * @param named - The bundle names of the mounted scene, the scene bundle first.
    * @example
@@ -876,6 +882,24 @@ export type Api = {
    * ```
    */
   sceneBundles(named: readonly string[]): void;
+
+  /**
+   * Tells assets which bundles the scene being built aside names, while the scene before stays mounted (F61 S2).
+   * Each call replaces the list. A bundle in it is held as a mounted scene's is: never a victim of the budget, never
+   * released by `release: "leave"`. The next `sceneBundles` call empties it, because the coming scene is then the
+   * mounted one; a discarded build calls it with `[]`. Called by `scenes`; a game never calls it.
+   *
+   * @param named - The bundle names of the coming scene, the scene bundle first.
+   * @example
+   * ```ts
+   * // scenes, at the build start of the switch from the ward to the board of episode 1.
+   * ctx.require(assetsPlugin).sceneComing(["board", "ep01"]);
+   * // a rest or budget pressure during the build leaves board and ep01 loaded
+   * ctx.require(assetsPlugin).sceneComing([]);
+   * // the build was discarded: board and ep01 are held no more
+   * ```
+   */
+  sceneComing(named: readonly string[]): void;
 
   /**
    * Tells whether the manifest carries a bundle, loaded or not. It reads the manifest only, so it

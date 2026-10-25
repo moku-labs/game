@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Transform } from "../../../renderer/components";
 import { createJsxState } from "../../jsx/state";
 import { readTree, sortedRoots } from "../../jsx/tree";
 import type { Element, JsxModule, Root } from "../../jsx/types";
@@ -146,6 +147,8 @@ function popupParts(registered: readonly string[]) {
  */
 function layoutParts() {
   const set = vi.fn();
+  // The entities of the scene the fake world builds aside.
+  const building = new Set<number>();
   const setRest = vi.fn();
   const error = vi.fn();
   const handle = {
@@ -170,12 +173,16 @@ function layoutParts() {
       text: { measure: () => ({ width: 10, height: 10 }), hasGlyph: () => true },
       world: {
         ecs: { set },
-        projection: { setRest, viewOf: () => handle }
+        projection: {
+          setRest,
+          viewOf: () => handle,
+          isBuilding: (entity: number): boolean => building.has(entity)
+        }
       }
     }
   } as unknown as UiCtx;
 
-  return { ctx, set, setRest, error, handle };
+  return { ctx, set, setRest, error, handle, building };
 }
 
 // ─── the order the readers walk the roots in ──────────────────
@@ -199,6 +206,19 @@ describe("sortedRoots", () => {
     state.roots.set(2, rootOf({ entity: 2, layer: "ui" }));
 
     expect(sortedRoots(state, ["ui"]).map(root => root.entity)).toEqual([2, 1]);
+  });
+
+  // Bug: `find`, `tree` and the doors answer the coming scene before it is on the screen.
+  it("leaves out a root of a scene built aside", () => {
+    const state = createJsxState();
+
+    state.roots.set(1, rootOf({ entity: 1 }));
+    state.roots.set(2, rootOf({ entity: 2, order: 1 }));
+    state.roots.set(3, rootOf({ entity: 3, popup: { close } }));
+
+    expect(sortedRoots(state, ["ui"], entity => entity === 2).map(root => root.entity)).toEqual([
+      3, 1
+    ]);
   });
 
   it("wraps several roots under one screen node", () => {
@@ -349,6 +369,48 @@ describe("createLayoutApi", () => {
     expect(layout.settled(moved)).toBe(false);
   });
 
+  // Bug: a re-solve of the coming scene (a text measured again) plays its change motions unseen, so
+  // the scene shows up mid-motion at the swap; or its pose is never written and it shows up at the
+  // pose of its first solve.
+  it("plays no change hook of an element held for the swap and writes its pose at once", async () => {
+    const { ctx, set, handle, building } = layoutParts();
+    const { createLayoutApi } = await import("../../layout/api");
+    const layout = createLayoutApi(ctx);
+    const box = vi.fn();
+    const transform = vi.fn();
+    const mark = vi.fn();
+    const held = elementOf({
+      entered: false,
+      motion: { change: { Box: box, Transform: transform, Mark: mark } }
+    });
+
+    building.add(held.entity);
+
+    const answers = [
+      layout.change(held, { x: 0, y: 0, w: 0, h: 0 }),
+      layout.changeExtra(held, "Mark", { previous: { level: 1 }, next: { level: 2 } }, undefined)
+    ];
+
+    layout.repose(held, undefined, false);
+
+    expect(answers).toEqual([false, false]);
+    expect([box, transform, mark].map(hook => hook.mock.calls.length)).toEqual([0, 0, 0]);
+    expect(handle.toRest).not.toHaveBeenCalled();
+    expect(set).toHaveBeenCalledWith(held.entity, Transform, {
+      x: 50,
+      y: 50,
+      rotation: 0,
+      scale: 1,
+      pivot: { x: 50, y: 50 }
+    });
+
+    // An element that is not the build's plays its hook before its enter as before.
+    building.clear();
+
+    expect(layout.change(held, { x: 0, y: 0, w: 0, h: 0 })).toBe(true);
+    expect(box).toHaveBeenCalledOnce();
+  });
+
   it("does nothing for an element with no hooks and reports a throwing one", async () => {
     const { ctx, error } = layoutParts();
     const { createLayoutApi } = await import("../../layout/api");
@@ -410,13 +472,43 @@ describe("lint of a hollow style", () => {
       },
       deps: {
         renderer: { viewport: { size: () => ({ scale: 1 }) } },
-        world: { ecs: { has: () => false } }
+        world: { ecs: { has: () => false }, projection: { isBuilding: () => false } }
       }
     } as unknown as UiCtx;
 
     expect(runLint(ctx)).toEqual([
       { rule: "hollow-without-nine-slice", key: "frostBare", detail: "stack" }
     ]);
+  });
+});
+
+describe("lint of a scene built aside", () => {
+  // Bug: `lint()` reports the coming scene before it is on the screen.
+  it("reports no element of a root built aside", async () => {
+    const { runLint } = await import("../../jsx/lint");
+    const ward = elementOf({ entity: 1, key: "wardFrost", type: "stack", style: { hollow: true } });
+    const board = elementOf({
+      entity: 2,
+      root: 20,
+      key: "boardFrost",
+      type: "stack",
+      style: { hollow: true }
+    });
+    const ctx = {
+      config: { tapTargetPt: 44 },
+      state: {
+        jsx: { elements: new Map([ward, board].map(element => [element.entity, element])) }
+      },
+      deps: {
+        renderer: { viewport: { size: () => ({ scale: 1 }) } },
+        world: {
+          ecs: { has: () => false },
+          projection: { isBuilding: (entity: number): boolean => entity === 20 }
+        }
+      }
+    } as unknown as UiCtx;
+
+    expect(runLint(ctx).map(finding => finding.key)).toEqual(["wardFrost"]);
   });
 });
 

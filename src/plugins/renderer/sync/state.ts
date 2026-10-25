@@ -2,7 +2,14 @@
  * @file renderer/sync — state factory.
  */
 import { createOverdrawState } from "./overdraw";
-import type { DebugSwitches, OverlayState, SyncState, UploadState, WarmState } from "./types";
+import type {
+  AsideQueue,
+  DebugSwitches,
+  OverlayState,
+  SyncState,
+  UploadState,
+  WarmState
+} from "./types";
 
 /**
  * Creates an empty collection. It lives in its own non-exported function because lint rule L5
@@ -100,8 +107,19 @@ function createUploadState(): UploadState {
 }
 
 /**
+ * Creates the empty aside queue of a scene build: nothing waits for a view. Its own non-exported function, as
+ * `emptyMap`.
+ *
+ * @returns The aside branch of the sync state.
+ */
+function createAsideQueue(): AsideQueue {
+  return { entities: [], count: 0, head: 0, waiting: emptySet(), made: 0 };
+}
+
+/**
  * Creates the initial sync state: no root, no layers, no view, no orphan, no pool, no provider, no filter, no
- * filter area, no slice, no hidden mask, no overlay, no warm-up, no upload, no redraw counted and no unseen walk kept.
+ * filter area, no slice, no hidden mask, no overlay, no warm-up, no upload, no redraw counted, no unseen walk kept and
+ * no scene build.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -155,6 +173,8 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     passesVersion: 0,
     passes: { at: -1, root: undefined, filtered: 0, count: 0, filters: [], enabled: [] },
     hudLayer: undefined,
+    aside: createAsideQueue(),
+    heldViews: { entities: [], count: 0, reported: false },
     cleanups: []
   };
 }
