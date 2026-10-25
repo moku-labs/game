@@ -9,6 +9,7 @@ import {
   NineSlice,
   Shape,
   Sprite,
+  type SpriteBlend,
   type SpriteFit,
   type TransformValue
 } from "../renderer/components";
@@ -16,6 +17,7 @@ import { Text } from "../text/components";
 import type { AnyComponentValue } from "../world/types";
 import type { Element } from "./jsx/types";
 import type { ElementLookup, Rect } from "./layout/types";
+import type { ResolvedStyle } from "./styles/types";
 
 /** The tag of the one child a scroll container holds: everything inside it moves as one. */
 export const CONTENT = "content";
@@ -96,6 +98,41 @@ function hollowOf(element: Element, hollow: boolean | undefined): { hollow?: boo
   return element.hollowed === true ? { hollow: false } : {};
 }
 
+/** The blend field a sprite or a nine-slice value is spread with: one field, or none. */
+type BlendField = Readonly<{ blend?: SpriteBlend }>;
+
+/** What an element that never blended spreads into its visual: no field at all. */
+const NO_BLEND: BlendField = Object.freeze({});
+
+/** What an element that blended once spreads once its style no longer blends: the glow turned off. */
+const NORMAL_BLEND: BlendField = Object.freeze({ blend: "normal" });
+
+/** What an element spreads while its style blends, one frozen object per mode. */
+const BLENDS: Readonly<Record<NonNullable<ResolvedStyle["blend"]>, BlendField>> = Object.freeze({
+  add: Object.freeze({ blend: "add" }),
+  screen: Object.freeze({ blend: "screen" })
+});
+
+/**
+ * How an image or a nine-slice lays its pixels over what is under it: the style's blend while it
+ * says one, `"normal"` once it did and no longer does (a live element is patched, so the old blend
+ * would stay), and no field on an element that never blended, so a game's describe and saved
+ * values stay as they were without it. Each answer is a frozen module constant: nothing is built.
+ *
+ * @param element - The element drawn with the sprite or the nine-slice.
+ * @param blend - The style's `blend`.
+ * @returns `{ blend }`, or nothing.
+ */
+function blendOf(element: Element, blend: ResolvedStyle["blend"]): BlendField {
+  if (blend !== undefined) {
+    element.blended = true;
+
+    return BLENDS[blend];
+  }
+
+  return element.blended === true ? NORMAL_BLEND : NO_BLEND;
+}
+
 /**
  * The box a text wraps at: its laid-out width while it wraps at it, 0 once it fits again, so a
  * text that wrapped draws on one line, and no field on a text that never wrapped.
@@ -116,7 +153,8 @@ function boxOf(element: Element): { box?: number } {
 /**
  * The visual component of an element: a sprite for an image or an icon, the text for a text (with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
- * when the style sets `debug`, its rim alone when it sets `hollow`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
+ * when the style sets `debug`, its rim alone when it sets `hollow`; the sprite and the nine-slice
+ * blended by the style's `blend`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
  * stroke dashed with `dash`, or an arc with `shape: "arc"`
  * over the `sweep` of its style, ended by its `cap`. A clipping element (`scroll`,
  * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
@@ -143,7 +181,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
         anchor: { x: 0, y: 0 },
         width: rect.w,
         height: rect.h,
-        fit: spriteFitOf(node.props)
+        fit: spriteFitOf(node.props),
+        // Only on an image that blended once: a variant that made it glow never leaves it glowing after.
+        ...blendOf(element, style.blend)
       })
     ];
   }
@@ -178,7 +218,8 @@ export function visualOf(element: Element): AnyComponentValue[] {
         // A text field framed by slices clips its value to them, so a long one never leaves it.
         clip: type === "input",
         // Only on a panel that was hollow once: a variant that made it hollow never leaves it hollow after.
-        ...hollowOf(element, style.hollow)
+        ...hollowOf(element, style.hollow),
+        ...blendOf(element, style.blend)
       })
     ];
   }

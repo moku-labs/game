@@ -197,6 +197,36 @@ describe("nine-slice in the style", () => {
   });
 });
 
+describe("blend of the style", () => {
+  // Bug: an image that never blended carries the field and every game's describe changes; or the
+  // blend is written only while set, so the live patch never clears it and the image keeps glowing
+  // after the variant that blended it ends; or the rest is recorded without it, so a restore puts
+  // the other look back.
+  it("glows while a variant blends the image, and is drawn plain again after, its rest too", async () => {
+    const app = await startUiApp();
+
+    mount(app, "showcase");
+
+    const glow = entityOf(app, "glow");
+
+    expect(app.world.ecs.get(glow, Sprite)).not.toHaveProperty("blend");
+
+    app.world.ecs.tag(glow, PointerOver);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(glow, Sprite)).toMatchObject({ texture: "ui.coin", blend: "screen" });
+    expect(app.world.projection.restOf(glow, Sprite)?.blend).toBe("screen");
+
+    app.world.ecs.untag(glow, PointerOver);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(glow, Sprite)?.blend).toBe("normal");
+    expect(app.world.projection.restOf(glow, Sprite)?.blend).toBe("normal");
+
+    await app.stop();
+  });
+});
+
 describe("images", () => {
   it("draws an image and an icon at their rect with the fit of their prop", async () => {
     const app = await startUiApp();

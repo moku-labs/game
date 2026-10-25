@@ -172,6 +172,14 @@ describe("defineStyle", () => {
     defineStyle({ fit: "cover" });
   });
 
+  // Bug: the blend of a style widens to any string, so `"multiply"` compiles and is drawn plain,
+  // with a warning only at run time.
+  it("takes add and screen as the blend of a style and refuses any other mode", () => {
+    expectTypeOf(defineStyle({ blend: "screen" }).blend).toEqualTypeOf<"screen">();
+    // @ts-expect-error — a style blends "add" or "screen"; another mode is drawn plain.
+    defineStyle({ blend: "multiply" });
+  });
+
   it("refuses a field outside the vocabulary", () => {
     // @ts-expect-error — text size comes from the text style key, never from the layout style.
     defineStyle({ fontSize: 24 });
