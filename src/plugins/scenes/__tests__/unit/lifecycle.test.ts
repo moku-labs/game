@@ -61,6 +61,22 @@ describe("startScenes", () => {
     );
   });
 
+  // Bug: a budget of 0, NaN or a string never counts down: every frame of a build makes one view and the switch
+  // takes seconds. A game written in plain JS passes anything.
+  it.each([
+    [Number.NaN, "NaN"],
+    [0, "0"],
+    ["4", "4"]
+  ])("refuses a buildMs of %s, named in the message", (buildMs, shown) => {
+    const mock = createMockScenes({ buildMs } as unknown as { buildMs: number });
+
+    expect(() => mock.start()).toThrow(
+      `[game] scenes.buildMs is ${shown}.\n` +
+        "  Give the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4."
+    );
+    expect(mock.flow.enter).toEqual([]);
+  });
+
   it("registers one callback on the scene stage and keeps its remover", () => {
     const mock = createMockScenes();
 

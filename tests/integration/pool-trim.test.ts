@@ -237,15 +237,22 @@ async function open(options: {
 }
 
 /**
- * Waits until the flow rests at a node with its gate open.
+ * Waits until the flow rests at a node with its gate open. A turn that does not open it steps a
+ * frame, checked by the oracle: a live switch with a drawing renderer builds its scene aside over
+ * frames and opens the gate after the commit (spec 31), so the frames after it count from the
+ * commit.
  *
  * @param fixture - The running fixture.
  * @param path - The path of the rest node.
  */
 async function arrive(fixture: Running, path: string): Promise<void> {
+  const { flow } = fixture.app;
+  const rests = (): boolean => flow.state().path === path && flow.gate.state().open;
+
   for (let attempt = 0; attempt < 400; attempt += 1) {
-    if (fixture.app.flow.state().path === path && fixture.app.flow.gate.state().open) return;
+    if (rests()) return;
     await new Promise(resolve => setTimeout(resolve, 0));
+    if (!rests()) await fixture.frames(1);
   }
 
   throw new Error(`The flow did not rest at "${path}".`);

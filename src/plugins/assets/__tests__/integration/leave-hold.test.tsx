@@ -3,7 +3,8 @@
  * Missing's memory → board). The memory scene names a `release: "leave"` bundle; leaving it for the board, the
  * board's next event released the bundle while the memory still faded out over the board, and its pictures turned
  * into placeholders. A small game on the fake page: the memory's root fades out for 600 ms, the board rests and can
- * be entered again.
+ * be entered again. The renderer draws, so a switch builds the board aside and commits it frames after the tap
+ * (spec 31): every window of the tests is counted from the commit, the frame `scenes.current()` turns to the board.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -176,7 +177,7 @@ const SEPARATE: Game = { feature, flow: main };
  * @param game - The feature and its main flow; the game of the separate memory root by default.
  * @param game.feature - The feature.
  * @param game.flow - Its main flow.
- * @returns The running app, the frame driver and whether anything still leaves.
+ * @returns The running app, the frame driver, the wait for a commit and whether anything still leaves.
  */
 async function startMemory(game: Game = SEPARATE) {
   installFakeDom({ width: 1080, height: 1920 });
@@ -214,11 +215,30 @@ async function startMemory(game: Game = SEPARATE) {
     }
   };
 
+  /**
+   * Steps frames until the scene is committed, and no frame after: the commit comes in the `signals` phase of a frame
+   * once the build is done, or between two frames when nothing was left to build. The next frame is the swap frame.
+   *
+   * @param scene - The scene being switched to.
+   */
+  const untilCommit = async (scene: string): Promise<void> => {
+    for (let frame = 0; frame < 60; frame += 1) {
+      for (let turn = 0; turn < 80; turn += 1) await Promise.resolve();
+      if (app.scenes.current() === scene) return;
+      app.time.step(16);
+      if (app.scenes.current() === scene) return;
+    }
+
+    expect(app.scenes.current()).toBe(scene);
+  };
+
+  await untilCommit("memory");
   await frames(6);
 
   return {
     app,
     frames,
+    untilCommit,
     leaving: (): boolean => [...app.world.ecs.query(Exiting)].length > 0
   };
 }
@@ -239,7 +259,9 @@ describe("the bundles of a leaving scene (F51)", () => {
     expect(app.assets.isLoaded("ep.memory")).toBe(true);
 
     app.input.tap(app.ui.find("door") ?? 0);
-    await game.frames(4);
+    await game.untilCommit("board");
+    // The swap frame: the memory's root starts its fade.
+    await game.frames(1);
     expect(app.flow.state().path).toBe("board");
 
     // The board's next event: the release a rest marks runs, while the memory still fades out.
@@ -266,7 +288,12 @@ describe("the bundles of a leaving scene (F51)", () => {
     expect(app.assets.isLoaded("memory")).toBe(true);
 
     app.input.tap(app.ui.find("door") ?? 0);
-    await game.frames(4);
+    await game.untilCommit("board");
+
+    // The commit frame: the board is the mounted scene, the memory leaves from the next frame on and holds its bundle.
+    expect(app.assets.isLoaded("memory")).toBe(true);
+
+    await game.frames(1);
 
     expect(app.flow.state().path).toBe("board");
     expect(game.leaving()).toBe(true);
@@ -280,16 +307,23 @@ describe("the bundles of a leaving scene (F51)", () => {
   });
 
   // Bug (A Memory Missing, F51b): the memory's root stays mounted; its elements are tagged `Exiting` by the reconcile
-  // of the frame after the rest that mounts the board, and that rest's release ran first: nothing carried `Exiting`,
-  // the hold ended before the leave began, and the leaving pictures fetched the bundle again.
-  it("keeps the bundles when the leave starts only at the reconcile after the rest that mounts the board", async () => {
+  // of the frame after the commit of the board, and the release ran first: nothing carried `Exiting`, the hold ended
+  // before the leave began, and the leaving pictures fetched the bundle again.
+  it("keeps the bundles when the leave starts only at the reconcile after the commit of the board", async () => {
     const game = await startMemory({ feature: storyFeature, flow: storyMain });
     const { app } = game;
 
     expect(app.assets.isLoaded("ep.memory")).toBe(true);
 
     app.input.tap(app.ui.find("storyDoor") ?? 0);
-    await game.frames(4);
+    await game.untilCommit("board");
+
+    // The commit frame: nothing carries `Exiting` yet, and the memory's bundle is held all the same.
+    expect(game.leaving()).toBe(false);
+    expect(app.assets.isLoaded("ep.memory")).toBe(true);
+
+    // The frame after: the way out of the memory is committed and its picture starts its fade.
+    await game.frames(1);
 
     expect(app.flow.state().path).toBe("board");
     expect(game.leaving()).toBe(true);

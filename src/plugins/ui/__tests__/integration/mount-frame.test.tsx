@@ -309,7 +309,8 @@ describe("the views a slot hosts, in the frame the slot comes (F14, K4)", () => 
 
     await enterBoard(app);
     app.flow.gate.answer({ intent: "back" });
-    await settle(app, 2);
+    // The ward is built aside over as many frames as the budget takes: wait for its commit, not a frame count.
+    await arrive(app, "ward");
 
     expect(app.flow.state().path).toBe("ward");
 
@@ -625,23 +626,33 @@ const hostingManifest: Manifest = {
 type Way = "start" | "entry" | "restore" | "device";
 
 /**
- * Waits until the graph rests at a node with its gate open.
+ * Waits until the graph rests at a node with its gate open. A turn that does not open it steps a
+ * frame of 16 ms: a live switch with a drawing renderer builds its scene aside over frames and
+ * opens the gate after the commit (spec 31), so the next step is the first frame after the commit.
  *
  * @param app - The app.
  * @param app.flow - Its flow.
+ * @param app.time - Its time.
+ * @param app.time.step - Steps one frame.
  * @param path - The path of the rest node.
  */
-async function arrive(app: { flow: DrawnApp["flow"] }, path: string): Promise<void> {
+async function arrive(
+  app: { flow: DrawnApp["flow"]; time: { step(deltaMs: number): void } },
+  path: string
+): Promise<void> {
+  const rests = (): boolean => app.flow.state().path === path && app.flow.gate.state().open;
+
   for (let attempt = 0; attempt < 400; attempt += 1) {
-    if (app.flow.state().path === path && app.flow.gate.state().open) return;
+    if (rests()) return;
     await new Promise(resolve => setTimeout(resolve, 0));
+    if (!rests()) app.time.step(16);
   }
 
   throw new Error(`The flow did not rest at "${path}".`);
 }
 
 /**
- * Starts the port's game on the real Pixi at `hub`, before its first frame.
+ * Starts the port's game on the real Pixi at `hub`, before the first frame after the scene's commit.
  *
  * @returns The app and the stand-in Pixi it draws on.
  */
@@ -680,7 +691,8 @@ async function openHosting() {
 type HostingApp = Awaited<ReturnType<typeof openHosting>>["app"];
 
 /**
- * Brings the wide scene on screen once more, one way, and stops before its first frame.
+ * Brings the wide scene on screen once more, one way, and stops before the first frame after its
+ * commit.
  *
  * @param app - The app, resting at `hub` with its first frames drawn.
  * @param stage - The stand-in Pixi it draws on.
@@ -729,7 +741,7 @@ describe("a hosted view spawned before its root (D1, A Memory Missing hostsFirst
     "entry",
     "restore",
     "device"
-  ])("is drawn inside the root in the first frame, with the touch surface (%s)", async way => {
+  ])("is drawn inside the root in the first frame after the commit, with the touch surface (%s)", async way => {
     const { app, stage } = await openHosting();
 
     if (way !== "start") app.time.step(16);

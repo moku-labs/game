@@ -1,22 +1,23 @@
 /**
  * @file scenes plugin — shared fakes for the unit tests. Not a test file: the unit project only
  * collects `*.test.ts`. The real state, API, lifecycle and switch run over a fake `flow`, a fake
- * `world`, a fake `assets` and a fake `model`, so nothing loads, nothing is drawn and nothing
- * needs a DOM.
+ * `world`, a fake `assets`, a fake `time`, a fake `model` and a fake `renderer`, so nothing loads,
+ * nothing is drawn and nothing needs a DOM. The renderer draws nothing by default
+ * (`host.ready()` is false), so a switch takes the one-block path unless a test turns it on.
  */
 import type { Log } from "@moku-labs/common/browser";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Api as AssetsApi } from "../../../assets/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { EnterCallback, Api as FlowApi, NodeInfo, Stage } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
-import type { Api as TimeApi } from "../../../time/types";
-import type { LayerSpec, Owner, Api as WorldApi } from "../../../world/types";
+import type { FrameCallback, Phase, Api as TimeApi } from "../../../time/types";
+import type { LayerSpec, Owner, Api as WorldApi, WorldMode } from "../../../world/types";
 import { createScenesApi } from "../../api";
 import { startScenes, stopScenes, withDeps } from "../../lifecycle";
 import { createScenesState } from "../../state";
-import type { KernelSlice, RunContext, ScenesApi, ScenesCtx, State } from "../../types";
+import type { Config, KernelSlice, RunContext, ScenesApi, ScenesCtx, State } from "../../types";
 
 /** One load the fake `assets` is holding back. */
 export type HeldLoad = { bundle: string; resolve: () => void; reject: (error: unknown) => void };
@@ -35,6 +36,8 @@ export type FakeAssets = {
   fail(error: unknown): void;
   /** Every bundle `warm` was called with, and how a test steers it: `gate` is what each warm returns. */
   warm: { calls: string[]; gate: Promise<void> };
+  /** Every list `sceneComing` was called with, in order. */
+  coming: string[][];
   api: AssetsApi;
 };
 
@@ -43,6 +46,14 @@ export type FakeModel = {
   /** Replaces the committed trees; the next snapshot is a new frozen object. */
   set(player: Json, session: Json): void;
   api: ModelApi;
+};
+
+/** One call of `projection.build`, as the fake `world` recorded it. */
+export type BuildCall = {
+  names: readonly string[];
+  owner: Owner;
+  layers: readonly LayerSpec[];
+  budgetMs: number;
 };
 
 /** What the fake `world` recorded. */
@@ -55,6 +66,22 @@ export type FakeWorld = {
   mountError: unknown;
   /** Every scene `ecs.setScene` was told, in order. */
   scenes: string[];
+  /** What `ecs.mode()` answers: `"fast"` while the flow walks fast. */
+  mode: WorldMode;
+  /**
+   * The build of the next scene, steered by a test: `answer` is what `build` answers (false is a
+   * projection mounted under other layer rules), `error` is thrown once by `build`, the way a
+   * throwing `view` is, `done` is what `built()` answers while a build runs, `commitError` is
+   * thrown once by `commit`. `running` tells whether a build runs.
+   */
+  building: {
+    answer: boolean;
+    error: unknown;
+    done: boolean;
+    commitError: unknown;
+    running: boolean;
+    calls: BuildCall[];
+  };
   api: WorldApi;
 };
 
@@ -64,7 +91,19 @@ export type FakeTime = {
   wakes: number;
   /** How often the switch told the adaptive frame rate that a new scene stands. */
   scenes: number;
+  /** The frame callbacks registered now, by phase. */
+  callbacks: Record<Phase, FrameCallback[]>;
+  /** The page clock of an agent build, ms; `undefined` is a build without the flag. */
+  clock: { now: number } | undefined;
+  /** Runs one frame: every registered callback, phase by phase, as `time.step` does. */
+  frame(): void;
   api: TimeApi;
+};
+
+/** The fake `renderer`: its host's `ready`, a spy answering false, and its performance log's `event`, a spy. */
+export type FakeRenderer = {
+  host: { ready: Mock<() => boolean> };
+  monitor: { event: Mock<(name: string, detail?: unknown) => void> };
 };
 
 /** What the fake `flow` recorded and what it answers with. */
@@ -87,8 +126,12 @@ export type MockScenes = {
   assets: FakeAssets;
   time: FakeTime;
   model: FakeModel;
-  /** The fake renderer: its performance log's `event`, a spy. */
-  renderer: { monitor: { event: ReturnType<typeof vi.fn> } };
+  renderer: FakeRenderer;
+  /**
+   * Every call the switch made into its fakes, in order, as `world:setLayers`, `assets:sceneBundles`,
+   * `time:wake`, `emit:scenes:changed` or `monitor:scene`: the order of the swap.
+   */
+  journal: string[];
   start(): void;
   stop(): void;
   /** Calls the registered `onEnter("scene")` callback, the way the runner does. */
@@ -136,13 +179,15 @@ export function nodeOf(node: Partial<NodeInfo>): NodeInfo {
 /**
  * Creates the fake `assets`: `load`, which resolves at once unless a test gates it, and `warm`, which records the bundle and returns `warm.gate`.
  *
+ * @param journal - The order of every call into the fakes.
  * @returns The fake assets and its recordings.
  */
-function createFakeAssets(): FakeAssets {
+function createFakeAssets(journal: string[]): FakeAssets {
   const loaded: string[] = [];
   const control = { gated: false };
   const held: HeldLoad[] = [];
   const named: string[][] = [];
+  const coming: string[][] = [];
   const warm = { calls: [] as string[], gate: Promise.resolve() };
 
   const api = {
@@ -166,7 +211,12 @@ function createFakeAssets(): FakeAssets {
     texture: () => undefined,
     usage: () => ({ textureMb: 0, budgetMb: 0, bundles: [] }),
     sceneBundles: (list: readonly string[]): void => {
+      journal.push("assets:sceneBundles");
       named.push([...list]);
+    },
+    sceneComing: (list: readonly string[]): void => {
+      journal.push("assets:sceneComing");
+      coming.push([...list]);
     }
   } as unknown as AssetsApi;
 
@@ -188,17 +238,36 @@ function createFakeAssets(): FakeAssets {
       for (const entry of held.splice(0)) entry.reject(error);
     },
     warm,
+    coming,
     api
   };
 }
 
 /**
- * Creates the fake `world`: the three `projection` members the switch calls, each recording the
- * call and its order, and `ecs.setScene`, recording the scenes it was told.
+ * Takes the error a test set on a field once, so the next call goes through.
  *
+ * @param holder - The object that holds the error.
+ * @param field - The field the error is in.
+ * @throws {Error} The error the field held.
+ */
+function throwOnce<Field extends string>(holder: Record<Field, unknown>, field: Field): void {
+  const error = holder[field];
+
+  if (error === undefined) return;
+
+  holder[field] = undefined;
+  throw error;
+}
+
+/**
+ * Creates the fake `world`: the `projection` members the switch calls, each recording the call
+ * and its order, the build members steered by `building`, `ecs.setScene`, recording the scenes it
+ * was told, and `ecs.mode`, answering `mode`.
+ *
+ * @param journal - The order of every call into the fakes.
  * @returns The fake world and its recordings.
  */
-function createFakeWorld(): FakeWorld {
+function createFakeWorld(journal: string[]): FakeWorld {
   const fake: FakeWorld = {
     calls: [],
     layers: [],
@@ -206,35 +275,66 @@ function createFakeWorld(): FakeWorld {
     unmounted: [],
     mountError: undefined,
     scenes: [],
+    mode: "live",
+    building: {
+      answer: true,
+      error: undefined,
+      done: false,
+      commitError: undefined,
+      running: false,
+      calls: []
+    },
     api: undefined as unknown as WorldApi
+  };
+  const record = (call: string): void => {
+    fake.calls.push(call);
+    journal.push(`world:${call}`);
   };
 
   fake.api = {
     ecs: {
       setScene: (scene: string): void => {
+        journal.push("world:setScene");
         fake.scenes.push(scene);
-      }
+      },
+      mode: (): WorldMode => fake.mode
     },
     projection: {
       setLayers: (list: ReadonlyArray<LayerSpec>): void => {
-        fake.calls.push("setLayers");
+        record("setLayers");
         fake.layers.push([...list]);
       },
       unmount: (names: readonly string[]): void => {
-        fake.calls.push("unmount");
+        record("unmount");
         fake.unmounted.push([...names]);
       },
       mount: (names: readonly string[], owner: Owner): void => {
-        fake.calls.push("mount");
-
-        if (fake.mountError !== undefined) {
-          const error = fake.mountError;
-
-          fake.mountError = undefined;
-          throw error;
-        }
-
+        record("mount");
+        throwOnce(fake, "mountError");
         fake.mounted.push({ names: [...names], owner });
+      },
+      build: (
+        names: readonly string[],
+        owner: Owner,
+        layers: ReadonlyArray<LayerSpec>,
+        budgetMs: number
+      ): boolean => {
+        record("build");
+        fake.building.calls.push({ names: [...names], owner, layers: [...layers], budgetMs });
+        throwOnce(fake.building, "error");
+        fake.building.running = fake.building.answer;
+
+        return fake.building.answer;
+      },
+      built: (): boolean => fake.building.running && fake.building.done,
+      commit: (): void => {
+        record("commit");
+        throwOnce(fake.building, "commitError");
+        fake.building.running = false;
+      },
+      discard: (): void => {
+        record("discard");
+        fake.building.running = false;
       }
     }
   } as unknown as WorldApi;
@@ -243,19 +343,51 @@ function createFakeWorld(): FakeWorld {
 }
 
 /**
- * Creates the fake `time`: the two members `scenes` calls, counting the wakes and the new scenes.
+ * Creates the fake `time`: the members `scenes` calls, counting the wakes and the new scenes,
+ * keeping the frame callbacks for `frame()`, and answering the page clock of `clock`.
  *
+ * @param journal - The order of every call into the fakes.
  * @returns The fake time and its recording.
  */
-function createFakeTime(): FakeTime {
-  const fake: FakeTime = { wakes: 0, scenes: 0, api: undefined as unknown as TimeApi };
+function createFakeTime(journal: string[]): FakeTime {
+  const fake: FakeTime = {
+    wakes: 0,
+    scenes: 0,
+    callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
+    clock: undefined,
+    frame: (): void => {
+      for (const callbacks of Object.values(fake.callbacks)) {
+        // eslint-disable-next-line unicorn/no-useless-spread -- a callback that removes itself does not skip the next one
+        for (const callback of [...callbacks]) {
+          callback({ delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false });
+        }
+      }
+    },
+    api: undefined as unknown as TimeApi
+  };
 
   fake.api = {
     wake: (): void => {
+      journal.push("time:wake");
       fake.wakes += 1;
     },
     sceneChanged: (): void => {
+      journal.push("time:sceneChanged");
       fake.scenes += 1;
+    },
+    onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {
+      fake.callbacks[phase].push(callback);
+
+      return () => {
+        const at = fake.callbacks[phase].indexOf(callback);
+
+        if (at !== -1) fake.callbacks[phase].splice(at, 1);
+      };
+    },
+    agentClock: (): (() => number) | undefined => {
+      const clock = fake.clock;
+
+      return clock === undefined ? undefined : () => clock.now;
     }
   } as unknown as TimeApi;
 
@@ -321,18 +453,27 @@ function createFakeFlow(): FakeFlow {
 /**
  * Creates the mock plugin: the real state, the real API and the real lifecycle over the fakes.
  *
+ * @param config - The config the kernel resolved; `{ buildMs: 4 }`, the default, when left out.
  * @returns The context, the API, the fakes and the lifecycle steps.
  */
-export function createMockScenes(): MockScenes {
+export function createMockScenes(config?: Config): MockScenes {
   const state = createScenesState();
   const log = createMockLog();
   const emitted: Array<{ name: string; payload: unknown }> = [];
+  const journal: string[] = [];
   const flow = createFakeFlow();
-  const world = createFakeWorld();
-  const assets = createFakeAssets();
-  const time = createFakeTime();
+  const world = createFakeWorld(journal);
+  const assets = createFakeAssets(journal);
+  const time = createFakeTime(journal);
   const model = createFakeModel();
-  const renderer = { monitor: { event: vi.fn() } };
+  const renderer: FakeRenderer = {
+    host: { ready: vi.fn(() => false) },
+    monitor: {
+      event: vi.fn((name: string) => {
+        journal.push(`monitor:${name}`);
+      })
+    }
+  };
   const apis: Record<string, unknown> = {
     flow: flow.api,
     world: world.api,
@@ -343,9 +484,10 @@ export function createMockScenes(): MockScenes {
   };
 
   const ctx: KernelSlice = {
-    config: {},
+    config: config ?? { buildMs: 4 },
     state,
     emit: (name: string, payload: unknown): void => {
+      journal.push(`emit:${name}`);
       emitted.push({ name, payload });
     },
     global: {},
@@ -366,6 +508,7 @@ export function createMockScenes(): MockScenes {
     time,
     model,
     renderer,
+    journal,
     start: (): void => startScenes(ctx),
     stop: (): void => stopScenes({ state }),
     enter: async (node: Partial<NodeInfo>, run: Partial<RunContext> = {}): Promise<void> => {
