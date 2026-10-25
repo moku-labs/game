@@ -225,6 +225,34 @@ describe("a scene built aside", () => {
       }
     ]);
   });
+
+  // Bug: "auto" hands the world a fixed number, a whole frame, or the rate the loop ran at before the switch instead
+  // of the one it runs at when the build starts.
+  it.each([
+    [60, 500 / 60],
+    [120, 500 / 120]
+  ])('hands the world half a frame for "auto" at %i fps, read at the build start', async (fps, budgetMs) => {
+    const mock = await onHome({ buildMs: "auto" });
+
+    mock.time.fps = fps;
+    await enterBoard(mock);
+
+    expect(mock.world.building.calls.map(call => call.budgetMs)).toEqual([budgetMs]);
+  });
+
+  // Bug: a rate of 0 or NaN gives the world an endless budget (the renderer then takes the build for none and draws
+  // the coming scene at once) or no number at all.
+  it.each([
+    0,
+    Number.NaN
+  ])('hands the world half a 60 Hz frame for "auto" when time answers %s fps', async fps => {
+    const mock = await onHome({ buildMs: "auto" });
+
+    mock.time.fps = fps;
+    await enterBoard(mock);
+
+    expect(mock.world.building.calls.map(call => call.budgetMs)).toEqual([500 / 60]);
+  });
 });
 
 describe("a scene built aside that does not stand", () => {
@@ -373,8 +401,8 @@ describe("a scene built aside that does not stand", () => {
 });
 
 describe("a scene built aside in the performance log", () => {
-  // Bug: the perf script cannot tell how long a switch built, or an app without the flag logs it.
-  it("names the build start, and the commit with the frames and the page milliseconds it took, in an agent build only", async () => {
+  // Bug: the perf script cannot tell how long a switch built or with what budget, or an app without the flag logs it.
+  it("names the build start, and the commit with the frames, the page milliseconds and the budget, in an agent build only", async () => {
     const plain = await onHome();
     const plainBuild = await enterBoard(plain);
 
@@ -400,7 +428,7 @@ describe("a scene built aside in the performance log", () => {
     expect(plain.renderer.monitor.event).not.toHaveBeenCalled();
     expect(agent.renderer.monitor.event.mock.calls).toEqual([
       ["scene:build", { from: "home", to: "board" }],
-      ["scene", { from: "home", to: "board", buildFrames: 3, buildMs: 30 }]
+      ["scene", { from: "home", to: "board", buildFrames: 3, buildMs: 30, budgetMs: 500 / 60 }]
     ]);
   });
 });

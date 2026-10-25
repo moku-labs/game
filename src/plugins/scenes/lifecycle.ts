@@ -85,21 +85,22 @@ function readScenes(ctx: ScenesCtx): void {
 }
 
 /**
- * Refuses a building budget a frame cannot count down, in `onInit`, so `createApp` throws: not a
- * number, not finite, or not above 0. A game written in plain JS passes anything, so the config is
- * a boundary.
+ * Refuses a building budget a frame cannot count down, in `onInit`, so `createApp` throws: neither
+ * `"auto"` nor a finite number above 0. A game written in plain JS passes anything, so the config
+ * is a boundary.
  *
  * @param config - The resolved config of the plugin.
- * @throws {Error} When `buildMs` is not a finite number above 0.
+ * @throws {Error} When `buildMs` is neither `"auto"` nor a finite number above 0.
  */
 export function checkConfig(config: Readonly<Config>): void {
   const value: unknown = config.buildMs;
 
+  if (value === "auto") return;
   if (typeof value === "number" && Number.isFinite(value) && value > 0) return;
 
   throw new Error(
     `[game] scenes.buildMs is ${String(value)}.\n` +
-      "  Give the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4."
+      '  Give "auto" or the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4.'
   );
 }
 

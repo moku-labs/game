@@ -163,10 +163,11 @@ and alive, and swaps it in one frame (spec 31, F61 S2). What a game sees:
 
 - **The switch ends later.** The steps up to the warm are as before. Then the logic of the coming
   scene (its projections' `view`, the elements and the layout of its JSX) runs in one block, and the
-  renderer makes its Pixi views over the next frames, `buildMs` of each frame (4 by default) after
-  the live work, off the stage, and draws them once into a small target so their first real frame is
-  cheap. On a phone the swap comes some frames later than the old one-block switch did, up to about
-  0.15 s after the tap.
+  renderer makes its Pixi views over the next frames, off the stage, in the budget of each frame
+  after the live work: `buildMs`, by default half of the frame interval the loop runs at when the
+  build starts (8.33 ms at 60 Hz, 4.17 ms at 120 Hz). Their first draw is the swap frame. On a phone
+  the swap comes some frames later than the old one-block switch did, up to about 0.15 s after the
+  tap.
 - **The old scene stays.** Until the swap `app.scenes.current()` answers the old scene, nothing of
   the new one is drawn, hit, found with `ui.find` or shown by the `ui`, `locate` and `render` doors,
   and its `enter` motions and hooks wait. The projections only the old scene lists keep what they
@@ -198,7 +199,10 @@ and alive, and swaps it in one frame (spec 31, F61 S2). What a game sees:
   good.
 
 ```ts
-// A game on a slow phone gives the next scene 3 ms of each frame: the switch takes a frame or two more.
+// The default: half of each frame, read at the start of every build (8.33 ms at 60 Hz, 4.17 ms at 120 Hz).
+createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { buildMs: "auto" } } });
+
+// A game on a slow phone gives the next scene a fixed 3 ms of each frame: the switch takes a frame or two more.
 createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { buildMs: 3 } } });
 ```
 
@@ -259,13 +263,13 @@ HUD that is not shared does not blink either.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `buildMs` | `number` | `4` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work: about half a 120 Hz frame. At 60 Hz the build takes a few more frames |
+| `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is half of the frame interval the loop runs at, `500 / time.rate().fps`, read once at the build start: 8.33 ms at 60 Hz, 4.17 ms at 120 Hz (half a 60 Hz frame if `time` answers no rate). A number is a fixed budget |
 
-A value that is not a finite number above 0 throws in `onInit`, so `createApp` throws:
+A value that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
 
 ```
 [game] scenes.buildMs is 0.
-  Give the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4.
+  Give "auto" or the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4.
 ```
 
 A scene is data in a feature. A transition effect is V3 work of `anim`.
@@ -287,8 +291,8 @@ A scene is data in a feature. A transition effect is V3 work of `anim`.
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
 | `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
-| `renderer` | `host.ready()`, which picks the path of a live switch; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames` and `buildMs` for a scene built aside: the performance log of an agent build names the switch |
-| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard; `agentClock()`, the page clock of a build's `buildMs` in an agent build |
+| `renderer` | `host.ready()`, which picks the path of a live switch; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
+| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard; `rate().fps` at a build start, for the budget of `"auto"`; `agentClock()`, the page clock of a build's `buildMs` in an agent build |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle

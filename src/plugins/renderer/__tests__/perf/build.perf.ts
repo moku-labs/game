@@ -6,8 +6,8 @@ import { bytesPerCall, waitingBuild } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the frame functions of a scene built aside (spec 31, F61 S2) on their idle paths. The still pass with no build
-// is `sync-pass.perf.ts`; here the pass while a build waits for its swap, the pre-draw step with and without a build,
-// and the renderer's readiness check that `world.projection.built()` asks every build frame.
+// is `sync-pass.perf.ts`; here the pass while a build waits for its swap, the build step of a drawn frame with no
+// build, and the renderer's readiness check that `world.projection.built()` asks every build frame.
 // ---------------------------------------------------------------------------
 
 describe("the frame functions of a scene build", () => {
@@ -22,23 +22,14 @@ describe("the frame functions of a scene build", () => {
     );
   });
 
-  // Bug: the pre-draw step of every drawn frame builds a queue, a closure or a target with no build at all.
-  it("allocates nothing on the pre-draw step with no build", async () => {
+  // Bug: the build step of every drawn frame builds a queue or a closure with no build at all.
+  it("allocates nothing on the build step of a drawn frame with no build", async () => {
     const mock = createMockRenderer();
 
     await mock.start();
 
-    expect(bytesPerCall(() => mock.modules.sync.predrawStep())).toBeLessThanOrEqual(
-      BUDGET.predrawIdle + NOISE
-    );
-  });
-
-  // Bug: the pre-draw step cuts the held tops again, or walks them, in every frame after it drew them all.
-  it("allocates nothing on the pre-draw step once every held view is pre-drawn", async () => {
-    const { mock } = await waitingBuild(40);
-
-    expect(bytesPerCall(() => mock.modules.sync.predrawStep())).toBeLessThanOrEqual(
-      BUDGET.predrawWaiting + NOISE
+    expect(bytesPerCall(() => mock.modules.sync.takeBuildWork())).toBeLessThanOrEqual(
+      BUDGET.buildStepIdle + NOISE
     );
   });
 

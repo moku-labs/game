@@ -5,7 +5,7 @@ import type { AnyProjectionSpec } from "../../../world/projection/types";
 import type { AnyComponentValue, Entity, LayerSpec } from "../../../world/types";
 import { Parent, Sprite, Transform } from "../../components";
 import type { PixiContainer } from "../../types";
-import { FakeRenderTexture, FakeTexture } from "../fake-pixi";
+import { FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ const texture = new FakeTexture({});
  * @returns The started mock.
  */
 async function started(layers: readonly LayerSpec[] = WARD): Promise<MockRenderer> {
-  const mock = createMockRenderer({ renderTextures: true });
+  const mock = createMockRenderer();
 
   await mock.start();
   mock.api.sync.textures.provide(() => texture as never);
@@ -481,8 +481,8 @@ describe("a scene built aside: the end of the build", () => {
   });
 
   // Bug: the readiness answers true while views wait (the swap builds them all in one frame) or before the pass
-  // sorted them out of `added` (the commit comes before any view exists), or never after the pre-draw.
-  it("answers built() only when every building view is made and pre-drawn", async () => {
+  // sorted them out of `added` (the commit comes before any view exists), or holds the swap back once all are made.
+  it("answers built() only when every building view is made", async () => {
     const mock = await started();
     const projection = mock.world.projection;
 
@@ -503,14 +503,7 @@ describe("a scene built aside: the end of the build", () => {
     mock.runPhase("render");
     mock.world.startFrame();
     mock.modules.sync.pass();
-    // Both made; the pre-draw has not drawn yet.
-    expect(projection.built()).toBe(false);
-
-    // The first piece: the frame's budget is spent; the next frame draws the rest.
-    mock.runPhase("render");
-    expect(projection.built()).toBe(false);
-
-    frame(mock);
+    // Both made: the renderer holds the swap back no longer.
     expect(projection.built()).toBe(true);
 
     // A live view the old scene spawns meanwhile holds nothing back.
@@ -565,71 +558,15 @@ describe("a scene built aside: the end of the build", () => {
     expect(mock.api.sync.displayOf(good)).toBeDefined();
     expect(mock.world.projection.built()).toBe(true);
   });
-
-  // Bug: the pre-draw's target cannot be made and the build waits for a pre-draw that never comes, or it is tried and
-  // logged again in every frame.
-  it("ends the pre-draw when its target cannot be made, logged once, and the swap still comes", async () => {
-    const mock = await started();
-    const thrown = new Error("out of memory");
-
-    vi.spyOn(FakeRenderTexture, "create").mockImplementation(() => {
-      throw thrown;
-    });
-    startBuild(mock);
-
-    const top = spawnBuilding(mock, boardTop(1));
-
-    frame(mock);
-    frame(mock);
-
-    expect(
-      vi.mocked(mock.log.error).mock.calls.filter(call => call[0] === "renderer:predraw-failed")
-    ).toEqual([["renderer:predraw-failed", { error: thrown }]]);
-    expect(mock.world.projection.built()).toBe(true);
-
-    commit(mock);
-    frame(mock);
-
-    expect(objectOf(mock, top).parent).toBe(mock.modules.sync.layerContainer("board"));
-  });
-
-  // Bug: a Pixi without render textures (a trimmed module, which keeps no picture either) throws at every build's
-  // first piece and logs it as a failure.
-  it("pre-draws nothing on a Pixi without render textures, logs nothing, and the swap still comes", async () => {
-    const mock = createMockRenderer();
-
-    await mock.start();
-    mock.api.sync.textures.provide(() => texture as never);
-    mock.world.projection.setLayers(WARD);
-    startBuild(mock);
-    spawnBuilding(mock, boardTop(1));
-    frame(mock);
-
-    expect(mock.world.projection.built()).toBe(true);
-    expect(mock.log.error).not.toHaveBeenCalled();
-  });
 });
 
 describe("a scene built aside: frames", () => {
   // Bug: a frame of building work is taken for a sample of the adaptive rate, which then drops for the load; or a
   // frame with no such work is told as probed and never counts.
-  it("tells time that a frame was probed on frames with aside or pre-draw work only", async () => {
+  it("tells time that a frame was probed on frames with aside work only", async () => {
     const mock = await started();
     const probed = vi.mocked(mock.time.frameProbed);
-    const renderer = mock.pixi.last().renderer;
-    const draw = renderer.render;
     let now = 100;
-
-    // A piece of the pre-draw, a render into a texture, spends more than the budget too.
-    renderer.render = (options: unknown): void => {
-      if (typeof options === "object" && options !== null && "target" in options) {
-        now += 5;
-        mock.setWorldNow(now);
-      }
-
-      draw(options as never);
-    };
-
     const calls: number[] = [];
     const step = (): void => {
       const before = probed.mock.calls.length;
@@ -650,38 +587,10 @@ describe("a scene built aside: frames", () => {
 
       return texture as never;
     });
-    // Views made: 1, 2, 3 and the first piece; then a piece a frame; then nothing but the wait for the swap.
+    // Views made: 1, 2, 3; then nothing but the wait for the swap.
     for (let index = 0; index < 6; index += 1) step();
 
-    expect(calls).toEqual([0, 1, 1, 1, 1, 1, 0]);
-  });
-
-  // Bug: the pieces of the pre-draw count as passes of the frame they are drawn in: `stats().renderPasses` of every
-  // build frame on a phone reads one pass per piece more than the screen costs, and a budget or a test reads a scene
-  // that draws dearer than it does.
-  it("counts no pass of the frame for the pieces of the pre-draw", async () => {
-    const mock = createMockRenderer({ renderTextures: true, scene: { passes: 1 } });
-
-    await mock.start();
-    mock.api.sync.textures.provide(() => texture as never);
-    mock.world.projection.setLayers(WARD);
-    frame(mock);
-
-    expect(mock.api.stats().renderPasses).toBe(1);
-
-    const renderer = mock.pixi.last().renderer;
-
-    startBuild(mock);
-    spawnBuilding(mock, boardTop(1));
-    spawnBuilding(mock, boardTop(2));
-
-    const renders = renderer.renders;
-
-    frame(mock);
-
-    // The stage and the two held tops were rendered; only the stage is a pass of the frame.
-    expect(renderer.renders - renders).toBe(3);
-    expect(mock.api.stats().renderPasses).toBe(1);
+    expect(calls).toEqual([0, 1, 1, 1, 0, 0, 0]);
   });
 
   // Bug: the hit test finds the coming scene's views before the swap (a tap lands on the board under the ward), or the

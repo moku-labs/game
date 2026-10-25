@@ -16,7 +16,8 @@ import {
   dropAside,
   heldWaiting,
   sortAside,
-  stepAside
+  stepAside,
+  takeBuildWork
 } from "./build";
 import { eachEntity, isEmptyList } from "./each";
 import { applySwitched, forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
@@ -36,7 +37,6 @@ import {
 import { forgetOverlays } from "./overlay-state";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { parentOf } from "./pose";
-import { predrawStep } from "./predraw";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
 import { checkTree } from "./tree-check";
@@ -921,7 +921,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     warmStep: (): boolean => warmStep(sctx),
 
-    predrawStep: (): boolean => predrawStep(sctx),
+    takeBuildWork: (): boolean => takeBuildWork(state.aside),
 
     uploadStep: (): boolean => uploadStep(sctx),
 
@@ -986,7 +986,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         ecs.onRemoved(Parent, markReparented),
         ...watchOverlays(sctx),
         ecs.system(createSyncSystem(pass)),
-        // The renderer's part of a scene build: every building view made and pre-drawn (spec 31).
+        // The renderer's part of a scene build: every building view made (spec 31).
         ctx.deps.world.projection.onBuild(() => buildReady(sctx))
       );
 

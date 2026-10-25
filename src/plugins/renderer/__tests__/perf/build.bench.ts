@@ -17,17 +17,9 @@ describe("the frame functions of a scene build", () => {
   );
 
   bench(
-    "the pre-draw step with no build",
+    "the build step of a drawn frame with no build",
     () => {
-      idle.modules.sync.predrawStep();
-    },
-    BENCH_OPTIONS
-  );
-
-  bench(
-    "the pre-draw step once every held view is pre-drawn",
-    () => {
-      waiting.mock.modules.sync.predrawStep();
+      idle.modules.sync.takeBuildWork();
     },
     BENCH_OPTIONS
   );

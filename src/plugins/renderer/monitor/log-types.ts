@@ -614,7 +614,7 @@ export type PerfLongFrameLine = PerfLine<"longFrame"> &
  * `{ on, off }`: the names of the sections on and off, in the order of `MONITOR_SECTIONS`; `"scale"` is a move of the
  * render scale of the adaptive frame rate, detail `{ from, to, reason, fps }`; `"scene:build"` is the start of a
  * scene built aside on a live switch (spec 31), detail `{ from, to }`, and the `"scene"` line of its commit carries
- * `buildFrames` and `buildMs` too).
+ * `buildFrames`, `buildMs` and the budget of a frame it ran with, `budgetMs`, too).
  */
 export type PerfEventName =
   | "scene"

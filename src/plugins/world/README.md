@@ -198,7 +198,7 @@ alive (spec 31, F61 S2). The world keeps the build in a table of its own, so a p
 has two records:
 
 ```ts
-// `scenes`, at the build start: the coming list, its layers, 4 ms a frame for ui and renderer.
+// `scenes`, at the build start: the coming list, its layers, 4 ms a frame for ui and renderer (`buildMs: 4`).
 const projection = ctx.deps.world.projection;
 projection.build(["board.back", "board.items", "hud"], ctx.state.owner, scene.layers, 4); // true
 

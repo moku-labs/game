@@ -749,7 +749,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views of a scene build that was committed, added views, changed components, invalidated texture keys; then, while a scene is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then pre-draws pieces of a scene build's held views, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -771,34 +771,16 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
   and it waits in the held list, in the order it was made. A building view under a building parent
   hangs in the parent's tree, which is held as a whole. Layer containers the coming scene declares
   are made only by the commit's layer list. The hit test walks the stage, so it never finds a held
-  view: a tap during the build hits the old scene.
+  view: a tap during the build hits the old scene, and the pass estimate (`sync.renderPasses()`) never
+  counts one. Nothing draws a held view before the swap: its first draw is in the swap frame.
 - **Still frames.** `still()` does not read the aside queue, and the aside work leaves
   `passesVersion` where it was: the held views are drawn nowhere, so the live scene's unseen walks
   (E4) and render passes (Q2) are not taken again in every build frame.
-- **Pre-draw.** Once every building view is made, the held tops are drawn into a 4 × 4 render
-  texture the renderer makes for it once per device (`host.renderProbe(container, target)`, the call
-  of the warm-up, whose own target exists only after a warm frame with `warm` above 0), in a drawn
-  frame before the stage pass. A top is cut into pieces of subtrees of at most `PREDRAW_NODES` (60)
-  nodes, by node count, not by level; at least one piece a frame, more while `left()` is above 0.
-  Pixi builds the geometry, the text and the uploads of a piece then, so the swap frame draws them
-  faster (A26 estimate: about half the first draw). Pixi makes a rendered container a render group;
-  the pre-draw takes the groups it made away again. A subtree that carries a filter or a mask (and a
-  clip's mask beside the container it clips) is never a piece, nor in one: drawn alone it would cost a
-  filter pass per piece and open Pixi's filter or mask stack in a render of its own, which the warm-up
-  never does either. It is drawn first at the swap, as without the pre-draw; its neighbours without
-  one are still pre-drawn. The pieces are no passes of the frame: the monitor's counters
-  (`stats().renderPasses`, the pass log of an agent build) are paused around each one, and the
-  estimate (`sync.renderPasses()`) never counts a held view. A piece is drawn only while it still hangs
-  in the top it was cut from: a top that changed since is cut again. A piece that throws ends the pre-draw
-  of the build (`renderer:predraw-failed`, an error) and the swap draws as without it. The pre-draw
-  is skipped after a failed warm-up on this device (`warm.failed`: Pixi's filter stack may be
-  unbalanced) and without a device.
-- **Frames.** While views wait to be made, pre-drawn or attached, the renderer asks for the next
-  frame (`"request"`), and a frame that made views or drew a piece is told to `time` with
-  `frameProbed()`: load work, never a sample of the adaptive rate.
+- **Frames.** While views wait to be made or attached, the renderer asks for the next frame
+  (`"request"`), and a frame that made views is told to `time` with `frameProbed()`: load work,
+  never a sample of the adaptive rate.
 - **Readiness.** The renderer registers its part of `world.projection.built()` with `onBuild` at
-  start: no building entity waits in the added set or the aside queue, and the pre-draw is done,
-  skipped or ended by an error.
+  start: no building entity waits in the added set or the aside queue.
 - **The swap.** In the pass after the commit, the coming layer list is applied first, then every held
   top is attached in one block, in the order it was made, and sorted by the rule of its layer: the
   tree is the one a one-block build of the same scene makes. A discard despawns the build: its held

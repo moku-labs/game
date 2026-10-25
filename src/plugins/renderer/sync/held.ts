@@ -6,7 +6,7 @@
  */
 import type { Entity } from "../../world/types";
 import { detach } from "./pools";
-import type { PredrawState, SyncCtx, SyncState, View } from "./types";
+import type { SyncCtx, SyncState, View } from "./types";
 
 /**
  * Tells whether a view is held: its entity belongs to the running build, and it has no parent or its parent is live.
@@ -49,30 +49,13 @@ export function holdView(sctx: SyncCtx, entity: Entity, view: View, layer: strin
 }
 
 /**
- * Empties the pre-draw for the next build: no piece, no top, the failure forgotten. The target stays for the device.
- *
- * @param predraw - The pre-draw branch of the sync state.
- */
-export function resetPredraw(predraw: PredrawState): void {
-  predraw.pieces.length = 0;
-  predraw.count = 0;
-  predraw.head = 0;
-  predraw.next = 0;
-  predraw.slot = -1;
-  predraw.entity = 0;
-  predraw.top = undefined;
-  predraw.failed = false;
-}
-
-/**
  * Forgets the queues of a scene build with the tree, on a device loss, a rebuild or a stop: the views they name are
- * gone, and a rebuild holds every building view again. The pre-draw target belongs to the device and is destroyed.
- * Works on the state alone.
+ * gone, and a rebuild holds every building view again. Works on the state alone.
  *
  * @param state - The sync branch of the plugin state.
  */
 export function forgetBuild(state: SyncState): void {
-  const { aside, heldViews, predraw } = state;
+  const { aside, heldViews } = state;
 
   aside.count = 0;
   aside.head = 0;
@@ -80,7 +63,4 @@ export function forgetBuild(state: SyncState): void {
   aside.waiting.clear();
   heldViews.count = 0;
   heldViews.reported = false;
-  resetPredraw(predraw);
-  predraw.target?.destroy(true);
-  predraw.target = undefined;
 }

@@ -1063,17 +1063,12 @@ export type SyncInternal = {
   warmStep(): boolean;
 
   /**
-   * The render phase's half of a scene build (spec 31): once every building view is made, cuts the held tops into
-   * pieces of at most `PREDRAW_NODES` nodes and draws them into the pre-draw's own 4 x 4 target, at least one piece a
-   * frame and more while `world.projection.left()` is above 0, in a drawn frame before the stage pass, so Pixi builds
-   * their geometry before the swap draws them. Skipped after a failed warm-up and without a device; a piece that throws
-   * ends the pre-draw of the build. Asks for the next frame while pieces wait. Two field reads and no allocation with
-   * no build.
+   * The render phase's half of a scene build (spec 31): tells whether the pass made views of the build aside in this
+   * frame, and clears the count, so a frame the pass did not run in reads false. A field read and no allocation.
    *
-   * @returns True when this frame did building work: views made by the pass, or a piece drawn here. Such a frame is no
-   *   sample of the adaptive rate.
+   * @returns True when this frame did building work: such a frame is no sample of the adaptive rate.
    */
-  predrawStep(): boolean;
+  takeBuildWork(): boolean;
 
   /**
    * Uploads up to `renderer.uploads` queued texture sources (F60), in a drawn frame, right after the warm-up's probes
@@ -1465,7 +1460,7 @@ export type AsideQueue = {
   head: number;
   /** The entities of the queue that have no view yet: a parent that waits here is made before its child. */
   waiting: Set<Entity>;
-  /** The views the pass made aside in the current frame, read by the render phase (`predrawStep`). */
+  /** The views the pass made aside in the current frame, read and cleared by the render phase (`takeBuildWork`). */
   made: number;
 };
 
@@ -1479,28 +1474,6 @@ export type HeldViews = {
   count: number;
   /** The dev check named a building view under the stage in this build: named once. */
   reported: boolean;
-};
-
-/**
- * The pre-draw of a scene build (spec 31): the pieces of the held top being drawn, dense from `head` to `count`, the
- * slot of `heldViews` cut next, the top the pieces were cut from, and the 4 x 4 target made once per device. Private
- * to `sync`.
- */
-export type PredrawState = {
-  pieces: PixiContainer[];
-  count: number;
-  head: number;
-  /** The slot of `heldViews` whose top is cut next. */
-  next: number;
-  /** The slot of the top the pieces were cut from; -1 before the first cut. */
-  slot: number;
-  /** The entity of that top. */
-  entity: Entity;
-  /** That top's object (`wrapper ?? object`) when it was cut: a piece is drawn only while it still hangs in it. */
-  top: PixiContainer | undefined;
-  target: PixiRenderTexture | undefined;
-  /** A piece threw, or the target could not be made: no more pre-draw in this build. */
-  failed: boolean;
 };
 
 /**
@@ -1613,8 +1586,6 @@ export type SyncState = {
   aside: AsideQueue;
   /** The held tops of the scene build, attached in the pass after its commit (spec 31). */
   heldViews: HeldViews;
-  /** The pre-draw of the held tops (spec 31). */
-  predraw: PredrawState;
   cleanups: Array<() => void>;
 };
 

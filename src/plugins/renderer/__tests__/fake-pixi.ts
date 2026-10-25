@@ -24,8 +24,6 @@ export type FakeSource = {
   pixelHeight?: number;
   /** Whether Pixi would generate the mip chain on upload; `from` always writes it. */
   autoGenerateMipmaps?: boolean;
-  /** The label a render texture was made with: Pixi's `RenderTexture.create` hands it to the source. */
-  label?: string;
   released?: string[];
   style?: { removeAllListeners(event: string): void };
   removeAllListeners?(event: string): void;
@@ -155,33 +153,6 @@ export class FakeTexture {
     this.destroyedSource = destroySource === true;
     this.releasedBeforeDestroy = [...(this.source.released ?? [])];
     if (destroySource === true) this.source.destroyed = true;
-  }
-}
-
-/** A fake of Pixi's `RenderTexture`: what a texture target is made with, as the pre-draw of a scene build makes one. */
-export class FakeRenderTexture extends FakeTexture {
-  /**
-   * Makes a render texture of a size, as Pixi's `RenderTexture.create` does: the label goes to its source.
-   *
-   * @param options - The size and the label.
-   * @param options.width - Width in CSS pixels.
-   * @param options.height - Height in CSS pixels.
-   * @param options.label - The label.
-   * @returns A new render texture.
-   */
-  public static create(options: {
-    width: number;
-    height: number;
-    label?: string;
-  }): FakeRenderTexture {
-    return new FakeRenderTexture({
-      source: {
-        width: options.width,
-        height: options.height,
-        destroyed: false,
-        ...(options.label === undefined ? {} : { label: options.label })
-      }
-    });
   }
 }
 
@@ -2370,16 +2341,10 @@ export type FakePixi = {
  * @param options.kind - The backend the fake renderer reports.
  * @param options.failInit - True to make `init` reject, as an unsupported device does.
  * @param options.scene - What every WebGPU frame draws; nothing when left out.
- * @param options.renderTextures - True to give the module `RenderTexture` (the pre-draw's target, and the kept cache).
  * @returns The module to pass to `config.loadPixi`, and the recorded applications.
  */
 export function createFakePixi(
-  options: {
-    kind?: "webgpu" | "webgl";
-    failInit?: boolean;
-    scene?: Partial<FakeScene>;
-    renderTextures?: boolean;
-  } = {}
+  options: { kind?: "webgpu" | "webgl"; failInit?: boolean; scene?: Partial<FakeScene> } = {}
 ): FakePixi {
   FakeApplication.instances = [];
   FakeFilterSystem.onApply = undefined;
@@ -2403,9 +2368,6 @@ export function createFakePixi(
     Mesh: FakeMesh,
     MeshGeometry: FakeMeshGeometry,
     Texture: FakeTexture,
-    // Without render textures the kept cache keeps nothing, as in every test before it; a test of a scene build's
-    // pre-draw asks for them.
-    ...(options.renderTextures === true ? { RenderTexture: FakeRenderTexture } : {}),
     TexturePool: new FakeTexturePool(),
     Rectangle: FakeRectangle,
     Graphics: FakeGraphics,

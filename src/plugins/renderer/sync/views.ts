@@ -1633,8 +1633,9 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 /**
  * Drops every view, every layer, every pool, every filter slot and filter area, the warm-up (its waiting promises
  * answer false, its probe tree is destroyed), the upload queue (its waiting calls answer false) and the queues of a
- * scene build with the pre-draw's target. Works on the state alone, because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
- * destroyed, and leaves without the filters, the filter area and the hidden reasons the renderer gave it.
+ * scene build. Works on the state alone, because `onStop` has no context. A `Display` object belongs to the game: it
+ * is detached, never destroyed, and leaves without the filters, the filter area and the hidden reasons the renderer
+ * gave it.
  *
  * @param state - The sync branch of the plugin state.
  */
@@ -1691,7 +1692,7 @@ export function stopSync(state: SyncState): void {
   stopWarm(state);
   stopUploads(state);
   state.held.clear();
-  // The scene build's queues: the views they named are gone with the maps above, the pre-draw target goes here.
+  // The scene build's queues: the views they named are gone with the maps above.
   forgetBuild(state);
   state.redraws = 0;
   state.overdraw.listeners.length = 0;

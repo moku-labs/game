@@ -1,12 +1,15 @@
 /**
  * @file scenes plugin — the next scene built aside on a live switch (spec 31, F61 S2). The world
  * mounts the coming projections into a table of its own while the old scene stays current, drawn
- * and alive; `ui` and the renderer do their part under `buildMs` a frame; the frame
+ * and alive; `ui` and the renderer do their part under the budget of a frame (`buildMs`); the frame
  * `world.projection.built()` first answers true commits it with the swap of a one-block switch. An
  * abort of the node discards the build and leaves the world as it stood.
  */
 import { swapIn } from "./swap";
 import type { SceneBuild, SceneDefinition, ScenesCtx } from "./types";
+
+/** The budget of a frame when `time` answers no frame rate to halve: half a 60 Hz frame, ms. */
+const FALLBACK_BUDGET_MS = 500 / 60;
 
 /**
  * Does nothing: the listeners of a build that commits at once, before it registered any.
@@ -25,6 +28,24 @@ function agentNow(ctx: ScenesCtx): number {
   const clock = ctx.deps.time.agentClock();
 
   return clock === undefined ? 0 : clock();
+}
+
+/**
+ * The building budget of a frame for a build that starts now: the number a game configured, or
+ * for `"auto"` half of the frame interval the loop runs at, `500 / time.rate().fps`, read once
+ * here. A rate that is not a finite number above 0 gives half a 60 Hz frame.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns Milliseconds per frame the building work may take.
+ */
+function budgetOf(ctx: ScenesCtx): number {
+  const { buildMs } = ctx.config;
+
+  if (buildMs !== "auto") return buildMs;
+
+  const { fps } = ctx.deps.time.rate();
+
+  return Number.isFinite(fps) && fps > 0 ? 500 / fps : FALLBACK_BUDGET_MS;
 }
 
 /**
@@ -107,6 +128,7 @@ function abortBuild(ctx: ScenesCtx, build: SceneBuild): void {
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene being built.
  * @param named - The bundles it names, as they were awaited.
+ * @param budgetMs - The building budget of a frame the world was given.
  * @param settle - The callbacks of the switch's promise.
  * @param settle.resolve - Settles the switch.
  * @param settle.reject - Rejects the switch.
@@ -116,6 +138,7 @@ function startBuildRecord(
   ctx: ScenesCtx,
   scene: SceneDefinition,
   named: readonly string[],
+  budgetMs: number,
   settle: { resolve: () => void; reject: (error: unknown) => void }
 ): SceneBuild {
   return {
@@ -123,6 +146,7 @@ function startBuildRecord(
     named,
     from: ctx.state.current,
     frames: 0,
+    budgetMs,
     startedAt: agentNow(ctx),
     off: noListeners,
     resolve: settle.resolve,
@@ -153,7 +177,8 @@ function watchBuild(ctx: ScenesCtx, build: SceneBuild, signal: AbortSignal): voi
 
 /**
  * Starts the build of a scene aside and answers the promise of the switch. The world mounts what
- * only the coming scene lists, against the committed state; the coming bundles are held from now.
+ * only the coming scene lists, against the committed state, and gets the budget of a frame
+ * (`budgetOf`); the coming bundles are held from now.
  * When nothing is left for `ui` and the renderer the commit runs at once, with no frame between.
  * Otherwise a `signals` callback asks every frame whether the build is done, and an abort of the
  * node discards it.
@@ -175,12 +200,8 @@ export function buildAside(
   signal: AbortSignal
 ): Promise<void> | undefined {
   const projection = ctx.deps.world.projection;
-  const started = projection.build(
-    scene.projections,
-    ctx.state.owner,
-    scene.layers,
-    ctx.config.buildMs
-  );
+  const budgetMs = budgetOf(ctx);
+  const started = projection.build(scene.projections, ctx.state.owner, scene.layers, budgetMs);
 
   if (!started) return undefined;
 
@@ -197,7 +218,7 @@ export function buildAside(
   }
 
   return new Promise<void>((resolve, reject) => {
-    const build = startBuildRecord(ctx, scene, named, { resolve, reject });
+    const build = startBuildRecord(ctx, scene, named, budgetMs, { resolve, reject });
 
     // A build with nothing left for ui and the renderer swaps now: fake-clock tests keep their frames.
     if (projection.built()) {

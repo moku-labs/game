@@ -6,7 +6,6 @@ import type {
   AsideQueue,
   DebugSwitches,
   OverlayState,
-  PredrawState,
   SyncState,
   UploadState,
   WarmState
@@ -118,25 +117,6 @@ function createAsideQueue(): AsideQueue {
 }
 
 /**
- * Creates the empty pre-draw: no piece, no top cut yet, no target. Its own non-exported function, as `emptyMap`.
- *
- * @returns The pre-draw branch of the sync state.
- */
-function createPredrawState(): PredrawState {
-  return {
-    pieces: [],
-    count: 0,
-    head: 0,
-    next: 0,
-    slot: -1,
-    entity: 0,
-    top: undefined,
-    target: undefined,
-    failed: false
-  };
-}
-
-/**
  * Creates the initial sync state: no root, no layers, no view, no orphan, no pool, no provider, no filter, no
  * filter area, no slice, no hidden mask, no overlay, no warm-up, no upload, no redraw counted, no unseen walk kept and
  * no scene build.
@@ -195,7 +175,6 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     hudLayer: undefined,
     aside: createAsideQueue(),
     heldViews: { entities: [], count: 0, reported: false },
-    predraw: createPredrawState(),
     cleanups: []
   };
 }

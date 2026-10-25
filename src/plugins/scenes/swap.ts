@@ -21,7 +21,8 @@ function leavingOf(previous: SceneDefinition, scene: SceneDefinition): readonly 
 
 /**
  * Names the switch in the performance log of an agent build: the scenes it went between and,
- * for a scene built aside, the frames and the milliseconds of page clock the build took.
+ * for a scene built aside, the frames and the milliseconds of page clock the build took, and the
+ * budget of a frame it ran with.
  *
  * @param ctx - Domain context of the plugin.
  * @param from - The scene that left, `undefined` for the first one.
@@ -46,7 +47,12 @@ function logSwitch(
   const clock = ctx.deps.time.agentClock();
   const buildMs = clock === undefined ? 0 : clock() - build.startedAt;
 
-  ctx.deps.renderer.monitor.event("scene", { ...scenes, buildFrames: build.frames, buildMs });
+  ctx.deps.renderer.monitor.event("scene", {
+    ...scenes,
+    buildFrames: build.frames,
+    buildMs,
+    budgetMs: build.budgetMs
+  });
 }
 
 /**

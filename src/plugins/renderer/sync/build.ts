@@ -9,10 +9,8 @@
  */
 import type { Entity } from "../../world/types";
 import type { PixiContainer } from "../types";
-import { resetPredraw } from "./held";
 import { resort } from "./layers";
 import { parentOf } from "./pose";
-import { predrawDone } from "./predraw";
 import type { AsideQueue, SyncCtx, SyncState } from "./types";
 import { attach, createView } from "./views";
 
@@ -198,8 +196,7 @@ function checkDrawn(sctx: SyncCtx): void {
 
 /**
  * The building step of a frame, after the live pass: the views of the aside queue are made under the budget, and while
- * views wait to be made, pre-drawn or attached, the next frame is asked for. A few field reads and no allocation with
- * no build.
+ * views wait to be made or attached, the next frame is asked for. A few field reads and no allocation with no build.
  *
  * @param sctx - Domain context of the sync module.
  * @param report - Logs a throw of one entity's work.
@@ -267,7 +264,6 @@ export function attachHeld(sctx: SyncCtx): void {
 
   held.count = 0;
   held.reported = false;
-  resetPredraw(state.predraw);
 }
 
 /**
@@ -287,8 +283,7 @@ function holdsBuilding(sctx: SyncCtx, entities: ReadonlySet<Entity>): boolean {
 
 /**
  * The renderer's part of `world.projection.built()`, registered with `onBuild`: no building entity waits in `added`
- * or in the aside queue for its view, and the pre-draw is done, skipped or ended by an error. True while the renderer
- * draws nothing.
+ * or in the aside queue for its view. True while the renderer draws nothing.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when the renderer holds the swap back no longer.
@@ -298,7 +293,21 @@ export function buildReady(sctx: SyncCtx): boolean {
 
   if (state.root === undefined) return true;
   if (state.aside.head < state.aside.count) return false;
-  if (state.added.size > 0 && holdsBuilding(sctx, state.added)) return false;
 
-  return predrawDone(sctx);
+  return state.added.size === 0 || !holdsBuilding(sctx, state.added);
+}
+
+/**
+ * The render phase's half of a scene build (the body of `SyncInternal.takeBuildWork`): reads and clears the count of the
+ * views the pass made aside in this frame. A field read and no allocation.
+ *
+ * @param aside - The aside queue.
+ * @returns True when the pass made views of the build: the frame did load work.
+ */
+export function takeBuildWork(aside: AsideQueue): boolean {
+  const made = aside.made > 0;
+
+  aside.made = 0;
+
+  return made;
 }

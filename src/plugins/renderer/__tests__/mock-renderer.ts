@@ -215,8 +215,6 @@ function createWorld(
  * @param options.orientation - The orientation the game is designed for.
  * @param options.referenceLong - The long side the layout needs inside the safe area.
  * @param options.scene - What every WebGPU frame of the fake Pixi draws.
- * @param options.renderTextures - True to give the fake Pixi `RenderTexture`: the pre-draw of a scene build draws, and
- *   the kept cache keeps.
  * @returns The context, the modules, the fakes and the drivers.
  */
 export function createMockRenderer(
@@ -232,13 +230,11 @@ export function createMockRenderer(
     orientation?: "portrait" | "landscape";
     referenceLong?: number;
     scene?: Partial<FakeScene>;
-    renderTextures?: boolean;
   } = {}
 ): MockRenderer {
   const pixi = createFakePixi({
     kind: options.kind ?? "webgpu",
     failInit: options.failInit ?? false,
-    renderTextures: options.renderTextures === true,
     ...(options.scene === undefined ? {} : { scene: options.scene })
   });
   const dom =

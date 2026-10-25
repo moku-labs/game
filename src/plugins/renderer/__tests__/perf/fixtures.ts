@@ -158,15 +158,10 @@ export type SpriteStage = {
  *
  * @param count - The sprites.
  * @param onDemand - `renderer.onDemand`: a frame is drawn only for a reason.
- * @param renderTextures - True to give the fake Pixi `RenderTexture` (a scene build's pre-draw draws with it).
  * @returns The stage.
  */
-export async function startSprites(
-  count: number,
-  onDemand = false,
-  renderTextures = false
-): Promise<SpriteStage> {
-  const mock = createMockRenderer({ config: { onDemand }, renderTextures });
+export async function startSprites(count: number, onDemand = false): Promise<SpriteStage> {
+  const mock = createMockRenderer({ config: { onDemand } });
   const texture = new FakeTexture({ source: { width: 64, height: 64, destroyed: false } });
 
   await mock.start();
@@ -759,14 +754,14 @@ export type WaitingBuild = { mock: MockRenderer; sctx: SyncCtx };
 
 /**
  * A board of 300 sprite views on screen while the next scene is built aside (spec 31): `count` building views made and
- * pre-drawn, held, waiting for the commit. The world's clock stands, so the budget of a frame is never spent and one
- * pass and one pre-draw step do the whole build.
+ * held, waiting for the commit. The world's clock stands, so the budget of a frame is never spent and one pass does the
+ * whole build.
  *
  * @param count - How many building views wait.
  * @returns The started renderer and the sync context.
  */
 export async function waitingBuild(count: number): Promise<WaitingBuild> {
-  const { mock } = await startSprites(300, false, true);
+  const { mock } = await startSprites(300);
 
   mock.world.projection.build([], OWNER, [{ name: "items", sort: "none" }], 4);
 
@@ -782,7 +777,6 @@ export async function waitingBuild(count: number): Promise<WaitingBuild> {
 
   mock.modules.sync.pass();
   mock.world.clearChanges();
-  mock.modules.sync.predrawStep();
 
   const { host, viewport, demand, kept } = mock.modules;
 

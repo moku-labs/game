@@ -100,6 +100,8 @@ export type FakeTime = {
   callbacks: Record<Phase, FrameCallback[]>;
   /** The page clock of an agent build, ms; `undefined` is a build without the flag. */
   clock: { now: number } | undefined;
+  /** What `rate().fps` answers: the frame rate the loop runs at, 60 unless a test moves it. */
+  fps: number;
   /** Runs one frame: every registered callback, phase by phase, as `time.step` does. */
   frame(): void;
   api: TimeApi;
@@ -358,7 +360,8 @@ function createFakeWorld(journal: string[]): FakeWorld {
 
 /**
  * Creates the fake `time`: the members `scenes` calls, counting the wakes and the new scenes,
- * keeping the frame callbacks for `frame()`, and answering the page clock of `clock`.
+ * keeping the frame callbacks for `frame()`, and answering the page clock of `clock` and the
+ * frame rate of `fps`.
  *
  * @param journal - The order of every call into the fakes.
  * @returns The fake time and its recording.
@@ -369,6 +372,7 @@ function createFakeTime(journal: string[]): FakeTime {
     scenes: 0,
     callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
     clock: undefined,
+    fps: 60,
     frame: (): void => {
       for (const callbacks of Object.values(fake.callbacks)) {
         // eslint-disable-next-line unicorn/no-useless-spread -- a callback that removes itself does not skip the next one
@@ -402,7 +406,8 @@ function createFakeTime(journal: string[]): FakeTime {
       const clock = fake.clock;
 
       return clock === undefined ? undefined : () => clock.now;
-    }
+    },
+    rate: (): { fps: number } => ({ fps: fake.fps })
   } as unknown as TimeApi;
 
   return fake;
@@ -467,7 +472,7 @@ function createFakeFlow(): FakeFlow {
 /**
  * Creates the mock plugin: the real state, the real API and the real lifecycle over the fakes.
  *
- * @param config - The config the kernel resolved; `{ buildMs: 4 }`, the default, when left out.
+ * @param config - The config the kernel resolved; `{ buildMs: "auto" }`, the default, when left out.
  * @returns The context, the API, the fakes and the lifecycle steps.
  */
 export function createMockScenes(config?: Config): MockScenes {
@@ -498,7 +503,7 @@ export function createMockScenes(config?: Config): MockScenes {
   };
 
   const ctx: KernelSlice = {
-    config: config ?? { buildMs: 4 },
+    config: config ?? { buildMs: "auto" },
     state,
     emit: (name: string, payload: unknown): void => {
       journal.push(`emit:${name}`);

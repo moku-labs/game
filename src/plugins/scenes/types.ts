@@ -242,16 +242,20 @@ export type SceneOwner = Owner & { kind: "plugin"; name: "scenes" };
  *
  * @example
  * ```ts
- * // A game on a slow phone gives the next scene less of each frame: the switch takes more frames.
- * const config: Config = { buildMs: 3 };
+ * // The default: half of each frame, read at the start of every build: 8.33… ms at 60 Hz, 4.16… ms at 120 Hz.
+ * const config: Config = { buildMs: "auto" };
+ *
+ * // A game on a slow phone gives the next scene a fixed 3 ms of each frame: the switch takes more frames.
+ * const fixed: Config = { buildMs: 3 };
  * ```
  */
 export type Config = {
   /**
    * Milliseconds per frame the next scene's building work may take on a live switch with a
-   * drawing renderer, about half a 120 Hz frame by default (4). A finite number above 0.
+   * drawing renderer: a finite number above 0, or `"auto"` (the default) for half of the frame
+   * interval the loop runs at, `500 / time.rate().fps`, read once at the build start.
    */
-  buildMs: number;
+  buildMs: number | "auto";
 };
 
 /**
@@ -267,6 +271,8 @@ export type SceneBuild = {
   from: string | undefined;
   /** Frames the build waited in so far. */
   frames: number;
+  /** The building budget of a frame the build runs with, ms: `buildMs`, or what `"auto"` gave at its start. */
+  budgetMs: number;
   /** The page clock of an agent build at the build start, ms; 0 in a build without the flag. */
   startedAt: number;
   /** Removes the frame callback and the abort listener of the build. */
