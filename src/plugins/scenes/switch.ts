@@ -4,8 +4,9 @@
  * renderer never sees a scene half built. In live mode it then waits until the textures of those
  * bundles are on the GPU. The upload queue sends `renderer.uploads` of them per drawn frame while
  * the old scene is still on screen, so the frame that shows the new scene uploads nothing. On a
- * Galaxy A26 the first switch to a board took one frame of 284 ms with 8 uploads in it (F61). At a node of the mounted scene it re-reads what the
- * scene names and awaits a bundle that is new, without mounting again.
+ * Galaxy A26 the first switch to a board took one frame of 284 ms with 8 uploads in it (F61). At a
+ * node of the mounted scene it re-reads what the scene names and awaits a bundle that is new,
+ * without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
 import { namedBundles } from "./bundles";
@@ -282,7 +283,7 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
 
   if (warmsFirst) await untilWarmed(ctx, named, run.signal);
 
-  // A stop resolves a waiting warm instead of rejecting it, before `flow` aborts the node.
+  // A stop answers a waiting upload instead of rejecting it; `stopScenes` clears `teardown`.
   const stopped = ctx.state.teardown === undefined;
 
   if (run.signal.aborted || stopped) return;
