@@ -2132,7 +2132,13 @@ export function createReconciler(
     const tree = ecs.get(root.entity, WORLD_TREE);
     const place = ctx.deps.world.projection.keyOf(root.entity);
 
-    if (place !== undefined) root.name = place.projection;
+    // The `Tree` hook mounts a root before the world knows its key: a name learned here moves the
+    // hosts, so the next solve gives the root its slot even when the slots were given out without it.
+    if (place !== undefined && place.projection !== root.name) {
+      root.name = place.projection;
+      hostsMoved(state);
+    }
+
     if (tree !== undefined) root.tree = tree.node as DescriptionNode;
 
     refreshRootOrder(root);

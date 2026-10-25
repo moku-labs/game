@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
-import { Display, Sprite, Transform } from "../../components";
+import { Display, Shape, Sprite, Transform } from "../../components";
 import type { Config } from "../../types";
-import { FakeContainer, FakeTexture } from "../fake-pixi";
+import { FakeContainer, type FakeGraphics, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -96,6 +96,35 @@ describe("sync pools", () => {
     expect(pooled?.scale.x).toBe(1);
     expect(pooled?.visible).toBe(true);
     expect(pooled?.parent).toBeNull();
+  });
+
+  it("gives an empty shape a pooled graphics with no path of the shape it drew before", async () => {
+    const mock = await started();
+    const drawn = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 60, h: 24, fill: 0xff_00_00 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const object = mock.ctx.state.sync.views.get(drawn)?.object as unknown as FakeGraphics;
+
+    expect(object.ops).not.toHaveLength(0);
+    mock.world.ecs.despawn(drawn);
+    mock.modules.sync.pass();
+
+    // An empty shape draws no path (spec 26 B7): the old one would still count in its parent's bounds.
+    const empty = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 74, h: 112, fillAlpha: 0 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(empty)?.object).toBe(object);
+    expect(object.ops).toEqual([]);
   });
 
   it("never resets an object the game owns", async () => {

@@ -707,6 +707,7 @@ function reconcileOne(
   }
 
   mounted.items = next;
+  mounted.seen = snapshot;
 
   if (options.direct) flushMounted(pctx, mounted);
 
@@ -719,6 +720,30 @@ function reconcileOne(
   }
 
   counts.queued += mounted.queue.length;
+}
+
+/**
+ * Tells whether a play reconcile would change nothing in a projection: its last reconcile read the same `player` and
+ * `session` trees, and nothing forces, converges or settles it. A scene mounts its projections direct after the commit
+ * of its node; the next frame's reconcile of that commit then skips them (≈2 ms a switch on a Galaxy A26, F61).
+ *
+ * @param mounted - The mounted projection.
+ * @param snapshot - The state of this reconcile.
+ * @param options - How this reconcile runs.
+ * @returns True when the projection is passed over.
+ */
+function isCurrent(mounted: Mounted, snapshot: Snapshot, options: ReconcileOptions): boolean {
+  const seen = mounted.seen;
+
+  return (
+    seen !== undefined &&
+    !options.direct &&
+    !options.force &&
+    !options.converge &&
+    !options.settle &&
+    seen.player === snapshot.player &&
+    seen.session === snapshot.session
+  );
 }
 
 /**
@@ -741,7 +766,7 @@ export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void 
 
     const spec = state.specs.get(name);
 
-    if (spec === undefined) continue;
+    if (spec === undefined || isCurrent(mounted, snapshot, options)) continue;
 
     counts.projections += 1;
     reconcileOne(pctx, spec, mounted, snapshot, options, counts, used);
