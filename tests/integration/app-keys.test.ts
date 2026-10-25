@@ -30,6 +30,9 @@ const WAIT_MS = 8000 * TIMING_SLACK;
 /** The English strings of the mini game, under the game folder. */
 const ENGLISH = "features/home/strings/en.json";
 
+/** The bundle description of the mini game's interface, under the game folder. */
+const DESCRIPTION = "features/ui/assets.ts";
+
 /** An image of the mini game, under the game folder. */
 const SPARK = "features/ui/assets/fx-spark.webp";
 
@@ -175,6 +178,38 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       } finally {
         log.mockRestore();
       }
+    });
+
+    it("rewrites generated/manifest.json for each save of a bundle description, read anew each time", async () => {
+      // Bug (E-B1): a save of assets.ts started no scan, and a later scan read the module the
+      // process cached first, so a bundle's `release: "leave"` never reached the manifest.
+      const root = game();
+      const description = path.join(root, DESCRIPTION);
+      const bundle = (): unknown =>
+        (JSON.parse(read(root, "generated/manifest.json")) as { bundles: Record<string, unknown> })
+          .bundles.ui;
+
+      expect(read(root, DESCRIPTION)).toContain('{ tier: "boot" }');
+      await watched(root);
+      writeFileSync(
+        description,
+        read(root, DESCRIPTION).replace('{ tier: "boot" }', '{ tier: "feature", release: "leave" }')
+      );
+
+      await vi.waitFor(
+        () => expect(bundle()).toMatchObject({ tier: "feature", release: "leave" }),
+        { timeout: WAIT_MS }
+      );
+
+      writeFileSync(
+        description,
+        read(root, DESCRIPTION).replace('{ tier: "feature", release: "leave" }', '{ tier: "lazy" }')
+      );
+
+      await vi.waitFor(() => expect(bundle()).toMatchObject({ tier: "lazy" }), {
+        timeout: WAIT_MS
+      });
+      expect(bundle()).not.toHaveProperty("release");
     });
 
     it("rewrites the stamp for new bytes in an existing image with that image as changed, and not generated/assets.ts", async () => {

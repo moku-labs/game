@@ -2,10 +2,11 @@
  * @file The keys watch of a game folder, behind `moku-game dev` and the editor's `watchKeys`: it
  * keeps `generated/` fresh while a dev page is open. A file event is only a trigger. When the
  * events stop for a quiet period, a batch walks the game and reads the size and the time stamp of
- * every asset file and every `strings/<locale>.json`; it runs the scan of `moku-game keys` only
- * when they differ from the batch before. A folder that becomes or stops being a sub-feature scans
- * too: the keys and bundles of its files move between owners. After a scan it writes `.moku/assets-stamp.ts` from the
- * asset files: every file with its stamp, and the ones this batch found changed, so the dev page
+ * every asset file, every `strings/<locale>.json` and every bundle description (`assets.ts`); it
+ * runs the scan of `moku-game keys` only when they differ from the batch before. A folder that
+ * becomes or stops being a sub-feature scans too: the keys and bundles of its files move between
+ * owners. After a scan it writes `.moku/assets-stamp.ts` from the asset files: every file with its
+ * stamp, and the ones this batch found changed, so the dev page
  * reads only those again. One scan runs at a time, and a failed scan never stops the watch. A
  * batch that scanned is followed by one more walk: the platform reports only the first path of a
  * burst of writes, so a save made in the same instant as the scan's own writes under `generated/`
@@ -40,8 +41,8 @@ export type KeysWatcher = {
 };
 
 /**
- * What `watchKeys` is started with. The watch scans when an asset file or a strings file changes;
- * a folder that becomes or stops being a sub-feature scans too.
+ * What `watchKeys` is started with. The watch scans when an asset file, a strings file or a bundle
+ * description changes; a folder that becomes or stops being a sub-feature scans too.
  */
 export type WatchKeysOptions = {
   /**
@@ -86,8 +87,8 @@ type Inputs = ReadonlyMap<string, string>;
 /** One walk of a game folder. */
 type Walk = {
   /**
-   * The stamp `<size>:<mtimeMs>` of every asset file and every strings file, and one entry per
-   * sub-feature folder (`features/episodes/ep01/`) or feature name clash (`features/`).
+   * The stamp `<size>:<mtimeMs>` of every asset file, strings file and bundle description, and
+   * one entry per sub-feature folder (`features/episodes/ep01/`) or feature name clash (`features/`).
    */
   inputs: Map<string, string>;
   /** Every folder walked, relative to the game with `/`; `""` is the game folder. */
@@ -125,6 +126,9 @@ const ASSET_FILE = /\.(?:png|webp|fnt|mp3|m4a)$/i;
 /** A strings file: a `.json` directly in a `strings/` folder. */
 const STRINGS_FILE = /(?:^|\/)strings\/[^/]+\.json$/;
 
+/** The bundle description of a feature or a layer: its `assets.ts` (`defineBundles`). */
+const DESCRIPTION_FILE = /(?:^|\/)assets\.ts$/;
+
 /**
  * Lists one folder of the walk.
  *
@@ -140,7 +144,8 @@ function entriesOf(folder: string): Dirent[] {
 }
 
 /**
- * Tells whether a file is an input of the scan: an asset file, or a strings file.
+ * Tells whether a file is an input of the scan: an asset file, a strings file, or a bundle
+ * description (`assets.ts`), whose tiers and releases go into the manifest.
  *
  * @param file - The path relative to the game, with `/`.
  * @returns True for a file the watch stamps.
@@ -150,12 +155,13 @@ function entriesOf(folder: string): Dirent[] {
  * ```
  */
 function isInput(file: string): boolean {
-  return ASSET_FILE.test(file) || STRINGS_FILE.test(file);
+  return ASSET_FILE.test(file) || STRINGS_FILE.test(file) || DESCRIPTION_FILE.test(file);
 }
 
 /**
  * Reads one folder of the walk and the folders below it, outside the skipped ones: every asset
- * file and every strings file joins the inputs with its stamp. Symlinks are not followed.
+ * file, strings file and bundle description joins the inputs with its stamp. Symlinks are not
+ * followed.
  *
  * @param root - The real game folder.
  * @param folder - The folder, relative to the game; `""` is the game folder.
@@ -406,8 +412,8 @@ function serialized(watch: Watch): Promise<void> {
  * Starts the keys watch of a checked game: watches the folder, runs the scan of `moku-game keys`
  * once, and resolves after it, so `generated/` is fresh before a page is served. The watcher
  * starts first: a save the platform reports during the first scan starts a batch after it. Then
- * every batch of file events outside the skipped folders scans again when an asset file or a
- * strings file changed. A failed scan, the first one too, goes to `onError` and the watch goes on.
+ * every batch of file events outside the skipped folders scans again when an asset file, a
+ * strings file or a bundle description changed. A failed scan, the first one too, goes to `onError` and the watch goes on.
  *
  * @param root - The game folder, absolute.
  * @param settings - The resolved config.
