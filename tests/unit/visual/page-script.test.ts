@@ -394,7 +394,12 @@ describe("the check of skipped frames", () => {
     app.log.warn("renderer:missed-mark", { entity: 9, label: "Display#9 stove" });
 
     expect(
-      await pageCheckpoint({ test: "open-popup", where: "step 1 (checkpoint)", settleFrames: 60 })
+      await pageCheckpoint({
+        test: "open-popup",
+        where: "step 1 (checkpoint)",
+        settleFrames: 60,
+        finish: true
+      })
     ).toEqual({
       ok: false,
       reason: 'renderer:missed-mark {"entity":9,"label":"Display#9 stove"}'
@@ -412,7 +417,12 @@ describe("the check of skipped frames", () => {
     app.log.warn("renderer:stale-picture", { entity: 12 });
 
     expect(
-      await pageCheckpoint({ test: "open-popup", where: "step 1 (checkpoint)", settleFrames: 60 })
+      await pageCheckpoint({
+        test: "open-popup",
+        where: "step 1 (checkpoint)",
+        settleFrames: 60,
+        finish: true
+      })
     ).toEqual({ ok: false, reason: 'renderer:stale-picture {"entity":12}' });
   });
 
@@ -461,6 +471,40 @@ describe("the check of skipped frames", () => {
 });
 
 describe("pageCheckpoint", () => {
+  // F87: the page landed every motion at every checkpoint, so a hint that fades out never showed on a snapshot.
+  it("keeps the motions running with finish: false: finishAll is not called, the popup still swings", async () => {
+    installCodec();
+
+    const { app, game } = await pageGame({ screen: () => pngOf(1, 1) });
+    const seen = { landed: 0 };
+
+    vi.stubGlobal("game", {
+      ...game,
+      anim: {
+        ...game.anim,
+        finishAll: () => {
+          seen.landed += 1;
+          app.anim.finishAll();
+        }
+      }
+    });
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pageStep(restore);
+    await pageStep({ ...restore, name: "tap", input: { key: "open" } });
+
+    const answer = await pageCheckpoint({
+      test: "open-popup",
+      where: "step 2",
+      settleFrames: 600,
+      finish: false
+    });
+
+    expect(answer.ok).toBe(true);
+    expect(seen.landed).toBe(0);
+    expect(app.anim.active()).toBeGreaterThan(0);
+  });
+
   it("lands every motion, then captures the screen as lossless WebP and reads the state through the doors", async () => {
     installCodec();
 
@@ -483,7 +527,12 @@ describe("pageCheckpoint", () => {
     await pageStep(restore);
     await pageStep({ ...restore, name: "tap", input: { key: "open" } });
 
-    const answer = await pageCheckpoint({ test: "open-popup", where: "step 2", settleFrames: 600 });
+    const answer = await pageCheckpoint({
+      test: "open-popup",
+      where: "step 2",
+      settleFrames: 600,
+      finish: true
+    });
 
     expect(seen.landed).toBeGreaterThan(0);
     expect(app.anim.active()).toBe(0);
@@ -512,7 +561,9 @@ describe("pageCheckpoint", () => {
     });
     await pageStart({ url: URL, settleFrames: 600 });
 
-    expect(await pageCheckpoint({ test: "t", where: "step 1", settleFrames: 600 })).toEqual({
+    expect(
+      await pageCheckpoint({ test: "t", where: "step 1", settleFrames: 600, finish: true })
+    ).toEqual({
       ok: false,
       reason: "Pixi could not read the frame."
     });
@@ -524,7 +575,8 @@ describe("pageCheckpoint", () => {
     const answer = await pageCheckpoint({
       test: "t",
       where: "step 1 (checkpoint)",
-      settleFrames: 2
+      settleFrames: 2,
+      finish: true
     });
 
     expect(answer).toMatchObject({ ok: false });

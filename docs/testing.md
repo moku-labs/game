@@ -99,7 +99,7 @@ The factory takes the seams of one app: `player`, `session`, `seed` and `clock`,
 
 The types `VisualTest`, `VisualStart`, `VisualStep`, `VisualSetup`, `VisualApp`, `VisualPage`, `VisualOptions`, `VisualRenderer`, `VisualTolerance`, `VisualReport`, `VisualTestResult` and `CheckpointResult` come from the same entry.
 
-A visual test is data: where the game starts, then steps. A step is a `/control` command by its short name (`answer`, `tap`, `drag`, `key`, `fill`, `walk`, `restore`, `step`, `pause`, `resume`, `reducedMotion`) with that command's input, or a checkpoint.
+A visual test is data: where the game starts, then steps. A step is a `/control` command by its short name (`answer`, `tap`, `drag`, `key`, `fill`, `walk`, `restore`, `step`, `pause`, `resume`, `reducedMotion`) with that command's input, or a checkpoint. A checkpoint lands every motion (`anim.finishAll()`) before its snapshot. `{ checkpoint: "name", finish: false }` does not: the snapshot shows the motions where the same frames left them in both legs, so a hint that fades out at the end of its animation is still on it.
 
 ```ts
 // tests/visual/reward-popup.visual.ts
@@ -112,7 +112,9 @@ export const rewardPopup = defineVisualTest("reward-popup", {
     { answer: { intent: "deliver", payload: { orderId: "o1" } } },
     { checkpoint: "open" },
     { tap: { key: "claim" } },
-    { checkpoint: "claimed" }
+    { checkpoint: "claimed" },
+    // The toast fades out at the end of its animation: caught while it still shows.
+    { checkpoint: "toast", finish: false }
   ]
 });
 
@@ -128,7 +130,7 @@ A game runs its visual tests with the bin, no script of its own: `moku-game visu
 export default { app: { app: () => game.screen({ manifest, io }).app }, tests: [rewardPopup] };
 ```
 
-A checkpoint settles the motions and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.webp`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, or with WebGL under `--webgl`, on a Mac only, and compares `screen.webp` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The pixel leg also turns on `renderer.sync.debug.verifyFrames` through the door `game.debug`: every frame the renderer skips (`renderer.onDemand`) is compared with the same frame drawn live, and the first `renderer:missed-frame`, `renderer:missed-mark` or `renderer:stale-picture` the page logs fails the step it happened in, as does the first `effects:broken`, `renderer:warm-failed` or `renderer: pixel read failed` (one logged while the page loaded fails the start); `--no-verify-frames` leaves the check off. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
+A checkpoint settles the motions (unless it says `finish: false`) and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.webp`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, or with WebGL under `--webgl`, on a Mac only, and compares `screen.webp` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The pixel leg also turns on `renderer.sync.debug.verifyFrames` through the door `game.debug`: every frame the renderer skips (`renderer.onDemand`) is compared with the same frame drawn live, and the first `renderer:missed-frame`, `renderer:missed-mark` or `renderer:stale-picture` the page logs fails the step it happened in, as does the first `effects:broken`, `renderer:warm-failed` or `renderer: pixel read failed` (one logged while the page loaded fails the start); `--no-verify-frames` leaves the check off. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
 
 #### Pixels
 
@@ -138,6 +140,7 @@ The pixel leg runs on a Mac only. `pixels` is on by default when the setup has a
 - **The browser.** `page.browser` when the setup names one (`{ channel }` or `{ executablePath }`). Otherwise Playwright's own Chromium, whose version `playwright-core` pins, so a Chrome update never moves the baselines: install it with `bunx playwright-core install chromium`. Otherwise the system Google Chrome. Chrome starts with WebGPU on Metal; a page that draws with a renderer other than the requested one fails the leg.
 - **The page.** 390 CSS px wide at a device scale of 2, as tall as the game's inert frame: 520 for a 4:3 portrait game, so `screen.webp` is 780 × 1040.
 - **Game time.** The leg drives the clock itself, so two runs draw the same pixels: a dash phase, a pulse or a particle reads the same time. It waits until the page has loaded what it asked for (no request for half a second), runs `pause`, then steps the game to 5 s of game time, the last frame shorter so it lands exactly. From there every frame of the restore, of every settle and of a checkpoint is a `step` of 1000/60 ms, the frame of the headless leg; the browser's own frames move no game time. The picture is the stage after the last stepped frame. A `resume` step hands the clock back to the browser.
+- **The clock.** The headless leg runs on the fake clock of its app (`startMoment` for `game.screen()` and `game.headless()`), which stands still: stepped frames move game time, not `clock.now()`. The pixel leg reads that moment from `setup.app()` and puts it on the page before it loads; the dev page then runs on a fake clock standing at the same moment instead of the device clock. A timer of the model (an energy refill `at`, a cooldown) is in the same state in both legs and in the baselines.
 - **The picture.** The page takes `game.renderer.capture()` and reads its `png`, a PNG data URL. Lossless WebP: the page encodes it with `convertToBlob({ type: "image/webp", quality: 1 })`, which Chrome encodes without loss, so the baseline holds the captured pixels exactly.
 - **`--update`** rewrites `state.json`, `describe.json` and `screen.webp` of every test it runs. A pixel difference writes `screen.actual.webp` and `screen.diff.webp` beside the baseline, red where a pixel differs. Git ignores both.
 - **Tolerance.** A pixel differs when one of its channels moves by more than 24. A checkpoint differs when more than 0.1% of its pixels do. Both are `tolerance` in the options.

@@ -128,3 +128,10 @@ export function fakeClock(start = 0): FakeClock {
 export function isFakeClock(source: ClockSource): boolean {
   return fakeClocks.has(source);
 }
+
+/**
+ * The global a visual test's pixel leg sets on the dev page before it loads (F86): the moment of
+ * the fake clock its headless leg runs on. The page of a dev build then runs on `fakeClock` at
+ * that moment, so both legs see the same `clock.now()`. Not in the root.
+ */
+export const VISUAL_CLOCK = "__mokuVisualClock";

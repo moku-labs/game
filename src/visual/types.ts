@@ -8,6 +8,7 @@
  * enters the package.
  */
 import type { AnimApi } from "../plugins/anim/types";
+import type { Api as ClockApi } from "../plugins/clock/types";
 import type { commands } from "../plugins/flow/doors/commands";
 import type { ControlApp, InputOf } from "../plugins/flow/doors/types";
 import type { HeadlessApp, Repro } from "../plugins/flow/headless";
@@ -49,7 +50,9 @@ export type VisualStart = Omit<Repro, "route">;
 
 /**
  * One step of a visual test: a `/control` command by its short name with that command's input,
- * typed from the catalogue, or a checkpoint by its name.
+ * typed from the catalogue, or a checkpoint by its name. A checkpoint lands every motion
+ * (`anim.finishAll()`) before its snapshot; with `finish: false` it does not, and the snapshot
+ * shows the motions where they stand after the same frames in both legs (F87).
  *
  * @example
  * ```ts
@@ -57,12 +60,14 @@ export type VisualStart = Omit<Repro, "route">;
  * const steps: VisualStep[] = [
  *   { tap: { key: "play" } },
  *   { answer: { intent: "deliver", payload: { orderId: "o1" } } },
- *   { checkpoint: "open" }
+ *   { checkpoint: "open" },
+ *   // The hint that fades out at the end of its animation, caught while it still shows.
+ *   { checkpoint: "hint", finish: false }
  * ];
  * ```
  */
 export type VisualStep =
-  | { checkpoint: string }
+  | { checkpoint: string; finish?: boolean }
   | { [K in StepCommand]: { [P in K]: InputOf<Catalogue[K]["input"]> } }[StepCommand];
 
 /**
@@ -104,6 +109,8 @@ export type VisualApp = ControlApp & {
   readonly model: ModelApi;
   readonly input: InputApi;
   readonly lifecycle: LifecycleApi;
+  /** The clock: the pixel leg puts its moment on the page, so both legs see one `clock.now()`. */
+  readonly clock: ClockApi;
 };
 
 /**

@@ -1,7 +1,9 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { VISUAL_CLOCK } from "../../../src/plugins/clock/fake";
 import { commands } from "../../../src/plugins/flow/doors/commands";
 import { read } from "../../../src/plugins/flow/doors/read";
 import { run } from "../../../src/plugins/flow/doors/run";
@@ -9,6 +11,7 @@ import { sources } from "../../../src/plugins/flow/doors/sources";
 import { stableJson } from "../../../src/visual/compare";
 import { defineVisualTest } from "../../../src/visual/define";
 import {
+  clockScript,
   launchChrome,
   loadChromium,
   pageSize,
@@ -303,6 +306,16 @@ describe("pageSize", () => {
   });
 });
 
+describe("clockScript (F86)", () => {
+  it("puts the moment on the page's global the dev page reads its clock from", () => {
+    const page: Record<string, unknown> = {};
+
+    runInNewContext(clockScript(1_000_000), page);
+
+    expect(page[VISUAL_CLOCK]).toBe(1_000_000);
+  });
+});
+
 describe("runBrowserLeg", () => {
   let dir = "";
   let stops: Array<() => Promise<void>> = [];
@@ -384,7 +397,8 @@ describe("runBrowserLeg", () => {
     ]);
     expect(log.urls).toEqual([URL, URL]);
     expect(log.loads).toEqual(["networkidle", "networkidle"]);
-    expect(log.scripts).toEqual([pageScript(), pageScript()]);
+    // F86: before it loads, each page gets the moment the headless leg's clock stands at, 1000 for the tiny game.
+    expect(log.scripts).toEqual([pageScript(), clockScript(1000), pageScript(), clockScript(1000)]);
     expect(log.contexts[0]).toEqual({
       viewport: { width: 390, height: 520 },
       deviceScaleFactor: 2,
@@ -528,6 +542,33 @@ describe("runBrowserLeg", () => {
     expect(results[0]?.error).toBe(
       '[game] Visual test "open-popup", step 1 (tap) failed.\n  The canvas moved. Hold still.'
     );
+  });
+
+  // F87: the page landed every motion whatever the step said, so its picture never matched a finish: false snapshot.
+  it("hands finish: false of a checkpoint to the page: the page lands no motion", async () => {
+    const { game } = await pageGame({ screen: () => pngOf(4, 4) });
+    const landed = { count: 0 };
+
+    vi.stubGlobal("game", {
+      ...game,
+      anim: {
+        ...game.anim,
+        finishAll: () => {
+          landed.count += 1;
+          game.anim.finishAll();
+        }
+      }
+    });
+
+    const { chromium } = fakeChromium();
+    const kept = defineVisualTest("open-popup", {
+      start: { player: { coins: 7 }, checkpoint: "home" },
+      steps: [{ tap: { key: "open" } }, { checkpoint: "open", finish: false }]
+    });
+    const results = await bothLegs([kept], chromium);
+
+    expect(results[0]?.error).toBeUndefined();
+    expect(landed.count).toBe(0);
   });
 
   it("ends a test whose step does not settle in the page", async () => {

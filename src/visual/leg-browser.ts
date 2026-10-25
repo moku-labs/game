@@ -9,6 +9,7 @@
  * `screen.webgl.webp`. The pixels are compared in the page (`page-script.ts`); the files are written by
  * `files.ts`. A failure of the page itself fails the leg; a failure of a step ends its test only.
  */
+import { VISUAL_CLOCK } from "../plugins/clock/fake";
 import type { RendererKind } from "../plugins/renderer/types";
 import { stableJson } from "./compare";
 import { baselineFile, compareBaseline, readScreen, writeScreen } from "./files";
@@ -24,7 +25,7 @@ import {
   pageStep,
   pageVerify
 } from "./page-script";
-import { stepEntry } from "./steps";
+import { type CheckpointEntry, stepEntry } from "./steps";
 import type {
   CheckpointResult,
   ChromeBrowser,
@@ -218,6 +219,21 @@ export async function launchChrome(
 }
 
 /**
+ * The init script that puts the moment of the headless leg's clock on the page before it loads
+ * (F86): a dev page then runs its app on a fake clock standing there, as the headless leg does.
+ *
+ * @param moment - The moment, epoch milliseconds.
+ * @returns The script.
+ * @example
+ * ```ts
+ * clockScript(1_000_000); // 'globalThis["__mokuVisualClock"] = 1000000;'
+ * ```
+ */
+export function clockScript(moment: number): string {
+  return `globalThis[${JSON.stringify(VISUAL_CLOCK)}] = ${JSON.stringify(moment)};`;
+}
+
+/**
  * Sizes the page: `page.width` CSS px wide (390), as tall as the inert frame of the game is at
  * that width, so the reference frame of the page equals the one of the headless leg; a phone
  * with touch at `page.deviceScaleFactor` (2). Builds one app of the setup, never started, to read
@@ -363,15 +379,22 @@ async function startPage(page: ChromePage, url: string, run: VisualRun): Promise
  * @param context - The browser context.
  * @param url - The URL of the page the leg opens.
  * @param run - The run options, for `settleFrames` and `renderer`.
+ * @param moment - The moment the headless leg's clock stands at, for the page's clock (F86).
  * @returns The open page.
  * @throws {Error} When the page does not open, never exposes `game` and `doors`, does not start,
  *   draws with another backend or never stops loading. The page is closed then.
  */
-async function openPage(context: ChromeContext, url: string, run: VisualRun): Promise<ChromePage> {
+async function openPage(
+  context: ChromeContext,
+  url: string,
+  run: VisualRun,
+  moment: number
+): Promise<ChromePage> {
   const page = await context.newPage();
 
   try {
     await page.addInitScript({ content: pageScript() });
+    await page.addInitScript({ content: clockScript(moment) });
     await page.goto(url).catch((error: unknown) => {
       throw new Error(
         `[game] The page at ${url} did not open: ${firstLine(error)}.\n  Serve the dev page (moku-game dev), or run with --no-pixels.`
@@ -455,17 +478,19 @@ async function checkScreen(
  * headless leg wrote, the picture against the baseline of the leg's backend.
  *
  * @param play - The test being played.
- * @param name - The checkpoint name.
+ * @param entry - The checkpoint: its name, and whether it lands the motions.
  * @param where - The step, for the message.
  * @returns What the browser leg found there.
  * @throws {Error} When the page did not settle, gave no picture, or broke.
  */
-async function checkpoint(play: Play, name: string, where: string): Promise<PixelFound> {
+async function checkpoint(play: Play, entry: CheckpointEntry, where: string): Promise<PixelFound> {
   const { test, run } = play;
+  const { name } = entry;
   const shot = await callPage(play.page, pageCheckpoint, {
     test: test.name,
     where,
-    settleFrames: run.settleFrames
+    settleFrames: run.settleFrames,
+    finish: entry.finish
   });
 
   if (shot.screen === undefined) {
@@ -514,7 +539,7 @@ async function playSteps(play: Play, found: Map<string, PixelFound>): Promise<vo
     const where = `step ${index + 1} (${entry.kind === "checkpoint" ? "checkpoint" : entry.name})`;
 
     if (entry.kind === "checkpoint") {
-      found.set(entry.name, await checkpoint(play, entry.name, where));
+      found.set(entry.name, await checkpoint(play, entry, where));
       continue;
     }
 
@@ -530,7 +555,9 @@ async function playSteps(play: Play, found: Map<string, PixelFound>): Promise<vo
  * @param play - The test and the run options; the page is opened here.
  * @param play.test - The test.
  * @param play.run - The run options.
- * @param url - The URL of the page the leg opens.
+ * @param target - The page the leg opens: its URL, and the moment of the headless leg's clock.
+ * @param target.url - The URL.
+ * @param target.moment - The moment, epoch milliseconds.
  * @param headless - The result of the test in the headless leg.
  * @returns The result of the test with its pixel fields.
  * @throws {Error} When the page fails to open: that fails the leg.
@@ -538,10 +565,10 @@ async function playSteps(play: Play, found: Map<string, PixelFound>): Promise<vo
 async function browserTest(
   context: ChromeContext,
   play: Omit<Play, "page">,
-  url: string,
+  target: { url: string; moment: number },
   headless: VisualTestResult
 ): Promise<VisualTestResult> {
-  const page = await openPage(context, url, play.run);
+  const page = await openPage(context, target.url, play.run, target.moment);
   const found = new Map<string, PixelFound>();
   let failed: string | undefined;
 
@@ -595,9 +622,10 @@ export async function runBrowserLeg(
     );
   }
 
+  // The page of every test: its size, its URL, and the moment the headless leg's clock stands at (F86).
   const chromium = await load();
   const options = pageSize(setup, page);
-  const url = rendererUrl(page.url, run.renderer);
+  const target = { url: rendererUrl(page.url, run.renderer), moment: setup.app().clock.now() };
   const browser = await launchChrome(chromium, page.browser);
 
   try {
@@ -611,7 +639,9 @@ export async function runBrowserLeg(
       };
 
       results.push(
-        before.error === undefined ? await browserTest(context, { test, run }, url, before) : before
+        before.error === undefined
+          ? await browserTest(context, { test, run }, target, before)
+          : before
       );
     }
 

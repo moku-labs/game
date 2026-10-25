@@ -7,6 +7,7 @@
  * the dev guard, so a production build drops them; a debug build keeps the door and the agents.
  */
 import { read, sources, watch } from "../inspect";
+import { fakeClock, VISUAL_CLOCK } from "../plugins/clock/fake";
 import { systemSource } from "../plugins/clock/system";
 import type { ClockSource } from "../plugins/clock/types";
 import { isControl } from "../plugins/flow/doors/dev";
@@ -97,6 +98,24 @@ function lateReporter(): LateReporter {
  */
 function toError(thrown: unknown): Error {
   return thrown instanceof Error ? thrown : new Error(String(thrown));
+}
+
+/**
+ * The clock of the page: the device clock; on a dev page a visual test's pixel leg opened, the fake
+ * clock its headless leg runs on, standing at the same moment (F86). The leg puts the moment on the
+ * page before it loads, so the app never sees the device time.
+ *
+ * @returns The clock source of the page.
+ */
+function pageClock(): ClockSource {
+  // The guard stays inline: a build defines the flag false and folds the fake clock away.
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+    const moment: unknown = Reflect.get(globalThis, VISUAL_CLOCK);
+
+    if (typeof moment === "number") return fakeClock(moment);
+  }
+
+  return systemSource();
 }
 
 /**
@@ -315,7 +334,7 @@ export async function startPage<Game extends AnyGameApp>(
   const settings = resolveConfig(config);
   const query = new URLSearchParams(location.search);
   const { report, attach } = lateReporter();
-  const clock = systemSource();
+  const clock = pageClock();
   const start = scenarioStart(query.get("player"), options.scenarios ?? {}, clock.now(), report);
   const shell = options.system === undefined ? undefined : await options.system(settings, report);
   const namespace = settings.native?.identifier ?? "moku-game";
