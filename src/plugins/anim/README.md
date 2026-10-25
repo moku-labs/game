@@ -46,7 +46,8 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 ```ts
 defineAnimation(id, { slots, build })   // slots: { name: type<Target>() | type<Target[]>() }
 sequence(...steps)  parallel(...steps)  stagger(items, ms, item => Step)  wait(ms)  mark(name)
-tween(target, Component, to, { ms, ease?, delayMs?, additive?, space?, reduced? })   set(target, Component, patch)
+tween(target, Component, to, { ms, ease?, delayMs?, additive?, space?, reduced?, segments?, repeat? })
+set(target, Component, patch)
 frames(target, { keys, fps, loop? })    // writes Sprite.texture, one key per frame
 spawn(id, components, { layer?, order? }) // a temporary entity, made when the step is reached
 spawned(id)                             // the target of an entity a spawn step of this timeline made
@@ -246,15 +247,66 @@ for both and for any other component (a game's own, a filter's values, a text's 
 what is made of it), nothing for a tint or a fill colour; an endless `Frames` loop passes `"place"`. A
 loop that writes the view's own alpha or place is not held for its own alpha 0 or for being off the
 screen: a blink whose trough is 0 keeps blinking. Its clock runs on, so when it writes again it stands
-where it would have been; bases and offsets are left as they are. Finite tracks, a timeline's own
-tracks and motions a node waits for always write.
+where it would have been; bases and offsets are left as they are. A timeline's endless `tween` step
+(`repeat: "forever"`) is held the same way, its clock running on (F76). Finite tracks, a timeline's
+finite steps included, and motions a node waits for always write.
 
 ## Repeat
 
-A track with `repeat` (from `ViewHandle.tween`) walks again from its first segment when a run ends: a
-number counts the extra runs, `"forever"` never ends and its motion never resolves until it is
-cancelled or finished. Time past the end of a run carries into the next run; a counted track hands
-the time past its last run back like any other track.
+A track with `repeat` (from `ViewHandle.tween` or a `tween` step) walks again from its first segment
+when a run ends: a number counts the extra runs, `"forever"` never ends and its motion never resolves
+until it is cancelled or finished. Time past the end of a run carries into the next run; a counted
+track hands the time past its last run back like any other track.
+
+## Keyframes and repeat in a timeline
+
+A `tween` step takes the two options `ViewHandle.tween` has, with the same names and meaning (F75):
+
+```ts
+tween(target, Component, to, {
+  ms, ease?, delayMs?, additive?, space?, reduced?,
+  segments?: [{ at: 0.5, ease?: "out", to: { y: -14 } }, { at: 1, to: { y: 0 } }],
+  repeat?: 2 // or "forever"
+});
+```
+
+- `segments` run one after another over `ms` on one clock; `at` is where a segment ends, as a
+  fraction of `ms`. A field a segment does not name holds where the segment before left it. `to` is
+  where the last segment ends. A segment without `ease` runs on the step's `ease`. Each segment names
+  the numeric fields of the component, as `to` does.
+- An additive walk (`additive: true`) names offsets over the pose under it: it starts at no offset,
+  each segment gives the delta it adds, and the pose is left as it was when the walk ends.
+- `repeat: N` runs the walk N more times, then the step ends and the next step of a sequence starts.
+  `repeat: "forever"` never ends by itself: only a cancel or a finish of the play ends it, and a
+  `parallel` around it lives as long.
+- The options are frozen into the step when it is built, each segment and its `to` copied, and they
+  are in the step data only when given: a step without them reads as before.
+- With `space: "root"` every segment target is turned into the space of the target's `Parent` when
+  the track starts, like `to`. An additive walk names offsets, not positions, so it stays in the
+  local space: `additive: true` with `segments` and `space: "root"` throws when the step is built.
+- Errors when the step is built, in the house format: an empty list, an `at` outside 0..1 (or not a
+  number), `at` not strictly ascending, a last segment before `at: 1`
+  (`[game] A tween of Transform ends its last segment at 0.5.`), an additive walk in the root space
+  (`[game] An additive tween of Transform walks segments in the root space.`), and a `repeat` that
+  is negative, not whole or not a number.
+- `sequence` refuses a step that never ends with another step after it, since that step would never
+  play: a forever tween, a `parallel` or a `sequence` that holds one, a `use` of one.
+  `[game] Step 1 of a sequence never ends, so the steps after it would never play.` Last in a
+  sequence, or anywhere in a `parallel`, it is fine.
+- A finish (`finish()`, `finishAll()`, the abort of a node) lands a forever step on its start pose: the
+  pose its walk starts from, so an additive bounce leaves the view where it stands, and a forever step
+  that never started writes nothing. A counted repeat lands on its end, as before. A keyframe step
+  that never started lands on `to` and on the last value of every field its segments name; an additive
+  one writes nothing, because its segments name offsets.
+- A fast world (a fast walk of the flow, the headless game) finishes every timeline in its next frame
+  step, so a forever step lands on its start pose at once and nothing waits for it. A node that awaits
+  a forever play in a live world waits until it is aborted: start one with `fx.start(play(...))`, or
+  from a system through `AnimPlayer`.
+- Reduced motion (`reduced: "cut"`, the default): a forever step does not play at all. It writes
+  nothing and the tree goes on at once. `reduced: "keep"` plays it as written. A counted repeat lands
+  on its target at once, as every cut track does.
+- A forever step does not keep the clock awake: two seconds after the last `wake()` the screen steps
+  at `time.idleFps`, as with a view's loop.
 
 ## Reduced motion
 
@@ -262,8 +314,9 @@ the time past its last run back like any other track.
 started afterwards take 0 ms, its delay and repeats dropped: enter and exit, state changes, change and
 settle motions, drag returns and timeline tweens land on their target at the next frame step. Marks,
 sounds and `wait` steps of a timeline are untouched. Every loop stands on its first key, a running
-one at once, and walks on from its first key when the switch goes off. A loop that stands writes its
-first key once, not every frame. Tracks already running keep their length. A `Frames` loop stops on
+one at once, and walks on from its first key when the switch goes off. A timeline's forever `tween`
+step started under reduced motion does not play at all: it writes nothing and its step ends at once.
+A loop that stands writes its first key once, not every frame. Tracks already running keep their length. A `Frames` loop stops on
 the frame it shows and walks on from that frame when the switch goes off.
 
 The author marks the tracks reduced motion keeps, a fade for one: the engine never guesses.
@@ -316,10 +369,12 @@ app.anim.play(deliverFly, {
 - `space: "local"` is the default: the fields are written into the `Transform` as they are.
 - `space: "root"`: the `x`, `y`, `rotation` and `scale` of a `Transform` are a root pose. When the
   track starts, or when a finished timeline writes a step that never started, they are turned into
-  the space of the target's `Parent` with `localPoseOf` of `renderer`.
+  the space of the target's `Parent` with `localPoseOf` of `renderer`. The target of every keyframe
+  segment is turned the same way.
 - A field the step does not name stays where it is. Under a turned parent, name `x` and `y`
   together.
 - A target without a `Parent`, and a component other than `Transform`, move as in the local space.
+- An additive keyframe walk refuses the root space: its segments name offsets.
 - The step data carries the space: `{ kind: "tween", ..., space: "root" }`.
 
 ## Spawned entities
@@ -427,6 +482,48 @@ const popIn = system({ name: "popIn", phase: "input", query: [Fresh], run: (item
   before the next play, or take away the tag that asked for the play.
 - Play from phase `input`: the tree moves in `animate` of the same frame. From a later phase it
   moves from the next frame. Phase `sync` runs in fast mode too, where the next step finishes it.
+- An endless animation is played once and held by its handle. A chest that is ready bounces until it
+  is taken, from one system and one play, with no wake per cycle:
+
+```ts
+// features/board/motion/animations.ts: one hop of 14 up, then a pause, every 2.4 s, as offsets.
+export const chestBounce = defineAnimation("board.chestBounce", {
+  slots: { chest: type<Target>() },
+  build: ({ chest }) =>
+    tween(chest, Transform, { y: 0, scale: 0 }, {
+      ms: 2400, additive: true, repeat: "forever",
+      segments: [
+        { at: 0.08, ease: "out", to: { y: -14, scale: 0.06 } },
+        { at: 0.16, ease: "in", to: { y: 0, scale: -0.03 } },
+        { at: 0.22, ease: "out", to: { y: 0, scale: 0 } },
+        { at: 1, to: { y: 0, scale: 0 } } // the pause until the next hop
+      ]
+    })
+});
+
+// features/board/world/systems/chest.ts: a play when the chest becomes ready, a cancel when it is not.
+const Bounces = resource("chestBounces", () => new Map<World.Entity, Anim.PlayHandle>());
+
+const bounceChests = system({ name: "bounceChests", phase: "input", query: [ChestItem], run: (rows, { world, res }) => {
+  const handles = res(Bounces);
+
+  for (const [entity] of rows) {
+    const ready = world.has(entity, Ready);
+    const handle = handles.get(entity);
+
+    if (ready && handle === undefined) handles.set(entity, res(AnimPlayer).play(chestBounce, { chest: entity }));
+    if (!ready && handle !== undefined) {
+      handle.cancel(); // the offsets go: the chest stands on its pose again
+      handles.delete(entity);
+    }
+  }
+} });
+```
+
+- The offsets of an additive walk are on the field named by the component: `y` and `scale` of
+  `Transform`; `Transform` has no `dy`. Under an opaque sheet the chest stands still and hops on at
+  the phase of the time when the sheet closes (F76). Under reduced motion and in a fast world the play
+  ends at once; the system keeps the handle all the same, so it does not play again every frame.
 - Before `anim` started, and after the world stopped, `play` throws
   `[game] AnimPlayer is not ready: anim has not started.` A system that plays in an app without
   `anim` is logged as `world:system-failed` with that sentence.
