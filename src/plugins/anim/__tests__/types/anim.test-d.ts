@@ -45,6 +45,31 @@ tween(card, Transform, { x: 540, y: 300 }, { ms: 100, space: "local" });
 // @ts-expect-error — the space is local or root, nothing else
 tween(card, Transform, { x: 540 }, { ms: 100, space: "world" });
 
+// A keyframe walk names the numeric fields of the component in each segment, as `to` does (F75).
+tween(
+  card,
+  Transform,
+  { y: 0, scale: 0 },
+  {
+    ms: 2400,
+    additive: true,
+    repeat: "forever",
+    segments: [
+      { at: 0.08, ease: "out", to: { y: -14, scale: 0.06 } },
+      { at: 1, to: { y: 0, scale: 0 } }
+    ]
+  }
+);
+// @ts-expect-error — Transform has no `dy`: an additive walk offsets `y` itself
+tween(card, Transform, { y: 0 }, { ms: 100, segments: [{ at: 1, to: { dy: 0 } }] });
+// @ts-expect-error — repeat counts the extra runs, or is "forever"
+tween(card, Transform, { x: 1 }, { ms: 100, repeat: "always" });
+
+// A walk written for `ViewHandle.tween` passes to a timeline step as it is.
+const walk: readonly World.TrackSegment[] = [{ at: 1, to: { y: 0 } }];
+
+tween(card, Transform, { y: 0 }, { ms: 100, segments: walk });
+
 // The components a game gets from `defineGame` pass unchanged, as `world.ecs` takes them.
 const kit = defineGame<{
   player: { coins: number };

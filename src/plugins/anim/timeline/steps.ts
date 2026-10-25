@@ -5,7 +5,13 @@
  */
 import type { Json } from "../../model/types";
 import type { AnyComponentValue } from "../../world/ecs/types";
-import type { ComponentHandle, Ease, NumericFields, ReducedMotion } from "../../world/types";
+import type {
+  ComponentHandle,
+  Ease,
+  NumericFields,
+  ReducedMotion,
+  TrackSegment
+} from "../../world/types";
 import { asComponent } from "../components";
 import type {
   AnimationDefinition,
@@ -16,6 +22,7 @@ import type {
   SlotValues,
   Target
 } from "../types";
+import { checkRepeat, checkSegments, checkSequence } from "./checks";
 import type {
   ExternalPlayer,
   FxStep,
@@ -140,10 +147,13 @@ function slotsJson(slots: object): Json {
 
 /**
  * Runs the steps one after another. The remainder past a step's end reaches the next step in the
- * same frame, so the tree takes exactly the sum of its durations.
+ * same frame, so the tree takes exactly the sum of its durations. A step that never ends (a
+ * `tween` with `repeat: "forever"`, or a `parallel`, `sequence` or `use` that holds one) may only
+ * come last: the steps after it would never play.
  *
  * @param steps - The steps, in order.
  * @returns The sequence step.
+ * @throws {Error} When a step that never ends has another step after it.
  * @example
  * ```ts
  * sequence(wait(100), mark("done"));
@@ -151,6 +161,8 @@ function slotsJson(slots: object): Json {
  * ```
  */
 export function sequence(...steps: readonly Step[]): Step {
+  checkSequence(steps);
+
   return Object.freeze({ kind: "sequence" as const, steps: Object.freeze([...steps]) });
 }
 
@@ -221,6 +233,34 @@ export function mark(name: string): Step {
   return Object.freeze({ kind: "mark" as const, name });
 }
 
+/** The fields of a `tween` step, written before the step is frozen. */
+type TweenFields = { -readonly [Field in keyof TweenStep]: TweenStep[Field] };
+
+/** The `tween` member of `Step`. */
+type TweenStep = Extract<Step, { kind: "tween" }>;
+
+/**
+ * Copies one keyframe segment into frozen plain data: its `at`, its ease when it names one and
+ * its numeric target fields.
+ *
+ * @param segment - The segment the author gave.
+ * @param segment.at - Where it ends, as a fraction of the track's `ms`.
+ * @param segment.ease - Its curve; the step's `ease` when left out.
+ * @param segment.to - The fields it reaches.
+ * @returns A frozen copy.
+ * @example
+ * ```ts
+ * frozenSegment({ at: 1, to: { y: 0, texture: "a" } }); // { at: 1, to: { y: 0 } }
+ * ```
+ */
+function frozenSegment(segment: { at: number; ease?: Ease; to: object }): TrackSegment {
+  const frozen: TrackSegment = { at: segment.at, to: Object.freeze(numbersOf(segment.to)) };
+
+  if (segment.ease !== undefined) frozen.ease = segment.ease;
+
+  return Object.freeze(frozen);
+}
+
 /**
  * Moves the numeric fields of one component of one target to an exact target value. The component
  * is any handle `world.ecs` takes, so the kit's `Sprite` and `NineSlice` of `defineGame` pass as
@@ -245,8 +285,15 @@ export function mark(name: string): Step {
  * @param options.space - `"root"` reads the `Transform` fields as a root pose; `"local"` when
  *   omitted.
  * @param options.reduced - `"keep"` plays the track at its length under reduced motion, a fade
- *   for one; `"cut"` (the default) lands it at once.
- * @returns The tween step.
+ *   for one; `"cut"` (the default) lands it at once, and a `"forever"` track does not play.
+ * @param options.segments - Keyframe segments `{ at, ease?, to }` walked one after another over
+ *   `ms` on one clock; a field a segment does not name holds, `to` is where the last one ends. An
+ *   additive walk names offsets. The same as `TweenOptions` of `ViewHandle.tween`.
+ * @param options.repeat - How many more times the walk runs, or `"forever"`: the step never ends
+ *   by itself, so it comes last in a `sequence`.
+ * @returns The tween step; `segments` and `repeat` are in it only when given.
+ * @throws {Error} When the segments are empty, an `at` is outside 0..1 or out of order, the last
+ *   segment ends before 1, or the repeat is not a whole number of 0 or more.
  * @example
  * ```ts
  * // An order is delivered: the board item flies out of the scaled board slot onto the order card.
@@ -262,6 +309,23 @@ export function mark(name: string): Step {
  *   card: { projection: "hud", key: "card0" }
  * });
  * // 400 ms later the item covers the card at the card's size; its Transform stays slot-local
+ *
+ * // A ready chest hops 14 up and back every 2.4 s, as offsets over its pose, until it is cancelled.
+ * const chestBounce = defineAnimation("board.chestBounce", {
+ *   slots: { chest: type<Target>() },
+ *   build: ({ chest }) =>
+ *     tween(chest, Transform, { y: 0, scale: 0 }, {
+ *       ms: 2400, additive: true, repeat: "forever",
+ *       segments: [
+ *         { at: 0.08, ease: "out", to: { y: -14, scale: 0.06 } },
+ *         { at: 0.22, ease: "in", to: { y: 0, scale: 0 } },
+ *         { at: 1, to: { y: 0, scale: 0 } }
+ *       ]
+ *     })
+ * });
+ * const bounce = res(AnimPlayer).play(chestBounce, { chest: entity });
+ * // 192 ms later the chest stands 14 higher at 1.06 of its scale
+ * bounce.cancel(); // it stands on its own pose again
  * ```
  */
 export function tween<Value extends object>(
@@ -275,12 +339,15 @@ export function tween<Value extends object>(
     additive?: boolean;
     space?: "local" | "root";
     reduced?: ReducedMotion;
+    segments?: readonly { at: number; ease?: Ease; to: Partial<NumericFields<Value>> }[];
+    repeat?: number | "forever";
   }
 ): Step {
-  return Object.freeze({
-    kind: "tween" as const,
+  const erased = asComponent(component);
+  const step: TweenFields = {
+    kind: "tween",
     target,
-    component: asComponent(component),
+    component: erased,
     to: Object.freeze(numbersOf(to)),
     ms: options.ms,
     ease: options.ease ?? DEFAULT_EASE,
@@ -288,7 +355,19 @@ export function tween<Value extends object>(
     additive: options.additive === true,
     space: options.space ?? "local",
     reduced: options.reduced ?? "cut"
-  });
+  };
+
+  if (options.segments !== undefined) {
+    checkSegments(erased.componentName, options.segments);
+    step.segments = Object.freeze(options.segments.map(segment => frozenSegment(segment)));
+  }
+
+  if (options.repeat !== undefined) {
+    checkRepeat(erased.componentName, options.repeat);
+    step.repeat = options.repeat;
+  }
+
+  return Object.freeze(step);
 }
 
 /**
