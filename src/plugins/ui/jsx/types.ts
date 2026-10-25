@@ -76,9 +76,12 @@ export type ElementChange<Value> = (
 /**
  * The motion hooks of one element: the hook triple of `world.projection`, which `defineMotion`
  * of `anim` returns. `ui` plays the `change` hooks of `Box` (the rects), of `Transform` (the rest
- * poses) and of every extra component of the `components` prop (its values before and after). A
- * hook for any other component name is accepted, so every `defineMotion` result fits, and `ui`
- * never plays it. Every hook gets the hint routed to the element's key in that frame step.
+ * poses), of the visual the element is drawn with (`Shape`, `Sprite`, `NineSlice` or `Text`: its
+ * values before and after, when a render or a restyle moves a number of it) and of every extra
+ * component of the `components` prop (its values before and after). A hook for any other
+ * component name is accepted, so every `defineMotion` result fits; `ui` never plays it, and a dev
+ * build names it once (`ui:change-never-plays`). Every hook gets the hint routed to the element's
+ * key in that frame step.
  *
  * @example
  * ```ts
@@ -241,27 +244,29 @@ export type StyleBasis = { epoch: number; rowHeight: number | undefined };
 
 /**
  * One live element: the entity, the Yoga node, the resolved style and the place in the tree.
- * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit`
- * is the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform`
- * last written for it. `loop` is the motion of the running `loop` hook, kept apart from
- * `handles`: it never ends, so the exit sweep must not wait for it. `extras` holds the values of
- * the `components` prop added last time, by component name; `extraHandles` the motion the last
- * `change` hook of each of them returned; `warnedOwned` the names of the `components` values the
- * element owns that were already logged. A windowed scroll carries its `window` and the one-time
- * warnings of its props in `warned`; `scrolledIn` marks an element a range change of a windowed
- * scroll created: it plays no `enter` hook. A scroll carries its `scroll` motion from its enter. A text or an icon that sizes itself keeps in
- * `measuredSize` what its measure function last answered, before Yoga's clamp: a bound text whose
- * new string measures the same asks for no solve. `measuredWidth` is the width Yoga offered that
- * call when the text wrapped at it (only a `"box"` style does), `undefined` otherwise: such a text
- * is measured again at its laid-out width and gets a `Text.box`, any other gets none. `basis` is what `style` was resolved on, set
- * once the style is on the layout node and the components are written; an element without one is
- * patched in full at its next patch. `index` is its place among the element children of its parent
- * at the last diff (0 for a root element): with its `zIndex` it gives the child its `Order`.
- * `cause` is why the element appeared: `"mount"` when it came with the first build of its root and
- * the root came by a mount, `"change"` otherwise; its `enter` hook is told. `rebuilds` counts the
- * patches in a row that brought a loop of another reference that is not really another loop: a
- * dev build names the element once it reaches three. `endless` holds the motions a hook returned
- * after it started a track that repeats forever: they never end, so no exit waits for them (F42).
+ * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit` is
+ * the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform` last
+ * written for it. `loop` is the motion of the running `loop` hook, kept apart from `handles`: it
+ * never ends, so the exit sweep must not wait for it. `extras` holds the values of the
+ * `components` prop added last time, by component name; `extraHandles` the motion the last
+ * `change` hook of each of them and of the visual returned; `warnedOwned` the names of the
+ * `components` values the element owns that were already logged. A windowed scroll carries its
+ * `window` and the one-time warnings of its props in `warned`; `scrolledIn` marks an element a
+ * range change of a windowed scroll created: it plays no `enter` hook. A scroll carries its
+ * `scroll` motion from its enter. A text or an icon that sizes itself keeps in `measuredSize` what
+ * its measure function last answered, before Yoga's clamp: a bound text whose new string measures
+ * the same asks for no solve. `measuredWidth` is the width Yoga offered that call when the text
+ * wrapped at it (only a `"box"` style does), `undefined` otherwise: such a text is measured again
+ * at its laid-out width and gets a `Text.box`, any other gets none. `basis` is what `style` was
+ * resolved on, set once the style is on the layout node and the components are written; an
+ * element without one is patched in full at its next patch. `index` is its place among the
+ * element children of its parent at the last diff (0 for a root element): with its `zIndex` it
+ * gives the child its `Order`. `cause` is why the element appeared: `"mount"` when it came with
+ * the first build of its root and the root came by a mount, `"change"` otherwise; its `enter` hook
+ * is told. `rebuilds` counts the patches in a row that brought a loop of another reference that is
+ * not really another loop: a dev build names the element once it reaches three. `endless` holds
+ * the motions a hook returned after it started a track that repeats forever: they never end, so
+ * no exit waits for them (F42).
  */
 export type Element = {
   entity: Entity;
@@ -310,6 +315,12 @@ export type Element = {
   endless?: Set<MotionHandle>;
   /** What its enter hook did at the `Box`, until `ui.enter` keeps the play or plays it again (F49). */
   posed?: PosedEnter | undefined;
+  /** The value of its visual last written: what a `change` hook of the visual gets as the value before (F85). */
+  look?: AnyComponentValue | undefined;
+  /** The write pass in which a `change` hook of its visual last returned a motion. */
+  lookPass?: number | undefined;
+  /** The value of its visual before that pass: a second write in the pass plays the hook from it. */
+  lookFrom?: object | undefined;
 };
 
 /**
