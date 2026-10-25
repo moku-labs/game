@@ -73,6 +73,46 @@ type StandInRender = {
 /** A transform with no move and no scale. */
 const IDENTITY = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 } as const;
 
+/** The numbers of a 2D affine transform, in Pixi's order: x' = a·x + c·y + tx, y' = b·x + d·y + ty. */
+type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
+
+/**
+ * The product `m · n`: `n` first, then `m`.
+ *
+ * @param m - The outer transform.
+ * @param n - The inner transform.
+ * @returns The product.
+ */
+function times(m: Affine, n: Affine): Affine {
+  return {
+    a: m.a * n.a + m.c * n.b,
+    b: m.b * n.a + m.d * n.b,
+    c: m.a * n.c + m.c * n.d,
+    d: m.b * n.c + m.d * n.d,
+    tx: m.a * n.tx + m.c * n.ty + m.tx,
+    ty: m.b * n.tx + m.d * n.ty + m.ty
+  };
+}
+
+/**
+ * The inverse of an affine transform.
+ *
+ * @param m - The transform.
+ * @returns Its inverse.
+ */
+function inverted(m: Affine): Affine {
+  const det = m.a * m.d - m.b * m.c;
+
+  return {
+    a: m.d / det,
+    b: -m.b / det,
+    c: -m.c / det,
+    d: m.a / det,
+    tx: (m.c * m.ty - m.d * m.tx) / det,
+    ty: (m.b * m.tx - m.a * m.ty) / det
+  };
+}
+
 /** A quad lands where its picture does within this much, CSS px. */
 const PLACE_TOLERANCE = 1e-6;
 
@@ -480,15 +520,6 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
 
     if (stale !== undefined) fail(name, `subtree: ${stale}`);
 
-    if (
-      world.a !== transform.a ||
-      world.b !== transform.b ||
-      world.c !== transform.c ||
-      world.d !== transform.d
-    ) {
-      fail(name, `linear part ${world.a},${world.b},${world.c},${world.d}`);
-    }
-
     if (filtersText(standIn.standIn) !== standIn.filters) {
       fail(name, `filters: ${filtersText(standIn.standIn)}`);
     }
@@ -497,19 +528,20 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
     if (quad.zIndex !== top.zIndex)
       fail(name, `quad depth ${quad.zIndex}, top depth ${top.zIndex}`);
 
+    // The picture lands where the top draws now: `W · T⁻¹ · S⁻¹`, this frame's world transform after the inverse of
+    // the one it was taken at and of the stand-in's offset. A changed linear part draws it scaled (F67).
     const placed = quad.getGlobalTransform(undefined, false);
-    const x = world.tx - transform.tx - standIn.transform.tx;
-    const y = world.ty - transform.ty - standIn.transform.ty;
+    const lands = times(times(world, inverted(transform)), inverted(standIn.transform));
 
     if (
-      Math.abs(placed.tx - x) > PLACE_TOLERANCE ||
-      Math.abs(placed.ty - y) > PLACE_TOLERANCE ||
-      Math.abs(placed.a - IDENTITY.a) > PLACE_TOLERANCE ||
-      Math.abs(placed.d - IDENTITY.d) > PLACE_TOLERANCE ||
-      Math.abs(placed.b) > PLACE_TOLERANCE ||
-      Math.abs(placed.c) > PLACE_TOLERANCE
+      Math.abs(placed.tx - lands.tx) > PLACE_TOLERANCE ||
+      Math.abs(placed.ty - lands.ty) > PLACE_TOLERANCE ||
+      Math.abs(placed.a - lands.a) > PLACE_TOLERANCE ||
+      Math.abs(placed.b - lands.b) > PLACE_TOLERANCE ||
+      Math.abs(placed.c - lands.c) > PLACE_TOLERANCE ||
+      Math.abs(placed.d - lands.d) > PLACE_TOLERANCE
     ) {
-      fail(name, `quad at ${placed.tx},${placed.ty}, its picture lands at ${x},${y}`);
+      fail(name, `quad at ${placed.tx},${placed.ty}, its picture lands at ${lands.tx},${lands.ty}`);
     }
 
     throughTops.add(top);

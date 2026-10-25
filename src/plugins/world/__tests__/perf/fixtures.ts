@@ -631,9 +631,10 @@ export function recordedFrameFixture(): () => void {
   }
 
   const store = state.stores.get("Spot");
+  const ctx = withDeps(world.ctx);
   let frame = 1;
 
-  recordFrame(world.ctx, frame);
+  recordFrame(ctx, frame);
   clearAllChanges(state);
 
   return (): void => {
@@ -647,7 +648,7 @@ export function recordedFrameFixture(): () => void {
       markChanged(state, "Spot", entity);
     }
 
-    recordFrame(world.ctx, frame);
+    recordFrame(ctx, frame);
     clearAllChanges(state);
   };
 }

@@ -639,6 +639,32 @@ export async function keptBoard(count: number, marked = false): Promise<() => vo
 }
 
 /**
+ * The board of `keptBoard` under a camera zoom (F67): every frame the root above the kept views scales by a step, in
+ * turn 1.1 and 1.2, as a glide changes a camera layer's scale, and a view elsewhere is marked. Every record steps and
+ * draws its picture scaled; none is retaken.
+ *
+ * @param count - The kept views.
+ * @returns One frame of the zoom: the scale, the mark, the collect and the flush.
+ */
+export async function keptZoomBoard(count: number): Promise<() => void> {
+  const { stage, other } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const root = stage.drawn.mock.ctx.state.sync.root;
+
+  if (root === undefined) throw new Error("perf fixture: the zoom board has no root");
+
+  let near = false;
+
+  return () => {
+    near = !near;
+    root.scale.set(near ? 1.2 : 1.1);
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A skipped frame of a dev build with `onDemand` and 300 views over real Pixi render groups, as the case-sheet of
  * A Memory Missing stands idle: after the last drawn frame five views were written without a mark, warned, and stay in
  * Pixi's change lists, because a skipped frame renders nothing. Each call is the after-frame step of one more skipped frame (F69).

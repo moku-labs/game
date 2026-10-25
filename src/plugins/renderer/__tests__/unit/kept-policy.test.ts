@@ -257,8 +257,9 @@ describe("a picture retaken at another size", () => {
     const quad = quadOf(drawn, entity) as pixi.Sprite | undefined;
     const before = quad?.texture.width ?? 0;
 
+    // The scale frame draws the picture scaled (F67); the next one, at rest, retakes it at the new size.
     drawn.mock.world.ecs.set(entity, Transform, { scale: 2 });
-    drawn.frame();
+    drawn.frames(2);
 
     const bounds = quad?.bounds;
 
@@ -729,5 +730,83 @@ describe("device loss and the stop", () => {
 
     expect(atDestroy).toEqual([true, true]);
     expect(drawn.mock.ctx.state.kept.records).toEqual([]);
+  });
+});
+
+/**
+ * A 40 x 40 label with a filter inside a camera container, kept.
+ *
+ * @param drawn - The running renderer.
+ * @returns The camera and the label.
+ */
+function zoomed(drawn: Drawn): { camera: Entity; label: Entity } {
+  const camera = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 1, h: 1 }));
+  const label = drawn.mock.world.ecs.spawn(OWNER, [
+    Transform({ x: 100, y: 100 }),
+    Shape({ w: 40, h: 40 }),
+    Parent({ entity: camera })
+  ]);
+
+  drawn.mock.api.sync.filters.set(label, [slotOf(new pixi.ColorMatrixFilter())]);
+  drawn.frames(4);
+
+  return { camera, label };
+}
+
+describe("a kept picture under an ancestor's zoom (F67)", () => {
+  // Bug F67: every frame of a glide changed the linear part above the picture, so it was retaken three times and then
+  // drawn live, its filter pass every frame (the case-sheet's perspective labels: 2 passes a frame during each glide).
+  it("draws the picture scaled while an ancestor zooms: no retake, no render into a texture, still kept", async () => {
+    const drawn = await open();
+    const { camera, label } = zoomed(drawn);
+
+    expect(keptNow(drawn, label)).toBe(true);
+
+    const from = drawn.stage.targets().length;
+
+    for (let frame = 1; frame <= 12; frame += 1) {
+      drawn.mock.world.ecs.set(camera, Transform, { scale: 1 + frame * 0.05 });
+      drawn.frame();
+
+      expect(keptNow(drawn, label)).toBe(true);
+    }
+
+    expect(drawn.stage.targets().length - from).toBe(0);
+  });
+
+  it("retakes the picture once at rest, at the new scale", async () => {
+    const drawn = await open();
+    const { camera, label } = zoomed(drawn);
+    const from = drawn.stage.targets().length;
+
+    for (let frame = 1; frame <= 6; frame += 1) {
+      drawn.mock.world.ecs.set(camera, Transform, { scale: 1 + frame * 0.1 });
+      drawn.frame();
+    }
+
+    drawn.frames(3);
+
+    expect(rendersOf(drawn, label, "#1", from)).toBe(1);
+    expect(keptNow(drawn, label)).toBe(true);
+    expect((quadOf(drawn, label) as pixi.Sprite | undefined)?.texture.width).toBeCloseTo(
+      40 * 1.6,
+      0
+    );
+  });
+
+  it("retakes a picture zoomed past twice its scale, and draws it scaled again from there", async () => {
+    const drawn = await open();
+    const { camera, label } = zoomed(drawn);
+    const from = drawn.stage.targets().length;
+
+    // 1 → 2.5 in fifteen frames: the area scale passes 4 once, at 2.1.
+    for (let frame = 1; frame <= 15; frame += 1) {
+      drawn.mock.world.ecs.set(camera, Transform, { scale: 1 + frame * 0.1 });
+      drawn.frame();
+
+      expect(keptNow(drawn, label)).toBe(true);
+    }
+
+    expect(rendersOf(drawn, label, "#1", from)).toBe(1);
   });
 });
