@@ -3,7 +3,7 @@
  * Imports no plugin: a descriptor is data.
  */
 import type { HeadlessApp } from "../headless";
-import type { Command, InputSchema, Source } from "./types";
+import type { Command, InputKind, InputSchema, Source } from "./types";
 
 /** Lowercase-first camelCase words joined by dots, at least two: `game.position`. */
 const idPattern = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$/;
@@ -21,6 +21,38 @@ function checkId(kind: "source" | "command", id: string): void {
   throw new Error(
     `[game] The ${kind} id "${id}" is not a dotted name.\n  Name it like "game.position": camelCase words joined by dots.`
   );
+}
+
+/** One field of an input schema: its name, then its kind. */
+type InputEntry = readonly [name: string, kind: InputKind | `${InputKind}?`];
+
+/** The schema a list of entries describes, field name to kind. */
+type SchemaOf<Entries extends readonly InputEntry[]> = {
+  readonly [Entry in Entries[number] as Entry[0]]: Entry[1];
+};
+
+/**
+ * Builds the input schema of a door without an object literal (F77). A literal such as
+ * `{ x: "number", y: "number" }` shares V8's hidden shape with the game's points and stores
+ * strings where they store numbers: V8 turns the fields of that shape tagged, and every fractional
+ * write into any `{ x, y }` then boxes a heap number. An object without a prototype is a
+ * dictionary and shares no shape with anything.
+ *
+ * @param entries - The fields, each `[name, kind]`.
+ * @returns The schema, an object without a prototype.
+ * @example
+ * ```ts
+ * inputSchema(["x", "number"], ["y", "number"]); // { x: "number", y: "number" }, no prototype
+ * ```
+ */
+export function inputSchema<const Entries extends readonly InputEntry[]>(
+  ...entries: Entries
+): SchemaOf<Entries> {
+  const schema: Record<string, string> = Object.create(null);
+
+  for (const [name, kind] of entries) schema[name] = kind;
+
+  return schema as SchemaOf<Entries>;
 }
 
 /**

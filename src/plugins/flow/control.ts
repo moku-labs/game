@@ -7,7 +7,7 @@
  */
 import type { Json, Snapshot, StoreApi } from "../model/types";
 import type { ScenesApi } from "../scenes/types";
-import { defineCommand } from "./doors/define";
+import { defineCommand, inputSchema } from "./doors/define";
 import { controlRefused } from "./doors/dev";
 import type { ControlApp } from "./doors/types";
 import { type HeadlessApp, reproBookmark } from "./headless";
@@ -154,7 +154,7 @@ function startBookmark(app: HeadlessApp, save: SaveTrees): Json {
 export const answerCommand = defineCommand({
   id: "game.answer",
   title: "Answer",
-  input: { intent: "string", payload: "json?" },
+  input: inputSchema(["intent", "string"], ["payload", "json?"]),
   effect: "route",
   run: (app: ControlApp, { intent, payload }) => {
     if (
@@ -183,7 +183,7 @@ export const answerCommand = defineCommand({
 export const walkCommand = defineCommand({
   id: "game.walk",
   title: "Walk a route",
-  input: { route: "json" },
+  input: inputSchema(["route", "json"]),
   effect: "route",
   run: (app: ControlApp, { route }) => {
     if (
@@ -263,7 +263,7 @@ export const bookmarkCommand = defineCommand({
 export const restoreCommand = defineCommand({
   id: "game.restore",
   title: "Restore",
-  input: { bookmark: "json?", repro: "json?" },
+  input: inputSchema(["bookmark", "json?"], ["repro", "json?"]),
   effect: "raw",
   run: (app: ControlApp & SceneApp, input) => {
     if (
@@ -332,7 +332,7 @@ export const saveExportCommand = defineCommand({
 export const saveImportCommand = defineCommand({
   id: "game.saveImport",
   title: "Import a save",
-  input: { save: "json" },
+  input: inputSchema(["save", "json"]),
   effect: "raw",
   run: async (app: SaveApp, { save }) => {
     if (

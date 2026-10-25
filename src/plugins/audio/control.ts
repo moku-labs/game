@@ -3,7 +3,7 @@
  * debug builds: the body starts with the inline agent guard of a cosmetic command, so a bundler
  * `define` of `false` drops it, and logs the `moku:dev` marker.
  */
-import { defineCommand } from "../flow/doors/define";
+import { defineCommand, inputSchema } from "../flow/doors/define";
 import { controlRefused, notInstalled } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
 import type { AudioApi } from "./types";
@@ -22,7 +22,7 @@ import type { AudioApi } from "./types";
 export const muteCommand = defineCommand({
   id: "game.mute",
   title: "Mute",
-  input: { muted: "boolean" },
+  input: inputSchema(["muted", "boolean"]),
   effect: "cosmetic",
   run: (app: ControlApp & { readonly audio?: AudioApi }, { muted }) => {
     if (

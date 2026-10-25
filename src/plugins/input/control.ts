@@ -7,7 +7,7 @@
  * are read with `target.ts`; `readTarget` is re-exported here for the `game.tap` command of ui,
  * which taps a view by the same projection key.
  */
-import { defineCommand } from "../flow/doors/define";
+import { defineCommand, inputSchema } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
 import type { Json } from "../model/types";
@@ -50,7 +50,7 @@ function readPath(value: Json | undefined): ProjectionTarget[] {
 export const dragCommand = defineCommand({
   id: "game.drag",
   title: "Drag",
-  input: { from: "json", to: "json" },
+  input: inputSchema(["from", "json"], ["to", "json"]),
   effect: "route",
   run: (app: InputApp, { from, to }) => {
     if (
@@ -80,7 +80,7 @@ export const dragCommand = defineCommand({
 export const traceCommand = defineCommand({
   id: "game.trace",
   title: "Trace",
-  input: { path: "json" },
+  input: inputSchema(["path", "json"]),
   effect: "route",
   run: (app: InputApp, { path }) => {
     if (
@@ -110,7 +110,7 @@ export const traceCommand = defineCommand({
 export const keyCommand = defineCommand({
   id: "game.key",
   title: "Press a key",
-  input: { key: "string", shift: "boolean?" },
+  input: inputSchema(["key", "string"], ["shift", "boolean?"]),
   effect: "route",
   run: (app: InputApp, { key, shift = false }) => {
     if (
