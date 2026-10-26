@@ -7,7 +7,7 @@ import type { Root } from "../../model/types";
 import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
 import { buildNames, commitBuild, discardBuild } from "./build";
-import { cancelTracks, forgetEndedTracks, forgetJoined, runningComponents } from "./driver";
+import { cancelTracks, forgetEndedTracks, runningComponents } from "./driver";
 import {
   cancelHandles,
   createViewHandle,
@@ -20,6 +20,7 @@ import {
   writeRestUnderLoops
 } from "./motions";
 import { checkLayers, mountNames, unmountNames } from "./mount";
+import { learnSeed, muteFields, reseedViews } from "./mutes";
 import {
   clearMounted,
   dropIfStill,
@@ -77,49 +78,6 @@ function isDirectCause(cause: Cause): boolean {
  */
 function isConvergeCause(cause: Cause): boolean {
   return cause === "load" || cause === "restore";
-}
-
-/**
- * Creates the empty mute table of one entity. It lives in its own non-exported function because
- * lint rule L5 refuses a collection built inside an exported declaration.
- *
- * @returns An empty table of component name to owned fields.
- */
-function emptyMuteTable(): Map<string, Set<string>> {
-  return new Map();
-}
-
-/**
- * Creates the empty field set of one muted component.
- *
- * @returns An empty set of field names.
- */
-function emptyFieldSet(): Set<string> {
-  return new Set();
-}
-
-/**
- * Deletes a released field set once it is empty, and the entity's table once no component is
- * left. Only the set and table still stored are touched, so a remover that runs after a clear
- * never drops a newer mute.
- *
- * @param mutes - The mute tables of every entity.
- * @param entity - The muted entity.
- * @param name - The muted component's name.
- * @param owned - The field set the remover released from.
- */
-function dropEmptyMute(
-  mutes: Map<Entity, Map<string, Set<string>>>,
-  entity: Entity,
-  name: string,
-  owned: Set<string>
-): void {
-  const byComponent = mutes.get(entity);
-
-  if (owned.size > 0 || byComponent?.get(name) !== owned) return;
-
-  byComponent.delete(name);
-  if (byComponent.size === 0) mutes.delete(entity);
 }
 
 /**
@@ -248,11 +206,14 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         );
       }
 
+      learnSeed(state, spec);
       state.specs.set(spec.name, spec);
     },
 
     replace: (spec: AnyProjectionSpec): void => {
-      if (!state.specs.has(spec.name)) {
+      const previous = state.specs.get(spec.name);
+
+      if (previous === undefined) {
         throw new Error(
           `[game] Projection "${spec.name}" is not registered.\n` +
             "  Register it before replacing it."
@@ -262,7 +223,12 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       const mounted = state.mounted.has(spec.name);
 
       if (mounted) checkLayers(spec, state.layers);
+
+      const from = state.initialOnly.get(previous);
+      const seed = learnSeed(state, spec);
+
       state.specs.set(spec.name, spec);
+      reseedViews(state, spec.name, from, seed);
       if (mounted) forceRerun();
     },
 
@@ -321,26 +287,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       entity: Entity,
       component: ComponentType<object>,
       fields: readonly string[]
-    ): (() => void) => {
-      const byComponent = state.mutes.get(entity) ?? emptyMuteTable();
-      const owned = byComponent.get(component.componentName) ?? emptyFieldSet();
-
-      for (const field of fields) owned.add(field);
-      forgetJoined(state, owned);
-      byComponent.set(component.componentName, owned);
-      state.mutes.set(entity, byComponent);
-
-      let released = false;
-
-      return (): void => {
-        if (released) return;
-
-        released = true;
-        for (const field of fields) owned.delete(field);
-        forgetJoined(state, owned);
-        dropEmptyMute(state.mutes, entity, component.componentName, owned);
-      };
-    },
+    ): (() => void) => muteFields(state, entity, component.componentName, fields),
 
     lift: (entity: Entity, on: boolean): void => {
       const view = state.byEntity.get(entity);

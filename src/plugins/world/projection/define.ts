@@ -8,9 +8,11 @@ import type { ProjectionSpec } from "./types";
 /**
  * Types a projection: keyed items of the model turned into entities. `Item` is inferred from the
  * return of `from` and reaches `key`, `view` and every motion hook; `layer` and `lift` stay
- * literal, so `defineScene` can check them against the layers of the scene.
+ * literal, so `defineScene` can check them against the layers of the scene. Each pair of
+ * `initialOnly` has its field names checked against its own component.
  *
- * @param spec - Name, layer, optional lift layer, `from`, `key`, `view` and the motion hooks.
+ * @param spec - Name, layer, optional lift layer, `from`, `key`, `view`, the motion hooks and
+ *   the `initialOnly` fields.
  * @returns The same spec, typed.
  * @example
  * ```ts
@@ -29,10 +31,11 @@ export function projection<
   const LiftName extends string,
   Item,
   Player = Json,
-  Session = Json
+  Session = Json,
+  const Values extends readonly object[] = []
 >(
-  spec: ProjectionSpec<Item, LayerName, LiftName, Player, Session>
-): ProjectionSpec<Item, LayerName, LiftName, Player, Session> {
+  spec: ProjectionSpec<Item, LayerName, LiftName, Player, Session, Values>
+): ProjectionSpec<Item, LayerName, LiftName, Player, Session, Values> {
   return spec;
 }
 
@@ -47,10 +50,11 @@ export function projection<
 export type ProjectionFor<Player, Session> = <
   const LayerName extends string,
   const LiftName extends string,
-  Item
+  Item,
+  const Values extends readonly object[] = []
 >(
-  spec: ProjectionSpec<Item, LayerName, LiftName, Player, Session>
-) => ProjectionSpec<Item, LayerName, LiftName, Player, Session>;
+  spec: ProjectionSpec<Item, LayerName, LiftName, Player, Session, Values>
+) => ProjectionSpec<Item, LayerName, LiftName, Player, Session, Values>;
 
 /**
  * Binds `projection` to one game's `player` and `session`. Type-only: the same function.
