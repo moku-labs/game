@@ -289,6 +289,8 @@ function harness() {
           membershipVersion: () => 0,
           setRest,
           isBuilding: (entity: Entity): boolean => world.building.has(entity),
+          // A build of this world never runs out of budget: a root built aside is made in one part.
+          left: (): number => Number.POSITIVE_INFINITY,
           adopt: (entity: Entity): void => {
             world.adoptedBare.push(store.get(entity)?.size === 0);
             world.building.add(entity);

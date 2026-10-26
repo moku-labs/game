@@ -20,7 +20,7 @@ import { checkConfig, startScenes, stopScenes } from "./lifecycle";
 import { createScenesState } from "./state";
 import type { Config, Events } from "./types";
 
-/** The budget of a live switch: half of each frame at the rate the loop runs. Typed, so a game's number overrides it. */
+/** The budget of a live switch: two thirds of each frame at the rate the loop runs. Typed, so a game's number overrides it. */
 const defaultConfig: Config = { buildMs: "auto" };
 
 /**
@@ -45,7 +45,7 @@ const defaultConfig: Config = { buildMs: "auto" };
  *   projections: [wardRoom]
  * });
  *
- * // A game gives the next scene a fixed 3 ms of each frame (half of it by default) while the old one stays on the screen.
+ * // A game gives the next scene a fixed 3 ms of each frame (two thirds of it by default) while the old one stays on the screen.
  * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { buildMs: 3 } } });
  * ```
  */

@@ -1,9 +1,10 @@
 import { bench, describe } from "vitest";
 import { BENCH_OPTIONS } from "../../../../../tests/perf/alloc";
-import { startAsidePerf, startPerfUi } from "./fixtures";
+import { startAsidePerf, startPartsPerf, startPerfUi } from "./fixtures";
 
 const idle = await startPerfUi();
 const building = await startAsidePerf();
+const parted = await startPartsPerf();
 
 describe("ui and a scene built aside", () => {
   bench(
@@ -29,6 +30,15 @@ describe("ui and a scene built aside", () => {
     () => {
       building.reconcile();
       building.solve();
+    },
+    BENCH_OPTIONS
+  );
+
+  bench(
+    "reconcile + solve, one root built in parts, its queue empty",
+    () => {
+      parted.reconcile();
+      parted.solve();
     },
     BENCH_OPTIONS
   );

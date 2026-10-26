@@ -89,7 +89,9 @@ export function dropHost(state: JsxState, entity: Entity): void {
 }
 
 /**
- * The element of a host entity while it hosts: mounted, live and not leaving.
+ * The element of a host entity while it hosts: mounted, live and not leaving. A host of a root
+ * built aside that is applied in parts hosts nothing until the root is whole (spec 33 A7): the
+ * last part gives it its views.
  *
  * @param state - The jsx state.
  * @param host - An entity of the host set.
@@ -98,7 +100,9 @@ export function dropHost(state: JsxState, entity: Entity): void {
 function liveHost(state: JsxState, host: Entity): Element | undefined {
   const element = state.elements.get(host);
 
-  return element === undefined || !element.live || state.exiting.has(host) ? undefined : element;
+  if (element === undefined || !element.live || state.exiting.has(host)) return undefined;
+
+  return state.roots.get(element.root)?.applying === undefined ? element : undefined;
 }
 
 /**

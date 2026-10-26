@@ -226,32 +226,37 @@ describe("a scene built aside", () => {
     ]);
   });
 
-  // Bug: "auto" hands the world a fixed number, a whole frame, or the rate the loop ran at before the switch instead
-  // of the one it runs at when the build starts.
+  // Bug: "auto" hands the world a fixed number, half a frame or a whole one, or the rate the loop ran at before the
+  // switch instead of the one it runs at when the build starts.
   it.each([
-    [60, 500 / 60],
-    [120, 500 / 120]
-  ])('hands the world half a frame for "auto" at %i fps, read at the build start', async (fps, budgetMs) => {
+    [60, 11.111],
+    [120, 5.556]
+  ])('hands the world two thirds of a frame for "auto" at %i fps, read at the build start', async (fps, budgetMs) => {
     const mock = await onHome({ buildMs: "auto" });
 
     mock.time.fps = fps;
     await enterBoard(mock);
 
-    expect(mock.world.building.calls.map(call => call.budgetMs)).toEqual([budgetMs]);
+    expect(mock.world.building.calls.map(call => call.budgetMs)).toEqual([
+      expect.closeTo(budgetMs, 3)
+    ]);
   });
 
   // Bug: a rate of 0 or NaN gives the world an endless budget (the renderer then takes the build for none and draws
   // the coming scene at once) or no number at all.
   it.each([
     0,
-    Number.NaN
-  ])('hands the world half a 60 Hz frame for "auto" when time answers %s fps', async fps => {
+    Number.NaN,
+    Number.POSITIVE_INFINITY
+  ])('hands the world two thirds of a 60 Hz frame for "auto" when time answers %s fps', async fps => {
     const mock = await onHome({ buildMs: "auto" });
 
     mock.time.fps = fps;
     await enterBoard(mock);
 
-    expect(mock.world.building.calls.map(call => call.budgetMs)).toEqual([500 / 60]);
+    expect(mock.world.building.calls.map(call => call.budgetMs)).toEqual([
+      expect.closeTo(11.111, 3)
+    ]);
   });
 });
 
@@ -428,7 +433,16 @@ describe("a scene built aside in the performance log", () => {
     expect(plain.renderer.monitor.event).not.toHaveBeenCalled();
     expect(agent.renderer.monitor.event.mock.calls).toEqual([
       ["scene:build", { from: "home", to: "board" }],
-      ["scene", { from: "home", to: "board", buildFrames: 3, buildMs: 30, budgetMs: 500 / 60 }]
+      [
+        "scene",
+        {
+          from: "home",
+          to: "board",
+          buildFrames: 3,
+          buildMs: 30,
+          budgetMs: expect.closeTo(11.111, 3)
+        }
+      ]
     ]);
   });
 });

@@ -186,6 +186,54 @@ export async function startAsidePerf(): Promise<PerfUi> {
 }
 
 /**
+ * Starts the perf app and builds the names of the box files aside on a budget of 0, so the build
+ * goes in parts (spec 33, slice A): every frame makes a few elements and parks the children of the
+ * rest, then the names are laid out once and applied a few elements a frame. Frames run until
+ * ui's part is done: the queue of the names' root is empty and kept, and no application is open.
+ *
+ * @returns The app and its `ui` steps, the names built in parts and held.
+ */
+export async function startPartsPerf(): Promise<PerfUi> {
+  const ui = await startPerfUi();
+  const projection = ui.app.world.projection;
+  const owner = { kind: "plugin", name: "perf" } as const;
+
+  if (!projection.build([...MOUNTED, "boxes"], owner, projection.layers(), 0)) {
+    throw new Error("perf: the names were not built aside");
+  }
+
+  let frames = 0;
+
+  while (!ui.built() && frames < 60) {
+    ui.app.time.step(16);
+    frames += 1;
+  }
+
+  // Built in one frame, the names would measure the one-block path.
+  if (!ui.built() || frames < 3) throw new Error("perf: the names were not built in parts");
+
+  return ui;
+}
+
+/**
+ * Starts the perf app, builds the names in parts and commits them: no build runs any more, and
+ * the names' root keeps its empty queue.
+ *
+ * @returns The app and its `ui` steps, the names on the screen.
+ */
+export async function startPartsCommittedPerf(): Promise<PerfUi> {
+  const ui = await startPartsPerf();
+  const projection = ui.app.world.projection;
+
+  projection.setLayers(projection.layers());
+  projection.commit();
+
+  for (let frame = 0; frame < 3; frame += 1) ui.app.time.step(16);
+
+  return ui;
+}
+
+/**
  * The heap bytes one call of a step keeps: the step run until V8 optimized what it calls, outside
  * the window, then `alloc` over a window of `calls`.
  *

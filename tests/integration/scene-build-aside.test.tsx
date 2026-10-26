@@ -4,7 +4,8 @@
  * fake clock, with `scenes.buildMs: 1`; every board sprite's texture costs 1 ms of that clock, so the renderer makes
  * one board view a frame and the switch builds over several frames. The ward stays current, drawn and hit until the
  * commit, the board is hung in one frame, and the screen it ends on is the one a one-block switch ends on. An abort
- * in the middle of the build leaves the world as it stood. The tree oracle checks every frame.
+ * in the middle of the build leaves the world as it stood. On a clock that runs on with every read, a big board panel
+ * is made, laid out and applied by `ui` in parts (spec 33, slice A). The tree oracle checks every frame.
  */
 import type { Assets, World } from "@moku-labs/game";
 import { defineGame, Shape, Sprite, Transform, type } from "@moku-labs/game";
@@ -69,14 +70,23 @@ const boardCells = projection({
   ]
 });
 
-/** The board's panel: a JSX root with the button a player taps first. */
+/** The board's panel as its view gets it: the rows under its button, as many as the player's `n`. */
+type Panel = { id: string; rows: number };
+
+/** The board's panel: a JSX root with the button a player taps first, and `n` rows of three elements under it. */
 const boardPanel = projection({
   name: "aside.boardPanel",
   layer: "ui",
-  from: () => ({ id: "panel" }),
-  view: () => (
+  from: (player: { n: number }): Panel => ({ id: "panel", rows: player.n }),
+  view: (panel: Panel) => (
     <column key="boardPanel" style={{ width: 390, height: 844 }}>
       <button key="boardPlay" intent="back" style={{ width: 200, height: 80 }} />
+      {Array.from({ length: panel.rows }, (_unused, index) => (
+        <row key={`boardRow${index}`} style={{ width: 390, height: 12, gap: 4 }}>
+          <stack key={`boardRow${index}a`} style={{ width: 12, height: 12 }} />
+          <stack key={`boardRow${index}b`} style={{ width: 12, height: 12 }} />
+        </row>
+      ))}
     </column>
   )
 });
@@ -136,16 +146,31 @@ afterEach(async () => {
 /**
  * Starts the fixture on the ward, on a fake clock, and steps until the ward stands.
  *
+ * @param options - How the fixture differs from the plain one.
+ * @param options.rows - The rows of the board's panel, the player's `n`: none unless given.
+ * @param options.stepMs - Milliseconds every read of the clock moves it on: 0, a clock that stands between frames,
+ *   unless given.
  * @returns The running fixture, the ward drawn and its gate open.
  */
-async function open(): Promise<Running> {
+async function open(options: { rows?: number; stepMs?: number } = {}): Promise<Running> {
+  const { rows = 0, stepMs = 0 } = options;
   const page = openPage();
   const clock = fakeClock(1000);
+  const read = clock.now.bind(clock);
+
+  // A clock that runs on with every read: the building budget of a frame runs out after a known number of reads.
+  clock.now = (): number => {
+    const moment = read();
+
+    clock.set(moment + stepMs);
+
+    return moment;
+  };
   const cell = new pixi.Texture({ source: new pixi.TextureSource({ width: 64, height: 64 }) });
   const { app } = defineGameApp({
     flow: mainFlow,
     safeNode: "ward",
-    player: { n: 0 },
+    player: { n: rows },
     session: {},
     // A 390 x 844 page at scale 1: a view's reference size is its size in pixels.
     referenceSide: 390,
@@ -244,15 +269,16 @@ function cellsOf(fixture: Running): readonly World.Entity[] {
  * Switches from the ward to the board and steps until the commit, recording each build frame.
  *
  * @param fixture - The running fixture, at the ward.
+ * @param most - The most frames the build may take.
  * @returns What every frame before the commit showed.
  */
-async function switchToBoard(fixture: Running) {
+async function switchToBoard(fixture: Running, most = 120) {
   const { app } = fixture;
   const frames: Array<{ current: string | undefined; tree: string[]; cellsOnStage: number }> = [];
 
   expect(app.flow.gate.answer({ intent: "board" })).toBe(true);
 
-  for (let frame = 0; frame < 120 && app.scenes.current() !== "board"; frame += 1) {
+  for (let frame = 0; frame < most && app.scenes.current() !== "board"; frame += 1) {
     await fixture.frames(1);
 
     if (app.scenes.current() === "board") break;
@@ -307,6 +333,43 @@ describe("the next scene built aside, across the engine", () => {
     expect(
       aside.app.log.trace().filter(entry => entry.event === "renderer:building-drawn")
     ).toEqual([]);
+  });
+
+  // Bug: the board's panel is diffed, laid out or applied whole in one frame of the build (the long frame of a
+  // switch), or a switch built in parts ends in another screen than a one-block switch.
+  it("builds a big panel in parts on a clock that runs with every read, and ends as a one-block switch", async () => {
+    const aside = await open({ rows: 40, stepMs: 1 });
+    const { app } = aside;
+    const madeIn: number[] = [];
+    const adopt = app.world.projection.adopt;
+
+    vi.spyOn(app.world.projection, "adopt").mockImplementation(entity => {
+      madeIn.push(app.time.snapshot().frame);
+      adopt(entity);
+    });
+
+    const wardTree = describeTree(aside.stage());
+    // The renderer makes one held view a frame on this clock: the board's 128 views take that many frames.
+    const built = await switchToBoard(aside, 300);
+
+    // The panel's 122 elements came over several frames, the ward current and drawn as it was all along.
+    expect(madeIn).toHaveLength(122);
+    expect(new Set(madeIn).size).toBeGreaterThanOrEqual(3);
+    expect(built.every(frame => frame.current === "ward")).toBe(true);
+    expect(built.every(frame => frame.cellsOnStage === 0)).toBe(true);
+    expect(built.filter(frame => frame.tree.join("\n") !== wardTree.join("\n"))).toEqual([]);
+
+    const oneBlock = await open({ rows: 40, stepMs: 1 });
+
+    vi.spyOn(oneBlock.app.world.projection, "build").mockReturnValue(false);
+    oneBlock.app.flow.gate.answer({ intent: "board" });
+    await arrive(oneBlock, "board");
+    await arrive(aside, "board");
+    await aside.frames(30);
+    await oneBlock.frames(30);
+
+    expect(aside.app.ui.tree()).toEqual(oneBlock.app.ui.tree());
+    expect(aside.app.renderer.stats().views).toEqual(oneBlock.app.renderer.stats().views);
   });
 
   // Bug: a tap during the build lands on a view of the coming scene, which is not drawn.
