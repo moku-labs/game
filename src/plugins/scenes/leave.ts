@@ -3,7 +3,7 @@
  * start, before the bundles are awaited, so a cold first visit reacts in the next frame, and a loader when the switch is
  * not done `afterMs` after its start. The scene being left decides: its `leave` over `config.leave` over the engine's
  * default, field by field. The renderer draws both (`renderer.sync.leave`); this file resolves the look, mounts a
- * loader projection for the wait, and lands the look at the swap or drops it on an abort or a throw.
+ * loader projection once its loader is due, and lands the look at the swap or drops it on an abort or a throw.
  */
 import type { LeaveLoader, LeaveLook } from "../renderer/types";
 import { Layer } from "../world/ecs/define";
@@ -155,51 +155,83 @@ export function leaveOf(
 }
 
 /**
- * Mounts a loader projection for the wait and reads the layer its views draw in, which the renderer draws above the
- * veil. A projection a scene of the switch lists is no loader, and one the scene being left cannot mount (an unknown
- * name, a layer it does not declare) is warned; both, and a projection with no view, give the engine's ring instead.
+ * The layer a mounted projection's views draw in, read from its first view.
  *
  * @param ctx - Domain context of the plugin.
- * @param name - The loader projection.
- * @param between - The scene being left and the scene being switched to.
- * @param between.from - The scene being left.
- * @param between.to - The scene being switched to.
- * @param leaving - The look of the switch: it keeps the name to unmount at the end.
- * @returns The layer, or `undefined` for the ring.
+ * @param name - The projection.
+ * @returns The layer, or `undefined` while it has no view.
  */
-function mountLoader(
-  ctx: ScenesCtx,
-  name: string,
-  between: { from: SceneDefinition; to: SceneDefinition },
-  leaving: Leaving
-): string | undefined {
+function layerOf(ctx: ScenesCtx, name: string): string | undefined {
   const { projection, ecs } = ctx.deps.world;
-  const { from, to } = between;
-
-  if (from.projections.includes(name) || to.projections.includes(name)) {
-    ctx.log.warn("scenes:loader-listed", { projection: name, from: from.id, to: to.id });
-
-    return undefined;
-  }
-
-  try {
-    projection.mount([name], ctx.state.owner);
-  } catch (error) {
-    ctx.log.warn("scenes:loader-unmounted", { projection: name, scene: from.id, error });
-
-    return undefined;
-  }
-
-  leaving.projection = name;
-
   const entity = projection.entitiesOf(name)[0];
 
   return entity === undefined ? undefined : ecs.get(entity, Layer)?.name;
 }
 
 /**
- * The renderer's loader of a resolved one: a texture as it is, a projection mounted and turned into the layer it draws
- * in, nothing for the ring.
+ * Unmounts the loader projection a switch mounted, once: one it did not mount is left alone.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param leaving - The look of the switch.
+ */
+function unmountLoader(ctx: ScenesCtx, leaving: Leaving): void {
+  const name = leaving.projection;
+
+  if (name === undefined) return;
+
+  delete leaving.projection;
+  ctx.deps.world.projection.unmount([name]);
+}
+
+/**
+ * Mounts a loader projection once its loader is due, called by the renderer in that frame, and answers the layer its
+ * views draw in, which the renderer draws above the veil. One mounted already (by another owner) is drawn as it is and
+ * never unmounted by the switch. One the scene being left cannot mount (an unknown name, a layer it does not declare),
+ * and one whose layer a projection of the scene being left draws in too (the whole layer would rise above the veil), is
+ * warned and gives the engine's ring, as does one with no view. A switch that ended meanwhile mounts nothing.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param name - The loader projection.
+ * @param from - The scene being left.
+ * @param leaving - The look of the switch: it keeps the name to unmount at the end.
+ * @returns The layer, or `undefined` for the ring.
+ */
+function mountLoader(
+  ctx: ScenesCtx,
+  name: string,
+  from: SceneDefinition,
+  leaving: Leaving
+): string | undefined {
+  if (leaving.done) return undefined;
+
+  if (ctx.deps.world.projection.entitiesOf(name).length === 0) {
+    try {
+      ctx.deps.world.projection.mount([name], ctx.state.owner);
+    } catch (error) {
+      ctx.log.warn("scenes:loader-unmounted", { projection: name, scene: from.id, error });
+
+      return undefined;
+    }
+
+    leaving.projection = name;
+  }
+
+  const layer = layerOf(ctx, name);
+
+  if (layer !== undefined && from.projections.some(other => layerOf(ctx, other) === layer)) {
+    ctx.log.warn("scenes:loader-layer-shared", { projection: name, layer, scene: from.id });
+    unmountLoader(ctx, leaving);
+
+    return undefined;
+  }
+
+  return layer;
+}
+
+/**
+ * The renderer's loader of a resolved one: a texture as it is, nothing for the ring, and for a projection the `due`
+ * the renderer calls once the loader is due, which mounts it then: a switch done sooner never runs its `from` and
+ * `view`. A projection a scene of the switch lists is no loader: warned, the ring.
  *
  * @param ctx - Domain context of the plugin.
  * @param loader - The resolved loader.
@@ -216,18 +248,24 @@ function loaderLook(
   leaving: Leaving
 ): LeaveLoader {
   const { afterMs, texture, projection } = loader;
+  const { from, to } = between;
 
   if (texture !== undefined) return { afterMs, texture };
   if (projection === undefined) return { afterMs };
 
-  const layer = mountLoader(ctx, projection, between, leaving);
+  if (from.projections.includes(projection) || to.projections.includes(projection)) {
+    ctx.log.warn("scenes:loader-listed", { projection, from: from.id, to: to.id });
 
-  return layer === undefined ? { afterMs } : { afterMs, layer };
+    return { afterMs };
+  }
+
+  return { afterMs, due: () => mountLoader(ctx, projection, from, leaving) };
 }
 
 /**
  * Tells whether a switch shows anything over the scene being left: a real change of scene, a live run that was not
- * aborted, a drawing renderer. The first scene of a run, a fast walk and a headless app show nothing.
+ * aborted, a world that runs live, a drawing renderer. The first scene of a run, a fast walk, a world walking fast or
+ * paused and a headless app show nothing.
  *
  * @param ctx - Domain context of the plugin.
  * @param run - The runner's mode and signal.
@@ -237,14 +275,16 @@ function leftScene(ctx: ScenesCtx, run: RunContext): SceneDefinition | undefined
   const current = ctx.state.current;
 
   if (current === undefined || run.mode !== "live" || run.signal.aborted) return undefined;
-  if (!ctx.deps.renderer.host.ready()) return undefined;
+  // A node entered live while the world walks fast or stands paused (the restore of a repro) switches in one block.
+  if (ctx.deps.world.ecs.mode() !== "live" || !ctx.deps.renderer.host.ready()) return undefined;
 
   return ctx.state.scenes.get(current);
 }
 
 /**
  * Shows the veil and the loader of a switch that starts now, before its bundles are awaited: the scene being left
- * decides. A loader projection is mounted for the wait. An abort of the node drops both at once, from its listener.
+ * decides. A loader projection is mounted only once its loader is due. An abort of the node drops both at once, from
+ * its listener.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene being switched to.
@@ -305,7 +345,7 @@ export function endLeave(ctx: ScenesCtx, leaving: Leaving | undefined, how: "lan
   if (how === "land") leave.land();
   else leave.drop();
 
-  if (leaving.projection !== undefined) ctx.deps.world.projection.unmount([leaving.projection]);
+  unmountLoader(ctx, leaving);
 }
 
 /**

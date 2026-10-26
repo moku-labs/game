@@ -811,10 +811,12 @@ README). The renderer's part, `sync.leave`:
   loader shows once `clock.now()` is `afterMs` past `show`, until `land`.
 - **The loader.** `texture` resolves the key through the texture providers at `show` and turns the texture at the
   centre, one turn a second; a key nothing answers is warned once (`renderer: no texture for asset key`) and draws the
-  ring. Neither: a white three-quarter ring 96 u across, 10 u wide, drawn once and turned the same way. `layer`: the
-  container of that layer of the scene is moved into the look, above the veil, hidden until `afterMs`, and put back
-  under the root at the place of its layer at `land` or `drop` (a layer list that changed before takes it back
-  itself). Its views stay views of the scene: their own motions run, and a hidden or shown loader moves the walks of
+  ring. Neither: a white three-quarter ring 96 u across, 10 u wide, drawn once and turned the same way. `due`: called
+  once, in the first frame the loader is due and before it is drawn (never for a switch done sooner), it makes what the
+  loader draws (`scenes` mounts its loader projection there) and answers a layer of the scene; that layer's container
+  is moved into the look, above the veil, from that frame on, and put back under the root at the place of its layer at
+  `land` or `drop` (a layer list that changed before takes it back itself). No layer, or a throw (logged,
+  `renderer: the loader of a scene being left threw`), draws the ring. Its views stay views of the scene: their own motions run, and a hidden or shown loader moves the walks of
   `shown`, so their loops run while it shows.
 - **No tap.** The hit test walks the layers of the root only, and a lifted layer is not under the root: neither the
   veil nor the loader takes a tap.

@@ -5,7 +5,7 @@
  * the veil of the engine's default is on the stage in the first frame after the answer, the ring from 400 ms after the
  * switch start, and both are gone once the board stands and the veil faded out. The tree oracle checks every frame.
  */
-import type { Assets } from "@moku-labs/game";
+import type { Assets, Scenes } from "@moku-labs/game";
 import { defineGame, Shape, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import { fakeClock } from "@moku-labs/game/testing";
@@ -49,9 +49,20 @@ const boardCells = projection({
   ]
 });
 
+/** The game's own loading screen: one rectangle in a layer of its own, which the ward declares. */
+const loadingScreen = projection({
+  name: "leave.loading",
+  layer: "loading",
+  from: () => ({ id: "loading" }),
+  view: () => [
+    Transform({ x: 95, y: 372 }),
+    Shape({ kind: "rect", w: 200, h: 100, fill: 0xff_ff_ff })
+  ]
+});
+
 const wardScene = defineScene("ward", {
   bundle: "ward",
-  layers: { room: {} },
+  layers: { room: {}, loading: {} },
   projections: [wardRoom]
 });
 const boardScene = defineScene("board", {
@@ -73,7 +84,7 @@ const mainFlow = defineFlow("main", {
 });
 const leaveFeature = defineFeature("leave", {
   scenes: [wardScene, boardScene],
-  projections: [wardRoom, boardCells]
+  projections: [wardRoom, boardCells, loadingScreen]
 });
 
 /** A running fixture: its app, its clock and its frame driver with the oracle. */
@@ -113,9 +124,10 @@ async function arrive(fixture: Running, path: string): Promise<void> {
 /**
  * Starts the fixture on the ward, on a fake clock, and steps until the ward stands.
  *
+ * @param leave - The `leave` of the config; the engine's default when left out.
  * @returns The running fixture.
  */
-async function open(): Promise<Running> {
+async function open(leave?: Scenes.SceneLeave): Promise<Running> {
   const page = openPage();
   const clock = fakeClock(1000);
   const { app } = defineGameApp({
@@ -126,7 +138,11 @@ async function open(): Promise<Running> {
     referenceSide: 390,
     referenceLong: 844,
     features: [leaveFeature],
-    pluginConfigs: { log: { mode: "test" }, flow: { holdMs: 0 } }
+    pluginConfigs: {
+      log: { mode: "test" },
+      flow: { holdMs: 0 },
+      ...(leave === undefined ? {} : { scenes: { leave } })
+    }
   }).screen({ manifest: MANIFEST, renderer: page.renderer, clock });
 
   await app.start();
@@ -164,24 +180,60 @@ function leaveNode(fixture: Running, label: string): pixi.Container | undefined 
   return found(top);
 }
 
+/**
+ * Holds the board's textures on their way to the GPU: the switch waits at its warm until the test lets them go.
+ *
+ * @param fixture - The running fixture, at the ward.
+ * @returns What lets the textures go.
+ */
+function holdBoardTextures(fixture: Running): () => void {
+  const warm = fixture.app.assets.warm;
+  const held: { release: () => void } = { release: () => undefined };
+  const textures = new Promise<void>(resolve => {
+    held.release = resolve;
+  });
+
+  vi.spyOn(fixture.app.assets, "warm").mockImplementation(async bundle => {
+    if (bundle === "board") await textures;
+    await warm(bundle);
+  });
+
+  return () => held.release();
+}
+
+/**
+ * Tells whether an entity's display object hangs under a node.
+ *
+ * @param fixture - The running fixture.
+ * @param entity - The entity.
+ * @param ancestor - The node.
+ * @returns True when the node is one of its ancestors.
+ */
+function hangsUnder(
+  fixture: Running,
+  entity: number,
+  ancestor: pixi.Container | undefined
+): boolean {
+  let node = fixture.app.renderer.sync.displayOf(entity) as pixi.Container | undefined;
+
+  while (node !== undefined && node !== null) {
+    if (node === ancestor) return true;
+    node = node.parent ?? undefined;
+  }
+
+  return false;
+}
+
 describe("the picture of a scene being left, across the engine", () => {
   // Bug: the veil waits for the next scene's textures (a cold first visit shows nothing for the whole wait), the ring
   // shows before 400 ms or never, or either stays over the board.
   it("shows the veil in the next frame and the ring past afterMs while the board's textures go up, both gone after the swap", async () => {
     const fixture = await open();
     const { app, clock } = fixture;
-    const warm = app.assets.warm;
-    const held: { release: () => void } = { release: () => undefined };
-    const textures = new Promise<void>(resolve => {
-      held.release = resolve;
-    });
+    const release = holdBoardTextures(fixture);
     const show = app.renderer.sync.leave.show;
     const startedAt: number[] = [];
 
-    vi.spyOn(app.assets, "warm").mockImplementation(async bundle => {
-      if (bundle === "board") await textures;
-      await warm(bundle);
-    });
     vi.spyOn(app.renderer.sync.leave, "show").mockImplementation(look => {
       startedAt.push(clock.now());
       show(look);
@@ -216,7 +268,7 @@ describe("the picture of a scene being left, across the engine", () => {
     ).toBe(true);
     expect(waited.some(frame => frame.ring === true)).toBe(true);
 
-    held.release();
+    release();
     await arrive(fixture, "board");
     await fixture.frames(1);
 
@@ -226,5 +278,33 @@ describe("the picture of a scene being left, across the engine", () => {
     await fixture.frames(150 / FRAME_MS + 1);
 
     expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
+  });
+
+  // Bug: the game's loading screen is mounted at the tap (its views made in the frame of the first answer, and for
+  // every warm switch), is drawn under the veil, or stays mounted over the board.
+  it("mounts a loader projection once it is due, draws it above the veil, and unmounts it after the swap", async () => {
+    const fixture = await open({ loader: { afterMs: 100, projection: "leave.loading" } });
+    const { app } = fixture;
+    const release = holdBoardTextures(fixture);
+
+    app.flow.gate.answer({ intent: "board" });
+    await fixture.frames(3);
+
+    expect(app.world.projection.entitiesOf("leave.loading")).toEqual([]);
+
+    await fixture.frames(5);
+
+    const [screen] = app.world.projection.entitiesOf("leave.loading");
+
+    expect(screen).toBeDefined();
+    expect(hangsUnder(fixture, screen ?? 0, leaveNode(fixture, "renderer.leave.layer"))).toBe(true);
+    expect(leaveNode(fixture, "renderer.leave.layer")?.visible).toBe(true);
+
+    release();
+    await arrive(fixture, "board");
+    await fixture.frames(1);
+
+    expect(app.world.projection.entitiesOf("leave.loading")).toEqual([]);
+    expect(app.renderer.sync.displayOf(screen ?? 0)).toBeUndefined();
   });
 });

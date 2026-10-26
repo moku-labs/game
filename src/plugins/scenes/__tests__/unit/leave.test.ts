@@ -187,12 +187,21 @@ describe("a live switch", () => {
   });
 
   // Bug: a switch shows a veil where nobody sees a switch: the first scene of a run, a fast walk (a restore, a test
-  // walk), a headless app, or a scene that leaves with `false`.
+  // walk), a node entered live while the world walks fast or stands paused (a repro restore), a headless app, or a
+  // scene that leaves with `false`.
   it.each([
-    ["the first scene of a run", { first: undefined, mode: "live", ready: true }],
-    ["a fast walk", { first: "home", mode: "fast", ready: true }],
-    ["a headless app", { first: "home", mode: "live", ready: false }],
-    ["a scene that leaves with `false`", { first: "ward", mode: "live", ready: true }]
+    ["the first scene of a run", { first: undefined, mode: "live", world: "live", ready: true }],
+    ["a fast walk", { first: "home", mode: "fast", world: "live", ready: true }],
+    ["a live run over a fast world", { first: "home", mode: "live", world: "fast", ready: true }],
+    [
+      "a live run over a paused world",
+      { first: "home", mode: "live", world: "paused", ready: true }
+    ],
+    ["a headless app", { first: "home", mode: "live", world: "live", ready: false }],
+    [
+      "a scene that leaves with `false`",
+      { first: "ward", mode: "live", world: "live", ready: true }
+    ]
   ] as const)("shows nothing for %s", async (_case, setup) => {
     const mock = createMockScenes();
 
@@ -203,6 +212,7 @@ describe("a live switch", () => {
     mock.start();
     if (setup.first !== undefined) await mock.enter({ rest: true, scene: setup.first });
     mock.renderer.host.ready.mockReturnValue(setup.ready);
+    mock.world.mode = setup.world;
     // A build aside commits at its start: nothing is left for ui and the renderer.
     mock.world.building.done = true;
     await mock.enter({ rest: true, scene: "board" }, { mode: setup.mode });
@@ -267,25 +277,42 @@ describe("a live switch", () => {
   });
 });
 
+/**
+ * The `due` of the loader the renderer was handed: what the renderer calls the first frame the loader is due.
+ *
+ * @param mock - The mock with a switch at its start.
+ * @returns The callback.
+ */
+function dueOf(mock: MockScenes): () => string | undefined {
+  const due = mock.renderer.sync.leave.show.mock.calls.at(-1)?.[0].loader?.due;
+
+  if (due === undefined) throw new Error("the look has no due loader");
+
+  return due;
+}
+
+/** A config whose loader is the projection "loading". */
+const LOADING: Config = { buildMs: "auto", leave: { loader: { projection: "loading" } } };
+
 describe("a loader projection", () => {
-  // Bug: the loader projection is not mounted for the wait, its layer is not handed to the renderer, or it stays
-  // mounted over the next scene.
-  it("is mounted at the switch start, drawn by its layer, and unmounted after the land", async () => {
-    const mock = await on("home", {
-      buildMs: "auto",
-      leave: { loader: { projection: "loading" } }
-    });
+  // Bug: the loader projection is mounted at the tap (its `from` and `view` run in the frame of the first answer), its
+  // layer is not handed to the renderer, or it stays mounted over the next scene.
+  it("is mounted once its loader is due, drawn by its layer, and unmounted after the land", async () => {
+    const mock = await on("home", LOADING);
 
     mock.world.viewLayers = { loading: "loading" };
     const { entering } = await enterScene(mock, "board");
 
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: VEIL,
+      loader: { afterMs: 400, due: expect.any(Function) }
+    });
+    expect(mock.world.mounted.map(entry => entry.names)).not.toContainEqual(["loading"]);
+
+    expect(dueOf(mock)()).toBe("loading");
     expect(mock.world.mounted.at(-1)).toEqual({
       names: ["loading"],
       owner: { kind: "plugin", name: "scenes" }
-    });
-    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
-      cover: VEIL,
-      loader: { afterMs: 400, layer: "loading" }
     });
 
     mock.renderer.sync.leave.land.mockImplementation(() => {
@@ -296,51 +323,108 @@ describe("a loader projection", () => {
     expect(mock.world.unmounted.at(-1)).toEqual(["loading"]);
   });
 
-  // Bug: an abort leaves the loader projection mounted.
-  it("is unmounted at the abort", async () => {
-    const mock = await on("home", {
-      buildMs: "auto",
-      leave: { loader: { projection: "loading" } }
-    });
+  // Bug: a warm switch, done before `afterMs`, mounts and unmounts the loader projection all the same.
+  it("is never mounted by a switch done before its loader is due", async () => {
+    const mock = await on("home", LOADING);
+
+    mock.world.viewLayers = { loading: "loading" };
+    const { entering } = await enterScene(mock, "board");
+
+    await finish(mock, entering);
+
+    expect(mock.world.mounted.flatMap(entry => entry.names)).not.toContain("loading");
+    expect(mock.world.unmounted.flat()).not.toContain("loading");
+  });
+
+  // Bug: an abort, or a switch that throws once the loader was mounted, leaves the loader projection mounted.
+  it.each([
+    ["an abort", "abort"],
+    ["a throw", "throw"]
+  ] as const)("is unmounted at %s after it was mounted", async (_case, how) => {
+    const mock = await on("home", LOADING);
     const controller = new AbortController();
 
     mock.world.viewLayers = { loading: "loading" };
-    await enterScene(mock, "board", controller.signal);
-    controller.abort();
+    const { entering } = await enterScene(mock, "board", controller.signal);
+
+    dueOf(mock)();
+    if (how === "abort") controller.abort();
+    else mock.assets.fail(new Error("offline"));
+    await entering.catch(() => undefined);
 
     expect(mock.world.unmounted).toEqual([["loading"]]);
   });
 
-  // Bug: a loader projection with no item hands the renderer no layer to draw (a blank wait), or stays mounted.
-  it("draws the engine's ring when it has no view, and is still unmounted at the end", async () => {
-    const mock = await on("home", {
-      buildMs: "auto",
-      leave: { loader: { projection: "loading" } }
-    });
+  // Bug: a projection someone else mounted is unmounted by the switch, or mounted a second time.
+  it("is drawn but neither mounted nor unmounted when it is mounted already", async () => {
+    const mock = await on("home", LOADING);
+
+    mock.world.viewLayers = { loading: "loading" };
+    mock.world.live.add("loading");
     const { entering } = await enterScene(mock, "board");
 
-    expect(mock.world.mounted.at(-1)?.names).toEqual(["loading"]);
-    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
-      cover: VEIL,
-      loader: { afterMs: 400 }
+    expect(dueOf(mock)()).toBe("loading");
+
+    await finish(mock, entering);
+
+    expect(mock.world.mounted.flatMap(entry => entry.names)).not.toContain("loading");
+    expect(mock.world.unmounted.flat()).not.toContain("loading");
+  });
+
+  // Bug: a loader drawn in a layer the scene being left draws in too lifts that scene's views above the veil.
+  it("gives the ring when a projection of the scene being left draws in its layer, warned and unmounted", async () => {
+    const mock = await on("home", LOADING);
+
+    mock.world.viewLayers = { "home.menu": "ui", loading: "ui" };
+    await enterScene(mock, "board");
+
+    expect(dueOf(mock)()).toBeUndefined();
+    expect(mock.log.warn).toHaveBeenCalledWith("scenes:loader-layer-shared", {
+      projection: "loading",
+      layer: "ui",
+      scene: "home"
     });
+    expect(mock.world.unmounted).toEqual([["loading"]]);
+  });
+
+  // Bug: a loader projection with no item hands the renderer no layer to draw (a blank wait), or stays mounted.
+  it("gives the ring when it has no view, and is still unmounted at the end", async () => {
+    const mock = await on("home", LOADING);
+    const { entering } = await enterScene(mock, "board");
+
+    expect(dueOf(mock)()).toBeUndefined();
+    expect(mock.world.mounted.at(-1)?.names).toEqual(["loading"]);
 
     await finish(mock, entering);
 
     expect(mock.world.unmounted.at(-1)).toEqual(["loading"]);
   });
 
-  // Bug: a loader the scene cannot mount rejects the switch, or a projection a scene lists is mounted twice and
-  // unmounted under the scene that needs it.
-  it.each([
-    ["one the scene cannot mount", "loading", "scenes:loader-unmounted"],
-    ["one the scene being left lists", "home.menu", "scenes:loader-listed"],
-    ["one the coming scene lists", "board.cells", "scenes:loader-listed"]
-  ] as const)("draws the engine's ring instead of %s, warned", async (_case, name, warning) => {
-    const mock = await on("home", { buildMs: "auto", leave: { loader: { projection: name } } });
+  // Bug: a loader the scene cannot mount rejects the switch, warns nothing, or is unmounted though never mounted.
+  it("gives the ring when the scene being left cannot mount it, warned", async () => {
+    const mock = await on("home", LOADING);
 
     mock.world.mountError = new Error('[game] Projection "loading" names layer "loading".');
-    mock.world.viewLayers = { [name]: "ui" };
+    const { entering } = await enterScene(mock, "board");
+
+    expect(dueOf(mock)()).toBeUndefined();
+    expect(mock.log.warn).toHaveBeenCalledWith(
+      "scenes:loader-unmounted",
+      expect.objectContaining({ projection: "loading", scene: "home" })
+    );
+
+    await finish(mock, entering);
+
+    expect(mock.world.unmounted.flat()).not.toContain("loading");
+  });
+
+  // Bug: a projection a scene lists is mounted twice and unmounted under the scene that needs it.
+  it.each([
+    ["the scene being left", "home.menu"],
+    ["the coming scene", "board.cells"]
+  ] as const)("is no loader when %s lists it: the ring, warned", async (_case, name) => {
+    const mock = await on("home", { buildMs: "auto", leave: { loader: { projection: name } } });
+
     mock.world.calls.length = 0;
     const { entering } = await enterScene(mock, "board");
 
@@ -349,14 +433,13 @@ describe("a loader projection", () => {
       loader: { afterMs: 400 }
     });
     expect(mock.log.warn).toHaveBeenCalledWith(
-      warning,
+      "scenes:loader-listed",
       expect.objectContaining({ projection: name })
     );
 
-    mock.world.mountError = undefined;
     await finish(mock, entering);
 
-    // The swap's unmount of what only home lists, and no second one of the loader.
+    // The swap's unmount of what only home lists, and no other.
     expect(mock.world.calls.filter(call => call === "unmount")).toHaveLength(1);
   });
 });

@@ -76,9 +76,11 @@ export type FakeWorld = {
   scenes: string[];
   /**
    * Set by a test: the layer the views of a projection draw in. A projection named here answers one view entity in
-   * `entitiesOf`, whose `Layer` `ecs.get` answers; any other answers none.
+   * `entitiesOf` while it is mounted (`live`), whose `Layer` `ecs.get` answers; any other answers none.
    */
   viewLayers: Record<string, string>;
+  /** The projections mounted now: a mount adds its names, an unmount takes them out; a test may add one. */
+  live: Set<string>;
   /** What `ecs.mode()` answers: `"fast"` while the flow walks fast. */
   mode: WorldMode;
   /**
@@ -308,6 +310,7 @@ function createFakeWorld(journal: string[]): FakeWorld {
     unmountError: undefined,
     scenes: [],
     viewLayers: {},
+    live: new Set(),
     mode: "live",
     building: {
       answer: true,
@@ -348,16 +351,18 @@ function createFakeWorld(journal: string[]): FakeWorld {
         record("unmount");
         throwOnce(fake, "unmountError");
         fake.unmounted.push([...names]);
+        for (const name of names) fake.live.delete(name);
       },
       mount: (names: readonly string[], owner: Owner): void => {
         record("mount");
         throwOnce(fake, "mountError");
         fake.mounted.push({ names: [...names], owner });
+        for (const name of names) fake.live.add(name);
       },
       entitiesOf: (name: string): readonly number[] => {
         const at = Object.keys(fake.viewLayers).indexOf(name);
 
-        return at === -1 ? [] : [VIEW_ENTITY + at];
+        return at === -1 || !fake.live.has(name) ? [] : [VIEW_ENTITY + at];
       },
       build: (
         names: readonly string[],

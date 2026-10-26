@@ -267,27 +267,30 @@ describe("the loader", () => {
     });
   });
 
-  // Bug: a loader projection's layer shows before `afterMs`, is drawn under the veil, or stays out of the root after
-  // the swap.
-  it("draws a layer above the veil from afterMs, and puts it back in its place at the land", async () => {
+  // Bug: a loader projection is made at the tap (its views built for a switch that never shows them), its layer
+  // leaves the scene before `afterMs`, is drawn under the veil, or stays out of the root after the swap.
+  it("asks for its layer once at afterMs, draws it above the veil, and puts it back in its place at the land", async () => {
     const mock = await drawing();
     const root = mock.ctx.state.sync.root as unknown as FakeContainer;
     const loading = mock.ctx.state.sync.layers.get("loading")
       ?.container as unknown as FakeContainer;
+    const due = vi.fn(() => "loading");
 
-    showAt(mock, 0, { cover: VEIL, loader: { afterMs: 100, layer: "loading" } });
+    showAt(mock, 0, { cover: VEIL, loader: { afterMs: 100, due } });
     frameAt(mock, 50);
+
+    expect(due).not.toHaveBeenCalled();
+    expect(loading.parent).toBe(root);
+
+    frameAt(mock, 100);
+    frameAt(mock, 150);
 
     const held = objectOf(mock, "held");
 
-    expect(loading.parent).toBe(held);
-    expect(held.visible).toBe(false);
-    expect(root.children.map(child => child.label)).toEqual(["layer:scene", "layer:ui"]);
-
-    frameAt(mock, 100);
-
-    expect(held.visible).toBe(true);
+    expect(due).toHaveBeenCalledOnce();
+    expect([loading.parent, held.visible]).toEqual([held, true]);
     expect(objectOf(mock, "top").children.indexOf(objectOf(mock, "veil"))).toBe(0);
+    expect(root.children.map(child => child.label)).toEqual(["layer:scene", "layer:ui"]);
 
     mock.api.sync.leave.land();
 
@@ -296,6 +299,38 @@ describe("the loader", () => {
       "layer:ui",
       "layer:loading"
     ]);
+  });
+
+  // Bug: a switch done before `afterMs` still makes the loader's views.
+  it("never asks for its layer when the land comes before afterMs", async () => {
+    const mock = await drawing();
+    const due = vi.fn(() => "loading");
+
+    showAt(mock, 0, { cover: VEIL, loader: { afterMs: 400, due } });
+    frameAt(mock, 200);
+    mock.api.sync.leave.land();
+    frameAt(mock, 400);
+    frameAt(mock, 600);
+
+    expect(due).not.toHaveBeenCalled();
+  });
+
+  // Bug: a loader with no layer to draw, or one whose making threw, leaves the wait blank or breaks the frame.
+  it.each([
+    ["answers no layer", (): string | undefined => undefined],
+    [
+      "throws",
+      (): string | undefined => {
+        throw new Error("view threw");
+      }
+    ]
+  ] as const)("draws the ring when its due %s", async (_case, due) => {
+    const mock = await drawing();
+
+    showAt(mock, 0, { cover: VEIL, loader: { afterMs: 0, due } });
+    frameAt(mock, 0);
+
+    expect([objectOf(mock, "ring").visible, objectOf(mock, "held").visible]).toEqual([true, false]);
   });
 });
 
@@ -338,7 +373,7 @@ describe("the objects of the picture", () => {
     frameAt(mock, 0);
     const top = objectOf(mock, "top");
 
-    mock.api.sync.leave.show({ loader: { afterMs: 0, layer: "loading" } });
+    mock.api.sync.leave.show({ loader: { afterMs: 0, due: () => "loading" } });
     frameAt(mock, 16);
     mock.stop();
 

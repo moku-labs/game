@@ -86,7 +86,7 @@ function objectsOf(sctx: SyncCtx): LeaveObjects | undefined {
 }
 
 /**
- * What the loader of a look draws once due: a layer above the veil, a game texture, or the engine's ring. A texture key
+ * What the loader of a look draws once due: a game texture, a layer above the veil, or the engine's ring. A texture key
  * no provider answers is warned once and draws the ring.
  *
  * @param sctx - Domain context of the sync module.
@@ -97,8 +97,7 @@ function loaderOf(sctx: SyncCtx, look: LeaveLook): Pick<LeaveRun, "loader" | "te
   const loader = look.loader;
 
   if (loader === undefined) return { loader: "none" };
-  if (loader.layer !== undefined) return { loader: "layer" };
-  if (loader.texture === undefined) return { loader: "ring" };
+  if (loader.texture === undefined) return { loader: loader.due === undefined ? "ring" : "layer" };
 
   const texture = resolveTexture(sctx, loader.texture);
 
@@ -127,7 +126,7 @@ function unlift(sctx: SyncCtx, run: LeaveRun): void {
 
   if (lifted.parent !== state.leave.objects?.held) return;
 
-  const name = run.look.loader?.layer;
+  const name = run.layer;
   const at = state.layerList?.findIndex(spec => spec.name === name) ?? -1;
   const root = state.root;
 
@@ -221,19 +220,38 @@ function hang(
 }
 
 /**
- * Keeps the layer of a `"layer"` loader in the holder above the veil until the swap, hidden until the loader is due. A
- * layer the scene does not declare draws nothing.
+ * Asks a `"layer"` loader's `due`, once, the first frame it is due: what it draws is made now, and it answers the
+ * layer that holds it. No layer, or a throw (logged), draws the ring instead.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param run - The running look, its loader due.
+ */
+function ask(sctx: SyncCtx, run: LeaveRun): void {
+  run.asked = true;
+
+  let layer: string | undefined;
+
+  try {
+    layer = run.look.loader?.due?.();
+  } catch (error) {
+    sctx.ctx.log.error("renderer: the loader of a scene being left threw", { error });
+  }
+
+  if (layer === undefined) run.loader = "ring";
+  else run.layer = layer;
+}
+
+/**
+ * Keeps the layer of a shown `"layer"` loader in the holder above the veil until the swap. A layer the scene does not
+ * declare draws nothing.
  *
  * @param sctx - Domain context of the sync module.
  * @param objects - The engine's objects.
- * @param run - The running look.
+ * @param run - The running look, its loader shown.
  */
 function lift(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun): void {
-  if (run.loader !== "layer" || run.landed) return;
-
   const state = sctx.ctx.state.sync;
-  const name = run.look.loader?.layer;
-  const container = name === undefined ? undefined : layerContainer(state, name);
+  const container = run.layer === undefined ? undefined : layerContainer(state, run.layer);
 
   if (container === undefined || container.parent === objects.held) return;
 
@@ -269,8 +287,9 @@ function turn(
 }
 
 /**
- * Shows the loader once the switch took `afterMs`, until the swap, and turns a ring or a texture. A loader that comes
- * or goes moves the walks of `shown`, so the loops of a lifted layer's views run while it shows.
+ * Shows the loader once the switch took `afterMs`, until the swap: a layer loader asks its `due` then and lifts the
+ * layer it answers above the veil; a ring or a texture turns. A loader that comes or goes moves the walks of `shown`,
+ * so the loops of a lifted layer's views run while it shows.
  *
  * @param sctx - Domain context of the sync module.
  * @param objects - The engine's objects.
@@ -281,9 +300,11 @@ function turn(
 function paintLoader(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun, now: number): boolean {
   const afterMs = run.look.loader?.afterMs ?? 0;
   const shown = !run.landed && run.loader !== "none" && now - run.startedAt >= afterMs;
-  const toggled = shown !== run.shown;
 
-  lift(sctx, objects, run);
+  if (shown && run.loader === "layer" && !run.asked) ask(sctx, run);
+  if (shown && run.loader === "layer") lift(sctx, objects, run);
+
+  const toggled = shown !== run.shown;
 
   if (toggled) {
     run.shown = shown;
@@ -327,6 +348,7 @@ export function showLeave(sctx: SyncCtx, look: LeaveLook): void {
     steppedAt: now,
     level,
     landed: false,
+    asked: false,
     shown: false,
     ...loader
   };

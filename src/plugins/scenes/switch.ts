@@ -16,7 +16,7 @@ import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
 import { endLeave, startLeave } from "./leave";
 import { swapIn } from "./swap";
-import type { RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
+import type { Leaving, RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
 /**
  * A promise that resolves when the node was aborted. Already aborted resolves at once.
@@ -318,9 +318,10 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
   }
 
   const named = namedBundles(scene, committedState(ctx));
-  const leaving = startLeave(ctx, scene, run);
+  let leaving: Leaving | undefined;
 
   try {
+    leaving = startLeave(ctx, scene, run);
     await loadAndStand(ctx, scene, named, run);
   } catch (error) {
     endLeave(ctx, leaving, "drop");

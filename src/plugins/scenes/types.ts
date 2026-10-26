@@ -152,7 +152,8 @@ export type SceneCover = {
  * texture turning at the centre (`texture`), a projection of the game drawn above the veil (`projection`), or, with
  * neither, a white ring the engine draws. `texture` and `projection` are one choice: a level that names either replaces
  * both of the level below, and with both named `projection` is drawn. A projection loader draws in a layer of its own
- * that the scene being left declares: the whole layer is drawn above the veil while the loader shows.
+ * that the scene being left declares, mounted only once the loader is due: the whole layer is drawn above the veil
+ * while the loader shows.
  *
  * @example
  * ```ts
@@ -167,7 +168,7 @@ export type SceneLoader<Asset extends string = string> = {
   afterMs?: number;
   /** An asset key of the game: the texture turns at the centre of the frame. */
   texture?: Asset;
-  /** The name of a registered projection: mounted for the wait, its layer drawn above the veil. */
+  /** The name of a registered projection: mounted once the loader is due, its layer drawn above the veil. */
   projection?: string;
 };
 
@@ -417,12 +418,12 @@ export type State = {
 
 /**
  * The veil and the loader a switch showed over the scene being left (spec 33, slice A2): whether they were taken down
- * already, the loader projection it mounted for the wait, and how to stop listening to the abort of its node.
+ * already, the loader projection it mounted once its loader was due, and how to stop listening to the abort of its node.
  */
 export type Leaving = {
   /** Landed or dropped: a second end does nothing. */
   done: boolean;
-  /** The projection mounted for the wait, unmounted at the end; absent for a loader that is not a projection. */
+  /** The loader projection the switch mounted, unmounted at the end; absent while it mounted none. */
   projection?: string;
   /** Removes the abort listener of the switch's node. */
   off: () => void;

@@ -792,14 +792,16 @@ export type LeaveCover = {
 
 /**
  * The loader of a scene being left, drawn above the veil when the switch is not done `afterMs` after its start, until
- * the swap: a game texture turning at the centre (`texture`), a layer of the scene drawn above the veil (`layer`, the
- * layer of a loader projection `scenes` mounted for the wait), or, with neither, a white ring the engine draws.
+ * the swap: a game texture turning at the centre (`texture`), a layer of the scene drawn above the veil (`due`, which
+ * makes what the loader draws only once it is due and answers its layer: `scenes` mounts a loader projection there),
+ * or, with neither, a white ring the engine draws.
  *
  * @example
  * ```ts
  * const ring: LeaveLoader = { afterMs: 400 };
  * const spinner: LeaveLoader = { afterMs: 400, texture: "ui.loader.ring" };
- * const screen: LeaveLoader = { afterMs: 250, layer: "loading" };
+ * // The layer "loading" above the veil, its views made only if the switch takes 250 ms.
+ * const screen: LeaveLoader = { afterMs: 250, due: () => "loading" };
  * ```
  */
 export type LeaveLoader = {
@@ -807,8 +809,15 @@ export type LeaveLoader = {
   afterMs: number;
   /** An asset key: the texture turns at the centre of the frame. A key no provider answers draws the ring. */
   texture?: string;
-  /** A layer of the scene: its container is drawn above the veil. A layer the scene does not declare draws nothing. */
-  layer?: string;
+  /**
+   * Called once, in the first frame the loader is due and before it is drawn, never for a switch done sooner: it
+   * makes what the loader draws and answers the layer of the scene that holds it, whose container is drawn above the
+   * veil from then until the swap. `undefined`, or a throw, draws the ring; a layer the scene does not declare draws
+   * nothing.
+   *
+   * @returns The layer, or `undefined` for the ring.
+   */
+  due?: () => string | undefined;
 };
 
 /**
@@ -916,6 +925,10 @@ export type LeaveRun = {
   loader: LoaderKind;
   /** The texture of a `"texture"` loader, resolved at `show`. */
   texture?: PixiTexture;
+  /** A `"layer"` loader's `due` was called: once, the first frame it was due. */
+  asked: boolean;
+  /** The layer a `"layer"` loader's `due` answered; absent before. */
+  layer?: string;
   /** The layer container a `"layer"` loader drew above the veil; absent while none hangs there. */
   lifted?: PixiContainer;
   /** The loader is shown: past its `afterMs`, before the swap. */
