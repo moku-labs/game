@@ -131,5 +131,8 @@ export const BUDGET = {
   // F61 S2 R1: the build step of a drawn frame with no build (`takeBuildWork`). New: one number read and cleared.
   buildStepIdle: 0,
   // F61 S2: the renderer's readiness check of `world.projection.built()` while the views wait for the swap. New.
-  buildReadyWaiting: 0
+  buildReadyWaiting: 0,
+  // F61 S3 slice A2: the step of the picture of a scene being left in a frame with no switch, after one look ran and
+  // its objects were kept. New: one field read.
+  leaveIdle: 0
 } as const;

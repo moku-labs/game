@@ -11,6 +11,8 @@ import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { dropBuild, isPositiveFinite } from "./build";
 import { isSceneDefinition } from "./bundles";
+import { forgetLeave } from "./leave";
+import { checkLeave } from "./leave-check";
 import { enterScene } from "./switch";
 import type { Config, Deps, KernelSlice, ScenesCtx, State } from "./types";
 
@@ -85,15 +87,18 @@ function readScenes(ctx: ScenesCtx): void {
 }
 
 /**
- * Refuses a building budget a frame cannot count down, in `onInit`, so `createApp` throws: neither
- * `"auto"` nor a finite number above 0. A game written in plain JS passes anything, so the config
- * is a boundary.
+ * Refuses a config a switch cannot run with, in `onInit`, so `createApp` throws: a building budget
+ * that is neither `"auto"` nor a finite number above 0, and a `leave` of the wrong shape. A game
+ * written in plain JS passes anything, so the config is a boundary.
  *
  * @param config - The resolved config of the plugin.
- * @throws {Error} When `buildMs` is neither `"auto"` nor a finite number above 0.
+ * @throws {Error} When `buildMs` is neither `"auto"` nor a finite number above 0, and for a `leave`
+ *   `checkLeave` refuses.
  */
 export function checkConfig(config: Readonly<Config>): void {
   const value: unknown = config.buildMs;
+
+  checkLeave("scenes.leave", config.leave);
 
   if (value === "auto") return;
   if (isPositiveFinite(value)) return;
@@ -128,7 +133,8 @@ export function startScenes(ctx: KernelSlice): void {
 
 /**
  * Removes the `onEnter` callback in `onStop` and forgets every scene and the bundles the mounted
- * one named. A running build loses its frame callback and its switch returns. Nothing is unmounted
+ * one named. A running build loses its frame callback and its switch returns; the look of a running
+ * switch loses its abort listener (the renderer drops it at its own stop). Nothing is unmounted
  * or discarded: a teardown context may not call another plugin, and `world.onStop` clears every
  * entity and the build table anyway.
  *
@@ -147,6 +153,7 @@ export function stopScenes(teardown: { state: State }): void {
   state.teardown = undefined;
   dropBuild(state.build);
   delete state.build;
+  forgetLeave(state);
   state.scenes.clear();
   state.current = undefined;
   state.pending = undefined;

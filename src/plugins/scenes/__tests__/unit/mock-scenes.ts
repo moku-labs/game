@@ -12,12 +12,16 @@ import type { Api as AssetsApi } from "../../../assets/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { EnterCallback, Api as FlowApi, NodeInfo, Stage } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
+import type { LeaveLook } from "../../../renderer/types";
 import type { FrameCallback, Phase, Api as TimeApi } from "../../../time/types";
 import type { LayerSpec, Owner, Api as WorldApi, WorldMode } from "../../../world/types";
 import { createScenesApi } from "../../api";
 import { checkConfig, startScenes, stopScenes, withDeps } from "../../lifecycle";
 import { createScenesState } from "../../state";
 import type { Config, KernelSlice, RunContext, ScenesApi, ScenesCtx, State } from "../../types";
+
+/** The first view entity the fake `world` answers for a projection of `viewLayers`. */
+const VIEW_ENTITY = 9000;
 
 /** One load the fake `assets` is holding back. */
 export type HeldLoad = { bundle: string; resolve: () => void; reject: (error: unknown) => void };
@@ -70,6 +74,13 @@ export type FakeWorld = {
   unmountError: unknown;
   /** Every scene `ecs.setScene` was told, in order. */
   scenes: string[];
+  /**
+   * Set by a test: the layer the views of a projection draw in. A projection named here answers one view entity in
+   * `entitiesOf` while it is mounted (`live`), whose `Layer` `ecs.get` answers; any other answers none.
+   */
+  viewLayers: Record<string, string>;
+  /** The projections mounted now: a mount adds its names, an unmount takes them out; a test may add one. */
+  live: Set<string>;
   /** What `ecs.mode()` answers: `"fast"` while the flow walks fast. */
   mode: WorldMode;
   /**
@@ -107,10 +118,22 @@ export type FakeTime = {
   api: TimeApi;
 };
 
-/** The fake `renderer`: its host's `ready`, a spy answering false, and its performance log's `event`, a spy. */
+/**
+ * The fake `renderer`: its host's `ready`, a spy answering false, its performance log's `event`, a spy, and the
+ * picture of a scene being left, three spies that record the scene current when each was called.
+ */
 export type FakeRenderer = {
   host: { ready: Mock<() => boolean> };
   monitor: { event: Mock<(name: string, detail?: unknown) => void> };
+  sync: {
+    leave: {
+      show: Mock<(look: LeaveLook) => void>;
+      land: Mock<() => void>;
+      drop: Mock<() => void>;
+    };
+  };
+  /** Every call of `sync.leave`, in order, with the scene current then. */
+  leaves: Array<{ call: "show" | "land" | "drop"; current: string | undefined }>;
 };
 
 /** What the fake `flow` recorded and what it answers with. */
@@ -286,6 +309,8 @@ function createFakeWorld(journal: string[]): FakeWorld {
     setLayersError: undefined,
     unmountError: undefined,
     scenes: [],
+    viewLayers: {},
+    live: new Set(),
     mode: "live",
     building: {
       answer: true,
@@ -308,7 +333,13 @@ function createFakeWorld(journal: string[]): FakeWorld {
         journal.push("world:setScene");
         fake.scenes.push(scene);
       },
-      mode: (): WorldMode => fake.mode
+      mode: (): WorldMode => fake.mode,
+      get: (entity: number): { name: string } | undefined => {
+        const name = Object.keys(fake.viewLayers)[entity - VIEW_ENTITY];
+        const layer = name === undefined ? undefined : fake.viewLayers[name];
+
+        return layer === undefined ? undefined : { name: layer };
+      }
     },
     projection: {
       setLayers: (list: ReadonlyArray<LayerSpec>): void => {
@@ -320,11 +351,18 @@ function createFakeWorld(journal: string[]): FakeWorld {
         record("unmount");
         throwOnce(fake, "unmountError");
         fake.unmounted.push([...names]);
+        for (const name of names) fake.live.delete(name);
       },
       mount: (names: readonly string[], owner: Owner): void => {
         record("mount");
         throwOnce(fake, "mountError");
         fake.mounted.push({ names: [...names], owner });
+        for (const name of names) fake.live.add(name);
+      },
+      entitiesOf: (name: string): readonly number[] => {
+        const at = Object.keys(fake.viewLayers).indexOf(name);
+
+        return at === -1 || !fake.live.has(name) ? [] : [VIEW_ENTITY + at];
       },
       build: (
         names: readonly string[],
@@ -485,13 +523,28 @@ export function createMockScenes(config?: Config): MockScenes {
   const assets = createFakeAssets(journal);
   const time = createFakeTime(journal);
   const model = createFakeModel();
+  const leaves: FakeRenderer["leaves"] = [];
   const renderer: FakeRenderer = {
     host: { ready: vi.fn(() => false) },
     monitor: {
       event: vi.fn((name: string) => {
         journal.push(`monitor:${name}`);
       })
-    }
+    },
+    sync: {
+      leave: {
+        show: vi.fn(() => {
+          leaves.push({ call: "show", current: state.current });
+        }),
+        land: vi.fn(() => {
+          leaves.push({ call: "land", current: state.current });
+        }),
+        drop: vi.fn(() => {
+          leaves.push({ call: "drop", current: state.current });
+        })
+      }
+    },
+    leaves
   };
   const apis: Record<string, unknown> = {
     flow: flow.api,

@@ -770,6 +770,178 @@ export type DebugApi = {
 };
 
 /**
+ * The veil of a scene being left, every field resolved: a full-canvas rect in one colour that fades from 0 to `alpha`
+ * over `inMs` from the switch start, and back to 0 over `outMs` after the swap.
+ *
+ * @example
+ * ```ts
+ * // A game that writes nothing: black at 45 %, 150 ms in, 150 ms out.
+ * const cover: LeaveCover = { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 };
+ * ```
+ */
+export type LeaveCover = {
+  /** The colour of the veil, `0xRRGGBB`. */
+  color: number;
+  /** The alpha the veil fades in to, 0 to 1. */
+  alpha: number;
+  /** Clock milliseconds from 0 to `alpha`; 0 shows it at once. */
+  inMs: number;
+  /** Clock milliseconds from where it stands at the swap back to 0; 0 takes it away at once. */
+  outMs: number;
+};
+
+/**
+ * The loader of a scene being left, drawn above the veil when the switch is not done `afterMs` after its start, until
+ * the swap: a game texture turning at the centre (`texture`), a layer of the scene drawn above the veil (`due`, which
+ * makes what the loader draws only once it is due and answers its layer: `scenes` mounts a loader projection there),
+ * or, with neither, a white ring the engine draws.
+ *
+ * @example
+ * ```ts
+ * const ring: LeaveLoader = { afterMs: 400 };
+ * const spinner: LeaveLoader = { afterMs: 400, texture: "ui.loader.ring" };
+ * // The layer "loading" above the veil, its views made only if the switch takes 250 ms.
+ * const screen: LeaveLoader = { afterMs: 250, due: () => "loading" };
+ * ```
+ */
+export type LeaveLoader = {
+  /** Clock milliseconds after the switch start the loader waits for. */
+  afterMs: number;
+  /** An asset key: the texture turns at the centre of the frame. A key no provider answers draws the ring. */
+  texture?: string;
+  /**
+   * Called once, in the first frame the loader is due and before it is drawn, never for a switch done sooner: it
+   * makes what the loader draws and answers the layer of the scene that holds it, whose container is drawn above the
+   * veil from then until the swap. `undefined`, or a throw, draws the ring; a layer the scene does not declare draws
+   * nothing.
+   *
+   * @returns The layer, or `undefined` for the ring.
+   */
+  due?: () => string | undefined;
+};
+
+/**
+ * What a scene switch shows over the scene being left: the veil, the loader, or both. A part left out is not drawn.
+ *
+ * @example
+ * ```ts
+ * // The default of `scenes`: the veil from the start, the engine's ring once the switch took 400 ms.
+ * const look: LeaveLook = { cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } };
+ * ```
+ */
+export type LeaveLook = {
+  /** The veil; absent for none. */
+  cover?: LeaveCover;
+  /** The loader; absent for none. */
+  loader?: LeaveLoader;
+};
+
+/**
+ * The picture of a scene being left, `app.renderer.sync.leave` (spec 33, slice A2): a veil over the whole canvas and a
+ * loader at its centre, drawn in a container of the engine above the root and every layer. `scenes` drives it: it
+ * shows it at the start of a live switch, lands it at the swap and drops it on an abort. It takes no hit: the hit test
+ * walks the layers of the scene only.
+ *
+ * @example
+ * ```ts
+ * // `scenes`, at the start of a switch from the ward, whose bundles are still loading.
+ * const renderer = ctx.require(rendererPlugin);
+ * renderer.sync.leave.show({ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } });
+ * renderer.sync.leave.land(); // the board stands: the veil fades out over 150 ms, the ring is gone
+ * ```
+ */
+export type LeaveApi = {
+  /**
+   * Shows a look from now: the veil fades in from where it stands (0, or the level of a veil still fading out after
+   * the last swap), the loader waits for its `afterMs`. A look shown while another runs replaces it. Asks for a frame.
+   * Inert, nothing is drawn and nothing is kept.
+   *
+   * @param look - The veil and the loader, resolved.
+   * @example
+   * ```ts
+   * // `scenes` leaves a scene whose `leave` names a turning texture: the veil from the next frame, the texture at 400 ms.
+   * ctx.require(rendererPlugin).sync.leave.show({
+   *   cover: { color: 0x0b1020, alpha: 0.6, inMs: 150, outMs: 150 },
+   *   loader: { afterMs: 400, texture: "ui.loader.ring" }
+   * });
+   * ```
+   */
+  show(look: LeaveLook): void;
+
+  /**
+   * The switch swapped the next scene in: the loader goes at once, the veil fades out over its `outMs` from where it
+   * stands and is taken off the stage. Nothing runs: nothing happens.
+   *
+   * @example
+   * ```ts
+   * // `scenes`, right after the swap to the board: the board is drawn under the veil, which is gone 150 ms later.
+   * ctx.require(rendererPlugin).sync.leave.land();
+   * ```
+   */
+  land(): void;
+
+  /**
+   * The switch ended without a swap (an abort, a throw): the veil and the loader go at once, in the next frame.
+   * Nothing runs: nothing happens.
+   *
+   * @example
+   * ```ts
+   * // `scenes`, when a restore aborts the switch to the board: the ward stands as it was, undimmed.
+   * ctx.require(rendererPlugin).sync.leave.drop();
+   * ```
+   */
+  drop(): void;
+};
+
+/**
+ * The engine's objects of the picture of a scene being left, made once per application at the first step that needs
+ * them and kept: `top` hangs on the stage above the root while a look runs; `veil` (the white texture, tinted) covers
+ * the canvas; `frame` carries the root's transform, so `ring`, `spinner` and `held` (where a lifted layer hangs) are in
+ * reference units. Not public.
+ */
+export type LeaveObjects = {
+  top: PixiContainer;
+  veil: PixiSprite;
+  frame: PixiContainer;
+  ring: PixiGraphics;
+  spinner: PixiSprite;
+  held: PixiContainer;
+};
+
+/** What the loader of a running look draws once it is due. Not public. */
+export type LoaderKind = "none" | "ring" | "texture" | "layer";
+
+/**
+ * A running look: the moments it started and was last stepped at on the clock, the veil's level (0 to 1, the share of
+ * its `alpha`), whether the swap came, what its loader draws and whether it shows, and the layer container it lifted
+ * above the veil. Not public.
+ */
+export type LeaveRun = {
+  look: LeaveLook;
+  startedAt: number;
+  steppedAt: number;
+  level: number;
+  landed: boolean;
+  loader: LoaderKind;
+  /** The texture of a `"texture"` loader, resolved at `show`. */
+  texture?: PixiTexture;
+  /** A `"layer"` loader's `due` was called: once, the first frame it was due. */
+  asked: boolean;
+  /** The layer a `"layer"` loader's `due` answered; absent before. */
+  layer?: string;
+  /** The layer container a `"layer"` loader drew above the veil; absent while none hangs there. */
+  lifted?: PixiContainer;
+  /** The loader is shown: past its `afterMs`, before the swap. */
+  shown: boolean;
+};
+
+/**
+ * The picture of a scene being left (spec 33, slice A2): the running look, absent while none runs, and the engine's
+ * objects, absent until the first look needs them and after the application that held them was lost. Not public.
+ */
+export type LeaveState = { run?: LeaveRun; objects?: LeaveObjects };
+
+/**
  * sync module API, `app.renderer.sync`. The one owner of every display object: it builds them
  * from components, sorts them inside the named layers of the scene and answers hit tests.
  *
@@ -913,6 +1085,19 @@ export type SyncApi = {
   filters: FiltersApi;
 
   /**
+   * The picture of a scene being left: the veil and the loader `scenes` shows during a live switch.
+   *
+   * @example
+   * ```ts
+   * // `scenes`, at the start of a switch from the ward, and at the swap to the board.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.leave.show({ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } });
+   * renderer.sync.leave.land(); // the veil fades out over the board in 150 ms
+   * ```
+   */
+  leave: LeaveApi;
+
+  /**
    * The render passes of the frame, the number `stats().renderPasses` reports: 1 for the frame,
    * plus, for every view in the tree with an enabled filter, 1 for its content and the passes of
    * its enabled slots. Read from the slots at call time, with no allocation. Inert: 0.
@@ -1030,6 +1215,13 @@ export type SyncInternal = {
 
   /** The overlays of this frame: modes, ranges, reasons, dims, HUD parts, and the pictures to take (spec 22). */
   stepOverlays(): void;
+
+  /**
+   * The picture of a scene being left, for this frame (spec 33, slice A2): the veil's level from the clock, the loader
+   * once due, both placed over the canvas as it stands; a frame is asked for while either moves. Run by the draw
+   * callback before the decision. One field read and no allocation while no look runs.
+   */
+  stepLeave(): void;
 
   /**
    * Hands Pixi again the filters of every view whose filters were switched on or off since they were written: Pixi
@@ -1586,6 +1778,8 @@ export type SyncState = {
   aside: AsideQueue;
   /** The held tops of the scene build, attached in the pass after its commit (spec 31). */
   heldViews: HeldViews;
+  /** The picture of a scene being left: the running look and the engine's objects (spec 33, slice A2). */
+  leave: LeaveState;
   cleanups: Array<() => void>;
 };
 

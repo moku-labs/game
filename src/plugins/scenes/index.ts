@@ -2,8 +2,8 @@
  * Standard tier — a scene is a declaration a node names: a bundle, the bundles of state it
  * names with `bundles`, layers, projections, music. The switch runs inside
  * `flow.onEnter("scene")` and mounts a scene once all its bundles are in; a live switch with a
- * drawing renderer builds it aside under `buildMs` a frame and swaps it in one frame. Emits
- * `scenes:changed`.
+ * drawing renderer builds it aside under `buildMs` a frame and swaps it in one frame, with a veil and
+ * a loader over the scene being left from its start (`leave`). Emits `scenes:changed`.
  *
  * @see README.md
  */
@@ -20,8 +20,17 @@ import { checkConfig, startScenes, stopScenes } from "./lifecycle";
 import { createScenesState } from "./state";
 import type { Config, Events } from "./types";
 
-/** The budget of a live switch: two thirds of each frame at the rate the loop runs. Typed, so a game's number overrides it. */
-const defaultConfig: Config = { buildMs: "auto" };
+/**
+ * The budget of a live switch, two thirds of each frame at the rate the loop runs, and what it shows over the scene
+ * being left: the engine's veil and ring. Typed, so a game's values override it.
+ */
+const defaultConfig: Config = {
+  buildMs: "auto",
+  leave: {
+    cover: { color: 0x00_00_00, alpha: 0.45, inMs: 150, outMs: 150 },
+    loader: { afterMs: 400 }
+  }
+};
 
 /**
  * Scenes plugin: `app.scenes.current()`, and `defineScene` for the game.
@@ -47,6 +56,9 @@ const defaultConfig: Config = { buildMs: "auto" };
  *
  * // A game gives the next scene a fixed 3 ms of each frame (two thirds of it by default) while the old one stays on the screen.
  * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { buildMs: 3 } } });
+ *
+ * // No veil and no loader over a scene being left, on any switch.
+ * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { leave: false } } });
  * ```
  */
 export const scenesPlugin = /*#__PURE__*/ createPlugin("scenes", {

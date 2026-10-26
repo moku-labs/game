@@ -167,10 +167,14 @@ afterEach(async () => {
  * @param options.rows - The rows of the board's panel, the player's `n`: none unless given.
  * @param options.stepMs - Milliseconds every read of the clock moves it on: 0, a clock that stands between frames,
  *   unless given.
+ * @param options.leave - True for the engine's default veil over the scene being left; off unless given, so the stage
+ *   of the build frames can be compared with the ward's (spec 33 A2).
  * @returns The running fixture, the ward drawn and its gate open.
  */
-async function open(options: { rows?: number; stepMs?: number } = {}): Promise<Running> {
-  const { rows = 0, stepMs = 0 } = options;
+async function open(
+  options: { rows?: number; stepMs?: number; leave?: boolean } = {}
+): Promise<Running> {
+  const { rows = 0, stepMs = 0, leave = false } = options;
   const page = openPage();
   const clock = fakeClock(1000);
   const read = clock.now.bind(clock);
@@ -193,7 +197,11 @@ async function open(options: { rows?: number; stepMs?: number } = {}): Promise<R
     referenceSide: 390,
     referenceLong: 844,
     features: [asideFeature],
-    pluginConfigs: { log: { mode: "test" }, flow: { holdMs: 0 }, scenes: { buildMs: 1 } }
+    pluginConfigs: {
+      log: { mode: "test" },
+      flow: { holdMs: 0 },
+      scenes: leave ? { buildMs: 1 } : { buildMs: 1, leave: false }
+    }
   }).screen({ manifest: MANIFEST, renderer: page.renderer, clock });
 
   await app.start();
@@ -310,6 +318,16 @@ async function switchToBoard(fixture: Running, most = 120) {
   expect(app.scenes.current()).toBe("board");
 
   return frames;
+}
+
+/**
+ * Tells whether the picture of a scene being left hangs on the stage now, last, above the root.
+ *
+ * @param fixture - The running fixture.
+ * @returns True while the veil is up.
+ */
+function veiled(fixture: Running): boolean {
+  return fixture.stage().children.at(-1)?.label === "renderer.leave";
 }
 
 describe("the next scene built aside, across the engine", () => {
@@ -476,5 +494,46 @@ describe("the next scene built aside, across the engine", () => {
     );
     expect(coming.mock.calls).toEqual([[["board"]], [[]]]);
     expect(named).not.toHaveBeenCalled();
+  });
+
+  // Bug: the default veil is missing from frames of the build (the player sees no answer while the board is made), or
+  // stays over the board after the commit.
+  it("keeps the default veil up through every build frame and takes it off after the commit", async () => {
+    const fixture = await open({ leave: true });
+    const { app } = fixture;
+    const during: boolean[] = [];
+
+    app.flow.gate.answer({ intent: "board" });
+
+    for (let frame = 0; frame < 120 && app.scenes.current() !== "board"; frame += 1) {
+      await fixture.frames(1);
+      if (app.scenes.current() !== "board") during.push(veiled(fixture));
+    }
+
+    expect(during.length).toBeGreaterThanOrEqual(CELLS.length);
+    expect(during.every(Boolean)).toBe(true);
+
+    await arrive(fixture, "board");
+    await fixture.frames(Math.ceil(150 / 16) + 1);
+
+    expect(veiled(fixture)).toBe(false);
+  });
+
+  // Bug: an abort in the middle of the build (a restore) leaves the veil over the ward.
+  it("takes the default veil off at an abort in the middle of the build", async () => {
+    const fixture = await open({ leave: true });
+    const { app } = fixture;
+    const bookmark = app.flow.bookmark();
+
+    app.flow.gate.answer({ intent: "board" });
+    await fixture.frames(3);
+
+    expect([app.scenes.current(), veiled(fixture)]).toEqual(["ward", true]);
+
+    await app.flow.restore(bookmark);
+    await arrive(fixture, "ward");
+    await fixture.frames(1);
+
+    expect(veiled(fixture)).toBe(false);
   });
 });

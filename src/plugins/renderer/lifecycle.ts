@@ -85,6 +85,8 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
   modules.sync.stepFilters();
   modules.sync.stepOverlays();
   modules.sync.drainOverlayEvents(modules.monitor);
+  // The veil and the loader of a scene switch (spec 33, slice A2): above every layer, asking for a frame while they move.
+  modules.sync.stepLeave();
   // Before the decision clears the marks: they become the dirty flags of the pictures.
   modules.kept.collect();
 
