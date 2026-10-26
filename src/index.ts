@@ -65,7 +65,7 @@
  * | assets | preloadDepth | 2 |
  * | assets | baseUrl | undefined |
  * | assets | io | undefined, the browser fetch and the renderer textures |
- * | scenes | buildMs | "auto", half of a frame (500 / time.rate().fps), read at each build start; a number fixes it |
+ * | scenes | buildMs | "auto", two thirds of a frame ((1000 / time.rate().fps) * 2 / 3, 11.1 ms at 60 Hz), read at each build start; a number fixes it |
  * | anim | maxTracks | 2000 |
  * | anim | reducedMotion | false |
  * | i18n | locale | "en" |

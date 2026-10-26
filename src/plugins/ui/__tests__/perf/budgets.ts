@@ -85,6 +85,20 @@ export const BUDGET = {
    */
   reconcileBuilding: 0,
   /**
+   * Spec 33 A (change 2026-10-25-f61-s3-big-mount): `ui.reconcile` and `ui.solve` of a frame while
+   * the names are built aside and their parts are all made and applied: the drain walks the roots
+   * and finds the names' queue empty, kept for reuse, and no application open. 0 B.
+   */
+  reconcileParked: 0,
+  /** Spec 33 A: `ui`'s part of the same build, the empty queue and the closed application read. 0 B. */
+  asideBuiltParked: 0,
+  /**
+   * Spec 33 A: `ui.reconcile` and `ui.solve` of an idle frame after a build in parts was committed:
+   * no build runs, and the names' root keeps its empty queue. One number decides the drain and the
+   * application step. 0 B.
+   */
+  reconcileAfterParts: 0,
+  /**
    * F85 (change 2026-10-25-f83-f85-ui-exits-shape): the check every write of an element with a
    * `change` hook of its visual asks first, on each of the four visuals (the XP arc's `Shape`, a
    * coin `Sprite`, a panel `NineSlice`, a label `Text`, fractional numbers in all), none moved.

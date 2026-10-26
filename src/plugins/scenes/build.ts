@@ -8,11 +8,14 @@
 import { swapIn } from "./swap";
 import type { SceneBuild, SceneDefinition, ScenesCtx } from "./types";
 
-/** Half a second in ms: half of a frame interval is this over the frame rate. */
-const HALF_SECOND_MS = 500;
+/** A second in ms: the frame interval is this over the frame rate. */
+const SECOND_MS = 1000;
 
-/** The budget of a frame when `time` answers no frame rate to halve: half a 60 Hz frame, ms. */
-const FALLBACK_BUDGET_MS = HALF_SECOND_MS / 60;
+/** The share of a frame interval `"auto"` gives the building work: two thirds. */
+const BUILD_SHARE = 2 / 3;
+
+/** The budget of a frame when `time` answers no usable frame rate: two thirds of a 60 Hz frame, ≈ 11.1 ms. */
+const FALLBACK_BUDGET_MS = (SECOND_MS / 60) * BUILD_SHARE;
 
 /**
  * Tells whether a value is a number a frame can count with: finite and above 0. Pure.
@@ -49,8 +52,8 @@ function agentNow(ctx: ScenesCtx): number {
 
 /**
  * The building budget of a frame for a build that starts now: the number a game configured, or
- * for `"auto"` half of the frame interval the loop runs at, `500 / time.rate().fps`, read once
- * here. A rate that is not a finite number above 0 gives half a 60 Hz frame.
+ * for `"auto"` two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`,
+ * read once here. A rate that is not a finite number above 0 gives two thirds of a 60 Hz frame.
  *
  * @param ctx - Domain context of the plugin.
  * @returns Milliseconds per frame the building work may take.
@@ -62,7 +65,7 @@ function budgetOf(ctx: ScenesCtx): number {
 
   const { fps } = ctx.deps.time.rate();
 
-  return isPositiveFinite(fps) ? HALF_SECOND_MS / fps : FALLBACK_BUDGET_MS;
+  return isPositiveFinite(fps) ? (SECOND_MS / fps) * BUILD_SHARE : FALLBACK_BUDGET_MS;
 }
 
 /**

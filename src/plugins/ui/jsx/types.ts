@@ -368,6 +368,24 @@ export type PopupLink = {
 export type AsideOf = (entity: Entity) => boolean;
 
 /**
+ * One part of a root built aside that waits for a later frame (spec 33 A2): an element that exists
+ * and whose children were not diffed yet, the nodes it would have diffed, the nearest component
+ * instance and the cause its children enter with. Back in the pool it holds no element.
+ */
+export type Parked = {
+  element: Element | undefined;
+  nodes: readonly DescriptionNode[];
+  instance: string | undefined;
+  cause: MotionCause | undefined;
+};
+
+/**
+ * The application of a solved root built aside, in parts (spec 33 A6): the elements still to
+ * apply, the next one on top, and whether a live one takes its rect with no motion.
+ */
+export type ApplyCursor = { stack: Element[]; quiet: boolean };
+
+/**
  * One reconciled tree: a projection view or a popup, with the flags the frame step reads.
  * `covered` is true while the root is kept under another popup; every element of the root then
  * resolves `is.covered`. `cause` is how the root came, read at its first build: `"change"` for a
@@ -375,7 +393,8 @@ export type AsideOf = (entity: Entity) => boolean;
  * restore or a load. `slot` is the host element the root is laid out in (`undefined` for the
  * viewport), `slotRect` the content box it was last solved in, in the host's own units.
  * `pending` is true while the solve running now still waits to lay the root out; `mountRoot`
- * creates it `false`.
+ * creates it `false`. A root built aside carries its parked parts in `parked` and its
+ * application in parts in `applying` (spec 33 slice A).
  */
 export type Root = {
   entity: Entity;
@@ -398,6 +417,13 @@ export type Root = {
    * other root.
    */
   aside?: true;
+  /**
+   * The parts of a root built aside whose children wait for a later frame, in the order they were
+   * parked. Made with its first part and kept, empty, after its last: a later part reuses it.
+   */
+  parked?: Parked[];
+  /** The application of a root built aside in parts, while it is open; absent otherwise. */
+  applying?: ApplyCursor;
 };
 
 /**
@@ -775,8 +801,8 @@ export type JsxModule = {
   converged(): void;
   /**
    * The part of a scene build `ui` does, as `world.projection.onBuild` asks it: true when no root
-   * of the scene built aside is dirty, waits for its solve or waits for the layout engine. Walks
-   * the roots and allocates nothing.
+   * of the scene built aside is dirty, has parked parts, waits for its solve, is applied in parts
+   * or waits for the layout engine. Walks the roots and allocates nothing.
    *
    * @returns True when every root built aside is reconciled and solved.
    */

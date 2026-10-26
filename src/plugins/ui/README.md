@@ -770,7 +770,8 @@ in the same frame. A slot takes a projection with one root, or roots that place 
 On a live switch with a drawing renderer `scenes` builds the next scene while the old one stays
 current, drawn and alive (spec 31). `world.projection.build` mounts the coming projections aside
 and flags their views building (`isBuilding`); a view whose `view` returns JSX becomes a root of
-the build. `ui` reconciles and solves it like any root, in the frame after the build starts, and:
+the build. `ui` reconciles it by root and by part under the budget, lays it out once and applies it
+in parts (spec 33, see [In parts](#in-parts)), starting in the frame after the build starts, and:
 
 - marks every element it spawns for it as the build's (`world.projection.adopt`) right after the
   spawn, before the element gets a visual, and the parts of its text fields with them: the renderer
@@ -792,9 +793,38 @@ the build. `ui` reconciles and solves it like any root, in the frame after the b
   stands as it did before the build.
 
 `ui`'s part of the build, registered with `world.projection.onBuild`, is done when no root of the
-build is dirty (its tree not diffed yet, or the layout engine not loaded) and none waits for its
-solve. A root whose first diff threw (`ui:root-failed`) does not hold the swap. The check walks the
-roots and allocates nothing; with no build the reconcile pays one number a frame.
+build is dirty (its tree not diffed yet, or the layout engine not loaded), has parked parts, waits
+for its solve or is applied in parts. A root whose first diff threw (`ui:root-failed`) does not
+hold the swap. The check walks the roots and allocates nothing; with no build the reconcile and the
+solve pay a few numbers a frame.
+
+### In parts
+
+The budget of a frame is `world.projection.left()`: the build's `budgetMs` less the time the frame
+spent, finite only while a build runs (`scenes.buildMs`). The work of a root built aside goes in
+units, and the first unit of a frame always runs, so a build always moves; a later one runs while
+the budget lasts.
+
+- **By root.** A dirty root built aside is diffed while the budget lasts; one that waits stays
+  dirty and is diffed in a later frame against its newest tree.
+- **By part.** Inside a diff, from the 8th element of a frame the budget is read every 8 elements.
+  Once it is spent, a new element is still made (its parent's child list is complete), but its
+  children wait in the root's queue. The next frames diff the queue first, in the order it was
+  parked; children that park again go to its end. A row a windowed scroll moves in never parks.
+- **No diff twice.** While parts wait, the root is not diffed again and its windowed scrolls do not
+  move their range, so no element is made twice. A state change during the build costs one more
+  diff, once the queue is empty.
+- **Laid out once.** Yoga solves the root whole once, after its last part.
+- **Applied in parts.** Its first application then runs top-down, parent before children, under the
+  budget and at most 100 elements a frame: the components it writes are flushed after the system,
+  where the budget does not see them. The root is not solved again until the last element is
+  applied.
+- **The whole lands together.** Its scrolls are ranged, moved and settled, and its hosts take their
+  views, once the last part is applied. Its overlays land after the swap, as before.
+- **Ends here.** A discard, a root whose key leaves, its exit and a restore forget the queue and the
+  application with the rest of the root.
+
+The screen a build in parts ends on is the one a one-block build ends on.
 
 ```ts
 // The ward stays on the screen while the board is built aside, in one frame.

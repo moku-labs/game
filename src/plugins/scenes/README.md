@@ -162,10 +162,10 @@ A live switch with a drawing renderer builds the next scene while the old one st
 and alive, and swaps it in one frame (spec 31, F61 S2). What a game sees:
 
 - **The switch ends later.** The steps up to the warm are as before. Then the logic of the coming
-  scene (its projections' `view`, the elements and the layout of its JSX) runs in one block, and the
-  renderer makes its Pixi views over the next frames, off the stage, in the budget of each frame
-  after the live work: `buildMs`, by default half of the frame interval the loop runs at when the
-  build starts (8.33 ms at 60 Hz, 4.17 ms at 120 Hz). Their first draw is the swap frame. On a phone
+  scene runs over the next frames: its projections' `view` at the build start, the elements of its
+  JSX by root and by part, its layout once and its first application in parts, and the renderer
+  makes its Pixi views, all off the stage, in the budget of each frame after the live work: `buildMs`, by default two thirds of the frame interval the loop runs at when
+  the build starts (11.1 ms at 60 Hz, 5.56 ms at 120 Hz). Their first draw is the swap frame. On a phone
   the swap comes some frames later than the old one-block switch did, up to about 0.15 s after the
   tap.
 - **The old scene stays.** Until the swap `app.scenes.current()` answers the old scene, nothing of
@@ -199,7 +199,7 @@ and alive, and swaps it in one frame (spec 31, F61 S2). What a game sees:
   good.
 
 ```ts
-// The default: half of each frame, read at the start of every build (8.33 ms at 60 Hz, 4.17 ms at 120 Hz).
+// The default: two thirds of each frame, read at the start of every build (11.1 ms at 60 Hz, 5.56 ms at 120 Hz).
 createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { buildMs: "auto" } } });
 
 // A game on a slow phone gives the next scene a fixed 3 ms of each frame: the switch takes a frame or two more.
@@ -263,7 +263,7 @@ HUD that is not shared does not blink either.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is half of the frame interval the loop runs at, `500 / time.rate().fps`, read once at the build start: 8.33 ms at 60 Hz, 4.17 ms at 120 Hz (half a 60 Hz frame if `time` answers no rate). A number is a fixed budget |
+| `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`, read once at the build start: 11.1 ms at 60 Hz, 5.56 ms at 120 Hz (two thirds of a 60 Hz frame, ≈ 11.1 ms, if `time` answers no usable rate). A number is a fixed budget |
 
 A value that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
 

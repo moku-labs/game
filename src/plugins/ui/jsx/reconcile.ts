@@ -4,8 +4,8 @@
  * that stays is compared prop by prop, by value: one that says what it said is neither styled nor
  * written. Beside it:
  * the range of a windowed scroll (`range.ts`), the rest and the motion of the extras
- * (`extras.ts`), the hint routed to a keyed element (`hints.ts`) and the remeasure of the texts
- * `text` resolved again (`remeasure.ts`).
+ * (`extras.ts`), the hint routed to a keyed element (`hints.ts`), the remeasure of the texts
+ * `text` resolved again (`remeasure.ts`) and a scene build in parts (`parts.ts`).
  */
 import { printOf } from "../../anim/motion";
 import { PointerOver, Pressed, Scrollable, Tappable, Touchable } from "../../input/components";
@@ -52,6 +52,7 @@ import { forgetInstances, instanceFor, runView } from "./instances";
 import { type LookWriter, otherFields, warnIdleChanges, writeLook } from "./look";
 import { childOrder, SIBLING_SPAN } from "./order";
 import { createSpan, enterOverlay, exitOverlay, overlayOf, settleOverlays } from "./overlay";
+import { createParts } from "./parts";
 import { settlePopups } from "./popups";
 import { createRange } from "./range";
 import { markResizedIcons, markResizedTexts } from "./remeasure";
@@ -676,6 +677,7 @@ export function createReconciler(
     forgetSubtree,
     despawnTree
   });
+  const parts = createParts(ctx, { diffChildren, applyElement, isMoving: range.isMoving });
   // The reconciler's per-frame scratch, kept so an idle frame allocates nothing: the roots to
   // reconcile, the scroll containers, the roots whose slot changed in this solve, the roots still
   // waiting in it, the viewport box, what the slots were last assigned for, and the layer list
@@ -767,8 +769,9 @@ export function createReconciler(
     checkTag(node);
 
     const entity = ecs.spawn(UI_OWNER, []);
+    const aside = isAside(root.entity);
 
-    if (isAside(root.entity)) ctx.deps.world.projection.adopt(entity);
+    if (aside) ctx.deps.world.projection.adopt(entity);
 
     const is = isFlagsOf(node, {
       pressed: false,
@@ -826,12 +829,14 @@ export function createReconciler(
     modules.layout.attach(element);
     // The style is on the layout node: from here an equal description keeps it.
     element.basis = { epoch: state.epoch, rowHeight: range.rowHeightOf(parent, node) };
-    diffChildren(
-      root,
-      element,
-      childrenOf(node, range.slotsFor(element), element.scroll?.axis),
-      instance
-    );
+
+    const nodes = childrenOf(node, range.slotsFor(element), element.scroll?.axis);
+
+    // Past the frame's budget a root built aside makes the element and leaves its children for a
+    // later frame (spec 33 A2).
+    if (aside && parts.parks() && nodes.length > 0) parts.park(root, element, nodes, instance);
+    else diffChildren(root, element, nodes, instance);
+
     root.needsSolve = true;
 
     return entity;
@@ -1773,7 +1778,23 @@ export function createReconciler(
    * @param quiet - Whether a live element takes its rect with no motion.
    */
   function applyRects(element: Element, quiet = false): void {
-    // Apply this element: a live one moves, a new one spawns its components.
+    applyElement(element, quiet);
+
+    // Then its children, top-down.
+    for (const child of element.children) {
+      const childElement = lookup(child);
+
+      if (childElement !== undefined) applyRects(childElement, quiet);
+    }
+  }
+
+  /**
+   * Applies the solved rect of one element: a live one moves, a new one spawns its components.
+   *
+   * @param element - The element to apply.
+   * @param quiet - Whether a live element takes its rect with no motion.
+   */
+  function applyElement(element: Element, quiet: boolean): void {
     const parent = parentRect(element);
 
     if (element.live) {
@@ -1783,13 +1804,6 @@ export function createReconciler(
     }
 
     element.moved = false;
-
-    // Then its children, top-down.
-    for (const child of element.children) {
-      const childElement = lookup(child);
-
-      if (childElement !== undefined) applyRects(childElement, quiet);
-    }
   }
 
   /**
@@ -1971,7 +1985,8 @@ export function createReconciler(
 
   /**
    * Solves one root in a box and applies its rects: a root on the viewport when it is marked, a
-   * root in a slot also when its slot was resized.
+   * root in a slot also when its slot was resized. A root built aside waits while parts of it wait,
+   * and is applied in parts.
    *
    * @param root - The root.
    * @param box - The viewport, or the slot's content box.
@@ -1981,7 +1996,9 @@ export function createReconciler(
   function solveOne(root: Root, box: Rect, quiet: boolean): boolean {
     const element = root.element === undefined ? undefined : lookup(root.element);
 
-    if (element === undefined) return false;
+    // A root built aside is laid out whole once its last part is made, and not again while it is
+    // applied in parts (spec 33 A5, A6).
+    if (element === undefined || parts.waits(root)) return false;
 
     const resized = root.slot !== undefined && !sameBox(root.slotRect, box);
 
@@ -1991,7 +2008,14 @@ export function createReconciler(
 
     modules.layout.solve(element, box, lookup);
     root.needsSolve = false;
-    applyRects(element, quiet);
+
+    // Only the first application goes in parts: a later solve of the same build (a state change, a
+    // new viewport, a text measured again) applies in one block, so the build always reaches its end.
+    if (root.aside !== undefined && isAside(root.entity) && !element.live) {
+      parts.applyInParts(root, element, quiet);
+    } else {
+      applyRects(element, quiet);
+    }
 
     return true;
   }
@@ -2206,6 +2230,8 @@ export function createReconciler(
 
       const element = root.element === undefined ? undefined : lookup(root.element);
 
+      parts.forgetParts(root);
+
       if (element !== undefined) {
         forgetSubtree(element);
         forgetInstances(state, element.identity);
@@ -2251,7 +2277,9 @@ export function createReconciler(
 
   /**
    * The live scroll containers, which the frame step moves with the finger. Read from the set the
-   * enter fills and the exit empties, so an idle frame walks no other element.
+   * enter fills and the exit empties, so an idle frame walks no other element. A scroll of a root
+   * built aside waits while parts of the root wait: it is ranged, moved and settled once the root
+   * is whole (spec 33 A7).
    *
    * @returns Every live element whose tag is `scroll`: the reconciler's own list, valid until the
    *   next call.
@@ -2263,7 +2291,11 @@ export function createReconciler(
     for (const entity of state.scrolls) {
       const element = state.elements.get(entity);
 
-      if (element?.live === true) scrollList.push(element);
+      if (element?.live !== true) continue;
+      // Per frame: one number while no scene is built aside.
+      if (state.asideRoots > 0 && parts.waits(state.roots.get(element.root))) continue;
+
+      scrollList.push(element);
     }
 
     return scrollList;
@@ -2416,9 +2448,9 @@ export function createReconciler(
 
   /**
    * The part of a scene build `ui` does, which `world` asks through `onBuild` (spec 31): done when no
-   * root of the build is dirty (its tree not diffed yet, or the layout engine not loaded) and none
-   * waits for its solve. A root whose first diff threw has no element to solve and does not hold
-   * the swap.
+   * root of the build is dirty (its tree not diffed yet, or the layout engine not loaded), has
+   * parked parts, waits for its solve or is applied in parts (spec 33 A8). A root whose first diff
+   * threw has no element to solve and does not hold the swap.
    *
    * @returns True when every root built aside is reconciled and solved.
    */
@@ -2428,7 +2460,7 @@ export function createReconciler(
       const solves =
         root.needsSolve && root.element !== undefined && lookup(root.element) !== undefined;
 
-      if ((root.dirty || solves) && isAside(root.entity)) return false;
+      if ((root.dirty || solves || parts.waits(root)) && isAside(root.entity)) return false;
     }
 
     return true;
@@ -2438,11 +2470,15 @@ export function createReconciler(
    * The first of the two systems of phase `layout`: the sweep, the roots a scene build committed, the
    * roots a restore asked to build again, the roots a scene placed again, the popups that may leave,
    * the pull of the text being typed, the scroll offsets and the windowed ranges, the bound texts
-   * that show a string of another size, the viewport, the dirty roots and the hosted views.
+   * that show a string of another size, the viewport, the parked parts of a scene build, the dirty
+   * roots and the hosted views.
    *
    * @param time - The frame's `Time`: the scrolls move by its `delta`.
    */
   function reconcile(time: Readonly<Time> = NO_TIME): void {
+    // A new frame of a scene build: no element entered, the budget not read, no building unit run.
+    parts.beginReconcile();
+
     // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
@@ -2489,10 +2525,14 @@ export function createReconciler(
 
     rendered = count;
 
+    // The parked parts of the roots built aside go first, then the dirty roots, a root built aside
+    // while the budget lasts.
+    parts.drainParked();
+
     for (let index = 0; index < count; index += 1) {
       const root = dirtyList[index];
 
-      if (root !== undefined) reconcileDirtyRoot(root);
+      if (root !== undefined && !parts.holdRoot(root)) reconcileDirtyRoot(root);
     }
 
     // Give the views a slot hosts their parent, take it back where the slot left, and publish the
@@ -2519,12 +2559,13 @@ export function createReconciler(
   }
 
   /**
-   * The second system of phase `layout`: every root takes its slot, then one solve per marked
-   * root, a root in a slot after the root of its slot and in its content box, then the rects, the
-   * rest poses and the hooks, the scrolls settled on what the solve and the render gave them, the
-   * hosting of the hosts that came, a sweep of what left with nothing to wait for, and, in the swap
-   * frame of a scene build, the start pose of the enters it held. The hints released since the last frame step are dropped
-   * at its end, so the `change.Box` and `change.Transform` hooks the solve plays get the hint the
+   * The second system of phase `layout`: every root takes its slot, the open applications of roots
+   * built aside take their next part, then one solve per marked root, a root in a slot after the
+   * root of its slot and in its content box, then the rects, the rest poses and the hooks, the
+   * scrolls settled on what the solve and the render gave them, the hosting of the hosts that came,
+   * a sweep of what left with nothing to wait for, and, in the swap frame of a scene build, the
+   * start pose of the enters it held. The hints released since the last frame step are dropped at
+   * its end, so the `change.Box` and `change.Transform` hooks the solve plays get the hint the
    * reconcile routed, and the next frame starts with none.
    *
    * @param time - The frame's `Time`: a scroll left moving asks for a frame only while it runs.
@@ -2535,15 +2576,20 @@ export function createReconciler(
     // Per frame: the viewport box is the reconciler's scratch; the solve keeps no reference to it.
     viewportBox.w = viewport?.width ?? 0;
     viewportBox.h = viewport?.height ?? 0;
+    parts.beginSolve();
     assignSlots();
+    // The open applications of roots built aside take their next part before any root is solved.
+    parts.applyParts();
 
     const changed = layOutRoots(viewportBox);
 
     if (changed) ctx.deps.time.wake();
 
     // A solve may give a scroll a new range and a render a new `offset` prop; a scroll that came in
-    // this solve stands at its prop before it is first drawn.
-    if (changed || rendered > 0) modules.layout.settleScroll(scrollContainers(), lookup, time);
+    // this solve, or with the last part of its root, stands at its prop before it is first drawn.
+    if (changed || rendered > 0 || parts.hasLanded()) {
+      modules.layout.settleScroll(scrollContainers(), lookup, time);
+    }
 
     rendered = 0;
 
@@ -2639,6 +2685,9 @@ export function createReconciler(
     const element = root.element === undefined ? undefined : lookup(root.element);
     const cause =
       root.popup === undefined ? (ctx.deps.world.projection.causeOf(entity) ?? "change") : "change";
+
+    // Its build ends here, whichever way it goes: no parked part is diffed under a leaving tree.
+    parts.forgetParts(root);
 
     if (cause === "discard" || isAside(entity)) {
       dropRoot(root, element);
