@@ -216,33 +216,25 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       // Bug (F92): Bun keeps a module by its path and ignores a query, so outside vitest's module
       // runner the watch read the first description forever and wrote the stale tier back.
       const root = game();
-      const script = path.join(root, "watch-twice.ts");
-      const cli = path.resolve("src/cli.ts");
-
-      writeFileSync(
-        script,
+      const child = Bun.spawnSync(
         [
-          `import { readFileSync, writeFileSync } from "node:fs";`,
-          `import { watchKeys } from ${JSON.stringify(cli)};`,
-          `const root = ${JSON.stringify(root)};`,
-          `const file = root + "/${DESCRIPTION}";`,
-          `const tier = () => JSON.parse(readFileSync(root + "/generated/manifest.json", "utf8")).bundles.ui.tier;`,
-          `const keys = await watchKeys(root);`,
-          `const save = async (from: string, to: string) => {`,
-          `  writeFileSync(file, readFileSync(file, "utf8").replace(from, to));`,
-          `  for (let wait = 0; wait < 80 && tier() !== to.slice(9, -3); wait += 1) await Bun.sleep(100);`,
-          `};`,
-          `await save('{ tier: "boot" }', '{ tier: "lazy" }');`,
-          `const first = tier();`,
-          `await save('{ tier: "lazy" }', '{ tier: "feature" }');`,
-          `console.log(JSON.stringify([first, tier()]));`,
-          `keys.close();`
-        ].join("\n")
+          process.execPath,
+          path.resolve("tests/integration/keys-watch-child.ts"),
+          root,
+          String(WAIT_MS)
+        ],
+        { stderr: "pipe", stdout: "pipe" }
       );
-
-      const child = Bun.spawnSync([process.execPath, script], { stderr: "pipe", stdout: "pipe" });
       const lines = child.stdout.toString().trim().split("\n");
 
+      // A crash of the child shows with its stderr, apart from a stale read.
+      expect({
+        exit: child.exitCode,
+        stderr: child.exitCode === 0 ? "" : child.stderr.toString()
+      }).toEqual({
+        exit: 0,
+        stderr: ""
+      });
       expect(lines.at(-1)).toBe('["lazy","feature"]');
     });
 

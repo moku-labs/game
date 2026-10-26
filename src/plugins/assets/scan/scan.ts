@@ -467,8 +467,8 @@ async function importDescription(file: string): Promise<Record<string, unknown> 
 
   if (entry === undefined || !entry.isFile()) return undefined;
 
-  // Bun: forget the module of the last scan. Whole microseconds in the query: Bun reads a `.` in
-  // it as a loader name.
+  // Bun: forget the module of the last scan (an ES module Node has no `require`; there the query
+  // alone counts). Whole microseconds in the query: Bun reads a `.` in it as a loader name.
   if (typeof require !== "undefined") delete require.cache[file];
   const url = `${pathToFileURL(file).href}?saved=${entry.size}-${Math.round(entry.mtimeMs * 1000)}`;
 
