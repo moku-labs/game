@@ -452,9 +452,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Imports the optional `assets.ts` of a feature. Node strips the types of a `.ts` file, so the
- * description a game writes runs as it stands. The URL carries the file's size and mtime: a
- * long-lived process (the keys watch of `dev` and the editor) reads a saved description again
- * instead of the module it cached, while one scan, or scans with nothing saved, import it once.
+ * description a game writes runs as it stands. A long-lived process (the keys watch of `dev` and
+ * the editor) must read a saved description again, not the module it imported first. Bun keeps a
+ * module by its path and ignores a query, so the entry is dropped from its cache before each
+ * import; the query (the file's size and mtime) does the same in a module runner that keys by
+ * URL, such as vitest's.
  *
  * @param file - Absolute path of the description.
  * @returns Its exports, or `undefined` when the feature brought none.
@@ -465,7 +467,9 @@ async function importDescription(file: string): Promise<Record<string, unknown> 
 
   if (entry === undefined || !entry.isFile()) return undefined;
 
-  // Whole microseconds and the size: Bun reads a `.` in the query as a loader name.
+  // Bun: forget the module of the last scan. Whole microseconds in the query: Bun reads a `.` in
+  // it as a loader name.
+  if (typeof require !== "undefined") delete require.cache[file];
   const url = `${pathToFileURL(file).href}?saved=${entry.size}-${Math.round(entry.mtimeMs * 1000)}`;
 
   return (await import(/* @vite-ignore */ url)) as Record<string, unknown>;

@@ -212,6 +212,40 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       expect(bundle()).not.toHaveProperty("release");
     });
 
+    it("rewrites the manifest for a saved description in a plain Bun process too", async () => {
+      // Bug (F92): Bun keeps a module by its path and ignores a query, so outside vitest's module
+      // runner the watch read the first description forever and wrote the stale tier back.
+      const root = game();
+      const script = path.join(root, "watch-twice.ts");
+      const cli = path.resolve("src/cli.ts");
+
+      writeFileSync(
+        script,
+        [
+          `import { readFileSync, writeFileSync } from "node:fs";`,
+          `import { watchKeys } from ${JSON.stringify(cli)};`,
+          `const root = ${JSON.stringify(root)};`,
+          `const file = root + "/${DESCRIPTION}";`,
+          `const tier = () => JSON.parse(readFileSync(root + "/generated/manifest.json", "utf8")).bundles.ui.tier;`,
+          `const keys = await watchKeys(root);`,
+          `const save = async (from: string, to: string) => {`,
+          `  writeFileSync(file, readFileSync(file, "utf8").replace(from, to));`,
+          `  for (let wait = 0; wait < 80 && tier() !== to.slice(9, -3); wait += 1) await Bun.sleep(100);`,
+          `};`,
+          `await save('{ tier: "boot" }', '{ tier: "lazy" }');`,
+          `const first = tier();`,
+          `await save('{ tier: "lazy" }', '{ tier: "feature" }');`,
+          `console.log(JSON.stringify([first, tier()]));`,
+          `keys.close();`
+        ].join("\n")
+      );
+
+      const child = Bun.spawnSync([process.execPath, script], { stderr: "pipe", stdout: "pipe" });
+      const lines = child.stdout.toString().trim().split("\n");
+
+      expect(lines.at(-1)).toBe('["lazy","feature"]');
+    });
+
     it("rewrites the stamp for new bytes in an existing image with that image as changed, and not generated/assets.ts", async () => {
       const root = game();
 
