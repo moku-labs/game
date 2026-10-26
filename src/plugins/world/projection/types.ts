@@ -695,7 +695,8 @@ export type ProjectionState = {
   keysByEntity: Map<Entity, ProjectionKey>;
   /**
    * Entity to component name to the fields another writer owns: what `mute()` handed over, and
-   * the shared `initialOnly` seed a view of such a projection is born with.
+   * the shared `initialOnly` seed a view of such a projection is born with. A view a listener of
+   * its spawn muted keeps that table, and the seed joins it.
    */
   mutes: Map<Entity, MuteTable>;
   /** The `initialOnly` seed of each registered spec that has one, frozen, built at `register` and `replace`. */

@@ -190,8 +190,10 @@ writes or compares them. A changed item leaves them out, a motion and its `finis
 them, the check at the end of a motion does not correct them (no `world:view-corrected`), and a
 rollback, `settle(entity)`, a restore and a load do not put them back. These are the rules of
 `mute()`, for every view of the projection and for its whole life. A `mute()` on the view adds to
-them, and its release keeps them. A `replace` moves the live views to the new list; a view a
-`mute()` touched keeps the old one until it is born again. Each pair is
+them, and its release keeps them; that holds for a mute an `onAdded` listener makes inside the
+spawn of the view too, as `anim` does for the texture of a `Frames` loop. A `replace` moves the live
+views to the new list. On a component a `mute()` touched, a view keeps the fields of the old list as
+well, until it is born again. Each pair is
 checked against its own component: `[[Shape, ["swep"]]]` does not compile. A pair with no field is
 refused at `register` with `[game] Projection "…" lists Shape in initialOnly with no field.`. Left
 out, the projection writes every field, as before.

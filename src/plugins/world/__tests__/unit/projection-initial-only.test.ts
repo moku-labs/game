@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { component } from "../../ecs/define";
-import type { Entity } from "../../ecs/types";
+import type { ComponentType, Entity } from "../../ecs/types";
 import { projection } from "../../projection/define";
 import type { AnyProjectionSpec, ProjectionMotion } from "../../projection/types";
 import { LAYERS, MOUNT_OWNER, mountBoard, settleFrames, Transform } from "./board";
@@ -14,6 +14,9 @@ import { createMockWorld, type MockWorld } from "./mock-world";
 
 /** The ring of a timer: `sweep` is drawn by a system, `alpha` belongs to the projection. */
 const Arc = component("Arc", { sweep: 1, alpha: 1 });
+
+/** A label whose type gives `shown` to a plugin for good: the driver joins it with every mute. */
+const Label = component("Label", { x: 0, y: 0, shown: 0 }, { owned: ["shown"] });
 
 type Timer = { id: string; sweep: number; alpha: number; x: number };
 type Player = { timers: Timer[] };
@@ -44,6 +47,27 @@ function marks(motion?: ProjectionMotion<Timer>, initialOnly = true): AnyProject
   };
   const spec = initialOnly
     ? projection({ ...base, initialOnly: [[Arc, ["sweep"]]] })
+    : projection(base);
+
+  return spec as AnyProjectionSpec;
+}
+
+/**
+ * Builds a projection of labels over the timers.
+ *
+ * @param initialOnly - Whether `x` is given to another writer after the birth.
+ * @returns The spec.
+ */
+function labels(initialOnly: boolean): AnyProjectionSpec {
+  const base = {
+    name: MARKS,
+    layer: "items",
+    from: (player: Player) => player.timers,
+    key: (found: Timer) => found.id,
+    view: (found: Timer) => [Label({ x: found.x })]
+  };
+  const spec = initialOnly
+    ? projection({ ...base, initialOnly: [[Label, ["x"]]] })
     : projection(base);
 
   return spec as AnyProjectionSpec;
@@ -120,11 +144,34 @@ function arcOf(
 function commitTimers(
   world: MockWorld,
   timers: Timer[],
-  cause: "edge" | "rollback" | "restore" = "edge"
+  cause: "edge" | "rollback" | "restore" | "load" = "edge"
 ): void {
   setTimers(world, timers);
   world.commit(cause);
   world.frame(16);
+}
+
+/**
+ * Mutes fields of every new ring from inside its spawn, the way `anim` mutes `Sprite.texture` in
+ * its `onAdded(Frames)`: the listener runs before the projection knows the view.
+ *
+ * @param world - The mock world.
+ * @param component - The component whose fields are muted.
+ * @param fields - The fields.
+ * @returns The removers, one for each ring born from now on.
+ */
+function muteInSpawn(
+  world: MockWorld,
+  component: ComponentType<object>,
+  fields: readonly string[]
+): Array<() => void> {
+  const releases: Array<() => void> = [];
+
+  world.api.ecs.onAdded(Arc, entity => {
+    releases.push(world.api.projection.mute(entity, component, fields));
+  });
+
+  return releases;
 }
 
 /**
@@ -226,6 +273,7 @@ describe("projection initialOnly — after the birth", () => {
   it.each([
     ["a rollback", (world: MockWorld): void => commitTimers(world, [timer("a")], "rollback")],
     ["a restore", (world: MockWorld): void => commitTimers(world, [timer("a")], "restore")],
+    ["a load", (world: MockWorld): void => commitTimers(world, [timer("a")], "load")],
     ["settle(entity)", (world: MockWorld): void => world.api.projection.settle(ringOf(world, "a"))]
   ])("is left by %s, which brings the other fields home", (_way, goHome) => {
     const world = createMockWorld();
@@ -239,6 +287,103 @@ describe("projection initialOnly — after the birth", () => {
     settleFrames(world);
 
     expect(arcOf(world, "a")).toEqual({ sweep: DRAWN, alpha: 1 });
+  });
+
+  // Bug: a key added again during its exit comes back with the writes of a birth, or its settle
+  // brings the drawn field home with the others.
+  it("is left by a revive: the key removed and added again during its exit", () => {
+    const world = createMockWorld();
+
+    mountMarks(
+      world,
+      [timer("a")],
+      marks({ exit: view => view.tween(Arc, { alpha: 0 }, { ms: 200, ease: "linear" }) })
+    );
+
+    const ring = ringOf(world, "a");
+
+    world.api.ecs.set(ring, Arc, { sweep: DRAWN });
+    commitTimers(world, []);
+    world.frame(100);
+
+    expect(world.api.ecs.get(ring, Arc)?.alpha).toBeLessThan(1);
+
+    commitTimers(world, [timer("a", { x: 5 })]);
+    settleFrames(world);
+
+    expect(ringOf(world, "a")).toBe(ring);
+    expect(arcOf(world, "a")).toEqual({ sweep: DRAWN, alpha: 1 });
+    expect(world.api.ecs.get(ring, Transform)?.x).toBe(5);
+    expect(corrected(world)).toBe(false);
+  });
+});
+
+describe("projection initialOnly — a mute made inside the spawn", () => {
+  // Bug: the birth puts the shared table over the one a listener's mute wrote inside the spawn,
+  // so the projection writes the listener's field again (the flash of a `Frames` texture), and the
+  // merge that fixes it writes into the table every view shares, or leaves the release nothing.
+  it("keeps a mute of the same component next to the field, on that view only, until released", () => {
+    const world = createMockWorld();
+    const timers = [timer("a"), timer("b", { sweep: 0.5 })];
+    const releases: Array<() => void> = [];
+
+    // Only the ring born with a full arc is muted: "a".
+    world.api.ecs.onAdded(Arc, (entity, arc) => {
+      if (arc.sweep === 1) releases.push(world.api.projection.mute(entity, Arc, ["alpha"]));
+    });
+    mountMarks(world, timers, marks());
+
+    for (const id of ["a", "b"])
+      world.api.ecs.set(ringOf(world, id), Arc, { sweep: DRAWN, alpha: 0.3 });
+
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")).toEqual({ sweep: DRAWN, alpha: 0.3 });
+    expect(arcOf(world, "b")).toEqual({ sweep: DRAWN, alpha: 1 });
+
+    for (const release of releases) release();
+    world.api.ecs.set(ringOf(world, "a"), Arc, { sweep: DRAWN, alpha: 0.3 });
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")).toEqual({ sweep: DRAWN, alpha: 1 });
+  });
+
+  // Bug: the merge keeps only the components the seed names, or only the ones the mute wrote.
+  it("keeps a mute of another component next to the field, until released", () => {
+    const world = createMockWorld();
+    const timers = [timer("a")];
+    const releases = muteInSpawn(world, Transform, ["x"]);
+
+    mountMarks(world, timers, marks());
+    world.api.ecs.set(ringOf(world, "a"), Arc, { sweep: DRAWN });
+    world.api.ecs.set(ringOf(world, "a"), Transform, { x: 7 });
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")?.sweep).toBe(DRAWN);
+    expect(world.api.ecs.get(ringOf(world, "a"), Transform)?.x).toBe(7);
+
+    for (const release of releases) release();
+    world.api.ecs.set(ringOf(world, "a"), Transform, { x: 7 });
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")?.sweep).toBe(DRAWN);
+    expect(world.api.ecs.get(ringOf(world, "a"), Transform)?.x).toBe(0);
+  });
+
+  // Bug: a mute made before the view was known asks for the fields to keep at that moment, finds
+  // none, and its release drops the initialOnly field it also named.
+  it("keeps the field when a mute made inside the spawn named it and is released", () => {
+    const world = createMockWorld();
+    const timers = [timer("a")];
+    const releases = muteInSpawn(world, Arc, ["sweep"]);
+
+    mountMarks(world, timers, marks());
+
+    for (const release of releases) release();
+    world.api.ecs.set(ringOf(world, "a"), Arc, { sweep: DRAWN });
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")?.sweep).toBe(DRAWN);
   });
 });
 
@@ -317,5 +462,78 @@ describe("projection initialOnly — the spec", () => {
     commitTimers(world, timers, "restore");
 
     expect(arcOf(world, "a")?.sweep).toBe(1);
+  });
+
+  // Bug: a hot swap skips a view a `mute()` gave a table of its own, so it keeps the fields of
+  // the old spec and never gets the new ones, or loses the mute.
+  it("hands a view with a mute of its own the fields of a replaced spec, and keeps the mute", () => {
+    const world = createMockWorld();
+    const timers = [timer("a")];
+
+    mountMarks(world, timers, marks(undefined, false));
+
+    const ring = ringOf(world, "a");
+    const drawSweepAndX = (): void => {
+      world.api.ecs.set(ring, Arc, { sweep: DRAWN });
+      world.api.ecs.set(ring, Transform, { x: 7 });
+    };
+
+    world.api.projection.mute(ring, Transform, ["x"]);
+    world.api.projection.replace(marks());
+    world.frame(16);
+    drawSweepAndX();
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")?.sweep).toBe(DRAWN);
+    expect(world.api.ecs.get(ring, Transform)?.x).toBe(7);
+
+    world.api.projection.replace(marks(undefined, false));
+    world.frame(16);
+    drawSweepAndX();
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")?.sweep).toBe(1);
+    expect(world.api.ecs.get(ring, Transform)?.x).toBe(7);
+  });
+
+  // Bug: a hot swap to a spec without the option leaves its field muted for the whole life of a
+  // view whose mute was released, and leaves the empty table behind.
+  it("hands a view whose mute was released back to a replaced spec without the option", () => {
+    const world = createMockWorld();
+    const timers = [timer("a")];
+
+    mountMarks(world, timers, marks());
+
+    const ring = ringOf(world, "a");
+
+    world.api.projection.mute(ring, Transform, ["x"])();
+    world.api.projection.replace(marks(undefined, false));
+    world.frame(16);
+    world.api.ecs.set(ring, Arc, { sweep: DRAWN });
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")?.sweep).toBe(1);
+    expect(world.ctx.state.projection.mutes.size).toBe(0);
+  });
+
+  // Bug: a hot swap adds a field to the set of a mute, but the driver keeps the set it joined with
+  // the type's owned fields before, so the projection writes the new field.
+  it("joins a field a replaced spec adds to a mute's set with the type's owned fields", () => {
+    const world = createMockWorld();
+    const timers = [timer("a")];
+
+    mountMarks(world, timers, labels(false));
+
+    const label = ringOf(world, "a");
+
+    world.api.projection.mute(label, Label, ["y"]);
+    // The restore asks for the muted fields of the label: the driver joins them now.
+    commitTimers(world, timers, "restore");
+    world.api.projection.replace(labels(true));
+    world.frame(16);
+    world.api.ecs.set(label, Label, { x: 7, y: 3 });
+    commitTimers(world, timers, "restore");
+
+    expect(world.api.ecs.get(label, Label)).toEqual({ x: 7, y: 3, shown: 0 });
   });
 });

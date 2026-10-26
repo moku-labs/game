@@ -2,7 +2,9 @@
  * @file world/projection — the mute tables: the fields another writer owns on one entity. `mute()`
  * hands fields over for a while. A projection's `initialOnly` hands them over for the whole life of
  * each of its views: one frozen table, built when the spec is registered, is shared by every view,
- * so a birth makes no set and the driver's ask on every frame finds the fields as for a mute.
+ * so a birth makes no set and the driver's ask on every frame finds the fields as for a mute. A
+ * view a listener of its spawn muted already (`anim` in its `onAdded(Frames)`) keeps that table,
+ * and the seed joins it in place, so the remover of that mute still finds what it wrote.
  */
 import type { Entity } from "../ecs/types";
 import { forgetJoined } from "./driver";
@@ -97,7 +99,8 @@ function dropEmptyMute(
 
 /**
  * Hands fields of one component of one entity to another writer, until the remover runs. A view
- * born with an `initialOnly` seed gets its own copy first, and the remover keeps the seed fields.
+ * born with an `initialOnly` seed gets its own copy first. The remover keeps the seed fields, asked
+ * when it runs: a mute made inside the spawn came before the view was known.
  *
  * @param state - The projection branch of the plugin state.
  * @param entity - The entity.
@@ -113,8 +116,6 @@ export function muteFields(
 ): () => void {
   const table = ownTable(state.mutes.get(entity));
   const owned = ownFields(table.get(name));
-  // The projection's own fields stay muted when this mute is released.
-  const kept = initialFieldsOf(state, entity, name);
 
   for (const field of fields) owned.add(field);
   forgetJoined(state, owned);
@@ -127,6 +128,9 @@ export function muteFields(
     if (released) return;
 
     released = true;
+
+    // The projection's own fields stay muted when this mute is released.
+    const kept = initialFieldsOf(state, entity, name);
 
     for (const field of fields) {
       if (kept?.has(field) !== true) owned.delete(field);
@@ -191,8 +195,40 @@ export function learnSeed(state: ProjectionState, spec: AnyProjectionSpec): Mute
 }
 
 /**
+ * Joins a seed into a table of the entity's own, in place, so the remover of every mute that wrote
+ * the table still holds its table and its sets: a component the table lacks gets the shared set
+ * of the seed, the set a mute wrote gets the fields of the seed.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param table - The entity's own table.
+ * @param seed - The seed to join.
+ */
+function joinSeed(
+  state: ProjectionState,
+  table: Map<string, ReadonlySet<string>>,
+  seed: MuteTable
+): void {
+  for (const [name, fields] of seed) {
+    const stored = table.get(name);
+
+    if (stored === undefined) {
+      table.set(name, fields);
+
+      continue;
+    }
+
+    const owned = ownFields(stored);
+
+    for (const field of fields) owned.add(field);
+    forgetJoined(state, owned);
+    table.set(name, owned);
+  }
+}
+
+/**
  * Gives a view that was just born the seed of its projection, so from now on nothing of the
- * projection writes or compares those fields. The birth itself wrote them from `view`.
+ * projection writes or compares those fields. The birth itself wrote them from `view`. A view a
+ * listener of its spawn muted already keeps its table, and the seed joins it.
  *
  * @param state - The projection branch of the plugin state.
  * @param spec - The projection spec.
@@ -203,13 +239,57 @@ export function seedMutes(state: ProjectionState, spec: AnyProjectionSpec, entit
 
   const seed = state.initialOnly.get(spec);
 
-  if (seed !== undefined) state.mutes.set(entity, seed);
+  if (seed === undefined) return;
+
+  const stored = state.mutes.get(entity);
+
+  if (stored === undefined) {
+    state.mutes.set(entity, seed);
+
+    return;
+  }
+
+  const table = ownTable(stored);
+
+  joinSeed(state, table, seed);
+  state.mutes.set(entity, table);
+}
+
+/**
+ * Moves a view with a table of its own from one seed to the next: a set of the old seed goes, the
+ * new seed joins. A set a mute wrote keeps every field it holds, an old seed's field it copied too,
+ * since the table does not say which mute named it. A table left empty goes.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param entity - The entity of the view.
+ * @param stored - The table the view has now, if any.
+ * @param from - The seed of the old spec, if any.
+ * @param to - The seed of the new spec, if any.
+ */
+function reseedOwn(
+  state: ProjectionState,
+  entity: Entity,
+  stored: MuteTable | undefined,
+  from: MuteTable | undefined,
+  to: MuteTable | undefined
+): void {
+  const table = ownTable(stored);
+
+  for (const [name, fields] of from ?? []) {
+    if (table.get(name) === fields) table.delete(name);
+  }
+
+  if (to !== undefined) joinSeed(state, table, to);
+
+  if (table.size === 0) state.mutes.delete(entity);
+  else state.mutes.set(entity, table);
 }
 
 /**
  * Moves the views of a replaced projection from the seed of the old spec to the seed of the new
- * one: a view that holds the old seed, or none when the old spec had none. A view a `mute()` gave
- * its own table keeps that table.
+ * one. A view that holds the old seed, or none when the old spec had none, takes the new seed. A
+ * view a `mute()` gave its own table keeps it: the sets of the old seed in it go, the new seed
+ * joins it.
  *
  * @param state - The projection branch of the plugin state.
  * @param name - The projection name.
@@ -225,9 +305,12 @@ export function reseedViews(
   if (from === to) return;
 
   for (const view of state.byEntity.values()) {
-    if (view.projection !== name || state.mutes.get(view.entity) !== from) continue;
+    if (view.projection !== name) continue;
 
-    if (to === undefined) state.mutes.delete(view.entity);
+    const stored = state.mutes.get(view.entity);
+
+    if (stored !== from) reseedOwn(state, view.entity, stored, from, to);
+    else if (to === undefined) state.mutes.delete(view.entity);
     else state.mutes.set(view.entity, to);
   }
 }
