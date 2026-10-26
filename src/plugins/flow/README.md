@@ -195,8 +195,10 @@ names the edge and the target:
 ```
 
 **Edges without a rest node.** The runner counts the edges it takes since it last arrived at a rest
-node. The cap is four per node of the whole graph (every flow, contributions included), never
-fewer than 64. The edge that would go past it fails its node:
+node. The cap is `max(64, 4 × n)`, where `n` counts the nodes of the expanded graph from the main
+flow: a node is one, a sub-flow counts its own nodes once per entry that uses it, and a slot counts
+one for its own edge plus the nodes of all its contributions. A flow that leads back into itself
+counts one where it does. The edge that would go past the cap fails its node:
 
 ```text
 [game] 64 edges without a rest node, at "sub/quick".
@@ -207,7 +209,8 @@ The static check of `run()` refuses a cycle of transit nodes, but it cannot see 
 through a sub-flow that rests only on another branch, or through a slot, which never rests. Such a
 loop would freeze the game; with the cap it is a failure the safe node recovers from. The count
 starts again at every rest node, at a rollback, at a restore and at `run()`. A legal graph comes to
-rest long before the cap.
+rest long before the cap. If the safe node's own path leads back into the loop, each pass fails
+again: a stream of `flow:error`, not a hang.
 
 **`recover`.** When the graph goes to `safeNode`, the state is the one of the rest point that
 failed. Without `recover` the safe node opens its gate on that state. A rest node brings `recover`

@@ -3392,3 +3392,178 @@ describe("edges without a rest node", () => {
     await stopRunner(harness.ctx);
   });
 });
+
+describe("named outcomes across levels", () => {
+  // Bug: a leave stops at the inner slot, or the outer slot treats the inner slot's exit as done.
+  it("leaves two slots on one declared outcome: the inner slot's edge exits into the outer slot", async () => {
+    const ran: string[] = [];
+    const outerFlow = flow(
+      "outerFlow",
+      { inner: declaredSlot("inner", ["shop"]) },
+      "inner",
+      {
+        inner: { done: { kind: "exit", outcome: "done" }, shop: { kind: "exit", outcome: "shop" } }
+      },
+      ["done", "shop"]
+    );
+    const harness = setup({
+      main: shopMain(declaredSlot("outer", ["shop"])),
+      contributions: {
+        outer: [{ feature: "outerFeature", flow: outerFlow, order: 10 }],
+        inner: [{ feature: "story", flow: leaving("story", "shop", shopping, ran), order: 10 }]
+      }
+    });
+
+    harness.start();
+    await tick();
+
+    expect(edgesOfJournal(harness)).toEqual([
+      { path: "episode/inner/work", outcome: "shop", payload: shopping, next: "episode/inner" },
+      { path: "episode/inner", outcome: "shop", payload: shopping, next: "episode" },
+      { path: "episode", outcome: "shop", payload: shopping, next: "shopSheet" }
+    ]);
+    expect(harness.ctx.state.runner.stack).toEqual([
+      { flow: "main", node: "shopSheet", input: shopping }
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a restore into a contribution loses the slot it stands in, and its named exit goes nowhere.
+  it("leaves the slot on a declared outcome after a restore into its contribution", async () => {
+    const story = flow(
+      "story",
+      { show: node({ rest: true, outcomes: ["next", "shop"] }) },
+      "show",
+      {
+        show: { next: { kind: "exit", outcome: "done" }, shop: { kind: "exit", outcome: "shop" } }
+      },
+      ["done", "shop"]
+    );
+    const main = flow(
+      "main",
+      {
+        home: waiting("play"),
+        episode: declaredSlot("episodeStep", ["shop"]),
+        shopSheet: waiting("close")
+      },
+      "home",
+      {
+        home: { play: "episode" },
+        episode: { done: "home", shop: "shopSheet" },
+        shopSheet: { close: "home" }
+      }
+    );
+    const harness = setup({
+      main,
+      contributions: { episodeStep: [{ feature: "storyFeature", flow: story, order: 10 }] }
+    });
+
+    harness.start();
+    await tick();
+    await restorePosition(harness.ctx, harness.modules, bookmarkAt("episode/show"));
+    await tick();
+    harness.gate.reply({ intent: "shop", payload: shopping });
+    await tick();
+
+    expect(edgesOfJournal(harness)).toEqual([
+      { path: "episode/show", outcome: "shop", payload: shopping, next: "episode" },
+      { path: "episode", outcome: "shop", payload: shopping, next: "shopSheet" }
+    ]);
+    expect(harness.ctx.state.runner.stack).toEqual([
+      { flow: "main", node: "shopSheet", input: shopping }
+    ]);
+    await stopRunner(harness.ctx);
+  });
+});
+
+describe("a to() mapper that throws a value that is no error", () => {
+  // Bug: the message reads "undefined" or "[object Object]" for a thrown string, and names nothing.
+  it("names the thrown value by its text", async () => {
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, checkpoint: true, outcomes: ["play"] }),
+        load: node({ outcomes: ["failed"], run: () => result("failed") }),
+        retry: waiting("again")
+      },
+      "home",
+      {
+        home: { play: "load" },
+        load: {
+          failed: {
+            kind: "map",
+            target: "retry",
+            map: () => {
+              // A game may throw a string; the runner must still name it.
+              throw "tab gone";
+            }
+          }
+        },
+        retry: { again: "home" }
+      }
+    );
+    const harness = setup({ main, config: { safeNode: "home", retries: 0 } });
+
+    harness.start();
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await tick();
+
+    expect(payloadsOf(harness.emitted, "flow:error")[0]?.error).toMatchObject({
+      message:
+        '[game] The mapper of edge "load.failed" threw: tab gone.\n  Return plain JSON from to("retry", ...).'
+    });
+    await stopRunner(harness.ctx);
+  });
+});
+
+describe("the cap of edges without a rest node, counted on the expanded graph", () => {
+  // Bug: the cap counts a sub-flow once, but the loop takes its edges on every pass: a legal chain
+  // that enters one eight-node loader sixteen times fails at edge 101.
+  it("lets a chain pass that enters one sub-flow sixteen times", async () => {
+    const leave: Target = { kind: "exit", outcome: "done" };
+    const loader = flow(
+      "loader",
+      Object.fromEntries(
+        Array.from({ length: 8 }, (_, index) => [`l${index}`, node({ run: () => result("done") })])
+      ),
+      "l0",
+      Object.fromEntries(
+        Array.from({ length: 8 }, (_, index) => [
+          `l${index}`,
+          { done: index === 7 ? leave : `l${index + 1}` }
+        ])
+      ),
+      ["done"]
+    );
+    const steps = Object.fromEntries(
+      Array.from({ length: 16 }, (_, index) => [`s${index}`, loader])
+    );
+    const stepEdges = Object.fromEntries(
+      Array.from({ length: 16 }, (_, index) => [
+        `s${index}`,
+        { done: index === 15 ? "home" : `s${index + 1}` }
+      ])
+    );
+    const main = flow("main", { home: waiting("play"), ...steps }, "home", {
+      home: { play: "s0" },
+      ...stepEdges
+    });
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await until(
+      () =>
+        harness.ctx.state.runner.journalIndex >= 129 ||
+        payloadsOf(harness.emitted, "flow:error").length > 0
+    );
+
+    // One edge out of home, eight per pass, sixteen passes; the cap is 4 × (1 + 16 × 8).
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
+    expect(harness.ctx.state.runner.journalIndex).toBe(129);
+    expect(harness.ctx.state.runner.restlessCap).toBe(516);
+    await stopRunner(harness.ctx);
+  });
+});

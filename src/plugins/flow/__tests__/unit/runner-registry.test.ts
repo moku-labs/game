@@ -7,7 +7,8 @@ import {
   describeGraph,
   findNode,
   framePath,
-  graphHash
+  graphHash,
+  restlessCapOf
 } from "../../runner/registry";
 import type {
   AnyFlow,
@@ -431,5 +432,38 @@ describe("graphHash", () => {
 
   it("returns a short hexadecimal string", () => {
     expect(graphHash({ main: "main", flows: {}, slots: {} })).toMatch(/^[\da-f]+$/);
+  });
+});
+
+/** A flow of `count` transit nodes, read for its size only. */
+const sized = (id: string, count: number, extra: Record<string, FlowEntry> = {}): AnyFlow =>
+  flow(
+    id,
+    {
+      ...Object.fromEntries(Array.from({ length: count }, (_, index) => [`n${index}`, node()])),
+      ...extra
+    },
+    "n0",
+    {}
+  );
+
+describe("restlessCapOf", () => {
+  // Bug: a slot counts as one node, and a contribution with a long transit chain fails at the floor.
+  it("counts the contributions of a slot where the slot is used", () => {
+    const long = sized("long", 20);
+    const main = flow("main", { home, afterWin }, "home", {});
+
+    // home 1, the slot's own edge 1, its contribution 20: 4 × 22.
+    expect(restlessCapOf(main, name => (name === "afterWin" ? [{ flow: long }] : []))).toBe(88);
+  });
+
+  // Bug: a contribution that holds its own slot sends the count round forever: run() overflows.
+  it("counts a flow that leads back into itself once, and ends", () => {
+    const again = slotNode("again");
+    const looping = sized("looping", 20, { again });
+    const main = flow("main", { home, again }, "home", {});
+
+    // looping: 20 + the slot 1 + looping again, already being counted, 1 = 22. main: 1 + 1 + 22.
+    expect(restlessCapOf(main, () => [{ flow: looping }])).toBe(96);
   });
 });

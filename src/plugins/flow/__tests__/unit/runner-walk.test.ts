@@ -762,3 +762,67 @@ describe("reachGateOrRest", () => {
     expect(watch.seam.gateOpen).toEqual([]);
   });
 });
+
+describe("walkRoute through a slot that declares outcomes", () => {
+  // Bug: a walk loses the named exit: the route stalls at the slot, or the next contribution runs.
+  it("walks across a named exit of a slot and back into its first contribution", async () => {
+    const episode: FlowEntry = {
+      kind: "slot",
+      name: "episodeStep",
+      input: tag,
+      outcomes: { done: tag, ...tags(["shop"]) }
+    };
+    const story = flow(
+      "story",
+      { show: waiting("next", "shop") },
+      "show",
+      {
+        show: { next: { kind: "exit", outcome: "done" }, shop: { kind: "exit", outcome: "shop" } }
+      },
+      ["done", "shop"]
+    );
+    const quest = flow(
+      "quest",
+      { ask: waiting("ok") },
+      "ask",
+      { ask: { ok: { kind: "exit", outcome: "done" } } },
+      ["done"]
+    );
+    const main = flow(
+      "main",
+      { home: waiting("play"), episode, shopSheet: waiting("back") },
+      "home",
+      {
+        home: { play: "episode" },
+        episode: { done: "home", shop: "shopSheet" },
+        shopSheet: { back: "episode" }
+      }
+    );
+    const harness = setup(main);
+
+    harness.modules.features.register("storyFeature", {
+      contribute: { episodeStep: { flow: story, order: 10 } }
+    });
+    harness.modules.features.register("questFeature", {
+      contribute: { episodeStep: { flow: quest, order: 20, when: () => true } }
+    });
+    harness.start();
+
+    const state = await walkRoute(harness.ctx, harness.modules, [
+      { at: "home", intent: "play" },
+      { at: "episode/show", intent: "shop", payload: { tab: "gems" } },
+      { at: "shopSheet", intent: "back" }
+    ]);
+
+    expect(state.path).toBe("episode/show");
+    expect(
+      harness.ctx.state.runner.journal.map(entry => [entry.path, entry.outcome, entry.payload])
+    ).toEqual([
+      ["home", "play", noPayload],
+      ["episode/show", "shop", { tab: "gems" }],
+      ["episode", "shop", { tab: "gems" }],
+      ["shopSheet", "back", noPayload]
+    ]);
+    await stopRunner(harness.ctx);
+  });
+});

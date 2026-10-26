@@ -337,7 +337,7 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
 
   state.flows = collectGraph(ctx, modules.features);
   checkGraph(ctx, modules.features);
-  state.restlessCap = restlessCapOf(state.flows);
+  state.restlessCap = restlessCapOf(main, modules.features.contributions);
   modules.features.seal();
 
   await ctx.deps.model.store.load();

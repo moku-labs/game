@@ -2,7 +2,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import type { Flow } from "../../../../index";
 import { contribution, defineFeature, exit, slot, to, type } from "../../../../index";
 import { defineFlow, defineNode } from "../../runner/define";
-import type { SlotNode, TypeTag } from "../../runner/types";
+import type { Fits, GraphError, SlotNode, TypeTag } from "../../runner/types";
 
 // What a game can get wrong with the named outcomes of a slot. Each `@ts-expect-error` fails the
 // build in both directions: the mistake must error, and a correct line under one would be an
@@ -167,6 +167,13 @@ describe("slot outcomes", () => {
     >();
     contribution(episodeStep, { flow: doneFlow, order: 20, when: () => true });
     contribution(episodeStep, { flow: plainFlow, order: 30 });
+  });
+
+  it("reads Fits as unknown for a fitting flow and as the sentence for a misfit", () => {
+    expectTypeOf<Fits<typeof storyFlow, typeof episodeStep>>().toEqualTypeOf<unknown>();
+    expectTypeOf<Fits<typeof giftFlow, typeof episodeStep>>().toEqualTypeOf<
+      GraphError<'Slot "episodeStep" declares no outcome "gift".'>
+    >();
   });
 
   it("lets a slot that declares no outcome take any flow", () => {

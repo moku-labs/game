@@ -189,7 +189,7 @@ export function to<const TargetName extends string, Payload, Output>(
  * and with none left the slot takes its `done` edge. A contribution that exits a declared outcome
  * leaves the slot at once with its payload: the later contributions do not run, and the slot takes
  * its own edge of that outcome, journalled like `done`. The next entry of the slot starts again at
- * its first contribution. Without `outcomes` the slot is the same plain data as before.
+ * its first contribution. Without `outcomes` the slot declares only `done`.
  *
  * @param name - Slot name features contribute to.
  * @param outcomes - The named outcomes besides `done`, with the type tag of each payload.
@@ -233,12 +233,12 @@ export function slot(name: string, outcomes?: OutcomeTags): SlotNode<OutcomeTags
  * whose payload fits; a slot that declares none accepts any flow. A raw `contribute` entry stays
  * valid and is checked by name at `run()` only.
  *
- * @param slot - The slot node the flow runs in, as `slot()` returned it.
+ * @param host - The slot node the flow runs in, as `slot()` returned it.
  * @param spec - The flow, its `order` among the slot's contributions and an optional `when`.
  * @param spec.flow - The contributed flow; an outcome the slot does not take is a compile error.
  * @param spec.order - Place among the contributions of the slot, lowest first.
  * @param spec.when - Skips the contribution while it returns false, read on the committed state.
- * @returns `{ [slot.name]: spec }`, spread into `contribute`; no `when` key when none was given.
+ * @returns `{ [host.name]: spec }`, spread into `contribute`; no `when` key when none was given.
  * @example
  * ```ts
  * // The story feature fills the episode step of the main flow: spread the entry into contribute.
@@ -248,25 +248,25 @@ export function slot(name: string, outcomes?: OutcomeTags): SlotNode<OutcomeTags
  * ```
  */
 export function contribution<S extends SlotNode<OutcomeTags, string>, F extends AnyFlow>(
-  slot: S,
+  host: S,
   spec: { flow: F & Fits<F, S>; order: number; when?: (snapshot: Snapshot) => boolean }
 ): Readonly<Record<S["name"], ContributionSpec>>;
 /**
  * Builds the entry. The body works on the widened shapes the runner reads: the signature above
  * has already checked the flow against the slot.
  *
- * @param slot - The slot node the flow runs in.
+ * @param host - The slot node the flow runs in.
  * @param spec - The flow, its `order` and an optional `when`.
  * @returns The entry under the slot's name.
  */
 export function contribution(
-  slot: SlotNode,
+  host: SlotNode,
   spec: ContributionSpec
 ): Readonly<Record<string, ContributionSpec>> {
   const { flow, order, when } = spec;
 
   // `exactOptionalPropertyTypes`: the key is absent, never present with `undefined`.
-  return { [slot.name]: when === undefined ? { flow, order } : { flow, order, when } };
+  return { [host.name]: when === undefined ? { flow, order } : { flow, order, when } };
 }
 
 /**

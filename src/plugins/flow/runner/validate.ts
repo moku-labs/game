@@ -422,6 +422,9 @@ function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: Features
 /** One slot node of the graph: the flow that holds it and the outcomes it declares. */
 type SlotDeclaration = { flow: string; declared: readonly string[] };
 
+/** The slot nodes of one slot name, in graph order: there is always a first. */
+type SlotDeclarations = [SlotDeclaration, ...SlotDeclaration[]];
+
 /**
  * Names the outcomes of a table besides `done`: what a slot declares, or what a contributed flow
  * may leave its slot on.
@@ -459,17 +462,18 @@ function sameNames(first: readonly string[], second: readonly string[]): boolean
  * @param flows - Every collected flow by id.
  * @returns Slot name to its slot nodes, at least one each.
  */
-function slotDeclarations(flows: ReadonlyMap<string, AnyFlow>): Map<string, SlotDeclaration[]> {
-  const declarations = new Map<string, SlotDeclaration[]>();
+function slotDeclarations(flows: ReadonlyMap<string, AnyFlow>): Map<string, SlotDeclarations> {
+  const declarations = new Map<string, SlotDeclarations>();
 
   for (const flow of flows.values()) {
     for (const entry of Object.values(flow.nodes)) {
       if (entry.kind !== "slot") continue;
 
-      const list = declarations.get(entry.name) ?? [];
+      const declaration = { flow: flow.id, declared: declaredOutcomes(entry.outcomes) };
+      const list = declarations.get(entry.name);
 
-      list.push({ flow: flow.id, declared: declaredOutcomes(entry.outcomes) });
-      declarations.set(entry.name, list);
+      if (list === undefined) declarations.set(entry.name, [declaration]);
+      else list.push(declaration);
     }
   }
 
@@ -518,8 +522,6 @@ function slotOutcomeProblems(flows: ReadonlyMap<string, AnyFlow>, features: Feat
   const problems: string[] = [];
 
   for (const [slotName, [first, ...others]] of slotDeclarations(flows)) {
-    if (first === undefined) continue;
-
     for (const other of others) {
       if (sameNames(first.declared, other.declared)) continue;
 
@@ -595,8 +597,6 @@ function slotOutcomeWarnings(flows: ReadonlyMap<string, AnyFlow>, features: Feat
   const warnings: string[] = [];
 
   for (const [slotName, [first]] of slotDeclarations(flows)) {
-    if (first === undefined) continue;
-
     const contributions = features.contributions(slotName);
 
     warnings.push(

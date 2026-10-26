@@ -591,8 +591,16 @@ type MisfitOutcomes<Contributed extends AnyFlow, Host extends SlotNode<OutcomeTa
 /**
  * Checking type of `contribution()`: whether the flow `Contributed` fits the slot `Host`. Every
  * outcome of the flow is `done`, or an outcome the slot declares whose payload fits; then it is
- * `unknown`, otherwise the `GraphError` sentence of the first misfit. A slot that declares no
- * outcome accepts any flow, and a flow without outcomes fits any slot.
+ * `unknown`, otherwise the `GraphError` sentence of the misfit. A slot that declares no outcome
+ * accepts any flow, and a flow without outcomes fits any slot.
+ *
+ * @example
+ * ```ts
+ * // episodeStep = slot("episodeStep", { shop: type<{ tab: string }>() })
+ * type Fitting = Fits<typeof storyFlow, typeof episodeStep>; // unknown: outcomes done and shop
+ * type Misfit = Fits<typeof giftFlow, typeof episodeStep>; // giftFlow exits "gift":
+ * // GraphError<'Slot "episodeStep" declares no outcome "gift".'>
+ * ```
  */
 export type Fits<Contributed extends AnyFlow, Host extends SlotNode<OutcomeTags, string>> = [
   Exclude<keyof Host["outcomes"], "done">
@@ -987,7 +995,7 @@ export type RunnerState = {
   slotLeave: { outcome: string; payload: Json } | undefined;
   /** Edges committed since the loop last arrived at a rest node. */
   restless: number;
-  /** Edges without a rest node after which the next one fails: `max(64, 4 × node count)`. */
+  /** Edges without a rest node after which the next one fails: `max(64, 4 × expanded nodes)`. */
   restlessCap: number;
   /** Edges since the last checkpoint. */
   journal: JournalEntry[];
