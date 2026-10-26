@@ -130,6 +130,7 @@ function exposeSync(sync: SyncModule): SyncApi {
     fonts: sync.fonts,
     debug: sync.debug,
     filters: sync.filters,
+    leave: sync.leave,
     renderPasses: sync.renderPasses,
     loopsHeld: sync.loopsHeld,
     displayOf: sync.displayOf

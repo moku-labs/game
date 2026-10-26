@@ -37,6 +37,7 @@ import { clearHidden, setHidden, writeRenderable } from "./hidden";
 import { makeHollow } from "./hollow";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
+import { stopLeave } from "./leave";
 import { bordersInto, drawOutline, type OutlineShape, type SliceBorders } from "./outline";
 import { noteLeaving } from "./overlay-range";
 import { stopOverlays } from "./overlay-state";
@@ -1697,8 +1698,10 @@ export function stopSync(state: SyncState): void {
   state.redraws = 0;
   state.overdraw.listeners.length = 0;
 
-  // The tree last: the layers, the pooled objects and the root with what still hangs in it.
+  // The tree last: the layers, the picture of a scene being left, the pooled objects and the root with what still hangs
+  // in it.
   clearLayers(state);
+  stopLeave(state);
   destroyPools(state);
   state.root?.destroy({ children: true });
   state.root = undefined;

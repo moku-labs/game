@@ -176,7 +176,12 @@ async function open(options: { rows?: number; stepMs?: number } = {}): Promise<R
     referenceSide: 390,
     referenceLong: 844,
     features: [asideFeature],
-    pluginConfigs: { log: { mode: "test" }, flow: { holdMs: 0 }, scenes: { buildMs: 1 } }
+    // `leave: false`: the stage of the build frames is compared with the ward's, with no veil over it (spec 33 A2).
+    pluginConfigs: {
+      log: { mode: "test" },
+      flow: { holdMs: 0 },
+      scenes: { buildMs: 1, leave: false }
+    }
   }).screen({ manifest: MANIFEST, renderer: page.renderer, clock });
 
   await app.start();

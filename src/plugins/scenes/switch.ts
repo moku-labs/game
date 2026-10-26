@@ -6,12 +6,15 @@
  * frame that shows the new scene uploads nothing. On a Galaxy A26 the first switch to a board
  * took one frame of 284 ms with 8 uploads in it (F61). Then a live switch with a drawing renderer
  * builds the scene aside and swaps it in one frame (`build.ts`); a fast walk and a headless app
- * touch the world in one synchronous block (`swap.ts`). At a node of the mounted scene it
- * re-reads what the scene names and awaits a bundle that is new, without mounting again.
+ * touch the world in one synchronous block (`swap.ts`). From its start to the swap, a live switch
+ * with a drawing renderer shows a veil and a loader over the scene being left (`leave.ts`). At a
+ * node of the mounted scene it re-reads what the scene names and awaits a bundle that is new,
+ * without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
 import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
+import { endLeave, startLeave } from "./leave";
 import { swapIn } from "./swap";
 import type { RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
@@ -260,11 +263,44 @@ async function standUp(
 }
 
 /**
- * Switches to another scene: it reads what the scene names from the committed state, awaits all
- * of it and only then builds the scene. In live mode it waits between the two for the textures of
- * those bundles to reach the GPU; a fast walk does not, so tests and restores keep their pace. An
- * aborted node, or a plugin stopped during the wait, returns without touching anything. A live
- * switch with a drawing renderer resolves at the commit of the scene built aside, frames later.
+ * Awaits every bundle the scene names and only then builds the scene. In live mode it waits between
+ * the two for the textures of those bundles to reach the GPU; a fast walk does not, so tests and
+ * restores keep their pace. An aborted node, or a plugin stopped during the wait, returns without
+ * touching anything. A live switch with a drawing renderer resolves at the commit of the scene
+ * built aside, frames later.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param scene - The scene to mount.
+ * @param named - The bundles it names, read from the committed state.
+ * @param run - The runner's mode and signal.
+ * @returns A promise that resolves once the scene stands, or the node was aborted.
+ * @throws {Error} Whatever a load, the mount or the build threw.
+ */
+async function loadAndStand(
+  ctx: ScenesCtx,
+  scene: SceneDefinition,
+  named: readonly string[],
+  run: RunContext
+): Promise<void> {
+  await untilAborted(ctx, named, run.signal);
+
+  const warmsFirst = run.mode === "live" && !run.signal.aborted;
+
+  if (warmsFirst) await untilWarmed(ctx, named, run.signal);
+
+  // A stop answers a waiting upload instead of rejecting it; `stopScenes` clears `teardown`.
+  const stopped = ctx.state.teardown === undefined;
+
+  if (run.signal.aborted || stopped) return;
+
+  await standUp(ctx, scene, named, run);
+}
+
+/**
+ * Switches to another scene: it reads what the scene names from the committed state, shows the
+ * veil and the loader of the scene being left at once (a cold first visit reacts in the next
+ * frame), then awaits the bundles and builds the scene (`loadAndStand`). The look lands when the
+ * scene stands, and is dropped when the switch ends without it or throws.
  *
  * @param ctx - Domain context of the plugin.
  * @param target - Id of the scene to mount.
@@ -282,19 +318,17 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
   }
 
   const named = namedBundles(scene, committedState(ctx));
+  const leaving = startLeave(ctx, scene, run);
 
-  await untilAborted(ctx, named, run.signal);
+  try {
+    await loadAndStand(ctx, scene, named, run);
+  } catch (error) {
+    endLeave(ctx, leaving, "drop");
 
-  const warmsFirst = run.mode === "live" && !run.signal.aborted;
+    throw error;
+  }
 
-  if (warmsFirst) await untilWarmed(ctx, named, run.signal);
-
-  // A stop answers a waiting upload instead of rejecting it; `stopScenes` clears `teardown`.
-  const stopped = ctx.state.teardown === undefined;
-
-  if (run.signal.aborted || stopped) return;
-
-  await standUp(ctx, scene, named, run);
+  endLeave(ctx, leaving, ctx.state.current === scene.id ? "land" : "drop");
 }
 
 /**

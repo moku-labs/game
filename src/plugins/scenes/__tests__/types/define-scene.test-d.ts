@@ -91,6 +91,25 @@ defineGameScene("home", {
 // The loose export stays wide, so a plugin that does not know the game still compiles.
 defineScene("board", { bundle: "anything", layers: { cells: {} }, projections: [], music: "any" });
 
+// ─── leave: the loader's texture is an asset key of the game ──
+
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  leave: { cover: { color: 0x0b_10_20, alpha: 0.6 }, loader: { texture: "board.cell" } }
+});
+
+defineGameScene("home", { bundle: "home", layers: {}, projections: [], leave: false });
+
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  // @ts-expect-error — "board.cel" is not an asset key of this game.
+  leave: { loader: { texture: "board.cel" } }
+});
+
 // ─── music is narrowed to the audio keys of the game ──────────
 
 /** What the scanner generates for the `.mp3` files of that game; the textures stay out. */

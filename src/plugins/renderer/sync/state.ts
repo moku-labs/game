@@ -118,8 +118,8 @@ function createAsideQueue(): AsideQueue {
 
 /**
  * Creates the initial sync state: no root, no layers, no view, no orphan, no pool, no provider, no filter, no
- * filter area, no slice, no hidden mask, no overlay, no warm-up, no upload, no redraw counted, no unseen walk kept and
- * no scene build.
+ * filter area, no slice, no hidden mask, no overlay, no warm-up, no upload, no redraw counted, no unseen walk kept,
+ * no scene build and no picture of a scene being left.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -175,6 +175,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     hudLayer: undefined,
     aside: createAsideQueue(),
     heldViews: { entities: [], count: 0, reported: false },
+    leave: {},
     cleanups: []
   };
 }
