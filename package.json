@@ -112,7 +112,7 @@
     "mini:visual": "bun tests/visual/run.ts",
     "sheets:visual": "bun tests/visual-sheets/run.ts",
     "filters:visual": "bun tests/visual/filter-inputs.visual.ts",
-    "validate": "publint && (attw --pack . --profile esm-only --quiet || attw --pack . --profile esm-only)",
+    "validate": "bun scripts/browser-chunks.ts && publint && (attw --pack . --profile esm-only --quiet || attw --pack . --profile esm-only)",
     "release:setup": "moku-release setup",
     "release:doctor": "moku-release doctor",
     "release": "moku-release"

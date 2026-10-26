@@ -7,7 +7,6 @@
  */
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
 import type { NineSlice } from "../../types";
 import { WEBP_ALPHA_QUALITY, WEBP_QUALITY } from "./encode";
@@ -64,6 +63,9 @@ export function sha256(bytes: Uint8Array | string): string {
  * @returns The version from its `package.json`.
  */
 function packerVersion(): string {
+  // `getBuiltinModule`, not an import of `node:module`: the bundler moves that import into the
+  // runtime chunk every browser chunk shares.
+  const { createRequire } = process.getBuiltinModule("node:module");
   const manifest = createRequire(import.meta.url)("maxrects-packer/package.json") as {
     version?: unknown;
   };
