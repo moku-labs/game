@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Contribution, FeaturesApi } from "../../features/types";
+import { slot, type } from "../../runner/define";
 import {
   collectFlows,
   describedNode,
@@ -266,6 +267,27 @@ describe("describeGraph", () => {
     expect(graph.flows.main?.nodes.board?.subFlow).toBe("board");
   });
 
+  // Bug: describe() drops what a slot declares, and the editor draws a slot with one exit.
+  it("lists the outcomes a slot declares after done", () => {
+    const main = flow(
+      "main",
+      { home, episode: slot("episodeStep", { shop: type<{ tab: string }>(), board: type() }) },
+      "home",
+      { home: { play: "episode" }, episode: { done: "home", shop: "home", board: "home" } }
+    );
+
+    expect(describeGraph(collectFlows(main, []), noFeatures).flows.main?.nodes.episode).toEqual({
+      flow: "main",
+      node: "episode",
+      rest: false,
+      over: false,
+      checkpoint: false,
+      barrier: false,
+      outcomes: ["done", "shop", "board"],
+      slot: "episodeStep"
+    });
+  });
+
   it("names the slot of a slot node", () => {
     expect(graph.flows.main?.nodes.afterWin?.slot).toBe("afterWin");
   });
@@ -391,6 +413,20 @@ describe("graphHash", () => {
     expect(graphHash(before)).not.toBe(
       graphHash(describeGraph(collectFlows(edited, []), features))
     );
+  });
+
+  // Bug: a slot that declares nothing describes differently, and every bookmark of an existing game
+  // is taken for one of a changed graph: restore falls back or refuses.
+  it("keeps the hash of a graph whose slot declares no outcome, also for one made by slot()", () => {
+    const withSlot = flow(
+      "main",
+      { home, board: boardFlow, afterWin: slot("afterWin"), result },
+      "home",
+      mainFlow.edges
+    );
+
+    expect(graphHash(describeGraph(collectFlows(mainFlow, []), features))).toBe("27135aa0");
+    expect(graphHash(describeGraph(collectFlows(withSlot, []), features))).toBe("27135aa0");
   });
 
   it("returns a short hexadecimal string", () => {

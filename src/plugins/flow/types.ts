@@ -279,6 +279,7 @@ export type Position = {
 
 export type {
   Contribution,
+  ContributionSpec,
   FeatureDescription,
   FeatureEmitter,
   FeatureFilter,

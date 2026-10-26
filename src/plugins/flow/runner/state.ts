@@ -1,6 +1,7 @@
 /**
  * @file flow/runner — state factory.
  */
+import { RESTLESS_FLOOR } from "./registry";
 import type { RunnerState } from "./types";
 
 /**
@@ -31,6 +32,9 @@ export function createRunnerState(): RunnerState {
     stack: [],
     restFrame: undefined,
     slotAfter: undefined,
+    slotLeave: undefined,
+    restless: 0,
+    restlessCap: RESTLESS_FLOOR,
     journal: [],
     journalIndex: 0,
     running: undefined,

@@ -23,7 +23,7 @@ Facts: Bun only. ESM only. `"sideEffects"` lists the root entry `./dist/index.mj
 - `@moku-labs/game/jsx-runtime` and `@moku-labs/game/jsx-dev-runtime`: what `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand.
 
 Root exports:
-- Functions: `createApp`, `createPlugin`, `defineGame`, `defineFeature`, `flattenFeatures`, `type`, `exit`, `to`, `slot`, `schedule`, `guide`, `hint`, `defineEffect`.
+- Functions: `createApp`, `createPlugin`, `defineGame`, `defineFeature`, `flattenFeatures`, `type`, `exit`, `to`, `slot`, `contribution`, `schedule`, `guide`, `hint`, `defineEffect`.
 - Class: `SaveUnreadableError`.
 - Plugin instances: `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`, `worldPlugin`, `rendererPlugin`, `inputPlugin`, `assetsPlugin`, `scenesPlugin`, `animPlugin`, `i18nPlugin`, `textPlugin`, `uiPlugin`, `audioPlugin`, `effectsPlugin`, `platformPlugin`; the list `screen` = `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`. `effects`, `audio` and `platform` are opt-in: `plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin]`, `platform` last.
 - Screen helpers from the root: `component`, `tag`, `resource`, `mut`, `system`, `projection`, `Layer`, `Order`, `Exiting`, `Tree`, `Now`, `Transform`, `Sprite`, `NineSlice`, `Shape`, `Parent`, `Display`, `Overlay`, `HudPart`, `sprite`, `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`, `Traceable`, `Touchable`, `Held`, `Hovered`, `PointerOver`, `Pressed`, `Pointer`, `Traced`, `defineBundles`, `load`, `defineScene`.
@@ -54,7 +54,7 @@ Root exports:
 - Path: node names joined by `/` through sub-flows and slots. Examples: `"home"`, `"board/awaitIntent"`, `"afterBonus/thanks"`.
 - Edge target: a node name, `exit(...)` or `to(...)`. A payload must fit the input of the target. A node without input accepts any payload.
 - Sub-flow: a flow that declares `outcomes` is used as a node of another flow. `exit("name")` leaves it with that outcome.
-- Slot: `slot("name")` is a node with the single outcome `done`. Features contribute sub-flows to it. They run in `order`. `when(snapshot)` can skip one; it always reads the committed state, also what an earlier contribution of the same slot wrote. A contribution may hold a slot of its own. The slot ends with its own `done` edge after the last contribution.
+- Slot: `slot("name")` is a node with the outcome `done`; `slot("name", { shop: type<{ tab: string }>() })` declares more outcomes (never `done`), and the flow that holds the slot gives each an edge, as for a node. Features contribute sub-flows to it. They run in `order`. `when(snapshot)` can skip one; it always reads the committed state, also what an earlier contribution of the same slot wrote. A contribution may hold a slot of its own. A contribution that exits `done` hands over to the next one, and the slot ends with its own `done` edge after the last. A contribution that exits an outcome the slot declares leaves the slot at once with its payload: the later contributions do not run, and the slot takes its own edge of that outcome (a journal entry and a `flow:edge`, like `done`). The next entry of a slot starts at its first contribution. `contribution(slot, { flow, order, when? })` builds the `contribute` entry and checks at compile time that every outcome of the flow is `done` or a declared outcome whose payload fits. `run()` refuses a contribution of a slot with declared outcomes that declares another outcome, and one slot name declared with different outcomes; it warns about named exits into a slot that declares none, and about two contributions without `when` in a slot that declares some. A slot never counts as a rest node: more than `max(64, 4 × node count)` edges without one fail the node.
 - Feature: `defineFeature(name, description)` makes an ordinary plugin that registers into `flow.features` in `onInit`. Pass it in `createApp({ plugins: [...] })`. `feature.logicOnly` is the same plugin with the V1 keys only, for headless tests. `features: [episodesKitFeature, ep01Feature, ep02Feature]` declares sub-features, each in a folder of its own inside the parent's (`features/episodes/ep01/`); `flattenFeatures([homeFeature, episodesFeature])` gives the flat plugin list, a parent before its children, depth first, and a parent's `onInit` throws when a declared sub-feature is not composed. `flow.features.all()` gives `{ name, description, parent? }` per feature.
 - Modes: `"live"` and `"fast"`. In fast mode effects answer instantly, hints are dropped and only `runInFast` handlers run. All node logic runs for real.
 
@@ -92,13 +92,22 @@ function to<const TargetName extends string, Payload, Output>(
   target: TargetName,
   map: (payload: Payload) => Output    // annotate the parameter type yourself
 ): Mapped<TargetName, Payload, Output>;
-function slot(name: string): SlotNode;
+function slot<const Name extends string, const Tags extends OutcomeTags = Record<never, never>>(
+  name: Name,
+  outcomes?: Tags                      // { shop: type<{ tab: string }>() }; declaring done throws a TypeError
+): SlotNode<Tags, Name>;               // outcomes: done, then the declared ones
+function contribution<S extends SlotNode<OutcomeTags, string>, F extends AnyFlow>(
+  slot: S,
+  spec: { flow: F; order: number; when?: (snapshot: Snapshot) => boolean }
+): Readonly<Record<S["name"], ContributionSpec>>;   // { [slot.name]: { flow, order, when? } }
+// contribute: { ...contribution(episodeStep, { flow: storyFlow, order: 10 }) }
+// compile error when storyFlow declares an outcome episodeStep does not declare, or its payload does not fit
 
 function defineFeature(name: string, description: FeatureDescription): FeaturePlugin;
 // FeatureDescription = {
 //   nodes?: readonly AnyNode[];
 //   flows?: readonly AnyFlow[];
-//   contribute?: Record<string, { flow: AnyFlow; order: number; when?: (snapshot: Snapshot) => boolean }>;
+//   contribute?: Record<string, ContributionSpec>;            // ContributionSpec = { flow: AnyFlow; order: number; when?: (snapshot: Snapshot) => boolean }
 //   features?: readonly FeaturePlugin[];                       // sub-features, composed right after this one
 //   projections?, systems?, components?, scenes?, assets?;   // V2 keys, read by world, scenes and assets
 //   systemsRun?: never;                                        // the 0.15.3 key, removed: a system runs while its query has an entity

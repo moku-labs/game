@@ -2,11 +2,13 @@
  * @file flow/runner — authoring helpers. Pure: they produce plain data. The signatures carry the
  * compile-time graph check of spike P3.
  */
-import type { Json } from "../../model/types";
+import type { Json, Snapshot } from "../../model/types";
+import type { ContributionSpec } from "../features/types";
 import type {
   AnyFlow,
   AnyTypeTag,
   Exit,
+  Fits,
   FlowDefinition,
   FlowEntry,
   FlowSpec,
@@ -182,19 +184,89 @@ export function to<const TargetName extends string, Payload, Output>(
 
 /**
  * Defines an extension point: a node whose body is "run the contributions of this slot in order".
- * Its single outcome is `done`.
+ * Its outcomes are `done` and the ones declared here; the flow that holds the slot gives each an
+ * edge. A contribution that exits `done` hands over to the next contribution whose `when` holds,
+ * and with none left the slot takes its `done` edge. A contribution that exits a declared outcome
+ * leaves the slot at once with its payload: the later contributions do not run, and the slot takes
+ * its own edge of that outcome, journalled like `done`. The next entry of the slot starts again at
+ * its first contribution. Without `outcomes` the slot is the same plain data as before.
  *
  * @param name - Slot name features contribute to.
+ * @param outcomes - The named outcomes besides `done`, with the type tag of each payload.
  * @returns The slot node as plain data.
+ * @throws {TypeError} When `outcomes` declares `done`, which is every slot's own outcome.
  * @example
  * ```ts
- * // The main flow leaves room after a finished order. Features contribute sub-flows to it.
- * nodes: { boot, home, board: boardFlow, afterOrder: slot("afterOrder") }
- * // slot("afterOrder"): { kind: "slot", name: "afterOrder", input: …, outcomes: { done: … } }
+ * // After an order a feature may send the player to the shop, on the tab it names.
+ * slot("afterOrder", { shop: type<{ tab: string }>() });
+ * // { kind: "slot", name: "afterOrder", input: { kind: "type" },
+ * //   outcomes: { done: { kind: "type" }, shop: { kind: "type" } } }
  * ```
  */
-export function slot(name: string): SlotNode {
-  return { kind: "slot", name, input: type(), outcomes: { done: type() } };
+export function slot<
+  const Name extends string,
+  const Tags extends OutcomeTags = Record<never, never>
+>(name: Name, outcomes?: Tags & { readonly done?: never }): SlotNode<Tags, Name>;
+/**
+ * Builds the slot. The body works on the widened shapes the runner reads: the signature above has
+ * already kept `done` out of the declared outcomes for a typed caller, and the check here refuses
+ * it past a cast.
+ *
+ * @param name - Slot name features contribute to.
+ * @param outcomes - The named outcomes besides `done`.
+ * @returns The slot node as plain data.
+ * @throws {TypeError} When `outcomes` declares `done`.
+ */
+export function slot(name: string, outcomes?: OutcomeTags): SlotNode<OutcomeTags> {
+  if (outcomes !== undefined && Object.hasOwn(outcomes, "done")) {
+    throw new TypeError(
+      `[game] Slot "${name}" declares the outcome "done".\n  done is every slot's own outcome; remove it from slot("${name}", ...).`
+    );
+  }
+
+  return { kind: "slot", name, input: type(), outcomes: { done: type(), ...outcomes } };
+}
+
+/**
+ * Builds one typed entry of a feature's `contribute`: the flow a slot runs, under the slot's
+ * name. The compiler checks every outcome of the flow: `done`, or an outcome the slot declares
+ * whose payload fits; a slot that declares none accepts any flow. A raw `contribute` entry stays
+ * valid and is checked by name at `run()` only.
+ *
+ * @param slot - The slot node the flow runs in, as `slot()` returned it.
+ * @param spec - The flow, its `order` among the slot's contributions and an optional `when`.
+ * @param spec.flow - The contributed flow; an outcome the slot does not take is a compile error.
+ * @param spec.order - Place among the contributions of the slot, lowest first.
+ * @param spec.when - Skips the contribution while it returns false, read on the committed state.
+ * @returns `{ [slot.name]: spec }`, spread into `contribute`; no `when` key when none was given.
+ * @example
+ * ```ts
+ * // The story feature fills the episode step of the main flow: spread the entry into contribute.
+ * contribution(episodeStep, { flow: storyFlow, order: 10 });
+ * // { episodeStep: { flow: storyFlow, order: 10 } }
+ * contribute: { ...contribution(episodeStep, { flow: storyFlow, order: 10 }) }
+ * ```
+ */
+export function contribution<S extends SlotNode<OutcomeTags, string>, F extends AnyFlow>(
+  slot: S,
+  spec: { flow: F & Fits<F, S>; order: number; when?: (snapshot: Snapshot) => boolean }
+): Readonly<Record<S["name"], ContributionSpec>>;
+/**
+ * Builds the entry. The body works on the widened shapes the runner reads: the signature above
+ * has already checked the flow against the slot.
+ *
+ * @param slot - The slot node the flow runs in.
+ * @param spec - The flow, its `order` and an optional `when`.
+ * @returns The entry under the slot's name.
+ */
+export function contribution(
+  slot: SlotNode,
+  spec: ContributionSpec
+): Readonly<Record<string, ContributionSpec>> {
+  const { flow, order, when } = spec;
+
+  // `exactOptionalPropertyTypes`: the key is absent, never present with `undefined`.
+  return { [slot.name]: when === undefined ? { flow, order } : { flow, order, when } };
 }
 
 /**

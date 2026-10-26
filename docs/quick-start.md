@@ -202,7 +202,7 @@ Every term of the graph, in full.
 | `inbox` | Outcome names of a rest node that a world event of the same type may produce. |
 | Flow | `defineFlow(id, { nodes, start, edges, input?, outcomes? })`. A flow with `outcomes` is used as a node of another flow. |
 | Edge target | A node name, `exit("outcome")` to leave a sub-flow, or `to("node", payload => input)` to adapt the payload. |
-| Slot | `slot("name")`. An extension point. Features contribute sub-flows to it with an `order`. |
+| Slot | `slot("name")`, or `slot("name", { shop: type<{ tab: string }>() })` with named outcomes besides `done`. An extension point. Features contribute sub-flows to it with an `order`; `contribution(slot, { flow, order })` checks their outcomes at compile time. A contribution that exits a declared outcome leaves the slot at once, and the flow routes it with the slot's edge of that outcome. The next entry starts at the first contribution. |
 | Feature | `defineFeature(name, { nodes?, flows?, contribute?, features? })`. An ordinary plugin that registers into `flow.features`. `feature.logicOnly` is the headless twin. `features` declares the sub-features of the feature. |
 | Effect | `await fx(descriptor)` for awaited effects, `fx.start(descriptor)` to start one now and not wait for it, `fx.emit(hint(kind, payload))` for cosmetic ones. Hints are released after the commit and dropped in fast mode. |
 | Transition | Rest node to rest node. It is a transaction. An error rolls back to the last rest point, retries, then enters `safeNode`. Every failure is an `error` entry `flow:error` in the log. |

@@ -67,6 +67,32 @@ export function collectFlows(main: AnyFlow, extra: readonly AnyFlow[]): Map<stri
   return flows;
 }
 
+/** Edges without a rest node the runner allows in any graph, also before `run()` counted it. */
+export const RESTLESS_FLOOR = 64;
+
+/** Edges without a rest node the runner allows per node of the graph, above the floor. */
+const RESTLESS_PER_NODE = 4;
+
+/**
+ * Computes how many edges the loop may take without arriving at a rest node before the next one
+ * fails: four per node of every collected flow, and never fewer than 64. A legal graph passes a
+ * rest node long before that; a loop of transit nodes that never rests would freeze the game.
+ *
+ * @param flows - Every collected flow by id.
+ * @returns The cap of edges without a rest node.
+ * @example
+ * ```ts
+ * restlessCapOf(collectFlows(mainFlow, [])); // 64 for a graph of up to sixteen nodes
+ * ```
+ */
+export function restlessCapOf(flows: ReadonlyMap<string, AnyFlow>): number {
+  let nodes = 0;
+
+  for (const flow of flows.values()) nodes += Object.keys(flow.nodes).length;
+
+  return Math.max(RESTLESS_FLOOR, RESTLESS_PER_NODE * nodes);
+}
+
 /**
  * Renders a position as a path: the node of every frame, outermost first.
  *

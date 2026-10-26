@@ -133,6 +133,9 @@ const createMockState = (): State => ({
     stack: [],
     restFrame: undefined,
     slotAfter: undefined,
+    slotLeave: undefined,
+    restless: 0,
+    restlessCap: 64,
     journal: [],
     journalIndex: 0,
     running: undefined,
@@ -2975,5 +2978,417 @@ describe("stopRunner deadline", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ─── named outcomes of a slot ─────────────────────────────────
+
+/** A slot that declares `declared` besides its own `done`. */
+const declaredSlot = (name: string, declared: readonly string[]): SlotNode => ({
+  kind: "slot",
+  name,
+  input: tag,
+  outcomes: { done: tag, ...tags(declared) }
+});
+
+/** A contribution whose one transit node ends with `outcome` and leaves the flow with it. */
+const leaving = (id: string, outcome: string, payload: Json, ran: string[]): AnyFlow =>
+  flow(
+    id,
+    {
+      work: node({
+        outcomes: [outcome],
+        run: () => {
+          ran.push(id);
+
+          return result(outcome, payload);
+        }
+      })
+    },
+    "work",
+    { work: { [outcome]: { kind: "exit", outcome } } },
+    ["done", outcome]
+  );
+
+/** A main flow that starts at the slot `episode` and routes its `shop` to a rest node. */
+const shopMain = (episode: SlotNode): AnyFlow =>
+  flow("main", { episode, home: waiting("play"), shopSheet: waiting("close") }, "episode", {
+    episode: { done: "home", shop: "shopSheet" },
+    home: { play: "episode" },
+    shopSheet: { close: "home" }
+  });
+
+const shopping: Json = { tab: "gems" };
+
+/** The journal reduced to what an edge says: where, which outcome, with what, to where. */
+const edgesOfJournal = (harness: ReturnType<typeof setup>) =>
+  harness.ctx.state.runner.journal.map(({ path, outcome, payload, next }) => ({
+    path,
+    outcome,
+    payload,
+    next
+  }));
+
+describe("named outcomes of a slot", () => {
+  // Bug: the slot ignores the named exit, runs the next contribution and ends on done.
+  it("leaves the slot at once on a declared outcome, with its payload, through the parent's edge", async () => {
+    const ran: string[] = [];
+    const harness = setup({
+      main: shopMain(declaredSlot("episodeStep", ["shop"])),
+      contributions: {
+        episodeStep: [
+          { feature: "story", flow: leaving("story", "shop", shopping, ran), order: 10 },
+          {
+            feature: "quest",
+            flow: leaving("quest", "done", noPayload, ran),
+            order: 20,
+            when: () => true
+          }
+        ]
+      }
+    });
+
+    harness.start();
+    await tick();
+
+    expect(ran).toEqual(["story"]);
+    expect(harness.ctx.state.runner.stack).toEqual([
+      { flow: "main", node: "shopSheet", input: shopping }
+    ]);
+    expect(edgesOfJournal(harness)).toEqual([
+      { path: "episode/work", outcome: "shop", payload: shopping, next: "episode" },
+      { path: "episode", outcome: "shop", payload: shopping, next: "shopSheet" }
+    ]);
+    expect(payloadsOf(harness.emitted, "flow:edge").at(-1)).toMatchObject({
+      flow: "main",
+      node: "episode",
+      outcome: "shop",
+      payload: shopping,
+      next: "shopSheet"
+    });
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: `done` is an own outcome of every slot, so it is taken for a named exit and leaves early.
+  it("hands a done exit over to the next contribution in a slot that declares outcomes", async () => {
+    const ran: string[] = [];
+    const harness = setup({
+      main: shopMain(declaredSlot("episodeStep", ["shop"])),
+      contributions: {
+        episodeStep: [
+          { feature: "story", flow: leaving("story", "done", noPayload, ran), order: 10 },
+          {
+            feature: "quest",
+            flow: leaving("quest", "done", noPayload, ran),
+            order: 20,
+            when: () => true
+          }
+        ]
+      }
+    });
+
+    harness.start();
+    await tick();
+
+    expect(ran).toEqual(["story", "quest"]);
+    expect(edgesOfJournal(harness).at(-1)).toEqual({
+      path: "episode",
+      outcome: "done",
+      payload: noPayload,
+      next: "home"
+    });
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a slot that declares nothing leaves on any named exit, and an existing game breaks.
+  it("continues a slot that declares no outcomes after a named exit, as before", async () => {
+    const ran: string[] = [];
+    const harness = setup({
+      main: shopMain(slotNode("episodeStep")),
+      contributions: {
+        episodeStep: [
+          { feature: "story", flow: leaving("story", "shop", shopping, ran), order: 10 },
+          { feature: "quest", flow: leaving("quest", "done", noPayload, ran), order: 20 }
+        ]
+      }
+    });
+
+    harness.start();
+    await tick();
+
+    expect(ran).toEqual(["story", "quest"]);
+    expect(harness.ctx.state.runner.stack).toEqual([
+      { flow: "main", node: "home", input: noPayload }
+    ]);
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: the slot resumes after the contribution that left it, and the first one never runs again.
+  it("starts the next entry of the slot at its first contribution after an early leave", async () => {
+    const ran: string[] = [];
+    const harness = setup({
+      main: shopMain(declaredSlot("episodeStep", ["shop"])),
+      contributions: {
+        episodeStep: [
+          { feature: "story", flow: leaving("story", "shop", shopping, ran), order: 10 },
+          {
+            feature: "quest",
+            flow: leaving("quest", "done", noPayload, ran),
+            order: 20,
+            when: () => true
+          }
+        ]
+      }
+    });
+
+    harness.start();
+    await tick();
+    harness.gate.reply({ intent: "close" });
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await tick();
+
+    expect(ran).toEqual(["story", "story"]);
+    expect(harness.ctx.state.runner.stack.at(-1)?.node).toBe("shopSheet");
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a leave left over from before `run()` makes a slot at the start leave before it ran.
+  it("forgets a slot leave at the start of the run", async () => {
+    const ran: string[] = [];
+    const harness = setup({
+      main: shopMain(declaredSlot("episodeStep", ["shop"])),
+      contributions: {
+        episodeStep: [
+          { feature: "quest", flow: leaving("quest", "done", noPayload, ran), order: 10 }
+        ]
+      }
+    });
+
+    harness.ctx.state.runner.slotLeave = { outcome: "shop", payload: shopping };
+    harness.start();
+    await tick();
+
+    expect(ran).toEqual(["quest"]);
+    expect(harness.ctx.state.runner.stack.at(-1)?.node).toBe("home");
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a leave the failed transition left behind steers the next slot entry after the rollback.
+  it("forgets a slot leave when a failed node is rolled back", async () => {
+    const main = flow(
+      "main",
+      {
+        home: waiting("play"),
+        boot: node({
+          run: () => {
+            harness.ctx.state.runner.slotLeave = { outcome: "shop", payload: shopping };
+
+            throw new Error("boom");
+          }
+        })
+      },
+      "home",
+      { home: { play: "boot" }, boot: { done: "home" } }
+    );
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await tick();
+
+    expect(payloadsOf(harness.emitted, "flow:error")).toHaveLength(1);
+    expect(harness.ctx.state.runner.slotLeave).toBeUndefined();
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a restore keeps what belonged to the old position: a leave, or the edges counted there.
+  it("forgets a slot leave and the count of edges without a rest when a bookmark is entered", async () => {
+    const main = flow("main", { home: waiting("play"), play: waiting("home") }, "home", {
+      home: { play: "play" },
+      play: { home: "home" }
+    });
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+    harness.ctx.state.runner.slotLeave = { outcome: "shop", payload: shopping };
+    harness.ctx.state.runner.restless = 63;
+
+    await restorePosition(harness.ctx, harness.modules, bookmarkAt("play"));
+
+    expect(harness.ctx.state.runner.slotLeave).toBeUndefined();
+    expect(harness.ctx.state.runner.restless).toBe(0);
+    await stopRunner(harness.ctx);
+  });
+});
+
+// ─── a mapper that throws ─────────────────────────────────────
+
+describe("a to() mapper that throws", () => {
+  // Bug: the throw escapes the loop and rejects run(): the game dies on one bad edge.
+  it("fails the node: a rollback and a retry, then the safe node, and run() goes on", async () => {
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, checkpoint: true, outcomes: ["play"] }),
+        load: node({ outcomes: ["failed"], run: () => result("failed", { reason: "clock" }) }),
+        retry: waiting("again")
+      },
+      "home",
+      {
+        home: { play: "load" },
+        load: {
+          failed: {
+            kind: "map",
+            target: "retry",
+            map: () => {
+              throw new Error("no tab");
+            }
+          }
+        },
+        retry: { again: "home" }
+      }
+    );
+    const harness = setup({ main, config: { safeNode: "home", retries: 1 } });
+    const rejected = rejectionOf(harness.start());
+
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await tick();
+
+    const errors = payloadsOf(harness.emitted, "flow:error");
+
+    expect(errors.map(({ path, rolledBackTo, retry }) => ({ path, rolledBackTo, retry }))).toEqual([
+      { path: "load", rolledBackTo: "home", retry: true },
+      { path: "load", rolledBackTo: "home", retry: false }
+    ]);
+    expect(errors[0]?.error).toMatchObject({
+      message:
+        '[game] The mapper of edge "load.failed" threw: no tab.\n  Return plain JSON from to("retry", ...).'
+    });
+    expect(harness.gate.opened).toHaveLength(3);
+    expect(rejected.error).toBeUndefined();
+    await stopRunner(harness.ctx);
+  });
+});
+
+// ─── edges without a rest node ────────────────────────────────
+
+/** Yields to the loop until `done()` holds, at most `rounds` times sixty microtasks. */
+const until = async (done: () => boolean, rounds = 200): Promise<void> => {
+  for (let round = 0; round < rounds && !done(); round += 1) await tick();
+};
+
+/** Names of the events emitted so far, in order. */
+const namesOf = (harness: ReturnType<typeof setup>): string[] =>
+  harness.emitted.map(entry => entry.name);
+
+describe("edges without a rest node", () => {
+  // Bug: a loop through a sub-flow that rests only on another branch runs forever: the tab freezes.
+  it("fails a run of edges at the cap with its message, then recovers at the safe node", async () => {
+    const sub = flow(
+      "sub",
+      { quick: node({ outcomes: ["go", "stay"], run: () => result("go") }), wait: waiting("ok") },
+      "quick",
+      {
+        quick: { go: { kind: "exit", outcome: "back" }, stay: "wait" },
+        wait: { ok: { kind: "exit", outcome: "back" } }
+      },
+      ["back"]
+    );
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, checkpoint: true, outcomes: ["play"] }),
+        step: node({ run: () => result("done") }),
+        sub
+      },
+      "home",
+      { home: { play: "step" }, step: { done: "sub" }, sub: { back: "step" } }
+    );
+    const harness = setup({ main, config: { safeNode: "home", retries: 1 } });
+    const rejected = rejectionOf(harness.start());
+    const errorsSoFar = (): number => payloadsOf(harness.emitted, "flow:error").length;
+
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await until(() => errorsSoFar() === 1);
+    harness.gate.reply({ intent: "play" });
+    await until(() => errorsSoFar() === 2);
+    await tick();
+
+    const names = namesOf(harness);
+    const first = names.indexOf("flow:error");
+    const second = names.lastIndexOf("flow:error");
+    const edgesIn = (from: number, to: number): number =>
+      names.slice(from, to).filter(name => name === "flow:edge").length;
+    const errors = payloadsOf(harness.emitted, "flow:error");
+
+    // The cap of a five-node graph is the floor, 64. The count starts again after the rollback.
+    expect(edgesIn(0, first)).toBe(64);
+    expect(edgesIn(first, second)).toBe(64);
+    expect(errors.map(({ path, rolledBackTo, retry }) => ({ path, rolledBackTo, retry }))).toEqual([
+      { path: "sub/quick", rolledBackTo: "home", retry: true },
+      { path: "sub/quick", rolledBackTo: "home", retry: false }
+    ]);
+    expect(errors[0]?.error).toMatchObject({
+      message:
+        '[game] 64 edges without a rest node, at "sub/quick".\n  Put a rest node in the loop.'
+    });
+    expect(harness.gate.opened).toHaveLength(3);
+    expect(rejected.error).toBeUndefined();
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: the count is not reset at a rest node, and a long but ordinary game fails after 64 edges.
+  it("never stops a graph that comes to rest between its edges", async () => {
+    const main = flow(
+      "main",
+      { home: waiting("play"), step: node({ run: () => result("done") }) },
+      "home",
+      { home: { play: "step" }, step: { done: "home" } }
+    );
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    for (let round = 0; round < 100; round += 1) {
+      harness.gate.reply({ intent: "play" });
+      await tick();
+    }
+
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
+    expect(harness.ctx.state.runner.journalIndex).toBe(200);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: the cap stays at the floor, so a big graph with long transit chains fails although legal.
+  it("allows four edges per node of the graph above the floor", async () => {
+    const chain = Object.fromEntries(
+      Array.from({ length: 20 }, (_, index) => [`n${index}`, node({ run: () => result("done") })])
+    );
+    const chainEdges = Object.fromEntries(
+      Array.from({ length: 20 }, (_, index) => [
+        `n${index}`,
+        { done: index === 19 ? "home" : `n${index + 1}` }
+      ])
+    );
+    const main = flow("main", { home: waiting("play"), ...chain }, "home", {
+      home: { play: "n0" },
+      ...chainEdges
+    });
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    expect(harness.ctx.state.runner.restlessCap).toBe(84);
+    await stopRunner(harness.ctx);
   });
 });

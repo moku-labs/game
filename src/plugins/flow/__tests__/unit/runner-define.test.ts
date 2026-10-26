@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createOut, defineFlow, defineNode, exit, slot, to, type } from "../../runner/define";
+import {
+  contribution,
+  createOut,
+  defineFlow,
+  defineNode,
+  exit,
+  slot,
+  to,
+  type
+} from "../../runner/define";
 import type { GameState, NodeRecover, NodeRun, TypeTag } from "../../runner/types";
 
 const done: NodeRun<GameState, void, { done: TypeTag<void> }> = ({ out }) => out.done();
@@ -9,6 +18,12 @@ const reset: NodeRecover<GameState> = () => undefined;
 const wait: NodeRun<GameState, void, { play: TypeTag<void> }> = ({ out }) => out.play();
 
 const why = (failure: { reason: string }) => ({ why: failure.reason });
+
+/** Declares `done` past the type, as a cast in a game would. */
+const declareDone = () => slot("episodeStep", { done: type() } as never);
+
+/** A `when` that skips its contribution. */
+const skipAlways = () => false;
 
 describe("type", () => {
   it("returns a tag that carries no value", () => {
@@ -204,6 +219,62 @@ describe("slot", () => {
     expect(point.kind).toBe("slot");
     expect(point.name).toBe("afterWin");
     expect(Object.keys(point.outcomes)).toEqual(["done"]);
+  });
+
+  // Bug: a declared outcome is dropped, or `done` is lost beside it: the host cannot route a hand-back.
+  it("lists done first, then the outcomes it declares", () => {
+    const point = slot("episodeStep", { shop: type<{ tab: string }>(), board: type() });
+
+    expect(Object.keys(point.outcomes)).toEqual(["done", "shop", "board"]);
+  });
+
+  // Bug: a slot that declares nothing gains a key, and the graph hash of every existing game moves.
+  it("returns the same plain data as before when it declares no outcome", () => {
+    expect(slot("afterWin")).toEqual({
+      kind: "slot",
+      name: "afterWin",
+      input: { kind: "type" },
+      outcomes: { done: { kind: "type" } }
+    });
+  });
+
+  // Bug: a cast lets `done` through; after the spread nothing tells it from the slot's own.
+  it("throws a TypeError when the outcomes declare done", () => {
+    expect(declareDone).toThrow(TypeError);
+    expect(declareDone).toThrow(
+      new TypeError(
+        '[game] Slot "episodeStep" declares the outcome "done".\n  done is every slot\'s own outcome; remove it from slot("episodeStep", ...).'
+      )
+    );
+  });
+});
+
+describe("contribution", () => {
+  const show = defineNode({
+    rest: true,
+    outcomes: { next: type(), shop: type<{ tab: string }>() }
+  });
+  const storyFlow = defineFlow("story", {
+    nodes: { show },
+    start: "show",
+    outcomes: { done: type(), shop: type<{ tab: string }>() },
+    edges: { show: { next: exit("done"), shop: exit("shop") } }
+  });
+  const episodeStep = slot("episodeStep", { shop: type<{ tab: string }>() });
+
+  // Bug: the entry lands under another key than the slot's name, so the slot never runs the flow.
+  it("returns the spec under the slot's name, with no when key when none is given", () => {
+    const entry = contribution(episodeStep, { flow: storyFlow, order: 10 });
+
+    expect(entry).toEqual({ episodeStep: { flow: storyFlow, order: 10 } });
+    expect(Object.keys(entry.episodeStep)).toEqual(["flow", "order"]);
+  });
+
+  // Bug: the when is dropped, and the contribution runs while the game says it must be skipped.
+  it("keeps the when it is given", () => {
+    const entry = contribution(episodeStep, { flow: storyFlow, order: 10, when: skipAlways });
+
+    expect(entry.episodeStep.when).toBe(skipAlways);
   });
 });
 
