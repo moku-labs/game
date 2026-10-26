@@ -39,6 +39,13 @@ export const BUDGET = {
   mutedUnmuted: 0,
   /** W3: 50 muted tracks of a type with an owned field. Was 29 212 B: a joined `Set` per ask. */
   mutedOwned: 0,
+  /**
+   * F91: 50 fades on views whose projection names `initialOnly` fields, asking for their muted fields: the seed every
+   * view shares, joined once with the type's owned field. New: 0 B.
+   */
+  initialOnlyAsks: 0,
+  /** F91: a still frame over 300 such views after their fade ended off the rest pose. New: 0 B. */
+  initialOnlyStill: 0,
   /** W6: `ecs.get`. Was 0 B. */
   ecsGet: 0,
   /**

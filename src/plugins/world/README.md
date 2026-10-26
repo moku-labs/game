@@ -154,7 +154,7 @@ app.world.ecs.snapshot().entities[0];
 | `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. A screen root draws at the `Order` of its place in the list, −n … −1. A projection a scene before mounted (under another layer list of `setLayers`) stays mounted when the new list declares its `layer` and `lift` alike (every field of the entry equal): its views keep their entities and their motions, no hook runs, and its screen roots take the `Order` of their place in this list, on the entity and in the rest pose. One whose layer the new list declares otherwise is unmounted and mounted again. One mounted under the current layer list already warns `world:already-mounted` and changes nothing. Throws for an unknown name and for a `layer` or `lift` the scene does not declare, a kept projection's too; nothing is mounted then. A new view is spawned with its `Layer` first, so an `onAdded` hook of a view component (the `Tree` hook of `ui`) already reads the layer. |
 | `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call. |
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
-| `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
+| `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. On a view whose projection names `initialOnly` fields the mute adds to them, and the remover keeps them. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
 | `membershipVersion(): number` | Moves every time a view enters the live views, leaves them, or is forgotten after its despawn, and on a clear. `ui` hosts the views of a projection again only when it moved. Allocates nothing. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. A view's `keyOf` is the frozen address it keeps for its life: the same object every call. |
@@ -181,6 +181,58 @@ The authoring helpers are pure and exported from the package root:
 `Tree`. A projection whose `from` returns one plain object needs no `key`: it draws one item under
 the name of the projection, and a `view` that returns one description node instead of components is
 wrapped as `Tree({ node })`, which `ui` reconciles into child entities.
+
+#### Fields another writer draws: `initialOnly`
+
+`projection({ …, initialOnly: [[Component, fields], …] })` names fields that `view` gives a view once,
+when it is born. From then on they are another writer's, a system's for one: nothing of the projection
+writes or compares them. A changed item leaves them out, a motion and its `finish()` do not move
+them, the check at the end of a motion does not correct them (no `world:view-corrected`), and a
+rollback, `settle(entity)`, a restore and a load do not put them back. These are the rules of
+`mute()`, for every view of the projection and for its whole life. A `mute()` on the view adds to
+them, and its release keeps them; that holds for a mute an `onAdded` listener makes inside the
+spawn of the view too, as `anim` does for the texture of a `Frames` loop. A `replace` moves the live
+views to the new list. On a component a `mute()` touched, a view keeps the fields of the old list as
+well, until it is born again. Each pair is
+checked against its own component: `[[Shape, ["swep"]]]` does not compile. A pair with no field is
+refused at `register` with `[game] Projection "…" lists Shape in initialOnly with no field.`. Left
+out, the projection writes every field, as before.
+
+The cost: the list is built once per spec, into one frozen table every view of the projection
+shares, so a birth makes no set and the frame does no new work. The table joins the type's `owned`
+fields through the same cached set as a mute (0 B a frame, `__tests__/perf/initial-only.perf.ts`).
+
+The recipe of F91, a timer ring whose arc runs on the clock: the view draws it full, the system
+draws the arc from `Now`, and the end of the fade-in keeps the arc.
+
+```ts
+// features/board/world/projections/marks.ts
+export const marks = projection({
+  name: "board.marks",
+  layer: "marks",
+  from: player => player.board.timers,
+  key: timer => timer.id,
+  view: timer => [TimerRing({ startedAt: timer.startedAt, ms: timer.ms }), Shape({ kind: "arc", w: 28, h: 28, sweep: 1 })],
+  motion: { enter: view => { view.set(Shape, { alpha: 0 }); return view.tween(Shape, { alpha: 1 }, { ms: 200 }); } },
+  initialOnly: [[Shape, ["sweep"]]] // the arc belongs to board.rings
+});
+
+// features/board/world/systems/rings.ts
+export const rings = system({
+  name: "board.rings",
+  phase: "input",
+  query: [TimerRing, Shape],
+  run: (entities, { world, res }) => {
+    const { now } = res(Now);
+
+    for (const [entity, ring, shape] of entities) {
+      const sweep = Math.max(0, 1 - (now - ring.startedAt) / ring.ms);
+
+      if (shape.sweep !== sweep) world.set(entity, Shape, { sweep });
+    }
+  }
+});
+```
 
 `resource(name, defaults | () => value)` takes plain JSON defaults, cloned into every world, or a
 factory, called once per world on first read. A factory value may hold a `Map` or a function, so a
@@ -561,7 +613,8 @@ that flushes no view leaves a loop standing where it is.
 A new motion on a view that still animates cancels the running ones and starts from the current
 values (spike P5). Components the new hooks do not drive are brought to the rest pose by
 `motion.settle`, or by the built-in `toRest` over `settleMs`. When the last motion of a view ends,
-every rest component is compared with the stored value, muted fields excluded. A number counts as
+every rest component is compared with the stored value, muted fields excluded (the `initialOnly`
+fields of its projection too). A number counts as
 at rest within 1e-6 reference units, so float noise from a root-space round trip is no difference.
 A difference is written and reported with `log.warn("world:view-corrected", …)`.
 

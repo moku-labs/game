@@ -7,6 +7,7 @@ import type { Json, Root, Snapshot } from "../../model/types";
 import type {
   AnyComponent,
   AnyComponentValue,
+  ComponentHandle,
   ComponentType,
   EcsApi,
   Entity,
@@ -405,8 +406,41 @@ export type AnyProjectionMotion = {
 };
 
 /**
+ * One pair of `ProjectionSpec.initialOnly`: a component and the fields of it that `view` gives a
+ * view once, when it is born. The field names are checked against the component's own value.
+ *
+ * @example
+ * ```ts
+ * const arc: InitialOnlyPair<ShapeValue> = [Shape, ["sweep"]];
+ * ```
+ */
+export type InitialOnlyPair<Value extends object> = readonly [
+  ComponentHandle<Value>,
+  readonly (keyof Value & string)[]
+];
+
+/**
+ * The `initialOnly` list of a projection: one pair for each value type of `Values`, each pair
+ * checked against its own component. `projection()` infers `Values` from the list, so
+ * `[[Shape, ["swep"]]]` is a type error.
+ *
+ * @example
+ * ```ts
+ * const fields: InitialOnly<[ShapeValue, TransformValue]> = [
+ *   [Shape, ["sweep", "alpha"]],
+ *   [Transform, ["rotation"]]
+ * ];
+ * ```
+ */
+export type InitialOnly<Values extends readonly object[]> = {
+  readonly [Index in keyof Values]: InitialOnlyPair<Values[Index]>;
+};
+
+/**
  * One projection: keyed items of the model turned into entities. `Item` is inferred from the
  * return of `from`; `layer` and `lift` keep their literal types so a scene can check them.
+ * `Values` are the value types of the `initialOnly` pairs, inferred by `projection()`; an
+ * annotation that leaves it out accepts any field name.
  *
  * @example
  * ```ts
@@ -425,7 +459,8 @@ export type ProjectionSpec<
   LayerName extends string,
   LiftName extends string,
   Player,
-  Session
+  Session,
+  Values extends readonly object[] = readonly Record<string, unknown>[]
 > = {
   readonly name: string;
   readonly layer: LayerName;
@@ -435,6 +470,35 @@ export type ProjectionSpec<
   key?(item: Item): string;
   view(item: Item): ViewOutput;
   readonly motion?: ProjectionMotion<Item>;
+  /**
+   * Fields another writer owns once a view is born. `view` gives them their first value when the
+   * view spawns; from then on nothing of the projection writes or compares them: not a changed
+   * item, not a motion or its finish, not the check at the end of a motion (no
+   * `world:view-corrected`), not a rollback, `settle(entity)`, a restore or a load. These are the
+   * rules of `mute()`, for every view of the projection and for its whole life. A `mute()` on the
+   * view adds to them, and its release keeps them. Left out, the projection writes every field.
+   *
+   * @example
+   * ```ts
+   * // The timer ring of a chest: born full, then the system `board.rings` draws its arc from `Now`.
+   * export const marks = projection({
+   *   name: "board.marks",
+   *   layer: "marks",
+   *   from: (player: Player) => player.board.timers,
+   *   key: timer => timer.id,
+   *   view: timer => [Shape({ kind: "arc", w: 28, h: 28, strokeWidth: 2.2, sweep: 1 })],
+   *   motion: {
+   *     enter: view => {
+   *       view.set(Shape, { alpha: 0 });
+   *       return view.toRest(Shape, { ms: 200 });
+   *     }
+   *   },
+   *   initialOnly: [[Shape, ["sweep"]]]
+   * });
+   * // The fade ends with the 0.42 the system wrote: no full ring, no `world:view-corrected`.
+   * ```
+   */
+  readonly initialOnly?: InitialOnly<Values>;
 };
 
 /**
@@ -459,6 +523,8 @@ export type AnyProjectionSpec = {
   key?(item: unknown): string;
   view(item: unknown): ViewOutput;
   readonly motion?: AnyProjectionMotion;
+  /** The `initialOnly` pairs, their field names no longer tied to the component. */
+  readonly initialOnly?: readonly (readonly [ComponentHandle<object>, readonly string[]])[];
 };
 
 /**
@@ -587,6 +653,13 @@ export type ProjectionKey = { projection: string; key: string };
 export type Dirty = { causes: Cause[]; roots: Set<Root>; force: boolean };
 
 /**
+ * Component name to the fields another writer owns, of one entity. A frozen table, and a frozen
+ * set in one, is the `initialOnly` seed every view of one projection shares: nothing writes into
+ * it, and `mute()` copies it before it adds a field.
+ */
+export type MuteTable = ReadonlyMap<string, ReadonlySet<string>>;
+
+/**
  * A mute's fields joined with a type's owned fields, and the owned set they were joined with.
  */
 export type JoinedFields = {
@@ -620,8 +693,14 @@ export type ProjectionState = {
    * entity that is gone is dropped with its rest pose, and its side of `keys` with it.
    */
   keysByEntity: Map<Entity, ProjectionKey>;
-  /** Entity to component name to the fields another writer owns. */
-  mutes: Map<Entity, Map<string, Set<string>>>;
+  /**
+   * Entity to component name to the fields another writer owns: what `mute()` handed over, and
+   * the shared `initialOnly` seed a view of such a projection is born with. A view a listener of
+   * its spawn muted keeps that table, and the seed joins it.
+   */
+  mutes: Map<Entity, MuteTable>;
+  /** The `initialOnly` seed of each registered spec that has one, frozen, built at `register` and `replace`. */
+  initialOnly: WeakMap<AnyProjectionSpec, MuteTable>;
   /** The owned fields of each component type as a set, by the type's frozen `owned` list: made once. */
   ownedSets: WeakMap<readonly string[], ReadonlySet<string>>;
   /** The muted and the owned fields joined, by the mute's field set: dropped when `mute()` or its release changes it. */
@@ -909,7 +988,9 @@ export type ProjectionApi = {
   settle(entity: Entity): void;
 
   /**
-   * Hands a set of fields to another writer. Tracks never write them, also not on `finish()`.
+   * Hands a set of fields to another writer. Tracks never write them, also not on `finish()`. On
+   * a view whose projection names `initialOnly` fields the mute adds to them, and the remover keeps
+   * them.
    *
    * @param entity - The entity of the view.
    * @param component - The component whose fields are taken over.

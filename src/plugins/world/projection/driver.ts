@@ -110,8 +110,9 @@ export function inertHandle(): MotionHandle {
 }
 
 /**
- * The fields another writer owns on one component of one entity: the fields a running driver
- * holds, and the fields the component type gives to a plugin for good.
+ * The fields another writer owns on one component of one entity: the fields a `mute()` holds and
+ * the `initialOnly` fields of a view's projection (one table, `state.mutes`), and the fields the
+ * component type gives to a plugin for good.
  *
  * @param pctx - Domain context of the projection module.
  * @param entity - The entity to ask about.

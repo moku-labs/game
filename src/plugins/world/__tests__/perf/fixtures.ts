@@ -14,9 +14,10 @@ import { component, Exiting, mut, Now, system } from "../../ecs/define";
 import { recordFrame } from "../../ecs/history";
 import type { AnySystem, Entity, Owner, WorldPhase } from "../../ecs/types";
 import { withDeps } from "../../lifecycle";
-import type { MotionHandle, Track, TweenDriver } from "../../projection/types";
+import { projection } from "../../projection/define";
+import type { AnyProjectionSpec, MotionHandle, Track, TweenDriver } from "../../projection/types";
 import type { EcsModule, ProjectionModule } from "../../types";
-import { BOARD, type Item, LAYERS, MOUNT_OWNER, mountBoard } from "../unit/board";
+import { BOARD, type Item, LAYERS, MOUNT_OWNER, mountBoard, settleFrames } from "../unit/board";
 import { createMockWorld, type MockWorld } from "../unit/mock-world";
 
 /** The first term of the walk fixture: every entity carries it. */
@@ -340,6 +341,110 @@ export function mutedFixture(owned: boolean): () => void {
     for (let index = 0; index < count; index += 1) {
       sink.flag = asks[index]?.().has("x") === true;
     }
+  };
+}
+
+/** A timer ring (F91): `sweep` is drawn by a system after the birth, `shown` belongs to a plugin. */
+const Dial = component("Dial", { sweep: 1, alpha: 1, shown: 0 }, { owned: ["shown"] });
+
+/** Name of the rings projection. */
+const RINGS = "perf.rings";
+
+/** One ring of the rings projection. */
+type Ring = { id: string };
+
+/**
+ * The rings projection: every ring fades in when a commit brings it, and its `sweep` is another
+ * writer's from the birth on.
+ *
+ * @returns The spec.
+ */
+function ringsSpec(): AnyProjectionSpec {
+  return projection({
+    name: RINGS,
+    layer: "items",
+    from: (player: { rings: Ring[] }) => player.rings,
+    key: (ring: Ring) => ring.id,
+    view: () => [Dial()],
+    motion: { enter: view => view.tween(Dial, { alpha: 1 }, { ms: 200, ease: "linear" }) },
+    initialOnly: [[Dial, ["sweep"]]]
+  }) as AnyProjectionSpec;
+}
+
+/**
+ * Mounts the rings projection empty, then commits `count` rings, so each is born in play mode and
+ * starts its fade.
+ *
+ * @param world - The mock world.
+ * @param count - How many rings.
+ */
+function mountRings(world: MockWorld, count: number): void {
+  const rings: Ring[] = [];
+
+  for (let index = 0; index < count; index += 1) rings.push({ id: `r${index}` });
+
+  world.model.player = { rings: [] };
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(ringsSpec());
+  world.start();
+  world.api.projection.mount([RINGS], MOUNT_OWNER);
+  world.model.player = { rings };
+  world.commit();
+  world.frame(16);
+}
+
+/**
+ * Fifty rings fading in, each fade asking for the muted fields of its view as a driver does on
+ * every frame: the `initialOnly` seed of the projection joined with the field the type owns.
+ *
+ * @returns One frame of the fifty asks.
+ */
+export function initialOnlyAsksFixture(): () => void {
+  const world = createMockWorld();
+  const asks: Array<() => ReadonlySet<string>> = [];
+  const driver: TweenDriver = {
+    track: (_entity, _component, _to, _options, muted) => {
+      asks.push(muted);
+
+      return RUNNING;
+    },
+    cancelAll: (): void => {}
+  };
+
+  world.api.projection.setDriver(driver);
+  mountRings(world, 50);
+
+  const count = asks.length;
+
+  return (): void => {
+    for (let index = 0; index < count; index += 1) {
+      sink.flag = asks[index]?.().has("sweep") === true;
+    }
+  };
+}
+
+/**
+ * The sweep of a still frame over 300 rings whose fade ended while a system had drawn their
+ * `sweep` off the rest pose: the check at the end of the fade ran and corrected nothing, and now
+ * nothing moves.
+ *
+ * @returns One sweep.
+ */
+export function initialOnlyStillFixture(): () => void {
+  const world = createMockWorld();
+
+  mountRings(world, ENTITIES);
+
+  for (const entity of world.api.projection.entitiesOf(RINGS)) {
+    world.api.ecs.set(entity, Dial, { sweep: 0.42 });
+  }
+
+  settleFrames(world);
+
+  const { projection: module } = stableModules(world);
+
+  return (): void => {
+    module.sweep();
   };
 }
 
