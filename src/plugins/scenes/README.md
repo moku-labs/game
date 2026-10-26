@@ -243,7 +243,10 @@ defineScene("ward", { ..., leave: false });
 With neither `texture` nor `projection` the loader is a white ring the engine draws.
 
 - **The scene being left decides.** Its `leave` over `config.leave` over the engine's default, field by field: a scene
-  that writes `cover: { color }` keeps the config's alpha and times. `false` at a level turns both parts off there; a
+  that writes `cover: { color }` keeps the config's alpha and times. This merge is the plugin's own, on top of the
+  kernel's shallow merge of `pluginConfigs`: a game's `pluginConfigs.scenes.leave` replaces the whole default object
+  at the kernel, and scenes then takes every field the game left out from its fallback (`FALLBACK_LEAVE` in
+  `leave.ts`, the same value as the default config in `index.ts`). `false` at a level turns both parts off there; a
   part written over `false` starts from the engine's default. `texture` and `projection` are one choice: a level that
   names either replaces both of the level below, and with both named the projection is drawn. The type of `texture` is
   the game's asset key through `defineGame`.
@@ -341,7 +344,7 @@ HUD that is not shared does not blink either.
 |---|---|---|---|
 | `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`, read once at the build start: 11.1 ms at 60 Hz, 5.56 ms at 120 Hz (two thirds of a 60 Hz frame, ≈ 11.1 ms, if `time` answers no usable rate). A number is a fixed budget |
 
-| `leave` | `SceneLeave` | `{ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }` | What a live switch shows over the scene being left, for every scene; a scene's `leave` is merged over it field by field, and a field the config leaves out keeps the engine's default. `false` turns a part or the whole off. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
+| `leave` | `SceneLeave` | `{ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }` | What a live switch shows over the scene being left, for every scene; a scene's `leave` is merged over it field by field, and a field the config leaves out keeps the engine's default (the kernel merges `pluginConfigs` shallowly and replaces the whole object; the field-by-field merge is the plugin's own). `false` turns a part or the whole off. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
 
 A `buildMs` that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
 

@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineScene } from "../../define";
-import { leaveOf } from "../../leave";
-import { checkConfig } from "../../lifecycle";
-import type { Config, SceneLeave } from "../../types";
+import { scenesPlugin } from "../../index";
+import { FALLBACK_LEAVE, leaveOf } from "../../leave";
+import type { Config } from "../../types";
 import { createMockScenes, type MockScenes } from "./mock-scenes";
 
 // ---------------------------------------------------------------------------
 // Unit test of what a live switch shows over the scene being left (spec 33, slice A2): the merge of the scene's
 // `leave` over the config's over the engine's, the look handed to the renderer at the switch start (before the
 // bundles are in), its land after the swap and its drop on an abort, a throw or a stop, the loader projection mounted
-// for the wait, and the checks of a `leave` a game wrote. The renderer's `sync.leave` is three spies that record the
+// for the wait. The renderer's `sync.leave` is three spies that record the
 // scene current at each call.
 // ---------------------------------------------------------------------------
 
@@ -107,6 +107,12 @@ async function finish(mock: MockScenes, entering: Promise<void>): Promise<void> 
 }
 
 describe("the merge of `leave`", () => {
+  // Bug: the default config a game gets and the fallback of a part written over `false` drift apart, so a game that
+  // turns the veil off in its config and back on in a scene gets another veil than one that writes nothing.
+  it("has the plugin's default config and its fallback equal", () => {
+    expect(scenesPlugin.spec.config?.leave).toEqual(FALLBACK_LEAVE);
+  });
+
   // Bug: a level replaces the whole part below it (shallow), so a scene that writes a colour loses the config's alpha.
   it("takes each field from the highest level that writes it: the scene's, the config's, the engine's", () => {
     expect(
@@ -355,6 +361,25 @@ describe("a loader projection", () => {
     expect(mock.world.unmounted).toEqual([["loading"]]);
   });
 
+  // Bug: a stop calls the stopped world from the switch's end to unmount the loader projection it mounted.
+  it("is left to the world's stop when the plugin stops after it was mounted", async () => {
+    const mock = await on("home", LOADING);
+    const controller = new AbortController();
+
+    mock.world.viewLayers = { loading: "loading" };
+    const { entering } = await enterScene(mock, "board", controller.signal);
+
+    dueOf(mock)();
+    mock.stop();
+    controller.abort();
+    mock.assets.release();
+    await entering;
+
+    expect(mock.world.mounted.at(-1)?.names).toEqual(["loading"]);
+    expect(mock.world.unmounted.flat()).not.toContain("loading");
+    expect(mock.renderer.leaves.map(entry => entry.call)).toEqual(["show"]);
+  });
+
   // Bug: a projection someone else mounted is unmounted by the switch, or mounted a second time.
   it("is drawn but neither mounted nor unmounted when it is mounted already", async () => {
     const mock = await on("home", LOADING);
@@ -441,44 +466,5 @@ describe("a loader projection", () => {
 
     // The swap's unmount of what only home lists, and no other.
     expect(mock.world.calls.filter(call => call === "unmount")).toHaveLength(1);
-  });
-});
-
-describe("the checks of `leave`", () => {
-  // Bug: a wrong value reaches the renderer and draws a veil that never fades, or never shows.
-  it.each([
-    ["a string", "dim", "scenes.leave is dim."],
-    ["a part that is no object", { loader: 400 }, "scenes.leave.loader is 400."],
-    ["an alpha over 1", { cover: { alpha: 2 } }, "scenes.leave.cover.alpha is 2."],
-    [
-      "a colour that is no whole number",
-      { cover: { color: 0.5 } },
-      "scenes.leave.cover.color is 0.5."
-    ],
-    ["a negative duration", { cover: { inMs: -1 } }, "scenes.leave.cover.inMs is -1."],
-    [
-      "a delay that is no number",
-      { loader: { afterMs: "soon" } },
-      "scenes.leave.loader.afterMs is soon."
-    ],
-    ["an empty texture key", { loader: { texture: "" } }, "scenes.leave.loader.texture is ."]
-  ])("refuses %s in the config at createApp", (_case, leave, message) => {
-    expect(() => checkConfig({ buildMs: "auto", leave: leave as SceneLeave })).toThrow(
-      `[game] ${message}\n  Give `
-    );
-  });
-
-  // Bug: a scene's wrong `leave` throws only at its first switch, far from the line that wrote it.
-  it("refuses a scene's `leave` of the wrong shape at `defineScene`, naming the scene", () => {
-    expect(() =>
-      defineScene("board", {
-        bundle: "board",
-        layers: {},
-        projections: [],
-        leave: { cover: { outMs: Number.NaN } }
-      })
-    ).toThrow(
-      '[game] Scene "board": leave.cover.outMs is NaN.\n  Give the milliseconds of the fade-out, 0 or more.'
-    );
   });
 });

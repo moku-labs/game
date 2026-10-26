@@ -16,7 +16,6 @@ import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createScenesApi } from "./api";
-import { DEFAULT_LEAVE } from "./leave";
 import { checkConfig, startScenes, stopScenes } from "./lifecycle";
 import { createScenesState } from "./state";
 import type { Config, Events } from "./types";
@@ -25,7 +24,13 @@ import type { Config, Events } from "./types";
  * The budget of a live switch, two thirds of each frame at the rate the loop runs, and what it shows over the scene
  * being left: the engine's veil and ring. Typed, so a game's values override it.
  */
-const defaultConfig: Config = { buildMs: "auto", leave: DEFAULT_LEAVE };
+const defaultConfig: Config = {
+  buildMs: "auto",
+  leave: {
+    cover: { color: 0x00_00_00, alpha: 0.45, inMs: 150, outMs: 150 },
+    loader: { afterMs: 400 }
+  }
+};
 
 /**
  * Scenes plugin: `app.scenes.current()`, and `defineScene` for the game.

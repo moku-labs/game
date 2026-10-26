@@ -52,12 +52,14 @@ const RING: Readonly<ShapeValue> = Object.freeze({
 function objectsOf(sctx: SyncCtx): LeaveObjects | undefined {
   const leave = sctx.ctx.state.sync.leave;
 
+  // Made once per application: every later look reuses them.
   if (leave.objects !== undefined) return leave.objects;
 
   const pixi = sctx.deps.host.pixi();
 
   if (pixi === undefined || sctx.deps.host.stage() === undefined) return undefined;
 
+  // The objects: the top container, the veil, the frame in reference units and the three loaders in it.
   const top = new pixi.Container();
   const veil = new pixi.Sprite(pixi.Texture.WHITE);
   const frame = new pixi.Container();
@@ -65,6 +67,7 @@ function objectsOf(sctx: SyncCtx): LeaveObjects | undefined {
   const ring = new pixi.Graphics();
   const spinner = new pixi.Sprite(pixi.Texture.WHITE);
 
+  // Labels for the doors and the tests; the veil grows from its top left corner.
   top.label = TOP_LABEL;
   veil.label = `${TOP_LABEL}.cover`;
   veil.anchor.set(0, 0);
@@ -75,6 +78,7 @@ function objectsOf(sctx: SyncCtx): LeaveObjects | undefined {
   ring.pivot.set(RING.w / 2, RING.h / 2);
   spinner.label = `${TOP_LABEL}.texture`;
   spinner.anchor.set(0.5, 0.5);
+  // The tree: the veil under the frame, the frame's loaders above it.
   frame.addChild(held);
   frame.addChild(ring);
   frame.addChild(spinner);
@@ -242,6 +246,23 @@ function ask(sctx: SyncCtx, run: LeaveRun): void {
 }
 
 /**
+ * Writes the veil of a running look: its colour, and its alpha at the level it stands at; hidden for a look without one.
+ *
+ * @param objects - The engine's objects.
+ * @param run - The running look.
+ */
+function paintVeil(objects: LeaveObjects, run: LeaveRun): void {
+  const cover = run.look.cover;
+
+  objects.veil.visible = cover !== undefined;
+
+  if (cover === undefined) return;
+
+  objects.veil.tint = cover.color;
+  objects.veil.alpha = cover.alpha * run.level;
+}
+
+/**
  * Keeps the layer of a shown `"layer"` loader in the holder above the veil until the swap. A layer the scene does not
  * declare draws nothing.
  *
@@ -300,9 +321,11 @@ function turn(
 function paintLoader(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun, now: number): boolean {
   const afterMs = run.look.loader?.afterMs ?? 0;
   const shown = !run.landed && run.loader !== "none" && now - run.startedAt >= afterMs;
+  const due = shown && run.loader === "layer";
 
-  if (shown && run.loader === "layer" && !run.asked) ask(sctx, run);
-  if (shown && run.loader === "layer") lift(sctx, objects, run);
+  // A layer loader asks for its layer once, the first frame it is due, and lifts it from then on.
+  if (due && !run.asked) ask(sctx, run);
+  if (due) lift(sctx, objects, run);
 
   const toggled = shown !== run.shown;
 
@@ -311,11 +334,14 @@ function paintLoader(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun, now: n
     sctx.ctx.state.sync.passesVersion += 1;
   }
 
-  objects.held.visible = shown && run.loader === "layer";
+  // `ask` may have turned the layer loader into the ring.
+  const isLayer = shown && run.loader === "layer";
+
+  objects.held.visible = isLayer;
   objects.ring.visible = shown && run.loader === "ring";
   objects.spinner.visible = shown && run.loader === "texture";
 
-  if (!shown || run.loader === "layer") return toggled;
+  if (!shown || isLayer) return toggled;
 
   turn(objects, run, now, sctx.deps.viewport.size());
 
@@ -422,15 +448,7 @@ export function stepLeave(sctx: SyncCtx): void {
   }
 
   hang(sctx, objects, stage, screen);
-
-  const cover = run.look.cover;
-
-  objects.veil.visible = cover !== undefined;
-
-  if (cover !== undefined) {
-    objects.veil.tint = cover.color;
-    objects.veil.alpha = cover.alpha * run.level;
-  }
+  paintVeil(objects, run);
 
   const loading = paintLoader(sctx, objects, run, now);
 

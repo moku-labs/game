@@ -21,28 +21,17 @@ import type {
   State
 } from "./types";
 
-/** The veil a game gets when it writes nothing: black at 45 %, 150 ms in, 150 ms out. */
-const DEFAULT_COVER: Readonly<FullCover> = Object.freeze({
-  color: 0x00_00_00,
-  alpha: 0.45,
-  inMs: 150,
-  outMs: 150
-});
-
-/** The loader a game gets when it writes nothing: the engine's ring, once the switch took 400 ms. */
-const DEFAULT_LOADER: Readonly<FullLoader> = Object.freeze({ afterMs: 400 });
-
 /**
- * The `leave` of the config a game gets when it writes nothing: the engine's veil and ring.
- *
- * @example
- * ```ts
- * DEFAULT_LEAVE; // { cover: { color: 0, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }
- * ```
+ * What a game gets when it writes nothing: black at 45 %, 150 ms in and out, the engine's ring once the switch took
+ * 400 ms. The level under `config.leave`, and where a part written over `false` starts. `index.ts` writes the same
+ * value inline as the plugin's default config; a test pins the two equal.
  */
-export const DEFAULT_LEAVE: SceneLeave = Object.freeze({
-  cover: DEFAULT_COVER,
-  loader: DEFAULT_LOADER
+export const FALLBACK_LEAVE: {
+  readonly cover: Readonly<FullCover>;
+  readonly loader: Readonly<FullLoader>;
+} = Object.freeze({
+  cover: Object.freeze({ color: 0x00_00_00, alpha: 0.45, inMs: 150, outMs: 150 }),
+  loader: Object.freeze({ afterMs: 400 })
 });
 
 /**
@@ -64,7 +53,7 @@ function coverOver(
   if (over === undefined) return below;
   if (over === false) return false;
 
-  const base = below === false ? DEFAULT_COVER : below;
+  const base = below === false ? FALLBACK_LEAVE.cover : below;
 
   return {
     color: over.color ?? base.color,
@@ -114,7 +103,7 @@ function loaderOver(
   if (over === undefined) return below;
   if (over === false) return false;
 
-  const base = below === false ? DEFAULT_LOADER : below;
+  const base = below === false ? FALLBACK_LEAVE.loader : below;
   const named = over.texture !== undefined || over.projection !== undefined;
 
   return { afterMs: over.afterMs ?? base.afterMs, ...lookOf(named ? over : base) };
@@ -136,8 +125,8 @@ export function leaveOf(
   config: SceneLeave | undefined,
   scene: SceneLeave | undefined
 ): FullLeave | undefined {
-  let cover: Readonly<FullCover> | false = DEFAULT_COVER;
-  let loader: Readonly<FullLoader> | false = DEFAULT_LOADER;
+  let cover: Readonly<FullCover> | false = FALLBACK_LEAVE.cover;
+  let loader: Readonly<FullLoader> | false = FALLBACK_LEAVE.loader;
 
   for (const level of [config, scene]) {
     if (level === false) {
@@ -184,11 +173,53 @@ function unmountLoader(ctx: ScenesCtx, leaving: Leaving): void {
 }
 
 /**
+ * Mounts a loader projection for the switch, unless it is mounted already (by another owner): such a one is drawn as it
+ * is and never unmounted by the switch. A mount that throws (an unknown name, a layer the scene being left does not
+ * declare) is warned.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param name - The loader projection.
+ * @param from - The scene being left.
+ * @param leaving - The look of the switch: it keeps the name to unmount at the end.
+ * @returns False when the mount threw.
+ */
+function mountOnce(ctx: ScenesCtx, name: string, from: SceneDefinition, leaving: Leaving): boolean {
+  const projection = ctx.deps.world.projection;
+
+  if (projection.entitiesOf(name).length > 0) return true;
+
+  try {
+    projection.mount([name], ctx.state.owner);
+  } catch (error) {
+    ctx.log.warn("scenes:loader-unmounted", { projection: name, scene: from.id, error });
+
+    return false;
+  }
+
+  // Recorded right after the mount: an abort or a throw from here on unmounts it.
+  leaving.projection = name;
+
+  return true;
+}
+
+/**
+ * Tells whether a projection of the scene being left draws in a layer: lifted above the veil, that layer would take
+ * the scene's own views with it.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param from - The scene being left.
+ * @param layer - The layer of the loader.
+ * @returns True when one of its projections has a view in that layer.
+ */
+function sharesLayer(ctx: ScenesCtx, from: SceneDefinition, layer: string): boolean {
+  return from.projections.some(other => layerOf(ctx, other) === layer);
+}
+
+/**
  * Mounts a loader projection once its loader is due, called by the renderer in that frame, and answers the layer its
- * views draw in, which the renderer draws above the veil. One mounted already (by another owner) is drawn as it is and
- * never unmounted by the switch. One the scene being left cannot mount (an unknown name, a layer it does not declare),
- * and one whose layer a projection of the scene being left draws in too (the whole layer would rise above the veil), is
- * warned and gives the engine's ring, as does one with no view. A switch that ended meanwhile mounts nothing.
+ * views draw in, which the renderer draws above the veil. A mount that throws, a layer a projection of the scene being
+ * left draws in too, and a projection with no view give the engine's ring. A switch that ended meanwhile mounts
+ * nothing.
  *
  * @param ctx - Domain context of the plugin.
  * @param name - The loader projection.
@@ -202,30 +233,19 @@ function mountLoader(
   from: SceneDefinition,
   leaving: Leaving
 ): string | undefined {
-  if (leaving.done) return undefined;
+  // The switch landed or was dropped before the renderer asked: nothing to draw.
+  if (leaving.done || !mountOnce(ctx, name, from, leaving)) return undefined;
 
-  if (ctx.deps.world.projection.entitiesOf(name).length === 0) {
-    try {
-      ctx.deps.world.projection.mount([name], ctx.state.owner);
-    } catch (error) {
-      ctx.log.warn("scenes:loader-unmounted", { projection: name, scene: from.id, error });
-
-      return undefined;
-    }
-
-    leaving.projection = name;
-  }
-
+  // The layer its views draw in; a projection with no view has none.
   const layer = layerOf(ctx, name);
 
-  if (layer !== undefined && from.projections.some(other => layerOf(ctx, other) === layer)) {
-    ctx.log.warn("scenes:loader-layer-shared", { projection: name, layer, scene: from.id });
-    unmountLoader(ctx, leaving);
+  if (layer === undefined || !sharesLayer(ctx, from, layer)) return layer;
 
-    return undefined;
-  }
+  // A shared layer would lift the scene's own views above the veil: the ring instead.
+  ctx.log.warn("scenes:loader-layer-shared", { projection: name, layer, scene: from.id });
+  unmountLoader(ctx, leaving);
 
-  return layer;
+  return undefined;
 }
 
 /**
@@ -296,6 +316,7 @@ export function startLeave(
   scene: SceneDefinition,
   run: RunContext
 ): Leaving | undefined {
+  // Whether this switch shows anything, and what: the scene being left decides.
   const from = leftScene(ctx, run);
 
   if (from === undefined) return undefined;
@@ -304,9 +325,11 @@ export function startLeave(
 
   if (leave === undefined) return undefined;
 
-  // Aborted by `off`, it takes the abort listener of the node's signal away.
+  // The record of the switch's look; `off`, by aborting `listening`, takes its abort listener away.
   const listening = new AbortController();
   const leaving: Leaving = { done: false, off: (): void => listening.abort() };
+
+  // The look the renderer draws: only the parts that are on.
   const look: LeaveLook = {};
 
   if (leave.cover !== false) look.cover = leave.cover;
@@ -314,6 +337,7 @@ export function startLeave(
     look.loader = loaderLook(ctx, leave.loader, { from, to: scene }, leaving);
   }
 
+  // Shown now, before the bundles are awaited; an abort of the node drops it at once.
   ctx.deps.renderer.sync.leave.show(look);
   run.signal.addEventListener("abort", () => endLeave(ctx, leaving, "drop"), {
     once: true,

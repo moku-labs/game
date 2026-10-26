@@ -1,6 +1,6 @@
 import { expectTypeOf } from "vitest";
 import { createPlugin } from "../../../../config";
-import { projection } from "../../../../index";
+import { createApp, projection, screen } from "../../../../index";
 import type { Json } from "../../../model/types";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
@@ -109,6 +109,37 @@ defineGameScene("board", {
   // @ts-expect-error — "board.cel" is not an asset key of this game.
   leave: { loader: { texture: "board.cel" } }
 });
+
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  // @ts-expect-error — the veil's `alpha` is a number.
+  leave: { cover: { alpha: "0.6" } }
+});
+
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  // @ts-expect-error — `leave` is an object or `false`, never `true`.
+  leave: true
+});
+
+// The config's `leave` takes the same shape.
+createApp({
+  plugins: [...screen],
+  pluginConfigs: { scenes: { leave: { cover: { alpha: 0.6 }, loader: false } } }
+});
+
+createApp({
+  plugins: [...screen],
+  // @ts-expect-error — the veil's `alpha` is a number.
+  pluginConfigs: { scenes: { leave: { cover: { alpha: "0.6" } } } }
+});
+
+// @ts-expect-error — `leave` is an object or `false`, never `true`.
+createApp({ plugins: [...screen], pluginConfigs: { scenes: { leave: true } } });
 
 // ─── music is narrowed to the audio keys of the game ──────────
 
