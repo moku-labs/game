@@ -44,6 +44,7 @@ export function createProjectionState(): ProjectionState {
     keys: emptyMap(),
     keysByEntity: emptyMap(),
     mutes: emptyMap(),
+    initialOnly: emptyWeakMap(),
     ownedSets: emptyWeakMap(),
     joinedMutes: emptyWeakMap(),
     converged: [],

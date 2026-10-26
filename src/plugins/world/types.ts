@@ -204,6 +204,8 @@ export type {
   ChangeHook,
   DescriptionNode,
   Ease,
+  InitialOnly,
+  InitialOnlyPair,
   LayerSort,
   LayerSpec,
   Motion,

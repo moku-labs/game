@@ -21,6 +21,7 @@ import {
   writeRestNow,
   writeRestUnderLoops
 } from "./motions";
+import { seedMutes } from "./mutes";
 import {
   dequeueRevive,
   despawnView,
@@ -161,6 +162,9 @@ function enterEntry(
 
   const state = pctx.ctx.state.projection;
   const building = state.building;
+
+  // The spawn wrote the `initialOnly` fields from `view`; from here on they are another writer's.
+  seedMutes(state, spec, entity);
 
   mounted.live.set(entry.key, view);
   state.byEntity.set(entity, view);
