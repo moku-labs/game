@@ -66,6 +66,7 @@
  * | assets | baseUrl | undefined |
  * | assets | io | undefined, the browser fetch and the renderer textures |
  * | scenes | buildMs | "auto", two thirds of a frame ((1000 / time.rate().fps) * 2 / 3, 11.1 ms at 60 Hz), read at each build start; a number fixes it |
+ * | scenes | leave | { cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }, what a live switch shows over the scene being left: a veil from its start and a loader (the engine's ring, a `texture` or a `projection`) once it took `afterMs`; a scene's `leave` is merged over it field by field, a field left out keeps this default, `false` turns a part or the whole off |
  * | anim | maxTracks | 2000 |
  * | anim | reducedMotion | false |
  * | i18n | locale | "en" |

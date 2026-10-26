@@ -33,6 +33,7 @@ export const boardFeature = defineFeature("board", {
 | `layers` | `Record<string, { sort? }>` | Layer name to its sort rule. The order of the lines is draw order, bottom first. A layer `ui` is appended |
 | `projections` | `ProjectionSpec[]` | The projections the scene mounts. Their `layer` and `lift` are checked against the keys of `layers` and `ui` |
 | `music` | `AudioKey` | Optional. The audio keys of the game (`G["assets"]`). Carried in `scenes:changed`, so `audio` needs no lookup |
+| `leave` | `SceneLeave` | Optional. What a live switch shows over this scene when it is left: a veil and a loader, merged field by field over `config.leave`; `false` shows nothing. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
 
 The layer names are inferred from the keys of `layers`, and `NoInfer` keeps `projections` out of that inference: a wrong `layer` or `lift` is an error on the projection that is wrong, with no generic at the call site. The same check runs at run time for a caller without types:
 
@@ -213,6 +214,84 @@ the commit". A headless test and a fast walk keep their timing.
 
 **Known limit.** When a scene stays mounted and the committed state changes what `bundles` names (a restore of another episode while the ward is up), the projections reconcile on `model:committed` before the scene stage awaits the new bundle, so the new art may be missing for the frames of that load (the texture lookup of `assets` warns and loads it). A switch never shows a scene before its bundles are in.
 
+## What a switch shows over the scene being left
+
+From the start of a live switch to its swap, the renderer draws a veil over the scene being left and, when the switch
+is slow, a loader above the veil (spec 33, slice A2). The player sees an answer to the tap in the next frame, also on a
+first visit whose textures still go to the GPU; the swap happens under the veil, which then fades out over the new
+scene.
+
+```ts
+// What a game gets when it writes nothing.
+pluginConfigs.scenes.leave = { cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } };
+
+// Per scene, merged field by field over the config; `false` turns a part or the whole off.
+defineScene("board", { ..., leave: { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } } });
+defineScene("ward", { ..., leave: false });
+```
+
+| Part | Field | Default | Meaning |
+|---|---|---|---|
+| `cover` | `color` | `0x000000` | The colour of the veil |
+| | `alpha` | `0.45` | The alpha it fades in to, 0 to 1 |
+| | `inMs` | `150` | Clock milliseconds from 0 to `alpha`, from the switch start |
+| | `outMs` | `150` | Clock milliseconds back to 0, from the swap |
+| `loader` | `afterMs` | `400` | Clock milliseconds after the switch start the loader waits for; a switch done sooner shows none |
+| | `texture` | none | An asset key: the game's texture turns at the centre of the frame, once a second |
+| | `projection` | none | A registered projection: mounted once the loader is due, its layer drawn above the veil |
+
+With neither `texture` nor `projection` the loader is a white ring the engine draws.
+
+- **The scene being left decides.** Its `leave` over `config.leave` over the engine's default, field by field: a scene
+  that writes `cover: { color }` keeps the config's alpha and times. This merge is the plugin's own, on top of the
+  kernel's shallow merge of `pluginConfigs`: a game's `pluginConfigs.scenes.leave` replaces the whole default object
+  at the kernel, and scenes then takes every field the game left out from its fallback (`FALLBACK_LEAVE` in
+  `leave.ts`, the same value as the default config in `index.ts`). `false` at a level turns both parts off there; a
+  part written over `false` starts from the engine's default. `texture` and `projection` are one choice: a level that
+  names either replaces both of the level below, and with both named the projection is drawn. The type of `texture` is
+  the game's asset key through `defineGame`.
+- **When.** Only a real scene change on a live run, while the world runs live, with a drawing renderer
+  (`renderer.host.ready()`): the switches that build aside. A fast walk (a restore, a test walk), a node entered live
+  while the world walks fast or stands paused (the restore of a repro), a headless app and the first scene of a run
+  show nothing, and so does a switch whose look resolves to nothing.
+- **The start.** The look is handed to `renderer.sync.leave.show` at the start of the switch, right after `bundles` was
+  read and before the bundles and their textures are awaited, so the veil is in the next frame. A bundle that is not
+  loaded at all when the node is entered holds the `load` stage of `assets`, which runs before the `scene` stage: the
+  veil then comes after that load.
+- **The swap.** Once the scene stands (the block of step 13, a commit or a one-block mount), `renderer.sync.leave.land`:
+  the loader goes at once and the veil fades out over `outMs` above the new scene, then leaves the stage.
+- **Without a swap.** An abort of the node (a restore, the inbox, a stop of the runner) drops the veil and the loader
+  at once, from the abort listener of the switch; a switch that throws (a failed load, a `view` that throws) drops
+  them before its rejection. A stop of the plugin forgets the look; the renderer drops it at its own stop.
+- **No tap.** The veil and the loader take no tap: the hit test walks the scene's layers only. The gate is closed during
+  a switch anyway.
+- **A loader projection** draws in a layer of its own that the scene being left declares (`loading: {}`). It is mounted
+  only once the loader is due: the renderer calls the loader's `due` in the first frame `afterMs` after the switch
+  start, and the projection is mounted there, under the scenes owner, so a switch done sooner never runs its `from` and
+  `view`. The renderer then draws its whole layer above the veil and puts it back at the swap; the projection is
+  unmounted after the land or the drop, also when the switch throws. A projection mounted already (by another owner) is
+  drawn as it is and never unmounted by the switch. These draw the engine's ring instead, warned: a projection one of
+  the two scenes lists (`scenes:loader-listed`, at the switch start), one the scene being left cannot mount, an unknown
+  name or a layer it does not declare (`scenes:loader-unmounted`), and one whose layer a projection of the scene being
+  left draws in too (`scenes:loader-layer-shared`: the whole layer would rise above the veil; it is unmounted again).
+  A projection whose `from` gives no item has no view and no layer: the ring too.
+
+```ts
+// A game's loading screen: its own layer in every scene it leaves from, after 250 ms.
+export const loadingScreen = projection({ name: "loading", layer: "loading", from: () => ({ id: "loading" }), view: () => <LoadingScreen /> });
+defineScene("ward", { bundle: "ward", layers: { room: {}, loading: {} }, projections: [wardRoom] });
+createApp({ pluginConfigs: { scenes: { leave: { loader: { afterMs: 250, projection: "loading" } } } } });
+```
+
+A `leave` of the wrong shape throws where it was written: in the config at `createApp`, in a scene at `defineScene`:
+
+```
+[game] scenes.leave.cover.alpha is 2.
+  Give the alpha the veil fades in to, a number from 0 to 1.
+[game] Scene "board": leave.loader.afterMs is -1.
+  Give the milliseconds the loader waits for, 0 or more.
+```
+
 ## A projection both scenes list
 
 A projection the leaving scene and the coming scene both list stays mounted when both declare its
@@ -265,14 +344,17 @@ HUD that is not shared does not blink either.
 |---|---|---|---|
 | `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`, read once at the build start: 11.1 ms at 60 Hz, 5.56 ms at 120 Hz (two thirds of a 60 Hz frame, ≈ 11.1 ms, if `time` answers no usable rate). A number is a fixed budget |
 
-A value that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
+| `leave` | `SceneLeave` | `{ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }` | What a live switch shows over the scene being left, for every scene; a scene's `leave` is merged over it field by field, and a field the config leaves out keeps the engine's default (the kernel merges `pluginConfigs` shallowly and replaces the whole object; the field-by-field merge is the plugin's own). `false` turns a part or the whole off. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
+
+A `buildMs` that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
 
 ```
 [game] scenes.buildMs is 0.
   Give "auto" or the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4.
 ```
 
-A scene is data in a feature. A transition effect is V3 work of `anim`.
+A `leave` of the wrong shape throws there too. A scene is data in a feature. A transition the game draws itself (its
+own view built and warmed ahead) is later work (spec 33, slice C).
 
 ## Events
 
@@ -289,16 +371,16 @@ A scene is data in a feature. A transition effect is V3 work of `anim`.
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
-| `world` | `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
+| `world` | `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection once its loader is due, and its `projection.unmount` at the end; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
-| `renderer` | `host.ready()`, which picks the path of a live switch; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
+| `renderer` | `host.ready()`, which picks the path of a live switch and whether it shows a look; `sync.leave.show` at its start, `sync.leave.land` after its swap and `sync.leave.drop` on an abort or a throw; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard; `rate().fps` at a build start, for the budget of `"auto"`; `agentClock()`, the page clock of a build's `buildMs` in an agent build |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle
 
-`onInit` checks `buildMs`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
+`onInit` checks `buildMs` and `leave`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, forgets the look of a running switch (its abort listener goes), and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
 
 ## Not in V2
 
-`flow.fx.handle("scene")`: no node needs a switch in the middle of its body. A transition effect between two scenes is later work.
+`flow.fx.handle("scene")`: no node needs a switch in the middle of its body. A transition the game draws itself between two scenes is later work.

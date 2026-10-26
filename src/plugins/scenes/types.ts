@@ -125,6 +125,74 @@ export type CheckedProjections<Layer extends string, List> = {
 };
 
 /**
+ * The veil a live switch lays over the scene being left, from the switch start: a full-screen rect the engine draws
+ * above every layer, fading from 0 to `alpha` over `inMs`; after the swap the next scene is under it and it fades out
+ * over `outMs`. It takes no tap. A field left out keeps the one of the level below: the scene's over the config's over
+ * the engine's.
+ *
+ * @example
+ * ```ts
+ * // A navy veil at 60 %, the engine's 150 ms in and out.
+ * const cover: SceneCover = { color: 0x0b1020, alpha: 0.6 };
+ * ```
+ */
+export type SceneCover = {
+  /** Colour of the veil, `0xRRGGBB`. Default `0x000000`. */
+  color?: number;
+  /** The alpha it fades in to, 0 to 1. Default 0.45. */
+  alpha?: number;
+  /** Milliseconds from 0 to `alpha`, from the switch start. Default 150. */
+  inMs?: number;
+  /** Milliseconds back to 0 after the swap. Default 150. */
+  outMs?: number;
+};
+
+/**
+ * What a live switch shows above the veil when it is not done `afterMs` after its start, until the swap: a game
+ * texture turning at the centre (`texture`), a projection of the game drawn above the veil (`projection`), or, with
+ * neither, a white ring the engine draws. `texture` and `projection` are one choice: a level that names either replaces
+ * both of the level below, and with both named `projection` is drawn. A projection loader draws in a layer of its own
+ * that the scene being left declares, mounted only once the loader is due: the whole layer is drawn above the veil
+ * while the loader shows.
+ *
+ * @example
+ * ```ts
+ * // The game's ring texture, shown once the switch took 400 ms.
+ * const loader: SceneLoader<"ui.loader.ring"> = { texture: "ui.loader.ring" };
+ * // The game's own loading screen, the projection "loading" in the layer "loading", after 250 ms.
+ * const screen: SceneLoader = { afterMs: 250, projection: "loading" };
+ * ```
+ */
+export type SceneLoader<Asset extends string = string> = {
+  /** Milliseconds after the switch start the loader waits for. Default 400. */
+  afterMs?: number;
+  /** An asset key of the game: the texture turns at the centre of the frame. */
+  texture?: Asset;
+  /** The name of a registered projection: mounted once the loader is due, its layer drawn above the veil. */
+  projection?: string;
+};
+
+/**
+ * What a live switch shows over the scene being left: the veil and the loader. The scene being left decides: its
+ * `leave` is merged field by field over `config.leave`, which is merged over the engine's default (`{ cover: { color:
+ * 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }`). `false` turns a part or the whole off;
+ * a part written over `false` starts from the engine's default. Fast mode, a headless app and the first scene of a run
+ * show nothing.
+ *
+ * @example
+ * ```ts
+ * // The board leaves under a navy veil with the game's ring texture; the ward leaves with nothing at all.
+ * const board: SceneLeave<"ui.loader.ring"> = { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } };
+ * const ward: SceneLeave = false;
+ * // The veil without a loader.
+ * const quiet: SceneLeave = { loader: false };
+ * ```
+ */
+export type SceneLeave<Asset extends string = string> =
+  | { cover?: SceneCover | false; loader?: SceneLoader<Asset> | false }
+  | false;
+
+/**
  * What the author passes to `defineScene`. The layer names come from the keys of `layers` plus
  * the appended `ui`; `NoInfer` keeps `projections` out of that inference, so a wrong name is
  * reported on the projection and never widens the layer union. `music` is an asset key of the
@@ -163,6 +231,8 @@ export type SceneSpec<
   layers: Layers;
   projections: Projections & NoInfer<CheckedProjections<SceneLayer<Layers>, Projections>>;
   music?: Asset;
+  /** What a live switch shows over this scene when it is left: merged field by field over `config.leave`. */
+  leave?: SceneLeave<Asset>;
 };
 
 /**
@@ -210,6 +280,8 @@ export type SceneDefinition = {
    * @returns The bundle names the scene needs on top of `bundle`.
    */
   bundles?(state: SceneState): readonly string[];
+  /** What `defineScene` was given as `leave`; absent when the scene takes the config's. */
+  readonly leave?: SceneLeave;
 };
 
 /**
@@ -238,7 +310,8 @@ export type SceneState<Player extends Json = Json, Session extends Json = Json> 
 export type SceneOwner = Owner & { kind: "plugin"; name: "scenes" };
 
 /**
- * scenes plugin config. A scene is data in a feature; the one key is the budget of a live switch.
+ * scenes plugin config. A scene is data in a feature; the keys are the budget of a live switch and what it shows over
+ * the scene being left.
  *
  * @example
  * ```ts
@@ -247,6 +320,9 @@ export type SceneOwner = Owner & { kind: "plugin"; name: "scenes" };
  *
  * // A game on a slow phone gives the next scene a fixed 3 ms of each frame: the switch takes more frames.
  * const fixed: Config = { buildMs: 3 };
+ *
+ * // Every switch shows the veil and no loader.
+ * const quiet: Config = { buildMs: "auto", leave: { loader: false } };
  * ```
  */
 export type Config = {
@@ -256,6 +332,23 @@ export type Config = {
    * frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`, read once at the build start.
    */
   buildMs: number | "auto";
+  /**
+   * What a live switch shows over the scene being left, for every scene; a scene's own `leave` is merged over it field
+   * by field. A field left out keeps the engine's default, `{ cover: { color: 0x000000, alpha: 0.45, inMs: 150,
+   * outMs: 150 }, loader: { afterMs: 400 } }`; `false` turns a part or the whole off.
+   *
+   * @example
+   * ```ts
+   * // The veil a little darker for every scene, and the game's ring texture after 300 ms instead of the white ring.
+   * createApp({
+   *   plugins: [...screen, boardFeature],
+   *   pluginConfigs: { scenes: { leave: { cover: { alpha: 0.6 }, loader: { afterMs: 300, texture: "ui.loader.ring" } } } }
+   * });
+   * // No veil and no loader on any switch.
+   * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { leave: false } } });
+   * ```
+   */
+  leave?: SceneLeave;
 };
 
 /**
@@ -316,7 +409,40 @@ export type State = {
    * Absent otherwise: deleted, never written as `undefined`.
    */
   build?: SceneBuild;
+  /**
+   * The veil and the loader of the running switch, from its start to its swap or its end without one. Absent
+   * otherwise: deleted, never written as `undefined`.
+   */
+  leaving?: Leaving;
 };
+
+/**
+ * The veil and the loader a switch showed over the scene being left (spec 33, slice A2): whether they were taken down
+ * already, the loader projection it mounted once its loader was due, and how to stop listening to the abort of its node.
+ */
+export type Leaving = {
+  /** Landed or dropped: a second end does nothing. */
+  done: boolean;
+  /** The loader projection the switch mounted, unmounted at the end; absent while it mounted none. */
+  projection?: string;
+  /** Removes the abort listener of the switch's node. */
+  off: () => void;
+};
+
+/**
+ * A veil with every field: what a level of `leave` resolves to.
+ */
+export type FullCover = Required<SceneCover>;
+
+/**
+ * A loader with its delay and at most one look: what a level of `leave` resolves to.
+ */
+export type FullLoader = { afterMs: number; texture?: string; projection?: string };
+
+/**
+ * What a switch shows over the scene being left, every level merged: each part resolved or off.
+ */
+export type FullLeave = { cover: FullCover | false; loader: FullLoader | false };
 
 /**
  * scenes plugin events.

@@ -38,10 +38,12 @@ describe("renderer api", () => {
       "hitAll",
       "hitBoxOf",
       "hitTest",
+      "leave",
       "loopsHeld",
       "renderPasses",
       "textures"
     ]);
+    expect(Object.keys(mock.api.sync.leave).toSorted()).toEqual(["drop", "land", "show"]);
     expect(Object.keys(mock.api.sync.textures).toSorted()).toEqual([
       "create",
       "destroy",

@@ -224,6 +224,9 @@ internal markup: select them by nothing, set the properties instead.
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
 | `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
+| `leave.show(look)` | `scenes` at the start of a live switch: a veil over the whole canvas fading in, and a loader that waits for its `afterMs`, drawn above every layer; replaces a look that runs. See "The picture of a scene being left". Inert: nothing. |
+| `leave.land()` | `scenes` after the swap: the loader goes, the veil fades out over its `outMs` and leaves the stage. Nothing runs: nothing. |
+| `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once. Nothing runs: nothing. |
 | `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
@@ -749,7 +752,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views of a scene build that was committed, added views, changed components, invalidated texture keys; then, while a scene is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -791,6 +794,40 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
 
 Headless, fast mode and a renderer without a device keep the one-block switch: `scenes` takes it
 when `host.ready()` is false.
+
+## The picture of a scene being left
+
+From the start of a live switch to its swap, `scenes` has the renderer draw a veil over the scene being left and, when
+the switch is slow, a loader above the veil (spec 33, slice A2; the look, its defaults and its merge are in the scenes
+README). The renderer's part, `sync.leave`:
+
+- **Where.** One container of the engine, `renderer.leave`, hangs last on the stage while a look runs: above the root,
+  so above every layer, overlay and HUD layer of the scene, whatever layer list comes. It holds the veil (the white
+  texture, tinted, scaled to the canvas from `host.screen()`, so the bars of a wide screen are dimmed too) and a frame
+  with the root's transform, in which the loader sits at the centre of the reference frame.
+- **The clock.** Every render phase steps the look on `clock.now()`, before the draw decision: the veil's level rises by
+  the clock milliseconds since the last step over `inMs` and, after `land`, falls over `outMs` from where it stands;
+  at 0 the container leaves the stage. A look shown while the last one still fades out starts from that level. The
+  loader shows once `clock.now()` is `afterMs` past `show`, until `land`.
+- **The loader.** `texture` resolves the key through the texture providers at `show` and turns the texture at the
+  centre, one turn a second; a key nothing answers is warned once (`renderer: no texture for asset key`) and draws the
+  ring. Neither: a white three-quarter ring 96 u across, 10 u wide, drawn once and turned the same way. `due`: called
+  once, in the first frame the loader is due and before it is drawn (never for a switch done sooner), it makes what the
+  loader draws (`scenes` mounts its loader projection there) and answers a layer of the scene; that layer's container
+  is moved into the look, above the veil, from that frame on, and put back under the root at the place of its layer at
+  `land` or `drop` (a layer list that changed before takes it back itself). No layer, or a throw (logged,
+  `renderer: the loader of a scene being left threw`), draws the ring. Its views stay views of the scene: their own motions run, and a hidden or shown loader moves the walks of
+  `shown`, so their loops run while it shows.
+- **No tap.** The hit test walks the layers of the root only, and a lifted layer is not under the root: neither the
+  veil nor the loader takes a tap.
+- **Frames.** A step asks for a frame (`"request"`) while the veil's level moves, when the loader comes or goes, and
+  every frame a ring or a texture turns; a veil that stands asks for none, so a still screen under it draws nothing
+  with `onDemand`.
+- **Objects.** The container, the veil, the frame, the ring, the spinner and the holder of a lifted layer are made at
+  the first step that needs them and kept for the life of the application: a switch makes no Pixi object. A lost
+  device takes them with its stage; the step makes them again on the restored one, and a look that ran on goes on. A
+  stop frees them; the game's texture and a lifted layer are not freed with them. With no look running a step reads
+  one field: 0 B a frame (`leave.perf.ts`).
 
 ## Render on demand
 
@@ -1400,7 +1437,8 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
   with `undefined` and forgets the frame counters, then runs the cleanups of `sync`,
   `viewport` and `host` in that order, destroys the pooled objects and the application
   (`{ removeView: true }`, `{ children: true, texture: false }`), swaps Pixi's own draw classes
-  back, removes the two safe-area probes and the unsupported element and clears every map, the filter slots too. It runs before `world` stops, so the world hooks are
+  back, removes the two safe-area probes and the unsupported element and clears every map, the filter slots too, and
+  drops the look of a scene being left and frees its objects. It runs before `world` stops, so the world hooks are
   removed while `world` is alive. Textures are left to `assets`; a `Display` object is detached,
   never destroyed. The pool trim starts over and its listeners go, and both `viewport.size()`
   objects are dropped; Pixi's texture pool itself is left alone, since it is module-global and

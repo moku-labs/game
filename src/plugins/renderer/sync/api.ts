@@ -26,6 +26,7 @@ import { forgetBuild } from "./held";
 import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
 import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
+import { dropLeave, forgetLeave, landLeave, showLeave, stepLeave } from "./leave";
 import { drawOverdraw } from "./overdraw";
 import {
   drainOverlayEvents,
@@ -47,6 +48,7 @@ import type {
   DisplayEntry,
   FilterSlot,
   HitBox,
+  LeaveLook,
   OverlayEventSink,
   OverlayReport,
   SliceFrame,
@@ -748,6 +750,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     clearLayers(state);
     // A rebuild holds every building view again, with the tree it builds.
     forgetBuild(state);
+    // The picture of a scene being left goes with the stage; a running look makes its objects again on the new one.
+    forgetLeave(state);
     state.root = undefined;
     state.passesVersion += 1;
   };
@@ -905,6 +909,14 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       warm: (filter: PixiFilter): Promise<boolean> => warmFilter(sctx, filter)
     },
 
+    leave: {
+      show: (look: LeaveLook): void => showLeave(sctx, look),
+
+      land: (): void => landLeave(sctx),
+
+      drop: (): void => dropLeave(sctx)
+    },
+
     renderPasses: (): number => renderPassesOf(state, ctx.state.kept),
 
     root: (): PixiContainer | undefined => state.root,
@@ -914,6 +926,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     layerOf: (entity: Entity): string | undefined => layerOf(sctx, entity),
 
     stepOverlays: (): void => stepOverlays(sctx),
+
+    stepLeave: (): void => stepLeave(sctx),
 
     stepFilters: (): void => applySwitched(state, deps.kept),
 

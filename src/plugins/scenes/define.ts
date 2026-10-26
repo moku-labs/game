@@ -4,6 +4,7 @@
  */
 import type { Json } from "../model/types";
 import type { LayerSpec } from "../world/types";
+import { checkLeave } from "./leave-check";
 import type {
   AnySceneProjection,
   DefineScene,
@@ -176,14 +177,15 @@ function namesOf(
  * layer names come from the keys of `layers` and that `ui`, so a projection whose `layer` or
  * `lift` is not among them does not compile — and throws here for a caller without types.
  * `bundles` names bundles that depend on the committed state: the scene is mounted once those
- * are in too.
+ * are in too. `leave` is what a live switch shows over the scene when it is left, merged over the
+ * config's: `false` shows nothing.
  *
  * @param id - Id of the scene. A node names it with `defineNode({ scene: id })`.
- * @param scene - The bundle, the optional bundles of state, the layers, the projections and the
- *   optional music key.
+ * @param scene - The bundle, the optional bundles of state, the layers, the projections, the
+ *   optional music key and the optional `leave`.
  * @returns The scene as frozen data, ready for the `scenes` key of a feature.
  * @throws {Error} For an integer-like layer name, for a `layer` or `lift` that is not declared, for two HUD layers,
- *   an `above` other than `"overlays"`, and a `ui` declared after the HUD layer.
+ *   an `above` other than `"overlays"`, a `ui` declared after the HUD layer, and a `leave` of the wrong shape.
  * @example
  * ```ts
  * // features/board/view/scene.ts of a game.
@@ -208,6 +210,14 @@ function namesOf(
  *   projections: [wardRoom, wardGlows]
  * });
  * wardScene.bundles?.({ player: {}, session: { episode: "ep02" } }); // ["ep02"]
+ *
+ * // Leaving the board dims it in navy and turns the game's ring texture once the switch took 400 ms.
+ * defineScene("board", {
+ *   bundle: "board",
+ *   layers: { cells: {} },
+ *   projections: [],
+ *   leave: { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } }
+ * }).leave; // { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } }
  * ```
  */
 export function defineScene<
@@ -222,13 +232,16 @@ export function defineScene<
   const layers = layersOf(id, scene.layers);
   const projections: readonly AnySceneProjection[] = scene.projections;
 
+  checkLeave(`Scene "${id}": leave`, scene.leave);
+
   return Object.freeze({
     id,
     bundle: scene.bundle,
     music: scene.music,
     layers: Object.freeze(layers),
     projections: Object.freeze(namesOf(id, layers, projections)),
-    ...(scene.bundles === undefined ? {} : { bundles: scene.bundles })
+    ...(scene.bundles === undefined ? {} : { bundles: scene.bundles }),
+    ...(scene.leave === undefined ? {} : { leave: scene.leave })
   });
 }
 
