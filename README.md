@@ -200,7 +200,7 @@ A rest node waits. A player answer comes through the gate. A world event comes t
 | `barrier` | The save is written durably after this node. Rollback cannot cross it. |
 | Flow | `defineFlow(id, { nodes, start, edges })`. A flow with `outcomes` is a node of another flow. |
 | Edge target | A node name, `exit("outcome")` to leave a sub-flow, or `to("node", mapper)`. |
-| Slot | `slot("name")`. Features contribute sub-flows to it. |
+| Slot | `slot("name")`, or `slot("name", { shop: type<{ tab: string }>() })` with named outcomes. Features contribute sub-flows to it with `contribution(slot, { flow, order })`. A contribution that exits a declared outcome leaves the slot at once through the slot's edge. |
 | Feature | `defineFeature(name, { nodes?, flows?, contribute?, features? })`. A plugin that adds to the graph. `features` declares the sub-features of the feature; `flattenFeatures` turns the tree into the plugin list. |
 | Effect | `await fx(descriptor)` for awaited effects, `fx.emit(hint(...))` for cosmetic ones. |
 | Transition | Rest node to rest node, as one transaction. An error rolls back and retries. |

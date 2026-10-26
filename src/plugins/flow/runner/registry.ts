@@ -67,6 +67,90 @@ export function collectFlows(main: AnyFlow, extra: readonly AnyFlow[]): Map<stri
   return flows;
 }
 
+/** Edges without a rest node the runner allows in any graph, also before `run()` counted it. */
+export const RESTLESS_FLOOR = 64;
+
+/** Edges without a rest node the runner allows per node of the expanded graph, above the floor. */
+const RESTLESS_PER_NODE = 4;
+
+/** Reads the contributions of a slot, in order. */
+type ContributionsOf = (slot: string) => readonly { flow: AnyFlow }[];
+
+/** The walk of `expandedSize`: sizes already known by flow id, and the flows being counted. */
+type SizeWalk = {
+  sizes: Map<string, number>;
+  counting: Set<string>;
+  contributionsOf: ContributionsOf;
+};
+
+/**
+ * Counts the nodes of one entry as the loop passes through it: a node is one, a sub-flow is its
+ * own expanded size, a slot is one for its own edge plus the expanded sizes of its contributions.
+ *
+ * @param entry - A node, sub-flow or slot.
+ * @param walk - The sizes known so far, the flows being counted and the contributions reader.
+ * @returns The expanded size of the entry.
+ */
+function entrySize(entry: FlowEntry, walk: SizeWalk): number {
+  if (entry.kind === "node") return 1;
+  if (entry.kind === "flow") return expandedSize(entry, walk);
+
+  let size = 1;
+
+  for (const { flow } of walk.contributionsOf(entry.name)) size += expandedSize(flow, walk);
+
+  return size;
+}
+
+/**
+ * Counts the nodes of a flow with every sub-flow and slot contribution expanded where it is
+ * used: a sub-flow entered from sixteen nodes counts sixteen times. Each flow is counted once and
+ * remembered; a flow that is already being counted, a sub-flow or a slot that leads back into
+ * itself, counts one.
+ *
+ * @param flow - The flow to count.
+ * @param walk - The sizes known so far, the flows being counted and the contributions reader.
+ * @returns The expanded node count of the flow.
+ */
+function expandedSize(flow: AnyFlow, walk: SizeWalk): number {
+  const known = walk.sizes.get(flow.id);
+
+  if (known !== undefined) return known;
+  if (walk.counting.has(flow.id)) return 1;
+
+  walk.counting.add(flow.id);
+
+  let size = 0;
+
+  for (const entry of Object.values(flow.nodes)) size += entrySize(entry, walk);
+
+  walk.counting.delete(flow.id);
+  walk.sizes.set(flow.id, size);
+
+  return size;
+}
+
+/**
+ * Computes how many edges the loop may take without arriving at a rest node before the next one
+ * fails: four per node of the expanded graph, never fewer than 64. The graph is expanded from the
+ * main flow: a sub-flow counts once per entry that uses it, a slot counts its contributions,
+ * because the loop takes their edges once per pass. A legal graph comes to rest long before the
+ * cap; a loop of transit nodes that never rests would freeze the game.
+ *
+ * @param main - The top-level flow.
+ * @param contributionsOf - Reads the contributions of a slot, in order.
+ * @returns The cap of edges without a rest node.
+ * @example
+ * ```ts
+ * restlessCapOf(mainFlow, () => []); // 64 for a graph of up to sixteen expanded nodes
+ * ```
+ */
+export function restlessCapOf(main: AnyFlow, contributionsOf: ContributionsOf): number {
+  const walk: SizeWalk = { sizes: new Map(), counting: new Set(), contributionsOf };
+
+  return Math.max(RESTLESS_FLOOR, RESTLESS_PER_NODE * expandedSize(main, walk));
+}
+
 /**
  * Renders a position as a path: the node of every frame, outermost first.
  *

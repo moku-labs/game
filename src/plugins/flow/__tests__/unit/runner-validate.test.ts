@@ -756,3 +756,172 @@ describe("validateGraph", () => {
     );
   });
 });
+
+describe("validateGraph: own keys", () => {
+  // Bug: `in` reads the prototype, so exit("constructor") passes for every flow and leaves nowhere.
+  it("reports an exit named like an Object method that the flow does not declare", () => {
+    const board = flow(
+      "board",
+      { awaitIntent: node({ rest: true, outcomes: ["leave"] }) },
+      "awaitIntent",
+      { awaitIntent: { leave: { kind: "exit", outcome: "constructor" } } },
+      ["left"]
+    );
+
+    expect(report(board).problems).toContain(
+      '[game] Flow "board": exit("constructor") of node "awaitIntent" names no outcome of the flow.\n  Declare outcomes.constructor on flow "board".'
+    );
+  });
+
+  // Bug: `in` reads the prototype, so an inbox type "constructor" passes and the event is never an outcome.
+  it("reports an inbox type named like an Object method that is no outcome", () => {
+    const board = flow(
+      "board",
+      { awaitIntent: node({ rest: true, outcomes: ["merge"], inbox: ["constructor"] }) },
+      "awaitIntent",
+      { awaitIntent: { merge: "awaitIntent" } }
+    );
+
+    expect(report(board).problems).toContain(
+      '[game] Flow "board": inbox type "constructor" of node "awaitIntent" is not an outcome.\n  Add outcomes.constructor to node "awaitIntent".'
+    );
+  });
+});
+
+/** A slot that declares `declared` besides its own `done`. */
+const declaredSlot = (name: string, declared: readonly string[]): SlotNode => ({
+  kind: "slot",
+  name,
+  input: tag,
+  outcomes: { done: tag, ...tags(declared) }
+});
+
+/** A contributed flow whose rest node leaves it on each of `exits`; node names differ per flow. */
+const leaving = (id: string, exits: readonly string[]): AnyFlow =>
+  flow(
+    id,
+    { [`${id}Show`]: node({ rest: true, outcomes: exits }) },
+    `${id}Show`,
+    {
+      [`${id}Show`]: Object.fromEntries(exits.map(name => [name, { kind: "exit", outcome: name }]))
+    },
+    exits
+  );
+
+/** A main flow that routes every outcome of `episode` from its rest node "home". */
+const mainWith = (episode: SlotNode, extra: Record<string, FlowEntry> = {}): AnyFlow => {
+  const routes = Object.fromEntries(Object.keys(episode.outcomes).map(name => [name, "home"]));
+
+  return flow(
+    "main",
+    { home: node({ rest: true, outcomes: ["play", ...Object.keys(extra)] }), episode, ...extra },
+    "home",
+    {
+      home: { play: "episode", ...Object.fromEntries(Object.keys(extra).map(key => [key, key])) },
+      episode: routes,
+      ...Object.fromEntries(Object.keys(extra).map(key => [key, { done: "home" }]))
+    }
+  );
+};
+
+const contributed = (flowValue: AnyFlow, order: number, when?: () => boolean): Contribution =>
+  when === undefined
+    ? { feature: `${flowValue.id}Feature`, flow: flowValue, order }
+    : { feature: `${flowValue.id}Feature`, flow: flowValue, order, when };
+
+describe("validateGraph: slot outcomes", () => {
+  // Bug: a check fires on a correct declared slot: `done` taken for undeclared, or one slot used
+  // in two flows taken for two declarations, and run() refuses a game that is right.
+  it("reports nothing for a declared slot used in two flows, whose contributions fit and have when", () => {
+    const episodeStep = declaredSlot("episodeStep", ["shop", "board"]);
+    const hub = flow(
+      "hub",
+      {
+        gate: node({ rest: true, outcomes: ["enter"] }),
+        step: declaredSlot("episodeStep", ["board", "shop"])
+      },
+      "gate",
+      {
+        gate: { enter: "step" },
+        step: {
+          done: { kind: "exit", outcome: "done" },
+          shop: { kind: "exit", outcome: "done" },
+          board: { kind: "exit", outcome: "done" }
+        }
+      },
+      ["done"]
+    );
+    const features = featuresWith([
+      contributed(leaving("story", ["done", "shop"]), 10, () => true),
+      contributed(leaving("ward", ["board"]), 20)
+    ]);
+
+    expect(report(mainWith(episodeStep, { hub }), features)).toEqual({
+      problems: [],
+      warnings: []
+    });
+  });
+
+  // Bug: a contribution exits a name the slot never routes, and the hand-back is lost at run time.
+  it("reports a contribution that exits an outcome the slot does not declare", () => {
+    const features = featuresWith([contributed(leaving("story", ["done", "gift"]), 10)]);
+
+    expect(report(mainWith(declaredSlot("episodeStep", ["shop"])), features).problems).toEqual([
+      '[game] Slot "episodeStep": flow "story" of feature "storyFeature" exits "gift", which the slot does not declare.\n  Declare slot("episodeStep", { gift: type() }) or exit "done".'
+    ]);
+  });
+
+  // Bug: two flows declare one slot name differently, and a contribution fits one of them only.
+  it("reports two slot nodes of one name that declare different outcomes", () => {
+    const hub = flow(
+      "hub",
+      {
+        gate: node({ rest: true, outcomes: ["enter"] }),
+        step: declaredSlot("episodeStep", ["board"])
+      },
+      "gate",
+      {
+        gate: { enter: "step" },
+        step: { done: { kind: "exit", outcome: "done" }, board: { kind: "exit", outcome: "done" } }
+      },
+      ["done"]
+    );
+
+    expect(report(mainWith(declaredSlot("episodeStep", ["shop"]), { hub })).problems).toEqual([
+      '[game] Slot "episodeStep" declares different outcomes in flow "main" and flow "hub".\n  Declare the slot once and use it in both flows.'
+    ]);
+  });
+
+  // Bug: a slot that declares nothing silently drops a named exit of its contribution.
+  it("warns about a contribution whose named exit a slot that declares none ignores", () => {
+    const features = featuresWith([contributed(leaving("story", ["done", "shop"]), 10)]);
+    const result = report(mainWith(slotNode("episodeStep")), features);
+
+    expect(result.problems).toEqual([]);
+    expect(result.warnings).toEqual([
+      '[game] Slot "episodeStep": flow "story" exits "shop", which the slot ignores.\n  Declare slot("episodeStep", { shop: type() }) to route it, or exit "done".'
+    ]);
+  });
+
+  // Bug: a later contribution without when never runs once an earlier one leaves on a named exit.
+  it("warns about two contributions without when in a slot that declares outcomes", () => {
+    const features = featuresWith([
+      contributed(leaving("story", ["done", "shop"]), 10),
+      contributed(leaving("quest", ["done"]), 20)
+    ]);
+
+    expect(report(mainWith(declaredSlot("episodeStep", ["shop"])), features).warnings).toEqual([
+      '[game] Slot "episodeStep": the flows "story" and "quest" have no when.\n  A named exit leaves the slot, so "quest" runs only when "story" exits done; give them when.'
+    ]);
+  });
+
+  // Bug: the warning fires for a single contribution without when, which is the normal case.
+  it("does not warn about one contribution without when beside one with when", () => {
+    const features = featuresWith([
+      contributed(leaving("story", ["done", "shop"]), 10),
+      contributed(leaving("quest", ["done"]), 20, () => true)
+    ]);
+
+    expect(report(mainWith(declaredSlot("episodeStep", ["shop"])), features).warnings).toEqual([]);
+  });
+});

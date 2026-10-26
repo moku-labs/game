@@ -10,7 +10,7 @@ import { nodeInfo, nodeOutcome, runEnterCallbacks, stopped, waitForPointer } fro
 import { describePlan, pickContribution } from "./plan";
 import { eventResult, framesOf, locateFrames } from "./position";
 import { recoverNode, takeRecovery } from "./recover";
-import { findNode, framePath, isRestCheckpoint } from "./registry";
+import { findNode, framePath, isRestCheckpoint, restlessCapOf } from "./registry";
 import { loopSeam, notifyGateOpen, notifyRest, takeSubstitution } from "./seam";
 import type { AnyFlow, AnyNode, Bookmark, Modules, SlotNode } from "./types";
 
@@ -151,7 +151,8 @@ function enterSubFlow(
 
 /**
  * Enters a slot: the first contribution whose `when` passes, or the slot's `done` edge when the
- * slot has no contribution to run.
+ * slot has no contribution to run. When a contribution just left on an outcome the slot declares,
+ * the slot takes its own edge of that outcome instead, with the contribution's payload.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -168,6 +169,18 @@ function enterSlot(
   safe: Safe
 ): Promise<StepOutcome> | StepOutcome {
   const state = ctx.state.runner;
+  const leave = state.slotLeave;
+
+  // A contribution left on a declared outcome: the slot's own edge, journalled like `done`.
+  if (leave !== undefined) {
+    state.slotLeave = undefined;
+
+    return applyResult(ctx, modules, location, leave, safe, {
+      barrier: false,
+      now: ctx.deps.clock.now()
+    });
+  }
+
   const finished = state.slotAfter;
   const contributions = modules.features.contributions(slot.name);
   const from =
@@ -248,8 +261,10 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark, safe:
   // Move the position to the node. Its frames are also what a failure retries from.
   state.stack = framesOf(location.trail, bookmark.input);
   state.slotAfter = undefined;
+  state.slotLeave = undefined;
   state.restFrame = [...state.stack];
   state.failures = 0;
+  state.restless = 0;
 
   // Announce the node once. Only a rest node is announced as a checkpoint.
   ctx.emit("flow:rest", {
@@ -306,7 +321,8 @@ async function advance(ctx: FlowCtx, modules: Modules, safe: Safe): Promise<Step
  * Runs the graph until aborted: enter node, `onEnter` stages, begin a transaction, await the
  * body, commit on the edge, release hints, journal, emit `flow:edge`, follow the edge. An error
  * discards, rolls back, is logged and retries, then enters `safeNode`, whose `recover` runs first
- * as one committed edge; a failure inside `safeNode` rejects.
+ * as one committed edge; a failure inside `safeNode` rejects. More edges without a rest node than
+ * the graph's cap is such an error too.
  * Abort reasons: `"stop"` ends the loop, `"inbox"` turns the event into the outcome, `"restore"`
  * enters the bookmark's frame.
  *
@@ -321,6 +337,7 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
 
   state.flows = collectGraph(ctx, modules.features);
   checkGraph(ctx, modules.features);
+  state.restlessCap = restlessCapOf(main, modules.features.contributions);
   modules.features.seal();
 
   await ctx.deps.model.store.load();
@@ -328,7 +345,9 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
   state.stack = [{ flow: main.id, node: main.start, input: noPayload }];
   state.restFrame = [...state.stack];
   state.slotAfter = undefined;
+  state.slotLeave = undefined;
   state.failures = 0;
+  state.restless = 0;
 
   const safe: Safe = { inside: false, recover: false };
   const loop = { running: true };

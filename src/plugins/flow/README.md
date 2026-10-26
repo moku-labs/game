@@ -161,9 +161,10 @@ The second form needs no timeline: the item's projection draws the flight from s
 
 ## When a node fails
 
-A node that throws, an `onEnter` stage that rejects and an edge that leads nowhere all fail the
-transition. The runner discards the transaction, drops the hints, shuts the gate and rolls the
-state back to the last rest point.
+A node that throws, an `onEnter` stage that rejects, an edge that leads nowhere, a `to()` mapper
+that throws or returns a value that is not JSON, and an edge beyond the cap of edges without a
+rest node all fail the transition. The runner discards the transaction, drops the hints, shuts the
+gate and rolls the state back to the last rest point.
 
 | Failures in a row | Where the graph goes | `retry` |
 |---|---|---|
@@ -183,6 +184,33 @@ app.log.trace().filter(entry => entry.event === "flow:error");
 
 A thrown value that is no `Error` is logged as `new Error(String(value))`. The event carries the
 value as it was thrown. The fatal failure inside the safe node is no log entry and no event.
+
+**A mapper that throws.** The mapper of a `to()` edge is game code. When it throws, the node whose
+edge it maps fails like any other: rollback, retry, then the safe node; `run()` goes on. The error
+names the edge and the target:
+
+```text
+[game] The mapper of edge "load.failed" threw: no tab.
+  Return plain JSON from to("retry", ...).
+```
+
+**Edges without a rest node.** The runner counts the edges it takes since it last arrived at a rest
+node. The cap is `max(64, 4 × n)`, where `n` counts the nodes of the expanded graph from the main
+flow: a node is one, a sub-flow counts its own nodes once per entry that uses it, and a slot counts
+one for its own edge plus the nodes of all its contributions. A flow that leads back into itself
+counts one where it does. The edge that would go past the cap fails its node:
+
+```text
+[game] 64 edges without a rest node, at "sub/quick".
+  Put a rest node in the loop.
+```
+
+The static check of `run()` refuses a cycle of transit nodes, but it cannot see every one: a cycle
+through a sub-flow that rests only on another branch, or through a slot, which never rests. Such a
+loop would freeze the game; with the cap it is a failure the safe node recovers from. The count
+starts again at every rest node, at a rollback, at a restore and at `run()`. A legal graph comes to
+rest long before the cap. If the safe node's own path leads back into the loop, each pass fails
+again: a stream of `flow:error`, not a hang.
 
 **`recover`.** When the graph goes to `safeNode`, the state is the one of the rest point that
 failed. Without `recover` the safe node opens its gate on that state. A rest node brings `recover`
@@ -495,6 +523,70 @@ The `onEnter` stages of a node read the state it is entered with: the state the 
 committed, the bookmark's state after a restore, and the state the safe node's `recover`
 committed after a give-up.
 
+## Slots
+
+A slot is an extension point of a flow: a node whose body runs the flows features contribute to it.
+The flow that holds the slot declares it and routes its outcomes; the features fill it.
+
+```ts
+// The main flow leaves room for an episode step. A contribution may send the player to the shop.
+const episodeStep = slot("episodeStep", { shop: type<{ tab: string }>() });
+
+const mainFlow = defineFlow("main", {
+  nodes: { home, episodeStep, shopSheet },
+  start: "home",
+  edges: {
+    home: { play: "episodeStep" },
+    episodeStep: {
+      done: "home",
+      shop: to("shopSheet", (handBack: { tab: string }) => ({ ...handBack, from: "story" }))
+    },
+    shopSheet: { back: "episodeStep" }
+  }
+});
+
+// A feature fills the slot. contribution() checks the outcomes of storyFlow against the slot.
+const storyFeature = defineFeature("storyFeature", {
+  flows: [storyFlow],
+  contribute: { ...contribution(episodeStep, { flow: storyFlow, order: 10 }) }
+});
+```
+
+- **Outcomes.** Every slot has the outcome `done`. `slot(name, outcomes)` declares more, each with
+  the type of its payload, as a node declares its outcomes. The flow that holds the slot gives each
+  one an edge: the compiler requires it, and checks the annotated parameter of a `to()` mapper
+  against the payload. `done` cannot be declared: it is a compile error, and a `TypeError` when
+  `slot()` runs past a cast. A slot without declared outcomes is the same plain data as before, so
+  `describe()` and the graph hash of an existing game do not change.
+- **Contributions.** They run in `order`, lowest first. `when(snapshot)` skips one; it reads the
+  committed state, also what an earlier contribution of the same slot wrote. A contribution may
+  hold a slot of its own.
+- **`done` and a declared outcome.** A contribution that exits `done` hands over to the next
+  contribution whose `when` holds; with none left the slot takes its `done` edge. A contribution that
+  exits an outcome the slot declares leaves the slot at once, with its payload: the later
+  contributions do not run, and the slot takes its own edge of that outcome. A slot that declares
+  no outcome treats every exit as `done`.
+- **The next entry** of a slot starts again at its first contribution. There is no resume index
+  and the bookmark keeps none: the progress of a story lives in the game state its `when` reads.
+- **Journal.** The slot's own edge is an edge like any other: a journal entry and a `flow:edge`
+  with the slot's path, the outcome (`done` or the declared name) and the payload. A named leave
+  is two edges: the contribution's last edge, which leads back to the slot, then the slot's edge.
+- **Checks at `run()`.** It refuses a contribution of a slot that declares outcomes when the flow
+  declares an outcome the slot does not, and one slot name declared with different outcomes in two
+  flows. It warns (`flow:graph-warning`) when a contribution declares named outcomes but its slot
+  declares none, so the slot ignores them, and when a slot that declares outcomes has two or more
+  contributions without `when`: a named exit leaves the slot, so the later one runs only when the
+  earlier one exits `done`. A slot never counts as a rest node: a loop through it must rest
+  elsewhere, and the cap of edges without a rest node (above) catches one that does not.
+- **`contribution(slot, { flow, order, when? })`** returns `{ [slot.name]: { flow, order, when? } }`
+  to spread into `contribute`, with no `when` key when none was given. The compiler checks every
+  outcome of the flow: `done`, or an outcome the slot declares whose payload fits. A slot that
+  declares none takes any flow, and a flow without outcomes fits any slot. A raw `contribute: {
+  episodeStep: { flow, order } }` stays valid: `run()` checks it by name only.
+- **A table built from names.** An edge table a helper builds in a loop (one builder per episode)
+  has `string` keys, so the compiler cannot prove a named exit or its payload there. Declare such a
+  table literally, or give its rows a type with `satisfies`.
+
 ## Configuration
 
 | Key | Type | Default | Meaning |
@@ -523,7 +615,7 @@ would never let `app.start()` resolve.
 
 | Event | Payload | When |
 |---|---|---|
-| `flow:edge` | `{ flow, node, outcome, payload, next, patches, index, now }` | After the commit of an edge. A slot emits its own `done` edge after its last contribution ended, also when it had none; each one is a journal entry. The recovery of the safe node is an edge too: `node` and `next` are the safe node, `outcome` is `"recover"`. |
+| `flow:edge` | `{ flow, node, outcome, payload, next, patches, index, now }` | After the commit of an edge. A slot emits its own `done` edge after its last contribution ended, also when it had none; each one is a journal entry. A contribution that exits an outcome its slot declares makes the slot emit its own edge of that outcome right after the contribution's last edge: `node` is the slot node, `outcome` the declared name, `payload` the contribution's. The recovery of the safe node is an edge too: `node` and `next` are the safe node, `outcome` is `"recover"`. |
 | `flow:rest` | `{ path, checkpoint }` | On entering a rest node, also one that starts a slot contribution (`"afterOrder/show"`). The save goes to the provider and `bookmark()` names this node. Also once when a bookmark is entered, for a transit node too: `path` is then no rest node and `checkpoint` is false. And once after the recovery of the safe node, before that node is entered. |
 | `flow:error` | `{ path, error, rolledBackTo, retry }` | After a rollback. The log has the same failure first, as the error entry `flow:error`. See [When a node fails](#when-a-node-fails). |
 

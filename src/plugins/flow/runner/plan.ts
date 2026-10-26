@@ -9,7 +9,7 @@ import { maxDepth, noPayload } from "./loop-types";
 import { isJson, locateFrames } from "./position";
 import { framePath } from "./registry";
 import { hasSubstitution } from "./seam";
-import type { AnyFlow, Frame } from "./types";
+import type { AnyFlow, AnyMapped, Frame, SlotNode } from "./types";
 
 /**
  * Describes where the frames now point and descends into a sub-flow until a node or a slot is
@@ -110,7 +110,9 @@ export function pickContribution(
 
 /**
  * Follows one result to the next position: a node of the same flow, a mapped node, or the exit of
- * a sub-flow, which hands the outcome to the parent.
+ * a sub-flow, which hands the outcome to the parent. The exit of a slot contribution returns to
+ * the slot: on `done` or an outcome the slot does not declare to continue it, on a declared
+ * outcome to leave it.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param frames - The position being planned; mutated.
@@ -144,19 +146,7 @@ export function planFrom(
 
   if (typeof target === "string") return enterTarget(ctx, frames, location.flow, target, payload);
 
-  if (target.kind === "map") {
-    // eslint-disable-next-line unicorn/no-array-callback-reference -- `target.map` is the edge mapper, not Array#map.
-    const mapped: unknown = target.map(payload);
-    const input = mapped === undefined ? noPayload : mapped;
-
-    if (!isJson(input)) {
-      return {
-        problem: `[game] The mapper of edge "${location.name}.${outcome}" returned a value that is not JSON.\n  Return plain JSON from to("${target.target}", ...).`
-      };
-    }
-
-    return enterTarget(ctx, frames, location.flow, target.target, input);
-  }
+  if (target.kind === "map") return enterMapped(ctx, frames, location, outcome, target, payload);
 
   frames.pop();
 
@@ -169,10 +159,95 @@ export function planFrom(
   }
 
   if (parent.entry.kind === "slot") {
-    return continueSlot(frames, location.flow.id);
+    return leavesSlot(parent.entry, target.outcome)
+      ? leaveSlot(frames, target.outcome, payload)
+      : continueSlot(frames, location.flow.id);
   }
 
   return planFrom(ctx, frames, parent, target.outcome, payload, depth + 1);
+}
+
+/**
+ * Follows a `to()` edge: maps the payload and enters the target with it. The mapper is game code:
+ * a throw, or a result that is not JSON, is a problem, and the node fails like any other.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param frames - The position being planned; mutated.
+ * @param location - Where the result was produced.
+ * @param outcome - Outcome name of the result.
+ * @param target - The mapped target of the edge.
+ * @param payload - Payload of the result, handed to the mapper.
+ * @returns The plan, or the problem that stops it.
+ */
+function enterMapped(
+  ctx: FlowCtx,
+  frames: Frame[],
+  location: Location,
+  outcome: string,
+  target: AnyMapped,
+  payload: Json
+): Plan {
+  let mapped: unknown;
+
+  try {
+    // eslint-disable-next-line unicorn/no-array-callback-reference -- `target.map` is the edge mapper, not Array#map.
+    mapped = target.map(payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      problem: `[game] The mapper of edge "${location.name}.${outcome}" threw: ${message}.\n  Return plain JSON from to("${target.target}", ...).`
+    };
+  }
+
+  const input = mapped === undefined ? noPayload : mapped;
+
+  if (!isJson(input)) {
+    return {
+      problem: `[game] The mapper of edge "${location.name}.${outcome}" returned a value that is not JSON.\n  Return plain JSON from to("${target.target}", ...).`
+    };
+  }
+
+  return enterTarget(ctx, frames, location.flow, target.target, input);
+}
+
+/**
+ * Tells whether a contribution that exits `outcome` leaves its slot at once: the slot declares the
+ * outcome, and it is not `done`, which hands over to the next contribution. Own keys only:
+ * `"constructor" in outcomes` is true for every object.
+ *
+ * @param slot - The slot the contribution runs in.
+ * @param outcome - The outcome the contribution exited with.
+ * @returns True when the slot takes its own edge of that outcome next.
+ * @example
+ * ```ts
+ * leavesSlot(slot("episodeStep", { shop: type() }), "shop"); // true
+ * leavesSlot(slot("episodeStep", { shop: type() }), "done"); // false: the next contribution runs
+ * ```
+ */
+function leavesSlot(slot: SlotNode, outcome: string): boolean {
+  return outcome !== "done" && Object.hasOwn(slot.outcomes, outcome);
+}
+
+/**
+ * Plans the early leave of a slot: a contribution exited an outcome the slot declares. The plan
+ * stands on the slot node like `continueSlot`, without `after`, and carries the outcome and its
+ * payload: the loop takes the slot's own edge with them after the commit, so the later
+ * contributions do not run and the next entry of the slot starts at its first one.
+ *
+ * @param frames - The position, already popped back to the slot node.
+ * @param outcome - The declared outcome the contribution left on.
+ * @param payload - Its payload, handed on to the slot's edge.
+ * @returns The plan that stands on the slot node.
+ */
+function leaveSlot(frames: Frame[], outcome: string, payload: Json): Plan {
+  return {
+    stack: frames,
+    next: framePath(frames),
+    rest: false,
+    checkpoint: false,
+    leave: { outcome, payload }
+  };
 }
 
 /**
