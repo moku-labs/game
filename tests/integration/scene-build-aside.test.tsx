@@ -8,7 +8,7 @@
  * is made, laid out and applied by `ui` in parts (spec 33, slice A). The tree oracle checks every frame.
  */
 import type { Assets, World } from "@moku-labs/game";
-import { defineGame, Shape, Sprite, Transform, type } from "@moku-labs/game";
+import { defineGame, Shape, Sprite, system, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import { fakeClock } from "@moku-labs/game/testing";
 import * as pixi from "pixi.js";
@@ -91,6 +91,22 @@ const boardPanel = projection({
   )
 });
 
+/** The alpha the board's own system gives its cells: a value the spawn never writes. */
+const SHADE = 0.5;
+
+/** A system of the board alone, as a game's timer rings: it writes every cell's look, phase `animate`. */
+const boardShade = system({
+  name: "aside.boardShade",
+  phase: "animate",
+  query: [Sprite],
+  scenes: ["board"],
+  run: (rows, { world }) => {
+    for (const [entity, sprite] of rows) {
+      if (sprite.alpha !== SHADE) world.set(entity, Sprite, { alpha: SHADE });
+    }
+  }
+});
+
 const wardScene = defineScene("ward", {
   bundle: "ward",
   layers: { room: {} },
@@ -115,7 +131,8 @@ const mainFlow = defineFlow("main", {
 });
 const asideFeature = defineFeature("aside", {
   scenes: [wardScene, boardScene],
-  projections: [wardRoom, wardHud, boardCells, boardPanel]
+  projections: [wardRoom, wardHud, boardCells, boardPanel],
+  systems: [boardShade]
 });
 
 /** The projections of both scenes, by name. */
@@ -333,6 +350,28 @@ describe("the next scene built aside, across the engine", () => {
     expect(
       aside.app.log.trace().filter(entry => entry.event === "renderer:building-drawn")
     ).toEqual([]);
+  });
+
+  // Bug: the coming scene is drawn before any of its systems ran, so its first frame shows the values its views were
+  // spawned with (a game's timer ring whole for one frame, found on the A26 as a reading of the world).
+  it("draws the board for the first time after its own systems ran on it", async () => {
+    const aside = await open();
+
+    await switchToBoard(aside);
+
+    let first: readonly number[] | undefined;
+
+    for (let frame = 0; frame < 10 && first === undefined; frame += 1) {
+      const shown = cellsOf(aside).filter(entity => onStage(aside, entity));
+
+      if (shown.length > 0) {
+        first = shown.map(entity => (aside.app.renderer.sync.displayOf(entity) as Node).alpha);
+      } else {
+        await aside.frames(1);
+      }
+    }
+
+    expect(first).toEqual(CELLS.map(() => SHADE));
   });
 
   // Bug: the board's panel is diffed, laid out or applied whole in one frame of the build (the long frame of a
