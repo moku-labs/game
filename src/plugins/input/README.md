@@ -58,7 +58,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Tr
 
 `onTap` is the seam `ui` uses for a button that carries `LocalWrite` and no intent: the listeners run on every tap — the finger's and `app.input.tap`'s — in registration order, before the answer. A listener that throws is logged through `ctx.log.error` with its entity, and the listeners after it still run.
 
-`onPointer` is the one synchronous door, the seam `ui` uses to open the keyboard of a text field: iOS shows no keyboard for a `focus()` made in the next frame. The listeners run inside the DOM listener, right after the sample is queued, for `pointerdown`, `pointerup` and `pointercancel` only; never for a move, a leave or a lost capture, and never from `app.input.tap`, `press`, `drag` or `swipe`, which have no DOM moment. The sample is raw: `kind`, `pointerType`, `pointerId`, `clientX`, `clientY`; a listener converts with `renderer.viewport.toReference` itself. Input still decides nothing there: the frame step sees the same sample afterwards and resolves the tap as before. A listener that throws is logged through `ctx.log.error` with the sample kind, and the rest still run.
+`onPointer` is the one synchronous door, the seam `ui` uses to open the keyboard of a text field: iOS shows no keyboard for a `focus()` made in the next frame. The listeners run inside the DOM listener, right after the sample is queued, for `pointerdown`, `pointerup` and `pointercancel` only; never for a move, a leave or a lost capture, and never from `app.input.tap`, `press`, `drag` or `swipe`, which have no DOM moment. The sample is raw: `kind`, `pointerType`, `pointerId`, `clientX`, `clientY`; a listener converts with `renderer.viewport.toReference` itself. Input still decides nothing there: the machine sees the same sample right after the listeners, as the early drain of a `live` world, or in the frame step. A listener that throws is logged through `ctx.log.error` with the sample kind, and the rest still run.
 
 ```ts
 // ui opens the keyboard the moment the finger lifts on a text field, inside the DOM listener.
@@ -91,12 +91,12 @@ expect(
 
 ## The frame step
 
-The DOM handlers do one thing: turn a pointer event into a raw sample and queue it, then hand a down, an up or a cancel to the `onPointer` listeners. They hit-test nothing, answer nothing and write no component. Everything else runs in one `time.onFrame("input")` callback, registered in `onInit` — before `world` registers its own `input` callback in its `onStart` — so `Pointer`, `Held`, `Hovered` and `Pressed` are fresh when game systems of phase `input` read them.
+The DOM handlers turn a pointer event into a raw sample and queue it. A down, an up or a cancel then goes to the `onPointer` listeners, and in a `live` world the queue is drained at once, by steps 1 and 2 below: the pressed view is tagged `Pressed` and a release answers the gate at the event itself, before the next frame. So the press look starts in the next frame and a node that awaits nothing commits before it. A move waits in the queue for the frame, unless a down, an up or a cancel comes after it first: the drain takes the whole queue, in order. The flags that early drain wrote stay for the whole next frame: its step 1 is skipped, so game systems of that frame read `justPressed` and `justReleased`. Everything else runs in one `time.onFrame("input")` callback, registered in `onInit` — before `world` registers its own `input` callback in its `onStart` — so `Pointer`, `Held`, `Hovered` and `Pressed` are fresh when game systems of phase `input` read them.
 
 | Step | What happens |
 |---|---|
 | 0 | `renderer.host.canvas()` is compared with the attached canvas. A new one is a WebGPU device restore: the listeners move, and a gesture in progress gets a cancel, so a drag settles home |
-| 1 | `justPressed` and `justReleased` of `Pointer` are cleared |
+| 1 | `justPressed` and `justReleased` of `Pointer` are cleared, unless a down, an up or a cancel was drained at its event since the last frame |
 | 2 | The queued samples are drained in order, each through `renderer.viewport.toReference`. A move of an idle mouse or pen moves `PointerOver` |
 | 3 | `time.delta` is added to `pressedMs`, and the long press fires |
 | 4 | While dragging: the held view is checked, a carried view that left is let go, the held `Transform` is written and `Hovered` moves. While tracing: a cell of the path that left ends the trace with no answer |
@@ -136,7 +136,7 @@ A view tagged `Exiting` — in the despawn queue, playing its exit — is never 
 
 A press inside a scroll: `ui` puts the internal `Scrollable` (`{ axis, moving }`, not exported from the root) on every scroll container. **Hand-off:** the move that takes a press past `tapSlopPx` reads its dominant axis from the start (`|dx| ≥ |dy|` is x) and gives the press to the innermost `Scrollable` of that axis on the pressed view's own `Parent` chain, the view itself included. A view drawn over a scroll from another root, a popup or HUD button over a list, hangs in no chain of it and keeps its press. The view under the finger loses `Pressed`, and the press is a scroll gesture from then on: its release answers nothing and runs no `onTap` listener, also when the finger came back inside the slop. It happens once per press. A `Draggable` or `Swipeable` view keeps its drag or swipe, and with no scroll of that axis the press stays where it is, so a tap inside the slop stays an ordinary tap. **Catch:** the hit test runs first; when the view it finds is a `Scrollable` that is `moving` (a fling or a glide), or hangs in one by its `Parent` chain, the press goes to that scroll. A button of another root drawn over a moving scroll keeps its tap. The finger only stops the scroll: the release answers nothing, runs no `onTap` listener, and a later move does not hand the press on. A scroll tagged `Exiting` takes neither.
 
-A move past `tapSlopPx` marks the press as moved for good: a finger that panned past the slop and came back to its start has still started a gesture. A pointer that gave way is not remembered: its later samples are dropped only while another pointer is followed, and at rest they pass as any sample does. `Pointer.id` is written once per frame step, after the gesture: a tap whose down and up arrive in one frame reads `id: -1` with `justPressed` and `justReleased` both true, and a drag given up while the finger stays down (the held view left) reads `id: -1` with `down` true. A system that follows the finger starts over when `id` changes:
+A move past `tapSlopPx` marks the press as moved for good: a finger that panned past the slop and came back to its start has still started a gesture. A pointer that gave way is not remembered: its later samples are dropped only while another pointer is followed, and at rest they pass as any sample does. `Pointer.id` is written at the end of every drain, at the event or in the frame step, after the gesture: a tap whose down and up arrive in one frame reads `id: -1` with `justPressed` and `justReleased` both true, and a drag given up while the finger stays down (the held view left) reads `id: -1` with `down` true. A system that follows the finger starts over when `id` changes:
 
 ```ts
 // A background that follows the finger, started over on a change of finger.
@@ -177,7 +177,7 @@ Every raw sample carries its device: `pointerType` is `"mouse"`, `"touch"` or `"
 | lost capture | nothing: the browser sends one after every click |
 | world mode `paused` | the tag goes |
 
-The hit test runs once per frame, at the last hover move of the frame. A clear that comes after it in the same frame wins; a hover move after a clear wins.
+The hit test runs once per drain, at the last hover move of that drain. A clear that comes after it in the same frame wins; a hover move after a clear wins.
 
 At most one view carries `PointerOver`. It is not `Hovered`: that one marks the drop target under a drag.
 

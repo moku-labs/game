@@ -8,7 +8,7 @@ import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
-import { stepGestures } from "./gestures";
+import { resolveEarly, stepGestures } from "./gestures";
 import { attachKeys, detachKeys } from "./keys";
 import { attach, detach } from "./pointer";
 import { countListeners } from "./state";
@@ -51,6 +51,7 @@ export function initInput(ctx: KernelSlice): void {
   const inputCtx = withDeps(ctx);
 
   inputCtx.state.wake = (): void => inputCtx.deps.time.wake();
+  inputCtx.state.resolveNow = (): void => resolveEarly(inputCtx);
   inputCtx.state.offFrame = inputCtx.deps.time.onFrame("input", time =>
     stepGestures(inputCtx, time)
   );
@@ -116,6 +117,8 @@ export function stopInput(state: State): void {
   state.restScale = undefined;
   state.heldPose = undefined;
   state.wake = undefined;
+  state.resolveNow = undefined;
+  state.resolvedEarly = false;
   state.tapListeners = [];
   state.keyListeners = [];
   state.pointerListeners = [];

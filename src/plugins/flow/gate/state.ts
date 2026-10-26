@@ -13,6 +13,7 @@ export function createGateState(): GateState {
     open: undefined,
     resolve: undefined,
     held: undefined,
+    aged: 0,
     narrow: undefined,
     pointerActive: false,
     wake: undefined

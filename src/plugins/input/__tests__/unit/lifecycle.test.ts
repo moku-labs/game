@@ -38,7 +38,8 @@ describe("startInput", () => {
     expect(mock.state.canvas).toBe(canvas.element);
     expect(canvas.names()).toHaveLength(6);
 
-    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 10, clientY: 10 });
+    // A move waits in the queue for the frame; a down is resolved at its event (F61).
+    canvas.dispatch("pointermove", { pointerId: 1, clientX: 10, clientY: 10 });
     expect(mock.state.samples).toHaveLength(1);
   });
 });

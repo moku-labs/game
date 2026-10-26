@@ -40,10 +40,19 @@ export type GateState = {
   resolve: ((answer: Answer) => void) | undefined;
   /**
    * An answer given while the gate was closed, kept for the next gate: for the frame it was given
-   * in, or for `config.holdMs` of game time. `frame` is the frame of the refusal and `at` is
-   * `time.snapshot().elapsed` at that moment: the age is counted from it.
+   * in, or for `config.holdMs` of game time. `frame` is the frame the hold lives through: the frame
+   * of the refusal, or the next one for a refusal after its `signals` (see `aged`). `at` is
+   * `time.snapshot().elapsed` at the refusal: the age is counted from it.
    */
   held: { answer: Answer; frame: number; at: number } | undefined;
+  /**
+   * The last frame whose `signals` phase aged the hold; 0 before the first, since frame 0 runs no
+   * phases. An answer refused
+   * after it (later in that frame, or between two frames, as a tap resolved at its DOM event) is
+   * held for the next frame: it lives through that frame's `signals`, as one refused in its input
+   * phase does.
+   */
+  aged: number;
   /** The one answer a running `guide` lets through. */
   narrow: Allow | undefined;
   /** True while a pointer is down. Entering an `over` node waits for false. */
@@ -68,7 +77,8 @@ export type GateApi = {
    * Gives one answer. Accepted only while the gate is open and the intent is allowed. An answer
    * to a closed gate is refused and held: it is offered once to the next gate that opens, which
    * takes it when it lists the intent and a running `guide` lets it through. With `holdMs: 0` the
-   * hold lives for the frame the answer was given in and the first answer wins. With `holdMs`
+   * hold lives for the frame the answer was given in, or through the next frame for an answer given
+   * after that frame's `signals` or between two frames, and the first answer wins. With `holdMs`
    * above 0 the last answer wins and it is kept for that much game time. Nothing is held in fast
    * mode or while no frame source runs.
    *
