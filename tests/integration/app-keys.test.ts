@@ -212,6 +212,32 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       expect(bundle()).not.toHaveProperty("release");
     });
 
+    it("rewrites the manifest for a saved description in a plain Bun process too", async () => {
+      // Bug (F92): Bun keeps a module by its path and ignores a query, so outside vitest's module
+      // runner the watch read the first description forever and wrote the stale tier back.
+      const root = game();
+      const child = Bun.spawnSync(
+        [
+          process.execPath,
+          path.resolve("tests/integration/keys-watch-child.ts"),
+          root,
+          String(WAIT_MS)
+        ],
+        { stderr: "pipe", stdout: "pipe" }
+      );
+      const lines = child.stdout.toString().trim().split("\n");
+
+      // A crash of the child shows with its stderr, apart from a stale read.
+      expect({
+        exit: child.exitCode,
+        stderr: child.exitCode === 0 ? "" : child.stderr.toString()
+      }).toEqual({
+        exit: 0,
+        stderr: ""
+      });
+      expect(lines.at(-1)).toBe('["lazy","feature"]');
+    });
+
     it("rewrites the stamp for new bytes in an existing image with that image as changed, and not generated/assets.ts", async () => {
       const root = game();
 
