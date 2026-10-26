@@ -467,8 +467,9 @@ async function importDescription(file: string): Promise<Record<string, unknown> 
 
   if (entry === undefined || !entry.isFile()) return undefined;
 
-  // Bun: forget the module of the last scan. Neither a bare `require` nor an import of
-  // `node:module`: the bundler moves either into the runtime chunk every browser chunk shares.
+  // Bun: forget the module of the last scan; in Node the delete finds nothing and the query alone
+  // counts. Not a bare `require` and not an import of `node:module`: the bundler hoists either
+  // into the runtime chunk every browser chunk shares.
   // Whole microseconds in the query: Bun reads a `.` in it as a loader name.
   const { createRequire } = process.getBuiltinModule("node:module");
 
