@@ -1,6 +1,7 @@
 /**
- * @file input plugin — the one frame step. The DOM handlers only queue raw samples; every
- * decision is made here, in `time.onFrame("input")`. No `Date.now`, no `performance.now`, no
+ * @file input plugin — the gesture machine. The DOM handlers queue raw samples; the machine
+ * drains them in `time.onFrame("input")`, and a down, an up and a cancel of a live world at their
+ * event (`resolveEarly`): a move waits for the frame step. No `Date.now`, no `performance.now`, no
  * `event.timeStamp`: every duration is a sum of `time.delta`, so `time.step(dt)` drives the
  * machine in a test and a time scale or a pause applies to it.
  */
@@ -538,6 +539,7 @@ function pauseGestures(ctx: InputCtx): void {
   const pointer = ctx.deps.world.ecs.resource(Pointer);
 
   ctx.state.samples = [];
+  ctx.state.resolvedEarly = false;
   clearPointerOver(ctx);
   letGestureGo(ctx);
   pointer.down = false;
@@ -545,6 +547,42 @@ function pauseGestures(ctx: InputCtx): void {
   pointer.justReleased = false;
   pointer.id = -1;
   toIdle(ctx);
+}
+
+/**
+ * Clears `justPressed` and `justReleased` of the `Pointer` resource: they tell one frame of a press or a release.
+ *
+ * @param pointer - The `Pointer` resource.
+ */
+function clearJust(pointer: PointerValue): void {
+  pointer.justPressed = false;
+  pointer.justReleased = false;
+}
+
+/**
+ * Resolves the queued samples at the DOM event of a down, an up or a cancel, between two frames
+ * (F61): the pressed view is tagged and a release answers the gate now, so the press look starts
+ * in the next frame and a node that awaits nothing commits before it. The first resolve after a
+ * frame clears that frame's flags; the next frame step keeps the ones it wrote. Only a live world
+ * resolves early: fast and paused leave the samples to the frame step, as before.
+ *
+ * @param ctx - Domain context of the input plugin.
+ */
+export function resolveEarly(ctx: InputCtx): void {
+  if (ctx.deps.world.ecs.mode() !== "live") return;
+
+  const pointer = ctx.deps.world.ecs.resource(Pointer);
+  const queue = ctx.state.samples;
+
+  if (!ctx.state.resolvedEarly) {
+    clearJust(pointer);
+    ctx.state.resolvedEarly = true;
+  }
+
+  ctx.state.samples = [];
+  drainSamples(ctx, pointer, queue);
+  syncCursor(ctx);
+  pointer.id = ctx.state.pointerId ?? -1;
 }
 
 /**
@@ -564,6 +602,8 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
 
   if (mode === "fast") {
     ctx.state.samples = [];
+    // A press drained at its event before the mode turned keeps no flags for a later live step.
+    ctx.state.resolvedEarly = false;
 
     // A gesture that was running when the mode turned fast is let go like a cancel. Leaving it
     // would leak `Held`, the mute, the lift and a pointer the gate believes is still down. With
@@ -583,8 +623,10 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
   const pointer = ctx.deps.world.ecs.resource(Pointer);
   const queue = ctx.state.samples;
 
-  pointer.justPressed = false;
-  pointer.justReleased = false;
+  // A press resolved at its event wrote the flags this frame's systems read: they stay until the next step.
+  if (ctx.state.resolvedEarly) ctx.state.resolvedEarly = false;
+  else clearJust(pointer);
+
   ctx.state.samples = [];
   drainSamples(ctx, pointer, queue);
   syncCursor(ctx);

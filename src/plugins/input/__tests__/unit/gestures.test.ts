@@ -1303,3 +1303,128 @@ describe("a finger that has not started a gesture", () => {
     expect(mock.answers).toEqual([play]);
   });
 });
+
+// A view under (50, 50) and the canvas attached, the way a page on a phone starts.
+function onCanvas(values: Parameters<MockInput["spawn"]>[0]) {
+  const mock = createMockInput();
+  const canvas = createStubCanvas();
+  const entity = mock.spawn(values);
+
+  mock.boxes.push({ entity, x: 0, y: 0, width: 200, height: 200 });
+  mock.canvas.current = canvas.element;
+  mock.start();
+  mock.frame();
+
+  return { mock, canvas, entity };
+}
+
+describe("a press and a release from the canvas resolve at their event", () => {
+  it("tags the pressed view at the pointerdown, before the next frame (F61: the press look starts one frame sooner)", () => {
+    const { mock, canvas, entity } = onCanvas([Tappable({ intent: "found" })]);
+
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+
+    expect(mock.has(entity, Pressed)).toBe(true);
+    expect(mock.state.phase).toBe("pressed");
+    expect(mock.state.samples).toEqual([]);
+  });
+
+  it("answers the gate at the pointerup, before the next frame", () => {
+    const { mock, canvas } = onCanvas([Tappable({ intent: "found", payload: { id: "o1" } })]);
+
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+    canvas.dispatch("pointerup", { pointerId: 1, clientX: 52, clientY: 52 });
+
+    expect(mock.answers).toEqual([{ intent: "found", payload: { id: "o1" } }]);
+    expect(mock.state.phase).toBe("idle");
+  });
+
+  it("keeps justPressed and justReleased of an early press for the whole next frame, and clears them after it", () => {
+    const { mock, canvas } = onCanvas([Tappable({ intent: "found" })]);
+
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ down: true, justPressed: true });
+
+    canvas.dispatch("pointerup", { pointerId: 1, clientX: 50, clientY: 50 });
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ down: false, justPressed: false, justReleased: true });
+
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ justPressed: false, justReleased: false });
+  });
+
+  it("lets a press go at its pointercancel, before the next frame, and answers nothing", () => {
+    const { mock, canvas, entity } = onCanvas([Tappable({ intent: "found" })]);
+
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+    canvas.dispatch("pointercancel", { pointerId: 1, clientX: 50, clientY: 50 });
+
+    expect(mock.state.phase).toBe("idle");
+    expect(mock.has(entity, Pressed)).toBe(false);
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("drops the last frame's flags at the first early resolve and keeps both of a tap drained between two frames", () => {
+    const { mock, canvas } = onCanvas([Tappable({ intent: "found" })]);
+
+    // A frame-step press leaves justPressed true for the frame it ran in.
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, up(50, 50));
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ justPressed: false, justReleased: true });
+
+    // The next tap comes at its events: the old justReleased goes at the down, the up adds its own.
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+
+    expect(pointerOf(mock)).toMatchObject({ justPressed: true, justReleased: false });
+
+    canvas.dispatch("pointerup", { pointerId: 1, clientX: 50, clientY: 50 });
+
+    expect(pointerOf(mock)).toMatchObject({ justPressed: true, justReleased: true });
+  });
+
+  it("leaves a move to the frame: a drag still follows the finger once per frame", () => {
+    const { mock, canvas } = onCanvas([Tappable({ intent: "found" })]);
+
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+    canvas.dispatch("pointermove", { pointerId: 1, clientX: 60, clientY: 50 });
+
+    expect(mock.state.samples).toHaveLength(1);
+    expect(mock.state.samples[0]?.kind).toBe("move");
+  });
+
+  it("clears the flags of an early tap on the first live step after the world went fast and back", () => {
+    const { mock, canvas } = onCanvas([Tappable({ intent: "found" })]);
+
+    // The whole tap is drained at its events: the machine is idle again when the world turns fast.
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+    canvas.dispatch("pointerup", { pointerId: 1, clientX: 50, clientY: 50 });
+    mock.world.mode = "fast";
+    mock.frame();
+    mock.world.mode = "live";
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ justPressed: false, justReleased: false });
+  });
+
+  it("leaves a press to the frame in fast and paused mode, as before", () => {
+    const { mock, canvas, entity } = onCanvas([Tappable({ intent: "found" })]);
+
+    mock.world.mode = "paused";
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+
+    expect(mock.has(entity, Pressed)).toBe(false);
+    expect(mock.state.samples).toHaveLength(1);
+
+    mock.world.mode = "fast";
+    canvas.dispatch("pointerup", { pointerId: 1, clientX: 50, clientY: 50 });
+
+    expect(mock.answers).toEqual([]);
+  });
+});

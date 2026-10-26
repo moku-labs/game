@@ -1,8 +1,9 @@
 /**
  * @file input plugin — the only file that touches the pointer DOM. The six listeners turn a
  * pointer event into a raw sample and queue it; for a down, an up and a cancel they then run the
- * `onPointer` listeners, the one synchronous door. They hit-test nothing, answer nothing and write
- * no component; the frame step owns every decision.
+ * `onPointer` listeners, the one synchronous door, and hand the queue to the gesture machine at
+ * once (`state.resolveNow`). They hit-test nothing, answer nothing and write no component
+ * themselves; the machine owns every decision.
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { PointerListener, RawSample, State } from "./types";
@@ -144,7 +145,12 @@ export function attach(canvas: HTMLCanvasElement, ctx: PointerCtx): void {
       };
 
       record(state, sample);
-      if (isDoorKind(entry.kind)) runPointerListeners(ctx, sample);
+
+      // A down, an up and a cancel reach the listeners, then the machine, at the event itself (F61).
+      if (isDoorKind(entry.kind)) {
+        runPointerListeners(ctx, sample);
+        state.resolveNow?.();
+      }
     };
 
     canvas.addEventListener(entry.name, listener);

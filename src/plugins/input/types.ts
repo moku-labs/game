@@ -256,6 +256,17 @@ export type State = {
   detachKeys: (() => void) | undefined;
   /** `time.wake`, bound in `onInit`: every pointer sample leaves the idle frame rate. */
   wake: (() => void) | undefined;
+  /**
+   * Resolves the queued samples at once, bound in `onInit`: the DOM listener calls it after a
+   * down, an up or a cancel, so the press is tagged and the release answered before the next
+   * frame (F61). A move waits for the frame unless such a sample comes after it.
+   */
+  resolveNow: (() => void) | undefined;
+  /**
+   * True from a resolve at an event to the next frame step: that step keeps the `justPressed` and
+   * `justReleased` the event wrote, so the game systems of its frame read them.
+   */
+  resolvedEarly: boolean;
   /** The cursor last written on the attached canvas; `undefined` while nothing was written. */
   cursor: string | undefined;
   /** Component types other plugins registered through `controls.add`, once per registration. */

@@ -138,8 +138,10 @@ function hold(ctx: FlowCtx, answer: Answer): void {
   if (ctx.config.holdMs <= 0 && ctx.state.gate.held !== undefined) return;
 
   const { frame, elapsed } = ctx.deps.time.snapshot();
+  // Refused after this frame's `signals`: the hold belongs to the next frame and lives through it.
+  const heldFor = frame === ctx.state.gate.aged ? frame + 1 : frame;
 
-  ctx.state.gate.held = { answer, frame, at: elapsed };
+  ctx.state.gate.held = { answer, frame: heldFor, at: elapsed };
 }
 
 /**
@@ -217,6 +219,8 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
 
     clearHeld: (frame: number, elapsed: number): void => {
       const held = ctx.state.gate.held;
+
+      ctx.state.gate.aged = frame;
 
       if (held === undefined) return;
       if (held.frame === frame) return;

@@ -44,6 +44,7 @@ const createMockState = (): State => ({
     open: undefined,
     resolve: undefined,
     held: undefined,
+    aged: -1,
     narrow: undefined,
     pointerActive: false,
     wake: undefined

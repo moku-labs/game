@@ -42,6 +42,8 @@ export function createInputState(_ctx: { readonly config: Readonly<Config> }): S
     pointerListeners: [],
     detachKeys: undefined,
     wake: undefined,
+    resolveNow: undefined,
+    resolvedEarly: false,
     cursor: undefined,
     controls: []
   };

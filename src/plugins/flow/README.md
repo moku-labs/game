@@ -108,7 +108,7 @@ a running `guide` lets it through. Otherwise the answer is dropped.
 
 | `holdMs` | How long the answer is held | Two answers at a closed gate |
 |---|---|---|
-| `0`, the default | The frame it was given in | The first wins |
+| `0`, the default | The frame it was given in; an answer given after that frame's `signals` phase, or between two frames (a tap resolved at its DOM event), is held through the next frame | The first wins |
 | Above `0` | Until it is older than `holdMs` | The last wins |
 | `Infinity` | Until the next gate opens | The last wins |
 

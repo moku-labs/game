@@ -364,6 +364,33 @@ describe("createGateApi", () => {
       expect(answers).toEqual([]);
     });
 
+    it("keeps an answer refused after the frame's signals through the next frame, then drops it (a tap resolved between two frames)", async () => {
+      const { ctx } = createMockCtx();
+      const gate = createGateApi(ctx);
+
+      // Frame 1 has aged its hold; the tap arrives at its DOM event, before frame 2 starts.
+      gate.clearHeld(1, 0);
+      gate.answer({ intent: "play" });
+      gate.clearHeld(2, 16);
+
+      expect(ctx.state.gate.held?.answer).toEqual({ intent: "play" });
+
+      gate.clearHeld(3, 32);
+
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+
+    it("holds an answer given before the first frame through frame 1: frame 0 runs no phases", () => {
+      const { ctx } = createMockCtx();
+      const gate = createGateApi(ctx);
+
+      // Before the first frame the clock stands at frame 0.
+      (ctx.deps.time.snapshot() as { frame: number }).frame = 0;
+      gate.answer({ intent: "play" });
+
+      expect(ctx.state.gate.held?.frame).toBe(1);
+    });
+
     it("does nothing when no answer is held", () => {
       const { ctx } = createMockCtx();
       const gate = createGateApi(ctx);
@@ -382,7 +409,8 @@ describe("createGateApi", () => {
       playFrame(gate, time, 250);
       gate.answer({ intent: "play" });
 
-      expect(ctx.state.gate.held).toEqual({ answer: { intent: "play" }, frame: 2, at: 250 });
+      // Refused after frame 2 aged its hold: it is held for frame 3, from 250 ms of game time.
+      expect(ctx.state.gate.held).toEqual({ answer: { intent: "play" }, frame: 3, at: 250 });
     });
 
     it("delivers an answer refused at 0 ms to a gate that opens at 300 ms", async () => {
