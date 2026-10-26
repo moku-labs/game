@@ -4,8 +4,8 @@
  * that stays is compared prop by prop, by value: one that says what it said is neither styled nor
  * written. Beside it:
  * the range of a windowed scroll (`range.ts`), the rest and the motion of the extras
- * (`extras.ts`), the hint routed to a keyed element (`hints.ts`) and the remeasure of the texts
- * `text` resolved again (`remeasure.ts`).
+ * (`extras.ts`), the hint routed to a keyed element (`hints.ts`), the remeasure of the texts
+ * `text` resolved again (`remeasure.ts`) and a scene build in parts (`parts.ts`).
  */
 import { printOf } from "../../anim/motion";
 import { PointerOver, Pressed, Scrollable, Tappable, Touchable } from "../../input/components";
@@ -52,17 +52,16 @@ import { forgetInstances, instanceFor, runView } from "./instances";
 import { type LookWriter, otherFields, warnIdleChanges, writeLook } from "./look";
 import { childOrder, SIBLING_SPAN } from "./order";
 import { createSpan, enterOverlay, exitOverlay, overlayOf, settleOverlays } from "./overlay";
+import { createParts } from "./parts";
 import { settlePopups } from "./popups";
 import { createRange } from "./range";
 import { markResizedIcons, markResizedTexts } from "./remeasure";
 import { sameValue } from "./same";
 import type {
-  ApplyCursor,
   DescriptionNode,
   Element,
   ElementMotion,
   JsxState,
-  Parked,
   PointerFlag,
   PopupLink,
   Root,
@@ -500,22 +499,6 @@ const REBUILDS_WARNED = 3;
 const SLOT_PASSES = 4;
 
 /**
- * How many elements a root built aside makes or applies in a frame between two reads of the
- * frame's budget, from the first read on (spec 33 A2, A6): the clock is read every 8 elements.
- */
-const CLOCK_EVERY = 8;
-
-/**
- * The most elements of roots built aside one frame applies. The components `applyFirst` adds are
- * flushed after the system, where the budget does not see them: the cap keeps that flush short
- * (spec 33 A6; 275 elements in one frame took 3.6 ms in Node, about 15 ms on the A26).
- */
-const APPLY_CAP = 100;
-
-/** What a parked part holds once it is back in the pool: no nodes and no element, so the pool keeps no tree alive. */
-const NO_NODES: readonly DescriptionNode[] = [];
-
-/**
  * Tells whether a root was last solved in a box of this size and place.
  *
  * @param solved - The box it was last solved in, if any.
@@ -694,6 +677,7 @@ export function createReconciler(
     forgetSubtree,
     despawnTree
   });
+  const parts = createParts(ctx, { diffChildren, applyElement, isMoving: range.isMoving });
   // The reconciler's per-frame scratch, kept so an idle frame allocates nothing: the roots to
   // reconcile, the scroll containers, the roots whose slot changed in this solve, the roots still
   // waiting in it, the viewport box, what the slots were last assigned for, and the layer list
@@ -714,18 +698,6 @@ export function createReconciler(
   const isAside = (entity: Entity): boolean => ctx.deps.world.projection.isBuilding(entity);
   // The reconcile of this frame found a committed build: its solve gives the held enters their start pose.
   let released = false;
-  // A scene build in parts (spec 33, slice A). Since the start of the reconcile: the elements entered
-  // for roots built aside, whether the budget was read spent, and whether a building unit (a root, a
-  // parked part, a part of an application) ran. Since the start of the solve: the elements applied in
-  // parts, and whether an application ended. The parked parts and the cursors are pooled: a build
-  // allocates them once.
-  let entered = 0;
-  let spent = false;
-  let unitRan = false;
-  let applied = 0;
-  let landed = false;
-  const parkedPool: Parked[] = [];
-  const cursorPool: ApplyCursor[] = [];
   // The reconciler's side of a look write (F85): the write pass (one per reconcile with its solve,
   // one per pointer restyle), one values object filled in place for every play, and the writes.
   const lookWriter: LookWriter = {
@@ -862,191 +834,12 @@ export function createReconciler(
 
     // Past the frame's budget a root built aside makes the element and leaves its children for a
     // later frame (spec 33 A2).
-    if (aside && parks() && nodes.length > 0) park(root, element, nodes, instance);
+    if (aside && parts.parks() && nodes.length > 0) parts.park(root, element, nodes, instance);
     else diffChildren(root, element, nodes, instance);
 
     root.needsSolve = true;
 
     return entity;
-  }
-
-  /**
-   * Counts an element entered for a root built aside and tells whether its children wait for a
-   * later frame. From the 8th element of the frame the budget is read every 8; once it is spent,
-   * the children of every next element wait. A row a range change scrolls in never parks: the
-   * window moves in one block, as on a live root.
-   *
-   * @returns True when the children of the element wait.
-   */
-  function parks(): boolean {
-    if (range.isMoving()) return false;
-
-    entered += 1;
-    if (!spent && entered % CLOCK_EVERY === 0) spent = ctx.deps.world.projection.left() <= 0;
-
-    return spent;
-  }
-
-  /**
-   * Leaves the children of a new element of a root built aside for a later frame: the element
-   * itself exists, so the child list of its parent is complete. The part is queued behind the
-   * root's other parts, with the cause of the diff running now.
-   *
-   * @param root - The root built aside.
-   * @param element - The element that entered.
-   * @param nodes - The children it would have diffed.
-   * @param instance - The identity of the nearest component instance.
-   */
-  function park(
-    root: Root,
-    element: Element,
-    nodes: readonly DescriptionNode[],
-    instance: string | undefined
-  ): void {
-    const cause = state.building;
-    const part = parkedPool.pop() ?? { element, nodes, instance, cause };
-
-    part.element = element;
-    part.nodes = nodes;
-    part.instance = instance;
-    part.cause = cause;
-    root.parked ??= [];
-    root.parked.push(part);
-  }
-
-  /**
-   * Puts a parked part back in the pool, its element and nodes dropped.
-   *
-   * @param part - A part that was diffed or forgotten.
-   */
-  function recycle(part: Parked): void {
-    part.element = undefined;
-    part.nodes = NO_NODES;
-    parkedPool.push(part);
-  }
-
-  /**
-   * Tells whether the next building unit may run in this frame: the first one always does, so a
-   * build always moves; a later one while the budget lasts.
-   *
-   * @returns True when the unit runs.
-   */
-  function mayRun(): boolean {
-    return !unitRan || ctx.deps.world.projection.left() > 0;
-  }
-
-  /**
-   * Tells whether parts of a root built aside wait: children parked, or its application open.
-   * Two field reads; false for every other root.
-   *
-   * @param root - The root, if it is still known.
-   * @returns True while its build waits for a later frame.
-   */
-  function waits(root: Root | undefined): boolean {
-    return root !== undefined && (root.applying !== undefined || (root.parked?.length ?? 0) > 0);
-  }
-
-  /**
-   * Diffs one parked part under the cause it was parked with. A part whose element left meanwhile
-   * is dropped. A part that throws fails its root alone, as the root's own diff does.
-   *
-   * @param root - The root built aside.
-   * @param part - The part.
-   */
-  function diffPart(root: Root, part: Parked): void {
-    const element = part.element;
-
-    if (element === undefined || lookup(element.entity) !== element) return;
-
-    const cause = state.building;
-
-    unitRan = true;
-    state.building = part.cause;
-
-    try {
-      diffChildren(root, element, part.nodes, part.instance);
-    } catch (error) {
-      ctx.log.error("ui:root-failed", { root: root.name }, asError(error));
-    } finally {
-      state.building = cause;
-    }
-
-    root.needsSolve = true;
-  }
-
-  /**
-   * Diffs the parked parts of the roots built aside, each root's in the order they were parked,
-   * while the frame's budget lasts (spec 33 A3). Children that park again go to the end of their
-   * root's queue.
-   */
-  function drainParked(): void {
-    // Per frame: one number while no scene is built aside.
-    if (state.asideRoots === 0) return;
-
-    for (const root of state.roots.values()) {
-      const parked = root.parked;
-
-      while (parked !== undefined && parked.length > 0) {
-        if (!mayRun()) return;
-
-        const part = parked.shift();
-
-        if (part === undefined) break;
-
-        diffPart(root, part);
-        recycle(part);
-      }
-    }
-  }
-
-  /**
-   * Holds a dirty root built aside for a later frame instead of diffing it now: while parked parts
-   * of it wait, so no element is made twice, and once the frame's budget is spent after its first
-   * building unit. It stays dirty: the next frame lists it again and diffs its newest tree once
-   * (spec 33 A1, A4). The drain runs before, until its queue is empty or the budget is spent, so a
-   * root with parked parts meets a spent budget here too. A live root is never held.
-   *
-   * @param root - A root with work this frame.
-   * @returns True when the root waits.
-   */
-  function holdRoot(root: Root): boolean {
-    if (!isAside(root.entity)) return false;
-
-    if ((root.parked?.length ?? 0) > 0 || !mayRun()) {
-      root.dirty = true;
-
-      return true;
-    }
-
-    unitRan = true;
-
-    return false;
-  }
-
-  /**
-   * Forgets the parked parts and the open application of a root whose build ends here: a drop, a
-   * discard, its exit or a restore.
-   *
-   * @param root - The root.
-   */
-  function forgetParts(root: Root): void {
-    const parked = root.parked;
-
-    while (parked !== undefined && parked.length > 0) {
-      const part = parked.pop();
-
-      if (part !== undefined) recycle(part);
-    }
-
-    const cursor = root.applying;
-
-    if (cursor === undefined) return;
-
-    // Emptied by `pop`: a cut by `length` would free its store.
-    while (cursor.stack.length > 0) cursor.stack.pop();
-
-    delete root.applying;
-    cursorPool.push(cursor);
   }
 
   /**
@@ -2014,104 +1807,6 @@ export function createReconciler(
   }
 
   /**
-   * Opens the application of a solved root built aside and applies its first part (spec 33 A6).
-   *
-   * @param root - The root built aside.
-   * @param element - Its root element.
-   * @param quiet - Whether its live elements take their rects with no motion.
-   */
-  function applyInParts(root: Root, element: Element, quiet: boolean): void {
-    const cursor = cursorPool.pop() ?? { stack: [], quiet };
-
-    cursor.quiet = quiet;
-    cursor.stack.push(element);
-    root.applying = cursor;
-    applyPart(root, cursor);
-  }
-
-  /**
-   * Applies the next elements of an open application, top-down, parent before children in the
-   * order of `applyRects`, until the frame's budget is spent (read every 8 elements of the frame)
-   * or the frame applied `APPLY_CAP` elements of roots built aside. An element that left on the
-   * way is skipped. The last element closes the application.
-   *
-   * @param root - The root built aside.
-   * @param cursor - Its open application.
-   */
-  function applyPart(root: Root, cursor: ApplyCursor): void {
-    const stack = cursor.stack;
-
-    while (stack.length > 0 && applied < APPLY_CAP) {
-      if (applied > 0 && applied % CLOCK_EVERY === 0 && ctx.deps.world.projection.left() <= 0) {
-        return;
-      }
-
-      const element = stack.pop();
-
-      if (element === undefined || lookup(element.entity) !== element) continue;
-
-      applyElement(element, cursor.quiet);
-      applied += 1;
-      stackChildren(stack, element);
-    }
-
-    if (stack.length === 0) closeApplication(root, cursor);
-  }
-
-  /**
-   * Puts the children of an applied element on the stack of its application, the first one on top,
-   * so they come next, in the order of `applyRects`.
-   *
-   * @param stack - The elements still to apply.
-   * @param element - The element just applied.
-   */
-  function stackChildren(stack: Element[], element: Element): void {
-    for (let index = element.children.length - 1; index >= 0; index -= 1) {
-      const child = element.children[index];
-      const childElement = child === undefined ? undefined : lookup(child);
-
-      if (childElement !== undefined) stack.push(childElement);
-    }
-  }
-
-  /**
-   * Ends the application of a root built aside: its scrolls settle in this solve, and its live
-   * hosts take their views in it, now that the root is whole (spec 33 A7).
-   *
-   * @param root - The root built aside.
-   * @param cursor - Its application, empty.
-   */
-  function closeApplication(root: Root, cursor: ApplyCursor): void {
-    delete root.applying;
-    cursorPool.push(cursor);
-    landed = true;
-
-    for (const host of state.hosts) {
-      if (lookup(host)?.root === root.entity) state.risen.add(host);
-    }
-  }
-
-  /**
-   * Applies the next part of every open application of a root built aside, in mount order, while
-   * the frame's budget lasts. It runs before any root is solved: a root whose application ends
-   * here is solved again in the same call when it asks for it.
-   */
-  function applyParts(): void {
-    // Per frame: one number while no scene is built aside.
-    if (state.asideRoots === 0) return;
-
-    for (const root of state.roots.values()) {
-      const cursor = root.applying;
-
-      if (cursor === undefined) continue;
-      if (!mayRun()) return;
-
-      unitRan = true;
-      applyPart(root, cursor);
-    }
-  }
-
-  /**
    * Where the element of a root draws: its layer and order, and its slot with the place the slot
    * lists the root's projection at.
    *
@@ -2303,7 +1998,7 @@ export function createReconciler(
 
     // A root built aside is laid out whole once its last part is made, and not again while it is
     // applied in parts (spec 33 A5, A6).
-    if (element === undefined || waits(root)) return false;
+    if (element === undefined || parts.waits(root)) return false;
 
     const resized = root.slot !== undefined && !sameBox(root.slotRect, box);
 
@@ -2317,7 +2012,7 @@ export function createReconciler(
     // Only the first application goes in parts: a later solve of the same build (a state change, a
     // new viewport, a text measured again) applies in one block, so the build always reaches its end.
     if (root.aside !== undefined && isAside(root.entity) && !element.live) {
-      applyInParts(root, element, quiet);
+      parts.applyInParts(root, element, quiet);
     } else {
       applyRects(element, quiet);
     }
@@ -2535,7 +2230,7 @@ export function createReconciler(
 
       const element = root.element === undefined ? undefined : lookup(root.element);
 
-      forgetParts(root);
+      parts.forgetParts(root);
 
       if (element !== undefined) {
         forgetSubtree(element);
@@ -2598,7 +2293,7 @@ export function createReconciler(
 
       if (element?.live !== true) continue;
       // Per frame: one number while no scene is built aside.
-      if (state.asideRoots > 0 && waits(state.roots.get(element.root))) continue;
+      if (state.asideRoots > 0 && parts.waits(state.roots.get(element.root))) continue;
 
       scrollList.push(element);
     }
@@ -2765,7 +2460,7 @@ export function createReconciler(
       const solves =
         root.needsSolve && root.element !== undefined && lookup(root.element) !== undefined;
 
-      if ((root.dirty || solves || waits(root)) && isAside(root.entity)) return false;
+      if ((root.dirty || solves || parts.waits(root)) && isAside(root.entity)) return false;
     }
 
     return true;
@@ -2782,9 +2477,7 @@ export function createReconciler(
    */
   function reconcile(time: Readonly<Time> = NO_TIME): void {
     // A new frame of a scene build: no element entered, the budget not read, no building unit run.
-    entered = 0;
-    spent = false;
-    unitRan = false;
+    parts.beginReconcile();
 
     // Despawn what finished exiting, and count this pass.
     sweep();
@@ -2834,12 +2527,12 @@ export function createReconciler(
 
     // The parked parts of the roots built aside go first, then the dirty roots, a root built aside
     // while the budget lasts.
-    drainParked();
+    parts.drainParked();
 
     for (let index = 0; index < count; index += 1) {
       const root = dirtyList[index];
 
-      if (root !== undefined && !holdRoot(root)) reconcileDirtyRoot(root);
+      if (root !== undefined && !parts.holdRoot(root)) reconcileDirtyRoot(root);
     }
 
     // Give the views a slot hosts their parent, take it back where the slot left, and publish the
@@ -2883,11 +2576,10 @@ export function createReconciler(
     // Per frame: the viewport box is the reconciler's scratch; the solve keeps no reference to it.
     viewportBox.w = viewport?.width ?? 0;
     viewportBox.h = viewport?.height ?? 0;
-    applied = 0;
-    landed = false;
+    parts.beginSolve();
     assignSlots();
     // The open applications of roots built aside take their next part before any root is solved.
-    applyParts();
+    parts.applyParts();
 
     const changed = layOutRoots(viewportBox);
 
@@ -2895,7 +2587,7 @@ export function createReconciler(
 
     // A solve may give a scroll a new range and a render a new `offset` prop; a scroll that came in
     // this solve, or with the last part of its root, stands at its prop before it is first drawn.
-    if (changed || rendered > 0 || landed) {
+    if (changed || rendered > 0 || parts.hasLanded()) {
       modules.layout.settleScroll(scrollContainers(), lookup, time);
     }
 
@@ -2995,7 +2687,7 @@ export function createReconciler(
       root.popup === undefined ? (ctx.deps.world.projection.causeOf(entity) ?? "change") : "change";
 
     // Its build ends here, whichever way it goes: no parked part is diffed under a leaving tree.
-    forgetParts(root);
+    parts.forgetParts(root);
 
     if (cause === "discard" || isAside(entity)) {
       dropRoot(root, element);

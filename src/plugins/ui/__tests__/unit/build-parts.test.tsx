@@ -422,6 +422,52 @@ describe("a scene built in parts", () => {
     expect(offsetOf(parts, "win")).toEqual(offsetOf(block, "win"));
   });
 
+  // Bug: a windowed list of a root whose build waits moves its range: its rows are diffed while
+  // parts of the root are parked, or the rows after the commit are not one block's.
+  it("moves no range of a windowed list while parts of its root are parked", async () => {
+    const parts = await start();
+    const { made, clock } = recordMade(parts);
+    const counters = parts.app.world.ecs.resource(UiCounters);
+    const renders = counters.windowRenders;
+    const waited: Array<{ tall: boolean; made: number; renders: number }> = [];
+
+    // A budget of 0: the first application stops after 8 elements, the list live among them.
+    parts.build(["parts.listed"], 0);
+    clock.frame = 1;
+    parts.frame();
+
+    expect(marked(parts, "tall")).toBeDefined();
+    expect(parts.app.flow.gate.answer({ intent: "more" })).toBe(true);
+    await settle();
+
+    while (!parts.built() && waited.length < 60) {
+      clock.frame += 1;
+      parts.frame();
+      waited.push({
+        tall: marked(parts, "tall") !== undefined,
+        made: made.size,
+        renders: counters.windowRenders - renders
+      });
+    }
+
+    const parked = waited.filter((frame, index) => frame.made > (waited[index - 1]?.made ?? 0));
+
+    // The section's rows came over several frames, their leaves parked; no range moved meanwhile.
+    expect(parked.length).toBeGreaterThanOrEqual(3);
+    expect(waited.every(frame => frame.tall && frame.renders === 0)).toBe(true);
+
+    commitAndSettle(parts);
+
+    const block = await oneBlock(["parts.listed"], async fixture => {
+      fixture.app.flow.gate.answer({ intent: "more" });
+      await settle();
+      fixture.frame();
+    });
+
+    expect(rootOf(block, "listedRoot")?.children[1]?.children).toHaveLength(6);
+    expect(rounded(parts.app.ui.tree())).toEqual(rounded(block.app.ui.tree()));
+  });
+
   // Bug: an overlay applied in a later part lands at another level than in one block.
   it("lands an overlay of a root applied in parts as one block does", async () => {
     const parts = await start();

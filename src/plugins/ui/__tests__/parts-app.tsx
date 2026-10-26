@@ -32,9 +32,9 @@ import type { DescriptionNode, UiNode } from "../jsx/types";
 
 /**
  * The player of the fixture: how many rows the big scene draws, whether its cells are wide (and
- * five, not four), and whether it shows.
+ * five, not four), whether it shows, and how many rows the section of the listed scene holds.
  */
-export type PartsPlayer = { rows: number; wide: boolean; shown: boolean };
+export type PartsPlayer = { rows: number; wide: boolean; shown: boolean; extra: number };
 
 const { defineNode, defineFlow, defineFeature } = defineGame<{
   player: PartsPlayer;
@@ -224,6 +224,53 @@ const overlayScreen = projection({
   )
 });
 
+/** The item of the listed scene. */
+type ListedItem = { id: string; extra: number };
+
+/**
+ * One row of the windowed list of the listed scene.
+ *
+ * @param index - The index of the row.
+ * @returns The row.
+ */
+function tallRow(index: number): DescriptionNode {
+  return <row key={`t${index}`} style={{ width: 400 }} />;
+}
+
+/**
+ * A windowed list first in a column, rows of 600 u, growing into what the section and 20 leaves
+ * leave it, so its range is cut first at the viewport's height; then a section of the player's
+ * `extra` rows of two leaves each. Built on a budget of 0, its first application stops after 8
+ * elements with the list live; a commit then adds the section's rows, and past the 8th of them
+ * their leaves are parked.
+ */
+const listedScreen = projection({
+  name: "parts.listed",
+  layer: "ui",
+  from: (player: PartsPlayer): ListedItem => ({ id: "listed", extra: player.extra }),
+  view: (item: ListedItem) => (
+    <column key="listedRoot" style={{ width: 1080, height: 1920 }}>
+      <scroll
+        key="tall"
+        rows={20}
+        rowHeight={600}
+        overscan={0}
+        row={tallRow}
+        style={{ width: 400, grow: 1 }}
+        components={[Mark({ name: "tall" })]}
+      />
+      <column key="section" style={{ width: 400 }}>
+        {Array.from({ length: item.extra }, (_unused, index) => (
+          <row key={`s${index}`} style={{ width: 400, height: 20 }}>
+            {leaves(`s${index}d`, 2)}
+          </row>
+        ))}
+      </column>
+      {leaves("f", 20)}
+    </column>
+  )
+});
+
 /** A text field that names no local field: its enter throws, as a broken tag does. */
 const BROKEN_FIELD: DescriptionNode = {
   type: "input",
@@ -253,7 +300,7 @@ const brokenScreen = projection({
 
 const home = defineNode({
   rest: true,
-  outcomes: { grow: type(), shrink: type(), hide: type() }
+  outcomes: { grow: type(), shrink: type(), hide: type(), more: type() }
 });
 
 /** Three more rows and wider cells. */
@@ -277,6 +324,16 @@ const shrink = defineNode({
   }
 });
 
+/** Six rows in the section of the listed scene. */
+const more = defineNode({
+  outcomes: { done: type() },
+  run: ({ player, out }) => {
+    player.extra += 6;
+
+    return out.done();
+  }
+});
+
 /** The big scene leaves. */
 const hide = defineNode({
   outcomes: { done: type() },
@@ -288,11 +345,12 @@ const hide = defineNode({
 });
 
 const main = defineFlow("main", {
-  nodes: { home, grow, shrink, hide },
+  nodes: { home, grow, shrink, hide, more },
   start: "home",
   outcomes: {},
   edges: {
-    home: { grow: "grow", shrink: "shrink", hide: "hide" },
+    home: { grow: "grow", shrink: "shrink", hide: "hide", more: "more" },
+    more: { done: "home" },
     grow: { done: "home" },
     shrink: { done: "home" },
     hide: { done: "home" }
@@ -309,7 +367,8 @@ const partsFeature = defineFeature("parts", {
     piecesScreen,
     hostedScreen,
     overlayScreen,
-    brokenScreen
+    brokenScreen,
+    listedScreen
   ],
   components: [Mark]
 });
@@ -381,7 +440,7 @@ export async function startParts(stepMs = 0) {
       flow: { mainFlow: main, holdMs: 0 },
       i18n: { locale: "en", fallback: "en" },
       model: {
-        initialPlayer: { rows: BIG_ROWS, wide: false, shown: true },
+        initialPlayer: { rows: BIG_ROWS, wide: false, shown: true, extra: 0 },
         initialSession: {},
         seed: 1
       }
