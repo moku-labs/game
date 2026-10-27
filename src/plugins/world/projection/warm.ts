@@ -3,7 +3,8 @@
  * view of that item built aside and held hidden while `from` does not show its key: `isBuilding` answers for it, so ui
  * and the renderer build it in parts and keep it off stage. One step a frame, in the idle time of a live world, builds,
  * patches or drops a held view; the reconcile shows the held view when `from` brings its key, and a close leaves the
- * record cold, to be built again.
+ * record cold, to be built again. A world that stops being live drops the view in work. An element registered for a
+ * closed window is held with it, and the sweep forgets the held entities that are gone.
  */
 import type { Snapshot } from "../../model/types";
 import type { AnyComponentValue, Entity } from "../ecs/types";
@@ -258,6 +259,71 @@ export function adoptWarm(state: ProjectionState, entity: Entity): void {
 }
 
 /**
+ * Holds an element whose key a plugin registers under a projection whose warm window is closed: the record holds a
+ * view, not shown, and the projection shows no live view, so the element can only be one of the held root's, made
+ * after the record was ready (a row a windowed list ranges in after the solve). It joins the record as an adopted one:
+ * `isBuilding` answers true, `entityOf` nothing, until the open; a discard despawns it with the view. A projection
+ * that shows other keys live while it warms one is not covered: an element registered for it is taken as live.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param projection - The projection the key is registered under.
+ * @param entity - The element.
+ */
+export function holdRegistered(state: ProjectionState, projection: string, entity: Entity): void {
+  if (state.warm.size === 0) return;
+
+  const record = state.warm.get(projection);
+
+  if (record?.view === undefined || record.phase === "shown") return;
+  if (state.mounted.get(projection)?.live.size !== 0) return;
+
+  record.entities.add(entity);
+  state.warmHeld.add(entity);
+}
+
+/** What the prune's callback reads: set before the walk, so the callback is module-level and a walk makes no closure. */
+const pruning: { pctx: ProjectionCtx | undefined } = { pctx: undefined };
+
+/**
+ * Forgets one held entity when it is gone: out of the held set and out of the record that marked it.
+ *
+ * @param entity - The held entity.
+ * @param _same - The same entity, as a set hands it twice.
+ * @param held - The held set.
+ */
+function dropDeadHeld(entity: Entity, _same: Entity, held: Set<Entity>): void {
+  const pctx = pruning.pctx;
+
+  if (pctx === undefined || pctx.deps.ecs.ownerOf(entity) !== undefined) return;
+
+  held.delete(entity);
+
+  const list = pctx.ctx.state.projection.warmList;
+
+  for (let index = 0; index < list.length; index += 1) list[index]?.entities.delete(entity);
+}
+
+/**
+ * Forgets the held entities that are gone: the elements a plugin despawned while their window was held (the rows a
+ * refresh took away), so the held sets of a window held for a long session do not grow. The sweep calls it after a
+ * frame that despawned an entity; with nothing held it reads one size.
+ *
+ * @param pctx - Domain context of the projection module.
+ */
+export function forgetDeadHeld(pctx: ProjectionCtx): void {
+  const held = pctx.ctx.state.projection.warmHeld;
+
+  if (held.size === 0) return;
+
+  const outer = pruning.pctx;
+
+  pruning.pctx = pctx;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, read without an iterator, by a module-level callback
+  held.forEach(dropDeadHeld);
+  pruning.pctx = outer;
+}
+
+/**
  * The budget `left()` counts down in this frame: the scene build's, else the warm window's while one is in work.
  *
  * @param state - The projection branch of the plugin state.
@@ -348,8 +414,9 @@ export function writeDifference(
 }
 
 /**
- * Tells whether a motion that owns its fields runs: a track that is not additive. A loop adds to its fields and runs
- * for good, so it never holds the warm work back.
+ * Tells whether a motion that owns its fields and ends runs: a track that is not additive and does not repeat
+ * forever. A loop adds to its fields and runs for good, and a track that repeats forever never ends, so neither holds
+ * the warm work back.
  *
  * @param tracks - The tracks the projection started.
  * @returns True while one such track is active.
@@ -361,7 +428,9 @@ function ownedMotionRuns(tracks: readonly Track[]): boolean {
   for (let index = 0; index < count; index += 1) {
     const track = tracks[index];
 
-    if (track !== undefined && !track.additive && track.handle.active()) return true;
+    if (track !== undefined && !track.additive && !track.forever && track.handle.active()) {
+      return true;
+    }
   }
 
   return false;
@@ -612,9 +681,11 @@ function stepNext(pctx: ProjectionCtx): void {
 
 /**
  * One step of the warm windows, run in world's `input` callback after the reconcile. At rest it reads two fields and
- * returns. It runs only in a live world with no scene build, a drawing plugin, and no motion that owns its fields: the
- * frames of an animation get no warm step. While a record is in work its checks are polled; otherwise the next record
- * with work spawns, patches or drops its held view. One step a frame.
+ * returns. It runs only in a live world with no scene build, a drawing plugin, and no motion that owns its fields and
+ * ends: the frames of an animation get no warm step. Where it may not run, the record in work is dropped: a paused or
+ * fast world builds no part of it, and `left()` would stay finite for good; it is built again once the step runs.
+ * While a record is in work its checks are polled; otherwise the next record with work spawns, patches or drops its
+ * held view. One step a frame.
  *
  * @param pctx - Domain context of the projection module.
  */
@@ -623,7 +694,14 @@ export function stepWarm(pctx: ProjectionCtx): void {
   const active = state.warmActive;
 
   if (active === undefined && !state.warmStale) return;
-  if (!mayWarm(pctx) || ownedMotionRuns(state.tracks)) return;
+
+  if (!mayWarm(pctx)) {
+    if (active !== undefined) discardWarm(pctx, active);
+
+    return;
+  }
+
+  if (ownedMotionRuns(state.tracks)) return;
 
   if (active === undefined) stepNext(pctx);
   else pollActive(state, active);

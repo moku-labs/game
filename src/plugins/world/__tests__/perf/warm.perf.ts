@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { settled, warmCallsFixture } from "./fixtures";
+import { settled, warmCallsFixture, warmPruneFixture } from "./fixtures";
 
 // F61 slice B+D: a warm window held hidden costs its memory and nothing a frame. World's `input` callback takes one
 // warm step every frame; ui and the renderer ask `left()` and `isBuilding` while they build the held view.
@@ -40,5 +40,14 @@ describe("warm windows: heap per frame", () => {
     await annotate(`left: ${left} B, isBuilding: ${flag} B`);
     expect(left).toBeLessThanOrEqual(BUDGET.warmLeft + NOISE_BYTES);
     expect(flag).toBeLessThanOrEqual(BUDGET.warmIsBuilding + NOISE_BYTES);
+  });
+
+  // Bug caught: the prune of the held entities that are gone allocates in every frame that despawns something while a
+  // window is held (a match that clears tiles under a held shop).
+  it("the sweep after a despawn with 600 held elements keeps nothing", async ({ annotate }) => {
+    const bytes = alloc(warmPruneFixture(), 2000);
+
+    await annotate(`sweep after a despawn, 600 held elements: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.warmPruneSweep + NOISE_BYTES);
   });
 });

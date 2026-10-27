@@ -3,7 +3,7 @@ import { Layer, Order } from "../../../world/ecs/define";
 import { projection } from "../../../world/projection/define";
 import type { AnyProjectionSpec } from "../../../world/projection/types";
 import type { AnyComponentValue, Entity, LayerSpec } from "../../../world/types";
-import { Sprite, Transform } from "../../components";
+import { Parent, Sprite, Transform } from "../../components";
 import type { PixiContainer } from "../../types";
 import { FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
@@ -189,6 +189,35 @@ function onStage(mock: MockRenderer, entity: Entity): boolean {
 }
 
 /**
+ * Where an entity's view is: under the stage, made but off it, or not made yet.
+ *
+ * @param mock - The mock renderer.
+ * @param entity - The entity.
+ * @returns `"stage"`, `"off"` or `"none"`.
+ */
+function placeOf(mock: MockRenderer, entity: Entity): "stage" | "off" | "none" {
+  if (mock.api.sync.displayOf(entity) === undefined) return "none";
+
+  return onStage(mock, entity) ? "stage" : "off";
+}
+
+/**
+ * Makes every view creation spend more of the world clock than a frame's warm budget: the provider moves it on 50 ms.
+ *
+ * @param mock - The mock renderer.
+ */
+function slowViews(mock: MockRenderer): void {
+  let now = 0;
+
+  mock.api.sync.textures.provide(() => {
+    now += 50;
+    mock.setWorldNow(now);
+
+    return texture as never;
+  });
+}
+
+/**
  * The entities of the held list, in its order.
  *
  * @param mock - The mock renderer.
@@ -359,6 +388,76 @@ describe("warm windows: the release by membership version", () => {
 
     expect(onStage(mock, settings)).toBe(true);
     expect(heldList(mock)).toEqual([]);
+  });
+
+  // Bug: the open attaches the window's top in its pass, while the rows still waiting aside are handed to the live pass
+  // only after it: the window is drawn half-built for one frame, its top on the stage without its rows.
+  it("hangs every view of a window opened while it is built under the stage in the frame of the open", async () => {
+    const windows = await mountWindows([SETTINGS]);
+    const { mock } = windows;
+
+    // The spawn of the window: its top is made aside and held.
+    frame(mock);
+
+    const top = heldOf(mock, SETTINGS);
+    const rows = [0, 1, 2, 3, 4, 5].map(index => {
+      const row = mock.world.ecs.spawn(owner, [
+        Transform({ y: index * 40 }),
+        Sprite({ texture: `sheet.row${index}` }),
+        Parent({ entity: top })
+      ]);
+
+      mock.world.projection.adopt(row);
+
+      return row;
+    });
+
+    slowViews(mock);
+    // The budget is spent after one row.
+    frame(mock);
+
+    const built = rows.map(row => placeOf(mock, row));
+
+    expect(built).toEqual(["off", "none", "none", "none", "none", "none"]);
+
+    show(windows, [SETTINGS]);
+    frame(mock);
+
+    expect(placeOf(mock, top)).toBe("stage");
+    expect(rows.map(row => placeOf(mock, row))).toEqual(rows.map(() => "stage"));
+  });
+
+  // Bug: the open of a window during a scene build hands the build's views still aside to the live pass with the
+  // window's, or drops them from the queue: the coming scene shows before its commit, or misses views after it.
+  it("keeps a scene build's views still aside building through the open of a window, and hangs them at the commit", async () => {
+    const windows = await warmWindows();
+    const { mock } = windows;
+    const settings = heldOf(mock, SETTINGS);
+
+    expect(mock.world.projection.build([SETTINGS], owner, COMING, 4)).toBe(true);
+
+    const tops = [boardTop(1), boardTop(2), boardTop(3)].map(components => {
+      const entity = mock.world.ecs.spawn(owner, components);
+
+      mock.world.projection.adopt(entity);
+
+      return entity;
+    });
+
+    slowViews(mock);
+    // One top is made aside; two wait.
+    frame(mock);
+    show(windows, [SETTINGS]);
+    frame(mock);
+
+    expect(onStage(mock, settings)).toBe(true);
+    expect(tops.map(top => placeOf(mock, top))).toEqual(["off", "off", "none"]);
+
+    mock.world.projection.setLayers(COMING);
+    mock.world.projection.commit();
+    frame(mock);
+
+    expect(tops.map(top => placeOf(mock, top))).toEqual(["stage", "stage", "stage"]);
   });
 
   // Bug: a window opened while a scene builds attaches the coming scene's tops with it: the next scene shows before

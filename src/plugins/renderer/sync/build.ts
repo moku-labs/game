@@ -5,9 +5,10 @@
  * after the live pass makes their views in chunks under `world.projection.left()`, parents first. A made view of the
  * build is held (`held.ts`): it hangs nowhere in the stage, so the hit test, the kept cache and the frame's render
  * passes never see it. A held window rests for as long as it is closed, asking for no frame. When world's membership
- * version moves (a commit, an open), the pass applies the layer list and attaches every held top that is no longer
- * building, in one block. The aside work moves nothing the live tree is counted by: `still()` does not read the
- * queue, and `passesVersion` stays.
+ * version moves (a commit, an open), the pass applies the layer list, attaches every held top that is no longer
+ * building, in one block, and makes in the same pass the views of that build still queued aside: the scene or the
+ * window is whole in the frame it is attached. The aside work moves nothing the live tree is counted by: `still()`
+ * does not read the queue, and `passesVersion` stays.
  */
 import type { Entity } from "../../world/types";
 import type { PixiContainer } from "../types";
@@ -74,6 +75,20 @@ export function dropAside(state: SyncState, entity: Entity): void {
 }
 
 /**
+ * Hands a queued entity whose build ended before its view was made to the live pass: it leaves the waiting set, and
+ * joins `added` while it is alive.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity, no longer building.
+ */
+function toLivePass(sctx: SyncCtx, entity: Entity): void {
+  const state = sctx.ctx.state.sync;
+
+  state.aside.waiting.delete(entity);
+  if (sctx.ctx.deps.world.ecs.ownerOf(entity) !== undefined) state.added.add(entity);
+}
+
+/**
  * Makes the view of one queued entity, its queued parent first (spec 16 U2.3: a child made before its parent finds no
  * parent view and is detached for good). The entity leaves the waiting set before its parent is made, so a cycle of
  * parents ends. A throw costs that entity.
@@ -117,7 +132,7 @@ function makeParentFirst(
 function makeAside(sctx: SyncCtx, report: (entity: Entity, error: unknown) => void): number {
   const state = sctx.ctx.state.sync;
   const { aside } = state;
-  const { projection, ecs } = sctx.ctx.deps.world;
+  const projection = sctx.ctx.deps.world.projection;
   const version = state.passesVersion;
   let made = 0;
   let check = 1;
@@ -130,8 +145,7 @@ function makeAside(sctx: SyncCtx, report: (entity: Entity, error: unknown) => vo
     if (!aside.waiting.has(entity)) continue;
 
     if (!projection.isBuilding(entity)) {
-      aside.waiting.delete(entity);
-      if (ecs.ownerOf(entity) !== undefined) state.added.add(entity);
+      toLivePass(sctx, entity);
       continue;
     }
 
@@ -244,12 +258,45 @@ export function heldWaiting(sctx: SyncCtx): boolean {
 }
 
 /**
+ * Hands the live pass every queued entity whose build ended before its view was made: a scene build committed, or a
+ * window opened, while views of it still waited aside. The pass that attaches the held top makes them next, parents
+ * first, so the top never hangs on the stage without them. The entities still building stay queued and move to the
+ * front, in their order, with no new array; a slot that waits no more (its entity left) is dropped. One set lookup
+ * per slot, and only after world's membership version moved.
+ *
+ * @param sctx - Domain context of the sync module.
+ */
+function releaseAside(sctx: SyncCtx): void {
+  const aside = sctx.ctx.state.sync.aside;
+  const projection = sctx.ctx.deps.world.projection;
+  let kept = 0;
+
+  for (let index = aside.head; index < aside.count; index += 1) {
+    const entity = aside.entities[index] ?? 0;
+
+    if (!aside.waiting.has(entity)) continue;
+
+    if (projection.isBuilding(entity)) {
+      aside.entities[kept] = entity;
+      kept += 1;
+    } else {
+      toLivePass(sctx, entity);
+    }
+  }
+
+  aside.head = 0;
+  aside.count = kept;
+}
+
+/**
  * The swap: once the membership version moved, every held top that is no longer building is attached in one block, in
  * the order it was made (parents first), and sorted by the rule of the layer list the pass has just applied: the tops
  * of a committed scene build, a warm window world shows. The tops still building (a window at rest, a scene still
  * being built) stay held and move to the front of the list, in their order, with no new array; a slot whose view went
- * (a discard, a view that left) or hangs elsewhere by now is dropped. The version is stored, so the next scan waits for
- * its next move. Called by the pass right after `syncLayers`.
+ * (a discard, a view that left) or hangs elsewhere by now is dropped. The views of an ended build still queued aside
+ * go to `added`, for this same pass: the scene or the window is whole in the frame it is attached. The version is
+ * stored, so the next scan waits for its next move. Called by the pass right after `syncLayers`, before it builds
+ * `added`.
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -281,6 +328,7 @@ export function attachHeld(sctx: SyncCtx): void {
   // A build ended: the dev check may name the next one.
   if (kept !== held.count) held.reported = false;
 
+  releaseAside(sctx);
   held.count = kept;
   held.version = projection.membershipVersion();
 }

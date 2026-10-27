@@ -874,7 +874,7 @@ JSX is a root of `ui`, held:
   budget, and it is laid out and applied whole with no motion, so no half-built frame is drawn.
 - **The close** plays the exits as for any root; the world builds the window again in idle frames.
 - **At rest** the held roots cost a few numbers a frame: the walk for a released root runs only
-  when the membership of the world's projections moved or work is under way, the queue of held
+  when the membership of the world's projections moved, the queue of held
   enters is not walked, the drain and the application step read one size, and no scroll of a held
   root is stepped. 0 B a frame (`__tests__/perf/warm-rest.perf.ts`).
 - **Headless.** `ui` registers its part of a build only with a renderer that draws: a headless

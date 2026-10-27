@@ -53,8 +53,10 @@ import {
   discardHeld,
   discardWarm,
   ensureWarm,
+  forgetDeadHeld,
   forgetWarm,
   frameBudget,
+  holdRegistered,
   stepWarm
 } from "./warm";
 
@@ -417,6 +419,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.keysByEntity.set(entity, { projection, key });
       // The next sweep looks for dead elements, also when no entity was despawned since the last.
       state.sweptDespawns = -1;
+      // An element of a closed window's root, made after its view was ready, is held with it.
+      holdRegistered(state, projection, entity);
 
       return (): void => {
         if (byKey.get(key) === entity) byKey.delete(key);
@@ -523,12 +527,13 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       sweepQueue(pctx);
 
-      // Per frame: an element's key and rest pose can only go stale when an entity was despawned.
+      // Per frame: an element's key, its rest pose and a held entity can only go stale when an entity was despawned.
       const despawns = ctx.state.ecs.despawns;
 
       if (state.sweptDespawns !== despawns) {
         state.sweptDespawns = despawns;
         forgetDeadElements(pctx);
+        forgetDeadHeld(pctx);
       }
 
       if (state.owedLoops > 0) startOwedLoops(pctx);

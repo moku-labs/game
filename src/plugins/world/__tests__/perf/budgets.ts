@@ -110,5 +110,7 @@ export const BUDGET = {
   /** F61 B+D: `projection.left()` while a held view builds: a clock read and a subtraction. New: 0 B. */
   warmLeft: 0,
   /** F61 B+D: `projection.isBuilding(entity)` of a held view: two lookups. New: 0 B. */
-  warmIsBuilding: 0
+  warmIsBuilding: 0,
+  /** F61 B+D: the sweep of a frame with a despawn, a warm window of 600 elements held: the prune of the dead. New: 0 B. */
+  warmPruneSweep: 0
 } as const;

@@ -351,7 +351,9 @@ describe("a windowed list of a window held warm", () => {
     const late = markedIn(warm, "w15") ?? 0;
 
     expect(warm.app.world.ecs.ownerOf(late)).toBeDefined();
-    expect(warm.app.world.projection.isBuilding(late)).toBe(false);
+    // `world` holds it with the closed window: no game code reaches it by key.
+    expect(warm.app.world.projection.isBuilding(late)).toBe(true);
+    expect(warm.app.world.projection.entityOf("warm.rows", "w15")).toBeUndefined();
 
     // The warm item changes: every row is wider, so it moves.
     await warm.answer("coin");

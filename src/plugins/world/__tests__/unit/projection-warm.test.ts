@@ -361,6 +361,44 @@ describe("warm: the held view", () => {
     expect(world.api.projection.isBuilding(element)).toBe(true);
   });
 
+  // Bug: a row a windowed list of a closed window ranges in after its view is ready is live: `entityOf` answers for
+  // it, so `input` or `guide` reach a button of a window that is not on the screen, and the renderer draws it.
+  it("holds an element whose key is registered for a closed window after its view is ready, until the open", () => {
+    const { world } = sheetWorld();
+
+    warmUp(world);
+
+    const row = adoptElement(world);
+
+    world.api.projection.registerKey(SHEET, "w15", row);
+
+    expect(world.api.projection.isBuilding(row)).toBe(true);
+    expect(world.api.projection.entityOf(SHEET, "w15")).toBeUndefined();
+
+    commitSession(world, { sheet: { page: "main" } });
+
+    expect(world.api.projection.isBuilding(row)).toBe(false);
+    expect(world.api.projection.entityOf(SHEET, "w15")).toBe(row);
+  });
+
+  // Bug: an element of a window on the screen is taken for one of the view its projection holds for another key:
+  // a button the player sees answers no `entityOf`.
+  it("holds no element registered for a projection that shows a view live", () => {
+    const { world } = sheetWorld([sheetSpec()], { session: { sheet: { page: "main" } } });
+
+    commitPlayer(world, { coins: 5, warmId: "about" });
+    world.frame(16);
+
+    expect(recordOf(world)?.phase).toBe("ready");
+
+    const button = world.api.ecs.spawn({ kind: "plugin", name: "ui" }, []);
+
+    world.api.projection.registerKey(SHEET, "close", button);
+
+    expect(world.api.projection.isBuilding(button)).toBe(false);
+    expect(world.api.projection.entityOf(SHEET, "close")).toBe(button);
+  });
+
   // Bug: a hidden copy of a window that is open is built beside it (two roots, twice the memory).
   it("skips a key from shows, and warms it after the close", () => {
     const { world } = sheetWorld([sheetSpec()], { session: { sheet: { page: "main" } } });
@@ -398,6 +436,33 @@ describe("warm: the held view", () => {
     world.frame(16);
 
     expect(heldOf(world)).not.toBe(0);
+  });
+
+  // Bug: a pulse that owns its field and repeats for good (a "tap here" ring) keeps every window cold for the whole
+  // scene; or a motion that repeats a counted number of times is taken for one that never ends, and an animated frame
+  // gets the warm spawn.
+  it("never waits for a motion that repeats forever, and waits for one that repeats a counted number of times", () => {
+    const owner = { kind: "plugin", name: "ui" } as const;
+    const pulsing = (repeat: number | "forever"): MockWorld => {
+      const { world } = sheetWorld();
+      const ring = world.api.ecs.spawn(owner, [Transform()]);
+
+      world.api.projection
+        .viewOf(ring, owner)
+        ?.tween(Transform, { scale: 1.2 }, { ms: 100, ease: "linear", repeat });
+      world.frame(16);
+
+      return world;
+    };
+    const counted = pulsing(3);
+
+    expect(heldOf(pulsing("forever"))).not.toBe(0);
+    expect(heldOf(counted)).toBe(0);
+
+    settleFrames(counted);
+    counted.frame(16);
+
+    expect(heldOf(counted)).not.toBe(0);
   });
 
   // Bug: the frames of an animation get a warm step: the drawing plugins' checks run in them.
@@ -623,6 +688,35 @@ describe("warm: a commit while the window rests", () => {
     world.frame(16);
 
     expect(world.api.projection.left()).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  // Bug: the held sets keep the ids of the rows a refresh took away: a window held through a long session grows them
+  // with every refresh.
+  it("forgets the elements of a held view that were despawned, in the next frame", () => {
+    const { world, parts } = sheetWorld();
+
+    parts.done = false;
+    world.frame(16);
+
+    const first = adoptElement(world);
+    const second = adoptElement(world);
+    const third = adoptElement(world);
+
+    parts.done = true;
+    world.frame(16);
+    parts.done = false;
+    commitPlayer(world, { coins: 9 });
+    // ui takes away the rows the patched sheet no longer has.
+    world.api.ecs.despawn(first);
+    world.api.ecs.despawn(second);
+    world.frame(16);
+
+    const record = recordOf(world);
+    const kept = [...world.ctx.state.projection.warmHeld, ...(record?.entities ?? [])];
+
+    expect(kept.filter(entity => world.api.ecs.ownerOf(entity) === undefined)).toEqual([]);
+    expect(record?.entities.has(third)).toBe(true);
+    expect(world.api.projection.isBuilding(third)).toBe(true);
   });
 
   // Bug: the view of the old key stays held for good (memory), or the new key is never warmed.
@@ -914,6 +1008,36 @@ describe("warm: where it does not run", () => {
     world.frame(16);
 
     expect(heldOf(world)).not.toBe(0);
+  });
+
+  // Bug: a world paused while a window builds keeps `left()` finite, and the renderer asks for a frame in every frame
+  // of the pause; or the record stays in work for good and the window is never ready.
+  it("drops the record in work when the world stops being live, and builds it again once it is live", () => {
+    const { world, parts } = sheetWorld();
+
+    parts.done = false;
+    world.frame(16);
+
+    const held = heldOf(world);
+    const lefts: number[] = [];
+
+    world.api.ecs.setMode("paused");
+
+    for (let frame = 0; frame < 30; frame += 1) {
+      world.frame(16);
+      lefts.push(world.api.projection.left());
+    }
+
+    expect(Math.min(...lefts)).toBe(Number.POSITIVE_INFINITY);
+    expect(world.api.ecs.ownerOf(held)).toBeUndefined();
+
+    parts.done = true;
+    world.api.ecs.setMode("live");
+    world.frame(16);
+    world.frame(16);
+
+    expect(recordOf(world)?.phase).toBe("ready");
+    expect(world.api.projection.isBuilding(heldOf(world))).toBe(true);
   });
 });
 

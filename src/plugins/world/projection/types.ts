@@ -507,8 +507,10 @@ export type ProjectionSpec<
    * writes the difference into the held view, another key builds it again. When `from` shows that key the held view
    * is shown at once: the same entity, only what differs from the warm item is written (no `change` hook), and the
    * `enter` and `loop` hooks play as for a new view. A close plays the exit as before; the view is then built again
-   * in idle frames. Only on a drawing renderer and a live world; a `warm` or a `view` that throws is logged as
-   * `world:projection-failed` and nothing is held until the next commit. The cost is the memory of the held view.
+   * in idle frames. Only on a drawing renderer and a live world (a pause or a fast walk drops the view in work, to be
+   * built again after it), and not in the frames of a motion that owns its fields (a loop and a motion that repeats
+   * forever do not count); a `warm` or a `view` that throws is logged as `world:projection-failed` and nothing is held
+   * until the next commit. The cost is the memory of the held view.
    * Left out, nothing is warmed.
    *
    * @param player - The `player` root of the committed state.
@@ -656,6 +658,11 @@ export type Track = {
    * additive track drives no component: a settle may bring the component home under it.
    */
   additive: boolean;
+  /**
+   * Whether the track repeats forever (`repeat: "forever"`): it never ends, so the warm step does not wait for it to
+   * end, as for a loop.
+   */
+  forever: boolean;
 };
 
 /**
@@ -774,7 +781,11 @@ export type ProjectionState = {
   warm: Map<string, WarmRecord>;
   /** The same records in mounted order: the order the warm step takes them in. */
   warmList: WarmRecord[];
-  /** Every entity a warm record holds hidden: its view and the entities `adopt` marked for it. One lookup in `isBuilding`. */
+  /**
+   * Every entity a warm record holds hidden: its view, the entities `adopt` marked for it, and the elements a plugin
+   * registered a key for under its projection while it is closed. One lookup in `isBuilding`. An entity that is gone
+   * leaves it in the sweep after its despawn.
+   */
   warmHeld: Set<Entity>;
   /** The record whose held view is being built now; absent when none is, never written as `undefined`. */
   warmActive?: WarmRecord;
@@ -806,7 +817,10 @@ export type WarmRecord = {
   item?: unknown;
   /** The held view: never in `mounted.live` until `from` shows its key; absent while nothing is held. */
   view?: View;
-  /** The held view's entity and the entities `adopt` marked for it, emptied when the view is shown or dropped. */
+  /**
+   * The held view's entity, the entities `adopt` marked for it and the elements registered under its projection while
+   * it is closed; emptied when the view is shown or dropped. An entity that is gone leaves it in the sweep.
+   */
   entities: Set<Entity>;
   phase: WarmPhase;
   /**
@@ -1294,7 +1308,10 @@ export type ProjectionApi = {
    * Gives an entity a projection and key of its own, so `entityOf` and `keyOf` answer for it next
    * to the live views. That is how an element becomes a target for `anim`, `input` and `guide`.
    * A key whose entity is gone is dropped in the next live frame, also when the remover was never
-   * called.
+   * called. An element registered while the projection's warm window is held and the projection
+   * shows no live view belongs to the held root (a row its list ranged in after it was built): it
+   * is held with the window, `isBuilding` answers true and `entityOf` nothing until the open. A
+   * projection that shows other keys live while it warms one is not covered: its elements answer.
    *
    * @param projection - Name the element is addressed under.
    * @param key - Key the element is addressed under.
@@ -1309,6 +1326,10 @@ export type ProjectionApi = {
    *
    * world.projection.entityOf("hud", "coins"); // the entity of the counter
    * drop(); // the element left the screen
+   *
+   * // A row the shop's list ranges in while the shop is closed and held warm.
+   * world.projection.registerKey("shop.sheet", "w15", row);
+   * world.projection.entityOf("shop.sheet", "w15"); // undefined until the shop opens
    * ```
    */
   registerKey(projection: string, key: string, entity: Entity): () => void;
@@ -1453,7 +1474,8 @@ export type ProjectionApi = {
    * game clock time since the frame started (read at the start of world's `input` phase). The budget is the scene
    * build's `budgetMs`, or while a warm window is built two thirds of the frame interval the loop runs at,
    * `(1000 / fps) * 2 / 3`. The clock counts whole milliseconds. Negative once the frame spent more; `Infinity` while
-   * nothing is built, also while warm windows rest built. Allocates nothing.
+   * nothing is built, also while warm windows rest built, and in a world that is not live: a pause or a fast walk drops
+   * the warm window in work. Allocates nothing.
    *
    * @returns The milliseconds left, or `Infinity`.
    * @example
@@ -1469,8 +1491,8 @@ export type ProjectionApi = {
 
   /**
    * Whether an entity is built aside or held warm: a view the running build spawned, the view a warm window holds
-   * hidden (`warm` of a projection), or an entity `adopt` marked for either. Such an entity is not drawn, not hit and
-   * not found until it is shown. A view is flagged before the `onAdded` hooks of its components, so a hook can ask.
+   * hidden (`warm` of a projection), an entity `adopt` marked for either, or an element registered with `registerKey`
+   * for a closed warm window. Such an entity is not drawn, not hit and not found until it is shown. A view is flagged before the `onAdded` hooks of its components, so a hook can ask.
    * Two set lookups; false after the commit of the build and once `from` shows the warm view. Allocates nothing.
    *
    * @param entity - The entity to ask about.

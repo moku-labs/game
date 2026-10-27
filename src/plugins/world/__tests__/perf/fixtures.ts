@@ -291,7 +291,13 @@ export function sweepFixture(ending: number): () => void {
   const ended: Track[] = [];
 
   for (let index = 0; index < ending; index += 1) {
-    ended.push({ entity: index, component: "Transform", handle: ENDED, additive: false });
+    ended.push({
+      entity: index,
+      component: "Transform",
+      handle: ENDED,
+      additive: false,
+      forever: false
+    });
   }
 
   const count = ended.length;
@@ -926,6 +932,54 @@ export function warmCallsFixture(building: boolean): WarmCalls {
     isBuilding: (): void => {
       sink.flag = projection.isBuilding(held);
     }
+  };
+}
+
+/** The elements `adopt` marks for the held sheet of the prune fixture: a shop's worth. */
+const HELD_ELEMENTS = 600;
+
+/**
+ * The sweep of a frame that despawned an entity while the warm sheet is held ready with 600 elements `adopt` marked
+ * for it: the prune walks every held entity and finds none gone. The state and the flow answer one kept object.
+ *
+ * @returns One sweep after a despawn.
+ */
+export function warmPruneFixture(): () => void {
+  const world = createMockWorld();
+  const done = { parts: false };
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(sheetSpec());
+  world.start();
+  world.api.projection.onBuild(() => done.parts);
+  world.api.projection.mount([SHEET], MOUNT_OWNER);
+
+  const deps = withDeps(world.ctx).deps;
+  const model = { store: { snapshot: () => CLOSED } } as unknown as ModelApi;
+  const flow = { state: () => LIVE } as unknown as FlowApi;
+  const { projection } = createModules({ ...world.ctx, deps: { ...deps, model, flow } });
+
+  // The spawn, the elements of the held root, then the poll that finds it ready.
+  projection.stepWarm();
+  for (let index = 0; index < HELD_ELEMENTS; index += 1) {
+    projection.adopt(world.api.ecs.spawn({ kind: "plugin", name: "ui" }, []));
+  }
+  done.parts = true;
+  projection.stepWarm();
+
+  const state = world.ctx.state;
+
+  // The call must measure the path it names: a ready sheet that holds its view and every element.
+  if (
+    state.projection.warmHeld.size !== HELD_ELEMENTS + 1 ||
+    state.projection.warmActive !== undefined
+  ) {
+    throw new Error("warmPruneFixture: the sheet does not hold its elements");
+  }
+
+  return (): void => {
+    state.ecs.despawns += 1;
+    projection.sweep();
   };
 }
 

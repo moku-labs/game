@@ -787,10 +787,12 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
   moved since its last scan: every end of a build moves it (a commit, a discard, the open of a warm
   window). In that pass the coming layer list is applied first, then every held top that is no
   longer building is attached in one block, in the order it was made, and sorted by the rule of its
-  layer: the tree is the one a one-block build of the same scene makes. The tops still building stay
-  held and move to the front of the list, in their order, with no new array. A discard despawns the
-  build: its held views are dropped and pooled like any removed view, their slots leave the list, and
-  none is attached.
+  layer: the tree is the one a one-block build of the same scene makes. The views of that build still
+  waiting in the aside queue join the added set of the same pass and are made there, parents first,
+  so the scene is whole in the frame it is attached: never a top without its children. The tops still
+  building stay held and move to the front of the list, in their order, with no new array; so do the
+  queued entities still building. A discard despawns the build: its held views are dropped and pooled
+  like any removed view, their slots leave the list, and none is attached.
 - **Held views of warm windows** (spec 33, slice B+D). A projection with `warm` has world build the
   view of a closed window in idle frames, flagged building for as long as the window stays closed,
   possibly the whole session. The renderer makes its views through the same aside queue while the
@@ -799,7 +801,9 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
   pass stays still: the build step returns after a few field reads, 0 B a frame
   (`__tests__/perf/warm-held.perf.ts`). When `from` shows the window, world adopts the held view and
   moves its membership version: the pass of that same frame attaches the top in its layer, so the
-  window shows in the frame of the reconcile. A held list may mix both kinds: a scene build's tops
+  window shows in the frame of the reconcile. A window opened while it is still being built shows
+  whole in that frame too: the views still in the aside queue are made by that pass, parents first,
+  under the top it attaches. A held list may mix both kinds: a scene build's tops
   attach at its commit while a resting window stays held, and a window opened during a build
   attaches alone.
 - **Dev check.** In a dev or agent build every frame with aside work (views to make, or held views

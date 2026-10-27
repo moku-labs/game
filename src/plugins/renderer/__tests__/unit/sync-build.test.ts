@@ -459,6 +459,43 @@ describe("a scene built aside: the end of the build", () => {
     expect(mock.modules.sync.layerContainer("board")?.children).toHaveLength(2);
   });
 
+  // Bug: the commit attaches the held tops in its pass, while the views still aside are handed to the live pass only
+  // after it: the new scene is drawn half-built for one frame, a top without its rows and a top missing.
+  it("a commit with views still aside hangs the whole scene in its own frame, as a one-block build does", async () => {
+    const aside = await started();
+
+    startBuild(aside);
+
+    const second = spawnBuilding(aside, boardTop(2, 40));
+
+    spawnBuilding(aside, boardTop(1, 20));
+    spawnBuilding(aside, childOf(second));
+    spawnBuilding(aside, childOf(second, 1));
+    slowViews(aside);
+    frame(aside);
+
+    expect(aside.modules.sync.counts().views).toBe(1);
+
+    commit(aside);
+    frame(aside);
+
+    const block = await started(BOARD);
+
+    block.world.ecs.spawn(owner, boardTop(2, 40));
+    block.world.ecs.spawn(owner, boardTop(1, 20));
+    block.world.ecs.spawn(owner, childOf(second));
+    block.world.ecs.spawn(owner, childOf(second, 1));
+    frame(block);
+
+    const asideRoot = aside.modules.sync.root();
+    const blockRoot = block.modules.sync.root();
+
+    if (asideRoot === undefined || blockRoot === undefined) throw new Error("no root");
+
+    expect(aside.modules.sync.counts().views).toBe(4);
+    expect(shapeOf(asideRoot)).toEqual(shapeOf(blockRoot));
+  });
+
   // Bug: a device restore during a build rebuilds the building views straight into the stage, or lists a held top a
   // second time, which the swap then hangs twice.
   it("a rebuild during a build holds every building view again and the swap hangs each once", async () => {
