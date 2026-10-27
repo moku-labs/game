@@ -306,12 +306,17 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
 
     // Trees of an older schema run through the chain first: put in place as they are, the next
     // rest point would save them under this build's version, and no migration would run again.
-    const rng = input.rng ?? store.doc.rng;
+    // The trees are cloned first, so a step that writes in place leaves the caller's bookmark be.
+    const trees = {
+      player: structuredClone(input.player),
+      rng: structuredClone(input.rng ?? store.doc.rng)
+    };
     const version = input.version ?? ctx.config.schemaVersion;
+    // `{ player, rng }` is the document of a save; `readSaveDoc` checks its shape after the chain.
     const doc =
       version === ctx.config.schemaVersion
-        ? { player: structuredClone(input.player), rng: structuredClone(rng) }
-        : documentOfSave({ state: { player: input.player, rng } as unknown as Json, version });
+        ? trees
+        : documentOfSave({ state: trees as unknown as Json, version });
 
     store.doc = deepFreeze(doc);
 

@@ -805,10 +805,22 @@ describe("restore", () => {
     expect(api.snapshot()).toBe(before);
   });
 
-  it("names the schema version it writes", () => {
-    const { api } = setup({ config: { schemaVersion: 4 } });
+  it("keeps the state when a step of the chain throws, and leaves the input as it was", async () => {
+    const throwing: Migration = {
+      from: 1,
+      up: state => {
+        (record(record(state).player ?? {}) as { gold?: number }).gold = 0;
+        throw new Error("step broke");
+      }
+    };
+    const { api } = setup({ config: { schemaVersion: 2, migrations: [throwing] } });
+    await api.load();
+    const before = api.snapshot();
+    const player = { gold: 7 };
 
-    expect(api.schemaVersion()).toBe(4);
+    expect(() => api.restore({ player, version: 1 })).toThrow(SaveUnreadableError);
+    expect(api.snapshot()).toBe(before);
+    expect(player).toEqual({ gold: 7 });
   });
 });
 

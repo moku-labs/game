@@ -395,7 +395,12 @@ export type StoreApi = {
    * ```ts
    * // The flow runner enters a bookmark: the trees first, then the rest point, then the node.
    * // A game calls app.flow.restore(bookmark), which does all three.
-   * store.restore({ player: bookmark.player, session: bookmark.session, rng: bookmark.rng });
+   * store.restore({
+   *   player: bookmark.player,
+   *   session: bookmark.session,
+   *   rng: bookmark.rng,
+   *   version: bookmark.version // an older one migrates first
+   * });
    * store.markRest();
    * ```
    */
