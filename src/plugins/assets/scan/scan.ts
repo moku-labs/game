@@ -467,9 +467,13 @@ async function importDescription(file: string): Promise<Record<string, unknown> 
 
   if (entry === undefined || !entry.isFile()) return undefined;
 
-  // Bun: forget the module of the last scan (an ES module Node has no `require`; there the query
-  // alone counts). Whole microseconds in the query: Bun reads a `.` in it as a loader name.
-  if (typeof require !== "undefined") delete require.cache[file];
+  // Bun: forget the module of the last scan; in Node the delete finds nothing and the query alone
+  // counts. Not a bare `require` and not an import of `node:module`: the bundler hoists either
+  // into the runtime chunk every browser chunk shares.
+  // Whole microseconds in the query: Bun reads a `.` in it as a loader name.
+  const { createRequire } = process.getBuiltinModule("node:module");
+
+  delete createRequire(import.meta.url).cache[file];
   const url = `${pathToFileURL(file).href}?saved=${entry.size}-${Math.round(entry.mtimeMs * 1000)}`;
 
   return (await import(/* @vite-ignore */ url)) as Record<string, unknown>;
