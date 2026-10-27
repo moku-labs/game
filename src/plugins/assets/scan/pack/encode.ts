@@ -4,6 +4,7 @@
  * binary, and `bun run assets:keys` never touches it.
  */
 import type { Sharp, SharpOptions } from "sharp";
+import { EXTRUDE } from "./layout";
 
 /** WebP quality of every page and every encoded loose texture. */
 export const WEBP_QUALITY = 80;
@@ -35,7 +36,8 @@ export type Encoder = {
    */
   decode(bytes: Uint8Array): Promise<Pixels>;
   /**
-   * Copies the decoded textures onto a transparent page and encodes it as WebP.
+   * Copies the decoded textures onto a transparent page, their edges extruded into the padding, and encodes it as
+   * WebP.
    *
    * @param width - Width of the page.
    * @param height - Height of the page.
@@ -58,22 +60,66 @@ type SharpFactory = ((input?: Uint8Array, options?: SharpOptions) => Sharp) & {
 };
 
 /**
- * Copies the rows of one decoded texture into the pixels of a page. A copy, not a blend: the
- * page is transparent everywhere else, so the frame holds exactly the source's pixels.
+ * Copies the rows of one decoded texture into the pixels of a page, then its edge pixels `EXTRUDE` out into the
+ * padding around it (F105): a frame drawn at a fractional place samples its own edge there, not the page's clear
+ * padding. A copy, not a blend; a pixel outside the page is skipped.
  *
  * @param page - The RGBA pixels of the page.
- * @param pageWidth - Width of the page.
+ * @param size - Width and height of the page.
+ * @param size.width - Width of the page.
+ * @param size.height - Height of the page.
  * @param part - The texture and its place.
  */
-function blit(page: Uint8Array, pageWidth: number, part: PagePart): void {
+function blit(page: Uint8Array, size: { width: number; height: number }, part: PagePart): void {
   const { pixels, x, y } = part;
   const rowBytes = pixels.width * CHANNELS;
 
   for (let row = 0; row < pixels.height; row += 1) {
     const from = row * rowBytes;
 
-    page.set(pixels.data.subarray(from, from + rowBytes), ((y + row) * pageWidth + x) * CHANNELS);
+    page.set(pixels.data.subarray(from, from + rowBytes), ((y + row) * size.width + x) * CHANNELS);
   }
+
+  if (pixels.width === 0 || pixels.height === 0) return;
+
+  // Each pixel of the extruded ring copies the nearest pixel of the frame, corners included.
+  for (let row = y - EXTRUDE; row < y + pixels.height + EXTRUDE; row += 1) {
+    if (row < 0 || row >= size.height) continue;
+
+    const inner = row >= y && row < y + pixels.height;
+
+    for (let column = x - EXTRUDE; column < x + pixels.width + EXTRUDE; column += 1) {
+      if (column < 0 || column >= size.width) continue;
+      if (inner && column >= x && column < x + pixels.width) continue;
+
+      const sourceX = Math.min(Math.max(column - x, 0), pixels.width - 1);
+      const sourceY = Math.min(Math.max(row - y, 0), pixels.height - 1);
+      const from = (sourceY * pixels.width + sourceX) * CHANNELS;
+
+      page.set(pixels.data.subarray(from, from + CHANNELS), (row * size.width + column) * CHANNELS);
+    }
+  }
+}
+
+/**
+ * Composes a page: a transparent page with every texture copied onto its place and its edges extruded. Pure.
+ *
+ * @param width - Width of the page.
+ * @param height - Height of the page.
+ * @param parts - The textures and their places.
+ * @returns The RGBA pixels of the page.
+ * @example
+ * ```ts
+ * // One opaque 1×1 pixel at (1, 1) of a 3×3 page: its colour fills the whole page.
+ * composePage(3, 3, [{ pixels: { width: 1, height: 1, data: Uint8Array.of(255, 0, 0, 255) }, x: 1, y: 1 }])[3]; // 255
+ * ```
+ */
+export function composePage(width: number, height: number, parts: readonly PagePart[]): Uint8Array {
+  const pixels = new Uint8Array(width * height * CHANNELS);
+
+  for (const part of parts) blit(pixels, { width, height }, part);
+
+  return pixels;
 }
 
 /**
@@ -104,10 +150,7 @@ function encoderOf(sharp: SharpFactory): Encoder {
       height: number,
       parts: readonly PagePart[]
     ): Promise<Uint8Array> => {
-      const pixels = new Uint8Array(width * height * CHANNELS);
-
-      for (const part of parts) blit(pixels, width, part);
-
+      const pixels = composePage(width, height, parts);
       const encoded = await sharp(pixels, { raw: { width, height, channels: CHANNELS } })
         .webp(webpOptions)
         .toBuffer();
