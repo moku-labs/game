@@ -100,5 +100,15 @@ export const BUDGET = {
   /** F61 S2: the frame start of phase `input` with no build: one field read. New: 0 B. */
   buildStartFrameIdle: 0,
   /** F61 S2: the frame start of phase `input` while a build runs: one number written. New: 0 B. */
-  buildStartFrame: 0
+  buildStartFrame: 0,
+  /** F61 B+D: the warm step at rest, a warm window held and ready: two field reads. New: 0 B. */
+  warmStepRest: 0,
+  /** F61 B+D: world's `input` step at rest with a warm window held: frame start, no reconcile, warm step. New: 0 B. */
+  warmInputRest: 0,
+  /** F61 B+D: the warm step while a held view builds: the poll of two `onBuild` checks. New: 0 B. */
+  warmStepPoll: 0,
+  /** F61 B+D: `projection.left()` while a held view builds: a clock read and a subtraction. New: 0 B. */
+  warmLeft: 0,
+  /** F61 B+D: `projection.isBuilding(entity)` of a held view: two lookups. New: 0 B. */
+  warmIsBuilding: 0
 } as const;

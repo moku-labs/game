@@ -9,6 +9,7 @@ import { emptyMounted, orderIn, placeNames, reconcileFresh, sortMount } from "./
 import { despawnView } from "./queue";
 import { reconcile } from "./reconcile";
 import type { Building, Dirty, LayerSpec, ProjectionCtx } from "./types";
+import { discardActive } from "./warm";
 
 /**
  * Creates the empty table of a build: nothing mounted aside and nothing spawned yet.
@@ -16,16 +17,14 @@ import type { Building, Dirty, LayerSpec, ProjectionCtx } from "./types";
  * @param names - The projection list of the coming scene.
  * @param layers - The layer list of the coming scene.
  * @param owner - Who owns the entities of the projections it mounts.
- * @param timing - The frame budget and the moment the build starts.
- * @param timing.budgetMs - Milliseconds per frame the building work may take.
- * @param timing.now - The game clock at the build start.
- * @returns The table, its frame starting at the build start.
+ * @param budgetMs - Milliseconds per frame the building work may take.
+ * @returns The table.
  */
 function emptyBuilding(
   names: readonly string[],
   layers: ReadonlyArray<LayerSpec>,
   owner: Owner,
-  timing: { budgetMs: number; now: number }
+  budgetMs: number
 ): Building {
   return {
     names: [...names],
@@ -33,8 +32,7 @@ function emptyBuilding(
     owner,
     mounted: new Map(),
     entities: new Set<Entity>(),
-    frameStart: timing.now,
-    budgetMs: timing.budgetMs
+    budgetMs
   };
 }
 
@@ -78,6 +76,8 @@ function handBack(pctx: ProjectionCtx, building: Building): void {
  * a mount checks it, against the coming layers; a projection the current scene mounts and the
  * coming one declares alike stays as it is, and every other one is mounted aside, direct. A view
  * that throws leaves nothing behind: what the build spawned is despawned and the throw goes on.
+ * The warm window in work is dropped first, or its parts would hold the build's readiness; a ready
+ * one stays held, and no warm work runs until the build ends. The frame budget counts from now.
  *
  * @param pctx - Domain context of the projection module.
  * @param names - The projection list of the coming scene.
@@ -110,8 +110,10 @@ export function buildNames(
   // A projection mounted under other layer rules would need two records under one name: refuse before any write.
   if (again.length > 0) return false;
 
-  const now = pctx.ctx.deps.clock.now();
-  const building = emptyBuilding(names, layers, owner, { budgetMs, now });
+  discardActive(pctx);
+  state.frameStart = pctx.ctx.deps.clock.now();
+
+  const building = emptyBuilding(names, layers, owner, budgetMs);
 
   // Only the projections the current scene does not mount alike get a record aside; the kept ones stay as they are.
   for (const spec of fresh) {
