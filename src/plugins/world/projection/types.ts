@@ -1395,9 +1395,9 @@ export type ProjectionApi = {
    * projection.isBuilding(1_048_600); // true: a board item the build spawned
    * projection.isBuilding(1_048_576); // false: a ward bed on screen
    *
-   * // A game plugin keeps one camera root: the root of the scene built aside is not a second one.
-   * ctx.require(worldPlugin).ecs.onAdded(Pan, entity => {
-   *   if (projection.isBuilding(entity)) return; // true for the memory's root, built while the ward shows
+   * // A game plugin keeps one board root: the root of the board built aside is not a second one.
+   * ctx.require(worldPlugin).ecs.onAdded(Tree, entity => {
+   *   if (projection.isBuilding(entity)) return; // true for the board's root, built while the ward shows
    * });
    * ```
    */

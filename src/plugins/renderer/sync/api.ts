@@ -576,8 +576,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
   /**
    * Takes the entities that are waiting to be built out of the change set. Called only when one waits. While a scene is
-   * built aside, its entities go to the aside queue instead (spec 31): world flags them right after their spawn, so
-   * they are sorted here, not when their components came.
+   * built aside, its entities go to the aside queue instead (spec 31): world flags a view before the `onAdded` hooks of
+   * its components, and the pass sorts them here, once per pass, out of its added set.
    *
    * @returns The entities of this pass, so the change step skips what the build just wrote.
    */
