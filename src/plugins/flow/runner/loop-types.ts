@@ -21,8 +21,11 @@ export const noPayload: Json = null;
 /** Where one frame points: the flow, the name inside it and the entry itself. */
 export type Location = { flow: AnyFlow; name: string; entry: FlowEntry };
 
-/** Why the runner aborted the active node. */
-export type AbortReason = "stop" | "inbox" | "restore";
+/**
+ * Why the runner aborted the active node. `"failed"`: a stage of the node threw, and the runner
+ * aborts it before it rolls back, so what an earlier stage started for the node ends at once.
+ */
+export type AbortReason = "stop" | "inbox" | "restore" | "failed";
 
 /** What one node run produced. Nothing here throws: the loop reads the variant. */
 export type NodeOutcome =

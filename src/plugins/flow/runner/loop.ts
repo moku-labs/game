@@ -56,6 +56,10 @@ async function runNode(
   try {
     await runEnterCallbacks(ctx, nodeInfo(path, location, node), abort.signal);
   } catch (error) {
+    // The node ends in its stages: what an earlier stage started for it (the veil `scenes` shows
+    // at `begin`) hears the abort now, before the rollback, a safe node's `recover` or a fatal end.
+    abort.abort("failed");
+
     return handleFailure(ctx, modules, undefined, error, path, safe);
   }
 

@@ -596,6 +596,37 @@ describe("the begin stage of a node that switches", () => {
     expect(mock.state.current).toBe("home");
   });
 
+  // Bug: the expected scene changed between the stages to a third scene, and the switch takes over the look `begin`
+  // resolved for the first one: its loader was checked against the wrong scene (here: the ring, though the scene the
+  // switch mounts does not list the loader projection).
+  it("shows the look again when the scene stage switches to another scene than begin saw", async () => {
+    const mock = await on("home", {
+      buildMs: "auto",
+      leave: { loader: { projection: "board.cells" } }
+    });
+    const run = { signal: new AbortController().signal };
+
+    mock.api.expect("board");
+    await mock.stage("begin", { rest: true, over: true }, run);
+    mock.api.expect("ward");
+    const entering = mock.stage("scene", { rest: true, over: true }, run);
+
+    entering.catch(() => undefined);
+    await flush();
+    await finish(mock, entering);
+
+    expect(mock.renderer.leaves).toEqual([
+      { call: "show", current: "home" },
+      { call: "drop", current: "home" },
+      { call: "show", current: "home" },
+      { call: "land", current: "ward" }
+    ]);
+    expect(mock.renderer.sync.leave.show.mock.calls.map(([look]) => look.loader)).toEqual([
+      { afterMs: 400 },
+      { afterMs: 400, due: expect.any(Function) }
+    ]);
+  });
+
   // Bug: a `bundles` that throws at the scene stage leaves the look its begin stage showed.
   it("drops the look when the scene's bundles throw at the scene stage", async () => {
     const mock = createMockScenes();

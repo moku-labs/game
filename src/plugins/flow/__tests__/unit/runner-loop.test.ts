@@ -2979,6 +2979,67 @@ describe("restorePosition", () => {
   });
 });
 
+// ─── a node whose stage threw ─────────────────────────────────
+
+describe("a node whose onEnter stage threw", () => {
+  // Bug: a stage that throws aborts nothing, so what an earlier stage started for the node (the veil `scenes` shows at
+  // `begin`) stays over the scene the rollback returns to; or the abort reads as a stop and the loop ends there.
+  it("is aborted with reason failed before the rollback, and the retry goes on", async () => {
+    const seen: Array<{ reason: unknown; rolledBack: boolean }> = [];
+    const entries = { count: 0 };
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const { begin, load } = harness.ctx.state.runner.enterCallbacks;
+
+    begin.push((_info, { signal }) => {
+      entries.count += 1;
+      signal.addEventListener(
+        "abort",
+        () => {
+          seen.push({ reason: signal.reason, rolledBack: harness.calls.includes("rollback") });
+        },
+        { once: true }
+      );
+    });
+    load.push(() => {
+      if (entries.count === 1) throw new Error("offline");
+    });
+    harness.start();
+    await tick();
+
+    expect(seen).toEqual([{ reason: "failed", rolledBack: false }]);
+    // The retry entered the node again, its stages passed and its gate opened.
+    expect(entries.count).toBe(2);
+    expect(harness.calls).toContain("open:play");
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a stage that throws inside the safe node ends the loop with run() rejected and the node never aborted: what
+  // its `begin` stage started stays on screen for good.
+  it("is aborted before run() rejects on a fatal failure inside the safe node", async () => {
+    const reasons: unknown[] = [];
+    const home = node({ rest: true, checkpoint: true, outcomes: ["play"] });
+    const main = flow("main", { home }, "home", { home: { play: "home" } });
+    const harness = setup({ main, config: { safeNode: "home", retries: 0 } });
+    const { begin, load } = harness.ctx.state.runner.enterCallbacks;
+
+    begin.push((_info, { signal }) => {
+      signal.addEventListener("abort", () => reasons.push(signal.reason), { once: true });
+    });
+    load.push(() => {
+      throw new Error("offline");
+    });
+
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    expect(fatal.error?.message).toContain("failed while the graph was recovering");
+    // The give-up, then the fatal failure inside the safe node: both aborted.
+    expect(reasons).toEqual(["failed", "failed"]);
+  });
+});
+
 // ─── stop deadline ────────────────────────────────────────────
 
 describe("stopRunner deadline", () => {

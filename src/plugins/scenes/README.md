@@ -265,11 +265,13 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   the loader goes at once and the veil fades out over `outMs` above the new scene, then leaves the stage.
 - **Without a swap.** An abort of the node (a restore, the inbox, a stop of the runner) drops the veil and the loader
   at once, from the abort listener of the switch; a switch that throws (a failed load, a `bundles` or a `view` that
-  throws) drops them before its rejection. A `load` stage that throws (a download that failed) aborts nothing and the
-  node never reaches its `scene` stage: `flow` rolls back and enters the rest node again, and the `begin` stage of that
-  node drops the left-over look before anything else (after a give-up, once the safe node's `recover` ran). A look the
-  `scene` stage of its node does not use (the expected scene changed between the stages) is dropped there. A stop of
-  the plugin forgets the look; the renderer drops it at its own stop.
+  throws) drops them before its rejection. A `load` stage that throws (a download that failed) never reaches the
+  switch: `flow` aborts the node with reason `"failed"` before it rolls back, so the abort listener drops the look at
+  once, before the rest node is entered again, before a safe node's `recover` waits at its gate, and before `run()`
+  rejects on a fatal failure. The `begin` stage of the next node drops a look left over all the same (a backstop). A
+  look the `scene` stage of its node does not use (the expected scene changed between the stages) is dropped there,
+  and one `begin` started for another scene than the one the switch mounts is dropped and shown again for it. A stop
+  of the plugin forgets the look; the renderer drops it at its own stop.
 - **No tap.** The veil and the loader take no tap: the hit test walks the scene's layers only. The gate is closed during
   a switch anyway.
 - **A loader projection** draws in a layer of its own that the scene being left declares (`loading: {}`). It is mounted

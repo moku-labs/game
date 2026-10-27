@@ -14,7 +14,7 @@
 import type { NodeInfo } from "../flow/types";
 import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
-import { dropLeftOver, endLeave, ownLeave, startLeave } from "./leave";
+import { dropLeftOver, endLeave, leaveFor, ownLeave, startLeave } from "./leave";
 import { swapIn } from "./swap";
 import type { Leaving, RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
@@ -298,8 +298,9 @@ async function loadAndStand(
 
 /**
  * Switches to another scene: it takes over the veil and the loader the `begin` stage of the node
- * showed over the scene being left (a cold first visit reacts in the next frame), or shows them
- * now when that stage did not, after reading what the scene names from the committed state. Then
+ * showed over the scene being left for this scene (a cold first visit reacts in the next frame),
+ * or shows them now when that stage did not, or showed them for another scene, after reading what
+ * the scene names from the committed state. Then
  * it awaits the bundles and builds the scene (`loadAndStand`). The look lands when the scene
  * stands, and is dropped when the switch ends without it or throws.
  *
@@ -318,8 +319,8 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
     );
   }
 
-  // The look `begin` started for this node; a `bundles` that throws drops it below.
-  let leaving: Leaving | undefined = ownLeave(ctx, run);
+  // The look `begin` started for this node and scene; a `bundles` that throws drops it below.
+  let leaving: Leaving | undefined = leaveFor(ctx, run, scene.id);
 
   try {
     const named = namedBundles(scene, committedState(ctx));
@@ -420,8 +421,8 @@ function nextScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | un
  * downloads the bundles of the coming one, so a cold first visit reacts in the next frame. The
  * `scene` stage of the same node takes the look over, lands it at the swap or drops it. A node
  * that keeps the scene, the first scene of a run, a fast walk and an aborted node start nothing
- * (`startLeave` decides the rest). A look a node before left running, because a stage after its
- * `begin` threw, is dropped first.
+ * (`startLeave` decides the rest). A stage after `begin` that throws aborts the node, and the abort
+ * drops the look; one a node before left running all the same is dropped first.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.

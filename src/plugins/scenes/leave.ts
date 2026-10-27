@@ -4,7 +4,8 @@
  * the next frame, and a loader when the switch is not done `afterMs` after its start. The scene being left decides: its
  * `leave` over `config.leave` over the engine's default, field by field. The renderer draws both
  * (`renderer.sync.leave`); this file resolves the look, mounts a loader projection once its loader is due, and lands
- * the look at the swap or drops it on an abort, a throw, or at the next node when its own never reached the swap.
+ * the look at the swap or drops it on an abort or a throw. A stage of the node that throws aborts the node (flow), so the
+ * abort listener drops the look then too; the next node's `begin` drops one left over all the same.
  */
 import type { LeaveLoader, LeaveLook } from "../renderer/types";
 import { Layer } from "../world/ecs/define";
@@ -328,7 +329,12 @@ export function startLeave(
 
   // The record of the switch's look; `off`, by aborting `listening`, takes its abort listener away.
   const listening = new AbortController();
-  const leaving: Leaving = { signal: run.signal, done: false, off: (): void => listening.abort() };
+  const leaving: Leaving = {
+    signal: run.signal,
+    to: scene.id,
+    done: false,
+    off: (): void => listening.abort()
+  };
 
   // The look the renderer draws: only the parts that are on.
   const look: LeaveLook = {};
@@ -363,9 +369,29 @@ export function ownLeave(ctx: ScenesCtx, run: RunContext): Leaving | undefined {
 }
 
 /**
- * Drops a look still running when another node is entered: the node that started it never reached its swap, because a
- * stage after its `begin` threw (a download that failed) and flow rolled back. An abort drops a look from its listener,
- * but a throw aborts nothing, so the next node entered (the rest node the rollback returned to) drops it here.
+ * The look the `begin` stage of this node started for the scene the `scene` stage switches to. One it started for
+ * another scene (the expected scene changed between the two stages) is dropped: its loader was resolved against that
+ * scene, so the switch shows its own.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal of the node.
+ * @param target - The scene the switch mounts.
+ * @returns The look to take over, or `undefined` when the switch shows its own.
+ */
+export function leaveFor(ctx: ScenesCtx, run: RunContext, target: string): Leaving | undefined {
+  const own = ownLeave(ctx, run);
+
+  if (own === undefined || own.to === target) return own;
+
+  endLeave(ctx, own, "drop");
+
+  return undefined;
+}
+
+/**
+ * Drops a look still running when another node is entered: the node that started it never reached its swap. Flow aborts
+ * a node whose stage threw (a download that failed), so the abort listener drops such a look already, before the
+ * rollback; this is the backstop for a node that ended without an abort the look heard.
  *
  * @param ctx - Domain context of the plugin.
  * @param run - The runner's mode and signal of the node being entered.

@@ -1080,7 +1080,9 @@ export type RunnerApi = {
    * callback before the first `scene` callback, in registration order inside a stage, each
    * awaited. A `begin` callback must not wait: it starts what reacts at once and returns, since
    * the loads start only after it. Once the node is aborted (a restore, a stop) no further stage
-   * starts.
+   * starts. A stage that throws ends the node: its signal is aborted with reason `"failed"` before
+   * the rollback, so what an earlier stage started for it (a veil over the scene being left) is
+   * taken down at once, also before a safe node's `recover` and when the failure is fatal.
    *
    * The stages run before the node opens its transaction, and `model.store.snapshot()` is the
    * committed state, so a stage reads the state the node is entered with: on an ordinary entry

@@ -427,6 +427,11 @@ export type Leaving = {
    * `begin` stage of any later node finds it left over by a node that never reached its `scene` stage.
    */
   signal: AbortSignal;
+  /**
+   * The scene the look was started for: the `scene` stage takes it over only for that scene, since its loader was
+   * resolved against it.
+   */
+  to: string;
   /** Landed or dropped: a second end does nothing. */
   done: boolean;
   /** The loader projection the switch mounted, unmounted at the end; absent while it mounted none. */

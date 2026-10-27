@@ -263,13 +263,14 @@ export async function runEnterCallbacks(
  * @example
  * ```ts
  * abortReason(AbortSignal.abort("inbox")); // "inbox"
+ * abortReason(AbortSignal.abort("failed")); // "failed": a stage of the node threw
  * abortReason(AbortSignal.abort()); // "stop": anything unexpected
  * ```
  */
 export function abortReason(signal: AbortSignal): AbortReason {
   const reason: unknown = signal.reason;
 
-  if (reason === "inbox" || reason === "restore") return reason;
+  if (reason === "inbox" || reason === "restore" || reason === "failed") return reason;
 
   return "stop";
 }
