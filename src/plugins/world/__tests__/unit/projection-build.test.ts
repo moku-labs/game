@@ -168,6 +168,32 @@ describe("projection.build", () => {
     expect(world.api.ecs.get(rootOf(world, "board.back"), Order)?.value).toBe(-3);
   });
 
+  // Bug (F97): the build flags a view only after its spawn, so a plugin's `onAdded` hook takes the coming scene's
+  // root for a second root of the scene on show.
+  it("flags a view of the build before the onAdded hooks of its components, and a mounted view not at all", () => {
+    const world = wardWorld();
+    const seen: Array<{ kind: string; building: boolean }> = [];
+
+    world.api.ecs.onAdded(Tree, entity => {
+      seen.push({ kind: "screen", building: world.api.projection.isBuilding(entity) });
+    });
+    world.api.ecs.onAdded(Transform, entity => {
+      seen.push({ kind: "item", building: world.api.projection.isBuilding(entity) });
+    });
+
+    buildBoard(world);
+    commitBoard(world);
+    world.api.projection.unmount(["board.back"]);
+    world.api.projection.mount(["board.back"], MOUNT_OWNER);
+
+    expect(seen).toEqual([
+      { kind: "screen", building: true },
+      { kind: "item", building: true },
+      { kind: "item", building: true },
+      { kind: "screen", building: false }
+    ]);
+  });
+
   // Bug: a projection both scenes list is built a second time beside its live twin.
   it("leaves a projection both lists name as it is: the same entity, never flagged, not rebuilt", () => {
     const world = wardWorld();

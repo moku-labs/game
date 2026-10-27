@@ -1382,8 +1382,9 @@ export type ProjectionApi = {
   left(): number;
 
   /**
-   * Whether an entity belongs to the running build: a view it spawned, or an entity `adopt` marked. One set lookup;
-   * false with no build and after the commit. Allocates nothing.
+   * Whether an entity belongs to the running build: a view it spawned, or an entity `adopt` marked. A view is flagged
+   * before the `onAdded` hooks of its components, so a hook can ask. One set lookup; false with no build and after the
+   * commit. Allocates nothing.
    *
    * @param entity - The entity to ask about.
    * @returns True for an entity of the running build.
@@ -1393,6 +1394,11 @@ export type ProjectionApi = {
    * const projection = ctx.require(worldPlugin).projection;
    * projection.isBuilding(1_048_600); // true: a board item the build spawned
    * projection.isBuilding(1_048_576); // false: a ward bed on screen
+   *
+   * // A game plugin keeps one camera root: the root of the scene built aside is not a second one.
+   * ctx.require(worldPlugin).ecs.onAdded(Pan, entity => {
+   *   if (projection.isBuilding(entity)) return; // true for the memory's root, built while the ward shows
+   * });
    * ```
    */
   isBuilding(entity: Entity): boolean;
