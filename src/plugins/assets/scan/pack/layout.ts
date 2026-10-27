@@ -16,6 +16,13 @@ export const PADDING = 2;
 /** Transparent pixels between a frame and the edge of its page. */
 export const BORDER = 2;
 
+/**
+ * Pixels each frame's edge is copied out into its padding (F105): bilinear sampling at a fractional place reads half a
+ * texel past the frame, which must be the frame's own edge, never the page's clear padding. One pixel each side keeps
+ * two neighbours `PADDING` apart from writing over each other.
+ */
+export const EXTRUDE = 1;
+
 /** Where one texture lies on its page, in page pixels. */
 export type LayoutFrame = { key: string; x: number; y: number; width: number; height: number };
 

@@ -878,6 +878,12 @@ export type Bookmark = {
    * and when no rest node came before the transit node.
    */
   rest?: { path: string; input: Json };
+  /**
+   * The save schema version `player` and `rng` were taken at (`model.store.schemaVersion()`).
+   * `restore` runs the migrations from it when the game's schema moved on since, as a dev reload
+   * after a schema change does. Absent in a bookmark of an older engine: taken as the current one.
+   */
+  version?: number;
 };
 
 /**

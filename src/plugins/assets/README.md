@@ -569,7 +569,7 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 | Rule | Value |
 |---|---|
 | Page | 2048 × 2048 at most, as small as its content (not a power of two, not square). |
-| Padding | 2 px between frames and a 2 px border, transparent, no extrude. |
+| Padding | 2 px between frames and a 2 px border. Each frame's edge pixels are copied 1 px out into it (extrude), so a picture drawn at a fractional place samples its own edge, never transparent black (F105); the rest stays transparent. |
 | Trim, rotation | Never: a rotated or trimmed nine-slice would lose its borders. |
 | Loose by size | A texture with a side above 512 px stays a file of its own. |
 | Loose by mipmaps | A texture with `mips` stays a file of its own, whatever its key or size: Pixi builds the full chain, and from the second level on the neighbours on a page would bleed into it. The pack check refuses a mipmapped frame. The packed bundle keeps `parent`, `dir` and `release`; a loose mipmapped file keeps `mips` and its chain `mb`. |

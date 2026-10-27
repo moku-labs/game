@@ -775,6 +775,7 @@ describe("a bookmark taken while a popup waits", () => {
       session: { popups: 0 },
       rng: { seed: 7, streams: {} },
       graph: bookmark.graph,
+      version: 1,
       rest: { path: "home", input: noPayload }
     });
 
