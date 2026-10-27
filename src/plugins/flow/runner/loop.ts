@@ -272,7 +272,8 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark, safe:
   ctx.deps.model.store.restore({
     player: bookmark.player,
     session: bookmark.session,
-    rng: bookmark.rng
+    rng: bookmark.rng,
+    ...(bookmark.version === undefined ? {} : { version: bookmark.version })
   });
   ctx.deps.model.store.markRest();
 

@@ -190,6 +190,7 @@ const createStoreFake = (calls: string[], barrier: () => Promise<void>) => {
         calls.push("restore");
         restored.push(input);
       },
+      schemaVersion: () => 1,
       flush: async (): Promise<void> => {
         calls.push("flush");
       }
