@@ -1,5 +1,5 @@
 import type { Log } from "@moku-labs/common/browser";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Json, Snapshot, Transaction } from "../../../model/types";
 import type { Contribution, FeaturesApi, FeaturesInternal } from "../../features/types";
@@ -7,6 +7,7 @@ import { createFxApi } from "../../fx/api";
 import { guide } from "../../fx/descriptors";
 import type { Descriptor, FxApi, FxInternal, Hint } from "../../fx/types";
 import type { Allow, Answer, GateApi, GateInternal, GateSpec } from "../../gate/types";
+import { createHandlers } from "../../handlers";
 import type { InboxApi, InboxInternal, WorldEvent } from "../../inbox/types";
 import { loopSeam, restorePosition, runLoop, stopRunner } from "../../runner/loop";
 import { refuseStart } from "../../runner/node";
@@ -3764,6 +3765,344 @@ describe("the cap of edges without a rest node, counted on the expanded graph", 
     expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
     expect(harness.ctx.state.runner.journalIndex).toBe(129);
     expect(harness.ctx.state.runner.restlessCap).toBe(516);
+    await stopRunner(harness.ctx);
+  });
+});
+
+// ─── the guide of a node (F98) ────────────────────────────────
+
+/**
+ * Gives a guided node a guide that throws once when armed, and otherwise guides what the node's
+ * own guide does.
+ *
+ * @param entry - The guided node.
+ * @param armed - Set `throws` to make the next derive throw.
+ * @param armed.throws - True arms one throw.
+ * @returns The node with that guide.
+ */
+function throwingOnce(entry: AnyNode, armed: { throws: boolean }): AnyNode {
+  return {
+    ...entry,
+    guide: state => {
+      if (!armed.throws) return entry.guide?.(state);
+
+      armed.throws = false;
+      throw new Error("no such step.");
+    }
+  };
+}
+
+/**
+ * Builds the harness on a flow whose start is `node`, records the `blocked` the runner narrows
+ * with, and starts it.
+ *
+ * @param entry - The guided node.
+ * @param options - What else the harness gets.
+ * @returns The harness, the `blocked` answers seen, the hook of `model:committed`, the session.
+ */
+const startGuided = async (entry: AnyNode, options: Partial<SetupOptions> = {}) => {
+  const main = flow("main", { home: entry, next: waiting("again") }, "home", {
+    home: Object.fromEntries(Object.keys(entry.outcomes).map(name => [name, "next"])),
+    next: { again: "home" }
+  });
+  const harness = setup({ main, ...options });
+  const blocked: Array<Allow | undefined> = [];
+  const narrow = harness.modules.gate.narrow;
+
+  harness.modules.gate.narrow = (allow, answer) => {
+    blocked.push(answer);
+    narrow(allow, answer);
+  };
+
+  const session = harness.model.store.snapshot().session as { visits: number };
+  const committed = createHandlers(harness.ctx)["model:committed"];
+
+  /**
+   * Commits a new step while the node waits at its gate, as a commit not made by an edge does.
+   *
+   * @param step - The step the session holds now.
+   */
+  const commitStep = (step: number): void => {
+    session.visits = step;
+    // The fake gate keeps its own record: the hook reads the gate state.
+    harness.ctx.state.gate.open = { allowed: Object.keys(entry.outcomes) };
+    committed({ roots: ["session"], cause: "restore" });
+  };
+
+  harness.start();
+  await tick();
+
+  return { harness, blocked, commitStep, session };
+};
+
+describe("the guide of a node", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** The answer a press outside the window gives. */
+  const BLOCKED = { intent: "blocked" };
+
+  /** The guide of step 0 of the fixture's tutorial: the merge of c2 into c3. */
+  const MERGE = {
+    allow: { intent: "merge", payload: { from: "c2", to: "c3" } },
+    target: { projection: "board", key: "c3" },
+    blocked: BLOCKED
+  };
+
+  /** The guide of step 1: the sale of c4. */
+  const SELL = { allow: { intent: "sell" }, target: { projection: "board", key: "c4" } };
+
+  /**
+   * A rest node without a body whose guide is the step in `session.visits`: 0 merges, 1 sells,
+   * anything else guides nothing, a negative step throws.
+   *
+   * @param outcomes - Its outcomes.
+   * @param run - A body, for a rest node that has one.
+   * @returns The node.
+   */
+  const guided = (
+    outcomes: readonly string[] = ["merge", "sell", "blocked"],
+    run?: NodeOptions["run"]
+  ): AnyNode => ({
+    ...node({ rest: true, outcomes, ...(run === undefined ? {} : { run }) }),
+    guide: ({ session }) => {
+      const step = (session as { visits: number }).visits;
+
+      if (step < 0) throw new Error("no such step.");
+      if (step === 0) return MERGE;
+      if (step === 1) return SELL;
+
+      return undefined;
+    }
+  });
+
+  // Bug caught: a rest node with no body never narrows the gate or shows its tutorial step.
+  it("derives the guide of a rest node without a body on entry, before its gate opens", async () => {
+    const { harness, blocked } = await startGuided(guided());
+
+    expect(harness.gate.narrows).toEqual([MERGE.allow]);
+    expect(blocked).toEqual([BLOCKED]);
+    expect(harness.fx.descriptors).toEqual([{ kind: "guide", payload: MERGE }]);
+    expect(harness.calls.indexOf("fx:guide")).toBeLessThan(
+      harness.calls.indexOf("open:merge,sell,blocked")
+    );
+    expect(harness.ctx.state.runner.guide?.last).toEqual(MERGE);
+    await stopRunner(harness.ctx);
+  });
+
+  it("reads the state the node is entered with, after its onEnter stages", async () => {
+    const order: string[] = [];
+    const entry = guided();
+    const harnessed = setup({
+      main: flow("main", { home: entry }, "home", {
+        home: { merge: "home", sell: "home", blocked: "home" }
+      })
+    });
+
+    harnessed.ctx.state.runner.enterCallbacks.scene.push(() => {
+      order.push("scene");
+      (harnessed.model.store.snapshot().session as { visits: number }).visits = 1;
+    });
+    harnessed.modules.fx.run = async descriptor => {
+      order.push(descriptor.kind);
+    };
+    harnessed.start();
+    await tick();
+
+    expect(order).toEqual(["scene", "guide"]);
+    expect(harnessed.gate.narrows).toEqual([SELL.allow]);
+    await stopRunner(harnessed.ctx);
+  });
+
+  // Bug caught: every commit shows the same guide again, or a new step keeps the old narrow.
+  it("derives it again after a commit: equal changes nothing, new replaces, undefined lifts", async () => {
+    const { harness, commitStep } = await startGuided(guided());
+
+    commitStep(0);
+
+    expect(harness.fx.descriptors).toHaveLength(1);
+    expect(harness.gate.narrows).toEqual([MERGE.allow]);
+
+    commitStep(1);
+
+    expect(harness.calls.filter(call => call === "endGuides")).toHaveLength(1);
+    expect(harness.fx.descriptors.at(-1)).toEqual({ kind: "guide", payload: SELL });
+    expect(harness.gate.narrows).toEqual([MERGE.allow, SELL.allow]);
+
+    commitStep(2);
+
+    expect(harness.calls.filter(call => call === "endGuides")).toHaveLength(2);
+    expect(harness.gate.narrows).toEqual([MERGE.allow, SELL.allow, undefined]);
+    expect(harness.ctx.state.runner.guide?.last).toBeUndefined();
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug caught: a guide outlives its node, or a commit after the exit shows it again.
+  it("lifts the guide when the node is left and derives nothing for it afterwards", async () => {
+    const { harness, commitStep } = await startGuided(guided());
+    const guide = harness.ctx.state.runner.guide;
+
+    harness.gate.reply({ intent: "merge", payload: { from: "c2", to: "c3" } });
+    await tick();
+
+    expect(harness.ctx.state.runner.guide).toBeUndefined();
+    expect(harness.gate.narrows).toEqual([MERGE.allow, undefined]);
+    expect(harness.calls.indexOf("endGuides")).toBeLessThan(harness.calls.indexOf("commit"));
+
+    commitStep(1);
+    guide?.refresh();
+
+    expect(harness.fx.descriptors).toHaveLength(1);
+    expect(harness.gate.narrows).toEqual([MERGE.allow, undefined]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug caught: a guide that throws leaves the gate open on a node that cannot guide.
+  it("fails the node when its guide throws on entry, before the gate opens", async () => {
+    const entry = guided();
+    const harness = setup({
+      main: flow("main", { home: entry }, "home", {
+        home: { merge: "home", sell: "home", blocked: "home" }
+      })
+    });
+    const session = harness.model.store.snapshot().session as { visits: number };
+
+    session.visits = -1;
+    harness.onEmit(name => {
+      // The retry finds the step again.
+      if (name === "flow:error") session.visits = 0;
+    });
+    harness.start();
+    await tick();
+
+    const [failure] = payloadsOf(harness.emitted, "flow:error");
+
+    expect((failure?.error as Error).message).toBe(
+      '[game] The guide of node "home" threw: no such step.\n  Return GuideOptions or undefined from guide.'
+    );
+    expect(failure).toMatchObject({ path: "home", retry: true });
+    expect(harness.calls.slice(1, 6)).toEqual(["begin", "discard", "drop", "close", "rollback"]);
+    // The retry entered the node again and opened its gate once.
+    expect(harness.gate.opened).toEqual([{ allowed: ["merge", "sell", "blocked"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug caught: a guide that throws after a commit leaves the node waiting at its gate for ever.
+  it("fails the node that waits at its gate when its guide throws after a commit", async () => {
+    const armed = { throws: false };
+    const { harness, commitStep } = await startGuided(throwingOnce(guided(), armed));
+
+    armed.throws = true;
+    commitStep(0);
+    await tick();
+
+    const errors = payloadsOf(harness.emitted, "flow:error");
+
+    // The node's own failure, not a throw at its next entry: the guide throws once.
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ path: "home", rolledBackTo: "home", retry: true });
+    expect((errors[0]?.error as Error).message).toBe(
+      '[game] The guide of node "home" threw: no such step.\n  Return GuideOptions or undefined from guide.'
+    );
+    expect(harness.calls).toContain("rollback");
+    // Rolled back and entered again: the gate opened a second time, the guide shown again.
+    expect(harness.gate.opened).toHaveLength(2);
+    expect(harness.fx.descriptors).toHaveLength(2);
+    await stopRunner(harness.ctx);
+  });
+
+  it("fails a rest node with a body the same way", async () => {
+    const aborts: string[] = [];
+    const armed = { throws: false };
+    const entry = guided(["merge", "sell", "blocked"], context => {
+      context.signal.addEventListener("abort", () => aborts.push(String(context.signal.reason)));
+
+      return new Promise<Result>(() => undefined);
+    });
+    const { harness, commitStep } = await startGuided(throwingOnce(entry, armed));
+
+    armed.throws = true;
+    commitStep(0);
+    await tick();
+
+    expect(aborts).toEqual(["failed"]);
+    expect(payloadsOf(harness.emitted, "flow:error")).toHaveLength(1);
+    expect(harness.calls).toContain("rollback");
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug caught: a dev build lets a guide name a `blocked` the gate never takes: every press lost.
+  it("fails the node in a dev build when blocked names no outcome of it", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const entry = { ...guided(["merge", "sell"]), guide: () => MERGE };
+    const harness = setup({
+      main: flow("main", { home: entry }, "home", { home: { merge: "home", sell: "home" } }),
+      config: { retries: 0 }
+    });
+
+    harness.start();
+    await tick();
+
+    expect((payloadsOf(harness.emitted, "flow:error")[0]?.error as Error).message).toBe(
+      '[game] The guide of node "home" blocks with "blocked", which is no outcome of the node.\n  Add it to outcomes or drop blocked.'
+    );
+    await stopRunner(harness.ctx);
+  });
+
+  it("logs a guide handler that fails, and leaves the node waiting", async () => {
+    const entry = guided();
+    const harness = setup({
+      main: flow("main", { home: entry }, "home", {
+        home: { merge: "home", sell: "home", blocked: "home" }
+      })
+    });
+
+    harness.modules.fx.run = () => Promise.reject(new Error("no veil"));
+    harness.start();
+    await tick();
+
+    expect(harness.ctx.log.error).toHaveBeenCalledWith(
+      "flow:guide-handler-failed",
+      { path: "home" },
+      new Error("no veil")
+    );
+    expect(harness.gate.opened).toHaveLength(1);
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug caught: `await fx(guide({ blocked }))` narrows without the blocked answer.
+  it("narrows with the blocked answer of an awaited guide too", async () => {
+    const main = flow(
+      "main",
+      {
+        teach: node({
+          rest: true,
+          outcomes: ["done", "blocked"],
+          run: async context => {
+            await context.fx(guide({ allow: { intent: "merge" }, blocked: BLOCKED }));
+            return new Promise<Result>(() => undefined);
+          }
+        })
+      },
+      "teach",
+      { teach: { done: "teach", blocked: "teach" } }
+    );
+    const harness = setup({ main });
+    const blocked: Array<Allow | undefined> = [];
+    const narrow = harness.modules.gate.narrow;
+
+    harness.modules.gate.narrow = (allow, answer) => {
+      blocked.push(answer);
+      narrow(allow, answer);
+    };
+    harness.start();
+    await tick();
+
+    expect(harness.gate.narrows).toEqual([{ intent: "merge" }]);
+    expect(blocked).toEqual([BLOCKED]);
     await stopRunner(harness.ctx);
   });
 });

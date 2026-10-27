@@ -64,6 +64,7 @@ export function createLayoutState(): LayoutState {
     scrollPatches: scrollPatches(),
     iconLine: undefined,
     order: 0,
-    cleanups: []
+    cleanups: [],
+    guide: undefined
   };
 }

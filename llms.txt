@@ -77,6 +77,7 @@ defineNode(spec: {
   barrier?: boolean;
   inbox?: readonly (keyof Tags & string)[];
   run?: (ctx: NodeContext) => Result | Promise<Result>;
+  guide?: (state: { player; session }) => GuideOptions | undefined;  // the tutorial step derived from committed state, see "Tutorial guide"
 }): NodeDefinition;
 
 defineFlow(id: string, spec: {
@@ -122,7 +123,9 @@ function defineFeature(name: string, description: FeatureDescription): FeaturePl
 function schedule(moment: number | undefined): Descriptor;  // awaited, asks the clock for one `elapsed`
 function guide(options: GuideOptions): Descriptor;          // awaited, narrows the gate to one answer
 function hint(kind: string, payload?: Json): Hint;          // for fx.emit, cosmetic
-// GuideOptions = { allow: { intent: string; payload?: Json }; highlight?: readonly string[]; hand?: "tap" | "drag"; text?: string }
+// GuideOptions = { allow: { intent: string; payload?: Json }; target?: AnchorTarget | readonly AnchorTarget[];
+//                  pad?: number; veil?: { color?: number; alpha?: number } | false; blocked?: { intent: string; payload?: Json };
+//                  highlight?, hand?, text? (deprecated: not drawn by the engine, draw them in an <anchor>) }
 // Descriptor   = { kind: string; payload?: Json; answers?: readonly string[]; cosmetic?: boolean }
 ```
 
@@ -443,7 +446,31 @@ export const thanksFeature = defineFeature("thanks", {
 });
 ```
 
-A tutorial step is `await fx(guide({ allow: { intent: "roll" }, hand: "tap", text: "Tap the dice" }))`. Only that answer passes the gate until the node exits.
+### Tutorial guide
+
+A tutorial step is data: the rest node derives it from the committed state with `guide`, so no save field and no `run` hold it.
+
+```ts
+export const awaitIntent = defineNode({
+  rest: true,
+  outcomes: { merge: type<{ from: string; to: string }>(), tutorialBlocked: type() },
+  guide: ({ session }) =>
+    session.tutorial === 2
+      ? {
+          allow: { intent: "merge", payload: { from: "c2", to: "c3" } },
+          target: [{ projection: "board.items", key: "c2" }, { projection: "board.items", key: "c3" }],
+          pad: 8,
+          veil: false,                                  // the game draws its own look in an <anchor>
+          blocked: { intent: "tutorialBlocked" }        // a press outside the window answers this
+        }
+      : undefined
+});
+```
+
+- `guide` runs when the node is entered (after its `onEnter` stages) and again after a commit while it waits at its gate (never for the commit of an edge); an equal result (deep JSON) changes nothing, a new one replaces the guide, `undefined` lifts it. It goes when the node is left; a restore enters the node again, so it is derived again. Fast mode: only the narrow. A `guide` that throws fails the node: `[game] The guide of node "path" threw: <message>` (rollback, retry, safe node). A dev build fails it when `blocked.intent` is no outcome of the node.
+- The gate takes only `allow` and `blocked` while a guide stands; `app.flow.gate.state()` reports `blocked`.
+- `ui` draws a veil (black 0.6, or `veil: { color, alpha }`; `alpha: 0` invisible, `false` none) around a window over the target or the union of the shown targets, grown by `pad`, placed every frame (it follows a moving or scrolling target), and locks `input` outside the window: a press there reaches no view (no `Tappable`, `LocalWrite`, scroll, drag, trace) and answers `blocked`, or nothing. No target, or none shown: the veil covers the screen and every press is locked. The doors `app.input.tap/press/drag` do no hit test and are not locked; a press reads the window of the frame before (input runs before layout). 0 B a frame.
+- `await fx(guide({ allow: { intent: "roll" } }))` in a body still works, with the same options. The rounded window, the rim, the glide, the hand and the text are the game's: an `<anchor>` on the same targets with `veil: false`.
 
 ## Graph rules checked at `run()`
 
@@ -510,7 +537,7 @@ The editor's overlay from the game, in every app. The plugin name `debug` is res
 
 The graph. Modules `runner`, `gate`, `inbox`, `fx`, `features`. Runner methods sit on the plugin root.
 - Runner: `run(): Promise<void>`, `onEnter(stage: "begin" | "load" | "scene", callback): () => void` (stages run in that order, each awaited; a `"begin"` callback must not wait: `scenes` shows the veil there before `assets` downloads at `"load"`), `walk(route, options?: { from?: Bookmark }): Promise<FlowState>`, `bookmark(): Bookmark`, `restore(bookmark): Promise<void>`, `describe(): FlowGraph`, `state(): FlowState`, `history(): readonly JournalEntry[]`, `setMode("live" | "fast")`.
-- `gate.answer({ intent, payload? }): boolean` is the one entry of player answers. `gate.pointer(active)`. `gate.state(): { open, allowed, narrowed }`.
+- `gate.answer({ intent, payload? }): boolean` is the one entry of player answers. `gate.pointer(active)`. `gate.state(): { open, allowed, narrowed, blocked? }` (`blocked` while a guide names the answer of a press outside its window).
 - `inbox.post({ type, payload? })` queues a world event. One entry per type. It is delivered only to a rest node whose `inbox` lists the type.
 - `fx.handle(kind, handler, options?: { runInFast?: boolean }): () => void` registers the single handler of one effect kind. `fx.dispatch(descriptor)` is fire-and-forget. An awaited effect without a handler resolves `undefined` at once.
 - `features.register(name, description)`, `features.all()`, `features.contributions(slotName)`.
@@ -543,6 +570,7 @@ The graph. Modules `runner`, `gate`, `inbox`, `fx`, `features`. Runner methods s
 - Motion hooks are told why they play: `enter(view, item, hint, cause)` and `exit(view, item, hint, cause)` get `World.MotionCause`, `"mount"` (the view comes or goes with its screen: a mount, an unmount, a load, a restore, a paused or fast world) or `"change"` (a commit). A world projection plays them only for `"change"`; `ui` plays them for both. `app.world.projection.causeOf(entity)` answers how a view came or how it is leaving, also in a removal hook of its despawn, until the next frame.
 - `app.world.projection.replace(spec)` swaps the spec of a registered projection; a mounted one runs its new `view` on the next frame. An unknown name throws. The caller is the dev hot swap.
 - `projection({ …, initialOnly: [[Shape, ["sweep"]]] })`: `view` gives those fields once, at the birth of a view; after that they belong to another writer (a system drawing a timer arc from `Now`), and no changed item, motion, end-of-motion check (`world:view-corrected`), rollback, `settle`, restore or load writes or compares them, as with `mute()` for every view's whole life. Field names are checked per component; a pair with no field throws at register. Absent, every field is the projection's.
+- `app.input.lock.window(rect | null | undefined)`: the input lock `ui` sets for a guide (`Input.LockWindow` = `{ x, y, w, h }` in reference units, kept by reference and written in place); a press outside reaches no view and answers `flow.gate.state().blocked` or nothing, a drop or trace sample outside finds nothing; `null` locks everything, `undefined` lifts it. The doors `tap`, `press`, `drag`, `swipe`, `trace` are never locked.
 - `input`: one followed pointer. A finger that has not started a gesture (pressed, inside the tap slop, no long press, no trace) gives way to the next finger that goes down, wherever it rests, and its press is cancelled; a finger that started a gesture keeps it. `Pointer.id` is the followed `pointerId` (`-1` at rest): a system that measures the finger's travel starts over when it changes.
 - `Draggable({ payload, carry?, aim? })`: `aim: { x, y }`, a point of the view in its own units, moves the hover and the drop lookup from the finger to that point of the view in the hand; `null` (default) is the finger.
 - `pluginConfigs.renderer.onDemand: true` draws a frame only when something visible changed (a written view, a filter value, a resize, a wake, a capture); `app.renderer.stats().drawn` is the frames drawn per second (`fps` without it); a game that writes into its own `Display` object calls `app.renderer.invalidate(entity)` before the write; `renderer.sync.debug.verifyFrames(true)` (dev/debug) checks skipped frames by pixels and logs `renderer:missed-frame`; a dev build warns `renderer:missed-mark` for a write without the call.

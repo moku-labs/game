@@ -9,7 +9,7 @@ import { Transform } from "../renderer/components";
 import type { Time } from "../time/types";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
-import { notifyTap, submit, swipeAnswer, tapAnswer } from "./answers";
+import { notifyTap, submit, submitBlocked, swipeAnswer, tapAnswer } from "./answers";
 import {
   Draggable,
   Pointer,
@@ -22,7 +22,7 @@ import {
   Traceable
 } from "./components";
 import { abortDrag, grab, letGoOfLeavers, moveHeld, moveHover, release } from "./drag";
-import { findPressed, movingScrollOf, scrollOnAxisOf } from "./hit";
+import { findPressed, lockedOut, movingScrollOf, scrollOnAxisOf } from "./hit";
 import { clearPointerOver, endsHover, isHover, movePointerOver, syncCursor } from "./hover";
 import { attach, detach, record } from "./pointer";
 import { abortTrace, beginTrace, endTrace, extendTrace, traceLost } from "./trace";
@@ -137,7 +137,9 @@ function press(ctx: InputCtx, entity: Entity): void {
  * trace — a second finger stays ignored. When the view under the finger sits in a moving scroll,
  * that scroll takes the press: the finger stops it, and the press is caught. A view drawn over a
  * moving scroll from another root, a HUD or a popup button, keeps its press. A view that carries
- * `Traceable` starts a trace instead of a press: it is not tagged `Pressed`.
+ * `Traceable` starts a trace instead of a press: it is not tagged `Pressed`. A press outside the
+ * window of a guide's lock reaches no view: it answers the guide's `blocked`, or nothing, and its
+ * release answers nothing more.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -156,6 +158,12 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
   pointer.down = true;
   pointer.justPressed = true;
   capture(ctx, true);
+
+  if (lockedOut(ctx.state, point.x, point.y)) {
+    submitBlocked(ctx);
+
+    return;
+  }
 
   const entity = findPressed(ctx, point.x, point.y);
 

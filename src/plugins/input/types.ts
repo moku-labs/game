@@ -22,6 +22,17 @@ import type { AnyComponentType, Entity, Api as WorldApi } from "../world/types";
 export type Point = { x: number; y: number };
 
 /**
+ * The window of the input lock a `guide` sets: a rect in reference units, edges included. While a
+ * lock stands, a press, a drop and a trace sample outside it reach no view.
+ *
+ * @example
+ * ```ts
+ * const window: LockWindow = { x: 36, y: 1496, w: 124, h: 128 }; // the padded seat of the strip
+ * ```
+ */
+export type LockWindow = Readonly<{ x: number; y: number; w: number; h: number }>;
+
+/**
  * The dominant axis of a swipe.
  *
  * @example
@@ -271,6 +282,12 @@ export type State = {
   cursor: string | undefined;
   /** Component types other plugins registered through `controls.add`, once per registration. */
   controls: AnyComponentType[];
+  /**
+   * The lock of a running `guide`, set through `lock.window`: `undefined` locks nothing, `null`
+   * locks everything, a window locks everything outside it. Kept by reference: `ui` writes the same
+   * object in place every frame.
+   */
+  lock: LockWindow | null | undefined;
 };
 
 /**
@@ -486,6 +503,35 @@ export type InputApi = {
    * ```
    */
   listeners(): number;
+
+  /**
+   * The input lock of a tutorial guide: while it stands, the finger reaches only the views inside
+   * its window.
+   */
+  lock: {
+    /**
+     * Sets the window of the lock. A press whose point lies outside it reaches no view, so no
+     * `Tappable`, no `LocalWrite`, no scroll and no drag starts there: it answers the gate's
+     * `blocked` (`flow.gate.state().blocked`, the `blocked` of the running guide) when there is one
+     * and is dropped otherwise. A drop and a trace sample outside the window find no view either,
+     * and the hover leaves the views outside it. Inside the window nothing changes. `undefined`
+     * lifts the lock, `null` locks everything: a guide with no target shown. The rect is kept by
+     * reference, so a caller writes the same object in place every frame; the frame step of
+     * `input` runs before `layout`, so a press reads the window of the frame before. The doors
+     * `tap`, `press`, `drag`, `swipe` and `trace` do no hit test: the lock never applies to them.
+     *
+     * @param rect - The window in reference units, `null` for none, `undefined` to lift the lock.
+     * @example
+     * ```ts
+     * // ui's guide over the first seat of the strip, padded by 4: written in place every frame.
+     * const window = { x: 36, y: 1496, w: 124, h: 128 };
+     * ctx.require(inputPlugin).lock.window(window);
+     * // a tap at (300, 900) reaches no view and answers { intent: "tutorialBlocked" }, the guide's blocked
+     * ctx.require(inputPlugin).lock.window(undefined); // the guide ended: every view takes presses again
+     * ```
+     */
+    window(rect: LockWindow | null | undefined): void;
+  };
 
   /**
    * The components that make a view a control besides input's own: the cursor shows

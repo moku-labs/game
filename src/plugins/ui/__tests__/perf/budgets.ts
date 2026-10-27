@@ -148,5 +148,19 @@ export const BUDGET = {
    * (`world.projection.mute`), and writes them in place every frame; the hold is let go in the
    * frame the anchor stands. Was a `setRest` and a 0 ms rest track every frame. 0 B.
    */
-  anchorMovingLoop: 0
+  anchorMovingLoop: 0,
+  /**
+   * F98 (change 2026-10-27-f99-f98-layout-guide): the system `ui.guide` over the guide of a rest
+   * node standing on a world sprite: the target's root pose walked into the guide's kept pose, the
+   * window padded and the four rects of the veil written in place, the viewport read, nothing
+   * written on the stored components, the lock window handed to `input` once. 0 B.
+   */
+  guideStill: 0,
+  /**
+   * F98: the same pass while the sprite moves between two fractional places, one a frame: the
+   * window and the four rects take the new numbers in place, and the veil's `Transform` and `Shape`
+   * fields are written on the stored values, which are only marked changed. The lock keeps the same
+   * window object. 0 B.
+   */
+  guideMoving: 0
 } as const;

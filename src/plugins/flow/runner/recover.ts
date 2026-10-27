@@ -12,7 +12,7 @@ import { notifyGateOpen } from "./seam";
 import type { AnyNode, AnyRecoverContext, Modules } from "./types";
 
 /** One recovery in progress: a node run that has no input. */
-type Recovery = Omit<Step, "abort" | "input">;
+type Recovery = Omit<Step, "abort" | "input" | "fail" | "failure">;
 
 /** The safe node the loop stands on: what `runNode` knows when it starts a recovery. */
 type Place = Pick<Step, "location" | "node" | "path">;

@@ -15,6 +15,7 @@ export function createGateState(): GateState {
     held: undefined,
     aged: 0,
     narrow: undefined,
+    blocked: undefined,
     pointerActive: false,
     wake: undefined
   };

@@ -8,9 +8,9 @@ rect from one Yoga solve per change.
 |---|---|
 | `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()`, `scroll()`, the tap counter of `DebugTrigger` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
-| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, the scroll on both axes (finger, fling, snap, offset, range) and the range of a windowed scroll, the `popup` and `guide` handlers |
+| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, the scroll on both axes (finger, fling, snap, offset, range) and the range of a windowed scroll, the `popup` and `guide` handlers, the system `ui.guide` that places a guide's veil and lock every frame (see [Guide](#guide)) |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
-| `drawn.ts` | where a view or an element is drawn in screen reference units: the resolver `<anchor>` and `app.ui.rectOf` share |
+| `drawn.ts` | where a view or an element is drawn in screen reference units: the resolver `<anchor>`, `app.ui.rectOf` and the guide share |
 | `anchor.ts` | the system `ui.anchor`: every `<anchor>` placed on its targets after the solve (see [Anchor](#anchor)) |
 
 | Member | Answers |
@@ -667,7 +667,7 @@ again the elements stand on the rest `world` wrote in step 1. Two things keep th
 `fit: "contain"` lays the element out at its own style size, out of the flow, and centres it in
 the content box of its parent (the rect less its padding). Its rest `Transform.scale` is
 `min(1, contentW / w, contentH / h)`. Its children keep their natural rects: `Box` under a fitted
-element is natural space. `lint()` and the `guide` hole scale a rect by every fitted element on
+element is natural space. `lint()` and the `guide` window scale a rect by every fitted element on
 the way up; `tree()` reports the natural rect and adds `fitScale`.
 
 ```tsx
@@ -832,6 +832,70 @@ children lay out inside it as in any element; its style gives its look, and a `w
   values is shared with frozen ones) and the world's copy of the anchor's rest pose.
 - **Headless.** `app.input.tap(entity)` does not hit-test: a button inside a hidden anchor still
   answers it.
+
+## Guide
+
+`ui` draws a `guide` (the awaited `await fx(guide(options))` of a node body, and the `guide` a node
+derives from state, see the flow README) as a veil over the screen with a window cut over its
+targets, and locks `input` outside that window. The narrow of the gate belongs to `flow`: only
+`allow` and `blocked` pass it.
+
+```ts
+// The tutorial's step on the strip: the first seat, a press anywhere else answers "tutorialBlocked".
+defineNode({
+  rest: true,
+  outcomes: { seat: type(), tutorialBlocked: type() },
+  guide: ({ session }) =>
+    session.tutorial === 1
+      ? {
+          allow: { intent: "seat" },
+          target: { projection: "board.strip", key: "seat0" },
+          pad: 4,
+          blocked: { intent: "tutorialBlocked" }
+        }
+      : undefined
+});
+// the seat drawn at { x: 40, y: 1500, w: 116, h: 120 }: the window at { x: 36, y: 1496, w: 124, h: 128 }
+```
+
+- **Where.** The window is the drawn rect of the target (the resolver of `<anchor>` and
+  `app.ui.rectOf`: through fits, slots, scrolls and ancestor motion, rotation left out), or the
+  bounding rect of the shown targets of a list, grown by `pad` on every side, in screen reference
+  units. The system `ui.guide` of phase `layout`, right after `ui.anchor`, places it every frame,
+  so the window follows a target that moves or scrolls, in the frame it moved.
+- **The veil.** Four rectangles around the window, at `Order` 1 000 000 of the `ui` layer, above
+  every popup: black at 0.6, or the guide's `veil: { color, alpha }`. `alpha: 0` draws nothing
+  visible; `veil: false` spawns no rectangle. Without a target the veil is one rectangle over the
+  screen. While no target is shown (not mounted yet, leaving, built aside, alpha 0), the veil covers
+  the screen and every press is locked; it opens again when a target shows. A target not shown when
+  the guide starts is named once, `ui:guide-target-missing`.
+- **The lock.** `ui` hands `input` the window by reference (`input.lock.window(window)`) and writes
+  it in place every frame; `null` while no target is shown, `undefined` when the guide ends. A press
+  outside reaches no view (no `Tappable`, no `LocalWrite`, no scroll, no drag, no trace, no hover)
+  and answers the guide's `blocked` when it names one; a drop outside finds no target. Inside the
+  window everything works as before. `input` runs before `layout`, so a press reads the window of
+  the frame before: one frame of lag behind a moving target. The doors `app.input.tap`, `press`,
+  `drag` do no hit test and are not locked.
+- **One at a time.** A new guide replaces the one shown: its veil leaves and its lock goes. The
+  veil and the lock leave with the narrow that carried them, when the node is left. Fast mode draws
+  nothing and locks nothing.
+- **Your own look.** The rounded window, the rim, the glide between steps, the hand and the text
+  are the game's: `veil: false` (or `alpha: 0`) keeps the lock, and an `<anchor>` on the same
+  targets draws the look, glides with its `change.Box` motion and follows the target in the same
+  frame the window does. `hand`, `text` and `highlight` of `GuideOptions` are not drawn by the
+  engine (deprecated).
+
+```tsx
+// The game's tutorial window: the engine locks, the anchor draws the rim and glides between steps.
+<anchor key="tutorialWindow" to={{ projection: "board.strip", key: "seat0" }} pad={4} motion={glide}>
+  <stack key="rim" style={{ nineSlice: "tutorial.rim", hollow: true, width: "100%", height: "100%" }} />
+</anchor>
+```
+
+- **Cost.** A frame of a standing guide, and of one whose target moves (fractional numbers
+  included), allocates nothing (`guideStill`, `guideMoving`): the window and the rectangles are
+  written in place, the veil's `Transform` and `Shape` field by field on their stored values, and
+  the lock keeps the same window object.
 
 ## A scene built aside
 

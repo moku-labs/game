@@ -87,7 +87,7 @@ export function startInput(ctx: KernelSlice): void {
 /**
  * Closes what the plugin opened: the six pointer listeners, the key listener, the frame callback,
  * the `onTap`, `onKey` and `onPointer` listeners and the mutes a drag still holds on the held view
- * and on every view it carries. The path of a trace is forgotten. The tags, `Traced` among them,
+ * and on every view it carries. The path of a trace and the lock of a guide are forgotten. The tags, `Traced` among them,
  * die with the world, which stops after `input`: a teardown context reaches no world.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
@@ -122,4 +122,5 @@ export function stopInput(state: State): void {
   state.tapListeners = [];
   state.keyListeners = [];
   state.pointerListeners = [];
+  state.lock = undefined;
 }

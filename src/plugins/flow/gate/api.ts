@@ -2,86 +2,58 @@
  * @file flow/gate — API factory. The single entry of player answers: close before deliver, a hold
  * for an answer that arrived while the gate was closed, and the `guide` narrow.
  */
-import type { Json } from "../../model/types";
+import { jsonEquals } from "../guide";
 import type { FlowCtx } from "../types";
 import type { Allow, Answer, GateApi, GateInternal, GateSpec, GateState } from "./types";
 
 /**
- * Compares two JSON values by value. Used for the payload of a `guide`, which points at one
- * concrete move, not at any move of that intent.
+ * Tells whether an answer is the one a guide names: the intent matches, and the payload too when
+ * the guide's answer carries one.
  *
- * @param left - First value, `undefined` when the payload is absent.
- * @param right - Second value, `undefined` when the payload is absent.
- * @returns True when both sides carry the same data.
+ * @param named - The answer a `guide` names: the one it lets through, or the one of a blocked press.
+ * @param answer - The answer given.
+ * @returns True when the answer is that one.
  * @example
  * ```ts
- * jsonEquals({ from: "c2" }, { from: "c2" }); // true
+ * matchesAnswer({ intent: "merge" }, { intent: "sell" }); // false
  * ```
  */
-function jsonEquals(left: Json | undefined, right: Json | undefined): boolean {
-  if (left === right) return true;
-  if (left === null || right === null) return false;
-  if (typeof left !== "object" || typeof right !== "object") return false;
-  if (Array.isArray(left)) return Array.isArray(right) && arrayEquals(left, right);
-  if (Array.isArray(right)) return false;
+function matchesAnswer(named: Allow, answer: Answer): boolean {
+  if (named.intent !== answer.intent) return false;
+  if (named.payload === undefined) return true;
 
-  return objectEquals(left, right);
-}
-
-/**
- * Compares two JSON arrays element by element.
- *
- * @param left - First array.
- * @param right - Second array.
- * @returns True when both arrays hold the same elements in the same order.
- * @example
- * ```ts
- * arrayEquals(["c3", 2], ["c3", 2]); // true
- * ```
- */
-function arrayEquals(left: readonly Json[], right: readonly Json[]): boolean {
-  if (left.length !== right.length) return false;
-
-  return left.every((item, index) => jsonEquals(item, right[index]));
-}
-
-/**
- * Compares two JSON objects key by key.
- *
- * @param left - First object.
- * @param right - Second object.
- * @returns True when both objects hold the same keys with the same values.
- * @example
- * ```ts
- * objectEquals({ from: "c2" }, { from: "c2" }); // true
- * ```
- */
-function objectEquals(left: { [key: string]: Json }, right: { [key: string]: Json }): boolean {
-  const keys = Object.keys(left);
-
-  if (keys.length !== Object.keys(right).length) return false;
-
-  return keys.every(key => jsonEquals(left[key], right[key]));
+  return jsonEquals(named.payload, answer.payload);
 }
 
 /**
  * Tells whether a running `guide` lets this answer through. Without a narrow every answer passes;
- * with one the intent must match, and the payload too when the narrow names one.
+ * with one it must be the answer the guide allows or the answer of a press outside its window.
  *
- * @param narrow - The one answer a `guide` lets through, or `undefined`.
+ * @param state - Gate state: the narrow and the answer of a blocked press.
  * @param answer - The answer given.
  * @returns True when the answer passes the narrow.
+ */
+function passesNarrow(state: GateState, answer: Answer): boolean {
+  if (state.narrow === undefined) return true;
+  if (matchesAnswer(state.narrow, answer)) return true;
+
+  return state.blocked !== undefined && matchesAnswer(state.blocked, answer);
+}
+
+/**
+ * Copies a guide's answer for a reader: the intent, and a copy of the payload when there is one.
+ *
+ * @param named - The answer the gate keeps.
+ * @returns A copy nobody shares.
  * @example
  * ```ts
- * passesNarrow({ intent: "merge" }, { intent: "sell" }); // false
+ * copyAnswer({ intent: "tutorialBlocked", payload: { step: 2 } }); // { intent: "tutorialBlocked", payload: { step: 2 } }
  * ```
  */
-function passesNarrow(narrow: Allow | undefined, answer: Answer): boolean {
-  if (narrow === undefined) return true;
-  if (narrow.intent !== answer.intent) return false;
-  if (narrow.payload === undefined) return true;
+function copyAnswer(named: Allow): Allow {
+  if (named.payload === undefined) return { intent: named.intent };
 
-  return jsonEquals(narrow.payload, answer.payload);
+  return { intent: named.intent, payload: structuredClone(named.payload) };
 }
 
 /**
@@ -95,7 +67,7 @@ function accepts(state: GateState, answer: Answer): boolean {
   if (state.open === undefined) return false;
   if (!state.open.allowed.includes(answer.intent)) return false;
 
-  return passesNarrow(state.narrow, answer);
+  return passesNarrow(state, answer);
 }
 
 /**
@@ -191,11 +163,22 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
       ctx.state.gate.pointerActive = active;
     },
 
-    state: (): { open: boolean; allowed: readonly string[]; narrowed: boolean } => ({
-      open: ctx.state.gate.open !== undefined,
-      allowed: ctx.state.gate.open?.allowed ?? [],
-      narrowed: ctx.state.gate.narrow !== undefined
-    }),
+    state: (): {
+      open: boolean;
+      allowed: readonly string[];
+      narrowed: boolean;
+      blocked?: Allow;
+    } => {
+      const { open, narrow, blocked } = ctx.state.gate;
+      const read = {
+        open: open !== undefined,
+        allowed: open?.allowed ?? [],
+        narrowed: narrow !== undefined
+      };
+
+      // A copy: the caller may keep it, never write the gate's own.
+      return blocked === undefined ? read : { ...read, blocked: copyAnswer(blocked) };
+    },
 
     open: (spec: GateSpec): Promise<Answer> => {
       if (ctx.state.gate.open !== undefined) {
@@ -213,8 +196,10 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
       shut(ctx.state.gate);
     },
 
-    narrow: (allow: Allow | undefined): void => {
+    narrow: (allow: Allow | undefined, blocked?: Allow): void => {
       ctx.state.gate.narrow = allow;
+      // A lift takes the answer of a blocked press with it: it belongs to the guide.
+      ctx.state.gate.blocked = allow === undefined ? undefined : blocked;
     },
 
     clearHeld: (frame: number, elapsed: number): void => {
