@@ -1275,4 +1275,49 @@ describe("guide", () => {
   it("never asks for an answer: the node continues at once", () => {
     expect(guide({ allow: { intent: "merge" } }).answers).toBeUndefined();
   });
+
+  // F98. Bug caught: a list of targets, the padding, the veil or the answer of a blocked press is
+  // lost on the way to `ui` and the gate, or the list is the caller's own.
+  it("copies a list of targets, the padding, the veil and the blocked answer", () => {
+    const target = [
+      { projection: "board", key: "c2" },
+      { projection: "board", key: "c3" }
+    ];
+    const veil = { color: 0x0d_2f_33, alpha: 0.6 };
+    const descriptor = guide({
+      allow: { intent: "merge" },
+      target,
+      pad: 4,
+      veil,
+      blocked: { intent: "tutorialBlocked", payload: { step: 2 } }
+    });
+
+    target.push({ projection: "board", key: "c9" });
+    veil.alpha = 0;
+
+    expect(descriptor.payload).toEqual({
+      allow: { intent: "merge" },
+      target: [
+        { projection: "board", key: "c2" },
+        { projection: "board", key: "c3" }
+      ],
+      pad: 4,
+      veil: { color: 0x0d_2f_33, alpha: 0.6 },
+      blocked: { intent: "tutorialBlocked", payload: { step: 2 } }
+    });
+  });
+
+  it("keeps `veil: false` and only the veil keys that were given", () => {
+    expect(guide({ allow: { intent: "merge" }, veil: false }).payload).toEqual({
+      allow: { intent: "merge" },
+      veil: false
+    });
+    expect(guide({ allow: { intent: "merge" }, veil: { alpha: 0 } }).payload).toEqual({
+      allow: { intent: "merge" },
+      veil: { alpha: 0 }
+    });
+    expect(
+      Object.keys(guide({ allow: { intent: "merge" }, veil: { alpha: 0 } }).payload ?? {})
+    ).toEqual(["allow", "veil"]);
+  });
 });

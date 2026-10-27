@@ -6,9 +6,10 @@ import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import type { Message } from "../../i18n/types";
+import type { TransformValue } from "../../renderer/components";
 import type { Size } from "../../text/types";
 import type { Time } from "../../time/types";
-import type { Motion, ViewHandle } from "../../world/projection/types";
+import type { AnchorTarget, Motion, ViewHandle } from "../../world/projection/types";
 import type { Ease, Entity, MotionCause, ReducedMotion } from "../../world/types";
 import type { Element, JsxModule } from "../jsx/types";
 import type { ResolvedStyle } from "../styles/types";
@@ -70,6 +71,44 @@ export type ScrollPatches = {
 };
 
 /**
+ * The guide `ui` shows: its targets and padding, the veil it spawned, and the rects it writes in
+ * place every frame. `window` is the object `input` keeps as the lock while a target is shown.
+ */
+export type Guide = {
+  /** The targets the window is cut over; empty for a guide with no target: a full veil. */
+  targets: readonly AnchorTarget[];
+  /** How far the window grows outward on every side, in screen reference units. */
+  pad: number;
+  /** The rectangles of the veil, in the order of `rects`; none for `veil: false`. */
+  veils: Entity[];
+  /** One rect per rectangle of the veil: one for a guide with no target, four around a window. */
+  rects: readonly Rect[];
+  /** The union of the shown targets, padded: the window of the veil and of the lock. */
+  window: Rect;
+  /** The viewport, read every frame. */
+  screen: Rect;
+  /** What the resolver writes on its way: one target's rect and its pose. */
+  scratch: { part: Rect; pose: TransformValue };
+  /** What `input` locks now: the window, every press, or nothing yet. */
+  locked: "window" | "all" | "none";
+  /** Whether a target was shown at the last placement. */
+  found: boolean;
+  /**
+   * Frames of the pass the window taken over from the guide this one replaced is kept while no
+   * target is shown; 0 when nothing was taken over, or once a target showed.
+   */
+  grace: number;
+  /** Frames in a row a key of the guide named no entity; counted in a dev build. */
+  missing: number;
+  /** True once a dev build named a key that named no entity. */
+  warned: boolean;
+  /** True once the guide ended: its veil left. */
+  ended: boolean;
+  /** The frame the guide ended in; -1 while it stands. */
+  endedAt: number;
+};
+
+/**
  * layout module state. `nodes` is attach minus detach: Yoga 3.2.1 has no instance counter.
  * `scrolling` is the scroll the finger holds; `scrollClock` the ms the scroll step has run, the
  * clock of the samples; `scrollRing` the last pointer samples of the press on its axis, a
@@ -93,6 +132,10 @@ export type LayoutState = {
   iconLine: number | undefined;
   order: number;
   cleanups: Array<() => void>;
+  /** The guide on screen, placed every frame by the system `ui.guide`; none while no guide stands. */
+  guide: Guide | undefined;
+  /** The last guide that ended: one that follows in its frame with the same targets takes its window. */
+  lastGuide: Guide | undefined;
 };
 
 /**

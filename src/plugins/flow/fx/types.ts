@@ -2,6 +2,7 @@
  * @file flow/fx — type definitions.
  */
 import type { Json } from "../../model/types";
+import type { AnchorTarget } from "../../world/projection/types";
 import type { Allow } from "../gate/types";
 
 /**
@@ -38,23 +39,100 @@ export type Descriptor<Result = unknown> = {
 export type Hint = { kind: string; payload?: Json; hint: true };
 
 /**
- * Options of the `guide` descriptor: the one allowed answer and its visual part. `target` names
- * the keyed element the visual hole of `ui` is cut over.
+ * Options of a guide: the `guide` descriptor a node awaits, and what the `guide` of a node returns.
+ * `allow` is the one answer the gate lets through. `ui` dims the screen with a veil and cuts a
+ * window over `target` (one target, or the union of the shown ones of a list), grown by `pad`; a
+ * press outside the window reaches no view and answers `blocked` when it is set. Without a target
+ * the veil covers the whole screen and every press is outside.
  *
  * @example
  * ```ts
+ * // The tutorial's step on the board: drag the item of c2 onto c3, a press elsewhere is "tutorialBlocked".
  * const options: GuideOptions = {
- *   allow: { intent: "merge" },
- *   target: { projection: "board", key: "c3" },
- *   hand: "drag"
+ *   allow: { intent: "merge", payload: { from: "c2", to: "c3" } },
+ *   target: [
+ *     { projection: "board.items", key: "c2" },
+ *     { projection: "board.items", key: "c3" }
+ *   ],
+ *   pad: 8,
+ *   veil: { color: 0x0d2f33, alpha: 0.6 },
+ *   blocked: { intent: "tutorialBlocked" }
  * };
  * ```
  */
 export type GuideOptions = {
+  /** The one answer the gate lets through while the guide stands. */
   allow: Allow;
-  target?: { projection: string; key: string };
+  /**
+   * What the window is cut over: a view or a ui element by projection and key, or a list of them,
+   * whose shown ones the window spans. Followed every frame: a target that moves or scrolls takes
+   * the window with it. Without one, or while none is shown, the veil covers the whole screen.
+   *
+   * @example
+   * ```ts
+   * const order: GuideOptions = {
+   *   allow: { intent: "deliver" },
+   *   target: [{ projection: "board.strip", key: "order0" }, { projection: "board.strip", key: "deliver0" }]
+   * }; // one window around the order card and its button
+   * ```
+   */
+  target?: AnchorTarget | readonly AnchorTarget[];
+  /**
+   * How far the window grows outward on every side, in screen reference units. 0 when left out.
+   *
+   * @example
+   * ```ts
+   * const padded: GuideOptions = { allow: { intent: "seat" }, target: { projection: "board.strip", key: "seat0" }, pad: 4 };
+   * // the seat drawn at { x: 40, y: 1500, w: 116, h: 120 }: the window at { x: 36, y: 1496, w: 124, h: 128 }
+   * ```
+   */
+  pad?: number;
+  /**
+   * The veil around the window: its colour and alpha, black at 0.6 when left out. `alpha: 0` draws
+   * nothing visible and still locks; `false` draws nothing at all and still locks, so the game
+   * draws its own look in an `<anchor>` on the same targets.
+   *
+   * @example
+   * ```ts
+   * const clear: GuideOptions = { allow: { intent: "play" }, target: { projection: "hud", key: "play" }, veil: false };
+   * // no veil: the game's <anchor to={{ projection: "hud", key: "play" }}> draws the rim, presses outside still reach nothing
+   * ```
+   */
+  veil?: { color?: number; alpha?: number } | false;
+  /**
+   * The answer a press outside the window gives, with its payload, instead of reaching nothing.
+   * The gate takes it beside `allow`, so it must be an outcome of the node that waits.
+   *
+   * @example
+   * ```ts
+   * const strict: GuideOptions = {
+   *   allow: { intent: "play" },
+   *   target: { projection: "hud", key: "play" },
+   *   blocked: { intent: "tutorialBlocked" }
+   * }; // a press on the shop button answers { intent: "tutorialBlocked" }: the node shows the hand again
+   * ```
+   */
+  blocked?: Allow;
+  /**
+   * Not drawn by the engine: draw it in an `<anchor>`. Kept in the descriptor for the game's own
+   * handler; it goes in the next minor version.
+   *
+   * @deprecated Draw the highlight in an `<anchor>` on the targets.
+   */
   highlight?: readonly string[];
+  /**
+   * Not drawn by the engine: draw the hand in an `<anchor>`. Kept in the descriptor for the game's
+   * own handler; it goes in the next minor version.
+   *
+   * @deprecated Draw the hand in an `<anchor>` on the targets.
+   */
   hand?: "tap" | "drag";
+  /**
+   * Not drawn by the engine: draw the text in an `<anchor>`. Kept in the descriptor for the game's
+   * own handler; it goes in the next minor version.
+   *
+   * @deprecated Draw the text in an `<anchor>` beside the targets.
+   */
   text?: string;
 };
 

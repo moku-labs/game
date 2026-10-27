@@ -10,6 +10,27 @@ type Built = ReturnType<typeof createMockKernel> & {
   onChanged: ReturnType<typeof createHandlers>["lifecycle:changed"];
 };
 
+/**
+ * Builds the `model:committed` hook with a node guide standing and the gate open, counting the
+ * derives.
+ *
+ * @returns The hook, the context and how often the guide was derived.
+ */
+function standing() {
+  const kernel = createMockKernel();
+  const derived = { count: 0 };
+
+  kernel.ctx.state.runner.guide = {
+    last: undefined,
+    refresh: () => {
+      derived.count += 1;
+    }
+  };
+  kernel.ctx.state.gate.open = { allowed: ["merge"] };
+
+  return { ...kernel, derived, onCommitted: createHandlers(kernel.ctx)["model:committed"] };
+}
+
 function build(): Built {
   const kernel = createMockKernel();
 
@@ -17,10 +38,11 @@ function build(): Built {
 }
 
 describe("createHandlers", () => {
-  it("declares exactly the one hook flow listens to", () => {
+  it("declares exactly the hooks flow listens to", () => {
     const { ctx } = createMockKernel();
 
-    expect(Object.keys(createHandlers(ctx))).toEqual(["lifecycle:changed"]);
+    // F98: `model:committed` derives the guide of the node that waits at its gate again.
+    expect(Object.keys(createHandlers(ctx))).toEqual(["lifecycle:changed", "model:committed"]);
   });
 
   it("resolves no dependency before the hook fires", () => {
@@ -94,6 +116,46 @@ describe("createHandlers", () => {
       expect(record.flushes).toBe(0);
       expect(ctx.state.runner.flushing).toBeUndefined();
       expect(record.pokes).toBe(1);
+    });
+  });
+
+  // F98. The guide of a rest node is derived again after a commit while the node waits at its
+  // gate. Bug caught: the commit of the edge that leaves the node shows its guide again after the
+  // loop lifted it, or a commit derives the guide of a node whose gate is shut.
+  describe("model:committed", () => {
+    it("derives the standing guide again after a commit that is no edge", () => {
+      const { onCommitted, derived } = standing();
+
+      onCommitted({ roots: ["session"], cause: "restore" });
+      onCommitted({ roots: ["player", "session", "rng"], cause: "rollback" });
+
+      expect(derived.count).toBe(2);
+    });
+
+    it("derives nothing for the commit of an edge", () => {
+      const { onCommitted, derived } = standing();
+
+      onCommitted({ roots: ["session"], cause: "edge" });
+
+      expect(derived.count).toBe(0);
+    });
+
+    it("derives nothing while the gate is shut", () => {
+      const { onCommitted, derived, ctx } = standing();
+
+      ctx.state.gate.open = undefined;
+      onCommitted({ roots: ["session"], cause: "restore" });
+
+      expect(derived.count).toBe(0);
+    });
+
+    it("does nothing while no node guide stands", () => {
+      const { onCommitted, ctx, record } = standing();
+
+      ctx.state.runner.guide = undefined;
+
+      expect(() => onCommitted({ roots: ["session"], cause: "restore" })).not.toThrow();
+      expect(record.requires).toEqual([]);
     });
   });
 });

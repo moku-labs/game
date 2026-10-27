@@ -4,10 +4,12 @@
 import type { FlowCtx } from "../types";
 import { applyResult, arrive, finishNode, handleAbort, handleFailure } from "./edge";
 import { checkGraph, collectGraph, requireMainFlow } from "./graph";
-import type { Delivery, Location, Safe, Step, StepOutcome } from "./loop-types";
+import { enterGuide } from "./guide";
+import type { Delivery, Location, NodeOutcome, Safe, Step, StepOutcome } from "./loop-types";
 import { noPayload } from "./loop-types";
 import {
   abortReason,
+  failedOrAsIs,
   isAbortRejection,
   nodeInfo,
   nodeOutcome,
@@ -24,7 +26,9 @@ import type { AnyFlow, AnyNode, Bookmark, Modules, SlotNode } from "./types";
 
 /**
  * Runs one node: wait for the pointer, the recovery the loop owes the safe node, `onEnter` stages,
- * open the transaction, produce the outcome, then commit on the edge or recover.
+ * open the transaction, derive the node's guide, produce the outcome, then commit on the edge or
+ * recover. A `guide` that throws on entry fails the node before its gate opens or its body runs:
+ * it is aborted with `"failed"`, as for a stage that throws.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -92,11 +96,32 @@ async function runNode(
     gateOpened: (): void => {
       notifyGateOpen(state);
     },
-    log: ctx.log
+    log: ctx.log,
+    /**
+     * Fails the node from outside its body: keeps the error and aborts the node with `"failed"`.
+     *
+     * @param error - What the node fails with.
+     */
+    fail: (error: unknown): void => {
+      if (abort.signal.aborted) return;
+
+      step.failure = { error };
+      abort.abort("failed");
+    },
+    failure: undefined
   };
   const delivered: Delivery = { event: undefined };
-  const outcome = await nodeOutcome(modules, step, delivered);
+  const entered = enterGuide(ctx, modules, step);
 
+  if (entered !== undefined) abort.abort("failed");
+
+  const outcome: NodeOutcome =
+    entered === undefined
+      ? failedOrAsIs(step, await nodeOutcome(modules, step, delivered))
+      : { kind: "failed", error: entered };
+
+  // The guide derived from state goes with the node: a commit after this derives nothing.
+  state.guide = undefined;
   // eslint-disable-next-line unicorn/no-useless-undefined -- `undefined` lifts a running guide.
   modules.gate.narrow(undefined);
   // The visual of a guide belongs to the narrow: both end where the node ends.
@@ -262,11 +287,12 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark, safe:
     );
   }
 
-  // The old position is left: the safe node, its pending recovery and a press made there go
-  // with it.
+  // The old position is left: the safe node, its pending recovery, a press made there and its
+  // guide go with it. The node of the bookmark derives its guide again when it is entered.
   safe.inside = false;
   safe.recover = false;
   modules.gate.dropHeld();
+  state.guide = undefined;
 
   // Replace the state, and mark the rest point: the provider gets the whole restored document.
   ctx.deps.model.store.restore({
@@ -367,6 +393,7 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
   state.slotLeave = undefined;
   state.failures = 0;
   state.restless = 0;
+  state.guide = undefined;
 
   const safe: Safe = { inside: false, recover: false };
   const loop = { running: true };

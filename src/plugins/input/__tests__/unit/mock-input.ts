@@ -78,8 +78,11 @@ export type MockInput = {
   /** The fields of every `world.projection.mute` call, in order. */
   muted: Array<readonly string[]>;
   answers: Answer[];
-  /** What `flow.gate.answer` returns. */
-  gate: { open: boolean };
+  /**
+   * What `flow.gate.answer` returns, and the `blocked` answer `flow.gate.state()` reports for a
+   * running guide.
+   */
+  gate: { open: boolean; blocked?: Answer | undefined };
   /** The effective world mode `ecs.mode()` reports. */
   world: { mode: WorldMode };
   boxes: StubBox[];
@@ -212,7 +215,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const hitBoxes = new Map<Entity, HitBox>();
   const muted: Array<readonly string[]> = [];
   const answers: Answer[] = [];
-  const gate = { open: true };
+  const gate: MockInput["gate"] = { open: true };
   const world = { mode: "live" as WorldMode };
   const boxes: StubBox[] = [];
   const canvas: { current: HTMLCanvasElement | undefined } = { current: undefined };
@@ -352,6 +355,13 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
       },
       pointer: (active: boolean): void => {
         calls.push(`pointer:${String(active)}`);
+      },
+      state: () => {
+        calls.push("state");
+
+        const read = { open: gate.open, allowed: [], narrowed: gate.blocked !== undefined };
+
+        return gate.blocked === undefined ? read : { ...read, blocked: gate.blocked };
       }
     }
   } as unknown as FlowApi;

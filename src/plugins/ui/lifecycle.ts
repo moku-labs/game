@@ -23,6 +23,7 @@ import { checkTrigger, debugTap } from "./jsx/debug";
 import { stopFields } from "./jsx/fields";
 import { hostsMoved } from "./jsx/hosts";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
+import { createGuidePass, guardPointer } from "./layout/guide";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
 
@@ -94,7 +95,7 @@ function drawsViews(ctx: UiCtx): boolean {
 }
 
 /**
- * Opens the three systems of phase `layout`, the system `ui.enter` of phase `sync`, the seven world
+ * Opens the four systems of phase `layout`, the system `ui.enter` of phase `sync`, the seven world
  * hooks of `Tree`, `Box`, `Pressed` and `PointerOver`, the two that tell the hosting step a view
  * lost its `Parent` or its `Held` (a view freed so may hang under its host again), the listener
  * that asks for every root to be built again after a restore or a load, the two effect handlers,
@@ -106,7 +107,7 @@ function drawsViews(ctx: UiCtx): boolean {
  * `ui`'s part of a scene build (`onBuild`: the roots built aside are reconciled and solved, spec
  * 31). On an agent page also the tap counter of `DebugTrigger` and its check of a view that takes
  * no press. The third system of `layout`, `ui.anchor`, runs after the solve and places every
- * `<anchor>` on its targets.
+ * `<anchor>` on its targets; the fourth, `ui.guide`, places the veil and the lock window of a guide.
  *
  * The `Box` hook plays an element's enter hook and queues it, so the game's systems see its start
  * pose (F49); `ui.enter` starts its loop after them and before the frame is drawn, and plays the
@@ -141,6 +142,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ),
     // Registered after `ui.solve`: a phase runs its systems in registration order.
     ecs.system(system({ name: "ui.anchor", phase: "layout", query: [], run: anchors })),
+    // After the anchors: the window of a guide sits where the game's own anchor on it does.
+    ecs.system(system({ name: "ui.guide", phase: "layout", query: [], run: createGuidePass(ctx) })),
     ecs.system(
       system({
         name: "ui.enter",
@@ -171,7 +174,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ctx.deps.input.onTap(jsx.applyTap),
     ctx.deps.input.onTap(() => jsx.blur()),
     ctx.deps.input.onTap(jsx.tapped),
-    ctx.deps.input.onPointer(jsx.pointer),
+    // A field the lock of a guide keeps from the finger opens no keyboard.
+    ctx.deps.input.onPointer(guardPointer(ctx, jsx.pointer)),
     ctx.deps.input.onKey(jsx.key),
     ctx.deps.input.controls.add(LocalWrite),
     () => jsx.releaseHosted(),
@@ -253,6 +257,9 @@ export function stopUi(state: State): void {
   state.layout.scrolling = undefined;
   state.layout.scrollSamples = 0;
   state.layout.iconLine = undefined;
+  // The veil of a guide went with the ui owner above; input forgets its lock in its own stop.
+  state.layout.guide = undefined;
+  state.layout.lastGuide = undefined;
   state.jsx.components.clear();
   state.jsx.roots.clear();
   state.jsx.elements.clear();

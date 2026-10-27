@@ -230,12 +230,18 @@ function idsOf(app: Awaited<ReturnType<typeof startWard>>["app"]): number[] {
     .toSorted((first, second) => first - second);
 }
 
+/**
+ * A building budget no test runner spends in one frame: these tests mean "the whole build lands in
+ * one frame", which a budget of a few real milliseconds does not promise on a slow CI runner.
+ */
+const ONE_FRAME_MS = 1000;
+
 describe("a scene built aside", () => {
   it("is built in one frame, unseen, and its enters start in the frame after the commit", async () => {
     const { app, uiBuilt } = await startWard();
     const before = idsOf(app);
 
-    expect(app.world.projection.build(["ward", "board"], OWNER, LAYERS, 4)).toBe(true);
+    expect(app.world.projection.build(["ward", "board"], OWNER, LAYERS, ONE_FRAME_MS)).toBe(true);
     // Its root is mounted and dirty: ui's part is not done.
     expect(uiBuilt()).toBe(false);
 
@@ -278,7 +284,7 @@ describe("a scene built aside", () => {
     const { app } = await startWard();
     const before = idsOf(app);
 
-    app.world.projection.build(["ward", "board"], OWNER, LAYERS, 4);
+    app.world.projection.build(["ward", "board"], OWNER, LAYERS, ONE_FRAME_MS);
     app.time.step(16);
     app.world.projection.discard();
     app.time.step(16);

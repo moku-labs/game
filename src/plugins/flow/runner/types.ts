@@ -4,7 +4,7 @@
  */
 import type { Json, RngState, RngView } from "../../model/types";
 import type { FeaturesApi, FeaturesInternal } from "../features/types";
-import type { FxApi, FxInternal, NodeFx } from "../fx/types";
+import type { FxApi, FxInternal, GuideOptions, NodeFx } from "../fx/types";
 import type { GateApi, GateInternal, GateSpec } from "../gate/types";
 import type { InboxApi, InboxInternal } from "../inbox/types";
 
@@ -189,6 +189,15 @@ export type NodeRecover<Game extends GameState> = (
 ) => void | Promise<void>;
 
 /**
+ * The guide of a node, derived from the committed state: the options while the node stands, or
+ * `undefined` for none. `player` and `session` are the committed trees, frozen.
+ */
+export type NodeGuide<Game extends GameState> = (state: {
+  player: Game["player"];
+  session: Game["session"];
+}) => GuideOptions | undefined;
+
+/**
  * The part of a node, or of a flow used as a node, that an edge table looks at.
  */
 export type Wired<Input, Tags extends OutcomeTags> = {
@@ -232,6 +241,8 @@ export type NodeDefinition<
   readonly run?: NodeRun<Game, Input, Tags>;
   /** The recovery of a rest node. Absent: the node is entered as it is after a failure. */
   readonly recover?: NodeRecover<Game>;
+  /** The guide that stands while the node does, derived from state. Absent: the node shows none. */
+  readonly guide?: NodeGuide<Game>;
 };
 
 /**
@@ -257,6 +268,40 @@ export type NodeSpec<Game extends GameState, Input, Tags extends OutcomeTags> = 
   inbox?: readonly (keyof Tags & string)[];
   /** Id of the scene this node is shown on. Without it the node keeps the current scene. */
   scene?: SceneIdOf<Game>;
+  /**
+   * Derives the guide that stands while this node does, from the committed state: a tutorial step
+   * that is data, with no `run` and no save field of its own. The engine calls it when the node is
+   * entered, after its `onEnter` stages, and again after a commit while the node waits at its
+   * gate; a result equal to the last one (deep JSON equality) changes nothing, a new one replaces
+   * the guide, `undefined` lifts it. The guide goes when the node is left, and a restore enters the
+   * node again, so it is derived again. It narrows the gate to `allow` and `blocked` and hands the
+   * options to the `guide` handler of `ui`; in fast mode only the narrow applies. A `guide` that
+   * throws fails the node: rollback and retry, as a body that throws. Meant for a rest node; any
+   * node may carry one.
+   *
+   * @param state - The committed `player` and `session`, frozen.
+   * @param state.player - The committed player tree.
+   * @param state.session - The committed session tree.
+   * @returns The guide while the node stands, or `undefined` for none.
+   * @example
+   * ```ts
+   * // The board rests; the tutorial's step is in the session: step 2 teaches the merge of c2 into c3.
+   * const awaitIntent = defineNode({
+   *   rest: true,
+   *   outcomes: { merge: type<{ from: string; to: string }>(), tutorialBlocked: type() },
+   *   guide: ({ session }) =>
+   *     session.tutorial === 2
+   *       ? {
+   *           allow: { intent: "merge", payload: { from: "c2", to: "c3" } },
+   *           target: [{ projection: "board.items", key: "c2" }, { projection: "board.items", key: "c3" }],
+   *           blocked: { intent: "tutorialBlocked" }
+   *         }
+   *       : undefined
+   * });
+   * // session.tutorial 2: app.flow.gate.state().narrowed is true, a press beside the two items answers "tutorialBlocked"
+   * ```
+   */
+  guide?(state: { player: Game["player"]; session: Game["session"] }): GuideOptions | undefined;
 } & (
   | {
       rest: true;
@@ -700,6 +745,20 @@ export type AnyNode = AnyWired & {
   readonly scene?: string;
   run?(ctx: AnyNodeContext): Result | Promise<Result>;
   recover?(context: AnyRecoverContext): void | Promise<void>;
+  /**
+   * The guide of the node, derived from the committed state; see `NodeSpec.guide`.
+   *
+   * @param state - The committed `player` and `session`.
+   * @param state.player - The committed player tree.
+   * @param state.session - The committed session tree.
+   * @returns The guide while the node stands, or `undefined` for none.
+   * @example
+   * ```ts
+   * // A unit test of the game asks the board's rest node what it guides at step 2 of the tutorial.
+   * awaitIntent.guide?.({ player, session: { tutorial: 2 } })?.allow; // { intent: "merge", payload: { from: "c2", to: "c3" } }
+   * ```
+   */
+  guide?(state: { player: unknown; session: unknown }): GuideOptions | undefined;
 };
 
 /**
@@ -1025,6 +1084,23 @@ export type RunnerState = {
   seam?: LoopSeam;
   /** The last `state()` and what it was read from. Absent until the first `state()`. */
   view?: StateView;
+  /**
+   * The guide of the node that stands, derived from state: its last result and how to derive it
+   * again. Set when a node with a `guide` is entered; cleared when the node is left, at a restore
+   * and when the loop starts.
+   */
+  guide?: NodeGuideHost | undefined;
+};
+
+/**
+ * The guide of the node that stands. A commit while the node waits at its gate calls `refresh`;
+ * the node's abort makes it a no-op.
+ */
+export type NodeGuideHost = {
+  /** The last result as the payload of its descriptor; `undefined` while the node guides nothing. */
+  last: { [key: string]: Json } | undefined;
+  /** Derives the guide again from the committed state; a `guide` that throws fails the node. */
+  refresh: () => void;
 };
 
 /**

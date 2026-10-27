@@ -45,7 +45,8 @@ export function createInputState(_ctx: { readonly config: Readonly<Config> }): S
     resolveNow: undefined,
     resolvedEarly: false,
     cursor: undefined,
-    controls: []
+    controls: [],
+    lock: undefined
   };
 }
 
