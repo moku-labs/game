@@ -48,7 +48,7 @@ describe("createFlowState", () => {
     expect(state.runner.stack).toEqual([]);
     expect(state.runner.journal).toEqual([]);
     expect(state.runner.failures).toBe(0);
-    expect(state.runner.enterCallbacks).toEqual({ load: [], scene: [] });
+    expect(state.runner.enterCallbacks).toEqual({ begin: [], load: [], scene: [] });
   });
 
   it("gives every app its own collections", () => {

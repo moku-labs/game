@@ -166,8 +166,16 @@ export type MockScenes = {
   init(): void;
   start(): void;
   stop(): void;
-  /** Calls the registered `onEnter("scene")` callback, the way the runner does. */
+  /**
+   * Enters a node the way the runner does: the registered `onEnter` callbacks of `begin`, then those of `scene`, with
+   * one signal. A `begin` callback never waits (flow's rule), so they are called in a row and the `scene` stage starts
+   * in the same turn. Unlike the runner, the `scene` stage runs also after an abort: the plugin's own handling of an
+   * aborted signal is what these tests see. The `load` stage belongs to `assets`: a test that holds it calls `stage`
+   * for each side of it.
+   */
   enter(node: Partial<NodeInfo>, run?: Partial<RunContext>): Promise<void>;
+  /** Calls the registered `onEnter` callbacks of one stage, in registration order, each awaited. */
+  stage(stage: Stage, node: Partial<NodeInfo>, run?: Partial<RunContext>): Promise<void>;
 };
 
 /**
@@ -508,6 +516,52 @@ function createFakeFlow(): FakeFlow {
 }
 
 /**
+ * Fills in the mode and the signal a test left out: live, and a signal nobody aborts.
+ *
+ * @param run - What the test gave.
+ * @returns What the runner hands a callback.
+ */
+function runOf(run: Partial<RunContext>): RunContext {
+  return { mode: run.mode ?? "live", signal: run.signal ?? new AbortController().signal };
+}
+
+/**
+ * Calls the callbacks a fake `flow` holds for one stage, the way the runner does.
+ *
+ * @param flow - The fake flow.
+ * @param stage - The stage.
+ * @param node - The fields of the node the test set.
+ * @param run - The mode and the signal.
+ */
+async function runStage(
+  flow: FakeFlow,
+  stage: Stage,
+  node: Partial<NodeInfo>,
+  run: RunContext
+): Promise<void> {
+  const callbacks = flow.enter.filter(entry => entry.stage === stage);
+
+  if (stage === "scene" && callbacks.length === 0) {
+    throw new Error("no onEnter callback was registered");
+  }
+
+  for (const { callback } of callbacks) await callback(nodeOf(node), run);
+}
+
+/**
+ * Calls the `begin` callbacks a fake `flow` holds, in a row: none of them waits.
+ *
+ * @param flow - The fake flow.
+ * @param node - The fields of the node the test set.
+ * @param run - The mode and the signal.
+ */
+function runBegin(flow: FakeFlow, node: Partial<NodeInfo>, run: RunContext): void {
+  for (const { stage, callback } of flow.enter) {
+    if (stage === "begin") callback(nodeOf(node), run);
+  }
+}
+
+/**
  * Creates the mock plugin: the real state, the real API and the real lifecycle over the fakes.
  *
  * @param config - The config the kernel resolved; `{ buildMs: "auto" }`, the default, when left out.
@@ -584,16 +638,15 @@ export function createMockScenes(config?: Config): MockScenes {
     init: (): void => checkConfig(ctx.config),
     start: (): void => startScenes(ctx),
     stop: (): void => stopScenes({ state }),
-    enter: async (node: Partial<NodeInfo>, run: Partial<RunContext> = {}): Promise<void> => {
-      const callback = flow.enter[0]?.callback;
+    enter: (node: Partial<NodeInfo>, run: Partial<RunContext> = {}): Promise<void> => {
+      const full = runOf(run);
 
-      if (callback === undefined) throw new Error("no onEnter callback was registered");
+      runBegin(flow, node, full);
 
-      await callback(nodeOf(node), {
-        mode: run.mode ?? "live",
-        signal: run.signal ?? new AbortController().signal
-      });
-    }
+      return runStage(flow, "scene", node, full);
+    },
+    stage: (stage: Stage, node: Partial<NodeInfo>, run: Partial<RunContext> = {}): Promise<void> =>
+      runStage(flow, stage, node, runOf(run))
   };
 
   return mock;

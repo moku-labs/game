@@ -1,17 +1,20 @@
 /**
- * @file Root integration — what a live switch shows over the scene being left (spec 33, slice A2): flow, scenes, assets,
- * world and the renderer together, on the fake page over Pixi's own display objects (`drawn-helpers.ts`) and a fake
- * clock that moves 16 ms a frame. The board's textures are still on their way to the GPU (its `assets.warm` is held):
- * the veil of the engine's default is on the stage in the first frame after the answer, the ring from 400 ms after the
- * switch start, and both are gone once the board stands and the veil faded out. The tree oracle checks every frame.
+ * @file Root integration — what a live switch shows over the scene being left (spec 33, slices A2 and A3): flow,
+ * scenes, assets, world and the renderer together, on the fake page over Pixi's own display objects (`drawn-helpers.ts`)
+ * and a fake clock that moves 16 ms a frame. The board's textures are still on their way to the GPU (its `assets.warm`
+ * is held), or its one file is still downloading (the fetch of its io is held, a cold first visit): the veil of the
+ * engine's default is on the stage in the first frame after the answer, the ring from 400 ms after the switch start,
+ * and both are gone once the board stands and the veil faded out. A download that fails takes the veil down at once,
+ * on a retry, while the safe node's `recover` waits at the gate, and on a fatal failure. The tree oracle checks every
+ * frame.
  */
 import type { Assets, Scenes } from "@moku-labs/game";
 import { defineGame, Shape, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import { fakeClock } from "@moku-labs/game/testing";
-import type * as pixi from "pixi.js";
+import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FRAME_MS, openPage, type Watched, watch } from "./drawn-helpers";
+import { type DrawnPage, FRAME_MS, openPage, type Watched, watch } from "./drawn-helpers";
 
 const { defineNode, defineFlow, defineFeature, defineScene, projection } = defineGame<{
   player: Record<string, never>;
@@ -29,6 +32,78 @@ const MANIFEST: Assets.Manifest = {
     board: { feature: "leave", tier: "lazy", mb: 0, files: [] }
   }
 };
+
+/** The same two bundles, the board's with one image: a cold first visit downloads it in the `load` stage. */
+const COLD_MANIFEST: Assets.Manifest = {
+  version: 2,
+  bundles: {
+    ...MANIFEST.bundles,
+    board: {
+      feature: "leave",
+      tier: "lazy",
+      mb: 0.001,
+      files: [{ key: "board.cells", path: "board/cells.png", width: 4, height: 4, mb: 0.001 }]
+    }
+  }
+};
+
+/** The io of a page whose network holds every download until the test answers it. */
+type HeldNetwork = {
+  io: Assets.AssetsIo;
+  /** The URLs fetched and not answered yet. */
+  waiting(): string[];
+  /** Answers every waiting download. */
+  release(): void;
+  /** Fails every waiting download, the way a lost connection does. */
+  fail(): void;
+};
+
+/**
+ * Makes the io of a page whose downloads wait for the test: a fetch answers once `release` was called, or rejects
+ * once `fail` was; an image decodes to 4 x 4 and becomes a real Pixi texture of that size with no pixels.
+ *
+ * @returns The io and what answers its downloads.
+ */
+function heldNetwork(): HeldNetwork {
+  const held: Array<{ url: string; resolve: () => void; reject: (error: Error) => void }> = [];
+  const blob = new Blob([new Uint8Array(4)]);
+
+  return {
+    waiting: () => held.map(entry => entry.url),
+    release: () => {
+      for (const entry of held.splice(0)) entry.resolve();
+    },
+    fail: () => {
+      for (const entry of held.splice(0)) entry.reject(new Error("offline"));
+    },
+    io: {
+      fetch: async url => {
+        const answer = Promise.withResolvers<void>();
+
+        held.push({ url, resolve: answer.resolve, reject: answer.reject });
+        await answer.promise;
+
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
+          headers: { get: () => null },
+          json: () => Promise.resolve({}),
+          blob: () => Promise.resolve(blob),
+          text: () => Promise.resolve(""),
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(4))
+        };
+      },
+      decode: () => Promise.resolve({ width: 4, height: 4 } as unknown as Assets.DecodedImage),
+      createTexture: () =>
+        new pixi.Texture({
+          source: new pixi.TextureSource({ width: 4, height: 4 })
+        }) as unknown as Assets.Texture,
+      sliceTexture: page => page,
+      destroyTexture: texture => (texture as unknown as pixi.Texture).destroy()
+    }
+  };
+}
 
 /** The ward's room: one rectangle. */
 const wardRoom = projection({
@@ -87,10 +162,47 @@ const leaveFeature = defineFeature("leave", {
   projections: [wardRoom, boardCells, loadingScreen]
 });
 
+/**
+ * The ward of the failure tests: a safe node whose `recover` asks the player first, waiting at the gate for "retry".
+ * It leaves for the board straight (a rest node: a failure retries the board itself) or through `travel`.
+ */
+const safeWard = defineNode({
+  scene: "ward",
+  outcomes: { board: type(), travel: type() },
+  rest: true,
+  checkpoint: true,
+  recover: async ({ fx }) => {
+    await fx({ kind: "offline", answers: ["retry"] });
+  }
+});
+/** A transit node that switches to the board: a failure in it rolls back to the ward. */
+const travel = defineNode({
+  scene: "board",
+  outcomes: { arrived: type() },
+  run: ({ out }) => out.arrived()
+});
+const safeBoard = defineNode({
+  scene: "board",
+  outcomes: { back: type() },
+  rest: true,
+  checkpoint: true
+});
+const failureFlow = defineFlow("main", {
+  nodes: { ward: safeWard, travel, board: safeBoard },
+  start: "ward",
+  edges: {
+    ward: { board: "board", travel: "travel" },
+    travel: { arrived: "board" },
+    board: { back: "ward" }
+  }
+});
+
 /** A running fixture: its app, its clock and its frame driver with the oracle. */
 type Running = Watched & {
   app: ReturnType<ReturnType<typeof defineGameApp>["screen"]>["app"];
   clock: ReturnType<typeof fakeClock>;
+  /** What `run()` rejected with, once it did: a fatal failure. */
+  ended: { error: unknown };
   /** The stage root of the page's Pixi application. */
   stage(): pixi.Container;
 };
@@ -125,11 +237,18 @@ async function arrive(fixture: Running, path: string): Promise<void> {
  * Starts the fixture on the ward, on a fake clock, and steps until the ward stands.
  *
  * @param leave - The `leave` of the config; the engine's default when left out.
+ * @param network - The manifest and the io of the page; bundles with no file and the engine's io when left out.
+ * @param network.manifest - The manifest.
+ * @param network.io - The io its files are fetched with.
  * @returns The running fixture.
  */
-async function open(leave?: Scenes.SceneLeave): Promise<Running> {
+async function open(
+  leave?: Scenes.SceneLeave,
+  network?: { manifest: Assets.Manifest; io: Assets.AssetsIo }
+): Promise<Running> {
   const page = openPage();
   const clock = fakeClock(1000);
+  const seams = network ?? { manifest: MANIFEST };
   const { app } = defineGameApp({
     flow: mainFlow,
     safeNode: "ward",
@@ -143,15 +262,37 @@ async function open(leave?: Scenes.SceneLeave): Promise<Running> {
       flow: { holdMs: 0 },
       ...(leave === undefined ? {} : { scenes: { leave } })
     }
-  }).screen({ manifest: MANIFEST, renderer: page.renderer, clock });
+  }).screen({ ...seams, renderer: page.renderer, clock });
 
+  return track(app, page, clock);
+}
+
+/**
+ * Starts an app on the ward and watches it: its frames, its stage and how its `run()` ended.
+ *
+ * @param app - The screen app, not started.
+ * @param page - The page it draws on.
+ * @param clock - The fake clock it runs on.
+ * @returns The running fixture, at the ward.
+ */
+async function track(
+  app: Running["app"],
+  page: DrawnPage,
+  clock: ReturnType<typeof fakeClock>
+): Promise<Running> {
   await app.start();
-  app.flow.run().catch(() => undefined);
+
+  const ended: Running["ended"] = { error: undefined };
+
+  app.flow.run().catch((error: unknown) => {
+    ended.error = error;
+  });
 
   const fixture: Running = {
     ...watch(app, page, clock),
     app,
     clock,
+    ended,
     stage: () => page.stage.last().stage
   };
 
@@ -160,6 +301,35 @@ async function open(leave?: Scenes.SceneLeave): Promise<Running> {
   await fixture.frames(5);
 
   return fixture;
+}
+
+/**
+ * Starts the failure graph on the ward, with the cold manifest over a held network.
+ *
+ * @param network - The network the board's file is fetched over.
+ * @param flow - Which node is safe and how often a failure is retried.
+ * @param flow.safeNode - The safe node.
+ * @param flow.retries - Failures in a row that are retried before the loop gives up.
+ * @returns The running fixture, at the ward.
+ */
+function openFailing(
+  network: HeldNetwork,
+  flow: { safeNode: "ward" | "board"; retries: number }
+): Promise<Running> {
+  const page = openPage();
+  const clock = fakeClock(1000);
+  const { app } = defineGameApp({
+    flow: failureFlow,
+    safeNode: flow.safeNode,
+    player: {},
+    session: {},
+    referenceSide: 390,
+    referenceLong: 844,
+    features: [leaveFeature],
+    pluginConfigs: { log: { mode: "test" }, flow: { holdMs: 0, retries: flow.retries } }
+  }).screen({ manifest: COLD_MANIFEST, io: network.io, renderer: page.renderer, clock });
+
+  return track(app, page, clock);
 }
 
 /**
@@ -306,5 +476,117 @@ describe("the picture of a scene being left, across the engine", () => {
 
     expect(app.world.projection.entitiesOf("leave.loading")).toEqual([]);
     expect(app.renderer.sync.displayOf(screen ?? 0)).toBeUndefined();
+  });
+
+  // Bug: the veil waits for the `load` stage: a cold first visit downloads the board's files first and shows nothing
+  // for the whole download (measured on the A26 with slice A2).
+  it("shows the veil in the next frame while the board's bundle is still downloading", async () => {
+    const network = heldNetwork();
+    const fixture = await open(undefined, { manifest: COLD_MANIFEST, io: network.io });
+    const { app } = fixture;
+
+    expect(app.flow.gate.answer({ intent: "board" })).toBe(true);
+    await fixture.frames(1);
+
+    // The next frame: the board's image is still on its way, the ward stands under the veil.
+    expect(network.waiting()).toHaveLength(1);
+    expect(network.waiting()[0]).toContain("board/cells.png");
+    expect(app.assets.isLoaded("board")).toBe(false);
+    expect(app.scenes.current()).toBe("ward");
+    expect(fixture.stage().children.at(-1)).toBe(leaveNode(fixture, "renderer.leave"));
+    expect(leaveNode(fixture, "renderer.leave.cover")?.alpha).toBeGreaterThan(0);
+
+    network.release();
+    await arrive(fixture, "board");
+    await fixture.frames(150 / FRAME_MS + 1);
+
+    expect(app.assets.isLoaded("board")).toBe(true);
+    expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
+  });
+});
+
+/**
+ * Answers the ward with an intent and steps one frame: the veil is up while the board's file downloads.
+ *
+ * @param fixture - The running fixture, at the ward.
+ * @param network - Its network.
+ * @param intent - `"board"` or `"travel"`.
+ */
+async function leaveUnderVeil(
+  fixture: Running,
+  network: HeldNetwork,
+  intent: "board" | "travel"
+): Promise<void> {
+  expect(fixture.app.flow.gate.answer({ intent })).toBe(true);
+  await fixture.frames(1);
+
+  expect(network.waiting()).toHaveLength(1);
+  expect(leaveNode(fixture, "renderer.leave.cover")?.alpha).toBeGreaterThan(0);
+}
+
+describe("a download that fails under the veil", () => {
+  // Bug: the `load` stage throws and nothing drops the veil: the ward the rollback returns to stays dimmed, the ring
+  // turning over it, while the player answers it again. This path is guarded twice: by the abort of the failed node,
+  // and by the backstop of the ward's `begin`, which drops a look left over. The two cases below prove the abort alone:
+  // no `begin` comes before the veil must go.
+  it("is gone when the rollback returns to the ward", async () => {
+    const network = heldNetwork();
+    const fixture = await openFailing(network, { safeNode: "ward", retries: 1 });
+    const { app } = fixture;
+
+    await leaveUnderVeil(fixture, network, "travel");
+    network.fail();
+    await arrive(fixture, "ward");
+    await fixture.frames(1);
+
+    expect(app.log.trace().filter(entry => entry.event === "flow:error")).toHaveLength(1);
+    expect(app.scenes.current()).toBe("ward");
+    expect(app.flow.gate.state().allowed).toEqual(["board", "travel"]);
+    expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
+  });
+
+  // Bug: after the give-up the safe node's `recover` runs before any stage of the next node, so a veil only the next
+  // `begin` drops covers the question `recover` asks at the gate.
+  it("is gone while the safe node's recover waits at the gate", async () => {
+    const network = heldNetwork();
+    const fixture = await openFailing(network, { safeNode: "ward", retries: 0 });
+    const { app } = fixture;
+
+    await leaveUnderVeil(fixture, network, "board");
+    network.fail();
+    await fixture.frames(2);
+
+    // The recovery waits for the player's "retry"; the ward under it is undimmed.
+    expect(app.flow.gate.state()).toMatchObject({ open: true, allowed: ["retry"] });
+    expect(app.scenes.current()).toBe("ward");
+    expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
+
+    expect(app.flow.gate.answer({ intent: "retry" })).toBe(true);
+    await arrive(fixture, "ward");
+
+    expect(app.flow.gate.state().allowed).toEqual(["board", "travel"]);
+  });
+
+  // Bug: a failure inside the safe node rejects `run()` with nothing after it, and the veil the safe node's `begin`
+  // showed stays over the game until it stops.
+  it("is gone after a fatal failure inside the safe node", async () => {
+    const network = heldNetwork();
+    const fixture = await openFailing(network, { safeNode: "board", retries: 0 });
+    const { app } = fixture;
+
+    await leaveUnderVeil(fixture, network, "board");
+    network.fail();
+    // The give-up enters the safe node, the board: its `begin` shows the veil again while its file downloads.
+    await fixture.frames(1);
+
+    expect(network.waiting()).toHaveLength(1);
+    expect(leaveNode(fixture, "renderer.leave.cover")?.alpha).toBeGreaterThan(0);
+
+    network.fail();
+    await fixture.frames(2);
+
+    expect(String(fixture.ended.error)).toContain("failed while the graph was recovering");
+    expect(app.scenes.current()).toBe("ward");
+    expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
   });
 });

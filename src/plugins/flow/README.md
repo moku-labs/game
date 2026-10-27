@@ -26,7 +26,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | Method | Behaviour |
 |---|---|
 | `run(): Promise<void>` | Validates the graph, seals `features`, loads the save and enters `mainFlow.start`. Called once, by the consumer's `onStart`. Rejects on a fatal error; resolves when `onStop` aborts the loop. |
-| `onEnter(stage, fn): () => void` | Registry for the plugins above: `assets` preloads at `"load"`, `scenes` switches at `"scene"`. The callback gets `NodeInfo`, which carries `scene` when the node was defined with `defineNode({ scene: "board", ... })`; a game that passes `scenes: "home" | "board"` to `defineGame` gets the id checked by the compiler. A node without `scene` keeps the current scene; an `over` node must not name one. |
+| `onEnter(stage, fn): () => void` | Registry for the plugins above, three stages run in this order before the node body, each callback awaited: `scenes` reacts at `"begin"` (the veil over the scene being left, in the next frame), `assets` preloads at `"load"`, `scenes` switches at `"scene"`. A `"begin"` callback must not wait: it starts what reacts at once and returns, since the loads start only after it. Once the node is aborted (a restore, a stop) no further stage starts. A stage that throws ends the node: its signal is aborted with reason `"failed"` before the rollback, so what an earlier stage started for it (the veil of `scenes`) goes at once, also before a safe node's `recover` and on a fatal failure. The callback gets `NodeInfo`, which carries `scene` when the node was defined with `defineNode({ scene: "board", ... })`; a game that passes `scenes: "home" | "board"` to `defineGame` gets the id checked by the compiler. A node without `scene` keeps the current scene; an `over` node must not name one. |
 | `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. `options.from` enters a bookmark first. A rest node is entered before the switch to fast mode. A transit node is entered after the switch, without waiting for its gate. |
 | `bookmark(): Bookmark` | Where the graph stands as serialisable data: the last rest node, or the transit node that waits at the gate for an answer. See [Bookmark and restore](#bookmark-and-restore). Flow does not know scenes: the optional `scene` field is written by the `game.bookmark` door only. |
 | `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. Ignores `scene`. For a rest node it resolves before the scene stage of the restored node runs; `walk([])` waits for the gate it opens after that stage. For a transit node it resolves once that node opened its gate. It also resolves when the loop ends first, by a stop or a fatal error: nothing is entered then, and `state()` shows where the graph stands. See [Bookmark and restore](#bookmark-and-restore). |
@@ -164,7 +164,12 @@ The second form needs no timeline: the item's projection draws the flight from s
 A node that throws, an `onEnter` stage that rejects, an edge that leads nowhere, a `to()` mapper
 that throws or returns a value that is not JSON, and an edge beyond the cap of edges without a
 rest node all fail the transition. The runner discards the transaction, drops the hints, shuts the
-gate and rolls the state back to the last rest point.
+gate and rolls the state back to the last rest point. A node whose `onEnter` stage rejects is first
+aborted with reason `"failed"`: what an earlier stage started for it, listening to its signal, ends
+before the rollback, in all three rows below. A stage that rejects with the abort itself after a
+stop or a restore (the `AbortError` of a cancelled download, or the signal's reason) is that abort,
+not a failure: the node is left as an aborted one, with no rollback, no failure counted and no
+`flow:error`. A real error that arrives after the abort is still a failure.
 
 | Failures in a row | Where the graph goes | `retry` |
 |---|---|---|
@@ -516,8 +521,8 @@ to release a `"leave"` bundle.
 - A flow contributed to a slot (`contribute`) that its feature does not list in `flows` has no
   owner. List it in `flows`. The owner rule is part of the graph hash, so it does not change.
 - `flow:rest` fires after the edge committed and `stack` moved to the rest node, before that
-  node's `load` and `scene` stages: the scene mounted at that moment is still the one of the node
-  before.
+  node's `begin`, `load` and `scene` stages: the scene mounted at that moment is still the one of
+  the node before.
 
 The `onEnter` stages of a node read the state it is entered with: the state the edge into it
 committed, the bookmark's state after a restore, and the state the safe node's `recover`

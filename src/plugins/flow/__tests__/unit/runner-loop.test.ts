@@ -129,7 +129,7 @@ const createMockState = (): State => ({
   runner: {
     flushing: undefined,
     flows: new Map(),
-    enterCallbacks: { load: [], scene: [] },
+    enterCallbacks: { begin: [], load: [], scene: [] },
     stack: [],
     restFrame: undefined,
     slotAfter: undefined,
@@ -1079,6 +1079,86 @@ describe("runLoop", () => {
     await tick();
 
     expect(order.slice(0, 3)).toEqual(["load:boot", "scene:boot", "body"]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: the callbacks run in registration order across the stages, or `begin` is not the first stage: the veil a
+  // plugin starts at `begin` waits for a download another plugin registered at `load` earlier.
+  it("runs every begin callback before the first load callback, and every load callback before the scene ones", async () => {
+    const order: string[] = [];
+    const download = Promise.withResolvers<void>();
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const { begin, load, scene } = harness.ctx.state.runner.enterCallbacks;
+
+    // Registered against the order of the stages: scene first, begin last.
+    scene.push(() => {
+      order.push("scene");
+    });
+    load.push(async () => {
+      order.push("load:start");
+      await download.promise;
+      order.push("load:end");
+    });
+    begin.push(
+      () => {
+        order.push("begin:1");
+      },
+      () => {
+        order.push("begin:2");
+      }
+    );
+    harness.start();
+    await tick();
+
+    // The download is still running: both begin callbacks ran before it, the scene stage waits.
+    expect(order).toEqual(["begin:1", "begin:2", "load:start"]);
+
+    download.resolve();
+    await tick();
+
+    expect(order).toEqual(["begin:1", "begin:2", "load:start", "load:end", "scene"]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a node aborted during `begin` still runs its later stages: the bundles of a node the player already left are
+  // downloaded, and its `scene` stage switches for nobody. A stop ends the loop; a restore or the inbox lets it go on,
+  // here into the same node again, whose stages then all run.
+  it.each([
+    ["stop", ["begin"], true],
+    ["restore", ["begin", "begin", "load", "scene"], false],
+    ["inbox", ["begin", "begin", "load", "scene"], false]
+  ] as const)("starts no further stage once the node was aborted between two stages (%s)", async (reason, expected, ends) => {
+    const order: string[] = [];
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const ended = { value: false };
+    const { begin, load, scene } = harness.ctx.state.runner.enterCallbacks;
+
+    begin.push(() => {
+      order.push("begin");
+      // The first entry only: the one after it runs on.
+      if (order.length === 1) harness.ctx.state.runner.abort?.abort(reason);
+    });
+    load.push(() => {
+      order.push("load");
+    });
+    scene.push(() => {
+      order.push("scene");
+    });
+
+    const running = harness.start();
+
+    running.then(
+      () => {
+        ended.value = true;
+      },
+      () => undefined
+    );
+    await tick();
+
+    expect(order).toEqual(expected);
+    expect(ended.value).toBe(ends);
     await stopRunner(harness.ctx);
   });
 
@@ -2902,6 +2982,126 @@ describe("restorePosition", () => {
     await expect(running).rejects.toThrow(
       '[game] The bookmark names no node "gone".\n  Bookmark a node of the running graph.'
     );
+  });
+});
+
+// ─── a node whose stage threw ─────────────────────────────────
+
+describe("a node whose onEnter stage threw", () => {
+  // Bug: a stage that throws aborts nothing, so what an earlier stage started for the node (the veil `scenes` shows at
+  // `begin`) stays over the scene the rollback returns to; or the abort reads as a stop and the loop ends there.
+  it("is aborted with reason failed before the rollback, and the retry goes on", async () => {
+    const seen: Array<{ reason: unknown; rolledBack: boolean }> = [];
+    const entries = { count: 0 };
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const { begin, load } = harness.ctx.state.runner.enterCallbacks;
+
+    begin.push((_info, { signal }) => {
+      entries.count += 1;
+      signal.addEventListener(
+        "abort",
+        () => {
+          seen.push({ reason: signal.reason, rolledBack: harness.calls.includes("rollback") });
+        },
+        { once: true }
+      );
+    });
+    load.push(() => {
+      if (entries.count === 1) throw new Error("offline");
+    });
+    harness.start();
+    await tick();
+
+    expect(seen).toEqual([{ reason: "failed", rolledBack: false }]);
+    // The retry entered the node again, its stages passed and its gate opened.
+    expect(entries.count).toBe(2);
+    expect(harness.calls).toContain("open:play");
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a stop or a restore that lands while `load` awaits a download makes the download reject with an AbortError,
+  // and the runner takes it for a failure of the node: a rollback, a failure counted, `flow:error` and an error entry
+  // for a node that did not fail.
+  it.each([
+    ["stop", "the AbortError of the cancelled download"],
+    ["restore", "the AbortError of the cancelled download"],
+    ["restore", "the signal's own reason"]
+  ] as const)("takes a stage that rejects after a %s with %s for that abort, not a failure", async (reason, rejection) => {
+    const home = node({ rest: true, checkpoint: true, outcomes: ["play"] });
+    const main = flow("main", { home }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const entries = { count: 0 };
+
+    harness.ctx.state.runner.enterCallbacks.load.push((_info, { signal }) => {
+      entries.count += 1;
+
+      // The first entry downloads until it is cancelled; the bookmark's entry finds its bundles in.
+      if (entries.count > 1) return;
+
+      return new Promise<void>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            reject(
+              rejection === "the signal's own reason"
+                ? signal.reason
+                : new DOMException("The download was cancelled.", "AbortError")
+            );
+          },
+          { once: true }
+        );
+      });
+    });
+
+    const running = harness.start();
+
+    await tick();
+
+    await (reason === "stop"
+      ? stopRunner(harness.ctx)
+      : restorePosition(harness.ctx, harness.modules, bookmarkAt("home")));
+    await tick();
+
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
+    expect(harness.ctx.log.error).not.toHaveBeenCalled();
+    expect(harness.ctx.state.runner.failures).toBe(0);
+    expect(harness.calls).not.toContain("rollback");
+
+    if (reason === "stop") {
+      await expect(running).resolves.toBeUndefined();
+    } else {
+      // The bookmark's node was entered and its gate opened.
+      expect(entries.count).toBe(2);
+      expect(harness.calls).toContain("open:play");
+    }
+
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a stage that throws inside the safe node ends the loop with run() rejected and the node never aborted: what
+  // its `begin` stage started stays on screen for good.
+  it("is aborted before run() rejects on a fatal failure inside the safe node", async () => {
+    const reasons: unknown[] = [];
+    const home = node({ rest: true, checkpoint: true, outcomes: ["play"] });
+    const main = flow("main", { home }, "home", { home: { play: "home" } });
+    const harness = setup({ main, config: { safeNode: "home", retries: 0 } });
+    const { begin, load } = harness.ctx.state.runner.enterCallbacks;
+
+    begin.push((_info, { signal }) => {
+      signal.addEventListener("abort", () => reasons.push(signal.reason), { once: true });
+    });
+    load.push(() => {
+      throw new Error("offline");
+    });
+
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    expect(fatal.error?.message).toContain("failed while the graph was recovering");
+    // The give-up, then the fatal failure inside the safe node: both aborted.
+    expect(reasons).toEqual(["failed", "failed"]);
   });
 });
 

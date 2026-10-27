@@ -1,6 +1,6 @@
 # scenes
 
-> Standard plugin — a scene is a declaration, not a manager. A bundle, the bundles of state it names, named layers, a list of projections, optional music. A node names its scene; the switch runs inside `flow.onEnter("scene")`.
+> Standard plugin — a scene is a declaration, not a manager. A bundle, the bundles of state it names, named layers, a list of projections, optional music. A node names its scene; the switch runs inside `flow.onEnter("scene")`, and the veil over the scene being left goes up at `flow.onEnter("begin")`, before anything is downloaded.
 
 There is no scene life cycle to learn. The four mechanisms already exist: bundles in `assets`, layers and projections in `world`, the switch moment in `flow`. This plugin is the sentence that joins them.
 
@@ -116,7 +116,7 @@ app.scenes.current(); // "home"
 
 ## The switch
 
-`Stage` in `flow` is `"load"` then `"scene"`, each awaited before the node body, so the node preload of `assets` is done when the switch starts. The scene still awaits its own bundles, because they may not be in that preload. There are two paths: the **switch** to another scene, and the **re-read** at a node that keeps the mounted scene.
+`Stage` in `flow` is `"begin"`, `"load"`, then `"scene"`, each awaited before the node body. At `"begin"` a live switch only shows its look over the scene being left and returns (see [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left)); the node preload of `assets` at `"load"` is done when the switch starts. The scene still awaits its own bundles, because they may not be in that preload. There are two paths: the **switch** to another scene, and the **re-read** at a node that keeps the mounted scene.
 
 | Step | What happens |
 |---|---|
@@ -254,15 +254,24 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   (`renderer.host.ready()`): the switches that build aside. A fast walk (a restore, a test walk), a node entered live
   while the world walks fast or stands paused (the restore of a repro), a headless app and the first scene of a run
   show nothing, and so does a switch whose look resolves to nothing.
-- **The start.** The look is handed to `renderer.sync.leave.show` at the start of the switch, right after `bundles` was
-  read and before the bundles and their textures are awaited, so the veil is in the next frame. A bundle that is not
-  loaded at all when the node is entered holds the `load` stage of `assets`, which runs before the `scene` stage: the
-  veil then comes after that load.
+- **The start.** The look is handed to `renderer.sync.leave.show` at the `begin` stage of the node (spec 33, slice A3),
+  the first stage of entering it, before the `load` stage of `assets` downloads the coming scene's bundles: the veil is
+  in the next frame, also on a cold first visit (with slice A2 alone it came only after that download, as measured on
+  the A26). The `begin` stage reads the target by the rules of steps 1 to 4 without touching the pending record, and starts
+  the look only for a real change to a registered scene; it never waits. The `scene` stage of the same node takes the
+  look over, so a switch shows one look. A switch the `begin` stage did not see shows it at its own start, right after
+  `bundles` was read.
 - **The swap.** Once the scene stands (the block of step 13, a commit or a one-block mount), `renderer.sync.leave.land`:
   the loader goes at once and the veil fades out over `outMs` above the new scene, then leaves the stage.
 - **Without a swap.** An abort of the node (a restore, the inbox, a stop of the runner) drops the veil and the loader
-  at once, from the abort listener of the switch; a switch that throws (a failed load, a `view` that throws) drops
-  them before its rejection. A stop of the plugin forgets the look; the renderer drops it at its own stop.
+  at once, from the abort listener of the switch; a switch that throws (a failed load, a `bundles` or a `view` that
+  throws) drops them before its rejection. A `load` stage that throws (a download that failed) never reaches the
+  switch: `flow` aborts the node with reason `"failed"` before it rolls back, so the abort listener drops the look at
+  once, before the rest node is entered again, before a safe node's `recover` waits at its gate, and before `run()`
+  rejects on a fatal failure. The `begin` stage of the next node drops a look left over all the same (a backstop). A
+  look the `scene` stage of its node does not use (the expected scene changed between the stages) is dropped there,
+  and one `begin` started for another scene than the one the switch mounts is dropped and shown again for it. A stop
+  of the plugin forgets the look; the renderer drops it at its own stop.
 - **No tap.** The veil and the loader take no tap: the hit test walks the scene's layers only. The gate is closed during
   a switch anyway.
 - **A loader projection** draws in a layer of its own that the scene being left declares (`loading: {}`). It is mounted
@@ -370,7 +379,7 @@ own view built and warmed ahead) is later work (spec 33, slice C).
 
 | Plugin | Used for |
 |---|---|
-| `flow` | `onEnter("scene", fn)`, `features.all()` |
+| `flow` | `onEnter("begin", fn)` for the look, `onEnter("scene", fn)` for the switch, `features.all()` |
 | `world` | `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection once its loader is due, and its `projection.unmount` at the end; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
 | `renderer` | `host.ready()`, which picks the path of a live switch and whether it shows a look; `sync.leave.show` at its start, `sync.leave.land` after its swap and `sync.leave.drop` on an abort or a throw; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
@@ -379,7 +388,7 @@ own view built and warmed ahead) is later work (spec 33, slice C).
 
 ## Lifecycle
 
-`onInit` checks `buildMs` and `leave`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, forgets the look of a running switch (its abort listener goes), and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
+`onInit` checks `buildMs` and `leave`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("begin")` and `onEnter("scene")` callbacks, keeping one remover for both. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, forgets the look of a running switch (its abort listener goes), and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
 
 ## Not in V2
 

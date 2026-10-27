@@ -61,13 +61,13 @@ describe("startScenes", () => {
     );
   });
 
-  it("registers one callback on the scene stage and keeps its remover", () => {
+  // Bug: the look is registered on `load` or `scene` (it waits for the download it should cover), or not at all.
+  it("registers one callback on the begin stage and one on the scene stage, and keeps their remover", () => {
     const mock = createMockScenes();
 
     mock.start();
 
-    expect(mock.flow.enter).toHaveLength(1);
-    expect(mock.flow.enter[0]?.stage).toBe("scene");
+    expect(mock.flow.enter.map(entry => entry.stage)).toEqual(["begin", "scene"]);
     expect(mock.state.teardown).toBeInstanceOf(Function);
   });
 });

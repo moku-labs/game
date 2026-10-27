@@ -6,8 +6,8 @@ import type { Json, Transaction } from "../../model/types";
 import type { WorldEvent } from "../inbox/types";
 import type { AnyFlow, AnyNode, FlowEntry, Frame, Result, Stage } from "./types";
 
-/** The stages of entering a node, in the order they run. */
-export const stages: readonly Stage[] = ["load", "scene"];
+/** The stages of entering a node, in the order they run: what reacts at once, the loads, the scene. */
+export const stages: readonly Stage[] = ["begin", "load", "scene"];
 
 /** How deep the graph may nest or exit before the runner calls it a mistake. */
 export const maxDepth = 32;
@@ -21,8 +21,11 @@ export const noPayload: Json = null;
 /** Where one frame points: the flow, the name inside it and the entry itself. */
 export type Location = { flow: AnyFlow; name: string; entry: FlowEntry };
 
-/** Why the runner aborted the active node. */
-export type AbortReason = "stop" | "inbox" | "restore";
+/**
+ * Why the runner aborted the active node. `"failed"`: a stage of the node threw, and the runner
+ * aborts it before it rolls back, so what an earlier stage started for the node ends at once.
+ */
+export type AbortReason = "stop" | "inbox" | "restore" | "failed";
 
 /** What one node run produced. Nothing here throws: the loop reads the variant. */
 export type NodeOutcome =

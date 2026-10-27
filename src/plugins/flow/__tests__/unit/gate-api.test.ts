@@ -120,7 +120,7 @@ const createTestState = (): State => ({
   runner: {
     flushing: undefined,
     flows: new Map(),
-    enterCallbacks: { load: [], scene: [] },
+    enterCallbacks: { begin: [], load: [], scene: [] },
     stack: [],
     restFrame: undefined,
     slotAfter: undefined,

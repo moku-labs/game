@@ -28,7 +28,7 @@ export function createRunnerState(): RunnerState {
   return {
     flushing: undefined,
     flows: emptyFlows(),
-    enterCallbacks: { load: [], scene: [] },
+    enterCallbacks: { begin: [], load: [], scene: [] },
     stack: [],
     restFrame: undefined,
     slotAfter: undefined,

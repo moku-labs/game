@@ -226,7 +226,9 @@ export function nodeInfo(path: string, location: Location, node: AnyNode): NodeI
 }
 
 /**
- * Runs the `onEnter` callbacks stage by stage, registration order inside a stage, each awaited.
+ * Runs the `onEnter` callbacks stage by stage (`begin`, `load`, `scene`), registration order inside
+ * a stage, each awaited. A node aborted meanwhile starts no further stage: a restore during
+ * `begin` loads nothing for the node it left.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param info - The node being entered.
@@ -240,6 +242,9 @@ export async function runEnterCallbacks(
   const mode = ctx.state.fx.mode;
 
   for (const stage of stages) {
+    // The node was left between two stages: the callbacks of the rest would work for nobody.
+    if (signal.aborted) return;
+
     const callbacks = [...ctx.state.runner.enterCallbacks[stage]];
 
     for (const callback of callbacks) {
@@ -258,15 +263,39 @@ export async function runEnterCallbacks(
  * @example
  * ```ts
  * abortReason(AbortSignal.abort("inbox")); // "inbox"
+ * abortReason(AbortSignal.abort("failed")); // "failed": a stage of the node threw
  * abortReason(AbortSignal.abort()); // "stop": anything unexpected
  * ```
  */
 export function abortReason(signal: AbortSignal): AbortReason {
   const reason: unknown = signal.reason;
 
-  if (reason === "inbox" || reason === "restore") return reason;
+  if (reason === "inbox" || reason === "restore" || reason === "failed") return reason;
 
   return "stop";
+}
+
+/**
+ * Tells whether a stage rejected because its node was aborted: with an `AbortError` (the wait of a
+ * download that a stop or a restore cancelled) or with the signal's own reason. A real error that
+ * arrives after the abort is still a failure of the node.
+ *
+ * @param signal - The node's abort signal.
+ * @param error - What the stage rejected with.
+ * @returns True when the rejection is the abort itself.
+ * @example
+ * ```ts
+ * const aborted = AbortSignal.abort("restore");
+ * const cancelled = Object.assign(new Error("[game] assets: the load was aborted."), { name: "AbortError" });
+ * isAbortRejection(aborted, cancelled); // true
+ * isAbortRejection(aborted, new Error("offline")); // false: a real failure
+ * ```
+ */
+export function isAbortRejection(signal: AbortSignal, error: unknown): boolean {
+  if (!signal.aborted) return false;
+  if (error === signal.reason) return true;
+
+  return error instanceof Error && error.name === "AbortError";
 }
 
 /**

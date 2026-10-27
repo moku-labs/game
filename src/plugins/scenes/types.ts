@@ -402,7 +402,7 @@ export type State = {
    */
   named: readonly string[];
   owner: SceneOwner;
-  /** The remover of the `onEnter` callback: set in `onStart`, run in `onStop`. */
+  /** The remover of the two `onEnter` callbacks, `begin` and `scene`: set in `onStart`, run in `onStop`. */
   teardown: (() => void) | undefined;
   /**
    * The build of the next scene on a live switch, from its start to its commit or discard.
@@ -410,17 +410,28 @@ export type State = {
    */
   build?: SceneBuild;
   /**
-   * The veil and the loader of the running switch, from its start to its swap or its end without one. Absent
-   * otherwise: deleted, never written as `undefined`.
+   * The veil and the loader of the running switch, from the `begin` stage of its node to its swap or its end without
+   * one. Absent otherwise: deleted, never written as `undefined`.
    */
   leaving?: Leaving;
 };
 
 /**
- * The veil and the loader a switch showed over the scene being left (spec 33, slice A2): whether they were taken down
- * already, the loader projection it mounted once its loader was due, and how to stop listening to the abort of its node.
+ * The veil and the loader a switch showed over the scene being left (spec 33, slices A2 and A3): the node that started
+ * them, whether they were taken down already, the loader projection it mounted once its loader was due, and how to stop
+ * listening to the abort of its node.
  */
 export type Leaving = {
+  /**
+   * The abort signal of the node whose `begin` stage started the look: its `scene` stage takes the look over, and the
+   * `begin` stage of any later node finds it left over by a node that never reached its `scene` stage.
+   */
+  signal: AbortSignal;
+  /**
+   * The scene the look was started for: the `scene` stage takes it over only for that scene, since its loader was
+   * resolved against it.
+   */
+  to: string;
   /** Landed or dropped: a second end does nothing. */
   done: boolean;
   /** The loader projection the switch mounted, unmounted at the end; absent while it mounted none. */
