@@ -15,6 +15,7 @@ import type { NodeInfo } from "../flow/types";
 import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
 import { dropLeftOver, endLeave, leaveFor, ownLeave, startLeave } from "./leave";
+import { afterReaction, watchReaction } from "./reaction";
 import { swapIn } from "./swap";
 import type { Leaving, RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
@@ -242,10 +243,15 @@ async function standUp(
   run: RunContext
 ): Promise<void> {
   if (buildsAside(ctx, run)) {
-    const building = buildAside(ctx, scene, named, run.signal);
+    const started = await afterReaction(ctx, run, inFrame =>
+      buildAside(ctx, scene, named, { signal: run.signal, inFrame })
+    );
 
-    if (building !== undefined) {
-      await building;
+    // Aborted or stopped while the reaction frame was drawn: nothing was built.
+    if (started === undefined) return;
+
+    if (started.building !== undefined) {
+      await started.building;
 
       return;
     }
@@ -418,7 +424,8 @@ function nextScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | un
 /**
  * The `begin` stage of entering a node, which must not wait (spec 33, slice A3): a node that
  * switches to another scene shows the look of the scene being left now, before the `load` stage
- * downloads the bundles of the coming one, so a cold first visit reacts in the next frame. The
+ * downloads the bundles of the coming one, so a cold first visit reacts in the next frame, and
+ * starts watching for that frame: the build waits for it (slice R). The
  * `scene` stage of the same node takes the look over, lands it at the swap or drops it. A node
  * that keeps the scene, the first scene of a run, a fast walk and an aborted node start nothing
  * (`startLeave` decides the rest). A stage after `begin` that throws aborts the node, and the abort
@@ -438,5 +445,8 @@ export function beginScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): voi
   // A scene no feature declared starts nothing: the `scene` stage throws for it.
   const scene = ctx.state.scenes.get(target);
 
-  if (scene !== undefined) startLeave(ctx, scene, run);
+  if (scene === undefined) return;
+
+  watchReaction(ctx, run);
+  startLeave(ctx, scene, run);
 }

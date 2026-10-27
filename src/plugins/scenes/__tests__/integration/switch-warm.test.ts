@@ -178,23 +178,25 @@ describe("scenes integration: a live switch uploads the new scene's textures fir
     expect(made.slice((at ?? 0) - 1)).toEqual(made.slice((at ?? 0) - 1).map(() => 4));
   });
 
-  // Bug: the switch waits a frame or more for textures that are on the GPU already.
+  // Bug: the switch waits a frame or more beyond a plain switch for textures that are on the GPU already.
   it("switches back to a board whose textures are uploaded at the speed of a plain switch", async () => {
     const { app, frames } = await startGame();
 
     app.flow.gate.answer({ intent: "open" });
     await frames(6);
     app.flow.gate.answer({ intent: "back" });
-    await frames(1);
+    await frames(3);
 
     const left = clock.frame;
 
     expect(app.flow.gate.answer({ intent: "open" })).toBe(true);
-    await frames(1);
+    await frames(3);
 
     const back = switched.findLast(entry => entry.to === "board")?.frame;
 
     expect(app.flow.state().path).toBe("board");
-    expect(back).toBe(left);
+    // A plain switch (slice R): the frame after the answer draws the reaction, the next one builds (the renderer makes
+    // the views aside in its pass), and the one after swaps.
+    expect(back).toBe(left + 3);
   });
 });

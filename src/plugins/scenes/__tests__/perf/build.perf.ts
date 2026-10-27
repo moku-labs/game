@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
-import { buildWaiting, bytesPerCall } from "./fixtures";
+import { buildWaiting, bytesPerCall, reactionWaiting } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the `signals` callback of a scene built aside (spec 31, F61 S2), which every frame of a build runs until the
@@ -13,5 +13,12 @@ describe("the frame callback of a scene build, heap bytes per call", () => {
     const frame = await buildWaiting();
 
     expect(bytesPerCall(frame)).toBeLessThanOrEqual(BUDGET.buildWaiting + NOISE);
+  });
+
+  // Bug: the callback of a switch waiting for its reaction frame allocates each frame it finds the frame not drawn.
+  it("while the reaction frame is not drawn: nothing", async () => {
+    const frame = await reactionWaiting();
+
+    expect(bytesPerCall(frame)).toBeLessThanOrEqual(BUDGET.reactionWaiting + NOISE);
   });
 });

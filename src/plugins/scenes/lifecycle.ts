@@ -13,6 +13,7 @@ import { dropBuild, isPositiveFinite } from "./build";
 import { isSceneDefinition } from "./bundles";
 import { forgetLeave } from "./leave";
 import { checkLeave } from "./leave-check";
+import { forgetReaction } from "./reaction";
 import { beginScene, enterScene } from "./switch";
 import type { Config, Deps, KernelSlice, ScenesCtx, State } from "./types";
 
@@ -160,6 +161,7 @@ export function stopScenes(teardown: { state: State }): void {
   dropBuild(state.build);
   delete state.build;
   forgetLeave(state);
+  forgetReaction(state);
   state.scenes.clear();
   state.current = undefined;
   state.pending = undefined;

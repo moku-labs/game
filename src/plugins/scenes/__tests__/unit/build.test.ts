@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineScene } from "../../define";
-import type { Config } from "../../types";
+import type { Config, RunContext } from "../../types";
 import { createMockScenes, type MockScenes } from "./mock-scenes";
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,37 @@ const boardScene = defineScene("board", {
  */
 async function flush(): Promise<void> {
   for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+}
+
+/**
+ * Draws the reaction frame of a live switch and runs the `input` phase of the next frame, where the build starts
+ * (slice R), without the build's own `signals` step.
+ *
+ * @param mock - The mock with a switch past its `begin` stage.
+ */
+async function react(mock: MockScenes): Promise<void> {
+  mock.time.phase("render");
+  mock.time.phase("input");
+  await flush();
+}
+
+/**
+ * Switches to the board as a live node does: the stages, the reaction frame drawn, and the switch waited for.
+ *
+ * @param mock - The mock on home.
+ * @param run - The mode of the run.
+ * @returns The switch, settled.
+ */
+async function switchTo(mock: MockScenes, run: Partial<RunContext> = {}): Promise<void> {
+  const entering = mock.enter({ rest: true, scene: "board" }, run);
+
+  entering.catch(() => undefined);
+  await flush();
+  // The reaction frame, then the frame the build starts in.
+  mock.time.frame();
+  mock.time.frame();
+
+  return entering;
 }
 
 /**
@@ -77,6 +108,7 @@ async function enterBoard(
     });
 
   await flush();
+  await react(mock);
 
   return { entering, settled };
 }
@@ -125,13 +157,13 @@ describe("the path of a switch", () => {
     const plain = await onHome();
 
     plain.world.building.answer = false;
-    await plain.enter({ rest: true, scene: "board" });
+    await switchTo(plain);
 
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const dev = await onHome();
 
     dev.world.building.answer = false;
-    await dev.enter({ rest: true, scene: "board" });
+    await switchTo(dev);
 
     expect(plain.world.calls).toEqual(["build", "setLayers", "unmount", "mount"]);
     expect(plain.state.current).toBe("board");
@@ -201,9 +233,13 @@ describe("a scene built aside", () => {
   // Bug: a scene of kept projections only waits a frame for nothing, so every fake-clock test moves by a frame.
   it("commits inside the switch, with no frame, when nothing is left to build", async () => {
     const mock = await onHome();
+    const run = { signal: new AbortController().signal };
 
+    // The reaction frame was drawn while the bundles downloaded: the build starts between two frames.
+    await mock.stage("begin", { rest: true, scene: "board" }, run);
+    mock.time.frame();
     mock.world.building.done = true;
-    await mock.enter({ rest: true, scene: "board" });
+    await mock.stage("scene", { rest: true, scene: "board" }, run);
 
     expect(mock.world.calls).toEqual(["build", "setLayers", "unmount", "commit"]);
     expect(mock.api.current()).toBe("board");
@@ -326,9 +362,7 @@ describe("a scene built aside that does not stand", () => {
 
     mock.world.building.error = new Error("board.items: view failed");
 
-    await expect(mock.enter({ rest: true, scene: "board" })).rejects.toThrow(
-      "board.items: view failed"
-    );
+    await expect(switchTo(mock)).rejects.toThrow("board.items: view failed");
     expect(mock.world.calls).toEqual(["build"]);
     expect(mock.api.current()).toBe("home");
     expect(mock.assets.coming).toEqual([]);
@@ -367,7 +401,7 @@ describe("a scene built aside that does not stand", () => {
     expect(mock.world.api.projection.built()).toBe(false);
     expect(mock.assets.coming).toEqual([["board"], []]);
 
-    await mock.enter({ rest: true, scene: "board" });
+    await switchTo(mock);
 
     expect(mock.world.building.calls).toHaveLength(2);
     expect(mock.api.current()).toBe("board");
@@ -402,6 +436,124 @@ describe("a scene built aside that does not stand", () => {
     expect(mock.time.callbacks.signals).toEqual([]);
     expect(mock.emitted).toEqual([]);
     expect("build" in mock.state).toBe(false);
+  });
+});
+
+describe("the reaction frame of a live switch (slice R)", () => {
+  // Bug: the build starts in the answer's turn, so the mount of the whole coming scene lands in the first frame after
+  // the release and the press look and the veil reach the screen one to three frames late.
+  it("starts the build in the input phase of the frame after the first drawn one, not in the answer's turn", async () => {
+    const mock = await onHome();
+    const entering = mock.enter({ rest: true, scene: "board" });
+
+    await flush();
+    expect(mock.world.building.calls).toEqual([]);
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledOnce();
+
+    mock.time.frame();
+    await flush();
+    expect(mock.world.building.calls).toEqual([]);
+
+    mock.time.phase("input");
+    expect(mock.world.building.calls).toHaveLength(1);
+    expect(mock.time.callbacks.input).toEqual([]);
+    expect(mock.time.callbacks.render).toEqual([]);
+
+    mock.world.building.done = true;
+    mock.time.frame();
+    await entering;
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug (F51b): a build done at its start inside a frame swaps in the `input` phase, and the frame's own steps release
+  // the old scene's bundles before its reconcile starts their exit.
+  it("swaps a build done at its start in the signals phase of the frame it started in", async () => {
+    const mock = await onHome();
+    const entering = mock.enter({ rest: true, scene: "board" });
+
+    await flush();
+    mock.time.frame();
+    mock.world.building.done = true;
+    mock.time.phase("input");
+    await flush();
+    expect(mock.world.calls).toEqual(["build"]);
+
+    mock.time.phase("signals");
+    await entering;
+    expect(mock.world.calls).toEqual(["build", "setLayers", "unmount", "commit"]);
+  });
+
+  // Bug: the first scene of a run, with nothing on screen to react with, waits a frame for a reaction.
+  it("builds the first scene of a run without waiting for a frame", async () => {
+    const mock = createMockScenes();
+
+    mock.flow.features.push({ name: "screens", description: { scenes: [homeScene, boardScene] } });
+    mock.start();
+    mock.renderer.host.ready.mockReturnValue(true);
+    mock.world.building.done = true;
+    await mock.enter({ rest: true, scene: "home" });
+
+    expect(mock.world.building.calls).toHaveLength(1);
+    expect(mock.api.current()).toBe("home");
+    expect(mock.time.callbacks.render).toEqual([]);
+  });
+
+  // Bug: a cold first visit, whose reaction frame was drawn while its bundles downloaded, waits one more frame.
+  it("starts at once when the reaction frame was drawn before the scene stage", async () => {
+    const mock = await onHome();
+    const run = { signal: new AbortController().signal };
+
+    await mock.stage("begin", { rest: true, scene: "board" }, run);
+    mock.time.frame();
+    mock.world.building.done = true;
+    await mock.stage("scene", { rest: true, scene: "board" }, run);
+
+    expect(mock.world.building.calls).toHaveLength(1);
+    expect(mock.api.current()).toBe("board");
+    expect(mock.time.callbacks.input).toEqual([]);
+  });
+
+  // Bug: a node aborted while its reaction frame is drawn builds the scene it no longer enters, or never returns.
+  it("builds nothing for a node aborted while it waits, and returns", async () => {
+    const mock = await onHome();
+    const abort = new AbortController();
+    const entering = mock.enter({ rest: true, scene: "board" }, { signal: abort.signal });
+
+    await flush();
+    abort.abort();
+    await entering;
+    mock.time.frame();
+    mock.time.frame();
+
+    expect(mock.world.building.calls).toEqual([]);
+    expect(mock.time.callbacks.input).toEqual([]);
+    expect(mock.api.current()).toBe("home");
+    expect("reaction" in mock.state).toBe(false);
+  });
+
+  // Bug: a stop while the switch waits for its reaction frame leaves a frame callback and a switch that never returns.
+  it("lets the switch return and leaves no frame callback when the plugin stops while it waits", async () => {
+    const mock = await onHome();
+    const entering = mock.enter({ rest: true, scene: "board" });
+
+    await flush();
+    mock.stop();
+    await entering;
+
+    expect(mock.world.building.calls).toEqual([]);
+    expect(mock.time.callbacks.input).toEqual([]);
+    expect(mock.time.callbacks.render).toEqual([]);
+  });
+
+  // Bug: a build that throws inside the frame loop is swallowed: the switch never settles.
+  it("rejects the switch with the throw of a build started in the input phase", async () => {
+    const mock = await onHome();
+
+    mock.world.building.error = new Error("board.items: view failed");
+
+    await expect(switchTo(mock)).rejects.toThrow("board.items: view failed");
+    expect(mock.time.callbacks.input).toEqual([]);
+    expect(mock.api.current()).toBe("home");
   });
 });
 

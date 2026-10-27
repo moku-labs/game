@@ -95,6 +95,25 @@ async function enterScene(
 }
 
 /**
+ * Switches to the board as a live node does: the stages, the reaction frame drawn, and the switch waited for.
+ *
+ * @param mock - The mock on home.
+ * @param run - The mode of the run.
+ * @returns The switch, settled.
+ */
+async function switchTo(mock: MockScenes, run: Partial<RunContext> = {}): Promise<void> {
+  const entering = mock.enter({ rest: true, scene: "board" }, run);
+
+  entering.catch(() => undefined);
+  await flush();
+  // The reaction frame, then the frame the build starts in.
+  mock.time.frame();
+  mock.time.frame();
+
+  return entering;
+}
+
+/**
  * Lets the held loads go, steps the build's frame with the build done, and waits for the switch.
  *
  * @param mock - The mock with a switch at its bundle wait.
@@ -102,6 +121,10 @@ async function enterScene(
  */
 async function finish(mock: MockScenes, entering: Promise<void>): Promise<void> {
   mock.assets.release();
+  await flush();
+  // The reaction frame, then the build starts in the next frame's `input` phase (slice R).
+  mock.time.phase("render");
+  mock.time.phase("input");
   await flush();
   mock.world.building.done = true;
   mock.time.frame();
@@ -223,7 +246,7 @@ describe("a live switch", () => {
     mock.world.mode = setup.world;
     // A build aside commits at its start: nothing is left for ui and the renderer.
     mock.world.building.done = true;
-    await mock.enter({ rest: true, scene: "board" }, { mode: setup.mode });
+    await switchTo(mock, { mode: setup.mode });
 
     expect(mock.renderer.leaves).toEqual([]);
   });

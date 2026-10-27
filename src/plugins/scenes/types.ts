@@ -414,6 +414,24 @@ export type State = {
    * one. Absent otherwise: deleted, never written as `undefined`.
    */
   leaving?: Leaving;
+  /**
+   * The watch for the reaction frame of the running switch (spec 33, slice R), from the `begin` stage of its node to the
+   * build start. Absent otherwise: deleted, never written as `undefined`.
+   */
+  reaction?: Reaction;
+};
+
+/**
+ * The reaction frame of a live switch (spec 33, slice R): the node that began it, whether a frame was drawn since, and
+ * how to stop watching, which also returns a build that waits for it with nothing started.
+ */
+export type Reaction = {
+  /** The abort signal of the node whose `begin` stage started the watch: only its `scene` stage waits for it. */
+  signal: AbortSignal;
+  /** A frame was drawn since the `begin` stage: the build may start. */
+  drawn: boolean;
+  /** Removes the frame listeners of the watch and returns a waiting build with nothing started. */
+  off: () => void;
 };
 
 /**

@@ -115,6 +115,8 @@ export type FakeTime = {
   fps: number;
   /** Runs one frame: every registered callback, phase by phase, as `time.step` does. */
   frame(): void;
+  /** Runs the callbacks of one phase only, as a part of a frame. */
+  phase(phase: Phase): void;
   api: TimeApi;
 };
 
@@ -425,6 +427,12 @@ function createFakeTime(journal: string[]): FakeTime {
         for (const callback of [...callbacks]) {
           callback({ delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false });
         }
+      }
+    },
+    phase: (phase: Phase): void => {
+      // eslint-disable-next-line unicorn/no-useless-spread -- a callback that removes itself does not skip the next one
+      for (const callback of [...fake.callbacks[phase]]) {
+        callback({ delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false });
       }
     },
     api: undefined as unknown as TimeApi
