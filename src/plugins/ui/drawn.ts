@@ -127,6 +127,23 @@ export function drawnPoseInto(reader: DrawnReader, entity: Entity, out: Transfor
 }
 
 /**
+ * Tells whether an entity belongs to a scene built aside or a held warm window: the entity itself,
+ * or the root of a ui element, as the reconcile asks it.
+ *
+ * @param reader - What the resolver reads.
+ * @param entity - The entity.
+ * @returns True while it is not on the screen yet.
+ */
+function building(reader: DrawnReader, entity: Entity): boolean {
+  const element = reader.elements.get(entity);
+
+  return (
+    reader.projection.isBuilding(entity) ||
+    (element !== undefined && reader.projection.isBuilding(element.root))
+  );
+}
+
+/**
  * Tells whether the player can see an entity: neither it nor anything it is drawn under is on its
  * way out, and the alphas of their visuals (`Shape`, `NineSlice`, `Sprite` or `Text`) multiply to
  * more than 0.01. The alpha of a visual fades the entity's children with it, as the renderer draws
@@ -263,7 +280,7 @@ export function drawnInto(
   out: Rect,
   pose: TransformValue
 ): boolean {
-  if (reader.projection.isBuilding(entity) || !visible(reader, entity)) return false;
+  if (building(reader, entity) || !visible(reader, entity)) return false;
   if (!drawnPoseInto(reader, entity, pose) || !localBoxInto(reader, entity, pose, out))
     return false;
 

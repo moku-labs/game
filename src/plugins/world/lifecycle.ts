@@ -159,8 +159,9 @@ function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionM
  * callback records the frame history before it clears the change sets; in an agent build the
  * timing table starts with the page clock of `time` and the `input` callback zeroes it each
  * frame. The resource `Now` gets `clock.now()` once here and first thing in every `input`
- * callback, so every system of a frame reads one moment; a running scene build counts its frame
- * budget from that moment too. `onStart` has no access to the
+ * callback, so every system of a frame reads one moment; a running scene build and a warm window in
+ * work count their frame budget from that moment too. After the reconcile the `input` callback
+ * takes one step of the warm windows. `onStart` has no access to the
  * plugin's own API, so it builds its own module objects — they are views on `ctx.state`, which is
  * the one place the modules keep their data.
  *
@@ -196,6 +197,8 @@ export function connectWorld(ctx: KernelSlice): void {
       // The time per system of the frame starts from 0, in place: no allocation.
       worldCtx.state.ecs.timing?.ms.fill(0);
       projection.reconcileIfDirty();
+      // After the reconcile: an open shows its held view first, a commit is seen by the refresh.
+      projection.stepWarm();
       ecs.runPhase("input", frame);
     }),
     time.onFrame("animate", frame => {
@@ -223,7 +226,7 @@ export function connectWorld(ctx: KernelSlice): void {
 /**
  * Empties the world in `onStop`: the frame callbacks and the hint listener are removed, then
  * every track, view, queued view, entity and resource is dropped, a running scene build and the
- * `onBuild` checks with them, and the scenes and the frame history are reset.
+ * `onBuild` checks with them, every warm record, and the scenes and the frame history are reset.
  * No `onRemoved` fires, because `renderer` stopped earlier and destroyed its own objects.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
@@ -253,6 +256,11 @@ export function clearWorld(state: State): void {
   state.projection.owedLoops = 0;
   delete state.projection.building;
   state.projection.buildChecks.length = 0;
+  state.projection.warm.clear();
+  state.projection.warmList.length = 0;
+  state.projection.warmHeld.clear();
+  delete state.projection.warmActive;
+  state.projection.warmStale = false;
 
   state.ecs.generations.length = 0;
   state.ecs.free.length = 0;

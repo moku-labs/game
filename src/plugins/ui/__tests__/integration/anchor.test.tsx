@@ -455,12 +455,17 @@ describe("an anchor whose target fades or which is a root", () => {
     expect(app.world.projection.build(["board.strip", "tutorial"], owner, layers, 4)).toBe(true);
     frames(app, 3);
 
-    expect(app.world.ecs.get(entityOf(app, WINDOW), Box)).toBeUndefined();
+    // `entityOf` names no entity of a build (spec 33 B+D): what carries a `Box` while the tutorial
+    // is built aside is read off the world, and matched to the keys once the swap made them live.
+    const boxed = new Set([...app.world.ecs.query(Box)].map(([entity]) => entity));
 
     app.world.projection.setLayers(layers);
     app.world.projection.commit();
     frames(app, 1);
 
+    // The tutorial was laid out aside, the window in it was not placed on the live seat.
+    expect(boxed.has(entityOf(app, { projection: "tutorial", key: "tutorialView" }))).toBe(true);
+    expect(boxed.has(entityOf(app, WINDOW))).toBe(false);
     expect(app.ui.rectOf(WINDOW)).toEqual({ x: 40, y: 1500, w: 116, h: 120 });
   });
 });

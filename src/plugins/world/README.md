@@ -157,24 +157,24 @@ app.world.ecs.snapshot().entities[0];
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. On a view whose projection names `initialOnly` fields the mute adds to them, and the remover keeps them. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
 | `membershipVersion(): number` | Moves every time a view enters the live views, leaves them, or is forgotten after its despawn, and on a clear. `ui` hosts the views of a projection again only when it moved. Allocates nothing. |
-| `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. A view's `keyOf` is the frozen address it keeps for its life: the same object every call. |
+| `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view and for the view a warm window holds hidden; `entityOf` answers for neither. Both also answer for a key registered with `registerKey`; `entityOf` never for an element of a build or of a held window (`isBuilding`), so game code reaches no button that is not on the screen. A view's `keyOf` is the frozen address it keeps for its life: the same object every call. |
 | `causeOf(entity)` | Why the view's motion hooks play: `"mount"` when the view came or goes with its screen (a scene mount, a load, a restore), `"change"` when a commit changed a live screen, `"discard"` when `discard()` dropped the scene build it belonged to; also answers for a view that just left, until the next sweep. A world projection passes the same value to `enter`/`exit` as their fourth argument; a discarded view plays no exit, so a game's hook never sees `"discard"`. |
 | `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
-| `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is neither mounted nor being built. A projection the running build mounts answers its building views, so a host of the coming scene can take them before the swap (`isBuilding` tells them apart). `ui` uses it to host a projection inside a slot. |
+| `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views, the view a warm window holds hidden and keys registered with `registerKey` are left out; `[]` when the projection is neither mounted nor being built. A projection the running build mounts answers its building views, so a host of the coming scene can take them before the swap (`isBuilding` tells them apart). `ui` uses it to host a projection inside a slot. |
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. A driver may report what its additive tracks add right now with the optional `offsetsOf(entity, component)`: the world then compares the value under a loop with the rest pose. |
 | `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
 | `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home, and where a restore and a load put it. The owner records the pose it draws the element with, every time that changes. The pose of an entity that is gone is dropped in the next live frame. |
-| `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. A key whose entity is gone is dropped in the next live frame, also when the remover was never called. |
+| `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. A key whose entity is gone is dropped in the next live frame, also when the remover was never called. An element registered while the projection's warm window is held and the projection shows no live view is held with the window (a row its list ranged in after it was built): `isBuilding` true, no `entityOf`, until the open. |
 | `onConverged(listener)` | Calls the listener after a reconcile a restore or a load caused, when every view and every element stands on its rest pose and every track on them is ended. `ui` builds its roots again after it, so each element stands as freshly mounted. The remover is safe to call twice. |
 | `rerunAll()` | Marks every mounted projection dirty and forces `view` for every item. |
 | `build(names, owner, layers, budgetMs): boolean` | Starts building the next scene aside (`scenes`, on a live switch with a drawing renderer). See [Building the next scene aside](#building-the-next-scene-aside). |
 | `built(): boolean` | True while a build runs and every `onBuild` check answers true; false without a build. `scenes` polls it once a frame. |
 | `commit()` | The swap: the building projections become mounted. `scenes` calls it right after `setLayers(coming)` and `unmount(leaving)`. Does nothing without a build. |
 | `discard()` | The abort: every entity of the build is despawned with no motion. Does nothing without a build. |
-| `left(): number` | Milliseconds of building budget left in this frame; `Infinity` without a build. Allocates nothing. |
-| `isBuilding(entity): boolean` | Whether an entity belongs to the running build, also inside an `onAdded` hook of its components. One set lookup, allocates nothing. |
-| `onBuild(check)` | Registers "my part of the build is done" (`ui`, `renderer`); the remover is safe to call twice. |
-| `adopt(entity)` | Marks an entity another plugin spawned for a building root as building (`ui`'s elements). Nothing without a build. |
+| `left(): number` | Milliseconds of building budget left in this frame, for a scene build or a warm window in work; `Infinity` while nothing is built and in a world that is not live (a pause or a fast walk drops the warm window in work). Allocates nothing. |
+| `isBuilding(entity): boolean` | Whether an entity is built aside or held warm: it belongs to the running build or to a warm window (its view, what `adopt` marked, an element registered for it while closed), also inside an `onAdded` hook of its components. Two set lookups, allocates nothing. |
+| `onBuild(check)` | Registers "my part of the build is done" (`ui`, `renderer`); the same checks tell when a warm window's view is built, and a world with none warms nothing. The remover is safe to call twice. |
+| `adopt(entity)` | Marks an entity another plugin spawned for a root built aside or held warm (`ui`'s elements): it joins the running build, else the warm window in work. Nothing when neither runs. |
 
 The authoring helpers are pure and exported from the package root:
 `component`, `tag`, `resource`, `mut`, `system`, `projection`, and `Layer`, `Order`, `Exiting`,
@@ -299,6 +299,75 @@ projection.commit(); // the board is mounted, nothing is building
   entity `adopt` marked, and drops the table. The mounted projections, the layer list and the
   scene are untouched, so a later `mount` of the same names works as before.
 
+#### Warm windows
+
+A window of a scene (a settings sheet, the shop, a card) opens in the frame after the tap when its
+projection declares `warm`: one item of the type `from` gives, which the engine keeps built and
+hidden while `from` does not show its key (spec 33, slice B+D).
+
+```ts
+// The settings sheet of a game: its main page is built while the board shows.
+export const settingsSheet = projection({
+  name: "settings.sheet",
+  layer: "ui",
+  from: (player: Player, session: Session) =>
+    session.sheet?.kind === "settings" ? [settingsModel(player, session, tables)] : [],
+  key: sheet => sheet.id,
+  view: sheet => settingsView(sheet),
+  warm: (player, session) => settingsModel(player, { ...session, sheet: { kind: "settings", page: "main" } }, tables)
+});
+```
+
+- **Held.** Every mounted projection that declares `warm` has a record. In the idle time of frames
+  world spawns the view of the warm item as a scene build spawns one: bare, flagged, then its `Layer`
+  and its components, so `isBuilding` answers true in every `onAdded` hook. ui and the renderer
+  build it in parts under `left()` and keep it off stage: never drawn, never hit, never found.
+  `keyOf` and `causeOf` answer for it (`"change"`, so its enter plays when it is shown); `entityOf`
+  and `entitiesOf` do not. A key `from` shows is not warmed: an open window is not built twice.
+- **Late elements.** `adopt` marks only for the record in work. An element whose key is registered
+  (`registerKey`) for a projection whose window is held, not shown, while the projection shows no
+  live view is held with the window too: a row a windowed list ranges in after the window was
+  ready. `isBuilding` answers true and `entityOf` nothing until the open; a discard despawns it with
+  the view. The sweep after a despawn forgets every held entity that is gone (the rows a refresh
+  took away), so the held sets of a window held for a long session do not grow.
+- **One step a frame**, in world's `input` callback after the reconcile: the `onBuild` checks of the
+  record in work are polled (all true: the view is ready and `left()` is `Infinity` again), or the
+  next record with work, in mounted order, spawns, patches or drops its view. The step runs only in
+  a live world, with no scene build, with at least one `onBuild` check (a drawing plugin: headless
+  warms nothing) and while no motion that owns its fields runs (a loop and a motion that repeats
+  forever do not count: they never end): the frames of an animation get no warm step. Where the
+  step may not run, the record in work is dropped: a paused or fast world builds no part of it, so
+  `left()` is `Infinity` through the pause and no frame is asked for it; it is built again once the
+  world is live. The budget
+  is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`; work
+  that starts wakes the loop. At rest the step reads two fields and returns: 0 B a frame
+  (`__tests__/perf/warm.perf.ts`).
+- **The open.** When `from` shows the key, the reconcile shows the held view instead of a spawn: the
+  same entity, out of the held set, into the live views. An item with the content of the warm one
+  (equal as JSON) runs no `view` and writes nothing; another one has the difference written directly,
+  with no `change` hook. The `enter` and `loop` hooks play as for a new view; a direct reconcile (fast
+  mode) plays none and the view owes its loop. A record still in work is shown as it stands, and ui
+  builds the rest of its root in one block.
+- **The close** plays the exit as before. The record goes cold and is built again in idle frames,
+  after the exit motion ended.
+- **A commit while the window rests.** The step reads `warm` again: the same content changes nothing;
+  the same key writes the difference into the held view, which is built again under the budget;
+  another key drops the view and spawns the new one. A forced rerun (a new locale, a hot swap) drops
+  the held view, which is then built again with the new `view`.
+- **What drops a held view**, despawned with the cause `"discard"` and no motion, with every entity
+  `adopt` marked for it: the start of a scene build drops the record in work (its parts would hold the
+  build); a ready one stays held and rests until the build ends, and a projection the coming scene
+  keeps keeps it, its `Order` moved to the new place. `unmount` and the clear forget the record; a
+  restore and a load drop every held view before their reconcile, so it is built again from the new
+  state. `onStop` forgets every record.
+- **A throw.** A `warm` or a `view` that throws for the warm item is logged as
+  `world:projection-failed` once per commit; nothing is held, and the window opens as before.
+- **Limits.** A held root hosts no live projection view: a `ui` host takes only views held as it is.
+  A projection that shows other keys live while it warms one holds no late element of its held root:
+  an element registered for it is taken as one of the live views'.
+  The editor's `game.projections` lists a held view, as it lists a view built aside. The cost is the
+  memory of every held view.
+
 #### `Now` — the frame's moment
 
 `Now` (`{ now }`, exported from the package root) is the moment of the frame on the game's clock:
@@ -377,15 +446,16 @@ const app = createApp({
 
 | `time` phase | What `world` does, in order |
 |---|---|
-| `input` | write `Now` from `clock.now()` → reconcile when dirty → drop the hint buffer → systems of `input` → flush commands |
+| `input` | write `Now` from `clock.now()` → reconcile when dirty → drop the hint buffer → one step of the warm windows → systems of `input` → flush commands |
 | `animate` | sweep ended motions (the driver advanced its tracks first) → forget dead elements → start the owed loops → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
 | `signals` | record the frame history (dev builds only) → clear every change set |
 
 The sweep does only the work there is: the live views are walked only while one may hold a motion
-(every view handle made since the last sweep, or a view still moving), the dead elements are looked
-for only after a despawn or a new `registerKey`, and the owed loops only while a view owes one. An
+(every view handle made since the last sweep, or a view still moving), the dead elements and the
+dead entities a warm window holds are looked for only after a despawn or a new `registerKey`, and
+the owed loops only while a view owes one. An
 idle frame of the world allocates nothing; `__tests__/perf/` holds the budgets that prove it.
 
 Before each system runs, the phase checks it: a system whose query has no entity, or none of
@@ -692,8 +762,8 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
   views, registered keys, recorded rest poses, the `onConverged` listeners, a running scene build
-  and the `onBuild` checks, the despawn queue, entities and resources, forgets the mounted scene,
-  and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
+  and the `onBuild` checks, every warm record, the despawn queue, entities and resources, forgets
+  the mounted scene, and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Doors
 

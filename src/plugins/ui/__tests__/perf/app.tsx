@@ -4,7 +4,8 @@
  * a JSX projection laid out in a slot of the board; and eight small HUD roots. Three host elements
  * of the board name two world projections each, forty sprite views per projection. The scroll
  * files mount one more root, an order strip; the box files one more, a list of names that wrap at
- * their box. Real flow, world, text and Yoga; inert renderer, headless.
+ * their box; the warm files two closed sheets the world holds warm. Real flow, world, text and
+ * Yoga; inert renderer, headless.
  */
 import {
   createApp,
@@ -235,6 +236,81 @@ const boxesScreen = projection({
   )
 });
 
+/** The rows of the shop's windowed list. */
+const SHOP_ROWS = 200;
+
+/**
+ * One row of the shop: a name and its buy button.
+ *
+ * @param index - The index of the row.
+ * @returns The row.
+ */
+function shopRow(index: number) {
+  return (
+    <row key={`shop${index}`} style={{ width: 1000, gap: 8 }}>
+      <text
+        key={`shopName${index}`}
+        style={{ width: 600, height: 40 }}
+        content={`offer ${index}`}
+      />
+      <button key={`shopBuy${index}`} intent="tick" style={{ width: 200, height: 80 }} />
+    </row>
+  );
+}
+
+/**
+ * The shop of the warm files (spec 33 B+D), mounted by them only: never open, its view kept built
+ * and held. A windowed list of 200 offers that grows into the column under its two tabs.
+ */
+const shopSheet = projection({
+  name: "shopSheet",
+  layer: "ui",
+  from: (): Item[] => [],
+  key: (item: Item) => item.id,
+  view: () => (
+    <column key="shopRoot" style={{ width: 1080, height: 1920, gap: 8 }}>
+      <row key="shopTabs" style={{ height: 100, gap: 16 }}>
+        <button key="shopCrystals" intent="tick" style={{ width: 300, height: 100 }} />
+        <button key="shopMarket" intent="tick" style={{ width: 300, height: 100 }} />
+      </row>
+      <scroll
+        key="shopList"
+        rows={SHOP_ROWS}
+        rowHeight={120}
+        overscan={2}
+        row={shopRow}
+        style={{ width: 1000, grow: 1 }}
+      />
+    </column>
+  ),
+  warm: (): Item => ({ id: "shop" })
+});
+
+/** The rows of the settings sheet. */
+const SETTINGS_ROWS = 12;
+
+/** The settings sheet of the warm files: never open, a column of rows held warm. */
+const settingsSheet = projection({
+  name: "settingsSheet",
+  layer: "ui",
+  from: (): Item[] => [],
+  key: (item: Item) => item.id,
+  view: () => (
+    <column key="settingsRoot" style={{ width: 1080, height: 1920, gap: 8 }}>
+      {Array.from({ length: SETTINGS_ROWS }, (_unused, index) => (
+        <row key={`setting${index}`} style={{ height: 80, gap: 16 }}>
+          <text key={`settingName${index}`} style={{ width: 600, height: 40 }} content="volume" />
+          <button key={`settingGo${index}`} intent="tick" style={{ width: 120, height: 80 }} />
+        </row>
+      ))}
+    </column>
+  ),
+  warm: (): Item => ({ id: "settings" })
+});
+
+/** The sheets the warm files mount, closed. */
+export const WARM_SHEETS: readonly string[] = ["shopSheet", "settingsSheet"];
+
 /** Every projection the fixture mounts. */
 export const MOUNTED: readonly string[] = [...PIECES, "board", "inset", "hud"];
 
@@ -247,7 +323,9 @@ const perfFeature = defineFeature("perf", {
     insetScreen,
     hudScreen,
     stripScreen,
-    boxesScreen
+    boxesScreen,
+    shopSheet,
+    settingsSheet
   ],
   ui: [Board],
   textStyles: defineTextStyles({

@@ -4,7 +4,7 @@
  */
 import type { Hint } from "../../flow/types";
 import type { Snapshot } from "../../model/types";
-import type { AnyComponentValue, Entity, Owner } from "../ecs/types";
+import type { AnyComponentValue, Entity } from "../ecs/types";
 import { diffComponents } from "./diff";
 import { cancelTracks } from "./driver";
 import { routeHint } from "./hints";
@@ -39,10 +39,15 @@ import type {
   ReconcileOptions,
   View
 } from "./types";
-import { asError, collectView, createViewRecord, storedValue, writeValue } from "./views";
-
-/** The components of a view of the build at its spawn: none, so it is flagged before the first `onAdded`. */
-const NO_COMPONENTS: readonly AnyComponentValue[] = [];
+import {
+  asError,
+  collectView,
+  createViewRecord,
+  spawnFlagged,
+  storedValue,
+  writeValue
+} from "./views";
+import { coolShown, type HeldRecord, heldFor, sameItem, showHeld, writeDifference } from "./warm";
 
 /**
  * Creates the empty set of used hints. It lives in its own non-exported function because lint
@@ -124,12 +129,58 @@ function hintFor(
 }
 
 /**
+ * Plays how a view comes when the reconcile plays motions: the `enter` hook and the `loop` hook,
+ * then the settle of what is loose. The loop is not kept with the view's handles: a change cancels
+ * those, and the loop runs until the view dies. A direct reconcile plays neither hook; the view
+ * then owes its loop, which the sweep starts.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param view - The view that came: spawned now, or shown from a warm window.
+ * @param entry - The key, its item, the peers, the mode and the used hints.
+ * @param entry.key - The model key.
+ * @param entry.item - The model item.
+ * @param entry.peers - The new and the old items.
+ * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.used - The hints that reached an entry.
+ */
+function playEnter(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  view: View,
+  entry: { key: string; item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
+): void {
+  const hook = spec.motion?.enter;
+  const loop = spec.motion?.loop;
+
+  if (entry.direct) {
+    view.loopOwed = true;
+    pctx.ctx.state.projection.owedLoops += 1;
+
+    return;
+  }
+
+  if (hook === undefined && loop === undefined) return;
+
+  const handle = createViewHandle(pctx, view, entry.peers);
+
+  if (hook !== undefined) {
+    const hint = hintFor(pctx, spec.name, entry.key, entry.used);
+    const played = runHook(pctx, view, "enter", () => hook(handle, entry.item, hint, "change"));
+
+    if (played?.motion !== undefined) view.handles.push(played.motion);
+  }
+
+  if (loop !== undefined) runHook(pctx, view, "loop", () => loop(handle));
+
+  playSettle(pctx, view, spec, entry.peers, looseComponents(pctx, view));
+}
+
+/**
  * A key that is new: spawn the entity with the projection's layer and the view components, then
- * play the `enter` hook and the `loop` hook when the reconcile plays motions. The loop is not
- * kept with the view's handles: a change cancels those, and the loop runs until the view dies.
- * A direct reconcile plays neither hook. The view then owes its loop, which the sweep starts.
- * A view of a projection the running build mounts is spawned bare, flagged building, then given
- * its components in the same order: the `onAdded` hooks of a plugin then tell it apart (F97).
+ * play how it comes (`playEnter`). A view of a projection the running build mounts is spawned bare,
+ * flagged building, then given its components in the same order: the `onAdded` hooks of a plugin
+ * then tell it apart (F97).
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -150,20 +201,19 @@ function enterEntry(
   const values = collectView(pctx, spec, entry.item);
   const state = pctx.ctx.state.projection;
   const building = state.building;
-  const ecs = pctx.deps.ecs;
-  const owner: Owner = { kind: "projection", name: spec.name };
-  // `Layer` first: the ecs fires `onAdded` in list order, and the `Tree` hook of `ui` reads the
-  // layer a JSX root draws in when it fires.
-  const layer = pctx.deps.components.Layer({ name: spec.layer });
   let entity: Entity;
 
   if (building?.mounted.get(spec.name) === mounted) {
-    entity = ecs.spawn(owner, NO_COMPONENTS);
-    building.entities.add(entity);
-    ecs.add(entity, layer);
-    for (const value of values.values()) ecs.add(entity, value);
+    entity = spawnFlagged(pctx, spec, values, building.entities);
   } else {
-    entity = ecs.spawn(owner, [layer, ...values.values()]);
+    // `Layer` first: the ecs fires `onAdded` in list order, and the `Tree` hook of `ui` reads the
+    // layer a JSX root draws in when it fires.
+    const layer = pctx.deps.components.Layer({ name: spec.layer });
+
+    entity = pctx.deps.ecs.spawn({ kind: "projection", name: spec.name }, [
+      layer,
+      ...values.values()
+    ]);
   }
 
   const view = createViewRecord(
@@ -182,30 +232,43 @@ function enterEntry(
   state.byEntity.set(entity, view);
   state.membershipVersion += 1;
 
-  const hook = spec.motion?.enter;
-  const loop = spec.motion?.loop;
+  playEnter(pctx, spec, view, entry);
+}
 
-  if (entry.direct) {
-    view.loopOwed = true;
-    state.owedLoops += 1;
+/**
+ * A key that is new while a warm window holds its view: the held view is shown instead of a spawn,
+ * the same entity, built already. An item with the content of the warm one runs no `view` and
+ * writes nothing; another one has the difference written directly, with no `change` hook. Then it
+ * comes as a spawned view does (`playEnter`). A `view` that throws leaves the window held, as an
+ * enter that throws spawns nothing.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param mounted - The mounted projection.
+ * @param record - The warm record that holds the view of the key.
+ * @param entry - The key, its item, the peers, the mode and the used hints.
+ * @param entry.key - The model key.
+ * @param entry.item - The model item.
+ * @param entry.peers - The new and the old items.
+ * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.used - The hints that reached an entry.
+ */
+function adoptEntry(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  mounted: Mounted,
+  record: HeldRecord,
+  entry: { key: string; item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
+): void {
+  const view = record.view;
+  const next = sameItem(record.item, entry.item) ? undefined : collectView(pctx, spec, entry.item);
 
-    return;
-  }
+  showHeld(pctx, mounted, record, entry.direct ? "mount" : "change");
 
-  if (hook === undefined && loop === undefined) return;
+  if (next === undefined) view.item = entry.item;
+  else writeDifference(pctx, view, next, entry.item);
 
-  const handle = createViewHandle(pctx, view, entry.peers);
-
-  if (hook !== undefined) {
-    const hint = hintFor(pctx, spec.name, entry.key, entry.used);
-    const played = runHook(pctx, view, "enter", () => hook(handle, entry.item, hint, "change"));
-
-    if (played?.motion !== undefined) view.handles.push(played.motion);
-  }
-
-  if (loop !== undefined) runHook(pctx, view, "loop", () => loop(handle));
-
-  playSettle(pctx, view, spec, entry.peers, looseComponents(pctx, view));
+  playEnter(pctx, spec, view, entry);
 }
 
 /**
@@ -374,10 +437,13 @@ function exitEntry(
   entry: { peers: Peers; direct: boolean; used: Set<Hint> }
 ): void {
   const hook = spec.motion?.exit;
+  const state = pctx.ctx.state.projection;
 
   mounted.live.delete(view.key);
-  pctx.ctx.state.projection.membershipVersion += 1;
+  state.membershipVersion += 1;
   view.cause = entry.direct ? "mount" : "change";
+  // A window a warm record showed closes: the record is built again in idle frames.
+  coolShown(state, spec.name, view);
 
   if (entry.direct || hook === undefined) {
     despawnView(pctx, mounted, view);
@@ -436,7 +502,7 @@ function settleUnchanged(
 
 /**
  * Routes one key of the new state to the entry it belongs to: a live view changes, a queued view
- * revives, an unknown key enters.
+ * revives, a key a warm window holds is shown, an unknown key enters.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -487,7 +553,11 @@ function applyEntry(
   const queued = mounted.queue.find(view => view.key === entry.key);
 
   if (queued === undefined) {
-    enterEntry(pctx, spec, mounted, entry);
+    const held = heldFor(pctx.ctx.state.projection, spec.name, entry.key);
+
+    if (held === undefined) enterEntry(pctx, spec, mounted, entry);
+    else adoptEntry(pctx, spec, mounted, held, entry);
+
     counts.entered += 1;
 
     return;

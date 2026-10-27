@@ -45,6 +45,13 @@ export type MockWorld = WorldApi & {
   clearChanges(): void;
   /** Starts the frame of a scene build at the world clock's now, as world's `input` callback does (`left()`). */
   startFrame(): void;
+  /**
+   * The rest of world's `input` callback after `startFrame`: the reconcile of a marked commit, then one step of the
+   * warm windows (spec 33, slice B+D).
+   */
+  input(): void;
+  /** Marks a commit of the session, as `model:committed` does: the next `input()` reconciles it. */
+  commitSession(): void;
 };
 
 /** The mock renderer: the modules, the fakes behind them and the drivers a test uses. */
@@ -155,7 +162,8 @@ function noRemover(): () => void {
  * @param systems.timing - The timing table, or `undefined`.
  * @param clock - What the world's clock answers: 0 unless a test of a scene build moves it.
  * @param clock.now - The milliseconds it answers.
- * @returns The world API plus the internal change-set clear and the frame start of a build.
+ * @returns The world API plus the internal change-set clear, the frame start of a build, the rest of the input step
+ *   and the mark of a commit.
  */
 function createWorld(
   timeApi: TimeApi,
@@ -196,7 +204,12 @@ function createWorld(
     projection: modules.projection,
     systemTimes: () => systems.timing,
     clearChanges: () => modules.ecs.clearChanges(),
-    startFrame: () => modules.projection.startFrame(clock.now)
+    startFrame: () => modules.projection.startFrame(clock.now),
+    input: () => {
+      modules.projection.reconcileIfDirty();
+      modules.projection.stepWarm();
+    },
+    commitSession: () => modules.projection.markDirty(["session"], "edge")
   };
 }
 

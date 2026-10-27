@@ -4,7 +4,7 @@
  * `time`, `model` and `flow`; frames are driven by calling the recorded phase callbacks.
  */
 import type { Log } from "@moku-labs/common/browser";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 import type { Require } from "../../../../config";
 import { fakeClock } from "../../../clock/fake";
 import type { Api as ClockApi, FakeClock } from "../../../clock/types";
@@ -43,6 +43,10 @@ export type MockWorld = {
   clock: FakeClock;
   /** The tween driver installed on the world, advanced by `frame`. */
   driver: FakeDriver;
+  /** What `time.rate()` answers: a case sets the frame rate the warm budget reads. */
+  rate: { fps: number };
+  /** The spy behind `time.wake()`. */
+  wake: Mock<() => void>;
   /** Takes the driver back, so the world writes every target at once. */
   offDriver(): void;
   /** Fires the `model:committed` hook. */
@@ -91,6 +95,8 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
   const frames: FrameRegistration[] = [];
   const hintListeners: Array<(hint: Hint) => void> = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
+  const rate = { fps: 60 };
+  const wake = vi.fn<() => void>();
 
   const timeApi = {
     onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {
@@ -112,7 +118,10 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
     isRunning: () => false,
     step: vi.fn(),
     // An agent build asks for the page clock; a test that times systems hands one in.
-    agentClock: () => undefined
+    agentClock: () => undefined,
+    // The warm windows read the frame rate for their budget and wake the loop when they work.
+    rate: () => rate,
+    wake
   } as unknown as TimeApi;
 
   const snapshot = (): Snapshot => ({
@@ -178,6 +187,8 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
     time,
     clock,
     driver,
+    rate,
+    wake,
     offDriver: removeDriver,
     start: (): void => {
       connectWorld(ctx);

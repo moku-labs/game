@@ -238,14 +238,20 @@ describe("drawnInto", () => {
     const faded = panelWorld();
     const unposed = emptyWorld();
 
+    const held = panelWorld();
+
     leaving.exiting.add(1);
     aside.building.add(2);
+    // A late element of a held window: its root is held, the element itself was never adopted.
+    held.elements.set(2, { ...(held.elements.get(2) as Element), root: 7 });
+    held.building.add(7);
     put(empty, 3, { Transform: pose({}), Sprite: { ...Sprite.defaults } });
     put(faded, 1, { Shape: { ...Shape.defaults, alpha: 0 } });
     put(unposed, 4, { Sprite: { ...Sprite.defaults, width: 8, height: 8 } });
 
     expect(drawn(leaving, 2)).toBeUndefined();
     expect(drawn(aside, 2)).toBeUndefined();
+    expect(drawn(held, 2)).toBeUndefined();
     expect(drawn(empty, 3)).toBeUndefined();
     expect(drawn(faded, 2)).toBeUndefined();
     expect(drawn(unposed, 4)).toBeUndefined();

@@ -83,6 +83,17 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 }
 
 /**
+ * Tells whether a renderer draws the views: one chose a backend at its start. It registers its own
+ * part of a scene build on the same condition, and a scene is built aside only then.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @returns True when the renderer draws; false while it is inert or unsupported.
+ */
+function drawsViews(ctx: UiCtx): boolean {
+  return ctx.deps.renderer.host.kind() !== "none";
+}
+
+/**
  * Opens the three systems of phase `layout`, the system `ui.enter` of phase `sync`, the seven world
  * hooks of `Tree`, `Box`, `Pressed` and `PointerOver`, the two that tell the hosting step a view
  * lost its `Parent` or its `Held` (a view freed so may hang under its host again), the listener
@@ -91,10 +102,11 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
  * step, the three tap listeners (the `LocalWrite` patch, the pointer tap that clears the keyboard
  * focus, and the tap that starts or ends the editing of a text field), the pointer door that opens
  * the keyboard inside the DOM listener, the key listener of the focus and `LocalWrite` as an input
- * control, so the cursor shows a hand over a local-state button, and `ui`'s part of a scene build
- * (`onBuild`: the roots built aside are reconciled and solved, spec 31). On an agent page also the
- * tap counter of `DebugTrigger` and its check of a view that takes no press. The third system of
- * `layout`, `ui.anchor`, runs after the solve and places every `<anchor>` on its targets.
+ * control, so the cursor shows a hand over a local-state button, and, with a renderer that draws,
+ * `ui`'s part of a scene build (`onBuild`: the roots built aside are reconciled and solved, spec
+ * 31). On an agent page also the tap counter of `DebugTrigger` and its check of a view that takes
+ * no press. The third system of `layout`, `ui.anchor`, runs after the solve and places every
+ * `<anchor>` on its targets.
  *
  * The `Box` hook plays an element's enter hook and queues it, so the game's systems see its start
  * pose (F49); `ui.enter` starts its loop after them and before the frame is drawn, and plays the
@@ -145,7 +157,6 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ecs.onRemoved(Tree, entity => jsx.unmountRoot(entity)),
     ecs.onAdded(Box, entity => jsx.queueEnter(entity)),
     projection.onConverged(jsx.converged),
-    projection.onBuild(jsx.asideBuilt),
     ecs.onAdded(Pressed, entity => jsx.markPointer(entity, "pressed", true)),
     ecs.onRemoved(Pressed, entity => jsx.markPointer(entity, "pressed", false)),
     ecs.onAdded(PointerOver, entity => jsx.markPointer(entity, "hover", true)),
@@ -166,6 +177,10 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     () => jsx.releaseHosted(),
     () => ecs.despawnOwnedBy(UI_OWNER)
   );
+
+  // A build aside only means something to a renderer that draws: a headless app (a test, the CLI)
+  // registers no part of it, so the world builds no warm window for it (spec 33 B+D).
+  if (drawsViews(ctx)) ctx.state.layout.cleanups.push(projection.onBuild(jsx.asideBuilt));
 
   // The agent guard is inline and positive: a release build defines the flag false and drops the counter.
   if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {

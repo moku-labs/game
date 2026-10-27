@@ -174,7 +174,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     passes: { at: -1, root: undefined, filtered: 0, count: 0, filters: [], enabled: [] },
     hudLayer: undefined,
     aside: createAsideQueue(),
-    heldViews: { entities: [], count: 0, reported: false },
+    heldViews: { entities: [], count: 0, version: 0, reported: false },
     leave: {},
     cleanups: []
   };

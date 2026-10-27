@@ -47,6 +47,18 @@ import type {
   ViewHandle
 } from "./types";
 import { createViewRecord, writeLayer } from "./views";
+import {
+  adoptWarm,
+  clearWarm,
+  discardHeld,
+  discardWarm,
+  ensureWarm,
+  forgetDeadHeld,
+  forgetWarm,
+  frameBudget,
+  holdRegistered,
+  stepWarm
+} from "./warm";
 
 /**
  * Tells whether a cause sets the picture instead of playing it.
@@ -151,6 +163,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
    * Reconciles what is dirty. The cause table decides play or direct, whether every live view
    * and every element with a recorded rest pose is brought to it (a restore and a load do that),
    * and whether an unchanged view that stands off its rest pose is settled (a rollback does).
+   * A restore, a load and a forced rerun drop the views warm windows hold hidden first: they
+   * replace the state or run `view` anew. After a reconcile the warm step looks at its records.
    */
   const reconcileIfDirty = (): void => {
     const dirty = state.dirty;
@@ -165,7 +179,11 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       const converge = dirty.causes.some(cause => isConvergeCause(cause));
       const settle = dirty.causes.includes("rollback");
 
+      if (converge || dirty.force) discardHeld(pctx);
+
       reconcile(pctx, { direct, force: dirty.force, converge, settle });
+
+      if (state.warmList.length > 0) state.warmStale = true;
     }
 
     state.hints.length = 0;
@@ -229,7 +247,13 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       state.specs.set(spec.name, spec);
       reseedViews(state, spec.name, from, seed);
-      if (mounted) forceRerun();
+
+      if (!mounted) return;
+
+      // The forced rerun drops a held view; a spec that no longer warms forgets its record.
+      if (spec.warm === undefined) forgetWarm(pctx, spec.name);
+      else ensureWarm(state, spec);
+      forceRerun();
     },
 
     setLayers: (list: ReadonlyArray<LayerSpec>): void => {
@@ -327,8 +351,18 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     motionsOf: (entity: Entity): readonly string[] => runningComponents(state.tracks, entity),
 
-    entityOf: (projection: string, key: string): Entity | undefined =>
-      state.mounted.get(projection)?.live.get(key)?.entity ?? state.keys.get(projection)?.get(key),
+    entityOf: (projection: string, key: string): Entity | undefined => {
+      const entity =
+        state.mounted.get(projection)?.live.get(key)?.entity ??
+        state.keys.get(projection)?.get(key);
+
+      // An element of a root built aside or held warm is not on the screen: no game code may reach it by key.
+      return entity === undefined ||
+        state.building?.entities.has(entity) === true ||
+        state.warmHeld.has(entity)
+        ? undefined
+        : entity;
+    },
 
     entitiesOf: (name: string): readonly Entity[] => {
       const mounted = state.mounted.get(name) ?? state.building?.mounted.get(name);
@@ -385,6 +419,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.keysByEntity.set(entity, { projection, key });
       // The next sweep looks for dead elements, also when no entity was despawned since the last.
       state.sweptDespawns = -1;
+      // An element of a closed window's root, made after its view was ready, is held with it.
+      holdRegistered(state, projection, entity);
 
       return (): void => {
         if (byKey.get(key) === entity) byKey.delete(key);
@@ -431,14 +467,15 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     },
 
     left: (): number => {
-      const building = state.building;
+      const budget = frameBudget(state);
 
-      if (building === undefined) return Number.POSITIVE_INFINITY;
+      if (budget === undefined) return Number.POSITIVE_INFINITY;
 
-      return building.budgetMs - (ctx.deps.clock.now() - building.frameStart);
+      return budget - (ctx.deps.clock.now() - state.frameStart);
     },
 
-    isBuilding: (entity: Entity): boolean => state.building?.entities.has(entity) === true,
+    isBuilding: (entity: Entity): boolean =>
+      state.building?.entities.has(entity) === true || state.warmHeld.has(entity),
 
     onBuild: (check: () => boolean): (() => void) => {
       state.buildChecks.push(check);
@@ -451,13 +488,18 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     },
 
     adopt: (entity: Entity): void => {
-      state.building?.entities.add(entity);
+      const building = state.building;
+
+      if (building === undefined) adoptWarm(state, entity);
+      else building.entities.add(entity);
     },
 
     startFrame: (now: number): void => {
-      const building = state.building;
+      state.frameStart = now;
+    },
 
-      if (building !== undefined) building.frameStart = now;
+    stepWarm: (): void => {
+      stepWarm(pctx);
     },
 
     markDirty: (roots: readonly Root[], cause: Cause): void => {
@@ -485,12 +527,13 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       sweepQueue(pctx);
 
-      // Per frame: an element's key and rest pose can only go stale when an entity was despawned.
+      // Per frame: an element's key, its rest pose and a held entity can only go stale when an entity was despawned.
       const despawns = ctx.state.ecs.despawns;
 
       if (state.sweptDespawns !== despawns) {
         state.sweptDespawns = despawns;
         forgetDeadElements(pctx);
+        forgetDeadHeld(pctx);
       }
 
       if (state.owedLoops > 0) startOwedLoops(pctx);
@@ -510,12 +553,16 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       if (owner.kind !== "projection") return;
 
       const mounted = state.mounted.get(owner.name);
+      const warm = state.warm.get(owner.name);
 
       if (mounted !== undefined) clearMounted(pctx, mounted);
+      // Its held view left with the owner's other entities: the window is warmed again.
+      if (warm !== undefined) discardWarm(pctx, warm);
     },
 
     clear: (): void => {
       discardBuild(pctx);
+      clearWarm(pctx);
       // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
       for (const mounted of [...state.mounted.values()]) clearMounted(pctx, mounted);
       state.mounted.clear();

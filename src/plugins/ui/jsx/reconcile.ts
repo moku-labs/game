@@ -721,6 +721,18 @@ export function createReconciler(
   let released = false;
   // True while the anchor pass applies an element of an `<anchor>`: the solve leaves them alone.
   let anchoring = false;
+  // The membership version of the world's projections the last walk for a released root read, and the
+  // one the last pass of the held enters read with the length of the queue it left: a frame with
+  // windows held warm and at rest compares numbers and walks nothing (spec 33 B+D).
+  let asideSeen = -1;
+  let enteredSeen = -1;
+  let heldEnters = -1;
+  // A root built aside or held was laid out in the last solve: the next range step cuts the windowed
+  // ranges of its scrolls once more, so its rows are made aside, not at its open.
+  let asideSolved = false;
+  // Whether a scroll belongs to a root built aside or held: it stands, as nobody sees it.
+  const isAsideScroll = (container: Element): boolean =>
+    state.asideRoots > 0 && state.roots.get(container.root)?.aside !== undefined;
   // The reconciler's side of a look write (F85): the write pass (one per reconcile with its solve,
   // one per pointer restyle), one values object filled in place for every play, and the writes.
   const lookWriter: LookWriter = {
@@ -733,8 +745,10 @@ export function createReconciler(
   };
 
   /**
-   * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
-   * `ui` gave a node of its own, a spacer's, is never registered.
+   * Registers the key of an element under its root, so `find` and `entityOf` answer for it. A key
+   * `ui` gave a node of its own, a spacer's, is never registered. A root built aside or held warm
+   * is not on the screen: `find` leaves it out, and `world`'s `entityOf` answers nothing for an
+   * entity it builds or holds, so a closed window's button is not reached by key (spec 33 B+D).
    *
    * @param root - The root the element belongs to.
    * @param element - The element that entered.
@@ -748,6 +762,19 @@ export function createReconciler(
     else keys.set(element.key, element.entity);
 
     state.byKey.set(root.entity, keys);
+
+    shareKey(root, element);
+  }
+
+  /**
+   * Registers the key of an element with `world`, so `entityOf` answers for it.
+   *
+   * @param root - The root the element belongs to.
+   * @param element - An element of the root on the screen.
+   */
+  function shareKey(root: Root, element: Element): void {
+    if (element.key === undefined || isOwnKey(element.key)) return;
+
     element.dropKey = ctx.deps.world.projection.registerKey(root.name, element.key, element.entity);
   }
 
@@ -2018,7 +2045,7 @@ export function createReconciler(
   /**
    * Solves one root in a box and applies its rects: a root on the viewport when it is marked, a
    * root in a slot also when its slot was resized. A root built aside waits while parts of it wait,
-   * and is applied in parts.
+   * and is applied in parts. A root shown before its parts were done is applied whole and still.
    *
    * @param root - The root.
    * @param box - The viewport, or the slot's content box.
@@ -2041,12 +2068,17 @@ export function createReconciler(
     modules.layout.solve(element, box, lookup);
     root.needsSolve = false;
 
+    // A root not on the screen: its windowed ranges are cut once more in the next frame.
+    if (root.aside !== undefined) asideSolved = true;
+
     // Only the first application goes in parts: a later solve of the same build (a state change, a
     // new viewport, a text measured again) applies in one block, so the build always reaches its end.
     if (root.aside !== undefined && isAside(root.entity) && !element.live) {
       parts.applyInParts(root, element, quiet);
     } else {
-      applyRects(element, quiet);
+      // A root shown before its parts were done takes its rects with no motion: its enters play next.
+      applyRects(element, quiet || root.still === true);
+      delete root.still;
     }
 
     return true;
@@ -2134,9 +2166,9 @@ export function createReconciler(
    * Keeps an element whose spawn has just been applied: the world calls it from the `Box` hook, at
    * the flush of phase `layout`. Its enter hook waits for `playEntered`, so the game's systems see
    * the entity first (F48). The hook itself plays at once, so they see the start pose it writes (F49);
-   * `ui.enter` plays it again when one of them changed what it read. An element of a scene built
-   * aside plays nothing here: its enter waits for the swap, and `poseReleased` plays it at the same
-   * point of the swap frame (spec 31).
+   * `ui.enter` plays it again when one of them changed what it read. An element of a root built
+   * aside or held warm plays nothing here: its enter waits for the swap or the open, and
+   * `poseReleased` plays it at the same point of that frame (spec 31, spec 33 B+D).
    *
    * @param entity - The entity the `Box` was attached to.
    */
@@ -2152,7 +2184,7 @@ export function createReconciler(
     const element = state.elements.get(entity);
 
     // Its hook plays now, so the game's systems see the element as it will be drawn (F49).
-    if (arrives(element) && !isAside(entity)) {
+    if (arrives(element) && !isAside(element.root)) {
       modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
     }
   }
@@ -2171,7 +2203,7 @@ export function createReconciler(
       const entity = entering.list[index];
       const element = entity === undefined ? undefined : state.elements.get(entity);
 
-      if (!arrives(element) || element.posed !== undefined || isAside(element.entity)) continue;
+      if (!arrives(element) || element.posed !== undefined || isAside(element.root)) continue;
 
       modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
     }
@@ -2181,43 +2213,52 @@ export function createReconciler(
    * Plays the enter hooks queued since the last call, in the order the elements came. The `ui.enter`
    * system calls it in phase `sync`: after the game's systems, which may have written what a hook
    * reads (a list's scroll), and before `renderer.sync`, so an element is never drawn at its rest
-   * pose by mistake. An element despawned in between plays nothing. An element of a scene built
-   * aside stays queued, in its order, and plays in the first call after the swap (spec 31): its
-   * enter, posed by `poseReleased` in that frame's solve, its loop and the level of an overlay
-   * start in the frame the scene is first drawn.
+   * pose by mistake. An element despawned in between plays nothing. An element of a root built
+   * aside or held warm stays queued, in its order, and plays in the first call after the swap or
+   * the open (spec 31, spec 33 B+D): its enter, posed by `poseReleased` in that frame's solve, its
+   * loop and the level of an overlay start in the frame the root is first drawn. While nothing was
+   * queued since the last call and no root was released, the queue holds only held enters and is
+   * not walked.
    */
   function playEntered(): void {
     const entering = state.entering;
+    const version = ctx.deps.world.projection.membershipVersion();
+
+    // Per frame while windows rest held: two numbers, and the held enters stay where they are.
+    if (entering.count === heldEnters && version === enteredSeen) return;
+
     let held = 0;
 
-    // Per frame: an index loop over the kept slots, the count read every turn, as a hook may queue another
+    enteredSeen = version;
+
+    // An index loop over the kept slots, the count read every turn, as a hook may queue another
     // element. A held one moves to the front of the same array.
     for (let index = 0; index < entering.count; index += 1) {
       const entity = entering.list[index];
+      const element = entity === undefined ? undefined : state.elements.get(entity);
 
-      if (entity === undefined) continue;
+      if (entity === undefined || element === undefined) continue;
 
-      if (isAside(entity)) {
+      if (isAside(element.root)) {
         entering.list[held] = entity;
         held += 1;
       } else {
-        playEnter(entity);
+        playEnter(element);
       }
     }
 
     entering.count = held;
+    heldEnters = held;
   }
 
   /**
    * Plays the enter hook of an element whose spawn has been applied, once. A row a range change
    * scrolled in is not new: it plays no `enter` hook, only its loop starts.
    *
-   * @param entity - The entity the `Box` was attached to.
+   * @param element - The element the `Box` was attached to.
    */
-  function playEnter(entity: Entity): void {
-    const element = state.elements.get(entity);
-
-    if (element === undefined || element.entered) return;
+  function playEnter(element: Element): void {
+    if (element.entered) return;
 
     element.entered = true;
 
@@ -2308,15 +2349,17 @@ export function createReconciler(
   }
 
   /**
-   * The live scroll containers, which the frame step moves with the finger. Read from the set the
-   * enter fills and the exit empties, so an idle frame walks no other element. A scroll of a root
-   * built aside waits while parts of the root wait: it is ranged, moved and settled once the root
-   * is whole (spec 33 A7).
+   * The live scroll containers. Read from the set the enter fills and the exit empties, so an idle
+   * frame walks no other element. A scroll of a root built aside waits while parts of the root wait:
+   * it is settled once the root is whole (spec 33 A7). Without `aside`, the scrolls the frame step
+   * moves with the finger and ranges: a scroll of a root built aside or held warm is left out, as
+   * nobody sees it and no finger reaches it, and it moves from the swap or the open on (spec 33 B+D).
    *
-   * @returns Every live element whose tag is `scroll`: the reconciler's own list, valid until the
+   * @param aside - Whether the scrolls of roots built aside or held, once whole, are in the list.
+   * @returns Those live elements whose tag is `scroll`: the reconciler's own list, valid until the
    *   next call.
    */
-  function scrollContainers(): readonly Element[] {
+  function scrollContainers(aside: boolean): readonly Element[] {
     // Per frame: one kept list, emptied by `pop` (a cut by `length` would free its store).
     while (scrollList.length > 0) scrollList.pop();
 
@@ -2324,8 +2367,10 @@ export function createReconciler(
       const element = state.elements.get(entity);
 
       if (element?.live !== true) continue;
-      // Per frame: one number while no scene is built aside.
-      if (state.asideRoots > 0 && parts.waits(state.roots.get(element.root))) continue;
+      // Per frame: one number while no part of a build waits; one read of the root while a root
+      // is built aside or held.
+      if (parts.working() && parts.waits(state.roots.get(element.root))) continue;
+      if (!aside && isAsideScroll(element)) continue;
 
       scrollList.push(element);
     }
@@ -2447,14 +2492,25 @@ export function createReconciler(
   }
 
   /**
-   * Finds the roots the last scene build committed: a root counted aside that `world` builds no more
-   * loses its mark, the slots are given out again, so a kept host takes its coming guest in the
-   * swap frame, and this frame's solve poses the held enters (spec 31). A root a discard dropped is
-   * gone from the registry and is not counted.
+   * Finds the roots the last scene build committed, and the held roots of the warm windows that
+   * opened: a root counted aside that `world` builds or holds no more is released, the slots are
+   * given out again, so a kept host takes its coming guest in the swap frame, and this frame's
+   * solve poses the held enters (spec 31, spec 33 B+D). A root a discard dropped is gone from the
+   * registry and is not counted. The roots are walked only when the membership of the world's
+   * projections moved: every release moves it (a commit, an open, a discard), so windows held warm
+   * and at rest, and a build between two of its moves, cost two numbers a frame. The budget is not
+   * read here: a finite `left()` is a number the heap keeps, every frame of a build.
    */
   function settleAside(): void {
-    // Per frame: one number while no scene is built aside.
+    // Per frame: one number while no root is built aside or held.
     if (state.asideRoots === 0) return;
+
+    const version = ctx.deps.world.projection.membershipVersion();
+
+    // Per frame while roots are held or built aside: one number, nothing released since the last walk.
+    if (version === asideSeen) return;
+
+    asideSeen = version;
 
     let left = 0;
     let committed = false;
@@ -2465,7 +2521,7 @@ export function createReconciler(
       if (isAside(root.entity)) {
         left += 1;
       } else {
-        delete root.aside;
+        releaseRoot(root);
         committed = true;
       }
     }
@@ -2476,6 +2532,20 @@ export function createReconciler(
 
     hostsMoved(state);
     released = true;
+  }
+
+  /**
+   * Releases a root `world` builds or holds no more. A root shown before its parts were done (a
+   * warm window opened while it was built) has the rest made now, in one block, and is laid out
+   * and applied whole in this frame's solve, with no motion, so no half-built frame is drawn.
+   *
+   * @param root - A root counted aside that `world` builds or holds no more.
+   */
+  function releaseRoot(root: Root): void {
+    // Its parked children enter while it still counts aside: their keys go to `world` with the rest.
+    if (parts.finish(root)) root.still = true;
+
+    delete root.aside;
   }
 
   /**
@@ -2532,11 +2602,14 @@ export function createReconciler(
     fields.pull();
 
     // Move the scroll containers with the finger, a fling or a glide, then cut the windowed ranges
-    // at that offset, before any root is diffed.
-    const containers = scrollContainers();
+    // at that offset, before any root is diffed. The scrolls of a root built aside or held stand; a
+    // root of them laid out in the last solve has its ranges cut once more, so its rows come aside.
+    const containers = scrollContainers(false);
+    const rangesAside = asideSolved || parts.hasLanded();
 
+    asideSolved = false;
     modules.layout.scroll(containers, lookup, time);
-    range.step(containers);
+    range.step(rangesAside ? scrollContainers(true) : containers);
 
     // A text that `text` wrote this frame and that measures to another size now asks its root
     // for a solve: a bound number, a new locale, a font that arrived.
@@ -2620,7 +2693,7 @@ export function createReconciler(
     // A solve may give a scroll a new range and a render a new `offset` prop; a scroll that came in
     // this solve, or with the last part of its root, stands at its prop before it is first drawn.
     if (changed || rendered > 0 || parts.hasLanded()) {
-      modules.layout.settleScroll(scrollContainers(), lookup, time);
+      modules.layout.settleScroll(scrollContainers(true), lookup, time, isAsideScroll);
     }
 
     rendered = 0;

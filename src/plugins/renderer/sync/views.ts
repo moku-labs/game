@@ -32,7 +32,7 @@ import {
   moveFilters
 } from "./filters";
 import { clearFonts } from "./fonts";
-import { forgetBuild, holds, holdView } from "./held";
+import { forgetBuild, holds, holdView, leaveHeld } from "./held";
 import { clearHidden, setHidden, writeRenderable } from "./hidden";
 import { makeHollow } from "./hollow";
 import { labelOf } from "./labels";
@@ -1603,6 +1603,8 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
   // Structural: the view leaves the tree, judged where it was drawn.
   markView(sctx, entity);
   noteLeaving(state, view);
+  // A held top leaves its slot to the next scan of the held list.
+  leaveHeld(state, view);
   // Its picture goes before the object returns to the pool (P9.3): no quad, no reason, no render group left.
   sctx.deps.kept.forget(entity);
 

@@ -177,9 +177,9 @@ export type View = {
   /** The HUD factor an overlay fades this view with (a `HudPart`), 1 for every other view (spec 22 O7). */
   hud: number;
   /**
-   * A held top of a scene build (spec 31): a view of the next scene with no parent, or with a live parent, built while
-   * the current scene stays drawn. It hangs nowhere in the stage, is listed in `SyncState.heldViews`, and is attached
-   * in the pass after the commit.
+   * A held top of a scene build (spec 31) or of a warm window (spec 33, slice B+D): a view of the next scene, or of a
+   * closed window, with no parent or with a live parent, built while the current scene stays drawn. It hangs nowhere
+   * in the stage, is listed in `SyncState.heldViews`, and is attached in the pass after the commit or the open.
    */
   held: boolean;
 };
@@ -1657,13 +1657,18 @@ export type AsideQueue = {
 };
 
 /**
- * The held tops of a scene build, in the order they were made (spec 31): dense, from 0 to `count`. A slot whose view
- * went, or that hangs under a building parent by now, is stale and skipped. Not `held`, the unseen cache of the
- * loops. Private to `sync`.
+ * The held tops of a scene build and of warm windows, in the order they were made (spec 31, spec 33 slice B+D):
+ * dense, from 0 to `count`. A slot whose view went, or that hangs under a building parent by now, is stale and dropped
+ * at the next scan. Not `held`, the unseen cache of the loops. Private to `sync`.
  */
 export type HeldViews = {
   entities: Entity[];
   count: number;
+  /**
+   * `world.projection.membershipVersion()` at the last scan of the list, or at the first top of an empty one. Every
+   * end of a build moves it: the list is looked at again only after a move.
+   */
+  version: number;
   /** The dev check named a building view under the stage in this build: named once. */
   reported: boolean;
 };
@@ -1776,7 +1781,7 @@ export type SyncState = {
   hudLayer: string | undefined;
   /** The building entities waiting for their view (spec 31). */
   aside: AsideQueue;
-  /** The held tops of the scene build, attached in the pass after its commit (spec 31). */
+  /** The held tops of the scene build and of warm windows, attached in the pass after their commit or open (spec 31, 33). */
   heldViews: HeldViews;
   /** The picture of a scene being left: the running look and the engine's objects (spec 33, slice A2). */
   leave: LeaveState;

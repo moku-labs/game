@@ -2,7 +2,13 @@
  * @file world/projection — the view record: what `view(item)` produced, how it reaches the store
  * and how the layer is written.
  */
-import type { AnyComponent, AnyComponentType, AnyComponentValue, Entity } from "../ecs/types";
+import type {
+  AnyComponent,
+  AnyComponentType,
+  AnyComponentValue,
+  Entity,
+  Owner
+} from "../ecs/types";
 import type {
   AnyProjectionSpec,
   DescriptionNode,
@@ -12,6 +18,9 @@ import type {
   View,
   ViewOutput
 } from "./types";
+
+/** The components of a view built aside or held warm at its spawn: none, so it is flagged before the first `onAdded`. */
+const NO_COMPONENTS: readonly AnyComponentValue[] = [];
 
 /**
  * Normalises a caught value into an `Error`, so the log always gets one.
@@ -124,17 +133,43 @@ function drawsAtPlace(pctx: ProjectionCtx, view: View, order: number): boolean {
 }
 
 /**
+ * Moves one screen root from the `Order` of its old place to the new one, on the entity and in the
+ * rest pose. A view that does not draw at the old place keeps its own.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view.
+ * @param previous - The `Order` of the place the projection had.
+ * @param order - The `Order` of its new place.
+ */
+function placeView(pctx: ProjectionCtx, view: View, previous: number, order: number): void {
+  if (!drawsAtPlace(pctx, view, previous)) return;
+
+  const value = pctx.deps.components.Order({ value: order });
+
+  view.rest.set(value.type.componentName, value);
+  writeValue(pctx, view.entity, value);
+}
+
+/**
  * Keeps a mounted projection for the scene that comes, as a scene switch does for a projection
  * both scenes list: it stays mounted into the new layer list, and its screen roots take the
  * `Order` of their place in the new list, on the entity and in the rest pose, so the next node of
- * a root compares equal and writes none. Nothing else is touched: no view is spawned or
- * despawned, no motion is cut, no hook runs. A view on its way out keeps the order it leaves with.
+ * a root compares equal and writes none; the view a warm window holds hidden does too. Nothing
+ * else is touched: no view is spawned or despawned, no motion is cut, no hook runs. A view on its
+ * way out keeps the order it leaves with.
  *
  * @param pctx - Domain context of the projection module.
  * @param mounted - The mounted projection the new list names again.
  * @param order - The `Order` of its place in the new list.
+ * @param held - The view of its warm window, if any: held hidden, or shown and then placed with the
+ *   live views already.
  */
-export function placeMounted(pctx: ProjectionCtx, mounted: Mounted, order: number): void {
+export function placeMounted(
+  pctx: ProjectionCtx,
+  mounted: Mounted,
+  order: number,
+  held?: View
+): void {
   const previous = mounted.order;
 
   mounted.layers = pctx.ctx.state.projection.layers;
@@ -143,14 +178,36 @@ export function placeMounted(pctx: ProjectionCtx, mounted: Mounted, order: numbe
 
   mounted.order = order;
 
-  for (const view of mounted.live.values()) {
-    if (!drawsAtPlace(pctx, view, previous)) continue;
+  for (const view of mounted.live.values()) placeView(pctx, view, previous, order);
+  if (held !== undefined) placeView(pctx, held, previous, order);
+}
 
-    const value = pctx.deps.components.Order({ value: order });
+/**
+ * Spawns the entity of a view that is built aside or held warm: bare, flagged in `flags`, then
+ * given its `Layer` and its view components in that order. The ecs fires `onAdded` in list order,
+ * so every hook of a plugin already sees the flag (F97), and the `Tree` hook of `ui` the layer.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param values - The output of `view(item)`, by component name.
+ * @param flags - The set `isBuilding` reads: the scene build's entities, or the warm held ones.
+ * @returns The entity.
+ */
+export function spawnFlagged(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  values: ReadonlyMap<string, AnyComponentValue>,
+  flags: Set<Entity>
+): Entity {
+  const ecs = pctx.deps.ecs;
+  const owner: Owner = { kind: "projection", name: spec.name };
+  const entity = ecs.spawn(owner, NO_COMPONENTS);
 
-    view.rest.set(value.type.componentName, value);
-    writeValue(pctx, view.entity, value);
-  }
+  flags.add(entity);
+  ecs.add(entity, pctx.deps.components.Layer({ name: spec.layer }));
+  for (const value of values.values()) ecs.add(entity, value);
+
+  return entity;
 }
 
 /**

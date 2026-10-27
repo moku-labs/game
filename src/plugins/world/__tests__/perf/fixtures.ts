@@ -15,7 +15,13 @@ import { recordFrame } from "../../ecs/history";
 import type { AnySystem, Entity, Owner, WorldPhase } from "../../ecs/types";
 import { withDeps } from "../../lifecycle";
 import { projection } from "../../projection/define";
-import type { AnyProjectionSpec, MotionHandle, Track, TweenDriver } from "../../projection/types";
+import type {
+  AnyProjectionSpec,
+  DescriptionNode,
+  MotionHandle,
+  Track,
+  TweenDriver
+} from "../../projection/types";
 import type { EcsModule, ProjectionModule } from "../../types";
 import { BOARD, type Item, LAYERS, MOUNT_OWNER, mountBoard, settleFrames } from "../unit/board";
 import { createMockWorld, type MockWorld } from "../unit/mock-world";
@@ -285,7 +291,13 @@ export function sweepFixture(ending: number): () => void {
   const ended: Track[] = [];
 
   for (let index = 0; index < ending; index += 1) {
-    ended.push({ entity: index, component: "Transform", handle: ENDED, additive: false });
+    ended.push({
+      entity: index,
+      component: "Transform",
+      handle: ENDED,
+      additive: false,
+      forever: false
+    });
   }
 
   const count = ended.length;
@@ -808,4 +820,217 @@ export function buildCallsFixture(building: boolean): BuildCalls {
       projection.startFrame(now);
     }
   };
+}
+
+/** Name of the warm sheet of the warm fixtures. */
+const SHEET = "perf.sheet";
+
+/** One item of the warm sheet. */
+type Sheet = { id: string; page: string };
+
+/** The session the warm sheet reads: open on a page, or closed. */
+type SheetSession = { sheet?: string };
+
+/** The state with the sheet closed: one kept object, as a frame at rest reads it. */
+const CLOSED: Snapshot = Object.freeze({
+  player: {},
+  session: {},
+  rng: { seed: 1, streams: {} }
+});
+
+/** The state with the sheet open on its main page: one kept object. */
+const OPEN: Snapshot = Object.freeze({
+  player: {},
+  session: { sheet: "main" },
+  rng: { seed: 1, streams: {} }
+});
+
+/**
+ * The warm sheet: shown while `session.sheet` is set, kept warm on its main page. Its view is a screen of 20 rows,
+ * as a settings sheet draws.
+ *
+ * @returns The spec.
+ */
+function sheetSpec(): AnyProjectionSpec {
+  return projection({
+    name: SHEET,
+    layer: "items",
+    from: (_player: unknown, session: SheetSession): Sheet[] =>
+      session.sheet === undefined ? [] : [{ id: "sheet", page: session.sheet }],
+    key: (sheet: Sheet) => sheet.id,
+    view: (sheet: Sheet): DescriptionNode => ({
+      type: "sheet",
+      props: { page: sheet.page },
+      children: Array.from({ length: 20 }, (_, row) => ({
+        type: "row",
+        props: { row },
+        children: []
+      }))
+    }),
+    warm: () => ({ id: "sheet", page: "main" })
+  }) as AnyProjectionSpec;
+}
+
+/** The calls of a frame with a warm window that world makes, and what ui and the renderer ask. */
+export type WarmCalls = {
+  step(): void;
+  input(): void;
+  left(): void;
+  isBuilding(): void;
+};
+
+/**
+ * World's warm calls with the sheet held: at rest (the held view ready and nothing to do) or while it builds (its two
+ * `onBuild` checks answer false, so every step polls them). The state and the flow answer one kept object.
+ *
+ * @param building - Whether the held view is still being built.
+ * @returns One call of each.
+ */
+export function warmCallsFixture(building: boolean): WarmCalls {
+  const world = createMockWorld();
+  const done = { ui: !building, renderer: !building };
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(sheetSpec());
+  world.start();
+  world.api.projection.onBuild(() => done.ui);
+  world.api.projection.onBuild(() => done.renderer);
+  world.api.projection.mount([SHEET], MOUNT_OWNER);
+
+  const deps = withDeps(world.ctx).deps;
+  const model = { store: { snapshot: () => CLOSED } } as unknown as ModelApi;
+  const flow = { state: () => LIVE } as unknown as FlowApi;
+  const { projection } = createModules({ ...world.ctx, deps: { ...deps, model, flow } });
+
+  // The spawn, the poll, and a walk that finds no more work.
+  projection.stepWarm();
+  projection.stepWarm();
+  projection.stepWarm();
+
+  const state = world.ctx.state.projection;
+  const held = state.warm.get(SHEET)?.view?.entity ?? 0;
+  const now = world.clock.now();
+  const rests = state.warmActive === undefined && !state.warmStale;
+
+  // The calls must measure the path they name: a sheet held, at rest or in work.
+  if (!projection.isBuilding(held) || rests === building) {
+    throw new Error("warmCallsFixture: the sheet is not held as asked");
+  }
+
+  return {
+    step: (): void => {
+      projection.stepWarm();
+    },
+    input: (): void => {
+      projection.startFrame(now);
+      projection.reconcileIfDirty();
+      projection.stepWarm();
+    },
+    left: (): void => {
+      sink.ms = projection.left();
+    },
+    isBuilding: (): void => {
+      sink.flag = projection.isBuilding(held);
+    }
+  };
+}
+
+/** The elements `adopt` marks for the held sheet of the prune fixture: a shop's worth. */
+const HELD_ELEMENTS = 600;
+
+/**
+ * The sweep of a frame that despawned an entity while the warm sheet is held ready with 600 elements `adopt` marked
+ * for it: the prune walks every held entity and finds none gone. The state and the flow answer one kept object.
+ *
+ * @returns One sweep after a despawn.
+ */
+export function warmPruneFixture(): () => void {
+  const world = createMockWorld();
+  const done = { parts: false };
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(sheetSpec());
+  world.start();
+  world.api.projection.onBuild(() => done.parts);
+  world.api.projection.mount([SHEET], MOUNT_OWNER);
+
+  const deps = withDeps(world.ctx).deps;
+  const model = { store: { snapshot: () => CLOSED } } as unknown as ModelApi;
+  const flow = { state: () => LIVE } as unknown as FlowApi;
+  const { projection } = createModules({ ...world.ctx, deps: { ...deps, model, flow } });
+
+  // The spawn, the elements of the held root, then the poll that finds it ready.
+  projection.stepWarm();
+  for (let index = 0; index < HELD_ELEMENTS; index += 1) {
+    projection.adopt(world.api.ecs.spawn({ kind: "plugin", name: "ui" }, []));
+  }
+  done.parts = true;
+  projection.stepWarm();
+
+  const state = world.ctx.state;
+
+  // The call must measure the path it names: a ready sheet that holds its view and every element.
+  if (
+    state.projection.warmHeld.size !== HELD_ELEMENTS + 1 ||
+    state.projection.warmActive !== undefined
+  ) {
+    throw new Error("warmPruneFixture: the sheet does not hold its elements");
+  }
+
+  return (): void => {
+    state.ecs.despawns += 1;
+    projection.sweep();
+  };
+}
+
+/**
+ * One open and one close of the warm sheet, with its rebuild: the commit that opens it shows the held view, the commit
+ * that closes it takes it apart, and the next steps build it again and find it ready. No renderer and no ui: the
+ * world's part of a tap on the settings button and of the close.
+ *
+ * @returns One open, close and rebuild.
+ */
+export function warmOpenFixture(): () => void {
+  const world = createMockWorld();
+  const current = { snapshot: CLOSED };
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(sheetSpec());
+  world.start();
+  world.api.projection.onBuild(() => true);
+  world.api.projection.mount([SHEET], MOUNT_OWNER);
+
+  const deps = withDeps(world.ctx).deps;
+  const model = { store: { snapshot: () => current.snapshot } } as unknown as ModelApi;
+  const flow = { state: () => LIVE } as unknown as FlowApi;
+  const { projection } = createModules({ ...world.ctx, deps: { ...deps, model, flow } });
+
+  projection.stepWarm();
+  projection.stepWarm();
+
+  const record = world.ctx.state.projection.warm.get(SHEET);
+  const cycle = (): void => {
+    current.snapshot = OPEN;
+    projection.markDirty(["session"], "edge");
+    projection.reconcileIfDirty();
+    projection.stepWarm();
+    current.snapshot = CLOSED;
+    projection.markDirty(["session"], "edge");
+    projection.reconcileIfDirty();
+    projection.stepWarm();
+    projection.stepWarm();
+    projection.stepWarm();
+    // The sweep of the frame forgets the cause of the view that left.
+    projection.sweep();
+  };
+  const before = record?.view?.entity;
+
+  cycle();
+
+  // The bench must measure an open that shows the held view and a rebuild that holds a new one.
+  if (record?.phase !== "ready" || record.view?.entity === before) {
+    throw new Error("warmOpenFixture: the sheet was not shown and held again");
+  }
+
+  return cycle;
 }

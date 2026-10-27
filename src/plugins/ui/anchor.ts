@@ -952,7 +952,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
       return;
     }
 
-    if (projection.isBuilding(entity)) return;
+    // Asked of its root, as the reconcile asks it: a held window's late elements are its root's.
+    if (projection.isBuilding(element.root)) return;
 
     readNode(element, anchor);
 

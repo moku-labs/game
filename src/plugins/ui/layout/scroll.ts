@@ -668,24 +668,49 @@ function settle(
 }
 
 /**
+ * Ends a glide at its target at once: the scroll stands where its `offset` prop puts it.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param state - The layout state, which keeps the patches.
+ * @param container - The scroll element.
+ * @param content - Its content element.
+ * @param motion - Its motion, gliding.
+ */
+function standAtTarget(
+  ctx: UiCtx,
+  state: LayoutState,
+  container: Element,
+  content: Element,
+  motion: ScrollMotion
+): void {
+  motion.offset = motion.to;
+  stop(motion);
+  show(ctx, state, container, content, motion);
+}
+
+/**
  * Settles every scroll on what the solve and the render of this frame gave it. A scroll the solve
  * just spawned takes its place at its `offset` prop. A placed one keeps inside a new range at
  * once, a running glide's target too, and glides to a new `offset` prop; the same value on a
- * re-render does nothing, and a scroll the finger holds only remembers it. A scroll left moving
- * wakes the loop the way `stepScroll` does: not at a time scale of 0, where it stands.
+ * re-render does nothing, and a scroll the finger holds only remembers it. A scroll nobody sees
+ * yet (`stands`: a root built aside or held warm) stands at its target at once instead of gliding,
+ * so no glide plays hidden or at its open. A scroll left moving wakes the loop the way
+ * `stepScroll` does: not at a time scale of 0, where it stands.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
  * @param containers - The live scroll elements.
  * @param lookup - How a child entity becomes its element.
  * @param time - The frame's `Time`.
+ * @param stands - Whether a scroll is not on the screen yet; none for every scroll on it.
  */
 export function settleScroll(
   ctx: UiCtx,
   state: LayoutState,
   containers: readonly Element[],
   lookup: ElementLookup,
-  time: Readonly<Time>
+  time: Readonly<Time>,
+  stands?: (container: Element) => boolean
 ): void {
   let moving = false;
 
@@ -697,6 +722,10 @@ export function settleScroll(
 
     if (motion.placed) settle(ctx, state, container, content, motion);
     else place(ctx, container, content, motion);
+
+    if (motion.mode === "glide" && stands?.(container) === true) {
+      standAtTarget(ctx, state, container, content, motion);
+    }
 
     if (motion.mode !== "still") moving = true;
   }

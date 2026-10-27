@@ -2,8 +2,9 @@
  * @file ui/jsx — a scene build in parts (spec 33, slice A): a root built aside is diffed by root
  * and by part under the frame's budget, laid out once, and applied in parts. The budget is
  * `world.projection.left()`, finite only while a build runs. The first building unit of a frame (a
- * root, a parked part, a part of an application) always runs, so a build always moves. The
- * reconcile owns the diff and the application of one element and lends them in.
+ * root, a parked part, a part of an application) always runs, so a build always moves. A root held
+ * warm (slice B+D) is built the same way, and one shown before its parts were done finishes in one
+ * block. The reconcile owns the diff and the application of one element and lends them in.
  */
 import type { Entity } from "../../world/types";
 import { asError } from "../errors";
@@ -43,6 +44,16 @@ export type PartsReconcile = {
   /** True while the range step diffs a windowed list. */
   isMoving(): boolean;
 };
+
+/**
+ * Creates the set of the roots whose parts wait. Its own function, because lint rule L5 refuses a
+ * collection built inside an exported declaration.
+ *
+ * @returns An empty set.
+ */
+function rootSet(): Set<Root> {
+  return new Set();
+}
 
 /**
  * Tells whether a root has parked parts.
@@ -88,6 +99,28 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
   let landed = false;
   const parkedPool: Parked[] = [];
   const cursorPool: ApplyCursor[] = [];
+  // The roots whose parts wait, parked or in an open application. The drain and the application
+  // step walk the roots only while one does: windows held warm and at rest cost one size read.
+  const busy = rootSet();
+
+  /**
+   * Notes whether parts of a root wait now, after its queue or its application changed.
+   *
+   * @param root - The root.
+   */
+  function track(root: Root): void {
+    if (waits(root)) busy.add(root);
+    else busy.delete(root);
+  }
+
+  /**
+   * Tells whether parts of any root wait: children parked, or an application open.
+   *
+   * @returns True while a build in parts has work left.
+   */
+  function working(): boolean {
+    return busy.size > 0;
+  }
 
   /**
    * Starts the frame's reconcile: no element entered, the budget not read, no building unit run.
@@ -168,6 +201,7 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
     part.cause = cause;
     root.parked ??= [];
     root.parked.push(part);
+    track(root);
   }
 
   /**
@@ -225,8 +259,8 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
    * root's queue.
    */
   function drainParked(): void {
-    // Per frame: one number while no scene is built aside.
-    if (state.asideRoots === 0) return;
+    // Per frame: one number while no part waits, also with windows held warm and at rest.
+    if (busy.size === 0) return;
 
     for (const root of state.roots.values()) {
       const parked = root.parked;
@@ -241,6 +275,8 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
         diffPart(root, part);
         recycle(part);
       }
+
+      track(root);
     }
   }
 
@@ -283,6 +319,17 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
       if (part !== undefined) recycle(part);
     }
 
+    dropApplication(root);
+    track(root);
+  }
+
+  /**
+   * Drops the open application of a root, if it has one, with no element applied: its cursor goes
+   * back to the pool, empty.
+   *
+   * @param root - The root.
+   */
+  function dropApplication(root: Root): void {
     const cursor = root.applying;
 
     if (cursor === undefined) return;
@@ -292,6 +339,37 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
 
     delete root.applying;
     cursorPool.push(cursor);
+  }
+
+  /**
+   * Finishes the build of a root shown before its parts were done (a warm window opened while it
+   * was built, spec 33 B+D): every parked part is diffed now, whatever the budget, and its children
+   * no longer park, since the root is not built aside any more; an open application is dropped.
+   * The root then asks for a solve, which lays it out and applies it whole, so no half-built frame
+   * is drawn.
+   *
+   * @param root - A root that was built aside and is not any more.
+   * @returns True when parts were left, so the solve of this frame applies the root in one block.
+   */
+  function finish(root: Root): boolean {
+    if (!waits(root)) return false;
+
+    const parked = root.parked;
+
+    while (parked !== undefined && parked.length > 0) {
+      const part = parked.shift();
+
+      if (part === undefined) break;
+
+      diffPart(root, part);
+      recycle(part);
+    }
+
+    dropApplication(root);
+    track(root);
+    root.needsSolve = true;
+
+    return true;
   }
 
   /**
@@ -308,6 +386,7 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
     cursor.stack.push(element);
     root.applying = cursor;
     applyPart(root, cursor);
+    track(root);
   }
 
   /**
@@ -363,6 +442,7 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
   function closeApplication(root: Root, cursor: ApplyCursor): void {
     delete root.applying;
     cursorPool.push(cursor);
+    track(root);
     landed = true;
 
     for (const host of state.hosts) {
@@ -376,8 +456,8 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
    * here is solved again in the same call when it asks for it.
    */
   function applyParts(): void {
-    // Per frame: one number while no scene is built aside.
-    if (state.asideRoots === 0) return;
+    // Per frame: one number while no part waits, also with windows held warm and at rest.
+    if (busy.size === 0) return;
 
     for (const root of state.roots.values()) {
       const cursor = root.applying;
@@ -397,9 +477,11 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
     parks,
     park,
     waits,
+    working,
     drainParked,
     holdRoot,
     forgetParts,
+    finish,
     applyInParts,
     applyParts
   };

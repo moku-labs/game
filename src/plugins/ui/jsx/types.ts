@@ -413,9 +413,9 @@ export type Root = {
   slotRect: { x: number; y: number; w: number; h: number } | undefined;
   pending?: boolean;
   /**
-   * Present from the reconcile that found the root in the scene `world` builds aside (spec 31)
-   * until the reconcile that finds it committed, which gives the slots out again. Absent on every
-   * other root.
+   * Present from the reconcile that found the root in the scene `world` builds aside (spec 31), or
+   * held warm (spec 33 B+D), until the reconcile that finds it committed or shown, which gives the
+   * slots out again and registers its element keys with `world`. Absent on every other root.
    */
   aside?: true;
   /**
@@ -425,6 +425,12 @@ export type Root = {
   parked?: Parked[];
   /** The application of a root built aside in parts, while it is open; absent otherwise. */
   applying?: ApplyCursor;
+  /**
+   * Present from the release of a root whose parts still waited (a warm window opened while it was
+   * built) until the solve that lays it out whole: its elements take their rects with no motion,
+   * as their enters play next. Absent on every other root.
+   */
+  still?: true;
 };
 
 /**
@@ -605,7 +611,10 @@ export type JsxState = {
   debugWarned: boolean;
   /** Elements that carry `Overlay`, from their enter to their despawn (spec 22 O4.5). */
   overlays: Set<Entity>;
-  /** How many roots carry `aside`, as the last reconcile counted them: 0 while no scene is built aside. */
+  /**
+   * How many roots carry `aside`, as the last reconcile counted them: 0 while no scene is built
+   * aside and no window is held warm.
+   */
   asideRoots: number;
   /** Every `<anchor>` from its enter to its despawn, with what the anchor pass keeps for it. */
   anchors: Map<Entity, Anchor>;
