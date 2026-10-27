@@ -6,6 +6,7 @@
  */
 import type { Node as YogaNode } from "yoga-layout/load";
 import type { Element } from "../jsx/types";
+import { ANCHOR } from "../visual";
 import type { ElementLookup, LayoutState, Rect } from "./types";
 
 /**
@@ -70,7 +71,8 @@ function frameOf(state: LayoutState, rect: Rect, node: YogaNode): Frame {
 }
 
 /**
- * Walks the element tree and writes the rect of every element in root coordinates.
+ * Walks the element tree and writes the rect of every element in root coordinates. An `<anchor>`
+ * and everything under it are left to the anchor pass, which places them by their targets.
  *
  * @param state - The layout state, for the node of each element.
  * @param element - The element to place.
@@ -81,7 +83,7 @@ function frameOf(state: LayoutState, rect: Rect, node: YogaNode): Frame {
 function place(state: LayoutState, element: Element, frame: Frame, lookup: ElementLookup): boolean {
   const node = state.byEntity.get(element.entity);
 
-  if (node === undefined) return false;
+  if (node === undefined || element.type === ANCHOR) return false;
 
   const width = node.getComputedWidth();
   const height = node.getComputedHeight();

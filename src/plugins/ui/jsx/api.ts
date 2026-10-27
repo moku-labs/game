@@ -214,6 +214,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     asideBuilt: frame.asideBuilt,
 
+    applyAnchored: frame.applyAnchored,
+
     key: (input: KeyInput): boolean => focus.key(input),
 
     blur: focus.blur

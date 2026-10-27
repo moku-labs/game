@@ -43,7 +43,7 @@ import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
-import { CONTENT, visualOf } from "../visual";
+import { ANCHOR, CONTENT, visualOf } from "../visual";
 import { cancelExtra, livePatch, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
@@ -57,6 +57,7 @@ import { settlePopups } from "./popups";
 import { createRange } from "./range";
 import { markResizedIcons, markResizedTexts } from "./remeasure";
 import { sameValue } from "./same";
+import { createAnchor } from "./state";
 import type {
   DescriptionNode,
   Element,
@@ -643,6 +644,26 @@ function identitySet(identities: readonly string[]): ReadonlySet<string> {
 }
 
 /**
+ * Tells whether an element is an `<anchor>` or lies under one: the anchor pass places it after
+ * the solve, by its targets, so the solve leaves it alone.
+ *
+ * @param element - The element.
+ * @param lookup - How a parent entity becomes its element.
+ * @returns True for an anchor and everything under it.
+ */
+function isAnchored(element: Element, lookup: (entity: Entity) => Element | undefined): boolean {
+  let current: Element | undefined = element;
+
+  while (current !== undefined) {
+    if (current.type === ANCHOR) return true;
+
+    current = current.parent === undefined ? undefined : lookup(current.parent);
+  }
+
+  return false;
+}
+
+/**
  * Tells whether an element whose `Box` just came arrives with an enter: new, and not a row a
  * range change scrolled in.
  *
@@ -698,6 +719,8 @@ export function createReconciler(
   const isAside = (entity: Entity): boolean => ctx.deps.world.projection.isBuilding(entity);
   // The reconcile of this frame found a committed build: its solve gives the held enters their start pose.
   let released = false;
+  // True while the anchor pass applies an element of an `<anchor>`: the solve leaves them alone.
+  let anchoring = false;
   // The reconciler's side of a look write (F85): the write pass (one per reconcile with its solve,
   // one per pointer restyle), one values object filled in place for every play, and the writes.
   const lookWriter: LookWriter = {
@@ -825,6 +848,8 @@ export function createReconciler(
       state.scrolls.add(entity);
       element.scroll = scrollMotionOf(node);
     }
+
+    if (element.type === ANCHOR) state.anchors.set(entity, createAnchor());
 
     modules.layout.attach(element);
     // The style is on the layout node: from here an equal description keeps it.
@@ -1623,6 +1648,7 @@ export function createReconciler(
 
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
+    state.anchors.delete(element.entity);
     state.exiting.delete(element.entity);
     state.leading.delete(element.entity);
     state.overlays.delete(element.entity);
@@ -1789,12 +1815,16 @@ export function createReconciler(
   }
 
   /**
-   * Applies the solved rect of one element: a live one moves, a new one spawns its components.
+   * Applies the solved rect of one element: a live one moves, a new one spawns its components. An
+   * `<anchor>` and everything under it wait for the anchor pass, which places them by their targets.
    *
    * @param element - The element to apply.
    * @param quiet - Whether a live element takes its rect with no motion.
    */
   function applyElement(element: Element, quiet: boolean): void {
+    // Per solve: one number while no anchor exists.
+    if (!anchoring && state.anchors.size > 0 && isAnchored(element, lookup)) return;
+
     const parent = parentRect(element);
 
     if (element.live) {
@@ -2728,6 +2758,23 @@ export function createReconciler(
   }
 
   /**
+   * Applies the rect the anchor pass gave one element of an `<anchor>` subtree, as the solve
+   * applies any other element.
+   *
+   * @param element - The anchor or an element under it.
+   * @param quiet - Whether a live element takes its rect with no motion.
+   */
+  function applyAnchored(element: Element, quiet: boolean): void {
+    anchoring = true;
+
+    try {
+      applyElement(element, quiet);
+    } finally {
+      anchoring = false;
+    }
+  }
+
+  /**
    * Re-resolves the style of one element whose pointer or focus flag changed: a press, a release,
    * the mouse coming over it or leaving it, the keyboard focus arriving or leaving. A new rect
    * waits for the solve; a new look and a new rest pose apply now. Only this element is restyled:
@@ -2777,6 +2824,7 @@ export function createReconciler(
     playEntered,
     sweep,
     converged,
-    asideBuilt
+    asideBuilt,
+    applyAnchored
   };
 }

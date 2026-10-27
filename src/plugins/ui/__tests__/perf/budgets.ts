@@ -113,5 +113,20 @@ export const BUDGET = {
    * and the notes of the pass. A numbers-only change writes no other fields, so no patch is built;
    * the hook's own motion is not in the window. 0 B.
    */
-  lookWrite: 0
+  lookWrite: 0,
+  /**
+   * F99 (change 2026-10-27-f99-f98-layout-guide): the system `ui.anchor` over two anchors whose
+   * targets stand: the tutorial's window on a world sprite, and a window on a seat of the strip
+   * inside a container drawn at half its size. Each target's root pose is walked into the anchor's
+   * kept pose, the parent's pose mapped, the rest compared; nothing is written. 0 B.
+   */
+  anchorStill: 0,
+  /**
+   * F99: the same pass while the sprite moves between two fractional places, one a frame: the
+   * window, its rim and its button take the new rects in place (`previous` by value), and the
+   * window's `Box` and `Transform` and the children's `Box` are written field by field on the
+   * stored values, which are only marked changed: no `ecs.set` with a patch of doubles, which
+   * boxes 16 B a field. No Yoga run: the size stands. 0 B.
+   */
+  anchorMoving: 0
 } as const;
