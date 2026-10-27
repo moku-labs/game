@@ -4,7 +4,7 @@
  */
 import type { Hint } from "../../flow/types";
 import type { Snapshot } from "../../model/types";
-import type { AnyComponentValue } from "../ecs/types";
+import type { AnyComponentValue, Entity, Owner } from "../ecs/types";
 import { diffComponents } from "./diff";
 import { cancelTracks } from "./driver";
 import { routeHint } from "./hints";
@@ -40,6 +40,9 @@ import type {
   View
 } from "./types";
 import { asError, collectView, createViewRecord, storedValue, writeValue } from "./views";
+
+/** The components of a view of the build at its spawn: none, so it is flagged before the first `onAdded`. */
+const NO_COMPONENTS: readonly AnyComponentValue[] = [];
 
 /**
  * Creates the empty set of used hints. It lives in its own non-exported function because lint
@@ -125,8 +128,8 @@ function hintFor(
  * play the `enter` hook and the `loop` hook when the reconcile plays motions. The loop is not
  * kept with the view's handles: a change cancels those, and the loop runs until the view dies.
  * A direct reconcile plays neither hook. The view then owes its loop, which the sweep starts.
- * A view of a projection the running build mounts is flagged building right after its spawn: the
- * spawn fires `onAdded` inside the call, so no flag can come before it.
+ * A view of a projection the running build mounts is spawned bare, flagged building, then given
+ * its components in the same order: the `onAdded` hooks of a plugin then tell it apart (F97).
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -145,12 +148,24 @@ function enterEntry(
   entry: { key: string; item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
 ): void {
   const values = collectView(pctx, spec, entry.item);
+  const state = pctx.ctx.state.projection;
+  const building = state.building;
+  const ecs = pctx.deps.ecs;
+  const owner: Owner = { kind: "projection", name: spec.name };
   // `Layer` first: the ecs fires `onAdded` in list order, and the `Tree` hook of `ui` reads the
   // layer a JSX root draws in when it fires.
-  const entity = pctx.deps.ecs.spawn({ kind: "projection", name: spec.name }, [
-    pctx.deps.components.Layer({ name: spec.layer }),
-    ...values.values()
-  ]);
+  const layer = pctx.deps.components.Layer({ name: spec.layer });
+  let entity: Entity;
+
+  if (building?.mounted.get(spec.name) === mounted) {
+    entity = ecs.spawn(owner, NO_COMPONENTS);
+    building.entities.add(entity);
+    ecs.add(entity, layer);
+    for (const value of values.values()) ecs.add(entity, value);
+  } else {
+    entity = ecs.spawn(owner, [layer, ...values.values()]);
+  }
+
   const view = createViewRecord(
     entity,
     spec.name,
@@ -160,16 +175,12 @@ function enterEntry(
     entry.direct ? "mount" : "change"
   );
 
-  const state = pctx.ctx.state.projection;
-  const building = state.building;
-
   // The spawn wrote the `initialOnly` fields from `view`; from here on they are another writer's.
   seedMutes(state, spec, entity);
 
   mounted.live.set(entry.key, view);
   state.byEntity.set(entity, view);
   state.membershipVersion += 1;
-  if (building?.mounted.get(spec.name) === mounted) building.entities.add(entity);
 
   const hook = spec.motion?.enter;
   const loop = spec.motion?.loop;

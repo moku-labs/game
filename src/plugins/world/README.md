@@ -172,7 +172,7 @@ app.world.ecs.snapshot().entities[0];
 | `commit()` | The swap: the building projections become mounted. `scenes` calls it right after `setLayers(coming)` and `unmount(leaving)`. Does nothing without a build. |
 | `discard()` | The abort: every entity of the build is despawned with no motion. Does nothing without a build. |
 | `left(): number` | Milliseconds of building budget left in this frame; `Infinity` without a build. Allocates nothing. |
-| `isBuilding(entity): boolean` | Whether an entity belongs to the running build. One set lookup, allocates nothing. |
+| `isBuilding(entity): boolean` | Whether an entity belongs to the running build, also inside an `onAdded` hook of its components. One set lookup, allocates nothing. |
 | `onBuild(check)` | Registers "my part of the build is done" (`ui`, `renderer`); the remover is safe to call twice. |
 | `adopt(entity)` | Marks an entity another plugin spawned for a building root as building (`ui`'s elements). Nothing without a build. |
 
@@ -270,8 +270,8 @@ projection.commit(); // the board is mounted, nothing is building
   one block instead. Otherwise every name and its layers are checked against the coming list, as
   `mount` checks them; a projection the current scene mounts and the coming list declares alike
   (F23) is not touched; every other one is mounted at once, direct, against the committed state, and
-  its views are flagged building right after their spawn (`onAdded` fires inside the spawn, before
-  any flag can). A screen root draws at the `Order` of its place in the coming list from the start.
+  its views are flagged building before the `onAdded` hooks of their components fire, so a plugin's
+  hook can ask `isBuilding` (F97). A screen root draws at the `Order` of its place in the coming list from the start.
   `entityOf` does not answer for a building view, `keyOf`, `causeOf` and `entitiesOf` do. A second
   `build` while one runs throws `[game] A scene is already being built.`; an unknown name or an
   undeclared layer throws before anything is built; a `view` that throws is not logged as in a
