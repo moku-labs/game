@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 /** The engine's veil, what a game that writes nothing gets. */
-const VEIL = { color: 0x00_00_00, alpha: 0.45, inMs: 150, outMs: 150 };
+const VEIL = { color: 0x00_00_00, alpha: 0.45, inMs: 50, outMs: 150 };
 
 const homeScene = defineScene("home", {
   bundle: "home",
@@ -120,7 +120,7 @@ describe("the merge of `leave`", () => {
     expect(
       leaveOf({ cover: { alpha: 0.3 }, loader: { afterMs: 250 } }, { cover: { color: 0x0b_10_20 } })
     ).toEqual({
-      cover: { color: 0x0b_10_20, alpha: 0.3, inMs: 150, outMs: 150 },
+      cover: { color: 0x0b_10_20, alpha: 0.3, inMs: 50, outMs: 150 },
       loader: { afterMs: 250 }
     });
   });
@@ -176,7 +176,7 @@ describe("a live switch", () => {
 
     expect(mock.assets.held.map(load => load.bundle)).toEqual(["home"]);
     expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
-      cover: { color: 0x0b_10_20, alpha: 0.6, inMs: 150, outMs: 150 },
+      cover: { color: 0x0b_10_20, alpha: 0.6, inMs: 50, outMs: 150 },
       loader: { afterMs: 400, texture: "ui.loader.ring" }
     });
   });

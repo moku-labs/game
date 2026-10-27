@@ -132,7 +132,7 @@ export type CheckedProjections<Layer extends string, List> = {
  *
  * @example
  * ```ts
- * // A navy veil at 60 %, the engine's 150 ms in and out.
+ * // A navy veil at 60 %, the engine's 50 ms in and 150 ms out.
  * const cover: SceneCover = { color: 0x0b1020, alpha: 0.6 };
  * ```
  */
@@ -141,7 +141,7 @@ export type SceneCover = {
   color?: number;
   /** The alpha it fades in to, 0 to 1. Default 0.45. */
   alpha?: number;
-  /** Milliseconds from 0 to `alpha`, from the switch start. Default 150. */
+  /** Milliseconds from 0 to `alpha`, from the switch start. Default 50. */
   inMs?: number;
   /** Milliseconds back to 0 after the swap. Default 150. */
   outMs?: number;
@@ -175,7 +175,7 @@ export type SceneLoader<Asset extends string = string> = {
 /**
  * What a live switch shows over the scene being left: the veil and the loader. The scene being left decides: its
  * `leave` is merged field by field over `config.leave`, which is merged over the engine's default (`{ cover: { color:
- * 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }`). `false` turns a part or the whole off;
+ * 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }`). `false` turns a part or the whole off;
  * a part written over `false` starts from the engine's default. Fast mode, a headless app and the first scene of a run
  * show nothing.
  *
@@ -334,7 +334,7 @@ export type Config = {
   buildMs: number | "auto";
   /**
    * What a live switch shows over the scene being left, for every scene; a scene's own `leave` is merged over it field
-   * by field. A field left out keeps the engine's default, `{ cover: { color: 0x000000, alpha: 0.45, inMs: 150,
+   * by field. A field left out keeps the engine's default, `{ cover: { color: 0x000000, alpha: 0.45, inMs: 50,
    * outMs: 150 }, loader: { afterMs: 400 } }`; `false` turns a part or the whole off.
    *
    * @example

@@ -775,8 +775,8 @@ export type DebugApi = {
  *
  * @example
  * ```ts
- * // A game that writes nothing: black at 45 %, 150 ms in, 150 ms out.
- * const cover: LeaveCover = { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 };
+ * // A game that writes nothing: black at 45 %, 50 ms in, 150 ms out.
+ * const cover: LeaveCover = { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 };
  * ```
  */
 export type LeaveCover = {
@@ -826,7 +826,7 @@ export type LeaveLoader = {
  * @example
  * ```ts
  * // The default of `scenes`: the veil from the start, the engine's ring once the switch took 400 ms.
- * const look: LeaveLook = { cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } };
+ * const look: LeaveLook = { cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } };
  * ```
  */
 export type LeaveLook = {
@@ -846,7 +846,7 @@ export type LeaveLook = {
  * ```ts
  * // `scenes`, at the start of a switch from the ward, whose bundles are still loading.
  * const renderer = ctx.require(rendererPlugin);
- * renderer.sync.leave.show({ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } });
+ * renderer.sync.leave.show({ cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } });
  * renderer.sync.leave.land(); // the board stands: the veil fades out over 150 ms, the ring is gone
  * ```
  */
@@ -861,7 +861,7 @@ export type LeaveApi = {
    * ```ts
    * // `scenes` leaves a scene whose `leave` names a turning texture: the veil from the next frame, the texture at 400 ms.
    * ctx.require(rendererPlugin).sync.leave.show({
-   *   cover: { color: 0x0b1020, alpha: 0.6, inMs: 150, outMs: 150 },
+   *   cover: { color: 0x0b1020, alpha: 0.6, inMs: 50, outMs: 150 },
    *   loader: { afterMs: 400, texture: "ui.loader.ring" }
    * });
    * ```
@@ -1091,7 +1091,7 @@ export type SyncApi = {
    * ```ts
    * // `scenes`, at the start of a switch from the ward, and at the swap to the board.
    * const renderer = ctx.require(rendererPlugin);
-   * renderer.sync.leave.show({ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } });
+   * renderer.sync.leave.show({ cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } });
    * renderer.sync.leave.land(); // the veil fades out over the board in 150 ms
    * ```
    */
