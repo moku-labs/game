@@ -45,6 +45,12 @@ const NOTE = { projection: "tutorial", key: "note" };
 /** The window that is the root element of its screen. */
 const ROOT_WINDOW = { projection: "rootAnchor", key: "rootWindow" };
 
+/** The looking window on the first seat. */
+const LOOK_SEAT = { projection: "looking", key: "lookSeat" };
+
+/** The looking window on the world piece. */
+const LOOK_PIECE = { projection: "looking", key: "lookPiece" };
+
 /** The anchor whose style sets a size and a place, drawn with a nine-slice. */
 const STYLED = { projection: "styled", key: "styledWindow" };
 
@@ -271,9 +277,9 @@ describe("the subtree of an anchor", () => {
     expect(app.world.ecs.get(entityOf(app, NOTE), Box)).toEqual({ x: 40, y: 1580, w: 30, h: 10 });
   });
 
-  it("carries a child along when the anchor moves in a frame a root was solved", async () => {
-    // Bug caught: in a frame both a solve and a follow happen, a child only carried along keeps the
-    // `Box` of where the anchor was.
+  it("carries a child along when the anchor moves in a frame its subtree is laid out", async () => {
+    // Bug caught: in a frame both a relayout and a follow happen, a child only carried along keeps
+    // the `Box` of where the anchor was.
     const app = await mounted();
 
     expect(app.ui.scroll("strip", 30)).toBe(true);
@@ -400,22 +406,39 @@ describe("an anchor whose target fades or which is a root", () => {
     expect(app.ui.rectOf(WINDOW)).toEqual({ x: 468, y: 668, w: 64, h: 64 });
   });
 
-  it("sits on its target as the root of a screen and follows it under a loop", async () => {
-    // Bug caught: a root anchor has no parent to map through, or a loop that never ends holds its
-    // pose back forever as a motion it waits for.
+  it("sits on its target as the root of a screen and follows it under a swaying loop", async () => {
+    // Bug caught: a root anchor has no parent to map through; a loop that never ends is waited for
+    // as a motion, so the anchor never follows; or the loop writes its old place over the follow's.
     running = await startAnchorApp();
     const app = running;
+    const left = (): number => app.ui.rectOf(ROOT_WINDOW)?.x ?? 0;
 
-    mount(app, ["board.strip", "rootAnchor"]);
+    mount(app, ["board.pieces", "rootAnchor"]);
     frames(app, 2);
 
-    expect(app.ui.rectOf(ROOT_WINDOW)).toEqual({ x: 40, y: 1500, w: 116, h: 120 });
+    expect(left()).toBeGreaterThanOrEqual(468);
+    expect(left()).toBeLessThanOrEqual(474);
+    expect(app.ui.rectOf(ROOT_WINDOW)?.y).toBe(668);
     expect(loops.started).toBe(1);
 
-    expect(app.ui.scroll("strip", 30)).toBe(true);
+    app.world.ecs.set(entityOf(app, PIECE), Transform, { x: 600 });
     frames(app, 1);
 
-    expect(app.ui.rectOf(ROOT_WINDOW)).toEqual({ x: 10, y: 1500, w: 116, h: 120 });
+    // Held on the target while it follows.
+    expect(left()).toBe(568);
+
+    // Let go once it stands: the sway goes on around the new place, never back at the old one.
+    const seen = new Set<number>();
+
+    for (let frame = 0; frame < 12; frame += 1) {
+      frames(app, 1);
+      seen.add(left());
+
+      expect(left()).toBeGreaterThanOrEqual(562);
+      expect(left()).toBeLessThanOrEqual(574);
+    }
+
+    expect(seen.size).toBeGreaterThan(1);
   });
 
   it("waits while its screen is built aside and sits on its target in the swap frame", async () => {
@@ -439,6 +462,52 @@ describe("an anchor whose target fades or which is a root", () => {
     frames(app, 1);
 
     expect(app.ui.rectOf(WINDOW)).toEqual({ x: 40, y: 1500, w: 116, h: 120 });
+  });
+});
+
+describe("an anchor while a look tween plays on it", () => {
+  it("follows its target scrolling with no jump", async () => {
+    // Bug caught: the follow carries the tween by how far the target moved since the anchor was
+    // placed, not since the tween began, so the window jumps off the seat.
+    running = await startAnchorApp();
+    const app = running;
+
+    mount(app, ["board.strip", "looking"]);
+    frames(app, 2);
+
+    expect(app.ui.scroll("strip", 30)).toBe(true);
+    frames(app, 1);
+
+    expect(app.ui.rectOf(LOOK_SEAT)).toEqual({ x: 10, y: 1500, w: 116, h: 120 });
+
+    press(app, "go-round", "looking");
+    expect(app.ui.scroll("strip", 60)).toBe(true);
+    frames(app, 1);
+
+    expect(app.ui.rectOf(LOOK_SEAT)).toEqual({ x: -20, y: 1500, w: 116, h: 120 });
+
+    settle(app);
+
+    expect(app.ui.rectOf(LOOK_SEAT)).toEqual({ x: -20, y: 1500, w: 116, h: 120 });
+  });
+
+  it("follows its target growing with no jump", async () => {
+    // Bug caught: a new size moves the pivot, which the tween does not write, so the window is drawn
+    // off its target until the tween ends.
+    running = await startAnchorApp();
+    const app = running;
+
+    mount(app, ["board.pieces", "looking"]);
+    frames(app, 2);
+    press(app, "go-round", "looking");
+    app.world.ecs.set(entityOf(app, PIECE), Sprite, { width: 80, height: 80 });
+    frames(app, 1);
+
+    expect(app.ui.rectOf(LOOK_PIECE)).toEqual({ x: 460, y: 660, w: 80, h: 80 });
+
+    settle(app);
+
+    expect(app.ui.rectOf(LOOK_PIECE)).toEqual({ x: 460, y: 660, w: 80, h: 80 });
   });
 });
 

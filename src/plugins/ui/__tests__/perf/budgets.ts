@@ -128,5 +128,12 @@ export const BUDGET = {
    * stored values, which are only marked changed: no `ecs.set` with a patch of doubles, which
    * boxes 16 B a field. No Yoga run: the size stands. 0 B.
    */
-  anchorMoving: 0
+  anchorMoving: 0,
+  /**
+   * F99 review: the same follow of a moving view by an anchor whose loop sways it forever (an
+   * additive `x` track). The follow holds `x` and `y` from the loop once, when it starts moving
+   * (`world.projection.mute`), and writes them in place every frame; the hold is let go in the
+   * frame the anchor stands. Was a `setRest` and a 0 ms rest track every frame. 0 B.
+   */
+  anchorMovingLoop: 0
 } as const;

@@ -797,7 +797,11 @@ children lay out inside it as in any element; its style gives its look, and a `w
   sits on its targets in the frame they are laid out, scrolled or moved by a system before it: no
   lag. A ui element spawned in this frame is found by its rest pose. An anchor and its subtree are
   a Yoga tree of their own, out of the flow of the parent: Yoga runs for it only when its size
-  changes or a root was solved since; a pure move writes the rects in place.
+  changes or a node of it is dirty (a child restyled, measured again, added or taken out); a pure
+  move writes the rects in place. Anchors are placed in the order they came: one whose target lies
+  inside another anchor that came after it sits a frame behind that anchor. A `scroll` (its first
+  `offset`) and a slot host inside an anchor are settled by the solve, before the anchor pass: they
+  take the anchor's rect a frame late.
 - **Not shown.** A target is not shown when its key names no entity, it or something it is drawn
   under is leaving, it belongs to a scene built aside, it has no area, or the alphas on its way up
   multiply to 0.01 or less. With no target shown the anchor is drawn at alpha 0 (its subtree is not
@@ -808,17 +812,20 @@ children lay out inside it as in any element; its style gives its look, and a `w
   `[game] An anchor cannot point at its own child "key".` (`ui:anchor-own-child`).
 - **Motion.** Its `change.Box` motion plays only when its targets change: a new `to`, or keys that
   name other entities (a view spawned again), and the rect moved. Following a moving, resizing or
-  scrolling target starts no motion. While a motion that ends runs (the glide of a change), a
-  follow carries it by how far the target moved, so it lands on the target. A loop on the anchor
-  re-bases on each new rest through a 0 ms rest track. On a change of targets its children play
-  their `change` hooks as any element whose rect moved; a follow that resizes the anchor gives them
-  their rects with none.
+  scrolling target starts no motion. While a motion that ends runs (the glide of a change, a look
+  tween of its visual), a follow carries it by how far the target moved since it began, so it lands
+  on the target with no jump; a new size sets the pivot at once. While a loop runs on the anchor, a
+  follow holds its `x` and `y` from every track (`world.projection.mute`) and writes them; the loop
+  gets them back in the frame the anchor stands and goes on from there. On a change of targets its
+  children play their `change` hooks as any element whose rect moved; a follow that resizes the
+  anchor gives them their rects with none.
 - **Cost.** A frame of a still anchor and one of an anchor following a moving target (fractional
-  numbers included) allocate nothing (`anchorStill`, `anchorMoving`): rects in place, `previous` by
-  value, the `Transform` written field by field on its stored value. Two things wait for the frame
-  the anchor stands, once: the `Box` of the anchor and of its subtree, since V8 boxes a fractional
-  number written into a stored `Box` field (the shape of `Box` values is shared with frozen ones),
-  and the world's copy of the anchor's rest pose.
+  numbers included), also under a loop, allocate nothing (`anchorStill`, `anchorMoving`,
+  `anchorMovingLoop`): rects in place, `previous` by value, the `Transform` written field by field
+  on its stored value. Three things happen once per follow instead of every frame: the hold of a
+  loop when the follow starts, and in the frame the anchor stands the `Box` of the anchor and of its
+  subtree (V8 boxes a fractional number written into a stored `Box` field: the shape of `Box`
+  values is shared with frozen ones) and the world's copy of the anchor's rest pose.
 - **Headless.** `app.input.tap(entity)` does not hit-test: a button inside a hidden anchor still
   answers it.
 

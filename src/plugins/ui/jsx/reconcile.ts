@@ -1648,6 +1648,8 @@ export function createReconciler(
 
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
+    // An anchor that goes while a follow holds its position from a loop gives it back.
+    state.anchors.get(element.entity)?.held?.();
     state.anchors.delete(element.entity);
     state.exiting.delete(element.entity);
     state.leading.delete(element.entity);

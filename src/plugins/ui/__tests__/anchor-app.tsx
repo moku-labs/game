@@ -4,8 +4,10 @@
  * seats, 116 x 120 each), a fitted board (800 u drawn at 0.5 in a 400 u slot at 600, 200) with a
  * cell, and a world piece, a 64 u sprite centred at 500, 700. The tutorial screen holds the window,
  * an `<anchor>` whose targets a local `step` names, with a rim filling it and a button inside it;
- * a second anchor sits in a container fitted to 0.5. A third screen holds an anchor whose style
- * sets a size and a place. Real flow, world, text and Yoga; inert renderer, headless.
+ * a second anchor sits in a container fitted to 0.5. Other screens hold an anchor whose style sets
+ * a size and a place, an anchor that is the root of its screen under a swaying loop, and two
+ * anchors whose rectangles tween their look. Real flow, world, text and Yoga; inert renderer,
+ * headless.
  */
 import type { Log } from "@moku-labs/common/browser";
 import { createApp, defineGame, projection, Shape, Sprite, Transform, type } from "../../../index";
@@ -169,25 +171,85 @@ const styled = projection({
 /** How often the root window's loop started. */
 export const loops = { started: 0 };
 
-/** The root window's loop: its alpha breathes forever, its pose is its rest's. */
+/**
+ * The root window's loop: its alpha breathes, and it sways 6 u to the right and back, added over
+ * its position, forever.
+ */
 const breathing: ElementMotion = {
   loop: view => {
     loops.started += 1;
 
-    return view.tween(Shape, { alpha: 0.5 }, { ms: 300, repeat: "forever" });
+    return view.all([
+      view.tween(Shape, { alpha: 0.5 }, { ms: 300, repeat: "forever" }),
+      view.tween(
+        Transform,
+        { x: 0 },
+        {
+          ms: 300,
+          additive: true,
+          repeat: "forever",
+          segments: [
+            { at: 0.5, to: { x: 6 } },
+            { at: 1, to: { x: 0 } }
+          ]
+        }
+      )
+    ]);
   }
 };
 
-/** A screen whose root element is an anchor on the first seat, with a loop that never ends. */
+/** A screen whose root element is an anchor on the world piece, with a loop that never ends. */
 const rootAnchor = projection({
   name: "rootAnchor",
   layer: "ui",
   from: () => ({ id: "rootAnchor" }),
   view: () => (
-    <anchor key="rootWindow" to={SEAT0} motion={breathing}>
+    <anchor key="rootWindow" to={PIECE} motion={breathing}>
       <stack key="rootRim" style={{ width: "100%", height: "100%" }} />
     </anchor>
   )
+});
+
+/** The look the looking windows take: a change of their rectangle's numbers tweens over 300 ms. */
+const lookTween: ElementMotion = {
+  change: { Shape: view => view.toRest(Shape, { ms: 300 }) }
+};
+
+/**
+ * Two windows whose rectangles round their corners on `go-round`, which plays their look tween:
+ * one on the first seat of the strip, one on the world piece.
+ */
+export const Looking = defineComponent("Looking", {
+  local: { round: false },
+  view: (_props: object, local) => (
+    <stack key="lookRoot" style={{ width: 1080, height: 1920 }}>
+      <anchor
+        key="lookSeat"
+        to={SEAT0}
+        motion={lookTween}
+        style={{ radius: local.round ? 12 : 0 }}
+      />
+      <anchor
+        key="lookPiece"
+        to={PIECE}
+        motion={lookTween}
+        style={{ radius: local.round ? 12 : 0 }}
+      />
+      <button
+        key="go-round"
+        local={{ round: true }}
+        style={{ left: 0, top: 1820, width: 100, height: 100 }}
+      />
+    </stack>
+  )
+});
+
+/** The screen of the looking windows. */
+const looking = projection({
+  name: "looking",
+  layer: "ui",
+  from: () => ({ id: "looking" }),
+  view: () => <Looking key="lookingView" />
 });
 
 /** The tutorial screen. */
@@ -217,8 +279,8 @@ const main = defineFlow("main", {
 /** The feature of the anchor fixture. */
 const anchorFeature = defineFeature("anchors", {
   flows: [main],
-  projections: [boardStrip, boardPieces, tutorial, styled, rootAnchor],
-  ui: [Tutorial]
+  projections: [boardStrip, boardPieces, tutorial, styled, rootAnchor, looking],
+  ui: [Tutorial, Looking]
 });
 
 /** Yields the microtask queue to the loop, the way a test waits without a timer. */
@@ -325,13 +387,14 @@ export function entityOf(app: AnchorApp, target: AnchorTarget): number {
 }
 
 /**
- * Taps a control of the tutorial and runs the frame that renders the new step.
+ * Taps a control of a screen and runs the frame that renders what it changed.
  *
  * @param app - The running app.
- * @param key - The key of the control: `go-<step>` or `go-pad`.
+ * @param key - The key of the control: `go-<step>`, `go-pad`, `go-thin` or `go-round`.
+ * @param screen - The projection of the control: the tutorial unless named.
  */
-export function press(app: AnchorApp, key: string): void {
-  app.input.tap(entityOf(app, { projection: "tutorial", key }));
+export function press(app: AnchorApp, key: string, screen = "tutorial"): void {
+  app.input.tap(entityOf(app, { projection: screen, key }));
   app.time.step(16);
 }
 

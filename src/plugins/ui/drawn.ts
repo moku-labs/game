@@ -81,7 +81,9 @@ function poseOf(reader: DrawnReader, entity: Entity): Readonly<TransformValue> |
 
 /**
  * Writes where an entity really is: its pose composed through every entity it is drawn under,
- * the arithmetic of `rootPoseInto`, over `upOf`. The answer keeps the entity's own pivot.
+ * the arithmetic of `rootPoseInto`, over `upOf`. The answer keeps the entity's own pivot. Kept in
+ * step with `rootPoseInto` of `renderer/sync/pose.ts`: the same composition, step by step, over the
+ * parents of `ui` elements and the rest pose of an element whose `Transform` has not landed.
  *
  * @param reader - What the resolver reads.
  * @param entity - The entity.
@@ -287,7 +289,7 @@ export function unionInto(out: Rect, part: Readonly<Rect>): void {
 /**
  * Tells a list of targets from one target.
  *
- * @param to - What `to` or `rectOf` was given.
+ * @param to - What `to` or `rectOf` was given, or nothing.
  * @returns True for a list.
  * @example
  * ```ts
@@ -295,7 +297,7 @@ export function unionInto(out: Rect, part: Readonly<Rect>): void {
  * ```
  */
 export function isTargetList(
-  to: AnchorTarget | readonly AnchorTarget[]
+  to: AnchorTarget | readonly AnchorTarget[] | undefined
 ): to is readonly AnchorTarget[] {
   return Array.isArray(to);
 }

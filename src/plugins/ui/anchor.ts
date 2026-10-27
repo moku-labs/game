@@ -2,8 +2,8 @@
  * @file ui plugin — the anchor pass, the system `ui.anchor` of phase `layout`, right after `ui.solve`.
  * Every `<anchor>` takes the drawn rect of its targets (`drawn.ts`), padded and mapped into the space
  * of its parent, in the frame its targets were laid out. Its subtree is a Yoga tree of its own, laid
- * out only when the anchor's size changed or a root was solved; a pure move shifts the rects in
- * place. A change of the targets applies the subtree as the solve applies any element, so the
+ * out only when the anchor's size changed or a node of it is dirty (a child restyled, measured
+ * again, added or taken out); a pure move shifts the rects in place. A change of the targets applies the subtree as the solve applies any element, so the
  * anchor's `change.Box` motion plays; following a target never starts a motion. A frame of a still
  * anchor, and of one that follows a moving target, allocates nothing.
  */
@@ -12,7 +12,7 @@ import type { Point } from "../renderer/types";
 import type { AnchorTarget } from "../world/projection/types";
 import type { Entity } from "../world/types";
 import { Box, type BoxValue } from "./components";
-import { drawnInto, drawnPoseInto, readerOf, unionInto, upOf } from "./drawn";
+import { drawnInto, drawnPoseInto, isTargetList, readerOf, unionInto, upOf } from "./drawn";
 import { sameValue } from "./jsx/same";
 import { ownRect } from "./jsx/state";
 import type { Anchor, Element, JsxModule } from "./jsx/types";
@@ -30,6 +30,9 @@ const SHIFT_EPSILON = 1e-6;
 
 /** The patch that only marks a component changed: its fields were written in place. */
 const NO_PATCH: object = Object.freeze({});
+
+/** The fields of the anchor's `Transform` a follow writes, held from a loop while it follows. */
+const FOLLOWED_FIELDS: readonly string[] = Object.freeze(["x", "y"]);
 
 /** The style fields an anchor takes from its targets: a style that sets one is ignored there. */
 const PLACED_FIELDS = ["width", "height", "position", "left", "top", "right", "bottom"] as const;
@@ -53,6 +56,22 @@ function isTarget(value: unknown): value is AnchorTarget {
   const target = value as { projection?: unknown; key?: unknown };
 
   return typeof target.projection === "string" && typeof target.key === "string";
+}
+
+/**
+ * The targets a `to` prop names, when it names one or a list of them.
+ *
+ * @param to - What the render wrote.
+ * @returns The target or the list, or `undefined` for anything else: the anchor is not shown.
+ * @example
+ * ```ts
+ * targetsOf("seat0"); // undefined
+ * ```
+ */
+function targetsOf(to: unknown): AnchorTarget | readonly AnchorTarget[] | undefined {
+  if (isTarget(to)) return to;
+
+  return Array.isArray(to) && to.every(entry => isTarget(entry)) ? to : undefined;
 }
 
 /**
@@ -111,6 +130,16 @@ function aim(element: Element, anchor: Anchor): void {
 }
 
 /**
+ * Gives the position of an anchor back to its tracks, when a follow held it from a loop.
+ *
+ * @param anchor - Its record.
+ */
+function letGo(anchor: Anchor): void {
+  anchor.held?.();
+  anchor.held = undefined;
+}
+
+/**
  * Creates the set of rects the anchor pass made. Its own function, because lint rule L5 refuses a
  * collection built inside an exported declaration.
  *
@@ -143,12 +172,13 @@ function relaidOut(element: Element, shift: Readonly<Point>): boolean {
  * Tells whether a motion that can end still plays on an element, or one that never ends.
  *
  * @param element - The element.
- * @returns `"finite"` while a motion that ends plays, `"endless"` while only a loop or a track
- *   that repeats forever plays, `"none"` otherwise.
+ * @returns `"finite"` while a motion that ends plays, `"endless"` while the element runs a loop or
+ *   only a track that repeats forever plays, `"none"` otherwise.
  */
 function motionOn(element: Element): "finite" | "endless" | "none" {
   if (!still(element)) return "finite";
-  if (element.loop?.active() === true) return "endless";
+  // A loop is endless by its kind: asking its handle would build the closure of `view.all` a frame.
+  if (element.loop !== undefined) return "endless";
 
   for (const handle of element.handles) if (handle.active()) return "endless";
 
@@ -178,9 +208,6 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
   // handed to a call is boxed, so the numbers travel in these two objects, written in place.
   const slot = ownRect(0, 0, 0, 0);
   const shift: Point = { x: 0, y: 0 };
-  // How many Yoga runs the pass made: the solves of the roots are the layout's count less these.
-  let ownSolves = 0;
-  const rootSolves = (): number => layout.solves - ownSolves;
 
   /**
    * Moves an element to a rect: its `previous` takes the rect it had, by value, and its rect the new
@@ -242,7 +269,7 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
   function readNode(element: Element, anchor: Anchor): void {
     if (element.node === anchor.node) return;
 
-    const to = element.node.props.to;
+    const to = targetsOf(element.node.props.to);
 
     if (anchor.node !== undefined && !sameValue(anchor.to, to)) anchor.retarget = true;
 
@@ -250,11 +277,20 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     anchor.to = to;
 
     // The dev guard is inline: a production `define` folds it away.
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__ || anchor.warned.style) {
+    if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) warnStyle(element, anchor);
+  }
+
+  /**
+   * Names, once, an anchor whose style sets what its targets decide. Its own function: a closure
+   * over `element` in `readNode` would make every call of it, every frame, allocate its context.
+   *
+   * @param element - The anchor.
+   * @param anchor - Its record.
+   */
+  function warnStyle(element: Element, anchor: Anchor): void {
+    if (anchor.warned.style || !PLACED_FIELDS.some(field => element.style[field] !== undefined)) {
       return;
     }
-
-    if (!PLACED_FIELDS.some(field => element.style[field] !== undefined)) return;
 
     anchor.warned.style = true;
     ctx.log.warn("ui:anchor-style", { key: element.key ?? element.identity });
@@ -287,9 +323,7 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
    * @param anchor - Its record.
    * @param target - One entry of `to`.
    */
-  function visit(element: Element, anchor: Anchor, target: unknown): void {
-    if (!isTarget(target)) return;
-
+  function visit(element: Element, anchor: Anchor, target: AnchorTarget): void {
     const entity = projection.entityOf(target.projection, target.key);
     const at = anchor.count;
 
@@ -341,9 +375,10 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     found.own = undefined;
     anchor.count = 0;
 
-    if (Array.isArray(to)) {
-      for (const target of to as readonly unknown[]) visit(element, anchor, target);
-    } else {
+    // A `to` that names no target shows nothing.
+    if (isTargetList(to)) {
+      for (const target of to) visit(element, anchor, target);
+    } else if (to !== undefined) {
       visit(element, anchor, to);
     }
 
@@ -522,7 +557,6 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     node.setHeight(element.rect.h);
     node.calculateLayout(element.rect.w, element.rect.h, yoga.DIRECTION_LTR);
     layout.solves += 1;
-    ownSolves += 1;
     placeUnder(element);
   }
 
@@ -694,13 +728,20 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
    */
   function carry(element: Element, anchor: Anchor, pose: TransformValue): void {
     const { aim: aimed, track, wrote } = anchor;
+    const rest = element.rest;
+
+    // A new size moves the pivot: no track writes it (it is no number), so it is set at once, and
+    // the position carried below counts its change.
+    if (pose.pivot.x !== rest.pivot.x || pose.pivot.y !== rest.pivot.y) {
+      ecs.set(element.entity, Transform, { pivot: { x: rest.pivot.x, y: rest.pivot.y } });
+    }
 
     // A value that is not the one the pass left is the motion's own of this frame.
     if (pose.x !== wrote.x) track.x = pose.x;
     if (pose.y !== wrote.y) track.y = pose.y;
 
-    const x = track.x + element.rest.x - aimed.x;
-    const y = track.y + element.rest.y - aimed.y;
+    const x = track.x + rest.x - aimed.x;
+    const y = track.y + rest.y - aimed.y;
 
     if (x === pose.x && y === pose.y) return;
 
@@ -713,9 +754,10 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
 
   /**
    * Writes the anchor's `Transform` from its rest pose. While a motion that ends plays (the glide of
-   * a change of targets), the motion is carried by the follow and lands on the rest; the pose is
-   * owed to the rest until it ends. A loop re-bases on the new rest through a 0 ms rest track.
-   * Otherwise each field is written on the stored value.
+   * a change of targets, a look tween), the motion is carried by the follow and lands on the rest;
+   * the pose is owed to the rest until it ends. Under a loop the follow holds `x` and `y` from every
+   * track while it moves (`world.projection.mute`), and the loop goes on from where the anchor
+   * stands once it is let go. Each field is written on the stored value.
    *
    * @param element - The anchor.
    * @param anchor - Its record.
@@ -736,15 +778,10 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
 
     anchor.owed = false;
 
-    if (motion === "endless") {
-      if (anchor.stale) {
-        ctx.deps.world.projection.setRest(element.entity, Transform, element.rest);
-        anchor.stale = false;
-      }
-
-      handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
-
-      return;
+    // A loop would write its own position over the follow's: the follow holds `x` and `y` from
+    // every track until the anchor stands, once per follow, and writes them itself.
+    if (motion === "endless" && anchor.held === undefined) {
+      anchor.held = projection.mute(element.entity, Transform, FOLLOWED_FIELDS);
     }
 
     const rest = element.rest;
@@ -788,6 +825,9 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
 
     if (x === rest.x && y === rest.y) return false;
 
+    // A motion carried from now on moves by what the target moves from here.
+    if (!anchor.owed) aim(element, anchor);
+
     rest.x = x;
     rest.y = y;
     anchor.stale = true;
@@ -821,7 +861,7 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
    *
    * @param element - The anchor.
    * @param anchor - Its record, `next` holding its new rect.
-   * @param relayout - Whether a root was solved since the last pass.
+   * @param relayout - Whether a node of its subtree is dirty.
    */
   function retarget(element: Element, anchor: Anchor, relayout: boolean): void {
     const next = anchor.next;
@@ -837,6 +877,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
 
     anchor.owed = false;
     anchor.stale = false;
+    // Its `change.Box` motion writes the position: a hold of a follow ends.
+    letGo(anchor);
     applyTree(element);
     // The glide its `change.Box` motion started lands on the new rest.
     aim(element, anchor);
@@ -845,12 +887,12 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
   /**
    * Keeps an anchor on targets that moved, resized or stood: no motion starts. A pure move writes
    * every number in place and leaves the `Box` values for the frame the anchor stands (a fractional
-   * number written into a stored `Box` field is boxed); a new size or a solved root lays the
+   * number written into a stored `Box` field is boxed); a new size or a dirty node lays the
    * subtree out again.
    *
    * @param element - The anchor.
    * @param anchor - Its record, `next` holding its rect of this frame.
-   * @param relayout - Whether a root was solved since the last pass.
+   * @param relayout - Whether a node of its subtree is dirty.
    * @returns True when the anchor's rest pose moved.
    */
   function keep(element: Element, anchor: Anchor, relayout: boolean): boolean {
@@ -863,6 +905,9 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     writeRect(element, next);
 
     if (resized) {
+      // A motion carried from now on moves by what the target moves from here.
+      if (!anchor.owed) aim(element, anchor);
+
       layOut(element);
       // The commit records the new rest with the world.
       jsx.applyAnchored(element, true);
@@ -898,8 +943,16 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
   function placeAnchor(entity: Entity, anchor: Anchor): void {
     const element = lookup(entity);
 
+    if (element === undefined) return;
+
     // A leaving anchor stays where it is; one of a scene built aside waits for the swap.
-    if (element === undefined || leaving(element) || projection.isBuilding(entity)) return;
+    if (leaving(element)) {
+      letGo(anchor);
+
+      return;
+    }
+
+    if (projection.isBuilding(entity)) return;
 
     readNode(element, anchor);
 
@@ -909,10 +962,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
       return;
     }
 
-    // A root solved since this anchor was last placed may have restyled or grown its subtree.
-    const relayout = rootSolves() !== anchor.solves;
-
-    anchor.solves = rootSolves();
+    // A child restyled, measured again, added or taken out marks the anchor's own tree dirty.
+    const relayout = layout.byEntity.get(entity)?.isDirty() === true;
 
     if (!anchor.placed) {
       place(element, anchor);
@@ -944,6 +995,9 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
       writeBoxes(element);
       anchor.boxes = false;
     }
+
+    // A loop held while the anchor moved goes on from where it stands.
+    letGo(anchor);
   }
 
   return (): void => {
