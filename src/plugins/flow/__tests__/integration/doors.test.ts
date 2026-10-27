@@ -255,6 +255,35 @@ describe("doors over a real app", () => {
     await game.stop();
   });
 
+  it("restores a bookmark without a version as it is, with no migration and no error", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const migrated = vi.fn((state: unknown) => state as never);
+    const app = createApp({
+      pluginConfigs: {
+        model: {
+          playerProvider: memory(),
+          seed: 7,
+          initialPlayer: { coins: 0 },
+          schemaVersion: 2,
+          migrations: [{ from: 1, up: migrated }]
+        },
+        clock: { source: fakeClock(1000) },
+        flow: { mainFlow: main }
+      }
+    });
+    const game = await createHeadless(app);
+    const taken = await run(app, bookmarkCommand);
+
+    // A checkpoint an older engine stored: the same trees, and no version.
+    const older: Record<string, unknown> = { ...structuredClone(taken.value as object) };
+    delete older.version;
+    await run(app, restoreCommand, { bookmark: { ...older, player: { coins: 3 } } as never });
+
+    expect(app.model.store.snapshot().player).toEqual({ coins: 3 });
+    expect(migrated).not.toHaveBeenCalled();
+    await game.stop();
+  });
+
   it("refuses every command without the dev flag, and nothing moves", async () => {
     const app = createDoorsGame();
     const game = await createHeadless(app);
