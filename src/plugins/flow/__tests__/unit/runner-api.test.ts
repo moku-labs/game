@@ -208,6 +208,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
         restore: vi.fn(() => {
           calls.push("restore");
         }),
+        schemaVersion: () => 1,
         flush: () => Promise.resolve()
       },
       rng: { peek: vi.fn() }
@@ -724,6 +725,7 @@ describe("bookmark() at a transit node", () => {
       session: { visits: 1 },
       rng: { seed: 42, streams: { chest: 3 } },
       graph: graphHash(harness.api.describe()),
+      version: 1,
       rest: { path: "home", input: { level: 3 } }
     });
   });

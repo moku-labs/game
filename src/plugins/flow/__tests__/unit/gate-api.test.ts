@@ -84,6 +84,7 @@ const createMockDeps = (time: TimeApi): Deps => ({
       markBarrier: vi.fn(),
       rollback: vi.fn(),
       restore: vi.fn(),
+      schemaVersion: () => 1,
       flush: vi.fn()
     },
     rng: { peek: vi.fn() }

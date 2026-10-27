@@ -385,7 +385,12 @@ export type StoreApi = {
    * @param input.player - The player tree.
    * @param input.session - The session tree. Omitted: the current one stays.
    * @param input.rng - The rng branch. Omitted: the current one stays.
+   * @param input.version - The schema version `player` and `rng` were written at (a bookmark's
+   *   `version`). An older one runs through the migration chain first, as a stored save does on
+   *   `load()`. Omitted: they are taken as the current version.
    * @throws {Error} When a transaction is open.
+   * @throws {SaveUnreadableError} When the version is newer than this build, a step is missing or
+   *   a step throws; the state stays as it was.
    * @example
    * ```ts
    * // The flow runner enters a bookmark: the trees first, then the rest point, then the node.
@@ -394,7 +399,19 @@ export type StoreApi = {
    * store.markRest();
    * ```
    */
-  restore(input: { player: Json; session?: Json; rng?: RngState }): void;
+  restore(input: { player: Json; session?: Json; rng?: RngState; version?: number }): void;
+
+  /**
+   * The schema version this build writes, `config.schemaVersion`: the version of the trees
+   * `snapshot()` returns. A bookmark keeps it, so a restore after the schema changed migrates.
+   *
+   * @returns The version.
+   * @example
+   * ```ts
+   * app.model.store.schemaVersion(); // 2 in a game on schemaVersion 2
+   * ```
+   */
+  schemaVersion(): number;
 
   /**
    * Asks the provider to write what it has accumulated. The pending patches stay: between two

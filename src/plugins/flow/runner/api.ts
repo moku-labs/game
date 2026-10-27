@@ -115,6 +115,7 @@ function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
     session: snapshot.session,
     rng: { seed: snapshot.rng.seed, streams: { ...snapshot.rng.streams } },
     graph: graphHash(graphOf(ctx, modules.features)),
+    version: ctx.deps.model.store.schemaVersion(),
     // `exactOptionalPropertyTypes`: a bookmark without a rest point has no key.
     ...(rest === undefined ? {} : { rest })
   };

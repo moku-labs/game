@@ -209,6 +209,52 @@ describe("doors over a real app", () => {
     await game.stop();
   });
 
+  it("migrates a bookmark of an older save schema on restore (bug F106: a dev reload after a schema change)", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    // The page before the reload: schema 1, the coins kept as `gold`.
+    const before = createApp({
+      pluginConfigs: {
+        model: { playerProvider: memory(), seed: 7, initialPlayer: { gold: 5 } as never },
+        clock: { source: fakeClock(1000) },
+        flow: { mainFlow: main }
+      }
+    });
+    const old = await createHeadless(before);
+    const taken = await run(before, bookmarkCommand);
+    await old.stop();
+
+    // The page after it: schema 2 renames `gold` to `coins`; the editor restores its checkpoint.
+    const after = createApp({
+      pluginConfigs: {
+        model: {
+          playerProvider: memory(),
+          seed: 7,
+          initialPlayer: { coins: 0 },
+          schemaVersion: 2,
+          migrations: [
+            {
+              from: 1,
+              up: state => {
+                const doc = state as { player: { gold: number }; rng: unknown };
+                return { player: { coins: doc.player.gold }, rng: doc.rng } as never;
+              }
+            }
+          ]
+        },
+        clock: { source: fakeClock(1000) },
+        flow: { mainFlow: main }
+      }
+    });
+    const game = await createHeadless(after);
+
+    expect(taken.value).toMatchObject({ version: 1 });
+    await run(after, restoreCommand, { bookmark: structuredClone(taken.value) });
+
+    expect(after.model.store.snapshot().player).toEqual({ coins: 5 });
+    await game.stop();
+  });
+
   it("refuses every command without the dev flag, and nothing moves", async () => {
     const app = createDoorsGame();
     const game = await createHeadless(app);
