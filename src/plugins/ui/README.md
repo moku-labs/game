@@ -859,7 +859,8 @@ JSX is a root of `ui`, held:
   the warm budget of `world.projection.left()`, laid out once and applied in parts, every element
   it spawns marked for the held view (`world.projection.adopt`). It stays out of `app.ui.find`,
   `app.ui.tree()`, `app.ui.lint()` and the keyboard focus; the renderer neither draws nor hits it.
-- **No key until the open.** `world` learns the keys of its elements in the frame it opens:
+- **No key reached until the open.** Its elements register their keys with `world` as they are made,
+  but `entityOf` answers nothing for an entity `world` builds or holds:
   `world.projection.entityOf("shop.sheet", "shopBuy")` answers nothing for a closed shop.
 - **Still while closed.** Its enters wait in the queue of `ui.enter`. A change (a new warm item, a
   new viewport, a text measured again) plays no `change` motion and is written at once. An overlay
@@ -867,7 +868,7 @@ JSX is a root of `ui`, held:
   A row a windowed list ranges in after the build, when the world no longer marks the work, is
   held as its root is.
 - **The open.** In the frame `from` shows the item the world hands the held view over and `ui`
-  releases its root: the slots are given out again, the keys go to `world` in mount order, and the
+  releases its root: the slots are given out again, `entityOf` answers for its keys, and the
   held enters play in that frame, posed at the end of its solve. A root opened before its build was
   done gets the rest in one block in that frame: its parked children are diffed whatever the
   budget, and it is laid out and applied whole with no motion, so no half-built frame is drawn.
