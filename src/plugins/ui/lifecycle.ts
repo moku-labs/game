@@ -23,7 +23,7 @@ import { checkTrigger, debugTap } from "./jsx/debug";
 import { stopFields } from "./jsx/fields";
 import { hostsMoved } from "./jsx/hosts";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
-import { createGuidePass } from "./layout/guide";
+import { createGuidePass, guardPointer } from "./layout/guide";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
 
@@ -174,7 +174,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ctx.deps.input.onTap(jsx.applyTap),
     ctx.deps.input.onTap(() => jsx.blur()),
     ctx.deps.input.onTap(jsx.tapped),
-    ctx.deps.input.onPointer(jsx.pointer),
+    // A field the lock of a guide keeps from the finger opens no keyboard.
+    ctx.deps.input.onPointer(guardPointer(ctx, jsx.pointer)),
     ctx.deps.input.onKey(jsx.key),
     ctx.deps.input.controls.add(LocalWrite),
     () => jsx.releaseHosted(),
@@ -258,6 +259,7 @@ export function stopUi(state: State): void {
   state.layout.iconLine = undefined;
   // The veil of a guide went with the ui owner above; input forgets its lock in its own stop.
   state.layout.guide = undefined;
+  state.layout.lastGuide = undefined;
   state.jsx.components.clear();
   state.jsx.roots.clear();
   state.jsx.elements.clear();

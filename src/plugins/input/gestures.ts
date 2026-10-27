@@ -159,6 +159,8 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
   pointer.justPressed = true;
   capture(ctx, true);
 
+  // Checked here, before `findPressed` (which also finds nothing there): an empty spot inside the
+  // window must stay a plain press on nothing, only a locked point answers the guide's `blocked`.
   if (lockedOut(ctx.state, point.x, point.y)) {
     submitBlocked(ctx);
 

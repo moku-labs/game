@@ -3,27 +3,21 @@
  * window cut over the guide's targets: one target, or the union of the shown ones of a list, grown
  * by `pad`. The system `ui.guide` of phase `layout` places it every frame, after the anchor pass,
  * through the resolver the anchors use (`drawn.ts`), so the window follows a target that moves or
- * scrolls. The window, written in place, is also the lock `input` keeps presses outside of. The
- * gate narrowing belongs to the runner. A frame of a guide allocates nothing.
+ * scrolls. The window, written in place, is also the lock `input` keeps presses outside of, and the
+ * text fields' pointer door honours it. The gate narrowing belongs to the runner. A frame of a guide
+ * allocates nothing.
  */
 import type { FxHandler } from "../../flow/fx/types";
-import {
-  NineSlice,
-  Shape,
-  type ShapeValue,
-  Sprite,
-  Transform,
-  type TransformValue
-} from "../../renderer/components";
-import { rootPoseOf } from "../../renderer/sync/pose";
+import type { PointerListener } from "../../input/types";
+import type { Json } from "../../model/types";
+import { Shape, type ShapeValue, Transform, type TransformValue } from "../../renderer/components";
 import { Layer, Order } from "../../world/ecs/define";
 import type { AnchorTarget } from "../../world/projection/types";
 import type { EcsApi, Entity } from "../../world/types";
-import { Box, UI_OWNER } from "../components";
+import { UI_OWNER } from "../components";
 import { type DrawnReader, readerOf, targetsInto } from "../drawn";
 import type { UiCtx } from "../types";
-import { drawnRect, visualRectOf } from "../visual";
-import type { ElementLookup, Guide, Rect } from "./types";
+import type { Guide, Rect } from "./types";
 
 /** How dark the veil is when the guide names no alpha. */
 const DIM_ALPHA = 0.6;
@@ -36,6 +30,16 @@ const GUIDE_ORDER = 1_000_000;
 
 /** The patch that only marks a component changed: its fields were written in place. */
 const NO_PATCH: object = Object.freeze({});
+
+/**
+ * Frames of the pass a guide that replaced one with the same targets keeps that guide's window while
+ * none of its targets is shown yet: a node that derives its guide again in the tick its edge
+ * committed finds a view the edge made before the world laid it out.
+ */
+const GRACE_FRAMES = 2;
+
+/** Frames in a row a key of the guide names no entity before a dev build names it, as for an anchor. */
+const MISSING_FRAMES = 2;
 
 /** How the veil of a guide is drawn: its colour and alpha, or not at all. */
 type Veil = { color: number; alpha: number } | false;
@@ -59,7 +63,21 @@ function emptyRect(): Rect {
 }
 
 /**
- * Tells whether a value is a target: an object with a string `projection` and a string `key`.
+ * Tells whether a JSON value is an object with keys: not `null`, not an array.
+ *
+ * @param value - Any JSON value, or nothing.
+ * @returns `true` for a plain object.
+ * @example
+ * ```ts
+ * isPlainRecord({ target: [] }); // true
+ * ```
+ */
+function isPlainRecord(value: Json | undefined): value is Record<string, Json> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Tells whether a JSON value is a target: an object with a string `projection` and a string `key`.
  *
  * @param value - One entry of a guide's `target`.
  * @returns True for a target.
@@ -68,28 +86,24 @@ function emptyRect(): Rect {
  * isTarget({ projection: "hud", key: "play" }); // true
  * ```
  */
-function isTarget(value: unknown): value is AnchorTarget {
-  if (typeof value !== "object" || value === null) return false;
-
-  const record = value as { projection?: unknown; key?: unknown };
-
-  return typeof record.projection === "string" && typeof record.key === "string";
+function isTarget(value: Json | undefined): value is AnchorTarget {
+  return (
+    isPlainRecord(value) && typeof value.projection === "string" && typeof value.key === "string"
+  );
 }
 
 /**
- * Reads the payload of a guide as a record.
+ * Reads the payload of a guide, or of its veil, as a record.
  *
- * @param payload - What `guide()` put in the descriptor.
- * @returns The payload's fields, or an empty record for no payload.
+ * @param payload - What `guide()` put in the descriptor, or one of its fields.
+ * @returns The record, or an empty one for anything else.
  * @example
  * ```ts
  * fieldsOf(undefined); // {}
  * ```
  */
-function fieldsOf(payload: unknown): Record<string, unknown> {
-  if (typeof payload !== "object" || payload === null) return {};
-
-  return payload as Record<string, unknown>;
+function fieldsOf(payload: Json | undefined): Record<string, Json> {
+  return isPlainRecord(payload) ? payload : {};
 }
 
 /**
@@ -102,7 +116,9 @@ function fieldsOf(payload: unknown): Record<string, unknown> {
  * readTarget({ target: { projection: "hud", key: "play" } })?.key; // "play"
  * ```
  */
-export function readTarget(payload: unknown): { projection: string; key: string } | undefined {
+export function readTarget(
+  payload: Json | undefined
+): { projection: string; key: string } | undefined {
   const target = fieldsOf(payload).target;
 
   if (!isTarget(target)) return undefined;
@@ -120,7 +136,7 @@ export function readTarget(payload: unknown): { projection: string; key: string 
  * readTargets({ target: [{ projection: "board", key: "c2" }, { projection: "board", key: "c3" }] }).length; // 2
  * ```
  */
-function readTargets(payload: unknown): AnchorTarget[] {
+function readTargets(payload: Json | undefined): AnchorTarget[] {
   const target = fieldsOf(payload).target;
 
   if (!Array.isArray(target)) {
@@ -144,7 +160,7 @@ function readTargets(payload: unknown): AnchorTarget[] {
  * readPad({ pad: 4 }); // 4
  * ```
  */
-function readPad(payload: unknown): number {
+function readPad(payload: Json | undefined): number {
   const pad = fieldsOf(payload).pad;
 
   return typeof pad === "number" && Number.isFinite(pad) ? pad : 0;
@@ -161,7 +177,7 @@ function readPad(payload: unknown): number {
  * readVeil({ veil: { alpha: 0 } }); // { color: 0, alpha: 0 }
  * ```
  */
-function readVeil(payload: unknown): Veil {
+function readVeil(payload: Json | undefined): Veil {
   const veil = fieldsOf(payload).veil;
 
   if (veil === false) return false;
@@ -172,50 +188,6 @@ function readVeil(payload: unknown): Veil {
     color: typeof color === "number" ? color : DIM_COLOR,
     alpha: typeof alpha === "number" ? alpha : DIM_ALPHA
   };
-}
-
-/**
- * The rect of the view a guide points at: where a ui element is drawn (its `Box` scaled by every
- * fitted element on the way up, through the pose of its slot for a root laid out in one), the `Box`
- * of an element the lookup does not know, else where a
- * view is drawn: its pose composed through the `Parent` chain (a view a ui slot hosts sits in the
- * slot's space) with the size of its panel or its sprite. A sprite of size 0 is drawn at its
- * texture's size, which `ui` does not know: its hole has size 0.
- *
- * @param ctx - Domain context of the ui plugin.
- * @param entity - The entity the target named.
- * @param lookup - How an entity becomes its ui element; nothing for a view `ui` does not own.
- * @returns The rect, or `undefined` when the view carries no size.
- */
-export function rectOfTarget(ctx: UiCtx, entity: Entity, lookup?: ElementLookup): Rect | undefined {
-  const element = lookup?.(entity);
-
-  if (element !== undefined && lookup !== undefined) {
-    const rect = visualRectOf(element, lookup);
-    // A root laid out in a slot is solved in the slot's units: its rect is mapped through the slot's pose (spec 16 U3).
-    const slot = ctx.state.jsx.roots.get(element.root)?.slot;
-
-    return slot === undefined ? rect : drawnRect(rootPoseOf(ctx.deps.world.ecs, slot), rect);
-  }
-
-  const ecs = ctx.deps.world.ecs;
-  const box = ecs.get(entity, Box);
-
-  if (box !== undefined) return { x: box.x, y: box.y, w: box.w, h: box.h };
-  if (!ecs.has(entity, Transform)) return undefined;
-
-  const pose = rootPoseOf(ecs, entity);
-  const panel = ecs.get(entity, NineSlice);
-
-  if (panel !== undefined) return drawnRect(pose, { x: 0, y: 0, w: panel.width, h: panel.height });
-
-  const sprite = ecs.get(entity, Sprite);
-
-  if (sprite === undefined) return undefined;
-
-  const { anchor, width, height } = sprite;
-
-  return drawnRect(pose, { x: -anchor.x * width, y: -anchor.y * height, w: width, h: height });
 }
 
 /**
@@ -267,46 +239,33 @@ function dimInto(
 }
 
 /**
- * The four rectangles that cover the screen except the hole: `dimInto` on new rects.
- *
- * @param screen - The viewport rect.
- * @param hole - The rect left uncovered, or nothing for a full dim.
- * @returns Between one and four rectangles.
- * @example
- * ```ts
- * dimRects({ x: 0, y: 0, w: 100, h: 100 }, undefined).length; // 1
- * ```
- */
-export function dimRects(screen: Rect, hole: Rect | undefined): Rect[] {
-  if (hole === undefined) return [screen];
-
-  const out = [emptyRect(), emptyRect(), emptyRect(), emptyRect()];
-
-  dimInto(screen, hole, out);
-
-  return out.map(rect => ({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }));
-}
-
-/**
  * Places a guide for this frame: its window over the union of its shown targets, grown by its
  * padding, and the rects of its veil around it, all written in place. No target shown: the window
- * keeps its last numbers and the veil covers the screen.
+ * keeps its last numbers; during its grace, a guide that took over the window of the one it
+ * replaced keeps that window, otherwise the veil covers the screen.
  *
  * @param reader - What the resolver reads.
  * @param viewport - The viewport the veil covers.
- * @param guide - The guide.
- * @returns True when a target is shown and the window holds its rect.
+ * @param guide - The guide: `found` is written.
+ * @returns True when the window holds a rect to cut: a shown target's, or the one kept.
  */
 function placeGuide(reader: DrawnReader, viewport: ViewportReader, guide: Guide): boolean {
   const { window, pad } = guide;
-  let shown = guide.targets.length > 0 && targetsInto(reader, guide.targets, window, guide.scratch);
 
-  if (shown) {
+  guide.found =
+    guide.targets.length > 0 && targetsInto(reader, guide.targets, window, guide.scratch);
+
+  // Not found: the resolver left the window as it was, the kept one during the grace.
+  let shown = guide.grace > 0;
+
+  if (guide.found) {
     window.x -= pad;
     window.y -= pad;
     window.w += 2 * pad;
     window.h += 2 * pad;
     shown = window.w > 0 && window.h > 0;
+    // The window is the guide's own from now on.
+    guide.grace = 0;
   }
 
   const size = viewport.size();
@@ -333,9 +292,9 @@ function writeVeils(ecs: EcsApi, guide: Guide): void {
   for (const entity of guide.veils) {
     const rect = rects[index];
     const pose: TransformValue | undefined = ecs.get(entity, Transform);
+    const shape: ShapeValue | undefined = ecs.get(entity, Shape);
 
     index += 1;
-    const shape: ShapeValue | undefined = ecs.get(entity, Shape);
 
     if (rect === undefined || pose === undefined || shape === undefined) continue;
 
@@ -410,8 +369,79 @@ function endGuide(ctx: UiCtx, guide: Guide): void {
   if (ctx.state.layout.guide !== guide) return;
 
   ctx.state.layout.guide = undefined;
+  // A guide that follows in this frame with the same targets takes its window over.
+  ctx.state.layout.lastGuide = guide;
+  guide.endedAt = ctx.deps.time.snapshot().frame;
   // eslint-disable-next-line unicorn/no-useless-undefined -- `undefined` lifts the lock.
   ctx.deps.input.lock.window(undefined);
+}
+
+/**
+ * Tells whether two guides name the same targets, in the same order.
+ *
+ * @param first - One list of targets.
+ * @param second - The other.
+ * @returns True when every target matches.
+ * @example
+ * ```ts
+ * sameTargets([{ projection: "hud", key: "play" }], [{ projection: "hud", key: "play" }]); // true
+ * ```
+ */
+function sameTargets(first: readonly AnchorTarget[], second: readonly AnchorTarget[]): boolean {
+  return (
+    first.length === second.length &&
+    first.every(
+      (target, index) =>
+        target.projection === second[index]?.projection && target.key === second[index]?.key
+    )
+  );
+}
+
+/**
+ * Hands a new guide the window of the guide it replaces, when that one names the same targets and
+ * cut a window: the guide shown now, or one that ended in this frame (a node left and entered again
+ * in one tick). The new guide keeps it for its grace while none of its targets is shown.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param guide - The new guide, not placed yet.
+ * @param replaced - The guide shown now, if any.
+ */
+function takeOver(ctx: UiCtx, guide: Guide, replaced: Guide | undefined): void {
+  const last = ctx.state.layout.lastGuide;
+  const before =
+    replaced ??
+    (last !== undefined && last.endedAt === ctx.deps.time.snapshot().frame ? last : undefined);
+
+  if (before?.locked !== "window" || !sameTargets(before.targets, guide.targets)) return;
+
+  guide.window.x = before.window.x;
+  guide.window.y = before.window.y;
+  guide.window.w = before.window.w;
+  guide.window.h = before.window.h;
+  guide.grace = GRACE_FRAMES;
+}
+
+/**
+ * Names, in a dev build, a guide a key of which named no entity two frames in a row, once: a target
+ * that never shows keeps the whole screen veiled and every press locked.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param guide - The guide.
+ */
+function countMissing(ctx: UiCtx, guide: Guide): void {
+  const projection = ctx.deps.world.projection;
+  let missing = false;
+
+  for (const target of guide.targets) {
+    if (projection.entityOf(target.projection, target.key) === undefined) missing = true;
+  }
+
+  guide.missing = missing ? guide.missing + 1 : 0;
+
+  if (guide.missing < MISSING_FRAMES) return;
+
+  guide.warned = true;
+  ctx.log.warn("ui:guide-target-missing", { targets: guide.targets });
 }
 
 /**
@@ -422,7 +452,7 @@ function endGuide(ctx: UiCtx, guide: Guide): void {
  * @param veil - The veil of the guide.
  * @returns The guide, nothing placed and nothing locked yet.
  */
-function createGuide(payload: unknown, veil: Veil): Guide {
+function createGuide(payload: Json | undefined, veil: Veil): Guide {
   const targets = readTargets(payload);
   const count = targets.length === 0 ? 1 : 4;
 
@@ -438,7 +468,12 @@ function createGuide(payload: unknown, veil: Veil): Guide {
       pose: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
     },
     locked: "none",
-    ended: false
+    found: false,
+    grace: 0,
+    missing: 0,
+    warned: false,
+    ended: false,
+    endedAt: -1
   };
 }
 
@@ -461,6 +496,13 @@ export function createGuidePass(ctx: UiCtx): () => void {
 
     const shown = placeGuide(reader, viewport, guide);
 
+    if (!guide.found && guide.grace > 0) guide.grace -= 1;
+
+    // The dev guard is inline: a production `define` folds the count away.
+    if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__ && !guide.warned) {
+      countMissing(ctx, guide);
+    }
+
     writeVeils(ecs, guide);
     lockTo(ctx, guide, shown);
   };
@@ -469,7 +511,9 @@ export function createGuidePass(ctx: UiCtx): () => void {
 /**
  * Builds the `guide` handler. It returns at once: the node continues while the veil stays on
  * screen, and the veil and the lock leave when the narrow is lifted. A new guide replaces the one
- * `ui` shows. Fast mode draws nothing.
+ * `ui` shows; one with the same targets as the guide it replaces (shown now, or ended in this
+ * frame) keeps that guide's window for its grace while its targets are not laid out yet. Fast mode
+ * draws nothing.
  *
  * @param ctx - Domain context of the ui plugin.
  * @returns The handler `flow.fx.handle("guide", ...)` takes.
@@ -482,24 +526,62 @@ export function createGuideHandler(ctx: UiCtx): FxHandler {
     // A node left before its guide reached the handler shows nothing: no abort would take it down.
     if (mode === "fast" || signal.aborted) return;
 
-    const shownBefore = ctx.state.layout.guide;
+    const replaced = ctx.state.layout.guide;
 
-    if (shownBefore !== undefined) endGuide(ctx, shownBefore);
+    if (replaced !== undefined) endGuide(ctx, replaced);
 
     const veil = readVeil(descriptor.payload);
     const guide = createGuide(descriptor.payload, veil);
-    const shown = placeGuide(reader, viewport, guide);
 
-    if (guide.targets.length > 0 && !shown) {
-      ctx.log.warn(
-        "ui:guide-target-missing",
-        readTarget(descriptor.payload) ?? { targets: guide.targets }
-      );
-    }
+    takeOver(ctx, guide, replaced);
+
+    const shown = placeGuide(reader, viewport, guide);
 
     guide.veils = spawnVeils(ctx.deps.world.ecs, guide.rects, veil);
     ctx.state.layout.guide = guide;
     lockTo(ctx, guide, shown);
     signal.addEventListener("abort", () => endGuide(ctx, guide), { once: true });
+  };
+}
+
+/**
+ * Tells whether the lock of a guide keeps a point from every view: it locks everything, or the
+ * point lies outside its window, edges included, as `input` decides it.
+ *
+ * @param guide - The guide on screen.
+ * @param x - Reference x.
+ * @param y - Reference y.
+ * @returns True when the point is locked.
+ */
+function locksPoint(guide: Guide, x: number, y: number): boolean {
+  if (guide.locked === "all") return true;
+  if (guide.locked !== "window") return false;
+
+  const { window } = guide;
+
+  return x < window.x || x > window.x + window.w || y < window.y || y > window.y + window.h;
+}
+
+/**
+ * Wraps the pointer door of the text fields, which finds the field under a sample on its own:
+ * while a guide stands, a sample whose point its lock keeps from every view does nothing, so a
+ * field outside the window is neither focused nor blurred. The point is brought into reference
+ * units as `input` brings it.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param door - The `onPointer` listener of the text fields.
+ * @returns The listener `input.onPointer` takes.
+ */
+export function guardPointer(ctx: UiCtx, door: PointerListener): PointerListener {
+  return sample => {
+    const guide = ctx.state.layout.guide;
+
+    if (guide !== undefined) {
+      const point = ctx.deps.renderer.viewport.toReference(sample.clientX, sample.clientY);
+
+      if (locksPoint(guide, point.x, point.y)) return;
+    }
+
+    door(sample);
   };
 }

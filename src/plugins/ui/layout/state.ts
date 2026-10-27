@@ -65,6 +65,7 @@ export function createLayoutState(): LayoutState {
     iconLine: undefined,
     order: 0,
     cleanups: [],
-    guide: undefined
+    guide: undefined,
+    lastGuide: undefined
   };
 }

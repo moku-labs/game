@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Shape, Transform } from "../../../renderer/components";
+import { guide } from "../../../../index";
+import { Shape, Sprite, Transform } from "../../../renderer/components";
 import { Order } from "../../../world/ecs/define";
 import { ScrollState } from "../../components";
+import { mountScreen, startFieldApp } from "../field-app";
 import {
   createGuideApp,
   dragAt,
@@ -242,12 +244,126 @@ describe("the veil of a guide", () => {
     expect(locks.at(-1)).toBeUndefined();
   });
 
-  it("warns once when a named target is not shown at the start", async () => {
-    const { app } = await headless("missing");
+  // Bug caught: a target an edge just made warns and flashes a full veil for a frame, or a key that
+  // names nothing is never named, and the tutorial soft-locks without a word.
+  it("names a key that names no entity two frames in a row, once, in a dev build only", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const { app, locks } = await headless("none");
+    const missing = {
+      allow: { intent: "seat" },
+      target: { projection: "guide.board", key: "nowhere" }
+    };
+
+    app.flow.fx.dispatch(guide(missing));
+
+    // The first placement veils the screen and locks every press, as before; it names nothing yet.
+    expect(veil(app)[0]).toMatchObject({ x: 0, y: 0, ...screenOf(app) });
+    // eslint-disable-next-line unicorn/no-null -- `null` is the lock of everything.
+    expect(locks).toEqual([null]);
+    expect(logged(app, "ui:guide-target-missing")).toEqual([]);
+
+    frames(app, 1);
+
+    expect(logged(app, "ui:guide-target-missing")).toEqual([]);
+
+    frames(app, 4);
 
     expect(logged(app, "ui:guide-target-missing")).toEqual([
-      { projection: "guide.board", key: "nowhere" }
+      { targets: [{ projection: "guide.board", key: "nowhere" }] }
     ]);
+
+    vi.unstubAllGlobals();
+
+    const quiet = await headless("missing");
+
+    frames(quiet.app, 4);
+
+    expect(logged(quiet.app, "ui:guide-target-missing")).toEqual([]);
+    await quiet.app.stop();
+  });
+
+  // Bug caught: a node that derives the same guide again in the tick its edge committed finds the
+  // view the edge made before the world laid it out, and flashes a full veil and a full lock.
+  it("keeps the window of the guide it replaced while the same targets are not laid out yet", async () => {
+    const { app, locks } = await headless("piece");
+    const window = { x: 468, y: 668, w: 64, h: 64 };
+    const piece = entityOf(app, PIECE);
+
+    // The piece is not drawn when the node guides again in the tick of its edge, as a view the
+    // edge made and the world has not laid out yet.
+    app.world.ecs.set(piece, Sprite, { alpha: 0 });
+    expect(app.flow.gate.answer({ intent: "blocked" })).toBe(true);
+    await tick();
+
+    expect(locks).toEqual([window, undefined, window]);
+    expect(veil(app)).toMatchObject(around(app, window));
+
+    app.world.ecs.set(piece, Sprite, { alpha: 1 });
+    app.world.ecs.set(piece, Transform, { x: 512.25 });
+    frames(app, 1);
+
+    // The piece shows again: the window is the piece's own, followed from there.
+    expect(locks).toEqual([window, undefined, window]);
+    expect(veil(app)).toMatchObject(around(app, { ...window, x: 480.25 }));
+  });
+
+  it("takes no window over from a guide of other targets", async () => {
+    const { app, locks } = await headless("piece");
+
+    expect(app.flow.gate.answer({ intent: "seat", payload: { step: "missing" } })).toBe(true);
+    await tick();
+
+    // eslint-disable-next-line unicorn/no-null -- `null` is the lock of everything.
+    expect(locks).toEqual([{ x: 468, y: 668, w: 64, h: 64 }, undefined, null]);
+    expect(veil(app)[0]).toMatchObject({ x: 0, y: 0, ...screenOf(app) });
+  });
+
+  it("veils the screen once its grace ends and the targets still are not shown", async () => {
+    const { app, locks } = await headless("piece");
+    const window = { x: 468, y: 668, w: 64, h: 64 };
+
+    app.world.ecs.set(entityOf(app, PIECE), Sprite, { alpha: 0 });
+    expect(app.flow.gate.answer({ intent: "blocked" })).toBe(true);
+    await tick();
+    frames(app, 2);
+
+    expect(locks).toEqual([window, undefined, window]);
+    expect(veil(app)).toMatchObject(around(app, window));
+
+    frames(app, 1);
+
+    // The lock of everything.
+    expect(locks.at(-1)).toBeNull();
+    expect(veil(app)[0]).toMatchObject({ x: 0, y: 0, ...screenOf(app) });
+  });
+});
+
+describe("a text field under the lock of a guide", () => {
+  // Bug caught: the keyboard opens on a field the veil covers, though its tap is locked.
+  it("focuses no field outside the window, and the field inside as before", async () => {
+    const { app, page } = await startFieldApp({ dom: true, innerHeight: 1920 });
+    const input = page?.dom.inputs[0];
+
+    if (page === undefined || input === undefined) throw new Error("no hidden input was made");
+
+    mountScreen(app, "profile");
+    app.flow.fx.dispatch(
+      guide({ allow: { intent: "rename" }, target: { projection: "profile", key: "nickField" } })
+    );
+    app.time.step(16);
+
+    page.canvas.pointer("pointerdown", 100, 1340);
+    page.canvas.pointer("pointerup", 100, 1340);
+
+    expect(input.focusCalls).toEqual([]);
+
+    page.canvas.pointer("pointerdown", 100, 40);
+    page.canvas.pointer("pointerup", 100, 40);
+
+    expect(input.focusCalls).toEqual([{ preventScroll: true }]);
+
+    await app.stop();
   });
 });
 

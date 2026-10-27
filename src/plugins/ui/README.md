@@ -867,13 +867,23 @@ defineNode({
   every popup: black at 0.6, or the guide's `veil: { color, alpha }`. `alpha: 0` draws nothing
   visible; `veil: false` spawns no rectangle. Without a target the veil is one rectangle over the
   screen. While no target is shown (not mounted yet, leaving, built aside, alpha 0), the veil covers
-  the screen and every press is locked; it opens again when a target shows. A target not shown when
-  the guide starts is named once, `ui:guide-target-missing`.
+  the screen and every press is locked; it opens again when a target shows.
+- **A target that never shows.** It keeps the whole screen veiled and every press locked: only the
+  guide's `blocked` answer and the keyboard reach the gate, so a key that names nothing (a typo, a
+  view of another scene) soft-locks the tutorial. A dev build names it once per guide,
+  `ui:guide-target-missing` `{ targets }`, after a key named no entity two frames in a row, as for
+  an `<anchor>`.
+- **A guide that follows itself.** A node that derives its guide again in the tick its edge
+  committed (it was left and entered again) may find a target the edge made that the world has
+  not laid out yet. A guide with the same targets as the one it replaced, shown now or ended in
+  this frame, keeps that guide's window for two frames while none of its targets is shown, so the
+  veil does not flash over the whole screen; a guide of other targets does as above.
 - **The lock.** `ui` hands `input` the window by reference (`input.lock.window(window)`) and writes
   it in place every frame; `null` while no target is shown, `undefined` when the guide ends. A press
   outside reaches no view (no `Tappable`, no `LocalWrite`, no scroll, no drag, no trace, no hover)
-  and answers the guide's `blocked` when it names one; a drop outside finds no target. Inside the
-  window everything works as before. `input` runs before `layout`, so a press reads the window of
+  and answers the guide's `blocked` when it names one; a drop outside finds no target. A text field
+  outside opens no keyboard: `ui`'s pointer door, which finds the field under the finger on its own,
+  does nothing at a locked point. Inside the window everything works as before. `input` runs before `layout`, so a press reads the window of
   the frame before: one frame of lag behind a moving target. The doors `app.input.tap`, `press`,
   `drag` do no hit test and are not locked.
 - **One at a time.** A new guide replaces the one shown: its veil leaves and its lock goes. The

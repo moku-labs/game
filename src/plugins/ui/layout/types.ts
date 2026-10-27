@@ -91,8 +91,21 @@ export type Guide = {
   scratch: { part: Rect; pose: TransformValue };
   /** What `input` locks now: the window, every press, or nothing yet. */
   locked: "window" | "all" | "none";
+  /** Whether a target was shown at the last placement. */
+  found: boolean;
+  /**
+   * Frames of the pass the window taken over from the guide this one replaced is kept while no
+   * target is shown; 0 when nothing was taken over, or once a target showed.
+   */
+  grace: number;
+  /** Frames in a row a key of the guide named no entity; counted in a dev build. */
+  missing: number;
+  /** True once a dev build named a key that named no entity. */
+  warned: boolean;
   /** True once the guide ended: its veil left. */
   ended: boolean;
+  /** The frame the guide ended in; -1 while it stands. */
+  endedAt: number;
 };
 
 /**
@@ -121,6 +134,8 @@ export type LayoutState = {
   cleanups: Array<() => void>;
   /** The guide on screen, placed every frame by the system `ui.guide`; none while no guide stands. */
   guide: Guide | undefined;
+  /** The last guide that ended: one that follows in its frame with the same targets takes its window. */
+  lastGuide: Guide | undefined;
 };
 
 /**

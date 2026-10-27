@@ -38,6 +38,8 @@ function reactToLifecycle(ctx: KernelSlice, payload: LifecycleChanged): void {
  * @param payload - What was committed and why.
  */
 function refreshGuide(ctx: KernelSlice, payload: ModelCommitted): void {
+  // In today's engine this derives only after a rollback or a load made outside the loop: the node
+  // that waits at its gate holds the only transaction, so no other commit can land meanwhile.
   const guide = ctx.state.runner.guide;
 
   if (guide === undefined || payload.cause === "edge") return;
