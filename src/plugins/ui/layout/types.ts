@@ -152,8 +152,16 @@ export type LayoutModule = {
   settled(element: Element): boolean;
   /** Moves every scroll by the frame: the finger, a fling or a glide. */
   scroll(containers: readonly Element[], lookup: ElementLookup, time: Readonly<Time>): void;
-  /** After a solve or a render: the first place of a new scroll, a new range, a new `offset` prop. */
-  settleScroll(containers: readonly Element[], lookup: ElementLookup, time: Readonly<Time>): void;
+  /**
+   * After a solve or a render: the first place of a new scroll, a new range, a new `offset` prop.
+   * A scroll `stands` answers true for is not on the screen yet: it stands at its prop, no glide.
+   */
+  settleScroll(
+    containers: readonly Element[],
+    lookup: ElementLookup,
+    time: Readonly<Time>,
+    stands?: (container: Element) => boolean
+  ): void;
   clampScroll(container: Element, contentHeight: number, lookup: ElementLookup): number;
   /** Puts a live scroll at an offset at once; false when it has not been placed yet. */
   scrollTo(container: Element, to: number, lookup: ElementLookup): boolean;

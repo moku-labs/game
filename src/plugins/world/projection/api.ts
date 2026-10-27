@@ -349,8 +349,18 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     motionsOf: (entity: Entity): readonly string[] => runningComponents(state.tracks, entity),
 
-    entityOf: (projection: string, key: string): Entity | undefined =>
-      state.mounted.get(projection)?.live.get(key)?.entity ?? state.keys.get(projection)?.get(key),
+    entityOf: (projection: string, key: string): Entity | undefined => {
+      const entity =
+        state.mounted.get(projection)?.live.get(key)?.entity ??
+        state.keys.get(projection)?.get(key);
+
+      // An element of a root built aside or held warm is not on the screen: no game code may reach it by key.
+      return entity === undefined ||
+        state.building?.entities.has(entity) === true ||
+        state.warmHeld.has(entity)
+        ? undefined
+        : entity;
+    },
 
     entitiesOf: (name: string): readonly Entity[] => {
       const mounted = state.mounted.get(name) ?? state.building?.mounted.get(name);

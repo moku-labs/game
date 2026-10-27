@@ -192,6 +192,9 @@ async function startWard() {
 
     return onBuild(check);
   });
+  // The renderer is inert here. ui registers its part of a build only with a renderer that draws:
+  // it is asked as one would answer, the views themselves stay undrawn.
+  vi.spyOn(app.renderer.host, "kind").mockReturnValue("webgpu");
   await app.start();
   vi.restoreAllMocks();
   app.flow.run().catch(() => undefined);

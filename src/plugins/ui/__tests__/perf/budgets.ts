@@ -99,6 +99,19 @@ export const BUDGET = {
    */
   reconcileAfterParts: 0,
   /**
+   * Spec 33 B+D (change 2026-10-25-f61-s3-big-mount): `ui.reconcile` and `ui.solve` of an idle
+   * frame with two windows held warm and at rest beside the ten roots, a shop with a windowed list
+   * and a settings sheet. The walk for a released root reads the membership version and the
+   * budget, the drain and the application step one size, and the scrolls of the held windows are
+   * neither moved nor ranged. 0 B.
+   */
+  reconcileWarmRest: 0,
+  /**
+   * Spec 33 B+D: `ui.enter` while the enters of the two held windows wait in its queue: two
+   * numbers, the queue not walked. 0 B.
+   */
+  enterWarmRest: 0,
+  /**
    * F85 (change 2026-10-25-f83-f85-ui-exits-shape): the check every write of an element with a
    * `change` hook of its visual asks first, on each of the four visuals (the XP arc's `Shape`, a
    * coin `Sprite`, a panel `NineSlice`, a label `Text`, fractional numbers in all), none moved.

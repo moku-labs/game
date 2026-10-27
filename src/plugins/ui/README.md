@@ -14,7 +14,7 @@ rect from one Yoga solve per change.
 | Member | Answers |
 |---|---|
 | `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key, `value` on a text field, `window` on a windowed scroll, children |
-| `app.ui.find(key)` | the entity of a keyed element, live only, never one of a scene built aside |
+| `app.ui.find(key)` | the entity of a keyed element, live only, never one of a scene built aside or of a window held warm |
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 | `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key, `false` and the warning `ui:scroll-before-solve` `{ key }` when the `scroll` came in this frame and its first solve has not placed it yet. Works headless. See [Scroll](#scroll) |
@@ -33,8 +33,9 @@ Emits the global `ui:hot-swap` in a dev build only, listens to nothing. Depends 
 `await import("yoga-layout/load")` in `onStart`; nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
 the cursor shows a hand over a local-state button, one `input.onKey` listener for the focus, one
 `input.onPointer` listener for the text fields, one `flow.fx.onHint` listener that hands released
-hints to the `change` hooks of elements, `ui`'s part of a scene build through
-`world.projection.onBuild` (see [A scene built aside](#a-scene-built-aside)), and on a page the
+hints to the `change` hooks of elements, with a renderer that draws `ui`'s part of a scene build through
+`world.projection.onBuild` (see [A scene built aside](#a-scene-built-aside) and
+[Warm windows](#warm-windows)), and on a page the
 hidden input of the text fields; `onStop` removes all of them. A dev build also installs the [hot swap](#hot-swap-dev) handler.
 
 ## What a re-render costs
@@ -785,15 +786,18 @@ in parts (spec 33, see [In parts](#in-parts)), starting in the frame after the b
   keeps the play or plays it again (F48) and starts the loops and the level of an overlay, the
   frame the scene is first drawn;
 - leaves it out of `app.ui.find`, `app.ui.tree()` (so the `ui` and `locate` doors), `app.ui.lint()`
-  and the keyboard focus. The `render` door reads the renderer, which draws no view of the build;
+  and the keyboard focus. The `render` door reads the renderer, which draws no view of the build.
+  `world` learns the keys of its elements in the frame after the commit, so
+  `world.projection.entityOf` answers nothing for an element of the build before;
 - lays it out on the viewport, or in a host of the build, never in a slot of a live root. The
   reconcile after the commit gives the slots out again;
 - drops an element or a root of the build that leaves before the swap at once, with no exit. A
   discard (`causeOf` answers `"discard"`) drops every root of the build that way, so the world
   stands as it did before the build.
 
-`ui`'s part of the build, registered with `world.projection.onBuild`, is done when no root of the
-build is dirty (its tree not diffed yet, or the layout engine not loaded), has parked parts, waits
+`ui`'s part of the build, registered with `world.projection.onBuild` when a renderer draws
+(`renderer.host.kind()` is not `"none"`, the condition the renderer registers its own part on), is
+done when no root of the build is dirty (its tree not diffed yet, or the layout engine not loaded), has parked parts, waits
 for its solve or is applied in parts. A root whose first diff threw (`ui:root-failed`) does not
 hold the swap. The check walks the roots and allocates nothing; with no build the reconcile and the
 solve pay a few numbers a frame.
@@ -819,8 +823,13 @@ the budget lasts.
   budget and at most 100 elements a frame: the components it writes are flushed after the system,
   where the budget does not see them. The root is not solved again until the last element is
   applied.
-- **The whole lands together.** Its scrolls are ranged, moved and settled, and its hosts take their
-  views, once the last part is applied. Its overlays land after the swap, as before.
+- **The whole lands together.** Its scrolls are settled, and its hosts take their views, once the
+  last part is applied; the windowed ranges are cut in the next frame. Its overlays land after the
+  swap, as before.
+- **Still until the swap.** A scroll of a root built aside is not moved by the frame step, and its
+  windowed range is cut only in the frame after the root was laid out: a frame at rest ranges
+  nothing. A new `offset` prop stands at once, with no glide, so the scroll is in place when it is
+  first drawn.
 - **Ends here.** A discard, a root whose key leaves, its exit and a restore forget the queue and the
   application with the rest of the root.
 
@@ -839,6 +848,54 @@ app.world.projection.commit();
 app.ui.find("boardPlay"); // the button's entity: on the screen from the next frame
 app.time.step(16); // the held enters of the board play now
 ```
+
+## Warm windows
+
+A projection that declares `warm` keeps the view of one item built and held while it is closed
+(spec 33, slice B+D; the world's side is in the world README, "Warm windows"). A view that returns
+JSX is a root of `ui`, held:
+
+- **Built aside, in parts.** It is built as a root of a scene built aside: by root and by part under
+  the warm budget of `world.projection.left()`, laid out once and applied in parts, every element
+  it spawns marked for the held view (`world.projection.adopt`). It stays out of `app.ui.find`,
+  `app.ui.tree()`, `app.ui.lint()` and the keyboard focus; the renderer neither draws nor hits it.
+- **No key until the open.** `world` learns the keys of its elements in the frame it opens:
+  `world.projection.entityOf("shop.sheet", "shopBuy")` answers nothing for a closed shop.
+- **Still while closed.** Its enters wait in the queue of `ui.enter`. A change (a new warm item, a
+  new viewport, a text measured again) plays no `change` motion and is written at once. An overlay
+  keeps its level at 0 and does not land. A scroll is not moved; a new `offset` prop stands at once.
+  A row a windowed list ranges in after the build, when the world no longer marks the work, is
+  held as its root is.
+- **The open.** In the frame `from` shows the item the world hands the held view over and `ui`
+  releases its root: the slots are given out again, the keys go to `world` in mount order, and the
+  held enters play in that frame, posed at the end of its solve. A root opened before its build was
+  done gets the rest in one block in that frame: its parked children are diffed whatever the
+  budget, and it is laid out and applied whole with no motion, so no half-built frame is drawn.
+- **The close** plays the exits as for any root; the world builds the window again in idle frames.
+- **At rest** the held roots cost a few numbers a frame: the walk for a released root runs only
+  when the membership of the world's projections moved or work is under way, the queue of held
+  enters is not walked, the drain and the application step read one size, and no scroll of a held
+  root is stepped. 0 B a frame (`__tests__/perf/warm-rest.perf.ts`).
+- **Headless.** `ui` registers its part of a build only with a renderer that draws: a headless
+  app (a test, the CLI) warms no window, and a sheet opens as a mount.
+
+```ts
+// The shop of a scene declares `warm`: its sheet is built while the board rests.
+app.ui.find("shopBuy"); // undefined: built and held, not on the screen
+app.world.projection.entityOf("shop.sheet", "shopBuy"); // undefined
+// The player taps the shop button; in the next frame the sheet is drawn whole and its enters play.
+app.time.step(16);
+app.world.projection.entityOf("shop.sheet", "shopBuy") === app.ui.find("shopBuy"); // true
+```
+
+Limits:
+
+- A held root hosts no live projection view: a `ui` host of it takes only views held as it is (a
+  live view under a hidden host would vanish from the screen). Its hosts take their views at the
+  open.
+- A later solve of a held root (a new warm item, a new viewport) is applied in one block, as a later
+  solve of a scene built aside.
+- A held root costs the memory of its elements and their Yoga nodes for as long as it is held.
 
 ## Doors
 
