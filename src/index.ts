@@ -403,6 +403,7 @@ export { defineComponent } from "./plugins/ui/jsx/component";
 export { defineStyle } from "./plugins/ui/styles/define";
 export { resolve } from "./plugins/ui/styles/resolve";
 export { defineTokens } from "./plugins/ui/styles/tokens";
+export type { AnchorTarget } from "./plugins/world/projection/types";
 // audio: the music descriptor (sfx is anim's)
 export { music } from "./plugins/audio/descriptors";
 // effects: particles and filters as data on entities

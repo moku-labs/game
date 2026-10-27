@@ -683,6 +683,18 @@ export type RestPose = Map<string, AnyComponentValue>;
 export type ProjectionKey = { projection: string; key: string };
 
 /**
+ * What an `<anchor>` sits on and `app.ui.rectOf` measures: a view or a ui element by its
+ * projection and key. A ui element is keyed under the projection of its root.
+ *
+ * @example
+ * ```ts
+ * // The first seat of the board's order strip, the tutorial's window sits on it.
+ * const seat: AnchorTarget = { projection: "board.strip", key: "seat0" };
+ * ```
+ */
+export type AnchorTarget = { projection: string; key: string };
+
+/**
  * What the next reconcile has to do: why it runs, which roots changed and whether `view` is
  * forced for every item.
  *

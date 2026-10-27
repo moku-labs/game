@@ -3,6 +3,7 @@
  * order `styles → layout → jsx`, and the one place the public half is spread flat onto `app.ui`.
  */
 
+import { rectOfTargets } from "./drawn";
 import { createJsxApi } from "./jsx/api";
 import type { JsxModule } from "./jsx/types";
 import { createLayoutApi } from "./layout/api";
@@ -32,13 +33,21 @@ export function createModules(ctx: UiCtx): {
 }
 
 /**
- * Creates the ui API: the five members a game calls, flat.
+ * Creates the ui API: the six members a game calls, flat.
  *
  * @param ctx - Kernel context of the ui plugin.
  * @returns The plugin API.
  */
 export function createUiApi(ctx: KernelSlice): UiApi {
-  const { jsx } = createModules(withDeps(ctx));
+  const uctx = withDeps(ctx);
+  const { jsx } = createModules(uctx);
 
-  return { tree: jsx.tree, find: jsx.find, lint: jsx.lint, fill: jsx.fill, scroll: jsx.scroll };
+  return {
+    tree: jsx.tree,
+    find: jsx.find,
+    lint: jsx.lint,
+    fill: jsx.fill,
+    scroll: jsx.scroll,
+    rectOf: target => rectOfTargets(uctx, target)
+  };
 }
