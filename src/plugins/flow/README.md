@@ -336,7 +336,7 @@ calls. `recover` gets the same `fx`.
 
 | Call | The handler runs | The body | Use it for |
 |---|---|---|---|
-| `await fx(descriptor)` | Now | Waits for the handler. With `answers` it waits for the player's answer. | A popup, a `guide`, `schedule`, an animation the next line depends on |
+| `await fx(descriptor)` | Now | Waits for the handler. With `answers` it waits for the player's answer. While the frame loop runs, the body goes on in the `signals` phase after the handler ended, so effects that end in one frame resume in the order they started; `schedule` goes on at once, since its handler only writes a moment (a transit node that arms the clock costs no frame). | A popup, a `guide`, `schedule`, an animation the next line depends on |
 | `fx.start(descriptor)` | Now | Goes on at once. The call returns nothing. | A tap sound, a haptic tick, an animation nothing waits for |
 | `fx.emit(hint)` | After the commit of the edge | Goes on at once. | What shows a change that must be real first: a sparkle on the merged cell |
 

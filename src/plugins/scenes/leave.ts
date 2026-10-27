@@ -24,7 +24,7 @@ import type {
 } from "./types";
 
 /**
- * What a game gets when it writes nothing: black at 45 %, 150 ms in and out, the engine's ring once the switch took
+ * What a game gets when it writes nothing: black at 45 %, 50 ms in and 150 ms out, the engine's ring once the switch took
  * 400 ms. The level under `config.leave`, and where a part written over `false` starts. `index.ts` writes the same
  * value inline as the plugin's default config; a test pins the two equal.
  */
@@ -32,7 +32,7 @@ export const FALLBACK_LEAVE: {
   readonly cover: Readonly<FullCover>;
   readonly loader: Readonly<FullLoader>;
 } = Object.freeze({
-  cover: Object.freeze({ color: 0x00_00_00, alpha: 0.45, inMs: 150, outMs: 150 }),
+  cover: Object.freeze({ color: 0x00_00_00, alpha: 0.45, inMs: 50, outMs: 150 }),
   loader: Object.freeze({ afterMs: 400 })
 });
 
@@ -45,7 +45,7 @@ export const FALLBACK_LEAVE: {
  * @returns The veil, or `false`.
  * @example
  * ```ts
- * coverOver(false, { alpha: 0.6 }); // { color: 0, alpha: 0.6, inMs: 150, outMs: 150 }
+ * coverOver(false, { alpha: 0.6 }); // { color: 0, alpha: 0.6, inMs: 50, outMs: 150 }
  * ```
  */
 function coverOver(
@@ -120,7 +120,7 @@ function loaderOver(
  * @returns Both parts, each resolved or `false`; `undefined` when both are off.
  * @example
  * ```ts
- * leaveOf({ loader: false }, { cover: { alpha: 0.6 } }); // { cover: { color: 0, alpha: 0.6, inMs: 150, outMs: 150 }, loader: false }
+ * leaveOf({ loader: false }, { cover: { alpha: 0.6 } }); // { cover: { color: 0, alpha: 0.6, inMs: 50, outMs: 150 }, loader: false }
  * ```
  */
 export function leaveOf(

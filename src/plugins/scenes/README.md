@@ -223,7 +223,7 @@ scene.
 
 ```ts
 // What a game gets when it writes nothing.
-pluginConfigs.scenes.leave = { cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } };
+pluginConfigs.scenes.leave = { cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } };
 
 // Per scene, merged field by field over the config; `false` turns a part or the whole off.
 defineScene("board", { ..., leave: { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } } });
@@ -353,7 +353,7 @@ HUD that is not shared does not blink either.
 |---|---|---|---|
 | `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`, read once at the build start: 11.1 ms at 60 Hz, 5.56 ms at 120 Hz (two thirds of a 60 Hz frame, ≈ 11.1 ms, if `time` answers no usable rate). A number is a fixed budget |
 
-| `leave` | `SceneLeave` | `{ cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 }, loader: { afterMs: 400 } }` | What a live switch shows over the scene being left, for every scene; a scene's `leave` is merged over it field by field, and a field the config leaves out keeps the engine's default (the kernel merges `pluginConfigs` shallowly and replaces the whole object; the field-by-field merge is the plugin's own). `false` turns a part or the whole off. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
+| `leave` | `SceneLeave` | `{ cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }` | What a live switch shows over the scene being left, for every scene; a scene's `leave` is merged over it field by field, and a field the config leaves out keeps the engine's default (the kernel merges `pluginConfigs` shallowly and replaces the whole object; the field-by-field merge is the plugin's own). `false` turns a part or the whole off. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
 
 A `buildMs` that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
 

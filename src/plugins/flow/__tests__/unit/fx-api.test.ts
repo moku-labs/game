@@ -884,6 +884,19 @@ describe("completion order", () => {
     expect(done).toHaveBeenCalledWith("value");
   });
 
+  // Bug (F61): a node that arms the clock (`await fx(schedule(...))`) waits for the next `signals` phase although the
+  // handler only writes a moment: a transit node on the way to a scene switch costs the player a frame.
+  it("resolves a schedule at once while the frame loop runs, with no signals phase", async () => {
+    const { api } = setup({ running: true });
+    const done = vi.fn();
+
+    api.handle("schedule", () => undefined);
+    api.run(schedule(1000), signal()).then(done);
+    await tick();
+
+    expect(done).toHaveBeenCalledOnce();
+  });
+
   it("resolves two completions of one frame in start order", async () => {
     const { api } = setup({ running: true });
     const order: string[] = [];

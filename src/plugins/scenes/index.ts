@@ -28,7 +28,7 @@ import type { Config, Events } from "./types";
 const defaultConfig: Config = {
   buildMs: "auto",
   leave: {
-    cover: { color: 0x00_00_00, alpha: 0.45, inMs: 150, outMs: 150 },
+    cover: { color: 0x00_00_00, alpha: 0.45, inMs: 50, outMs: 150 },
     loader: { afterMs: 400 }
   }
 };

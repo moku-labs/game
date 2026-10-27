@@ -154,6 +154,18 @@ async function effectValue(
 }
 
 /**
+ * Tells whether an awaited effect resolves at once, without the wait for the next `signals` phase: the `schedule` of
+ * `flow` itself, whose handler only writes the next moment into the clock. A node that arms the clock on its way to a
+ * scene switch (a board's tick) would otherwise cost the player a frame before the switch starts (F61).
+ *
+ * @param descriptor - The awaited descriptor.
+ * @returns True for `schedule`.
+ */
+function resolvesAtOnce(descriptor: Descriptor): boolean {
+  return descriptor.kind === "schedule";
+}
+
+/**
  * Queues a completion for the `signals` phase. The slot is taken when the effect STARTS, so two
  * effects that end in one frame always resume in the order they were started. The queued entry
  * removes itself from the queue when it fires.
@@ -346,7 +358,8 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       const shown = descriptor.kind === "guide" ? beginGuide(state, signal) : signal;
       const work = effectValue(state, ctx.log, descriptor, shown);
 
-      if (state.mode === "fast" || !ctx.deps.time.isRunning()) return work;
+      if (state.mode === "fast" || !ctx.deps.time.isRunning() || resolvesAtOnce(descriptor))
+        return work;
 
       return enqueue(state, work);
     },
