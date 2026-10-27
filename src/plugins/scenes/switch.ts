@@ -326,6 +326,23 @@ function standLoader(ctx: ScenesCtx, scene: SceneDefinition, run: RunContext): v
 }
 
 /**
+ * Holds the loader of the scene that still stands after a switch that ended without its swap: the drop unmounted the
+ * loader the switch showed, and its next switch would mount it in the frame it is due. A loader the switch did not show
+ * is held still; no scene stands: nothing.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal.
+ */
+function standAgain(ctx: ScenesCtx, run: RunContext): void {
+  if (ctx.state.held !== undefined) return;
+
+  const current =
+    ctx.state.current === undefined ? undefined : ctx.state.scenes.get(ctx.state.current);
+
+  if (current !== undefined) standLoader(ctx, current, run);
+}
+
+/**
  * Switches to another scene: a loader still fading out after the last swap goes first. It takes
  * over the veil and the loader the `begin` stage of the node showed over the scene being left for
  * this scene (a cold first visit reacts in the next frame), or shows them now when that stage did
@@ -361,6 +378,7 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
     await loadAndStand(ctx, scene, named, run);
   } catch (error) {
     endLeave(ctx, leaving, "drop");
+    standAgain(ctx, run);
 
     throw error;
   }
@@ -370,6 +388,7 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
   endLeave(ctx, leaving, stands ? "land" : "drop");
 
   if (stands) standLoader(ctx, scene, run);
+  else standAgain(ctx, run);
 }
 
 /**

@@ -460,6 +460,48 @@ describe("a layer loader at the swap", () => {
     expect(loading.alpha).toBe(1);
   });
 
+  // Bug: views another owner draws in the loader's layer (the scene that stands, a loader the game mounted) never
+  // leave it, and the layer stays at alpha 0 for good.
+  it("goes back whole after a bounded wait when views stay in it", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+
+    spawnLoaderView(mock);
+    landLifted(mock);
+    frameAt(mock, 350);
+
+    // outMs 200: 200 / 50 + 2 frames of wait.
+    for (let frame = 1; frame <= 6; frame += 1) frameAt(mock, 350 + frame * 16);
+
+    expect([loading.parent === objectOf(mock, "held"), loading.alpha]).toEqual([true, 0]);
+
+    frameAt(mock, 350 + 7 * 16);
+
+    expect([loading.parent === rootOf(mock), loading.alpha]).toEqual([true, 1]);
+    expect(mock.ctx.state.sync.leave.parked).toBeUndefined();
+  });
+
+  // Bug: a loader shown before the veil is full drops from whole to the veil's level at the swap.
+  it("fades from whole at the swap when the veil was not full", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+
+    showAt(mock, 0, {
+      cover: { ...VEIL, inMs: 400 },
+      loader: { afterMs: 0, due: () => "loading" }
+    });
+    frameAt(mock, 0);
+    frameAt(mock, 200);
+    mock.api.sync.leave.land();
+    frameAt(mock, 200);
+
+    expect(loading.alpha).toBe(1);
+
+    frameAt(mock, 250);
+
+    expect(Number(loading.alpha.toFixed(3))).toBe(0.5);
+  });
+
   // Bug: a look with nothing to fade out puts the loader's layer back under the root at the land, where it draws the
   // loader whole until the switch unmounts it.
   it("waits the same at a land with outMs 0", async () => {

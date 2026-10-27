@@ -925,6 +925,8 @@ export type LeaveRun = {
   steppedAt: number;
   level: number;
   landed: boolean;
+  /** The veil's level at the swap: a layer loader fades from whole to nothing over the rest of it. 1 before the swap. */
+  landedLevel: number;
   loader: LoaderKind;
   /** The texture of a `"texture"` loader, resolved at `show`. */
   texture?: PixiTexture;
@@ -946,6 +948,11 @@ export type LeaveParked = {
   container: PixiContainer;
   /** The layer, whose place in the layer list it goes back to. */
   layer: string | undefined;
+  /**
+   * Frames it waits at most: views another owner draws in the layer (the scene that stands, a loader the game mounted)
+   * never leave it, and the layer goes back whole then.
+   */
+  framesLeft: number;
 };
 
 /**

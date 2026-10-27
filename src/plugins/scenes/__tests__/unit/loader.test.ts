@@ -392,6 +392,47 @@ describe("the loader after the swap", () => {
     expect(mock.time.callbacks.signals).toEqual([]);
   });
 
+  // Bug: the scene that still stands after a dropped switch holds nothing, and its next switch mounts the loader in
+  // the due frame, the long frame F103 removes.
+  it.each([
+    ["an abort", "abort"],
+    ["a throw", "throw"]
+  ] as const)("is held again for the scene that still stands after %s", async (_case, how) => {
+    const mock = await standing("ward");
+    const controller = new AbortController();
+    const { entering } = await switchTo(mock, "board", controller.signal);
+
+    due(mock);
+    if (how === "abort") controller.abort();
+    else mock.assets.fail(new Error("offline"));
+    await entering.catch(() => undefined);
+
+    expect(mock.world.holds).toEqual([["loading"], ["loading"]]);
+    expect(mock.state.held).toEqual({ name: "loading", layer: "loading" });
+  });
+
+  // Bug: `time` runs the callbacks it took at the frame start, so a fade the next switch ended earlier in the frame
+  // ends a second time: a second hold or unmount of the loader.
+  it("does nothing in a frame callback taken before the next switch ended it", async () => {
+    const mock = await standing("ward");
+    const { entering } = await switchTo(mock, "board");
+
+    due(mock);
+    await land(mock, entering);
+
+    const stale = mock.time.callbacks.signals[0];
+
+    await mock.stage("begin", { rest: true, scene: "ward" });
+    const unmounts = mock.world.unmounted.length;
+    const holds = mock.world.holds.length;
+
+    stale?.({ delta: 10_000, elapsed: 10_000, scale: 1, frame: 1, idle: false });
+
+    expect(stale).toBeDefined();
+    expect(mock.world.unmounted).toHaveLength(unmounts);
+    expect(mock.world.holds).toHaveLength(holds);
+  });
+
   // Bug: the next scene, which leaves with the same loader, gets it unmounted after the fade, and its next switch
   // mounts it in the due frame again.
   it("is held again after the fade when the scene that stands leaves with it too", async () => {

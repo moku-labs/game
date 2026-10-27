@@ -838,14 +838,17 @@ README). The renderer's part, `sync.leave`:
   `renderer: the loader of a scene being left threw`), draws the ring. Its views stay views of the scene: their own
   motions run, and a hidden or shown loader moves the walks of `shown`, so their loops run while it shows.
 - **The loader at the swap (F107).** A ring or a texture goes at `land`. A layer loader that shows stays above the veil
-  and fades out with it: every step writes the veil's level (the same curve, over `outMs` from where it stands) as the
-  alpha of its layer's container. The look keeps that container whatever layer list the next scene brings: one that
+  and fades out with it: every step writes the veil's level over its level at the swap as the alpha of its layer's
+  container, so the loader goes from whole to nothing on the veil's curve, also when the veil was not full at the swap. The look keeps that container whatever layer list the next scene brings: one that
   declares the layer does not take it back under the root, one that does not let it go and names none of its views as
   left without a layer. When the veil is gone the layer goes back under the root at alpha 1, at its place in the layer
   list as it stands then (let go when that list does not declare it), but only once no view hangs in it: `scenes`
   unmounts the loader projection in the first frame `outMs` has passed in, which can come a frame after the veil is
   gone, and under the root the layer would draw the loader whole for that frame. Until then it waits above the veil at
-  alpha 0, unseen; a look with `outMs: 0`, or no veil, leaves it waiting the same at `land`. One layer waits at a time
+  alpha 0, unseen; a look with `outMs: 0`, or no veil, leaves it waiting the same at `land`. The wait is bounded:
+  `outMs / 50 + 2` frames at most (50 ms is the cap of a `time` delta, which `scenes` counts in), and a frame is asked
+  for each of them. Views another owner draws in that layer, the scene that stands or a loader the game mounted, never
+  leave it: after the bound the layer goes back whole, views and all. One layer waits at a time
   (an older one goes back when another starts waiting), a look shown meanwhile whose `due` answers that layer takes it
   over at alpha 1, and a lost device or a stop forgets it. `drop` puts a lifted layer back at once, views and all:
   `scenes` unmounts the loader at once then.

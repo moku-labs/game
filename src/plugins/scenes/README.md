@@ -298,8 +298,8 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   - **A held loader the next switch does not use** goes at the swap: the new scene does not declare its layer, leaves
     with another loader or with nothing (`leave: false`), or stands in a fast walk or headless. One the scene being
     switched to lists is unmounted before that scene is built or mounted, so the scene mounts it as its own.
-  - **A drop** (an abort, a throw) unmounts a loader that was shown or mounted at once. The scene that stays holds no
-    loader from then on until its next stand: its next switch mounts the loader when it is due (A2).
+  - **A drop** (an abort, a throw) unmounts a loader that was shown or mounted at once, and the scene that still
+    stands holds its loader again for its next switch. A loader the switch did not show stays held.
   - **A projection mounted already** (by another owner) is never held, and is drawn as it is when due, never unmounted
     by the switch. These draw the engine's ring instead, warned: a projection one of the two scenes lists
     (`scenes:loader-listed`, at the switch start), one the scene being left cannot mount, an unknown name or a layer it

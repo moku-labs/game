@@ -358,14 +358,17 @@ function endFade(ctx: ScenesCtx, fading: FadingLoader): void {
 /**
  * The `signals` callback of a fade: counts the frame's milliseconds before the time scale (a game time frozen at
  * scale 0 counts one frame of the loop's rate) and ends the fade in the frame the veil's `outMs` ran out, before that
- * frame is drawn: the frame the renderer takes the veil down. Per frame while a loader fades: a subtraction, no
- * allocation.
+ * frame is drawn: about the frame the renderer takes the veil down, which keeps the layer unseen until then. A fade a
+ * new switch ended earlier in the frame does nothing: `time` runs the callbacks it took at the frame start. Per frame
+ * while a loader fades: a subtraction, no allocation.
  *
  * @param ctx - Domain context of the plugin.
  * @param fading - The fade.
  * @param time - The frame's `Time`.
  */
 function stepFade(ctx: ScenesCtx, fading: FadingLoader, time: Readonly<Time>): void {
+  if (ctx.state.fading !== fading) return;
+
   fading.leftMs -= time.scale > 0 ? time.delta / time.scale : frameMsOf(ctx);
 
   if (fading.leftMs > 0) return;

@@ -146,14 +146,36 @@ function putBack(sctx: SyncCtx, container: PixiContainer, name: string | undefin
 }
 
 /**
- * Leaves a loader layer waiting where it hangs, at alpha 0, until the loader's views left it: one layer at a time, so
- * an older one goes back now.
+ * The frames a loader layer waits at most after the veil's fade-out of `outMs`: `scenes` unmounts the loader once the
+ * frame deltas it counts reach `outMs`, and `time` caps a delta at its `maxDeltaMs` (50 by default), so after a run of
+ * long frames it counts at least 50 ms a frame; two frames more cover the frame it starts counting in and its last.
+ *
+ * @param outMs - The veil's fade-out.
+ * @returns The frames.
+ * @example
+ * ```ts
+ * parkFrames(300); // 8
+ * ```
+ */
+function parkFrames(outMs: number): number {
+  return Math.ceil(outMs / 50) + 2;
+}
+
+/**
+ * Leaves a loader layer waiting where it hangs, at alpha 0, until the loader's views left it, or for `framesLeft`
+ * frames at most: one layer at a time, so an older one goes back now.
  *
  * @param sctx - Domain context of the sync module.
  * @param container - The layer's container.
  * @param name - The layer.
+ * @param framesLeft - The frames it waits at most.
  */
-function park(sctx: SyncCtx, container: PixiContainer, name: string | undefined): void {
+function park(
+  sctx: SyncCtx,
+  container: PixiContainer,
+  name: string | undefined,
+  framesLeft: number
+): void {
   const state = sctx.ctx.state.sync;
   const before = state.leave.parked;
 
@@ -162,7 +184,7 @@ function park(sctx: SyncCtx, container: PixiContainer, name: string | undefined)
   }
 
   container.alpha = 0;
-  state.leave.parked = { container, layer: name };
+  state.leave.parked = { container, layer: name, framesLeft };
   // The walks of `shown` see its views unseen.
   state.passesVersion += 1;
 }
@@ -172,7 +194,7 @@ function park(sctx: SyncCtx, container: PixiContainer, name: string | undefined)
  * root (`putBack`). After the swap, while the loader's views still hang in it, it waits above the veil at alpha 0:
  * `scenes` unmounts the loader projection in the first frame `outMs` has passed in, which can come a frame after the
  * veil is gone, and under the root the layer would draw the loader whole in that frame. The step puts it back once
- * its views left (`stepParked`).
+ * its views left, or after a bounded wait (`stepParked`).
  *
  * @param sctx - Domain context of the sync module.
  * @param run - The look whose layer goes.
@@ -184,19 +206,28 @@ function unlift(sctx: SyncCtx, run: LeaveRun): void {
 
   delete run.lifted;
 
-  if (run.landed && lifted.children.length > 0) park(sctx, lifted, run.layer);
-  else putBack(sctx, lifted, run.layer);
+  if (run.landed && lifted.children.length > 0) {
+    park(sctx, lifted, run.layer, parkFrames(run.look.cover?.outMs ?? 0));
+  } else {
+    putBack(sctx, lifted, run.layer);
+  }
 }
 
 /**
- * Puts a layer that waits for the loader's views back once they left it.
+ * Puts a layer that waits for the loader's views back once they left it, or once it waited its frames: views another
+ * owner draws there stay, and are drawn whole again. A frame is asked for while it waits, so the wait ends.
  *
  * @param sctx - Domain context of the sync module.
  * @param parked - The waiting layer.
  */
 function stepParked(sctx: SyncCtx, parked: LeaveParked): void {
-  // per frame while it waits: one length read.
-  if (parked.container.children.length > 0) return;
+  // per frame while it waits: one length read and a count.
+  if (parked.container.children.length > 0 && parked.framesLeft > 0) {
+    parked.framesLeft -= 1;
+    sctx.deps.demand.request();
+
+    return;
+  }
 
   delete sctx.ctx.state.sync.leave.parked;
   putBack(sctx, parked.container, parked.layer);
@@ -349,8 +380,8 @@ function lift(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun): void {
     state.passesVersion += 1;
   }
 
-  // per frame of the fade-out: the loader fades with the veil, on the same level.
-  if (run.landed) container.alpha = run.level;
+  // per frame of the fade-out: the loader fades with the veil, from whole at the swap to nothing.
+  if (run.landed) container.alpha = run.landedLevel > 0 ? run.level / run.landedLevel : 0;
 }
 
 /**
@@ -461,6 +492,7 @@ export function showLeave(sctx: SyncCtx, look: LeaveLook): void {
     steppedAt: now,
     level,
     landed: false,
+    landedLevel: 1,
     asked: false,
     shown: false,
     ...loader
@@ -483,6 +515,7 @@ export function landLeave(sctx: SyncCtx): void {
 
   // A layer loader that shows stays lifted: the step fades it with the veil, the take-down leaves it waiting.
   run.landed = true;
+  run.landedLevel = run.level;
 
   const cover = run.look.cover;
 
