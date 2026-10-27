@@ -6,8 +6,8 @@ import type { Json, Transaction } from "../../model/types";
 import type { WorldEvent } from "../inbox/types";
 import type { AnyFlow, AnyNode, FlowEntry, Frame, Result, Stage } from "./types";
 
-/** The stages of entering a node, in the order they run. */
-export const stages: readonly Stage[] = ["load", "scene"];
+/** The stages of entering a node, in the order they run: what reacts at once, the loads, the scene. */
+export const stages: readonly Stage[] = ["begin", "load", "scene"];
 
 /** How deep the graph may nest or exit before the runner calls it a mistake. */
 export const maxDepth = 32;

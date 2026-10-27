@@ -6,15 +6,15 @@
  * frame that shows the new scene uploads nothing. On a Galaxy A26 the first switch to a board
  * took one frame of 284 ms with 8 uploads in it (F61). Then a live switch with a drawing renderer
  * builds the scene aside and swaps it in one frame (`build.ts`); a fast walk and a headless app
- * touch the world in one synchronous block (`swap.ts`). From its start to the swap, a live switch
- * with a drawing renderer shows a veil and a loader over the scene being left (`leave.ts`). At a
- * node of the mounted scene it re-reads what the scene names and awaits a bundle that is new,
- * without mounting again.
+ * touch the world in one synchronous block (`swap.ts`). From the `begin` stage of its node, before
+ * `assets` downloads anything at `load`, to the swap, a live switch with a drawing renderer shows a
+ * veil and a loader over the scene being left (`leave.ts`). At a node of the mounted scene it
+ * re-reads what the scene names and awaits a bundle that is new, without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
 import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
-import { endLeave, startLeave } from "./leave";
+import { dropLeftOver, endLeave, ownLeave, startLeave } from "./leave";
 import { swapIn } from "./swap";
 import type { Leaving, RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
@@ -297,10 +297,11 @@ async function loadAndStand(
 }
 
 /**
- * Switches to another scene: it reads what the scene names from the committed state, shows the
- * veil and the loader of the scene being left at once (a cold first visit reacts in the next
- * frame), then awaits the bundles and builds the scene (`loadAndStand`). The look lands when the
- * scene stands, and is dropped when the switch ends without it or throws.
+ * Switches to another scene: it takes over the veil and the loader the `begin` stage of the node
+ * showed over the scene being left (a cold first visit reacts in the next frame), or shows them
+ * now when that stage did not, after reading what the scene names from the committed state. Then
+ * it awaits the bundles and builds the scene (`loadAndStand`). The look lands when the scene
+ * stands, and is dropped when the switch ends without it or throws.
  *
  * @param ctx - Domain context of the plugin.
  * @param target - Id of the scene to mount.
@@ -317,11 +318,13 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
     );
   }
 
-  const named = namedBundles(scene, committedState(ctx));
-  let leaving: Leaving | undefined;
+  // The look `begin` started for this node; a `bundles` that throws drops it below.
+  let leaving: Leaving | undefined = ownLeave(ctx, run);
 
   try {
-    leaving = startLeave(ctx, scene, run);
+    const named = namedBundles(scene, committedState(ctx));
+
+    leaving ??= startLeave(ctx, scene, run);
     await loadAndStand(ctx, scene, named, run);
   } catch (error) {
     endLeave(ctx, leaving, "drop");
@@ -385,7 +388,54 @@ export async function enterScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext
     return;
   }
 
+  // `begin` saw a switch this stage does not make (the expected scene changed in between): no
+  // veil stays over the scene the node rests on.
+  endLeave(ctx, ownLeave(ctx, run), "drop");
+
   if (isFastTransit(node, run)) return;
 
   await reread(ctx, run);
+}
+
+/**
+ * Reads the scene the `scene` stage of the node will switch to, by the rules of `targetOf` and
+ * `overTargetOf`, without touching the record: an over node takes the expected scene, any other
+ * node its own scene or else the expected one. A transit node of a fast walk switches nothing.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param node - The node being entered.
+ * @param run - The runner's mode and signal.
+ * @returns The scene id the node asks for, or `undefined`.
+ */
+function nextScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | undefined {
+  if (isFastTransit(node, run)) return undefined;
+  if (node.over) return ctx.state.pending;
+
+  return node.scene ?? ctx.state.pending;
+}
+
+/**
+ * The `begin` stage of entering a node, which must not wait (spec 33, slice A3): a node that
+ * switches to another scene shows the look of the scene being left now, before the `load` stage
+ * downloads the bundles of the coming one, so a cold first visit reacts in the next frame. The
+ * `scene` stage of the same node takes the look over, lands it at the swap or drops it. A node
+ * that keeps the scene, the first scene of a run, a fast walk and an aborted node start nothing
+ * (`startLeave` decides the rest). A look a node before left running, because a stage after its
+ * `begin` threw, is dropped first.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param node - The node being entered.
+ * @param run - The runner's mode and signal.
+ */
+export function beginScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): void {
+  dropLeftOver(ctx, run);
+
+  const target = nextScene(ctx, node, run);
+
+  if (target === undefined || target === ctx.state.current) return;
+
+  // A scene no feature declared starts nothing: the `scene` stage throws for it.
+  const scene = ctx.state.scenes.get(target);
+
+  if (scene !== undefined) startLeave(ctx, scene, run);
 }

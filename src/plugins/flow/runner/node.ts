@@ -226,7 +226,9 @@ export function nodeInfo(path: string, location: Location, node: AnyNode): NodeI
 }
 
 /**
- * Runs the `onEnter` callbacks stage by stage, registration order inside a stage, each awaited.
+ * Runs the `onEnter` callbacks stage by stage (`begin`, `load`, `scene`), registration order inside
+ * a stage, each awaited. A node aborted meanwhile starts no further stage: a restore during
+ * `begin` loads nothing for the node it left.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param info - The node being entered.
@@ -240,6 +242,9 @@ export async function runEnterCallbacks(
   const mode = ctx.state.fx.mode;
 
   for (const stage of stages) {
+    // The node was left between two stages: the callbacks of the rest would work for nobody.
+    if (signal.aborted) return;
+
     const callbacks = [...ctx.state.runner.enterCallbacks[stage]];
 
     for (const callback of callbacks) {

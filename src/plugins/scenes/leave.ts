@@ -1,9 +1,10 @@
 /**
- * @file scenes plugin — what a live switch shows over the scene being left (spec 33, slice A2): a veil from the switch
- * start, before the bundles are awaited, so a cold first visit reacts in the next frame, and a loader when the switch is
- * not done `afterMs` after its start. The scene being left decides: its `leave` over `config.leave` over the engine's
- * default, field by field. The renderer draws both (`renderer.sync.leave`); this file resolves the look, mounts a
- * loader projection once its loader is due, and lands the look at the swap or drops it on an abort or a throw.
+ * @file scenes plugin — what a live switch shows over the scene being left (spec 33, slices A2 and A3): a veil from the
+ * `begin` stage of the node that switches, before the `load` stage downloads its bundles, so a cold first visit reacts in
+ * the next frame, and a loader when the switch is not done `afterMs` after its start. The scene being left decides: its
+ * `leave` over `config.leave` over the engine's default, field by field. The renderer draws both
+ * (`renderer.sync.leave`); this file resolves the look, mounts a loader projection once its loader is due, and lands
+ * the look at the swap or drops it on an abort, a throw, or at the next node when its own never reached the swap.
  */
 import type { LeaveLoader, LeaveLook } from "../renderer/types";
 import { Layer } from "../world/ecs/define";
@@ -304,7 +305,7 @@ function leftScene(ctx: ScenesCtx, run: RunContext): SceneDefinition | undefined
 /**
  * Shows the veil and the loader of a switch that starts now, before its bundles are awaited: the scene being left
  * decides. A loader projection is mounted only once its loader is due. An abort of the node drops both at once, from
- * its listener.
+ * its listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene being switched to.
@@ -327,7 +328,7 @@ export function startLeave(
 
   // The record of the switch's look; `off`, by aborting `listening`, takes its abort listener away.
   const listening = new AbortController();
-  const leaving: Leaving = { done: false, off: (): void => listening.abort() };
+  const leaving: Leaving = { signal: run.signal, done: false, off: (): void => listening.abort() };
 
   // The look the renderer draws: only the parts that are on.
   const look: LeaveLook = {};
@@ -346,6 +347,33 @@ export function startLeave(
   ctx.state.leaving = leaving;
 
   return leaving;
+}
+
+/**
+ * The look the `begin` stage of this node started: its `scene` stage takes it over instead of starting a second one.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal of the node.
+ * @returns The running look of this node, or `undefined`.
+ */
+export function ownLeave(ctx: ScenesCtx, run: RunContext): Leaving | undefined {
+  const leaving = ctx.state.leaving;
+
+  return leaving?.signal === run.signal ? leaving : undefined;
+}
+
+/**
+ * Drops a look still running when another node is entered: the node that started it never reached its swap, because a
+ * stage after its `begin` threw (a download that failed) and flow rolled back. An abort drops a look from its listener,
+ * but a throw aborts nothing, so the next node entered (the rest node the rollback returned to) drops it here.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal of the node being entered.
+ */
+export function dropLeftOver(ctx: ScenesCtx, run: RunContext): void {
+  const leaving = ctx.state.leaving;
+
+  if (leaving !== undefined && leaving.signal !== run.signal) endLeave(ctx, leaving, "drop");
 }
 
 /**

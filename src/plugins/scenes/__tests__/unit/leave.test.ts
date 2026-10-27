@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { stages } from "../../../flow/runner/loop-types";
+import type { NodeInfo } from "../../../flow/types";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
 import { FALLBACK_LEAVE, leaveOf } from "../../leave";
-import type { Config } from "../../types";
+import type { Config, RunContext } from "../../types";
 import { createMockScenes, type MockScenes } from "./mock-scenes";
 
 // ---------------------------------------------------------------------------
@@ -466,5 +468,152 @@ describe("a loader projection", () => {
 
     // The swap's unmount of what only home lists, and no other.
     expect(mock.world.calls.filter(call => call === "unmount")).toHaveLength(1);
+  });
+});
+
+/**
+ * Enters a node through every stage of flow, in flow's order, each awaited, the way the runner does.
+ *
+ * @param mock - The started mock.
+ * @param node - The node being entered.
+ * @param run - The mode and the signal of the node.
+ */
+async function enterStages(
+  mock: MockScenes,
+  node: Partial<NodeInfo>,
+  run: Partial<RunContext>
+): Promise<void> {
+  for (const stage of stages) await mock.stage(stage, node, run);
+}
+
+describe("the begin stage of a node that switches", () => {
+  // Bug: the look waits for the `load` stage (a cold first visit shows nothing until the coming scene's bundles are
+  // downloaded), or the `scene` stage starts a second look over the first.
+  it("shows the look before the load stage downloads the coming scene, and the scene stage takes it over", async () => {
+    const mock = await on("home");
+    const download = Promise.withResolvers<void>();
+    const run = { signal: new AbortController().signal };
+
+    // The `load` stage of assets: the board is still downloading.
+    mock.flow.api.onEnter("load", () => download.promise);
+    const entering = enterStages(mock, { rest: true, scene: "board" }, run);
+
+    await flush();
+
+    expect(mock.renderer.leaves).toEqual([{ call: "show", current: "home" }]);
+    expect(mock.assets.loaded).not.toContain("board");
+
+    download.resolve();
+    await flush();
+    await finish(mock, entering);
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledOnce();
+    expect(mock.renderer.leaves).toEqual([
+      { call: "show", current: "home" },
+      { call: "land", current: "board" }
+    ]);
+  });
+
+  // Bug: a node that keeps the scene dims it (every popup and every rest of the same scene flashes a veil), a fast
+  // walk shows one, or an over node takes its own scene, which the scene stage ignores.
+  it.each([
+    ["a node of the mounted scene", { rest: true, scene: "home" }, "live"],
+    ["a node without a scene and nothing expected", { rest: true }, "live"],
+    ["an over node with nothing expected", { rest: true, over: true }, "live"],
+    [
+      "an over node that names a scene of its own",
+      { rest: true, over: true, scene: "board" },
+      "live"
+    ],
+    ["a transit node of a fast walk", { scene: "board" }, "fast"]
+  ] as const)("starts nothing for %s", async (_case, node, mode) => {
+    const mock = await on("home");
+
+    await mock.stage("begin", node, { mode });
+
+    expect(mock.renderer.leaves).toEqual([]);
+    expect(mock.state.leaving).toBeUndefined();
+  });
+
+  // Bug: the begin stage reads only the node's own scene, so a restore at a popup over another scene shows no veil.
+  it("shows the look for an over node that takes the expected scene", async () => {
+    const mock = await on("home");
+
+    mock.api.expect("board");
+    await mock.stage("begin", { rest: true, over: true });
+
+    expect(mock.renderer.leaves).toEqual([{ call: "show", current: "home" }]);
+  });
+
+  // Bug: a `load` stage that throws (a download that failed) leaves the veil and the ring over the old scene for good:
+  // the throw aborts nothing and the node never reaches its `scene` stage, so neither the listener nor the switch
+  // drops it.
+  it("drops a look whose load stage threw when flow enters the rest node it rolled back to", async () => {
+    const mock = await on("home");
+
+    await mock.stage("begin", { rest: true, scene: "board" });
+    // The `load` stage threw: flow rolls back and enters the rest node of home again.
+    await mock.enter({ rest: true, scene: "home" });
+
+    expect(mock.renderer.leaves).toEqual([
+      { call: "show", current: "home" },
+      { call: "drop", current: "home" }
+    ]);
+    expect(mock.state.leaving).toBeUndefined();
+    expect(mock.state.current).toBe("home");
+  });
+
+  // Bug: the look of the next switch is shown first and the left-over one is then forgotten undropped (its loader
+  // projection stays mounted, its abort listener stays), or the drop takes the new look down.
+  it("drops a left-over look before it shows the look of the next switch", async () => {
+    const mock = await on("home", LOADING);
+
+    mock.world.viewLayers = { loading: "loading" };
+    await mock.stage("begin", { rest: true, scene: "board" });
+    dueOf(mock)();
+    await mock.stage("begin", { rest: true, scene: "ward" });
+
+    expect(mock.renderer.leaves.map(entry => entry.call)).toEqual(["show", "drop", "show"]);
+    expect(mock.world.unmounted).toEqual([["loading"]]);
+    expect(mock.state.leaving).toBeDefined();
+  });
+
+  // Bug: the begin stage saw a switch the scene stage does not make (the expected scene changed in between), and the
+  // veil stays over the scene the node rests on.
+  it("drops the look when the scene stage of its node does not switch after all", async () => {
+    const mock = await on("home");
+    const run = { signal: new AbortController().signal };
+
+    mock.api.expect("board");
+    await mock.stage("begin", { rest: true, over: true }, run);
+    mock.api.expect("home");
+    await mock.stage("scene", { rest: true, over: true }, run);
+
+    expect(mock.renderer.leaves).toEqual([
+      { call: "show", current: "home" },
+      { call: "drop", current: "home" }
+    ]);
+    expect(mock.state.current).toBe("home");
+  });
+
+  // Bug: a `bundles` that throws at the scene stage leaves the look its begin stage showed.
+  it("drops the look when the scene's bundles throw at the scene stage", async () => {
+    const mock = createMockScenes();
+    const broken = defineScene("broken", {
+      bundle: "broken",
+      bundles: () => {
+        throw new Error("no episode");
+      },
+      layers: { room: {} },
+      projections: []
+    });
+
+    mock.flow.features.push({ name: "screens", description: { scenes: [homeScene, broken] } });
+    mock.start();
+    await mock.enter({ rest: true, scene: "home" });
+    mock.renderer.host.ready.mockReturnValue(true);
+
+    await expect(mock.enter({ rest: true, scene: "broken" })).rejects.toThrow("no episode");
+    expect(mock.renderer.leaves.map(entry => entry.call)).toEqual(["show", "drop"]);
   });
 });

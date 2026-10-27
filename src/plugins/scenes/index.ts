@@ -3,7 +3,8 @@
  * names with `bundles`, layers, projections, music. The switch runs inside
  * `flow.onEnter("scene")` and mounts a scene once all its bundles are in; a live switch with a
  * drawing renderer builds it aside under `buildMs` a frame and swaps it in one frame, with a veil and
- * a loader over the scene being left from its start (`leave`). Emits `scenes:changed`.
+ * a loader over the scene being left from `flow.onEnter("begin")`, before any download (`leave`).
+ * Emits `scenes:changed`.
  *
  * @see README.md
  */

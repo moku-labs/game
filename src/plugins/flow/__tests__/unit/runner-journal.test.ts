@@ -183,7 +183,7 @@ describe("createRunnerState", () => {
   it("starts with one empty callback list per stage", () => {
     const state = createRunnerState();
 
-    expect(state.enterCallbacks).toEqual({ load: [], scene: [] });
+    expect(state.enterCallbacks).toEqual({ begin: [], load: [], scene: [] });
   });
 
   it("gives every state its own collections", () => {

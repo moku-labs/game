@@ -129,7 +129,7 @@ const createMockState = (): State => ({
   runner: {
     flushing: undefined,
     flows: new Map(),
-    enterCallbacks: { load: [], scene: [] },
+    enterCallbacks: { begin: [], load: [], scene: [] },
     stack: [],
     restFrame: undefined,
     slotAfter: undefined,
@@ -1079,6 +1079,80 @@ describe("runLoop", () => {
     await tick();
 
     expect(order.slice(0, 3)).toEqual(["load:boot", "scene:boot", "body"]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: the callbacks run in registration order across the stages, or `begin` is not the first stage: the veil a
+  // plugin starts at `begin` waits for a download another plugin registered at `load` earlier.
+  it("runs every begin callback before the first load callback, and every load callback before the scene ones", async () => {
+    const order: string[] = [];
+    const download = Promise.withResolvers<void>();
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const { begin, load, scene } = harness.ctx.state.runner.enterCallbacks;
+
+    // Registered against the order of the stages: scene first, begin last.
+    scene.push(() => {
+      order.push("scene");
+    });
+    load.push(async () => {
+      order.push("load:start");
+      await download.promise;
+      order.push("load:end");
+    });
+    begin.push(
+      () => {
+        order.push("begin:1");
+      },
+      () => {
+        order.push("begin:2");
+      }
+    );
+    harness.start();
+    await tick();
+
+    // The download is still running: both begin callbacks ran before it, the scene stage waits.
+    expect(order).toEqual(["begin:1", "begin:2", "load:start"]);
+
+    download.resolve();
+    await tick();
+
+    expect(order).toEqual(["begin:1", "begin:2", "load:start", "load:end", "scene"]);
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a node aborted during `begin` still runs its later stages: the bundles of a node the player already left are
+  // downloaded, and its `scene` stage switches for nobody.
+  it("starts no further stage once the node was aborted between two stages", async () => {
+    const order: string[] = [];
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const ended = { value: false };
+    const { begin, load, scene } = harness.ctx.state.runner.enterCallbacks;
+
+    begin.push(() => {
+      order.push("begin");
+      harness.ctx.state.runner.abort?.abort("stop");
+    });
+    load.push(() => {
+      order.push("load");
+    });
+    scene.push(() => {
+      order.push("scene");
+    });
+
+    const running = harness.start();
+
+    running.then(
+      () => {
+        ended.value = true;
+      },
+      () => undefined
+    );
+    await tick();
+
+    expect(order).toEqual(["begin"]);
+    expect(ended.value).toBe(true);
     await stopRunner(harness.ctx);
   });
 

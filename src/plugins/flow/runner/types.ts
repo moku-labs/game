@@ -920,14 +920,19 @@ export type FlowState = {
 };
 
 /**
- * Stages of entering a node: `assets` preloads at `load`, `scenes` switches at `scene`.
+ * Stages of entering a node, in the order they run: `begin`, `load`, `scene`. At `begin` a plugin
+ * starts what reacts at once and returns without waiting: the loop awaits it before the `load`
+ * stage, so a callback that waits there delays the loads. `assets` preloads at `load`, `scenes`
+ * switches at `scene`.
  *
  * @example
  * ```ts
- * const stage: Stage = "load";
+ * // The scenes plugin answers the tap on "board" at `begin` (the veil over the ward, in the next
+ * // frame, while the `load` stage of assets still downloads the board) and switches at `scene`.
+ * const scenesStages: Stage[] = ["begin", "scene"];
  * ```
  */
-export type Stage = "load" | "scene";
+export type Stage = "begin" | "load" | "scene";
 
 /**
  * Callback of `onEnter`. Called before `node.run`, awaited. Read the state with
@@ -1069,9 +1074,13 @@ export type RunnerApi = {
   run(): Promise<void>;
 
   /**
-   * Registers a callback run before every node body: `assets` preloads at `load`, `scenes`
-   * switches at `scene`. Every `load` callback runs before the first `scene` callback, in
-   * registration order, each awaited.
+   * Registers a callback run before every node body, at one of three stages: `scenes` reacts at
+   * `begin` (the veil over the scene being left), `assets` preloads at `load`, `scenes` switches
+   * at `scene`. Every `begin` callback runs before the first `load` callback, and every `load`
+   * callback before the first `scene` callback, in registration order inside a stage, each
+   * awaited. A `begin` callback must not wait: it starts what reacts at once and returns, since
+   * the loads start only after it. Once the node is aborted (a restore, a stop) no further stage
+   * starts.
    *
    * The stages run before the node opens its transaction, and `model.store.snapshot()` is the
    * committed state, so a stage reads the state the node is entered with: on an ordinary entry
@@ -1080,15 +1089,22 @@ export type RunnerApi = {
    * its `recover` committed, or, without `recover`, the state of the rest point the rollback
    * returned to.
    *
-   * @param stage - `"load"` or `"scene"`.
+   * @param stage - `"begin"`, `"load"` or `"scene"`.
    * @param callback - Called with the node and `{ mode, signal }`, awaited.
    * @returns The unregister function.
    * @example
    * ```ts
-   * // A scenes plugin switches the screen when the graph enters a node.
-   * const off = app.flow.onEnter("scene", node => showScene(node.path)); // node.path: "home"
+   * // The scenes plugin, at the tap on "board" over the ward: the veil goes up at `begin`, without
+   * // waiting, while the `load` stage still downloads the board; the switch runs at `scene`.
+   * const flow = ctx.require(flowPlugin);
+   * const veil = { cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 } };
+   * const offBegin = flow.onEnter("begin", (node, { mode }) => {
+   *   if (mode === "live" && node.scene === "board") ctx.require(rendererPlugin).sync.leave.show(veil);
+   * });
+   * const offScene = flow.onEnter("scene", node => switchTo(node.scene)); // node.scene: "board"
    *
-   * off(); // the plugin stops: the callback is not called any more
+   * offBegin(); // the plugin stops: neither callback is called any more
+   * offScene();
    * ```
    */
   onEnter(stage: Stage, callback: EnterCallback): () => void;
@@ -1162,7 +1178,7 @@ export type RunnerApi = {
    * ended the loop, or `run()` rejected. Nothing is entered then and the state is not replaced.
    * `state()` shows whether it was: its `path` is the node the graph stands at.
    *
-   * The restored node's `load` and `scene` stages run after this resolves for a rest node: the
+   * The restored node's `begin`, `load` and `scene` stages run after this resolves for a rest node: the
    * scene is mounted when its bundles are in, before the node's gate opens;
    * `await app.flow.walk([])` waits for that gate.
    *

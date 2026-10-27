@@ -1,7 +1,7 @@
 /**
  * @file scenes plugin — lifecycle: the config checked in `onInit`, the scenes read out of the
- * feature descriptions in `onStart`, the one `onEnter` registration, and the teardown that removes
- * exactly that registration.
+ * feature descriptions in `onStart`, the two `onEnter` registrations (`begin` and `scene`), and the
+ * teardown that removes exactly those registrations.
  */
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
@@ -13,7 +13,7 @@ import { dropBuild, isPositiveFinite } from "./build";
 import { isSceneDefinition } from "./bundles";
 import { forgetLeave } from "./leave";
 import { checkLeave } from "./leave-check";
-import { enterScene } from "./switch";
+import { beginScene, enterScene } from "./switch";
 import type { Config, Deps, KernelSlice, ScenesCtx, State } from "./types";
 
 /**
@@ -110,8 +110,9 @@ export function checkConfig(config: Readonly<Config>): void {
 }
 
 /**
- * Starts the plugin in `onStart`: it collects the scenes of the features and registers the one
- * callback that switches them, on the `scene` stage of entering a node.
+ * Starts the plugin in `onStart`: it collects the scenes of the features and registers two
+ * callbacks of entering a node: at `begin` the look of the scene being left, before `assets`
+ * downloads anything at `load`, and at `scene` the switch.
  *
  * @param ctx - Kernel context of the scenes plugin.
  * @throws {Error} When two features declare the same scene id.
@@ -126,13 +127,18 @@ export function startScenes(ctx: KernelSlice): void {
 
   readScenes(scenes);
 
-  scenes.state.teardown = scenes.deps.flow.onEnter("scene", (node, run) =>
-    enterScene(scenes, node, run)
-  );
+  const flow = scenes.deps.flow;
+  const offBegin = flow.onEnter("begin", (node, run) => beginScene(scenes, node, run));
+  const offScene = flow.onEnter("scene", (node, run) => enterScene(scenes, node, run));
+
+  scenes.state.teardown = (): void => {
+    offBegin();
+    offScene();
+  };
 }
 
 /**
- * Removes the `onEnter` callback in `onStop` and forgets every scene and the bundles the mounted
+ * Removes the two `onEnter` callbacks in `onStop` and forgets every scene and the bundles the mounted
  * one named. A running build loses its frame callback and its switch returns; the look of a running
  * switch loses its abort listener (the renderer drops it at its own stop). Nothing is unmounted
  * or discarded: a teardown context may not call another plugin, and `world.onStop` clears every
