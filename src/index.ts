@@ -263,7 +263,7 @@ export { audioPlugin, effectsPlugin, platformPlugin } from "./plugins";
 export { defineFeature, flattenFeatures } from "./plugins/flow/feature";
 export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
 export { defineEffect } from "./plugins/flow/fx/effect";
-export { exit, slot, to, type } from "./plugins/flow/runner/define";
+export { contribution, exit, slot, to, type } from "./plugins/flow/runner/define";
 // model
 export { SaveUnreadableError } from "./plugins/model/store/types";
 // world: the ECS vocabulary and the projection

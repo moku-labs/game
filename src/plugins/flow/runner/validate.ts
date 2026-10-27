@@ -2,10 +2,10 @@
  * @file flow/runner — static graph validation. Every rule reads the graph as data and returns a
  * sentence; `run()` throws all of them at once, so one start names every problem.
  */
-import type { FeaturesApi } from "../features/types";
+import type { Contribution, FeaturesApi } from "../features/types";
 import type { Config } from "../types";
 import { findNode, slotNames } from "./registry";
-import type { AnyFlow, FlowEntry, Target, ValidationReport } from "./types";
+import type { AnyFlow, FlowEntry, OutcomeTags, Target, ValidationReport } from "./types";
 
 /** Nodes of one flow above which `validate` warns. A flow holds 7 to 15 nodes. */
 const MAX_NODES = 15;
@@ -96,7 +96,8 @@ function targetProblem(
   target: Target
 ): string | undefined {
   if (typeof target !== "string" && target.kind === "exit") {
-    if (target.outcome in flow.outcomes) return undefined;
+    // Own keys only: `"constructor" in outcomes` is true for every object.
+    if (Object.hasOwn(flow.outcomes, target.outcome)) return undefined;
 
     return `[game] Flow "${flow.id}": exit("${target.outcome}") of node "${name}" names no outcome of the flow.\n  Declare outcomes.${target.outcome} on flow "${flow.id}".`;
   }
@@ -194,7 +195,7 @@ function nodeProblems(flow: AnyFlow): string[] {
     if (entry.kind !== "node") continue;
 
     for (const type of entry.inbox) {
-      if (type in entry.outcomes) continue;
+      if (Object.hasOwn(entry.outcomes, type)) continue;
 
       problems.push(
         `[game] Flow "${flow.id}": inbox type "${type}" of node "${name}" is not an outcome.\n  Add outcomes.${type} to node "${name}".`
@@ -418,6 +419,196 @@ function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: Features
   return problems;
 }
 
+/** One slot node of the graph: the flow that holds it and the outcomes it declares. */
+type SlotDeclaration = { flow: string; declared: readonly string[] };
+
+/** The slot nodes of one slot name, in graph order: there is always a first. */
+type SlotDeclarations = [SlotDeclaration, ...SlotDeclaration[]];
+
+/**
+ * Names the outcomes of a table besides `done`: what a slot declares, or what a contributed flow
+ * may leave its slot on.
+ *
+ * @param outcomes - The outcome table of a slot or a flow.
+ * @returns The outcome names other than `done`, in declaration order.
+ * @example
+ * ```ts
+ * declaredOutcomes({ done: type(), shop: type() }); // ["shop"]
+ * ```
+ */
+function declaredOutcomes(outcomes: OutcomeTags): string[] {
+  return Object.keys(outcomes).filter(name => name !== "done");
+}
+
+/**
+ * Tells whether two lists hold the same names, in any order.
+ *
+ * @param first - One list of names.
+ * @param second - The other list.
+ * @returns True when every name of one is in the other and the lengths match.
+ * @example
+ * ```ts
+ * sameNames(["shop", "board"], ["board", "shop"]); // true
+ * ```
+ */
+function sameNames(first: readonly string[], second: readonly string[]): boolean {
+  return first.length === second.length && first.every(name => second.includes(name));
+}
+
+/**
+ * Collects every slot node of the graph by slot name: the flow that holds it and what it
+ * declares, in the order the graph declares them.
+ *
+ * @param flows - Every collected flow by id.
+ * @returns Slot name to its slot nodes, at least one each.
+ */
+function slotDeclarations(flows: ReadonlyMap<string, AnyFlow>): Map<string, SlotDeclarations> {
+  const declarations = new Map<string, SlotDeclarations>();
+
+  for (const flow of flows.values()) {
+    for (const entry of Object.values(flow.nodes)) {
+      if (entry.kind !== "slot") continue;
+
+      const declaration = { flow: flow.id, declared: declaredOutcomes(entry.outcomes) };
+      const list = declarations.get(entry.name);
+
+      if (list === undefined) declarations.set(entry.name, [declaration]);
+      else list.push(declaration);
+    }
+  }
+
+  return declarations;
+}
+
+/**
+ * Reports the contributions of a slot that declares outcomes and that may leave it on an outcome
+ * the slot does not declare: the loop would have no edge for it.
+ *
+ * @param slotName - Name of the slot.
+ * @param declared - The outcomes the slot declares besides `done`.
+ * @param contributions - The contributions of the slot.
+ * @returns One sentence per contribution and outcome.
+ */
+function undeclaredExits(
+  slotName: string,
+  declared: readonly string[],
+  contributions: readonly Contribution[]
+): string[] {
+  const problems: string[] = [];
+
+  for (const { feature, flow } of contributions) {
+    for (const outcome of declaredOutcomes(flow.outcomes)) {
+      if (declared.includes(outcome)) continue;
+
+      problems.push(
+        `[game] Slot "${slotName}": flow "${flow.id}" of feature "${feature}" exits "${outcome}", which the slot does not declare.\n  Declare slot("${slotName}", { ${outcome}: type() }) or exit "done".`
+      );
+    }
+  }
+
+  return problems;
+}
+
+/**
+ * Reports the named outcomes of slots: one slot name declared with different outcomes in two
+ * places, and a contribution of a slot that declares outcomes which may leave it on another one.
+ * A slot that declares none takes any contribution: what it ignores is a warning.
+ *
+ * @param flows - Every collected flow by id.
+ * @param features - Features API, read for the contributions of every slot.
+ * @returns One sentence per problem.
+ */
+function slotOutcomeProblems(flows: ReadonlyMap<string, AnyFlow>, features: FeaturesApi): string[] {
+  const problems: string[] = [];
+
+  for (const [slotName, [first, ...others]] of slotDeclarations(flows)) {
+    for (const other of others) {
+      if (sameNames(first.declared, other.declared)) continue;
+
+      problems.push(
+        `[game] Slot "${slotName}" declares different outcomes in flow "${first.flow}" and flow "${other.flow}".\n  Declare the slot once and use it in both flows.`
+      );
+    }
+
+    if (first.declared.length === 0) continue;
+
+    problems.push(...undeclaredExits(slotName, first.declared, features.contributions(slotName)));
+  }
+
+  return problems;
+}
+
+/**
+ * Warns about the named exits of contributions that a slot declaring no outcomes ignores: the
+ * slot hands over to its next contribution as after `done`.
+ *
+ * @param slotName - Name of the slot.
+ * @param contributions - The contributions of the slot.
+ * @returns One warning per contribution and outcome.
+ */
+function ignoredExits(slotName: string, contributions: readonly Contribution[]): string[] {
+  return contributions.flatMap(({ flow }) =>
+    declaredOutcomes(flow.outcomes).map(
+      outcome =>
+        `[game] Slot "${slotName}": flow "${flow.id}" exits "${outcome}", which the slot ignores.\n  Declare slot("${slotName}", { ${outcome}: type() }) to route it, or exit "done".`
+    )
+  );
+}
+
+/**
+ * Warns about contributions without `when` in a slot that declares outcomes: a named exit leaves
+ * the slot, so a later one runs only when the one before it exits `done`.
+ *
+ * @param slotName - Name of the slot.
+ * @param contributions - The contributions of the slot, in order.
+ * @returns One warning per contribution without `when` after the first one.
+ */
+function unguardedContributions(
+  slotName: string,
+  contributions: readonly Contribution[]
+): string[] {
+  const warnings: string[] = [];
+  let earlier: Contribution | undefined;
+
+  for (const contribution of contributions) {
+    if (contribution.when !== undefined) continue;
+
+    if (earlier !== undefined) {
+      warnings.push(
+        `[game] Slot "${slotName}": the flows "${earlier.flow.id}" and "${contribution.flow.id}" have no when.\n  A named exit leaves the slot, so "${contribution.flow.id}" runs only when "${earlier.flow.id}" exits done; give them when.`
+      );
+    }
+
+    earlier = contribution;
+  }
+
+  return warnings;
+}
+
+/**
+ * Warns about the named outcomes of slots: a named exit a slot that declares none ignores, and
+ * contributions without `when` in a slot that declares some.
+ *
+ * @param flows - Every collected flow by id.
+ * @param features - Features API, read for the contributions of every slot.
+ * @returns One warning per finding.
+ */
+function slotOutcomeWarnings(flows: ReadonlyMap<string, AnyFlow>, features: FeaturesApi): string[] {
+  const warnings: string[] = [];
+
+  for (const [slotName, [first]] of slotDeclarations(flows)) {
+    const contributions = features.contributions(slotName);
+
+    warnings.push(
+      ...(first.declared.length === 0
+        ? ignoredExits(slotName, contributions)
+        : unguardedContributions(slotName, contributions))
+    );
+  }
+
+  return warnings;
+}
+
 /**
  * Reads the scene id of one entry of a feature's `scenes` list. The list holds whatever
  * `defineScene` returns; validation reads the `id` and ignores everything else.
@@ -635,12 +826,14 @@ function sizeWarnings(flow: AnyFlow): string[] {
  * Validates the whole graph at `run()` and returns every problem as one `[game] …` sentence:
  * unreachable node, outcome without an edge, missing target, barrier edge that does not reach a
  * rest node of the same flow, cycle with no rest node, slot without a name, equal contribution
- * `order`, one flow contributed twice to a slot, `inbox` type that is not an outcome, rest node
- * with neither `run` nor outcomes, a `recover` on a node that is not a rest node, a scene id no
- * feature registers, an `over` node that names a scene, `safeNode` that is not a checkpoint,
- * colliding ids. A `recover` on a node that is not the safe node is a warning: it never runs
- * there. Types are bypassed by JSON data and casts, so this runs even though the edge table is
- * checked at compile time.
+ * `order`, one flow contributed twice to a slot, one slot name declared with different outcomes,
+ * a contribution of a slot that declares outcomes which exits another one, `inbox` type that is
+ * not an outcome, rest node with neither `run` nor outcomes, a `recover` on a node that is not a
+ * rest node, a scene id no feature registers, an `over` node that names a scene, `safeNode` that
+ * is not a checkpoint, colliding ids. A `recover` on a node that is not the safe node is a
+ * warning: it never runs there. So are a named exit a slot that declares no outcomes ignores, and
+ * two contributions without `when` in a slot that declares some. Types are bypassed by JSON data
+ * and casts, so this runs even though the edge table is checked at compile time.
  *
  * @param flows - Every collected flow by id, the main flow first.
  * @param features - Features API: slot contributions and feature names.
@@ -666,11 +859,16 @@ export function validateGraph(
     warnings.push(...sizeWarnings(flow));
   }
 
-  warnings.push(...slotNameWarnings(flows, features), ...recoverWarnings(flows, features, config));
+  warnings.push(
+    ...slotNameWarnings(flows, features),
+    ...slotOutcomeWarnings(flows, features),
+    ...recoverWarnings(flows, features, config)
+  );
 
   problems.push(
     ...flowIdProblems(flows),
     ...featureProblems(flows, features),
+    ...slotOutcomeProblems(flows, features),
     ...sceneProblems(flows, features),
     ...safeNodeProblems(config, features)
   );

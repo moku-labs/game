@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Contribution, FeaturesApi } from "../../features/types";
+import { slot, type } from "../../runner/define";
 import {
   collectFlows,
   describedNode,
   describeGraph,
   findNode,
   framePath,
-  graphHash
+  graphHash,
+  restlessCapOf
 } from "../../runner/registry";
 import type {
   AnyFlow,
@@ -266,6 +268,27 @@ describe("describeGraph", () => {
     expect(graph.flows.main?.nodes.board?.subFlow).toBe("board");
   });
 
+  // Bug: describe() drops what a slot declares, and the editor draws a slot with one exit.
+  it("lists the outcomes a slot declares after done", () => {
+    const main = flow(
+      "main",
+      { home, episode: slot("episodeStep", { shop: type<{ tab: string }>(), board: type() }) },
+      "home",
+      { home: { play: "episode" }, episode: { done: "home", shop: "home", board: "home" } }
+    );
+
+    expect(describeGraph(collectFlows(main, []), noFeatures).flows.main?.nodes.episode).toEqual({
+      flow: "main",
+      node: "episode",
+      rest: false,
+      over: false,
+      checkpoint: false,
+      barrier: false,
+      outcomes: ["done", "shop", "board"],
+      slot: "episodeStep"
+    });
+  });
+
   it("names the slot of a slot node", () => {
     expect(graph.flows.main?.nodes.afterWin?.slot).toBe("afterWin");
   });
@@ -393,7 +416,54 @@ describe("graphHash", () => {
     );
   });
 
+  // Bug: a slot that declares nothing describes differently, and every bookmark of an existing game
+  // is taken for one of a changed graph: restore falls back or refuses.
+  it("keeps the hash of a graph whose slot declares no outcome, also for one made by slot()", () => {
+    const withSlot = flow(
+      "main",
+      { home, board: boardFlow, afterWin: slot("afterWin"), result },
+      "home",
+      mainFlow.edges
+    );
+
+    expect(graphHash(describeGraph(collectFlows(mainFlow, []), features))).toBe("27135aa0");
+    expect(graphHash(describeGraph(collectFlows(withSlot, []), features))).toBe("27135aa0");
+  });
+
   it("returns a short hexadecimal string", () => {
     expect(graphHash({ main: "main", flows: {}, slots: {} })).toMatch(/^[\da-f]+$/);
+  });
+});
+
+/** A flow of `count` transit nodes, read for its size only. */
+const sized = (id: string, count: number, extra: Record<string, FlowEntry> = {}): AnyFlow =>
+  flow(
+    id,
+    {
+      ...Object.fromEntries(Array.from({ length: count }, (_, index) => [`n${index}`, node()])),
+      ...extra
+    },
+    "n0",
+    {}
+  );
+
+describe("restlessCapOf", () => {
+  // Bug: a slot counts as one node, and a contribution with a long transit chain fails at the floor.
+  it("counts the contributions of a slot where the slot is used", () => {
+    const long = sized("long", 20);
+    const main = flow("main", { home, afterWin }, "home", {});
+
+    // home 1, the slot's own edge 1, its contribution 20: 4 × 22.
+    expect(restlessCapOf(main, name => (name === "afterWin" ? [{ flow: long }] : []))).toBe(88);
+  });
+
+  // Bug: a contribution that holds its own slot sends the count round forever: run() overflows.
+  it("counts a flow that leads back into itself once, and ends", () => {
+    const again = slotNode("again");
+    const looping = sized("looping", 20, { again });
+    const main = flow("main", { home, again }, "home", {});
+
+    // looping: 20 + the slot 1 + looping again, already being counted, 1 = 22. main: 1 + 1 + 22.
+    expect(restlessCapOf(main, () => [{ flow: looping }])).toBe(96);
   });
 });

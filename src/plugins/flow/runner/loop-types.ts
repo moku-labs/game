@@ -56,6 +56,8 @@ export type Arrival = {
   rest: boolean;
   checkpoint: boolean;
   after?: string;
+  /** Set when a contribution exited an outcome its slot declares: the slot leaves on it. */
+  leave?: { outcome: string; payload: Json };
 };
 
 /** Where the loop goes after one result, or the problem that stops it going anywhere. */

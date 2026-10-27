@@ -29,7 +29,7 @@ export function asError(value: unknown): Error {
 /**
  * Commits the transaction of one node, releases its hints, journals the edge and emits
  * `flow:edge`. This is the only commit of the engine: the edge of a node, and the recovery edge
- * of the safe node, both go through it.
+ * of the safe node, both go through it. It counts the edge among those since the last rest node.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -44,6 +44,8 @@ export function commitEdge(
   next: string
 ): JournalEntry {
   const commit = step.transaction.commit();
+
+  ctx.state.runner.restless += 1;
 
   // An edge is the moment the screen has something new to show: the idle cap is lifted after the commit.
   ctx.deps.time.wake();
@@ -128,6 +130,9 @@ export function handleFailure(
   state.stack = [...target];
   // A rollback leaves any slot the loop was in: nothing of it may steer the next slot entry.
   state.slotAfter = undefined;
+  state.slotLeave = undefined;
+  // The position is a rest point again, or the node the graph started at: the count starts anew.
+  state.restless = 0;
 
   if (!retry) {
     safe.inside = true;
@@ -163,9 +168,11 @@ export function handleAbort(
 
 /**
  * Moves the position to a planned place and, when that place is a rest node, makes it the rest
- * point of the loop: the frame rollback and `bookmark` return to, a zeroed failure count, a
- * compacted journal at a checkpoint, `flow:rest` and the walk's rest listeners. The caller marks the
- * rest point in the store first. Used by the edge, and by the loop when it enters a slot.
+ * point of the loop: the frame rollback and `bookmark` return to, a zeroed failure count, a zeroed
+ * count of edges without a rest, a compacted journal at a checkpoint, `flow:rest` and the walk's
+ * rest listeners. The caller marks the rest point in the store first. Used by the edge, and by the
+ * loop when it enters a slot. A slot it stands on keeps the contribution that ended, or the
+ * declared outcome one left on, for the next turn.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param plan - Where the loop stands now.
@@ -175,11 +182,13 @@ export function arrive(ctx: FlowCtx, plan: Arrival): void {
 
   state.stack = plan.stack;
   state.slotAfter = plan.after;
+  state.slotLeave = plan.leave;
 
   if (!plan.rest) return;
 
   state.restFrame = [...plan.stack];
   state.failures = 0;
+  state.restless = 0;
 
   if (plan.checkpoint) compact(state);
 
@@ -189,7 +198,9 @@ export function arrive(ctx: FlowCtx, plan: Arrival): void {
 
 /**
  * Takes the edge of one result: plan, commit, mark the barrier or the rest point, move the
- * position and announce a rest node.
+ * position and announce a rest node. A plan with a problem fails the node, and so does an edge
+ * beyond the cap of edges without a rest node: a loop of transit nodes that never rests would
+ * freeze the game.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -215,6 +226,12 @@ export async function finishNode(
 
   if ("problem" in plan) {
     return handleFailure(ctx, modules, step.transaction, new Error(plan.problem), step.path, safe);
+  }
+
+  if (state.restless >= state.restlessCap) {
+    const restless = `[game] ${state.restlessCap} edges without a rest node, at "${step.path}".\n  Put a rest node in the loop.`;
+
+    return handleFailure(ctx, modules, step.transaction, new Error(restless), step.path, safe);
   }
 
   const entry = commitEdge(ctx, modules, step, plan.next);

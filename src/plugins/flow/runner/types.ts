@@ -310,19 +310,26 @@ export type DefineNode<Game extends GameState> = <
 ) => NodeDefinition<Input, Tags, Game>;
 
 /**
- * An extension point inside a flow: a node whose body is "run the contributions in order".
- * Its single outcome is `done`.
+ * An extension point inside a flow: a node whose body is "run the contributions in order". Its
+ * outcomes are `done` and the named outcomes `slot()` declares, so the flow that holds it routes
+ * each of them with an ordinary edge. Without type arguments it is a slot that declares none.
  *
  * @example
  * ```ts
- * const afterOrder: SlotNode = slot("afterOrder");
+ * // A feature may send the player from the slot to the shop, on the tab it names.
+ * const afterOrder: SlotNode<{ shop: TypeTag<{ tab: string }> }, "afterOrder"> = slot("afterOrder", {
+ *   shop: type<{ tab: string }>()
+ * });
  * // { kind: "slot", name: "afterOrder", input: { kind: "type" },
- * //   outcomes: { done: { kind: "type" } } }
+ * //   outcomes: { done: { kind: "type" }, shop: { kind: "type" } } }
  * ```
  */
-export type SlotNode = Wired<void, { readonly done: TypeTag<void> }> & {
+export type SlotNode<
+  Tags extends OutcomeTags = Record<never, never>,
+  Name extends string = string
+> = Wired<void, { readonly done: TypeTag<void> } & Tags> & {
   readonly kind: "slot";
-  readonly name: string;
+  readonly name: Name;
 };
 
 // ─── Edge targets ─────────────────────────────────────────────
@@ -552,6 +559,56 @@ export type CheckedEdges<Nodes extends NodeTable, FlowTags extends OutcomeTags, 
   readonly [Extra in Exclude<keyof Table, keyof Nodes> &
     string]: GraphError<`"${Extra}" is not a node of this flow.`>;
 };
+
+/**
+ * Checks one outcome `Outcome` of the contributed flow `Contributed` against the slot `Host`:
+ * `never` when it is `done`, or an outcome the slot declares whose payload fits; a `GraphError`
+ * sentence otherwise.
+ */
+type OutcomeFit<
+  Contributed extends AnyFlow,
+  Host extends SlotNode<OutcomeTags, string>,
+  Outcome extends keyof Contributed["outcomes"]
+> = Outcome extends "done"
+  ? never
+  : Outcome extends Exclude<keyof Host["outcomes"], "done">
+    ? Accepts<
+        PayloadOf<Contributed["outcomes"][Outcome]>,
+        PayloadOf<Host["outcomes"][Outcome]>
+      > extends true
+      ? never
+      : GraphError<`Payload of outcome "${Outcome & string}" does not fit slot "${Host["name"]}".`>
+    : GraphError<`Slot "${Host["name"]}" declares no outcome "${Outcome & string}".`>;
+
+/**
+ * The outcomes of `Contributed` that do not fit the slot `Host`, as `GraphError` sentences, or
+ * `never` when every outcome fits.
+ */
+type MisfitOutcomes<Contributed extends AnyFlow, Host extends SlotNode<OutcomeTags, string>> = {
+  [Outcome in keyof Contributed["outcomes"]]: OutcomeFit<Contributed, Host, Outcome>;
+}[keyof Contributed["outcomes"]];
+
+/**
+ * Checking type of `contribution()`: whether the flow `Contributed` fits the slot `Host`. Every
+ * outcome of the flow is `done`, or an outcome the slot declares whose payload fits; then it is
+ * `unknown`, otherwise the `GraphError` sentence of the misfit. A slot that declares no outcome
+ * accepts any flow, and a flow without outcomes fits any slot.
+ *
+ * @example
+ * ```ts
+ * // episodeStep = slot("episodeStep", { shop: type<{ tab: string }>() })
+ * type Fitting = Fits<typeof storyFlow, typeof episodeStep>; // unknown: outcomes done and shop
+ * type Misfit = Fits<typeof giftFlow, typeof episodeStep>; // giftFlow exits "gift":
+ * // GraphError<'Slot "episodeStep" declares no outcome "gift".'>
+ * ```
+ */
+export type Fits<Contributed extends AnyFlow, Host extends SlotNode<OutcomeTags, string>> = [
+  Exclude<keyof Host["outcomes"], "done">
+] extends [never]
+  ? unknown
+  : [MisfitOutcomes<Contributed, Host>] extends [never]
+    ? unknown
+    : MisfitOutcomes<Contributed, Host>;
 
 // ─── Flow ─────────────────────────────────────────────────────
 
@@ -934,6 +991,12 @@ export type RunnerState = {
   restFrame: Frame[] | undefined;
   /** Inside a slot: the contribution the loop just finished. The slot continues after it. */
   slotAfter: string | undefined;
+  /** Inside a slot: the declared outcome a contribution left on. The slot takes its edge next. */
+  slotLeave: { outcome: string; payload: Json } | undefined;
+  /** Edges committed since the loop last arrived at a rest node. */
+  restless: number;
+  /** Edges without a rest node after which the next one fails: `max(64, 4 × expanded nodes)`. */
+  restlessCap: number;
   /** Edges since the last checkpoint. */
   journal: JournalEntry[];
   journalIndex: number;

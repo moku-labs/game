@@ -98,11 +98,18 @@ export type FeatureDescription = {
   nodes?: readonly AnyNode[];
   /** Flows the feature owns. */
   flows?: readonly AnyFlow[];
-  /** Slot name to the sub-flow run in that slot. */
-  contribute?: Record<
-    string,
-    { flow: AnyFlow; order: number; when?: (snapshot: Snapshot) => boolean }
-  >;
+  /**
+   * Slot name to the sub-flow run in that slot. Written by hand, an entry is checked by name at
+   * `run()`; `...contribution(slot, spec)` also checks its outcomes against the slot at compile time.
+   *
+   * @example
+   * ```ts
+   * // The story runs in the slot "episodeStep" and may leave it on one of the slot's outcomes.
+   * contribute: { ...contribution(episodeStep, { flow: storyFlow, order: 10 }) }
+   * // { episodeStep: { flow: storyFlow, order: 10 } }
+   * ```
+   */
+  contribute?: Record<string, ContributionSpec>;
   /**
    * Sub-features this feature declares, each in a folder of its own inside this feature's folder,
    * in the order they are composed. `defineGameApp` composes them right after this feature; this
@@ -148,19 +155,36 @@ export type FeaturePlugin = AnyPluginInstance & {
 };
 
 /**
- * One sub-flow contributed to a slot.
+ * One entry of a feature's `contribute`: the sub-flow a slot runs, its place among the slot's
+ * contributions (lowest `order` first) and the `when` that may skip it. `when` reads the committed
+ * state. `contribution(slot, spec)` builds the entry under the slot's name.
+ *
+ * @example
+ * ```ts
+ * // The story of episode 1 runs in the slot "episodeStep" while the player is in episode 1.
+ * // `episodeOf` is the game's reader of the committed player tree.
+ * const story: ContributionSpec = {
+ *   flow: storyFlow,
+ *   order: 10,
+ *   when: snapshot => episodeOf(snapshot.player) === "ep01"
+ * };
+ * ```
+ */
+export type ContributionSpec = {
+  flow: AnyFlow;
+  order: number;
+  when?: (snapshot: Snapshot) => boolean;
+};
+
+/**
+ * One sub-flow contributed to a slot, with the feature that contributed it.
  *
  * @example
  * ```ts
  * const contribution: Contribution = { feature: "reward", flow: rewardFlow, order: 10 };
  * ```
  */
-export type Contribution = {
-  feature: string;
-  flow: AnyFlow;
-  order: number;
-  when?: (snapshot: Snapshot) => boolean;
-};
+export type Contribution = ContributionSpec & { feature: string };
 
 /**
  * features module state.
