@@ -339,8 +339,7 @@ export const settingsSheet = projection({
   step may not run, the record in work is dropped: a paused or fast world builds no part of it, so
   `left()` is `Infinity` through the pause and no frame is asked for it; it is built again once the
   world is live. The budget
-  is a third of the frame interval the loop runs at, `(1000 / time.rate().fps) / 3` (2.8 ms at 120 Hz: the resting
-  scene draws its own frame beside it); work
+  is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`; work
   that starts wakes the loop. At rest the step reads two fields and returns: 0 B a frame
   (`__tests__/perf/warm.perf.ts`).
 - **The open.** When `from` shows the key, the reconcile shows the held view instead of a spawn: the

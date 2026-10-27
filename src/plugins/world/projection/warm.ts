@@ -27,25 +27,21 @@ import { asError, collectView, createViewRecord, spawnFlagged, writeValue } from
 /** A second in ms: the frame interval is this over the frame rate. */
 const SECOND_MS = 1000;
 
-/**
- * The share of a frame interval a warm window may take: a third, half a scene build's `"auto"`. The scene rests and
- * draws its own work in the same frame (≈ 7 ms on a Galaxy A26 ward): with two thirds a warm frame went past two
- * vsyncs (25 ms) now and then (F61).
- */
-const WARM_SHARE = 1 / 3;
+/** The share of a frame interval a warm window may take: two thirds, the share of a scene build's `"auto"`. */
+const WARM_SHARE = 2 / 3;
 
-/** The budget of a frame when the loop answers no usable rate: a third of a 60 Hz frame, ≈ 5.6 ms. */
+/** The budget of a frame when the loop answers no usable rate: two thirds of a 60 Hz frame, ≈ 11.1 ms. */
 export const FALLBACK_WARM_MS = (SECOND_MS / 60) * WARM_SHARE;
 
 /**
- * The building budget of one frame for a warm window: a third of the frame interval at `fps`, or of a 60 Hz frame
+ * The building budget of one frame for a warm window: two thirds of the frame interval at `fps`, or of a 60 Hz frame
  * for a rate that is not a finite number above 0. Pure.
  *
  * @param fps - The rate the loop runs at.
  * @returns Milliseconds per frame.
  * @example
  * ```ts
- * warmBudget(120); // 2.777…
+ * warmBudget(120); // 5.555…
  * ```
  */
 export function warmBudget(fps: number): number {
