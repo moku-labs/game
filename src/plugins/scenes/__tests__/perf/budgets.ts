@@ -10,6 +10,6 @@ export const NOISE = 1;
 export const BUDGET = {
   // The `signals` callback of a build that is not done: one counter step and one call of `built()`.
   buildWaiting: 0,
-  // The `input` callback of a switch that waits for its reaction frame (slice R): one flag read.
+  // The `signals` callback of a switch that waits for its reaction frame (slice R): one flag read.
   reactionWaiting: 0
 } as const;

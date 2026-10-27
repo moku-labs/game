@@ -416,7 +416,8 @@ export type State = {
   leaving?: Leaving;
   /**
    * The watch for the reaction frame of the running switch (spec 33, slice R), from the `begin` stage of its node to the
-   * build start. Absent otherwise: deleted, never written as `undefined`.
+   * build start, or to the abort of its node (forgotten by its `scene` stage, or by the next `begin`). Absent otherwise:
+   * deleted, never written as `undefined`.
    */
   reaction?: Reaction;
 };

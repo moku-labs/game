@@ -113,8 +113,13 @@ export type FakeTime = {
   clock: { now: number } | undefined;
   /** What `rate().fps` answers: the frame rate the loop runs at, 60 unless a test moves it. */
   fps: number;
-  /** Runs one frame: every registered callback, phase by phase, as `time.step` does. */
+  /**
+   * Runs one frame as `time.step` does: every callback registered at its start, phase by phase (one added during the
+   * frame first runs in the next, one removed during it still runs in it), a throw caught and kept in `errors`.
+   */
   frame(): void;
+  /** What frame callbacks threw, in order. */
+  errors: unknown[];
   /** Runs the callbacks of one phase only, as a part of a frame. */
   phase(phase: Phase): void;
   api: TimeApi;
@@ -421,11 +426,17 @@ function createFakeTime(journal: string[]): FakeTime {
     callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
     clock: undefined,
     fps: 60,
+    errors: [],
     frame: (): void => {
-      for (const callbacks of Object.values(fake.callbacks)) {
-        // eslint-disable-next-line unicorn/no-useless-spread -- a callback that removes itself does not skip the next one
-        for (const callback of [...callbacks]) {
-          callback({ delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false });
+      const captured = Object.values(fake.callbacks).map(callbacks => [...callbacks]);
+
+      for (const callbacks of captured) {
+        for (const callback of callbacks) {
+          try {
+            callback({ delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false });
+          } catch (error) {
+            fake.errors.push(error);
+          }
         }
       }
     },

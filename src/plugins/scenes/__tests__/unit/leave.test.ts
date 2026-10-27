@@ -122,9 +122,9 @@ async function switchTo(mock: MockScenes, run: Partial<RunContext> = {}): Promis
 async function finish(mock: MockScenes, entering: Promise<void>): Promise<void> {
   mock.assets.release();
   await flush();
-  // The reaction frame, then the build starts in the next frame's `input` phase (slice R).
+  // The reaction frame, then the build starts in the next frame's `signals` phase (slice R).
   mock.time.phase("render");
-  mock.time.phase("input");
+  mock.time.phase("signals");
   await flush();
   mock.world.building.done = true;
   mock.time.frame();

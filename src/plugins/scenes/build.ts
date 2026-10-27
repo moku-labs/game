@@ -199,17 +199,14 @@ function watchBuild(ctx: ScenesCtx, build: SceneBuild, signal: AbortSignal): voi
  * Starts the build of a scene aside and answers the promise of the switch. The world mounts what
  * only the coming scene lists, against the committed state, and gets the budget of a frame
  * (`budgetOf`); the coming bundles are held from now.
- * When nothing is left for `ui` and the renderer and the build starts between two frames, the
- * commit runs at once. Otherwise, and for a build started inside a frame (slice R), a `signals`
- * callback asks every frame whether the build is done, from the frame it started in on, and an
- * abort of the node discards it.
+ * When nothing is left for `ui` and the renderer the commit runs at once, with no frame between.
+ * Otherwise a `signals` callback asks every frame whether the build is done, and an abort of the
+ * node discards it.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundles are there.
  * @param named - The bundles it names, as they were awaited.
- * @param start - Where the build starts.
- * @param start.signal - The abort signal of the node, not aborted.
- * @param start.inFrame - True inside a frame's `input` phase, where the swap waits for its `signals` phase.
+ * @param signal - The abort signal of the node, not aborted.
  * @returns The promise of the switch, settled at the commit or the abort; `undefined` when the
  *   world refused to build (a listed projection is mounted under other layer rules), so the
  *   caller switches in one block.
@@ -220,9 +217,8 @@ export function buildAside(
   ctx: ScenesCtx,
   scene: SceneDefinition,
   named: readonly string[],
-  start: { signal: AbortSignal; inFrame: boolean }
+  signal: AbortSignal
 ): Promise<void> | undefined {
-  const { signal, inFrame } = start;
   const projection = ctx.deps.world.projection;
   const budgetMs = budgetOf(ctx);
   const started = projection.build(scene.projections, ctx.state.owner, scene.layers, budgetMs);
@@ -244,10 +240,8 @@ export function buildAside(
   return new Promise<void>((resolve, reject) => {
     const build = startBuildRecord(ctx, scene, named, budgetMs, { resolve, reject });
 
-    // A build with nothing left for ui and the renderer swaps now: fake-clock tests keep their frames. Inside a frame it
-    // swaps in the `signals` phase, as a build of several frames does: a swap in the `input` phase let the frame's
-    // own steps release the old scene's bundles before its reconcile started their exit (F51b).
-    if (!inFrame && projection.built()) {
+    // A build with nothing left for ui and the renderer swaps now: fake-clock tests keep their frames.
+    if (projection.built()) {
       endBuild(ctx, build, "commit");
 
       return;

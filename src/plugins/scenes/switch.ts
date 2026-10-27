@@ -15,7 +15,7 @@ import type { NodeInfo } from "../flow/types";
 import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
 import { dropLeftOver, endLeave, leaveFor, ownLeave, startLeave } from "./leave";
-import { afterReaction, watchReaction } from "./reaction";
+import { afterReaction, forgetReaction, watchReaction } from "./reaction";
 import { swapIn } from "./swap";
 import type { Leaving, RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
@@ -243,18 +243,19 @@ async function standUp(
   run: RunContext
 ): Promise<void> {
   if (buildsAside(ctx, run)) {
-    const started = await afterReaction(ctx, run, inFrame =>
-      buildAside(ctx, scene, named, { signal: run.signal, inFrame })
-    );
+    const started = await afterReaction(ctx, run, () => buildAside(ctx, scene, named, run.signal));
 
     // Aborted or stopped while the reaction frame was drawn: nothing was built.
-    if (started === undefined) return;
+    if (started === false) return;
 
     if (started.building !== undefined) {
       await started.building;
 
       return;
     }
+
+    // The world refused after the wait: a restore or a stop in that frame's later phases ends the node first.
+    if (run.signal.aborted || ctx.state.teardown === undefined) return;
 
     if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
       ctx.log.warn("scenes:build-skipped", {
@@ -297,7 +298,11 @@ async function loadAndStand(
   // A stop answers a waiting upload instead of rejecting it; `stopScenes` clears `teardown`.
   const stopped = ctx.state.teardown === undefined;
 
-  if (run.signal.aborted || stopped) return;
+  if (run.signal.aborted || stopped) {
+    if (ctx.state.reaction?.signal === run.signal) forgetReaction(ctx.state);
+
+    return;
+  }
 
   await standUp(ctx, scene, named, run);
 }
@@ -447,6 +452,8 @@ export function beginScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): voi
 
   if (scene === undefined) return;
 
-  watchReaction(ctx, run);
+  if (buildsAside(ctx, run)) watchReaction(ctx, run);
+  else forgetReaction(ctx.state);
+
   startLeave(ctx, scene, run);
 }

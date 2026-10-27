@@ -141,7 +141,8 @@ export function startScenes(ctx: KernelSlice): void {
 /**
  * Removes the two `onEnter` callbacks in `onStop` and forgets every scene and the bundles the mounted
  * one named. A running build loses its frame callback and its switch returns; the look of a running
- * switch loses its abort listener (the renderer drops it at its own stop). Nothing is unmounted
+ * switch loses its abort listener (the renderer drops it at its own stop); a switch waiting for its
+ * reaction frame loses its frame callbacks and returns. Nothing is unmounted
  * or discarded: a teardown context may not call another plugin, and `world.onStop` clears every
  * entity and the build table anyway.
  *

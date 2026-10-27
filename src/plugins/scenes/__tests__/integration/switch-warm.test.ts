@@ -195,8 +195,7 @@ describe("scenes integration: a live switch uploads the new scene's textures fir
     const back = switched.findLast(entry => entry.to === "board")?.frame;
 
     expect(app.flow.state().path).toBe("board");
-    // A plain switch (slice R): the frame after the answer draws the reaction, the next one builds (the renderer makes
-    // the views aside in its pass), and the one after swaps.
-    expect(back).toBe(left + 3);
+    // A plain switch (slice R): the frame after the answer draws the reaction, the next one builds and swaps.
+    expect(back).toBe(left + 2);
   });
 });

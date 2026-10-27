@@ -54,9 +54,9 @@ export async function buildWaiting(): Promise<() => void> {
   mock.enter({ rest: true, scene: "board" }).catch(() => undefined);
 
   for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
-  // The reaction frame, then the build starts in the next frame's `input` phase (slice R).
+  // The reaction frame, then the build starts in the next frame's `signals` phase (slice R).
   mock.time.phase("render");
-  mock.time.phase("input");
+  mock.time.phase("signals");
 
   const callback = mock.time.callbacks.signals[0];
 
@@ -68,7 +68,7 @@ export async function buildWaiting(): Promise<() => void> {
 }
 
 /**
- * The `input` callback of the live switch to the board while its reaction frame is not drawn yet (slice R): the home
+ * The `signals` callback of the live switch to the board while its reaction frame is not drawn yet (slice R): the home
  * scene is mounted, the renderer draws, and the switch waits for the frame that shows the veil.
  *
  * @returns The callback the frame loop calls, as `time` calls it.
@@ -86,9 +86,9 @@ export async function reactionWaiting(): Promise<() => void> {
 
   for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
 
-  const callback = mock.time.callbacks.input[0];
+  const callback = mock.time.callbacks.signals[0];
 
-  if (callback === undefined) throw new Error("the switch registered no input callback");
+  if (callback === undefined) throw new Error("the switch registered no signals callback");
 
   const time = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false };
 
