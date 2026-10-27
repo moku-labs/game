@@ -13,6 +13,7 @@ import type { InputApi } from "../input/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { TextApi } from "../text/types";
 import type { Api as TimeApi } from "../time/types";
+import type { AnchorTarget } from "../world/projection/types";
 import type { Entity, Api as WorldApi } from "../world/types";
 import type { Finding, JsxState, UiNode } from "./jsx/types";
 import type { LayoutState } from "./layout/types";
@@ -160,7 +161,7 @@ export type UiCtx = KernelSlice & { readonly deps: Deps };
 /**
  * ui plugin API, `app.ui`. The screen is one more projection, so three members read it the way a
  * test reads the board: a snapshot, a key lookup and a list of findings; the fourth types into a
- * text field, the fifth scrolls a `scroll`.
+ * text field, the fifth scrolls a `scroll`, the sixth measures where a view or an element is drawn.
  *
  * @example
  * ```ts
@@ -272,6 +273,33 @@ export type UiApi = {
    * ```
    */
   scroll(key: string, to: number): boolean;
+
+  /**
+   * Where a target is drawn, in screen reference units: the rect an `<anchor>` sits on. A ui
+   * element's layout box, a nine-slice's panel, a shape's rectangle or a sprite's box, through its
+   * root pose, so a fit, a slot, a scroll's offset and the motion of an ancestor move it; the
+   * rotation is left out. A list gives the bounding rect of its shown targets. Not shown: the key
+   * names no entity, or one leaving, built aside, of no area or drawn at alpha 0. Works in every
+   * build and headless; every call answers a new object.
+   *
+   * @param target - A view or an element by projection and key, or a list of them.
+   * @returns The rect, or `undefined` when no target is shown.
+   * @example
+   * ```ts
+   * // The tutorial puts its hint beside the first seat of the board's order strip.
+   * app.ui.rectOf({ projection: "board.strip", key: "seat0" }); // { x: 40, y: 1500, w: 116, h: 120 }
+   * // The seat and the cell of the board fitted to 0.5: the rect around both.
+   * app.ui.rectOf([
+   *   { projection: "board.strip", key: "seat0" },
+   *   { projection: "board.strip", key: "cell" }
+   * ]); // { x: 40, y: 250, w: 680, h: 1370 }
+   * app.ui.rectOf({ projection: "board.strip", key: "nowhere" }); // undefined
+   * ```
+   */
+  rectOf(
+    target: AnchorTarget | readonly AnchorTarget[]
+  ): Readonly<{ x: number; y: number; w: number; h: number }> | undefined;
 };
 
+export type { AnchorTarget } from "../world/projection/types";
 export type { ElementChange, ElementMotion, Finding, UiNode } from "./jsx/types";

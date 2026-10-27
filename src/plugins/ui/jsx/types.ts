@@ -11,6 +11,7 @@ import type { Json } from "../../model/types";
 import type { TransformValue } from "../../renderer/components";
 import type { Time } from "../../time/types";
 import type {
+  AnchorTarget,
   ChangeHook,
   Motion,
   MotionHandle,
@@ -620,6 +621,52 @@ export type JsxState = {
    * aside and no window is held warm.
    */
   asideRoots: number;
+  /** Every `<anchor>` from its enter to its despawn, with what the anchor pass keeps for it. */
+  anchors: Map<Entity, Anchor>;
+};
+
+/**
+ * What the anchor pass keeps for one `<anchor>` from frame to frame, every object written in place.
+ * `node` is the description `to` and `pad` were last read from; `to` the targets read from it
+ * (`undefined` for a prop that names none);
+ * `retarget` is true from a render that gave another `to` until the anchor is next shown. `seen`
+ * holds the entities the keys resolved to in this frame (0 for none, `count` of them), `shown` the
+ * ones of the last frame the anchor was shown (`shownCount` of them). `screen` is the union of the
+ * shown targets in screen reference units, `part` one target's rect, `next` the anchor's rect in
+ * root coordinates and `pose` the root pose the resolver writes. `placed` turns true at the first
+ * application of the anchor and its subtree; `hidden` is true while no target is shown; `missing`
+ * counts the frames in a row a key resolved to no entity. `owed` is true while the
+ * `Transform` waits for a motion to end before it takes the rest pose; `stale` while the world's
+ * rest pose lags the element's; `boxes` while the `Box` of the anchor and its subtree lags their
+ * rects, written once it stands. `held` lets go of the anchor's `x` and `y`, which a follow holds
+ * from a loop until the anchor stands. While a motion that ends plays, `aim` is the position it lands on,
+ * `track` the position it last wrote and `wrote` the position the pass wrote over it: the motion is
+ * carried by how far the targets moved since it began.
+ */
+export type Anchor = {
+  node: DescriptionNode | undefined;
+  to: AnchorTarget | readonly AnchorTarget[] | undefined;
+  retarget: boolean;
+  seen: Entity[];
+  shown: Entity[];
+  count: number;
+  shownCount: number;
+  screen: { x: number; y: number; w: number; h: number };
+  part: { x: number; y: number; w: number; h: number };
+  next: { x: number; y: number; w: number; h: number };
+  pose: TransformValue;
+  placed: boolean;
+  hidden: boolean;
+  missing: number;
+  owed: boolean;
+  stale: boolean;
+  boxes: boolean;
+  held: (() => void) | undefined;
+  aim: { x: number; y: number };
+  track: { x: number; y: number };
+  wrote: { x: number; y: number };
+  /** The one-time logs written for it: a missing target, its own child, an ignored style. */
+  warned: { missing: boolean; own: boolean; style: boolean };
 };
 
 /**
@@ -821,6 +868,15 @@ export type JsxModule = {
    * @returns True when every root built aside is reconciled and solved.
    */
   asideBuilt(): boolean;
+  /**
+   * Applies the rect the anchor pass gave one element of an `<anchor>` subtree, the way the solve
+   * applies any other: a new element spawns its components, a live one is committed and moved. The
+   * solve itself leaves these elements alone.
+   *
+   * @param element - The anchor or an element under it.
+   * @param quiet - Whether a live element takes its rect with no motion.
+   */
+  applyAnchored(element: Element, quiet: boolean): void;
   key(input: KeyInput): boolean;
   blur(): void;
 };

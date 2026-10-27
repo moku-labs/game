@@ -22,6 +22,9 @@ import type { ResolvedStyle } from "./styles/types";
 /** The tag of the one child a scroll container holds: everything inside it moves as one. */
 export const CONTENT = "content";
 
+/** The tag whose rect is where its targets are drawn: the anchor pass places it, not the solve. */
+export const ANCHOR = "anchor";
+
 /** The three ways a sized sprite fills its box, as the `fit` prop of `image` and `icon` names them. */
 const FITS: readonly SpriteFit[] = ["contain", "cover", "fill"];
 
@@ -29,14 +32,14 @@ const FITS: readonly SpriteFit[] = ["contain", "cover", "fill"];
  * Tells whether a tag draws nothing of its own, so its `Shape` is invisible unless its style fills.
  *
  * @param type - The intrinsic tag.
- * @returns True for the six container tags and the content of a scroll.
+ * @returns True for the seven container tags and the content of a scroll.
  * @example
  * ```ts
  * isContainer("row"); // true
  * ```
  */
 export function isContainer(type: string): boolean {
-  return ["screen", "layer", "row", "column", "stack", "spacer", CONTENT].includes(type);
+  return ["screen", "layer", "row", "column", "stack", "spacer", ANCHOR, CONTENT].includes(type);
 }
 
 /**

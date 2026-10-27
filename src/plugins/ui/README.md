@@ -10,6 +10,8 @@ rect from one Yoga solve per change.
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
 | `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, the scroll on both axes (finger, fling, snap, offset, range) and the range of a windowed scroll, the `popup` and `guide` handlers |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
+| `drawn.ts` | where a view or an element is drawn in screen reference units: the resolver `<anchor>` and `app.ui.rectOf` share |
+| `anchor.ts` | the system `ui.anchor`: every `<anchor>` placed on its targets after the solve (see [Anchor](#anchor)) |
 
 | Member | Answers |
 |---|---|
@@ -18,6 +20,7 @@ rect from one Yoga solve per change.
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 | `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key, `false` and the warning `ui:scroll-before-solve` `{ key }` when the `scroll` came in this frame and its first solve has not placed it yet. Works headless. See [Scroll](#scroll) |
+| `app.ui.rectOf(target)` | where a target is drawn, in screen reference units: `{ projection, key }` (an `AnchorTarget`) or a list of them, whose shown ones it spans; `undefined` when none is shown. Every build, headless too; a new object per call. See [Anchor](#anchor) |
 
 Config:
 
@@ -765,6 +768,70 @@ in the same frame. A slot takes a projection with one root, or roots that place 
 - While a scene is built aside, a host and a slot take nothing across the line: a live host no
   view or root of the build, a host of the build no live one. A kept host takes its coming guest in
   the frame after the swap. See [A scene built aside](#a-scene-built-aside).
+
+## Anchor
+
+`<anchor>` is an element whose rect is where its targets are drawn: a tutorial's window, a hint, an
+arrow sits on an element of another projection without reading where it landed (a view runs before
+the layout and reads none). `to` names one target, `{ projection, key }` (`AnchorTarget`), or a
+list, whose shown ones it spans; a ui element is keyed under the projection of its root. `pad`
+grows the rect outward on every side, in the units of the anchor's root (0 when left out). Its
+children lay out inside it as in any element; its style gives its look, and a `width`, `height`,
+`position`, `left`, `top`, `right` or `bottom` there is ignored (a dev build warns once,
+`ui:anchor-style` `{ key }`).
+
+```tsx
+// The tutorial's window on the first seat of the board's order strip, a rim drawn around it.
+<anchor key="window" to={{ projection: "board.strip", key: "seat0" }} pad={4} motion={glide}>
+  <stack key="rim" style={{ nineSlice: "tutorial.rim", hollow: true, width: "100%", height: "100%" }} />
+</anchor>
+// the seat is drawn at { x: 40, y: 1500, w: 116, h: 120 }: the window at { x: 36, y: 1496, w: 124, h: 128 }
+```
+
+- **Where.** A target's local box (the layout box of a ui element, the panel of a nine-slice, the
+  rectangle of a shape, the anchor box of a sprite) through its root pose: every `Transform` on its
+  way up, so a fit, a slot, a scroll's offset and the motion of an ancestor move it. Axis-aligned:
+  the rotation is left out. `app.ui.rectOf` answers the same rect. The union is mapped into the
+  space of the anchor's parent through the parent's root pose, so the anchor may sit in a fitted,
+  scrolled or slotted container.
+- **When.** The system `ui.anchor` runs in phase `layout` right after `ui.solve`, so the anchor
+  sits on its targets in the frame they are laid out, scrolled or moved by a system before it: no
+  lag. A ui element spawned in this frame is found by its rest pose. An anchor and its subtree are
+  a Yoga tree of their own, out of the flow of the parent: Yoga runs for it only when its size
+  changes or a node of it is dirty (a child restyled, measured again, added or taken out); a pure
+  move writes the rects in place. Anchors are placed in the order they came: one whose target lies
+  inside another anchor that came after it sits a frame behind that anchor. A `scroll` (its first
+  `offset`) and a slot host inside an anchor are settled by the solve, before the anchor pass: they
+  take the anchor's rect a frame late.
+- **Not shown.** A target is not shown when its key names no entity, it or something it is drawn
+  under is leaving, it belongs to a scene built aside or a held warm window, it has no area, or the
+  alphas on its way up multiply to 0.01 or less. The key of an element of a scene built aside or of
+  a closed warm window names no entity (`entityOf`), so an anchor on it waits, and a dev build
+  names it once after two frames. An anchor of such a scene or window is placed in the frame it
+  opens. With no target shown the anchor is drawn at alpha 0 (its subtree is not
+  drawn and takes no tap), stays, and shows again when a target does; one never shown yet waits
+  with no components. A dev build warns once, `ui:anchor-target-missing` `{ key, to }`, after a key
+  named no entity two frames in a row (a target spawned this frame is found a frame later). A
+  target inside the anchor itself counts as not shown and is logged once:
+  `[game] An anchor cannot point at its own child "key".` (`ui:anchor-own-child`).
+- **Motion.** Its `change.Box` motion plays only when its targets change: a new `to`, or keys that
+  name other entities (a view spawned again), and the rect moved. Following a moving, resizing or
+  scrolling target starts no motion. While a motion that ends runs (the glide of a change, a look
+  tween of its visual), a follow carries it by how far the target moved since it began, so it lands
+  on the target with no jump; a new size sets the pivot at once. While a loop runs on the anchor, a
+  follow holds its `x` and `y` from every track (`world.projection.mute`) and writes them; the loop
+  gets them back in the frame the anchor stands and goes on from there. On a change of targets its
+  children play their `change` hooks as any element whose rect moved; a follow that resizes the
+  anchor gives them their rects with none.
+- **Cost.** A frame of a still anchor and one of an anchor following a moving target (fractional
+  numbers included), also under a loop, allocate nothing (`anchorStill`, `anchorMoving`,
+  `anchorMovingLoop`): rects in place, `previous` by value, the `Transform` written field by field
+  on its stored value. Three things happen once per follow instead of every frame: the hold of a
+  loop when the follow starts, and in the frame the anchor stands the `Box` of the anchor and of its
+  subtree (V8 boxes a fractional number written into a stored `Box` field: the shape of `Box`
+  values is shared with frozen ones) and the world's copy of the anchor's rest pose.
+- **Headless.** `app.input.tap(entity)` does not hit-test: a button inside a hidden anchor still
+  answers it.
 
 ## A scene built aside
 

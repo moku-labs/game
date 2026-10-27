@@ -15,6 +15,7 @@ import { textPlugin } from "../text";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { Layer, system, Tree } from "../world/ecs/define";
+import { createAnchorPass } from "./anchor";
 import { createModules } from "./api";
 import { Box, DebugTrigger, LocalWrite, UI_OWNER } from "./components";
 import { installHot } from "./hot";
@@ -93,7 +94,7 @@ function drawsViews(ctx: UiCtx): boolean {
 }
 
 /**
- * Opens the two systems of phase `layout`, the system `ui.enter` of phase `sync`, the seven world
+ * Opens the three systems of phase `layout`, the system `ui.enter` of phase `sync`, the seven world
  * hooks of `Tree`, `Box`, `Pressed` and `PointerOver`, the two that tell the hosting step a view
  * lost its `Parent` or its `Held` (a view freed so may hang under its host again), the listener
  * that asks for every root to be built again after a restore or a load, the two effect handlers,
@@ -104,7 +105,8 @@ function drawsViews(ctx: UiCtx): boolean {
  * control, so the cursor shows a hand over a local-state button, and, with a renderer that draws,
  * `ui`'s part of a scene build (`onBuild`: the roots built aside are reconciled and solved, spec
  * 31). On an agent page also the tap counter of `DebugTrigger` and its check of a view that takes
- * no press.
+ * no press. The third system of `layout`, `ui.anchor`, runs after the solve and places every
+ * `<anchor>` on its targets.
  *
  * The `Box` hook plays an element's enter hook and queues it, so the game's systems see its start
  * pose (F49); `ui.enter` starts its loop after them and before the frame is drawn, and plays the
@@ -118,6 +120,7 @@ function drawsViews(ctx: UiCtx): boolean {
 function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): void {
   const ecs = ctx.deps.world.ecs;
   const projection = ctx.deps.world.projection;
+  const anchors = createAnchorPass(ctx, jsx);
 
   ctx.state.layout.cleanups.push(
     ecs.system(
@@ -136,6 +139,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
         run: (_rows, frame) => jsx.solve(frame.time)
       })
     ),
+    // Registered after `ui.solve`: a phase runs its systems in registration order.
+    ecs.system(system({ name: "ui.anchor", phase: "layout", query: [], run: anchors })),
     ecs.system(
       system({
         name: "ui.enter",
@@ -261,6 +266,7 @@ export function stopUi(state: State): void {
   state.jsx.risen.clear();
   state.jsx.released.clear();
   state.jsx.scrolls.clear();
+  state.jsx.anchors.clear();
   state.jsx.remount = false;
   state.jsx.asideRoots = 0;
   state.jsx.hints.length = 0;
