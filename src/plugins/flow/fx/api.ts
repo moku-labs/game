@@ -297,7 +297,7 @@ function openForAnswers(
  * Creates the effects gateway: `handle` registers one handler per kind, `dispatch` delivers
  * fire-and-forget, `onHint` listens to the released hints, the internal `run` awaits a descriptor
  * (through the gate when it has `answers`), hints are buffered with the transaction and released
- * after its commit, and completions resolve in start order in the `signals` phase.
+ * after its commit, and completions resolve in start order in the `signals` phase (`schedule` at once).
  *
  * @param ctx - Domain context of the flow plugin.
  * @param deps - Injected sibling APIs.

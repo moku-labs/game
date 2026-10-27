@@ -1106,7 +1106,7 @@ export type RunnerApi = {
    * // The scenes plugin, at the tap on "board" over the ward: the veil goes up at `begin`, without
    * // waiting, while the `load` stage still downloads the board; the switch runs at `scene`.
    * const flow = ctx.require(flowPlugin);
-   * const veil = { cover: { color: 0x000000, alpha: 0.45, inMs: 150, outMs: 150 } };
+   * const veil = { cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 } };
    * const offBegin = flow.onEnter("begin", (node, { mode }) => {
    *   if (mode === "live" && node.scene === "board") ctx.require(rendererPlugin).sync.leave.show(veil);
    * });

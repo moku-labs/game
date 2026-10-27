@@ -234,7 +234,7 @@ defineScene("ward", { ..., leave: false });
 |---|---|---|---|
 | `cover` | `color` | `0x000000` | The colour of the veil |
 | | `alpha` | `0.45` | The alpha it fades in to, 0 to 1 |
-| | `inMs` | `150` | Clock milliseconds from 0 to `alpha`, from the switch start |
+| | `inMs` | `50` | Clock milliseconds from 0 to `alpha`, from the switch start |
 | | `outMs` | `150` | Clock milliseconds back to 0, from the swap |
 | `loader` | `afterMs` | `400` | Clock milliseconds after the switch start the loader waits for; a switch done sooner shows none |
 | | `texture` | none | An asset key: the game's texture turns at the centre of the frame, once a second |

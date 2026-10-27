@@ -141,7 +141,7 @@ export type SceneCover = {
   color?: number;
   /** The alpha it fades in to, 0 to 1. Default 0.45. */
   alpha?: number;
-  /** Milliseconds from 0 to `alpha`, from the switch start. Default 150. */
+  /** Milliseconds from 0 to `alpha`, from the switch start. Default 50. */
   inMs?: number;
   /** Milliseconds back to 0 after the swap. Default 150. */
   outMs?: number;

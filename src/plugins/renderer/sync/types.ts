@@ -861,7 +861,7 @@ export type LeaveApi = {
    * ```ts
    * // `scenes` leaves a scene whose `leave` names a turning texture: the veil from the next frame, the texture at 400 ms.
    * ctx.require(rendererPlugin).sync.leave.show({
-   *   cover: { color: 0x0b1020, alpha: 0.6, inMs: 150, outMs: 150 },
+   *   cover: { color: 0x0b1020, alpha: 0.6, inMs: 50, outMs: 150 },
    *   loader: { afterMs: 400, texture: "ui.loader.ring" }
    * });
    * ```
