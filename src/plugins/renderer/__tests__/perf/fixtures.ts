@@ -8,6 +8,8 @@ import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import type { FrameMeasure } from "../../../time/types";
 import { Layer } from "../../../world/ecs/define";
+import { projection } from "../../../world/projection/define";
+import type { AnyProjectionSpec } from "../../../world/projection/types";
 import type { Entity, SystemTiming } from "../../../world/types";
 import {
   HudPart,
@@ -777,6 +779,107 @@ export async function waitingBuild(count: number): Promise<WaitingBuild> {
 
   mock.modules.sync.pass();
   mock.world.clearChanges();
+
+  const { host, viewport, demand, kept } = mock.modules;
+
+  return { mock, sctx: { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } } };
+}
+
+/**
+ * A warm window on the layer `items`: never shown, its warm item one sheet the size of the screen's middle.
+ *
+ * @param name - The projection, also the key of its item.
+ * @returns The spec.
+ */
+function warmWindow(name: string): AnyProjectionSpec {
+  return projection({
+    name,
+    layer: "items",
+    from: (): Array<{ id: string }> => [],
+    key: (item: { id: string }) => item.id,
+    view: () => [
+      Transform({ x: 180, y: 480 }),
+      Sprite({ texture: "board.cell", width: 720, height: 960 })
+    ],
+    warm: () => ({ id: name })
+  }) as unknown as AnyProjectionSpec;
+}
+
+/**
+ * The root world spawned for a warm window.
+ *
+ * @param mock - The started renderer.
+ * @param name - The window.
+ * @returns The entity.
+ */
+function warmRootOf(mock: MockRenderer, name: string): Entity {
+  for (const [entity] of mock.world.ecs.query(Layer)) {
+    if (mock.world.projection.keyOf(entity)?.projection === name) return entity;
+  }
+
+  throw new Error(`perf fixture: no held view of ${name}`);
+}
+
+/**
+ * One frame of world and sync: the frame start, world's input step (the reconcile, one warm step), the pass, the
+ * change sets closed.
+ *
+ * @param mock - The started renderer.
+ */
+function warmFrame(mock: MockRenderer): void {
+  mock.world.startFrame();
+  mock.world.input();
+  mock.modules.sync.pass();
+  mock.world.clearChanges();
+}
+
+/**
+ * A board of 300 sprite views on screen with `windows` warm windows closed (spec 33, slice B+D): the root of each and
+ * `elements` sprites under it, marked for it as `ui` marks its elements, built aside, held and ready. World rests:
+ * `left()` is `Infinity` and the held tops wait for the open.
+ *
+ * @param windows - How many windows rest.
+ * @param elements - The sprites under each window's root.
+ * @returns The started renderer and the sync context.
+ */
+export async function restingWarm(windows: number, elements: number): Promise<WaitingBuild> {
+  const { mock } = await startSprites(300);
+  const names = Array.from({ length: windows }, (_, index) => `window.${index}`);
+
+  for (const name of names) mock.world.projection.register(warmWindow(name));
+  mock.world.projection.mount(names, OWNER);
+
+  for (const name of names) {
+    // The step that spawns the root; its elements, marked while it is in work; the pass that holds the tree.
+    mock.world.startFrame();
+    mock.world.input();
+
+    const root = warmRootOf(mock, name);
+
+    for (let index = 0; index < elements; index += 1) {
+      const element = mock.world.ecs.spawn(OWNER, [
+        Transform({ x: (index % 10) * 70, y: Math.floor(index / 10) * 30 }),
+        Sprite({ texture: "board.cell", width: 64, height: 24 }),
+        Parent({ entity: root })
+      ]);
+
+      mock.world.projection.adopt(element);
+    }
+
+    mock.modules.sync.pass();
+    mock.world.clearChanges();
+    // The poll that finds the window ready.
+    warmFrame(mock);
+  }
+
+  // The step that finds no more work: the world rests.
+  warmFrame(mock);
+
+  const held = mock.ctx.state.sync.heldViews.count;
+
+  if (mock.world.projection.left() !== Number.POSITIVE_INFINITY || held !== windows) {
+    throw new Error(`perf fixture: ${held} held tops of ${windows} resting windows`);
+  }
 
   const { host, viewport, demand, kept } = mock.modules;
 

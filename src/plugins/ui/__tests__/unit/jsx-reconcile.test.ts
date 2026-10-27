@@ -286,7 +286,8 @@ function harness() {
           causeOf: () => world.cause,
           entitiesOf: () => [],
           layers: () => [],
-          membershipVersion: () => 0,
+          // The real world moves it at a commit; this one moves whenever its build gains or loses a member.
+          membershipVersion: () => world.building.size,
           setRest,
           isBuilding: (entity: Entity): boolean => world.building.has(entity),
           // A build of this world never runs out of budget: a root built aside is made in one part.

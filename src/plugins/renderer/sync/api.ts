@@ -653,9 +653,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * The live half of a pass: removed, layers, the held views of a build that ended, added, changed, orphans,
-   * invalidated. A despawned entity takes its filter slots with it, also when its view left in an earlier pass; a live
-   * one keeps them for its next view.
+   * The live half of a pass: removed, layers, the held views of a build that ended and its views still aside, added,
+   * changed, orphans, invalidated. A despawned entity takes its filter slots with it, also when its view left in an
+   * earlier pass; a live one keeps them for its next view.
    */
   const livePass = (): void => {
     // A pass that works may hang, wrap, move or drop views: the render passes are counted again (Q2), and the walks of
@@ -680,7 +680,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       deps.host.sceneChanged();
     }
 
-    // The swap of a scene build (spec 31): under the layer list just applied, every held view in one block.
+    // The swap of a scene build (spec 31) or the open of a warm window (spec 33): under the layer list just applied,
+    // every held view in one block, and the views of that build still aside join `added`, so they are made below.
     attachHeld(sctx);
 
     built = state.added.size === 0 ? nothingBuilt : buildParentFirst(takeAdded());

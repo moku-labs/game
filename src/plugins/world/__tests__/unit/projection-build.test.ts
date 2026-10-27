@@ -194,6 +194,25 @@ describe("projection.build", () => {
     ]);
   });
 
+  // Bug: `entityOf` answers for an element of the coming scene, which nothing sees yet: game code reaches a button
+  // that is not on the screen.
+  it("answers no entityOf for an element of the build until the commit", () => {
+    const world = wardWorld();
+
+    buildBoard(world);
+
+    const element = world.api.ecs.spawn({ kind: "plugin", name: "ui" }, []);
+
+    world.api.projection.adopt(element);
+    world.api.projection.registerKey(BOARD, "play", element);
+
+    expect(world.api.projection.entityOf(BOARD, "play")).toBeUndefined();
+
+    commitBoard(world);
+
+    expect(world.api.projection.entityOf(BOARD, "play")).toBe(element);
+  });
+
   // Bug: a projection both scenes list is built a second time beside its live twin.
   it("leaves a projection both lists name as it is: the same entity, never flagged, not rebuilt", () => {
     const world = wardWorld();

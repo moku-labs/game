@@ -9,6 +9,7 @@ import { clearMounted } from "./queue";
 import { reconcile } from "./reconcile";
 import type { AnyProjectionSpec, LayerSpec, Mounted, ProjectionCtx } from "./types";
 import { placeMounted } from "./views";
+import { ensureWarm, forgetWarm } from "./warm";
 
 /**
  * Creates the empty view tables of a freshly mounted projection.
@@ -119,7 +120,8 @@ function drawsAlike(
 
 /**
  * Unmounts projections: every motion of their views is finished, and the live views and the
- * despawn queue are despawned in the same call. An unknown or unmounted name is skipped.
+ * despawn queue are despawned in the same call, and so is the view a warm window holds hidden.
+ * An unknown or unmounted name is skipped.
  *
  * @param pctx - Domain context of the projection module.
  * @param names - Names of the projections to unmount.
@@ -133,6 +135,7 @@ export function unmountNames(pctx: ProjectionCtx, names: readonly string[]): voi
     if (mounted === undefined) continue;
 
     clearMounted(pctx, mounted);
+    forgetWarm(pctx, name);
     state.mounted.delete(name);
   }
 }
@@ -214,7 +217,8 @@ export function mountNames(pctx: ProjectionCtx, names: readonly string[], owner:
 /**
  * Gives every projection of a list its place under the current layer list: a missing one gets an
  * empty record at the `Order` of its place, a kept one mounted under another list takes its new
- * place (`placeMounted`). A screen root draws at its place in the list (spec 16 U1.6).
+ * place (`placeMounted`), its held warm view too. A screen root draws at its place in the list
+ * (spec 16 U1.6). A projection that declares `warm` gets its warm record, cold, unless it has one.
  *
  * @param pctx - Domain context of the projection module.
  * @param names - The projection list of the scene.
@@ -228,7 +232,13 @@ export function placeNames(pctx: ProjectionCtx, names: readonly string[], owner:
     const mounted = state.mounted.get(name);
 
     if (mounted === undefined) state.mounted.set(name, emptyMounted(owner, order, state.layers));
-    else if (mounted.layers !== state.layers) placeMounted(pctx, mounted, order);
+    else if (mounted.layers !== state.layers) {
+      placeMounted(pctx, mounted, order, state.warm.get(name)?.view);
+    }
+
+    const spec = state.specs.get(name);
+
+    if (spec !== undefined) ensureWarm(state, spec);
   }
 }
 

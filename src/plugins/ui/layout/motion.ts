@@ -126,16 +126,22 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
 }
 
 /**
- * Tells whether an element waits for the swap of a scene `world` builds aside (spec 31): it has not
- * entered, and it belongs to the build. Its hooks wait for its enter at the swap; a change before
- * it plays no motion and is written at once, so the enter starts from where it stands.
+ * Tells whether an element waits for the swap of a scene `world` builds aside (spec 31), or for the
+ * open of a window held warm (spec 33 B+D): it has not entered, and it or its root belongs to the
+ * build or to the held view. An element a held root makes while no warm work runs is not marked
+ * by `world`; its root is. Its hooks wait for its enter at the swap; a change before it plays no
+ * motion and is written at once, so the enter starts from where it stands.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element a hook would play on.
  * @returns True while its motions are held.
  */
 export function isHeld(ctx: UiCtx, element: Element): boolean {
-  return !element.entered && ctx.deps.world.projection.isBuilding(element.entity);
+  if (element.entered) return false;
+
+  const projection = ctx.deps.world.projection;
+
+  return projection.isBuilding(element.entity) || projection.isBuilding(element.root);
 }
 
 /**

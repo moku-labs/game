@@ -134,5 +134,11 @@ export const BUDGET = {
   buildReadyWaiting: 0,
   // F61 S3 slice A2: the step of the picture of a scene being left in a frame with no switch, after one look ran and
   // its objects were kept. New: one field read.
-  leaveIdle: 0
+  leaveIdle: 0,
+  // F61 S3 slice B+D: a still pass over 300 views while two warm windows rest held, each a root with 300 elements
+  // built aside and ready. New: the held list's count and world's membership version compared, `left()` read.
+  warmHeldPass: 0,
+  // F61 S3 slice B+D: the build step of a dev build while the windows rest. Before: the frame request and the dev check
+  // of building views, which walks every view into a list, every frame. Now it returns after a few field reads.
+  warmHeldStepDev: 0
 } as const;

@@ -8,13 +8,14 @@ import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { Pointer, Pressed } from "../../../input/components";
 import type { Time } from "../../../time/types";
+import { Tree } from "../../../world/ecs/define";
 import type { AnySystem, Entity, SystemContext } from "../../../world/types";
 import { Box } from "../../components";
 import type { Element, ScrollMotion } from "../../jsx/types";
 import type { stepScroll } from "../../layout/scroll";
 import type { ElementLookup, LayoutState } from "../../layout/types";
 import type { UiCtx } from "../../types";
-import { createPerfApp, MOUNTED, type PerfApp, settlePerfApp } from "./app";
+import { createPerfApp, MOUNTED, type PerfApp, settlePerfApp, WARM_SHEETS } from "./app";
 
 /** Calls before a window, so the engine's code reaches its optimized tier first. */
 const WARM_CALLS = 30_000;
@@ -109,6 +110,9 @@ export async function startPerfUi(): Promise<PerfUi> {
 
     return onBuild(check);
   });
+  // The renderer is inert here. ui registers its part of a build only with a renderer that draws:
+  // it is asked as one would answer, the views themselves stay undrawn.
+  vi.spyOn(app.renderer.host, "kind").mockReturnValue("webgpu");
 
   await app.start();
   vi.restoreAllMocks();
@@ -227,6 +231,54 @@ export async function startPartsCommittedPerf(): Promise<PerfUi> {
 
   projection.setLayers(projection.layers());
   projection.commit();
+
+  for (let frame = 0; frame < 3; frame += 1) ui.app.time.step(16);
+
+  return ui;
+}
+
+/**
+ * How many roots the world holds warm now: entities with a `Tree` that `isBuilding` answers for.
+ *
+ * @param ui - The started perf app.
+ * @returns The count.
+ */
+function heldCount(ui: PerfUi): number {
+  let count = 0;
+
+  for (const [entity] of ui.app.world.ecs.query(Tree)) {
+    if (ui.app.world.projection.isBuilding(entity)) count += 1;
+  }
+
+  return count;
+}
+
+/**
+ * Starts the perf app and mounts the two closed sheets that declare `warm` (spec 33 B+D): the
+ * world builds each one aside in the idle time of frames and holds it; ui builds their roots and
+ * keeps them off the screen. Frames run until both are held and none is in work, then a few more,
+ * so every step has seen the world at rest.
+ *
+ * @returns The app and its `ui` steps, two windows held warm and at rest.
+ */
+export async function startWarmPerf(): Promise<PerfUi> {
+  const ui = await startPerfUi();
+  const projection = ui.app.world.projection;
+
+  projection.mount(WARM_SHEETS, { kind: "plugin", name: "perf" });
+
+  let frames = 0;
+
+  while (frames < 300) {
+    ui.app.time.step(16);
+    frames += 1;
+
+    const rests = projection.left() === Number.POSITIVE_INFINITY;
+
+    if (rests && heldCount(ui) === WARM_SHEETS.length) break;
+  }
+
+  if (heldCount(ui) !== WARM_SHEETS.length) throw new Error("perf: the sheets were not held warm");
 
   for (let frame = 0; frame < 3; frame += 1) ui.app.time.step(16);
 

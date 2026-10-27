@@ -246,7 +246,8 @@ export function startTrack(
       entity,
       component: component.componentName,
       handle,
-      additive: options.additive === true
+      additive: options.additive === true,
+      forever: options.repeat === "forever"
     });
   }
 

@@ -750,7 +750,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 
 | `time` phase | What `renderer` does |
 |---|---|
-| `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views of a scene build that was committed, added views, changed components, invalidated texture keys; then, while a scene is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
+| `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views world released (a committed scene build, an opened warm window), added views, changed components, invalidated texture keys; then, while a scene or a warm window is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
 | `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
@@ -778,18 +778,38 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
 - **Still frames.** `still()` does not read the aside queue, and the aside work leaves
   `passesVersion` where it was: the held views are drawn nowhere, so the live scene's unseen walks
   (E4) and render passes (Q2) are not taken again in every build frame.
-- **Frames.** While views wait to be made or attached, the renderer asks for the next frame
-  (`"request"`), and a frame that made views is told to `time` with `frameProbed()`: load work,
-  never a sample of the adaptive rate.
+- **Frames.** While views wait to be made, or held views wait for a build that runs (`left()` is
+  finite), the renderer asks for the next frame (`"request"`), and a frame that made views is told to
+  `time` with `frameProbed()`: load work, never a sample of the adaptive rate.
 - **Readiness.** The renderer registers its part of `world.projection.built()` with `onBuild` at
   start: no building entity waits in the added set or the aside queue.
-- **The swap.** In the pass after the commit, the coming layer list is applied first, then every held
-  top is attached in one block, in the order it was made, and sorted by the rule of its layer: the
-  tree is the one a one-block build of the same scene makes. A discard despawns the build: its held
-  views are dropped and pooled like any removed view, and none is attached.
-- **Dev check.** In a dev or agent build every build frame checks that no view of a building entity
-  hangs under the stage; one that does is warned once per build, `renderer:building-drawn` with the
-  entities.
+- **The swap.** The held list is looked at again only when `world.projection.membershipVersion()`
+  moved since its last scan: every end of a build moves it (a commit, a discard, the open of a warm
+  window). In that pass the coming layer list is applied first, then every held top that is no
+  longer building is attached in one block, in the order it was made, and sorted by the rule of its
+  layer: the tree is the one a one-block build of the same scene makes. The views of that build still
+  waiting in the aside queue join the added set of the same pass and are made there, parents first,
+  so the scene is whole in the frame it is attached: never a top without its children. The tops still
+  building stay held and move to the front of the list, in their order, with no new array; so do the
+  queued entities still building. A discard despawns the build: its held views are dropped and pooled
+  like any removed view, their slots leave the list, and none is attached.
+- **Held views of warm windows** (spec 33, slice B+D). A projection with `warm` has world build the
+  view of a closed window in idle frames, flagged building for as long as the window stays closed,
+  possibly the whole session. The renderer makes its views through the same aside queue while the
+  window is in work, and holds its top as it holds a scene build's: off the stage, never drawn,
+  never hit, never counted. At rest (`left()` is `Infinity`) a held window asks for no frame and the
+  pass stays still: the build step returns after a few field reads, 0 B a frame
+  (`__tests__/perf/warm-held.perf.ts`). When `from` shows the window, world adopts the held view and
+  moves its membership version: the pass of that same frame attaches the top in its layer, so the
+  window shows in the frame of the reconcile. A window opened while it is still being built shows
+  whole in that frame too: the views still in the aside queue are made by that pass, parents first,
+  under the top it attaches. A held list may mix both kinds: a scene build's tops
+  attach at its commit while a resting window stays held, and a window opened during a build
+  attaches alone.
+- **Dev check.** In a dev or agent build every frame with aside work (views to make, or held views
+  while a build runs) checks that no view of a building entity hangs under the stage; one that does
+  is warned once per build, `renderer:building-drawn` with the entities. A frame of resting windows
+  runs no check: the walk of every view would cost each frame of the scene.
 
 Headless, fast mode and a renderer without a device keep the one-block switch: `scenes` takes it
 when `host.ready()` is false.

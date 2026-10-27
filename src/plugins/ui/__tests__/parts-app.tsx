@@ -389,7 +389,7 @@ const OWNER = { kind: "plugin", name: "test" } as const;
  * @param stepMs - Milliseconds every read moves the clock on; 0 holds it between frames.
  * @returns The source for the clock plugin and the fake clock under it.
  */
-function steppingClock(stepMs: number) {
+export function steppingClock(stepMs: number) {
   const base = fakeClock(1000);
   const source: ClockSource = {
     now: () => {
@@ -455,6 +455,9 @@ export async function startParts(stepMs = 0) {
 
     return onBuild(check);
   });
+  // The renderer is inert here. ui registers its part of a build only with a renderer that draws:
+  // it is asked as one would answer, the views themselves stay undrawn.
+  vi.spyOn(app.renderer.host, "kind").mockReturnValue("webgpu");
   vi.spyOn(app.world.projection, "onConverged").mockImplementation(listener => {
     listeners.push(listener);
 
