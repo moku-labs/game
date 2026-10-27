@@ -4,12 +4,13 @@
  * and a fake clock that moves 16 ms a frame. The board's textures are still on their way to the GPU (its `assets.warm`
  * is held), or its one file is still downloading (the fetch of its io is held, a cold first visit): the veil of the
  * engine's default is on the stage in the first frame after the answer, the ring from 400 ms after the switch start,
- * and both are gone once the board stands and the veil faded out. A download that fails takes the veil down at once,
- * on a retry, while the safe node's `recover` waits at the gate, and on a fatal failure. The tree oracle checks every
- * frame.
+ * and both are gone once the board stands and the veil faded out. A loader projection is built and hidden while the
+ * ward stands (F103), shown the frame after it is due, and fades out with the veil after the swap (F107 part 3). A
+ * download that fails takes the veil down at once, on a retry, while the safe node's `recover` waits at the gate, and
+ * on a fatal failure. The tree oracle checks every frame.
  */
 import type { Assets, Scenes } from "@moku-labs/game";
-import { defineGame, Shape, Transform, type } from "@moku-labs/game";
+import { defineGame, Layer, Shape, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import { fakeClock } from "@moku-labs/game/testing";
 import * as pixi from "pixi.js";
@@ -394,6 +395,78 @@ function hangsUnder(
   return false;
 }
 
+/**
+ * The root of the loader projection the ward holds built and hidden: the entity in the layer `loading`.
+ *
+ * @param fixture - The running fixture, at the ward.
+ * @returns The entity.
+ * @throws {Error} When nothing is built in that layer.
+ */
+function heldLoader(fixture: Running): number {
+  for (const [entity, layer] of fixture.app.world.ecs.query(Layer)) {
+    if (layer.name === "loading") return entity;
+  }
+
+  throw new Error("No loader view is built in the layer loading.");
+}
+
+/**
+ * Records the frames the renderer calls the loader's `due` in: the look the switch shows is handed on with a `due`
+ * that notes the frame the test set.
+ *
+ * @param fixture - The running fixture, at the ward.
+ * @returns The frame the test is in, which it sets, and the frames `due` was called in.
+ */
+function watchDue(fixture: Running): { frame: number; frames: number[] } {
+  const watched = { frame: 0, frames: [] as number[] };
+  const leave = fixture.app.renderer.sync.leave;
+  const show = leave.show;
+
+  vi.spyOn(leave, "show").mockImplementation(look => {
+    const loader = look.loader;
+    const due = loader?.due;
+
+    if (loader === undefined || due === undefined) {
+      show(look);
+
+      return;
+    }
+
+    show({
+      ...look,
+      loader: {
+        ...loader,
+        due: () => {
+          watched.frames.push(watched.frame);
+
+          return due();
+        }
+      }
+    });
+  });
+
+  return watched;
+}
+
+/**
+ * The alpha an entity's display object is drawn at: its own and every ancestor's, up to the stage.
+ *
+ * @param fixture - The running fixture.
+ * @param entity - The entity.
+ * @returns The product of the alphas, 0 when it hangs nowhere.
+ */
+function drawnAlpha(fixture: Running, entity: number): number {
+  let node = fixture.app.renderer.sync.displayOf(entity) as pixi.Container | undefined;
+  let alpha = 1;
+
+  while (node !== undefined && node !== null) {
+    alpha *= node.visible ? node.alpha : 0;
+    node = node.parent ?? undefined;
+  }
+
+  return alpha;
+}
+
 describe("the picture of a scene being left, across the engine", () => {
   // Bug: the veil waits for the next scene's textures (a cold first visit shows nothing for the whole wait), the ring
   // shows before 400 ms or never, or either stays over the board.
@@ -450,9 +523,9 @@ describe("the picture of a scene being left, across the engine", () => {
     expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
   });
 
-  // Bug: the game's loading screen is mounted at the tap (its views made in the frame of the first answer, and for
-  // every warm switch), is drawn under the veil, or stays mounted over the board.
-  it("mounts a loader projection once it is due, draws it above the veil, and unmounts it after the swap", async () => {
+  // Bug: the game's loading screen is shown at the tap (its views drawn in the frame of the first answer, and for every
+  // warm switch), is drawn under the veil, or stays mounted over the board once the veil faded out.
+  it("shows a loader projection once it is due, draws it above the veil, and unmounts it after the veil's fade", async () => {
     const fixture = await open({ loader: { afterMs: 100, projection: "leave.loading" } });
     const { app } = fixture;
     const release = holdBoardTextures(fixture);
@@ -472,10 +545,59 @@ describe("the picture of a scene being left, across the engine", () => {
 
     release();
     await arrive(fixture, "board");
-    await fixture.frames(1);
+    await fixture.frames(150 / FRAME_MS + 1);
 
     expect(app.world.projection.entitiesOf("leave.loading")).toEqual([]);
     expect(app.renderer.sync.displayOf(screen ?? 0)).toBeUndefined();
+  });
+
+  // Bug: the loading screen is built in the frame it is due (a spawn, its view and its first draw in the middle of a
+  // switch: 33–49 ms on the A26), shows a new root instead of the one built while the ward stood, or goes at the swap
+  // before the veil faded out over the board (F107 part 3).
+  it("shows the loader built while the ward stood: the same root the frame after its due, fading out with the veil", async () => {
+    const fixture = await open({ loader: { afterMs: 100, projection: "leave.loading" } });
+    const { app } = fixture;
+    const held = heldLoader(fixture);
+
+    // The ward stands: its loader is built and hidden, nothing of it is shown.
+    expect(app.world.projection.isBuilding(held)).toBe(true);
+    expect(app.world.projection.entitiesOf("leave.loading")).toEqual([]);
+
+    const release = holdBoardTextures(fixture);
+    const dueIn = watchDue(fixture);
+    const entities = app.world.ecs.count();
+    const shown: Array<readonly number[]> = [];
+
+    app.flow.gate.answer({ intent: "board" });
+    for (let frame = 0; frame < 12; frame += 1) {
+      dueIn.frame = frame;
+      await fixture.frames(1);
+      shown.push(app.world.projection.entitiesOf("leave.loading"));
+    }
+
+    const [due] = dueIn.frames;
+
+    expect(dueIn.frames).toHaveLength(1);
+    expect(shown[due ?? 0]).toEqual([]);
+    expect(shown[(due ?? 0) + 1]).toEqual([held]);
+    expect(app.world.ecs.count()).toBe(entities);
+    expect(hangsUnder(fixture, held, leaveNode(fixture, "renderer.leave.layer"))).toBe(true);
+
+    release();
+    await arrive(fixture, "board");
+    await fixture.frames(1);
+
+    // The board stands; the loader is still drawn over it, fading out with the veil.
+    expect(app.world.projection.entitiesOf("leave.loading")).toEqual([held]);
+    expect(hangsUnder(fixture, held, fixture.stage())).toBe(true);
+    expect(drawnAlpha(fixture, held)).toBeGreaterThan(0);
+    expect(drawnAlpha(fixture, held)).toBeLessThan(1);
+
+    await fixture.frames(150 / FRAME_MS + 1);
+
+    expect(app.world.projection.entitiesOf("leave.loading")).toEqual([]);
+    expect(app.renderer.sync.displayOf(held)).toBeUndefined();
+    expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
   });
 
   // Bug: the veil waits for the `load` stage: a cold first visit downloads the board's files first and shows nothing

@@ -794,7 +794,7 @@ export type LeaveCover = {
  * The loader of a scene being left, drawn above the veil when the switch is not done `afterMs` after its start, until
  * the swap: a game texture turning at the centre (`texture`), a layer of the scene drawn above the veil (`due`, which
  * makes what the loader draws only once it is due and answers its layer: `scenes` mounts a loader projection there),
- * or, with neither, a white ring the engine draws.
+ * or, with neither, a white ring the engine draws. A layer that shows at the swap fades out with the veil.
  *
  * @example
  * ```ts
@@ -812,8 +812,10 @@ export type LeaveLoader = {
   /**
    * Called once, in the first frame the loader is due and before it is drawn, never for a switch done sooner: it
    * makes what the loader draws and answers the layer of the scene that holds it, whose container is drawn above the
-   * veil from then until the swap. `undefined`, or a throw, draws the ring; a layer the scene does not declare draws
-   * nothing.
+   * veil from then on. After the swap it stays there and fades out with the veil, its alpha the veil's level; once the
+   * veil is gone it waits there at alpha 0 until no view hangs in it (the switch unmounts the loader), then goes back
+   * under the root at alpha 1. A drop puts it back at once. `undefined`, or a throw, draws the ring; a layer the scene
+   * does not declare draws nothing.
    *
    * @returns The layer, or `undefined` for the ring.
    */
@@ -869,8 +871,9 @@ export type LeaveApi = {
   show(look: LeaveLook): void;
 
   /**
-   * The switch swapped the next scene in: the loader goes at once, the veil fades out over its `outMs` from where it
-   * stands and is taken off the stage. Nothing runs: nothing happens.
+   * The switch swapped the next scene in: the veil fades out over its `outMs` from where it stands and is taken off the
+   * stage. A ring or a texture loader goes at once; a layer loader that shows stays above the veil and fades out with
+   * it, and its layer goes back under the root once the loader's views left it. Nothing runs: nothing happens.
    *
    * @example
    * ```ts
@@ -929,17 +932,28 @@ export type LeaveRun = {
   asked: boolean;
   /** The layer a `"layer"` loader's `due` answered; absent before. */
   layer?: string;
-  /** The layer container a `"layer"` loader drew above the veil; absent while none hangs there. */
+  /** The layer container a `"layer"` loader drew above the veil, kept through the fade-out; absent while none is. */
   lifted?: PixiContainer;
-  /** The loader is shown: past its `afterMs`, before the swap. */
+  /** The loader is shown: past its `afterMs`, before the swap; after it, a layer loader that showed, while it fades. */
   shown: boolean;
 };
 
 /**
- * The picture of a scene being left (spec 33, slice A2): the running look, absent while none runs, and the engine's
- * objects, absent until the first look needs them and after the application that held them was lost. Not public.
+ * A loader layer that faded out with the veil and waits above it, at alpha 0, until the loader's views left it: under
+ * the root it would draw them whole. Not public.
  */
-export type LeaveState = { run?: LeaveRun; objects?: LeaveObjects };
+export type LeaveParked = {
+  container: PixiContainer;
+  /** The layer, whose place in the layer list it goes back to. */
+  layer: string | undefined;
+};
+
+/**
+ * The picture of a scene being left (spec 33, slice A2): the running look, absent while none runs; the engine's
+ * objects, absent until the first look needs them and after the application that held them was lost; and the loader
+ * layer that waits for its views to leave, absent while none does. Not public.
+ */
+export type LeaveState = { run?: LeaveRun; objects?: LeaveObjects; parked?: LeaveParked };
 
 /**
  * sync module API, `app.renderer.sync`. The one owner of every display object: it builds them

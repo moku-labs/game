@@ -3,9 +3,10 @@
  * live switch: a veil over the whole canvas that fades in, and a loader that waits for its `afterMs`. Both hang in one
  * container of the engine, last on the stage, so above the root and every layer, overlay and HUD in it; the hit test
  * walks the layers of the root only, so neither takes a hit. The render phase steps the look on the clock: the veil's
- * level, the loader's turn, and a frame asked for while either moves. At the swap the loader goes and the veil fades
- * out; an abort drops both. The objects are made once per application and kept; with no look running a step reads one
- * field.
+ * level, the loader's turn, and a frame asked for while either moves. At the swap the veil fades out, and so does a
+ * layer loader that shows, above it, whose layer then waits unseen until the loader's views left it; a ring or a
+ * texture goes at once. An abort drops both at once. The objects are made once per application and kept; with no look
+ * running a step reads two fields.
  */
 import type { ShapeValue } from "../components";
 import type { PixiContainer } from "../types";
@@ -14,7 +15,7 @@ import { layerContainer } from "./layers";
 import { detach } from "./pools";
 import { paintShape } from "./shape-path";
 import { placeholderTexture, resolveTexture, warnMissing } from "./textures";
-import type { LeaveLook, LeaveObjects, LeaveRun, SyncCtx, SyncState } from "./types";
+import type { LeaveLook, LeaveObjects, LeaveParked, LeaveRun, SyncCtx, SyncState } from "./types";
 
 /** Label of the container the look hangs in, last on the stage. */
 const TOP_LABEL = "renderer.leave";
@@ -113,11 +114,68 @@ function loaderOf(sctx: SyncCtx, look: LeaveLook): Pick<LeaveRun, "loader" | "te
 }
 
 /**
- * Puts a layer the look drew above the veil back under the root, at the place of its layer: the layer list of the
- * scene orders the root's children. A layer the list of a swap took back already, or let go, is left alone.
+ * Puts a layer the look drew above the veil back under the root at alpha 1, at the place of its layer in the layer
+ * list as it stands now: the list orders the root's children. A layer that list does not declare is let go. One that
+ * no longer hangs above the veil (a layer list took it back, its application was lost) is left where it is.
  *
  * @param sctx - Domain context of the sync module.
- * @param run - The look whose layer goes back.
+ * @param container - The layer's container.
+ * @param name - The layer.
+ */
+function putBack(sctx: SyncCtx, container: PixiContainer, name: string | undefined): void {
+  const state = sctx.ctx.state.sync;
+
+  // The fade-out after the swap wrote its alpha: the layer is drawn whole again.
+  container.alpha = 1;
+
+  if (container.parent !== state.leave.objects?.held) return;
+
+  const at = state.layerList?.findIndex(spec => spec.name === name) ?? -1;
+  const root = state.root;
+
+  // The walks of `shown` and the render passes see the layer where it hangs now.
+  state.passesVersion += 1;
+
+  if (root === undefined || at === -1) {
+    detach(container);
+
+    return;
+  }
+
+  root.addChildAt(container, Math.min(at, root.children.length));
+}
+
+/**
+ * Leaves a loader layer waiting where it hangs, at alpha 0, until the loader's views left it: one layer at a time, so
+ * an older one goes back now.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param container - The layer's container.
+ * @param name - The layer.
+ */
+function park(sctx: SyncCtx, container: PixiContainer, name: string | undefined): void {
+  const state = sctx.ctx.state.sync;
+  const before = state.leave.parked;
+
+  if (before !== undefined && before.container !== container) {
+    putBack(sctx, before.container, before.layer);
+  }
+
+  container.alpha = 0;
+  state.leave.parked = { container, layer: name };
+  // The walks of `shown` see its views unseen.
+  state.passesVersion += 1;
+}
+
+/**
+ * Lets the layer a look drew above the veil go. Before the swap, and once no view hangs in it, it goes back under the
+ * root (`putBack`). After the swap, while the loader's views still hang in it, it waits above the veil at alpha 0:
+ * `scenes` unmounts the loader projection in the first frame `outMs` has passed in, which can come a frame after the
+ * veil is gone, and under the root the layer would draw the loader whole in that frame. The step puts it back once
+ * its views left (`stepParked`).
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param run - The look whose layer goes.
  */
 function unlift(sctx: SyncCtx, run: LeaveRun): void {
   const lifted = run.lifted;
@@ -126,24 +184,22 @@ function unlift(sctx: SyncCtx, run: LeaveRun): void {
 
   delete run.lifted;
 
-  const state = sctx.ctx.state.sync;
+  if (run.landed && lifted.children.length > 0) park(sctx, lifted, run.layer);
+  else putBack(sctx, lifted, run.layer);
+}
 
-  if (lifted.parent !== state.leave.objects?.held) return;
+/**
+ * Puts a layer that waits for the loader's views back once they left it.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param parked - The waiting layer.
+ */
+function stepParked(sctx: SyncCtx, parked: LeaveParked): void {
+  // per frame while it waits: one length read.
+  if (parked.container.children.length > 0) return;
 
-  const name = run.layer;
-  const at = state.layerList?.findIndex(spec => spec.name === name) ?? -1;
-  const root = state.root;
-
-  // The walks of `shown` and the render passes see the layer where it hangs now.
-  state.passesVersion += 1;
-
-  if (root === undefined || at === -1) {
-    detach(lifted);
-
-    return;
-  }
-
-  root.addChildAt(lifted, Math.min(at, root.children.length));
+  delete sctx.ctx.state.sync.leave.parked;
+  putBack(sctx, parked.container, parked.layer);
 }
 
 /**
@@ -263,8 +319,10 @@ function paintVeil(objects: LeaveObjects, run: LeaveRun): void {
 }
 
 /**
- * Keeps the layer of a shown `"layer"` loader in the holder above the veil until the swap. A layer the scene does not
- * declare draws nothing.
+ * Keeps the layer of a shown `"layer"` loader in the holder above the veil, until the end of the fade-out after the
+ * swap: the container lifted stays the look's, also when the next scene's layer list takes it back under the root or
+ * does not declare it. After the swap its alpha is the veil's level. A layer the last loader left waiting is this
+ * look's again, drawn whole. A layer the scene does not declare draws nothing.
  *
  * @param sctx - Domain context of the sync module.
  * @param objects - The engine's objects.
@@ -272,14 +330,27 @@ function paintVeil(objects: LeaveObjects, run: LeaveRun): void {
  */
 function lift(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun): void {
   const state = sctx.ctx.state.sync;
-  const container = run.layer === undefined ? undefined : layerContainer(state, run.layer);
+  const container =
+    run.lifted ?? (run.layer === undefined ? undefined : layerContainer(state, run.layer));
 
-  if (container === undefined || container.parent === objects.held) return;
+  if (container === undefined) return;
 
-  objects.held.addChild(container);
   run.lifted = container;
-  // The walks of `shown` and the render passes see the layer where it hangs now.
-  state.passesVersion += 1;
+
+  if (state.leave.parked?.container === container) {
+    delete state.leave.parked;
+    container.alpha = 1;
+    state.passesVersion += 1;
+  }
+
+  if (container.parent !== objects.held) {
+    objects.held.addChild(container);
+    // The walks of `shown` and the render passes see the layer where it hangs now.
+    state.passesVersion += 1;
+  }
+
+  // per frame of the fade-out: the loader fades with the veil, on the same level.
+  if (run.landed) container.alpha = run.level;
 }
 
 /**
@@ -308,9 +379,25 @@ function turn(
 }
 
 /**
+ * Whether the loader of a running look shows in this frame: from `afterMs` after the switch start until the swap. After
+ * the swap a layer loader that showed shows on, fading out with the veil; a ring, a texture, or a loader not due yet,
+ * shows no more.
+ *
+ * @param run - The running look.
+ * @param now - The clock now, ms.
+ * @returns True while it shows.
+ */
+function loaderShown(run: LeaveRun, now: number): boolean {
+  if (run.landed) return run.shown && run.loader === "layer";
+
+  return run.loader !== "none" && now - run.startedAt >= (run.look.loader?.afterMs ?? 0);
+}
+
+/**
  * Shows the loader once the switch took `afterMs`, until the swap: a layer loader asks its `due` then and lifts the
- * layer it answers above the veil; a ring or a texture turns. A loader that comes or goes moves the walks of `shown`,
- * so the loops of a lifted layer's views run while it shows.
+ * layer it answers above the veil, where it stays and fades out with the veil after the swap; a ring or a texture
+ * turns until the swap. A loader that comes or goes moves the walks of `shown`, so the loops of a lifted layer's views
+ * run while it shows.
  *
  * @param sctx - Domain context of the sync module.
  * @param objects - The engine's objects.
@@ -319,8 +406,7 @@ function turn(
  * @returns True when the loader came, went or turns in this frame: the frame is drawn.
  */
 function paintLoader(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun, now: number): boolean {
-  const afterMs = run.look.loader?.afterMs ?? 0;
-  const shown = !run.landed && run.loader !== "none" && now - run.startedAt >= afterMs;
+  const shown = loaderShown(run, now);
   const due = shown && run.loader === "layer";
 
   // A layer loader asks for its layer once, the first frame it is due, and lifts it from then on.
@@ -350,7 +436,8 @@ function paintLoader(sctx: SyncCtx, objects: LeaveObjects, run: LeaveRun, now: n
 
 /**
  * Shows a look from now, in place of one that runs: the veil fades in from where it stands (0, or the level of a veil
- * still fading out after the last swap), the loader waits for its `afterMs`. Inert, nothing is kept.
+ * still fading out after the last swap), the loader waits for its `afterMs`. A layer the last loader faded out with
+ * waits unseen for its views to leave. Inert, nothing is kept.
  *
  * @param sctx - Domain context of the sync module.
  * @param look - The veil and the loader, resolved.
@@ -382,8 +469,10 @@ export function showLeave(sctx: SyncCtx, look: LeaveLook): void {
 }
 
 /**
- * The swap came: the loader goes at once and the veil fades out over its `outMs` from where it stands; a look without
- * a veil, or with `outMs: 0`, is taken down at once. Nothing runs, or the swap was told already: nothing happens.
+ * The swap came: the veil fades out over its `outMs` from where it stands, and a layer loader that shows stays above
+ * it and fades with it, its layer waiting unseen at the end until the loader's views left it; a ring or a texture goes
+ * at once. A look without a veil, or with `outMs: 0`, is taken down at once, a layer loader's layer waiting the same.
+ * Nothing runs, or the swap was told already: nothing happens.
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -391,6 +480,9 @@ export function landLeave(sctx: SyncCtx): void {
   const run = sctx.ctx.state.sync.leave.run;
 
   if (run === undefined || run.landed) return;
+
+  // A layer loader that shows stays lifted: the step fades it with the veil, the take-down leaves it waiting.
+  run.landed = true;
 
   const cover = run.look.cover;
 
@@ -400,15 +492,14 @@ export function landLeave(sctx: SyncCtx): void {
     return;
   }
 
-  unlift(sctx, run);
-  run.landed = true;
   // The fade-out counts from the swap.
   run.steppedAt = sctx.ctx.deps.clock.now();
   sctx.deps.demand.request();
 }
 
 /**
- * The switch ended without a swap: the veil and the loader go at once. Nothing runs: nothing happens.
+ * The switch ended without a swap: the veil and the loader go at once, a lifted layer back under the root. Nothing
+ * runs: nothing happens.
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -421,15 +512,18 @@ export function dropLeave(sctx: SyncCtx): void {
 /**
  * The look of this frame, before the decision: the veil's level from the clock, the loader once due, both placed over
  * the canvas as it stands, and a frame asked for while either moves. A look whose veil faded out after the swap is
- * taken down. One field read and no allocation while no look runs; a lost device leaves the look waiting for the
- * restore, which makes its objects again.
+ * taken down, a layer loader fading with it left waiting; a waiting layer whose views left goes back. Two field reads
+ * and no allocation while no look runs, none during a fade or a wait either; a lost device leaves the look waiting for
+ * the restore, which makes its objects again.
  *
  * @param sctx - Domain context of the sync module.
  */
 export function stepLeave(sctx: SyncCtx): void {
-  const run = sctx.ctx.state.sync.leave.run;
+  const leave = sctx.ctx.state.sync.leave;
+  const run = leave.run;
 
-  // per frame: no switch runs, one field read.
+  // per frame: no switch runs and no layer waits, two field reads.
+  if (leave.parked !== undefined) stepParked(sctx, leave.parked);
   if (run === undefined) return;
 
   const objects = objectsOf(sctx);
@@ -456,20 +550,21 @@ export function stepLeave(sctx: SyncCtx): void {
 }
 
 /**
- * Forgets the objects of a lost application: they go with its stage, and so does a layer lifted above the veil. The
- * running look stays: the step makes its objects again on the restored device.
+ * Forgets the objects of a lost application: they go with its stage, and so does a layer lifted above the veil or
+ * waiting there. The running look stays: the step makes its objects again on the restored device.
  *
  * @param state - The sync branch of the plugin state.
  */
 export function forgetLeave(state: SyncState): void {
   delete state.leave.objects;
+  delete state.leave.parked;
 
   if (state.leave.run !== undefined) delete state.leave.run.lifted;
 }
 
 /**
- * Drops the look and frees the engine's objects when the plugin stops. A lifted layer is the layer table's and the
- * spinner's texture is the game's: neither is freed with them.
+ * Drops the look and frees the engine's objects when the plugin stops. A lifted or waiting layer is the layer table's
+ * and the spinner's texture is the game's: neither is freed with them.
  *
  * @param state - The sync branch of the plugin state.
  */
@@ -478,6 +573,7 @@ export function stopLeave(state: SyncState): void {
 
   delete state.leave.run;
   delete state.leave.objects;
+  delete state.leave.parked;
 
   if (objects === undefined) return;
 

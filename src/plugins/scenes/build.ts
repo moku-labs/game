@@ -14,8 +14,8 @@ const SECOND_MS = 1000;
 /** The share of a frame interval `"auto"` gives the building work: two thirds. */
 const BUILD_SHARE = 2 / 3;
 
-/** The budget of a frame when `time` answers no usable frame rate: two thirds of a 60 Hz frame, ≈ 11.1 ms. */
-const FALLBACK_BUDGET_MS = (SECOND_MS / 60) * BUILD_SHARE;
+/** The frame interval when `time` answers no usable frame rate: a 60 Hz frame, ≈ 16.7 ms. */
+const FALLBACK_FRAME_MS = SECOND_MS / 60;
 
 /**
  * Tells whether a value is a number a frame can count with: finite and above 0. Pure.
@@ -51,6 +51,19 @@ function agentNow(ctx: ScenesCtx): number {
 }
 
 /**
+ * The frame interval the loop runs at now, `1000 / time.rate().fps`. A rate that is not a finite number above 0 gives
+ * a 60 Hz frame.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns Milliseconds of one frame.
+ */
+export function frameMsOf(ctx: ScenesCtx): number {
+  const { fps } = ctx.deps.time.rate();
+
+  return isPositiveFinite(fps) ? SECOND_MS / fps : FALLBACK_FRAME_MS;
+}
+
+/**
  * The building budget of a frame for a build that starts now: the number a game configured, or
  * for `"auto"` two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`,
  * read once here. A rate that is not a finite number above 0 gives two thirds of a 60 Hz frame.
@@ -63,9 +76,7 @@ function budgetOf(ctx: ScenesCtx): number {
 
   if (buildMs !== "auto") return buildMs;
 
-  const { fps } = ctx.deps.time.rate();
-
-  return isPositiveFinite(fps) ? (SECOND_MS / fps) * BUILD_SHARE : FALLBACK_BUDGET_MS;
+  return frameMsOf(ctx) * BUILD_SHARE;
 }
 
 /**

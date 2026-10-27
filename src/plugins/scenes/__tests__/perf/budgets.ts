@@ -9,5 +9,7 @@ export const NOISE = 1;
 /** Bytes per call each fixture may keep allocated. */
 export const BUDGET = {
   // The `signals` callback of a build that is not done: one counter step and one call of `built()`.
-  buildWaiting: 0
+  buildWaiting: 0,
+  // The `signals` callback of a loader fading out with the veil after a swap (F107 part 3): a subtraction and a compare.
+  loaderFading: 0
 } as const;

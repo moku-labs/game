@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
+import type { Entity } from "../../../world/types";
 import { Sprite, Transform } from "../../components";
 import type { LeaveLook } from "../../types";
 import { type FakeContainer, type FakeSprite, FakeTexture } from "../fake-pixi";
@@ -80,6 +81,63 @@ function objectOf<Name extends "top" | "veil" | "ring" | "spinner" | "held">(
   if (objects === undefined) throw new Error("the picture made no objects");
 
   return objects[name] as unknown as Name extends "veil" | "spinner" ? FakeSprite : FakeContainer;
+}
+
+/**
+ * The container of a layer of the scene.
+ *
+ * @param mock - The mock.
+ * @param name - The layer.
+ * @returns Its container.
+ */
+function layerOf(mock: MockRenderer, name: string): FakeContainer {
+  const container = mock.ctx.state.sync.layers.get(name)?.container;
+
+  if (container === undefined) throw new Error(`no layer ${name}`);
+
+  return container as unknown as FakeContainer;
+}
+
+/**
+ * The root of the scene's layers.
+ *
+ * @param mock - The mock.
+ * @returns The root.
+ */
+function rootOf(mock: MockRenderer): FakeContainer {
+  return mock.ctx.state.sync.root as unknown as FakeContainer;
+}
+
+/**
+ * Spawns one view of a loader in a layer and builds it, as a mounted loader projection has.
+ *
+ * @param mock - The mock.
+ * @param layer - The layer.
+ * @returns The entity; despawned, it leaves as an unmount takes it.
+ */
+function spawnLoaderView(mock: MockRenderer, layer = "loading"): Entity {
+  const entity = mock.world.ecs.spawn(owner, [
+    Layer({ name: layer }),
+    Transform({ x: 540, y: 960 }),
+    Sprite({ width: 96, height: 96 })
+  ]);
+
+  mock.modules.sync.pass();
+
+  return entity;
+}
+
+/**
+ * Shows a look with the layer `"loading"` as its loader at 0, lifts it at 100 and lands it at 150, the veil full: its
+ * fade-out runs from 150 to 350.
+ *
+ * @param mock - The mock.
+ */
+function landLifted(mock: MockRenderer): void {
+  showAt(mock, 0, { cover: VEIL, loader: { afterMs: 100, due: () => "loading" } });
+  frameAt(mock, 100);
+  frameAt(mock, 150);
+  mock.api.sync.leave.land();
 }
 
 /**
@@ -268,8 +326,8 @@ describe("the loader", () => {
   });
 
   // Bug: a loader projection is made at the tap (its views built for a switch that never shows them), its layer
-  // leaves the scene before `afterMs`, is drawn under the veil, or stays out of the root after the swap.
-  it("asks for its layer once at afterMs, draws it above the veil, and puts it back in its place at the land", async () => {
+  // leaves the scene before `afterMs`, is drawn under the veil, or stays out of the root after the fade-out.
+  it("asks for its layer once at afterMs, draws it above the veil, and puts it back in its place after the fade-out", async () => {
     const mock = await drawing();
     const root = mock.ctx.state.sync.root as unknown as FakeContainer;
     const loading = mock.ctx.state.sync.layers.get("loading")
@@ -293,6 +351,7 @@ describe("the loader", () => {
     expect(root.children.map(child => child.label)).toEqual(["layer:scene", "layer:ui"]);
 
     mock.api.sync.leave.land();
+    frameAt(mock, 350);
 
     expect(root.children.map(child => child.label)).toEqual([
       "layer:scene",
@@ -331,6 +390,222 @@ describe("the loader", () => {
     frameAt(mock, 0);
 
     expect([objectOf(mock, "ring").visible, objectOf(mock, "held").visible]).toEqual([true, false]);
+  });
+});
+
+describe("a layer loader at the swap", () => {
+  // Bug: the game's loader blinks out at the swap while the veil fades, fades on a curve of its own, falls under the
+  // veil before the veil is gone, or stays faded (its alpha below 1) in its layer afterwards.
+  it("stays above the veil and fades with it, its alpha the veil's level, then goes back at alpha 1", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+
+    landLifted(mock);
+
+    const held = objectOf(mock, "held");
+    const veil = objectOf(mock, "veil");
+    const fade: [number, number, boolean][] = [];
+
+    for (const now of [200, 250, 300]) {
+      frameAt(mock, now);
+      fade.push([
+        Number(loading.alpha.toFixed(3)),
+        Number((veil.alpha / VEIL.alpha).toFixed(3)),
+        loading.parent === held &&
+          held.visible &&
+          stageOf(mock).children.at(-1) === objectOf(mock, "top")
+      ]);
+    }
+
+    expect(fade).toEqual([
+      [0.75, 0.75, true],
+      [0.5, 0.5, true],
+      [0.25, 0.25, true]
+    ]);
+
+    frameAt(mock, 350);
+
+    expect([loading.parent === rootOf(mock), loading.alpha]).toEqual([true, 1]);
+    expect(objectOf(mock, "top").parent).toBeNull();
+  });
+
+  // Bug: the layer goes back under the root while the switch has not unmounted the loader yet (it does so in the first
+  // frame `outMs` has passed in, which can come a frame after the veil is gone): the loader is drawn whole over the
+  // next scene for that frame; or the layer never comes back once the loader left it.
+  it("waits above the veil at alpha 0 once the veil is gone, until the loader's views left it", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+    const view = spawnLoaderView(mock);
+
+    landLifted(mock);
+    frameAt(mock, 350);
+
+    expect([loading.parent === objectOf(mock, "held"), loading.alpha]).toEqual([true, 0]);
+    expect(objectOf(mock, "top").parent).toBeNull();
+    expect(mock.ctx.state.sync.leave.run).toBeUndefined();
+
+    frameAt(mock, 366);
+
+    expect(loading.alpha).toBe(0);
+
+    mock.world.ecs.despawn(view);
+    mock.modules.sync.pass();
+    frameAt(mock, 383);
+
+    expect(rootOf(mock).children.map(child => child.label)).toEqual([
+      "layer:scene",
+      "layer:ui",
+      "layer:loading"
+    ]);
+    expect(loading.alpha).toBe(1);
+  });
+
+  // Bug: a look with nothing to fade out puts the loader's layer back under the root at the land, where it draws the
+  // loader whole until the switch unmounts it.
+  it("waits the same at a land with outMs 0", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+
+    spawnLoaderView(mock);
+    showAt(mock, 0, { cover: { ...VEIL, outMs: 0 }, loader: { afterMs: 0, due: () => "loading" } });
+    frameAt(mock, 16);
+    mock.api.sync.leave.land();
+
+    expect([loading.parent === objectOf(mock, "held"), loading.alpha]).toEqual([true, 0]);
+    expect(objectOf(mock, "top").parent).toBeNull();
+  });
+
+  // Bug: the next scene's layer list, which declares the loader's layer too, takes the fading loader back under the
+  // root at the swap: it drops under the veil, and the list's place for it is lost at the end.
+  it("stays above the veil through a next list that declares its layer, then takes its place in that list", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+
+    landLifted(mock);
+    mock.world.projection.setLayers([
+      { name: "loading", sort: "none" },
+      { name: "cells", sort: "none" }
+    ]);
+    mock.modules.sync.pass();
+    frameAt(mock, 200);
+
+    expect([loading.parent === objectOf(mock, "held"), loading.alpha]).toEqual([true, 0.75]);
+
+    frameAt(mock, 350);
+
+    expect(rootOf(mock).children.map(child => child.label)).toEqual([
+      "layer:loading",
+      "layer:cells"
+    ]);
+  });
+
+  // Bug: a next scene that does not declare the loader's layer takes the fading loader away at the swap, and warns
+  // that the loader's views, which the switch unmounts only after the fade, were left without a layer.
+  it("fades on through a next list without its layer, unwarned, and is let go once its views left", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+    const view = spawnLoaderView(mock);
+
+    landLifted(mock);
+    mock.world.projection.setLayers([{ name: "cells", sort: "none" }]);
+    mock.modules.sync.pass();
+    frameAt(mock, 200);
+
+    expect([loading.parent === objectOf(mock, "held"), loading.alpha]).toEqual([true, 0.75]);
+
+    frameAt(mock, 350);
+    mock.world.ecs.despawn(view);
+    mock.modules.sync.pass();
+    frameAt(mock, 366);
+
+    expect([loading.parent === null, loading.alpha]).toEqual([true, 1]);
+    expect(mock.log.warn).not.toHaveBeenCalledWith(
+      "renderer: views left without a layer",
+      expect.anything()
+    );
+  });
+
+  // Bug: an abort fades the loader, or hides it waiting, over the scene that stays instead of taking it away with the
+  // veil: the switch unmounts the loader at once then.
+  it("goes back at once at a drop, its views in it", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+
+    spawnLoaderView(mock);
+    showAt(mock, 0, { cover: VEIL, loader: { afterMs: 100, due: () => "loading" } });
+    frameAt(mock, 150);
+    mock.api.sync.leave.drop();
+
+    expect([loading.parent === rootOf(mock), loading.alpha]).toEqual([true, 1]);
+    expect(objectOf(mock, "top").parent).toBeNull();
+  });
+
+  // Bug: a switch started while the last loader fades puts that layer back under the root at full alpha while the
+  // loader is still mounted, leaves it faded, or draws the new loader at the alpha of the old fade.
+  it("restarts cleanly when a switch starts during the fade", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+
+    spawnLoaderView(mock);
+    landLifted(mock);
+    frameAt(mock, 250);
+    showAt(mock, 250, { cover: VEIL, loader: { afterMs: 100, due: () => "loading" } });
+
+    expect([loading.parent === objectOf(mock, "held"), loading.alpha]).toEqual([true, 0]);
+
+    frameAt(mock, 300);
+
+    expect(objectOf(mock, "veil").alpha).toBeCloseTo(VEIL.alpha);
+
+    frameAt(mock, 350);
+
+    expect([loading.parent === objectOf(mock, "held"), loading.alpha]).toEqual([true, 1]);
+
+    mock.api.sync.leave.land();
+    frameAt(mock, 450);
+
+    expect(loading.alpha).toBeCloseTo(0.5);
+  });
+
+  // Bug: a second loader layer that waits makes the first one wait for good: its layer never comes back to the root.
+  it("lets one layer wait at a time: the older goes back", async () => {
+    const mock = await drawing();
+    const loading = layerOf(mock, "loading");
+    const ui = layerOf(mock, "ui");
+
+    spawnLoaderView(mock);
+    spawnLoaderView(mock, "ui");
+    landLifted(mock);
+    frameAt(mock, 350);
+    showAt(mock, 400, { cover: VEIL, loader: { afterMs: 0, due: () => "ui" } });
+    frameAt(mock, 400);
+    mock.api.sync.leave.land();
+    frameAt(mock, 600);
+
+    expect([loading.parent === rootOf(mock), loading.alpha]).toEqual([true, 1]);
+    expect([ui.parent === objectOf(mock, "held"), ui.alpha]).toEqual([true, 0]);
+  });
+
+  // Bug: a waiting layer keeps the tree of a lost application, or outlives the stop.
+  it("is forgotten with a lost application and at the stop", async () => {
+    const mock = await drawing();
+
+    spawnLoaderView(mock);
+    landLifted(mock);
+    frameAt(mock, 350);
+    mock.pixi.last().lose("unknown");
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+
+    expect(mock.ctx.state.sync.leave.parked).toBeUndefined();
+
+    const stopped = await drawing();
+
+    spawnLoaderView(stopped);
+    landLifted(stopped);
+    frameAt(stopped, 350);
+    stopped.stop();
+
+    expect(stopped.ctx.state.sync.leave).toEqual({});
   });
 });
 

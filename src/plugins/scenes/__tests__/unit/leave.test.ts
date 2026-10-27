@@ -302,10 +302,22 @@ function dueOf(mock: MockScenes): () => string | undefined {
 /** A config whose loader is the projection "loading". */
 const LOADING: Config = { buildMs: "auto", leave: { loader: { projection: "loading" } } };
 
+/** Frames of 16 ms until the veil's 150 ms fade-out ran out: a loader fades out with it (F107 part 3). */
+const FADE_FRAMES = Math.ceil(VEIL.outMs / 16);
+
+/**
+ * Steps the frames of the veil's fade-out after a land: the frame the loader projection goes in.
+ *
+ * @param mock - The mock whose switch landed.
+ */
+function fadeOut(mock: MockScenes): void {
+  for (let frame = 0; frame < FADE_FRAMES; frame += 1) mock.time.frame();
+}
+
 describe("a loader projection", () => {
   // Bug: the loader projection is mounted at the tap (its `from` and `view` run in the frame of the first answer), its
-  // layer is not handed to the renderer, or it stays mounted over the next scene.
-  it("is mounted once its loader is due, drawn by its layer, and unmounted after the land", async () => {
+  // layer is not handed to the renderer, or it stays mounted over the next scene once the veil faded out.
+  it("is mounted once its loader is due, drawn by its layer, and unmounted after the land's fade", async () => {
     const mock = await on("home", LOADING);
 
     mock.world.viewLayers = { loading: "loading" };
@@ -327,6 +339,7 @@ describe("a loader projection", () => {
       expect(mock.world.unmounted).not.toContainEqual(["loading"]);
     });
     await finish(mock, entering);
+    fadeOut(mock);
 
     expect(mock.world.unmounted.at(-1)).toEqual(["loading"]);
   });
@@ -423,6 +436,7 @@ describe("a loader projection", () => {
     expect(mock.world.mounted.at(-1)?.names).toEqual(["loading"]);
 
     await finish(mock, entering);
+    fadeOut(mock);
 
     expect(mock.world.unmounted.at(-1)).toEqual(["loading"]);
   });

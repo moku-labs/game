@@ -225,8 +225,8 @@ internal markup: select them by nothing, set the properties instead.
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
 | `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
 | `leave.show(look)` | `scenes` at the start of a live switch: a veil over the whole canvas fading in, and a loader that waits for its `afterMs`, drawn above every layer; replaces a look that runs. See "The picture of a scene being left". Inert: nothing. |
-| `leave.land()` | `scenes` after the swap: the loader goes, the veil fades out over its `outMs` and leaves the stage. Nothing runs: nothing. |
-| `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once. Nothing runs: nothing. |
+| `leave.land()` | `scenes` after the swap: the veil fades out over its `outMs` and leaves the stage; a ring or a texture loader goes at once, a layer loader that shows fades out with the veil. Nothing runs: nothing. |
+| `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once, a lifted layer back under the root. Nothing runs: nothing. |
 | `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
@@ -827,16 +827,28 @@ README). The renderer's part, `sync.leave`:
 - **The clock.** Every render phase steps the look on `clock.now()`, before the draw decision: the veil's level rises by
   the clock milliseconds since the last step over `inMs` and, after `land`, falls over `outMs` from where it stands;
   at 0 the container leaves the stage. A look shown while the last one still fades out starts from that level. The
-  loader shows once `clock.now()` is `afterMs` past `show`, until `land`.
+  loader shows once `clock.now()` is `afterMs` past `show`, until `land`; a layer loader that shows then stays through
+  the fade-out (below).
 - **The loader.** `texture` resolves the key through the texture providers at `show` and turns the texture at the
   centre, one turn a second; a key nothing answers is warned once (`renderer: no texture for asset key`) and draws the
   ring. Neither: a white three-quarter ring 96 u across, 10 u wide, drawn once and turned the same way. `due`: called
   once, in the first frame the loader is due and before it is drawn (never for a switch done sooner), it makes what the
   loader draws (`scenes` mounts its loader projection there) and answers a layer of the scene; that layer's container
-  is moved into the look, above the veil, from that frame on, and put back under the root at the place of its layer at
-  `land` or `drop` (a layer list that changed before takes it back itself). No layer, or a throw (logged,
-  `renderer: the loader of a scene being left threw`), draws the ring. Its views stay views of the scene: their own motions run, and a hidden or shown loader moves the walks of
-  `shown`, so their loops run while it shows.
+  is moved into the look, above the veil, from that frame on. No layer, or a throw (logged,
+  `renderer: the loader of a scene being left threw`), draws the ring. Its views stay views of the scene: their own
+  motions run, and a hidden or shown loader moves the walks of `shown`, so their loops run while it shows.
+- **The loader at the swap (F107).** A ring or a texture goes at `land`. A layer loader that shows stays above the veil
+  and fades out with it: every step writes the veil's level (the same curve, over `outMs` from where it stands) as the
+  alpha of its layer's container. The look keeps that container whatever layer list the next scene brings: one that
+  declares the layer does not take it back under the root, one that does not let it go and names none of its views as
+  left without a layer. When the veil is gone the layer goes back under the root at alpha 1, at its place in the layer
+  list as it stands then (let go when that list does not declare it), but only once no view hangs in it: `scenes`
+  unmounts the loader projection in the first frame `outMs` has passed in, which can come a frame after the veil is
+  gone, and under the root the layer would draw the loader whole for that frame. Until then it waits above the veil at
+  alpha 0, unseen; a look with `outMs: 0`, or no veil, leaves it waiting the same at `land`. One layer waits at a time
+  (an older one goes back when another starts waiting), a look shown meanwhile whose `due` answers that layer takes it
+  over at alpha 1, and a lost device or a stop forgets it. `drop` puts a lifted layer back at once, views and all:
+  `scenes` unmounts the loader at once then.
 - **No tap.** The hit test walks the layers of the root only, and a lifted layer is not under the root: neither the
   veil nor the loader takes a tap.
 - **Frames.** A step asks for a frame (`"request"`) while the veil's level moves, when the loader comes or goes, and
@@ -846,7 +858,7 @@ README). The renderer's part, `sync.leave`:
   the first step that needs them and kept for the life of the application: a switch makes no Pixi object. A lost
   device takes them with its stage; the step makes them again on the restored one, and a look that ran on goes on. A
   stop frees them; the game's texture and a lifted layer are not freed with them. With no look running a step reads
-  one field: 0 B a frame (`leave.perf.ts`).
+  two fields: 0 B a frame, and 0 B a frame of the fade-out and of the wait too (`leave.perf.ts`).
 
 ## Render on demand
 

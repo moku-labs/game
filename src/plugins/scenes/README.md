@@ -238,7 +238,7 @@ defineScene("ward", { ..., leave: false });
 | | `outMs` | `150` | Clock milliseconds back to 0, from the swap |
 | `loader` | `afterMs` | `400` | Clock milliseconds after the switch start the loader waits for; a switch done sooner shows none |
 | | `texture` | none | An asset key: the game's texture turns at the centre of the frame, once a second |
-| | `projection` | none | A registered projection: mounted once the loader is due, its layer drawn above the veil |
+| | `projection` | none | A registered projection: kept built and hidden while the scene stands, shown once the loader is due, its layer drawn above the veil; it fades out with the veil after the swap |
 
 With neither `texture` nor `projection` the loader is a white ring the engine draws.
 
@@ -262,7 +262,8 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   look over, so a switch shows one look. A switch the `begin` stage did not see shows it at its own start, right after
   `bundles` was read.
 - **The swap.** Once the scene stands (the block of step 13, a commit or a one-block mount), `renderer.sync.leave.land`:
-  the loader goes at once and the veil fades out over `outMs` above the new scene, then leaves the stage.
+  the veil fades out over `outMs` above the new scene, then leaves the stage. A ring or a texture loader goes at once;
+  a loader projection fades out with the veil (F107 part 3, below).
 - **Without a swap.** An abort of the node (a restore, the inbox, a stop of the runner) drops the veil and the loader
   at once, from the abort listener of the switch; a switch that throws (a failed load, a `bundles` or a `view` that
   throws) drops them before its rejection. A `load` stage that throws (a download that failed) never reaches the
@@ -274,16 +275,37 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   of the plugin forgets the look; the renderer drops it at its own stop.
 - **No tap.** The veil and the loader take no tap: the hit test walks the scene's layers only. The gate is closed during
   a switch anyway.
-- **A loader projection** draws in a layer of its own that the scene being left declares (`loading: {}`). It is mounted
-  only once the loader is due: the renderer calls the loader's `due` in the first frame `afterMs` after the switch
-  start, and the projection is mounted there, under the scenes owner, so a switch done sooner never runs its `from` and
-  `view`. The renderer then draws its whole layer above the veil and puts it back at the swap; the projection is
-  unmounted after the land or the drop, also when the switch throws. A projection mounted already (by another owner) is
-  drawn as it is and never unmounted by the switch. These draw the engine's ring instead, warned: a projection one of
-  the two scenes lists (`scenes:loader-listed`, at the switch start), one the scene being left cannot mount, an unknown
-  name or a layer it does not declare (`scenes:loader-unmounted`), and one whose layer a projection of the scene being
-  left draws in too (`scenes:loader-layer-shared`: the whole layer would rise above the veil; it is unmounted again).
-  A projection whose `from` gives no item has no view and no layer: the ring too.
+- **A loader projection** draws in a layer of its own that the scene being left declares (`loading: {}`).
+  - **Held while the scene stands (F103).** Once a scene stands (a one-block mount or the commit of a scene built
+    aside), the projection its `leave` loader names (the scene's `leave` over `config.leave`) is held for its next
+    switch: `world.projection.hold([name], owner)` under the scenes owner. `world` builds the view of its `from`'s first
+    item in idle frames and keeps it hidden, so nothing of it shows over the scene. Only a projection the scene does not
+    list, whose spec's `layer` the scene declares (read from the `projections` of the features), and that no other
+    owner shows is held; a fast walk, a world that does not run live and a headless app hold none. A hold `world`
+    refuses (a `lift` the scene does not declare) is warned `scenes:loader-unmounted`.
+  - **Shown when due.** The renderer calls the loader's `due` in the first frame `afterMs` after the switch start. A
+    held loader is shown there (`world.projection.show(name)`): the next frame's reconcile shows the view built ahead,
+    the same entity, no spawn, and `due` answers the layer of its spec, as the view has no `Layer` before that
+    reconcile. A loader the scene did not hold (the first switch after a fast walk, a scene that stood headless) is
+    mounted there instead (A2), so a switch done sooner never runs its `from` and `view`, and `due` answers the layer
+    of its first view. The renderer draws the whole layer above the veil.
+  - **After the swap (F107 part 3).** The loader fades out with the veil above the new scene and is unmounted in the
+    frame the veil's `outMs` ran out, counted in frames of `time` before its time scale (a game time frozen at scale 0
+    counts one frame of the loop's rate per frame), in the `signals` phase, before that frame is drawn. When the new
+    scene leaves with the same loader, it is held again at that moment instead; a loader the new scene leaves with that
+    is another one is held at once. A look without a veil, or with `outMs: 0`, takes it down at the land. The next
+    switch that starts while it still fades unmounts it (or holds it again) at once, before its own look shows.
+  - **A held loader the next switch does not use** goes at the swap: the new scene does not declare its layer, leaves
+    with another loader or with nothing (`leave: false`), or stands in a fast walk or headless. One the scene being
+    switched to lists is unmounted before that scene is built or mounted, so the scene mounts it as its own.
+  - **A drop** (an abort, a throw) unmounts a loader that was shown or mounted at once. The scene that stays holds no
+    loader from then on until its next stand: its next switch mounts the loader when it is due (A2).
+  - **A projection mounted already** (by another owner) is never held, and is drawn as it is when due, never unmounted
+    by the switch. These draw the engine's ring instead, warned: a projection one of the two scenes lists
+    (`scenes:loader-listed`, at the switch start), one the scene being left cannot mount, an unknown name or a layer it
+    does not declare (`scenes:loader-unmounted`), and one whose layer a projection of the scene being left draws in too
+    (`scenes:loader-layer-shared`: the whole layer would rise above the veil; it is unmounted again). A loader the
+    scene did not hold whose `from` gives no item has no view and no layer: the ring too.
 
 ```ts
 // A game's loading screen: its own layer in every scene it leaves from, after 250 ms.
@@ -379,16 +401,16 @@ own view built and warmed ahead) is later work (spec 33, slice C).
 
 | Plugin | Used for |
 |---|---|
-| `flow` | `onEnter("begin", fn)` for the look, `onEnter("scene", fn)` for the switch, `features.all()` |
-| `world` | `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection once its loader is due, and its `projection.unmount` at the end; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
+| `flow` | `onEnter("begin", fn)` for the look, `onEnter("scene", fn)` for the switch, `features.all()`: the scenes, and the `layer` of a loader projection's spec |
+| `world` | `projection.hold` of the loader projection of a scene that stands and `projection.show` of it once its loader is due; `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection the scene did not hold, once its loader is due; `projection.unmount` of a loader at a drop, after the veil's fade, and of a held loader the next switch does not use; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
 | `renderer` | `host.ready()`, which picks the path of a live switch and whether it shows a look; `sync.leave.show` at its start, `sync.leave.land` after its swap and `sync.leave.drop` on an abort or a throw; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
-| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard; `rate().fps` at a build start, for the budget of `"auto"`; `agentClock()`, the page clock of a build's `buildMs` in an agent build |
+| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard, and while a loader projection fades out with the veil, removed in the frame its `outMs` ran out; `rate().fps` at a build start, for the budget of `"auto"`, and for a fade frame at time scale 0; `agentClock()`, the page clock of a build's `buildMs` in an agent build |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle
 
-`onInit` checks `buildMs` and `leave`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("begin")` and `onEnter("scene")` callbacks, keeping one remover for both. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, forgets the look of a running switch (its abort listener goes), and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
+`onInit` checks `buildMs` and `leave`. `onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("begin")` and `onEnter("scene")` callbacks, keeping one remover for both. `onStop` runs that remover, drops a running build's frame callback and lets its switch return, forgets the look of a running switch (its abort listener goes), a loader fading out (its frame callback goes) and the held loader, and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity and forgets the mounted scene.
 
 ## Not in V2
 

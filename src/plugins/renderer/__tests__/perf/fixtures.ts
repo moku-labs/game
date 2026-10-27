@@ -885,3 +885,49 @@ export async function restingWarm(windows: number, elements: number): Promise<Wa
 
   return { mock, sctx: { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } } };
 }
+
+/** A started renderer after a swap, its loader layer above the veil, and one frame's step of it. */
+export type FadingLoader = {
+  mock: MockRenderer;
+  /** One frame: the clock 1 ms on, then the step of the look. */
+  step: () => void;
+};
+
+/**
+ * Starts the mock renderer with the layer `loading` and one sprite of the loader in it, shows a look whose loader is
+ * that layer, lifts it above the veil and lands it. `"fade"`: a fade-out of a day, so every window steps it on without
+ * reaching its end. `"wait"`: a fade-out of 0 ms, so the layer waits for its view to leave, at alpha 0. The clock moves
+ * in whole milliseconds, which a call hands back unboxed.
+ *
+ * @param phase - `"fade"` or `"wait"`.
+ * @returns The renderer and its step.
+ */
+export async function fadingLoader(phase: "fade" | "wait"): Promise<FadingLoader> {
+  const mock = createMockRenderer();
+
+  await mock.start();
+  mock.world.projection.setLayers([{ name: "loading", sort: "none" }]);
+  mock.world.ecs.spawn(OWNER, [
+    Layer({ name: "loading" }),
+    Transform({ x: 540, y: 960 }),
+    Sprite({ width: 96, height: 96 })
+  ]);
+  mock.modules.sync.pass();
+  mock.api.sync.leave.show({
+    cover: { color: 0, alpha: 0.45, inMs: 0, outMs: phase === "fade" ? 86_400_000 : 0 },
+    loader: { afterMs: 0, due: () => "loading" }
+  });
+  mock.runPhase("render");
+  mock.api.sync.leave.land();
+
+  let now = 0;
+
+  return {
+    mock,
+    step: (): void => {
+      now += 1;
+      mock.setNow(now);
+      mock.modules.sync.stepLeave();
+    }
+  };
+}

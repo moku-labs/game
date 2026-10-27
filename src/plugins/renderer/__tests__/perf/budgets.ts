@@ -133,8 +133,14 @@ export const BUDGET = {
   // F61 S2: the renderer's readiness check of `world.projection.built()` while the views wait for the swap. New.
   buildReadyWaiting: 0,
   // F61 S3 slice A2: the step of the picture of a scene being left in a frame with no switch, after one look ran and
-  // its objects were kept. New: one field read.
+  // its objects were kept. New: one field read; two since F107 part 3 (the layer waiting for its views).
   leaveIdle: 0,
+  // F107 part 3: a frame of the fade-out after a swap, the loader's layer above the veil, its alpha the veil's level.
+  // New: the level, the veil's alpha and the layer's alpha written, a frame asked for.
+  leaveFade: 0,
+  // F107 part 3: a frame after the fade-out while the loader's layer waits, at alpha 0, for its views to leave. New:
+  // two fields and one length read.
+  leaveWait: 0,
   // F61 S3 slice B+D: a still pass over 300 views while two warm windows rest held, each a root with 300 elements
   // built aside and ready. New: the held list's count and world's membership version compared, `left()` read.
   warmHeldPass: 0,

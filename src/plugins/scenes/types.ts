@@ -152,8 +152,8 @@ export type SceneCover = {
  * texture turning at the centre (`texture`), a projection of the game drawn above the veil (`projection`), or, with
  * neither, a white ring the engine draws. `texture` and `projection` are one choice: a level that names either replaces
  * both of the level below, and with both named `projection` is drawn. A projection loader draws in a layer of its own
- * that the scene being left declares, mounted only once the loader is due: the whole layer is drawn above the veil
- * while the loader shows.
+ * that the scene being left declares: kept built and hidden while that scene stands, shown once the loader is due (the
+ * whole layer is drawn above the veil while it shows), and faded out with the veil after the swap.
  *
  * @example
  * ```ts
@@ -168,7 +168,10 @@ export type SceneLoader<Asset extends string = string> = {
   afterMs?: number;
   /** An asset key of the game: the texture turns at the centre of the frame. */
   texture?: Asset;
-  /** The name of a registered projection: mounted once the loader is due, its layer drawn above the veil. */
+  /**
+   * The name of a registered projection: kept built and hidden while the scene stands, shown once the loader is due,
+   * its layer drawn above the veil; it fades out with the veil after the swap.
+   */
   projection?: string;
 };
 
@@ -414,6 +417,43 @@ export type State = {
    * one. Absent otherwise: deleted, never written as `undefined`.
    */
   leaving?: Leaving;
+  /**
+   * The leave loader projection scenes holds for the next switch of the scene that stands (F103): `world` keeps it
+   * built and hidden, and the loader's `due` only shows it. Absent while it holds none: deleted, never written as
+   * `undefined`.
+   */
+  held?: HeldLoader;
+  /**
+   * The loader projection the last switch showed, fading out with the veil after its swap (F107 part 3), until the
+   * veil's `outMs` passed. Absent otherwise: deleted, never written as `undefined`.
+   */
+  fading?: FadingLoader;
+};
+
+/**
+ * A leave loader projection scenes holds while a scene stands (F103): its name and the layer its spec names, which the
+ * renderer draws above the veil once the loader is due.
+ */
+export type HeldLoader = {
+  /** The projection. */
+  name: string;
+  /** The `layer` of its spec: the view a `show` brings has no `Layer` before the next frame's reconcile. */
+  layer: string;
+};
+
+/**
+ * A loader projection fading out with the veil after the swap of its switch (F107 part 3): unmounted once the veil's
+ * `outMs` passed, or held again for the next switch when the scene that stands leaves with the same loader.
+ */
+export type FadingLoader = {
+  /** The projection. */
+  name: string;
+  /** Milliseconds of the fade still to run, counted down by the frames since the swap. */
+  leftMs: number;
+  /** The loader the scene that stands holds once the fade is over: this projection again. Absent: it is unmounted. */
+  rehold?: HeldLoader;
+  /** Removes the frame callback of the fade. */
+  off: () => void;
 };
 
 /**
@@ -434,8 +474,13 @@ export type Leaving = {
   to: string;
   /** Landed or dropped: a second end does nothing. */
   done: boolean;
-  /** The loader projection the switch mounted, unmounted at the end; absent while it mounted none. */
+  /**
+   * The loader projection the switch mounted or showed once its loader was due: unmounted at once at a drop, faded out
+   * with the veil after a land. Absent while it mounted and showed none.
+   */
   projection?: string;
+  /** Milliseconds the veil fades out over after the swap, 0 without a veil: a loader shown goes with it. */
+  outMs: number;
   /** Removes the abort listener of the switch's node. */
   off: () => void;
 };

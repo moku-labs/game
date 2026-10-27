@@ -1,7 +1,8 @@
 /**
  * @file scenes plugin — the fixtures of the perf tests and benches. Not a test file. Each fixture builds the mock
- * plugin outside any measured window and hands back the frame callback a running scene build registered in `signals`,
- * while `world.projection.built()` answers false: the call every frame of a build makes.
+ * plugin outside any measured window and hands back a frame callback scenes registered in `signals`: the one of a
+ * running scene build while `world.projection.built()` answers false, and the one of a loader projection fading out
+ * with the veil after a swap.
  */
 import { alloc } from "../../../../../tests/perf/alloc";
 import { defineScene } from "../../define";
@@ -58,6 +59,53 @@ export async function buildWaiting(): Promise<() => void> {
   const callback = mock.time.callbacks.signals[0];
 
   if (callback === undefined) throw new Error("the switch registered no build callback");
+
+  const time = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false };
+
+  return () => callback(time);
+}
+
+/** The scene on the screen of the fade fixture: it declares the loader's layer, so it holds the loader. */
+const wardScene = defineScene("ward", {
+  bundle: "ward",
+  layers: { loading: {} },
+  projections: []
+});
+
+/**
+ * The `signals` callback of the loader "loading" fading out with the veil after the swap from the ward to the board:
+ * the veil's `outMs` is so long that no window of calls ends the fade.
+ *
+ * @returns The callback the frame loop calls, as `time` calls it.
+ * @throws {Error} When the swap registered no fade callback.
+ */
+export async function loaderFading(): Promise<() => void> {
+  const mock = createMockScenes({
+    buildMs: "auto",
+    leave: { cover: { outMs: 1e15 }, loader: { projection: "loading" } }
+  });
+
+  mock.flow.features.push({
+    name: "screens",
+    description: {
+      scenes: [wardScene, boardScene],
+      projections: [{ name: "loading", layer: "loading" }]
+    }
+  });
+  mock.start();
+  mock.renderer.host.ready.mockReturnValue(true);
+  mock.world.building.done = true;
+  await mock.enter({ rest: true, scene: "ward" });
+
+  const entering = mock.enter({ rest: true, scene: "board" });
+
+  // The renderer calls the loader's `due`: the held loader is shown, and fades out after the swap.
+  mock.renderer.sync.leave.show.mock.calls.at(-1)?.[0].loader?.due?.();
+  await entering;
+
+  const callback = mock.time.callbacks.signals[0];
+
+  if (callback === undefined) throw new Error("the swap registered no fade callback");
 
   const time = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false };
 
