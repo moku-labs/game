@@ -107,6 +107,8 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     layers: projection.layers,
     mount: projection.mount,
     unmount: projection.unmount,
+    hold: projection.hold,
+    show: projection.show,
     settle: projection.settle,
     mute: projection.mute,
     lift: projection.lift,

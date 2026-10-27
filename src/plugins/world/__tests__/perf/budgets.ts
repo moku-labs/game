@@ -112,5 +112,7 @@ export const BUDGET = {
   /** F61 B+D: `projection.isBuilding(entity)` of a held view: two lookups. New: 0 B. */
   warmIsBuilding: 0,
   /** F61 B+D: the sweep of a frame with a despawn, a warm window of 600 elements held: the prune of the dead. New: 0 B. */
-  warmPruneSweep: 0
+  warmPruneSweep: 0,
+  /** F103: world's `input` step at rest with a loader held ready: frame start, no reconcile, no owed show, warm step. New: 0 B. */
+  heldInputRest: 0
 } as const;

@@ -152,7 +152,9 @@ app.world.ecs.snapshot().entities[0];
 | `replace(spec)` | Swaps the spec of a registered projection. A mounted one has its layers checked and runs the new `view` for every item on the next frame, directly. An unmounted one is only stored. An unknown name throws; a throw changes nothing. The caller is the dev hot swap in `ui`. |
 | `setLayers(list)` / `layers()` | The layer list of the scene; order is draw order. Every call stores a new frozen array, so a reader compares by identity. |
 | `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. A screen root draws at the `Order` of its place in the list, −n … −1. A projection a scene before mounted (under another layer list of `setLayers`) stays mounted when the new list declares its `layer` and `lift` alike (every field of the entry equal): its views keep their entities and their motions, no hook runs, and its screen roots take the `Order` of their place in this list, on the entity and in the rest pose. One whose layer the new list declares otherwise is unmounted and mounted again. One mounted under the current layer list already warns `world:already-mounted` and changes nothing. Throws for an unknown name and for a `layer` or `lift` the scene does not declare, a kept projection's too; nothing is mounted then. A new view is spawned with its `Layer` first, so an `onAdded` hook of a view component (the `Tree` hook of `ui`) already reads the layer. |
-| `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call. |
+| `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call, and so does the view a warm window or a hold keeps hidden. A held name is held no more. |
+| `hold(names, owner)` | Mounts projections held (`scenes`, for the leave loader of a standing scene): the checks and places of `mount`, but a held projection shows nothing; its `from`'s first item is kept built and hidden as a warm window keeps its item. See [Held projections](#held-projections). |
+| `show(name)` | Releases a held projection: the next reconcile shows `from`'s item and adopts the held view, the same entity. A name that is not held: nothing. |
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. On a view whose projection names `initialOnly` fields the mute adds to them, and the remover keeps them. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
@@ -368,6 +370,45 @@ export const settingsSheet = projection({
   The editor's `game.projections` lists a held view, as it lists a view built aside. The cost is the
   memory of every held view.
 
+#### Held projections
+
+A projection that has to appear at once at a moment only another plugin knows (the leave loader of
+a scene, shown when a switch takes `afterMs`) is mounted held (F103). It shows nothing while it is
+held; the warm machinery keeps the view of its `from`'s first item built and hidden meanwhile, so
+the moment it is due it is only shown.
+
+```ts
+// `scenes`: the ward stands; its leave loader is built ahead, hidden.
+const projection = ctx.require(worldPlugin).projection;
+projection.hold(["loading"], { kind: "plugin", name: "scenes" });
+projection.entitiesOf("loading"); // []
+
+// The renderer's `due`, 400 ms into a switch: the next frame shows the same root, no spawn.
+projection.show("loading");
+```
+
+- **`hold(names, owner)`** checks and places the names as `mount` does (an unknown name, or a
+  `layer` or `lift` the scene does not declare, throws and holds nothing; one mounted already
+  under this layer list warns `world:already-mounted`), then holds them: every reconcile of a held
+  projection shows none of its items, and every name is reconciled at once, direct, so one that
+  showed views drops them. Each held projection gets a warm record whose item is `from`'s first
+  item (keyed by `key`, or by the name for a screen), never `warm`'s: it is built, refreshed after a
+  commit and dropped exactly as a warm window's ("Warm windows", above): in idle frames under the
+  warm budget, only on a drawing renderer and a live world, `isBuilding` true and `entityOf`
+  nothing, 0 B a frame at rest (`__tests__/perf/hold.perf.ts`). A projection that declares `warm`
+  holds `from`'s item while held and warms its own again once shown and closed.
+- **`show(name)`** releases the name. The next reconcile, in the `input` phase of the next frame,
+  reconciles it by name (a running scene build passes over the mounted projections its list does
+  not name; a shown one is not passed over) and shows `from`'s item through the open of a warm
+  window: the held view is adopted, an equal item writes nothing, another one has the difference
+  written directly, `enter` and `loop` play as for a new view (direct in a world that is not live),
+  and a held view still in work is shown as it stands. With no held view (headless, paused) the
+  reconcile spawns it. A name that is not held: nothing.
+- **What drops a held view** is what drops a warm one: the start of a scene build (the one in
+  work), a restore, a load and a forced rerun (built again from the new state), the owner of its
+  views leaving. A hot swap (`replace`) keeps the hold. `unmount`, the clear and `onStop` forget
+  the hold and the held view.
+
 #### `Now` — the frame's moment
 
 `Now` (`{ now }`, exported from the package root) is the moment of the frame on the game's clock:
@@ -446,7 +487,7 @@ const app = createApp({
 
 | `time` phase | What `world` does, in order |
 |---|---|
-| `input` | write `Now` from `clock.now()` → reconcile when dirty → drop the hint buffer → one step of the warm windows → systems of `input` → flush commands |
+| `input` | write `Now` from `clock.now()` → reconcile when dirty → reconcile the projections `show` released → drop the hint buffer → one step of the warm windows → systems of `input` → flush commands |
 | `animate` | sweep ended motions (the driver advanced its tracks first) → forget dead elements → start the owed loops → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
@@ -762,7 +803,8 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
   views, registered keys, recorded rest poses, the `onConverged` listeners, a running scene build
-  and the `onBuild` checks, every warm record, the despawn queue, entities and resources, forgets
+  and the `onBuild` checks, every warm record, every held name and owed `show`, the despawn queue,
+  entities and resources, forgets
   the mounted scene, and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Doors

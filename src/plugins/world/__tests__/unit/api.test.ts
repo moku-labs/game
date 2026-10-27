@@ -45,6 +45,7 @@ const PROJECTION_MEMBERS = [
   "discard",
   "entitiesOf",
   "entityOf",
+  "hold",
   "isBuilding",
   "keyOf",
   "layers",
@@ -65,6 +66,7 @@ const PROJECTION_MEMBERS = [
   "setLayers",
   "setRest",
   "settle",
+  "show",
   "unmount",
   "viewOf"
 ];

@@ -1034,3 +1034,74 @@ export function warmOpenFixture(): () => void {
 
   return cycle;
 }
+
+/** Name of the held loader of the hold fixture. */
+const LOADER = "perf.loading";
+
+/** The one item of the held loader. */
+type Loading = { label: string };
+
+/**
+ * The leave loader of a scene: a screen of 12 rows that reads nothing of the state.
+ *
+ * @returns The spec.
+ */
+function loaderSpec(): AnyProjectionSpec {
+  return projection({
+    name: LOADER,
+    layer: "items",
+    from: (): Loading => ({ label: "Loading" }),
+    view: (loading: Loading): DescriptionNode => ({
+      type: "loader",
+      props: { label: loading.label },
+      children: Array.from({ length: 12 }, (_, row) => ({
+        type: "row",
+        props: { row },
+        children: []
+      }))
+    })
+  }) as AnyProjectionSpec;
+}
+
+/**
+ * World's `input` step with a loader held ready (F103): the frame start, the reconcile check with no commit and no
+ * owed `show`, and the warm step at rest. The state and the flow answer one kept object.
+ *
+ * @returns One `input` step.
+ */
+export function heldInputFixture(): () => void {
+  const world = createMockWorld();
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(loaderSpec());
+  world.start();
+  world.api.projection.onBuild(() => true);
+  world.api.projection.hold([LOADER], MOUNT_OWNER);
+
+  const { projection } = stableModules(world);
+
+  // The spawn, the poll, and a walk that finds no more work.
+  projection.stepWarm();
+  projection.stepWarm();
+  projection.stepWarm();
+
+  const state = world.ctx.state.projection;
+  const held = state.warm.get(LOADER)?.view?.entity ?? 0;
+  const now = world.clock.now();
+
+  // The call must measure the path it names: a loader held ready and hidden, nothing owed.
+  if (
+    !projection.isBuilding(held) ||
+    state.warmActive !== undefined ||
+    state.warmStale ||
+    projection.entitiesOf(LOADER).length > 0
+  ) {
+    throw new Error("heldInputFixture: the loader is not held ready");
+  }
+
+  return (): void => {
+    projection.startFrame(now);
+    projection.reconcileIfDirty();
+    projection.stepWarm();
+  };
+}

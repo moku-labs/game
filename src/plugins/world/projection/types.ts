@@ -789,7 +789,7 @@ export type ProjectionState = {
    * frame: what `left()` counts from, for a scene build and a warm window alike.
    */
   frameStart: number;
-  /** The warm record of every mounted projection that declares `warm`, by projection name. */
+  /** The warm record of every mounted projection that declares `warm` or is held, by projection name. */
   warm: Map<string, WarmRecord>;
   /** The same records in mounted order: the order the warm step takes them in. */
   warmList: WarmRecord[];
@@ -808,6 +808,13 @@ export type ProjectionState = {
   warmStale: boolean;
   /** Milliseconds per frame the building of a warm view may take, read from the frame rate when the work starts. */
   warmBudgetMs: number;
+  /**
+   * The projections `hold` mounted and `show` has not released: a reconcile shows none of their items, and their
+   * record keeps `from`'s first item built and hidden. `unmount`, the clear and `onStop` forget a name.
+   */
+  held: Set<string>;
+  /** The names `show` released since the last reconcile: the next reconcile reconciles them by name. */
+  showing: string[];
 };
 
 /**
@@ -817,8 +824,9 @@ export type ProjectionState = {
 export type WarmPhase = "cold" | "building" | "ready" | "shown";
 
 /**
- * The warm window of one mounted projection: the item `warm` gave, and the view of it held hidden until `from` shows
- * its key. A record lives while its projection is mounted; its view is spawned, patched and dropped in place.
+ * The warm window of one mounted projection: the item `warm` gave, or `from`'s first item while the projection is held,
+ * and the view of it held hidden until `from` shows its key. A record lives while its projection is mounted; its view
+ * is spawned, patched and dropped in place.
  */
 export type WarmRecord = {
   /** The projection. */
@@ -836,8 +844,8 @@ export type WarmRecord = {
   entities: Set<Entity>;
   phase: WarmPhase;
   /**
-   * The state `warm` was last read against: the step reads it again only after a commit. Kept when `warm` or `view`
-   * threw, so a throw is logged once per commit and not every frame.
+   * The state the item was last read against: the step reads it again only after a commit, a `hold` or a `show`.
+   * Kept when `warm`, `from` or `view` threw, so a throw is logged once per commit and not every frame.
    */
   seen?: Snapshot;
 };
@@ -1078,6 +1086,53 @@ export type ProjectionApi = {
    * ```
    */
   unmount(names: readonly string[]): void;
+
+  /**
+   * Mounts projections held: the checks and the places of `mount`, but a held projection shows none of its items, and
+   * every name is reconciled at once, direct, so one that showed views drops them. Its `from`'s first item (keyed by
+   * `key`, or by the name of the projection) is kept built and hidden instead, as a warm window keeps its item: in the
+   * idle time of frames, under the warm budget, never drawn, never hit; `isBuilding` answers true for its view and for
+   * what `adopt` marks, `entityOf` and `entitiesOf` nothing. A commit writes into the held view as into a warm one; a
+   * restore, a load, a forced rerun and the start of a scene build drop it as they drop a warm one, to be built again.
+   * It stays held until `show` or `unmount`. A projection that declares `warm` holds `from`'s item while it is held,
+   * and warms its own item again once shown and closed. Only a drawing renderer and a live world build it, as for a
+   * warm window; elsewhere nothing is built and `show` spawns the view. Nothing is held when the call throws.
+   *
+   * @param names - Names of the projections to hold.
+   * @param owner - Who owns the entities of these projections.
+   * @throws {Error} For an unknown name, or a `layer` or `lift` the scene does not declare.
+   * @example
+   * ```ts
+   * // `scenes`: the ward stands; its leave loader `loading` is built ahead for the next switch, hidden.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.hold(["loading"], { kind: "plugin", name: "scenes" });
+   * world.projection.entitiesOf("loading"); // []: nothing shows over the ward
+   * world.projection.isBuilding(1_048_620); // true a frame later: the loader's root, built in idle frames
+   * ```
+   */
+  hold(names: readonly string[], owner: Owner): void;
+
+  /**
+   * Shows a held projection: it is held no more, and the next reconcile (the `input` phase of the next frame) shows its
+   * `from`'s item, also while a scene is built aside. The held view is adopted: the same entity, no spawn. An item with
+   * the content of the held one runs no `view` and writes nothing; another one has the difference written directly,
+   * with no `change` hook. The `enter` and `loop` hooks play as for a new view; a world that is not live shows it
+   * direct. A held view still in work is shown as it stands, and ui builds the rest of its root in one block. With no
+   * held view (a headless app, a paused world) the reconcile spawns it as a mount does. A name that is not held:
+   * nothing.
+   *
+   * @param name - The held projection.
+   * @example
+   * ```ts
+   * // `scenes`, in the renderer's `due` of a switch that took 400 ms: the loader built while the ward stood is shown.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.show("loading");
+   * world.projection.entityOf("loading", "loading"); // undefined until the next frame's reconcile
+   * world.projection.entityOf("loading", "loading"); // 1_048_620 the next frame: the same root, no spawn
+   * world.projection.show("hud"); // nothing: the HUD is not held
+   * ```
+   */
+  show(name: string): void;
 
   /**
    * A drop with no commit: cancels the view's motions and plays settle for every loose component.
