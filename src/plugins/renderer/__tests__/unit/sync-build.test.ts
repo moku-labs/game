@@ -338,6 +338,31 @@ describe("a scene built aside: chunks under the budget", () => {
     expect(made).toEqual([1, 2, 3, 3]);
   });
 
+  // Bug (F61): the clock is read every 8 views; eight views of a shop took 4–6 ms on a Galaxy A26, past the whole budget
+  // of a warm window: a chunk overruns the budget by up to 7 views.
+  it("reads the clock every 2 views, so a chunk overruns its budget by one view at most", async () => {
+    const mock = await started();
+
+    startBuild(mock, 4);
+
+    for (let index = 1; index <= 12; index += 1) spawnBuilding(mock, boardTop(index));
+
+    // Every view spends 1 ms of the world clock.
+    let now = 0;
+
+    mock.api.sync.textures.provide(() => {
+      now += 1;
+      mock.setWorldNow(now);
+
+      return texture as never;
+    });
+
+    frame(mock);
+
+    // Read after the 1st (3 ms left), the 3rd (1 ms left) and the 5th (spent): 5 views, one over the 4 ms.
+    expect(mock.modules.sync.counts().views).toBe(5);
+  });
+
   // Bug (U2.3): a child made in a later chunk than its parent finds no parent view, or a child queued before its
   // parent is made first: it is detached for good and never drawn after the swap.
   it("a child in a later chunk hangs under its parent, and a parent queued after its child is made first", async () => {

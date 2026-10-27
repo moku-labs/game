@@ -332,6 +332,29 @@ describe("a scene built in parts", () => {
     expect(perFrame.filter(count => count === 0).length).toBeGreaterThanOrEqual(2);
   });
 
+  // Bug (F61): the solve, which cannot be split, runs in the frame of the last part after its budget is spent: on a
+  // Galaxy A26 a warm shop's frame went past two vsyncs.
+  it("lays the root out in a frame of its own once the last part spent the frame's budget", async () => {
+    const parts = await start(1);
+    const { made } = recordMade(parts);
+    const counters = parts.app.world.ecs.resource(UiCounters);
+    const solves = counters.solves;
+    const frames: Array<{ made: number; solves: number }> = [];
+
+    parts.build(["parts.big"], 3);
+
+    while (!parts.built() && frames.length < 200) {
+      parts.frame();
+      frames.push({ made: made.size, solves: counters.solves - solves });
+    }
+
+    const at = frames.findIndex(frame => frame.solves === 1);
+
+    expect(at).toBeGreaterThan(0);
+    // The frame of the solve made no element: the last part came a frame before.
+    expect(frames[at]?.made).toBe(frames[at - 1]?.made);
+  });
+
   // Bug: the first application of a big root runs whole in one frame (its component flush is the
   // long frame the budget does not see), or the build is reported done before it is applied.
   it("applies at most 100 elements a frame and is not done until the last one", async () => {
@@ -431,9 +454,12 @@ describe("a scene built in parts", () => {
     const renders = counters.windowRenders;
     const waited: Array<{ tall: boolean; made: number; renders: number }> = [];
 
-    // A budget of 0: the first application stops after 8 elements, the list live among them.
+    // A budget of 0: the solve waits for the next frame (F61), then the first application stops after 8 elements, the
+    // list live among them.
     parts.build(["parts.listed"], 0);
     clock.frame = 1;
+    parts.frame();
+    clock.frame = 2;
     parts.frame();
 
     expect(marked(parts, "tall")).toBeDefined();

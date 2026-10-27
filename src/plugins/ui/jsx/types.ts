@@ -430,6 +430,11 @@ export type Root = {
    * as their enters play next. Absent on every other root.
    */
   still?: true;
+  /**
+   * The solve of this root built aside waited for the next frame once, its frame's budget spent (F61): the next solve
+   * runs whatever the budget. Deleted at the solve, never written as `undefined`.
+   */
+  solveWaited?: true;
 };
 
 /**

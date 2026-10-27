@@ -2011,9 +2011,29 @@ export function createReconciler(
   }
 
   /**
+   * Tells whether the solve of a root built aside waits for the next frame: its first solve, when the frame's budget is
+   * spent (F61). A root that waited once is solved in the next frame whatever its budget, so a build always ends. A
+   * root on the screen never waits.
+   *
+   * @param root - A root that needs a solve.
+   * @returns True when it waits.
+   */
+  function solveWaits(root: Root): boolean {
+    if (root.aside === undefined || root.solveWaited === true || !isAside(root.entity))
+      return false;
+    if (ctx.deps.world.projection.left() > 0) return false;
+
+    root.solveWaited = true;
+
+    return true;
+  }
+
+  /**
    * Solves one root in a box and applies its rects: a root on the viewport when it is marked, a
    * root in a slot also when its slot was resized. A root built aside waits while parts of it wait,
-   * and is applied in parts. A root shown before its parts were done is applied whole and still.
+   * and is applied in parts. Its solve, which cannot be split (3–5 ms for a shop on a Galaxy A26),
+   * waits for the next frame once the frame's budget is spent, and runs there whatever it has left.
+   * A root shown before its parts were done is applied whole and still.
    *
    * @param root - The root.
    * @param box - The viewport, or the slot's content box.
@@ -2030,11 +2050,13 @@ export function createReconciler(
     const resized = root.slot !== undefined && !sameBox(root.slotRect, box);
 
     if (!root.needsSolve && !resized) return false;
+    if (solveWaits(root)) return false;
     // Kept: a copy, the box may be scratch.
     if (root.slot !== undefined) root.slotRect = { x: box.x, y: box.y, w: box.w, h: box.h };
 
     modules.layout.solve(element, box, lookup);
     root.needsSolve = false;
+    delete root.solveWaited;
 
     // A root not on the screen: its windowed ranges are cut once more in the next frame.
     if (root.aside !== undefined) asideSolved = true;

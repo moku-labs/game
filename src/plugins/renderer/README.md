@@ -766,7 +766,7 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
 - **Aside queue.** World flags a view before the `onAdded` hooks of its components, and the pass
   sorts the building entities out of its added set (one `isBuilding` lookup each) into an aside queue. After the live half of the pass, their views are made in chunks while
   `world.projection.left()` is above 0, at least one a frame, the clock read after the first view and
-  every 8 after it. A chunk carries the queued parents of its views first, as the one-block build
+  every 2 after it. A chunk carries the queued parents of its views first, as the one-block build
   does (U2.3), so a child made in a later frame still hangs under its parent.
 - **Held views.** A made view of the build with no parent, or with a live parent (a kept projection,
   a `ui` slot host), is held: it hangs nowhere in the stage, its live parent gets no wrapper for it,

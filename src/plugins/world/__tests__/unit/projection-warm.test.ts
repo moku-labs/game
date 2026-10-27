@@ -281,7 +281,7 @@ describe("warm: the held view", () => {
 
   // Bug: the held view is built with no budget, so ui builds the whole sheet in one frame (the long frame of the
   // open, moved to the rest); or `left()` stays finite at rest, so ui and the renderer work on every frame.
-  it("counts two thirds of the frame interval while the held view builds, and Infinity once every check passes", () => {
+  it("counts a third of the frame interval while the held view builds, and Infinity once every check passes", () => {
     const { world, parts } = sheetWorld();
 
     parts.done = false;
@@ -291,11 +291,11 @@ describe("warm: the held view", () => {
     world.frame(16);
     world.clock.advance(2);
 
-    expect(world.api.projection.left()).toBeCloseTo((1000 / 60) * (2 / 3) - 2, 6);
+    expect(world.api.projection.left()).toBeCloseTo(1000 / 60 / 3 - 2, 6);
 
     world.frame(16);
 
-    expect(world.api.projection.left()).toBeCloseTo((1000 / 60) * (2 / 3), 6);
+    expect(world.api.projection.left()).toBeCloseTo(1000 / 60 / 3, 6);
 
     parts.done = true;
     world.frame(16);
@@ -306,7 +306,7 @@ describe("warm: the held view", () => {
 
   // Bug: the budget ignores the loop's rate: at 120 fps a warm frame takes 11 ms of an 8.3 ms frame; or a loop with
   // no rate yet (0) gives an infinite budget, and ui builds the whole sheet in one frame.
-  it("reads the budget from the frame rate the loop runs at, two thirds of 60 Hz without a rate", () => {
+  it("reads the budget from the frame rate the loop runs at, a third of 60 Hz without a rate", () => {
     const fast = sheetWorld().world;
     const unknown = sheetWorld().world;
 
@@ -315,8 +315,8 @@ describe("warm: the held view", () => {
     unknown.rate.fps = 0;
     unknown.frame(16);
 
-    expect(fast.api.projection.left()).toBeCloseTo((1000 / 120) * (2 / 3), 6);
-    expect(unknown.api.projection.left()).toBeCloseTo((1000 / 60) * (2 / 3), 6);
+    expect(fast.api.projection.left()).toBeCloseTo(1000 / 120 / 3, 6);
+    expect(unknown.api.projection.left()).toBeCloseTo(1000 / 60 / 3, 6);
   });
 
   // Bug: every window is built in one frame (the long frame slice B+D removes), or a second record starts while the

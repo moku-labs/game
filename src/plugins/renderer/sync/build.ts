@@ -17,8 +17,11 @@ import { parentOf } from "./pose";
 import type { AsideQueue, SyncCtx, SyncState } from "./types";
 import { attach, createView } from "./views";
 
-/** Views made between two reads of the clock: a read costs more than a small view. */
-const CLOCK_EVERY = 8;
+/**
+ * Views made between two reads of the clock. Eight views of a shop (text, nine-slices, filters) took 4–6 ms on a Galaxy
+ * A26, past a warm window's whole budget; two keep a chunk under a millisecond or so (F61).
+ */
+const CLOCK_EVERY = 2;
 
 /**
  * Tells whether a scene or a warm window is being built: `left()` answers a finite number only while a build runs
