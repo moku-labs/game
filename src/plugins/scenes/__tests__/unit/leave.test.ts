@@ -545,6 +545,27 @@ describe("the begin stage of a node that switches", () => {
     expect(mock.renderer.leaves).toEqual([{ call: "show", current: "home" }]);
   });
 
+  // Bug: the begin stage reads only the node's own scene, so a node without one that mounts the expected scene (the
+  // restore door's `expect`) shows no veil while its bundles download.
+  it("shows the look for a node without a scene of its own that takes the expected scene", async () => {
+    const mock = await on("home");
+
+    mock.api.expect("board");
+    await mock.stage("begin", { rest: true });
+
+    expect(mock.renderer.leaves).toEqual([{ call: "show", current: "home" }]);
+  });
+
+  // Bug: the begin stage shows a veil for a scene no feature declared, which the scene stage refuses with a throw.
+  it("starts nothing for a scene no feature declared", async () => {
+    const mock = await on("home");
+
+    await mock.stage("begin", { rest: true, scene: "nowhere" });
+
+    expect(mock.renderer.leaves).toEqual([]);
+    expect(mock.state.leaving).toBeUndefined();
+  });
+
   // Bug: a `load` stage that throws (a download that failed) leaves the veil and the ring over the old scene for good:
   // the throw aborts nothing and the node never reaches its `scene` stage, so neither the listener nor the switch
   // drops it.

@@ -276,6 +276,29 @@ export function abortReason(signal: AbortSignal): AbortReason {
 }
 
 /**
+ * Tells whether a stage rejected because its node was aborted: with an `AbortError` (the wait of a
+ * download that a stop or a restore cancelled) or with the signal's own reason. A real error that
+ * arrives after the abort is still a failure of the node.
+ *
+ * @param signal - The node's abort signal.
+ * @param error - What the stage rejected with.
+ * @returns True when the rejection is the abort itself.
+ * @example
+ * ```ts
+ * const aborted = AbortSignal.abort("restore");
+ * const cancelled = Object.assign(new Error("[game] assets: the load was aborted."), { name: "AbortError" });
+ * isAbortRejection(aborted, cancelled); // true
+ * isAbortRejection(aborted, new Error("offline")); // false: a real failure
+ * ```
+ */
+export function isAbortRejection(signal: AbortSignal, error: unknown): boolean {
+  if (!signal.aborted) return false;
+  if (error === signal.reason) return true;
+
+  return error instanceof Error && error.name === "AbortError";
+}
+
+/**
  * Tells whether the runner was stopped. The abort of `onStop` survives between two nodes, so a
  * loop that is not inside a node ends at the next turn.
  *

@@ -1122,8 +1122,13 @@ describe("runLoop", () => {
   });
 
   // Bug: a node aborted during `begin` still runs its later stages: the bundles of a node the player already left are
-  // downloaded, and its `scene` stage switches for nobody.
-  it("starts no further stage once the node was aborted between two stages", async () => {
+  // downloaded, and its `scene` stage switches for nobody. A stop ends the loop; a restore or the inbox lets it go on,
+  // here into the same node again, whose stages then all run.
+  it.each([
+    ["stop", ["begin"], true],
+    ["restore", ["begin", "begin", "load", "scene"], false],
+    ["inbox", ["begin", "begin", "load", "scene"], false]
+  ] as const)("starts no further stage once the node was aborted between two stages (%s)", async (reason, expected, ends) => {
     const order: string[] = [];
     const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
     const harness = setup({ main });
@@ -1132,7 +1137,8 @@ describe("runLoop", () => {
 
     begin.push(() => {
       order.push("begin");
-      harness.ctx.state.runner.abort?.abort("stop");
+      // The first entry only: the one after it runs on.
+      if (order.length === 1) harness.ctx.state.runner.abort?.abort(reason);
     });
     load.push(() => {
       order.push("load");
@@ -1151,8 +1157,8 @@ describe("runLoop", () => {
     );
     await tick();
 
-    expect(order).toEqual(["begin"]);
-    expect(ended.value).toBe(true);
+    expect(order).toEqual(expected);
+    expect(ended.value).toBe(ends);
     await stopRunner(harness.ctx);
   });
 
@@ -3011,6 +3017,65 @@ describe("a node whose onEnter stage threw", () => {
     // The retry entered the node again, its stages passed and its gate opened.
     expect(entries.count).toBe(2);
     expect(harness.calls).toContain("open:play");
+    await stopRunner(harness.ctx);
+  });
+
+  // Bug: a stop or a restore that lands while `load` awaits a download makes the download reject with an AbortError,
+  // and the runner takes it for a failure of the node: a rollback, a failure counted, `flow:error` and an error entry
+  // for a node that did not fail.
+  it.each([
+    ["stop", "the AbortError of the cancelled download"],
+    ["restore", "the AbortError of the cancelled download"],
+    ["restore", "the signal's own reason"]
+  ] as const)("takes a stage that rejects after a %s with %s for that abort, not a failure", async (reason, rejection) => {
+    const home = node({ rest: true, checkpoint: true, outcomes: ["play"] });
+    const main = flow("main", { home }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const entries = { count: 0 };
+
+    harness.ctx.state.runner.enterCallbacks.load.push((_info, { signal }) => {
+      entries.count += 1;
+
+      // The first entry downloads until it is cancelled; the bookmark's entry finds its bundles in.
+      if (entries.count > 1) return;
+
+      return new Promise<void>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            reject(
+              rejection === "the signal's own reason"
+                ? signal.reason
+                : new DOMException("The download was cancelled.", "AbortError")
+            );
+          },
+          { once: true }
+        );
+      });
+    });
+
+    const running = harness.start();
+
+    await tick();
+
+    await (reason === "stop"
+      ? stopRunner(harness.ctx)
+      : restorePosition(harness.ctx, harness.modules, bookmarkAt("home")));
+    await tick();
+
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
+    expect(harness.ctx.log.error).not.toHaveBeenCalled();
+    expect(harness.ctx.state.runner.failures).toBe(0);
+    expect(harness.calls).not.toContain("rollback");
+
+    if (reason === "stop") {
+      await expect(running).resolves.toBeUndefined();
+    } else {
+      // The bookmark's node was entered and its gate opened.
+      expect(entries.count).toBe(2);
+      expect(harness.calls).toContain("open:play");
+    }
+
     await stopRunner(harness.ctx);
   });
 

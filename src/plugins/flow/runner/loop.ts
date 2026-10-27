@@ -6,7 +6,15 @@ import { applyResult, arrive, finishNode, handleAbort, handleFailure } from "./e
 import { checkGraph, collectGraph, requireMainFlow } from "./graph";
 import type { Delivery, Location, Safe, Step, StepOutcome } from "./loop-types";
 import { noPayload } from "./loop-types";
-import { nodeInfo, nodeOutcome, runEnterCallbacks, stopped, waitForPointer } from "./node";
+import {
+  abortReason,
+  isAbortRejection,
+  nodeInfo,
+  nodeOutcome,
+  runEnterCallbacks,
+  stopped,
+  waitForPointer
+} from "./node";
 import { describePlan, pickContribution } from "./plan";
 import { eventResult, framesOf, locateFrames } from "./position";
 import { recoverNode, takeRecovery } from "./recover";
@@ -56,6 +64,12 @@ async function runNode(
   try {
     await runEnterCallbacks(ctx, nodeInfo(path, location, node), abort.signal);
   } catch (error) {
+    // A stop or a restore landed while a stage awaited: the `AbortError` of the download it
+    // cancelled is that abort, not a failure of the node.
+    if (isAbortRejection(abort.signal, error)) {
+      return handleAbort(modules, undefined, abortReason(abort.signal));
+    }
+
     // The node ends in its stages: what an earlier stage started for it (the veil `scenes` shows
     // at `begin`) hears the abort now, before the rollback, a safe node's `recover` or a fatal end.
     abort.abort("failed");

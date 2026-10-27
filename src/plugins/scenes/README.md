@@ -256,8 +256,8 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   show nothing, and so does a switch whose look resolves to nothing.
 - **The start.** The look is handed to `renderer.sync.leave.show` at the `begin` stage of the node (spec 33, slice A3),
   the first stage of entering it, before the `load` stage of `assets` downloads the coming scene's bundles: the veil is
-  in the next frame, also on a cold first visit (with slice A2 alone it came after that download, about 190 ms on the
-  A26). The `begin` stage reads the target by the rules of steps 1 to 4 without touching the pending record, and starts
+  in the next frame, also on a cold first visit (with slice A2 alone it came only after that download, as measured on
+  the A26). The `begin` stage reads the target by the rules of steps 1 to 4 without touching the pending record, and starts
   the look only for a real change to a registered scene; it never waits. The `scene` stage of the same node takes the
   look over, so a switch shows one look. A switch the `begin` stage did not see shows it at its own start, right after
   `bundles` was read.

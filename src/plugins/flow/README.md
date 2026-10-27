@@ -166,7 +166,10 @@ that throws or returns a value that is not JSON, and an edge beyond the cap of e
 rest node all fail the transition. The runner discards the transaction, drops the hints, shuts the
 gate and rolls the state back to the last rest point. A node whose `onEnter` stage rejects is first
 aborted with reason `"failed"`: what an earlier stage started for it, listening to its signal, ends
-before the rollback, in all three rows below.
+before the rollback, in all three rows below. A stage that rejects with the abort itself after a
+stop or a restore (the `AbortError` of a cancelled download, or the signal's reason) is that abort,
+not a failure: the node is left as an aborted one, with no rollback, no failure counted and no
+`flow:error`. A real error that arrives after the abort is still a failure.
 
 | Failures in a row | Where the graph goes | `retry` |
 |---|---|---|

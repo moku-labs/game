@@ -927,9 +927,13 @@ export type FlowState = {
  *
  * @example
  * ```ts
- * // The scenes plugin answers the tap on "board" at `begin` (the veil over the ward, in the next
- * // frame, while the `load` stage of assets still downloads the board) and switches at `scene`.
- * const scenesStages: Stage[] = ["begin", "scene"];
+ * // Registered in any order, the stages of a node run begin, load, scene: the veil `scenes` shows
+ * // at "begin" is up before `assets` downloads the board at "load".
+ * const order: string[] = [];
+ * app.flow.onEnter("scene", () => order.push("scene"));
+ * app.flow.onEnter("load", () => order.push("load"));
+ * app.flow.onEnter("begin", () => order.push("begin"));
+ * // entering a node: order is ["begin", "load", "scene"]
  * ```
  */
 export type Stage = "begin" | "load" | "scene";
@@ -1082,7 +1086,10 @@ export type RunnerApi = {
    * the loads start only after it. Once the node is aborted (a restore, a stop) no further stage
    * starts. A stage that throws ends the node: its signal is aborted with reason `"failed"` before
    * the rollback, so what an earlier stage started for it (a veil over the scene being left) is
-   * taken down at once, also before a safe node's `recover` and when the failure is fatal.
+   * taken down at once, also before a safe node's `recover` and when the failure is fatal. A stage
+   * that rejects with the abort itself after a stop or a restore (the `AbortError` of a cancelled
+   * download, or the signal's reason) is that abort, not a failure: no rollback, no `flow:error`.
+   * A real error that arrives after the abort is still a failure.
    *
    * The stages run before the node opens its transaction, and `model.store.snapshot()` is the
    * committed state, so a stage reads the state the node is entered with: on an ordinary entry
@@ -1103,7 +1110,9 @@ export type RunnerApi = {
    * const offBegin = flow.onEnter("begin", (node, { mode }) => {
    *   if (mode === "live" && node.scene === "board") ctx.require(rendererPlugin).sync.leave.show(veil);
    * });
-   * const offScene = flow.onEnter("scene", node => switchTo(node.scene)); // node.scene: "board"
+   * const offScene = flow.onEnter("scene", async node => {
+   *   // node.scene: "board": await its bundles, build it aside, swap it in, then land the veil
+   * });
    *
    * offBegin(); // the plugin stops: neither callback is called any more
    * offScene();

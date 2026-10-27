@@ -479,7 +479,7 @@ describe("the picture of a scene being left, across the engine", () => {
   });
 
   // Bug: the veil waits for the `load` stage: a cold first visit downloads the board's files first and shows nothing
-  // for the whole download (~190 ms on the A26 with slice A2).
+  // for the whole download (measured on the A26 with slice A2).
   it("shows the veil in the next frame while the board's bundle is still downloading", async () => {
     const network = heldNetwork();
     const fixture = await open(undefined, { manifest: COLD_MANIFEST, io: network.io });
@@ -526,7 +526,9 @@ async function leaveUnderVeil(
 
 describe("a download that fails under the veil", () => {
   // Bug: the `load` stage throws and nothing drops the veil: the ward the rollback returns to stays dimmed, the ring
-  // turning over it, while the player answers it again.
+  // turning over it, while the player answers it again. This path is guarded twice: by the abort of the failed node,
+  // and by the backstop of the ward's `begin`, which drops a look left over. The two cases below prove the abort alone:
+  // no `begin` comes before the veil must go.
   it("is gone when the rollback returns to the ward", async () => {
     const network = heldNetwork();
     const fixture = await openFailing(network, { safeNode: "ward", retries: 1 });

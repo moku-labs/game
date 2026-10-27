@@ -147,19 +147,20 @@ export function handleFailure(
 
 /**
  * Leaves the aborted node: the transaction is discarded, the hints are dropped and the gate is
- * shut. `"stop"` ends the loop; `"restore"` lets the next turn enter the bookmark.
+ * shut. `"stop"` ends the loop; `"restore"` lets the next turn enter the bookmark. A node aborted
+ * in its stages has no transaction yet.
  *
  * @param modules - Injected sibling APIs.
- * @param transaction - The open transaction of the aborted node.
+ * @param transaction - The open transaction of the aborted node, `undefined` during its stages.
  * @param reason - Why the node was aborted.
  * @returns `"stop"` when the runner was stopped, `"continue"` otherwise.
  */
 export function handleAbort(
   modules: Modules,
-  transaction: Transaction,
+  transaction: Transaction | undefined,
   reason: AbortReason
 ): StepOutcome {
-  transaction.discard();
+  transaction?.discard();
   modules.fx.drop();
   modules.gate.close();
 
