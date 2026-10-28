@@ -437,6 +437,23 @@ export type InitialOnly<Values extends readonly object[]> = {
 };
 
 /**
+ * A scene switch, as a plugin hands it to a projection with `projection.feed`: the scene left, the scene entered, and
+ * the share of the switch's bundles loaded, 0 to 1. The projection's `from` reads it as its third argument. `scenes`
+ * feeds its leave loader one: `{ from: current, to: current, progress: 0 }` while the scene stands, then the switch.
+ *
+ * @example
+ * ```ts
+ * // 300 ms into the ward → board switch, half of the board's bundles are loaded.
+ * const sw: SceneSwitch = { from: "ward", to: "board", progress: 0.5 };
+ * ```
+ */
+export type SceneSwitch = {
+  readonly from: string;
+  readonly to: string;
+  readonly progress: number;
+};
+
+/**
  * One projection: keyed items of the model turned into entities. `Item` is inferred from the
  * return of `from`; `layer` and `lift` keep their literal types so a scene can check them.
  * `Values` are the value types of the `initialOnly` pairs, inferred by `projection()`; an
@@ -465,7 +482,33 @@ export type ProjectionSpec<
   readonly name: string;
   readonly layer: LayerName;
   readonly lift?: LiftName;
-  from(player: Player, session: Session): readonly Item[] | Item;
+  /**
+   * The items of the projection, read from the committed state: a list, keyed by `key`, or one plain object, a screen
+   * drawn under the name of the projection; `undefined` or `null` shows nothing. The third argument is the switch
+   * another plugin last handed this projection with `projection.feed`, `undefined` for a projection never fed: the
+   * leave loader of a scene reads where the switch goes and how far it loaded. A `from` with two parameters reads the
+   * state alone, as before.
+   *
+   * @param player - The `player` root of the committed state.
+   * @param session - The `session` root of the committed state.
+   * @param sw - The switch last fed, or `undefined`.
+   * @returns The items, or the one item of a screen.
+   * @example
+   * ```ts
+   * // The leave loader of a game: where the switch goes and its progress.
+   * export const loading = projection({
+   *   name: "screens.loading",
+   *   layer: "veil",
+   *   from: (_player: Player, _session: Session, sw: SceneSwitch | undefined) => ({
+   *     to: sw?.to ?? "",
+   *     progress: sw?.progress ?? 0
+   *   }),
+   *   view: loader => loaderView(loader)
+   * });
+   * // `scenes` fed it { from: "ward", to: "board", progress: 0.5 }: the item is { to: "board", progress: 0.5 }.
+   * ```
+   */
+  from(player: Player, session: Session, sw: SceneSwitch | undefined): readonly Item[] | Item;
   /** Omitted when `from` returns one plain object: the key is then the name of the projection. */
   key?(item: Item): string;
   view(item: Item): ViewOutput;
@@ -553,7 +596,8 @@ export type AnyProjectionSpec = {
   readonly name: string;
   readonly layer: string;
   readonly lift?: string;
-  from(player: Json, session: Json): unknown;
+  /** The items of `ProjectionSpec.from`, their type erased; the third argument is the switch last fed. */
+  from(player: Json, session: Json, sw: SceneSwitch | undefined): unknown;
   key?(item: unknown): string;
   view(item: unknown): ViewOutput;
   readonly motion?: AnyProjectionMotion;
@@ -813,8 +857,22 @@ export type ProjectionState = {
    * record keeps `from`'s first item built and hidden. `unmount`, the clear and `onStop` forget a name.
    */
   held: Set<string>;
-  /** The names `show` released since the last reconcile: the next reconcile reconciles them by name. */
+  /**
+   * The names `show` released, and the shown ones `feed` changed, since the last reconcile: the next reconcile
+   * reconciles them by name. A name is on it once.
+   */
   showing: string[];
+  /**
+   * The switch `feed` last handed each projection, by name: what `from` reads as its third argument. The public
+   * `unmount`, the clear and `onStop` forget it; a `hold` or a `mount` that places a mounted name again keeps it.
+   */
+  fed: Map<string, SceneSwitch>;
+  /**
+   * The switch a held projection's warm step reads `from` with, by name: set by the first `feed` after `hold`, so a
+   * later feed never makes the held item differ; dropped by `hold`, `show` and every unmount. Without one the warm step
+   * reads `fed`, the value stored when `hold` ran.
+   */
+  heldFed: Map<string, SceneSwitch>;
 };
 
 /**
@@ -1133,6 +1191,35 @@ export type ProjectionApi = {
    * ```
    */
   show(name: string): void;
+
+  /**
+   * Hands a projection the scene switch its `from` reads as its third argument (`scenes` feeds its leave loader).
+   * A value equal field by field to the one stored (`from`, `to` and `progress`, each with `===`) changes nothing and
+   * allocates nothing. Any other value is stored as it is, not copied: feed a new object for a new value, never one
+   * changed in place (its fields are read-only). Then what happens depends on the projection:
+   * - Held (`hold`): nothing more. The held view keeps the value of the first feed after `hold` (or the one stored
+   *   when `hold` ran), also through a commit, so a feed never builds it again; `show` reads the latest value and
+   *   writes the difference into the held view once.
+   * - Mounted and shown: the next reconcile (the `input` phase of the next frame) reads its `from` again by name, with
+   *   no commit. A changed item is a change of a live view under the rules of any commit: an `enter` that still plays
+   *   is cancelled, a `change` hook runs. It costs one reconcile of that projection.
+   * - Not mounted, or unknown: only stored; a later `mount` or `hold` reads it.
+   *
+   * `unmount` forgets the value of its names, and so do the clear and `onStop`; a `hold` or a `mount` that places a
+   * mounted name again keeps it.
+   *
+   * @param name - The projection.
+   * @param sw - The switch: the scene left, the scene entered and the share of its bundles loaded.
+   * @example
+   * ```ts
+   * // `scenes`, 300 ms into the ward → board switch: the shown loader gets half of the board's bundles loaded.
+   * ctx.require(worldPlugin).projection.feed("screens.loading", { from: "ward", to: "board", progress: 0.5 });
+   * // The next frame's reconcile calls the loader's from(player, session, { from: "ward", to: "board", progress: 0.5 }).
+   * ctx.require(worldPlugin).projection.feed("screens.loading", { from: "ward", to: "board", progress: 0.5 });
+   * // An equal value: no reconcile, 0 B.
+   * ```
+   */
+  feed(name: string, sw: SceneSwitch): void;
 
   /**
    * A drop with no commit: cancels the view's motions and plays settle for every loose component.

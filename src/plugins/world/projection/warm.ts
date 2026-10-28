@@ -19,6 +19,7 @@ import type {
   Mounted,
   ProjectionCtx,
   ProjectionState,
+  SceneSwitch,
   Track,
   View,
   WarmRecord
@@ -229,7 +230,8 @@ export function forgetWarm(pctx: ProjectionCtx, name: string): void {
 }
 
 /**
- * Drops every held view and forgets every record, every held name and every owed `show`: the clear of the projections.
+ * Drops every held view and forgets every record, every held name, every owed `show` and every value fed: the clear of
+ * the projections.
  *
  * @param pctx - Domain context of the projection module.
  */
@@ -243,6 +245,8 @@ export function clearWarm(pctx: ProjectionCtx): void {
   state.warmHeld.clear();
   state.held.clear();
   state.showing.length = 0;
+  state.fed.clear();
+  state.heldFed.clear();
   delete state.warmActive;
   state.warmStale = false;
 }
@@ -480,17 +484,23 @@ function pollActive(state: ProjectionState, active: WarmRecord): void {
  *
  * @param spec - The projection spec.
  * @param snapshot - The state now.
+ * @param sw - The switch `from` reads.
  * @returns The item, or `undefined` for an empty list.
  */
-function firstItem(spec: AnyProjectionSpec, snapshot: Snapshot): unknown {
-  const source: unknown = spec.from(snapshot.player, snapshot.session);
+function firstItem(
+  spec: AnyProjectionSpec,
+  snapshot: Snapshot,
+  sw: SceneSwitch | undefined
+): unknown {
+  const source: unknown = spec.from(snapshot.player, snapshot.session, sw);
 
   return Array.isArray(source) ? (source as readonly unknown[])[0] : source;
 }
 
 /**
- * Reads the item a record holds and its key: `from`'s first item while the projection is held, else the item `warm`
- * gives. A `warm`, a `from` or a `key` that throws is logged as a projection that failed, and nothing is held.
+ * Reads the item a record holds and its key: `from`'s first item while the projection is held, read with the value the
+ * first feed after `hold` stored (else the one fed before), so a later feed never makes it differ; else the item
+ * `warm` gives. A `warm`, a `from` or a `key` that throws is logged as a projection that failed, and nothing is held.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec, which declares `warm` or is held.
@@ -502,9 +512,11 @@ function readWarm(
   spec: AnyProjectionSpec,
   snapshot: Snapshot
 ): { item: unknown; key: string } | undefined {
+  const state = pctx.ctx.state.projection;
+
   try {
-    const item = pctx.ctx.state.projection.held.has(spec.name)
-      ? firstItem(spec, snapshot)
+    const item = state.held.has(spec.name)
+      ? firstItem(spec, snapshot, state.heldFed.get(spec.name) ?? state.fed.get(spec.name))
       : spec.warm?.(snapshot.player, snapshot.session);
 
     if (item === undefined || item === null) return undefined;

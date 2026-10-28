@@ -45,6 +45,7 @@ const PROJECTION_MEMBERS = [
   "discard",
   "entitiesOf",
   "entityOf",
+  "feed",
   "hold",
   "isBuilding",
   "keyOf",

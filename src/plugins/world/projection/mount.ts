@@ -121,7 +121,8 @@ function drawsAlike(
 /**
  * Unmounts projections: every motion of their views is finished, and the live views and the
  * despawn queue are despawned in the same call, and so is the view a warm window or a hold keeps
- * hidden. A held name is held no more. An unknown or unmounted name is skipped.
+ * hidden. A held name is held no more. The value fed to a name stays: a `hold` or a `mount` that places it again
+ * reads it, and the public `unmount` forgets it. An unknown or unmounted name is skipped.
  *
  * @param pctx - Domain context of the projection module.
  * @param names - Names of the projections to unmount.
@@ -137,6 +138,7 @@ export function unmountNames(pctx: ProjectionCtx, names: readonly string[]): voi
     clearMounted(pctx, mounted);
     forgetWarm(pctx, name);
     state.held.delete(name);
+    state.heldFed.delete(name);
     state.mounted.delete(name);
   }
 }

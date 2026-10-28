@@ -114,5 +114,17 @@ export const BUDGET = {
   /** F61 B+D: the sweep of a frame with a despawn, a warm window of 600 elements held: the prune of the dead. New: 0 B. */
   warmPruneSweep: 0,
   /** F103: world's `input` step at rest with a loader held ready: frame start, no reconcile, no owed show, warm step. New: 0 B. */
-  heldInputRest: 0
+  heldInputRest: 0,
+  /** F107: the same step with the loader fed: the switch of the standing scene, then one only stored. New: 0 B. */
+  heldFedInputRest: 0,
+  /** F107: `projection.feed` of a shown loader with the value it has, another object equal field by field. New: 0 B. */
+  feedEqual: 0,
+  /**
+   * F107: one feed of a shown loader of 12 rows that moves its progress, and the reconcile of the next frame that
+   * reads it: a live change of one view, as a commit makes it. Measured 7 645 B (Node 24, the Mac, 2026-10-28): the
+   * item `from` builds, its description node of 12 rows, the item table, the diff, the view handle of the change and
+   * the reconcile's options and counters. The budget leaves room for V8's growth of those objects, not for a second
+   * reconcile.
+   */
+  feedShown: 8192
 } as const;

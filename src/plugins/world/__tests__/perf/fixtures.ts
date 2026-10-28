@@ -10,7 +10,7 @@ import type { Api as ModelApi, Snapshot } from "../../../model/types";
 import type { Time } from "../../../time/types";
 import { createModules } from "../../api";
 import { clearAllChanges, markChanged } from "../../ecs/changes";
-import { component, Exiting, mut, Now, system } from "../../ecs/define";
+import { component, Exiting, mut, Now, system, Tree } from "../../ecs/define";
 import { recordFrame } from "../../ecs/history";
 import type { AnySystem, Entity, Owner, WorldPhase } from "../../ecs/types";
 import { withDeps } from "../../lifecycle";
@@ -19,6 +19,7 @@ import type {
   AnyProjectionSpec,
   DescriptionNode,
   MotionHandle,
+  SceneSwitch,
   Track,
   TweenDriver
 } from "../../projection/types";
@@ -1038,11 +1039,20 @@ export function warmOpenFixture(): () => void {
 /** Name of the held loader of the hold fixture. */
 const LOADER = "perf.loading";
 
-/** The one item of the held loader. */
-type Loading = { label: string };
+/** The one item of the held loader: the scene the switch goes to and its progress. */
+type Loading = { label: string; progress: number };
+
+/** What `scenes` feeds the loader while the ward stands. */
+const WARD: SceneSwitch = { from: "ward", to: "ward", progress: 0 };
+
+/** Half of the board's bundles loaded, on the ward → board switch. */
+const HALF: SceneSwitch = { from: "ward", to: "board", progress: 0.5 };
+
+/** One step more of the same switch. */
+const NEXT: SceneSwitch = { from: "ward", to: "board", progress: 0.51 };
 
 /**
- * The leave loader of a scene: a screen of 12 rows that reads nothing of the state.
+ * The leave loader of a scene: a screen of 12 rows that reads the switch it was fed, nothing of the state.
  *
  * @returns The spec.
  */
@@ -1050,10 +1060,13 @@ function loaderSpec(): AnyProjectionSpec {
   return projection({
     name: LOADER,
     layer: "items",
-    from: (): Loading => ({ label: "Loading" }),
+    from: (_player: unknown, _session: unknown, sw: SceneSwitch | undefined): Loading => ({
+      label: sw?.to ?? "Loading",
+      progress: sw?.progress ?? 0
+    }),
     view: (loading: Loading): DescriptionNode => ({
       type: "loader",
-      props: { label: loading.label },
+      props: { label: loading.label, progress: loading.progress },
       children: Array.from({ length: 12 }, (_, row) => ({
         type: "row",
         props: { row },
@@ -1065,11 +1078,13 @@ function loaderSpec(): AnyProjectionSpec {
 
 /**
  * World's `input` step with a loader held ready (F103): the frame start, the reconcile check with no commit and no
- * owed `show`, and the warm step at rest. The state and the flow answer one kept object.
+ * owed `show`, and the warm step at rest. The state and the flow answer one kept object. A fed loader (F107) got the
+ * switch of the standing scene right after the hold, as `scenes` feeds it, and then a value of a switch, only stored.
  *
+ * @param fed - Whether the loader was fed.
  * @returns One `input` step.
  */
-export function heldInputFixture(): () => void {
+export function heldInputFixture(fed = false): () => void {
   const world = createMockWorld();
 
   world.api.projection.setLayers(LAYERS);
@@ -1077,6 +1092,7 @@ export function heldInputFixture(): () => void {
   world.start();
   world.api.projection.onBuild(() => true);
   world.api.projection.hold([LOADER], MOUNT_OWNER);
+  if (fed) world.api.projection.feed(LOADER, WARD);
 
   const { projection } = stableModules(world);
 
@@ -1085,16 +1101,20 @@ export function heldInputFixture(): () => void {
   projection.stepWarm();
   projection.stepWarm();
 
+  if (fed) projection.feed(LOADER, HALF);
+
   const state = world.ctx.state.projection;
   const held = state.warm.get(LOADER)?.view?.entity ?? 0;
   const now = world.clock.now();
 
-  // The call must measure the path it names: a loader held ready and hidden, nothing owed.
+  // The call must measure the path it names: a loader held ready and hidden, nothing owed, fed when asked.
   if (
     !projection.isBuilding(held) ||
     state.warmActive !== undefined ||
     state.warmStale ||
-    projection.entitiesOf(LOADER).length > 0
+    state.showing.length > 0 ||
+    projection.entitiesOf(LOADER).length > 0 ||
+    (fed && (state.fed.get(LOADER) !== HALF || state.heldFed.get(LOADER) !== WARD))
   ) {
     throw new Error("heldInputFixture: the loader is not held ready");
   }
@@ -1103,5 +1123,73 @@ export function heldInputFixture(): () => void {
     projection.startFrame(now);
     projection.reconcileIfDirty();
     projection.stepWarm();
+  };
+}
+
+/**
+ * A loader shown by `scenes` (F107): held, built, shown and fed the half of a switch, reconciled.
+ *
+ * @returns The world's projection module over one kept snapshot.
+ */
+function shownLoader(): ProjectionModule {
+  const world = createMockWorld();
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(loaderSpec());
+  world.start();
+  world.api.projection.onBuild(() => true);
+
+  const { projection } = stableModules(world);
+
+  projection.hold([LOADER], MOUNT_OWNER);
+  projection.feed(LOADER, WARD);
+  // The spawn, the poll, and a walk that finds no more work.
+  projection.stepWarm();
+  projection.stepWarm();
+  projection.stepWarm();
+  projection.show(LOADER);
+  projection.feed(LOADER, HALF);
+  projection.reconcileIfDirty();
+
+  const entity = projection.entityOf(LOADER, LOADER) ?? 0;
+  const props = world.api.ecs.get(entity, Tree)?.node.props ?? {};
+
+  if (Object.getOwnPropertyDescriptor(props, "label")?.value !== "board") {
+    throw new Error("shownLoader: the loader is not shown with the switch");
+  }
+
+  return projection;
+}
+
+/**
+ * A feed of a shown loader with the value it has (F107): another object, equal field by field. It stores nothing and
+ * owes no reconcile.
+ *
+ * @returns One equal feed.
+ */
+export function feedEqualFixture(): () => void {
+  const projection = shownLoader();
+  const equal: SceneSwitch = { from: HALF.from, to: HALF.to, progress: HALF.progress };
+
+  return (): void => {
+    projection.feed(LOADER, equal);
+  };
+}
+
+/**
+ * One feed of a shown loader that moves its progress (F107), and the reconcile of the next frame's `input` phase that
+ * reads it: one reconcile of the loader, by name. The progress goes back and forth between two values.
+ *
+ * @returns One feed and its reconcile.
+ */
+export function feedShownFixture(): () => void {
+  const projection = shownLoader();
+  const values: readonly SceneSwitch[] = [NEXT, HALF];
+  let turn = 0;
+
+  return (): void => {
+    turn = 1 - turn;
+    projection.feed(LOADER, values[turn] ?? HALF);
+    projection.reconcileIfDirty();
   };
 }

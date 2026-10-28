@@ -226,8 +226,8 @@ export function connectWorld(ctx: KernelSlice): void {
 /**
  * Empties the world in `onStop`: the frame callbacks and the hint listener are removed, then
  * every track, view, queued view, entity and resource is dropped, a running scene build and the
- * `onBuild` checks with them, every warm record, every held name and owed `show`, and the scenes and the frame
- * history are reset.
+ * `onBuild` checks with them, every warm record, every held name and owed `show`, every value fed, and the scenes
+ * and the frame history are reset.
  * No `onRemoved` fires, because `renderer` stopped earlier and destroyed its own objects.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
@@ -264,6 +264,8 @@ export function clearWorld(state: State): void {
   state.projection.warmStale = false;
   state.projection.held.clear();
   state.projection.showing.length = 0;
+  state.projection.fed.clear();
+  state.projection.heldFed.clear();
 
   state.ecs.generations.length = 0;
   state.ecs.free.length = 0;

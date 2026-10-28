@@ -8,7 +8,7 @@ import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
 import { buildNames, commitBuild, discardBuild } from "./build";
 import { cancelTracks, forgetEndedTracks, runningComponents } from "./driver";
-import { holdNames, reconcileShown, showName } from "./hold";
+import { feedName, holdNames, reconcileShown, showName } from "./hold";
 import {
   cancelHandles,
   createViewHandle,
@@ -43,6 +43,7 @@ import type {
   ProjectionDeps,
   ProjectionKey,
   RestPose,
+  SceneSwitch,
   TweenDriver,
   View,
   ViewHandle
@@ -271,6 +272,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     unmount: (names: readonly string[]): void => {
       unmountNames(pctx, names);
+      // The value fed goes with the public unmount only: a `hold` or a `mount` that places a name again keeps it.
+      for (const name of names) state.fed.delete(name);
     },
 
     hold: (names: readonly string[], owner: Owner): void => {
@@ -279,6 +282,10 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     show: (name: string): void => {
       showName(pctx, name);
+    },
+
+    feed: (name: string, sw: SceneSwitch): void => {
+      feedName(pctx, name, sw);
     },
 
     restOf: <Value extends object>(

@@ -393,7 +393,7 @@ export type { HapticKind } from "./plugins/anim/timeline/types";
 // i18n: messages as data, and the two helpers a generated strings module imports
 export { messageArgument, messageDuration } from "./plugins/i18n/intl";
 export { tr } from "./plugins/i18n/tr";
-export type { DescriptionNode } from "./plugins/world/projection/types";
+export type { DescriptionNode, SceneSwitch } from "./plugins/world/projection/types";
 // text: the Text component, board labels, text styles, bound numbers and countdowns
 export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
 export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";

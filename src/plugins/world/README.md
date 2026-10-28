@@ -155,6 +155,7 @@ app.world.ecs.snapshot().entities[0];
 | `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call, and so does the view a warm window or a hold keeps hidden. A held name is held no more. |
 | `hold(names, owner)` | Mounts projections held (`scenes`, for the leave loader of a standing scene): the checks and places of `mount`, but a held projection shows nothing; its `from`'s first item is kept built and hidden as a warm window keeps its item. See [Held projections](#held-projections). |
 | `show(name)` | Releases a held projection: the next reconcile shows `from`'s item and adopts the held view, the same entity. A name that is not held: nothing. |
+| `feed(name, sw)` | Hands a projection the scene switch (`SceneSwitch`: `{ from, to, progress }`) its `from` reads as its third argument (`scenes`, for its leave loader). An equal value changes nothing, 0 B; a held projection only stores it, and `show` reads it; a shown one is read again by name in the next frame, with no commit. See [Feeding a projection](#feeding-a-projection-the-switch). |
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. On a view whose projection names `initialOnly` fields the mute adds to them, and the remover keeps them. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
@@ -182,7 +183,9 @@ The authoring helpers are pure and exported from the package root:
 `component`, `tag`, `resource`, `mut`, `system`, `projection`, and `Layer`, `Order`, `Exiting`,
 `Tree`. A projection whose `from` returns one plain object needs no `key`: it draws one item under
 the name of the projection, and a `view` that returns one description node instead of components is
-wrapped as `Tree({ node })`, which `ui` reconciles into child entities.
+wrapped as `Tree({ node })`, which `ui` reconciles into child entities. `from(player, session, sw)`
+gets as its third argument the switch another plugin last fed it (`projection.feed`), `undefined`
+for a projection never fed; a `from` with two parameters reads the state alone, as before.
 
 #### Fields another writer draws: `initialOnly`
 
@@ -409,6 +412,47 @@ projection.show("loading");
   views leaving. A hot swap (`replace`) keeps the hold. `unmount`, the clear and `onStop` forget
   the hold and the held view.
 
+#### Feeding a projection: the switch
+
+A switch commits nothing while it loads, so a loader cannot read its progress from the state.
+`scenes` hands it the switch instead (F107): `projection.feed(name, sw)` stores a `SceneSwitch`,
+`{ from, to, progress }`, for the projection, and its `from` reads it as a third argument.
+
+```ts
+// The leave loader of a game draws where the switch goes and how far it loaded.
+export const loading = projection({
+  name: "screens.loading",
+  layer: "veil",
+  from: (_player: Player, _session: Session, sw: SceneSwitch | undefined) => ({
+    to: sw?.to ?? "",
+    progress: sw?.progress ?? 0
+  }),
+  view: loader => loaderView(loader)
+});
+
+// `scenes`, 300 ms into the ward → board switch:
+ctx.require(worldPlugin).projection.feed("screens.loading", { from: "ward", to: "board", progress: 0.5 });
+```
+
+- **Equal.** A value equal field by field to the one stored (`from`, `to`, `progress`, each with
+  `===`) changes nothing: no reconcile, 0 B (`__tests__/perf/hold.perf.ts`), about 50 ns on the Mac.
+  Another value is stored as it is, not copied: a new value is a new object, never one changed in
+  place (its fields are read-only).
+- **Held.** Only stored. The held view reads the value of the first feed after `hold` (or the one
+  stored when `hold` ran), also through a commit, so a feed during a switch never builds it again.
+  `show` reads the latest value: the adopt writes the difference into the held view once.
+- **Shown.** The next reconcile, in the `input` phase of the next frame, reads its `from` again by
+  name, with no commit and also while a scene is built aside. A changed item is a live change under
+  the rules of a commit: an `enter` that still plays is cancelled, a `change` hook runs. One feed
+  that changes a shown loader of 12 rows costs one reconcile of it: 7 645 B (budget 8 192 B,
+  `hold.perf.ts`) and 2.2 µs on the Mac (`hold.bench.ts`). Frames at rest with a held, fed loader
+  allocate nothing.
+- **Not mounted.** Only stored: a later `mount` or `hold` reads it (the loader `scenes` mounts at
+  its due reads the switch fed at its start).
+- **Forgotten** by the public `unmount` of the name, the clear and `onStop`. A `hold` or a `mount`
+  that places a mounted name again under other layers keeps it. A projection never fed reads
+  `undefined`.
+
 #### `Now` — the frame's moment
 
 `Now` (`{ now }`, exported from the package root) is the moment of the frame on the game's clock:
@@ -487,7 +531,7 @@ const app = createApp({
 
 | `time` phase | What `world` does, in order |
 |---|---|
-| `input` | write `Now` from `clock.now()` → reconcile when dirty → reconcile the projections `show` released → drop the hint buffer → one step of the warm windows → systems of `input` → flush commands |
+| `input` | write `Now` from `clock.now()` → reconcile when dirty → reconcile the projections `show` released and the shown ones `feed` changed → drop the hint buffer → one step of the warm windows → systems of `input` → flush commands |
 | `animate` | sweep ended motions (the driver advanced its tracks first) → forget dead elements → start the owed loops → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
