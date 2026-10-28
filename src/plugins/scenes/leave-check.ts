@@ -1,7 +1,7 @@
 /**
- * @file scenes plugin — the check of a `leave` a game wrote, in the config (`onInit`) or in a scene (`defineScene`).
- * Pure. A game written in plain JS passes anything, so both are a boundary: a field of the wrong shape throws where it
- * was written, not in the middle of a switch.
+ * @file scenes plugin — the check of a `leave` a game wrote, in the config (`onInit`) or in a scene (`defineScene`),
+ * and of a scene's `enter`. Pure. A game written in plain JS passes anything, so both are a boundary: a field of the
+ * wrong shape throws where it was written, not in the middle of a switch.
  */
 
 /** What a field of a `leave` part must be, and the second line of its error. */
@@ -80,12 +80,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** The colour of a veil. */
+const COLOR_RULE: FieldRule = { ok: isColor, hint: "a colour from 0x000000 to 0xffffff" };
+
+/** The alpha of a veil. */
+const ALPHA_RULE: FieldRule = {
+  ok: isAlpha,
+  hint: "the alpha the veil fades in to, a number from 0 to 1"
+};
+
 /** The fields of a veil. */
 const COVER_RULES: Readonly<Record<string, FieldRule>> = Object.freeze({
-  color: { ok: isColor, hint: "a colour from 0x000000 to 0xffffff" },
-  alpha: { ok: isAlpha, hint: "the alpha the veil fades in to, a number from 0 to 1" },
+  color: COLOR_RULE,
+  alpha: ALPHA_RULE,
   inMs: { ok: isDuration, hint: "the milliseconds of the fade-in, 0 or more" },
   outMs: { ok: isDuration, hint: "the milliseconds of the fade-out, 0 or more" }
+});
+
+/** The fields of the veil a scene being entered sets: its look, never its times. */
+const ENTER_COVER_RULES: Readonly<Record<string, FieldRule>> = Object.freeze({
+  color: COLOR_RULE,
+  alpha: ALPHA_RULE
 });
 
 /** The fields of a loader. */
@@ -151,4 +166,24 @@ export function checkLeave(where: string, leave: unknown): void {
 
   checkPart(`${where}.cover`, leave.cover, COVER_RULES);
   checkPart(`${where}.loader`, leave.loader, LOADER_RULES);
+}
+
+/**
+ * Checks a scene's `enter`: nothing, or an object whose `cover` is nothing or an object of a colour and an alpha from 0
+ * to 1, by the rules of `leave.cover`.
+ *
+ * @param where - Where it was written, for the message: `Scene "night": enter`.
+ * @param enter - What was written.
+ * @throws {Error} For an `enter` that is no object, and for the first field of the wrong shape.
+ * @example
+ * ```ts
+ * checkEnter('Scene "night": enter', { cover: { alpha: 2 } });
+ * // throws '[game] Scene "night": enter.cover.alpha is 2.\n  Give the alpha the veil fades in to, a number from 0 to 1.'
+ * ```
+ */
+export function checkEnter(where: string, enter: unknown): void {
+  if (enter === undefined) return;
+  if (!isRecord(enter)) throw wrong(where, enter, "{ cover }");
+
+  checkPart(`${where}.cover`, enter.cover, ENTER_COVER_RULES);
 }

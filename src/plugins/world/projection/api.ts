@@ -8,6 +8,7 @@ import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
 import { buildNames, commitBuild, discardBuild } from "./build";
 import { cancelTracks, forgetEndedTracks, runningComponents } from "./driver";
+import { feedName, holdNames, reconcileShown, showName } from "./hold";
 import {
   cancelHandles,
   createViewHandle,
@@ -42,6 +43,7 @@ import type {
   ProjectionDeps,
   ProjectionKey,
   RestPose,
+  SceneSwitch,
   TweenDriver,
   View,
   ViewHandle
@@ -165,6 +167,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
    * and whether an unchanged view that stands off its rest pose is settled (a rollback does).
    * A restore, a load and a forced rerun drop the views warm windows hold hidden first: they
    * replace the state or run `view` anew. After a reconcile the warm step looks at its records.
+   * Then the projections `show` released are reconciled by name.
    */
   const reconcileIfDirty = (): void => {
     const dirty = state.dirty;
@@ -186,6 +189,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       if (state.warmList.length > 0) state.warmStale = true;
     }
 
+    reconcileShown(pctx);
     state.hints.length = 0;
   };
 
@@ -250,8 +254,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       if (!mounted) return;
 
-      // The forced rerun drops a held view; a spec that no longer warms forgets its record.
-      if (spec.warm === undefined) forgetWarm(pctx, spec.name);
+      // The forced rerun drops a held view; a spec that no longer warms, and is not held, forgets its record.
+      if (spec.warm === undefined && !state.held.has(spec.name)) forgetWarm(pctx, spec.name);
       else ensureWarm(state, spec);
       forceRerun();
     },
@@ -268,6 +272,20 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     unmount: (names: readonly string[]): void => {
       unmountNames(pctx, names);
+      // The value fed goes with the public unmount only: a `hold` or a `mount` that places a name again keeps it.
+      for (const name of names) state.fed.delete(name);
+    },
+
+    hold: (names: readonly string[], owner: Owner): void => {
+      holdNames(pctx, names, owner);
+    },
+
+    show: (name: string): void => {
+      showName(pctx, name);
+    },
+
+    feed: (name: string, sw: SceneSwitch): void => {
+      feedName(pctx, name, sw);
     },
 
     restOf: <Value extends object>(

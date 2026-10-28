@@ -151,7 +151,8 @@ export function syncLayers(sctx: SyncCtx): boolean {
 /**
  * Detaches the containers of the layers that are no longer declared and names the views that stay in them. The views
  * that went with the scene are gone already (the pass drops the removed ones first), and a view that plays its exit
- * (`Exiting`, a root that leaves with a motion) goes with it: neither is named.
+ * (`Exiting`, a root that leaves with a motion) goes with it: neither is named. A layer the loader of a scene being
+ * left holds above the veil stays there: it fades out with the veil after the swap, and its views go with the loader.
  *
  * @param sctx - Domain context of the sync module.
  * @param next - The new table of layers.
@@ -159,10 +160,13 @@ export function syncLayers(sctx: SyncCtx): boolean {
 function dropLeftLayers(sctx: SyncCtx, next: Map<string, LayerEntry>): void {
   const state = sctx.ctx.state.sync;
   const ecs = sctx.ctx.deps.world.ecs;
+  const held = state.leave.objects?.held;
   const stranded: Entity[] = [];
 
   for (const [name, entry] of state.layers) {
     if (next.has(name)) continue;
+    // The look puts it back, or lets it go, when its fade-out ends (`leave.ts`).
+    if (held !== undefined && entry.container?.parent === held) continue;
 
     if (entry.container !== undefined) detach(entry.container);
 

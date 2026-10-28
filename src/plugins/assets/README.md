@@ -427,8 +427,11 @@ a built game and headless.
 No plugin event belongs to `ready`: it posts the world event `{ type: "ready" }` into `flow.inbox`,
 which a rest node takes when its `inbox` lists `"ready"` (see "Resting on a load: `ready`").
 
-`assets:bundle-progress` is for the game: no engine plugin listens to it. A splash screen fills
-its loading bar from it.
+`assets:bundle-progress` is for the game, and for `scenes`: during a live switch whose leave loader
+is a projection, `scenes` listens to it and feeds that loader the share of the switch's bundles
+loaded (scenes README, "The switch it reads"). A game's own hook comes after the one of `scenes`
+(the kernel awaits each handler of an event in plugin order), so it runs a microtask after the
+emit. A splash screen fills its loading bar from it.
 
 ```ts
 createPlugin("loadingBar", {

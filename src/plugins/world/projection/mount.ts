@@ -120,8 +120,9 @@ function drawsAlike(
 
 /**
  * Unmounts projections: every motion of their views is finished, and the live views and the
- * despawn queue are despawned in the same call, and so is the view a warm window holds hidden.
- * An unknown or unmounted name is skipped.
+ * despawn queue are despawned in the same call, and so is the view a warm window or a hold keeps
+ * hidden. A held name is held no more. The value fed to a name stays: a `hold` or a `mount` that places it again
+ * reads it, and the public `unmount` forgets it. An unknown or unmounted name is skipped.
  *
  * @param pctx - Domain context of the projection module.
  * @param names - Names of the projections to unmount.
@@ -136,6 +137,8 @@ export function unmountNames(pctx: ProjectionCtx, names: readonly string[]): voi
 
     clearMounted(pctx, mounted);
     forgetWarm(pctx, name);
+    state.held.delete(name);
+    state.heldFed.delete(name);
     state.mounted.delete(name);
   }
 }
@@ -218,7 +221,8 @@ export function mountNames(pctx: ProjectionCtx, names: readonly string[], owner:
  * Gives every projection of a list its place under the current layer list: a missing one gets an
  * empty record at the `Order` of its place, a kept one mounted under another list takes its new
  * place (`placeMounted`), its held warm view too. A screen root draws at its place in the list
- * (spec 16 U1.6). A projection that declares `warm` gets its warm record, cold, unless it has one.
+ * (spec 16 U1.6). A projection that declares `warm` or is held gets its warm record, cold, unless
+ * it has one.
  *
  * @param pctx - Domain context of the projection module.
  * @param names - The projection list of the scene.

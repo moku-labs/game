@@ -13,6 +13,7 @@ import { dropBuild, isPositiveFinite } from "./build";
 import { isSceneDefinition } from "./bundles";
 import { forgetLeave } from "./leave";
 import { checkLeave } from "./leave-check";
+import { forgetLoader } from "./loader";
 import { beginScene, enterScene } from "./switch";
 import type { Config, Deps, KernelSlice, ScenesCtx, State } from "./types";
 
@@ -140,9 +141,10 @@ export function startScenes(ctx: KernelSlice): void {
 /**
  * Removes the two `onEnter` callbacks in `onStop` and forgets every scene and the bundles the mounted
  * one named. A running build loses its frame callback and its switch returns; the look of a running
- * switch loses its abort listener (the renderer drops it at its own stop). Nothing is unmounted
- * or discarded: a teardown context may not call another plugin, and `world.onStop` clears every
- * entity and the build table anyway.
+ * switch loses its abort listener (the renderer drops it at its own stop), a loader fading out its
+ * frame callback, and the held loader is forgotten. Nothing is unmounted or discarded: a teardown
+ * context may not call another plugin, and `world.onStop` clears every entity and the build table
+ * anyway.
  *
  * @param teardown - What the teardown context carries.
  * @param teardown.state - The plugin state.
@@ -160,6 +162,7 @@ export function stopScenes(teardown: { state: State }): void {
   dropBuild(state.build);
   delete state.build;
   forgetLeave(state);
+  forgetLoader(state);
   state.scenes.clear();
   state.current = undefined;
   state.pending = undefined;

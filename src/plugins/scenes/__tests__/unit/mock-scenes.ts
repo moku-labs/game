@@ -13,9 +13,16 @@ import type { FeatureDescription } from "../../../flow/features/types";
 import type { EnterCallback, Api as FlowApi, NodeInfo, Stage } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
 import type { LeaveLook } from "../../../renderer/types";
-import type { FrameCallback, Phase, Api as TimeApi } from "../../../time/types";
-import type { LayerSpec, Owner, Api as WorldApi, WorldMode } from "../../../world/types";
+import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/types";
+import type {
+  LayerSpec,
+  Owner,
+  SceneSwitch,
+  Api as WorldApi,
+  WorldMode
+} from "../../../world/types";
 import { createScenesApi } from "../../api";
+import { createHandlers } from "../../handlers";
 import { checkConfig, startScenes, stopScenes, withDeps } from "../../lifecycle";
 import { createScenesState } from "../../state";
 import type { Config, KernelSlice, RunContext, ScenesApi, ScenesCtx, State } from "../../types";
@@ -42,6 +49,8 @@ export type FakeAssets = {
   warm: { calls: string[]; gate: Promise<void> };
   /** Every list `sceneComing` was called with, in order. */
   coming: string[][];
+  /** The bundles `isLoaded` answers false for, set by a test; every other bundle is loaded. */
+  cold: Set<string>;
   api: AssetsApi;
 };
 
@@ -81,6 +90,22 @@ export type FakeWorld = {
   viewLayers: Record<string, string>;
   /** The projections mounted now: a mount adds its names, an unmount takes them out; a test may add one. */
   live: Set<string>;
+  /**
+   * The projections held now (F103): a hold adds its names and takes their views (`live`) away, a show or an unmount
+   * takes them out. A shown one has no view until a test adds it to `live`: the world reconciles it the next frame.
+   */
+  held: Set<string>;
+  /** Every list `projection.hold` was called with, in order. */
+  holds: string[][];
+  /** Every name `projection.show` was called with, in order. */
+  shows: string[];
+  /** Set by a test: `hold` throws it once, the way a `lift` the scene does not declare does. */
+  holdError: unknown;
+  /**
+   * Every value `projection.feed` was handed (F107), in order, with the world call made last before it: a feed is not
+   * one of `calls`, so the order of the other calls stays what the older tests read.
+   */
+  feeds: Array<{ name: string; sw: SceneSwitch; after: string | undefined }>;
   /** What `ecs.mode()` answers: `"fast"` while the flow walks fast. */
   mode: WorldMode;
   /**
@@ -113,8 +138,11 @@ export type FakeTime = {
   clock: { now: number } | undefined;
   /** What `rate().fps` answers: the frame rate the loop runs at, 60 unless a test moves it. */
   fps: number;
-  /** Runs one frame: every registered callback, phase by phase, as `time.step` does. */
-  frame(): void;
+  /**
+   * Runs one frame: every registered callback, phase by phase, as `time.step` does, with a `Time` of 16 ms at scale 1
+   * unless the test gives other fields.
+   */
+  frame(time?: Partial<Time>): void;
   api: TimeApi;
 };
 
@@ -157,6 +185,8 @@ export type MockScenes = {
   time: FakeTime;
   model: FakeModel;
   renderer: FakeRenderer;
+  /** The plugin's hooks, as the kernel registers them: a test calls one the way `assets` emits its event. */
+  hooks: ReturnType<typeof createHandlers>;
   /**
    * Every call the switch made into its fakes, in order, as `world:setLayers`, `assets:sceneBundles`,
    * `time:wake`, `emit:scenes:changed` or `monitor:scene`: the order of the swap.
@@ -228,6 +258,7 @@ function createFakeAssets(journal: string[]): FakeAssets {
   const held: HeldLoad[] = [];
   const named: string[][] = [];
   const coming: string[][] = [];
+  const cold = new Set<string>();
   const warm = { calls: [] as string[], gate: Promise.resolve() };
 
   const api = {
@@ -247,7 +278,7 @@ function createFakeAssets(journal: string[]): FakeAssets {
       return warm.gate;
     },
     unload: () => undefined,
-    isLoaded: () => true,
+    isLoaded: (bundle: string): boolean => !cold.has(bundle),
     texture: () => undefined,
     usage: () => ({ textureMb: 0, budgetMb: 0, bundles: [] }),
     sceneBundles: (list: readonly string[]): void => {
@@ -279,6 +310,7 @@ function createFakeAssets(journal: string[]): FakeAssets {
     },
     warm,
     coming,
+    cold,
     api
   };
 }
@@ -319,6 +351,11 @@ function createFakeWorld(journal: string[]): FakeWorld {
     scenes: [],
     viewLayers: {},
     live: new Set(),
+    held: new Set(),
+    holds: [],
+    shows: [],
+    holdError: undefined,
+    feeds: [],
     mode: "live",
     building: {
       answer: true,
@@ -359,7 +396,27 @@ function createFakeWorld(journal: string[]): FakeWorld {
         record("unmount");
         throwOnce(fake, "unmountError");
         fake.unmounted.push([...names]);
-        for (const name of names) fake.live.delete(name);
+        for (const name of names) {
+          fake.live.delete(name);
+          fake.held.delete(name);
+        }
+      },
+      hold: (names: readonly string[]): void => {
+        record("hold");
+        throwOnce(fake, "holdError");
+        fake.holds.push([...names]);
+        for (const name of names) {
+          fake.held.add(name);
+          fake.live.delete(name);
+        }
+      },
+      show: (name: string): void => {
+        record("show");
+        fake.shows.push(name);
+        fake.held.delete(name);
+      },
+      feed: (name: string, sw: SceneSwitch): void => {
+        fake.feeds.push({ name, sw, after: fake.calls.at(-1) });
       },
       mount: (names: readonly string[], owner: Owner): void => {
         record("mount");
@@ -419,12 +476,12 @@ function createFakeTime(journal: string[]): FakeTime {
     callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
     clock: undefined,
     fps: 60,
-    frame: (): void => {
+    frame: (time: Partial<Time> = {}): void => {
+      const step = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false, ...time };
+
       for (const callbacks of Object.values(fake.callbacks)) {
         // eslint-disable-next-line unicorn/no-useless-spread -- a callback that removes itself does not skip the next one
-        for (const callback of [...callbacks]) {
-          callback({ delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false });
-        }
+        for (const callback of [...callbacks]) callback(step);
       }
     },
     api: undefined as unknown as TimeApi
@@ -634,6 +691,7 @@ export function createMockScenes(config?: Config): MockScenes {
     time,
     model,
     renderer,
+    hooks: createHandlers(ctx),
     journal,
     init: (): void => checkConfig(ctx.config),
     start: (): void => startScenes(ctx),

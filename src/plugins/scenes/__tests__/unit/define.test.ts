@@ -368,3 +368,13 @@ describe("defineScene and the bundles of state", () => {
     expect(Object.keys(scene)).toEqual(["id", "bundle", "music", "layers", "projections"]);
   });
 });
+
+describe("defineScene and enter", () => {
+  // Bug: the freeze drops `enter`, so a switch to the scene shows the left scene's veil.
+  it("keeps the enter the scene declared", () => {
+    const enter = { cover: { color: 0x0b_10_20, alpha: 0.7 } };
+    const scene = defineScene("night", { bundle: "night", layers: {}, projections: [], enter });
+
+    expect(scene.enter).toEqual({ cover: { color: 0x0b_10_20, alpha: 0.7 } });
+  });
+});

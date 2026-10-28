@@ -8,15 +8,25 @@
  * builds the scene aside and swaps it in one frame (`build.ts`); a fast walk and a headless app
  * touch the world in one synchronous block (`swap.ts`). From the `begin` stage of its node, before
  * `assets` downloads anything at `load`, to the swap, a live switch with a drawing renderer shows a
- * veil and a loader over the scene being left (`leave.ts`). At a node of the mounted scene it
- * re-reads what the scene names and awaits a bundle that is new, without mounting again.
+ * veil and a loader over the scene being left (`leave.ts`). Once a scene stands, the loader projection
+ * it leaves with is held, built and hidden, for its next switch (`loader.ts`). At a node of the mounted scene
+ * it re-reads what the scene names and awaits a bundle that is new, without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
 import { buildAside } from "./build";
 import { namedBundles } from "./bundles";
-import { dropLeftOver, endLeave, leaveFor, ownLeave, startLeave } from "./leave";
+import {
+  dropLeftOver,
+  endLeave,
+  leaveFor,
+  loaderProjectionOf,
+  ownLeave,
+  startLeave
+} from "./leave";
+import { holdLoader, releaseListed, settleFade } from "./loader";
+import { committedState, countLoaded } from "./progress";
 import { swapIn } from "./swap";
-import type { Leaving, RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
+import type { Leaving, RunContext, SceneDefinition, ScenesCtx } from "./types";
 
 /**
  * A promise that resolves when the node was aborted. Already aborted resolves at once.
@@ -95,19 +105,6 @@ async function untilAborted(
   await Promise.race([Promise.all(loads), whenAborted(signal)]);
 
   if (load.failed && !signal.aborted) throw load.error;
-}
-
-/**
- * Reads the committed state a scene's `bundles` gets: the frozen trees of the store, in a frozen
- * wrapper. During the scene stage no node writes, so it is the state the node is entered with.
- *
- * @param ctx - Domain context of the plugin.
- * @returns The committed `player` and `session`.
- */
-function committedState(ctx: ScenesCtx): SceneState {
-  const { player, session } = ctx.deps.model.store.snapshot();
-
-  return Object.freeze({ player, session });
 }
 
 /**
@@ -226,7 +223,8 @@ function buildsAside(ctx: ScenesCtx, run: RunContext): boolean {
 /**
  * Builds the scene: aside on a live switch with a drawing renderer, resolving at the commit or
  * the abort; in one block otherwise, and when the world refuses to build it aside because a
- * projection both scenes list is declared on other layer rules (named in a dev build).
+ * projection both scenes list is declared on other layer rules (named in a dev build). A loader
+ * held for this switch that the scene lists is unmounted first: the scene mounts it as its own.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundles are there.
@@ -241,6 +239,8 @@ async function standUp(
   named: readonly string[],
   run: RunContext
 ): Promise<void> {
+  releaseListed(ctx, scene);
+
   if (buildsAside(ctx, run)) {
     const building = buildAside(ctx, scene, named, run.signal);
 
@@ -265,7 +265,8 @@ async function standUp(
 /**
  * Awaits every bundle the scene names and only then builds the scene. In live mode it waits between
  * the two for the textures of those bundles to reach the GPU; a fast walk does not, so tests and
- * restores keep their pace. An aborted node, or a plugin stopped during the wait, returns without
+ * restores keep their pace. Once the loads are in, a loader projection fed the switch counts every
+ * loaded bundle whole. An aborted node, or a plugin stopped during the wait, returns without
  * touching anything. A live switch with a drawing renderer resolves at the commit of the scene
  * built aside, frames later.
  *
@@ -286,6 +287,9 @@ async function loadAndStand(
 
   const warmsFirst = run.mode === "live" && !run.signal.aborted;
 
+  // The loads are in: a loader fed reads every bundle that is loaded whole, one with no file too.
+  if (warmsFirst) countLoaded(ctx.state);
+
   if (warmsFirst) await untilWarmed(ctx, named, run.signal);
 
   // A stop answers a waiting upload instead of rejecting it; `stopScenes` clears `teardown`.
@@ -297,12 +301,47 @@ async function loadAndStand(
 }
 
 /**
- * Switches to another scene: it takes over the veil and the loader the `begin` stage of the node
- * showed over the scene being left for this scene (a cold first visit reacts in the next frame),
- * or shows them now when that stage did not, or showed them for another scene, after reading what
- * the scene names from the committed state. Then
- * it awaits the bundles and builds the scene (`loadAndStand`). The look lands when the scene
- * stands, and is dropped when the switch ends without it or throws.
+ * Holds the loader of the scene that stands for its next switch (`loader.ts`): the projection its
+ * leave loader names, on a live run while the world runs live and the renderer draws, the switches
+ * that show a look. A fast walk, a world that does not run live and a headless app hold none.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param scene - The scene that stands.
+ * @param run - The runner's mode and signal.
+ */
+function standLoader(ctx: ScenesCtx, scene: SceneDefinition, run: RunContext): void {
+  const name = buildsAside(ctx, run)
+    ? loaderProjectionOf(ctx.config.leave, scene.leave)
+    : undefined;
+
+  holdLoader(ctx, scene, name);
+}
+
+/**
+ * Holds the loader of the scene that still stands after a switch that ended without its swap: the drop unmounted the
+ * loader the switch showed, and its next switch would mount it in the frame it is due. A loader the switch did not show
+ * is held still; no scene stands: nothing.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal.
+ */
+function standAgain(ctx: ScenesCtx, run: RunContext): void {
+  if (ctx.state.held !== undefined) return;
+
+  const current =
+    ctx.state.current === undefined ? undefined : ctx.state.scenes.get(ctx.state.current);
+
+  if (current !== undefined) standLoader(ctx, current, run);
+}
+
+/**
+ * Switches to another scene: a loader still fading out after the last swap goes first. It takes
+ * over the veil and the loader the `begin` stage of the node showed over the scene being left for
+ * this scene (a cold first visit reacts in the next frame), or shows them now when that stage did
+ * not, or showed them for another scene, after reading what the scene names from the committed
+ * state. Then it awaits the bundles and builds the scene (`loadAndStand`). The look lands when the
+ * scene stands, and the scene holds its own loader then; the look is dropped when the switch ends
+ * without it or throws.
  *
  * @param ctx - Domain context of the plugin.
  * @param target - Id of the scene to mount.
@@ -319,6 +358,8 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
     );
   }
 
+  settleFade(ctx);
+
   // The look `begin` started for this node and scene; a `bundles` that throws drops it below.
   let leaving: Leaving | undefined = leaveFor(ctx, run, scene.id);
 
@@ -329,11 +370,17 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
     await loadAndStand(ctx, scene, named, run);
   } catch (error) {
     endLeave(ctx, leaving, "drop");
+    standAgain(ctx, run);
 
     throw error;
   }
 
-  endLeave(ctx, leaving, ctx.state.current === scene.id ? "land" : "drop");
+  const stands = ctx.state.current === scene.id;
+
+  endLeave(ctx, leaving, stands ? "land" : "drop");
+
+  if (stands) standLoader(ctx, scene, run);
+  else standAgain(ctx, run);
 }
 
 /**
@@ -421,8 +468,9 @@ function nextScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | un
  * downloads the bundles of the coming one, so a cold first visit reacts in the next frame. The
  * `scene` stage of the same node takes the look over, lands it at the swap or drops it. A node
  * that keeps the scene, the first scene of a run, a fast walk and an aborted node start nothing
- * (`startLeave` decides the rest). A stage after `begin` that throws aborts the node, and the abort
- * drops the look; one a node before left running all the same is dropped first.
+ * (`startLeave` decides the rest). A loader still fading out after the last swap goes before the
+ * look shows. A stage after `begin` that throws aborts the node, and the abort drops the look; one a
+ * node before left running all the same is dropped first.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
@@ -438,5 +486,9 @@ export function beginScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): voi
   // A scene no feature declared starts nothing: the `scene` stage throws for it.
   const scene = ctx.state.scenes.get(target);
 
-  if (scene !== undefined) startLeave(ctx, scene, run);
+  if (scene === undefined) return;
+
+  // A loader still fading out after the last swap goes before the next look shows.
+  settleFade(ctx);
+  startLeave(ctx, scene, run);
 }
