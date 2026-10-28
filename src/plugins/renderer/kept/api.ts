@@ -18,7 +18,15 @@ import type {
 } from "../types";
 import { flushRanges, moveRange, releaseRange, retakeRange, spriteOf, takeRange } from "./freeze";
 import { drawnThrough, NOT_THROUGH, slotsPadding } from "./readers";
-import { bypassRecord, createRecord, dropRecord, goLive, stepCalm, stepRecord } from "./record";
+import {
+  bypassRecord,
+  createRecord,
+  dropRecord,
+  goLive,
+  markAlphaDue,
+  stepCalm,
+  stepRecord
+} from "./record";
 import { canKeep, dropTexture, matricesOf } from "./render";
 import { destroyRange } from "./state";
 import type { KeptCtx, KeptMatrices, KeptRange, KeptRecord, KeptStats } from "./types";
@@ -312,6 +320,7 @@ export function createKeptApi(
       if (state.on) {
         sortRecords();
         state.firstTakes = 0;
+        markAlphaDue(kctx, pixi);
         stepRecords(kctx, pixi, matrices);
         // A flush that no collect went before steps every record.
         state.calm = false;

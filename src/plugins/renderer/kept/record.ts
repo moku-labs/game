@@ -100,6 +100,9 @@ type Drawing = {
   shown: boolean;
 };
 
+/** The stack of a record looked at before the step (F114). One object: the look allocates nothing. */
+const DUE: Stack = { enabled: 0, rs: 1, P: 0, alpha: Number.NaN, passes: 0 };
+
 /** What the record being stepped drew before its step. One object: a step allocates nothing. */
 const BEFORE: Drawing = {
   mode: "live",
@@ -487,7 +490,9 @@ export function createRecord(
     blended: false,
     takenAt: Number.NaN,
     spared: false,
-    idle: false
+    idle: false,
+    alphaDue: false,
+    alphaMissed: false
   };
   const { state } = kctx;
 
@@ -1303,7 +1308,8 @@ function stepLive(
 ): void {
   const { state } = kctx;
   const { key } = record;
-  const turned = linearDiffers(key, NOW, KEY.seenA, KEY.seenRs);
+  // A record's first frame has no frame before it to turn from: a new view that did not change is still (F114).
+  const turned = !Number.isNaN(key[KEY.seenA]) && linearDiffers(key, NOW, KEY.seenA, KEY.seenRs);
   const changed = record.dirtyS1 || (turned && linearResets(record));
   const moved = turned || NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
 
@@ -1319,11 +1325,11 @@ function stepLive(
   if (record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget) return;
   // A glow under the top stays live, remembered until the subtree changes (F68).
   if (blendedBelow(kctx, record)) return;
-  // One first take per frame of a record not drawn direct, inner first: the others stay live and wait (F114). A stack
-  // drawn direct takes for one pass, less than its live draw: never held back.
+  // One first take per frame, inner first: the others stay live and wait (F114). A stack drawn direct takes for one
+  // pass, less than its live draw: never held back, and while one is due the others wait for the next frame.
   const direct = drawsDirect(NOW);
 
-  if (!direct && state.firstTakes > 0) return;
+  if (!direct && (state.firstTakes > 0 || state.alphaDue)) return;
 
   wrapBare(kctx, record, view);
 
@@ -1333,7 +1339,7 @@ function stepLive(
     return;
   }
 
-  if (!direct) state.firstTakes += 1;
+  state.firstTakes += 1;
 
   record.takenAt = state.frame;
   toKept(kctx, record, view);
@@ -1622,6 +1628,59 @@ export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
 }
 
 /**
+ * Marks, before the step, the live records drawn direct that may be taken in this flush (F114): eligible, nothing
+ * changed under them. An alpha take costs one pass and its live draw two, so while one is due no other first take
+ * happens in this frame. A record due once that did not end its step kept is not due again until a change under it.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ */
+export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
+  const { state } = kctx;
+  const resolution = kctx.host.resolution();
+
+  state.alphaDue = false;
+
+  for (let index = 0; index < state.records.length; index += 1) {
+    const record = state.records[index];
+    const view = record === undefined ? undefined : kctx.ctx.state.sync.views.get(record.entity);
+
+    if (record === undefined || view === undefined || !mayBeDue(kctx, record)) continue;
+
+    readStack(record.slots, resolution, pixi.AlphaFilter, DUE);
+    record.alphaDue =
+      !Number.isNaN(DUE.alpha) &&
+      DUE.P === 0 &&
+      DUE.rs === resolution &&
+      eligible(kctx, record, view, DUE);
+    state.alphaDue ||= record.alphaDue;
+  }
+}
+
+/**
+ * Tells whether a record may be taken in this flush as far as is known before its step: live, nothing changed under
+ * it, and no earlier refusal that still holds.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @returns True when it may.
+ */
+function mayBeDue(kctx: KeptCtx, record: KeptRecord): boolean {
+  const { state } = kctx;
+  const refused = record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget;
+
+  return (
+    record.mode === "live" &&
+    !record.dirtyS1 &&
+    !record.idle &&
+    !record.calm &&
+    !record.alphaMissed &&
+    !record.blended &&
+    !refused
+  );
+}
+
+/**
  * One drawn frame of a record, inside the flush: eligibility, the keys of this frame, the policy of its life, the quad
  * of a kept one; the dirty flags are cleared. A change under the top forgets a blended node found before: the next
  * take walks the subtree again (F68).
@@ -1646,6 +1705,7 @@ export function stepRecord(
   if (record.dirtyS1) {
     record.blended = false;
     record.idle = false;
+    record.alphaMissed = false;
   }
 
   NOW.r = kctx.host.resolution();
@@ -1661,6 +1721,9 @@ export function stepRecord(
   record.dirtyS2 = false;
   record.dirtyS3 = false;
   record.spared = false;
+  // A due alpha that could not be taken holds the others back once, not every frame (F114).
+  if (record.alphaDue && record.mode !== "kept") record.alphaMissed = true;
+  record.alphaDue = false;
 }
 
 /**

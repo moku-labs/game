@@ -1012,10 +1012,11 @@ is taken after it stood still for 2 drawn frames; a kept view whose subtree chan
 in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
 more than live). A kept view inside another is rendered first; its change retakes the outer one too.
 
-First takes in a frame (F114). A view whose filters are all alphas is taken in its first frame unchanged: its picture
-costs one pass, live costs two. Any other view takes its first picture at most one per frame, in drawing order; the
-others wait one more frame each, drawn live as before (never hidden), so a whole board that appears at once spreads
-its take passes over several frames. A first take inside a kept picture does not count as churn of the outer one. A
+First takes in a frame (F114). A view whose filters are all alphas is taken in its first frame unchanged (the first
+frame it is drawn counts as unchanged): its picture costs one pass, live costs two. Any other view takes its first
+picture at most one per frame, in drawing order, and none in a frame where an alpha may be taken; the others wait one
+more frame each, drawn live as before (never hidden), so a whole board that appears at once spreads its take passes
+over several frames. An alpha that may be taken but is not (cut to the canvas under a zoom) holds the others back once. A first take inside a kept picture does not count as churn of the outer one. A
 take that renders nothing (a view off the canvas, empty, too large) is not offered again until the view moves or
 changes.
 

@@ -187,6 +187,10 @@ export type KeptRecord = {
    * offered or attempted until a change under the top or a move of it clears it (F114).
    */
   idle: boolean;
+  /** A stack drawn direct that may be taken in this flush: no other first take happens before it (F114). */
+  alphaDue: boolean;
+  /** It was due and did not end the flush kept: not due again until a change under the top (F114). */
+  alphaMissed: boolean;
 };
 
 /** One picture of an overlay's range (P7), keyed by the owner overlay's entity. */
@@ -264,6 +268,8 @@ export type KeptState = {
   calm: boolean;
   /** First takes of records not drawn direct in this flush: one per frame (F114). */
   firstTakes: number;
+  /** A record drawn direct is due in this flush: the first takes of the others wait for the next (F114). */
+  alphaDue: boolean;
 };
 
 /** The scratch matrices of the module, made once from the Pixi module. */

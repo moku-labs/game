@@ -1081,6 +1081,70 @@ describe("the first takes of a frame (F114)", () => {
     expect(icons.map(icon => keptNow(drawn, icon))).toEqual([true, true, true]);
   });
 
+  // Bug (A Memory Missing, the memory leaving over the board): an alpha's first frame drawn counted as a change, so it
+  // was drawn live for two passes, and its take then fell in the frame of another view's first take (8 passes, not 7).
+  it("takes an alpha in the first frame its panel shows, and the other view due then waits a frame", async () => {
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200, alpha: 0 }));
+    const sheet = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 10, y: 10 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: panel })
+    ]);
+    // Deeper than the sheet, so its record steps first.
+    const outer = drawn.spawn(Transform({ x: 300, y: 50 }), Shape({ w: 200, h: 200 }));
+    const inner = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 0, y: 0 }),
+      Shape({ w: 100, h: 100 }),
+      Parent({ entity: outer })
+    ]);
+    const blurred = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 10, y: 10 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: inner })
+    ]);
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(sheet, [slotOf(new pixi.AlphaFilter({ alpha: 0.5 }))]);
+    drawn.mock.api.sync.filters.set(blurred, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.frames(2);
+
+    expect([keptNow(drawn, sheet), keptNow(drawn, blurred)]).toEqual([false, false]);
+
+    drawn.mock.world.ecs.set(panel, Shape, { alpha: 1 });
+    drawn.frame();
+
+    expect([keptNow(drawn, sheet), keptNow(drawn, blurred)]).toEqual([true, false]);
+
+    drawn.frame();
+
+    expect([keptNow(drawn, sheet), keptNow(drawn, blurred)]).toEqual([true, true]);
+  });
+
+  // Bug: an alpha cut to the canvas under a zoom is due in every frame and refused in every frame (a cut picture waits
+  // for rest, F113): it held every other first take back for the whole zoom (the board's entry).
+  it("lets an alpha refused under a zoom hold the other first takes back once, not for the whole zoom", async () => {
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 400, h: 400 }));
+    const sheet = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: -1000, y: 0 }),
+      Shape({ w: 3000, h: 400 }),
+      Parent({ entity: panel })
+    ]);
+    const blurred = drawn.spawn(Transform({ x: 100, y: 500 }), Shape({ w: 40, h: 40 }));
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(sheet, [slotOf(new pixi.AlphaFilter({ alpha: 0.5 }))]);
+    drawn.mock.api.sync.filters.set(blurred, [slotOf(new pixi.ColorMatrixFilter())]);
+
+    for (let frame = 1; frame <= 6; frame += 1) {
+      drawn.mock.world.ecs.set(panel, Transform, { scale: 1 + frame * 0.05 });
+      drawn.frame();
+    }
+
+    expect([keptNow(drawn, sheet), keptNow(drawn, blurred)]).toEqual([false, true]);
+  });
+
   // Bug: a view whose take renders nothing (off the canvas) is offered again every few frames, each attempt building its
   // bounds; or it holds the frame's one first take so a view on the canvas waits for ever.
   it("tries a view off the canvas once, takes a view on the canvas, and tries again when it moves", async () => {

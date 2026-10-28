@@ -75,7 +75,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     bypassed: false,
     flushPasses: 0,
     calm: false,
-    firstTakes: 0
+    firstTakes: 0,
+    alphaDue: false
   };
 }
 
@@ -174,6 +175,7 @@ export function stopKept(state: KeptState): void {
   state.flushPasses = 0;
   state.drawnPictures = 0;
   state.firstTakes = 0;
+  state.alphaDue = false;
   state.warnedBudget = false;
   state.warnedBlend.clear();
   state.verifySkipped = 0;
