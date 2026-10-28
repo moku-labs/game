@@ -59,7 +59,7 @@ describe("host init", () => {
       background: 0x00_00_00,
       antialias: false,
       resolution: 2,
-      autoDensity: true,
+      autoDensity: false,
       autoStart: false,
       sharedTicker: false
     });

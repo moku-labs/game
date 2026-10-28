@@ -238,7 +238,8 @@ export async function createApplication(
     background: ctx.config.background,
     antialias: ctx.config.antialias,
     resolution: targetResolution(state.resolution),
-    autoDensity: true,
+    // The host sets the canvas box itself (`resizeAt`): Pixi's would be the rounded-up store, past the mount.
+    autoDensity: false,
     autoStart: false,
     sharedTicker: false,
     useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all())
@@ -256,6 +257,10 @@ export async function createApplication(
   // A canvas is inline by default and leaves a line gap under it: the page grows past the window
   // and scrolls. Block layout keeps it exactly the size of its mount.
   app.canvas.style.display = "block";
+  // Until its first layout gives it the measured size, a canvas made again after a lost device fills its mount:
+  // with no size of its own it would show at its backing store's size.
+  app.canvas.style.width = "100%";
+  app.canvas.style.height = "100%";
   mount.append(app.canvas);
 }
 

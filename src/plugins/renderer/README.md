@@ -147,7 +147,9 @@ The drawing resolution has four sources and one rule: `override ?? min(devicePix
 Every change goes through one mechanism: it is remembered, and the next frame applies it on the
 resize path (`viewport` lays out, `host.resize(w, h)` calls Pixi's `renderer.resize(w, h, r)`), so
 a burst of changes costs one resize, the CSS size, the frame and the scale stay, only the backing
-store changes. A restore after a lost device comes back at the current target, override
+store changes. The CSS size is the mount's border box with its fractions (`getBoundingClientRect`):
+the canvas box is set to it, and the backing store is rounded up to whole device pixels, so the
+canvas covers the mount to its last device pixel at a fractional `devicePixelRatio` (F116). A restore after a lost device comes back at the current target, override
 included. `host.onResolution(fn)` (internal) hears every applied change with `(from, to, reason)`, the reason
 `"dpr"`, `"setting"`, `"debug"` or `"rate"`;
 the monitor writes it into the log, and B1, F12, C14 and PX1 subscribe in later blocks.

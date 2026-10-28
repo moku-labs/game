@@ -303,7 +303,10 @@ export type AdaptiveScale = {
  * ```
  */
 export type Config = {
-  /** Where the canvas goes: a selector or an element. `undefined` keeps the plugin inert. */
+  /**
+   * Where the canvas goes: a selector or an element. `undefined` keeps the plugin inert. The canvas takes the
+   * mount's border box, fractions of a CSS pixel kept, so the mount has no border, padding, scrollbar or transform.
+   */
   mount: string | HTMLElement | undefined;
   /** Clear colour. Also the colour of the bars around the frame. */
   background: number;

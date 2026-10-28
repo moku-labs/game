@@ -93,6 +93,7 @@ describe("overlay dim", () => {
 
     dom.mount.clientWidth = 1920;
     dom.mount.clientHeight = 1080;
+    dom.mount.rect = { left: 0, top: 0, width: dom.mount.clientWidth, height: 1080 };
     dom.observers[0]?.fire();
     stage.frames(2);
 
