@@ -311,6 +311,7 @@ export function createKeptApi(
 
       if (state.on) {
         sortRecords();
+        state.firstTakes = 0;
         stepRecords(kctx, pixi, matrices);
         // A flush that no collect went before steps every record.
         state.calm = false;

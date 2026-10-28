@@ -178,6 +178,15 @@ export type KeptRecord = {
    * is not taken again until a frame that sets `dirtyS1` (a change under the top) clears it.
    */
   blended: boolean;
+  /** The frame of the record's last take from live (F114): a picture that goes ineligible right after it churns. */
+  takenAt: number;
+  /** An inner record was first taken: the next stage-1 retake this causes is not counted as churn (F114). */
+  spared: boolean;
+  /**
+   * A take attempt rendered nothing (off the canvas, empty bounds, too big, a `Display` without `onDemand`): no take is
+   * offered or attempted until a change under the top or a move of it clears it (F114).
+   */
+  idle: boolean;
 };
 
 /** One picture of an overlay's range (P7), keyed by the owner overlay's entity. */
@@ -253,6 +262,8 @@ export type KeptState = {
    * the next flush.
    */
   calm: boolean;
+  /** First takes of records not drawn direct in this flush: one per frame (F114). */
+  firstTakes: number;
 };
 
 /** The scratch matrices of the module, made once from the Pixi module. */

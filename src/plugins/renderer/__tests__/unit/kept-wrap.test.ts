@@ -203,7 +203,10 @@ describe("when a bare view is wrapped", () => {
     const blink = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
 
     drawn.frame();
-    drawn.mock.api.sync.filters.set(blink, [slot()]);
+    // Not a stack of alphas: one is taken in its first eligible frame whatever it does next (F114).
+    drawn.mock.api.sync.filters.set(blink, [
+      { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
+    ]);
 
     for (let frame = 0; frame < 12; frame += 1) {
       drawn.mock.world.ecs.set(blink, Shape, { fill: frame % 2 === 0 ? 0xff_00_00 : 0x00_ff_00 });

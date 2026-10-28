@@ -1012,6 +1012,13 @@ is taken after it stood still for 2 drawn frames; a kept view whose subtree chan
 in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
 more than live). A kept view inside another is rendered first; its change retakes the outer one too.
 
+First takes in a frame (F114). A view whose filters are all alphas is taken in its first frame unchanged: its picture
+costs one pass, live costs two. Any other view takes its first picture at most one per frame, in drawing order; the
+others wait one more frame each, drawn live as before (never hidden), so a whole board that appears at once spreads
+its take passes over several frames. A first take inside a kept picture does not count as churn of the outer one. A
+take that renders nothing (a view off the canvas, empty, too large) is not offered again until the view moves or
+changes.
+
 Under a fading or zooming ancestor (F113). A view that stands still is taken while an ancestor fades or zooms, as in
 the entry of a screen, after 2 drawn frames as anywhere: an ancestor's alpha is not read, and a change of the view's
 world scale or rotation does not count as a change of the view. Its quad is faded with the ancestor and drawn scaled
