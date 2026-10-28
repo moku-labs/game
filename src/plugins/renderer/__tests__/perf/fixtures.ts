@@ -921,13 +921,19 @@ export async function fadingLoader(phase: "fade" | "wait"): Promise<FadingLoader
   mock.api.sync.leave.land();
 
   let now = 0;
-
-  return {
-    mock,
-    step: (): void => {
-      now += 1;
-      mock.setNow(now);
-      mock.modules.sync.stepLeave();
-    }
+  const step = (): void => {
+    now += 1;
+    mock.setNow(now);
+    mock.modules.sync.stepLeave();
   };
+
+  if (phase === "wait") {
+    // The first step parks the layer; its wait is bounded to a few frames, so a window of many calls keeps it open.
+    step();
+    const parked = mock.ctx.state.sync.leave.parked;
+
+    if (parked !== undefined) parked.framesLeft = Number.MAX_SAFE_INTEGER;
+  }
+
+  return { mock, step };
 }
