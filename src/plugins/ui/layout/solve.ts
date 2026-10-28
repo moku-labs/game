@@ -137,7 +137,9 @@ export function solveRoot(
 
   if (state.yoga === undefined || node === undefined) return false;
 
-  node.calculateLayout(size.w, size.h, state.yoga.DIRECTION_LTR);
+  // Whole units rounded up: Yoga rounds a root of 874.31 to 874, and a full-screen fill would stop short of the
+  // frame's last device row (F116). What reaches past the frame is less than one unit, off the canvas.
+  node.calculateLayout(Math.ceil(size.w), Math.ceil(size.h), state.yoga.DIRECTION_LTR);
   state.solves += 1;
 
   return place(state, rootElement, { origin: { x: size.x, y: size.y }, content: size }, lookup);

@@ -294,3 +294,38 @@ describe("contentRectOf", () => {
     expect(contentRectOf(createLayoutState(), slot)).toEqual({ x: 0, y: 0, w: 600, h: 300 });
   });
 });
+
+// ─── a root solved in a fractional viewport (F116) ────────────
+
+describe("solveRoot in a fractional viewport", () => {
+  // Bug: Yoga rounds a root of 874.31 units to 874, so a full-screen fill stops 0.31 units short of the frame and
+  // the last device row of the A26 (384 × 832 CSS px at 2.8125) shows the clear colour under it.
+  it("lays a full-screen fill over the whole frame on both axes", async () => {
+    const state = createLayoutState();
+    const yoga = await loadYogaModule();
+    const screen = elementOf({ entity: 1, style: { width: "100%", height: "100%" } });
+    const ground = elementOf({ entity: 2, style: { width: "100%", height: "100%" } });
+    const elements = new Map([
+      [1, screen],
+      [2, ground]
+    ]);
+
+    screen.children = [2];
+    state.yoga = yoga;
+    createNode(state, screen);
+    createNode(state, ground);
+
+    for (const element of [screen, ground]) {
+      const node = state.byEntity.get(element.entity);
+
+      if (node !== undefined) applyStyleToNode(yoga, node, element.style, element.type, undefined);
+    }
+
+    placeChildren(state, screen, [ground]);
+    solveRoot(state, screen, { x: 0, y: 0, w: 403.527, h: 874.309 }, entity =>
+      elements.get(entity)
+    );
+
+    expect(ground.rect).toEqual({ x: 0, y: 0, w: 404, h: 875 });
+  });
+});
