@@ -57,6 +57,27 @@ function elementOf(patch: Partial<Element> = {}): Element {
 
 // ─── the visual component of an element ───────────────────────
 
+/**
+ * The alpha of the sprite of an image with a style, laid out at a size.
+ *
+ * @param style - The resolved style.
+ * @param w - The laid-out width.
+ * @param h - The laid-out height.
+ * @returns The alpha written into its `Sprite`.
+ */
+function imageAlpha(style: Element["style"], w: number, h: number): number | undefined {
+  const value = visualOf(
+    elementOf({
+      type: "image",
+      style,
+      rect: { x: 0, y: 0, w, h },
+      node: { type: "image", props: { texture: "ui.rim" }, children: [] }
+    })
+  )[0]?.value;
+
+  return typeof value === "object" ? (value as { alpha?: number }).alpha : undefined;
+}
+
 describe("visualOf", () => {
   it("draws the nine-slice of the style on any tag, at the rect, with alpha and tint", () => {
     for (const type of ["button", "row", "stack", "panel"]) {
@@ -115,6 +136,17 @@ describe("visualOf", () => {
     expect(glow?.value).toMatchObject({ texture: "art.glow", alpha: 0.8, blend: "screen" });
     expect(halo?.type.componentName).toBe("NineSlice");
     expect(halo?.value).toMatchObject({ texture: "glass.frost", blend: "add" });
+  });
+
+  // Bug: an image hidden by a size of 0 the layout did not give it (its style states none, a
+  // game's system sizes its sprite), or shown at its texture's size when its edges squeeze it to 0.
+  it("puts an image at alpha 0 only on an axis its style sizes and the layout makes 0", () => {
+    const edges = { position: "absolute", left: 20, right: 20, top: 0, bottom: 0 } as const;
+
+    expect(imageAlpha({ position: "absolute", left: 0, top: 0, alpha: 0.5 }, 0, 0)).toBe(0.5);
+    expect(imageAlpha(edges, 0, 0)).toBe(0);
+    expect(imageAlpha({ ...edges, alpha: 0.5 }, 40, 8)).toBe(0.5);
+    expect(imageAlpha({ left: 20, right: 20, height: 8 }, 0, 8)).toBe(1);
   });
 
   it("sizes an image to its rect with the fit of its prop, contain by default", () => {

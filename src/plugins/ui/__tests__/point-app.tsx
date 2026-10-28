@@ -3,7 +3,8 @@
  * an element of no area at 300, 400, and a slab of 100 x 60 at 600, 400. A screen holds an
  * `<anchor>` on the dot or the slab, as a local `on` names, that glides on a change of target and
  * holds a 40 u button `hand` overflowing it; a second anchor on the slab padded inward by 60, more
- * than half the slab; and an image at 100, 1000 whose size a local names. Drawn on the fake page
+ * than half the slab; an image at 100, 1000 whose size a local names; and an image at 300, 1000
+ * whose style states no size, as a game whose own system sizes the sprite. Drawn on the fake page
  * and the fake Pixi, so a press is a pointer event that goes through the hit test. Real flow,
  * world, text and Yoga.
  */
@@ -50,7 +51,8 @@ const TARGETS = { dot: DOT, slab: SLAB } as const;
 const PICTURES = {
   full: { width: 40, height: 40 },
   thin: { width: 0, height: 40 },
-  flat: { width: 40, height: 0 }
+  flat: { width: 40, height: 0 },
+  none: { width: 0, height: 0 }
 } as const;
 
 /**
@@ -76,6 +78,11 @@ export const Marker = defineComponent("Marker", {
           ...PICTURES[local.picture]
         }}
       />
+      <image
+        key="placed"
+        texture="ui.coin"
+        style={{ position: "absolute", left: 300, top: 1000, reason: "sized by a system" }}
+      />
       <row
         key="controls"
         style={{ position: "absolute", left: 0, top: 1820, width: 1080, reason: "controls" }}
@@ -85,6 +92,7 @@ export const Marker = defineComponent("Marker", {
         <button key="go-thin" local={{ picture: "thin" }} style={{ width: 100, height: 100 }} />
         <button key="go-flat" local={{ picture: "flat" }} style={{ width: 100, height: 100 }} />
         <button key="go-full" local={{ picture: "full" }} style={{ width: 100, height: 100 }} />
+        <button key="go-none" local={{ picture: "none" }} style={{ width: 100, height: 100 }} />
       </row>
     </stack>
   )
