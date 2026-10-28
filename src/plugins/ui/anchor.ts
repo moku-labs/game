@@ -37,6 +37,12 @@ const FOLLOWED_FIELDS: readonly string[] = Object.freeze(["x", "y"]);
 /** The style fields an anchor takes from its targets: a style that sets one is ignored there. */
 const PLACED_FIELDS = ["width", "height", "position", "left", "top", "right", "bottom"] as const;
 
+/**
+ * Frames in a row a key of an anchor names no entity before a dev build names it: a view spawned
+ * this frame has its `Transform` queued until the flush.
+ */
+const MISSING_FRAMES = 2;
+
 /** What one anchor's targets came to in this frame. */
 type Found = { shown: boolean; missing: boolean; own: AnchorTarget | undefined };
 
@@ -52,10 +58,9 @@ type Found = { shown: boolean; missing: boolean; own: AnchorTarget | undefined }
  */
 function isTarget(value: unknown): value is AnchorTarget {
   if (typeof value !== "object" || value === null) return false;
+  if (!("projection" in value) || !("key" in value)) return false;
 
-  const target = value as { projection?: unknown; key?: unknown };
-
-  return typeof target.projection === "string" && typeof target.key === "string";
+  return typeof value.projection === "string" && typeof value.key === "string";
 }
 
 /**
@@ -288,9 +293,11 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
    * @param anchor - Its record.
    */
   function warnStyle(element: Element, anchor: Anchor): void {
-    if (anchor.warned.style || !PLACED_FIELDS.some(field => element.style[field] !== undefined)) {
-      return;
-    }
+    if (anchor.warned.style) return;
+
+    const placedByStyle = PLACED_FIELDS.some(field => element.style[field] !== undefined);
+
+    if (!placedByStyle) return;
 
     anchor.warned.style = true;
     ctx.log.warn("ui:anchor-style", { key: element.key ?? element.identity });
@@ -384,7 +391,7 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
 
     anchor.missing = found.missing ? anchor.missing + 1 : 0;
 
-    if (anchor.missing >= 2) warnMissing(element, anchor);
+    if (anchor.missing >= MISSING_FRAMES) warnMissing(element, anchor);
     if (found.own !== undefined) refuseOwn(element, anchor, found.own);
 
     return found.shown;
@@ -398,9 +405,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
    */
   function warnMissing(element: Element, anchor: Anchor): void {
     // The dev guard is inline: a production `define` folds it away.
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__ || anchor.warned.missing) {
-      return;
-    }
+    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return;
+    if (anchor.warned.missing) return;
 
     anchor.warned.missing = true;
     ctx.log.warn("ui:anchor-target-missing", {
@@ -585,13 +591,16 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
 
     for (const child of parent.children) {
       const element = lookup(child);
-      const childNode = element === undefined ? undefined : layout.byEntity.get(element.entity);
+      // A nested anchor is placed by its own turn of the pass.
+      const placeable = element !== undefined && element.type !== ANCHOR;
+      const childNode = placeable ? layout.byEntity.get(element.entity) : undefined;
 
-      if (element === undefined || childNode === undefined || element.type === ANCHOR) continue;
+      if (!placeable || childNode === undefined) continue;
 
       const w = childNode.getComputedWidth();
       const h = childNode.getComputedHeight();
       const fitted = element.style.fit === "contain" ? fitInto(content, w, h) : undefined;
+      const fit = fitted?.fit ?? 1;
 
       slot.x = fitted?.rect.x ?? parent.rect.x + childNode.getComputedLeft();
       slot.y = fitted?.rect.y ?? parent.rect.y + childNode.getComputedTop();
@@ -599,8 +608,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
       slot.h = h;
       writeRect(element, slot);
 
-      if ((fitted?.fit ?? 1) !== element.fit) {
-        element.fit = fitted?.fit ?? 1;
+      if (fit !== element.fit) {
+        element.fit = fit;
         element.moved = true;
       }
 
@@ -669,6 +678,27 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
   }
 
   /**
+   * Applies one live child a relayout moved: carried along only, it writes its `Box`; laid out
+   * anew, it is applied with its `change` hooks, or with no motion when the anchor's size followed.
+   *
+   * @param element - The moved child.
+   * @param followed - Whether the anchor's size changed by following its targets.
+   */
+  function applyMoved(element: Element, followed: boolean): void {
+    const carriedAlong = !relaidOut(element, shift);
+
+    if (carriedAlong) {
+      writeBox(element);
+      element.moved = false;
+    } else if (followed) {
+      jsx.applyAnchored(element, true);
+      settlePose(element);
+    } else {
+      jsx.applyAnchored(element, false);
+    }
+  }
+
+  /**
    * Applies what a relayout of an anchor's subtree moved. A child carried along only writes its
    * `Box`; one laid out anew is applied as the solve applies it, with its `change` hooks, unless
    * the anchor's size followed its targets: then it takes its rect and its rest pose with no motion.
@@ -685,14 +715,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
       if (!element.live) {
         // A child that came since the last pass gets its components with its first rect.
         jsx.applyAnchored(element, false);
-      } else if (element.moved && !relaidOut(element, shift)) {
-        writeBox(element);
-        element.moved = false;
-      } else if (element.moved && followed) {
-        jsx.applyAnchored(element, true);
-        settlePose(element);
       } else if (element.moved) {
-        jsx.applyAnchored(element, false);
+        applyMoved(element, followed);
       }
 
       applyUnder(element, followed);
@@ -984,9 +1008,18 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     // Every frame of a motion the follow carries, and the frame it ends: the pose takes the rest.
     if (anchor.owed && !moved) writePose(element, anchor);
 
-    if (moved) return;
+    if (!moved) settle(entity, element, anchor);
+  }
 
-    // The anchor stands: the world's copy of its rest and the `Box` values catch up, once.
+  /**
+   * Catches an anchor that stands up, once: the world's copy of its rest and the `Box` values, then
+   * a loop held while it moved goes on from where it stands.
+   *
+   * @param entity - The anchor's entity.
+   * @param element - The anchor.
+   * @param anchor - Its record.
+   */
+  function settle(entity: Entity, element: Element, anchor: Anchor): void {
     if (anchor.stale) {
       ctx.deps.world.projection.setRest(entity, Transform, element.rest);
       anchor.stale = false;
@@ -997,7 +1030,6 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
       anchor.boxes = false;
     }
 
-    // A loop held while the anchor moved goes on from where it stands.
     letGo(anchor);
   }
 

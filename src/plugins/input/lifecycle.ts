@@ -93,6 +93,7 @@ export function startInput(ctx: KernelSlice): void {
  * @param state - The plugin state, the only thing a teardown context carries.
  */
 export function stopInput(state: State): void {
+  // Close the listeners, the frame callback and the mutes held for a drag.
   detach(state);
   detachKeys(state);
   state.offFrame?.();
@@ -101,6 +102,8 @@ export function stopInput(state: State): void {
   state.unmute = undefined;
   for (const follower of state.carried) follower.unmute();
   state.carried = [];
+
+  // Forget the gesture in progress.
   state.path = [];
   state.traceIntent = undefined;
   state.traceClosed = false;
@@ -119,6 +122,8 @@ export function stopInput(state: State): void {
   state.wake = undefined;
   state.resolveNow = undefined;
   state.resolvedEarly = false;
+
+  // Forget the registrations and the lock of a guide.
   state.tapListeners = [];
   state.keyListeners = [];
   state.pointerListeners = [];

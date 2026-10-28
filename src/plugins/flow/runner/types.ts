@@ -752,11 +752,6 @@ export type AnyNode = AnyWired & {
    * @param state.player - The committed player tree.
    * @param state.session - The committed session tree.
    * @returns The guide while the node stands, or `undefined` for none.
-   * @example
-   * ```ts
-   * // A unit test of the game asks the board's rest node what it guides at step 2 of the tutorial.
-   * awaitIntent.guide?.({ player, session: { tutorial: 2 } })?.allow; // { intent: "merge", payload: { from: "c2", to: "c3" } }
-   * ```
    */
   guide?(state: { player: unknown; session: unknown }): GuideOptions | undefined;
 };
