@@ -33,6 +33,9 @@ const SQUEEZED = { projection: "point.screen", key: "squeezed" };
 /** The image whose size the controls set. */
 const PICTURE = { projection: "point.screen", key: "picture" };
 
+/** The image whose style states no size. */
+const PLACED = { projection: "point.screen", key: "placed" };
+
 /** The app of the running test, stopped after it. */
 let running: PointApp | undefined;
 
@@ -160,9 +163,31 @@ describe("an image laid out at no size", () => {
     expect(sprite()).toMatchObject({ alpha: 0, width: 40, height: 0 });
     expect(hit()).toBe(false);
 
+    press(app, "go-none");
+
+    expect(sprite()).toMatchObject({ alpha: 0, width: 0, height: 0 });
+    expect(hit()).toBe(false);
+
     press(app, "go-full");
 
     expect(sprite()).toMatchObject({ alpha: 1, width: 40, height: 40 });
     expect(hit()).toBe(true);
+  });
+
+  it("keeps its alpha when its style states no size, and draws at the size a system writes (F111)", async () => {
+    // Bug caught: an image the layout leaves at 0 by 0 because its style states no size, whose
+    // sprite a game's own system sizes (a backdrop that covers the screen), is put at alpha 0: the
+    // backdrop vanishes and its blurred picture is never kept.
+    const { app } = await started();
+    const placed = entityOf(app, PLACED);
+
+    expect(app.world.ecs.get(placed, Box)).toMatchObject({ w: 0, h: 0 });
+    expect(app.world.ecs.get(placed, Sprite)?.alpha).toBe(1);
+
+    app.world.ecs.set(placed, Sprite, { width: 50, height: 50 });
+    frames(app, 1);
+
+    expect(app.world.ecs.get(placed, Sprite)).toMatchObject({ alpha: 1, width: 50, height: 50 });
+    expect(app.renderer.sync.hitAll(320, 1020)).toContain(placed);
   });
 });

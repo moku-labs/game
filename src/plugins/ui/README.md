@@ -20,7 +20,7 @@ rect from one Yoga solve per change.
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 | `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key, `false` and the warning `ui:scroll-before-solve` `{ key }` when the `scroll` came in this frame and its first solve has not placed it yet. Works headless. See [Scroll](#scroll) |
-| `app.ui.rectOf(target)` | where a target is drawn, in screen reference units: `{ projection, key }` (an `AnchorTarget`) or a list of them, whose shown ones it spans; `{ x, y, w: 0, h: 0 }` for a target of no area; `undefined` when none is shown (an image laid out at no size and a world sprite of no width or height count as not shown). Every build, headless too; a new object per call. See [Anchor](#anchor) |
+| `app.ui.rectOf(target)` | where a target is drawn, in screen reference units: `{ projection, key }` (an `AnchorTarget`) or a list of them, whose shown ones it spans; `{ x, y, w: 0, h: 0 }` for a target of no area; `undefined` when none is shown (an image whose stated size is laid out at 0 and a world sprite of no width or height count as not shown). Every build, headless too; a new object per call. See [Anchor](#anchor) |
 
 Config:
 
@@ -87,7 +87,7 @@ draw adds 0 to both, solves nothing and sets no component.
 
 | Tag | Visual | Input |
 |---|---|---|
-| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha`, `style.blend`; laid out with no width or no height, alpha 0: it draws nothing and takes no tap (the renderer draws a sprite of width 0 at its texture's size), and its style's alpha comes back with a size | none |
+| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha`, `style.blend`; a size its style states (`width`, `height`, or both edges of an absolute element) laid out at 0, alpha 0: it draws nothing and takes no tap (the renderer draws a sprite of width 0 at its texture's size), and its style's alpha comes back with a size; a style that states no size leaves it 0 by 0 at its own alpha, drawn as its `Sprite` says (its texture's size, or the size a game's own system writes) | none |
 | `text` | `Text`; a string `style` is the text style key; `bind={bind(Counter, "value")}` shows a numeric field of a component the element carries (only `bind()` makes a bind) | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug`, `style.blend` | as below |
 | any other tag with `style.nineSlice` and `style.hollow: true` | the same `NineSlice` with `hollow: true`: the rim alone, the centre left unfilled; the hit box stays the whole rect | as below |
@@ -807,7 +807,7 @@ children lay out inside it as in any element; its style gives its look, and a `w
 - **Not shown.** A target is not shown when its key names no entity, it or something it is drawn
   under is leaving, it belongs to a scene built aside or a held warm window, it draws no box the
   resolver knows (a world sprite of no width or height is drawn at its texture's size), or the
-  alphas on its way up multiply to 0.01 or less (an image laid out at no size is drawn at alpha 0). The key of an element of a scene built aside or of
+  alphas on its way up multiply to 0.01 or less (an image whose style states a size laid out at 0 is drawn at alpha 0). The key of an element of a scene built aside or of
   a closed warm window names no entity (`entityOf`), so an anchor on it waits, and a dev build
   names it once after two frames. An anchor of such a scene or window is placed in the frame it
   opens. With no target shown the anchor is drawn at alpha 0 (its subtree is not
