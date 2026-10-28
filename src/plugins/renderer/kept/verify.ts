@@ -202,7 +202,9 @@ export function verifyPictures(
 
   // A picture moving off its grid is sampled linearly, one under a fading ancestor is faded after its filters: the
   // frame is skipped and counted.
-  if (records.some(record => offGrid(kctx, record) || fadedAbove(record))) {
+  const uncomparable = records.some(record => offGrid(kctx, record) || fadedAbove(record));
+
+  if (uncomparable) {
     state.verifySkipped += 1;
 
     return;

@@ -88,6 +88,9 @@ export const BUDGET = {
   // 16 B a new value, its setter boxing the double). Before: every record went
   // live, its filter pass in every frame of the fade. Now each keeps its picture, which Pixi draws at the root's alpha.
   keptAncestorFade: 0,
+  // F113: a still panorama wider than the canvas under a zoom. A cut take is refused once and remembered: the record
+  // waits for rest. Before, a take was tried every third frame of the zoom, each try building its bounds (arrays, spans).
+  keptCutZoom: 0,
   // F68: 10 kept views and a filtered view with a glow inside, drawn live, every record stepped (a mark elsewhere). New,
   // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
   // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.

@@ -1018,7 +1018,7 @@ world scale or rotation does not count as a change of the view. Its quad is fade
 (within 2× of the take, as under a camera zoom), and taken once more at rest. The picture is drawn at `A·F(x)` where
 live draws `F(A·x)`: the same for a filter that is linear in alpha (a blur, a colour matrix that keeps alpha, a shadow
 made of the input's alpha), the whole picture faded for one that is not (an outline thins as the content fades live,
-it fades whole from the picture). At an ancestor's alpha 0 the subtree is not drawn at all: the view is live, draws
+it fades whole from the picture). At an ancestor the engine fades to alpha 0 the subtree is not drawn at all: the view is live, draws
 nothing, and is taken again 2 frames after it shows. Not taken under a zoom: a `"placed"` filter (never drawn scaled),
 a picture cut to the canvas (it is taken again on every move), and a view that churned (it waits for real rest). A
 view under an ancestor that pulses or spins for ever is drawn scaled for ever, never taken again at rest.

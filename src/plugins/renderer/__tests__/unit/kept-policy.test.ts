@@ -876,6 +876,7 @@ describe("a still picture under a fading or zooming ancestor (F113)", () => {
     expect(rendersOf(drawn, icon, "#1", from)).toBe(1);
   });
 
+  // Bug: counted still under a zoom, a view whose subtree changes every frame is taken anyway and retaken every frame.
   it("counts a change under the view during a zoom: no take until two frames without one", async () => {
     const drawn = await open();
     const { panel, icon } = underPanel(drawn);

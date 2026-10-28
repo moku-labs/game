@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
 import {
   bytesPerCall,
+  cutZoomBoard,
   keptAncestorFadeBoard,
   keptBlendBoard,
   keptBoard,
@@ -44,6 +45,13 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing while 10 kept views are stepped under a translucent root (F113)", async () => {
     expect(bytesPerCall(await keptAncestorFadeBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptAncestorFade + NOISE
+    );
+  });
+
+  // Bug: a cut take refused under a zoom is tried again every third frame, building its bounds each time (F113).
+  it("allocates nothing while a still panorama cut to the canvas stands under a zoom (F113)", async () => {
+    expect(bytesPerCall(await cutZoomBoard(), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptCutZoom + NOISE
     );
   });
 
