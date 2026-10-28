@@ -208,6 +208,7 @@ export default {
 | `page.orientation` | `"portrait"` | `"portrait"`, `"landscape"` or `"any"`. The native build locks it; the page writes nothing |
 | `page.icons` | none | `{ favicon?, appleTouch? }`: files relative to the game, written as `<link>` tags |
 | `page.head` | none | Raw tags for `<head>`, verbatim, in order |
+| `page.boot` | none | `{ image, width?, fadeMs? }`: the boot picture, shown from the first paint until the first scene drew. `image` is a file relative to the game; `width` its CSS width, `"40vmin"`; `fadeMs` the fade, `300` (`0` removes it in that frame). The page writes `<img id="moku-boot">` before `#game`, centred, above the canvas; the build copies it beside the page like the icons |
 | `native` | none | `{ name, identifier, icon?, targets? }`. Left out, the game has no native build |
 | `system` | `[]` | The system plugins the shell wires: `lifecycle`, `back`, `haptics`, `keepAwake`, `store` |
 | `save` | `"memory"` | `"memory"`, `"local"` or `"store"` |
@@ -221,7 +222,11 @@ A value TypeScript would refuse, in a file that skips `satisfies`, stops `moku-g
 - `[game] config.page.title is empty.`
 - `[game] config.ts: debug.overlay must be "closed", "pill" or "open", got "card".`
 - `[game] moku-game: page.background "url(x)" is not a CSS color.`, and the same for `page.lang`.
-- `[game] moku-game: page.icons.favicon "assets/icon.png" is not a file in the game.`
+- `[game] moku-game: page.icons.favicon "assets/icon.png" is not a file in the game.`, and the same for `page.boot.image`.
+- `[game] moku-game: page.boot.width "40vmin; color: red" is not a CSS length.`
+- `[game] config.page.boot has no image.` with `Name a picture file of the game in page.boot.image.`
+- `[game] config.page.boot.fadeMs is -1.` with `Use a number of milliseconds, 0 or more.`
+- `[game] build: page.boot.image and page.icons.favicon share the name "icon.png" beside the page.`: two files Bun left in the game would land on one name beside the built page.
 
 ## The page
 

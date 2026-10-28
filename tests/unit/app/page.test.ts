@@ -425,6 +425,16 @@ describe("startPage: the shell, the handles and the start", () => {
       }
     });
   });
+
+  // Bug: a page with no document (or no #moku-boot) still subscribes a frame callback, or throws reading one.
+  it("a page with page.boot and no document adds no frame listener", async () => {
+    const plain = await open();
+    const listeners = plain.app.time.frameListeners();
+    const boot = { image: "features/ui/assets/fx-spark.webp" };
+    const { app } = await open({ page: { title: "mini-game", boot } });
+
+    expect(app.time.frameListeners()).toBe(listeners);
+  });
 });
 
 describe("startPage: the dev agents", () => {
