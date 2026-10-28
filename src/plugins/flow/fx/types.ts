@@ -273,9 +273,9 @@ export type FxApi = {
 export type FxInternal = {
   /**
    * Runs one awaited effect. With `answers` the gate decides; without it the handler does, and
-   * while the frame loop runs the completion waits for the next `signals` phase, except `schedule`, which resolves at
-   * once (its handler only writes a moment). A descriptor with
-   * `answers` and a `guide` reach their handler with a child of the node's signal, so what they
+   * while the frame loop runs the completion waits for the next `signals` phase, except
+   * `schedule`, which resolves at once (its handler only writes a moment). A descriptor with
+   * `answers`, and a `guide`, reach their handler with a child of the node's signal, so what they
    * showed can be taken down before the node ends.
    *
    * @param descriptor - The descriptor the node awaits.

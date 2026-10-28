@@ -1209,7 +1209,8 @@ export type RunnerApi = {
    * entered through the same check as `restore`, with the same fallback. A rest node is entered
    * before the switch to fast mode: its stages see the mode of the caller. A transit node is
    * entered after the switch and without the wait `restore` adds for it: its popup is not shown,
-   * the route answers it. The mode of the caller is put back afterwards.
+   * the route answers it. The mode of the caller is put back afterwards; when it is live, the guide
+   * of the node the walk ends at is shown, its lock and veil as on a live entry.
    *
    * @param route - The player's answers and substituted sub-flow results, in order.
    * @param options - Walk options.

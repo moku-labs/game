@@ -1,7 +1,8 @@
 /**
  * @file platform plugin — API factory, the Back chain and the exit. One press runs three steps and
  * the first that takes it wins: the Escape button of the top popup, the intent `back` of the
- * resting node, the provider leaving the app. A guide that narrows the open gate takes it first. `exit()` is that last step alone.
+ * resting node, the provider leaving the app. A guide that narrows the open gate takes it first.
+ * `exit()` is that last step alone.
  */
 import { flowPlugin } from "../flow";
 import { inputPlugin } from "../input";
@@ -44,8 +45,9 @@ export function runBack(ctx: KernelSlice): BackResult {
 
   const gate = ctx.require(flowPlugin).gate;
   const before = gate.state();
+  const guideOwnsScreen = before.open && before.narrowed;
 
-  if (before.open && before.narrowed) {
+  if (guideOwnsScreen) {
     gate.answer({ intent: BACK_INTENT });
 
     return "intent";
