@@ -36,10 +36,10 @@ function pose(patch: Partial<TransformValue>): TransformValue {
 }
 
 /**
- * An element the resolver reads: its rect, its rest pose, its parent and its root.
+ * An element the resolver reads: its rect, its rest pose, its parent and its root, applied.
  *
  * @param entity - Its entity.
- * @param patch - Its rect, rest, parent and root.
+ * @param patch - Its rect, rest, parent, root and whether it was applied.
  * @returns The element.
  */
 function element(entity: Entity, patch: Partial<Element>): Element {
@@ -49,6 +49,7 @@ function element(entity: Entity, patch: Partial<Element>): Element {
     rest: pose({}),
     parent: undefined,
     root: 0,
+    live: true,
     ...patch
   } as unknown as Element;
 }
@@ -255,6 +256,73 @@ describe("drawnInto", () => {
     expect(drawn(empty, 3)).toBeUndefined();
     expect(drawn(faded, 2)).toBeUndefined();
     expect(drawn(unposed, 4)).toBeUndefined();
+  });
+
+  it("shows an element, a nine-slice and a shape of no area at their point", () => {
+    // Bug caught: a target of no area counts as not shown, so an anchor on a point (a dot, an
+    // empty marker) never shows and `rectOf` answers nothing.
+    const world = panelWorld();
+
+    world.elements.set(2, element(2, { rect: { x: 120, y: 230, w: 0, h: 40 }, parent: 1 }));
+    put(world, 2, { Transform: pose({ x: 20, y: 50, pivot: { x: 0, y: 20 } }) });
+    put(world, 3, {
+      Transform: pose({ x: 10, y: 20 }),
+      NineSlice: { ...NineSlice.defaults, width: 30, height: 0 }
+    });
+    put(world, 4, { Transform: pose({ x: 10, y: 20 }), Shape: { ...Shape.defaults, w: 0, h: 0 } });
+
+    expect(drawn(world, 2)).toEqual({ x: 120, y: 230, w: 0, h: 40 });
+    expect(drawn(world, 3)).toEqual({ x: 10, y: 20, w: 30, h: 0 });
+    expect(drawn(world, 4)).toEqual({ x: 10, y: 20, w: 0, h: 0 });
+  });
+
+  it("answers nothing for a target of no area that is not shown", () => {
+    // Bug caught: the point case skips the checks before it, so a faded or leaving point keeps
+    // its anchor.
+    const faded = panelWorld();
+    const leaving = panelWorld();
+    const point = { rect: { x: 120, y: 230, w: 0, h: 0 }, parent: 1 };
+
+    faded.elements.set(2, element(2, point));
+    leaving.elements.set(2, element(2, point));
+    put(faded, 1, { Shape: { ...Shape.defaults, alpha: 0 } });
+    leaving.exiting.add(2);
+
+    expect(drawn(faded, 2)).toBeUndefined();
+    expect(drawn(leaving, 2)).toBeUndefined();
+  });
+
+  it("answers nothing for an element drawn at scale 0, its own or a parent's", () => {
+    // Bug caught: an element entering from scale 0 is found as a point, so a guide on it ends its
+    // grace and flashes a full veil instead of keeping the old window.
+    const popping = panelWorld();
+    const underCollapsed = panelWorld();
+
+    put(popping, 2, { Transform: pose({ x: 70, y: 50, scale: 0, pivot: { x: 50, y: 20 } }) });
+    put(underCollapsed, 1, {
+      Transform: pose({ x: 300, y: 350, scale: 0, pivot: { x: 200, y: 150 } })
+    });
+
+    expect(drawn(popping, 2)).toBeUndefined();
+    expect(drawn(underCollapsed, 2)).toBeUndefined();
+  });
+
+  it("answers nothing for a world sprite of no width or no height: it draws at its texture's size", () => {
+    // Bug caught: a sprite whose component says 0 on one axis is taken as a point or a line, while
+    // the renderer draws it at the texture's size there, so the anchor sits off what is drawn.
+    const world = emptyWorld();
+
+    put(world, 5, {
+      Transform: pose({ x: 500, y: 700 }),
+      Sprite: { ...Sprite.defaults, width: 0, height: 32 }
+    });
+    put(world, 6, {
+      Transform: pose({ x: 500, y: 700 }),
+      Sprite: { ...Sprite.defaults, width: 64, height: 0 }
+    });
+
+    expect(drawn(world, 5)).toBeUndefined();
+    expect(drawn(world, 6)).toBeUndefined();
   });
 
   it("answers nothing under an ancestor tagged Exiting", () => {

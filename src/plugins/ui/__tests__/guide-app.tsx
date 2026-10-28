@@ -2,7 +2,8 @@
  * @file ui plugin — the app of the guide tests (F98). Not a test file. The board of "A Memory
  * Missing" cut down: an order strip (an x scroll of 306 u at 40, 1500 over a 696 u track of two
  * seats, 116 x 120 each; the first seat answers `seat` with the step it leads to), a fitted board
- * (800 u drawn at 0.5 in a 400 u slot at 600, 200) with a cell, a button `outside` at 600, 1000, a
+ * (800 u drawn at 0.5 in a 400 u slot at 600, 200) with a cell, a dot of no area over the first
+ * seat at 98, 1560, a button `outside` at 600, 1000, a
  * local-state button `local` at 300, 1000 that shows the element `flag`, and a y scroll `list` at
  * 40, 300 of 300 x 400 over 1200 u; and a world piece, a 64 u sprite centred at 500, 700. The one
  * rest node `home` holds a guide derived from `session.step`; `seat` leads to `setStep`, which
@@ -42,6 +43,9 @@ export const CELL: AnchorTarget = { projection: "guide.board", key: "cell" };
 /** The world piece. */
 export const PIECE: AnchorTarget = { projection: "guide.pieces", key: "piece" };
 
+/** A dot of no area drawn over the first seat, at 98, 1560. */
+export const DOT: AnchorTarget = { projection: "guide.board", key: "dot" };
+
 /** A key no projection has. */
 export const NOWHERE: AnchorTarget = { projection: "guide.board", key: "nowhere" };
 
@@ -59,7 +63,8 @@ const STEPS = {
   clear: { allow: { intent: "seat" }, target: SEAT0, veil: { alpha: 0 }, blocked: BLOCKED },
   bare: { allow: { intent: "seat" }, target: SEAT0, veil: false, blocked: BLOCKED },
   tinted: { allow: { intent: "seat" }, target: SEAT0, veil: { color: 0x0d_2f_33, alpha: 0.5 } },
-  missing: { allow: { intent: "seat" }, target: NOWHERE }
+  missing: { allow: { intent: "seat" }, target: NOWHERE },
+  point: { allow: { intent: "seat" }, target: DOT, blocked: BLOCKED }
 } as const satisfies Record<string, Flow.GuideOptions | undefined>;
 
 /** A step of the tutorial. */
@@ -93,6 +98,10 @@ export const Board = defineComponent("Board", {
           />
         </stack>
       </stack>
+      <stack
+        key="dot"
+        style={{ position: "absolute", left: 98, top: 1560, width: 0, height: 0, reason: "d" }}
+      />
       <button
         key="outside"
         intent="outside"

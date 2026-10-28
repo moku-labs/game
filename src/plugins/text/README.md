@@ -26,7 +26,12 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `label({ text, style, at, anchor? })`, `defineTextStyles(map)`,
   `textFor<TextStyles, Fonts>()` for `defineGame`.
 - **Styles:** `font`, `size` and `fill` are required. `bold`, `italic`, `stroke`, `strokeWidth`,
-  `letterSpacing`, `align`, `wrap`, `digits` and `shadow` have defaults.
+  `letterSpacing`, `align`, `wrap`, `digits`, `shadow` and `lineHeight` have defaults.
+  `lineHeight` is the line as a multiple of `size`, like a unitless CSS `line-height`:
+  `{ font: "text-medium", size: 14, fill: 0, lineHeight: 1.28 }` lays every line 17.92 px high, so
+  three lines measure 53.76. The glyphs sit in the middle of the line (half the leading above,
+  half below, as CSS does), and an inline icon fills the line. Left out, the line is the font's.
+  It must be a number above 0. Wrap widths do not change with it.
   `shadow: { color, dx, dy, alpha? }` is a drop shadow under every glyph run. The offset is in
   reference px at the style size. `alpha` defaults to 1, and the shadow draws at it: `0.55` is
   0.55. A shadow never changes what `measure` answers.

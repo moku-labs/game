@@ -168,12 +168,31 @@ function isWrap(wrap: unknown): wrap is TextWrap {
 }
 
 /**
- * Fills the defaults of one style and refuses a wrap that is not a width, `"box"` or `"none"`.
+ * Tells whether a line height is one a style can carry: left out, or a finite number above zero.
+ * A style read back from a feature may carry anything, so the type is checked as well.
+ *
+ * @param lineHeight - The line height a style names, as it was stored.
+ * @returns False for a number that is not finite and above zero, and for anything else.
+ * @example
+ * ```ts
+ * isLineHeight(1.28); // true
+ * ```
+ */
+function isLineHeight(lineHeight: unknown): lineHeight is number | undefined {
+  if (lineHeight === undefined) return true;
+
+  return typeof lineHeight === "number" && Number.isFinite(lineHeight) && lineHeight > 0;
+}
+
+/**
+ * Fills the defaults of one style and refuses a wrap that is not a width, `"box"` or `"none"`,
+ * and a line height that is not a number above zero.
  *
  * @param name - The style name, for the error.
  * @param input - What the game wrote.
  * @returns The style with every field filled.
  * @throws {Error} When `wrap` is a number that is not greater than zero, or another word.
+ * @throws {Error} When `lineHeight` is not a finite number greater than zero.
  */
 function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
   const wrap = input.wrap ?? "none";
@@ -181,6 +200,13 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
   if (!isWrap(wrap)) {
     throw new Error(
       `[game] Text style "${name}" has wrap ${wrap}.\n  Use a width in reference px, "box" or "none".`
+    );
+  }
+
+  if (!isLineHeight(input.lineHeight)) {
+    throw new Error(
+      `[game] Text style "${name}" has lineHeight ${input.lineHeight}.\n` +
+        "  Use a multiple of size above 0, such as 1.2."
     );
   }
 
@@ -196,7 +222,8 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     align: input.align ?? "left",
     wrap,
     digits: input.digits ?? false,
-    shadow: shadowOf(input.shadow)
+    shadow: shadowOf(input.shadow),
+    lineHeight: input.lineHeight
   };
 }
 
@@ -207,12 +234,14 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
  * @param map - Style name to what that style looks like.
  * @returns The registration a feature carries.
  * @throws {Error} When a style names a wrap that is not a width, `"box"` or `"none"`.
+ * @throws {Error} When a style names a lineHeight that is not a number above 0.
  * @example
  * ```ts
  * defineTextStyles({ "hud.digits": { font: "ui.font-digits", size: 40, fill: 0xffe082 } });
  * // { kind: "textStyles", map: { "hud.digits": { font: "ui.font-digits", bold: undefined,
  * //   italic: undefined, size: 40, fill: 0xffe082, stroke: 0x000000, strokeWidth: 0,
- * //   letterSpacing: 0, align: "left", wrap: "none", digits: false, shadow: undefined } } }
+ * //   letterSpacing: 0, align: "left", wrap: "none", digits: false, shadow: undefined,
+ * //   lineHeight: undefined } } }
  * ```
  */
 export function defineTextStyles(map: Record<string, TextStyleInput>): TextStyles {
@@ -264,7 +293,8 @@ export function readStyle(name: string, value: object): TextStyle | undefined {
     align: value.align,
     wrap: value.wrap,
     digits: value.digits,
-    shadow: readShadow(value.shadow)
+    shadow: readShadow(value.shadow),
+    lineHeight: value.lineHeight
   };
 
   return normalizeStyle(name, { ...input, ...pruned(optional) });

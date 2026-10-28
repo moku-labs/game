@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutRuns, measureRun, parseAdvances } from "../../measure";
+import { fontLineOf, layoutRuns, lineHeightOf, measureRun, parseAdvances } from "../../measure";
 import type { AdvanceTable, LayoutOptions, Run, TextRun, TextStyle, Warn } from "../../types";
 import { latinFontJson, miniFontJson, miniFontXml } from "../fixtures/mini-font";
 
@@ -24,6 +24,7 @@ function style(over: Partial<TextStyle> = {}): TextStyle {
     wrap: "none",
     digits: false,
     shadow: undefined,
+    lineHeight: undefined,
     ...over
   };
 }
@@ -208,6 +209,49 @@ describe("layoutRuns — many lines", () => {
 
     expect(centre.width).toBe(left.width);
     expect(centre.height).toBe(left.height);
+  });
+});
+
+describe("the line of a style", () => {
+  // The fixture font: a line of 40 at an export size of 32, so 17.5 at size 14; 16.8 headless.
+
+  it("is the font's line when the style names no lineHeight", () => {
+    expect(lineHeightOf(style({ size: 14 }), tables())).toBe(17.5);
+    expect(lineHeightOf(style({ size: 14 }), new Map())).toBeCloseTo(16.8, 10);
+  });
+
+  // The bug: the font's line wins over the line the style asked for, with or without a font.
+  it("is lineHeight times size when the style names one, whatever font is loaded", () => {
+    const plate = style({ size: 14, lineHeight: 1.28 });
+
+    expect(lineHeightOf(plate, tables())).toBeCloseTo(17.92, 10);
+    expect(lineHeightOf(plate, new Map())).toBeCloseTo(17.92, 10);
+  });
+
+  // The bug: the font's line reads the style's lineHeight, so the glyphs get no half-leading.
+  it("keeps the font's own line apart from the line the style asked for", () => {
+    expect(fontLineOf(style({ size: 14, lineHeight: 1.28 }), tables())).toBe(17.5);
+  });
+
+  it("lays three lines out at three of those lines", () => {
+    const plate = style({ size: 14, lineHeight: 1.28 });
+    const layout = layoutRuns([text("A\nA\nA")], plate, tables(), options());
+
+    expect(layout.lines).toHaveLength(3);
+    expect(layout.height).toBeCloseTo(53.76, 10);
+  });
+
+  // The bug: the line height leaks into the advances, so a taller line wraps its words elsewhere.
+  it("wraps the glyphs at the same widths as the font's line does", () => {
+    const tall = layoutRuns(
+      [text("A A A")],
+      style({ wrap: 60, lineHeight: 2 }),
+      tables(),
+      options()
+    );
+
+    expect(tall.lines.map(line => line.width)).toEqual([56, 24]);
+    expect(tall.width).toBe(56);
   });
 });
 

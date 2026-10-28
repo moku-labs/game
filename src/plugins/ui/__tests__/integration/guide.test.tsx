@@ -6,6 +6,7 @@ import { ScrollState } from "../../components";
 import { mountScreen, startFieldApp } from "../field-app";
 import {
   createGuideApp,
+  DOT,
   dragAt,
   entityOf,
   frames,
@@ -212,6 +213,23 @@ describe("the veil of a guide", () => {
 
     expect(veil(app)).toMatchObject(around(app, { x: 468, y: 668, w: 64, h: 64 }));
     expect(locks.at(-1)).toEqual({ w: 64, h: 64, x: 468, y: 668 });
+  });
+
+  // Bug caught: a target of no area, found now that it counts as shown, is cut as a window: the
+  // veil opens around a point and `input` gets a window that holds no press instead of the lock of
+  // everything.
+  it("covers the whole screen and locks everything on a target of no area", async () => {
+    const { app, locks } = await headless("point");
+
+    expect(app.ui.rectOf(DOT)).toEqual({ x: 98, y: 1560, w: 0, h: 0 });
+    expect(veil(app)).toMatchObject([
+      { x: 0, y: 0, ...screenOf(app) },
+      { x: 0, y: 0, w: 0, h: 0 },
+      { x: 0, y: 0, w: 0, h: 0 },
+      { x: 0, y: 0, w: 0, h: 0 }
+    ]);
+    // eslint-disable-next-line unicorn/no-null -- `null` is the lock of everything.
+    expect(locks).toEqual([null]);
   });
 
   // Bug caught: a new step draws a second veil over the first, or the old one stays.
