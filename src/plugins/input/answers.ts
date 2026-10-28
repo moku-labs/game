@@ -149,3 +149,19 @@ export function submit(ctx: InputCtx, entity: Entity, answer: Answer): boolean {
 
   return ctx.deps.flow.gate.answer(answer);
 }
+
+/**
+ * Answers a press the lock of a guide kept from every view: the gate's `blocked`, the answer the
+ * running guide names for a press outside its window, with its payload. A guide that names none
+ * drops the press: the gate is not called.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @returns What `flow.gate.answer` returned; `false` when the guide names no `blocked`.
+ */
+export function submitBlocked(ctx: InputCtx): boolean {
+  const blocked = ctx.deps.flow.gate.state().blocked;
+
+  if (blocked === undefined) return false;
+
+  return ctx.deps.flow.gate.answer(blocked);
+}

@@ -40,6 +40,21 @@ describe("readBookmark", () => {
     );
   });
 
+  it("keeps the schema version, and leaves the key out when there is none (bug F106: a restore that never migrates)", () => {
+    expect(readBookmark({ ...saved, version: 11 })).toEqual({ ...saved, version: 11 });
+    expect("version" in readBookmark(saved)).toBe(false);
+  });
+
+  it.each([
+    ["a fraction", 1.5],
+    ["a string", "11"],
+    ["null", noPayload]
+  ])("refuses a version that is %s", (_name, version: Json) => {
+    expect(() => readBookmark({ ...saved, version })).toThrow(
+      /^\[game] The bookmark is not a flow\.bookmark\(\) value\.\n {2}.*\.$/
+    );
+  });
+
   it("keeps the rest point of a bookmark taken at a transit node", () => {
     const taken = { ...saved, path: "info/show", rest: { path: "home", input: noPayload } };
 

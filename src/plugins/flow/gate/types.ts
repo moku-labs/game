@@ -55,6 +55,11 @@ export type GateState = {
   aged: number;
   /** The one answer a running `guide` lets through. */
   narrow: Allow | undefined;
+  /**
+   * The answer a press outside the window of the running `guide` gives: the gate takes it beside
+   * `narrow`. Absent or `undefined` while the guide names none.
+   */
+  blocked?: Allow | undefined;
   /** True while a pointer is down. Entering an `over` node waits for false. */
   pointerActive: boolean;
   /** Ends the pending pointer wait of the runner. Set while the wait runs, so a stop needs no frame. */
@@ -110,16 +115,21 @@ export type GateApi = {
   pointer(active: boolean): void;
 
   /**
-   * Reads what the gate takes right now.
+   * Reads what the gate takes right now. While a `guide` narrows it, `blocked` is the answer a
+   * press outside the guide's window gives, when the guide names one: `input` answers it.
    *
-   * @returns Whether the gate is open, the allowed intents and whether a `guide` narrows it.
+   * @returns Whether the gate is open, the allowed intents, whether a `guide` narrows it, and the
+   *   answer of a blocked press.
    * @example
    * ```ts
    * // The screen greys out a button whose intent the resting node does not take.
    * app.flow.gate.state(); // { open: true, allowed: ["play", "shop"], narrowed: false }
+   * // The tutorial node stands: its guide lets "play" through and names "tutorialBlocked".
+   * app.flow.gate.state();
+   * // { open: true, allowed: ["play", "shop", "tutorialBlocked"], narrowed: true, blocked: { intent: "tutorialBlocked" } }
    * ```
    */
-  state(): { open: boolean; allowed: readonly string[]; narrowed: boolean };
+  state(): { open: boolean; allowed: readonly string[]; narrowed: boolean; blocked?: Allow };
 };
 
 /**
@@ -146,11 +156,13 @@ export type GateInternal = {
 
   /**
    * Narrows the gate to one answer, or lifts the narrow with `undefined`. This is what `guide`
-   * does while a tutorial step runs.
+   * does while a tutorial step runs. `blocked` passes beside it: the answer a press outside the
+   * guide's window gives. A lift drops it too.
    *
    * @param allow - The one answer that passes, or `undefined` to lift the narrow.
+   * @param blocked - The answer of a press outside the window, passed beside `allow`.
    */
-  narrow(allow: Allow | undefined): void;
+  narrow(allow: Allow | undefined, blocked?: Allow): void;
 
   /**
    * Ages the held answer. Wired to `time.onFrame("signals")` by the plugin root. An answer of the

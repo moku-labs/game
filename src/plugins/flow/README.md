@@ -28,7 +28,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `run(): Promise<void>` | Validates the graph, seals `features`, loads the save and enters `mainFlow.start`. Called once, by the consumer's `onStart`. Rejects on a fatal error; resolves when `onStop` aborts the loop. |
 | `onEnter(stage, fn): () => void` | Registry for the plugins above, three stages run in this order before the node body, each callback awaited: `scenes` reacts at `"begin"` (the veil over the scene being left, in the next frame), `assets` preloads at `"load"`, `scenes` switches at `"scene"`. A `"begin"` callback must not wait: it starts what reacts at once and returns, since the loads start only after it. Once the node is aborted (a restore, a stop) no further stage starts. A stage that throws ends the node: its signal is aborted with reason `"failed"` before the rollback, so what an earlier stage started for it (the veil of `scenes`) goes at once, also before a safe node's `recover` and on a fatal failure. The callback gets `NodeInfo`, which carries `scene` when the node was defined with `defineNode({ scene: "board", ... })`; a game that passes `scenes: "home" | "board"` to `defineGame` gets the id checked by the compiler. A node without `scene` keeps the current scene; an `over` node must not name one. |
 | `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. `options.from` enters a bookmark first. A rest node is entered before the switch to fast mode. A transit node is entered after the switch, without waiting for its gate. |
-| `bookmark(): Bookmark` | Where the graph stands as serialisable data: the last rest node, or the transit node that waits at the gate for an answer. See [Bookmark and restore](#bookmark-and-restore). Flow does not know scenes: the optional `scene` field is written by the `game.bookmark` door only. |
+| `bookmark(): Bookmark` | Where the graph stands as serialisable data: the last rest node, or the transit node that waits at the gate for an answer. Its `version` is the save schema version of its trees, so a restore after the game's schema moved on runs the migrations. See [Bookmark and restore](#bookmark-and-restore). Flow does not know scenes: the optional `scene` field is written by the `game.bookmark` door only. |
 | `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. Ignores `scene`. For a rest node it resolves before the scene stage of the restored node runs; `walk([])` waits for the gate it opens after that stage. For a transit node it resolves once that node opened its gate. It also resolves when the loop ends first, by a stop or a fatal error: nothing is entered then, and `state()` shows where the graph stands. See [Bookmark and restore](#bookmark-and-restore). |
 | `describe(): FlowGraph` | The whole graph as JSON, built without running the game. |
 | `state(): FlowState` | `{ running, path, stack, pending, mode }`, frozen. The same object comes back while the graph did not move: no edge, no gate opened or closed, no mode switch. |
@@ -36,7 +36,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `setMode(mode): void` | `"live"` or `"fast"`. Legal before `run()` and while the loop rests. It throws while a transit node waits at the gate, also right after a `restore` into one. |
 | `gate.answer(answer): boolean` | The one entry of player answers. The gate closes before the answer is handed on, so a double tap hits a closed door. An answer to a closed gate is refused and held for the next gate. See [The gate hold](#the-gate-hold). |
 | `gate.pointer(active): void` | While true, entering an `over` node waits: a popup never appears mid-drag. |
-| `gate.state()` | `{ open, allowed, narrowed }`. |
+| `gate.state()` | `{ open, allowed, narrowed, blocked? }`. `blocked` is there while a `guide` names the answer of a press outside its window: `input` answers it. |
 | `inbox.post(event): void` | Queues a world event. It is delivered only to a rest node whose `inbox` lists the type. |
 | `fx.handle(kind, fn, options?)` | Registers the single handler of one effect kind. `{ runInFast: true }` makes it run in fast mode too. The handler's `signal` is the node's, with two exceptions: a descriptor with `answers` (a popup) and a `guide` get a signal of their own, so the handler knows when to take down what it showed. |
 | `fx.dispatch(descriptor): void` | Fire-and-forget delivery, `runInFast` handlers only in fast mode. Handler errors are logged, never thrown. |
@@ -457,6 +457,51 @@ app.flow.fx.handle("popup", (descriptor, { signal }) => {
 });
 ```
 
+## The guide of a node
+
+A tutorial step is data when the node derives it from state: `defineNode({ guide })` takes the
+committed `player` and `session` and returns the `GuideOptions` that stand while the node does, or
+`undefined` for none. The step lives in the game's state, so no save field and no `run` keep it.
+
+```ts
+// The board rests; the tutorial's step is in the session.
+const awaitIntent = defineNode({
+  rest: true,
+  outcomes: { merge: type<{ from: string; to: string }>(), tutorialBlocked: type() },
+  guide: ({ session }) =>
+    session.tutorial === 2
+      ? {
+          allow: { intent: "merge", payload: { from: "c2", to: "c3" } },
+          target: [{ projection: "board.items", key: "c2" }, { projection: "board.items", key: "c3" }],
+          blocked: { intent: "tutorialBlocked" }
+        }
+      : undefined
+});
+```
+
+| When | What happens |
+|---|---|
+| The node is entered | After its `onEnter` stages, before its gate opens or its body runs, `guide` is called with the committed state. A result narrows the gate to `allow` and `blocked` and goes to the `guide` handler (`ui` draws the veil and locks input outside the window); `undefined` shows nothing. |
+| A commit while the node waits at its open gate | `guide` is called again (the hook on `model:committed`). A result equal to the last one (deep JSON equality) changes nothing; a new one ends the guide shown and shows the new one; `undefined` lifts it. The commit of an edge never derives: the loop lifts the narrow before it commits the edge that leaves the node. In the engine today a node waits with its transaction open, so every commit is an edge: a guide follows its state through the edges that lead back into its node (`merge` → `apply` → `awaitIntent` derives the next step). The hook serves a commit that is no edge. |
+| The node is left | The narrow is lifted and the handler's signal aborted, as for an awaited `guide`. |
+| A restore | The bookmark's node is entered again, so its guide is derived again. A bookmark keeps no guide. |
+| Fast mode | The narrow applies; nothing is drawn (the `guide` handler of `ui` does not run in fast mode). |
+| `guide` throws | The node fails: rollback, retry, then the safe node, as for a body that throws. On entry the node is aborted with `"failed"` before its gate opens; after a commit, the wait at its gate and its body end the same way. The message keeps the thrown text: `[game] The guide of node "board/awaitIntent" threw: no step.` / `Return GuideOptions or undefined from guide.` |
+| A dev build, `blocked` names no outcome | The node fails: `[game] The guide of node "path" blocks with "intent", which is no outcome of the node.` / `Add it to outcomes or drop blocked.` The gate lists only the node's outcomes, so such a press would be refused every time. |
+| The `guide` handler fails | The log gets the error entry `flow:guide-handler-failed` `{ path }`; the node goes on. |
+
+Any node may carry `guide`; it is meant for a rest node. The awaited `await fx(guide(options))` of a
+body keeps working, with the same options. `GuideOptions`:
+
+| Option | Meaning |
+|---|---|
+| `allow` | The one answer the gate lets through (its payload compared by deep equality when given). |
+| `target?` | `{ projection, key }` or a list of them: the window is cut over the target, or over the union of the shown ones, and follows them every frame. Without one the veil covers the screen and every press is outside. |
+| `pad?` | Outward padding of the window, screen reference units, 0 when left out. |
+| `veil?` | `{ color?, alpha? }` (black at 0.6 when left out), or `false`: nothing drawn, the lock stays. `alpha: 0` draws nothing visible and locks. |
+| `blocked?` | The answer, with its payload, a press outside the window gives instead of being lost. The gate takes it beside `allow`; it must be an outcome of the node that waits. |
+| `hand?`, `text?`, `highlight?` | Deprecated: not drawn by the engine, kept in the descriptor for a game's own handler; draw them in an `<anchor>` on the targets. They go in the next minor version. |
+
 ## What a feature brings
 
 `features.register(name, description)` stores the description untouched. `nodes`, `flows` and
@@ -638,6 +683,9 @@ loop itself never uses the event bus.
   the same fx the API uses.
 - **hooks** `lifecycle:changed`: `resumed` pokes the clock; a `"background"` push starts
   `model.store.flush()` and keeps its promise in `state.runner.flushing` for `onStop`.
+  `model:committed`: while a node with a `guide` waits at its open gate, a commit that is no edge
+  derives its guide again (`state.runner.guide`, cleared when the node is left, at a restore and
+  when the loop starts).
 - No `onStart`. The game calls `flow.run()` itself.
 - **onStop** is `({ config, state }) => stopRunner({ config, state })`: aborts the active node,
   wakes a pending pointer wait, awaits settle up to `settleTimeoutMs` of real time, with or without
@@ -651,5 +699,6 @@ loop itself never uses the event bus.
 `time` for the `signals` phase, `isRunning()`, the `elapsed` the gate hold is aged with, and
 `wake()` on every edge (an edge is the moment the
 screen has something new to show, so the idle cap is lifted for it), `lifecycle` for the hook,
-`model` for the store, `clock` for `now`, `onElapsed`, `poke` and the `schedule` effect. A node
+`model` for the store and the `model:committed` hook that derives a node's guide again, `clock` for
+`now`, `onElapsed`, `poke` and the `schedule` effect. A node
 never touches the clock: it writes `await fx(schedule(rules.nextDue(player, tables)))`.

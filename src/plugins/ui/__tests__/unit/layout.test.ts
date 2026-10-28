@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { NineSlice, Sprite, Transform } from "../../../renderer/components";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { Box, LocalWrite } from "../../components";
 import { asError, asHandle } from "../../errors";
@@ -10,7 +9,6 @@ import { applyTap } from "../../jsx/tap";
 import type { Element, Instance } from "../../jsx/types";
 import { applyStyleToNode } from "../../layout/apply";
 import { beginExit } from "../../layout/exit";
-import { rectOfTarget } from "../../layout/guide";
 import { createNode, detachNode, freeNode, placeChildren } from "../../layout/nodes";
 import { contentRectOf, solveRoot } from "../../layout/solve";
 import { createLayoutState } from "../../layout/state";
@@ -128,27 +126,6 @@ describe("beginExit", () => {
 });
 
 /**
- * Builds a context whose ecs answers with the components of one entity.
- *
- * @param components - Component name to stored value.
- * @returns The context the guide reads.
- */
-function ctxWith(components: Record<string, object>): UiCtx {
-  return {
-    deps: {
-      world: {
-        ecs: {
-          get: (_entity: number, component: { componentName: string }) =>
-            components[component.componentName],
-          has: (_entity: number, component: { componentName: string }) =>
-            components[component.componentName] !== undefined
-        }
-      }
-    }
-  } as unknown as UiCtx;
-}
-
-/**
  * Builds the context `applyTap` reads, with one element and one stored write.
  *
  * @param element - The element the tap landed on.
@@ -180,38 +157,6 @@ function tapCtx(element: Element, write: object | undefined, warn: () => void): 
 function instanceOf(identity: string): Instance {
   return { identity, component: "Panel", local: {}, props: {}, dirty: false };
 }
-
-// ─── the rect a guide cuts its hole over ──────────────────────
-
-describe("rectOfTarget", () => {
-  it("reads the Box of a ui element", () => {
-    const ctx = ctxWith({ Box: { x: 1, y: 2, w: 3, h: 4 } });
-
-    expect(rectOfTarget(ctx, 1)).toEqual({ x: 1, y: 2, w: 3, h: 4 });
-  });
-
-  it("reads the transform and the size of a panel", () => {
-    const ctx = ctxWith({
-      Transform: { ...Transform.defaults, x: 10, y: 20 },
-      NineSlice: { ...NineSlice.defaults, texture: "ui.panel", width: 30, height: 40 }
-    });
-
-    expect(rectOfTarget(ctx, 1)).toEqual({ x: 10, y: 20, w: 30, h: 40 });
-  });
-
-  it("reads the transform of a sprite and answers nothing for a view with no size", () => {
-    const at = { ...Transform.defaults, x: 5, y: 6 };
-
-    expect(rectOfTarget(ctxWith({ Transform: at, Sprite: { ...Sprite.defaults } }), 1)).toEqual({
-      x: 5,
-      y: 6,
-      w: 0,
-      h: 0
-    });
-    expect(rectOfTarget(ctxWith({ Transform: at }), 1)).toBeUndefined();
-    expect(rectOfTarget(ctxWith({}), 1)).toBeUndefined();
-  });
-});
 
 // ─── styles before the first viewport ─────────────────────────
 

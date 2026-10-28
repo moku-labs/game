@@ -84,6 +84,7 @@ const createMockDeps = (time: TimeApi): Deps => ({
       markBarrier: vi.fn(),
       rollback: vi.fn(),
       restore: vi.fn(),
+      schemaVersion: () => 1,
       flush: vi.fn()
     },
     rng: { peek: vi.fn() }
@@ -620,6 +621,45 @@ describe("createGateApi", () => {
       expect(
         gate.answer({ intent: "merge", payload: { from: "c2", to: ["c3", { level: 2 }] } })
       ).toBe(true);
+    });
+
+    // F98. Bug caught: a press outside a guide's window answers `blocked`, and the narrow refuses
+    // it, so the node never learns the player pressed elsewhere.
+    it("takes the blocked answer beside the allowed one, and nothing else", () => {
+      const { ctx } = createMockCtx();
+      const gate = createGateApi(ctx);
+
+      gate.narrow({ intent: "merge" }, { intent: "tutorialBlocked", payload: { step: 2 } });
+      gate.open({ allowed: ["merge", "sell", "tutorialBlocked"] });
+
+      expect(gate.answer({ intent: "sell" })).toBe(false);
+      expect(gate.answer({ intent: "tutorialBlocked", payload: { step: 3 } })).toBe(false);
+      expect(gate.answer({ intent: "tutorialBlocked", payload: { step: 2 } })).toBe(true);
+    });
+
+    it("reports the blocked answer as a copy, and drops it with the lift", () => {
+      const { ctx } = createMockCtx();
+      const gate = createGateApi(ctx);
+
+      gate.narrow({ intent: "merge" }, { intent: "tutorialBlocked", payload: { step: 2 } });
+
+      const read = gate.state();
+
+      expect(read).toEqual({
+        open: false,
+        allowed: [],
+        narrowed: true,
+        blocked: { intent: "tutorialBlocked", payload: { step: 2 } }
+      });
+      // A reader that writes its copy changes nothing the gate compares.
+      if (read.blocked?.payload !== undefined) read.blocked.payload = { step: 9 };
+      expect(gate.state().blocked).toEqual({ intent: "tutorialBlocked", payload: { step: 2 } });
+
+      gate.narrow(undefined, { intent: "tutorialBlocked" });
+      gate.open({ allowed: ["tutorialBlocked"] });
+
+      expect("blocked" in gate.state()).toBe(false);
+      expect(ctx.state.gate.blocked).toBeUndefined();
     });
 
     it("reports the narrowed flag and clears it with undefined", () => {

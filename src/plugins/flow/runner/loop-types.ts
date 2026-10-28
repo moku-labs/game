@@ -79,6 +79,14 @@ export type Step = {
   gateOpened: () => void;
   /** The engine log: an effect the body started with `fx.start` that fails is written there. */
   log: Log.LogApi;
+  /**
+   * Fails the node from outside its body: the `guide` of the node threw after a commit. The error
+   * is kept in `failure` and the node is aborted with `"failed"`, so the wait at its gate and its
+   * body end, and the loop takes the failure path. A node already aborted ignores it.
+   */
+  fail: (error: unknown) => void;
+  /** What `fail` recorded; `undefined` while the node did not fail from outside. */
+  failure: { error: unknown } | undefined;
 };
 
 /** One result ready to be committed onto its edge. */
