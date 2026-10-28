@@ -561,6 +561,7 @@ function eachRun(
   const left = -anchor.x * layout.width;
   let y = -anchor.y * layout.height;
 
+  // Lines top to bottom, runs left to right; a glyph run sits half the leading lower.
   for (const line of layout.lines) {
     let x = left + alignOffset(style, layout, line);
 

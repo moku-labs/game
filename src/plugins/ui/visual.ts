@@ -178,12 +178,14 @@ export function visualOf(element: Element): AnyComponentValue[] {
   const tint = style.tint ?? Sprite.defaults.tint;
 
   if (type === "image" || type === "icon") {
+    const hasArea = rect.w > 0 && rect.h > 0;
+
     return [
       Sprite({
         texture: textureOf(node.props),
         tint,
         // Laid out at no size, it draws nothing and, below the hit test's alpha, takes no tap.
-        alpha: rect.w > 0 && rect.h > 0 ? alpha : 0,
+        alpha: hasArea ? alpha : 0,
         anchor: { x: 0, y: 0 },
         width: rect.w,
         height: rect.h,
