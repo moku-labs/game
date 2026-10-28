@@ -58,10 +58,27 @@ function wrongBlocked(step: Step, payload: GuidePayload | undefined): Error | un
 }
 
 /**
+ * Hands a result to the `guide` handler with a signal of its own. A handler that fails is logged,
+ * `flow:guide-handler-failed`; one that fails after the node's abort was told to stop.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs.
+ * @param step - The node run in progress.
+ * @param payload - The result as the descriptor's payload.
+ */
+function runGuide(ctx: FlowCtx, modules: Modules, step: Step, payload: GuidePayload): void {
+  modules.fx.run({ kind: "guide", payload }, step.signal).catch((error: unknown) => {
+    // The node was left while the handler ran: it was told to stop, nothing failed.
+    if (step.signal.aborted) return;
+
+    ctx.log.error("flow:guide-handler-failed", { path: step.path }, asError(error));
+  });
+}
+
+/**
  * Shows a new result of the guide: the guide shown so far ends with its narrow, the gate is
  * narrowed to `allow` and `blocked`, and the `guide` handler gets the payload with a signal of its
- * own. A result equal to the last one changes nothing; `undefined` only lifts. A handler that fails
- * is logged, `flow:guide-handler-failed`; one that fails after the node's abort was told to stop.
+ * own. A result equal to the last one changes nothing; `undefined` only lifts.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -92,12 +109,7 @@ function show(
   }
 
   modules.gate.narrow(guideAnswer(payload, "allow"), guideAnswer(payload, "blocked"));
-  modules.fx.run({ kind: "guide", payload }, step.signal).catch((error: unknown) => {
-    // The node was left while the handler ran: it was told to stop, nothing failed.
-    if (step.signal.aborted) return;
-
-    ctx.log.error("flow:guide-handler-failed", { path: step.path }, asError(error));
-  });
+  runGuide(ctx, modules, step, payload);
 }
 
 /**
@@ -140,7 +152,8 @@ function derive(
  * Enters the guide of a node: derives it from the committed state and keeps it in the runner state,
  * so a commit while the node waits at its gate derives it again. Called after the node's `onEnter`
  * stages and before its outcome is awaited. A node without `guide`, and one already aborted, change
- * nothing. A `guide` that throws again after a commit fails the node through `step.fail`.
+ * nothing. A `guide` that throws again after a commit fails the node through `step.fail`. `reshow`
+ * hands the last result to the handler again, once the mode is live after a fast walk.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -151,7 +164,7 @@ export function enterGuide(ctx: FlowCtx, modules: Modules, step: Step): Error | 
   // A node a stop or a restore left during its stages guides nothing: it ends without a wait.
   if (step.node.guide === undefined || step.signal.aborted) return undefined;
 
-  const guide: NodeGuideHost = { last: undefined, refresh: noop };
+  const guide: NodeGuideHost = { last: undefined, refresh: noop, reshow: noop };
 
   guide.refresh = (): void => {
     // A commit after the node was left, or aborted, derives nothing for it.
@@ -160,6 +173,16 @@ export function enterGuide(ctx: FlowCtx, modules: Modules, step: Step): Error | 
     const failed = derive(ctx, modules, step, guide);
 
     if (failed !== undefined) step.fail(failed);
+  };
+  guide.reshow = (): void => {
+    const last = guide.last;
+
+    // A node that was left, or guides nothing, shows nothing.
+    if (step.signal.aborted || ctx.state.runner.guide !== guide || last === undefined) return;
+
+    // The fast run's signal ends; the narrow it set stands and the handler gets the result again.
+    modules.fx.endGuides();
+    runGuide(ctx, modules, step, last);
   };
   ctx.state.runner.guide = guide;
 

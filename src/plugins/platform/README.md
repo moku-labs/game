@@ -35,13 +35,16 @@ A provider method that throws is caught and logged with `ctx.log.error("platform
 
 ## The Back chain
 
-One press, three steps; the first step that takes the press wins.
+One press, three steps; the first step that takes the press wins. A guide that narrows the open gate takes the press before step 1.
 
 | Step | Test | `back()` returns |
 |---|---|---|
+| guide | `flow.gate.state()` is `open` and `narrowed`: a guide owns the screen. The press is offered as `flow.gate.answer({ intent: "back" })`, which only a guide whose `allow` is `{ intent: "back" }` takes. Escape is never pressed and the app is never left | `"intent"`, taken or not |
 | 1 | `input.pressKey("Escape")` is true: ui tapped the `escape` button of its top root | `"popup"` |
-| 2 | `flow.gate.answer({ intent: "back" })` is true: the resting node lists `back` | `"intent"` |
+| 2 | `flow.gate.answer({ intent: "back" })` is true: the resting node lists `back`, the gate is closed, or a guide narrows it | `"intent"` |
 | 3 | nothing took it: `provider.exit()` | `"exit"` |
+
+While a guide stands, Back does nothing unless the guide allows `back`: it never becomes the guide's `blocked`, even when the guided screen has an `escape` button, and it does not end the editing of a text field. A popup in flight closes the gate, so its `escape` button still takes Back over a guided node.
 
 Without a provider `back()` presses nothing and returns `"none"`. Every popup with an `escape` button closes on Back for free. Escape also ends the editing of a ui text field, so a press while a field is edited ends the edit and answers `"popup"`. A game that wants a confirm on Home lists `back` on its home node and opens the popup there; step 3 is then never reached from Home.
 

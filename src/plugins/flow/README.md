@@ -104,7 +104,8 @@ Known limits:
 
 An answer that arrives while the gate is closed is refused: `gate.answer` returns `false`. It is
 held and offered once to the next gate that opens. That gate takes it when it lists the intent and
-a running `guide` lets it through. Otherwise the answer is dropped.
+a running `guide` lets it through. Otherwise the answer is dropped: a held answer is never turned
+into a guide's `blocked`, which `input` gives only for a press the open gate refused.
 
 | `holdMs` | How long the answer is held | Two answers at a closed gate |
 |---|---|---|
@@ -485,7 +486,7 @@ const awaitIntent = defineNode({
 | A commit while the node waits at its open gate | `guide` is called again (the hook on `model:committed`). A result equal to the last one (deep JSON equality) changes nothing; a new one ends the guide shown and shows the new one; `undefined` lifts it. The commit of an edge never derives: the loop lifts the narrow before it commits the edge that leaves the node. In the engine today a node waits with its transaction open, so every commit is an edge: a guide follows its state through the edges that lead back into its node (`merge` → `apply` → `awaitIntent` derives the next step). The hook serves a commit that is no edge. |
 | The node is left | The narrow is lifted and the handler's signal aborted, as for an awaited `guide`. |
 | A restore | The bookmark's node is entered again, so its guide is derived again. A bookmark keeps no guide. |
-| Fast mode | The narrow applies; nothing is drawn (the `guide` handler of `ui` does not run in fast mode). |
+| Fast mode | The narrow applies; nothing is drawn (the `guide` handler of `ui` does not run in fast mode). When the mode goes back to live while the node stands (a walk ends, `setMode("live")`), the guide is shown: the lock and the veil appear as on a live entry, around the window of a target that is laid out, over the whole screen while none is. |
 | `guide` throws | The node fails: rollback, retry, then the safe node, as for a body that throws. On entry the node is aborted with `"failed"` before its gate opens; after a commit, the wait at its gate and its body end the same way. The message keeps the thrown text: `[game] The guide of node "board/awaitIntent" threw: no step.` / `Return GuideOptions or undefined from guide.` |
 | A dev build, `blocked` names no outcome | The node fails: `[game] The guide of node "path" blocks with "intent", which is no outcome of the node.` / `Add it to outcomes or drop blocked.` The gate lists only the node's outcomes, so such a press would be refused every time. |
 | The `guide` handler fails | The log gets the error entry `flow:guide-handler-failed` `{ path }`; the node goes on. |
@@ -499,7 +500,7 @@ body keeps working, with the same options. `GuideOptions`:
 | `target?` | `{ projection, key }` or a list of them: the window is cut over the target, or over the union of the shown ones, and follows them every frame. Without one the veil covers the screen and every press is outside. |
 | `pad?` | Outward padding of the window, screen reference units, 0 when left out. |
 | `veil?` | `{ color?, alpha? }` (black at 0.6 when left out), or `false`: nothing drawn, the lock stays. `alpha: 0` draws nothing visible and locks. |
-| `blocked?` | The answer, with its payload, a press outside the window gives instead of being lost. The gate takes it beside `allow`; it must be an outcome of the node that waits. |
+| `blocked?` | The answer, with its payload, a press outside the window gives instead of being lost. A press inside the window that the narrow drops gives it too: another intent, or the allowed intent with another payload (a drop on the wrong cell). A press at a closed gate is held as it is, not converted. The gate takes it beside `allow`; it must be an outcome of the node that waits. |
 | `hand?`, `text?`, `highlight?` | Deprecated: not drawn by the engine, kept in the descriptor for a game's own handler; draw them in an `<anchor>` on the targets. They go in the next minor version. |
 
 ## What a feature brings

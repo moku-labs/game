@@ -1096,6 +1096,12 @@ export type NodeGuideHost = {
   last: { [key: string]: Json } | undefined;
   /** Derives the guide again from the committed state; a `guide` that throws fails the node. */
   refresh: () => void;
+  /**
+   * Shows the last result again through the `guide` handler, with the narrow it already set. Called
+   * when the fx mode goes from fast back to live: in fast mode the handler of `ui` did not run.
+   * Shows nothing once the node was left, or while it guides nothing.
+   */
+  reshow: () => void;
 };
 
 /**

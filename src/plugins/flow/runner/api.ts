@@ -259,7 +259,11 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
         );
       }
 
+      const previous = ctx.state.fx.mode;
+
       modules.fx.setMode(mode);
+      // The guide of the node that stands was not shown in fast mode: live shows it, once.
+      if (previous === "fast" && mode === "live") state.guide?.reshow();
     }
   };
 }
