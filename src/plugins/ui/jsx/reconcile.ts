@@ -43,8 +43,8 @@ import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
-import { ANCHOR, CONTENT, visualOf } from "../visual";
-import { cancelExtra, livePatch, recordRest } from "./extras";
+import { ANCHOR, CONTENT, fieldsLeftAlone, livePatch, visualOf } from "../visual";
+import { cancelExtra, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
 import { dropHost, hostsMoved, hostsOf, hostViews, slotFor, slotOf, trackHost } from "./hosts";
@@ -1144,7 +1144,8 @@ export function createReconciler(
    * @param type - Its component type.
    */
   function writeOthers(element: Element, value: object, type: AnyComponentType): void {
-    const others = otherFields(value, ecs.typeOf(type.componentName)?.owned ?? NO_OWNED);
+    const owned = fieldsLeftAlone(element, type, ecs.typeOf(type.componentName)?.owned ?? NO_OWNED);
+    const others = otherFields(value, owned);
 
     if (others !== undefined) ecs.set(element.entity, asHandle(type), others);
   }
@@ -1166,7 +1167,8 @@ export function createReconciler(
 
     if (value.value === true || SCROLL_STATE.has(value.type.componentName)) return;
 
-    const owned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
+    const typeOwned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
+    const owned = fieldsLeftAlone(element, value.type, typeOwned);
 
     ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
   }

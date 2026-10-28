@@ -14,7 +14,7 @@ import {
   type TransformValue
 } from "../renderer/components";
 import { Text } from "../text/components";
-import type { AnyComponentValue } from "../world/types";
+import type { AnyComponentType, AnyComponentValue } from "../world/types";
 import type { Element } from "./jsx/types";
 import type { ElementLookup, Rect } from "./layout/types";
 import type { ResolvedStyle } from "./styles/types";
@@ -154,6 +154,33 @@ function boxOf(element: Element): { box?: number } {
 }
 
 /**
+ * Tells whether a style states the width of its element: a width, or both side edges of an absolute element.
+ *
+ * @param style - The resolved style.
+ * @returns True when it does.
+ */
+function statesWidth(style: ResolvedStyle): boolean {
+  return (
+    style.width !== undefined ||
+    (style.position === "absolute" && style.left !== undefined && style.right !== undefined)
+  );
+}
+
+/**
+ * Tells whether a style states the height of its element: a height, or both top and bottom edges of an absolute
+ * element.
+ *
+ * @param style - The resolved style.
+ * @returns True when it does.
+ */
+function statesHeight(style: ResolvedStyle): boolean {
+  return (
+    style.height !== undefined ||
+    (style.position === "absolute" && style.top !== undefined && style.bottom !== undefined)
+  );
+}
+
+/**
  * Whether the layout sized an image to nothing: an axis whose size its style states (a width or a
  * height, or both edges of an absolute element) came out at 0. An image whose style states no size
  * is 0 by 0 too, and draws as its `Sprite` says: at its texture's size, or at the size a game's own
@@ -164,15 +191,99 @@ function boxOf(element: Element): { box?: number } {
  * @returns True when it draws nothing.
  */
 function sizedToNothing(style: ResolvedStyle, rect: Rect): boolean {
-  const absolute = style.position === "absolute";
-  const statesWidth =
-    style.width !== undefined ||
-    (absolute && style.left !== undefined && style.right !== undefined);
-  const statesHeight =
-    style.height !== undefined ||
-    (absolute && style.top !== undefined && style.bottom !== undefined);
+  return (statesWidth(style) && rect.w <= 0) || (statesHeight(style) && rect.h <= 0);
+}
 
-  return (statesWidth && rect.w <= 0) || (statesHeight && rect.h <= 0);
+/**
+ * The patch a live element writes into one of its components: every field but the ones the
+ * component type gives to a plugin. That plugin keeps such a field for the life of the entity, so
+ * a re-render never puts it back to its default: a label keeps the string `text` resolved for it.
+ *
+ * @param value - The component value the element carries now.
+ * @param owned - The fields the component type gives to a plugin.
+ * @returns The fields to write.
+ * @example
+ * ```ts
+ * livePatch({ content: "Play", resolved: "" }, ["resolved"]); // { content: "Play" }
+ * ```
+ */
+export function livePatch(value: object, owned: readonly string[]): object {
+  if (owned.length === 0) return value;
+
+  return Object.fromEntries(Object.entries(value).filter(([field]) => !owned.includes(field)));
+}
+
+/**
+ * The rest pose recorded for an extra component: the value of this render, but the fields the
+ * component type gives to a plugin stay as the entity carries them, so a render never resets them.
+ *
+ * @param current - The value the entity carries now; none before the component is added.
+ * @param value - The value of this render.
+ * @param owned - The fields the component type gives to a plugin.
+ * @returns The rest value.
+ * @example
+ * ```ts
+ * restValueOf({ until: 2000, left: 42 }, { until: 5000, left: 0 }, ["left"]); // { until: 5000, left: 42 }
+ * ```
+ */
+export function restValueOf(
+  current: object | undefined,
+  value: object,
+  owned: readonly string[]
+): object {
+  if (current === undefined || owned.length === 0) return value;
+
+  return { ...current, ...livePatch(value, owned) };
+}
+
+/** The sizes of a sprite ui leaves alone, by axis: one list each, never a new one. */
+const LEFT_NONE: readonly string[] = [];
+const LEFT_WIDTH: readonly string[] = ["width"];
+const LEFT_HEIGHT: readonly string[] = ["height"];
+const LEFT_BOTH: readonly string[] = ["width", "height"];
+
+/**
+ * The list of sizes left alone for the axes that are.
+ *
+ * @param width - The width is left alone.
+ * @param height - The height is left alone.
+ * @returns One of the four lists.
+ */
+function leftSizes(width: boolean, height: boolean): readonly string[] {
+  if (width && height) return LEFT_BOTH;
+  if (width) return LEFT_WIDTH;
+
+  return height ? LEFT_HEIGHT : LEFT_NONE;
+}
+
+/**
+ * The fields of a value ui does not write onto a live element, or record as its rest: those its component type gives
+ * to a plugin and, for the `Sprite` of an image or an icon, the size on an axis its style does not state and the layout
+ * left at 0. A game's own system sizes such a sprite; written again by ui (a new viewport, a covered root, a restore)
+ * it went back to 0 by 0, drawn at its texture's size (F111). On a first add the size is 0 anyway, the texture's.
+ *
+ * @param element - The element.
+ * @param type - The component type of the value.
+ * @param owned - The fields its type gives to a plugin.
+ * @returns The fields left alone.
+ */
+export function fieldsLeftAlone(
+  element: Element,
+  type: AnyComponentType,
+  owned: readonly string[]
+): readonly string[] {
+  const { style, rect } = element;
+  const isImage = element.type === "image" || element.type === "icon";
+
+  if (!isImage || type !== Sprite) return owned;
+
+  const width = rect.w <= 0 && !statesWidth(style);
+  const height = rect.h <= 0 && !statesHeight(style);
+  const sizes = leftSizes(width, height);
+
+  if (owned.length === 0) return sizes;
+
+  return sizes.length === 0 ? owned : [...owned, ...sizes];
 }
 
 /**
