@@ -280,6 +280,11 @@ export {
   Tree
 } from "./plugins/world/ecs/define";
 export { projection } from "./plugins/world/projection/define";
+export type {
+  AnchorTarget,
+  DescriptionNode,
+  SceneSwitch
+} from "./plugins/world/projection/types";
 // renderer: the display components
 export {
   Display,
@@ -393,7 +398,6 @@ export type { HapticKind } from "./plugins/anim/timeline/types";
 // i18n: messages as data, and the two helpers a generated strings module imports
 export { messageArgument, messageDuration } from "./plugins/i18n/intl";
 export { tr } from "./plugins/i18n/tr";
-export type { DescriptionNode, SceneSwitch } from "./plugins/world/projection/types";
 // text: the Text component, board labels, text styles, bound numbers and countdowns
 export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
 export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
@@ -403,7 +407,6 @@ export { defineComponent } from "./plugins/ui/jsx/component";
 export { defineStyle } from "./plugins/ui/styles/define";
 export { resolve } from "./plugins/ui/styles/resolve";
 export { defineTokens } from "./plugins/ui/styles/tokens";
-export type { AnchorTarget } from "./plugins/world/projection/types";
 // audio: the music descriptor (sfx is anim's)
 export { music } from "./plugins/audio/descriptors";
 // effects: particles and filters as data on entities
