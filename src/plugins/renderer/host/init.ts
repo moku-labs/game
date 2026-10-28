@@ -238,7 +238,8 @@ export async function createApplication(
     background: ctx.config.background,
     antialias: ctx.config.antialias,
     resolution: targetResolution(state.resolution),
-    autoDensity: true,
+    // The host sets the canvas box itself (`resizeAt`): Pixi's would be the rounded-up store, past the mount.
+    autoDensity: false,
     autoStart: false,
     sharedTicker: false,
     useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all())
