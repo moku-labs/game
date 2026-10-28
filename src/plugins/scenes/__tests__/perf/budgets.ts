@@ -11,5 +11,8 @@ export const BUDGET = {
   // The `signals` callback of a build that is not done: one counter step and one call of `built()`.
   buildWaiting: 0,
   // The `signals` callback of a loader fading out with the veil after a swap (F107 part 3): a subtraction and a compare.
-  loaderFading: 0
+  loaderFading: 0,
+  // The `assets:bundle-progress` hook of a switch that feeds its loader, below the step (F107 part 1): a lookup in the
+  // table of the switch, a mean, a compare.
+  progressBelowStep: 0
 } as const;

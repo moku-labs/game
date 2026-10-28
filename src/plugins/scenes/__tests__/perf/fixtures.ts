@@ -1,8 +1,8 @@
 /**
  * @file scenes plugin — the fixtures of the perf tests and benches. Not a test file. Each fixture builds the mock
- * plugin outside any measured window and hands back a frame callback scenes registered in `signals`: the one of a
- * running scene build while `world.projection.built()` answers false, and the one of a loader projection fading out
- * with the veil after a swap.
+ * plugin outside any measured window and hands back a call scenes makes in a frame or on an event: the `signals`
+ * callback of a running scene build while `world.projection.built()` answers false, the one of a loader projection
+ * fading out with the veil after a swap, and the `assets:bundle-progress` hook of a switch that feeds its loader.
  */
 import { alloc } from "../../../../../tests/perf/alloc";
 import { defineScene } from "../../define";
@@ -110,4 +110,40 @@ export async function loaderFading(): Promise<() => void> {
   const time = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false };
 
   return () => callback(time);
+}
+
+/**
+ * The `assets:bundle-progress` hook of the ward → board switch, whose held loader "loading" is fed: one file of the
+ * board's 1000 settled, a share of 0.001, below the step of 0.01, so the call feeds nothing.
+ *
+ * @returns The hook, called with one payload, as the kernel calls it.
+ * @throws {Error} When the switch feeds no loader.
+ */
+export async function progressBelowStep(): Promise<() => void> {
+  const mock = createMockScenes({ buildMs: "auto", leave: { loader: { projection: "loading" } } });
+
+  mock.flow.features.push({
+    name: "screens",
+    description: {
+      scenes: [wardScene, boardScene],
+      projections: [{ name: "loading", layer: "loading" }]
+    }
+  });
+  mock.start();
+  mock.renderer.host.ready.mockReturnValue(true);
+  mock.world.building.done = true;
+  await mock.enter({ rest: true, scene: "ward" });
+  mock.assets.control.gated = true;
+  mock.assets.cold.add("board");
+  // The switch waits for the board's load for good: its promise is never awaited.
+  mock.enter({ rest: true, scene: "board" }).catch(() => undefined);
+
+  for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+
+  if (mock.state.leaving?.feeding === undefined) throw new Error("the switch feeds no loader");
+
+  const hook = mock.hooks["assets:bundle-progress"];
+  const payload = { bundle: "board", loaded: 1, total: 1000 };
+
+  return () => hook(payload);
 }

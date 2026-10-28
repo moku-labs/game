@@ -5,11 +5,12 @@
  * is held), or its one file is still downloading (the fetch of its io is held, a cold first visit): the veil of the
  * engine's default is on the stage in the first frame after the answer, the ring from 400 ms after the switch start,
  * and both are gone once the board stands and the veil faded out. A loader projection is built and hidden while the
- * ward stands (F103), shown the frame after it is due, and fades out with the veil after the swap (F107 part 3). A
+ * ward stands (F103), shown the frame after it is due, and fades out with the veil after the swap (F107 part 3); its
+ * `from` reads the switch `scenes` feeds it, and the scene being entered sets the veil's colour (F107 parts 1–2). A
  * download that fails takes the veil down at once, on a retry, while the safe node's `recover` waits at the gate, and
  * on a fatal failure. The tree oracle checks every frame.
  */
-import type { Assets, Scenes } from "@moku-labs/game";
+import type { Assets, SceneSwitch, Scenes } from "@moku-labs/game";
 import { defineGame, Layer, Shape, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import { fakeClock } from "@moku-labs/game/testing";
@@ -163,6 +164,44 @@ const leaveFeature = defineFeature("leave", {
   projections: [wardRoom, boardCells, loadingScreen]
 });
 
+/** The width of the switch loader's bar while the switch it reads goes to the board, and while it goes elsewhere. */
+const TO_BOARD_W = 300;
+const ELSEWHERE_W = 200;
+
+/** A loading screen that draws where the switch `scenes` feeds it goes: a wider bar on the way to the board. */
+const switchLoader = projection({
+  name: "leave.switch",
+  layer: "loading",
+  from: (_player: unknown, _session: unknown, sw: SceneSwitch | undefined) => ({
+    id: "switch",
+    to: sw?.to ?? ""
+  }),
+  view: item => [
+    Transform({ x: 95, y: 372 }),
+    Shape({
+      kind: "rect",
+      w: item.to === "board" ? TO_BOARD_W : ELSEWHERE_W,
+      h: 100,
+      fill: 0xff_ff_ff
+    })
+  ]
+});
+
+/** The colour every switch to the board dims the scene being left in. */
+const BOARD_VEIL = 0x33_66_99;
+
+/** The board of the feed fixture: the same scene, entered under a veil of its own colour. */
+const boardEntered = defineScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [boardCells],
+  enter: { cover: { color: BOARD_VEIL } }
+});
+const feedFeature = defineFeature("leave", {
+  scenes: [wardScene, boardEntered],
+  projections: [wardRoom, boardCells, switchLoader]
+});
+
 /**
  * The ward of the failure tests: a safe node whose `recover` asks the player first, waiting at the gate for "retry".
  * It leaves for the board straight (a rest node: a failure retries the board itself) or through `travel`.
@@ -241,11 +280,13 @@ async function arrive(fixture: Running, path: string): Promise<void> {
  * @param network - The manifest and the io of the page; bundles with no file and the engine's io when left out.
  * @param network.manifest - The manifest.
  * @param network.io - The io its files are fetched with.
+ * @param feature - The feature of the scenes and projections; the ward, the board and the loading screen when left out.
  * @returns The running fixture.
  */
 async function open(
   leave?: Scenes.SceneLeave,
-  network?: { manifest: Assets.Manifest; io: Assets.AssetsIo }
+  network?: { manifest: Assets.Manifest; io: Assets.AssetsIo },
+  feature = leaveFeature
 ): Promise<Running> {
   const page = openPage();
   const clock = fakeClock(1000);
@@ -257,7 +298,7 @@ async function open(
     session: {},
     referenceSide: 390,
     referenceLong: 844,
-    features: [leaveFeature],
+    features: [feature],
     pluginConfigs: {
       log: { mode: "test" },
       flow: { holdMs: 0 },
@@ -598,6 +639,43 @@ describe("the picture of a scene being left, across the engine", () => {
     expect(app.world.projection.entitiesOf("leave.loading")).toEqual([]);
     expect(app.renderer.sync.displayOf(held)).toBeUndefined();
     expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
+  });
+
+  // Bug: the held loader shows the switch it was built for (the ward that stood) instead of the one under way, is
+  // spawned again to read it, or the board's own veil colour is lost to the ward's (F107 parts 1–2).
+  it("shows the held loader patched to the switch it reads, the same root, under the board's veil colour", async () => {
+    const fixture = await open(
+      { loader: { afterMs: 100, projection: "leave.switch" } },
+      undefined,
+      feedFeature
+    );
+    const { app } = fixture;
+    const held = heldLoader(fixture);
+
+    // Built while the ward stands, for the switch it reads then: the ward to the ward.
+    expect(app.world.ecs.get(held, Shape)?.w).toBe(ELSEWHERE_W);
+
+    const release = holdBoardTextures(fixture);
+    const dueIn = watchDue(fixture);
+    const entities = app.world.ecs.count();
+
+    app.flow.gate.answer({ intent: "board" });
+    for (let frame = 0; frame < 12; frame += 1) {
+      dueIn.frame = frame;
+      await fixture.frames(1);
+    }
+
+    expect(dueIn.frames).toHaveLength(1);
+    expect(app.world.projection.entitiesOf("leave.switch")).toEqual([held]);
+    expect(app.world.ecs.count()).toBe(entities);
+    expect(app.world.ecs.get(held, Shape)?.w).toBe(TO_BOARD_W);
+    expect(leaveNode(fixture, "renderer.leave.cover")?.tint).toBe(BOARD_VEIL);
+
+    release();
+    await arrive(fixture, "board");
+    await fixture.frames(150 / FRAME_MS + 1);
+
+    expect(app.world.projection.entitiesOf("leave.switch")).toEqual([]);
   });
 
   // Bug: the veil waits for the `load` stage: a cold first visit downloads the board's files first and shows nothing

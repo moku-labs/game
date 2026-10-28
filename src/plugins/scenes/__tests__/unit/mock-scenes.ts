@@ -14,8 +14,15 @@ import type { EnterCallback, Api as FlowApi, NodeInfo, Stage } from "../../../fl
 import type { Json, Api as ModelApi } from "../../../model/types";
 import type { LeaveLook } from "../../../renderer/types";
 import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/types";
-import type { LayerSpec, Owner, Api as WorldApi, WorldMode } from "../../../world/types";
+import type {
+  LayerSpec,
+  Owner,
+  SceneSwitch,
+  Api as WorldApi,
+  WorldMode
+} from "../../../world/types";
 import { createScenesApi } from "../../api";
+import { createHandlers } from "../../handlers";
 import { checkConfig, startScenes, stopScenes, withDeps } from "../../lifecycle";
 import { createScenesState } from "../../state";
 import type { Config, KernelSlice, RunContext, ScenesApi, ScenesCtx, State } from "../../types";
@@ -42,6 +49,8 @@ export type FakeAssets = {
   warm: { calls: string[]; gate: Promise<void> };
   /** Every list `sceneComing` was called with, in order. */
   coming: string[][];
+  /** The bundles `isLoaded` answers false for, set by a test; every other bundle is loaded. */
+  cold: Set<string>;
   api: AssetsApi;
 };
 
@@ -92,6 +101,11 @@ export type FakeWorld = {
   shows: string[];
   /** Set by a test: `hold` throws it once, the way a `lift` the scene does not declare does. */
   holdError: unknown;
+  /**
+   * Every value `projection.feed` was handed (F107), in order, with the world call made last before it: a feed is not
+   * one of `calls`, so the order of the other calls stays what the older tests read.
+   */
+  feeds: Array<{ name: string; sw: SceneSwitch; after: string | undefined }>;
   /** What `ecs.mode()` answers: `"fast"` while the flow walks fast. */
   mode: WorldMode;
   /**
@@ -171,6 +185,8 @@ export type MockScenes = {
   time: FakeTime;
   model: FakeModel;
   renderer: FakeRenderer;
+  /** The plugin's hooks, as the kernel registers them: a test calls one the way `assets` emits its event. */
+  hooks: ReturnType<typeof createHandlers>;
   /**
    * Every call the switch made into its fakes, in order, as `world:setLayers`, `assets:sceneBundles`,
    * `time:wake`, `emit:scenes:changed` or `monitor:scene`: the order of the swap.
@@ -242,6 +258,7 @@ function createFakeAssets(journal: string[]): FakeAssets {
   const held: HeldLoad[] = [];
   const named: string[][] = [];
   const coming: string[][] = [];
+  const cold = new Set<string>();
   const warm = { calls: [] as string[], gate: Promise.resolve() };
 
   const api = {
@@ -261,7 +278,7 @@ function createFakeAssets(journal: string[]): FakeAssets {
       return warm.gate;
     },
     unload: () => undefined,
-    isLoaded: () => true,
+    isLoaded: (bundle: string): boolean => !cold.has(bundle),
     texture: () => undefined,
     usage: () => ({ textureMb: 0, budgetMb: 0, bundles: [] }),
     sceneBundles: (list: readonly string[]): void => {
@@ -293,6 +310,7 @@ function createFakeAssets(journal: string[]): FakeAssets {
     },
     warm,
     coming,
+    cold,
     api
   };
 }
@@ -337,6 +355,7 @@ function createFakeWorld(journal: string[]): FakeWorld {
     holds: [],
     shows: [],
     holdError: undefined,
+    feeds: [],
     mode: "live",
     building: {
       answer: true,
@@ -395,6 +414,9 @@ function createFakeWorld(journal: string[]): FakeWorld {
         record("show");
         fake.shows.push(name);
         fake.held.delete(name);
+      },
+      feed: (name: string, sw: SceneSwitch): void => {
+        fake.feeds.push({ name, sw, after: fake.calls.at(-1) });
       },
       mount: (names: readonly string[], owner: Owner): void => {
         record("mount");
@@ -669,6 +691,7 @@ export function createMockScenes(config?: Config): MockScenes {
     time,
     model,
     renderer,
+    hooks: createHandlers(ctx),
     journal,
     init: (): void => checkConfig(ctx.config),
     start: (): void => startScenes(ctx),

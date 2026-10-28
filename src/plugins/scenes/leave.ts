@@ -3,13 +3,15 @@
  * `begin` stage of the node that switches, before the `load` stage downloads its bundles, so a cold first visit reacts in
  * the next frame, and a loader when the switch is not done `afterMs` after its start. The scene being left decides: its
  * `leave` over `config.leave` over the engine's default, field by field. The renderer draws both
- * (`renderer.sync.leave`); this file resolves the look, hands the renderer the `due` of a loader projection
- * (`loader.ts` shows or mounts it), and lands the look at the swap or drops it on an abort or a throw. A stage of the
- * node that throws aborts the node (flow), so the abort listener drops the look then too; the next node's `begin` drops
- * one left over all the same.
+ * (`renderer.sync.leave`); this file resolves the look, with the veil's colour and alpha of the scene being entered on
+ * top (`enter.cover`), hands the renderer the `due` of a loader projection (`loader.ts` shows or mounts it), starts
+ * feeding that loader the switch (`progress.ts`), and lands the look at the swap or drops it on an abort or a throw. A
+ * stage of the node that throws aborts the node (flow), so the abort listener drops the look then too; the next node's
+ * `begin` drops one left over all the same.
  */
 import type { LeaveLoader, LeaveLook } from "../renderer/types";
 import { dropLoader, dueLoader, landLoader } from "./loader";
+import { startFeeding } from "./progress";
 import type {
   FullCover,
   FullLeave,
@@ -18,6 +20,7 @@ import type {
   RunContext,
   SceneCover,
   SceneDefinition,
+  SceneEnter,
   SceneLeave,
   SceneLoader,
   ScenesCtx,
@@ -63,6 +66,33 @@ function coverOver(
     alpha: over.alpha ?? base.alpha,
     inMs: over.inMs ?? base.inMs,
     outMs: over.outMs ?? base.outMs
+  };
+}
+
+/**
+ * The veil of a switch: the one the scene being left resolved, with the `color` and `alpha` of the scene being entered
+ * over it, field by field, in a new object (the resolved veil may be the engine's frozen one). A veil turned off stays
+ * off: the scene being entered never turns one on, and the times stay the left scene's.
+ *
+ * @param cover - The veil the scene being left resolved, or `false`.
+ * @param enter - The `enter.cover` of the scene being entered.
+ * @returns The veil, or `false`.
+ * @example
+ * ```ts
+ * enteredCover(FALLBACK_LEAVE.cover, { color: 0x0b1020 }); // { color: 0x0b1020, alpha: 0.45, inMs: 50, outMs: 150 }
+ * ```
+ */
+function enteredCover(
+  cover: Readonly<FullCover> | false,
+  enter: SceneEnter["cover"]
+): Readonly<FullCover> | false {
+  if (cover === false || enter === undefined) return cover;
+
+  return {
+    color: enter.color ?? cover.color,
+    alpha: enter.alpha ?? cover.alpha,
+    inMs: cover.inMs,
+    outMs: cover.outMs
   };
 }
 
@@ -169,8 +199,8 @@ export function loaderProjectionOf(
 /**
  * The renderer's loader of a resolved one: a texture as it is, nothing for the ring, and for a projection the `due`
  * the renderer calls once the loader is due, which shows it then when the scene being left holds it built (F103), and
- * mounts it then otherwise: a switch done sooner shows nothing of it. A projection a scene of the switch lists is no
- * loader: warned, the ring.
+ * mounts it then otherwise: a switch done sooner shows nothing of it. Such a projection is fed the switch from now on
+ * (F107 part 1). A projection a scene of the switch lists is no loader: warned, the ring.
  *
  * @param ctx - Domain context of the plugin.
  * @param loader - The resolved loader.
@@ -198,6 +228,8 @@ function loaderLook(
     return { afterMs };
   }
 
+  startFeeding(ctx, leaving, projection, between);
+
   return { afterMs, due: () => dueLoader(ctx, projection, from, leaving) };
 }
 
@@ -222,8 +254,9 @@ function leftScene(ctx: ScenesCtx, run: RunContext): SceneDefinition | undefined
 
 /**
  * Shows the veil and the loader of a switch that starts now, before its bundles are awaited: the scene being left
- * decides. A loader projection is shown or mounted only once its loader is due. An abort of the node drops both at
- * once, from its listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over.
+ * decides, and the scene being entered sets the veil's colour and alpha (`enter.cover`). A loader projection is fed
+ * the switch from now on, and shown or mounted only once its loader is due. An abort of the node drops both at once,
+ * from its listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene being switched to.
@@ -244,20 +277,22 @@ export function startLeave(
 
   if (leave === undefined) return undefined;
 
+  // The scene being entered has the last word on the veil's colour and alpha.
+  const cover = enteredCover(leave.cover, scene.enter?.cover);
   // The record of the switch's look; `off`, by aborting `listening`, takes its abort listener away.
   const listening = new AbortController();
   const leaving: Leaving = {
     signal: run.signal,
     to: scene.id,
     done: false,
-    outMs: leave.cover === false ? 0 : leave.cover.outMs,
+    outMs: cover === false ? 0 : cover.outMs,
     off: (): void => listening.abort()
   };
 
   // The look the renderer draws: only the parts that are on.
   const look: LeaveLook = {};
 
-  if (leave.cover !== false) look.cover = leave.cover;
+  if (cover !== false) look.cover = cover;
   if (leave.loader !== false) {
     look.loader = loaderLook(ctx, leave.loader, { from, to: scene }, leaving);
   }
@@ -323,8 +358,9 @@ export function dropLeftOver(ctx: ScenesCtx, run: RunContext): void {
 /**
  * Ends the look of a switch once: `"land"` at the swap (the veil fades out over the next scene, and a loader
  * projection mounted or shown for the wait fades out with it and is unmounted after the veil's `outMs`), `"drop"` on an
- * abort or a throw (both go at once, the loader projection unmounted). A look ended already, or a switch that showed
- * nothing, is left alone.
+ * abort or a throw (both go at once, the loader projection unmounted). Either ends the feeding of its loader: the look
+ * leaves the state, where the hooks of `assets` find it, and a fading loader keeps the last value fed. A look ended
+ * already, or a switch that showed nothing, is left alone.
  *
  * @param ctx - Domain context of the plugin.
  * @param leaving - The look of the switch.

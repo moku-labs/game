@@ -34,6 +34,7 @@ export const boardFeature = defineFeature("board", {
 | `projections` | `ProjectionSpec[]` | The projections the scene mounts. Their `layer` and `lift` are checked against the keys of `layers` and `ui` |
 | `music` | `AudioKey` | Optional. The audio keys of the game (`G["assets"]`). Carried in `scenes:changed`, so `audio` needs no lookup |
 | `leave` | `SceneLeave` | Optional. What a live switch shows over this scene when it is left: a veil and a loader, merged field by field over `config.leave`; `false` shows nothing. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
+| `enter` | `SceneEnter` | Optional. What a live switch to this scene shows: `{ cover: { color?, alpha? } }`, the colour and the alpha of the veil over the scene being left. See [A switch to the scene: `enter`](#a-switch-to-the-scene-enter) |
 
 The layer names are inferred from the keys of `layers`, and `NoInfer` keeps `projections` out of that inference: a wrong `layer` or `lift` is an error on the projection that is wrong, with no generic at the call site. The same check runs at run time for a caller without types:
 
@@ -289,6 +290,25 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
     reconcile. A loader the scene did not hold (the first switch after a fast walk, a scene that stood headless) is
     mounted there instead (A2), so a switch done sooner never runs its `from` and `view`, and `due` answers the layer
     of its first view. The renderer draws the whole layer above the veil.
+  - **The switch it reads (F107 part 1).** Its `from(player, session, sw)` gets the switch as its third argument, a
+    `SceneSwitch` `{ from, to, progress }` that scenes hands it with `world.projection.feed`; a `from` with two
+    parameters reads the state alone, as before. Right after the hold, while the ward stands, it is
+    `{ from: "ward", to: "ward", progress: 0 }`: the view built ahead is built for it, and so is the loader held again
+    after a fade. At the switch start it is `{ from: "ward", to: "board", progress }`, before the loader is due: a held
+    loader only stores it and its show writes the difference into the view built ahead once, the same entity; a loader
+    mounted at its due (A2) reads it at the mount. `progress` is the share of the bundles the scene being switched to
+    names (`bundle` and `bundles` for the committed state), 0 to 1: the mean of each bundle's share, counted in
+    integer thousandths (`Math.floor(1000 * loaded / total)` of its last `assets:bundle-progress`, 1000 once it is
+    loaded: already at the start, on its last file, or when the `scene` stage has its loads in, which is when a bundle
+    with no file, which sends no progress, counts), so the last value is exactly 1, before the warm and the build. It is
+    fed again only when it grew by 0.01 or reached 1: a bundle of 200 files feeds 101 values. scenes does not listen to
+    `assets:bundle-loaded`: the kernel awaits each handler of an event in plugin order, so a scenes handler there
+    would install the fonts of `text`, a later plugin, one microtask later. The hook allocates nothing for an event
+    below the step (0 B, `__tests__/perf/progress.perf.ts`; 45 to 53 ns a call on the Mac, `progress.bench.ts`); a
+    step fed to a shown loader costs one reconcile of it (world README, "Feeding a projection"). A `bundles` that
+    throws at `begin` gives progress 1, and the `scene` stage throws it as before. The
+    swap and the drop end the feeding; a loader fading out keeps the last value. Only a loader scenes holds, or one
+    with no view yet, is fed: a projection another owner shows never is.
   - **After the swap (F107 part 3).** The loader fades out with the veil above the new scene and is unmounted in the
     frame the veil's `outMs` ran out, counted in frames of `time` before its time scale (a game time frozen at scale 0
     counts one frame of the loop's rate per frame), in the `signals` phase, before that frame is drawn. When the new
@@ -310,6 +330,13 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
 ```ts
 // A game's loading screen: its own layer in every scene it leaves from, after 250 ms.
 export const loadingScreen = projection({ name: "loading", layer: "loading", from: () => ({ id: "loading" }), view: () => <LoadingScreen /> });
+// One that names where the switch goes and fills its bar: { to: "board", progress: 0.5 } halfway through ward → board.
+export const loadingBar = projection({
+  name: "loading",
+  layer: "loading",
+  from: (_player: Player, _session: Session, sw: SceneSwitch | undefined) => ({ to: sw?.to ?? "", progress: sw?.progress ?? 0 }),
+  view: bar => <LoadingBar to={bar.to} progress={bar.progress} />
+});
 defineScene("ward", { bundle: "ward", layers: { room: {}, loading: {} }, projections: [wardRoom] });
 createApp({ pluginConfigs: { scenes: { leave: { loader: { afterMs: 250, projection: "loading" } } } } });
 ```
@@ -321,6 +348,31 @@ A `leave` of the wrong shape throws where it was written: in the config at `crea
   Give the alpha the veil fades in to, a number from 0 to 1.
 [game] Scene "board": leave.loader.afterMs is -1.
   Give the milliseconds the loader waits for, 0 or more.
+```
+
+## A switch to the scene: `enter`
+
+The scene being left decides the look of a switch; the scene being entered may set the colour and the alpha of its
+veil (F107 part 2), so every way into a scene dims the scene being left in that scene's own colour.
+
+```ts
+// Every switch to the night dims the scene being left in navy at 70 %.
+defineScene("night", { bundle: "night", layers: { sky: {} }, projections: [nightSky], enter: { cover: { color: 0x0b1020, alpha: 0.7 } } });
+// ward → night, the ward leaving with the engine's veil: { color: 0x0b1020, alpha: 0.7, inMs: 50, outMs: 150 }
+```
+
+- **Field by field, on top.** A veil the scene being left resolved (its `leave` over `config.leave` over the engine's)
+  takes `enter.cover.color` and `enter.cover.alpha`, each one only when written, into a new object: the engine's
+  frozen fallback is never written into. `inMs` and `outMs` stay the left scene's; `enter.cover` has no other field
+  (the type refuses one).
+- **Never on.** A veil the scene being left turned off (`cover: false`, or `leave: false`) stays off: `enter` never
+  turns one on, and it says nothing about the loader.
+- **Absent by default.** A scene without `enter` changes nothing; `defineScene` copies `enter` onto the scene only when
+  it was given. A wrong value throws at `defineScene`, by the rules of `leave.cover`:
+
+```
+[game] Scene "night": enter.cover.alpha is 2.
+  Give the alpha the veil fades in to, a number from 0 to 1.
 ```
 
 ## A projection both scenes list
@@ -393,6 +445,9 @@ own view built and warmed ahead) is later work (spec 33, slice C).
 |---|---|---|
 | `scenes:changed` | `{ from, to, music }` | After the mounts, once per real switch; at the commit of a scene built aside |
 
+It listens to `assets:bundle-progress` while a switch feeds its loader projection (see "The switch it reads"); without
+one, the hook returns at once.
+
 `music` is the new scene's key, so `audio` needs no lookup API: it fades the old track out and the new one in straight from the payload. A scene without music carries `undefined`. Nobody answers the event.
 
 ## Dependencies
@@ -402,8 +457,8 @@ own view built and warmed ahead) is later work (spec 33, slice C).
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("begin", fn)` for the look, `onEnter("scene", fn)` for the switch, `features.all()`: the scenes, and the `layer` of a loader projection's spec |
-| `world` | `projection.hold` of the loader projection of a scene that stands and `projection.show` of it once its loader is due; `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection the scene did not hold, once its loader is due; `projection.unmount` of a loader at a drop, after the veil's fade, and of a held loader the next switch does not use; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
-| `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
+| `world` | `projection.hold` of the loader projection of a scene that stands and `projection.show` of it once its loader is due; `projection.feed` of the switch it reads, right after the hold and from the switch start to its swap or drop; `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection the scene did not hold, once its loader is due; `projection.unmount` of a loader at a drop, after the veil's fade, and of a held loader the next switch does not use; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
+| `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `isLoaded(bundle)` at the switch start and the hook `assets:bundle-progress` for the progress a loader projection reads; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
 | `renderer` | `host.ready()`, which picks the path of a live switch and whether it shows a look; `sync.leave.show` at its start, `sync.leave.land` after its swap and `sync.leave.drop` on an abort or a throw; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard, and while a loader projection fades out with the veil, removed in the frame its `outMs` ran out; `rate().fps` at a build start, for the budget of `"auto"`, and for a fade frame at time scale 0; `agentClock()`, the page clock of a build's `buildMs` in an agent build |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |

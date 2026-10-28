@@ -3,11 +3,13 @@
  * the projection its leave loader names is held: `world` keeps it built and hidden in idle frames, so the frame the
  * loader is due only shows it, and its layer comes from its spec. A loader that is not held is mounted in the frame it
  * is due (A2). After the swap it fades out with the veil and is unmounted once the veil's `outMs` passed, or held again
- * when the scene that stands leaves with it too; a drop takes it down at once.
+ * when the scene that stands leaves with it too; a drop takes it down at once. A loader held is fed the switch of the
+ * scene that stands right after the hold (F107 part 1), so the view built ahead reads `{ from, to, progress: 0 }` of it.
  */
 import type { Time } from "../time/types";
 import { Layer } from "../world/ecs/define";
 import { frameMsOf } from "./build";
+import { feedStanding } from "./progress";
 import type {
   AnySceneProjection,
   FadingLoader,
@@ -241,8 +243,10 @@ export function dueLoader(
 }
 
 /**
- * Holds a loader for the next switch. A hold `world` refuses (a `lift` the scene does not declare) is warned and holds
- * nothing: the loader is then mounted when it is due, and that mount is refused the same way.
+ * Holds a loader for the next switch and feeds it the switch of the scene that stands right after, in the same call:
+ * the first value fed after a hold is the one `world` builds the held view for. A hold `world` refuses (a `lift` the
+ * scene does not declare) is warned and holds nothing: the loader is then mounted when it is due, and that mount is
+ * refused the same way.
  *
  * @param ctx - Domain context of the plugin.
  * @param loader - The loader to hold.
@@ -260,6 +264,7 @@ function holdNow(ctx: ScenesCtx, loader: HeldLoader): void {
     return;
   }
 
+  feedStanding(ctx, loader.name);
   ctx.state.held = loader;
 }
 

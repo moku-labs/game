@@ -694,6 +694,8 @@ export type Events = {
    * One more file of a running load settled. `loaded` counts the settled files (a font once, with
    * its pages), `total` is the file count of the bundle; the last one of a load has
    * `loaded === total` and comes before `assets:bundle-loaded`. An aborted load sends none.
+   * `scenes` listens during a live switch: the share of the switch's bundles loaded is what its
+   * leave loader projection reads as `progress`.
    */
   "assets:bundle-progress": { bundle: string; loaded: number; total: number };
   /**

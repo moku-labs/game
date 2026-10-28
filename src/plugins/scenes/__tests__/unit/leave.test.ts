@@ -683,3 +683,86 @@ describe("the begin stage of a node that switches", () => {
     expect(mock.renderer.leaves.map(entry => entry.call)).toEqual(["show", "drop"]);
   });
 });
+
+/** The night: every switch to it dims the scene being left in its own slate, at 70 %. */
+const nightScene = defineScene("night", {
+  bundle: "night",
+  layers: { sky: {} },
+  projections: [],
+  enter: { cover: { color: 0x22_33_44, alpha: 0.7 } }
+});
+
+/** The dawn: sets the colour only. */
+const dawnScene = defineScene("dawn", {
+  bundle: "dawn",
+  layers: { sky: {} },
+  projections: [],
+  enter: { cover: { color: 0xff_cc_99 } }
+});
+
+/**
+ * Starts the plugin with home, board, ward, night and dawn, stands the first scene in one block and switches to the
+ * second with a drawing renderer, up to its bundle wait.
+ *
+ * @param first - The scene that stands.
+ * @param next - The scene switched to.
+ * @param config - The config of the plugin.
+ * @returns The started mock.
+ */
+async function enterFrom(first: string, next: string, config?: Config): Promise<MockScenes> {
+  const mock = createMockScenes(config);
+
+  mock.flow.features.push({
+    name: "screens",
+    description: { scenes: [homeScene, boardScene, wardScene, nightScene, dawnScene] }
+  });
+  mock.start();
+  await mock.enter({ rest: true, scene: first });
+  mock.renderer.host.ready.mockReturnValue(true);
+  mock.assets.control.gated = true;
+  await enterScene(mock, next);
+
+  return mock;
+}
+
+describe("the veil of the scene being entered", () => {
+  // Bug: the scene being entered has no say (its veil is the left scene's), it takes the left scene's times too, or a
+  // field it leaves out drops the left scene's.
+  it.each([
+    ["colour and alpha", "night", { color: 0x22_33_44, alpha: 0.7 }],
+    ["colour, keeping the left scene's alpha", "dawn", { color: 0xff_cc_99, alpha: 0.6 }]
+  ] as const)("takes its %s over the left scene's veil, the times staying the left scene's", async (_case, next, look) => {
+    const mock = await enterFrom("board", next, {
+      buildMs: "auto",
+      leave: { cover: { inMs: 80, outMs: 200 } }
+    });
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: { ...look, inMs: 80, outMs: 200 },
+      loader: { afterMs: 400, texture: "ui.loader.ring" }
+    });
+    expect(mock.state.leaving?.outMs).toBe(200);
+  });
+
+  // Bug: `enter` turns on a veil the scene being left turned off.
+  it("leaves a veil turned off off", async () => {
+    const mock = await enterFrom("home", "night", { buildMs: "auto", leave: { cover: false } });
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      loader: { afterMs: 400 }
+    });
+  });
+
+  // Bug: the entered colour is written into the engine's frozen fallback (a throw in the switch), or into the veil
+  // every later switch starts from.
+  it("never writes into the engine's veil", async () => {
+    const mock = await enterFrom("home", "night");
+
+    expect(mock.renderer.sync.leave.show.mock.calls[0]?.[0].cover).toEqual({
+      ...VEIL,
+      color: 0x22_33_44,
+      alpha: 0.7
+    });
+    expect(FALLBACK_LEAVE.cover).toEqual(VEIL);
+  });
+});

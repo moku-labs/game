@@ -24,8 +24,9 @@ import {
   startLeave
 } from "./leave";
 import { holdLoader, releaseListed, settleFade } from "./loader";
+import { committedState, countLoaded } from "./progress";
 import { swapIn } from "./swap";
-import type { Leaving, RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
+import type { Leaving, RunContext, SceneDefinition, ScenesCtx } from "./types";
 
 /**
  * A promise that resolves when the node was aborted. Already aborted resolves at once.
@@ -104,19 +105,6 @@ async function untilAborted(
   await Promise.race([Promise.all(loads), whenAborted(signal)]);
 
   if (load.failed && !signal.aborted) throw load.error;
-}
-
-/**
- * Reads the committed state a scene's `bundles` gets: the frozen trees of the store, in a frozen
- * wrapper. During the scene stage no node writes, so it is the state the node is entered with.
- *
- * @param ctx - Domain context of the plugin.
- * @returns The committed `player` and `session`.
- */
-function committedState(ctx: ScenesCtx): SceneState {
-  const { player, session } = ctx.deps.model.store.snapshot();
-
-  return Object.freeze({ player, session });
 }
 
 /**
@@ -277,7 +265,8 @@ async function standUp(
 /**
  * Awaits every bundle the scene names and only then builds the scene. In live mode it waits between
  * the two for the textures of those bundles to reach the GPU; a fast walk does not, so tests and
- * restores keep their pace. An aborted node, or a plugin stopped during the wait, returns without
+ * restores keep their pace. Once the loads are in, a loader projection fed the switch counts every
+ * loaded bundle whole. An aborted node, or a plugin stopped during the wait, returns without
  * touching anything. A live switch with a drawing renderer resolves at the commit of the scene
  * built aside, frames later.
  *
@@ -297,6 +286,9 @@ async function loadAndStand(
   await untilAborted(ctx, named, run.signal);
 
   const warmsFirst = run.mode === "live" && !run.signal.aborted;
+
+  // The loads are in: a loader fed reads every bundle that is loaded whole, one with no file too.
+  if (warmsFirst) countLoaded(ctx.state);
 
   if (warmsFirst) await untilWarmed(ctx, named, run.signal);
 
