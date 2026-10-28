@@ -154,7 +154,9 @@ function boxOf(element: Element): { box?: number } {
 }
 
 /**
- * The visual component of an element: a sprite for an image or an icon, the text for a text (with
+ * The visual component of an element: a sprite for an image or an icon (at alpha 0 while laid out
+ * with no width or no height: the renderer draws a sprite of width 0 at its texture's size, so the
+ * size alone cannot say "nothing"), the text for a text (with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
  * when the style sets `debug`, its rim alone when it sets `hollow`; the sprite and the nine-slice
  * blended by the style's `blend`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
@@ -180,7 +182,8 @@ export function visualOf(element: Element): AnyComponentValue[] {
       Sprite({
         texture: textureOf(node.props),
         tint,
-        alpha,
+        // Laid out at no size, it draws nothing and, below the hit test's alpha, takes no tap.
+        alpha: rect.w > 0 && rect.h > 0 ? alpha : 0,
         anchor: { x: 0, y: 0 },
         width: rect.w,
         height: rect.h,

@@ -304,15 +304,20 @@ export type InputProps = CommonProperties & {
  */
 export type AnchorTo = (AnchorTarget | readonly AnchorTarget[]) & Brand<"AnchorTo">;
 
-/** How far an anchor reaches past its targets on each side, in its root's units; 0 by default. */
+/**
+ * How far an anchor reaches past its targets on each side, in its root's units; 0 by default. A
+ * value below 0 pulls it inward; past half the targets the size stops at 0, at their centre.
+ */
 export type AnchorPad = number & Brand<"AnchorPad">;
 
 /**
  * What an anchor takes: the common props, `to` and `pad`. Its rect is the drawn rect of its
  * targets, padded, in the frame they are laid out, and its children lay out inside it; its style
  * gives its look, and a `width`, `height` or `position` there is ignored (`ui:anchor-style`, dev
- * builds). While no target is shown it is not drawn and takes no tap. Its `change.Box` motion plays
- * only when its targets change: a new `to`, or keys that name other entities.
+ * builds). While no target is shown it is not drawn and takes no tap. On a target of no area it
+ * stands at the point at size 0: it takes no tap itself, and its children overflow it and take
+ * theirs. Its `change.Box` motion plays only when its targets change: a new `to`, or keys that name
+ * other entities, a point included.
  *
  * @example
  * ```tsx

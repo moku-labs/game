@@ -234,6 +234,31 @@ describe("defineTextStyles", () => {
   });
 });
 
+describe("defineTextStyles — lineHeight", () => {
+  it("keeps the lineHeight a style names, and leaves it out of one that names none", () => {
+    const styles = defineTextStyles({
+      plate: { font: "text-medium", size: 14, fill: 0, lineHeight: 1.28 },
+      body: { font: "text-medium", size: 14, fill: 0 }
+    });
+
+    expect(styles.map.plate?.lineHeight).toBe(1.28);
+    expect(styles.map.body?.lineHeight).toBeUndefined();
+  });
+
+  // The bug: a line of 0, below 0 or NaN is stored, and every label of the style collapses or
+  // vanishes with no word of why.
+  it("refuses a lineHeight that is not a number above 0", () => {
+    for (const lineHeight of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        defineTextStyles({ plate: { font: "text-medium", size: 14, fill: 0, lineHeight } })
+      ).toThrow(
+        `[game] Text style "plate" has lineHeight ${lineHeight}.\n` +
+          "  Use a multiple of size above 0, such as 1.2."
+      );
+    }
+  });
+});
+
 describe("builtInStyles", () => {
   it("makes `body` and `digits` out of the two configured fonts", () => {
     const styles = builtInStyles({ body: "ui.font-body", digits: "ui.font-digits" });
@@ -287,6 +312,21 @@ describe("readStyle", () => {
     expect(() =>
       readStyle("hud.note", { font: "ui.font-body", size: 32, fill: 0, wrap: "auto" })
     ).toThrow('[game] Text style "hud.note" has wrap auto.');
+  });
+
+  // The bug: a hot swap reads the style back without its line, and the labels jump to the font's.
+  it("reads the lineHeight of a registered style back", () => {
+    const map = defineTextStyles({
+      plate: { font: "text-medium", size: 14, fill: 0, lineHeight: 1.28 }
+    }).map;
+
+    expect(readStyle("plate", map.plate ?? {})?.lineHeight).toBe(1.28);
+  });
+
+  it("refuses a stored lineHeight that is not a number above 0", () => {
+    expect(() =>
+      readStyle("plate", { font: "text-medium", size: 14, fill: 0, lineHeight: "1.2" })
+    ).toThrow('[game] Text style "plate" has lineHeight 1.2.');
   });
 
   it("answers nothing for an entry that is not a style", () => {

@@ -278,9 +278,12 @@ export type UiApi = {
    * Where a target is drawn, in screen reference units: the rect an `<anchor>` sits on. A ui
    * element's layout box, a nine-slice's panel, a shape's rectangle or a sprite's box, through its
    * root pose, so a fit, a slot, a scroll's offset and the motion of an ancestor move it; the
-   * rotation is left out. A list gives the bounding rect of its shown targets. Not shown: the key
-   * names no entity, or one leaving, built aside, of no area or drawn at alpha 0. Works in every
-   * build and headless; every call answers a new object.
+   * rotation is left out. A list gives the bounding rect of its shown targets. A target of no area
+   * (an empty element, a width or a height of 0) answers its point, `{ x, y, w: 0, h: 0 }`. Not
+   * shown: the key names no entity, or one leaving, built aside or drawn at alpha 0 (an image laid
+   * out at no size is drawn at alpha 0), or a world sprite of no width or height, which the
+   * renderer draws at its texture's size. Works in every build and headless; every call answers a
+   * new object.
    *
    * @param target - A view or an element by projection and key, or a list of them.
    * @returns The rect, or `undefined` when no target is shown.
@@ -294,6 +297,8 @@ export type UiApi = {
    *   { projection: "board.strip", key: "cell" }
    * ]); // { x: 40, y: 250, w: 680, h: 1370 }
    * app.ui.rectOf({ projection: "board.strip", key: "nowhere" }); // undefined
+   * // An empty element of no area, the spot a card lands on: its point.
+   * app.ui.rectOf({ projection: "point.board", key: "dot" }); // { x: 300, y: 400, w: 0, h: 0 }
    * ```
    */
   rectOf(

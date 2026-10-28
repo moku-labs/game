@@ -191,17 +191,23 @@ function toRoot(pose: Readonly<TransformValue>, out: Rect): void {
 
 /**
  * Writes the box of an entity in its own units, by what it draws: the layout box of a ui element,
- * the panel of a nine-slice, the rectangle of a shape, the anchor box of a sprite.
+ * the panel of a nine-slice, the rectangle of a shape, the anchor box of a sprite. A ui element not
+ * applied yet (an anchor waiting for its first target, and everything under it) draws nothing: it
+ * has no box. A sprite whose component says 0 or less on an axis is drawn at its texture's size
+ * there, a size the resolver does not know: it has no box.
  *
  * @param reader - What the resolver reads.
  * @param entity - The entity.
  * @param out - The rect written, its `x` and `y` at 0 when the call starts.
- * @returns False for an entity that draws none of them.
+ * @returns False for an entity that draws none of them, a ui element not applied yet, and a sprite
+ *   of no width or height.
  */
 function ownBoxInto(reader: DrawnReader, entity: Entity, out: Rect): boolean {
   const element = reader.elements.get(entity);
 
   if (element !== undefined) {
+    if (!element.live) return false;
+
     out.w = element.rect.w;
     out.h = element.rect.h;
 
@@ -228,7 +234,7 @@ function ownBoxInto(reader: DrawnReader, entity: Entity, out: Rect): boolean {
 
   const sprite = reader.ecs.get(entity, Sprite);
 
-  if (sprite === undefined) return false;
+  if (sprite === undefined || sprite.width <= 0 || sprite.height <= 0) return false;
 
   out.w = sprite.width;
   out.h = sprite.height;
@@ -264,9 +270,11 @@ function localBoxInto(
 }
 
 /**
- * Writes where an entity is drawn, in screen reference units, when it is shown. Not shown: the
- * entity belongs to a scene built aside, it or something it is drawn under is leaving, the alphas
- * on its way up multiply to 0.01 or less, it draws no box, or the box has no area.
+ * Writes where an entity is drawn, in screen reference units, when it is shown. A box of no area is
+ * shown at its point: a width or a height of 0. Not shown: the entity belongs to a scene built
+ * aside, it or something it is drawn under is leaving, the alphas on its way up multiply to 0.01 or
+ * less, its root pose is at scale 0 or less (it pops in from scale 0, or hangs under a collapsed
+ * parent), it draws no box, or the box is turned inside out (a size below 0).
  *
  * @param reader - What the resolver reads.
  * @param entity - The entity of the target.
@@ -281,10 +289,11 @@ export function drawnInto(
   pose: TransformValue
 ): boolean {
   if (building(reader, entity) || !visible(reader, entity)) return false;
-  if (!drawnPoseInto(reader, entity, pose) || !localBoxInto(reader, entity, pose, out))
-    return false;
+  // A collapsed pose draws nothing: an element entering from scale 0 is not a point yet.
+  if (!drawnPoseInto(reader, entity, pose) || pose.scale <= 0) return false;
+  if (!localBoxInto(reader, entity, pose, out)) return false;
 
-  return out.w > 0 && out.h > 0;
+  return out.w >= 0 && out.h >= 0;
 }
 
 /**
@@ -364,7 +373,8 @@ export function targetsInto(
  *
  * @param ctx - Domain context of the ui plugin.
  * @param to - One target or a list of them.
- * @returns The rect in screen reference units, or `undefined` when no target is shown.
+ * @returns The rect in screen reference units, `{ x, y, w: 0, h: 0 }` for a target of no area, or
+ *   `undefined` when no target is shown.
  */
 export function rectOfTargets(
   ctx: UiCtx,
