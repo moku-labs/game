@@ -398,7 +398,7 @@ async function playRoute(
  * after the switch, so it never starts live and never shows its popup. The mode of the caller
  * is put back afterwards, also when the bookmark is refused or a step rejects, and a
  * substitution the route never reached is disarmed: it must not skip a sub-flow in the live play
- * that follows.
+ * that follows. Back in live mode, the guide of the node the walk ends at is shown.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
@@ -441,6 +441,8 @@ export async function walkRoute(
     // The live play that follows gets the caller's mode back and no substitution left armed.
     loopSeam(ctx.state.runner).substitutions.clear();
     modules.fx.setMode(previous);
+    // A node that guides at the end of a fast walk shows its guide now that the handler runs live.
+    if (previous === "live") ctx.state.runner.guide?.reshow();
   }
 
   return readState(ctx);

@@ -461,14 +461,14 @@ export const awaitIntent = defineNode({
           target: [{ projection: "board.items", key: "c2" }, { projection: "board.items", key: "c3" }],
           pad: 8,
           veil: false,                                  // the game draws its own look in an <anchor>
-          blocked: { intent: "tutorialBlocked" }        // a press outside the window answers this
+          blocked: { intent: "tutorialBlocked" }        // a press outside the window, or one inside the narrow refuses, answers this
         }
       : undefined
 });
 ```
 
 - `guide` runs when the node is entered (after its `onEnter` stages) and again after a commit while it waits at its gate (never for the commit of an edge); an equal result (deep JSON) changes nothing, a new one replaces the guide, `undefined` lifts it. It goes when the node is left; a restore enters the node again, so it is derived again. Fast mode: only the narrow. A `guide` that throws fails the node: `[game] The guide of node "path" threw: <message>` (rollback, retry, safe node). A dev build fails it when `blocked.intent` is no outcome of the node.
-- The gate takes only `allow` and `blocked` while a guide stands; `app.flow.gate.state()` reports `blocked`.
+- The gate takes only `allow` and `blocked` while a guide stands; `app.flow.gate.state()` reports `blocked`. A press `input` gives that the open gate's narrow refuses (another intent, or `allow`'s intent with another payload, a drop on the wrong cell) answers `blocked` in its place, once, with its payload; without `blocked` it answers nothing. A press at a closed gate is held as it is, not converted.
 - `ui` draws a veil (black 0.6, or `veil: { color, alpha }`; `alpha: 0` invisible, `false` none) around a window over the target or the union of the shown targets, grown by `pad`, placed every frame (it follows a moving or scrolling target), and locks `input` outside the window: a press there reaches no view (no `Tappable`, `LocalWrite`, scroll, drag, trace) and answers `blocked`, or nothing. No target, or none shown: the veil covers the screen and every press is locked, so a target key that never shows soft-locks the step (only `blocked` and the keyboard answer); a dev build warns `ui:guide-target-missing` `{ targets }` once after a key named no entity two frames in a row. A guide derived again with the same targets keeps the previous window for two frames while its targets are not laid out yet. A text field outside the window opens no keyboard. The doors `app.input.tap/press/drag` do no hit test and are not locked; a press reads the window of the frame before (input runs before layout). 0 B a frame.
 - `await fx(guide({ allow: { intent: "roll" } }))` in a body still works, with the same options. The rounded window, the rim, the glide, the hand and the text are the game's: an `<anchor>` on the same targets with `veil: false`.
 

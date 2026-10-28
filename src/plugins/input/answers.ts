@@ -137,23 +137,36 @@ export function notifyTap(ctx: InputCtx, entity: Entity): void {
  * and forgot to name it — so it is reported with the projection it came from and still offered,
  * which keeps the return value honest.
  *
+ * A press the narrow of a guide drops — another intent, or the allowed intent with another
+ * payload (a drop on the wrong cell) — answers the guide's `blocked` instead, once, when the gate
+ * is open and the guide names one. A closed gate holds the press as it is and converts nothing.
+ * The gate's state is read only for a refused answer, never for an accepted one.
+ *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view the answer came from, for the warning.
  * @param answer - The answer one of the builders produced.
- * @returns What `flow.gate.answer` returned.
+ * @returns What `flow.gate.answer` returned: for the answer, or for `blocked` in its place.
  */
 export function submit(ctx: InputCtx, entity: Entity, answer: Answer): boolean {
   if (answer.intent === "") {
     ctx.log.warn("input: empty intent", { view: ctx.deps.world.projection.keyOf(entity) });
   }
 
-  return ctx.deps.flow.gate.answer(answer);
+  const gate = ctx.deps.flow.gate;
+
+  if (gate.answer(answer)) return true;
+
+  // The gate keeps `blocked` only while a guide narrows it.
+  const { open, blocked } = gate.state();
+
+  return open && blocked !== undefined && gate.answer(blocked);
 }
 
 /**
  * Answers a press the lock of a guide kept from every view: the gate's `blocked`, the answer the
  * running guide names for a press outside its window, with its payload. A guide that names none
- * drops the press: the gate is not called.
+ * drops the press: the gate is not called. A press inside the window that the narrow drops answers
+ * `blocked` through `submit`.
  *
  * @param ctx - Domain context of the input plugin.
  * @returns What `flow.gate.answer` returned; `false` when the guide names no `blocked`.

@@ -204,7 +204,10 @@ the lock (the guide ended). `onStop` forgets it.
 | A hover | Finds no view: no `PointerOver`, the idle cursor. |
 
 Inside the window everything works as before, and the gate's narrow still refuses every answer but
-the guide's `allow` and `blocked`. The `Pointer` resource reports the finger everywhere: a game
+the guide's `allow` and `blocked`. A press it refuses there, another intent or the allowed intent
+with another payload (a drop on the wrong cell), answers the guide's `blocked` in its place, once,
+with its payload; without `blocked` it answers nothing. A press at a closed gate is held as it is,
+not converted. The `Pointer` resource reports the finger everywhere: a game
 system that reads it is not locked.
 
 - **One frame of lag.** The frame step of input runs in phase `input`, before `layout`, where `ui`
@@ -212,7 +215,8 @@ system that reads it is not locked.
 - **The doors.** `tap`, `press`, `drag`, `swipe` and `trace` do no hit test: the lock never applies
   to them, so a test or an agent addresses any view.
 - **The keyboard.** The lock is a lock of the pointer. A focused element answers through the gate
-  as it does without a guide, so only `allow` and `blocked` pass there.
+  as it does without a guide, so only `allow` and `blocked` pass there, and a press of it the
+  narrow refuses answers `blocked` as a pointer press does.
 - **Cost.** The check reads four numbers of the window before the hit test and allocates nothing;
   without a lock it is one comparison.
 
@@ -323,7 +327,7 @@ reads a target without pulling command bodies into its bundle.
 | Plugin | Used for |
 |---|---|
 | `time` | `onFrame("input", fn)`, `time.delta` of the callback, and `wake()` on every pointer sample |
-| `flow` | `gate.answer`, `gate.pointer`, and `gate.state().blocked` for a press the lock of a guide keeps from every view |
+| `flow` | `gate.answer`, `gate.pointer`, and `gate.state()` for a press the lock of a guide keeps from every view or the narrow of an open gate refuses |
 | `world` | `ecs.get/set/add/remove/has/tag/untag/resource/mode`; `projection.mute/lift/settle/keyOf/entityOf/restOf`; the `Exiting` tag |
 | `renderer` | `sync.hitTest`, `sync.hitBoxOf`, `viewport.toReference`, `host.canvas`, the `Transform` and `Parent` components, the pose helpers `rootPoseOf`, `localPoseOf`, `poseUnder`, `parentOf` and `applyPose` of `renderer/sync/pose` |
 

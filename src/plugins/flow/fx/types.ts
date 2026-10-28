@@ -42,8 +42,10 @@ export type Hint = { kind: string; payload?: Json; hint: true };
  * Options of a guide: the `guide` descriptor a node awaits, and what the `guide` of a node returns.
  * `allow` is the one answer the gate lets through. `ui` dims the screen with a veil and cuts a
  * window over `target` (one target, or the union of the shown ones of a list), grown by `pad`; a
- * press outside the window reaches no view and answers `blocked` when it is set. Without a target
- * the veil covers the whole screen and every press is outside.
+ * press outside the window reaches no view and answers `blocked` when it is set. A press inside the
+ * window that the narrow drops answers `blocked` too: another intent, or the allowed intent with
+ * another payload (a drop on the wrong cell). Without a target the veil covers the whole screen and
+ * every press is outside.
  *
  * @example
  * ```ts
@@ -100,16 +102,25 @@ export type GuideOptions = {
    */
   veil?: { color?: number; alpha?: number } | false;
   /**
-   * The answer a press outside the window gives, with its payload, instead of reaching nothing.
-   * The gate takes it beside `allow`, so it must be an outcome of the node that waits.
+   * The answer a press outside the window gives, with its payload, instead of reaching nothing. A
+   * press inside the window that the narrow drops gives it too: another intent, or the allowed
+   * intent with another payload (a drop on the wrong cell). A press at a closed gate is held as it
+   * is, never turned into `blocked`. The gate takes it beside `allow`, so it must be an outcome of
+   * the node that waits.
    *
    * @example
    * ```ts
    * const strict: GuideOptions = {
-   *   allow: { intent: "play" },
-   *   target: { projection: "hud", key: "play" },
-   *   blocked: { intent: "tutorialBlocked" }
-   * }; // a press on the shop button answers { intent: "tutorialBlocked" }: the node shows the hand again
+   *   allow: { intent: "merge", payload: { from: "c2", to: "c3" } },
+   *   target: [
+   *     { projection: "board.items", key: "c2" },
+   *     { projection: "board.items", key: "c3" },
+   *     { projection: "board.items", key: "c4" }
+   *   ],
+   *   blocked: { intent: "tutorialBlocked", payload: { step: 2 } }
+   * };
+   * // a press on the shop button outside the window, or a drop of c2 onto c4 inside it, answers
+   * // { intent: "tutorialBlocked", payload: { step: 2 } }: the node shows the hand again
    * ```
    */
   blocked?: Allow;
@@ -262,9 +273,9 @@ export type FxApi = {
 export type FxInternal = {
   /**
    * Runs one awaited effect. With `answers` the gate decides; without it the handler does, and
-   * while the frame loop runs the completion waits for the next `signals` phase, except `schedule`, which resolves at
-   * once (its handler only writes a moment). A descriptor with
-   * `answers` and a `guide` reach their handler with a child of the node's signal, so what they
+   * while the frame loop runs the completion waits for the next `signals` phase, except
+   * `schedule`, which resolves at once (its handler only writes a moment). A descriptor with
+   * `answers`, and a `guide`, reach their handler with a child of the node's signal, so what they
    * showed can be taken down before the node ends.
    *
    * @param descriptor - The descriptor the node awaits.
