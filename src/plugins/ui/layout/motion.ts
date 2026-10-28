@@ -20,7 +20,7 @@ import { asError } from "../errors";
 import type { Element, PosedEnter, PoseWrite } from "../jsx/types";
 import type { Origin, ResolvedStyle } from "../styles/types";
 import type { UiCtx } from "../types";
-import { CONTENT, samePose, visualOf } from "../visual";
+import { CONTENT, fieldsLeftAlone, restValueOf, samePose, visualOf } from "../visual";
 import type { MotionSpan, Rect } from "./types";
 
 /**
@@ -83,23 +83,6 @@ export function restTransform(
 }
 
 /**
- * The rest value of the visual that is actually on the element: the same value the entity is
- * drawn with, so a motion returns to exactly that.
- *
- * @param element - The element whose rect is known.
- * @returns The component and the value to record, or `undefined` for an element with no visual.
- */
-function restVisual(
-  element: Element
-): { component: ComponentType<object>; value: object } | undefined {
-  const [visual] = visualOf(element);
-
-  if (visual === undefined || visual.value === true) return undefined;
-
-  return { component: visual.type as ComponentType<object>, value: visual.value };
-}
-
-/**
  * Records the rest pose of one element before a hook runs: the transform from `Box` and the
  * style, and the visual the element is actually drawn with. The content of a scroll records no
  * rest `Transform`: the scroll step owns its pose, and the world brings an element back to every
@@ -120,9 +103,16 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
     );
   }
 
-  const visual = restVisual(element);
+  // The visual the element is drawn with; a self-sized image keeps the size its game wrote (F111).
+  const [visual] = visualOf(element);
 
-  if (visual !== undefined) projection.setRest(element.entity, visual.component, visual.value);
+  if (visual === undefined || visual.value === true) return;
+
+  const type = visual.type as ComponentType<object>;
+  const left = fieldsLeftAlone(element, type, type.owned);
+  const current = left.length === 0 ? undefined : ctx.deps.world.ecs.get(element.entity, type);
+
+  projection.setRest(element.entity, type, restValueOf(current, visual.value, left));
 }
 
 /**

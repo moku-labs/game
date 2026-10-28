@@ -15,6 +15,7 @@ import { rendererPlugin } from "../../../renderer";
 import { installFakeDom } from "../../../renderer/__tests__/fake-dom";
 import { FakeRectangle, FakeTexture } from "../../../renderer/__tests__/fake-pixi";
 import { stagePixi } from "../../../renderer/__tests__/stage-pixi";
+import type { ViewportSize } from "../../../renderer/viewport/types";
 import { scenesPlugin } from "../../../scenes";
 import { textPlugin } from "../../../text";
 import { worldPlugin } from "../../../world";
@@ -181,5 +182,39 @@ describe("a blurred image sized by a game's system (F111)", () => {
     await frames(started, 10);
 
     expect(stage.targets().length).toBe(taken);
+  });
+});
+
+/** Another phone: a new viewport makes ui write every element again. */
+const TALLER: ViewportSize = {
+  width: 1080,
+  height: 2400,
+  scale: 0.36,
+  orientation: "portrait",
+  safeArea: { top: 44, right: 0, bottom: 0, left: 0 }
+};
+
+describe("an image sized by a game's system, written again by ui (F111, W1)", () => {
+  // Bug: ui writes the laid-out 0 by 0 into the image's `Sprite` whenever it writes the element again (a new viewport,
+  // a covered root, a restore), over the size the game's system wrote once: the backdrop jumps to its texture's size.
+  it("keeps the size the system wrote, and its alpha, across a new viewport", async () => {
+    const started = await start();
+    const { app } = started;
+
+    await frames(started, 2);
+
+    const back = app.ui.find("caseBack");
+
+    if (back === undefined) throw new Error("no caseBack");
+
+    // The game's system writes the size once.
+    app.world.ecs.set(back, Sprite, { width: 1080, height: 1920 });
+    await frames(started, 4);
+
+    vi.spyOn(app.renderer.viewport, "size").mockReturnValue(TALLER);
+    await frames(started, 4);
+
+    expect(app.world.ecs.get(app.ui.find("sheetRoot") ?? 0, Box)?.h).toBe(1920);
+    expect(app.world.ecs.get(back, Sprite)).toMatchObject({ alpha: 1, width: 1080, height: 1920 });
   });
 });
