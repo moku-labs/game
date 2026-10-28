@@ -322,9 +322,7 @@ describe("solveRoot in a fractional viewport", () => {
     }
 
     placeChildren(state, screen, [ground]);
-    solveRoot(state, screen, { x: 0, y: 0, w: 403.527, h: 874.309 }, entity =>
-      elements.get(entity)
-    );
+    solveRoot(state, screen, { x: 0, y: 0, w: 403.2, h: 874.309 }, entity => elements.get(entity));
 
     expect(ground.rect).toEqual({ x: 0, y: 0, w: 404, h: 875 });
   });

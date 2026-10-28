@@ -2,7 +2,9 @@
 
 The interface as one more projection. A screen is a projection whose `view` returns JSX; `world`
 wraps that tree in `Tree` and `ui` reconciles it by identity into entities it owns, with a `Box`
-rect from one Yoga solve per change.
+rect from one Yoga solve per change. A root is solved in whole units rounded up: a viewport of
+874.31 units lays out 875, so a full-screen fill covers the frame to its last device row, and what
+is anchored to the bottom or the right edge sits less than one unit past it (F116).
 
 | Module | Owns |
 |---|---|
