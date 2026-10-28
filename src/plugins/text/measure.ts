@@ -226,7 +226,8 @@ export function fontOfRun(style: TextStyle, run: TextRun): string {
 }
 
 /**
- * The height of one line of a style, from the table of its own font.
+ * The height of one line of a style: `lineHeight × size` when the style names its line, else the
+ * line of its own font.
  *
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded.
@@ -237,6 +238,22 @@ export function fontOfRun(style: TextStyle, run: TextRun): string {
  * ```
  */
 export function lineHeightOf(style: TextStyle, tables: Map<string, AdvanceTable>): number {
+  return style.lineHeight === undefined ? fontLineOf(style, tables) : style.lineHeight * style.size;
+}
+
+/**
+ * The height of one line of a style's own font, whatever line the style names: what the glyphs
+ * are drawn into, so the gap to `lineHeightOf` is the leading.
+ *
+ * @param style - The style of the label.
+ * @param tables - The advance tables that are loaded.
+ * @returns The font's line height in reference pixels.
+ * @example
+ * ```ts
+ * fontLineOf({ ...bodyStyle, lineHeight: 1.5 }, new Map()); // 38.4: the font's 1.2 em, not 48
+ * ```
+ */
+export function fontLineOf(style: TextStyle, tables: Map<string, AdvanceTable>): number {
   const table = tables.get(style.font);
 
   return table === undefined

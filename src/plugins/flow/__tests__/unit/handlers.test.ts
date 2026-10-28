@@ -24,7 +24,8 @@ function standing() {
     last: undefined,
     refresh: () => {
       derived.count += 1;
-    }
+    },
+    reshow: () => undefined
   };
   kernel.ctx.state.gate.open = { allowed: ["merge"] };
 

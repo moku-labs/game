@@ -100,9 +100,10 @@ type Shown = { payloads: unknown[]; signals: AbortSignal[] };
  *
  * @param step - The step the session starts at.
  * @param mode - `"fast"` switches the graph to fast mode before it runs.
+ * @param runInFast - `true` registers the handler to run in fast mode too.
  * @returns The app and what the handler was shown.
  */
-async function startGame(step: number, mode: "live" | "fast" = "live") {
+async function startGame(step: number, mode: "live" | "fast" = "live", runInFast = false) {
   derived.count = 0;
 
   const app = createApp({
@@ -120,10 +121,14 @@ async function startGame(step: number, mode: "live" | "fast" = "live") {
   const shown: Shown = { payloads: [], signals: [] };
 
   await app.start();
-  app.flow.fx.handle("guide", (descriptor, { signal }) => {
-    shown.payloads.push(descriptor.payload);
-    shown.signals.push(signal);
-  });
+  app.flow.fx.handle(
+    "guide",
+    (descriptor, { signal }) => {
+      shown.payloads.push(descriptor.payload);
+      shown.signals.push(signal);
+    },
+    { runInFast }
+  );
   app.flow.setMode(mode);
   app.flow.run().catch(() => undefined);
   await tick();
@@ -257,6 +262,34 @@ describe("the guide of a rest node without a body", () => {
     await expect(app.flow.walk([{ at: "board", intent: "leave" }])).rejects.toThrow(
       'flow.walk() could not answer "leave" at "board".'
     );
+
+    await app.stop();
+  });
+});
+
+describe("the guide when the mode goes back to live (F110)", () => {
+  // Bug caught: a handler that runs in fast mode too keeps the guide it showed there, so the
+  // guide shown again on the switch to live stands twice.
+  it("ends the guide of the fast run before it shows the guide again", async () => {
+    const { app, shown } = await startGame(0, "fast", true);
+
+    app.flow.setMode("live");
+    await tick();
+
+    expect(shown.payloads).toEqual([STEPS[0], STEPS[0]]);
+    expect(shown.signals.map(signal => signal.aborted)).toEqual([true, false]);
+
+    await app.stop();
+  });
+
+  // Bug caught: a node that guides nothing hands the handler a guide of no payload.
+  it("shows nothing when the node that stands guides nothing", async () => {
+    const { app, shown } = await startGame(5, "fast");
+
+    app.flow.setMode("live");
+    await tick();
+
+    expect(shown.payloads).toEqual([]);
 
     await app.stop();
   });

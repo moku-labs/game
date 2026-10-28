@@ -154,7 +154,31 @@ function boxOf(element: Element): { box?: number } {
 }
 
 /**
- * The visual component of an element: a sprite for an image or an icon, the text for a text (with
+ * Whether the layout sized an image to nothing: an axis whose size its style states (a width or a
+ * height, or both edges of an absolute element) came out at 0. An image whose style states no size
+ * is 0 by 0 too, and draws as its `Sprite` says: at its texture's size, or at the size a game's own
+ * system writes into the sprite.
+ *
+ * @param style - The resolved style of the image.
+ * @param rect - Its laid-out rect.
+ * @returns True when it draws nothing.
+ */
+function sizedToNothing(style: ResolvedStyle, rect: Rect): boolean {
+  const absolute = style.position === "absolute";
+  const statesWidth =
+    style.width !== undefined ||
+    (absolute && style.left !== undefined && style.right !== undefined);
+  const statesHeight =
+    style.height !== undefined ||
+    (absolute && style.top !== undefined && style.bottom !== undefined);
+
+  return (statesWidth && rect.w <= 0) || (statesHeight && rect.h <= 0);
+}
+
+/**
+ * The visual component of an element: a sprite for an image or an icon (at alpha 0 while its style
+ * states a size the layout makes 0: the renderer draws a sprite of width 0 at its texture's size,
+ * so the size alone cannot say "nothing"), the text for a text (with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
  * when the style sets `debug`, its rim alone when it sets `hollow`; the sprite and the nine-slice
  * blended by the style's `blend`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
@@ -176,11 +200,14 @@ export function visualOf(element: Element): AnyComponentValue[] {
   const tint = style.tint ?? Sprite.defaults.tint;
 
   if (type === "image" || type === "icon") {
+    const hidden = sizedToNothing(style, rect);
+
     return [
       Sprite({
         texture: textureOf(node.props),
         tint,
-        alpha,
+        // Sized to nothing, it draws nothing and, below the hit test's alpha, takes no tap.
+        alpha: hidden ? 0 : alpha,
         anchor: { x: 0, y: 0 },
         width: rect.w,
         height: rect.h,

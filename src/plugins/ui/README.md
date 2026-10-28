@@ -20,7 +20,7 @@ rect from one Yoga solve per change.
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 | `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key, `false` and the warning `ui:scroll-before-solve` `{ key }` when the `scroll` came in this frame and its first solve has not placed it yet. Works headless. See [Scroll](#scroll) |
-| `app.ui.rectOf(target)` | where a target is drawn, in screen reference units: `{ projection, key }` (an `AnchorTarget`) or a list of them, whose shown ones it spans; `undefined` when none is shown. Every build, headless too; a new object per call. See [Anchor](#anchor) |
+| `app.ui.rectOf(target)` | where a target is drawn, in screen reference units: `{ projection, key }` (an `AnchorTarget`) or a list of them, whose shown ones it spans; `{ x, y, w: 0, h: 0 }` for a target of no area; `undefined` when none is shown (an image whose stated size is laid out at 0 and a world sprite of no width or height count as not shown). Every build, headless too; a new object per call. See [Anchor](#anchor) |
 
 Config:
 
@@ -87,7 +87,7 @@ draw adds 0 to both, solves nothing and sets no component.
 
 | Tag | Visual | Input |
 |---|---|---|
-| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha`, `style.blend` | none |
+| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha`, `style.blend`; a size its style states (`width`, `height`, or both edges of an absolute element) laid out at 0, alpha 0: it draws nothing and takes no tap (the renderer draws a sprite of width 0 at its texture's size), and its style's alpha comes back with a size; a style that states no size leaves it 0 by 0 at its own alpha, drawn as its `Sprite` says (its texture's size, or the size a game's own system writes) | none |
 | `text` | `Text`; a string `style` is the text style key; `bind={bind(Counter, "value")}` shows a numeric field of a component the element carries (only `bind()` makes a bind) | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug`, `style.blend` | as below |
 | any other tag with `style.nineSlice` and `style.hollow: true` | the same `NineSlice` with `hollow: true`: the rim alone, the centre left unfilled; the hit box stays the whole rect | as below |
@@ -775,7 +775,8 @@ in the same frame. A slot takes a projection with one root, or roots that place 
 arrow sits on an element of another projection without reading where it landed (a view runs before
 the layout and reads none). `to` names one target, `{ projection, key }` (`AnchorTarget`), or a
 list, whose shown ones it spans; a ui element is keyed under the projection of its root. `pad`
-grows the rect outward on every side, in the units of the anchor's root (0 when left out). Its
+grows the rect outward on every side, in the units of the anchor's root (0 when left out); a `pad`
+below 0 pulls it inward, and past half the targets the size stops at 0, at their centre. Its
 children lay out inside it as in any element; its style gives its look, and a `width`, `height`,
 `position`, `left`, `top`, `right` or `bottom` there is ignored (a dev build warns once,
 `ui:anchor-style` `{ key }`).
@@ -804,8 +805,9 @@ children lay out inside it as in any element; its style gives its look, and a `w
   `offset`) and a slot host inside an anchor are settled by the solve, before the anchor pass: they
   take the anchor's rect a frame late.
 - **Not shown.** A target is not shown when its key names no entity, it or something it is drawn
-  under is leaving, it belongs to a scene built aside or a held warm window, it has no area, or the
-  alphas on its way up multiply to 0.01 or less. The key of an element of a scene built aside or of
+  under is leaving, it belongs to a scene built aside or a held warm window, it draws no box the
+  resolver knows (a world sprite of no width or height is drawn at its texture's size), or the
+  alphas on its way up multiply to 0.01 or less (an image whose style states a size laid out at 0 is drawn at alpha 0). The key of an element of a scene built aside or of
   a closed warm window names no entity (`entityOf`), so an anchor on it waits, and a dev build
   names it once after two frames. An anchor of such a scene or window is placed in the frame it
   opens. With no target shown the anchor is drawn at alpha 0 (its subtree is not
@@ -814,8 +816,15 @@ children lay out inside it as in any element; its style gives its look, and a `w
   named no entity two frames in a row (a target spawned this frame is found a frame later). A
   target inside the anchor itself counts as not shown and is logged once:
   `[game] An anchor cannot point at its own child "key".` (`ui:anchor-own-child`).
+- **A point.** A target of no area (an empty element, a width or a height of 0) is shown at its
+  point. The anchor stands there at size 0, shown: its own view holds no point, so it takes no tap,
+  and its children are laid out from that corner and overflow it (no clip unless
+  `overflow: "hidden"`), drawn and tapped as always. `app.ui.rectOf` answers `{ x, y, w: 0, h: 0 }`.
+  A guide on a point with no `pad` covers the screen and locks every press, as for a target not
+  shown.
 - **Motion.** Its `change.Box` motion plays only when its targets change: a new `to`, or keys that
-  name other entities (a view spawned again), and the rect moved. Following a moving, resizing or
+  name other entities (a view spawned again), and the rect moved: from a point to a rect it grows,
+  back to a point it shrinks. Following a moving, resizing or
   scrolling target starts no motion. While a motion that ends runs (the glide of a change, a look
   tween of its visual), a follow carries it by how far the target moved since it began, so it lands
   on the target with no jump; a new size sets the pivot at once. While a loop runs on the anchor, a
@@ -866,8 +875,9 @@ defineNode({
 - **The veil.** Four rectangles around the window, at `Order` 1 000 000 of the `ui` layer, above
   every popup: black at 0.6, or the guide's `veil: { color, alpha }`. `alpha: 0` draws nothing
   visible; `veil: false` spawns no rectangle. Without a target the veil is one rectangle over the
-  screen. While no target is shown (not mounted yet, leaving, built aside, alpha 0), the veil covers
-  the screen and every press is locked; it opens again when a target shows.
+  screen. While no target is shown (not mounted yet, leaving, built aside, alpha 0), and while the
+  window has no area (a target of no area with no `pad`), the veil covers the screen and every press is
+  locked; it opens again when a target shows with an area.
 - **A target that never shows.** It keeps the whole screen veiled and every press locked: only the
   guide's `blocked` answer and the keyboard reach the gate, so a key that names nothing (a typo, a
   view of another scene) soft-locks the tutorial. A dev build names it once per guide,

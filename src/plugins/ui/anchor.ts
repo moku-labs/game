@@ -439,7 +439,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
   /**
    * Maps the union of the targets into the root coordinates of the anchor: through the root pose of
    * the entity it is drawn under (its parent, or the slot of its root), then by its parent's rect,
-   * then padded outward.
+   * then padded outward. A size an inward pad turns below 0 stops at 0, about the centre of the
+   * targets: the anchor stands on that point.
    *
    * @param element - The anchor.
    * @param anchor - Its record: `screen` is read, `next` written.
@@ -472,7 +473,18 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     next.w = screen.w / scale + 2 * pad;
     next.h = screen.h / scale + 2 * pad;
 
-    return next.w > 0 && next.h > 0;
+    // An inward pad past half the targets: the size stops at 0 and keeps the centre.
+    if (next.w < 0) {
+      next.x += next.w / 2;
+      next.w = 0;
+    }
+
+    if (next.h < 0) {
+      next.y += next.h / 2;
+      next.h = 0;
+    }
+
+    return true;
   }
 
   /**

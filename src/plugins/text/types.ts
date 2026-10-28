@@ -203,18 +203,33 @@ export type TextStyleInput = {
    * left out. It never changes what `measure` answers.
    */
   shadow?: { color: number; dx: number; dy: number; alpha?: number };
+  /**
+   * The line as a multiple of `size`, like a unitless CSS `line-height`: every line of a label is
+   * `lineHeight × size` reference px high, and its glyphs sit in the middle of it. An inline icon
+   * fills the line. Left out, the line is the font's own. Not a number above 0 is refused.
+   *
+   * @example
+   * ```ts
+   * // A plate caption: 14 px glyphs on 17.92 px lines.
+   * defineTextStyles({ plate: { font: "text-medium", size: 14, fill: 0x3b2a1a, lineHeight: 1.28 } });
+   *
+   * app.text.measure("Old\nmill\nroad", "plate").height; // 53.76: three lines of 1.28 × 14
+   * ```
+   */
+  lineHeight?: number;
 };
 
 /**
  * One style as the plugin stores it: every field filled, `bold` and `italic` only when the game
- * shipped those MSDF fonts, `shadow` only when the style has one.
+ * shipped those MSDF fonts, `shadow` only when the style has one, `lineHeight` only when the style
+ * names its line (`undefined` is the font's line).
  *
  * @example
  * ```ts
  * const style: TextStyle = {
  *   font: "ui.font-body", bold: undefined, italic: undefined, size: 32, fill: 0xffffff,
  *   stroke: 0x000000, strokeWidth: 0, letterSpacing: 0, align: "left", wrap: "none",
- *   digits: false, shadow: undefined
+ *   digits: false, shadow: undefined, lineHeight: undefined
  * };
  * ```
  */
@@ -231,6 +246,7 @@ export type TextStyle = {
   wrap: TextWrap;
   digits: boolean;
   shadow: TextShadow | undefined;
+  lineHeight: number | undefined;
 };
 
 /**

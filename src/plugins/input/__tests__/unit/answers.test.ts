@@ -71,6 +71,18 @@ describe("submit", () => {
     expect(mock.answers).toEqual([{ intent: "play", payload: {} }]);
   });
 
+  // Bug caught: every accepted press reads the gate's state, an allocation per press (F108).
+  it("reads the gate's state only for a refused answer", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Tappable({ intent: "play" })]);
+
+    mock.gate.blocked = { intent: "tutorialBlocked" };
+    mock.calls.length = 0;
+    submit(mock.input, entity, { intent: "play", payload: {} });
+
+    expect(mock.calls).toEqual(["answer"]);
+  });
+
   it("returns false when the gate refused, and still counts one call", () => {
     const mock = createMockInput();
 

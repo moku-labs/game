@@ -6,6 +6,7 @@ import { ScrollState } from "../../components";
 import { mountScreen, startFieldApp } from "../field-app";
 import {
   createGuideApp,
+  DOT,
   dragAt,
   entityOf,
   frames,
@@ -214,6 +215,23 @@ describe("the veil of a guide", () => {
     expect(locks.at(-1)).toEqual({ w: 64, h: 64, x: 468, y: 668 });
   });
 
+  // Bug caught: a target of no area, found now that it counts as shown, is cut as a window: the
+  // veil opens around a point and `input` gets a window that holds no press instead of the lock of
+  // everything.
+  it("covers the whole screen and locks everything on a target of no area", async () => {
+    const { app, locks } = await headless("point");
+
+    expect(app.ui.rectOf(DOT)).toEqual({ x: 98, y: 1560, w: 0, h: 0 });
+    expect(veil(app)).toMatchObject([
+      { x: 0, y: 0, ...screenOf(app) },
+      { x: 0, y: 0, w: 0, h: 0 },
+      { x: 0, y: 0, w: 0, h: 0 },
+      { x: 0, y: 0, w: 0, h: 0 }
+    ]);
+    // eslint-disable-next-line unicorn/no-null -- `null` is the lock of everything.
+    expect(locks).toEqual([null]);
+  });
+
   // Bug caught: a new step draws a second veil over the first, or the old one stays.
   it("replaces the guide shown when the node guides another step, and takes it down at the end", async () => {
     const { app, locks } = await headless("seat", "padded");
@@ -371,10 +389,11 @@ describe("a text field under the lock of a guide", () => {
  * Starts the fixture at a step, drawn, so a press goes through input's hit test.
  *
  * @param step - The step the session starts at.
+ * @param next - The step the first seat leads to.
  * @returns The app and its fake Pixi.
  */
-async function drawn(step: GuideStep) {
-  const started = await startGuideApp({ step, drawn: true });
+async function drawn(step: GuideStep, next: GuideStep = "none") {
+  const started = await startGuideApp({ step, next, drawn: true });
   const { pixi } = started;
 
   running = started.app;
@@ -448,5 +467,50 @@ describe("the lock of a guide under a finger", () => {
 
     expect(outcomes(app)).toEqual(["outside"]);
     expect(app.ui.find("flag")).toBeDefined();
+  });
+});
+
+describe("a guide after a fast walk (F110)", () => {
+  /** The route that answers `home` with the seat leading to the `seat` step. */
+  const toSeat = [{ at: "home", intent: "seat", payload: { step: "seat" } }] as const;
+
+  // Bug caught: a fast walk ends on a guided node with the gate narrowed but no lock and no veil,
+  // so a press anywhere reaches the views under the tutorial.
+  it("shows the guide of the node a fast walk ends at, as soon as the walk resolves", async () => {
+    const { app, pixi } = await drawn("none", "seat");
+    const lock = vi.spyOn(app.input.lock, "window");
+    const window = { x: 40, y: 1500, w: 116, h: 120 };
+
+    await app.flow.walk(toSeat);
+
+    // The seat stands laid out: the lock and the veil take its window at once.
+    expect(lock.mock.calls).toEqual([[window]]);
+    expect(veil(app)).toMatchObject(around(app, window));
+
+    await tapAt(app, pixi, { x: 700, y: 1100 });
+
+    expect(outcomes(app)).toEqual(["seat", "done", "blocked"]);
+  });
+
+  // Bug caught: switching back to live shows nothing, or shows the guide again at every switch.
+  it("shows the guide once when the mode goes from fast back to live, and not again while live", async () => {
+    const { app, locks } = await headless("none", "seat");
+    const window = { x: 40, y: 1500, w: 116, h: 120 };
+
+    app.flow.setMode("fast");
+    await app.flow.walk(toSeat);
+
+    // A walk that started fast ends fast: nothing is shown yet.
+    expect(locks).toEqual([]);
+
+    app.flow.setMode("live");
+    await tick();
+
+    expect(locks).toEqual([window]);
+
+    app.flow.setMode("live");
+    await tick();
+
+    expect(locks).toEqual([window]);
   });
 });
