@@ -1,7 +1,8 @@
 /**
  * @file renderer/kept — one cached view: whether it may be kept, the keys of its stages, its two lives and the policy
- * between them (P4). A view that stood still for two drawn frames is taken; a kept view whose subtree changes in three
- * drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A view with a node under
+ * between them (P4). A view that stood still for two drawn frames is taken, a stack drawn direct in its first frame
+ * without a change, at most one first take a frame and none while an alpha is due (F114); a kept view whose subtree
+ * changes in three drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A view with a node under
  * its top that blends otherwise than normally is never taken (F68). Taking and releasing happen inside the flush,
  * before the stage pass, both halves in the same frame (K3).
  */
@@ -34,7 +35,7 @@ import {
   standInOf
 } from "./render";
 import { destroyRecord } from "./state";
-import type { KeptCtx, KeptMatrices, KeptRecord } from "./types";
+import type { KeptCtx, KeptMatrices, KeptRecord, KeptState } from "./types";
 
 /** Drawn frames a live view stands still before it is taken. */
 export const TAKE_AFTER = 2;
@@ -176,7 +177,42 @@ function readStack(
  * @returns True when it does.
  */
 function drawsDirect(now: Numbers): boolean {
-  return !Number.isNaN(now.alpha) && now.P === 0 && now.rs === now.r;
+  return drawsDirectAt(now, now.r);
+}
+
+/**
+ * Tells whether a stack draws direct at a renderer resolution (F54): every enabled filter an `AlphaFilter`, no
+ * padding, at that resolution.
+ *
+ * @param stack - The stack's numbers.
+ * @param resolution - The renderer resolution.
+ * @returns True when it does.
+ */
+function drawsDirectAt(stack: Stack, resolution: number): boolean {
+  return !Number.isNaN(stack.alpha) && stack.P === 0 && stack.rs === resolution;
+}
+
+/**
+ * Tells whether a take the budget refused still does not fit (P6.3).
+ *
+ * @param state - The kept state.
+ * @param record - The record.
+ * @returns True when it still does not fit.
+ */
+function refusalHolds(state: KeptState, record: KeptRecord): boolean {
+  return record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget;
+}
+
+/**
+ * Tells whether a first take waits for the next frame (F114): a stack drawn direct never does; any other waits when
+ * this frame took one already or an alpha is due.
+ *
+ * @param state - The kept state.
+ * @param direct - The stack draws direct.
+ * @returns True when it waits.
+ */
+function heldBack(state: KeptState, direct: boolean): boolean {
+  return !direct && (state.firstTakes > 0 || state.alphaDue);
 }
 
 /**
@@ -736,8 +772,8 @@ function writeTakeKeys(
 }
 
 /**
- * Refuses a take that would render nothing and remembers it (F114): the record attempts nothing until a change under
- * its top or a move of it.
+ * Refuses a take that cannot succeed until something changes (nothing to render, a `Display` without `onDemand`, too
+ * big for a texture) and remembers it (F114): the record attempts nothing until a change under its top or a move of it.
  *
  * @param record - The record.
  * @returns False, the refusal.
@@ -1290,8 +1326,9 @@ function spareAbove(kctx: KeptCtx, record: KeptRecord): void {
 
 /**
  * A live record's frame (P4.2): still frames are counted, and a zoom or turn of an ancestor counts as still (F113); at
- * two (eight after churning) the record is taken, a bare view in a wrapper of its own (D4). A record with a node under
- * its top that blends otherwise stays live, before any wrap (F68).
+ * two, none for a stack drawn direct, eight after churning, the record is taken, a bare view in a wrapper of its own
+ * (D4). An idle record waits for a change or a move; one first take a frame, and none while an alpha is due (F114). A
+ * record with a node under its top that blends otherwise stays live, before any wrap (F68).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1322,14 +1359,14 @@ function stepLive(
   if (changed || record.still < waitOf(record) || record.idle) return;
 
   // A refused take is not offered again until it fits (P6.3): no thrash.
-  if (record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget) return;
+  if (refusalHolds(state, record)) return;
   // A glow under the top stays live, remembered until the subtree changes (F68).
   if (blendedBelow(kctx, record)) return;
   // One first take per frame, inner first: the others stay live and wait (F114). A stack drawn direct takes for one
   // pass, less than its live draw: never held back, and while one is due the others wait for the next frame.
   const direct = drawsDirect(NOW);
 
-  if (!direct && (state.firstTakes > 0 || state.alphaDue)) return;
+  if (heldBack(state, direct)) return;
 
   wrapBare(kctx, record, view);
 
@@ -1454,7 +1491,9 @@ function stepKept(
   const retake = record.dirtyS1 || (scaled && !scalable(record));
 
   // Retaken for an inner record's first take alone: not churn (F114).
-  if (retake && record.spared && !scaled) {
+  const spareRetake = retake && record.spared && !scaled;
+
+  if (spareRetake) {
     retakeOrGoLive(kctx, pixi, matrices, record, view);
 
     return;
@@ -1647,12 +1686,9 @@ export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
 
     if (record === undefined || view === undefined || !mayBeDue(kctx, record)) continue;
 
+    // The stack as the step will read it: due when it draws direct and the record may be kept.
     readStack(record.slots, resolution, pixi.AlphaFilter, DUE);
-    record.alphaDue =
-      !Number.isNaN(DUE.alpha) &&
-      DUE.P === 0 &&
-      DUE.rs === resolution &&
-      eligible(kctx, record, view, DUE);
+    record.alphaDue = drawsDirectAt(DUE, resolution) && eligible(kctx, record, view, DUE);
     state.alphaDue ||= record.alphaDue;
   }
 }
@@ -1666,9 +1702,6 @@ export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
  * @returns True when it may.
  */
 function mayBeDue(kctx: KeptCtx, record: KeptRecord): boolean {
-  const { state } = kctx;
-  const refused = record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget;
-
   return (
     record.mode === "live" &&
     !record.dirtyS1 &&
@@ -1676,7 +1709,7 @@ function mayBeDue(kctx: KeptCtx, record: KeptRecord): boolean {
     !record.calm &&
     !record.alphaMissed &&
     !record.blended &&
-    !refused
+    !refusalHolds(kctx.state, record)
   );
 }
 
@@ -1761,8 +1794,8 @@ function stepEligible(
 }
 
 /**
- * The frame of a record that may not be kept: a kept one is drawn live again, calm when it was taken in the frame
- * before (F114), and its still frames start over.
+ * The frame of a record that may not be kept: a kept one is drawn live again, calm when it was taken in this frame or
+ * the one before (F114), and its still frames start over.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -1771,7 +1804,7 @@ function stepEligible(
 function stepIneligible(kctx: KeptCtx, record: KeptRecord, view: View): void {
   if (record.mode === "kept") {
     goLive(kctx, record, view, true);
-    // A picture refused in the frame after its take (an alpha that crosses 1 every frame) waits for real rest (F114).
+    // A picture refused in the frame of its take or the next (an alpha that crosses 1 every frame) waits for rest (F114).
     if (kctx.state.frame - record.takenAt <= 1) record.calm = true;
   }
 
