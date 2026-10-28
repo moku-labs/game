@@ -251,7 +251,8 @@ function followPageHide(app: PageApp): void {
 /**
  * Fades the boot picture once the first scene drew, when the page has one: a page with a
  * document and an `<img id="moku-boot">`. Without a document (a test) or the element, nothing is
- * added. A picture the config no longer names, on a page written before, goes at once.
+ * added. A picture the config no longer names, on a page written before, goes without a fade in the
+ * first scene frame.
  *
  * @param app - The started screen app: its renderer registered its render callback first.
  * @param boot - `page.boot` of the resolved config, or `undefined`.

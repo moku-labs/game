@@ -93,16 +93,19 @@ function checkConfig(config: GameConfig): void {
   }
 
   const image: unknown = config.page.boot?.image;
+  const bootWithoutImage =
+    config.page.boot !== undefined && (typeof image !== "string" || image === "");
 
-  if (config.page.boot !== undefined && (typeof image !== "string" || image === "")) {
+  if (bootWithoutImage) {
     throw new Error(
       "[game] config.page.boot has no image.\n  Name a picture file of the game in page.boot.image."
     );
   }
 
   const fadeMs = config.page.boot?.fadeMs;
+  const badFade = fadeMs !== undefined && !(Number.isFinite(fadeMs) && fadeMs >= 0);
 
-  if (fadeMs !== undefined && !(Number.isFinite(fadeMs) && fadeMs >= 0)) {
+  if (badFade) {
     throw new Error(
       `[game] config.page.boot.fadeMs is ${String(fadeMs)}.\n  Use a number of milliseconds, 0 or more.`
     );

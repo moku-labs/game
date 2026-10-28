@@ -436,11 +436,12 @@ async function bundlePage(
 }
 
 /**
- * Refuses two different files left in the game whose copies would share one name beside the page.
- * One file linked twice (the favicon also the boot picture) is one copy, not a clash.
+ * Refuses the boot picture when its copy would share one name beside the page with another file left in the game. One
+ * file linked twice (the favicon also the boot picture) is one copy, not a clash. Two icons of one name build as
+ * before: the boot picture is the only new file the copy can lose.
  *
  * @param left - The field and the `/` path of each file Bun left as a link, in page order.
- * @throws {Error} When two different files have one base name.
+ * @throws {Error} When the boot picture and another file have one base name.
  */
 function refuseNameClash(left: readonly (readonly [field: string, linked: string])[]): void {
   const byName = new Map<string, readonly [field: string, linked: string]>();
@@ -450,7 +451,9 @@ function refuseNameClash(left: readonly (readonly [field: string, linked: string
     const name = path.basename(linked);
     const earlier = byName.get(name);
 
-    if (earlier !== undefined && earlier[1] !== linked) {
+    const involvesBoot = field === "page.boot.image" || earlier?.[0] === "page.boot.image";
+
+    if (earlier !== undefined && earlier[1] !== linked && involvesBoot) {
       throw new Error(
         `[game] build: ${field} and ${earlier[0]} share the name "${name}" beside the page.`
       );
@@ -463,7 +466,7 @@ function refuseNameClash(left: readonly (readonly [field: string, linked: string
 /**
  * The fallback for page files Bun left as links into the game, the icons and the boot picture:
  * copies each beside the page and links it as `./<name>`. Two such files with one name are
- * refused before anything is copied; a file Bun already linked is never copied, so it cannot
+ * refused before anything is copied when one is the boot picture; a file Bun already linked is never copied, so it cannot
  * clash.
  *
  * @param run - The flags of the run.

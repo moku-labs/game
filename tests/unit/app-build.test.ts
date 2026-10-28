@@ -323,6 +323,23 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build, the bundle", () =>
     ]);
   });
 
+  // Bug: the clash check of the boot picture also refuses a game with no boot whose two icons share a name.
+  it("builds two icons left in the game with one name as before, with no boot", async () => {
+    const root = game();
+    const plugin = keepWebp(root);
+
+    put(path.join(root, "art", "fx-spark.webp"), "webp");
+    writeFileSync(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "t", icons: { favicon: "features/ui/assets/fx-spark.webp", appleTouch: "art/fx-spark.webp" } } };\n'
+    );
+
+    const { code, seen } = await build(["--serve-plugin", plugin, "--out", "dist/web"], root);
+
+    expect(seen.errors).toEqual([]);
+    expect(code).toBe(0);
+  });
+
   it("a --serve-plugin without a Bun plugin is refused", async () => {
     const root = game();
     const plugin = path.join(root, "not-a-plugin.ts");

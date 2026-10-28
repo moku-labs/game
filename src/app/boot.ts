@@ -40,16 +40,19 @@ export function fadeBoot(
   fadeMs: number
 ): void {
   const off = time.onFrame("render", () => {
+    // The first scene has not drawn yet: one read a frame.
     if (scenes.current() === undefined) return;
 
     off();
 
+    // No fade: the picture goes in the frame the scene drew.
     if (fadeMs === 0) {
       element.remove();
 
       return;
     }
 
+    // A fade: removed on its end, or by the timer on a page in the background, where no transition ends.
     let removed = false;
     const remove = (): void => {
       if (removed) return;
