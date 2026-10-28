@@ -792,7 +792,7 @@ export async function cutZoomBoard(): Promise<() => void> {
 }
 
 /**
- * Ten views with an alpha filter off the canvas (F114), a view on it marked every frame: each was tried once in its first
+ * `count` views with an alpha filter off the canvas (F114), a view on it marked every frame: each was tried once in its first
  * eligible frame, rendered nothing and is remembered idle, so a frame steps them and tries no take.
  *
  * @param count - The views off the canvas.

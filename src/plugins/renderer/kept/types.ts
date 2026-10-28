@@ -266,7 +266,7 @@ export type KeptState = {
    * the next flush.
    */
   calm: boolean;
-  /** First takes of records not drawn direct in this flush: one per frame (F114). */
+  /** First takes in this flush (F114): every one counts; a stack drawn direct is never held back by the count. */
   firstTakes: number;
   /** A record drawn direct is due in this flush: the first takes of the others wait for the next (F114). */
   alphaDue: boolean;

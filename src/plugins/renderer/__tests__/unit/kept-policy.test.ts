@@ -1016,22 +1016,16 @@ describe("the first takes of a frame (F114)", () => {
     expect(views.map(view => rendersOf(drawn, view, "#1"))).toEqual([1, 1]);
   });
 
-  // Guard (the owner's instant-reaction rule): no view waits hidden for its picture. A new filtered view is drawn in its
-  // first frame, live with its filters on its top; an alpha is taken the next frame, any other waits drawn live.
-  it("draws a new filtered view in its first frame live, an alpha from its quad the next, a waiting one live", async () => {
+  // Guard (the owner's instant-reaction rule): no view waits hidden for its picture. A new alpha is drawn in its first
+  // frame, live with its filter on its top, and from its quad the next.
+  it("draws a new alpha live in its first frame and from its quad the next", async () => {
     const drawn = await open();
     const sheet = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
-    const blurred = [200, 300].map(x =>
-      drawn.spawn(Transform({ x, y: 100 }), Shape({ w: 40, h: 40 }))
-    );
 
     drawn.frame();
     drawn.mock.api.sync.filters.set(sheet, [slotOf(new pixi.AlphaFilter({ alpha: 0.5 }))]);
-    for (const view of blurred)
-      drawn.mock.api.sync.filters.set(view, [slotOf(new pixi.ColorMatrixFilter())]);
     drawn.frame();
 
-    // Its first frame: the alpha is drawn live, its filter on its top.
     expect(topOf(drawn, sheet).renderable).toBe(true);
     expect(topOf(drawn, sheet).filters ?? []).toHaveLength(1);
 
@@ -1039,14 +1033,25 @@ describe("the first takes of a frame (F114)", () => {
 
     expect(keptNow(drawn, sheet)).toBe(true);
     expect(quadOf(drawn, sheet)?.visible).toBe(true);
+  });
+
+  // Guard (the owner's instant-reaction rule): a view whose first take waits for another's is drawn live meanwhile,
+  // its filter on its top, never hidden.
+  it("draws a view whose first take waits live, its filter on its top", async () => {
+    const drawn = await open();
+    const [first, second] = [200, 300].map(x =>
+      drawn.spawn(Transform({ x, y: 100 }), Shape({ w: 40, h: 40 }))
+    ) as [Entity, Entity];
 
     drawn.frame();
+    for (const view of [first, second])
+      drawn.mock.api.sync.filters.set(view, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.frames(3);
 
-    // One of the two took its picture; the other waits drawn live, its filter on its top.
-    const waiting = blurred.find(view => !keptNow(drawn, view));
+    expect([keptNow(drawn, first), keptNow(drawn, second)].filter(Boolean)).toHaveLength(1);
 
-    expect(waiting).toBeDefined();
-    if (waiting === undefined) return;
+    const waiting = keptNow(drawn, first) ? second : first;
+
     expect(topOf(drawn, waiting).renderable).toBe(true);
     expect(topOf(drawn, waiting).filters ?? []).toHaveLength(1);
   });

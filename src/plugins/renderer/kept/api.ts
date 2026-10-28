@@ -319,6 +319,7 @@ export function createKeptApi(
 
       if (state.on) {
         sortRecords();
+        // The first takes of this flush start over, the alphas due are marked, then every record steps (F114).
         state.firstTakes = 0;
         markAlphaDue(kctx, pixi);
         stepRecords(kctx, pixi, matrices);
