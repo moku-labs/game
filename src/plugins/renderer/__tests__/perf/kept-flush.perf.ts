@@ -3,6 +3,7 @@ import { BUDGET, NOISE } from "./budgets";
 import {
   bytesPerCall,
   cutZoomBoard,
+  idleAwayBoard,
   keptAncestorFadeBoard,
   keptBlendBoard,
   keptBoard,
@@ -52,6 +53,13 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing while a still panorama cut to the canvas stands under a zoom (F113)", async () => {
     expect(bytesPerCall(await cutZoomBoard(), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptCutZoom + NOISE
+    );
+  });
+
+  // Bug: a view whose take rendered nothing (off the canvas) is tried again every few frames, building its bounds (F114).
+  it("allocates nothing for 10 views with an alpha filter off the canvas, stepped (F114)", async () => {
+    expect(bytesPerCall(await idleAwayBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptIdleAway + NOISE
     );
   });
 

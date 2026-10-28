@@ -1304,12 +1304,12 @@ describe("the kept pictures in the stats and the agent ring (spec 23 P12)", () =
 
     expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 0, retakes: 0 });
 
+    // A stack of alphas is taken in its first frame unchanged, with no two-frame wait (F114).
     step(16);
-    step(32);
 
     expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 1, retakes: 1 });
 
-    step(48);
+    step(32);
 
     expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 1, retakes: 0 });
 

@@ -41,10 +41,12 @@ function picture(bright: boolean): Uint8ClampedArray {
  * Starts the renderer of a dev build, every frame drawn, with a kept view and the pixel check on.
  *
  * @param stale - True when the picture drawn differs from the frame drawn live.
+ * @param frames - The drawn frames before it is handed over; its stack of alphas is taken in the second, its first frame unchanged (F114).
  * @returns The renderer, the entity and the extract spy.
  */
 async function verified(
-  stale: boolean
+  stale: boolean,
+  frames = 3
 ): Promise<{ drawn: Drawn; entity: Entity; extract: ReturnType<typeof vi.fn> }> {
   const drawn = await startDrawn({ onDemand: false, dev: true });
   const entity = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
@@ -58,7 +60,7 @@ async function verified(
     { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
   ]);
   drawn.mock.api.sync.debug.verifyFrames(true);
-  drawn.frames(3);
+  drawn.frames(frames);
 
   return { drawn, entity, extract };
 }
@@ -127,7 +129,7 @@ describe("the pixel leg of the kept oracle", () => {
   });
 
   it("logs renderer:stale-picture with its labels and draws every view live", async () => {
-    const { drawn, entity } = await verified(true);
+    const { drawn, entity } = await verified(true, 2);
 
     expect(staleLines(drawn)).toEqual([
       expect.objectContaining({ pixels: 1, pictures: [`kept:Shape#${entity}`] })

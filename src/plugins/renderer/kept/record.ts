@@ -58,11 +58,11 @@ const DRAWN_ANYWAY = ["freeze", "kept"] as const;
 const WHITE = 0xff_ff_ff;
 
 /**
- * What a stack of filters draws with this frame: how many are enabled, their smallest resolution, their padding, and
- * the alpha they multiply by when every enabled one is an `AlphaFilter` (NaN otherwise). Reused: one object for the
+ * What a stack of filters draws with this frame: how many are enabled, their smallest resolution, their padding, the
+ * alpha they multiply by when every enabled one is an `AlphaFilter` (NaN otherwise), and the passes they apply. Reused: one object for the
  * module.
  */
-type Stack = { enabled: number; rs: number; P: number; alpha: number };
+type Stack = { enabled: number; rs: number; P: number; alpha: number; passes: number };
 
 /** The numbers of one frame of a record: the stack and the top's world transform. */
 type Numbers = Stack & {
@@ -81,6 +81,7 @@ const NOW: Numbers = {
   rs: 1,
   P: 0,
   alpha: Number.NaN,
+  passes: 0,
   r: 1,
   a: 1,
   b: 0,
@@ -98,6 +99,9 @@ type Drawing = {
   qty: number;
   shown: boolean;
 };
+
+/** The stack of a record looked at before the step (F114). One object: the look allocates nothing. */
+const DUE: Stack = { enabled: 0, rs: 1, P: 0, alpha: Number.NaN, passes: 0 };
 
 /** What the record being stepped drew before its step. One object: a step allocates nothing. */
 const BEFORE: Drawing = {
@@ -140,6 +144,7 @@ function readStack(
   let rs = Number.POSITIVE_INFINITY;
   let padding = 0;
   let alpha = 1;
+  let passes = 0;
 
   // per drawn frame and record: `effects` hands its lists frozen, and `for…of` over a frozen array allocates (88 B).
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
@@ -149,6 +154,7 @@ function readStack(
     if (filter === undefined || !filter.enabled) continue;
 
     enabled += 1;
+    passes += slots[index]?.passes ?? 0;
     rs = Math.min(rs, resolutionOf(filter, resolution));
     padding += filter.padding;
     alpha *= filter instanceof alphaFilter ? filter.alpha : Number.NaN;
@@ -158,6 +164,7 @@ function readStack(
   into.rs = enabled === 0 ? resolution : rs;
   into.P = Math.trunc(padding);
   into.alpha = alpha;
+  into.passes = passes;
 }
 
 /**
@@ -480,7 +487,12 @@ export function createRecord(
     cut: false,
     direct: false,
     displays: undefined,
-    blended: false
+    blended: false,
+    takenAt: Number.NaN,
+    spared: false,
+    idle: false,
+    alphaDue: false,
+    alphaMissed: false
   };
   const { state } = kctx;
 
@@ -724,6 +736,19 @@ function writeTakeKeys(
 }
 
 /**
+ * Refuses a take that would render nothing and remembers it (F114): the record attempts nothing until a change under
+ * its top or a move of it.
+ *
+ * @param record - The record.
+ * @returns False, the refusal.
+ */
+function refuseIdle(record: KeptRecord): boolean {
+  record.idle = true;
+
+  return false;
+}
+
+/**
  * Takes or retakes the picture of a record: stages 1, 2 (when its first filter has inputs) and 3, at the phase of this
  * frame. The bounds are cut to the filter area of the top when it holds one (F43). Refused, and the view drawn live,
  * for a `Display` in the subtree without `onDemand`, a node under the top that blends otherwise (F68, warned once per
@@ -751,7 +776,7 @@ function takePicture(
   const { top } = record;
 
   // A game's own object it may write unseen without `onDemand`, and an empty subtree, are never kept.
-  if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return false;
+  if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return refuseIdle(record);
   // A glow under the top would blend with the picture's empty texture: a retake goes live (F68).
   if (blendedBelow(kctx, record)) return false;
 
@@ -759,11 +784,11 @@ function takePicture(
   // the picture too (F43): same pixels, a smaller texture.
   const drawn = drawnBounds(pixi, top);
 
-  if (!drawn.isValid) return false;
+  if (!drawn.isValid) return refuseIdle(record);
 
   const local = clippedToArea(drawn, top.filterArea);
 
-  if (isEmptyBounds(local)) return false;
+  if (isEmptyBounds(local)) return refuseIdle(record);
 
   // The picture's box on the canvas, cut to it as the live pass cuts its target (F53), on the grid of the stack
   // resolution, and its padding; both textures must fit.
@@ -775,7 +800,7 @@ function takePicture(
   const across = cutSpan(now.tx + box.x0, now.tx + box.x1, width, Ps);
   const down = cutSpan(now.ty + box.y0, now.ty + box.y1, height, Ps);
 
-  if (isEmptySpan(across) || isEmptySpan(down)) return false;
+  if (isEmptySpan(across) || isEmptySpan(down)) return refuseIdle(record);
 
   // Cut when the canvas took a side off the box.
   const cut =
@@ -797,7 +822,9 @@ function takePicture(
   const w1 = x.texels / now.rs;
   const h1 = y.texels / now.rs;
 
-  if (!fitsTexture(w1, h1, now.rs) || !fitsTexture(w1 + 2 * Ps, h1 + 2 * Ps, now.r)) return false;
+  if (!fitsTexture(w1, h1, now.rs) || !fitsTexture(w1 + 2 * Ps, h1 + 2 * Ps, now.r)) {
+    return refuseIdle(record);
+  }
 
   // The budget makes room by drawing the least recently drawn pictures live; no room refuses the take (P6.3).
   const needed = neededBytes(record, now, { w1, h1, Ps });
@@ -1234,6 +1261,34 @@ function linearResets(record: KeptRecord): boolean {
 }
 
 /**
+ * The still frames a live record waits before it is taken: eight after churning, none for a stack drawn direct (its
+ * take costs one pass, its live draw two: F114; a take that rendered nothing is remembered, `idle`), two otherwise.
+ *
+ * @param record - The record, live.
+ * @returns Drawn frames.
+ */
+function waitOf(record: KeptRecord): number {
+  if (record.calm) return CALM_AFTER;
+
+  return drawsDirect(NOW) ? 0 : TAKE_AFTER;
+}
+
+/**
+ * Marks every kept record above a record that was just first taken: their retake in this flush is not churn (F114),
+ * so the inner takes spread over frames do not drop the outer picture to live.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record just taken.
+ */
+function spareAbove(kctx: KeptCtx, record: KeptRecord): void {
+  for (let node = record.top.parent; node !== null; node = node.parent) {
+    const above = kctx.state.byTop.get(node);
+
+    if (above !== undefined) above.spared = true;
+  }
+}
+
+/**
  * A live record's frame (P4.2): still frames are counted, and a zoom or turn of an ancestor counts as still (F113); at
  * two (eight after churning) the record is taken, a bare view in a wrapper of its own (D4). A record with a node under
  * its top that blends otherwise stays live, before any wrap (F68).
@@ -1252,22 +1307,43 @@ function stepLive(
   view: View
 ): void {
   const { state } = kctx;
-  const turned = linearDiffers(record.key, NOW, KEY.seenA, KEY.seenRs);
+  const { key } = record;
+  // A record's first frame has no frame before it to turn from: a new view that did not change is still (F114).
+  const turned = !Number.isNaN(key[KEY.seenA]) && linearDiffers(key, NOW, KEY.seenA, KEY.seenRs);
   const changed = record.dirtyS1 || (turned && linearResets(record));
+  const moved = turned || NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
 
   writeSeen(record, NOW);
   record.still = changed ? 0 : record.still + 1;
 
-  if (record.still < (record.calm ? CALM_AFTER : TAKE_AFTER)) return;
+  // A take that rendered nothing is not tried again until the view moves (a change under it clears it too).
+  if (moved) record.idle = false;
+  // Never taken in a frame its view changed in: a stack drawn direct waits for its first frame without a change.
+  if (changed || record.still < waitOf(record) || record.idle) return;
+
   // A refused take is not offered again until it fits (P6.3): no thrash.
   if (record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget) return;
   // A glow under the top stays live, remembered until the subtree changes (F68).
   if (blendedBelow(kctx, record)) return;
+  // One first take per frame, inner first: the others stay live and wait (F114). A stack drawn direct takes for one
+  // pass, less than its live draw: never held back, and while one is due the others wait for the next frame.
+  const direct = drawsDirect(NOW);
+
+  if (!direct && (state.firstTakes > 0 || state.alphaDue)) return;
 
   wrapBare(kctx, record, view);
 
-  if (takePicture(kctx, pixi, matrices, record, view, NOW, turned)) toKept(kctx, record, view);
-  else record.still = 0;
+  if (!takePicture(kctx, pixi, matrices, record, view, NOW, turned)) {
+    record.still = 0;
+
+    return;
+  }
+
+  state.firstTakes += 1;
+
+  record.takenAt = state.frame;
+  toKept(kctx, record, view);
+  spareAbove(kctx, record);
 }
 
 /**
@@ -1376,6 +1452,13 @@ function stepKept(
   writeSeen(record, NOW);
 
   const retake = record.dirtyS1 || (scaled && !scalable(record));
+
+  // Retaken for an inner record's first take alone: not churn (F114).
+  if (retake && record.spared && !scaled) {
+    retakeOrGoLive(kctx, pixi, matrices, record, view);
+
+    return;
+  }
 
   if (retake) {
     churn(kctx, pixi, matrices, record, view);
@@ -1545,6 +1628,59 @@ export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
 }
 
 /**
+ * Marks, before the step, the live records drawn direct that may be taken in this flush (F114): eligible, nothing
+ * changed under them. An alpha take costs one pass and its live draw two, so while one is due no other first take
+ * happens in this frame. A record due once that did not end its step kept is not due again until a change under it.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ */
+export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
+  const { state } = kctx;
+  const resolution = kctx.host.resolution();
+
+  state.alphaDue = false;
+
+  for (let index = 0; index < state.records.length; index += 1) {
+    const record = state.records[index];
+    const view = record === undefined ? undefined : kctx.ctx.state.sync.views.get(record.entity);
+
+    if (record === undefined || view === undefined || !mayBeDue(kctx, record)) continue;
+
+    readStack(record.slots, resolution, pixi.AlphaFilter, DUE);
+    record.alphaDue =
+      !Number.isNaN(DUE.alpha) &&
+      DUE.P === 0 &&
+      DUE.rs === resolution &&
+      eligible(kctx, record, view, DUE);
+    state.alphaDue ||= record.alphaDue;
+  }
+}
+
+/**
+ * Tells whether a record may be taken in this flush as far as is known before its step: live, nothing changed under
+ * it, and no earlier refusal that still holds.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @returns True when it may.
+ */
+function mayBeDue(kctx: KeptCtx, record: KeptRecord): boolean {
+  const { state } = kctx;
+  const refused = record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget;
+
+  return (
+    record.mode === "live" &&
+    !record.dirtyS1 &&
+    !record.idle &&
+    !record.calm &&
+    !record.alphaMissed &&
+    !record.blended &&
+    !refused
+  );
+}
+
+/**
  * One drawn frame of a record, inside the flush: eligibility, the keys of this frame, the policy of its life, the quad
  * of a kept one; the dirty flags are cleared. A change under the top forgets a blended node found before: the next
  * take walks the subtree again (F68).
@@ -1565,8 +1701,12 @@ export function stepRecord(
   // What the record draws before this frame: a change of it is a change of every picture above it (P4.5).
   noteDrawing(kctx, record, BEFORE);
 
-  // The subtree changed: a glow found under the top may be gone (F68).
-  if (record.dirtyS1) record.blended = false;
+  // The subtree changed: a glow found under the top may be gone (F68), a take may render something now (F114).
+  if (record.dirtyS1) {
+    record.blended = false;
+    record.idle = false;
+    record.alphaMissed = false;
+  }
 
   NOW.r = kctx.host.resolution();
   readStack(record.slots, NOW.r, pixi.AlphaFilter, NOW);
@@ -1580,6 +1720,10 @@ export function stepRecord(
   record.dirtyS1 = false;
   record.dirtyS2 = false;
   record.dirtyS3 = false;
+  record.spared = false;
+  // A due alpha that could not be taken holds the others back once, not every frame (F114).
+  if (record.alphaDue && record.mode !== "kept") record.alphaMissed = true;
+  record.alphaDue = false;
 }
 
 /**
@@ -1617,14 +1761,19 @@ function stepEligible(
 }
 
 /**
- * The frame of a record that may not be kept: a kept one is drawn live again, and its still frames start over.
+ * The frame of a record that may not be kept: a kept one is drawn live again, calm when it was taken in the frame
+ * before (F114), and its still frames start over.
  *
  * @param kctx - The kept context.
  * @param record - The record.
  * @param view - Its view.
  */
 function stepIneligible(kctx: KeptCtx, record: KeptRecord, view: View): void {
-  if (record.mode === "kept") goLive(kctx, record, view, true);
+  if (record.mode === "kept") {
+    goLive(kctx, record, view, true);
+    // A picture refused in the frame after its take (an alpha that crosses 1 every frame) waits for real rest (F114).
+    if (kctx.state.frame - record.takenAt <= 1) record.calm = true;
+  }
 
   record.still = 0;
 }

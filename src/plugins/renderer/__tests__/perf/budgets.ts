@@ -91,6 +91,9 @@ export const BUDGET = {
   // F113: a still panorama wider than the canvas under a zoom. A cut take is refused once and remembered: the record
   // waits for rest. Before, a take was tried every third frame of the zoom, each try building its bounds (arrays, spans).
   keptCutZoom: 0,
+  // F114: 10 views with an alpha filter off the canvas, stepped (a mark elsewhere). A take that rendered nothing is
+  // remembered: before, each was tried again every few frames, building its bounds (arrays, spans) at each attempt.
+  keptIdleAway: 0,
   // F68: 10 kept views and a filtered view with a glow inside, drawn live, every record stepped (a mark elsewhere). New,
   // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
   // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.

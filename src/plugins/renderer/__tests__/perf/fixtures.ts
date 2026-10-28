@@ -792,6 +792,53 @@ export async function cutZoomBoard(): Promise<() => void> {
 }
 
 /**
+ * Ten views with an alpha filter off the canvas (F114), a view on it marked every frame: each was tried once in its first
+ * eligible frame, rendered nothing and is remembered idle, so a frame steps them and tries no take.
+ *
+ * @param count - The views off the canvas.
+ * @returns One frame: the mark, the collect and the flush.
+ */
+export async function idleAwayBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const views: Entity[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: 5000 + index * 100, y: 100 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.AlphaFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  stage.frames(4);
+
+  const records = stage.drawn.mock.ctx.state.kept.records;
+
+  if (records.length !== count || records.some(record => !record.idle)) {
+    throw new Error("perf fixture: a view off the canvas is not idle");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A skipped frame of a dev build with `onDemand` and 300 views over real Pixi render groups, as the case-sheet of
  * A Memory Missing stands idle: after the last drawn frame five views were written without a mark, warned, and stay in
  * Pixi's change lists, because a skipped frame renders nothing. Each call is the after-frame step of one more skipped frame (F69).
