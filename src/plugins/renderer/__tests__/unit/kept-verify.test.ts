@@ -136,6 +136,46 @@ describe("the pixel leg of the kept oracle", () => {
     expect(drawn.objectOf(entity)?.renderable).toBe(true);
   });
 
+  // Bug F113: a kept view under a fading ancestor draws its filter's output faded, live draws the filter of the faded
+  // input; for a filter that is not alpha-linear every frame of a fade was reported stale and every view drawn live.
+  it("skips a frame in which a picture hangs under a translucent ancestor, and compares again at alpha 1", async () => {
+    const drawn = await startDrawn({ onDemand: false, dev: true });
+    const panel = drawn.spawn(Transform({ x: 60, y: 60 }), Shape({ w: 200, h: 120 }));
+    const icon = drawn.mock.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Transform({ x: 20, y: 20 }),
+      Shape({ w: 40, h: 20 }),
+      Parent({ entity: panel })
+    ]);
+    const kept = drawn.mock.ctx.state.kept;
+
+    running.push(drawn);
+    // Drawn live the frame differs from the picture: what a filter that is not alpha-linear draws under a fade.
+    drawn.stage.last().renderer.extract.pixels = () => ({
+      pixels: picture(kept.bypassed),
+      width: 4,
+      height: 4
+    });
+    drawn.mock.world.ecs.set(panel, Shape, { alpha: 0.5 });
+    drawn.mock.api.sync.filters.set(icon, [
+      { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
+    ]);
+    drawn.mock.api.sync.debug.verifyFrames(true);
+    drawn.frames(3);
+
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(2);
+
+    expect(kept.verifySkipped - skipped).toBe(2);
+    expect(staleLines(drawn)).toEqual([]);
+    expect(kept.byEntity.get(icon)?.mode).toBe("kept");
+
+    drawn.mock.world.ecs.set(panel, Shape, { alpha: 1 });
+    drawn.frame();
+
+    expect(staleLines(drawn)).toHaveLength(1);
+  });
+
   it("skips a frame in which a picture is off its grid, and counts it", async () => {
     const { drawn, entity, extract } = await verified(false);
     const reads = extract.mock.calls.length;

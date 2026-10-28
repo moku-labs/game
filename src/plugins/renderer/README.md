@@ -997,7 +997,9 @@ What each stage depends on, and the only stage redone when it changes:
 
 | Change | Redone |
 |---|---|
-| A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, its world scale or rotation, the stack resolution | stages 1, 2, 3 |
+| A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, the stack resolution | stages 1, 2, 3 |
+| Its world scale or rotation (an ancestor's zoom) | nothing: the quad is drawn scaled within 2× of the take either way, past it stages 1, 2, 3, and once at rest |
+| An ancestor's alpha | nothing: the quad hangs in the view's parent and is faded with it |
 | What the chain of the first filter with inputs draws (`inputs.version()`) | stages 2, 3 |
 | A filter value (`effects` calls `invalidate` before the write), the renderer resolution, the padding, a `"placed"` filter's move | stage 3; for a stack of alphas nothing: the quad's alpha |
 | A move of the view itself | nothing: the quad moves; a picture cut to the canvas: stages 1, 2, 3 |
@@ -1010,10 +1012,21 @@ is taken after it stood still for 2 drawn frames; a kept view whose subtree chan
 in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
 more than live). A kept view inside another is rendered first; its change retakes the outer one too.
 
+Under a fading or zooming ancestor (F113). A view that stands still is taken while an ancestor fades or zooms, as in
+the entry of a screen, after 2 drawn frames as anywhere: an ancestor's alpha is not read, and a change of the view's
+world scale or rotation does not count as a change of the view. Its quad is faded with the ancestor and drawn scaled
+(within 2× of the take, as under a camera zoom), and taken once more at rest. The picture is drawn at `A·F(x)` where
+live draws `F(A·x)`: the same for a filter that is linear in alpha (a blur, a colour matrix that keeps alpha, a shadow
+made of the input's alpha), the whole picture faded for one that is not (an outline thins as the content fades live,
+it fades whole from the picture). At an ancestor the engine fades to alpha 0 the subtree is not drawn at all: the view is live, draws
+nothing, and is taken again 2 frames after it shows. Not taken under a zoom: a `"placed"` filter (never drawn scaled),
+a picture cut to the canvas (it is taken again on every move), and a view that churned (it waits for real rest). A
+view under an ancestor that pulses or spins for ever is drawn scaled for ever, never taken again at rest.
+
 Not kept: a filter of category `"screen"` (see the effects README, "Filters that are kept"), a slot
 of a game that names no category, a filter that blends with the backdrop (`blendRequired`) or a blend
-mode other than normal, a top that blends otherwise, an ancestor that is translucent, tinted or blends
-otherwise (its alpha would be applied after the filter instead of before it), a `"placed"` filter
+mode other than normal, a top that blends otherwise, an ancestor that is tinted or blends otherwise, a
+`"placed"` filter
 under a filtered ancestor, a view hidden for the player, a picture over 4096 device pixels on a side,
 and without `onDemand` a subtree holding a `Display` view: a game that never turned `onDemand` on
 never promised to call `renderer.invalidate` before writing into its own Pixi objects.
@@ -1047,7 +1060,9 @@ at `onStop`. `stats().kept` is `{ pictures, mb, retakes }`.
 next drawn frame, `true` lets them be taken again: the A/B switch of a measurement, in every build.
 With `debug.verifyFrames` on (dev and debug builds), every drawn frame in which a picture stood is
 read twice, as drawn and with every picture drawn live, and compared; a difference logs
-`renderer:stale-picture` and draws every view live until the policy takes it again.
+`renderer:stale-picture` and draws every view live until the policy takes it again. A frame in which a picture
+moves off its grid or hangs under a translucent ancestor is skipped and counted, not compared: a fading ancestor fades
+the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design.
 
 Range pictures. The same machinery renders the canvas-sized picture of an overlay's range that
 `Overlay` (spec 22) asks for (`take`, `retake`, `move`, `release`): one render of the stage root with

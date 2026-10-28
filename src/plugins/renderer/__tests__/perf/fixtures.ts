@@ -714,6 +714,84 @@ export async function keptZoomBoard(count: number): Promise<() => void> {
 }
 
 /**
+ * The board of `keptBoard` under a translucent root (F113), as a scene fading over the board leaves it in a frame: the
+ * root above the kept views at alpha 0.5, a view elsewhere marked every frame, so every record steps and keeps its
+ * picture, drawn at the root's alpha by Pixi; none is retaken. The alpha is written once: Pixi's setter stores each new
+ * double into `localAlpha` as a heap number (16 B a write that changes it, Pixi's own, like F54's `AlphaFilter.alpha`),
+ * which is the fade's write, not the step of the kept cache.
+ *
+ * @param count - The kept views.
+ * @returns One frame under the fade: the mark, the collect and the flush.
+ */
+export async function keptAncestorFadeBoard(count: number): Promise<() => void> {
+  const { stage, other } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const root = stage.drawn.mock.ctx.state.sync.root;
+
+  if (root === undefined) throw new Error("perf fixture: the fading board has no root");
+
+  root.alpha = 0.5;
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * A live panorama wider than the canvas, with a filter, under a camera zoom (F113): every frame the root scales by a
+ * step, in turn 1.01 and 1.02, a view elsewhere is marked, and the panorama stands still under it. Its take would be cut to the canvas, which is
+ * never drawn scaled: it is refused once and the record waits for rest, so a frame steps it and tries no take.
+ *
+ * @returns One frame of the zoom: the scale, the mark, the collect and the flush.
+ */
+export async function cutZoomBoard(): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const panorama = stage.view({ order: 1, x: -1000, y: 0, w: 3000, h: 400 });
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const root = stage.drawn.mock.ctx.state.sync.root;
+
+  if (root === undefined) throw new Error("perf fixture: the cut zoom board has no root");
+
+  stage.frame();
+  sync.filters.set(
+    panorama,
+    Object.freeze([
+      {
+        filter: new pixi.AlphaFilter() as unknown as PixiFilter,
+        passes: 1,
+        cache: "local" as const
+      }
+    ])
+  );
+
+  let near = false;
+  const scale = (): void => {
+    near = !near;
+    root.scale.set(near ? 1.02 : 1.01);
+  };
+
+  // Drawn frames under the zoom: the marks of the build settle, and the panorama is refused once.
+  for (let frame = 0; frame < 8; frame += 1) {
+    scale();
+    stage.frame();
+  }
+
+  if (stage.drawn.mock.ctx.state.kept.byEntity.get(panorama)?.mode !== "live") {
+    throw new Error("perf fixture: the cut panorama was taken under the zoom");
+  }
+
+  return () => {
+    scale();
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A skipped frame of a dev build with `onDemand` and 300 views over real Pixi render groups, as the case-sheet of
  * A Memory Missing stands idle: after the last drawn frame five views were written without a mark, warned, and stay in
  * Pixi's change lists, because a skipped frame renders nothing. Each call is the after-frame step of one more skipped frame (F69).
