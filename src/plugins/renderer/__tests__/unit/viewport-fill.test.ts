@@ -38,6 +38,11 @@ async function startedIn(
   return mock;
 }
 
+/** Yields the microtask queue, so the restart after a lost device can finish. */
+async function tick(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+}
+
 /**
  * The backing store Pixi makes of the last resize: it rounds `size × resolution` to device pixels.
  *
@@ -110,5 +115,24 @@ describe("viewport fill (F116): the canvas covers a fractional mount", () => {
 
     expect(backingStore(mock)).toEqual({ width: 1024, height: 2218, resolution: 2.625 });
     expect(mock.pixi.last().canvas.style.height).toBe("844.77px");
+  });
+
+  it("a canvas made again after a lost device fills its mount until its first layout", async () => {
+    // Bug caught: without Pixi's autoDensity a new canvas has no CSS size, and shows at its backing store's size,
+    // 2.77 times the window, until the next frame lays it out.
+    const mock = await startedIn({ width: 389.89, height: 844.77 }, 2.77, 3);
+    const first = mock.pixi.last();
+
+    first.lose("unknown");
+    await tick();
+
+    const { style } = mock.pixi.last().canvas;
+
+    expect(mock.pixi.last()).not.toBe(first);
+    expect([style.width, style.height]).toEqual(["100%", "100%"]);
+
+    mock.runPhase("render");
+
+    expect([style.width, style.height]).toEqual(["389.89px", "844.77px"]);
   });
 });

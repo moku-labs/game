@@ -257,6 +257,10 @@ export async function createApplication(
   // A canvas is inline by default and leaves a line gap under it: the page grows past the window
   // and scrolls. Block layout keeps it exactly the size of its mount.
   app.canvas.style.display = "block";
+  // Until its first layout gives it the measured size, a canvas made again after a lost device fills its mount:
+  // with no size of its own it would show at its backing store's size.
+  app.canvas.style.width = "100%";
+  app.canvas.style.height = "100%";
   mount.append(app.canvas);
 }
 
