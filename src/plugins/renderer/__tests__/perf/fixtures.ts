@@ -714,6 +714,32 @@ export async function keptZoomBoard(count: number): Promise<() => void> {
 }
 
 /**
+ * The board of `keptBoard` under a translucent root (F113), as a scene fading over the board leaves it in a frame: the
+ * root above the kept views at alpha 0.5, a view elsewhere marked every frame, so every record steps and keeps its
+ * picture, drawn at the root's alpha by Pixi; none is retaken. The alpha is written once: Pixi's setter stores each new
+ * double into `localAlpha` as a heap number (16 B a write that changes it, Pixi's own, like F54's `AlphaFilter.alpha`),
+ * which is the fade's write, not the step of the kept cache.
+ *
+ * @param count - The kept views.
+ * @returns One frame under the fade: the mark, the collect and the flush.
+ */
+export async function keptAncestorFadeBoard(count: number): Promise<() => void> {
+  const { stage, other } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const root = stage.drawn.mock.ctx.state.sync.root;
+
+  if (root === undefined) throw new Error("perf fixture: the fading board has no root");
+
+  root.alpha = 0.5;
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A skipped frame of a dev build with `onDemand` and 300 views over real Pixi render groups, as the case-sheet of
  * A Memory Missing stands idle: after the last drawn frame five views were written without a mark, warned, and stay in
  * Pixi's change lists, because a skipped frame renders nothing. Each call is the after-frame step of one more skipped frame (F69).

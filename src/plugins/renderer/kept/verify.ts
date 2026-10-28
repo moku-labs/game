@@ -35,6 +35,21 @@ function offGrid(kctx: KeptCtx, record: KeptRecord): boolean {
 }
 
 /**
+ * Tells whether a kept record hangs under a translucent ancestor (F113): its quad draws `A·F(x)` where live draws
+ * `F(A·x)`, which differ by design for a filter that is not alpha-linear, not by a stale picture.
+ *
+ * @param record - The record, kept.
+ * @returns True when an ancestor's alpha is under 1.
+ */
+function fadedAbove(record: KeptRecord): boolean {
+  for (let node = record.top.parent; node !== null; node = node.parent) {
+    if (node.alpha < 1) return true;
+  }
+
+  return false;
+}
+
+/**
  * Tells whether the padded picture of a kept record reaches past the canvas edge, where Pixi clips the live filter.
  *
  * @param record - The record, kept.
@@ -166,7 +181,8 @@ function logStale(
 
 /**
  * The pixel leg after a drawn frame: the picture as drawn against the same frame with every picture live. Frames in
- * which a picture moves off its grid are skipped and counted; at rest every picture is compared.
+ * which a picture moves off its grid or hangs under a translucent ancestor (F113) are skipped and counted; at rest
+ * under opaque ancestors every picture is compared.
  *
  * @param kctx - The kept context.
  * @param bypass - Draws every kept record live (true) or as its picture again (false).
@@ -184,8 +200,9 @@ export function verifyPictures(
   // No picture stood in the frame: nothing to compare.
   if (records.length === 0 && ranges.length === 0) return;
 
-  // A picture moving off its grid is sampled linearly: the frame is skipped and counted.
-  if (records.some(record => offGrid(kctx, record))) {
+  // A picture moving off its grid is sampled linearly, one under a fading ancestor is faded after its filters: the
+  // frame is skipped and counted.
+  if (records.some(record => offGrid(kctx, record) || fadedAbove(record))) {
     state.verifySkipped += 1;
 
     return;

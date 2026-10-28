@@ -324,32 +324,6 @@ describe("only the stage whose key changed is redone", () => {
 });
 
 describe("what is never kept", () => {
-  it("a fading ancestor makes the view draw live, exactly, and taken again at alpha 1", async () => {
-    const drawn = await open();
-    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
-    const icon = drawn.mock.world.ecs.spawn(OWNER, [
-      Transform({ x: 10, y: 10 }),
-      Shape({ w: 40, h: 40 }),
-      Parent({ entity: panel })
-    ]);
-
-    drawn.mock.api.sync.filters.set(icon, [slotOf(new pixi.ColorMatrixFilter())]);
-    drawn.frames(3);
-
-    expect(keptNow(drawn, icon)).toBe(true);
-
-    drawn.mock.world.ecs.set(panel, Shape, { alpha: 0.5 });
-    drawn.frame();
-
-    expect(keptNow(drawn, icon)).toBe(false);
-    expect(topOf(drawn, icon).filters).toHaveLength(1);
-
-    drawn.mock.world.ecs.set(panel, Shape, { alpha: 1 });
-    drawn.frames(3);
-
-    expect(keptNow(drawn, icon)).toBe(true);
-  });
-
   it("a screen filter, a slot without a category, a filter with blendRequired or a non-normal blend mode makes no picture", async () => {
     const drawn = await open();
     const backdrop = new pixi.ColorMatrixFilter();
@@ -808,5 +782,192 @@ describe("a kept picture under an ancestor's zoom (F67)", () => {
     }
 
     expect(rendersOf(drawn, label, "#1", from)).toBe(1);
+  });
+});
+
+/**
+ * A 40 x 40 icon with a filter under a 200 x 200 panel, built and not taken yet.
+ *
+ * @param drawn - The running renderer.
+ * @param slot - The icon's filter slot.
+ * @returns The panel and the icon.
+ */
+function underPanel(
+  drawn: Drawn,
+  slot: FilterSlot = slotOf(new pixi.ColorMatrixFilter())
+): { panel: Entity; icon: Entity } {
+  const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
+  const icon = drawn.mock.world.ecs.spawn(OWNER, [
+    Transform({ x: 10, y: 10 }),
+    Shape({ w: 40, h: 40 }),
+    Parent({ entity: panel })
+  ]);
+
+  drawn.mock.api.sync.filters.set(icon, [slot]);
+  drawn.frame();
+
+  return { panel, icon };
+}
+
+/**
+ * The alpha the stage pass draws a node at: its own times every ancestor's.
+ *
+ * @param node - The node.
+ * @returns The product.
+ */
+function worldAlphaOf(node: PixiContainer): number {
+  let alpha = 1;
+
+  for (let at: PixiContainer | null = node; at !== null; at = at.parent) alpha *= at.alpha;
+
+  return alpha;
+}
+
+describe("a still picture under a fading or zooming ancestor (F113)", () => {
+  // Bug F113: a fading ancestor drew every filtered view under it live, 2–3 passes a view in every frame of the fade
+  // (A Memory Missing's board under a memory fading out: 10 passes a frame for one generator).
+  it("keeps the picture under a fading ancestor, drawn at the ancestor's alpha, and live with no pass at alpha 0", async () => {
+    const drawn = await open();
+    const { panel, icon } = underPanel(drawn);
+
+    drawn.frames(2);
+
+    expect(keptNow(drawn, icon)).toBe(true);
+
+    const from = drawn.stage.targets().length;
+
+    for (const alpha of [0.5, 0.25]) {
+      drawn.mock.world.ecs.set(panel, Shape, { alpha });
+      drawn.frame();
+
+      expect(keptNow(drawn, icon)).toBe(true);
+      expect(topOf(drawn, icon).filters ?? []).toEqual([]);
+      expect(worldAlphaOf(quadOf(drawn, icon) as PixiContainer)).toBeCloseTo(alpha, 6);
+    }
+
+    expect(drawn.stage.targets().length - from).toBe(0);
+
+    drawn.mock.world.ecs.set(panel, Shape, { alpha: 0 });
+    drawn.frame();
+
+    expect(keptNow(drawn, icon)).toBe(false);
+    expect(drawn.stage.targets().length - from).toBe(0);
+
+    drawn.mock.world.ecs.set(panel, Shape, { alpha: 1 });
+    drawn.frames(3);
+
+    expect(keptNow(drawn, icon)).toBe(true);
+    expect(rendersOf(drawn, icon, "#1", from)).toBe(1);
+  });
+
+  // Bug F113: under an ancestor that zooms every frame a view never stood still, so it was drawn live for the whole
+  // zoom (the board's entry: every piece's shadow live for 24 frames).
+  it("takes a still view while an ancestor zooms, once, and draws it scaled from there", async () => {
+    const drawn = await open();
+    const { panel, icon } = underPanel(drawn);
+    const from = drawn.stage.targets().length;
+
+    for (let frame = 1; frame <= 10; frame += 1) {
+      drawn.mock.world.ecs.set(panel, Transform, { scale: 1 + frame * 0.05 });
+      drawn.frame();
+    }
+
+    expect(keptNow(drawn, icon)).toBe(true);
+    expect(rendersOf(drawn, icon, "#1", from)).toBe(1);
+  });
+
+  it("counts a change under the view during a zoom: no take until two frames without one", async () => {
+    const drawn = await open();
+    const { panel, icon } = underPanel(drawn);
+
+    for (let frame = 1; frame <= 6; frame += 1) {
+      drawn.mock.world.ecs.set(panel, Transform, { scale: 1 + frame * 0.05 });
+      drawn.mock.world.ecs.set(icon, Shape, { w: 40 + frame });
+      drawn.frame();
+    }
+
+    expect(rendersOf(drawn, icon, "#1")).toBe(0);
+
+    drawn.mock.world.ecs.set(panel, Transform, { scale: 1.4 });
+    drawn.frame();
+    drawn.mock.world.ecs.set(panel, Transform, { scale: 1.45 });
+    drawn.frame();
+
+    expect(keptNow(drawn, icon)).toBe(true);
+  });
+
+  // Bug: a placed filter is never drawn scaled; taken under a zoom it was retaken in every frame, went calm and was
+  // taken again after eight, where it stays live.
+  it("keeps a placed filter live through a zoom", async () => {
+    const drawn = await open();
+    const { panel, icon } = underPanel(
+      drawn,
+      slotOf(new pixi.ColorMatrixFilter(), { cache: "placed" })
+    );
+
+    for (let frame = 1; frame <= 12; frame += 1) {
+      drawn.mock.world.ecs.set(panel, Transform, { scale: 1 + frame * 0.05 });
+      drawn.frame();
+    }
+
+    expect(rendersOf(drawn, icon, "#1")).toBe(0);
+    expect(keptNow(drawn, icon)).toBe(false);
+  });
+
+  // Bug: a view that churned waits for real rest; counted still under a zoom it was taken and churned again.
+  it("keeps a view that churned live through a zoom, and takes it at rest", async () => {
+    const drawn = await open();
+    const { panel, icon } = underPanel(drawn);
+
+    drawn.frames(2);
+
+    for (const alpha of [0.9, 0.8, 0.7]) {
+      drawn.mock.world.ecs.set(icon, Shape, { alpha });
+      drawn.frame();
+    }
+
+    expect(keptNow(drawn, icon)).toBe(false);
+
+    const from = drawn.stage.targets().length;
+
+    for (let frame = 1; frame <= 12; frame += 1) {
+      drawn.mock.world.ecs.set(panel, Transform, { scale: 1 + frame * 0.05 });
+      drawn.frame();
+    }
+
+    expect(rendersOf(drawn, icon, "#1", from)).toBe(0);
+
+    drawn.frames(9);
+
+    expect(keptNow(drawn, icon)).toBe(true);
+  });
+
+  // Bug: the quad of a view taken under a zoom moves by rounding every frame, and the picture holding it is retaken in
+  // every frame of the zoom.
+  it("does not retake an outer picture in every frame of a zoom above it and an inner view", async () => {
+    const drawn = await open();
+    const camera = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 1, h: 1 }));
+    const outer = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 50, y: 50 }),
+      Shape({ w: 200, h: 200 }),
+      Parent({ entity: camera })
+    ]);
+    const inner = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 10, y: 10 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: outer })
+    ]);
+
+    drawn.mock.api.sync.filters.set(outer, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.mock.api.sync.filters.set(inner, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.frame();
+
+    for (let frame = 1; frame <= 16; frame += 1) {
+      drawn.mock.world.ecs.set(camera, Transform, { scale: 1 + frame * 0.03 });
+      drawn.frame();
+    }
+
+    expect(keptNow(drawn, outer)).toBe(true);
+    expect(rendersOf(drawn, outer, "#1")).toBeLessThanOrEqual(2);
   });
 });

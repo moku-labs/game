@@ -242,13 +242,16 @@ function topDrawn(sync: SyncWriters, view: View): boolean {
 }
 
 /**
- * Tells whether an ancestor draws what is under it unchanged: visible, opaque, untinted, blending normally.
+ * Tells whether an ancestor draws what is under it as a picture would: visible, untinted, blending normally. Its alpha
+ * is not read (F113): the quad hangs in the top's parent and Pixi multiplies it by the ancestors' alpha, while stage 1
+ * renders the top as a root without them. A fading ancestor so draws the picture at `A·F(x)`, live draws `F(A·x)`: the
+ * same for an alpha-linear filter, the whole picture faded for one that is not.
  *
  * @param node - The ancestor.
  * @returns True when it does.
  */
 function drawsPlain(node: PixiContainer): boolean {
-  return node.visible && node.alpha === 1 && node.tint === WHITE && plainBlend(node.blendMode);
+  return node.visible && node.tint === WHITE && plainBlend(node.blendMode);
 }
 
 /**
@@ -724,7 +727,8 @@ function writeTakeKeys(
  * Takes or retakes the picture of a record: stages 1, 2 (when its first filter has inputs) and 3, at the phase of this
  * frame. The bounds are cut to the filter area of the top when it holds one (F43). Refused, and the view drawn live,
  * for a `Display` in the subtree without `onDemand`, a node under the top that blends otherwise (F68, warned once per
- * top), empty bounds, a picture over 4096 device pixels, or a budget that has no room (P6.3, warned once).
+ * top), empty bounds, a picture over 4096 device pixels, a picture cut to the canvas while its linear part moves (it
+ * is never drawn scaled, F113), or a budget that has no room (P6.3, warned once).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -732,6 +736,7 @@ function writeTakeKeys(
  * @param record - The record.
  * @param view - Its view.
  * @param now - This frame's numbers.
+ * @param turned - True when the linear part moved since the last frame: a first take under a zoom.
  * @returns True when every stage rendered.
  */
 function takePicture(
@@ -740,7 +745,8 @@ function takePicture(
   matrices: KeptMatrices,
   record: KeptRecord,
   view: View,
-  now: Numbers
+  now: Numbers,
+  turned = false
 ): boolean {
   const { top } = record;
 
@@ -771,6 +777,16 @@ function takePicture(
 
   if (isEmptySpan(across) || isEmptySpan(down)) return false;
 
+  // Cut when the canvas took a side off the box.
+  const cut =
+    across.start > now.tx + box.x0 ||
+    across.end < now.tx + box.x1 ||
+    down.start > now.ty + box.y0 ||
+    down.end < now.ty + box.y1;
+
+  // A cut picture is never drawn scaled: taken while an ancestor zooms, it would be taken again every frame (F113).
+  if (cut && turned) return false;
+
   const x = gridSpan(across.start, across.end, now.rs);
   const y = gridSpan(down.start, down.end, now.rs);
   const w1 = x.texels / now.rs;
@@ -793,11 +809,7 @@ function takePicture(
   }
 
   record.refused = 0;
-  // Cut when the canvas took a side off the box.
-  const cutAcross = across.start > now.tx + box.x0 || across.end < now.tx + box.x1;
-  const cutDown = down.start > now.ty + box.y0 || down.end < now.ty + box.y1;
-
-  record.cut = cutAcross || cutDown;
+  record.cut = cut;
   record.key[KEY.sw] = width;
   record.key[KEY.sh] = height;
   writeTakeKeys(record, now, { x, y, w1, h1 });
@@ -1202,7 +1214,7 @@ function wrapBare(kctx: KeptCtx, record: KeptRecord, view: View): void {
 }
 
 /**
- * A live record's frame (P4.2): still frames are counted; at two (eight after churning) the record is taken, a bare
+ * A live record's frame (P4.2): still frames are counted, a zoom or a turn above it counted still (F113); at two (eight after churning) the record is taken, a bare
  * view in a wrapper of its own (D4). A record with a node under its top that blends otherwise stays live, before any
  * wrap (F68).
  *
@@ -1220,7 +1232,8 @@ function stepLive(
   view: View
 ): void {
   const { state } = kctx;
-  const changed = record.dirtyS1 || linearDiffers(record.key, NOW, KEY.seenA, KEY.seenRs);
+  const turned = linearDiffers(record.key, NOW, KEY.seenA, KEY.seenRs);
+  const changed = record.dirtyS1 || (turned && linearResets(record));
 
   writeSeen(record, NOW);
   record.still = changed ? 0 : record.still + 1;
@@ -1233,8 +1246,20 @@ function stepLive(
 
   wrapBare(kctx, record, view);
 
-  if (takePicture(kctx, pixi, matrices, record, view, NOW)) toKept(kctx, record, view);
+  if (takePicture(kctx, pixi, matrices, record, view, NOW, turned)) toKept(kctx, record, view);
   else record.still = 0;
+}
+
+/**
+ * Tells whether a move of a live record's linear part or stack resolution resets its still frames (F113): a zoom or a
+ * turn of an ancestor does not, the picture is taken at it and drawn scaled (F67). It does for a new stack resolution,
+ * a `"placed"` record (never drawn scaled) and a calm one (a picture that churned waits for real rest).
+ *
+ * @param record - The record, live, whose linear part or stack resolution moved since the last frame.
+ * @returns True when the move resets its still frames.
+ */
+function linearResets(record: KeptRecord): boolean {
+  return record.key[KEY.seenRs] !== NOW.rs || record.category === "placed" || record.calm;
 }
 
 /**

@@ -84,6 +84,10 @@ export const BUDGET = {
   keptFade: 16,
   // F67: 10 kept views drawn scaled under a camera zoom, a view elsewhere marked. Before: three retakes, then live.
   keptZoom: 0,
+  // F113: 10 kept views stepped under a root at alpha 0.5, a view elsewhere marked (the fade's own alpha write is Pixi's:
+  // 16 B a new value, its setter boxing the double). Before: every record went
+  // live, its filter pass in every frame of the fade. Now each keeps its picture, which Pixi draws at the root's alpha.
+  keptAncestorFade: 0,
   // F68: 10 kept views and a filtered view with a glow inside, drawn live, every record stepped (a mark elsewhere). New,
   // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
   // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.
