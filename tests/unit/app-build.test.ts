@@ -115,6 +115,32 @@ afterAll(() => {
   removeCopies(copies);
 });
 
+/**
+ * Writes a `--serve-plugin` into a game that keeps every `.webp` external, so Bun leaves its links
+ * into the game and the build's fallback copies the files.
+ *
+ * @param root - The game folder.
+ * @returns The plugin file.
+ */
+function keepWebp(root: string): string {
+  const plugin = path.join(root, "keep-icons.ts");
+
+  writeFileSync(
+    plugin,
+    [
+      "export default {",
+      '  name: "keep-icons",',
+      "  setup(build) {",
+      String.raw`    build.onResolve({ filter: /\.webp$/ }, args => ({ path: args.path, external: true }));`,
+      "  }",
+      "};",
+      ""
+    ].join("\n")
+  );
+
+  return plugin;
+}
+
 describe("the defines and the build id of a page", () => {
   it("a release page defines the three flags false, a debug page AGENT true and CONTROL by its profile", () => {
     const page = {
@@ -242,23 +268,11 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build, the bundle", () =>
 
   it("bundles with the --serve-plugin plugins and copies the icons they leave as links", async () => {
     const root = game();
-    const plugin = path.join(root, "keep-icons.ts");
+    const plugin = keepWebp(root);
 
     writeFileSync(
       path.join(root, "config.ts"),
       'export default { page: { title: "t", icons: { favicon: "features/ui/assets/fx-spark.webp" } } };\n'
-    );
-    writeFileSync(
-      plugin,
-      [
-        "export default {",
-        '  name: "keep-icons",',
-        "  setup(build) {",
-        String.raw`    build.onResolve({ filter: /\.webp$/ }, args => ({ path: args.path, external: true }));`,
-        "  }",
-        "};",
-        ""
-      ].join("\n")
     );
 
     const { code, seen } = await build(["--serve-plugin", plugin, "--out", "dist/web"], root);
@@ -268,6 +282,62 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build, the bundle", () =>
     expect(code).toBe(0);
     expect(html).toContain('<link rel="icon" href="./fx-spark.webp" />');
     expect(existsSync(path.join(root, "dist", "web", "fx-spark.webp"))).toBe(true);
+  });
+
+  // Bug: a boot picture Bun left as a link points into the game, which the built page cannot reach.
+  it("copies the boot picture a plugin leaves as a link beside the page and links it ./", async () => {
+    const root = game();
+    const plugin = keepWebp(root);
+
+    put(path.join(root, "art", "boot.webp"), "webp");
+    writeFileSync(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "t", boot: { image: "art/boot.webp" } } };\n'
+    );
+
+    const { code, seen } = await build(["--serve-plugin", plugin, "--out", "dist/web"], root);
+    const html = readFileSync(path.join(root, "dist", "web", "index.html"), "utf8");
+
+    expect(seen.errors).toEqual([]);
+    expect(code).toBe(0);
+    expect(html).toContain('<img id="moku-boot" src="./boot.webp" alt="" />');
+    expect(readFileSync(path.join(root, "dist", "web", "boot.webp"), "utf8")).toBe("webp");
+  });
+
+  // Bug: two page files with one name overwrite each other beside the page, and one link shows the other picture.
+  it("refuses a boot picture and an icon left in the game with one name beside the page", async () => {
+    const root = game();
+    const plugin = keepWebp(root);
+
+    put(path.join(root, "art", "fx-spark.webp"), "webp");
+    writeFileSync(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "t", icons: { favicon: "features/ui/assets/fx-spark.webp" }, boot: { image: "art/fx-spark.webp" } } };\n'
+    );
+
+    const { code, seen } = await build(["--serve-plugin", plugin, "--out", "dist/web"], root);
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      '[game] build: page.boot.image and page.icons.favicon share the name "fx-spark.webp" beside the page.'
+    ]);
+  });
+
+  // Bug: the clash check of the boot picture also refuses a game with no boot whose two icons share a name.
+  it("builds two icons left in the game with one name as before, with no boot", async () => {
+    const root = game();
+    const plugin = keepWebp(root);
+
+    put(path.join(root, "art", "fx-spark.webp"), "webp");
+    writeFileSync(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "t", icons: { favicon: "features/ui/assets/fx-spark.webp", appleTouch: "art/fx-spark.webp" } } };\n'
+    );
+
+    const { code, seen } = await build(["--serve-plugin", plugin, "--out", "dist/web"], root);
+
+    expect(seen.errors).toEqual([]);
+    expect(code).toBe(0);
   });
 
   it("a --serve-plugin without a Bun plugin is refused", async () => {

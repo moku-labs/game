@@ -24,7 +24,15 @@ import type { BunPlugin } from "bun";
 import { findFeatureOwners } from "../project/features";
 import type { CliDeps } from "./cli";
 import { type EngineFingerprint, engineFingerprint, engineLine } from "./engine";
-import { agentFlag, buildMain, DEBUG_AGENT, debugMain, pageHtml, scriptMark } from "./generate";
+import {
+  agentFlag,
+  buildMain,
+  DEBUG_AGENT,
+  debugMain,
+  linkedFiles,
+  pageHtml,
+  scriptMark
+} from "./generate";
 import { DEV_MANIFEST, devModulesOf, hotPluginOf, loadGame } from "./serve";
 import type { ResolvedGameConfig } from "./types";
 
@@ -428,11 +436,42 @@ async function bundlePage(
 }
 
 /**
- * The fallback for icons Bun left as links into the game: copies each icon beside the page and
- * links it as `./<name>`.
+ * Refuses the boot picture when its copy would share one name beside the page with another file left in the game. One
+ * file linked twice (the favicon also the boot picture) is one copy, not a clash. Two icons of one name build as
+ * before: the boot picture is the only new file the copy can lose.
+ *
+ * @param left - The field and the `/` path of each file Bun left as a link, in page order.
+ * @throws {Error} When the boot picture and another file have one base name.
+ */
+function refuseNameClash(left: readonly (readonly [field: string, linked: string])[]): void {
+  const byName = new Map<string, readonly [field: string, linked: string]>();
+
+  for (const entry of left) {
+    const [field, linked] = entry;
+    const name = path.basename(linked);
+    const earlier = byName.get(name);
+
+    const involvesBoot = field === "page.boot.image" || earlier?.[0] === "page.boot.image";
+
+    if (earlier !== undefined && earlier[1] !== linked && involvesBoot) {
+      throw new Error(
+        `[game] build: ${field} and ${earlier[0]} share the name "${name}" beside the page.`
+      );
+    }
+
+    byName.set(name, entry);
+  }
+}
+
+/**
+ * The fallback for page files Bun left as links into the game, the icons and the boot picture:
+ * copies each beside the page and links it as `./<name>`. Two such files with one name are
+ * refused before anything is copied when one is the boot picture; a file Bun already linked is never copied, so it cannot
+ * clash.
  *
  * @param run - The flags of the run.
  * @param settings - The resolved config.
+ * @throws {Error} When two files left in the game share a name beside the page.
  */
 function relinkIcons(run: BuildRun, settings: ResolvedGameConfig): void {
   const file = path.join(run.out, "index.html");
@@ -441,11 +480,15 @@ function relinkIcons(run: BuildRun, settings: ResolvedGameConfig): void {
   // Bun rewrote every link it bundled: a page with no link into the game stays as built.
   if (!html.includes(`"${TO_ROOT}`)) return;
 
-  for (const icon of Object.values(settings.page.icons)) {
-    const linked = icon?.replaceAll("\\", "/");
-    const leftInGame = linked !== undefined && html.includes(`"${TO_ROOT}${linked}"`);
+  const left = linkedFiles(settings.page)
+    .map(([field, linkedFile]) => [field, linkedFile.replaceAll("\\", "/")] as const)
+    .filter(([, linked]) => html.includes(`"${TO_ROOT}${linked}"`));
 
-    if (!leftInGame) continue;
+  refuseNameClash(left);
+
+  for (const [, linked] of left) {
+    // One file linked twice is copied once: its first pass relinked every occurrence.
+    if (!html.includes(`"${TO_ROOT}${linked}"`)) continue;
 
     const name = path.basename(linked);
 

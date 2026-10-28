@@ -604,6 +604,24 @@ describe("moku-game dev, the parent", () => {
     ]);
   });
 
+  // Bug: the dev page links a boot picture that is not there, or writes a page with a broken fade.
+  it("dev refuses a boot picture that is not a file and a negative boot fade", async () => {
+    const missing = makeGame({
+      "config.ts": 'export default { page: { title: "t", boot: { image: "boot.png" } } };\n'
+    });
+    const fade = makeGame({
+      "config.ts":
+        'export default { page: { title: "t", boot: { image: "boot.png", fadeMs: -1 } } };\n'
+    });
+
+    expect(await errorsOf(["dev"], missing)).toEqual([
+      '[game] moku-game: page.boot.image "boot.png" is not a file in the game.'
+    ]);
+    expect(await errorsOf(["dev"], fade)).toEqual([
+      "[game] config.page.boot.fadeMs is -1.\n  Use a number of milliseconds, 0 or more."
+    ]);
+  });
+
   it("dev hands Ctrl+C, SIGTERM and SIGHUP to the child and exits with its code", async () => {
     const root = makeGame();
     const ended: { exit: (code: number) => void } = { exit: () => undefined };

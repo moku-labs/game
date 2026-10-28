@@ -100,6 +100,7 @@ export default { page: { title: "mini-game" } } satisfies GameConfig;
 | `page.orientation` | `"portrait" \| "landscape" \| "any"` | `"portrait"` | The orientation the native build locks |
 | `page.icons` | `{ favicon?, appleTouch? }` | `{}` | Icon files relative to the game, as `<link>` tags |
 | `page.head` | `readonly string[]` | `[]` | Raw tags for `<head>`, verbatim |
+| `page.boot` | `{ image, width?, fadeMs? }` | `undefined` | The boot picture: an `<img id="moku-boot">` centred over the canvas from the first paint, faded out after the first scene drew, then removed. `image` is a file relative to the game (required), `width` its CSS width (`"40vmin"`), `fadeMs` the fade (`300`; `0` removes it in that frame). Absent: the page shows only `page.background` until the first scene |
 | `native` | `{ name, identifier, icon?, targets? }` | `undefined` | The native app. Absent: no native build |
 | `system` | `readonly SystemName[]` | `[]` | `lifecycle`, `back`, `haptics`, `keepAwake`, `store`: the system plugins the shell wires |
 | `save` | `"memory" \| "local" \| "store"` | `"memory"` | Where the player's save lives |
