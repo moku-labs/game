@@ -23,7 +23,7 @@ export const DEBUG_AGENT = "@moku-labs/editor/agent/page";
  */
 export const ASSETS_STAMP = "assets-stamp.ts";
 
-/** A colour or a language tag: it lands in a `<style>` and in attributes, so nothing else passes. */
+/** A colour, a language tag or a CSS length: it lands in a `<style>` and in attributes, so nothing else passes. */
 const SAFE_VALUE = /^[#\w(),.%\s-]+$/;
 
 /** The files of `tests/scenarios/` that are not scenarios. */
@@ -46,6 +46,9 @@ type Page = ResolvedGameConfig["page"];
 
 /** The two icons a page may link. */
 type IconName = keyof Page["icons"];
+
+/** The boot picture of a page, every field set. */
+type Boot = NonNullable<Page["boot"]>;
 
 /** Where the page reaches the game folder and its script from. */
 export type PageLinks = {
@@ -111,10 +114,10 @@ function escapeHtml(text: string): string {
 /**
  * Checks a value of the page that lands in the style and in attributes.
  *
- * @param value - The background or the lang.
+ * @param value - The background, the lang or the width of the boot picture.
  * @param problem - The error when the value has another character.
  * @returns The value.
- * @throws {Error} The problem, when the value is not a plain colour or tag.
+ * @throws {Error} The problem, when the value is not a plain colour, tag or length.
  * @example
  * ```ts
  * safeValue("#10161d", "not a colour"); // "#10161d"
@@ -127,24 +130,25 @@ function safeValue(value: string, problem: string): string {
 }
 
 /**
- * The link of one icon: a path inside the game folder, never above it.
+ * The link of one file of the page, an icon or the boot picture: a path inside the game folder,
+ * never above it.
  *
- * @param name - The icon field.
+ * @param field - The config field, such as `page.icons.favicon` or `page.boot.image`.
  * @param file - The path the config gives, relative to the game folder.
  * @returns The path with `/` separators.
  * @throws {Error} When the path is absolute or climbs out of the game folder.
  * @example
  * ```ts
- * iconPath("favicon", "assets/icon.png"); // "assets/icon.png"
+ * gamePath("page.boot.image", "assets\\boot.png"); // "assets/boot.png"
  * ```
  */
-function iconPath(name: IconName, file: string): string {
+function gamePath(field: string, file: string): string {
   const slashed = file.replaceAll("\\", "/");
   const absolute = slashed.startsWith("/") || /^[a-z]:/i.test(slashed);
   const escapesGame = absolute || slashed.split("/").includes("..") || slashed === "";
 
   if (escapesGame) {
-    throw new Error(`[game] moku-game: page.icons.${name} "${file}" is not a file in the game.`);
+    throw new Error(`[game] moku-game: ${field} "${file}" is not a file in the game.`);
   }
 
   return slashed;
@@ -172,20 +176,92 @@ function iconLinks(icons: Page["icons"], toRoot: string): string[] {
 
     if (file === undefined) return [];
 
-    return [`    <link rel="${relation}" href="${escapeHtml(toRoot + iconPath(name, file))}" />`];
+    const field = `page.icons.${name}`;
+    const href = escapeHtml(toRoot + gamePath(field, file));
+
+    return [`    <link rel="${relation}" href="${href}" />`];
   });
+}
+
+/**
+ * The files of the game the page links, each with its config field, in a fixed order: the favicon,
+ * the apple touch icon, the boot picture. The build copies the ones Bun left as links; the dev
+ * server checks that each is a file.
+ *
+ * @param page - The page of the resolved `config.ts`.
+ * @returns The field and the path, as the config gives it, of each file the page names.
+ * @example
+ * ```ts
+ * linkedFiles(resolveConfig({ page: { title: "T", icons: { favicon: "icon.png" }, boot: { image: "boot.png" } } }).page); // [["page.icons.favicon", "icon.png"], ["page.boot.image", "boot.png"]]
+ * ```
+ */
+export function linkedFiles(page: Page): [field: string, file: string][] {
+  const { favicon, appleTouch } = page.icons;
+
+  return [
+    ...(favicon === undefined ? [] : [["page.icons.favicon", favicon] as [string, string]]),
+    ...(appleTouch === undefined
+      ? []
+      : [["page.icons.appleTouch", appleTouch] as [string, string]]),
+    ...(page.boot === undefined ? [] : [["page.boot.image", page.boot.image] as [string, string]])
+  ];
+}
+
+/**
+ * The style rule of the boot picture: centred, above the canvas, deaf to the pointer, fading
+ * over `fadeMs` once the page sets its opacity to 0.
+ *
+ * @param boot - The boot picture of the page.
+ * @returns The rule, with a space before it.
+ * @throws {Error} When the width is not a CSS length.
+ * @example
+ * ```ts
+ * bootRule({ image: "boot.png", width: "52vmin", fadeMs: 0 }).includes("width: 52vmin;"); // true
+ * ```
+ */
+function bootRule(boot: Boot): string {
+  const width = safeValue(
+    boot.width,
+    `[game] moku-game: page.boot.width "${boot.width}" is not a CSS length.`
+  );
+
+  return (
+    ` #moku-boot { position: fixed; left: 50%; top: 50%; width: ${width}; height: auto; ` +
+    "transform: translate(-50%, -50%); z-index: 1; pointer-events: none; " +
+    `transition: opacity ${String(boot.fadeMs)}ms linear; }`
+  );
+}
+
+/**
+ * The `<img>` of the boot picture, the first element of the body.
+ *
+ * @param boot - The boot picture of the page.
+ * @param toRoot - The path from the page to the game folder.
+ * @returns The line.
+ * @throws {Error} When the picture is not a file in the game.
+ * @example
+ * ```ts
+ * bootImage({ image: "assets/boot.png", width: "40vmin", fadeMs: 300 }, "../"); // '    <img id="moku-boot" src="../assets/boot.png" alt="" />'
+ * ```
+ */
+function bootImage(boot: Boot, toRoot: string): string {
+  const src = escapeHtml(toRoot + gamePath("page.boot.image", boot.image));
+
+  return `    <img id="moku-boot" src="${src}" alt="" />`;
 }
 
 /**
  * The page a game runs in: the title, the language, the background (also the theme colour), the
  * icons as links (never `url()` in the style: `Bun.build` does not rewrite it), the `head` tags
- * verbatim after the style, `<div id="game">` and the module script.
+ * verbatim after the style, then the body: the boot picture first when the page has one (an
+ * `<img id="moku-boot">`, its rule in the style), `<div id="game">` and the module script. A page
+ * without a boot is the same HTML as before `page.boot`.
  *
  * @param page - The page of the resolved `config.ts`.
  * @param links - The path to the game folder and the script.
  * @returns The HTML.
- * @throws {Error} When the background is not a CSS colour, the lang not a language tag, or an
- *   icon path leaves the game folder.
+ * @throws {Error} When the background is not a CSS colour, the lang not a language tag, an icon
+ *   path or the boot picture leaves the game folder, or the boot width is not a CSS length.
  * @example
  * ```ts
  * pageHtml(resolveConfig({ page: { title: "mini-game" } }).page, { toRoot: "../", script: "./main.ts" }).includes("<title>mini-game</title>"); // true
@@ -202,7 +278,8 @@ export function pageHtml(page: Page, links: PageLinks): string {
   );
   const style =
     `html, body { margin: 0; height: 100%; background: ${background}; } ` +
-    "#game { width: 100%; height: 100%; touch-action: none; }";
+    "#game { width: 100%; height: 100%; touch-action: none; }" +
+    (page.boot === undefined ? "" : bootRule(page.boot));
 
   return [
     "<!doctype html>",
@@ -217,6 +294,7 @@ export function pageHtml(page: Page, links: PageLinks): string {
     ...page.head.map(tag => `    ${tag}`),
     "  </head>",
     "  <body>",
+    ...(page.boot === undefined ? [] : [bootImage(page.boot, links.toRoot)]),
     '    <div id="game"></div>',
     `    <script type="module" src="${escapeHtml(links.script)}"></script>`,
     "  </body>",

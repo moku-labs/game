@@ -13,6 +13,7 @@ import type { ClockSource } from "../plugins/clock/types";
 import { isControl } from "../plugins/flow/doors/dev";
 import { memory } from "../plugins/model/store/providers/memory";
 import type { PlayerStateProvider } from "../plugins/model/store/types";
+import { fadeBoot } from "./boot";
 import { resolveConfig } from "./config";
 import { pageSave } from "./save";
 import type {
@@ -21,6 +22,7 @@ import type {
   OverlayStart,
   PageOptions,
   ResolvedGameConfig,
+  ResolvedPageBoot,
   Scenario,
   ScreenAppOfGame,
   StartedPage,
@@ -247,6 +249,24 @@ function followPageHide(app: PageApp): void {
 }
 
 /**
+ * Fades the boot picture once the first scene drew, when the page has one: a page with a
+ * document and an `<img id="moku-boot">`. Without a document (a test) or the element, nothing is
+ * added. A picture the config no longer names, on a page written before, goes at once.
+ *
+ * @param app - The started screen app: its renderer registered its render callback first.
+ * @param boot - `page.boot` of the resolved config, or `undefined`.
+ */
+function followBoot(app: PageApp, boot: ResolvedPageBoot | undefined): void {
+  if (typeof document === "undefined") return;
+
+  const element = document.querySelector<HTMLImageElement>("#moku-boot");
+
+  if (element === null) return;
+
+  fadeBoot(app.time, app.scenes, element, boot?.fadeMs ?? 0);
+}
+
+/**
  * Starts the agents, in order, after the app, in dev and in a debug build: each gets the app, the
  * page title and the game's `.dev` modules. A throwing agent is logged and the page keeps running.
  *
@@ -287,7 +307,8 @@ function openStartOverlay(app: PageApp, overlay: OverlayStart): void {
  * fresh memory save, never on the stored one), builds the system shell when the page has one,
  * picks the save, makes the screen app on `#game` over the device clock and the manifest next to
  * the page, sets `globalThis.game`, `system` and `doors`, follows reduced motion, starts the shell,
- * then the app, and runs the graph. A graph that stops is logged, never thrown. In dev and in a
+ * then the app, follows the boot picture of `page.boot` (it fades once the first scene drew, and
+ * is removed), and runs the graph. A graph that stops is logged, never thrown. In dev and in a
  * debug build it then logs `page:build` (the build id, the engine id, the control profile),
  * starts the agents and shows the overlay as `config.ts` `debug.overlay` asks. Every problem goes
  * to the app's log. On `pagehide` it flushes the save, and stops the app when the page is really
@@ -351,6 +372,8 @@ export async function startPage<Game extends AnyGameApp>(
   // The shell starts first, so keep-awake finds it running.
   await shell?.start();
   await app.start();
+  // After start: the renderer registered its render callback then, so the fade's runs after the draw.
+  followBoot(app, settings.page.boot);
 
   app.flow.run().catch((error: unknown) => {
     app.log.error("[game] The graph stopped.", undefined, toError(error));

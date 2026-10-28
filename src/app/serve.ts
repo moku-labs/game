@@ -19,6 +19,7 @@ import {
   bunfigText,
   devFlag,
   devMain,
+  linkedFiles,
   pageHtml,
   scriptMark
 } from "./generate";
@@ -172,28 +173,29 @@ export async function loadSettings(root: string): Promise<ResolvedGameConfig> {
 }
 
 /**
- * Checks that every icon the page names is a file of the game.
+ * Checks that every file the page links, the icons and the boot picture, is a file of the game.
  *
  * @param root - The game folder.
  * @param page - The resolved page.
- * @throws {Error} When an icon is not a file in the game.
+ * @throws {Error} When an icon or the boot picture is not a file in the game.
  */
-function checkIcons(root: string, page: ResolvedGameConfig["page"]): void {
-  for (const [name, file] of Object.entries(page.icons)) {
-    if (file !== undefined && !isFile(path.join(root, file))) {
-      throw new Error(`[game] moku-game: page.icons.${name} "${file}" is not a file in the game.`);
+function checkPageFiles(root: string, page: ResolvedGameConfig["page"]): void {
+  for (const [field, file] of linkedFiles(page)) {
+    if (!isFile(path.join(root, file))) {
+      throw new Error(`[game] moku-game: ${field} "${file}" is not a file in the game.`);
     }
   }
 }
 
 /**
  * Reads and checks a game folder for a page: `config.ts` and `index.ts` exist, the config
- * resolves and its icons are files of the game.
+ * resolves (a bad `page.boot.fadeMs` is refused here, before any page is made) and the files the
+ * page links, its icons and its boot picture, are files of the game.
  *
  * @param root - The game folder, absolute.
  * @returns The resolved config.
  * @throws {Error} When `config.ts` or `index.ts` is missing, a config value is refused, or an icon
- *   is not a file in the game.
+ *   or the boot picture is not a file in the game.
  */
 export async function loadGame(root: string): Promise<ResolvedGameConfig> {
   configFileOf(root);
@@ -206,7 +208,7 @@ export async function loadGame(root: string): Promise<ResolvedGameConfig> {
 
   const settings = await loadSettings(root);
 
-  checkIcons(root, settings.page);
+  checkPageFiles(root, settings.page);
 
   return settings;
 }

@@ -55,7 +55,7 @@ export type SaveKind = "memory" | "local" | "store";
  * // config.ts of a game
  * import type { GameConfig } from "@moku-labs/game/app";
  * export default {
- *   page: { title: "Лесной городок", lang: "ru", background: "#10161d", orientation: "portrait", icons: { favicon: "assets/icon.png" } },
+ *   page: { title: "Лесной городок", lang: "ru", background: "#10161d", orientation: "portrait", icons: { favicon: "assets/icon.png" }, boot: { image: "assets/boot.png" } },
  *   native: { name: "Лесной городок", identifier: "com.mokulabs.timber", icon: "assets/icon.png" },
  *   system: ["lifecycle", "back", "haptics", "keepAwake"],
  *   save: "memory",
@@ -78,6 +78,22 @@ export type GameConfig = {
     icons?: { favicon?: string; appleTouch?: string };
     /** Raw tags written into `<head>`, verbatim, in order. None by default. */
     head?: readonly string[];
+    /**
+     * The boot picture: an `<img>` centred over the canvas from the first paint, faded out after
+     * the first scene drew, then removed. Absent by default: the page shows only `background`
+     * until the first scene. `image` is a file relative to the game folder, never absolute, never
+     * `..`; `width` is its CSS width, default `"40vmin"`; `fadeMs` the fade, default `300`, `0`
+     * removes the picture in that frame.
+     *
+     * @example
+     * ```ts
+     * // config.ts of A Memory Missing: the logo from the icon tap to the splash scene's first frame.
+     * export default {
+     *   page: { title: "A Memory Missing", background: "#F4E6CA", boot: { image: "assets/boot.png", width: "52vmin" } }
+     * } satisfies GameConfig; // the logo fades over 300 ms, the default
+     * ```
+     */
+    boot?: { image: string; width?: string; fadeMs?: number };
   };
   /** The native app. Left out, the game has no native build. */
   native?: {
@@ -110,6 +126,23 @@ export type GameConfig = {
 };
 
 /**
+ * `page.boot` of `config.ts` with every default filled, as `resolveConfig` returns it.
+ *
+ * @example
+ * ```ts
+ * resolveConfig({ page: { title: "T", boot: { image: "assets/boot.png" } } }).page.boot; // { image: "assets/boot.png", width: "40vmin", fadeMs: 300 }
+ * ```
+ */
+export type ResolvedPageBoot = {
+  /** The picture file, relative to the game folder. */
+  image: string;
+  /** The CSS width of the picture. */
+  width: string;
+  /** The fade-out after the first scene drew, ms. */
+  fadeMs: number;
+};
+
+/**
  * How the editor's overlay shows when a debug page starts, `config.ts` `debug.overlay`.
  *
  * @example
@@ -122,7 +155,8 @@ export type OverlayStart = "closed" | "pill" | "open";
 
 /**
  * `GameConfig` with every default filled, as `resolveConfig` returns it. The page, the CLI and the
- * shell read this one, never the raw config.
+ * shell read this one, never the raw config. `page.boot` is the one key left out when the game
+ * names no boot picture.
  *
  * @example
  * ```ts
@@ -130,11 +164,12 @@ export type OverlayStart = "closed" | "pill" | "open";
  *   page: { title: "mini-game", lang: "en", background: "#000000", orientation: "portrait", icons: {}, head: [] },
  *   native: undefined, system: [], save: "memory", assets: { layers: {} }, debug: { overlay: "closed" }
  * };
+ * settings.page.boot; // undefined: no boot picture, the page as before
  * ```
  */
 export type ResolvedGameConfig = {
-  /** The page, every field set. */
-  page: Required<GameConfig["page"]>;
+  /** The page, every field set; `boot` only when the game names a boot picture. */
+  page: Required<Omit<GameConfig["page"], "boot">> & { boot?: ResolvedPageBoot };
   /** The native app, or `undefined` for a game with no native build. */
   native: GameConfig["native"];
   /** The system plugins the shell wires. */

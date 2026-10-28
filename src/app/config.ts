@@ -3,7 +3,20 @@
  * in a file that skips `satisfies GameConfig`. No IO: the page and the CLI both call it. Not
  * exported from any entry.
  */
-import type { GameConfig, OverlayStart, ResolvedGameConfig, SaveKind, SystemName } from "./types";
+import type {
+  GameConfig,
+  OverlayStart,
+  ResolvedGameConfig,
+  ResolvedPageBoot,
+  SaveKind,
+  SystemName
+} from "./types";
+
+/** The CSS width of a boot picture whose config names none. */
+const BOOT_WIDTH = "40vmin";
+
+/** The fade of a boot picture whose config names none, ms. */
+const BOOT_FADE_MS = 300;
 
 /**
  * The save kinds a config may name.
@@ -49,8 +62,9 @@ function overlayStarts(): ReadonlySet<string> {
  * Throws for the first value of a config that TypeScript would have refused.
  *
  * @param config - The default export of `config.ts`.
- * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty, or
- * `debug.overlay` is not a start mode.
+ * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
+ * `debug.overlay` is not a start mode, `page.boot` has no image, or `page.boot.fadeMs` is not a finite number of 0
+ * or more.
  */
 function checkConfig(config: GameConfig): void {
   if (config.save !== undefined && !saveKinds().has(config.save)) {
@@ -77,17 +91,53 @@ function checkConfig(config: GameConfig): void {
       `[game] config.ts: debug.overlay must be "closed", "pill" or "open", got "${String(overlay)}".`
     );
   }
+
+  const image: unknown = config.page.boot?.image;
+
+  if (config.page.boot !== undefined && (typeof image !== "string" || image === "")) {
+    throw new Error(
+      "[game] config.page.boot has no image.\n  Name a picture file of the game in page.boot.image."
+    );
+  }
+
+  const fadeMs = config.page.boot?.fadeMs;
+
+  if (fadeMs !== undefined && !(Number.isFinite(fadeMs) && fadeMs >= 0)) {
+    throw new Error(
+      `[game] config.page.boot.fadeMs is ${String(fadeMs)}.\n  Use a number of milliseconds, 0 or more.`
+    );
+  }
+}
+
+/**
+ * Fills the defaults of `page.boot`: the width `"40vmin"`, the fade 300 ms.
+ *
+ * @param boot - `page.boot` of the config.
+ * @returns The boot with every field set.
+ * @example
+ * ```ts
+ * resolveBoot({ image: "assets/boot.png", fadeMs: 0 }); // { image: "assets/boot.png", width: "40vmin", fadeMs: 0 }
+ * ```
+ */
+function resolveBoot(boot: NonNullable<GameConfig["page"]["boot"]>): ResolvedPageBoot {
+  return {
+    image: boot.image,
+    width: boot.width ?? BOOT_WIDTH,
+    fadeMs: boot.fadeMs ?? BOOT_FADE_MS
+  };
 }
 
 /**
  * Fills every default of a game's `config.ts`: `lang` `"en"`, `background` `"#000000"`,
  * `orientation` `"portrait"`, no icons, no head tags, no system plugin, the memory save, no asset
- * layers, the overlay of a debug page closed at its start.
+ * layers, the overlay of a debug page closed at its start. A `page.boot` gets the width
+ * `"40vmin"` and the fade 300 ms; without one the page has no `boot` key.
  *
  * @param config - The default export of `config.ts`.
  * @returns The config with every field set.
- * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty, or
- * `debug.overlay` is not a start mode.
+ * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
+ * `debug.overlay` is not a start mode, `page.boot` has no image, or `page.boot.fadeMs` is not a finite number of 0
+ * or more.
  * @example
  * ```ts
  * resolveConfig({ page: { title: "T" } }).save; // "memory"
@@ -103,7 +153,9 @@ export function resolveConfig(config: GameConfig): ResolvedGameConfig {
       background: config.page.background ?? "#000000",
       orientation: config.page.orientation ?? "portrait",
       icons: config.page.icons ?? {},
-      head: config.page.head ?? []
+      head: config.page.head ?? [],
+      // Written only with a boot: a page without one resolves as it did before page.boot.
+      ...(config.page.boot === undefined ? {} : { boot: resolveBoot(config.page.boot) })
     },
     native: config.native,
     system: config.system ?? [],
