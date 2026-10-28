@@ -89,16 +89,16 @@ function sameSwitch(before: SceneSwitch, after: SceneSwitch): boolean {
 export function feedName(pctx: ProjectionCtx, name: string, sw: SceneSwitch): void {
   const state = pctx.ctx.state.projection;
   const stored = state.fed.get(name);
+  const held = state.held.has(name);
+
+  // The first feed after `hold` is the value the held item is read with, also when it equals the stored one.
+  if (held && !state.heldFed.has(name)) state.heldFed.set(name, sw);
 
   if (stored !== undefined && sameSwitch(stored, sw)) return;
 
   state.fed.set(name, sw);
 
-  if (state.held.has(name)) {
-    if (!state.heldFed.has(name)) state.heldFed.set(name, sw);
-
-    return;
-  }
+  if (held) return;
 
   const mounted = state.mounted.get(name);
 

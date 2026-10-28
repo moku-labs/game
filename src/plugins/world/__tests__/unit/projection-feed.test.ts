@@ -298,6 +298,23 @@ describe("feed: a held projection", () => {
 
     expect(propsOf(world, held)).toEqual({ to: "board", progress: 0.5 });
   });
+
+  // Bug: a first feed after a second hold equal to the stored value is dropped, so the switch fed later becomes the
+  // value the held item is read with, and a commit builds the held loader again during the switch.
+  it("keeps an equal first feed after a second hold as the value the held item is read with", () => {
+    const world = standing([loaderSpec(loaderFrom())]);
+
+    holdReady(world, WARD);
+    const held = holdReady(world, { ...WARD });
+
+    world.api.projection.feed(LOADER, HALF);
+    world.model.session = { coins: 3 };
+    world.commit("edge", ["session"]);
+    world.frame(16);
+
+    expect(world.api.projection.left()).toBe(Number.POSITIVE_INFINITY);
+    expect(propsOf(world, held)).toEqual({ to: "ward", progress: 0 });
+  });
 });
 
 describe("feed: before the projection is placed", () => {
