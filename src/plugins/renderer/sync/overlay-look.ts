@@ -249,7 +249,10 @@ export function stepParts(sctx: SyncCtx): void {
     const key = ecs.get(entity, HudPart)?.key ?? "";
 
     if (hud === undefined || layerOf(sctx, entity) !== hud) {
-      if (!settling && !projection.isBuilding(entity)) warnOutside(sctx, entity, key);
+      // A part of a build is judged once its scene's layers stand: a HUD part is not outside a layer list not yet its own.
+      const building = settling || projection.isBuilding(entity);
+
+      if (!building) warnOutside(sctx, entity, key);
       applyHud(sctx, entity, view, 1);
 
       continue;
