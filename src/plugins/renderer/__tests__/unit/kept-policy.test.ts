@@ -585,6 +585,20 @@ describe("the debug switch", () => {
   });
 });
 
+describe("the debug switch called without a boolean", () => {
+  // Bug (F121): `debug.kept()` meant as a read switched every kept picture off and spoiled a measuring log.
+  it("switches nothing and names the call", async () => {
+    const drawn = await open(true);
+    const warn = vi.spyOn(drawn.mock.log, "warn");
+    const toggle = drawn.mock.api.sync.debug.kept as (on?: unknown) => void;
+
+    toggle();
+
+    expect(drawn.mock.api.sync.debug.state().kept).toBe(true);
+    expect(warn).toHaveBeenCalledWith("renderer:debug-kept-needs-boolean", { on: undefined });
+  });
+});
+
 describe("placed filters and settling", () => {
   it("a placed filter's origin is the picture's canvas origin in the picture and 0 drawn live", async () => {
     const drawn = await open();
