@@ -138,8 +138,10 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
 
   for (const name of bundles) {
     const isLeaving = state.manifest.bundles[name]?.release === "leave";
+    // A preload had its chance (a live rest) and still missed it; a `"leave"` bundle it skips on purpose.
+    const missed = state.restedLive && state.records.get(name)?.status !== "loaded" && !isLeaving;
 
-    if (state.restedLive && state.records.get(name)?.status !== "loaded" && !isLeaving) {
+    if (missed) {
       ctx.log.warn("assets: the node waited for a bundle", { bundle: name, path: node.path });
     }
 

@@ -86,7 +86,7 @@
  * | audio | music | "decode", gapless; "stream" plays an `<audio>` element |
  * | audio | session | "ambient", iOS only |
  * | effects | maxParticles | 3000, live particles above which one dev warning fires per crossing |
- * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
+ * | effects | maxPasses | 24, render passes per frame above which one dev warning fires once they stay over it 60 frames in a row |
  * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |
  * | effects | blur | { quality: 2, phoneResolution: 0.5 }, what a Blur with quality 0 and resolution 0 resolves to; shallow merge: a game that sets `blur` gives both fields |
  * | platform | provider | undefined, inert: no subscription, no haptic handler, `back()` answers "none"; the engine page passes the system shell's provider |

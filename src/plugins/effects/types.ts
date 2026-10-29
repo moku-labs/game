@@ -35,7 +35,7 @@ import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particl
 export type Config = {
   /** Live particles over all instances above which one dev warning fires per crossing. */
   maxParticles: number;
-  /** Render passes per frame above which one dev warning fires per crossing. */
+  /** Render passes per frame above which one dev warning fires once they stay over it 60 frames in a row. */
   maxPasses: number;
   /** Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart`. */
   phone: boolean | "auto";
