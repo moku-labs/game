@@ -38,6 +38,7 @@ import {
   FakeRectangle,
   FakeTexture
 } from "../../src/plugins/renderer/__tests__/fake-pixi";
+import { fakeClock } from "../../src/testing";
 
 const { defineNode, defineFlow, defineFeature } = defineGame<{
   player: { visits: number };
@@ -60,6 +61,7 @@ function file(key: string): ManifestFile {
 const manifest: Manifest = {
   version: 2,
   bundles: {
+    splash: { feature: "cold", tier: "lazy", mb: 0, files: [] },
     ward: { feature: "cold", tier: "lazy", mb: 0.004, files: [file("cold.wall")] },
     board: { feature: "cold", tier: "lazy", mb: 0.004, files: [file("cold.spark")] }
   }
@@ -112,6 +114,20 @@ const room = projection({
   view: () => [Transform(), Shape({ w: 400, h: 400, fill: 0x99_99_99 })]
 });
 
+/** The splash's logo, in the one layer the splash declares, as A Memory Missing's loading screen. */
+const logo = projection({
+  name: "cold.logo",
+  layer: "loading",
+  from: () => [{ id: "logo" }],
+  key: (item: { id: string }) => item.id,
+  view: () => [Transform(), Shape({ w: 100, h: 100, fill: 0xff_ff_ff })]
+});
+
+const splashScene = defineScene("splash", {
+  bundle: "splash",
+  layers: { loading: {} },
+  projections: [logo]
+});
 const wardScene = defineScene("ward", {
   bundle: "ward",
   layers: { scene: {}, hud: { above: "overlays" } },
@@ -122,8 +138,12 @@ const boardScene = defineScene("board", {
   layers: { scene: {}, ui: { sort: "order" }, hud: { above: "overlays" } },
   projections: [cell, hud]
 });
+const splash = defineNode({ rest: true, scene: "splash", outcomes: { ward: type() } });
 const ward = defineNode({ rest: true, scene: "ward", outcomes: { board: type() } });
 const board = defineNode({ rest: true, scene: "board", outcomes: { back: type() } });
+
+/** The node a cold page starts on. */
+type Start = "splash" | "ward" | "board";
 
 /**
  * The game's flow, starting where the page restores to.
@@ -131,7 +151,17 @@ const board = defineNode({ rest: true, scene: "board", outcomes: { back: type() 
  * @param start - The first node: the board for a restore onto it.
  * @returns The flow.
  */
-function flowFrom(start: "ward" | "board") {
+function flowFrom(start: Start) {
+  // A flow names only nodes its start reaches: the splash leads in, nothing leads back to it.
+  if (start === "splash") {
+    return defineFlow("main", {
+      nodes: { splash, ward, board },
+      start,
+      outcomes: {},
+      edges: { splash: { ward: "ward" }, ward: { board: "board" }, board: { back: "ward" } }
+    });
+  }
+
   return defineFlow("main", {
     nodes: { ward, board },
     start,
@@ -174,6 +204,26 @@ function createIo(): AssetsIo {
 /** The owner of the views a test spawns itself. */
 const PLUGIN = { kind: "plugin", name: "probe" } as const;
 
+/**
+ * A fake clock that moves 1 ms with every read: a frame's building budget of 1 ms runs out after a read or two.
+ *
+ * @returns The clock.
+ */
+function runningClock() {
+  const clock = fakeClock(1000);
+  const read = clock.now.bind(clock);
+
+  clock.now = (): number => {
+    const moment = read();
+
+    clock.set(moment + 1);
+
+    return moment;
+  };
+
+  return clock;
+}
+
 const running: Array<{ stop(): Promise<void> }> = [];
 
 afterEach(async () => {
@@ -186,9 +236,10 @@ afterEach(async () => {
  * Starts a cold page on a first node, every warning kept, and steps until it rests there.
  *
  * @param start - The first node.
+ * @param slow - True for a clock that moves 1 ms with every read under a 1 ms budget: a build spans frames.
  * @returns The running app, the frame driver and the reader of the kept warnings.
  */
-async function coldStart(start: "ward" | "board") {
+async function coldStart(start: Start, slow = false) {
   const warned: Array<{ event: string; data: unknown }> = [];
 
   vi.spyOn(console, "warn").mockImplementation((entry: { event: string; data: unknown }) => {
@@ -201,8 +252,8 @@ async function coldStart(start: "ward" | "board") {
   const main = flowFrom(start);
   const feature = defineFeature("cold", {
     flows: [main],
-    scenes: [wardScene, boardScene],
-    projections: [cell, hud, room],
+    scenes: [splashScene, wardScene, boardScene],
+    projections: [cell, hud, room, logo],
     emitters: [sparkles],
     strings: { en: english }
   });
@@ -214,7 +265,8 @@ async function coldStart(start: "ward" | "board") {
       flow: { mainFlow: main },
       i18n: { locale: "en", fallback: "en" },
       model: { initialPlayer: { visits: 0 }, initialSession: { visits: 0 }, seed: 1 },
-      renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
+      renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 },
+      ...(slow ? { clock: { source: runningClock() }, scenes: { buildMs: 1 } } : {})
     }
   });
 
@@ -275,6 +327,25 @@ describe("a cold page whose first scene is the board (F117)", () => {
     const cold = await coldStart(start);
 
     for (const event of COLD) expect(cold.warnings(event)).toEqual([]);
+  });
+
+  // Bug (A Memory Missing, a reload into the ward): the ward's HUD parts were built aside while the splash's layers
+  // stood, a list with no HUD layer, and each part was named outside it.
+  it("goes from the splash to the ward without naming a HUD part, in a build over several frames", async () => {
+    const cold = await coldStart("splash", true);
+    let building = 0;
+
+    expect(cold.app.flow.gate.answer({ intent: "ward" })).toBe(true);
+    for (let frame = 0; frame < 120 && cold.app.scenes.current() !== "ward"; frame += 1) {
+      await cold.frames(1);
+      if (cold.app.scenes.current() === "splash") building += 1;
+    }
+
+    expect(building).toBeGreaterThan(2);
+    await cold.frames(6);
+
+    expect(cold.app.scenes.current()).toBe("ward");
+    expect(cold.warnings("renderer:hud-part-outside")).toEqual([]);
   });
 
   // The warnings stay for what they were made for.
