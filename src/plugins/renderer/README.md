@@ -1075,6 +1075,8 @@ at `onStop`. `stats().kept` is `{ pictures, mb, retakes }`.
 
 `sync.debug.kept(false)` (door `game.debug { kept: false }`) draws every filtered view live from the
 next drawn frame, `true` lets them be taken again: the A/B switch of a measurement, in every build.
+A call without a boolean switches nothing and warns `renderer:debug-kept-needs-boolean`; `sync.debug.state().kept`
+reads the switch.
 With `debug.verifyFrames` on (dev and debug builds), every drawn frame in which a picture stood is
 read twice, as drawn and with every picture drawn live, and compared; a difference logs
 `renderer:stale-picture` and draws every view live until the policy takes it again. A frame in which a picture
