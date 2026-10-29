@@ -238,6 +238,15 @@ read at attach, as a `Display` object's is. A point outside the rectangle of a `
 helpers below, pivot included. A box without area holds no point: a particle container measures
 `0 × 0` and is never hit, not even at its origin.
 
+The hit test runs on every pointer move, the hover of a mouse and the drop lookup of a drag, so it
+allocates nothing (F118): it walks the layer containers in draw order without a sorted copy (children
+Pixi left in `zIndex` order are walked as they stand, others through a stable index order kept per
+depth), carries the alpha down the walk instead of walking up from each view, and writes its poses
+into pooled scratch; an accept function that asks again gets a walk of its own. The renderer also
+turns Pixi's own event handling off at `app.init` (`eventMode: "none"`, every `eventFeatures` flag
+false): no engine part listens to a Pixi event, and Pixi would hit-test every move again. `input`
+owns the pointer listeners, the cursor, `touch-action` and `preventDefault`.
+
 ### Filters
 
 `effects` builds, writes and destroys the filter instances; `sync` only hangs them on a view and

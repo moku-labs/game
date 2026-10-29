@@ -65,6 +65,17 @@ describe("host init", () => {
     });
   });
 
+  it("turns Pixi's own pointer handling off, so a move is hit-tested once, by the engine", async () => {
+    const mock = createMockRenderer();
+
+    await mock.start();
+
+    expect(mock.pixi.last().initOptions).toMatchObject({
+      eventMode: "none",
+      eventFeatures: { move: false, globalMove: false, click: false, wheel: false }
+    });
+  });
+
   it("appends the canvas to the mount and reports the backend Pixi chose", async () => {
     const mock = createMockRenderer({ kind: "webgl" });
 

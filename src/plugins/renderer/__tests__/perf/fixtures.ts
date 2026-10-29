@@ -7,7 +7,7 @@ import * as pixi from "pixi.js";
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import type { FrameMeasure } from "../../../time/types";
-import { Layer } from "../../../world/ecs/define";
+import { Layer, Order } from "../../../world/ecs/define";
 import { projection } from "../../../world/projection/define";
 import type { AnyProjectionSpec } from "../../../world/projection/types";
 import type { Entity, SystemTiming } from "../../../world/types";
@@ -1061,4 +1061,93 @@ export async function fadingLoader(phase: "fade" | "wait"): Promise<FadingLoader
   }
 
   return { mock, step };
+}
+
+/** A started renderer with a board of A Memory Missing's size under the finger, and the drop target of its lookups. */
+export type HoverBoard = {
+  mock: MockRenderer;
+  /** A slot of the bottom row of the board: the first view a drop lookup at `(drop.x, drop.y)` accepts. */
+  target: Entity;
+  /** A point over the target, under an item and its shadow. */
+  drop: { x: number; y: number };
+};
+
+/**
+ * Starts the mock renderer with a board of 540 views for the hover hit test (F118): the layer `board` holds 90 slots,
+ * each with an item and the item's shadow under it; the layer `items` holds 200 loose pieces in `order`, their order
+ * values not in insertion order, and a clipping panel of 60 rows; the layer `hud` holds 10 buttons. The frames that
+ * build it have run.
+ *
+ * @returns The board, its drop target and the point over it.
+ */
+export async function hoverBoard(): Promise<HoverBoard> {
+  const mock = createMockRenderer();
+  const { ecs } = mock.world;
+  const owner = { kind: "plugin", name: "perf" } as const;
+  let target: Entity = 0;
+
+  await mock.start();
+  mock.api.sync.textures.provide(() => new FakeTexture({}) as never);
+  mock.world.projection.setLayers([
+    { name: "board", sort: "none" },
+    { name: "items", sort: "order" },
+    { name: "hud", sort: "none" }
+  ]);
+
+  for (let index = 0; index < 90; index += 1) {
+    const at = { x: 60 + (index % 9) * 110, y: 400 + Math.floor(index / 9) * 110 };
+    const slot = ecs.spawn(owner, [
+      Layer({ name: "board" }),
+      Transform(at),
+      Sprite({ texture: "slot" })
+    ]);
+    const item = ecs.spawn(owner, [
+      Transform(),
+      Sprite({ texture: "item" }),
+      Parent({ entity: slot })
+    ]);
+
+    ecs.spawn(owner, [
+      Transform({ y: 8 }),
+      Sprite({ texture: "shadow" }),
+      Parent({ entity: item })
+    ]);
+    if (index === 85) target = slot;
+  }
+
+  for (let index = 0; index < 200; index += 1) {
+    ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 3000 + index * 10, y: 200 }),
+      Sprite({ texture: "piece" }),
+      Order({ value: (index * 7) % 13 })
+    ]);
+  }
+
+  const panel = ecs.spawn(owner, [
+    Layer({ name: "items" }),
+    Transform({ x: 0, y: 1800 }),
+    Shape({ w: 1080, h: 200, clip: true }),
+    Order({ value: 20 })
+  ]);
+
+  for (let index = 0; index < 60; index += 1) {
+    ecs.spawn(owner, [
+      Transform({ x: 540, y: index * 40 }),
+      Sprite({ texture: "row" }),
+      Parent({ entity: panel })
+    ]);
+  }
+
+  for (let index = 0; index < 10; index += 1) {
+    ecs.spawn(owner, [
+      Layer({ name: "hud" }),
+      Transform({ x: 60 + index * 100, y: 60 }),
+      Sprite({ texture: "button" })
+    ]);
+  }
+
+  mock.modules.sync.pass();
+
+  return { mock, target, drop: { x: 60 + 4 * 110, y: 400 + 9 * 110 } };
 }

@@ -242,8 +242,12 @@ export async function createApplication(
     autoDensity: false,
     autoStart: false,
     sharedTicker: false,
-    useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all())
-  };
+    useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all()),
+    // `input` hit-tests every pointer sample itself (`sync.hitTest`) and owns the cursor, `touch-action` and
+    // `preventDefault`; nothing listens to a Pixi event. Pixi's own handling would hit-test the tree again (F118).
+    eventMode: "none",
+    eventFeatures: { move: false, globalMove: false, click: false, wheel: false }
+  } as const;
 
   // Inline and positive: a production `define` folds the condition to `app.init(options)`.
   await (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__
