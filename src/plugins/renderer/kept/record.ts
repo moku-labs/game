@@ -60,6 +60,12 @@ export const SCALED_LIMIT = 2;
  */
 export const CROWD = 4;
 
+/**
+ * First takes a frame among a crowd drawn live (F119): a take costs about one pass more than the live draw it ends, so
+ * no frame of a board's entry passes the live frame before it by more than this; forty shadows rest in four frames.
+ */
+export const CROWD_TAKES = 10;
+
 /** The reasons an ancestor may be hidden by and still draw the view: an overlay's range, a kept ancestor's picture. */
 const DRAWN_ANYWAY = ["freeze", "kept"] as const;
 
@@ -215,8 +221,9 @@ function refusalHolds(state: KeptState, record: KeptRecord): boolean {
 }
 
 /**
- * Tells whether a first take waits for the next frame (F114): a stack drawn direct never does, nor a view drawn live
- * while a crowd of them waits (F119); any other waits when this frame took one already or an alpha is due.
+ * Tells whether a first take waits for the next frame (F114): a stack drawn direct never does; a view drawn live while
+ * a crowd of them waits only when `CROWD_TAKES` were taken in this frame already (F119); any other waits when this
+ * frame took one already or an alpha is due.
  *
  * @param state - The kept state.
  * @param direct - The stack draws direct.
@@ -224,7 +231,8 @@ function refusalHolds(state: KeptState, record: KeptRecord): boolean {
  * @returns True when it waits.
  */
 function heldBack(state: KeptState, direct: boolean, live: boolean): boolean {
-  if (direct || (live && state.liveWaiting >= CROWD)) return false;
+  if (direct) return false;
+  if (live && state.liveWaiting >= CROWD) return state.firstTakes >= CROWD_TAKES;
 
   return state.firstTakes > 0 || state.alphaDue;
 }

@@ -1019,8 +1019,8 @@ frame it is drawn counts as unchanged): its picture costs one pass, live costs t
 picture at most one per frame, in drawing order, and none in a frame where an alpha may be taken; the others wait one
 more frame each, drawn live as before (never hidden), so a whole board that appears at once spreads its take passes
 over several frames. An alpha that may be taken but is not (cut to the canvas under a zoom) holds the others back once.
-A crowd is not spread (F119): while four or more views with a filter are drawn live, not yet kept, the first takes of
-the views drawn live are not held back, so a board of forty shadows is taken in one frame instead of forty. Waiting,
+A crowd is spread less (F119): while four or more views with a filter are drawn live, not yet kept, up to ten of the
+views drawn live are first taken in a frame, so a board of forty shadows is taken in four frames instead of forty. Waiting,
 each live filter breaks the canvas pass every frame; its take renders into small targets before the stage pass. A view
 under a range picture or a kept picture is not drawn live, and its take keeps the spread. A first take inside a kept
 picture does not count as churn of the outer one. A
