@@ -119,6 +119,12 @@ queue would replay answers given against a board the player no longer sees.
 The age is counted in game time, `time.snapshot().elapsed`, from the moment of the refusal. A
 paused game ages nothing.
 
+A dev build (`__MOKU_GAME_DEV__`) warns `flow: a held answer was dropped` with `{ intent, reason }`
+for an answer no gate will take (F122): `aged` (the hold outlived its time), `not-taken` (the next
+gate does not list it, or a guide drops it), `jumped` (a bookmark or the safe node dropped it),
+`fast` (fast mode holds nothing) or `stopped` (no frame source runs). A second answer at `holdMs: 0`
+is not told: the first one is held, and its fate is.
+
 ```ts
 // The move animation closes the gate for about a second. A tap during it is played afterwards.
 createApp({ pluginConfigs: { flow: { mainFlow, safeNode: "home", holdMs: 1100 } } });

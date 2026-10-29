@@ -7,6 +7,21 @@ import type { FlowCtx } from "../types";
 import type { Allow, Answer, GateApi, GateInternal, GateSpec, GateState } from "./types";
 
 /**
+ * Logs, in a dev build, an answer a closed gate refused that no gate will take (F122): it was not
+ * held (`fast`, `stopped`), or it was dropped (`aged`, `not-taken`, `jumped`). The
+ * payload is built only when the line is written.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param answer - The answer that is lost.
+ * @param reason - Why no gate takes it.
+ */
+function dropped(ctx: FlowCtx, answer: Answer, reason: string): void {
+  if (!(typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__)) return;
+
+  ctx.log.warn("flow: a held answer was dropped", { intent: answer.intent, reason });
+}
+
+/**
  * Tells whether an answer is the one a guide names: the intent matches, and the payload too when
  * the guide's answer carries one.
  *
@@ -105,8 +120,15 @@ function deliver(state: GateState, answer: Answer): void {
  * @param answer - The answer the closed gate refused.
  */
 function hold(ctx: FlowCtx, answer: Answer): void {
-  if (ctx.state.fx.mode === "fast") return;
-  if (!ctx.deps.time.isRunning()) return;
+  if (ctx.state.fx.mode === "fast") {
+    dropped(ctx, answer, "fast");
+    return;
+  }
+  if (!ctx.deps.time.isRunning()) {
+    dropped(ctx, answer, "stopped");
+    return;
+  }
+  // The first answer wins: it is held, and its fate is told.
   if (ctx.config.holdMs <= 0 && ctx.state.gate.held !== undefined) return;
 
   const { frame, elapsed } = ctx.deps.time.snapshot();
@@ -130,8 +152,15 @@ function offerHeld(ctx: FlowCtx): void {
 
   ctx.state.gate.held = undefined;
 
-  if (ctx.state.fx.mode === "fast") return;
-  if (!accepts(ctx.state.gate, held.answer)) return;
+  if (ctx.state.fx.mode === "fast") {
+    dropped(ctx, held.answer, "fast");
+
+    return;
+  }
+  if (!accepts(ctx.state.gate, held.answer)) {
+    dropped(ctx, held.answer, "not-taken");
+    return;
+  }
 
   deliver(ctx.state.gate, held.answer);
 }
@@ -213,10 +242,14 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
       if (ctx.config.holdMs > 0 && elapsed - held.at <= ctx.config.holdMs) return;
 
       ctx.state.gate.held = undefined;
+      dropped(ctx, held.answer, "aged");
     },
 
     dropHeld: (): void => {
+      const held = ctx.state.gate.held;
+
       ctx.state.gate.held = undefined;
+      if (held !== undefined) dropped(ctx, held.answer, "jumped");
     }
   };
 }
