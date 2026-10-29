@@ -56,11 +56,11 @@ function file(key: string): ManifestFile {
   return { key, path: `features/cold/assets/${key}.png`, width: 32, height: 32, mb: 0.004 };
 }
 
-/** The board's bundle holds the sparkle; the ward's holds nothing. */
+/** The board's bundle holds the sparkle; the ward's a wall, so a cold start on it waits for a file too. */
 const manifest: Manifest = {
   version: 2,
   bundles: {
-    ward: { feature: "cold", tier: "lazy", mb: 0, files: [] },
+    ward: { feature: "cold", tier: "lazy", mb: 0.004, files: [file("cold.wall")] },
     board: { feature: "cold", tier: "lazy", mb: 0.004, files: [file("cold.spark")] }
   }
 };
