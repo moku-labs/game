@@ -85,8 +85,11 @@ export type State = {
   filterSync: FilterSyncState;
   /** Keys of the one-shot warnings: `"emitter:fx.x"`, `"texture:board.cell"`, `"atlas:fx.x"`. */
   warned: Set<string>;
-  /** Whether each budget warning is in force, so a crossing warns once. */
-  over: { particles: boolean; passes: boolean; fullScreen: boolean };
+  /**
+   * Whether each budget warning is in force, so a crossing warns once; for the passes, the frames in a row over the
+   * budget, so only a steady crossing warns.
+   */
+  over: { particles: boolean; passes: number; fullScreen: boolean };
   /** The teardown closure, the two systems and the world hooks. */
   removers: Array<() => void>;
   /**

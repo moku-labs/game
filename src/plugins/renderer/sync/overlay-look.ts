@@ -218,7 +218,8 @@ function warnOutside(sctx: SyncCtx, entity: Entity, key: string): void {
 
 /**
  * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame, and the
- * parts leaving or not fully back take no tap. A part outside the HUD layer is warned once and drawn as it is.
+ * parts leaving or not fully back take no tap. A part outside the HUD layer is warned once and drawn as it is. Before the
+ * first layers exist (a scene built aside on a cold page, committed after this frame's pass) no part is warned (F117).
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -230,6 +231,8 @@ export function stepParts(sctx: SyncCtx): void {
 
   // per frame: the HUD layer's name kept with the layers, no walk of the layer table.
   const hud = state.hudLayer;
+  // A scene committed after this frame's pass has no layers until the next one: no part is outside a HUD layer yet.
+  const layered = (state.layerList?.length ?? 0) > 0;
   const ecs = sctx.ctx.deps.world.ecs;
 
   // Only when it holds something: V8 gives an empty set a new table at every `clear()`, and the step runs every frame.
@@ -243,7 +246,7 @@ export function stepParts(sctx: SyncCtx): void {
     const key = ecs.get(entity, HudPart)?.key ?? "";
 
     if (hud === undefined || layerOf(sctx, entity) !== hud) {
-      warnOutside(sctx, entity, key);
+      if (layered) warnOutside(sctx, entity, key);
       applyHud(sctx, entity, view, 1);
 
       continue;

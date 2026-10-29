@@ -141,10 +141,11 @@ async function withBoardFeature(
 }
 
 describe("the enter callback", () => {
-  it("pins the bundles of the node and loads them", async () => {
+  it("pins the bundles of the node and loads them, naming a bundle the preload of a live rest missed", async () => {
     const mock = await withBoardFeature();
     const entry = mock.flow.enter[0];
 
+    mock.ctx.state.restedLive = true;
     await entry?.callback(boardNode, { mode: "live", signal: new AbortController().signal });
 
     expect([...mock.ctx.state.pinned]).toEqual(["board", "board.chains"]);
@@ -155,6 +156,20 @@ describe("the enter callback", () => {
       bundle: "board",
       path: "board/await"
     });
+  });
+
+  // Bug (F117): the first node of a cold page or a restore had no rest before it, so no preload, and was warned.
+  it("names no bundle the first node of a page waits for: no live rest ran a preload before it", async () => {
+    const mock = await withBoardFeature();
+    const entry = mock.flow.enter[0];
+
+    await entry?.callback(boardNode, { mode: "live", signal: new AbortController().signal });
+
+    expect(mock.api.isLoaded("board")).toBe(true);
+    expect(mock.log.warn).not.toHaveBeenCalledWith(
+      "assets: the node waited for a bundle",
+      expect.anything()
+    );
   });
 
   it("records the pins but awaits nothing in fast mode", async () => {
@@ -527,6 +542,7 @@ describe("the scene names of the node being entered", () => {
   it('warns that the node waited for a "budget" bundle, never for a "leave" one', async () => {
     const mock = await episodeGame();
 
+    mock.ctx.state.restedLive = true;
     await enter(mock, wardNode);
 
     expect(mock.log.warn).toHaveBeenCalledWith("assets: the node waited for a bundle", {

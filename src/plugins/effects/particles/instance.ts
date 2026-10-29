@@ -133,6 +133,12 @@ export function createInstance(
     Transform(pose),
     ...placementOf(ecs, host)
   ]);
+  const projection = ectx.deps.world.projection;
+
+  // A host of a scene built aside (spec 31): the particles join its build, held until the commit brings the layers, and
+  // a discard takes them with it (F117).
+  if (projection.isBuilding(host)) projection.adopt(entity);
+
   const instance: EmitterInstance = {
     id: baked.id,
     baked,

@@ -114,7 +114,7 @@ export function createEffectsState(): State {
     phone: false,
     seedCounter: 0,
     particles: 0,
-    over: { particles: false, passes: false, fullScreen: false },
+    over: { particles: false, passes: 0, fullScreen: false },
     removers: [],
     diagnostics: { kinds: NO_KINDS, off: new Set<string>(), offList: NO_KINDS },
     warm: { started: false, core: [], probes: [] }

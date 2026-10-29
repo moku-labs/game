@@ -33,6 +33,15 @@ describe("effects:filters, heap bytes per frame step", () => {
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
   });
 
+  // Bug it guards: the steady pass-budget count (F117) boxed its frames or made a record per frame over the budget.
+  it("12 filtered views, nothing changed, the render passes over the budget", () => {
+    const { run, mock } = filtersFixture();
+
+    mock.renderer.passes = 30;
+
+    expect(bytesPerCall(run)).toBeLessThanOrEqual(BUDGET.filtersIdle + NOISE);
+  });
+
   it.each([
     ["touching 1 in every other step: its filter stays on", CROSSING, BUDGET.filtersFadeCrossing],
     [

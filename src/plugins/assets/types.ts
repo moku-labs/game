@@ -627,6 +627,11 @@ export type State = {
   /** A live rest was announced; the arriving node's `load` stage runs the release. */
   restPending: boolean;
   /**
+   * A live rest was announced on this page, so the background preload had its chance: until then a node entered live
+   * (the first scene of a cold boot or a restore) waits for its bundles without a warning (F117).
+   */
+  restedLive: boolean;
+  /**
    * Bundles whose warm for a `ready` effect failed (not an abort): `ready` counts them as there, so a node never
    * hangs on them, until a later load of the bundle succeeds (F52).
    */
