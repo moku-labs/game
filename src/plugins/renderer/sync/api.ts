@@ -866,7 +866,16 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       verifyFrames: (on: boolean): void => deps.demand.verifyFrames(on),
 
-      kept: (on: boolean): void => deps.kept.enabled(on),
+      kept: (on: boolean): void => {
+        // A call from a console without a boolean is a read by mistake: it switched every picture off (F121).
+        if (typeof on !== "boolean") {
+          ctx.log.warn("renderer:debug-kept-needs-boolean", { on });
+
+          return;
+        }
+
+        deps.kept.enabled(on);
+      },
 
       overdraw: (on: boolean): void => {
         // Inline and positive: a production `define` folds the guard, and the switch stays off.

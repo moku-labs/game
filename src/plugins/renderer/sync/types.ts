@@ -709,7 +709,8 @@ export type DebugApi = {
   /**
    * Draws every kept picture live again (false) or lets the renderer keep them (true): the A/B switch of a measurement.
    * Off takes effect in the next drawn frame, all views at once; on lets each view be taken again by the usual rule.
-   * Works in every build; with `keptMb: 0` the pictures stay off.
+   * Works in every build; with `keptMb: 0` the pictures stay off. A call without a boolean switches nothing and warns
+   * `renderer:debug-kept-needs-boolean`: `state().kept` reads the switch.
    *
    * @param on - False to draw every filtered view live.
    * @example
