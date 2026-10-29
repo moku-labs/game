@@ -248,11 +248,10 @@ async function coldStart(start: "ward" | "board") {
   };
 }
 
-/** The warnings a cold start used to log, by event (F117). */
+/** The warnings a cold start used to log, by event (F117); the pass budget is tested in the effects unit tests. */
 const COLD = [
   "renderer: entity is not drawn, unknown layer",
   "renderer:hud-part-outside",
-  "effects:pass-budget",
   "assets: the node waited for a bundle"
 ] as const;
 
@@ -272,7 +271,7 @@ describe("a cold page whose first scene is the board (F117)", () => {
   it.each([
     "board",
     "ward"
-  ] as const)("starts cold on the %s without any of the four warnings", async start => {
+  ] as const)("starts cold on the %s without any of the cold-start warnings", async start => {
     const cold = await coldStart(start);
 
     for (const event of COLD) expect(cold.warnings(event)).toEqual([]);
