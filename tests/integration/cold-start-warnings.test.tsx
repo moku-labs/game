@@ -341,6 +341,7 @@ describe("a cold page whose first scene is the board (F117)", () => {
       if (cold.app.scenes.current() === "splash") building += 1;
     }
 
+    // The build spans frames, as in the game: a part judged while it builds, not only in the frame it is attached.
     expect(building).toBeGreaterThan(2);
     await cold.frames(6);
 

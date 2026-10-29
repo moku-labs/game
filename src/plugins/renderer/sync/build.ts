@@ -249,7 +249,7 @@ export function stepAside(sctx: SyncCtx, report: (entity: Entity, error: unknown
 /**
  * Tells whether held views may wait for the pass that attaches them: world's membership version moved since the list
  * was last scanned. A build ends only with such a move (a commit, a discard, the open of a warm window, a held view
- * dropped), so a list whose version stands holds building views only. Read by `still()`: two field reads.
+ * dropped), so a list whose version stands holds building views only. Read by `still()`, and by the HUD-part check of the overlay step, which judges no part in such a frame: two field reads.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when the pass has held views to look at again.
