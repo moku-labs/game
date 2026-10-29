@@ -16,6 +16,15 @@ function emptyRecords(): KeptRecord[] {
 }
 
 /**
+ * Creates an empty texture list. Same reason as `emptyRecords`.
+ *
+ * @returns An empty list.
+ */
+function emptyTextures(): PixiRenderTexture[] {
+  return [];
+}
+
+/**
  * Creates an empty map. Same reason as `emptyRecords`.
  *
  * @returns An empty map.
@@ -57,6 +66,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     byTop: emptyMap(),
     ranges: emptyMap(),
     spare: undefined,
+    pool: emptyTextures(),
+    poolBytes: 0,
     madeGroups: emptyWeakSet(),
     frame: 0,
     unsorted: false,
@@ -76,7 +87,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     flushPasses: 0,
     calm: false,
     firstTakes: 0,
-    alphaDue: false
+    alphaDue: false,
+    liveWaiting: 0
   };
 }
 
@@ -161,6 +173,9 @@ export function stopKept(state: KeptState): void {
 
   state.spare?.destroy(true);
   state.spare = undefined;
+  for (const texture of state.pool) destroyTexture(texture);
+  state.pool.length = 0;
+  state.poolBytes = 0;
   state.records.length = 0;
   state.byEntity.clear();
   state.byTop.clear();
@@ -176,6 +191,7 @@ export function stopKept(state: KeptState): void {
   state.drawnPictures = 0;
   state.firstTakes = 0;
   state.alphaDue = false;
+  state.liveWaiting = 0;
   state.warnedBudget = false;
   state.warnedBlend.clear();
   state.verifySkipped = 0;

@@ -94,6 +94,9 @@ export const BUDGET = {
   // F114: 10 views with an alpha filter off the canvas, stepped (a mark elsewhere). A take that rendered nothing is
   // remembered: before, each was tried again every few frames, building its bounds (arrays, spans) at each attempt.
   keptIdleAway: 0,
+  // F119: 10 live views with a filter that turn every frame, never taken, a view elsewhere marked. New: every flush
+  // counts the views drawn live that wait, each walk up to the stage by its parents, which allocates nothing.
+  keptCrowd: 0,
   // F68: 10 kept views and a filtered view with a glow inside, drawn live, every record stepped (a mark elsewhere). New,
   // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
   // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.

@@ -28,6 +28,7 @@ import {
   endLoan,
   firstInputs,
   labelOf,
+  poolTexture,
   renderStage1,
   renderStage2,
   renderStage3,
@@ -51,6 +52,13 @@ export const CALM_AFTER = 8;
  * blur or shimmer, and the picture is taken again at the new scale.
  */
 export const SCALED_LIMIT = 2;
+
+/**
+ * Views with a filter drawn live, not yet kept, from which a first take of one of them waits for no other (F119): each
+ * breaks the canvas pass with its filter in every frame it waits, while its take renders into small targets before the
+ * stage pass. Fewer keep the one-a-frame spread of F114 (a few pieces of the board under the leaving memory).
+ */
+export const CROWD = 4;
 
 /** The reasons an ancestor may be hidden by and still draw the view: an overlay's range, a kept ancestor's picture. */
 const DRAWN_ANYWAY = ["freeze", "kept"] as const;
@@ -193,26 +201,51 @@ function drawsDirectAt(stack: Stack, resolution: number): boolean {
 }
 
 /**
- * Tells whether a take the budget refused still does not fit (P6.3).
+ * Tells whether a take the budget refused still does not fit (P6.3); the pool's bytes are the take's to have (F119).
  *
  * @param state - The kept state.
  * @param record - The record.
  * @returns True when it still does not fit.
  */
 function refusalHolds(state: KeptState, record: KeptRecord): boolean {
-  return record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget;
+  return (
+    record.refused > 0 &&
+    state.bytes - state.poolBytes + record.refused - record.bytes > state.budget
+  );
 }
 
 /**
- * Tells whether a first take waits for the next frame (F114): a stack drawn direct never does; any other waits when
- * this frame took one already or an alpha is due.
+ * Tells whether a first take waits for the next frame (F114): a stack drawn direct never does, nor a view drawn live
+ * while a crowd of them waits (F119); any other waits when this frame took one already or an alpha is due.
  *
  * @param state - The kept state.
  * @param direct - The stack draws direct.
+ * @param live - The view is drawn live in this frame.
  * @returns True when it waits.
  */
-function heldBack(state: KeptState, direct: boolean): boolean {
-  return !direct && (state.firstTakes > 0 || state.alphaDue);
+function heldBack(state: KeptState, direct: boolean, live: boolean): boolean {
+  if (direct || (live && state.liveWaiting >= CROWD)) return false;
+
+  return state.firstTakes > 0 || state.alphaDue;
+}
+
+/**
+ * Tells whether a view is drawn live in the stage pass of this frame (F119): every ancestor up to the stage is
+ * renderable, none drawn through an overlay's range picture or a kept ancestor's picture. Waiting, it costs a filter
+ * pass on the canvas; its take costs about the same, in small targets before the stage pass.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @returns True when it is drawn live.
+ */
+function drawnLive(kctx: KeptCtx, record: KeptRecord): boolean {
+  const stage = kctx.host.stage();
+
+  for (let node = record.top.parent; node !== stage; node = node.parent) {
+    if (node === null || !node.renderable) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -638,7 +671,8 @@ export function dropRecord(
   if (record.mode === "kept") goLive(kctx, record, view, putBack);
 
   endLoan(record.s2Of);
-  destroyRecord(record, texture => dropTexture(kctx, texture));
+  // Its textures wait in the pool for the next take of their size (F119).
+  destroyRecord(record, texture => poolTexture(kctx, texture));
   ungroup(kctx, record);
 
   state.bytes -= record.bytes;
@@ -1363,10 +1397,11 @@ function stepLive(
   // A glow under the top stays live, remembered until the subtree changes (F68).
   if (blendedBelow(kctx, record)) return;
   // One first take per frame, inner first: the others stay live and wait (F114). A stack drawn direct takes for one
-  // pass, less than its live draw: never held back, and while one is due the others wait for the next frame.
+  // pass, less than its live draw: never held back, and while one is due the others wait for the next frame. A view
+  // drawn live is not held back either: waiting, it breaks the canvas pass in every frame (F119).
   const direct = drawsDirect(NOW);
 
-  if (heldBack(state, direct)) return;
+  if (heldBack(state, direct, drawnLive(kctx, record))) return;
 
   wrapBare(kctx, record, view);
 
@@ -1670,6 +1705,7 @@ export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
  * Marks, before the step, the live records drawn direct that may be taken in this flush (F114): eligible, nothing
  * changed under them. An alpha take costs one pass and its live draw two, so while one is due no other first take
  * happens in this frame. A record due once that did not end its step kept is not due again until a change under it.
+ * The others drawn live are counted: a first take among a crowd of them is not spread (F119).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1679,6 +1715,7 @@ export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
   const resolution = kctx.host.resolution();
 
   state.alphaDue = false;
+  state.liveWaiting = 0;
 
   for (let index = 0; index < state.records.length; index += 1) {
     const record = state.records[index];
@@ -1688,8 +1725,13 @@ export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
 
     // The stack as the step will read it: due when it draws direct and the record may be kept.
     readStack(record.slots, resolution, pixi.AlphaFilter, DUE);
-    record.alphaDue = drawsDirectAt(DUE, resolution) && eligible(kctx, record, view, DUE);
+
+    const direct = drawsDirectAt(DUE, resolution);
+
+    record.alphaDue = direct && eligible(kctx, record, view, DUE);
     state.alphaDue ||= record.alphaDue;
+    // Counted without the whole eligibility, which the step reads: the walk up its parents is enough for a crowd.
+    if (!direct && drawnLive(kctx, record)) state.liveWaiting += 1;
   }
 }
 

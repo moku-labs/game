@@ -224,6 +224,13 @@ export type KeptState = {
   /** A canvas-sized texture a released range left, reused by the next take of the same size (LRU-evictable, P6). */
   spare: PixiRenderTexture | undefined;
   /**
+   * The textures of records whose views left, reused by the next take of the same size (F119); counted in `bytes`,
+   * destroyed first when a take needs room.
+   */
+  pool: PixiRenderTexture[];
+  /** The bytes of `pool`, a part of `bytes`: a take may have them (P6.3). */
+  poolBytes: number;
+  /**
    * Containers the cache made render groups; a pooled object leaves one (P9.3). The stage root a range picture makes
    * one stays one (P7.5).
    */
@@ -270,6 +277,8 @@ export type KeptState = {
   firstTakes: number;
   /** A record drawn direct is due in this flush: the first takes of the others wait for the next (F114). */
   alphaDue: boolean;
+  /** Live records drawn live with a filter in this flush (F119): from `CROWD` on, their first takes do not wait. */
+  liveWaiting: number;
 };
 
 /** The scratch matrices of the module, made once from the Pixi module. */
