@@ -116,22 +116,25 @@ describe("a press that wore the press look and was not counted, in a dev build",
   });
 
   // Bug caught: a press the browser took away is lost silently.
-  it("warns cancelled for a pointercancel and capture-lost for a lost capture", () => {
-    const cancelled = createMockInput();
+  it("warns cancelled for a pointercancel", () => {
+    const mock = createMockInput();
 
-    pressButton(cancelled);
-    record(cancelled.state, at("cancel", 50));
-    cancelled.frame();
+    pressButton(mock);
+    record(mock.state, at("cancel", 50));
+    mock.frame();
 
-    expect(reasons(cancelled)).toEqual([{ view: KEY, reason: "cancelled" }]);
+    expect(reasons(mock)).toEqual([{ view: KEY, reason: "cancelled" }]);
+  });
 
-    const lost = createMockInput();
+  // Bug caught: a press whose capture the browser took away is lost silently.
+  it("warns capture-lost for a lost capture", () => {
+    const mock = createMockInput();
 
-    pressButton(lost);
-    record(lost.state, at("lost", 50));
-    lost.frame();
+    pressButton(mock);
+    record(mock.state, at("lost", 50));
+    mock.frame();
 
-    expect(reasons(lost)).toEqual([{ view: KEY, reason: "capture-lost" }]);
+    expect(reasons(mock)).toEqual([{ view: KEY, reason: "capture-lost" }]);
   });
 
   // Bug caught: a resting thumb's press, taken over by another finger, vanishes silently.
@@ -145,24 +148,27 @@ describe("a press that wore the press look and was not counted, in a dev build",
     expect(reasons(mock)).toEqual([{ view: KEY, reason: "other-finger" }]);
   });
 
-  // Bug caught: a world that stops under the finger drops the press silently, or warns every frame.
-  it("warns paused once when the world pauses, and fast when it turns fast", () => {
-    const paused = createMockInput();
+  // Bug caught: a world that pauses under the finger drops the press silently, or warns every frame.
+  it("warns paused once when the world pauses", () => {
+    const mock = createMockInput();
 
-    pressButton(paused);
-    paused.world.mode = "paused";
-    paused.frame();
-    paused.frame();
+    pressButton(mock);
+    mock.world.mode = "paused";
+    mock.frame();
+    mock.frame();
 
-    expect(reasons(paused)).toEqual([{ view: KEY, reason: "paused" }]);
+    expect(reasons(mock)).toEqual([{ view: KEY, reason: "paused" }]);
+  });
 
-    const fast = createMockInput();
+  // Bug caught: a world that turns fast under the finger drops the press silently.
+  it("warns fast when the world turns fast", () => {
+    const mock = createMockInput();
 
-    pressButton(fast);
-    fast.world.mode = "fast";
-    fast.frame();
+    pressButton(mock);
+    mock.world.mode = "fast";
+    mock.frame();
 
-    expect(reasons(fast)).toEqual([{ view: KEY, reason: "fast" }]);
+    expect(reasons(mock)).toEqual([{ view: KEY, reason: "fast" }]);
   });
 
   // Bug caught: a button that left the world under the finger (a scene switch) is lost silently.

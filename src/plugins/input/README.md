@@ -312,7 +312,7 @@ nothing and allocates nothing; a release build writes nothing.
 |---|---|---|---|
 | `input: pressed, but the tap was not counted` | warn | A pressed view that carries `Tappable` lets the press go without a tap | `{ view, reason }`: `moved-off` (released past `tapSlopPx`, no swipe answered), `scroll` (the press went to the scroll it pans), `cancelled` (`pointercancel`, or the canvas changed), `capture-lost`, `other-finger` (a second finger took the resting press over), `paused`, `fast` (the world stopped under the finger), `view-gone` (the view left before the release) |
 | `input: counted, but the gate took nothing` | warn | An answer `flow.gate` refused at an open gate | `{ view, intent, gate }`: `no-edge` (the resting node does not list the intent), `refused` (a guide's narrow dropped it and names no `blocked`), `blocked` (it answered the guide's `blocked` in its place) |
-| `input: counted, the gate is closed: held for the next gate` | debug | An answer at a closed gate: it is held, and `flow` warns `flow: a held answer was dropped` if no gate takes it | `{ view, intent }` |
+| `input: counted, the gate is closed: held for the next gate` | debug | An answer at a closed gate: it is held, and `flow` warns `flow:answer-dropped` if no gate takes it | `{ view, intent }` |
 
 ## Events
 

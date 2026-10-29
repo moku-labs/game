@@ -53,7 +53,7 @@ export function lostPress(ctx: InputCtx, reason: LostPress): void {
 
 /**
  * Logs an answer the gate did not take. A closed gate holds it for the next gate, so that is told
- * at debug level only: `flow` warns when the held answer is dropped. Otherwise the line says what
+ * at debug level only: `flow` warns `flow:answer-dropped` when no gate takes the held answer. Otherwise the line says what
  * the gate said: `no-edge`, the resting node does not list the intent; `refused`, a guide's narrow
  * dropped it and names no `blocked`; `blocked`, it answered the guide's `blocked` in its place.
  *

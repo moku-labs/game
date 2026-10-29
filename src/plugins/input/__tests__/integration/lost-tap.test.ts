@@ -85,7 +85,7 @@ function lostLines(app: App): Array<{ level: string; event: string; data: unknow
   return app.log
     .trace()
     .filter(
-      entry => entry.event.startsWith("input: counted") || entry.event.startsWith("flow: a held")
+      entry => entry.event.startsWith("input: counted") || entry.event === "flow:answer-dropped"
     )
     .map(({ level, event, data }) => ({ level, event, data }));
 }
@@ -172,8 +172,8 @@ describe("a tap the gate took nothing for, in a dev build", () => {
       },
       {
         level: "warn",
-        event: "flow: a held answer was dropped",
-        data: { intent: "play", reason: "not-taken" }
+        event: "flow:answer-dropped",
+        data: { intent: "play", payload: {}, reason: "refusedNext" }
       }
     ]);
 

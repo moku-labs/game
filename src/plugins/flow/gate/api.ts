@@ -7,18 +7,34 @@ import type { FlowCtx } from "../types";
 import type { Allow, Answer, GateApi, GateInternal, GateSpec, GateState } from "./types";
 
 /**
- * Logs, in a dev build, an answer a closed gate refused that no gate will take (F122): it was not
- * held (`fast`, `stopped`), or it was dropped (`aged`, `not-taken`, `jumped`). The
- * payload is built only when the line is written.
+ * Why an answer a closed gate refused is taken by no gate: the next gate does not take it
+ * (`refusedNext`), it outlived its hold (`expired`), a newer answer took its place (`replaced`), the
+ * position jumped (`jumped`), or it was never held: fast mode (`fast`), no frame source (`stopped`).
+ * The first three are the reasons of the game's own `taps:lost` line.
+ */
+type DropReason = "refusedNext" | "expired" | "replaced" | "jumped" | "fast" | "stopped";
+
+/**
+ * Tells whether the dev log is on: a dev build, `__MOKU_GAME_DEV__` defined true.
+ *
+ * @returns True in a dev build.
+ */
+function isDev(): boolean {
+  return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
+}
+
+/**
+ * Logs, in a dev build, an answer a closed gate refused that no gate will take (F122). The payload
+ * is built only when the line is written.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param answer - The answer that is lost.
  * @param reason - Why no gate takes it.
  */
-function dropped(ctx: FlowCtx, answer: Answer, reason: string): void {
-  if (!(typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__)) return;
+function dropped(ctx: FlowCtx, answer: Answer, reason: DropReason): void {
+  if (!isDev()) return;
 
-  ctx.log.warn("flow: a held answer was dropped", { intent: answer.intent, reason });
+  ctx.log.warn("flow:answer-dropped", { intent: answer.intent, payload: answer.payload, reason });
 }
 
 /**
@@ -122,14 +138,20 @@ function deliver(state: GateState, answer: Answer): void {
 function hold(ctx: FlowCtx, answer: Answer): void {
   if (ctx.state.fx.mode === "fast") {
     dropped(ctx, answer, "fast");
+
     return;
   }
   if (!ctx.deps.time.isRunning()) {
     dropped(ctx, answer, "stopped");
+
     return;
   }
+
+  const previous = ctx.state.gate.held;
+
   // The first answer wins: it is held, and its fate is told.
-  if (ctx.config.holdMs <= 0 && ctx.state.gate.held !== undefined) return;
+  if (ctx.config.holdMs <= 0 && previous !== undefined) return;
+  if (previous !== undefined) dropped(ctx, previous.answer, "replaced");
 
   const { frame, elapsed } = ctx.deps.time.snapshot();
   // Refused after this frame's `signals`: the hold belongs to the next frame and lives through it.
@@ -158,7 +180,8 @@ function offerHeld(ctx: FlowCtx): void {
     return;
   }
   if (!accepts(ctx.state.gate, held.answer)) {
-    dropped(ctx, held.answer, "not-taken");
+    dropped(ctx, held.answer, "refusedNext");
+
     return;
   }
 
@@ -242,7 +265,7 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
       if (ctx.config.holdMs > 0 && elapsed - held.at <= ctx.config.holdMs) return;
 
       ctx.state.gate.held = undefined;
-      dropped(ctx, held.answer, "aged");
+      dropped(ctx, held.answer, "expired");
     },
 
     dropHeld: (): void => {
