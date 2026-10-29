@@ -3,14 +3,14 @@
  * render time, one frame after the input phase asks. One walk yields every hit, topmost first:
  * `hitTest` stops at the first one the caller accepts, `hitAll` lists them all. It runs on every
  * pointer move (F118), so the walk allocates nothing: no sorted copy of a container's children, no
- * list of the tree, no generator, no pose object. Its scratch is a pooled walk, so a caller's
- * accept function that asks again gets a walk of its own.
+ * list of the tree, no generator, no pose object. Its scratch is a walk pooled in the sync state, so
+ * a caller's accept function that asks again gets a walk of its own.
  */
 import type { Entity } from "../../world/types";
-import { NineSlice, Shape, type TransformValue } from "../components";
+import { NineSlice, Shape } from "../components";
 import type { PixiContainer, Point } from "../types";
 import { parentOf, rootPoseInto } from "./pose";
-import type { HitBox, SyncCtx } from "./types";
+import type { HitBox, SyncCtx, HitWalk as Walk } from "./types";
 
 /** How deep a parent chain or a container tree is followed. */
 const MAX_DEPTH = 32;
@@ -18,41 +18,16 @@ const MAX_DEPTH = 32;
 /** Below this effective alpha a view is treated as not there. */
 const MIN_ALPHA = 0.01;
 
-/** The scratch of one hit test, taken from `idleWalks` and given back when it ends. */
-type Walk = {
-  /** Per depth, the child indices of an out-of-order container, sorted by `zIndex`; only ever grown. */
-  orders: number[][];
-  /**
-   * Per depth, the alpha the objects at that depth draw with, their own included. Kept here, not passed: a double
-   * handed to a call that is not inlined is boxed, once per view.
-   */
-  alphas: Float64Array;
-  /** The root pose of the entity whose box is tested, written in place. */
-  pose: TransformValue;
-  /** The reference point brought into an entity's own space, written in place. */
-  local: Point;
-  /** The reference point. */
-  x: number;
-  y: number;
-  /** The filter of `hitTest`; `undefined` while `hitAll` collects. */
-  accept: ((entity: Entity) => boolean) | undefined;
-  /** Where `hitAll` collects; `undefined` while `hitTest` looks for one. */
-  out: Entity[] | undefined;
-  /** The entity `hitTest` accepted. */
-  found: Entity | undefined;
-};
-
-/** Walks no hit test holds now: one, unless an accept function asked again. */
-const idleWalks: Walk[] = [];
-
 /**
- * Takes a walk from the pool, or makes one the first time and whenever every walk is held.
+ * Takes a walk from the pool of the sync state, or makes one the first time and whenever every
+ * walk is held.
  *
+ * @param sctx - Domain context of the sync module.
  * @returns The walk.
  */
-function takeWalk(): Walk {
+function takeWalk(sctx: SyncCtx): Walk {
   return (
-    idleWalks.pop() ?? {
+    sctx.ctx.state.sync.hitWalks.pop() ?? {
       orders: [],
       alphas: new Float64Array(MAX_DEPTH + 1),
       pose: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
@@ -67,15 +42,16 @@ function takeWalk(): Walk {
 }
 
 /**
- * Gives a walk back, holding nothing of the caller.
+ * Gives a walk back to the pool, holding nothing of the caller.
  *
+ * @param sctx - Domain context of the sync module.
  * @param walk - The walk.
  */
-function releaseWalk(walk: Walk): void {
+function releaseWalk(sctx: SyncCtx, walk: Walk): void {
   walk.accept = undefined;
   walk.out = undefined;
   walk.found = undefined;
-  idleWalks.push(walk);
+  sctx.ctx.state.sync.hitWalks.push(walk);
 }
 
 /**
@@ -98,6 +74,7 @@ function localPoint(sctx: SyncCtx, walk: Walk, entity: Entity): Point {
     return local;
   }
 
+  // Undo the entity's root pose: translate, unrotate, unscale, then add the pivot back.
   const above = rootPoseInto(sctx.ctx.deps.world.ecs, entity, walk.pose);
   const scale = above.scale === 0 ? 1 : above.scale;
   const cos = Math.cos(-above.rotation);
@@ -282,6 +259,33 @@ function inZOrder(children: readonly PixiContainer[]): boolean {
 }
 
 /**
+ * Puts one child index into the sorted head of a list: after the last kept child whose `zIndex` is
+ * lower or equal, so equals keep their insertion order.
+ *
+ * @param order - The list; its first `index` entries are sorted.
+ * @param children - The children the indices point into.
+ * @param index - The child to place.
+ */
+function insertInOrder(order: number[], children: readonly PixiContainer[], index: number): void {
+  const child = children[index];
+
+  if (child === undefined) return;
+
+  let slot = index;
+
+  for (; slot > 0; slot -= 1) {
+    const before = order[slot - 1];
+    const other = before === undefined ? undefined : children[before];
+
+    if (before === undefined || other === undefined || other.zIndex <= child.zIndex) break;
+
+    order[slot] = before;
+  }
+
+  order[slot] = index;
+}
+
+/**
  * The child indices of a container in `zIndex` order, insertion order kept between equals, as a
  * stable sort gives them; `undefined` when the children already stand so, as Pixi leaves a
  * sortable container after each render. Written into the walk's list for that depth.
@@ -306,24 +310,7 @@ function orderOf(
   }
 
   // Insertion sort into the kept list: stable, and short work on a list a render left nearly sorted.
-  for (let index = 0; index < children.length; index += 1) {
-    const child = children[index];
-
-    if (child === undefined) continue;
-
-    let slot = index;
-
-    for (; slot > 0; slot -= 1) {
-      const before = order[slot - 1];
-      const other = before === undefined ? undefined : children[before];
-
-      if (before === undefined || other === undefined || other.zIndex <= child.zIndex) break;
-
-      order[slot] = before;
-    }
-
-    order[slot] = index;
-  }
+  for (let index = 0; index < children.length; index += 1) insertInOrder(order, children, index);
 
   return order;
 }
@@ -459,7 +446,7 @@ export function hitTest(
   y: number,
   accept: (entity: Entity) => boolean
 ): Entity | undefined {
-  const walk = takeWalk();
+  const walk = takeWalk(sctx);
 
   walk.x = x;
   walk.y = y;
@@ -468,7 +455,7 @@ export function hitTest(
   try {
     return walkLayers(sctx, walk) ? walk.found : undefined;
   } finally {
-    releaseWalk(walk);
+    releaseWalk(sctx, walk);
   }
 }
 
@@ -481,7 +468,7 @@ export function hitTest(
  * @returns The entities, a fresh array; empty when nothing is there.
  */
 export function hitAll(sctx: SyncCtx, x: number, y: number): Entity[] {
-  const walk = takeWalk();
+  const walk = takeWalk(sctx);
   const out: Entity[] = [];
 
   walk.x = x;
@@ -493,6 +480,6 @@ export function hitAll(sctx: SyncCtx, x: number, y: number): Entity[] {
 
     return out;
   } finally {
-    releaseWalk(walk);
+    releaseWalk(sctx, walk);
   }
 }

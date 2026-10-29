@@ -168,6 +168,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     objectHidden: emptyWeakMap(),
     viewOfTop: emptyWeakMap(),
     overlay: createOverlayState(),
+    hitWalks: [],
     redraws: 0,
     held: emptyMap(),
     passesVersion: 0,

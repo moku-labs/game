@@ -2,7 +2,7 @@
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
-import type { OverlayValue, ShapeValue } from "../components";
+import type { OverlayValue, ShapeValue, TransformValue } from "../components";
 import type { Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { FilterCache, KeptState } from "../kept/types";
@@ -1694,6 +1694,31 @@ export type HeldViews = {
   reported: boolean;
 };
 
+/** The scratch of one hit test (F118), taken from `SyncState.hitWalks` and given back when it ends. */
+export type HitWalk = {
+  /** Per depth, the child indices of an out-of-order container, sorted by `zIndex`; only ever grown. */
+  orders: number[][];
+  /**
+   * Per depth, the alpha the objects at that depth draw with, their own included. Kept here, not passed: a double
+   * handed to a call that is not inlined is boxed, once per view.
+   */
+  alphas: Float64Array;
+  /** The root pose of the entity whose box is tested, written in place. */
+  pose: TransformValue;
+  /** The reference point brought into an entity's own space, written in place. */
+  local: Point;
+  /** The reference x. */
+  x: number;
+  /** The reference y. */
+  y: number;
+  /** The filter of `hitTest`; `undefined` while `hitAll` collects. */
+  accept: ((entity: Entity) => boolean) | undefined;
+  /** Where `hitAll` collects; `undefined` while `hitTest` looks for one. */
+  out: Entity[] | undefined;
+  /** The entity `hitTest` accepted. */
+  found: Entity | undefined;
+};
+
 /**
  * sync module state.
  */
@@ -1781,6 +1806,8 @@ export type SyncState = {
   viewOfTop: WeakMap<PixiContainer, View>;
   /** The overlays, their ranges, dims and HUD parts (spec 22). */
   overlay: OverlayState;
+  /** Hit test walks no call holds now: one, unless an accept function asked again (F118). */
+  hitWalks: HitWalk[];
   /** `Graphics` paths drawn since the monitor last took them: shapes, clip masks, outlines (spec 26 R2.3). */
   redraws: number;
   /**
