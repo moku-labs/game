@@ -393,6 +393,21 @@ describe("the filter sync — budgets", () => {
     expect(mock.log.warn).not.toHaveBeenCalled();
   });
 
+  // Bug it guards: a count left at 59 by a screen whose filtered views all left would warn on the next one's first frame.
+  it("starts the count again when the last filtered view leaves", () => {
+    const mock = started();
+    const first = view(mock, [Glow()]);
+
+    mock.renderer.passes = 26;
+    for (let frame = 0; frame < 59; frame += 1) mock.frame();
+    mock.world.ecs.despawn(first);
+    mock.frame();
+    view(mock, [Glow()]);
+    for (let frame = 0; frame < 59; frame += 1) mock.frame();
+
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
   it("reads neither the renderer's passes nor a change set while no view carries a filter", () => {
     const mock = started();
     const changed = vi.spyOn(mock.world.ecs, "changed");

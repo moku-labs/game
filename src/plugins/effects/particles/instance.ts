@@ -95,7 +95,8 @@ function placementOf(ecs: EcsApi, host: Entity): AnyComponentValue[] {
  * Starts an instance of a baked effect on a host: the container, the particle entity, the seed,
  * then the prewarm and the burst. World space places the container at the host's root point,
  * turned and scaled by nothing, and leaves it there; local space gives it the host's whole root
- * pose, which the step writes again every frame. Neither uses `Parent`.
+ * pose, which the step writes again every frame. Neither uses `Parent`. A host of a scene built
+ * aside has its particle entity adopted into that build: held until the commit, gone with a discard.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.

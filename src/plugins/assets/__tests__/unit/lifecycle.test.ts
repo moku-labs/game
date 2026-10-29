@@ -240,6 +240,7 @@ describe("releaseAll", () => {
 
     const created = mock.io.created.length;
 
+    mock.ctx.state.restedLive = true;
     releaseAll(mock.ctx.state);
 
     expect(mock.io.destroyed).toHaveLength(created);
@@ -248,6 +249,8 @@ describe("releaseAll", () => {
     expect(mock.flow.enter).toEqual([]);
     expect(mock.renderer.providers).toEqual([]);
     expect(mock.ctx.state.io).toBeUndefined();
+    // A restarted app is a cold page again: its first node waits without a warning (F117).
+    expect(mock.ctx.state.restedLive).toBe(false);
   });
 
   it("aborts a running load and the preload queue", async () => {
