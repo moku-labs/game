@@ -220,8 +220,15 @@ export function renderStage1(
   );
 
   const group = top.isRenderGroup;
+  // The picture leaves out the top's own alpha, which Pixi applies to a root it renders: the quad draws it (F120).
+  const alpha = top.alpha;
 
-  if (!kctx.host.renderTo(top, s1, matrices.m1, true)) return false;
+  if (alpha !== 1) top.alpha = 1;
+
+  const rendered = kctx.host.renderTo(top, s1, matrices.m1, true);
+
+  if (alpha !== 1) top.alpha = alpha;
+  if (!rendered) return false;
   if (!group && !record.wasGroup) kctx.state.madeGroups.add(top);
 
   record.s1Version += 1;
