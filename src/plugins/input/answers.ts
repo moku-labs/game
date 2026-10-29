@@ -6,6 +6,7 @@ import type { Answer } from "../flow/types";
 import type { Json } from "../model/types";
 import type { Entity } from "../world/types";
 import type { CarryValue, IntentValue } from "./components";
+import { lostAnswer } from "./lost";
 import type { Direction, InputCtx, State, TapListener } from "./types";
 
 /**
@@ -140,7 +141,8 @@ export function notifyTap(ctx: InputCtx, entity: Entity): void {
  * A press the narrow of a guide drops — another intent, or the allowed intent with another
  * payload (a drop on the wrong cell) — answers the guide's `blocked` instead, once, when the gate
  * is open and the guide names one. A closed gate holds the press as it is and converts nothing.
- * The gate's state is read only for a refused answer, never for an accepted one.
+ * The gate's state is read only for a refused answer, never for an accepted one. A dev build logs
+ * the refusal with the view and what the gate said (F122).
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view the answer came from, for the warning.
@@ -157,9 +159,12 @@ export function submit(ctx: InputCtx, entity: Entity, answer: Answer): boolean {
   if (gate.answer(answer)) return true;
 
   // The gate keeps `blocked` only while a guide narrows it.
-  const { open, blocked } = gate.state();
+  const read = gate.state();
+  const taken = read.open && read.blocked !== undefined && gate.answer(read.blocked);
 
-  return open && blocked !== undefined && gate.answer(blocked);
+  lostAnswer(ctx, entity, answer, read, taken);
+
+  return taken;
 }
 
 /**
