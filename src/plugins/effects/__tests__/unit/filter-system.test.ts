@@ -355,11 +355,15 @@ function cover(): AnyComponentValue[] {
 }
 
 describe("the filter sync — budgets", () => {
-  it("warns once per crossing of the renderer's render passes", () => {
+  it("warns once per steady crossing of the renderer's render passes: 60 frames in a row", () => {
     const mock = started();
 
     view(mock, [Glow()]);
     mock.renderer.passes = 30;
+    for (let frame = 0; frame < 59; frame += 1) mock.frame();
+
+    expect(mock.log.warn).not.toHaveBeenCalled();
+
     mock.frame();
     mock.frame();
 
@@ -369,9 +373,24 @@ describe("the filter sync — budgets", () => {
     mock.renderer.passes = 10;
     mock.frame();
     mock.renderer.passes = 25;
-    mock.frame();
+    for (let frame = 0; frame < 60; frame += 1) mock.frame();
 
     expect(mock.log.warn).toHaveBeenCalledTimes(2);
+  });
+
+  // Bug (F117): the first takes of a scene that appears go over the budget for a few frames and were warned.
+  it("names no start-up overshoot that falls back under the budget within 60 frames", () => {
+    const mock = started();
+
+    view(mock, [Glow()]);
+    mock.renderer.passes = 26;
+    for (let frame = 0; frame < 59; frame += 1) mock.frame();
+    mock.renderer.passes = 7;
+    mock.frame();
+    mock.renderer.passes = 26;
+    for (let frame = 0; frame < 59; frame += 1) mock.frame();
+
+    expect(mock.log.warn).not.toHaveBeenCalled();
   });
 
   it("reads neither the renderer's passes nor a change set while no view carries a filter", () => {

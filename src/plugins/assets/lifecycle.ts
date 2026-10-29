@@ -116,7 +116,8 @@ function releaseMarkedRest(ctx: AssetsCtx, run: RunContext): void {
 /**
  * The `load` stage of entering a node: the bundles of the node become the pinned set, the release
  * a rest marked runs, and in live mode the node waits for its bundles. A bundle the preload did not
- * reach is a dev warning, except a `"leave"` bundle, which the preload skips on purpose.
+ * reach is a dev warning, except a `"leave"` bundle, which the preload skips on purpose, and the
+ * bundles of a node entered before any live rest, which no preload could reach (F117).
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
@@ -138,7 +139,7 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
   for (const name of bundles) {
     const isLeaving = state.manifest.bundles[name]?.release === "leave";
 
-    if (state.records.get(name)?.status !== "loaded" && !isLeaving) {
+    if (state.restedLive && state.records.get(name)?.status !== "loaded" && !isLeaving) {
       ctx.log.warn("assets: the node waited for a bundle", { bundle: name, path: node.path });
     }
 
@@ -311,6 +312,7 @@ export function releaseAll(state: State): void {
   state.sceneComing = [];
   state.exiting = 0;
   state.restPending = false;
+  state.restedLive = false;
   state.stamps = undefined;
   state.swapping = undefined;
   state.io = undefined;

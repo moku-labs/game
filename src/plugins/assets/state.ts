@@ -57,6 +57,7 @@ export function createAssetsState(): State {
     exiting: 0,
     companions: [],
     restPending: false,
+    restedLive: false,
     readyFailed: emptySet(),
     warmed: emptyMap()
   };

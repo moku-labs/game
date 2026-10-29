@@ -802,9 +802,16 @@ function hasEnabledFilter(ectx: EffectsCtx, view: FilteredView): boolean {
 }
 
 /**
- * Warns once per crossing of the pass budget: the renderer's render passes over
- * `config.maxPasses`. The count walks the renderer's filtered views, so it is read only while a
- * view carries a filter; with none the frame draws at most one pass and the budget cannot trip.
+ * Frames in a row the render passes stay over the budget before it warns. A scene that appears draws every filtered
+ * view live until its first take, one take a frame, and a take frame pays the take on top of the views still live: a
+ * board of A Memory Missing went 26 of 24 for a few frames on a cold start (F117). A second at 60 Hz outlasts that.
+ */
+const STEADY_FRAMES = 60;
+
+/**
+ * Warns once per steady crossing of the pass budget: the renderer's render passes over `config.maxPasses` for
+ * `STEADY_FRAMES` frames in a row. The count walks the renderer's filtered views, so it is read only while a view
+ * carries a filter; with none the frame draws at most one pass and the budget cannot trip.
  *
  * @param ectx - Domain context of the effects plugin.
  */
@@ -813,20 +820,25 @@ function checkPassBudget(ectx: EffectsCtx): void {
 
   // No filtered view: at most one pass, under any budget.
   if (state.views.size === 0) {
-    state.over.passes = false;
+    state.over.passes = 0;
 
     return;
   }
 
-  // Warn once when the renderer's passes cross `maxPasses`.
   const passes = deps.renderer.sync.renderPasses();
-  const overPasses = passes > config.maxPasses;
 
-  if (overPasses && !state.over.passes) {
-    ectx.log.warn("effects:pass-budget", { passes, budget: config.maxPasses });
+  if (passes <= config.maxPasses) {
+    state.over.passes = 0;
+
+    return;
   }
 
-  state.over.passes = overPasses;
+  state.over.passes += 1;
+
+  // Warn once, in the frame the crossing becomes steady.
+  if (state.over.passes === STEADY_FRAMES) {
+    ectx.log.warn("effects:pass-budget", { passes, budget: config.maxPasses });
+  }
 }
 
 /** The components a view's box and scale are read from (`coversScreen`): one plain array, never frozen. */
