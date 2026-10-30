@@ -141,8 +141,8 @@ export function notifyTap(ctx: InputCtx, entity: Entity): void {
  * A press the narrow of a guide drops — another intent, or the allowed intent with another
  * payload (a drop on the wrong cell) — answers the guide's `blocked` instead, once, when the gate
  * is open and the guide names one. A closed gate holds the press as it is and converts nothing.
- * The gate's state is read only for a refused answer, never for an accepted one. A dev build logs
- * the refusal with the view and what the gate said (F122).
+ * The gate's state is read only for a refused answer, never for an accepted one. A dev or agent
+ * build logs the refusal with the view and what the gate said (F122).
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view the answer came from, for the warning.
@@ -160,6 +160,7 @@ export function submit(ctx: InputCtx, entity: Entity, answer: Answer): boolean {
 
   // The gate keeps `blocked` only while a guide narrows it.
   const read = gate.state();
+  // A guide's blocked answer takes the press's place, once, when the gate is open.
   const taken = read.open && read.blocked !== undefined && gate.answer(read.blocked);
 
   lostAnswer(ctx, entity, answer, read, taken);

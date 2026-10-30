@@ -119,7 +119,7 @@ queue would replay answers given against a board the player no longer sees.
 The age is counted in game time, `time.snapshot().elapsed`, from the moment of the refusal. A
 paused game ages nothing.
 
-A dev build (`__MOKU_GAME_DEV__`) warns `flow:answer-dropped` with `{ intent, payload, reason }`
+A dev or agent debug build (`__MOKU_GAME_DEV__` or `__MOKU_GAME_AGENT__`) warns `flow:answer-dropped` with `{ intent, payload, reason }`
 for an answer no gate will take (F122): `refusedNext` (the next gate does not list it, or a guide
 drops it), `expired` (the hold outlived its time), `replaced` (with `holdMs` above `0`, a newer
 answer took its place), `jumped` (a bookmark or the safe node dropped it), `fast` (fast mode holds

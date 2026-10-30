@@ -809,6 +809,19 @@ describe("the dev log of a held answer no gate takes (F122)", () => {
     expect(drops(ctx)).toEqual([{ intent: "tap", payload: { cell: "c4" }, reason: "replaced" }]);
   });
 
+  // Bug caught: the phone debug build (agent flag only) is silent exactly where taps are lost.
+  it("warns with __MOKU_GAME_AGENT__ alone", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { ctx, time } = createMockCtx();
+    const gate = createGateApi(ctx);
+
+    gate.answer({ intent: "play" });
+    playFrame(gate, time, 16);
+    playFrame(gate, time, 16);
+
+    expect(drops(ctx)).toEqual([{ intent: "play", payload: undefined, reason: "expired" }]);
+  });
+
   // Bug caught: a release build pays for the log, or prints it to the player.
   it("logs nothing outside a dev build", () => {
     const { ctx, time } = createMockCtx();
