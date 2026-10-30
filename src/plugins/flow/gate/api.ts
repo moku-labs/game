@@ -15,16 +15,7 @@ import type { Allow, Answer, GateApi, GateInternal, GateSpec, GateState } from "
 type DropReason = "refusedNext" | "expired" | "replaced" | "jumped" | "fast" | "stopped";
 
 /**
- * Tells whether the dev log is on: a dev build, `__MOKU_GAME_DEV__` defined true.
- *
- * @returns True in a dev build.
- */
-function isDev(): boolean {
-  return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
-}
-
-/**
- * Logs, in a dev build, an answer a closed gate refused that no gate will take (F122). The payload
+ * Logs, in a dev or agent build, an answer a closed gate refused that no gate will take (F122). The payload
  * is built only when the line is written.
  *
  * @param ctx - Domain context of the flow plugin.
@@ -32,7 +23,15 @@ function isDev(): boolean {
  * @param reason - Why no gate takes it.
  */
 function dropped(ctx: FlowCtx, answer: Answer, reason: DropReason): void {
-  if (!isDev()) return;
+  // The dev or agent guard stays inline: a build defines both flags and folds it.
+  if (
+    !(
+      (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+    )
+  ) {
+    return;
+  }
 
   ctx.log.warn("flow:answer-dropped", { intent: answer.intent, payload: answer.payload, reason });
 }

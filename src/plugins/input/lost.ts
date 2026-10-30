@@ -1,6 +1,6 @@
 /**
  * @file input plugin — the dev log of a lost tap (F122). A button that showed its press look and
- * did nothing is told in dev builds, with the reason, named by its projection key. A good tap
+ * did nothing is told in dev and agent builds, with the reason, named by its projection key. A good tap
  * logs nothing and allocates nothing: a payload is built only for a line that is written.
  */
 import type { Answer } from "../flow/types";
@@ -24,15 +24,6 @@ export type LostPress =
   | "view-gone";
 
 /**
- * Tells whether the dev log is on: a dev build, `__MOKU_GAME_DEV__` defined true.
- *
- * @returns True in a dev build.
- */
-function dev(): boolean {
-  return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
-}
-
-/**
  * Logs a press that wore the press look of a button and will not be a tap. Only a pressed view
  * that carries `Tappable` (or left the world during the press) is told; a press caught by a
  * scroll was the scroll's from its start, and a view without a tap has nothing to lose.
@@ -41,7 +32,15 @@ function dev(): boolean {
  * @param reason - Why the press is lost.
  */
 export function lostPress(ctx: InputCtx, reason: LostPress): void {
-  if (!dev()) return;
+  // The dev or agent guard stays inline: a build defines both flags and folds it.
+  if (
+    !(
+      (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+    )
+  ) {
+    return;
+  }
 
   const { entity, caught, key } = ctx.state;
 
@@ -72,7 +71,15 @@ export function lostAnswer(
   gate: { readonly open: boolean; readonly allowed: readonly string[] },
   blocked: boolean
 ): void {
-  if (!dev()) return;
+  // The dev or agent guard stays inline: a build defines both flags and folds it.
+  if (
+    !(
+      (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+    )
+  ) {
+    return;
+  }
 
   const view = ctx.deps.world.projection.keyOf(entity) ?? entity;
 

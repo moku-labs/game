@@ -141,7 +141,7 @@ export function notifyTap(ctx: InputCtx, entity: Entity): void {
  * A press the narrow of a guide drops — another intent, or the allowed intent with another
  * payload (a drop on the wrong cell) — answers the guide's `blocked` instead, once, when the gate
  * is open and the guide names one. A closed gate holds the press as it is and converts nothing.
- * The gate's state is read only for a refused answer, never for an accepted one. A dev build logs
+ * The gate's state is read only for a refused answer, never for an accepted one. A dev or agent build logs
  * the refusal with the view and what the gate said (F122).
  *
  * @param ctx - Domain context of the input plugin.

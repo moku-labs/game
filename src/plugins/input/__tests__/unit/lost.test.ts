@@ -199,6 +199,26 @@ describe("a press that wore the press look and was not counted, in a dev build",
   });
 });
 
+describe("a lost press in an agent debug build", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Bug caught: the phone debug build (agent flag only) is silent exactly where taps are lost.
+  it("warns with __MOKU_GAME_AGENT__ alone", () => {
+    const mock = createMockInput();
+
+    // Set after the start: the agent flag also turns on monitor counters the mock has no renderer for.
+    pressButton(mock);
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    record(mock.state, at("move", 70));
+    record(mock.state, at("up", 70));
+    mock.frame();
+
+    expect(reasons(mock)).toEqual([{ view: KEY, reason: "moved-off" }]);
+  });
+});
+
 describe("a lost press outside a dev build", () => {
   // Bug caught: a release build pays for the log, or prints it to the player.
   it("logs nothing", () => {

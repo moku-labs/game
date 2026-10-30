@@ -304,9 +304,9 @@ createApp({ plugins: [...screen], pluginConfigs: { input: { traceStepPx: 16 } } 
 
 ## The log of a lost tap
 
-A dev build (`__MOKU_GAME_DEV__`) tells a button that showed its press look and did nothing (F122).
+A dev or agent debug build (`__MOKU_GAME_DEV__` or `__MOKU_GAME_AGENT__`, as on the phone debug build) tells a button that showed its press look and did nothing (F122).
 Each line names the view by its projection key (the entity when it has none). A good tap writes
-nothing and allocates nothing; a release build writes nothing.
+nothing and allocates nothing; a production build drops the code.
 
 | Line | Level | When | Payload |
 |---|---|---|---|
