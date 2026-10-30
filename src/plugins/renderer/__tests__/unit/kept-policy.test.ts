@@ -587,15 +587,17 @@ describe("the debug switch", () => {
 
 describe("the debug switch called without a boolean", () => {
   // Bug (F121): `debug.kept()` meant as a read switched every kept picture off and spoiled a measuring log.
-  it("switches nothing and names the call", async () => {
+  // `0` and `null` read as off before the guard; `undefined` is the call with no argument.
+  // eslint-disable-next-line unicorn/no-null -- a console caller may pass null.
+  it.each([undefined, null, 0, "false"])("switches nothing for %s and names the call", async on => {
     const drawn = await open(true);
     const warn = vi.spyOn(drawn.mock.log, "warn");
     const toggle = drawn.mock.api.sync.debug.kept as (on?: unknown) => void;
 
-    toggle();
+    toggle(on);
 
     expect(drawn.mock.api.sync.debug.state().kept).toBe(true);
-    expect(warn).toHaveBeenCalledWith("renderer:debug-kept-needs-boolean", { on: undefined });
+    expect(warn).toHaveBeenCalledWith("renderer:debug-kept-needs-boolean", { on });
   });
 });
 
