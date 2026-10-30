@@ -2,6 +2,7 @@
  * @file renderer/kept — the state of the kept-picture cache, and its stop from state alone.
  */
 import { BYTES_PER_MB } from "../monitor/units";
+import { destroyWhole } from "../sources";
 import type { Config, PixiContainer, PixiRenderTexture } from "../types";
 import type { KeptRecord, KeptState, RangeRecord } from "./types";
 
@@ -149,7 +150,7 @@ export function destroyRange(range: RangeRecord, drop: (texture: PixiRenderTextu
  * @param texture - The texture.
  */
 function destroyTexture(texture: PixiRenderTexture): void {
-  texture.destroy(true);
+  destroyWhole(texture);
 }
 
 /**
@@ -171,7 +172,7 @@ export function stopKept(state: KeptState): void {
 
   for (const range of state.ranges.values()) destroyRange(range, destroyTexture);
 
-  state.spare?.destroy(true);
+  if (state.spare !== undefined) destroyWhole(state.spare);
   state.spare = undefined;
   for (const texture of state.pool) destroyTexture(texture);
   state.pool.length = 0;

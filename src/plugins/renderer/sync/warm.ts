@@ -12,6 +12,8 @@
  * API rebalances, so another probe would only throw again. The end of a run reaches the monitor through `onWarm`; this
  * file never imports the monitor (LEAD-FIXES-3 O24).
  */
+
+import { destroyWhole } from "../sources";
 import type { PixiContainer, PixiFilter, PixiModule, PixiSprite } from "../types";
 import { clearFilters } from "./filters";
 import type {
@@ -206,7 +208,7 @@ function dropObjects(warm: WarmState): void {
   ];
 
   for (const node of nodes) node?.destroy({ children: true });
-  objects.target.destroy(true);
+  destroyWhole(objects.target);
 }
 
 /**

@@ -4,6 +4,8 @@
  * render is a public `renderer.render` call made before the stage pass (`host.renderTo`); every texture is the
  * engine's own, registered with `host.keep` and destroyed explicitly.
  */
+
+import { destroyWhole } from "../sources";
 import type {
   FilterSlot,
   FilterSlotInputs,
@@ -220,7 +222,7 @@ export function emptyPool(kctx: KeptCtx): void {
  */
 export function dropTexture(kctx: KeptCtx, texture: PixiRenderTexture): void {
   kctx.host.keep(texture.source, false);
-  texture.destroy(true);
+  destroyWhole(texture);
 }
 
 /**
