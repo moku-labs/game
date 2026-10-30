@@ -163,5 +163,10 @@ export const BUDGET = {
   warmHeldPass: 0,
   // F61 S3 slice B+D: the build step of a dev build while the windows rest. Before: the frame request and the dev check
   // of building views, which walks every view into a list, every frame. Now it returns after a few field reads.
-  warmHeldStepDev: 0
+  warmHeldStepDev: 0,
+  // F118: the hover hit test, a miss over a board of 540 views. Before: a sorted copy of every container's children,
+  // the walk's list, two generators and two pose objects per view tested.
+  hitTestMiss: 0,
+  // F118: the drop lookup of a drag over the same board, found under an item and its shadow.
+  hitTestDrop: 0
 } as const;
