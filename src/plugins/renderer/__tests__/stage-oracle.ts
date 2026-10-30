@@ -376,8 +376,8 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
       root ? "root" : `p${idOf(node.parent)} i${place}`,
       root ? "" : `${node.x},${node.y},${node.rotation},${node.scale.x},${node.scale.y}`,
       root ? "" : `${node.pivot.x},${node.pivot.y},${node.skew.x},${node.skew.y}`,
-      // The root's depth sorts its quad among the siblings, never the picture.
-      `a${node.alpha} tint${node.tint} b${node.blendMode} z${root ? "" : node.zIndex}`,
+      // The root's depth sorts its quad among the siblings, never the picture; its alpha is its quad's (F120).
+      `a${root ? "" : node.alpha} tint${node.tint} b${node.blendMode} z${root ? "" : node.zIndex}`,
       `m${idOf(node.mask as object | null)}`,
       filtersText(node),
       lookText(node)
@@ -525,6 +525,11 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
     }
 
     if (drawnInStage(top)) fail(name, "the top is drawn beside its quad");
+    // The picture leaves the top's own alpha out, the quad draws it (F120); a quad drawn direct (F54) also carries the
+    // alpha of its stack, so only the quad of a stand-in is compared.
+    if (standIn.standIn !== quad && Math.abs(quad.alpha - top.alpha) > PLACE_TOLERANCE) {
+      fail(name, `quad alpha ${quad.alpha}, top alpha ${top.alpha}`);
+    }
     if (quad.zIndex !== top.zIndex)
       fail(name, `quad depth ${quad.zIndex}, top depth ${top.zIndex}`);
 
