@@ -1341,15 +1341,21 @@ function linearResets(record: KeptRecord): boolean {
 
 /**
  * The still frames a live record waits before it is taken: eight after churning, none for a stack drawn direct (its
- * take costs one pass, its live draw two: F114; a take that rendered nothing is remembered, `idle`), two otherwise.
+ * take costs one pass, its live draw two: F114; a take that rendered nothing is remembered, `idle`), none for a view
+ * never taken, drawn live in a crowd (each frame a crowd waits, its filters break the canvas pass: F119), two
+ * otherwise: taken in its first still frame, a view that animates in would churn.
  *
+ * @param kctx - The kept context.
  * @param record - The record, live.
  * @returns Drawn frames.
  */
-function waitOf(record: KeptRecord): number {
+function waitOf(kctx: KeptCtx, record: KeptRecord): number {
   if (record.calm) return CALM_AFTER;
+  if (drawsDirect(NOW)) return 0;
 
-  return drawsDirect(NOW) ? 0 : TAKE_AFTER;
+  return Number.isNaN(record.takenAt) && kctx.state.liveWaiting >= CROWD && drawnLive(kctx, record)
+    ? 0
+    : TAKE_AFTER;
 }
 
 /**
@@ -1399,7 +1405,7 @@ function stepLive(
   // A take that rendered nothing is not tried again until the view moves (a change under it clears it too).
   if (moved) record.idle = false;
   // Never taken in a frame its view changed in: a stack drawn direct waits for its first frame without a change.
-  if (changed || record.still < waitOf(record) || record.idle) return;
+  if (changed || record.still < waitOf(kctx, record) || record.idle) return;
 
   // A refused take is not offered again until it fits (P6.3): no thrash.
   if (refusalHolds(state, record)) return;
