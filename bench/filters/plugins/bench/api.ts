@@ -47,6 +47,7 @@ export type BenchHost = {
  */
 export function createBenchState(): BenchState {
   return {
+    host: undefined,
     scene: undefined,
     mounted: undefined,
     mountedMs: 0,
@@ -285,7 +286,7 @@ export function createBenchApi(state: BenchState, host: BenchHost): BenchApi {
       openScene(state, host, sceneOf(first), k === undefined ? {} : { k });
     },
     read: () => rowOf(state, host),
-    rows: () => state.rows,
-    ballast: () => state.ballast
+    rows: () => [...state.rows],
+    ballast: () => [...state.ballast]
   };
 }

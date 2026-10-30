@@ -108,11 +108,14 @@ function canvasPassesOf(
  */
 export function readArm(ring: RingView, since: number, skip: number): ArmRead {
   const { columns, capacity, newest } = ring;
+
+  // How many frames of the ring belong to the arm, and where the oldest of them sits.
   const count = Math.min(ring.written - since, ring.size);
   const oldest = count > 0 ? (newest - count + 1 + capacity) % capacity : 0;
   const { perFrame, restarts } = canvasPassesOf(ring.passes, columns.frame[oldest] ?? 0);
   const frames: FrameSample[] = [];
 
+  // The drawn frames, oldest first.
   for (let back = count - 1; back >= 0; back -= 1) {
     const slot = (newest - back + capacity) % capacity;
     const frame = columns.frame[slot] ?? 0;
@@ -130,6 +133,7 @@ export function readArm(ring: RingView, since: number, skip: number): ArmRead {
     });
   }
 
+  // The medians leave out the head of the arm: the switch, and the GPU timer catching up.
   const settled = frames.slice(skip);
 
   return {

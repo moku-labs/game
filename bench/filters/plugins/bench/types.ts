@@ -4,6 +4,7 @@
 import type { World } from "../../../../src/index.ts";
 import type { BenchScene, Mounted } from "../../features/bench/scenes/types";
 import type { ArmSummary, FrameSample } from "../../lib/readout";
+import type { BenchHost } from "./api";
 
 /** What a show may set. */
 export type ShowOptions = {
@@ -114,7 +115,7 @@ export type BenchApi = {
    * @example
    * ```ts
    * game.bench.show("slope-2");
-   * game.bench.read().summary.canvasPasses; // 3, on a debug page after a few frames
+   * game.bench.read().summary.canvasPasses; // 3, on a debug page once it drew more than 6 frames
    * ```
    */
   read(): ArmRow;
@@ -146,6 +147,8 @@ export type Cycle = { arms: readonly string[]; everyMs: number; at: number; next
 
 /** The state of the plugin. */
 export type BenchState = {
+  /** The engine as the bench reads it; set when the API is made. */
+  host: BenchHost | undefined;
   scene: BenchScene | undefined;
   mounted: Mounted | undefined;
   /** The game time the scene mounted at. */

@@ -5,6 +5,9 @@ canvas break and a filtered pixel cost on the phone. It is a normal Layer-3 game
 `defineGameApp`, a flow of one rest node, one plugin. It imports the engine from `../../src/`, never
 from `@moku-labs/game`: the package name can resolve to a stale `dist/`. It is not published.
 
+The bench is one plugin and this file is its README. Its tests sit in `__tests__/` of this folder,
+because they run the whole game.
+
 ## Run it on the Mac
 
 ```sh

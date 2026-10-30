@@ -76,6 +76,7 @@ async function adb(...words: string[]): Promise<string> {
   return text;
 }
 
+// The phone first: a held port or another app in front ends the run before anything is touched.
 const verdict = phoneVerdict({
   serial,
   forwards: portsOf(await adb("forward", "--list")),
@@ -88,6 +89,7 @@ if (!verdict.free) {
   process.exit(1);
 }
 
+// The plan of the run.
 const schedule = armSchedule(ARMS, {
   slotSeconds: SLOT_SECONDS,
   minFrames: MIN_FRAMES,
@@ -107,9 +109,11 @@ console.info(`Open on the phone: ${address}`);
 for (const slot of schedule.slots) console.info(`${String(slot.at).padStart(5)} s  ${slot.arm}`);
 console.info(`Clocks go to ${out}`);
 
+// The page's port on the phone, and the file of the clocks.
 await adb("reverse", `tcp:${values.port}`, `tcp:${values.port}`);
 writeFileSync(out, "");
 
+// The clocks: one sample loop on the phone, for the length of the run or until Ctrl+C.
 const sampler = Bun.spawn([values.adb, "-s", serial, "shell", SAMPLE_LOOP], { stderr: "ignore" });
 const stop = (): void => sampler.kill();
 const seconds = Number(values.seconds ?? schedule.seconds);
@@ -131,6 +135,7 @@ for await (const chunk of sampler.stdout) {
   for (const sample of samples) appendFileSync(out, `${JSON.stringify(sample)}\n`);
 }
 
+// Only the port this run took goes back.
 clearTimeout(timer);
 await adb("reverse", "--remove", `tcp:${values.port}`);
 console.info("Done: the port is given back.");

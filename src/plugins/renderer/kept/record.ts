@@ -1474,13 +1474,14 @@ function stepLive(
   // Never taken in a frame its view changed in: a stack drawn direct waits for its first frame without a change. A
   // refused take is not offered again until it fits (P6.3): no thrash. A glow under the top stays live, remembered until
   // the subtree changes (F68).
-  if (
+  const staysLive =
     changed ||
     record.still < waitOf(record) ||
     record.idle ||
     refusalHolds(state, record) ||
-    blendedBelow(kctx, record)
-  ) {
+    blendedBelow(kctx, record);
+
+  if (staysLive) {
     noteHeld(state, record, changed, turned);
 
     return;

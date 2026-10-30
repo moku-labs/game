@@ -71,7 +71,8 @@ function recordEntry(kctx: KeptCtx, record: KeptRecord, view: string): WhyEntry 
     return { view, mode: record.direct ? "direct" : "kept", reason: null, calmIn: 0, retake };
   }
 
-  const reason = WHY_LIVE[(record.why === 0 ? WHY.waiting : record.why) - 1] ?? null;
+  const why = record.why === 0 ? WHY.waiting : record.why;
+  const reason = WHY_LIVE[why - 1] ?? null;
 
   return { view, mode: "live", reason, calmIn: record.calmIn, retake };
 }

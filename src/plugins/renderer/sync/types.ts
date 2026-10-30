@@ -792,7 +792,7 @@ export type DebugApi = {
    * Why every view with an enabled filter is drawn as it is, in draw order: from its picture, by its quad, or live and
    * why, how many still frames are left before a take, and what its last take was for. Built when called, never per
    * frame, so a tool may ask at any moment. Agent builds only (dev and `--debug`); every other build answers a frozen
-   * `[]`, and so does an inert renderer.
+   * `[]`, and an inert renderer an empty array.
    *
    * @returns One entry per view, a fresh array.
    * @example
