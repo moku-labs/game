@@ -1064,7 +1064,9 @@ drawn in this frame, the least recently drawn first; an evicted view draws live 
 destroyed. A take that still does not fit is refused, the view drawn live, `renderer:kept-budget`
 logged once per run, and it is not offered again until it fits. Every texture is registered with
 `host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on a drop, a device loss, a rebuild and
-at `onStop`. `stats().kept` is `{ pictures, mb, retakes }`.
+at `onStop`, as `textures.destroy` frees a source, its `change` listeners removed first, so the bind
+groups Pixi keeps over a drawn picture print no `[BindGroup]` warning. The warm-up's probe target
+goes the same way. `stats().kept` is `{ pictures, mb, retakes }`.
 
 `sync.debug.kept(false)` (door `game.debug { kept: false }`) draws every filtered view live from the
 next drawn frame, `true` lets them be taken again: the A/B switch of a measurement, in every build.

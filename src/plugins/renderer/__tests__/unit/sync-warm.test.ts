@@ -549,6 +549,33 @@ describe("the warm-up of a filter", () => {
     expect(destroyFilter).not.toHaveBeenCalled();
     expect(await warmed.mock.api.sync.filters.warm(filter)).toBe(false);
   });
+
+  // Bug: the probe target Pixi drew was destroyed with the listeners of its cached bind groups still on it, and each
+  // warned "[BindGroup] ... destroyed while still bound to a shader".
+  it("stopping destroys the probe target without a bind group warning", async () => {
+    const warmed = await startWarm();
+
+    warmed.mock.api.sync.filters.warm(new pixi.AlphaFilter()).catch(() => undefined);
+    warmed.frame();
+
+    const target = warmed.mock.ctx.state.sync.warm.objects?.target;
+
+    if (target === undefined) throw new Error("no probe tree after a warm frame");
+
+    // What drawing leaves behind in Pixi: a cached batch bind group over the target.
+    pixi.getTextureBatchBindGroup([target.source], 1, 16);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    running.splice(0);
+    warmed.mock.stop();
+    await settle();
+
+    expect(target.destroyed).toBe(true);
+    expect(
+      warn.mock.calls.filter(call => call.some(part => String(part).includes("[BindGroup]")))
+    ).toEqual([]);
+  });
 });
 
 describe("a Pixi without the pieces of the probes", () => {
