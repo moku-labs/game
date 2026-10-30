@@ -19,11 +19,11 @@ import {
   samplesOf
 } from "./lib/a26";
 
-/** One sampling round on the phone: its time, every devfreq clock, the Samsung GPU clock. */
+/** One sampling round on the phone: its time, every devfreq clock, the Samsung GPU clock and load. */
 const SAMPLE_LOOP = [
   "while :; do",
   'echo "@ $(date +%s%N)";',
-  "for f in /sys/class/devfreq/*/cur_freq /sys/kernel/gpu/gpu_clock; do",
+  "for f in /sys/class/devfreq/*/cur_freq /sys/kernel/gpu/gpu_clock /sys/kernel/gpu/gpu_busy; do",
   '[ -r "$f" ] && echo "$f $(cat "$f")";',
   "done;",
   "sleep 0.1;",

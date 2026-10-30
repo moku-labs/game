@@ -116,6 +116,7 @@ describe("the clock samples", () => {
       t: 1_761_826_800_123,
       gpu: 949_000_000,
       mif: 2_028_000,
+      busy: null,
       nodes: {
         "13000000.mali": 949_000_000,
         "17000010.devfreq_mif": 2_028_000,
@@ -125,6 +126,12 @@ describe("the clock samples", () => {
   });
 
   // Bug: an A26 with no devfreq node for the Mali gives no GPU clock at all.
+  // Bug: the load reads 86% with its sign, a plain number test drops it and no run has a busy column.
+  it("reads the load of the GPU, a percent sign and all", () => {
+    expect(clockSample(["@ 1000000000", "/sys/kernel/gpu/gpu_busy 86%"])?.busy).toBe(86);
+    expect(clockSample(["@ 1000000000", "/sys/kernel/gpu/gpu_clock 221000"])?.busy).toBeNull();
+  });
+
   it("takes the GPU from gpu_clock only when no devfreq node names it", () => {
     expect(clockSample(["@ 1000000000", "/sys/kernel/gpu/gpu_clock 949"])?.gpu).toBe(949);
     expect(clockSample([...block, "/sys/kernel/gpu/gpu_clock 1"])?.gpu).toBe(949_000_000);
@@ -136,6 +143,7 @@ describe("the clock samples", () => {
       t: 1000,
       gpu: null,
       mif: null,
+      busy: null,
       nodes: {}
     });
     expect(clockSample(["/sys/class/devfreq/x.mali/cur_freq 1"])).toBeUndefined();

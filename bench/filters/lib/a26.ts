@@ -44,6 +44,9 @@ const MIF_NODE = /mif|ddr|dmc/i;
 /** The GPU clock the Samsung kernel keeps outside devfreq. */
 const GPU_CLOCK_FILE = "/sys/kernel/gpu/gpu_clock";
 
+/** The load of the GPU in percent, written with its sign. */
+const GPU_BUSY_FILE = "/sys/kernel/gpu/gpu_busy";
+
 /** One line of `adb forward --list` or `adb reverse --list`. */
 export type PortLine = { serial: string; local: string; remote: string };
 
@@ -66,6 +69,8 @@ export type ClockSample = {
   gpu: number | null;
   /** The memory clock as the node gives it; `null` without a node. */
   mif: number | null;
+  /** The load of the GPU in percent; `null` without the file. */
+  busy: number | null;
   /** Every devfreq node, by name. */
   nodes: Record<string, number>;
 };
@@ -150,6 +155,19 @@ export function phoneVerdict(reading: PhoneReading): PhoneVerdict {
 }
 
 /**
+ * Keeps one devfreq clock, and names it when it is the GPU's or the memory's.
+ *
+ * @param sample - The sample.
+ * @param node - The node's name.
+ * @param value - Its clock.
+ */
+function noteNode(sample: ClockSample, node: string, value: number): void {
+  sample.nodes[node] = value;
+  if (GPU_NODE.test(node)) sample.gpu = value;
+  if (MIF_NODE.test(node)) sample.mif = value;
+}
+
+/**
  * Reads one block of the sampling loop: `@ <ns>`, then `<file> <value>` lines.
  *
  * @param block - The lines.
@@ -169,22 +187,20 @@ export function clockSample(block: readonly string[]): ClockSample | undefined {
     t: Math.floor(Number(nanos) / 1_000_000),
     gpu: null,
     mif: null,
+    busy: null,
     nodes: {}
   };
   const fallback = { gpu: undefined as number | undefined };
 
   for (const line of lines) {
     const [file = "", word = ""] = line.split(" ");
-    const value = /^\d+$/.test(word) ? Number(word) : undefined;
+    const value = /^\d+%?$/.test(word) ? Number.parseInt(word, 10) : undefined;
     const node = /devfreq\/([^/]+)\//.exec(file)?.[1];
 
     if (value === undefined) continue;
     if (file === GPU_CLOCK_FILE) fallback.gpu = value;
-    if (node === undefined) continue;
-
-    sample.nodes[node] = value;
-    if (GPU_NODE.test(node)) sample.gpu = value;
-    if (MIF_NODE.test(node)) sample.mif = value;
+    if (file === GPU_BUSY_FILE) sample.busy = value;
+    if (node !== undefined) noteNode(sample, node, value);
   }
 
   sample.gpu ??= fallback.gpu ?? sample.gpu;

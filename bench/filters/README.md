@@ -89,8 +89,8 @@ bun -e 'Bun.serve({ port: 4173, fetch: request => {
 
 The phone is shared. Ask first, and never run this while another session holds it.
 
-1. On the phone: Chrome with `chrome://flags/#enable-webgpu-developer-features` on, or the GPU times
-   are rounded to 0.1 ms. Leave the launcher or Chrome in front.
+1. On the phone: leave the launcher or Chrome in front. Chrome needs no flag: `timestamp-query` is
+   there, its times are only rounded to 0.1 ms.
 2. On the Mac, the page: the dev command above, `--port 4173`.
 3. On the Mac, the script, with the serial as its argument:
 
@@ -107,12 +107,12 @@ The phone is shared. Ask first, and never run this while another session holds i
 4. Open the printed address on the phone within a few seconds. The page turns the arms itself, every
    2 s. The schedule plans at least 300 usable frames per arm at `--fps` (30 by default).
 5. Check the log header: `gpu.timer` must be `timestamp-query`.
-6. Before the end of the run, read the rows over CDP. `adb forward tcp:9333
-   localabstract:chrome_devtools_remote`, then `Runtime.evaluate` of
-   `JSON.stringify(game.bench.rows())`, then `adb forward --remove tcp:9333`.
+6. Before the end of the run, read the rows over CDP. `adb forward tcp:9444
+   localabstract:chrome_devtools_remote` once the script runs, because it refuses a held port; then
+   `Runtime.evaluate` of `JSON.stringify(game.bench.rows())`, then `adb forward --remove tcp:9444`.
+   Port 9333 belongs to other tools on this phone: leave it alone.
 
-Each line of the clocks file is `{ t, gpu, mif, nodes }`: `t` is the phone's epoch ms, `gpu` and `mif`
-the clocks as the nodes give them, `nodes` every devfreq node by name. `gpu` is the node named `mali`,
-`gpu` or `g3d`; `mif` is the one named `mif`, `ddr` or `dmc`. Without a GPU node it falls back to
-`/sys/kernel/gpu/gpu_clock`, which gives MHz. These names were written without the phone at hand:
-look at the first line of the first run.
+Each line of the clocks file is `{ t, gpu, mif, busy, nodes }`: `t` is the phone's epoch ms, `busy`
+the load of the GPU in percent, `nodes` every devfreq node the shell may read. On the A26 that is
+none: the devfreq files are closed to the shell, so `mif` stays `null`, and there is no GPU node.
+`gpu` comes from `/sys/kernel/gpu/gpu_clock`, in kHz, about five samples a second.
