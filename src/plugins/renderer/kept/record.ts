@@ -36,7 +36,14 @@ import {
   standInOf
 } from "./render";
 import { destroyRecord } from "./state";
-import type { KeptCtx, KeptMatrices, KeptRecord, KeptState } from "./types";
+import {
+  type KeptCtx,
+  type KeptMatrices,
+  type KeptRecord,
+  type KeptState,
+  RETAKE,
+  WHY
+} from "./types";
 
 /** Drawn frames a live view stands still before it is taken. */
 export const TAKE_AFTER = 2;
@@ -221,20 +228,21 @@ function refusalHolds(state: KeptState, record: KeptRecord): boolean {
 }
 
 /**
- * Tells whether a first take waits for the next frame (F114): a stack drawn direct never does; a view drawn live while
- * a crowd of them waits only when `CROWD_TAKES` were taken in this frame already (F119); any other waits when this
- * frame took one already or an alpha is due.
+ * Tells whether a first take waits for the next frame, and why (F114): a stack drawn direct never does; a view drawn
+ * live while a crowd of them waits only when `CROWD_TAKES` were taken in this frame already (F119); any other waits when
+ * an alpha is due or this frame took one already.
  *
  * @param state - The kept state.
  * @param direct - The stack draws direct.
  * @param live - The view is drawn live in this frame.
- * @returns True when it waits.
+ * @returns The `WHY` it waits for, 0 when it does not.
  */
-function heldBack(state: KeptState, direct: boolean, live: boolean): boolean {
-  if (direct) return false;
-  if (live && state.liveWaiting >= CROWD) return state.firstTakes >= CROWD_TAKES;
+function heldBack(state: KeptState, direct: boolean, live: boolean): number {
+  if (direct) return 0;
+  if (live && state.liveWaiting >= CROWD) return state.firstTakes >= CROWD_TAKES ? WHY.waiting : 0;
+  if (state.alphaDue) return WHY.alphaDue;
 
-  return state.firstTakes > 0 || state.alphaDue;
+  return state.firstTakes > 0 ? WHY.waiting : 0;
 }
 
 /**
@@ -282,19 +290,20 @@ function holdsFilters(node: PixiContainer): boolean {
  * Tells whether the filters of a stack draw like a picture: none reads the backdrop, every one blends normally.
  *
  * @param slots - The record's slots.
- * @returns True when they do.
+ * @returns 0 when they do, else the `WHY` of the first that does not.
  */
-function plainFilters(slots: readonly FilterSlot[]): boolean {
+function filtersWhy(slots: readonly FilterSlot[]): number {
   // per drawn frame and record: a frozen list, walked by index (`for…of` allocates over a frozen array).
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
   for (let index = 0; index < slots.length; index += 1) {
     const filter = slots[index]?.filter;
 
-    if (filter === undefined) continue;
-    if (filter.enabled && (filter.blendRequired || !plainBlend(filter.blendMode))) return false;
+    if (filter === undefined || !filter.enabled) continue;
+    if (filter.blendRequired) return WHY.backdrop;
+    if (!plainBlend(filter.blendMode)) return WHY.filterBlend;
   }
 
-  return true;
+  return 0;
 }
 
 /**
@@ -326,19 +335,6 @@ function topDrawn(sync: SyncWriters, view: View): boolean {
 }
 
 /**
- * Tells whether an ancestor draws what is under it as a picture would: visible, untinted, blending normally. Its alpha
- * is not read (F113): the quad hangs in the top's parent and Pixi multiplies it by the ancestors' alpha, while stage 1
- * renders the top as a root without them. A fading ancestor so draws the picture at `A·F(x)`, live draws `F(A·x)`: the
- * same for an alpha-linear filter, the whole picture faded for one that is not.
- *
- * @param node - The ancestor.
- * @returns True when it does.
- */
-function drawsPlain(node: PixiContainer): boolean {
-  return node.visible && node.tint === WHITE && plainBlend(node.blendMode);
-}
-
-/**
  * Tells whether an ancestor is drawn: renderable, or hidden only by an overlay's range or a kept ancestor's picture,
  * which draw it anyway.
  *
@@ -367,50 +363,73 @@ function filtersPlaced(kctx: KeptCtx, record: KeptRecord, node: PixiContainer): 
 }
 
 /**
- * Tells whether every ancestor up to the stage draws the view as a picture would: visible, untinted (its alpha is not
- * read, F113), blending normally, drawn (an overlay's range and a kept ancestor's picture count), and for a placed filter without a filter
- * above it (its canvas position would not be the canvas pixel live).
+ * Tells whether an ancestor draws what is under it as a picture would: visible, untinted, blending normally, drawn (an
+ * overlay's range and a kept ancestor's picture count), and for a placed filter holding no filter (its canvas position
+ * would not be the canvas pixel live). Its alpha is not read (F113): the quad hangs in the top's parent and Pixi
+ * multiplies it by the ancestors' alpha, while stage 1 renders the top as a root without them. A fading ancestor so
+ * draws the picture at `A·F(x)`, live draws `F(A·x)`: the same for an alpha-linear filter, the whole picture faded for
+ * one that is not.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @param node - The ancestor.
+ * @returns 0 when it does, else the `WHY` it does not.
+ */
+function ancestorWhy(kctx: KeptCtx, record: KeptRecord, node: PixiContainer): number {
+  if (!node.visible) return WHY.ancestorHidden;
+  if (node.tint !== WHITE) return WHY.ancestorTint;
+  if (!plainBlend(node.blendMode)) return WHY.ancestorBlend;
+  if (!drawnAnyway(kctx, node)) return WHY.ancestorHidden;
+
+  return filtersPlaced(kctx, record, node) ? WHY.placedUnderFilter : 0;
+}
+
+/**
+ * Tells whether every ancestor up to the stage draws the view as a picture would (`ancestorWhy`).
  *
  * @param kctx - The kept context.
  * @param record - The record.
  * @param stage - The stage of the application.
- * @returns True when they do.
+ * @returns 0 when they do, else the `WHY` of the first that does not.
  */
-function ancestorsPlain(kctx: KeptCtx, record: KeptRecord, stage: PixiContainer): boolean {
+function ancestorsWhy(kctx: KeptCtx, record: KeptRecord, stage: PixiContainer): number {
   for (let node = record.top.parent; node !== stage; node = node.parent) {
-    if (node === null) return false;
-    if (!drawsPlain(node) || !drawnAnyway(kctx, node) || filtersPlaced(kctx, record, node)) {
-      return false;
-    }
+    if (node === null) return WHY.ancestorHidden;
+
+    const why = ancestorWhy(kctx, record, node);
+
+    if (why !== 0) return why;
   }
 
-  return true;
+  return 0;
 }
 
 /**
- * Whether a record may be kept this frame (P4.1): an enabled filter, filters that draw like a picture, a top and a
- * visual that blend normally (the visual sits inside the wrapper of a kept bare view, D4), a top that is drawn,
- * ancestors that draw it as a picture would, and the switch on.
+ * Whether a record may be kept this frame (P4.1): the switch on, an enabled filter, filters that draw like a picture, a
+ * top and a visual that blend normally (the visual sits inside the wrapper of a kept bare view, D4), a top that is
+ * drawn, ancestors that draw it as a picture would.
  *
  * @param kctx - The kept context.
  * @param record - The record.
  * @param view - Its view.
  * @param stack - The stack of this frame.
- * @returns True when it may be kept.
+ * @returns 0 when it may be kept, else the `WHY` of the first check that failed.
  */
-function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): boolean {
-  const { top } = record;
+function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): number {
   const stage = kctx.host.stage();
 
-  return (
-    keepingOn(kctx) &&
-    stage !== undefined &&
-    stack.enabled > 0 &&
-    plainFilters(record.slots) &&
-    drawsAsPicture(top, view) &&
-    topDrawn(kctx.sync, view) &&
-    ancestorsPlain(kctx, record, stage)
-  );
+  if (!keepingOn(kctx) || stage === undefined || stack.enabled === 0) return WHY.off;
+
+  const filters = filtersWhy(record.slots);
+
+  if (filters !== 0) return filters;
+
+  const picture = pictureWhy(record.top, view);
+
+  if (picture !== 0) return picture;
+  if (!topDrawn(kctx.sync, view)) return WHY.hidden;
+
+  return ancestorsWhy(kctx, record, stage);
 }
 
 /**
@@ -429,12 +448,14 @@ function keepingOn(kctx: KeptCtx): boolean {
  *
  * @param top - The record's top.
  * @param view - Its view.
- * @returns True when they do.
+ * @returns 0 when they do, else the `WHY` they do not.
  */
-function drawsAsPicture(top: PixiContainer, view: View): boolean {
-  return (
-    top.visible && top.alpha > 0 && plainBlend(top.blendMode) && plainBlend(view.object.blendMode)
-  );
+function pictureWhy(top: PixiContainer, view: View): number {
+  if (top.visible && top.alpha > 0) {
+    return plainBlend(top.blendMode) && plainBlend(view.object.blendMode) ? 0 : WHY.topBlend;
+  }
+
+  return WHY.fadedOut;
 }
 
 /**
@@ -569,7 +590,14 @@ export function createRecord(
     spared: false,
     idle: false,
     alphaDue: false,
-    alphaMissed: false
+    alphaMissed: false,
+    idleSeen: false,
+    why: WHY.waiting,
+    calmIn: TAKE_AFTER,
+    markBy: 0,
+    retakeWhy: 0,
+    retakeBy: 0,
+    retakeAt: 0
   };
   const { state } = kctx;
 
@@ -822,6 +850,7 @@ function writeTakeKeys(
  */
 function refuseIdle(record: KeptRecord): boolean {
   record.idle = true;
+  record.idleSeen = true;
 
   return false;
 }
@@ -853,8 +882,10 @@ function takePicture(
 ): boolean {
   const { top } = record;
 
+  record.displays = !kctx.ctx.config.onDemand && holdsDisplay(kctx, top);
+
   // A game's own object it may write unseen without `onDemand`, and an empty subtree, are never kept.
-  if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return refuseIdle(record);
+  if (record.displays) return refuseIdle(record);
   // A glow under the top would blend with the picture's empty texture: a retake goes live (F68).
   if (blendedBelow(kctx, record)) return false;
 
@@ -913,6 +944,7 @@ function takePicture(
     )
   ) {
     record.refused = needed;
+    kctx.state.frameRefused += 1;
     warnRefused(kctx, labelOf(top));
 
     return false;
@@ -1260,6 +1292,9 @@ function toKept(kctx: KeptCtx, record: KeptRecord, view: View): void {
   record.mode = "kept";
   record.calm = false;
   record.churn = 0;
+  record.why = 0;
+  record.calmIn = 0;
+  record.idleSeen = false;
   kctx.sync.swapHidden(kctx.hidden, view, "kept", true);
 }
 
@@ -1353,6 +1388,44 @@ function waitOf(record: KeptRecord): number {
 }
 
 /**
+ * Notes why a live record that may be kept is not taken in this frame, from what the policy keeps on it: a `Display`
+ * found under its top, a take that rendered nothing or a cut under a move, a refused take, a glow under the top, else
+ * the still frames it waits for. A move offers a take again but changes neither of the first two: they stand until a
+ * change under the top, so a moving view does not flip to a wait.
+ *
+ * @param state - The kept state.
+ * @param record - The record, live.
+ * @param changed - It changed in this frame.
+ * @param turned - Its linear part moved in this frame.
+ */
+function noteHeld(state: KeptState, record: KeptRecord, changed: boolean, turned: boolean): void {
+  record.calmIn = 0;
+
+  if (record.displays === true) record.why = WHY.display;
+  else if (record.idleSeen || (turned && record.cut)) record.why = WHY.idle;
+  else if (refusalHolds(state, record)) record.why = WHY.budget;
+  else if (record.blended) record.why = WHY.blendBelow;
+  else {
+    record.why = record.calm ? WHY.churn : WHY.waiting;
+    // A frame it changed in is no still frame, also for a stack that waits for none.
+    record.calmIn = Math.max(waitOf(record) - record.still, changed ? 1 : 0);
+  }
+}
+
+/**
+ * Notes what a take was for, in numbers: `why()` names them when it is asked. A mark's reasons keep who marked.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @param why - The `RETAKE` of the take.
+ */
+function noteTake(kctx: KeptCtx, record: KeptRecord, why: number): void {
+  record.retakeWhy = why;
+  record.retakeBy = why === RETAKE.mark || why === RETAKE.innerFirst ? record.markBy : 0;
+  record.retakeAt = kctx.state.frame;
+}
+
+/**
  * Marks every kept record above a record that was just first taken: their retake in this flush is not churn (F114),
  * so the inner takes spread over frames do not drop the outer picture to live.
  *
@@ -1398,24 +1471,38 @@ function stepLive(
 
   // A take that rendered nothing is not tried again until the view moves (a change under it clears it too).
   if (moved) record.idle = false;
-  // Never taken in a frame its view changed in: a stack drawn direct waits for its first frame without a change.
-  if (changed || record.still < waitOf(record) || record.idle) return;
+  // Never taken in a frame its view changed in: a stack drawn direct waits for its first frame without a change. A
+  // refused take is not offered again until it fits (P6.3): no thrash. A glow under the top stays live, remembered until
+  // the subtree changes (F68).
+  if (
+    changed ||
+    record.still < waitOf(record) ||
+    record.idle ||
+    refusalHolds(state, record) ||
+    blendedBelow(kctx, record)
+  ) {
+    noteHeld(state, record, changed, turned);
 
-  // A refused take is not offered again until it fits (P6.3): no thrash.
-  if (refusalHolds(state, record)) return;
-  // A glow under the top stays live, remembered until the subtree changes (F68).
-  if (blendedBelow(kctx, record)) return;
+    return;
+  }
+
   // One first take per frame, inner first: the others stay live and wait (F114). A stack drawn direct takes for one
   // pass, less than its live draw: never held back, and while one is due the others wait for the next frame. A view
   // drawn live is not held back either: waiting, it breaks the canvas pass in every frame (F119).
-  const direct = drawsDirect(NOW);
+  const held = heldBack(state, drawsDirect(NOW), drawnLive(kctx, record));
 
-  if (heldBack(state, direct, drawnLive(kctx, record))) return;
+  if (held !== 0) {
+    record.why = held;
+    record.calmIn = 0;
+
+    return;
+  }
 
   wrapBare(kctx, record, view);
 
   if (!takePicture(kctx, pixi, matrices, record, view, NOW, turned)) {
     record.still = 0;
+    noteHeld(state, record, false, turned);
 
     return;
   }
@@ -1424,6 +1511,7 @@ function stepLive(
 
   record.takenAt = state.frame;
   toKept(kctx, record, view);
+  noteTake(kctx, record, RETAKE.first);
   spareAbove(kctx, record);
 }
 
@@ -1435,15 +1523,24 @@ function stepLive(
  * @param matrices - The scratch matrices.
  * @param record - The record, kept.
  * @param view - Its view.
+ * @param why - The `RETAKE` of the take.
  */
 function retakeOrGoLive(
   kctx: KeptCtx,
   pixi: PixiModule,
   matrices: KeptMatrices,
   record: KeptRecord,
-  view: View
+  view: View,
+  why: number
 ): void {
-  if (!takePicture(kctx, pixi, matrices, record, view, NOW)) goLive(kctx, record, view, true);
+  if (takePicture(kctx, pixi, matrices, record, view, NOW)) {
+    noteTake(kctx, record, why);
+
+    return;
+  }
+
+  goLive(kctx, record, view, true);
+  noteHeld(kctx.state, record, false, false);
 }
 
 /**
@@ -1455,18 +1552,20 @@ function retakeOrGoLive(
  * @param matrices - The scratch matrices.
  * @param record - The record, kept.
  * @param view - Its view.
+ * @param why - The `RETAKE` of a retake.
  */
 function churn(
   kctx: KeptCtx,
   pixi: PixiModule,
   matrices: KeptMatrices,
   record: KeptRecord,
-  view: View
+  view: View,
+  why: number
 ): void {
   record.churn += 1;
 
   if (record.churn < CHURN_LIMIT) {
-    retakeOrGoLive(kctx, pixi, matrices, record, view);
+    retakeOrGoLive(kctx, pixi, matrices, record, view, why);
 
     return;
   }
@@ -1474,6 +1573,34 @@ function churn(
   goLive(kctx, record, view, true);
   record.calm = true;
   writeSeen(record, NOW);
+  noteHeld(kctx.state, record, false, false);
+}
+
+/**
+ * What a retake of a kept record owes itself to: a new stack resolution, a change under its top, or a linear part it may
+ * not be drawn at.
+ *
+ * @param record - The record, kept, about to be retaken.
+ * @returns The `RETAKE`.
+ */
+function retakeWhy(record: KeptRecord): number {
+  if (record.key[KEY.rs] !== NOW.rs) return RETAKE.resolution;
+  if (record.dirtyS1) return RETAKE.mark;
+
+  return record.cut || record.category === "placed" ? RETAKE.placedMove : RETAKE.scaleLimit;
+}
+
+/**
+ * What a refresh of a kept record owes itself to, read before the render writes its keys.
+ *
+ * @param record - The record, kept.
+ * @param chain - Stage 2 is redone too.
+ * @returns The `RETAKE`.
+ */
+function refreshWhy(record: KeptRecord, chain: boolean): number {
+  if (chain) return RETAKE.chain;
+
+  return NOW.r === record.key[KEY.r] ? RETAKE.filter : RETAKE.resolution;
 }
 
 /**
@@ -1538,13 +1665,13 @@ function stepKept(
   const spareRetake = retake && record.spared && !scaled;
 
   if (spareRetake) {
-    retakeOrGoLive(kctx, pixi, matrices, record, view);
+    retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.innerFirst);
 
     return;
   }
 
   if (retake) {
-    churn(kctx, pixi, matrices, record, view);
+    churn(kctx, pixi, matrices, record, view, retakeWhy(record));
 
     return;
   }
@@ -1553,7 +1680,7 @@ function stepKept(
 
   // A picture cut to the canvas shows what it left out once it moves or the canvas changes size (F53).
   if (record.cut && (moved || canvasChanged(kctx, key))) {
-    churn(kctx, pixi, matrices, record, view);
+    churn(kctx, pixi, matrices, record, view, RETAKE.canvas);
 
     return;
   }
@@ -1561,7 +1688,7 @@ function stepKept(
   record.churn = 0;
 
   if (!moved && record.settle) {
-    retakeOrGoLive(kctx, pixi, matrices, record, view);
+    retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.settle);
 
     return;
   }
@@ -1628,6 +1755,7 @@ function refresh(
   }
   if (!stageThreeOwed) return;
 
+  noteTake(kctx, record, refreshWhy(record, stageTwoOwed));
   record.direct = false;
   renderStage3(kctx, pixi, matrices, record, NOW);
   account(kctx, record);
@@ -1737,7 +1865,7 @@ export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
 
     const direct = drawsDirectAt(DUE, resolution);
 
-    record.alphaDue = direct && eligible(kctx, record, view, DUE);
+    record.alphaDue = direct && eligible(kctx, record, view, DUE) === 0;
     state.alphaDue ||= record.alphaDue;
     // Counted without the whole eligibility, which the step reads: the walk up its parents is enough for a crowd.
     if (!direct && drawnLive(kctx, record)) state.liveWaiting += 1;
@@ -1790,13 +1918,17 @@ export function stepRecord(
     record.blended = false;
     record.idle = false;
     record.alphaMissed = false;
+    record.displays = undefined;
+    record.idleSeen = false;
   }
 
   NOW.r = kctx.host.resolution();
   readStack(record.slots, NOW.r, pixi.AlphaFilter, NOW);
 
-  if (eligible(kctx, record, view, NOW)) stepEligible(kctx, pixi, matrices, record, view);
-  else stepIneligible(kctx, record, view);
+  const why = eligible(kctx, record, view, NOW);
+
+  if (why === 0) stepEligible(kctx, pixi, matrices, record, view);
+  else stepIneligible(kctx, record, view, why);
 
   if (drawingChanged(kctx, record, BEFORE)) dirtyAbove(kctx, record);
 
@@ -1804,6 +1936,7 @@ export function stepRecord(
   record.dirtyS1 = false;
   record.dirtyS2 = false;
   record.dirtyS3 = false;
+  record.markBy = 0;
   record.spared = false;
   // A due alpha that could not be taken holds the others back once, not every frame (F114).
   if (record.alphaDue && record.mode !== "kept") record.alphaMissed = true;
@@ -1851,8 +1984,9 @@ function stepEligible(
  * @param kctx - The kept context.
  * @param record - The record.
  * @param view - Its view.
+ * @param why - The `WHY` of the check that failed.
  */
-function stepIneligible(kctx: KeptCtx, record: KeptRecord, view: View): void {
+function stepIneligible(kctx: KeptCtx, record: KeptRecord, view: View, why: number): void {
   if (record.mode === "kept") {
     goLive(kctx, record, view, true);
     // A picture refused in the frame of its take or the next (an alpha that crosses 1 every frame) waits for rest (F114).
@@ -1860,6 +1994,8 @@ function stepIneligible(kctx: KeptCtx, record: KeptRecord, view: View): void {
   }
 
   record.still = 0;
+  record.why = why;
+  record.calmIn = 0;
 }
 
 /**
@@ -1888,7 +2024,10 @@ function dirtyAbove(kctx: KeptCtx, record: KeptRecord): void {
   for (let node = record.top.parent; node !== null; node = node.parent) {
     const above = kctx.state.byTop.get(node);
 
-    if (above !== undefined) above.dirtyS1 = true;
+    if (above !== undefined) {
+      above.dirtyS1 = true;
+      above.markBy = record.entity;
+    }
   }
 
   // A range picture of an overlay that holds the record draws it too: rendered again after the records (spec 22 K1).

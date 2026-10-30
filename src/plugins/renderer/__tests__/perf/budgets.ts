@@ -105,6 +105,9 @@ export const BUDGET = {
   // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
   // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.
   keptBlend: 0,
+  // F126: new. 10 live views changed every frame: the step writes why each is live and how long it waits, and collect
+  // who marked it, numbers on the record. Measured 0 B.
+  keptWhy: 0,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
   filterSwitchStill: 0,
@@ -123,6 +126,11 @@ export const BUDGET = {
   // B3: what a frame that starts with a filter adds over Pixi's own frame. New, measured −344 B: the empty canvas pass
   // Pixi begins at render start, its descriptor and attachment objects, is never begun.
   lazyCanvasFrame: 0,
+  // F126: new. The monitor's listener of a canvas begin in an agent build, every section on: one typed-array increment
+  // and one store into the pass ring. Measured 0 B.
+  canvasBegin: 0,
+  // F126: new. The listener of a build without the agent flag: one increment. Measured 0 B.
+  canvasBeginRelease: 0,
   // Change 2026-10-19-glass-arc, A2: a pass that syncs a still slot-timer ring (its Shape in the change set, nothing of
   // it changed). New, measured 0 B: the drawn fields are compared and no path is built; a sweep that moves builds it.
   arcStill: 0,

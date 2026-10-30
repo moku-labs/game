@@ -42,6 +42,9 @@ export type ResolutionListener = (from: number, to: number, reason: ResolutionRe
  */
 export type TrimReason = PoolTrimDetail["reason"];
 
+/** Hears a canvas pass that really began (WebGPU), with its reason: an index into `CANVAS_RESTARTS`. Not public. */
+export type CanvasPassListener = (restart: number) => void;
+
 /**
  * A listener of a pool trim: why, and the MiB it freed (rounded to two decimals). The monitor of an agent build
  * registers one to write the `pool-trim` event line.
@@ -135,6 +138,8 @@ export type HostState = {
   pool: PoolState;
   /** The trim listeners: the monitor's, in an agent build. Emptied by `stopHost`. */
   onTrim: TrimListener[];
+  /** The listener of the canvas passes that really begin: the monitor's, set at every attach; cleared by `stopHost`. */
+  onCanvasPass: CanvasPassListener | undefined;
 };
 
 /**
@@ -522,4 +527,12 @@ export type HostInternal = {
    * @param fn - Called after every trim with the reason and the MiB freed.
    */
   onTrim(fn: TrimListener): void;
+
+  /**
+   * Sets the one listener of the canvas passes that really begin on WebGPU: `host/render-pass.ts` never imports the
+   * monitor (O24), which counts them here. Cleared by `stopHost`.
+   *
+   * @param fn - Called at every begin with the reason, an index into `CANVAS_RESTARTS`.
+   */
+  onCanvasPass(fn: CanvasPassListener): void;
 };

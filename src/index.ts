@@ -308,8 +308,9 @@ export {
   SHADER_WHATS
 } from "./plugins/renderer/monitor/log-types";
 export { frameAt, PASS_KINDS } from "./plugins/renderer/monitor/ring";
-export { DEMAND_REASONS } from "./plugins/renderer/reasons";
+export { CANVAS_RESTARTS, DEMAND_REASONS } from "./plugins/renderer/reasons";
 export type {
+  CanvasRestart,
   FrameColumns,
   FrameReadout,
   FrameReadResult,
@@ -347,9 +348,12 @@ export type {
   PoolTrimDetail,
   ProblemEventDetail,
   ProblemRule,
+  RetakeWhy,
   ShaderEventDetail,
   ShaderWhat,
-  WarmDetail
+  WarmDetail,
+  WhyEntry,
+  WhyLive
 } from "./plugins/renderer/types";
 // input: gestures as data
 export {

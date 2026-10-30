@@ -222,6 +222,7 @@ internal markup: select them by nothing, set the properties instead.
 | `debug.overlays()` | Every overlay, bottom first: `{ entity, label, phase, mode, level, range, kept }`, a fresh array; `[]` with none. |
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.overdraw(on)` | Dev and debug builds: draws every frame as the overdraw heat map (see "Overdraw heat map"); off draws the game again from the next frame. Elsewhere the switch stays off. |
+| `debug.why()` | Agent builds: why every view with an enabled filter is drawn as it is, in draw order: `{ view, mode, reason, calmIn, retake }`, a fresh array, built when called. Every other build, and while inert: a frozen `[]`. See "Why a view is drawn live". |
 | `debug.state()` | `{ nineSlice, verifyFrames, kept, overdraw }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
@@ -370,7 +371,7 @@ await renderer.sync.textures.upload(record.textures); // true at once: they are 
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, canvasPasses, canvasPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }`. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `scene:build` at the start of a scene built aside, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
@@ -410,9 +411,10 @@ the render targets Pixi draws into, and the pictures the engine keeps (`host.kee
   `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
   level, in MiB.
 - `views` and `pooled` are read from the `sync` state. `renderPasses` is the measured count of the last drawn frame,
-  `renderPassesMax` the most of one drawn frame in the last full second (see "Render passes"). `kept` reports the
-  kept pictures (see "Kept pictures"): the quads drawn in the last drawn frame, the MiB their textures hold, the
-  pictures taken in the last full second.
+  `renderPassesMax` the most of one drawn frame in the last full second (see "Render passes"). `canvasPasses` and
+  `canvasPassesMax` are the same two numbers for the passes on the canvas alone (see "Canvas passes"). `kept` reports
+  the kept pictures (see "Kept pictures"): the quads drawn in the last drawn frame, the MiB their textures hold, and
+  in the last full second the pictures taken, the pictures the budget evicted and the takes it refused.
 - The frame timing costs two `clock.now()` calls and a few number writes per frame; no allocation.
   The rest is read only when `stats()` is called.
 
@@ -437,6 +439,22 @@ on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and 
 buttons `31`. The renderer is the one owner of this number; `effects` declares the passes per kind
 and reads `sync.renderPasses()` for its budget warnings: the same number, without the texture walk
 and the fresh object of `stats()`.
+
+#### Canvas passes
+
+`renderPasses` counts every pass; `stats().canvasPasses` counts the passes on the canvas, in every build. Each one
+after the first is a break of the canvas: on a tiled GPU a store and a reload of the whole canvas, so breaks =
+`canvasPasses - 1`. On WebGPU the lazy canvas pass tells the monitor at every real begin, through `host.onCanvasPass`
+(`host/render-pass.ts` never imports the monitor): one typed-array increment, inside a frame only. On WebGL the runners
+of `renderPasses` count a bind of the canvas. `canvasPassesMax` is the most of one drawn frame in the last full second,
+and a frame that is not drawn keeps the numbers of the last drawn one, as for `renderPasses`.
+
+Where nothing counts (headless, a test stage, a fake application, and a canvas with multisampling, which is left to
+Pixi: see "The canvas pass on WebGPU") both report the estimate: 0 while inert, otherwise 1 + the views drawn live
+under the root with an enabled filter, by the walk of `sync.renderPasses()`. A kept view, a stack of alphas drawn by
+its quad, a view inside a picture and a view not drawn add 0; a view drawn live adds 1 however many applies it has. The
+pins: no filter `1`; one view drawn live `2`; ten `11`; a kept view `1`. It is counted at every read, so a take shows at
+once.
 
 #### Draw calls
 
@@ -563,11 +581,12 @@ frame, index, kind (`PASS_KINDS[kind]`), stencil, size, GPU time and label:
 | `kind2` | The filter's kind, **1-based** into `frames().kindNames` (`kindNames[kind2 - 1]`, `"other"` first), 0 for none: the rule of the frame's `fltKind` column too. |
 | `drawsAt` | The frame's draws when the pass began (WebGPU; draws are not counted on WebGL): a pass drew up to the next pass's `drawsAt`, the last one up to the frame's `draws`. |
 | `format`, `resolution` | The target's texture format (by reference) and resolution; `null` / NaN when unknown. |
+| `restart` | Why a canvas pass began, an index into the root export `CANVAS_RESTARTS` (append-only): `"first"` the first begin of a render call, `"filter"` a begin after a pass into another target, `"mask"` a restart for a stencil push, `"depth"` a restart for the first depth use, `"empty"` an owed clear or a settle with no draw. 0, `"none"`, for any other pass and on WebGL. A verify draw inside a frame is a render call of its own: it may add a second `"first"`. |
 
 A spike's `passes[]` reads the same: `owner` and `view` (the owner's view label when the line is
 built), `filter` (the kind id), `draws` (`null` where draws are not counted; they add up to the
-frame's draws), `format`, `resolution`, and `kept: true` for the take of a kept picture (its label
-starts with `kept:`). A filter chain is the passes of one owner in a row. `frames().systemNames` names
+frame's draws), `format`, `resolution`, `kept: true` for the take of a kept picture (its label
+starts with `kept:`), and `restart` as its name, no key for `"none"`. A filter chain is the passes of one owner in a row. `frames().systemNames` names
 `sysIdx`; a world that registers a system makes a new array, so a reader sees the growth by identity.
 
 #### Shader events
@@ -1089,7 +1108,9 @@ no render target. The pool is emptied first when a take needs room. Every textur
 `host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on an eviction, a device loss, a rebuild and
 at `onStop`, as `textures.destroy` frees a source, its `change` listeners removed first, so the bind
 groups Pixi keeps over a drawn picture print no `[BindGroup]` warning. The warm-up's probe target
-goes the same way. `stats().kept` is `{ pictures, mb, retakes }`.
+goes the same way. `stats().kept` is `{ pictures, mb, retakes, evicted, refused }`: `evicted` the pictures the budget
+evicted and `refused` the takes it refused in the last full second, drained with the takes; a refusal that holds for
+many frames counts once, a range's take that evicts a picture counts in `evicted`.
 
 `sync.debug.kept(false)` (door `game.debug { kept: false }`) draws every filtered view live from the
 next drawn frame, `true` lets them be taken again: the A/B switch of a measurement, in every build.
@@ -1101,7 +1122,64 @@ read twice, as drawn and with every picture drawn live, and compared; a differen
 moves off its grid or hangs under a translucent ancestor is skipped and counted, not compared: a fading ancestor fades
 the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design.
 
-Range pictures. The same machinery renders the canvas-sized picture of an overlay's range that
+### Why a view is drawn live
+
+`sync.debug.why()` (agent builds; every other build answers a frozen `[]`) answers one entry per view with an enabled
+filter, in draw order, built when called:
+
+```ts
+app.renderer.sync.debug.why();
+// [
+//   { view: "Shape#1048590 board:bottom", mode: "live", reason: "churn", calmIn: 6, retake: { why: "mark", by: "Text#1048612 tags:timer" } },
+//   { view: "Sprite#1048633 ward:glow3", mode: "live", reason: "placed-under-filter", calmIn: 0, retake: null },
+//   { view: "Sprite#1048640 board:g1", mode: "kept", reason: null, calmIn: 0, retake: { why: "resolution", by: null } }
+// ]
+```
+
+`view` is the label the monitor names the view by. `mode` is `"kept"`, `"direct"` (a stack of alphas drawn by its quad)
+or `"live"`. `calmIn` is the still frames left before a take, 0 when it waits for none. `retake` is the view's last
+take when it fell in the last full second. The step keeps numbers on the record, no string per frame; the names come
+from two append-only lists.
+
+`reason`, `null` unless the view is live. The checks of a record's frame in their order, the first that fails names it:
+
+| `reason` | Why it is drawn live |
+|---|---|
+| `"off"` | The switch `sync.debug.kept` is off, `keptMb` is 0, or the frame draws everything live for a check. |
+| `"backdrop"` | A filter reads what is under it. Also a view without a record. |
+| `"filter-blend"` | A filter blends otherwise than normally. |
+| `"cache-false"` | The cache may not keep a slot (`cache: false`, a slot that names no category): the view has no record. |
+| `"faded-out"` | The top is at alpha 0 or invisible. |
+| `"top-blend"` | The top or its visual blends otherwise. |
+| `"hidden"` | A cover or a hidden reason of the top holds it. |
+| `"ancestor-hidden"`, `"ancestor-tint"`, `"ancestor-blend"` | An ancestor is not drawn, is tinted, or blends otherwise. |
+| `"placed-under-filter"` | A `"placed"` filter under a filtered ancestor. |
+| `"idle"` | A take had nothing to render (empty, off the canvas, too big), or would be cut to the canvas under a zoom. |
+| `"display"` | A `Display` hangs under the top without `onDemand`. |
+| `"budget"` | The budget refused its take, and the refusal holds. |
+| `"blend-below"` | A node under the top blends otherwise (F68). |
+| `"churn"` | It changed in 3 drawn frames in a row: `calmIn` is 8 less the still frames since. |
+| `"waiting"` | `calmIn` still frames left, or `calmIn` 0: the first takes of this frame went to others (F114, F119). |
+| `"alpha-due"` | A stack of alphas goes first in this frame (F114). |
+
+`retake.why`, what the last take was for; `by` is the label of the view that caused it, `null` for none:
+
+| `why` | The take |
+|---|---|
+| `"first"` | Taken from live. |
+| `"mark"` | Its subtree changed: `by` the marked view, or the inner kept view whose drawing changed. |
+| `"inner-first"` | A view inside it took its first picture (F114): `by` that view. |
+| `"resolution"` | The stack's or the canvas's resolution moved. |
+| `"settle"` | It came to rest off its picture's grid. |
+| `"scale-limit"` | A zoom past 2× from the take. |
+| `"placed-move"` | A zoom on a picture that is not drawn scaled: `"placed"`, or cut to the canvas. |
+| `"canvas"` | A picture cut to the canvas moved, or the canvas changed size. |
+| `"filter"` | Stage 3 alone. |
+| `"chain"` | Stages 2 and 3. |
+
+### Range pictures
+
+The same machinery renders the canvas-sized picture of an overlay's range that
 `Overlay` (spec 22) asks for (`take`, `retake`, `move`, `release`): one render of the stage root with
 only the range drawn, shown by a sprite placed before the overlay, kept in the same budget. A kept
 view inside a range that switches between its picture and live takes the range's picture again in
@@ -1599,4 +1677,5 @@ emitter, and `renderPasses` reads 1 there. CI pins only the class names and thei
 How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,
 a label under a 0.6 parent at 0.6, and the same pixels as the per-label shader drew, in the browser, under
 WebGPU and under WebGL. So does the alpha of a parent: the icon of a disabled round button measured
-at 0.6 in the browser.
+at 0.6 in the browser. The canvas count and `passes.restart` are tested over Pixi's real systems on a stand-in of the
+GPU; `canvasPasses` on a real frame loop, and that it matches the passes a device really began, belong to the phone run.

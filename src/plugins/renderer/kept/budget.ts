@@ -88,6 +88,8 @@ export function evict(
   record: KeptRecord,
   goLive: (record: KeptRecord) => void
 ): void {
+  kctx.state.frameEvicted += 1;
+
   if (record.mode === "kept") goLive(record);
 
   endLoan(record.s2Of);

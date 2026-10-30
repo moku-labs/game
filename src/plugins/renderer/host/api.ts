@@ -26,7 +26,14 @@ import {
   targetResolution,
   watchPixelRatio
 } from "./resolution";
-import type { HostDeps, ResolutionListener, TextureUsage, TrimListener, TrimReason } from "./types";
+import type {
+  CanvasPassListener,
+  HostDeps,
+  ResolutionListener,
+  TextureUsage,
+  TrimListener,
+  TrimReason
+} from "./types";
 import { showUnsupported } from "./unsupported";
 import { watchVisibility } from "./visibility";
 
@@ -207,6 +214,10 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
 
     onTrim: (fn: TrimListener): void => {
       state.onTrim.push(fn);
+    },
+
+    onCanvasPass: (fn: CanvasPassListener): void => {
+      state.onCanvasPass = fn;
     },
 
     init: async (): Promise<void> => {

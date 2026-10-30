@@ -166,7 +166,9 @@ function installRenderPass(ctx: RendererCtx, pixi: PixiModule): void {
   if (state.uninstallRenderPass !== undefined) return;
 
   try {
-    state.uninstallRenderPass = installLazyCanvasPass(pixi);
+    state.uninstallRenderPass = installLazyCanvasPass(pixi, restart => {
+      state.onCanvasPass?.(restart);
+    });
   } catch (error) {
     ctx.log.warn("renderer: the canvas pass begins at render start", { error });
   }
@@ -321,6 +323,7 @@ export function stopHost(state: HostState): void {
   state.onLoss.length = 0;
   state.onResolutionChange.length = 0;
   state.onTrim.length = 0;
+  state.onCanvasPass = undefined;
   // The pool is module-global and another app on the page may draw: it is not cleared here.
   state.pool = createPoolState();
   state.resolution.pending = undefined;

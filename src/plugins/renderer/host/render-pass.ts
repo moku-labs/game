@@ -42,7 +42,9 @@
  * canvas bound before Pixi binds it, so that bind changes nothing, and the adaptor tells the stencil system right
  * after the pass began; a mask pushed first begins it before the stencil system reads its target.
  */
+import { RESTART } from "../reasons";
 import type { PixiModule } from "../types";
+import type { CanvasPassListener } from "./types";
 
 /** Pixi's WebGPU render target system class, the base of the renderer's. */
 type TargetSystemClass = PixiModule["GpuRenderTargetSystem"];
@@ -114,6 +116,11 @@ function clearBits(clear: ClearOrBool): number {
   return clear;
 }
 
+/** The listener of a stage nobody listens to. */
+function noListener(): void {
+  // No monitor: a canvas pass begins all the same.
+}
+
 /** The lazy canvas classes, for Pixi's registry: a render target system and a pipeline system. */
 export type LazyCanvasClasses = {
   targets: TargetSystemClass;
@@ -126,9 +133,13 @@ export type LazyCanvasClasses = {
  * under the same type and name. They cost one test of two booleans per pipeline request, and nothing else per draw.
  *
  * @param pixi - The loaded Pixi module.
+ * @param canvasBegan - Told of every canvas pass that really began, with its reason; the file never imports the monitor.
  * @returns The render target system and the pipeline system.
  */
-export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
+export function createLazyCanvasClasses(
+  pixi: PixiModule,
+  canvasBegan: CanvasPassListener = noListener
+): LazyCanvasClasses {
   /**
    * Pixi's WebGPU adaptor, which begins a pass on the canvas at its first draw and sets the canvas's stencil and depth
    * operations by the rule of the file. One per renderer.
@@ -247,7 +258,7 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
       if (this.canvas !== undefined && this.canvas !== renderTarget) this.settleCanvas();
 
       if (bits === CLEAR_NONE && this.isOpen(renderTarget)) {
-        this.beginCanvas(renderTarget, CLEAR_NONE, undefined, viewport);
+        this.beginCanvas(renderTarget, CLEAR_NONE, undefined, viewport, RESTART.filter);
 
         return;
       }
@@ -335,7 +346,13 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
       this.canvas = undefined;
       this.owed = CLEAR_NONE;
       this.owedColorSet = false;
-      this.beginCanvas(target, bits, color, this.view);
+      this.beginCanvas(
+        target,
+        bits,
+        color,
+        this.view,
+        this.acquired ? RESTART.filter : RESTART.first
+      );
     }
 
     /**
@@ -348,7 +365,7 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
       const canvas = this.openCanvas;
 
       if (canvas?.depthStencilAttachment !== undefined && !this.keepDepth && this.passOpen()) {
-        this.restart(canvas);
+        this.restart(canvas, RESTART.depth);
       }
     }
 
@@ -372,7 +389,7 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
       if (this.changeOwed && this.pending && this.canvas === target) {
         this.beginPending();
       } else if (this.openCanvas === target && !this.keepStencil && this.passOpen()) {
-        this.restart(target);
+        this.restart(target, RESTART.mask);
       }
     }
 
@@ -475,12 +492,14 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
      * @param bits - The `CLEAR` bits.
      * @param color - The clear colour, when one was given.
      * @param viewport - The viewport.
+     * @param restart - Why it begins, an index into `CANVAS_RESTARTS`.
      */
     private beginCanvas(
       target: RenderTarget,
       bits: number,
       color: Rgba | undefined,
-      viewport: Viewport
+      viewport: Viewport,
+      restart: number
     ): void {
       const gpu = this.gpu;
       const targets = this.targets;
@@ -496,7 +515,7 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
       super.startRenderPass(target, bits, color, viewport, 0, 0);
       this.openCanvas = target;
 
-      if (gpu.encoder.renderPassEncoder !== before) this.began(target, targets);
+      if (gpu.encoder.renderPassEncoder !== before) this.began(target, targets, restart);
     }
 
     /**
@@ -526,13 +545,16 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
     }
 
     /**
-     * Records a canvas pass that really began (Pixi did not reuse the open one), and tells the stencil system of the
-     * canvas when the root bind owes it the change, now that there is a pass to set its reference on.
+     * Records a canvas pass that really began (Pixi did not reuse the open one), tells the listener why, and tells the
+     * stencil system of the canvas when the root bind owes it the change, now that there is a pass to set its reference
+     * on.
      *
      * @param target - The canvas.
      * @param targets - The render target system.
+     * @param restart - Why it began, an index into `CANVAS_RESTARTS`.
      */
-    private began(target: RenderTarget, targets: TargetSystem): void {
+    private began(target: RenderTarget, targets: TargetSystem, restart: number): void {
+      canvasBegan(restart);
       this.acquired = true;
       this.keepStencil = this.planStencil;
       this.keepDepth = this.planDepth;
@@ -555,7 +577,7 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
 
       this.owed = CLEAR_NONE;
       this.owedColorSet = false;
-      this.beginCanvas(target, bits, color, this.view);
+      this.beginCanvas(target, bits, color, this.view, RESTART.empty);
       this.finishRenderPass();
     }
 
@@ -577,15 +599,16 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
      * reference again: a new pass starts from 0, and Pixi sets it only when the mode or the target changes.
      *
      * @param target - The canvas.
+     * @param restart - Why it begins again: `RESTART.mask` or `RESTART.depth`.
      */
-    private restart(target: RenderTarget): void {
+    private restart(target: RenderTarget, restart: number): void {
       const gpu = this.gpu;
       const targets = this.targets;
 
       if (gpu === undefined || targets === undefined) return;
 
       this.finishRenderPass();
-      this.beginCanvas(target, CLEAR_NONE, undefined, this.view);
+      this.beginCanvas(target, CLEAR_NONE, undefined, this.view, restart);
       gpu.encoder.setStencilReference(targets.getGpuRenderTarget(target).stencilReference);
     }
   }
@@ -763,11 +786,15 @@ export function createLazyCanvasClasses(pixi: PixiModule): LazyCanvasClasses {
  * Pixi's own classes back, the stencil system again last.
  *
  * @param pixi - The loaded Pixi module.
+ * @param canvasBegan - Told of every canvas pass that really began, with its reason.
  * @returns The remover.
  * @throws {TypeError} When the module has none of the classes to subclass.
  */
-export function installLazyCanvasPass(pixi: PixiModule): () => void {
-  const lazy = createLazyCanvasClasses(pixi);
+export function installLazyCanvasPass(
+  pixi: PixiModule,
+  canvasBegan: CanvasPassListener = noListener
+): () => void {
+  const lazy = createLazyCanvasClasses(pixi, canvasBegan);
 
   pixi.extensions.remove(pixi.GpuRenderTargetSystem, pixi.GpuStencilSystem, pixi.PipelineSystem);
   pixi.extensions.add(lazy.targets, pixi.GpuStencilSystem, lazy.pipeline);
