@@ -1027,6 +1027,13 @@ picture does not count as churn of the outer one. A
 take that renders nothing (a view off the canvas, empty, too large) is not offered again until the view moves or
 changes.
 
+The view's own alpha (F120). A kept view that fades keeps its picture: the picture is taken without the alpha of the
+view's top (Pixi applies a root's own alpha to its render), and its quad draws it at that alpha, as it draws it at
+another place when the view moves. An alpha write is marked as a move of the view: no stage is redone, and the picture
+around the view (a kept parent, a range) is retaken as for any change inside it. As under a fading ancestor, the
+picture is drawn at `A·F(x)` where live draws `F(A·x)`. A move, a scale or a turn is drawn from the picture too, and
+taken once more only when the view comes to rest off the grid of its take (a nudge or a pulse that returns costs none).
+
 Under a fading or zooming ancestor (F113). A view that stands still is taken while an ancestor fades or zooms, as in
 the entry of a screen, after 2 drawn frames as anywhere: an ancestor's alpha is not read, and a change of the view's
 world scale or rotation does not count as a change of the view. Its quad is faded with the ancestor and drawn scaled

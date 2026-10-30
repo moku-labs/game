@@ -82,6 +82,10 @@ export const BUDGET = {
   // a stage-3 pass into its filter output every frame. Measured 16 B a frame, all of it Pixi's `AlphaFilter.alpha`
   // setter the fixture calls as `effects` does (0 B without that write); the mark, the collect and the flush add nothing.
   keptFade: 16,
+  // F120: new. A kept view whose own alpha changes every frame writes its quad's alpha and renders nothing; before, a
+  // stage-1 retake every frame, then live. Pixi's `alpha` setters box each new double: the fixture's write of the top
+  // (as `applyAlpha` does) and the quad's; the mark, the collect and the flush add nothing.
+  keptOwnFade: 32,
   // F67: 10 kept views drawn scaled under a camera zoom, a view elsewhere marked. Before: three retakes, then live.
   keptZoom: 0,
   // F113: 10 kept views stepped under a root at alpha 0.5, a view elsewhere marked (the fade's own alpha write is Pixi's:

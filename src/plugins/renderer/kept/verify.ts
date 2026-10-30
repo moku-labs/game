@@ -35,14 +35,15 @@ function offGrid(kctx: KeptCtx, record: KeptRecord): boolean {
 }
 
 /**
- * Tells whether a kept record hangs under a translucent ancestor (F113): its quad draws `A·F(x)` where live draws
- * `F(A·x)`, which differ by design for a filter that is not alpha-linear, not by a stale picture.
+ * Tells whether a kept record is translucent, by its top's own alpha (F120) or an ancestor's (F113): its quad draws
+ * `A·F(x)` where live draws `F(A·x)`, which differ by design for a filter that is not alpha-linear, not by a stale
+ * picture.
  *
  * @param record - The record, kept.
- * @returns True when an ancestor's alpha is under 1.
+ * @returns True when the top's alpha or an ancestor's is under 1.
  */
-function fadedAbove(record: KeptRecord): boolean {
-  for (let node = record.top.parent; node !== null; node = node.parent) {
+function faded(record: KeptRecord): boolean {
+  for (let node: PixiContainer | null = record.top; node !== null; node = node.parent) {
     if (node.alpha < 1) return true;
   }
 
@@ -181,8 +182,8 @@ function logStale(
 
 /**
  * The pixel leg after a drawn frame: the picture as drawn against the same frame with every picture live. Frames in
- * which a picture moves off its grid or hangs under a translucent ancestor (F113) are skipped and counted; at rest
- * under opaque ancestors every picture is compared.
+ * which a picture moves off its grid, is translucent itself (F120) or hangs under a translucent ancestor (F113) are
+ * skipped and counted; at rest, opaque, under opaque ancestors every picture is compared.
  *
  * @param kctx - The kept context.
  * @param bypass - Draws every kept record live (true) or as its picture again (false).
@@ -200,9 +201,9 @@ export function verifyPictures(
   // No picture stood in the frame: nothing to compare.
   if (records.length === 0 && ranges.length === 0) return;
 
-  // A picture moving off its grid is sampled linearly, one under a fading ancestor is faded after its filters: the
-  // frame is skipped and counted.
-  const uncomparable = records.some(record => offGrid(kctx, record) || fadedAbove(record));
+  // A picture moving off its grid is sampled linearly, a fading one or one under a fading ancestor is faded after its
+  // filters: the frame is skipped and counted.
+  const uncomparable = records.some(record => offGrid(kctx, record) || faded(record));
 
   if (uncomparable) {
     state.verifySkipped += 1;

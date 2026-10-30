@@ -153,8 +153,9 @@ describe("a kept bare view is drawn into its picture from a wrapper (D4)", () =>
     expect(viewOf(drawn, button).object.tint).toBe(0x33_88_ff);
   });
 
-  // Bug: made the root of its picture, a shape at alpha 0.5 drew its alpha twice: the picture at 0.25.
-  it("draws a Shape at alpha 0.5 into its picture at 0.5 once: on the root, the shape inside at 1", async () => {
+  // Bug: made the root of its picture, a shape at alpha 0.5 drew its alpha twice: the picture at 0.25. Its alpha is
+  // drawn once, by the quad (F120): the root keeps it, the shape inside is at 1.
+  it("draws a Shape at alpha 0.5 once: its quad at 0.5, the root at 0.5, the shape inside at 1", async () => {
     const drawn = await open();
     const ghost = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 60, h: 60, alpha: 0.5 }));
 
@@ -164,6 +165,7 @@ describe("a kept bare view is drawn into its picture from a wrapper (D4)", () =>
     const [first] = stageOneOf(drawn, ghost);
 
     expect(first?.container.alpha).toBe(0.5);
+    expect(drawn.mock.ctx.state.kept.byEntity.get(ghost)?.quad?.alpha).toBe(0.5);
     expect(viewOf(drawn, ghost).object.alpha).toBe(1);
   });
 });

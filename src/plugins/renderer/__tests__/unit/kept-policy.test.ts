@@ -311,7 +311,8 @@ describe("only the stage whose key changed is redone", () => {
     expect(rendersOf(drawn, stove, "#1", from)).toBe(1);
   });
 
-  it("an alpha change of the kept view itself retakes stage 1", async () => {
+  // Bug F120: the view's own alpha was drawn into its picture, so every alpha change retook stage 1.
+  it("an alpha change of the kept view itself redoes no stage: its quad draws it", async () => {
     const drawn = await open();
     const entity = kept(drawn);
     const from = drawn.stage.targets().length;
@@ -319,7 +320,8 @@ describe("only the stage whose key changed is redone", () => {
     drawn.mock.world.ecs.set(entity, Shape, { alpha: 0.5 });
     drawn.frame();
 
-    expect(rendersOf(drawn, entity, "#1", from)).toBe(1);
+    expect(drawn.stage.targets().length).toBe(from);
+    expect(quadOf(drawn, entity)?.alpha).toBe(0.5);
   });
 });
 
@@ -957,8 +959,8 @@ describe("a still picture under a fading or zooming ancestor (F113)", () => {
 
     drawn.frames(2);
 
-    for (const alpha of [0.9, 0.8, 0.7]) {
-      drawn.mock.world.ecs.set(icon, Shape, { alpha });
+    for (const w of [41, 42, 43]) {
+      drawn.mock.world.ecs.set(icon, Shape, { w });
       drawn.frame();
     }
 
@@ -1288,5 +1290,76 @@ describe("the first takes of a frame (F114)", () => {
 
     expect(keptNow(drawn, away[0] ?? 0)).toBe(true);
     expect(records.slice(1).map(record => record?.idle)).toEqual([true, true]);
+  });
+});
+
+describe("the view's own alpha (F120)", () => {
+  // Bug F120 (A Memory Missing, the board's shadows): a kept view that faded was retaken in every frame of the fade,
+  // then drawn live (three passes a frame) once it churned. Its quad draws the picture at the view's alpha.
+  it("keeps a view that fades through its own alpha, its quad at that alpha, with no retake", async () => {
+    const drawn = await open();
+    const shadow = filtered(drawn, slotOf(new pixi.ColorMatrixFilter()));
+
+    drawn.frames(3);
+
+    expect(keptNow(drawn, shadow)).toBe(true);
+
+    const takes = rendersOf(drawn, shadow, "#1");
+    const alphas: number[] = [];
+
+    for (let step = 1; step <= 8; step += 1) {
+      drawn.mock.world.ecs.set(shadow, Shape, { alpha: 1 - step * 0.1 });
+      drawn.frame();
+
+      expect(keptNow(drawn, shadow)).toBe(true);
+      alphas.push(Number(quadOf(drawn, shadow)?.alpha.toFixed(2)));
+    }
+
+    expect(rendersOf(drawn, shadow, "#1")).toBe(takes);
+    expect(alphas).toEqual([0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]);
+  });
+
+  // Bug F120: the picture held the view's alpha (Pixi applies a root's own alpha), so the quad drew it twice.
+  it("takes the picture of a translucent view without its alpha and draws its quad at it", async () => {
+    const drawn = await open();
+    const sheet = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40, alpha: 0.5 }));
+    const seen: number[] = [];
+
+    drawn.frame();
+    drawn.stage.last().renderer.watchers.push(call => {
+      if (call.target?.source.label === `kept:${topOf(drawn, sheet).label}#1`) {
+        seen.push(call.container.alpha);
+      }
+    });
+    drawn.mock.api.sync.filters.set(sheet, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.frames(4);
+
+    expect(keptNow(drawn, sheet)).toBe(true);
+    expect(seen).toEqual([1]);
+    expect(topOf(drawn, sheet).alpha).toBe(0.5);
+    expect(quadOf(drawn, sheet)?.alpha).toBe(0.5);
+  });
+
+  // Guard: a child's alpha is drawn in the picture around it; its fade retakes the kept picture of its parent.
+  it("retakes the picture of a kept panel when a child inside it fades", async () => {
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 300, h: 200 }));
+    const child = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 10, y: 10 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: panel })
+    ]);
+
+    drawn.mock.api.sync.filters.set(panel, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.frames(4);
+
+    expect(keptNow(drawn, panel)).toBe(true);
+
+    const takes = rendersOf(drawn, panel, "#1");
+
+    drawn.mock.world.ecs.set(child, Shape, { alpha: 0.5 });
+    drawn.frame();
+
+    expect(rendersOf(drawn, panel, "#1")).toBe(takes + 1);
   });
 });

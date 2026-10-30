@@ -1193,9 +1193,10 @@ function placeQuad(
 ): void {
   const { top, key } = record;
   const parent = top.parent;
-  // A stack of alphas shows the subtree picture itself at their alpha (F54), any other stack its filter output.
+  // A stack of alphas shows the subtree picture itself at their alpha (F54), any other stack its filter output. The
+  // picture leaves out the top's own alpha: the quad draws it (F120).
   const output = (record.direct ? record.s1 : record.s3) ?? pixi.Texture.EMPTY;
-  const alpha = record.direct ? NOW.alpha : 1;
+  const alpha = (record.direct ? NOW.alpha : 1) * top.alpha;
 
   // The quad: made once, drawing the filter output.
   if (record.quad === undefined || record.quad.destroyed) {
