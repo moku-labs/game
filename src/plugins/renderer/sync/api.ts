@@ -867,7 +867,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       verifyFrames: (on: boolean): void => deps.demand.verifyFrames(on),
 
       kept: (on: boolean): void => {
-        // A call from a console without a boolean is a read by mistake: it switched every picture off (F121).
+        // A call from a console without a boolean is a read by mistake: it switched every picture off (F121). Only this
+        // switch is on by default, so only here does such a read change what a frame draws.
         if (typeof on !== "boolean") {
           ctx.log.warn("renderer:debug-kept-needs-boolean", { on });
 
