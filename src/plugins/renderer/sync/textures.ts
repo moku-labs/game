@@ -4,6 +4,7 @@
  * slice and free a Pixi texture.
  */
 import type { Entity } from "../../world/types";
+import { destroyWhole } from "../sources";
 import type { PixiModule, PixiTexture } from "../types";
 import type {
   CreateTextureOptions,
@@ -386,8 +387,5 @@ export function destroyTexture(state: SyncState, texture: PixiTexture): void {
     return;
   }
 
-  // Pixi 8.22 caches batch bind groups forever, and each one warns when a source it holds goes.
-  texture.source.style.removeAllListeners("change");
-  texture.source.removeAllListeners("change");
-  texture.destroy(true);
+  destroyWhole(texture);
 }
