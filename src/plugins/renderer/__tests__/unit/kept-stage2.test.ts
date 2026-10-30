@@ -233,6 +233,8 @@ describe("stage 2 of a kept picture", () => {
 
     drawn.mock.world.ecs.despawn(entity);
     drawn.frame();
+    // The target waits in the pool (F119); a reset destroys it.
+    drawn.mock.modules.kept.reset();
 
     expect(order[0]).toBe("hold:none");
     expect(order).toContain("destroy");

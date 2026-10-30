@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
 import {
   bytesPerCall,
+  crowdWaitingBoard,
   cutZoomBoard,
   idleAwayBoard,
   keptAncestorFadeBoard,
   keptBlendBoard,
   keptBoard,
   keptFadeBoard,
+  keptOwnFadeBoard,
   keptZoomBoard
 } from "./fixtures";
 
@@ -36,6 +38,13 @@ describe("the kept flush of a quiet board", () => {
     );
   });
 
+  // Bug: a kept view fading through its own alpha is retaken every frame (F120), or its step builds the quad's alpha.
+  it("allocates nothing but Pixi's alpha writes while one of 10 kept views fades through its own alpha (F120)", async () => {
+    expect(bytesPerCall(await keptOwnFadeBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptOwnFade + NOISE
+    );
+  });
+
   it("allocates nothing while 10 kept views are drawn scaled under a camera zoom (F67)", async () => {
     expect(bytesPerCall(await keptZoomBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptZoom + NOISE
@@ -60,6 +69,14 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for 10 views with an alpha filter off the canvas, stepped (F114)", async () => {
     expect(bytesPerCall(await idleAwayBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptIdleAway + NOISE
+    );
+  });
+
+  // Bug: counting the live views that wait for a first take (F119) walks their ancestors through an array or boxes a
+  // number at every flush.
+  it("allocates nothing for a crowd of 10 live views waiting for their first take, stepped (F119)", async () => {
+    expect(bytesPerCall(await crowdWaitingBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptCrowd + NOISE
     );
   });
 

@@ -154,22 +154,65 @@ describe("the budget of the kept pictures", () => {
     }
   });
 
-  it("every texture is destroyed and unregistered from host.keep when its record goes", async () => {
+  // Bug F119: a board that leaves and comes back made and destroyed every render target of its pictures again.
+  it("a record's textures wait in the pool when its view goes, counted in the budget, and the next take of their size takes them", async () => {
     const drawn = await withRoomFor(2);
-    const entity = keep(drawn, 100);
-    const record = drawn.mock.ctx.state.kept.byEntity.get(entity);
+    const gone = keep(drawn, 100);
+    const record = drawn.mock.ctx.state.kept.byEntity.get(gone);
     const textures = [record?.s1, record?.s3].filter(texture => texture !== undefined);
-    const host = drawn.mock.ctx.state.host;
+    const kept = drawn.mock.ctx.state.kept;
 
-    expect(textures).toHaveLength(2);
-    expect(textures.map(texture => host.kept.has(texture.source))).toEqual([true, true]);
-
-    drawn.mock.world.ecs.despawn(entity);
+    drawn.mock.world.ecs.despawn(gone);
     drawn.frame();
 
-    expect(textures.map(texture => host.kept.has(texture.source))).toEqual([false, false]);
+    expect(textures.map(texture => texture.destroyed)).toEqual([false, false]);
+    expect(kept.pool).toHaveLength(2);
+    expect(kept.bytes).toBe(kept.poolBytes);
+    expect(kept.bytes).toBeGreaterThan(0);
+
+    const back = keep(drawn, 200);
+    const again = kept.byEntity.get(back);
+
+    expect(isKept(drawn, back)).toBe(true);
+    expect(textures).toContain(again?.s1);
+    expect(textures).toContain(again?.s3);
+    expect(kept.pool).toHaveLength(0);
+    expect(kept.poolBytes).toBe(0);
+    expect(again?.s1?.source.label).toBe(`kept:Shape#${back}#1`);
+  });
+
+  // Bug: the pool held its textures past the budget, or past a reset (device loss, stop).
+  it("the pool's textures are destroyed and unregistered from host.keep when a take needs their room, and at a reset", async () => {
+    const drawn = await withRoomFor(1);
+    const gone = keep(drawn, 100);
+    const record = drawn.mock.ctx.state.kept.byEntity.get(gone);
+    const textures = [record?.s1, record?.s3].filter(texture => texture !== undefined);
+    const host = drawn.mock.ctx.state.host;
+    const kept = drawn.mock.ctx.state.kept;
+
+    drawn.mock.world.ecs.despawn(gone);
+    drawn.frame();
+
+    const larger = drawn.spawn(Transform({ x: 300, y: 100 }), Shape({ w: 41, h: 40 }));
+
+    drawn.mock.api.sync.filters.set(larger, [
+      { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
+    ]);
+    drawn.frames(3);
+
+    expect(isKept(drawn, larger)).toBe(true);
     expect(textures.map(texture => texture.destroyed)).toEqual([true, true]);
-    expect(drawn.mock.ctx.state.kept.bytes).toBe(0);
+    expect(textures.map(texture => host.kept.has(texture.source))).toEqual([false, false]);
+
+    const left = [kept.byEntity.get(larger)?.s1, kept.byEntity.get(larger)?.s3];
+
+    drawn.mock.world.ecs.despawn(larger);
+    drawn.frame();
+    drawn.mock.modules.kept.reset();
+
+    expect(left.map(texture => texture?.destroyed)).toEqual([true, true]);
+    expect(kept.pool).toHaveLength(0);
+    expect([kept.bytes, kept.poolBytes]).toEqual([0, 0]);
   });
 });
 

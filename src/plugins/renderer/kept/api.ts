@@ -27,7 +27,7 @@ import {
   stepCalm,
   stepRecord
 } from "./record";
-import { canKeep, dropTexture, matricesOf } from "./render";
+import { canKeep, dropTexture, emptyPool, matricesOf } from "./render";
 import { destroyRange } from "./state";
 import type { KeptCtx, KeptMatrices, KeptRange, KeptRecord, KeptStats } from "./types";
 import { drawLive, verifyPictures } from "./verify";
@@ -430,7 +430,9 @@ export function createKeptApi(
         state.spare = undefined;
       }
 
+      emptyPool(kctx);
       state.bytes = 0;
+      state.poolBytes = 0;
       state.drawnPictures = 0;
     }
   };

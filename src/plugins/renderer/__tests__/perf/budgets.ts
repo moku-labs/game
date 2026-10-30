@@ -82,6 +82,10 @@ export const BUDGET = {
   // a stage-3 pass into its filter output every frame. Measured 16 B a frame, all of it Pixi's `AlphaFilter.alpha`
   // setter the fixture calls as `effects` does (0 B without that write); the mark, the collect and the flush add nothing.
   keptFade: 16,
+  // F120: new. A kept view whose own alpha changes every frame writes its quad's alpha and renders nothing; before, a
+  // stage-1 retake every frame, then live. Pixi's `alpha` setters box each new double: the fixture's write of the top
+  // (as `applyAlpha` does) and the quad's; the mark, the collect and the flush add nothing.
+  keptOwnFade: 32,
   // F67: 10 kept views drawn scaled under a camera zoom, a view elsewhere marked. Before: three retakes, then live.
   keptZoom: 0,
   // F113: 10 kept views stepped under a root at alpha 0.5, a view elsewhere marked (the fade's own alpha write is Pixi's:
@@ -94,6 +98,9 @@ export const BUDGET = {
   // F114: 10 views with an alpha filter off the canvas, stepped (a mark elsewhere). A take that rendered nothing is
   // remembered: before, each was tried again every few frames, building its bounds (arrays, spans) at each attempt.
   keptIdleAway: 0,
+  // F119: 10 live views with a filter that turn every frame, never taken, a view elsewhere marked. New: every flush
+  // counts the views drawn live that wait, each walk up to the stage by its parents, which allocates nothing.
+  keptCrowd: 0,
   // F68: 10 kept views and a filtered view with a glow inside, drawn live, every record stepped (a mark elsewhere). New,
   // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
   // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.

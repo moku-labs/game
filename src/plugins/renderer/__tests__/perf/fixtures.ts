@@ -618,6 +618,33 @@ export async function keptFadeBoard(count: number): Promise<() => void> {
 }
 
 /**
+ * The board of `keptBoard` whose first view fades through its own alpha (F120), as `applyAlpha` writes it: the view is
+ * marked as a move, its top takes another alpha every frame, then the kept cache collects and flushes. Its picture is
+ * taken without the top's alpha: the frame writes the quad's alpha and renders nothing.
+ *
+ * @param count - The kept views.
+ * @returns One frame of the fade: the mark, the alpha, the collect and the flush.
+ */
+export async function keptOwnFadeBoard(count: number): Promise<() => void> {
+  const { stage, views } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const view = views[0] ?? 0;
+  const top = stage.drawn.mock.ctx.state.kept.byEntity.get(view)?.top;
+
+  if (top === undefined) throw new Error("perf fixture: the own-fade board has no kept view");
+
+  let low = false;
+
+  return () => {
+    low = !low;
+    demand.markMoved(view);
+    top.alpha = low ? 0.4 : 0.6;
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A board whose `count` filtered views the kept cache draws from their pictures (E5), over the real Pixi of the
  * overlay stage, every frame drawn: each view carries one alpha filter the cache may keep, in a frozen list as
  * `effects` hands it over, and stood still long enough to be taken. A frame collects the marks and flushes the cache,
@@ -1150,4 +1177,56 @@ export async function hoverBoard(): Promise<HoverBoard> {
   mock.modules.sync.pass();
 
   return { mock, target, drop: { x: 60 + 4 * 110, y: 400 + 9 * 110 } };
+}
+
+/**
+ * A crowd of `count` views with a filter drawn live (F119) under a tinted root, which no picture draws as it is drawn,
+ * so none is ever taken; a view elsewhere is marked every frame, so every flush counts the crowd before the step, each
+ * walk up its parents to the stage.
+ *
+ * @param count - The views of the crowd.
+ * @returns One frame: the mark, the collect and the flush.
+ */
+export async function crowdWaitingBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const root = stage.drawn.mock.ctx.state.sync.root;
+  const views: Entity[] = [];
+
+  if (root === undefined) throw new Error("perf fixture: the crowd board has no root");
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: 50 + index * 100, y: 100 }));
+  }
+
+  stage.frame();
+  root.tint = 0xff_00_00;
+
+  for (const view of views) {
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.ColorMatrixFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  stage.frames(4);
+
+  const state = stage.drawn.mock.ctx.state.kept;
+
+  if (state.liveWaiting !== count || state.records.some(record => record.mode !== "live")) {
+    throw new Error("perf fixture: the crowd is not drawn live");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
 }

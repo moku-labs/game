@@ -4,6 +4,8 @@
  * render is a public `renderer.render` call made before the stage pass (`host.renderTo`); every texture is the
  * engine's own, registered with `host.keep` and destroyed explicitly.
  */
+
+import { destroyWhole } from "../sources";
 import type {
   FilterSlot,
   FilterSlotInputs,
@@ -102,6 +104,14 @@ export function fitTexture(
     return current;
   }
 
+  const pooled = fromPool(kctx, size);
+
+  if (pooled !== undefined) {
+    pooled.source.label = label;
+
+    return pooled;
+  }
+
   const texture = pixi.RenderTexture.create({
     width,
     height,
@@ -120,6 +130,91 @@ export function fitTexture(
 }
 
 /**
+ * Takes a texture of the asked size out of the pool (F119): the first one of the same CSS size and resolution, its
+ * bytes no longer the pool's. The last one fills its place: the pool keeps no order.
+ *
+ * @param kctx - The kept context.
+ * @param size - CSS px and texels per CSS px.
+ * @param size.width - CSS width.
+ * @param size.height - CSS height.
+ * @param size.resolution - Texels per CSS px.
+ * @returns The texture, or `undefined` when none fits.
+ */
+function fromPool(
+  kctx: KeptCtx,
+  size: { width: number; height: number; resolution: number }
+): PixiRenderTexture | undefined {
+  const { pool } = kctx.state;
+
+  for (let index = 0; index < pool.length; index += 1) {
+    const texture = pool[index];
+
+    if (texture === undefined) continue;
+
+    const { source } = texture;
+
+    if (source.width !== size.width || source.height !== size.height) continue;
+    if (source.resolution !== size.resolution) continue;
+
+    const last = pool.pop();
+
+    if (last !== undefined && last !== texture) pool[index] = last;
+    unpool(kctx, texture);
+
+    return texture;
+  }
+
+  return undefined;
+}
+
+/**
+ * Puts a texture of a record whose view left into the pool (F119), for the next take of its size: a scene that leaves
+ * and comes back makes no render target. Its bytes count in the budget until it is taken or dropped.
+ *
+ * @param kctx - The kept context.
+ * @param texture - The texture.
+ */
+export function poolTexture(kctx: KeptCtx, texture: PixiRenderTexture): void {
+  if (texture.destroyed) return;
+
+  const { source } = texture;
+
+  const bytes = textureBytes(source.width, source.height, source.resolution);
+
+  kctx.state.pool.push(texture);
+  kctx.state.bytes += bytes;
+  kctx.state.poolBytes += bytes;
+}
+
+/**
+ * Gives back the bytes of a texture that left the pool.
+ *
+ * @param kctx - The kept context.
+ * @param texture - The texture.
+ */
+function unpool(kctx: KeptCtx, texture: PixiRenderTexture): void {
+  const { source } = texture;
+  const bytes = textureBytes(source.width, source.height, source.resolution);
+
+  kctx.state.bytes -= bytes;
+  kctx.state.poolBytes -= bytes;
+}
+
+/**
+ * Destroys every texture of the pool and gives its bytes back: room for a take, a reset.
+ *
+ * @param kctx - The kept context.
+ */
+export function emptyPool(kctx: KeptCtx): void {
+  const { state } = kctx;
+
+  for (let texture = state.pool.pop(); texture !== undefined; texture = state.pool.pop()) {
+    unpool(kctx, texture);
+    dropTexture(kctx, texture);
+  }
+}
+
+/**
  * Destroys a texture of the module: out of `host.keep`, then its source.
  *
  * @param kctx - The kept context.
@@ -127,7 +222,7 @@ export function fitTexture(
  */
 export function dropTexture(kctx: KeptCtx, texture: PixiRenderTexture): void {
   kctx.host.keep(texture.source, false);
-  texture.destroy(true);
+  destroyWhole(texture);
 }
 
 /**
@@ -220,8 +315,15 @@ export function renderStage1(
   );
 
   const group = top.isRenderGroup;
+  // The picture leaves out the top's own alpha, which Pixi applies to a root it renders: the quad draws it (F120).
+  const alpha = top.alpha;
 
-  if (!kctx.host.renderTo(top, s1, matrices.m1, true)) return false;
+  if (alpha !== 1) top.alpha = 1;
+
+  const rendered = kctx.host.renderTo(top, s1, matrices.m1, true);
+
+  if (alpha !== 1) top.alpha = alpha;
+  if (!rendered) return false;
   if (!group && !record.wasGroup) kctx.state.madeGroups.add(top);
 
   record.s1Version += 1;

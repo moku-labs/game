@@ -1027,9 +1027,21 @@ First takes in a frame (F114). A view whose filters are all alphas is taken in i
 frame it is drawn counts as unchanged): its picture costs one pass, live costs two. Any other view takes its first
 picture at most one per frame, in drawing order, and none in a frame where an alpha may be taken; the others wait one
 more frame each, drawn live as before (never hidden), so a whole board that appears at once spreads its take passes
-over several frames. An alpha that may be taken but is not (cut to the canvas under a zoom) holds the others back once. A first take inside a kept picture does not count as churn of the outer one. A
+over several frames. An alpha that may be taken but is not (cut to the canvas under a zoom) holds the others back once.
+A crowd is spread less (F119): while four or more views with a filter are drawn live, not yet kept, up to ten of the
+views drawn live are first taken in a frame, so a board of forty shadows is taken in four frames instead of forty. Waiting,
+each live filter breaks the canvas pass every frame; its take renders into small targets before the stage pass. A view
+under a range picture or a kept picture is not drawn live, and its take keeps the spread. A first take inside a kept
+picture does not count as churn of the outer one. A
 take that renders nothing (a view off the canvas, empty, too large) is not offered again until the view moves or
 changes.
+
+The view's own alpha (F120). A kept view that fades keeps its picture: the picture is taken without the alpha of the
+view's top (Pixi applies a root's own alpha to its render), and its quad draws it at that alpha, as it draws it at
+another place when the view moves. An alpha write is marked as a move of the view: no stage is redone, and the picture
+around the view (a kept parent, a range) is retaken as for any change inside it. As under a fading ancestor, the
+picture is drawn at `A·F(x)` where live draws `F(A·x)`. A move, a scale or a turn is drawn from the picture too, and
+taken once more only when the view comes to rest off the grid of its take (a nudge or a pulse that returns costs none).
 
 Under a fading or zooming ancestor (F113). A view that stands still is taken while an ancestor fades or zooms, as in
 the entry of a screen, after 2 drawn frames as anywhere: an ancestor's alpha is not read, and a change of the view's
@@ -1071,12 +1083,18 @@ area, cut from its bounds: its filters draw nothing outside it, so a full-screen
 costs the disc, not the screen. A take that would pass it evicts the pictures not
 drawn in this frame, the least recently drawn first; an evicted view draws live and its textures are
 destroyed. A take that still does not fit is refused, the view drawn live, `renderer:kept-budget`
-logged once per run, and it is not offered again until it fits. Every texture is registered with
-`host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on a drop, a device loss, a rebuild and
-at `onStop`. `stats().kept` is `{ pictures, mb, retakes }`.
+logged once per run, and it is not offered again until it fits. The textures of a view that leaves wait in a pool
+(F119), counted in the budget, and the next take of the same size takes them: a scene that leaves and comes back makes
+no render target. The pool is emptied first when a take needs room. Every texture is registered with
+`host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on an eviction, a device loss, a rebuild and
+at `onStop`, as `textures.destroy` frees a source, its `change` listeners removed first, so the bind
+groups Pixi keeps over a drawn picture print no `[BindGroup]` warning. The warm-up's probe target
+goes the same way. `stats().kept` is `{ pictures, mb, retakes }`.
 
 `sync.debug.kept(false)` (door `game.debug { kept: false }`) draws every filtered view live from the
 next drawn frame, `true` lets them be taken again: the A/B switch of a measurement, in every build.
+A call without a boolean switches nothing and warns `renderer:debug-kept-needs-boolean`; `sync.debug.state().kept`
+reads the switch.
 With `debug.verifyFrames` on (dev and debug builds), every drawn frame in which a picture stood is
 read twice, as drawn and with every picture drawn live, and compared; a difference logs
 `renderer:stale-picture` and draws every view live until the policy takes it again. A frame in which a picture

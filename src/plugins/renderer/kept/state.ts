@@ -2,6 +2,7 @@
  * @file renderer/kept — the state of the kept-picture cache, and its stop from state alone.
  */
 import { BYTES_PER_MB } from "../monitor/units";
+import { destroyWhole } from "../sources";
 import type { Config, PixiContainer, PixiRenderTexture } from "../types";
 import type { KeptRecord, KeptState, RangeRecord } from "./types";
 
@@ -12,6 +13,15 @@ import type { KeptRecord, KeptState, RangeRecord } from "./types";
  * @returns An empty list.
  */
 function emptyRecords(): KeptRecord[] {
+  return [];
+}
+
+/**
+ * Creates an empty texture list. Same reason as `emptyRecords`.
+ *
+ * @returns An empty list.
+ */
+function emptyTextures(): PixiRenderTexture[] {
   return [];
 }
 
@@ -57,6 +67,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     byTop: emptyMap(),
     ranges: emptyMap(),
     spare: undefined,
+    pool: emptyTextures(),
+    poolBytes: 0,
     madeGroups: emptyWeakSet(),
     frame: 0,
     unsorted: false,
@@ -76,7 +88,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     flushPasses: 0,
     calm: false,
     firstTakes: 0,
-    alphaDue: false
+    alphaDue: false,
+    liveWaiting: 0
   };
 }
 
@@ -137,7 +150,7 @@ export function destroyRange(range: RangeRecord, drop: (texture: PixiRenderTextu
  * @param texture - The texture.
  */
 function destroyTexture(texture: PixiRenderTexture): void {
-  texture.destroy(true);
+  destroyWhole(texture);
 }
 
 /**
@@ -159,8 +172,11 @@ export function stopKept(state: KeptState): void {
 
   for (const range of state.ranges.values()) destroyRange(range, destroyTexture);
 
-  state.spare?.destroy(true);
+  if (state.spare !== undefined) destroyWhole(state.spare);
   state.spare = undefined;
+  for (const texture of state.pool) destroyTexture(texture);
+  state.pool.length = 0;
+  state.poolBytes = 0;
   state.records.length = 0;
   state.byEntity.clear();
   state.byTop.clear();
@@ -176,6 +192,7 @@ export function stopKept(state: KeptState): void {
   state.drawnPictures = 0;
   state.firstTakes = 0;
   state.alphaDue = false;
+  state.liveWaiting = 0;
   state.warnedBudget = false;
   state.warnedBlend.clear();
   state.verifySkipped = 0;
