@@ -52,9 +52,10 @@ export function lostPress(ctx: InputCtx, reason: LostPress): void {
 
 /**
  * Logs an answer the gate did not take. A closed gate holds it for the next gate, so that is told
- * at debug level only: `flow` warns `flow:answer-dropped` when no gate takes the held answer. Otherwise the line says what
- * the gate said: `no-edge`, the resting node does not list the intent; `refused`, a guide's narrow
- * dropped it and names no `blocked`; `blocked`, it answered the guide's `blocked` in its place.
+ * at debug level only; `flow` warns `flow:answer-dropped` when no gate takes the held answer.
+ * Otherwise the line says what the gate said: `no-edge`, the resting node does not list the
+ * intent; `refused`, a guide's narrow dropped it and names no `blocked`; `blocked`, it answered the
+ * guide's `blocked` in its place.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view the answer came from.
@@ -81,8 +82,10 @@ export function lostAnswer(
     return;
   }
 
+  // The view by its projection key; a view without one by its entity.
   const view = ctx.deps.world.projection.keyOf(entity) ?? entity;
 
+  // A closed gate holds the answer: not lost yet, `flow` tells its fate.
   if (!gate.open && !blocked) {
     ctx.log.debug("input: counted, the gate is closed: held for the next gate", {
       view,
@@ -92,6 +95,7 @@ export function lostAnswer(
     return;
   }
 
+  // What the open gate said: the guide's blocked took it, no edge lists it, or the narrow dropped it.
   let said = "refused";
 
   if (blocked) said = "blocked";

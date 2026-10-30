@@ -48,6 +48,7 @@ describe("the lost-tap log in a Bun build of src/plugins/input/lost.ts", () => {
     expect(code).toContain("lostPress");
     expect(code).not.toContain("input: pressed, but the tap was not counted");
     expect(code).not.toContain("input: counted, but the gate took nothing");
+    expect(code).not.toContain("input: counted, the gate is closed");
   });
 
   // Bug caught: the phone debug build (agent only) is silent exactly where taps are lost.
