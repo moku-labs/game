@@ -8,6 +8,7 @@ import {
   keptBlendBoard,
   keptBoard,
   keptFadeBoard,
+  keptOwnFadeBoard,
   keptZoomBoard
 } from "./fixtures";
 
@@ -33,6 +34,13 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing while one of 10 kept views fades through a stack of alphas (F54)", async () => {
     expect(bytesPerCall(await keptFadeBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptFade + NOISE
+    );
+  });
+
+  // Bug: a kept view fading through its own alpha is retaken every frame (F120), or its step builds the quad's alpha.
+  it("allocates nothing but Pixi's alpha writes while one of 10 kept views fades through its own alpha (F120)", async () => {
+    expect(bytesPerCall(await keptOwnFadeBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptOwnFade + NOISE
     );
   });
 

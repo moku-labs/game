@@ -618,6 +618,33 @@ export async function keptFadeBoard(count: number): Promise<() => void> {
 }
 
 /**
+ * The board of `keptBoard` whose first view fades through its own alpha (F120), as `applyAlpha` writes it: the view is
+ * marked as a move, its top takes another alpha every frame, then the kept cache collects and flushes. Its picture is
+ * taken without the top's alpha: the frame writes the quad's alpha and renders nothing.
+ *
+ * @param count - The kept views.
+ * @returns One frame of the fade: the mark, the alpha, the collect and the flush.
+ */
+export async function keptOwnFadeBoard(count: number): Promise<() => void> {
+  const { stage, views } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const view = views[0] ?? 0;
+  const top = stage.drawn.mock.ctx.state.kept.byEntity.get(view)?.top;
+
+  if (top === undefined) throw new Error("perf fixture: the own-fade board has no kept view");
+
+  let low = false;
+
+  return () => {
+    low = !low;
+    demand.markMoved(view);
+    top.alpha = low ? 0.4 : 0.6;
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A board whose `count` filtered views the kept cache draws from their pictures (E5), over the real Pixi of the
  * overlay stage, every frame drawn: each view carries one alpha filter the cache may keep, in a frozen list as
  * `effects` hands it over, and stood still long enough to be taken. A frame collects the marks and flushes the cache,
