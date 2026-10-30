@@ -1010,7 +1010,9 @@ What each stage depends on, and the only stage redone when it changes:
 Moving and changing. A view that moves keeps its picture: only the quad's position is written. A move
 of a fraction of a texel draws the quad off its grid (sampled linearly) while it moves; at rest it is
 taken once more at its new phase (a settle retake, for which one frame is asked). Adaptivity: a view
-is taken after it stood still for 2 drawn frames; a kept view whose subtree changes in 3 drawn frames
+is taken after it stood still for 2 drawn frames, so one that animates in is not taken between two of its
+changes; a new view drawn live while a crowd of four or more waits is taken in its first drawn frame
+without a change (F119: each frame a crowd waits live, its filters break the canvas pass); a kept view whose subtree changes in 3 drawn frames
 in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
 more than live). A kept view inside another is rendered first; its change retakes the outer one too.
 

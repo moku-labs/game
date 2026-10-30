@@ -1012,7 +1012,8 @@ describe("a still picture under a fading or zooming ancestor (F113)", () => {
 
 describe("the first takes of a frame (F114)", () => {
   // Bug F114: every view that stood still took its first picture in the same frame, the take passes of a whole board in
-  // one frame (A Memory Missing's board appearing under a fading memory: 10 passes against a budget of 7).
+  // one frame (A Memory Missing's board appearing under a fading memory: 10 passes against a budget of 7). Fewer than
+  // a crowd also wait two still frames: taken in the first, a view that animates in churns (the moving sheet, F119).
   it("takes one first picture per frame of views not drawn as an alpha, the others the frames after", async () => {
     const drawn = await open();
     const views = [100, 200, 300].map(x =>
@@ -1034,8 +1035,9 @@ describe("the first takes of a frame (F114)", () => {
   });
 
   // Bug F119 (A Memory Missing, the board's entry): forty item shadows drawn live waited one take a frame, 330 ms of
-  // forty filters breaking the canvas pass. From four drawn live, the first takes are not spread.
-  it("takes the first pictures of a crowd of four views drawn live in the same frame", async () => {
+  // forty filters breaking the canvas pass. From four drawn live, the first takes are not spread, and they come in
+  // the first still frame, not the second (A26: the waiting frames were the entry's hitch).
+  it("takes the first pictures of a crowd of four views drawn live in the same frame, their first still one", async () => {
     const drawn = await open();
     const views = [100, 200, 300, 400].map(x =>
       drawn.spawn(Transform({ x, y: 100 }), Shape({ w: 40, h: 40 }))
@@ -1052,11 +1054,11 @@ describe("the first takes of a frame (F114)", () => {
       taken.push(views.filter(view => keptNow(drawn, view)).length);
     }
 
-    expect(taken).toEqual([0, 0, 4, 4]);
+    expect(taken).toEqual([0, 4, 4, 4]);
   });
 
   // Bug: forty shadows taken in one frame cost one peak of about 120 passes; a crowd takes at most ten a frame.
-  it("takes the first pictures of a crowd of twelve drawn live ten in a frame, the two left one a frame", async () => {
+  it("takes the first pictures of a crowd of twelve drawn live ten in a frame from the first still one", async () => {
     const drawn = await open();
     const views = Array.from({ length: 12 }, (_, index) =>
       drawn.spawn(
@@ -1076,7 +1078,7 @@ describe("the first takes of a frame (F114)", () => {
       taken.push(views.filter(view => keptNow(drawn, view)).length);
     }
 
-    expect(taken).toEqual([0, 0, 10, 11, 12]);
+    expect(taken).toEqual([0, 10, 11, 12, 12]);
   });
 
   // Guard (F114): views under a kept picture are not drawn live, their takes are pure cost; they stay spread while a
