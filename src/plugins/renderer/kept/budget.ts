@@ -1,12 +1,12 @@
 /**
  * @file renderer/kept — the budget of the kept pictures (P6): `renderer.keptMb` MiB, estimated at four bytes a texel.
  * Before a take that would pass it, the pictures not drawn in this frame are evicted, the least recently drawn first
- * (the spare of a released range before them); a range whose sprite is placed and a picture drawn in this frame are
+ * (the pool of left views' textures and the spare of a released range before them); a range whose sprite is placed and a picture drawn in this frame are
  * never evicted. An eviction draws the view live and destroys its textures; the record keeps its place.
  */
 import { BYTES_PER_MB, roundTo } from "../monitor/units";
 import { textureBytes } from "./geometry";
-import { dropTexture, endLoan } from "./render";
+import { dropTexture, emptyPool, endLoan } from "./render";
 import type { KeptCtx, KeptRecord } from "./types";
 
 /**
@@ -57,6 +57,8 @@ export function makeRoom(
   const { state } = kctx;
 
   if (fits(kctx, extra)) return true;
+
+  emptyPool(kctx);
 
   if (state.spare !== undefined) {
     const { source } = state.spare;

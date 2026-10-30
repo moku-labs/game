@@ -1089,3 +1089,55 @@ export async function fadingLoader(phase: "fade" | "wait"): Promise<FadingLoader
 
   return { mock, step };
 }
+
+/**
+ * A crowd of `count` views with a filter drawn live (F119) under a tinted root, which no picture draws as it is drawn,
+ * so none is ever taken; a view elsewhere is marked every frame, so every flush counts the crowd before the step, each
+ * walk up its parents to the stage.
+ *
+ * @param count - The views of the crowd.
+ * @returns One frame: the mark, the collect and the flush.
+ */
+export async function crowdWaitingBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const root = stage.drawn.mock.ctx.state.sync.root;
+  const views: Entity[] = [];
+
+  if (root === undefined) throw new Error("perf fixture: the crowd board has no root");
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: 50 + index * 100, y: 100 }));
+  }
+
+  stage.frame();
+  root.tint = 0xff_00_00;
+
+  for (const view of views) {
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.ColorMatrixFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  stage.frames(4);
+
+  const state = stage.drawn.mock.ctx.state.kept;
+
+  if (state.liveWaiting !== count || state.records.some(record => record.mode !== "live")) {
+    throw new Error("perf fixture: the crowd is not drawn live");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}

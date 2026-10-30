@@ -1033,6 +1033,84 @@ describe("the first takes of a frame (F114)", () => {
     expect(taken).toEqual([0, 0, 1, 2, 3, 3]);
   });
 
+  // Bug F119 (A Memory Missing, the board's entry): forty item shadows drawn live waited one take a frame, 330 ms of
+  // forty filters breaking the canvas pass. From four drawn live, the first takes are not spread.
+  it("takes the first pictures of a crowd of four views drawn live in the same frame", async () => {
+    const drawn = await open();
+    const views = [100, 200, 300, 400].map(x =>
+      drawn.spawn(Transform({ x, y: 100 }), Shape({ w: 40, h: 40 }))
+    );
+
+    drawn.frame();
+    for (const view of views)
+      drawn.mock.api.sync.filters.set(view, [slotOf(new pixi.ColorMatrixFilter())]);
+
+    const taken: number[] = [];
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      drawn.frame();
+      taken.push(views.filter(view => keptNow(drawn, view)).length);
+    }
+
+    expect(taken).toEqual([0, 0, 4, 4]);
+  });
+
+  // Bug: forty shadows taken in one frame cost one peak of about 120 passes; a crowd takes at most ten a frame.
+  it("takes the first pictures of a crowd of twelve drawn live ten in a frame, the two left one a frame", async () => {
+    const drawn = await open();
+    const views = Array.from({ length: 12 }, (_, index) =>
+      drawn.spawn(
+        Transform({ x: 20 + (index % 6) * 60, y: 100 + Math.floor(index / 6) * 60 }),
+        Shape({ w: 40, h: 40 })
+      )
+    );
+
+    drawn.frame();
+    for (const view of views)
+      drawn.mock.api.sync.filters.set(view, [slotOf(new pixi.ColorMatrixFilter())]);
+
+    const taken: number[] = [];
+
+    for (let frame = 0; frame < 5; frame += 1) {
+      drawn.frame();
+      taken.push(views.filter(view => keptNow(drawn, view)).length);
+    }
+
+    expect(taken).toEqual([0, 0, 10, 11, 12]);
+  });
+
+  // Guard (F114): views under a kept picture are not drawn live, their takes are pure cost; they stay spread while a
+  // crowd drawn live beside them is taken at once.
+  it("takes the first pictures of views under a kept panel one per frame, beside a crowd drawn live", async () => {
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 400, h: 200 }));
+    const icons = [10, 80, 150].map(x =>
+      drawn.mock.world.ecs.spawn(OWNER, [
+        Transform({ x, y: 10 }),
+        Shape({ w: 40, h: 40 }),
+        Parent({ entity: panel })
+      ])
+    );
+    const crowd = [100, 200, 300, 400].map(x =>
+      drawn.spawn(Transform({ x, y: 600 }), Shape({ w: 40, h: 40 }))
+    );
+
+    drawn.mock.api.sync.filters.set(panel, [slotOf(new pixi.ColorMatrixFilter())]);
+    drawn.frames(4);
+    for (const view of [...icons, ...crowd])
+      drawn.mock.api.sync.filters.set(view, [slotOf(new pixi.ColorMatrixFilter())]);
+
+    const taken: number[] = [];
+
+    for (let frame = 0; frame < 6; frame += 1) {
+      drawn.frame();
+      taken.push(icons.filter(icon => keptNow(drawn, icon)).length);
+    }
+
+    expect(crowd.map(view => keptNow(drawn, view))).toEqual([true, true, true, true]);
+    expect(taken).toEqual([0, 0, 1, 2, 3, 3]);
+  });
+
   // Bug F114: a stack of alphas drawn live for two frames costs two passes each, where its picture costs one.
   it("takes every view drawn as an alpha in its first eligible frame, no cap among them", async () => {
     const drawn = await open();

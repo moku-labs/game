@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
 import {
   bytesPerCall,
+  crowdWaitingBoard,
   cutZoomBoard,
   idleAwayBoard,
   keptAncestorFadeBoard,
@@ -68,6 +69,14 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for 10 views with an alpha filter off the canvas, stepped (F114)", async () => {
     expect(bytesPerCall(await idleAwayBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptIdleAway + NOISE
+    );
+  });
+
+  // Bug: counting the live views that wait for a first take (F119) walks their ancestors through an array or boxes a
+  // number at every flush.
+  it("allocates nothing for a crowd of 10 live views waiting for their first take, stepped (F119)", async () => {
+    expect(bytesPerCall(await crowdWaitingBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptCrowd + NOISE
     );
   });
 

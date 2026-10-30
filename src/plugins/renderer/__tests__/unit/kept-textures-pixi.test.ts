@@ -96,9 +96,9 @@ function bindGroupWarnings(spy: MockInstance<typeof console.warn>): number {
 }
 
 describe("a kept picture's render targets that Pixi drew", () => {
-  // Bug: a view that leaves destroys its targets while Pixi's cached bind groups still listen: a warning per source
-  // and per style, every scene change.
-  it("go without a bind group warning when the view leaves", async () => {
+  // Bug: the targets of a view that left are destroyed, from the pool (F119), while Pixi's cached bind groups still
+  // listen: a warning per source and per style, every time the pool empties.
+  it("go without a bind group warning when the view leaves and the pool empties", async () => {
     const drawn = await open();
     const entity = keep(drawn);
     const targets = drawnTargets(drawn, entity);
@@ -106,6 +106,11 @@ describe("a kept picture's render targets that Pixi drew", () => {
 
     drawn.mock.world.ecs.despawn(entity);
     drawn.frame();
+
+    // The view's targets wait in the pool for the next take of their size.
+    expect(targets.every(target => drawn.mock.ctx.state.kept.pool.includes(target))).toBe(true);
+
+    drawn.mock.modules.kept.reset();
 
     expect(targets.every(target => target.destroyed)).toBe(true);
     expect(bindGroupWarnings(spy)).toBe(0);
