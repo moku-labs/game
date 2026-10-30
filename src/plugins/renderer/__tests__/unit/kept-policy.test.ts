@@ -764,6 +764,25 @@ describe("a kept picture under an ancestor's zoom (F67)", () => {
     expect(drawn.stage.targets().length - from).toBe(0);
   });
 
+  // Bug: the quad's place under a zoom stands, but its inverse rounds otherwise in every frame (about 1e-13), so the
+  // quad was placed again in every frame through Pixi's `decompose`: 88 B a frame once its setters box.
+  it("places the quad no more than once while an ancestor zooms: its place under the zoom stands", async () => {
+    const drawn = await open();
+    const { camera, label } = zoomed(drawn);
+    const quad = quadOf(drawn, label);
+
+    if (quad === undefined) throw new Error("no quad");
+
+    const placed = vi.spyOn(quad, "setFromMatrix");
+
+    for (let frame = 1; frame <= 12; frame += 1) {
+      drawn.mock.world.ecs.set(camera, Transform, { scale: frame % 2 === 0 ? 1.1 : 1.2 });
+      drawn.frame();
+    }
+
+    expect(placed.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
   it("retakes the picture once at rest, at the new scale", async () => {
     const drawn = await open();
     const { camera, label } = zoomed(drawn);
