@@ -32,10 +32,13 @@ import type {
   Point,
   PoolTrim,
   RenderStats,
+  RetakeWhy,
   SafeArea,
   SliceFrame,
   Under,
-  ViewportSize
+  ViewportSize,
+  WhyEntry,
+  WhyLive
 } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -238,6 +241,8 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   pooled: number;
   renderPasses: number;
   renderPassesMax: number;
+  canvasPasses: number;
+  canvasPassesMax: number;
   kept: KeptStats;
   drawCalls?: number;
   redraws?: number;
@@ -250,7 +255,19 @@ expectTypeOf<RenderStats["kept"]>().toEqualTypeOf<{
   pictures: number;
   mb: number;
   retakes: number;
+  evicted: number;
+  refused: number;
 }>();
+
+// A report entry reads by its names: a tool switches on `reason` and `retake.why`.
+expectTypeOf<ReturnType<typeof renderer.sync.debug.why>>().toEqualTypeOf<readonly WhyEntry[]>();
+expectTypeOf<WhyEntry["reason"]>().toEqualTypeOf<WhyLive | null>();
+expectTypeOf<NonNullable<WhyEntry["retake"]>["why"]>().toEqualTypeOf<RetakeWhy>();
+
+declare const entry: WhyEntry;
+
+// @ts-expect-error — "cached" is no reason: a kept view's reason is `null`
+if (entry.reason === "cached") throw new Error("never");
 expectTypeOf<Config["keptMb"]>().toEqualTypeOf<number>();
 expectTypeOf(renderer.capture).toEqualTypeOf<
   (options?: CaptureOptions) => Promise<Captured | undefined>

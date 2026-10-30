@@ -61,7 +61,8 @@ describe("renderer api", () => {
       "overdraw",
       "overlays",
       "state",
-      "verifyFrames"
+      "verifyFrames",
+      "why"
     ]);
   });
 

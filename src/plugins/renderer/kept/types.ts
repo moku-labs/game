@@ -3,7 +3,14 @@
  * keeps.
  */
 import type { Entity } from "../../world/types";
-import type { FilterSlot, FilterSlotInputs, HiddenCtx, SyncWriters, View } from "../sync/types";
+import type {
+  FilterSlot,
+  FilterSlotInputs,
+  HiddenCtx,
+  SyncWriters,
+  View,
+  WhyEntry
+} from "../sync/types";
 import type {
   DemandModule,
   HostModule,
@@ -32,10 +39,167 @@ export type FilterCache = "local" | "placed" | "screen";
  *
  * @example
  * ```ts
- * const kept: KeptStats = { pictures: 2, mb: 9.6, retakes: 0 }; // the memory screen at rest
+ * const kept: KeptStats = { pictures: 2, mb: 9.6, retakes: 0, evicted: 0, refused: 0 }; // the memory screen at rest
  * ```
  */
-export type KeptStats = { pictures: number; mb: number; retakes: number };
+export type KeptStats = {
+  /** Views drawn as one texture in the last drawn frame. */
+  pictures: number;
+  /** The MiB the kept textures hold. */
+  mb: number;
+  /** Pictures taken in the last full second. */
+  retakes: number;
+  /**
+   * Pictures the budget evicted in the last full second, to make room for a take. 0 while inert or with `keptMb: 0`.
+   *
+   * @example
+   * ```ts
+   * // A scene of 80 MiB of pictures under the default budget of 64: the oldest go, drawn live until they are taken.
+   * app.renderer.stats().kept.evicted; // 3
+   * ```
+   */
+  evicted: number;
+  /**
+   * Takes the budget refused in the last full second: a refusal that holds for many frames counts once. 0 while inert
+   * or with `keptMb: 0`.
+   *
+   * @example
+   * ```ts
+   * // A full-screen picture that does not fit a budget of 8 MiB: the view stays live, and `why()` says `"budget"`.
+   * app.renderer.stats().kept.refused; // 1
+   * ```
+   */
+  refused: number;
+};
+
+/**
+ * Why a filtered view is drawn live, as `sync.debug.why()` names it. Its checks in the order they are made: the switch
+ * (`"off"`), the view's filters (`"backdrop"`, `"filter-blend"`, `"cache-false"`), its top (`"faded-out"`, `"top-blend"`,
+ * `"hidden"`), its ancestors (`"ancestor-tint"`, `"ancestor-blend"`, `"ancestor-hidden"`, `"placed-under-filter"`),
+ * then what the cache decided: `"blend-below"` (a node under the top blends otherwise), `"display"` (a `Display` without
+ * `onDemand`), `"waiting"` (still frames, or the frame's first takes went to others), `"alpha-due"` (a stack of alphas
+ * goes first), `"churn"` (it changed too often, calming down), `"budget"` (a take refused) and `"idle"` (a take had
+ * nothing to render).
+ *
+ * @example
+ * ```ts
+ * app.renderer.sync.debug.why()[0]?.reason; // "churn"
+ * ```
+ */
+export type WhyLive =
+  | "off"
+  | "backdrop"
+  | "filter-blend"
+  | "cache-false"
+  | "hidden"
+  | "faded-out"
+  | "top-blend"
+  | "ancestor-tint"
+  | "ancestor-blend"
+  | "ancestor-hidden"
+  | "placed-under-filter"
+  | "blend-below"
+  | "display"
+  | "waiting"
+  | "alpha-due"
+  | "churn"
+  | "budget"
+  | "idle";
+
+/**
+ * What a kept picture's last take was for, as `sync.debug.why()` names it: `"first"` (taken from live), `"mark"` (its
+ * subtree changed), `"inner-first"` (a view inside it took its first picture, F114), `"resolution"`, `"settle"` (it came
+ * to rest off its picture's grid), `"scale-limit"` (a zoom past what a picture is drawn scaled), `"canvas"` (a picture
+ * cut to the canvas moved or the canvas changed), `"filter"` (the filter output alone), `"chain"` (the filter's pre-pass
+ * and output) and `"placed-move"` (a view drawn scaled that may not be: placed, or cut to the canvas).
+ *
+ * @example
+ * ```ts
+ * app.renderer.sync.debug.why()[0]?.retake; // { why: "mark", by: "Text#1048612 tags:timer" }
+ * ```
+ */
+export type RetakeWhy =
+  | "first"
+  | "mark"
+  | "inner-first"
+  | "resolution"
+  | "settle"
+  | "scale-limit"
+  | "canvas"
+  | "filter"
+  | "chain"
+  | "placed-move";
+
+/** The reasons a view is drawn live: a record stores `WHY_LIVE[why - 1]`'s index, 0 while kept. Appended only. */
+export const WHY_LIVE: readonly WhyLive[] = [
+  "off",
+  "backdrop",
+  "filter-blend",
+  "cache-false",
+  "hidden",
+  "faded-out",
+  "top-blend",
+  "ancestor-tint",
+  "ancestor-blend",
+  "ancestor-hidden",
+  "placed-under-filter",
+  "blend-below",
+  "display",
+  "waiting",
+  "alpha-due",
+  "churn",
+  "budget",
+  "idle"
+];
+
+/** The reasons of a take: a record stores `RETAKE_WHY[retakeWhy - 1]`'s index, 0 before its first. Appended only. */
+export const RETAKE_WHY: readonly RetakeWhy[] = [
+  "first",
+  "mark",
+  "inner-first",
+  "resolution",
+  "settle",
+  "scale-limit",
+  "canvas",
+  "filter",
+  "chain",
+  "placed-move"
+];
+
+/** The 1-based index of each reason of `WHY_LIVE` the step writes: a number on the record, no string per frame. */
+export const WHY = {
+  off: 1,
+  backdrop: 2,
+  filterBlend: 3,
+  hidden: 5,
+  fadedOut: 6,
+  topBlend: 7,
+  ancestorTint: 8,
+  ancestorBlend: 9,
+  ancestorHidden: 10,
+  placedUnderFilter: 11,
+  blendBelow: 12,
+  display: 13,
+  waiting: 14,
+  alphaDue: 15,
+  churn: 16,
+  budget: 17,
+  idle: 18
+} as const;
+
+/** The 1-based index of each reason of `RETAKE_WHY`: a number on the record, no string per frame. */
+export const RETAKE = {
+  first: 1,
+  mark: 2,
+  innerFirst: 3,
+  resolution: 4,
+  settle: 5,
+  scaleLimit: 6,
+  canvas: 7,
+  filter: 8,
+  chain: 9,
+  placedMove: 10
+} as const;
 
 /**
  * One picture of an overlay's range, as spec 22 hands it over.
@@ -82,7 +246,9 @@ export type KeptInternal = {
   sprite(id: Entity): PixiContainer | undefined;
   /** The numbers `stats().kept` reports. */
   stats(): KeptStats;
-  /** The takes since the last call; the monitor's window close. */
+  /** Why every filtered view is drawn as it is: `sync.debug.why()`. Agent builds only, a frozen `[]` elsewhere. */
+  why(): readonly WhyEntry[];
+  /** The takes since the last call, the evictions and refusals with them; the monitor's window close. */
   drainTakes(): number;
   /** The stage-3-only redos since the last call. */
   drainRefreshes(): number;
@@ -171,7 +337,10 @@ export type KeptRecord = {
    * `AlphaFilter` at the canvas resolution.
    */
   direct: boolean;
-  /** A view of kind `"Display"` hangs in the subtree; `undefined` until a take attempt walks it (P4.1). */
+  /**
+   * A take attempt found a view of kind `"Display"` under the top that it may not keep (no `onDemand`); `undefined` until
+   * an attempt walked the subtree, and again after a change under the top. Read by the report alone.
+   */
   displays: boolean | undefined;
   /**
    * A walk found a node under the top that blends otherwise than normally (F68): the record is not taken, and the walk
@@ -187,10 +356,27 @@ export type KeptRecord = {
    * offered or attempted until a change under the top or a move of it clears it (F114).
    */
   idle: boolean;
+  /**
+   * A take rendered nothing since the last change under the top or the last take: `idle`, which a move clears to offer
+   * the take again, as the report keeps saying it. Read by the report alone.
+   */
+  idleSeen: boolean;
   /** A stack drawn direct that may be taken in this flush: no other first take happens before it (F114). */
   alphaDue: boolean;
   /** It was due and did not end the flush kept: not due again until a change under the top (F114). */
   alphaMissed: boolean;
+  /** Why it is drawn live: `WHY_LIVE[why - 1]`; 0 while kept, and for a record evicted until its next step. */
+  why: number;
+  /** Still frames left before a take; 0 when it waits for none. */
+  calmIn: number;
+  /** The entity whose mark set `dirtyS1` in this frame, or the inner record's whose drawing changed; 0 for none. */
+  markBy: Entity;
+  /** What the last take was for: `RETAKE_WHY[retakeWhy - 1]`; 0 before its first. */
+  retakeWhy: number;
+  /** The entity whose mark caused the last take; 0 for none. */
+  retakeBy: Entity;
+  /** The `KeptState.frame` of the last take. */
+  retakeAt: number;
 };
 
 /** One picture of an overlay's range (P7), keyed by the owner overlay's entity. */
@@ -251,6 +437,20 @@ export type KeptState = {
   refreshesOpen: number;
   /** Stage-1 and range takes of the frame running now: the ring's `retakes` column. */
   frameTakes: number;
+  /** Records the budget evicted since the monitor's last window close. */
+  frameEvicted: number;
+  /** Record takes the budget refused since the monitor's last window close. */
+  frameRefused: number;
+  /** The evictions of the last closed window: `stats().kept.evicted`. */
+  evictedWindow: number;
+  /** The refusals of the last closed window: `stats().kept.refused`. */
+  refusedWindow: number;
+  /** The first `frame` of the last closed window. */
+  windowStart: number;
+  /** The last `frame` of the last closed window; below `windowStart` before the first close. */
+  windowEnd: number;
+  /** The first `frame` of the open window. */
+  windowNext: number;
   /** Quads drawn in the last drawn frame (stats().kept.pictures). */
   drawnPictures: number;
   /** Debug switch `debug.kept` (P14); config `keptMb: 0` forces it off. */

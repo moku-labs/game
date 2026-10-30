@@ -113,6 +113,8 @@ export default [
       "**/.moku/**",
       // Build output of the mini game: the pack of `bun run mini:pack`.
       "tests/fixtures/mini-game/dist/**",
+      // Build output of the filter bench: the release page the A26 run serves.
+      "bench/filters/dist/**",
       // A v15-layout game for the project index and the lint e2e: its own tsconfig `paths`.
       "tests/fixtures/layout-game/**"
     ]
@@ -722,7 +724,7 @@ export default [
 
   // 7. Test files: relaxed rules
   {
-    files: ["tests/**/*.{ts,tsx}", "src/plugins/**/__tests__/**/*.{ts,tsx}"],
+    files: ["tests/**/*.{ts,tsx}", "bench/**/*.{ts,tsx}", "src/plugins/**/__tests__/**/*.{ts,tsx}"],
     rules: {
       "jsdoc/require-jsdoc": "off",
       "jsdoc/require-description": "off",

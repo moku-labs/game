@@ -78,6 +78,13 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     takesWindow: 0,
     refreshesOpen: 0,
     frameTakes: 0,
+    frameEvicted: 0,
+    frameRefused: 0,
+    evictedWindow: 0,
+    refusedWindow: 0,
+    windowStart: 0,
+    windowEnd: -1,
+    windowNext: 0,
     drawnPictures: 0,
     on: allowed && config.debug.kept !== false,
     allowed,
@@ -188,6 +195,13 @@ export function stopKept(state: KeptState): void {
   state.takesWindow = 0;
   state.refreshesOpen = 0;
   state.frameTakes = 0;
+  state.frameEvicted = 0;
+  state.frameRefused = 0;
+  state.evictedWindow = 0;
+  state.refusedWindow = 0;
+  state.windowStart = 0;
+  state.windowEnd = -1;
+  state.windowNext = 0;
   state.flushPasses = 0;
   state.drawnPictures = 0;
   state.firstTakes = 0;

@@ -620,7 +620,15 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 export type { HudPartValue, OverlayLevelValue, OverlayValue } from "./components";
 export type { DemandFrame, DemandReason, DemandState } from "./demand/types";
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
-export type { FilterCache, KeptInternal, KeptRange, KeptState, KeptStats } from "./kept/types";
+export type {
+  FilterCache,
+  KeptInternal,
+  KeptRange,
+  KeptState,
+  KeptStats,
+  RetakeWhy,
+  WhyLive
+} from "./kept/types";
 export type {
   FrameColumns,
   FrameReadout,
@@ -674,6 +682,7 @@ export type {
   PictureRect,
   RenderStats
 } from "./monitor/types";
+export type { CanvasRestart } from "./reasons";
 export type {
   CoverFrame,
   CreateTextureOptions,
@@ -704,7 +713,8 @@ export type {
   TextureProvider,
   TexturesApi,
   View,
-  ViewKind
+  ViewKind,
+  WhyEntry
 } from "./sync/types";
 export type {
   Orientation,

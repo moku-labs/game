@@ -87,7 +87,9 @@ describe("renderer stats", () => {
       pooled: 0,
       renderPasses: 0,
       renderPassesMax: 0,
-      kept: { pictures: 0, mb: 0, retakes: 0 }
+      canvasPasses: 0,
+      canvasPassesMax: 0,
+      kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }
     });
     expect("drawCalls" in stats).toBe(false);
   });
@@ -1262,11 +1264,23 @@ describe("the kept pictures in the stats and the agent ring (spec 23 P12)", () =
     for (const at of [0, 200, 400, 600, 800]) step(at);
 
     // Taken, the second still open: no take counted yet.
-    expect(drawn.mock.api.stats().kept).toEqual({ pictures: 1, mb: 0.01, retakes: 0 });
+    expect(drawn.mock.api.stats().kept).toEqual({
+      pictures: 1,
+      mb: 0.01,
+      retakes: 0,
+      evicted: 0,
+      refused: 0
+    });
 
     step(1000);
 
-    expect(drawn.mock.api.stats().kept).toEqual({ pictures: 1, mb: 0.01, retakes: 1 });
+    expect(drawn.mock.api.stats().kept).toEqual({
+      pictures: 1,
+      mb: 0.01,
+      retakes: 1,
+      evicted: 0,
+      refused: 0
+    });
 
     for (const at of [1200, 1400, 1600, 1800, 2000]) step(at);
 

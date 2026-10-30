@@ -20,7 +20,14 @@ import {
   takeBuildWork
 } from "./build";
 import { eachEntity, isEmptyList } from "./each";
-import { applySwitched, forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
+import {
+  applySwitched,
+  canvasPassesOf,
+  forgetLeft,
+  renderPassesOf,
+  setArea,
+  setFilters
+} from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
 import { forgetBuild } from "./held";
 import { clearHidden } from "./hidden";
@@ -57,7 +64,8 @@ import type {
   SyncDeps,
   TextureProvider,
   View,
-  WarmListener
+  WarmListener,
+  WhyEntry
 } from "./types";
 import { stopUploads, uploadStep, uploadTextures } from "./upload";
 import {
@@ -903,6 +911,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       overlays: (): readonly OverlayReport[] => overlayReports(sctx),
 
+      why: (): readonly WhyEntry[] => deps.kept.why(),
+
       state: (): DebugSwitches => ({
         ...state.debug,
         verifyFrames: deps.demand.verifying(),
@@ -929,6 +939,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     },
 
     renderPasses: (): number => renderPassesOf(state, ctx.state.kept),
+
+    canvasPasses: (): number => canvasPassesOf(state),
 
     root: (): PixiContainer | undefined => state.root,
 

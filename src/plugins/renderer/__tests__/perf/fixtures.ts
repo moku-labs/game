@@ -23,8 +23,10 @@ import {
   Transform,
   type TransformValue
 } from "../../components";
+import { WHY } from "../../kept/types";
 import { withDeps } from "../../lifecycle";
 import { commitFrame } from "../../monitor/commit";
+import { COUNT } from "../../monitor/types";
 import type { SyncCtx } from "../../sync/types";
 import type { PixiFilter } from "../../types";
 import { box, demandAlone } from "../demand-harness";
@@ -763,6 +765,110 @@ export async function keptAncestorFadeBoard(count: number): Promise<() => void> 
     demand.mark(other);
     kept.collect();
     kept.flush();
+  };
+}
+
+/**
+ * `count` live views with a filter whose subtrees change every frame, so none is ever taken (F126): each step of a frame
+ * writes why the view is live and how many still frames it lacks, and `collect` notes who marked it.
+ *
+ * @param count - The views.
+ * @returns One frame: the marks, the collect and the flush.
+ */
+export async function keptWhyBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const views: Entity[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: 50 + index * 100, y: 100 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.ColorMatrixFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  const step = (): void => {
+    for (const view of views) demand.mark(view);
+
+    kept.collect();
+    kept.flush();
+  };
+
+  for (let frame = 0; frame < 4; frame += 1) step();
+
+  if (stage.drawn.mock.ctx.state.kept.records.some(record => record.why !== WHY.waiting)) {
+    throw new Error("perf fixture: a view of the why board is not waiting");
+  }
+
+  return step;
+}
+
+/**
+ * A started renderer of a build, its pass ring holding a pass in an agent build: a begin writes the newest slot.
+ *
+ * @param agent - True for an agent build.
+ * @param clock - `"plain"` for an alloc window, `"real"` for a bench.
+ * @returns The renderer.
+ */
+async function startedRenderer(agent: boolean, clock: "plain" | "real"): Promise<MockRenderer> {
+  if (agent) {
+    const started = await startPlainAgent(clock);
+
+    started.frame();
+
+    if (started.pc.perf.ring.passes.newest < 0)
+      throw new Error("perf fixture: no pass in the ring");
+
+    return started.mock;
+  }
+
+  // An agent build started before it left the flag on.
+  vi.unstubAllGlobals();
+
+  const started = createMockRenderer();
+
+  await started.start();
+
+  if (started.ctx.state.monitor.perf !== undefined) throw new Error("perf fixture: an agent build");
+
+  return started;
+}
+
+/**
+ * The listener of the canvas passes the monitor set on the host, inside a frame.
+ *
+ * @param agent - True for an agent build.
+ * @param clock - `"plain"` for an alloc window, `"real"` for a bench.
+ * @returns One canvas begin.
+ */
+export async function canvasBeginStep(
+  agent: boolean,
+  clock: "plain" | "real" = "plain"
+): Promise<() => void> {
+  const started = await startedRenderer(agent, clock);
+  const { host, monitor } = started.ctx.state;
+  const listen = host.onCanvasPass;
+
+  if (listen === undefined) throw new Error("perf fixture: no listener of the canvas passes");
+
+  monitor.sinks.inFrame = true;
+
+  return () => {
+    listen(2);
+    // A frame's count starts over: a window of calls keeps it a small number.
+    monitor.sinks.counts[COUNT.canvas] = 0;
   };
 }
 

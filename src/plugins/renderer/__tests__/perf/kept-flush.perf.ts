@@ -10,6 +10,7 @@ import {
   keptBoard,
   keptFadeBoard,
   keptOwnFadeBoard,
+  keptWhyBoard,
   keptZoomBoard
 } from "./fixtures";
 
@@ -77,6 +78,13 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for a crowd of 10 live views waiting for their first take, stepped (F119)", async () => {
     expect(bytesPerCall(await crowdWaitingBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptCrowd + NOISE
+    );
+  });
+
+  // Bug: the step's bookkeeping for `why()` builds a string, an object or a closure for every live view of every frame.
+  it("allocates nothing for 10 live views changed every frame, their reasons noted (F126)", async () => {
+    expect(bytesPerCall(await keptWhyBoard(10), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptWhy + NOISE
     );
   });
 

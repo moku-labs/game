@@ -5,7 +5,7 @@ import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../.
 import type { OverlayValue, ShapeValue, TransformValue } from "../components";
 import type { Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
-import type { FilterCache, KeptState } from "../kept/types";
+import type { FilterCache, KeptState, RetakeWhy, WhyLive } from "../kept/types";
 import type {
   DemandModule,
   KeptModule,
@@ -659,6 +659,36 @@ export type DebugSwitches = {
 };
 
 /**
+ * One view of `sync.debug.why()`: the label the monitor names its view by; how it is drawn (`"direct"` is a stack of
+ * `AlphaFilter`s drawn by its quad, F54); why it is live, `null` when it is not; the still frames left before a take, 0
+ * when it waits for none; and the last take in the last full second, with the view whose mark caused it.
+ *
+ * @example
+ * ```ts
+ * // A panel whose timer text changes every frame: taken again and again, then left live until it stands still.
+ * const entry: WhyEntry = {
+ *   view: "Shape#1048590 board:bottom",
+ *   mode: "live",
+ *   reason: "churn",
+ *   calmIn: 6,
+ *   retake: { why: "mark", by: "Text#1048612 tags:timer" }
+ * };
+ * ```
+ */
+export type WhyEntry = {
+  /** The label of the view's display object, as the performance log names it. */
+  view: string;
+  /** How the view is drawn in this frame. */
+  mode: "kept" | "direct" | "live";
+  /** Why it is drawn live; `null` when kept or direct. */
+  reason: WhyLive | null;
+  /** Still frames left before a take; 0 when it waits for none. */
+  calmIn: number;
+  /** The view's last take, when it fell in the last full second. */
+  retake: { why: RetakeWhy; by: string | null } | null;
+};
+
+/**
  * The debug drawing of the renderer, `app.renderer.sync.debug`. The switch outlines every
  * nine-slice at once; a single panel asks for its own outline with `NineSlice.debug` (`ui`:
  * `style.debug`).
@@ -757,6 +787,26 @@ export type DebugApi = {
    * ```
    */
   overlays(): readonly OverlayReport[];
+
+  /**
+   * Why every view with an enabled filter is drawn as it is, in draw order: from its picture, by its quad, or live and
+   * why, how many still frames are left before a take, and what its last take was for. Built when called, never per
+   * frame, so a tool may ask at any moment. Agent builds only (dev and `--debug`); every other build answers a frozen
+   * `[]`, and an inert renderer an empty array.
+   *
+   * @returns One entry per view, a fresh array.
+   * @example
+   * ```ts
+   * // The memory screen in a debug build: the board churns, a lamp under a filtered room stays live, a picture stands.
+   * app.renderer.sync.debug.why();
+   * // [
+   * //   { view: "Shape#1048590 board:bottom", mode: "live", reason: "churn", calmIn: 6, retake: { why: "mark", by: "Text#1048612 tags:timer" } },
+   * //   { view: "Sprite#1048633 ward:glow3", mode: "live", reason: "placed-under-filter", calmIn: 0, retake: null },
+   * //   { view: "Sprite#1048640 board:g1", mode: "kept", reason: null, calmIn: 0, retake: { why: "resolution", by: null } }
+   * // ]
+   * ```
+   */
+  why(): readonly WhyEntry[];
 
   /**
    * What the debug switches are set to, as a fresh object.
@@ -1184,6 +1234,9 @@ export type SyncInternal = {
    * builds the views of the entities that already exist.
    */
   start(): void;
+
+  /** The canvas passes of a frame estimated from the filter slots, read by `stats()` where nothing counts them. */
+  canvasPasses(): number;
 
   /**
    * Drops every view, rebuilds the root, the layers and every view. Used after a restore, where

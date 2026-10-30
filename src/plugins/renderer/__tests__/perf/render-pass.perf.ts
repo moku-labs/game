@@ -4,7 +4,7 @@ import { createLazyCanvasClasses } from "../../host/render-pass";
 import type { PixiModule } from "../../types";
 import { createPassStage, type PassStage } from "../pass-stage";
 import { BUDGET, NOISE } from "./budgets";
-import { bytesPerCall } from "./fixtures";
+import { bytesPerCall, canvasBeginStep } from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the lazy canvas pass (B3 of change 2026-10-18-memory-render) over the real pixi.js systems on the recording
@@ -77,5 +77,21 @@ describe("the lazy canvas pass", () => {
     const added = bytesPerCall(filterFirst(lazy)) - bytesPerCall(filterFirst(own));
 
     expect(added).toBeLessThanOrEqual(BUDGET.lazyCanvasFrame + NOISE);
+  });
+});
+
+// Bug: the count of a canvas begin builds a label, boxes the reason or closes over it: it runs for every break of the
+// canvas, and the frames that break it most are the frames with the least to spare.
+describe("the canvas pass count", () => {
+  it("allocates nothing per begin in an agent build, the reason written into the ring", async () => {
+    expect(bytesPerCall(await canvasBeginStep(true))).toBeLessThanOrEqual(
+      BUDGET.canvasBegin + NOISE
+    );
+  });
+
+  it("allocates nothing per begin in a build without the flag", async () => {
+    expect(bytesPerCall(await canvasBeginStep(false))).toBeLessThanOrEqual(
+      BUDGET.canvasBeginRelease + NOISE
+    );
   });
 });
