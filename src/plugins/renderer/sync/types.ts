@@ -671,10 +671,11 @@ export type FiltersApi = {
    * ```ts
    * // `effects`, during the splash: a probe of the Frost's body, before the shop is ever opened.
    * const renderer = ctx.require(rendererPlugin);
-   * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true four drawn frames later (WebGPU, warm: 1)
+   * // Four drawn frames later on WebGPU at `warm: 1` with a cleared canvas:
+   * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true
    *
    * // A Tint's probe, whose body can also run on a kept view's quad: its pipelines are made with the filter's.
-   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true five drawn frames later (WebGPU, warm: 1)
+   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true, one drawn frame after those four
    * ```
    */
   warm(filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean>;
@@ -1476,8 +1477,8 @@ export type WarmSubject =
   | WarmQuad;
 
 /**
- * A filter's body on its quad, as a probe of the warm-up draws it: on WebGPU, after the filter, in the same variants, so
- * a kept view's first frame on its shader compiles nothing.
+ * A filter's body on its quad, as a probe of the warm-up draws it: on WebGPU, once, after the filter, in the first of
+ * the device's variants, so a kept view's first frame on its shader compiles nothing.
  */
 export type WarmQuad = { readonly filter: PixiFilter; readonly quad: FilterSlotQuad };
 

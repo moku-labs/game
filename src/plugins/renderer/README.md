@@ -227,7 +227,7 @@ internal markup: select them by nothing, set the properties instead.
 | `debug.state()` | `{ nineSlice, verifyFrames, kept, overdraw }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
-| `filters.warm(filter, quad?)` | Creates the GPU pipelines of a filter before a screen needs them, and of its body on its `quad` when it has one: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
+| `filters.warm(filter, quad?)` | Creates the GPU pipelines of a filter before a screen needs them, and of its body on its `quad` when it has one: drawn invisibly before a frame (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
 | `leave.show(look)` | `scenes` at the start of a live switch: a veil over the whole canvas fading in, and a loader that waits for its `afterMs`, drawn above every layer; replaces a look that runs. See "The picture of a scene being left". Inert: nothing. |
 | `leave.land()` | `scenes` after the swap: the veil fades out over its `outMs` and leaves the stage; a ring or a texture loader goes at once, a layer loader that shows fades out with the veil. Nothing runs: nothing. |
 | `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once, a lifted layer back under the root. Nothing runs: nothing. |
@@ -310,8 +310,8 @@ task, so a probe never shows. One probe draw is one subject in one target:
   ahead of the filters still waiting), every filter handed to `filters.warm` (`effects` hands it
   every checked definition, every stage of its inputs and every Pixi-core kind once the shader
   checks settled), and on WebGPU the quad a filter was handed over with: a mesh of its program on a
-  unit square of the module's own, drawn after the filter in the same targets, so a view's first
-  frame on its own shader (see "Kept pictures") compiles nothing;
+  unit square of the module's own, drawn once after the filter, in the first target of the device, so
+  a view's first frame on its own shader (see "Kept pictures") compiles nothing;
 - the targets on WebGPU: the canvas and a texture (a 4 × 4 render texture the module owns, cleared
   at each draw), each with and without a stencil clip, as `sync` hangs clips; on WebGL one draw, the
   program does not depend on the target. A canvas the stage pass does not clear

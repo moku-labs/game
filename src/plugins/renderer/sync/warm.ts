@@ -300,8 +300,8 @@ function enqueue(warm: WarmState, subject: WarmSubject, variants: readonly WarmV
 }
 
 /**
- * Queues the draws of a filter, then those of its quad: a quad program is a WebGPU program, and WebGL draws the stage 3
- * it stands for.
+ * Queues the draws of a filter, then the one draw of its quad. A quad program is a WebGPU program: WebGL draws the
+ * filter alone.
  *
  * @param sctx - Domain context of the sync module.
  * @param filter - The filter.
@@ -320,10 +320,12 @@ function enqueueFilter(
 
   if (quad === undefined || sctx.deps.host.kind() !== "webgpu") return variants.length;
 
-  // One draw: the four variants made one pipeline per program, and took the bench's warm-up on the A26 from 5.8 to 8.4 s.
-  enqueue(warm, { filter, quad }, variants.slice(0, 1));
+  // One draw: drawn in all four variants a quad made one pipeline, and the bench's warm-up on the A26 took 8.4 s, not 5.8.
+  const once = variants.slice(0, 1);
 
-  return variants.length + 1;
+  enqueue(warm, { filter, quad }, once);
+
+  return variants.length + once.length;
 }
 
 /**
@@ -510,6 +512,27 @@ function quadNode(pixi: PixiModule, objects: WarmObjects, subject: WarmQuad): Pi
 }
 
 /**
+ * The node of a filter or a quad: the holder with the draw's filter on it, or the mesh of the quad.
+ *
+ * @param pixi - The module that draws.
+ * @param objects - The probe tree.
+ * @param subject - The filter or the quad.
+ * @returns The node.
+ */
+function filterNode(
+  pixi: PixiModule,
+  objects: WarmObjects,
+  subject: PixiFilter | WarmQuad
+): PixiContainer {
+  if (isQuadSubject(subject)) return quadNode(pixi, objects, subject);
+
+  objects.list[0] = subject;
+  objects.holder.filters = objects.list;
+
+  return objects.holder;
+}
+
+/**
  * The node one subject hangs from: a content object, the holder with the draw's filter on it, or the mesh of a quad. The
  * text is made at its first draw, in the font of the warm-up.
  *
@@ -525,15 +548,7 @@ function nodeOf(
   objects: WarmObjects,
   subject: WarmSubject
 ): PixiContainer | undefined {
-  if (typeof subject !== "string") {
-    if (isQuadSubject(subject)) return quadNode(pixi, objects, subject);
-
-    objects.list[0] = subject;
-    objects.holder.filters = objects.list;
-
-    return objects.holder;
-  }
-
+  if (typeof subject !== "string") return filterNode(pixi, objects, subject);
   if (subject !== "text") return objects[FIXED_NODES[subject]];
   if (warm.textFont === undefined) return undefined;
 
