@@ -320,9 +320,10 @@ function enqueueFilter(
 
   if (quad === undefined || sctx.deps.host.kind() !== "webgpu") return variants.length;
 
-  enqueue(warm, { filter, quad }, variants);
+  // One draw: the four variants made one pipeline per program, and took the bench's warm-up on the A26 from 5.8 to 8.4 s.
+  enqueue(warm, { filter, quad }, variants.slice(0, 1));
 
-  return 2 * variants.length;
+  return variants.length + 1;
 }
 
 /**

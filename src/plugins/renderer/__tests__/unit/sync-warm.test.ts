@@ -605,10 +605,10 @@ async function handed(
 
 describe("the warm-up of a filter's quad", () => {
   // Bug: a pipeline compiled in play, in the first frame of a view on its shader.
-  it("draws the quad in every variant after its filter, and the promise answers after the last", async () => {
+  it("draws the quad once after its filter, and the promise answers after that draw", async () => {
     const { warmed, answer, content } = await handed();
 
-    warmed.frames(7);
+    warmed.frames(4);
     await settle();
 
     expect(answer.answer).toBeUndefined();
@@ -617,11 +617,8 @@ describe("the warm-up of a filter's quad", () => {
     await settle();
 
     expect(answer.answer).toBe(true);
-    expect(warmed.probes().slice(content)).toEqual([...inFour("probe"), ...inFour("quad")]);
-    expect(warmed.stage.last().renderer.gpu?.scopes).toEqual({
-      opened: VARIANTS.map(() => "validation"),
-      open: 0
-    });
+    expect(warmed.probes().slice(content)).toEqual([...inFour("probe"), "quad canvas"]);
+    expect(warmed.stage.last().renderer.gpu?.scopes).toEqual({ opened: ["validation"], open: 0 });
   });
 
   // Bug: a GPU program on WebGL: a probe that logs a warning, or a throw that ends the warm-up.

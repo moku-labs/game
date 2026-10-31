@@ -659,7 +659,7 @@ export type FiltersApi = {
    * app, `warm: 0`), and `false` when the renderer stops first or a probe's render threw, which ends the warm-up of the
    * application (`renderer:warm-failed`). A filter handed over again on the same device answers `true` at once when its
    * draws were made. The renderer never destroys the filter. On WebGPU a `quad` asks for the pipelines of the filter's body
-   * on its mesh too, after the filter, in the same four targets, so a kept view that later draws through it compiles
+   * on its mesh too, once, after the filter, so a kept view that later draws through it compiles
    * nothing in play; each of those draws runs in an error scope, and a program that does not fit logs
    * `renderer:warm-invalid` while the warm-up goes on. WebGL ignores it.
    *
@@ -674,7 +674,7 @@ export type FiltersApi = {
    * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true four drawn frames later (WebGPU, warm: 1)
    *
    * // A Tint's probe, whose body can also run on a kept view's quad: its pipelines are made with the filter's.
-   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true eight drawn frames later (WebGPU, warm: 1)
+   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true five drawn frames later (WebGPU, warm: 1)
    * ```
    */
   warm(filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean>;

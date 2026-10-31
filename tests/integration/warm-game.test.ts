@@ -360,14 +360,17 @@ describe("the warm-up of a game while its splash stands", () => {
 
     const seen = new Set(game.probes.flat());
 
-    for (const subject of [...CONTENT, ...FILTERS, ...QUADS]) {
+    for (const subject of [...CONTENT, ...FILTERS]) {
       for (const variant of VARIANTS)
         expect(seen, `${subject} ${variant}`).toContain(`${subject} ${variant}`);
     }
 
+    // A quad once: its four variants make one pipeline.
+    for (const quad of QUADS) expect(seen).toContain(`${quad} ${VARIANTS[0]}`);
+
     // Each drawn exactly once: nothing warmed twice on one device.
     expect(game.probes.flat()).toHaveLength(
-      (CONTENT.length + FILTERS.length + QUADS.length) * VARIANTS.length
+      (CONTENT.length + FILTERS.length) * VARIANTS.length + QUADS.length
     );
   });
 
