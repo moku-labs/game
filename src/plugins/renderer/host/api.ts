@@ -180,7 +180,12 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       return extractStage(ctx, app, hidden);
     },
 
-    resolution: (): number => state.app?.renderer.resolution ?? 1,
+    resolution: (): number => {
+      const app = state.app;
+
+      // No `?.` and `??`: they merge the number with `undefined`, which boxes a fractional one every frame.
+      return app === undefined ? 1 : app.renderer.resolution;
+    },
 
     textures: (): TextureUsage => {
       const app = state.app;

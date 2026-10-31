@@ -147,30 +147,16 @@ const BEFORE: Drawing = {
 };
 
 /**
- * The resolution one filter draws at: its own, or the target's for `"inherit"` (Pixi's own rule).
- *
- * @param filter - The filter.
- * @param resolution - The target's resolution.
- * @returns Texels per CSS px.
- */
-function resolutionOf(filter: PixiFilter, resolution: number): number {
-  const own: number | "inherit" = filter.resolution;
-
-  return own === "inherit" ? resolution : own;
-}
-
-/**
  * Reads what the enabled filters of a stack draw with: how many, the smallest resolution, the padding sum Pixi
- * pads by (whole pixels), and the alpha they multiply by while every one is an `AlphaFilter`.
+ * pads by (whole pixels), and the alpha they multiply by while every one is an `AlphaFilter`. A filter on `"inherit"`
+ * draws at the renderer resolution (Pixi's own rule), the one `markAlphaDue` wrote to `NOW`.
  *
  * @param slots - The record's slots.
- * @param resolution - The renderer resolution.
  * @param alphaFilter - Pixi's `AlphaFilter` class.
  * @param into - Where the numbers go.
  */
 function readStack(
   slots: readonly FilterSlot[],
-  resolution: number,
   alphaFilter: PixiModule["AlphaFilter"],
   into: Stack
 ): void {
@@ -189,13 +175,17 @@ function readStack(
 
     enabled += 1;
     passes += slots[index]?.passes ?? 0;
-    rs = Math.min(rs, resolutionOf(filter, resolution));
+
+    const own: number | "inherit" = filter.resolution;
+
+    // Each side its own `min`: merging `NOW.r` with `own` merges a number with a string, which boxes a fractional one.
+    rs = own === "inherit" ? Math.min(rs, NOW.r) : Math.min(rs, own);
     padding += filter.padding;
     alpha *= filter instanceof alphaFilter ? filter.alpha : Number.NaN;
   }
 
   into.enabled = enabled;
-  into.rs = enabled === 0 ? resolution : rs;
+  into.rs = enabled === 0 ? NOW.r : rs;
   into.P = Math.trunc(padding);
   into.alpha = alpha;
   into.passes = passes;
@@ -206,23 +196,11 @@ function readStack(
  * padding, at the renderer resolution. The quad then draws the picture itself at that alpha, as Pixi's alpha pass
  * draws its input: no stage 3, no pass when the alpha changes.
  *
- * @param now - This frame's numbers.
- * @returns True when it does.
- */
-function drawsDirect(now: Numbers): boolean {
-  return drawsDirectAt(now, now.r);
-}
-
-/**
- * Tells whether a stack draws direct at a renderer resolution (F54): every enabled filter an `AlphaFilter`, no
- * padding, at that resolution.
- *
  * @param stack - The stack's numbers.
- * @param resolution - The renderer resolution.
  * @returns True when it does.
  */
-function drawsDirectAt(stack: Stack, resolution: number): boolean {
-  return !Number.isNaN(stack.alpha) && stack.P === 0 && stack.rs === resolution;
+function drawsDirect(stack: Stack): boolean {
+  return !Number.isNaN(stack.alpha) && stack.P === 0 && stack.rs === NOW.r;
 }
 
 /**
@@ -2097,15 +2075,16 @@ export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
  * Marks, before the step, the live records drawn direct that may be taken in this flush (F114): eligible, nothing
  * changed under them. An alpha take costs one pass and its live draw two, so while one is due no other first take
  * happens in this frame. A record due once that did not end its step kept is not due again until a change under it.
- * The others drawn live are counted: a first take among a crowd of them is not spread (F119).
+ * The others drawn live are counted: a first take among a crowd of them is not spread (F119). The resolution of the
+ * flush is read here, once, for every record it steps.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
  */
 export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
   const { state } = kctx;
-  const resolution = kctx.host.resolution();
 
+  NOW.r = kctx.host.resolution();
   state.alphaDue = false;
   state.liveWaiting = 0;
 
@@ -2116,9 +2095,9 @@ export function markAlphaDue(kctx: KeptCtx, pixi: PixiModule): void {
     if (record === undefined || view === undefined || !mayBeDue(kctx, record)) continue;
 
     // The stack as the step will read it: due when it draws direct and the record may be kept.
-    readStack(record.slots, resolution, pixi.AlphaFilter, DUE);
+    readStack(record.slots, pixi.AlphaFilter, DUE);
 
-    const direct = drawsDirectAt(DUE, resolution);
+    const direct = drawsDirect(DUE);
 
     record.alphaDue = direct && eligible(kctx, record, view, DUE) === 0;
     state.alphaDue ||= record.alphaDue;
@@ -2177,8 +2156,7 @@ export function stepRecord(
     record.idleSeen = false;
   }
 
-  NOW.r = kctx.host.resolution();
-  readStack(record.slots, NOW.r, pixi.AlphaFilter, NOW);
+  readStack(record.slots, pixi.AlphaFilter, NOW);
 
   const why = eligible(kctx, record, view, NOW);
 
@@ -2284,7 +2262,7 @@ function takenAfterInner(pixi: PixiModule, above: KeptRecord): boolean {
 
   if (above.mode !== "kept" || drawn >= NOW.r || key[KEY.rs] !== drawn) return false;
 
-  readStack(above.slots, NOW.r, pixi.AlphaFilter, DUE);
+  readStack(above.slots, pixi.AlphaFilter, DUE);
 
   return above.direct || DUE.rs === NOW.r;
 }

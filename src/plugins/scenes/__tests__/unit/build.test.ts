@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineScene } from "../../define";
-import type { Config } from "../../types";
+import type { Config, SceneDefinition } from "../../types";
 import { createMockScenes, type MockScenes } from "./mock-scenes";
 
 // ---------------------------------------------------------------------------
@@ -42,14 +42,15 @@ async function flush(): Promise<void> {
  * now on: the next live switch builds aside. The journal starts empty.
  *
  * @param config - The config of the plugin.
+ * @param home - The scene that stands, home's own by default.
  * @returns The started mock, home current.
  */
-async function onHome(config?: Config): Promise<MockScenes> {
+async function onHome(config?: Config, home: SceneDefinition = homeScene): Promise<MockScenes> {
   const mock = createMockScenes(config);
 
-  mock.flow.features.push({ name: "screens", description: { scenes: [homeScene, boardScene] } });
+  mock.flow.features.push({ name: "screens", description: { scenes: [home, boardScene] } });
   mock.start();
-  await mock.enter({ rest: true, scene: "home" });
+  await mock.enter({ rest: true, scene: home.id });
   mock.renderer.host.ready.mockReturnValue(true);
   mock.world.calls.length = 0;
   mock.journal.length = 0;
@@ -402,6 +403,239 @@ describe("a scene built aside that does not stand", () => {
     expect(mock.time.callbacks.signals).toEqual([]);
     expect(mock.emitted).toEqual([]);
     expect("build" in mock.state).toBe(false);
+  });
+});
+
+/** A config whose every switch keeps the old scene for 260 ms: the fake clock stands at 1000, so until 1260. */
+const FLOOR: Config = { buildMs: "auto", leave: { loader: { holdMs: 260 } } };
+
+describe("a floor on the swap", () => {
+  // Bug: the swap comes a millisecond early or late, or waits to build (the swap then comes later by the build time).
+  it("builds at once and commits on the exact moment: the old scene at 259 ms, the new at 260", async () => {
+    const mock = await onHome(FLOOR);
+    const { entering, settled } = await enterBoard(mock);
+
+    expect(mock.world.building.calls).toHaveLength(1);
+
+    mock.world.building.done = true;
+    mock.time.frame();
+    mock.time.frame();
+    mock.clock.at = 1259;
+    mock.time.frame();
+    await flush();
+
+    expect(mock.api.current()).toBe("home");
+    expect(mock.world.calls).toEqual(["build"]);
+    expect(settled.done).toBe(false);
+
+    mock.clock.at = 1260;
+    mock.time.frame();
+    await entering;
+
+    expect(mock.api.current()).toBe("board");
+    expect(mock.world.calls).toEqual(["build", "setLayers", "unmount", "commit"]);
+    expect(mock.time.callbacks.signals).toEqual([]);
+  });
+
+  // Bug: the floor is counted from the build start, not from the look's, so a switch slower than the floor waits again
+  // after its long load.
+  it("adds no frame to a switch slower than the floor: a build done at its first frame commits there", async () => {
+    const mock = await onHome(FLOOR);
+
+    mock.assets.control.gated = true;
+    await enterBoard(mock);
+    mock.clock.at = 1300;
+    mock.time.frame();
+    mock.time.frame();
+    mock.assets.release();
+    await flush();
+
+    expect(mock.world.calls).toEqual(["build"]);
+
+    mock.world.building.done = true;
+    mock.time.frame();
+
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug: a scene of kept projections always goes through the frames, though the floor passed during its load.
+  it("adds no frame to a kept-only scene once the floor and the frames passed: it commits inside the switch", async () => {
+    const mock = await onHome(FLOOR);
+
+    mock.assets.control.gated = true;
+    mock.world.building.done = true;
+    await enterBoard(mock);
+    mock.clock.at = 1300;
+    mock.time.frame();
+    mock.time.frame();
+    mock.assets.release();
+    await flush();
+
+    expect(mock.api.current()).toBe("board");
+    expect(mock.time.callbacks.signals).toEqual([]);
+  });
+
+  // Bug: `buildAside`'s commit at once skips the floor, so a scene of kept projections swaps under a look just started.
+  it("makes a kept-only scene wait too, before the floor", async () => {
+    const mock = await onHome(FLOOR);
+
+    mock.world.building.done = true;
+
+    const { entering } = await enterBoard(mock);
+
+    expect(mock.api.current()).toBe("home");
+    expect(mock.world.calls).toEqual(["build"]);
+    expect(mock.time.callbacks.signals).toHaveLength(1);
+
+    mock.clock.at = 1260;
+    mock.time.frame();
+    mock.time.frame();
+    await entering;
+
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug: one long frame eats the whole floor, the swap comes in the first frame after the look's start, before any
+  // `render` phase of the look, and the floor shows nothing.
+  it("needs a drawn frame of the look when the clock passed the floor with no frame since its start", async () => {
+    const mock = await onHome(FLOOR);
+
+    mock.world.building.done = true;
+    mock.clock.at = 5000;
+
+    const { entering } = await enterBoard(mock);
+
+    mock.clock.at = 9000;
+    mock.time.frame();
+    await flush();
+
+    expect(mock.api.current()).toBe("home");
+
+    mock.time.frame();
+    await entering;
+
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug: a game at `idleFps: 0` stops the loop during a long floor, no frame comes and the swap never does.
+  it("keeps the loop awake while it waits, from the build start on", async () => {
+    const mock = await onHome(FLOOR);
+    const before = mock.time.wakes;
+
+    mock.world.building.done = true;
+    await enterBoard(mock);
+
+    expect(mock.time.wakes).toBe(before + 1);
+
+    mock.time.frame();
+
+    expect(mock.time.wakes).toBe(before + 2);
+  });
+
+  // Bug: the wait is checked first, so a walk that went fast during it waits out the floor with no `layout` phase.
+  it("ends in one block at once when the world leaves live during the wait", async () => {
+    const mock = await onHome(FLOOR);
+
+    mock.world.building.done = true;
+
+    const { entering } = await enterBoard(mock);
+
+    mock.world.mode = "fast";
+    mock.time.frame();
+    await entering;
+
+    expect(mock.world.calls).toEqual(["build", "discard", "setLayers", "unmount", "mount"]);
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug: an abort during the wait leaves the frame callback, which commits the scene of a node that was left.
+  it("keeps the old scene on an abort during the wait, drops the look and discards the build", async () => {
+    const mock = await onHome(FLOOR);
+    const controller = new AbortController();
+
+    mock.world.building.done = true;
+
+    const { entering } = await enterBoard(mock, controller.signal);
+
+    controller.abort("restore");
+    await entering;
+    mock.clock.at = 1260;
+    mock.time.frame();
+    mock.time.frame();
+
+    expect(mock.world.calls).toEqual(["build", "discard"]);
+    expect(mock.api.current()).toBe("home");
+    expect(mock.renderer.leaves.map(entry => entry.call)).toEqual(["show", "drop"]);
+    expect(mock.time.callbacks.signals).toEqual([]);
+  });
+
+  // Bug: a stop during the wait keeps the frame callback, which commits on a stopped app.
+  it("lets the switch return on a stop during the wait", async () => {
+    const mock = await onHome(FLOOR);
+
+    mock.world.building.done = true;
+
+    const { entering } = await enterBoard(mock);
+
+    mock.stop();
+    await entering;
+
+    expect(mock.world.calls).toEqual(["build"]);
+    expect(mock.time.callbacks.signals).toEqual([]);
+  });
+
+  // Bug: the fallback of a build the world refuses waits too: a second wait with abort and stop paths of its own.
+  it("does not wait on a build the world refuses: one block, inside the switch", async () => {
+    const mock = await onHome(FLOOR);
+
+    mock.world.building.answer = false;
+    await enterBoard(mock);
+
+    expect(mock.world.calls).toEqual(["build", "setLayers", "unmount", "mount"]);
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug: a walk or a headless app, which has no look and no frames to count, waits for a floor nobody sees.
+  it.each([
+    ["a fast walk", "fast", true],
+    ["a headless app", "live", false]
+  ] as const)("does not hold %s", async (_case, mode, ready) => {
+    const mock = await onHome(FLOOR);
+
+    mock.renderer.host.ready.mockReturnValue(ready);
+    await mock.enter({ rest: true, scene: "board" }, { mode });
+
+    expect(mock.world.calls).toEqual(["setLayers", "unmount", "mount"]);
+    expect(mock.api.current()).toBe("board");
+  });
+
+  // Bug: a scene that turns its look or its loader off still waits out the config's floor, with nothing shown.
+  it.each([
+    ["no look at all", false],
+    ["no loader", { loader: false }]
+  ] as const)("does not hold a switch with %s", async (_case, leave) => {
+    const quiet = defineScene("quiet", { bundle: "quiet", layers: {}, projections: [], leave });
+    const mock = await onHome(FLOOR, quiet);
+
+    mock.world.building.done = true;
+    await enterBoard(mock);
+
+    expect(mock.api.current()).toBe("board");
+    expect(mock.time.callbacks.signals).toEqual([]);
+  });
+
+  // Bug: a floor of 0, or no floor, costs a frame or a wake: every switch of every game moves by a frame.
+  it.each([
+    ["with no holdMs", { afterMs: 0 }],
+    ["with holdMs: 0", { holdMs: 0 }]
+  ] as const)("commits when it did before %s: inside the switch, with no wake before the swap", async (_case, loader) => {
+    const mock = await onHome({ buildMs: "auto", leave: { loader } });
+
+    mock.world.building.done = true;
+    await enterBoard(mock);
+
+    expect(mock.api.current()).toBe("board");
+    expect(mock.journal.filter(call => call === "time:wake")).toHaveLength(1);
   });
 });
 

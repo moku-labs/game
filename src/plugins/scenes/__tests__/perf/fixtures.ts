@@ -1,8 +1,9 @@
 /**
  * @file scenes plugin — the fixtures of the perf tests and benches. Not a test file. Each fixture builds the mock
  * plugin outside any measured window and hands back a call scenes makes in a frame or on an event: the `signals`
- * callback of a running scene build while `world.projection.built()` answers false, the one of a loader projection
- * fading out with the veil after a swap, and the `assets:bundle-progress` hook of a switch that feeds its loader.
+ * callback of a running scene build while `world.projection.built()` answers false, the same callback while a floor
+ * holds a built scene, the one of a loader projection fading out with the veil after a swap, and the
+ * `assets:bundle-progress` hook of a switch that feeds its loader.
  */
 import { alloc } from "../../../../../tests/perf/alloc";
 import { defineScene } from "../../define";
@@ -63,6 +64,55 @@ export async function buildWaiting(): Promise<() => void> {
   const time = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false };
 
   return () => callback(time);
+}
+
+/** The `Time` of a frame of the floor fixture: past the frames a floor asks for. */
+const HELD_TIME = { delta: 16, elapsed: 16, scale: 1, frame: 5, idle: false };
+
+/**
+ * Stands in for the fake's `time.wake`, whose journal grows with every call: the real one is four assignments.
+ */
+function wakeNothing(): void {
+  // Nothing to record: the window measures what `scenes` keeps.
+}
+
+/**
+ * Stands in for the fake's `time.snapshot`, one field V8 erases: this copies the whole `Time`, as the real one does, so
+ * a wait that reads it in a frame is seen in the window.
+ *
+ * @returns A copy of the `Time`.
+ */
+function copyTime(): typeof HELD_TIME {
+  return { ...HELD_TIME };
+}
+
+/**
+ * The `signals` callback of the board's build, done, while a floor no window of calls ends holds its swap.
+ *
+ * @returns The callback the frame loop calls, as `time` calls it.
+ * @throws {Error} When the switch registered no frame callback.
+ */
+export async function buildHeld(): Promise<() => void> {
+  const mock = createMockScenes({ buildMs: "auto", leave: { loader: { holdMs: 1e15 } } });
+
+  mock.flow.features.push({ name: "screens", description: { scenes: [homeScene, boardScene] } });
+  mock.start();
+  await mock.enter({ rest: true, scene: "home" });
+  mock.renderer.host.ready.mockReturnValue(true);
+  mock.world.building.done = true;
+  // The switch waits at the floor for good: its promise is never awaited.
+  mock.enter({ rest: true, scene: "board" }).catch(() => undefined);
+
+  for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+
+  const callback = mock.time.callbacks.signals[0];
+
+  if (callback === undefined) throw new Error("the switch registered no build callback");
+
+  mock.time.api.wake = wakeNothing;
+  mock.time.api.snapshot = copyTime;
+
+  return () => callback(HELD_TIME);
 }
 
 /** The scene on the screen of the fade fixture: it declares the loader's layer, so it holds the loader. */

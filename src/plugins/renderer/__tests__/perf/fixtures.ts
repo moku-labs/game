@@ -676,15 +676,73 @@ export async function keptBoard(count: number, marked = false): Promise<() => vo
 /**
  * The board of `keptBoard` after a step of the renderer resolution from 2 to 1 (F126): the pictures keep their textures
  * and owe nothing, and with a view elsewhere marked every record steps through the check of the step. Half of them draw
- * direct, the others keep a filter output through a filter on `"inherit"`. The step ends on a whole number: a kept flush
- * at a fractional resolution allocates per record, with or without a step, and that is not what this board measures.
+ * direct, the others keep a filter output through a filter on `"inherit"`.
  *
  * @param count - The kept views.
+ * @param resolution - The resolution the step ends on.
  * @returns One frame of the cache: the mark, the collect and the flush.
  */
-export async function keptSteppedBoard(count: number): Promise<() => void> {
-  const { stage, views, filters, other } = await startKeptBoard(count);
-  const { kept, demand, sync } = stage.drawn.mock.modules;
+export async function keptSteppedBoard(count: number, resolution = 1): Promise<() => void> {
+  const board = await startInheritBoard(count);
+  const { stage, other } = board;
+  const { kept, demand } = stage.drawn.mock.modules;
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  stage.drawn.mock.api.monitor.setResolution(2);
+  stage.frames(40);
+  stage.drawn.mock.api.monitor.setResolution(resolution);
+  stage.frames(2);
+
+  if (records.some(record => record.mode !== "kept" || record.key[KEY.rs] !== 2)) {
+    throw new Error("perf fixture: a view of the stepped board is not held through the step");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * The board of `keptBoard` settled at a fractional renderer resolution, as on a phone at 2.625: the pictures were taken
+ * there, half drawn direct, the others keeping a filter output through a filter on `"inherit"`, and with a view elsewhere
+ * marked every record steps.
+ *
+ * @param count - The kept views.
+ * @param resolution - The fractional resolution.
+ * @returns One frame of the cache: the mark, the collect and the flush.
+ */
+export async function keptFractionalBoard(count: number, resolution = 1.5): Promise<() => void> {
+  const { stage, other } = await startInheritBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  stage.drawn.mock.api.monitor.setResolution(resolution);
+  stage.frames(40);
+
+  if (records.some(record => record.mode !== "kept" || record.key[KEY.rs] !== resolution)) {
+    throw new Error("perf fixture: a view of the fractional board is not kept at its resolution");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * The kept board whose filters follow the canvas: every filter on `"inherit"`, every second one with a padding, so it
+ * keeps a filter output and the others draw direct.
+ *
+ * @param count - The kept views.
+ * @returns The board, its views taken.
+ */
+async function startInheritBoard(count: number): Promise<KeptBoard> {
+  const board = await startKeptBoard(count);
+  const { stage, views, filters } = board;
+  const { sync } = stage.drawn.mock.modules;
 
   for (const [index, view] of views.entries()) {
     const filter = filters[index];
@@ -705,22 +763,7 @@ export async function keptSteppedBoard(count: number): Promise<() => void> {
 
   stage.frames(40);
 
-  const { records } = stage.drawn.mock.ctx.state.kept;
-
-  stage.drawn.mock.api.monitor.setResolution(2);
-  stage.frames(40);
-  stage.drawn.mock.api.monitor.setResolution(1);
-  stage.frames(2);
-
-  if (records.some(record => record.mode !== "kept" || record.key[KEY.rs] !== 2)) {
-    throw new Error("perf fixture: a view of the stepped board is not held through the step");
-  }
-
-  return () => {
-    demand.mark(other);
-    kept.collect();
-    kept.flush();
-  };
+  return board;
 }
 
 /**

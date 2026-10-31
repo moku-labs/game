@@ -11,6 +11,7 @@
 import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { assetsPlugin } from "../assets";
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
@@ -64,7 +65,15 @@ const defaultConfig: Config = {
  * ```
  */
 export const scenesPlugin = /*#__PURE__*/ createPlugin("scenes", {
-  depends: [flowPlugin, worldPlugin, assetsPlugin, timePlugin, modelPlugin, rendererPlugin],
+  depends: [
+    flowPlugin,
+    worldPlugin,
+    assetsPlugin,
+    timePlugin,
+    clockPlugin,
+    modelPlugin,
+    rendererPlugin
+  ],
   config: defaultConfig,
   events: (register: RegisterFunction) =>
     register.map<Events>({ "scenes:changed": "The mounted scene changed" }),
