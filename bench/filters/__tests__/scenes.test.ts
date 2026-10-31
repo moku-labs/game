@@ -5,7 +5,7 @@ import type { Assets } from "../../../src/index.ts";
 import { fakeClock } from "../../../src/testing.ts";
 import { diskIo, openPage, type Watched, watch } from "../../../tests/integration/drawn-helpers";
 import { benchScene } from "../features/bench/bench.dev";
-import { scaleScene } from "../features/bench/scenes/cases";
+import { scaleScene, scaleUpScene } from "../features/bench/scenes/cases";
 import type { Stage } from "../features/bench/scenes/types";
 import game from "../index";
 import { ARMS } from "../lib/a26";
@@ -35,6 +35,7 @@ const EVERY_SCENE = [
   "fog-local",
   "flip",
   "scale",
+  "scale-up",
   "lens",
   "promo"
 ] as const;
@@ -288,32 +289,93 @@ describe("the editor", () => {
   });
 });
 
+/** What a scene asked of the fake stage: a resolution, or the write of one view. */
+type Asked = number | undefined | { entity: number; patch: object };
+
+/**
+ * A stage with no views, on a page of resolution 2, that writes down what it is asked.
+ *
+ * @param asked - Takes what is asked, in order.
+ * @returns The stage.
+ */
+function recordingStage(asked: Asked[]): Stage {
+  const views = { spawned: 0 };
+
+  return {
+    width: 390,
+    height: 844,
+    n: undefined,
+    spawn: () => {
+      views.spawned += 1;
+
+      return views.spawned;
+    },
+    child: () => 0,
+    set: (entity, _component, patch) => {
+      asked.push({ entity, patch });
+    },
+    despawn: () => undefined,
+    now: () => 0,
+    setResolution: resolution => {
+      asked.push(resolution);
+
+      return 2;
+    }
+  };
+}
+
 describe("the scale scene", () => {
   // Bug: the steps are absolute, not of the page's resolution, or the last step stays on the next arm.
   it("steps the page's resolution 1, 0.85, 0.75, 0.85 every 2 s, and hands it back when left", () => {
-    const asked: Array<number | undefined> = [];
-    const stage = {
-      width: 390,
-      height: 844,
-      n: undefined,
-      spawn: () => 1,
-      child: () => 2,
-      set: () => undefined,
-      despawn: () => undefined,
-      now: () => 0,
-      setResolution: (resolution: number | undefined) => {
-        asked.push(resolution);
-
-        return 2;
-      }
-    } satisfies Stage;
-    const mounted = scaleScene.mount(stage);
+    const asked: Asked[] = [];
+    const mounted = scaleScene.mount(recordingStage(asked));
 
     asked.length = 0;
 
     for (const elapsed of [0, 1999, 2000, 4000, 6000, 8000]) mounted?.tick?.(elapsed);
 
     expect(asked).toEqual([2, 1.7, 1.5, 1.7, 2]);
+    mounted?.leave?.();
+    expect(asked.at(-1)).toBeUndefined();
+  });
+});
+
+describe("the scale-up scene", () => {
+  // Bug: the fill changes with the step up or after it, so the pictures are never taken low and owe
+  // nothing at the step up; it changes every frame, so they stay live; or a loop writes the fill the
+  // loop before wrote, so nothing changes. A long frame that jumps a mark loses that mark.
+  it("changes every picture once a loop, after the step down and before the step up", () => {
+    const asked: Asked[] = [];
+    const mounted = scaleUpScene.mount(recordingStage(asked));
+
+    asked.length = 0;
+
+    // The frame at 4300 is a long one: the new loop and its fill change arrive in it together.
+    for (const elapsed of [0, 299, 300, 1999, 2000, 3999, 4300, 4316, 5999, 6000, 6016]) {
+      mounted?.tick?.(elapsed);
+    }
+
+    const writes = asked.filter(call => typeof call === "object");
+    const everyPicture = Array.from({ length: 40 }, () => "fill");
+
+    expect(asked.map(call => (typeof call === "object" ? "fill" : call))).toEqual([
+      1.5,
+      ...everyPicture,
+      2,
+      1.5,
+      ...everyPicture,
+      2
+    ]);
+    expect(new Set(writes.slice(0, 40).map(write => write.entity)).size).toBe(40);
+    expect(writes[0]?.patch).not.toEqual(writes[40]?.patch);
+  });
+
+  // Bug: the low step stays on the next arm.
+  it("hands the resolution back when left", () => {
+    const asked: Asked[] = [];
+    const mounted = scaleUpScene.mount(recordingStage(asked));
+
+    mounted?.tick?.(0);
     mounted?.leave?.();
     expect(asked.at(-1)).toBeUndefined();
   });

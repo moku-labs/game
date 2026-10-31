@@ -7,12 +7,13 @@
  */
 import { CHANNELS, differingPixels, NAMED, withinRatio } from "../pixels";
 import type { PixiContainer } from "../types";
-import { KEY, onGrid } from "./geometry";
+import { drawnResolution, KEY, onGrid } from "./geometry";
 import type { KeptCtx, KeptRecord, RangeRecord } from "./types";
 
 /**
- * Tells whether a kept record's quad stands off its picture's grid: it is moving, or drawn scaled to another linear part
- * than at the take (F67), and sampled linearly (P2.5).
+ * Tells whether a kept record's quad stands off its picture's grid: it is moving, drawn scaled to another linear part
+ * than at the take (F67), or drawn at another resolution than the canvas after a step (F126), and sampled linearly
+ * (P2.5). The last is the resampling of a picture nothing changed, not a stale one.
  *
  * @param kctx - The kept context.
  * @param record - The record, kept.
@@ -25,6 +26,7 @@ function offGrid(kctx: KeptCtx, record: KeptRecord): boolean {
   const r = kctx.host.resolution();
 
   return (
+    drawnResolution(key, record.direct) !== r ||
     world.a !== key[KEY.a] ||
     world.b !== key[KEY.b] ||
     world.c !== key[KEY.c] ||
@@ -182,8 +184,9 @@ function logStale(
 
 /**
  * The pixel leg after a drawn frame: the picture as drawn against the same frame with every picture live. Frames in
- * which a picture moves off its grid, is translucent itself (F120) or hangs under a translucent ancestor (F113) are
- * skipped and counted; at rest, opaque, under opaque ancestors every picture is compared.
+ * which a picture moves off its grid, was drawn at another resolution (F126), is translucent itself (F120) or hangs
+ * under a translucent ancestor (F113) are skipped and counted; at rest, opaque, under opaque ancestors every picture is
+ * compared.
  *
  * @param kctx - The kept context.
  * @param bypass - Draws every kept record live (true) or as its picture again (false).
@@ -201,8 +204,8 @@ export function verifyPictures(
   // No picture stood in the frame: nothing to compare.
   if (records.length === 0 && ranges.length === 0) return;
 
-  // A picture moving off its grid is sampled linearly, a fading one or one under a fading ancestor is faded after its
-  // filters: the frame is skipped and counted.
+  // A picture moving off its grid or kept through a step of the resolution is sampled linearly, a fading one or one under
+  // a fading ancestor is faded after its filters: the frame is skipped and counted.
   const uncomparable = records.some(record => offGrid(kctx, record) || faded(record));
 
   if (uncomparable) {

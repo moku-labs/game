@@ -35,7 +35,7 @@ import {
 import { fullSprite, loop, PICTURE, ramped } from "./shared";
 import type { BenchScene, Stage } from "./types";
 
-/** The items of `fade` and `entry`, and the pictures of `scale`. */
+/** The items of `fade` and `entry`, and the pictures of `scale` and `scale-up`. */
 const ITEMS = 40;
 
 /** The side of one item. */
@@ -53,8 +53,20 @@ const GLOWS = 12;
 /** The steps of `scale`, of the page's own resolution, each held 2 s. */
 const SCALE_STEPS = [1, 0.85, 0.75, 0.85] as const;
 
-/** How long one step of `scale` holds. */
+/** How long one step of `scale` and of `scale-up` holds. */
 const SCALE_STEP_MS = 2000;
+
+/** The fill the pictures of `scale` and `scale-up` are spawned with. */
+const SCALE_FILL = 0x33_88_ff;
+
+/** The fill the pictures of `scale-up` change to every other loop, and back the loop after. */
+const SCALE_UP_FILL = 0xf2_b4_3d;
+
+/** The low step of `scale-up`, of the page's own resolution. */
+const SCALE_UP_LOW = 0.75;
+
+/** How long after the step down the pictures of `scale-up` change: they are taken low from then on. */
+const SCALE_UP_CHANGE_MS = 300;
 
 /** The cross-dissolve of `fade`. */
 const DISSOLVE_MS = 420;
@@ -368,21 +380,37 @@ const flipScene: BenchScene = {
   }
 };
 
+/**
+ * Spawns the kept pictures of `scale` and `scale-up`.
+ *
+ * @param stage - The stage.
+ * @returns The pictures.
+ */
+function scalePictures(stage: Stage): World.Entity[] {
+  const pictures: World.Entity[] = [];
+
+  for (let index = 0; index < ITEMS; index += 1) {
+    pictures.push(
+      stage.spawn(
+        Transform(itemAt(index)),
+        Shape({ w: ITEM_SIDE, h: ITEM_SIDE, fill: SCALE_FILL, radius: 12 }),
+        Glow({ strength: 2, distance: 8 })
+      )
+    );
+  }
+
+  return pictures;
+}
+
 /** 40 kept pictures under a stepping render scale. */
 export const scaleScene: BenchScene = {
   name: "scale",
-  stands: "the adaptive render scale: 40 kept pictures retaken at 1, 0.85 and 0.75 (debug page)",
+  stands: "the adaptive render scale: 40 kept pictures under steps of 1, 0.85, 0.75 (debug page)",
   mount: stage => {
     const base = stage.setResolution(undefined);
     const state = { step: -1 };
 
-    for (let index = 0; index < ITEMS; index += 1) {
-      stage.spawn(
-        Transform(itemAt(index)),
-        Shape({ w: ITEM_SIDE, h: ITEM_SIDE, fill: 0x33_88_ff, radius: 12 }),
-        Glow({ strength: 2, distance: 8 })
-      );
-    }
+    scalePictures(stage);
 
     return {
       tick: elapsedMs => {
@@ -392,6 +420,44 @@ export const scaleScene: BenchScene = {
 
         state.step = step;
         stage.setResolution(base * (SCALE_STEPS[step % SCALE_STEPS.length] ?? 1));
+      },
+      leave: () => {
+        stage.setResolution(undefined);
+      }
+    };
+  }
+};
+
+/** The same 40 pictures, changed while the scale is low, so that the step up owes a take of each. */
+export const scaleUpScene: BenchScene = {
+  name: "scale-up",
+  stands: "the step up of the render scale: 40 pictures taken at 0.75, then all owing a take",
+  mount: stage => {
+    const base = stage.setResolution(undefined);
+    const pictures = scalePictures(stage);
+    const state = { lowered: -1, changed: -1, raised: -1 };
+
+    return {
+      tick: elapsedMs => {
+        const turn = Math.floor(elapsedMs / (2 * SCALE_STEP_MS));
+        const at = elapsedMs % (2 * SCALE_STEP_MS);
+
+        if (turn !== state.lowered) {
+          state.lowered = turn;
+          stage.setResolution(base * SCALE_UP_LOW);
+        }
+
+        if (at >= SCALE_UP_CHANGE_MS && turn !== state.changed) {
+          const fill = turn % 2 === 0 ? SCALE_UP_FILL : SCALE_FILL;
+
+          state.changed = turn;
+          for (const picture of pictures) stage.set(picture, Shape, { fill });
+        }
+
+        if (at >= SCALE_STEP_MS && turn !== state.raised) {
+          state.raised = turn;
+          stage.setResolution(base);
+        }
       },
       leave: () => {
         stage.setResolution(undefined);
@@ -512,6 +578,7 @@ export const CASE_SCENES: readonly BenchScene[] = [
   fogLocalScene,
   flipScene,
   scaleScene,
+  scaleUpScene,
   lensScene,
   promoScene
 ];

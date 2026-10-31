@@ -10,6 +10,7 @@ import {
   keptBoard,
   keptFadeBoard,
   keptOwnFadeBoard,
+  keptSteppedBoard,
   keptWhyBoard,
   keptZoomBoard
 } from "./fixtures";
@@ -78,6 +79,13 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for a crowd of 10 live views waiting for their first take, stepped (F119)", async () => {
     expect(bytesPerCall(await crowdWaitingBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptCrowd + NOISE
+    );
+  });
+
+  // Bug: the check of a step reads its numbers through an object, or a closure is made for what a record owes (F126).
+  it("allocates nothing for 40 kept views stepped in the frames after a step of the resolution (F126)", async () => {
+    expect(bytesPerCall(await keptSteppedBoard(40), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptFlushStepped + NOISE
     );
   });
 

@@ -180,12 +180,13 @@ function keptNow(drawn: Drawn, entity: Entity): boolean {
 }
 
 describe("a kept picture at a new scale", () => {
-  // Bug: a scale that flaps retakes every kept picture each time, three in a row send them live for good.
-  it("is retaken once per change and stays kept", async () => {
+  // Bug: a scale that flaps retakes every kept picture each time, three in a row send them live for good. A step down
+  // owes nothing, and the step back finds the picture at its resolution (F126).
+  it("is not retaken by a step down or the step back, and stays kept", async () => {
     const drawn = await startDrawn({ onDemand: false });
     const filter = new pixi.AlphaFilter();
 
-    // `effects` hands its filters "inherit": they draw at the canvas resolution, so a new one is a new picture.
+    // `effects` hands its filters "inherit": they draw at the canvas resolution.
     filter.resolution = "inherit";
 
     const entity = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
@@ -205,13 +206,13 @@ describe("a kept picture at a new scale", () => {
     drawn.mock.hooks["time:rate"](scaledTo(0.85));
     drawn.frames(10);
 
-    expect(takes(drawn, top, from)).toBe(1);
+    expect(takes(drawn, top, from)).toBe(0);
     expect(keptNow(drawn, entity)).toBe(true);
 
     drawn.mock.hooks["time:rate"](scaledTo(1));
     drawn.frames(10);
 
-    expect(takes(drawn, top, from)).toBe(2);
+    expect(takes(drawn, top, from)).toBe(0);
     expect(keptNow(drawn, entity)).toBe(true);
     drawn.oracle.expectPicturesCurrent();
     drawn.mock.stop();

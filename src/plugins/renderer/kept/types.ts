@@ -108,8 +108,8 @@ export type WhyLive =
 
 /**
  * What a kept picture's last take was for, as `sync.debug.why()` names it: `"first"` (taken from live), `"mark"` (its
- * subtree changed), `"inner-first"` (a view inside it took its first picture, F114), `"resolution"`, `"settle"` (it came
- * to rest off its picture's grid), `"scale-limit"` (a zoom past what a picture is drawn scaled), `"canvas"` (a picture
+ * subtree changed), `"inner-first"` (a view inside it took its first picture, or was settled or refined: F114, F126),
+ * `"resolution"`, `"settle"` (it came to rest off its picture's grid), `"scale-limit"` (a zoom past what a picture is drawn scaled), `"canvas"` (a picture
  * cut to the canvas moved or the canvas changed), `"filter"` (the filter output alone), `"chain"` (the filter's pre-pass
  * and output) and `"placed-move"` (a view drawn scaled that may not be: placed, or cut to the canvas).
  *
@@ -325,6 +325,13 @@ export type KeptRecord = {
   bytes: number;
   /** A settle retake is owed: the view came to rest off its picture's grid (P2.5). */
   settle: boolean;
+  /**
+   * A take under the limit is owed: after a step of the renderer resolution the picture is coarser than the canvas
+   * (P4.3), and the step must run also in a calm frame.
+   */
+  coarse: boolean;
+  /** This step's change of the record was a refining take and nothing else: read by `dirtyAbove`, cleared with the dirty flags. */
+  refined: boolean;
   /** Bytes a refused take asked for; the record is not offered again until they fit (P6.3). */
   refused: number;
   /**
@@ -349,7 +356,7 @@ export type KeptRecord = {
   blended: boolean;
   /** The frame of the record's last take from live (F114): a picture that goes ineligible right after it churns. */
   takenAt: number;
-  /** An inner record was first taken: the next stage-1 retake this causes is not counted as churn (F114). */
+  /** An inner record was first taken, settled or refined: the stage-1 retake this causes is not churn (F114, F126). */
   spared: boolean;
   /**
    * A take attempt rendered nothing (off the canvas, empty bounds, too big, a `Display` without `onDemand`): no take is
@@ -475,6 +482,8 @@ export type KeptState = {
   calm: boolean;
   /** First takes in this flush (F114): every one counts; a stack drawn direct is never held back by the count. */
   firstTakes: number;
+  /** The limited takes of this flush, refining and settle together (P4.3, `REFINE_TAKES`). */
+  frameRefines: number;
   /** A record drawn direct is due in this flush: the first takes of the others wait for the next (F114). */
   alphaDue: boolean;
   /** Live records drawn live with a filter in this flush (F119): from `CROWD` on, their first takes do not wait. */
