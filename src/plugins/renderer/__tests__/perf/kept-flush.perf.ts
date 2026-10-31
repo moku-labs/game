@@ -9,6 +9,7 @@ import {
   keptBlendBoard,
   keptBoard,
   keptFadeBoard,
+  keptFractionalBoard,
   keptOwnFadeBoard,
   keptSteppedBoard,
   keptWhyBoard,
@@ -85,6 +86,20 @@ describe("the kept flush of a quiet board", () => {
   // Bug: the check of a step reads its numbers through an object, or a closure is made for what a record owes (F126).
   it("allocates nothing for 40 kept views stepped in the frames after a step of the resolution (F126)", async () => {
     expect(bytesPerCall(await keptSteppedBoard(40), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptFlushStepped + NOISE
+    );
+  });
+
+  // Bug: a fractional resolution merged with `"inherit"` boxes per record, merged with `undefined` once a frame.
+  it("allocates nothing for 40 kept views stepped at a fractional resolution", async () => {
+    expect(bytesPerCall(await keptFractionalBoard(40), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptFlushStepped + NOISE
+    );
+  });
+
+  // Bug: the same boxes on the frames after a step that ends on a fraction.
+  it("allocates nothing for 40 kept views stepped after a step to a fractional resolution", async () => {
+    expect(bytesPerCall(await keptSteppedBoard(40, 1.5), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptFlushStepped + NOISE
     );
   });
