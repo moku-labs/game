@@ -632,8 +632,9 @@ function nativeDebugOf(
  */
 function buildNumberOf(value: string): number {
   const number = Number(value);
+  const isBuildNumber = /^\d+$/.test(value) && number >= 1 && number <= MAX_BUILD_NUMBER;
 
-  if (/^\d+$/.test(value) && number >= 1 && number <= MAX_BUILD_NUMBER) return number;
+  if (isBuildNumber) return number;
 
   throw new Error(
     `[game] native: --build-number takes an integer from 1 to ${MAX_BUILD_NUMBER}, got "${value}".`

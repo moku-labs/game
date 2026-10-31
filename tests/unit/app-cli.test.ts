@@ -1483,7 +1483,7 @@ describe("native --store", () => {
   });
 
   // Bug: a store warning speaks over the plain error of a game with no native section.
-  it("a game with no native section gets native's error, with no store warning", async () => {
+  it("a game with no native section gets no store warning", async () => {
     const root = makeGame();
     const { seen } = await run(["native", "build", "ios", "--store", "--build-number", "1"], root);
 

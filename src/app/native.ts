@@ -7,7 +7,6 @@
 import path from "node:path";
 import type { Cli, Config, Target } from "@moku-labs/native";
 import type { DebugLevel } from "./build";
-import type { CliDeps } from "./cli";
 import type { ResolvedGameConfig } from "./types";
 
 /** The port of the dev server Tauri's shell starts and loads. */
@@ -37,7 +36,7 @@ export type NativeStore = {
   /** The `--build-number`, one number for both stores. */
   buildNumber: number;
   /** The environment the password variables are looked up in. */
-  env: CliDeps["env"];
+  env: Readonly<Record<string, string | undefined>>;
   /** Tells whether a file is there. */
   exists: (path: string) => boolean;
 };
@@ -343,18 +342,20 @@ function signingOf(
 ): Config["signing"] {
   const android = native.signing?.android;
   const teamId = native.signing?.apple?.teamId;
+  const isStoreIos = target === "ios" && extras.buildNumber !== undefined;
+  const keepsSdkKey = android === undefined || extras.debug !== undefined;
+
+  // The Apple block: the team, the iOS minimum, the export of a store build.
   const apple: Config["signing"]["apple"] = {
     ...(teamId === undefined ? {} : { teamId }),
     ...(target === "ios"
       ? { iosMinimumSystemVersion: native.ios?.minimumVersion ?? IOS_MINIMUM }
       : {}),
-    ...(target === "ios" && extras.buildNumber !== undefined
-      ? { exportMethod: "app-store-connect" as const }
-      : {})
+    ...(isStoreIos ? { exportMethod: "app-store-connect" as const } : {})
   };
 
   return {
-    ...(android === undefined || extras.debug !== undefined
+    ...(keepsSdkKey
       ? {}
       : {
           android: {

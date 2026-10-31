@@ -134,8 +134,9 @@ function checkSigning(signing: NonNullable<GameConfig["native"]>["signing"]): vo
  */
 function checkIos(ios: NonNullable<GameConfig["native"]>["ios"]): void {
   const minimum: unknown = ios?.minimumVersion;
+  const isIosVersion = typeof minimum === "string" && IOS_VERSION.test(minimum);
 
-  if (minimum !== undefined && !(typeof minimum === "string" && IOS_VERSION.test(minimum))) {
+  if (minimum !== undefined && !isIosVersion) {
     throw new Error(
       `[game] config.native.ios.minimumVersion is ${JSON.stringify(minimum)}.\n  Use a version such as "26.0" or "26.0.1".`
     );
@@ -144,11 +145,11 @@ function checkIos(ios: NonNullable<GameConfig["native"]>["ios"]): void {
   for (const [key, value] of Object.entries(ios?.infoPlist ?? {})) {
     const bad = badPlistValue(value, key);
 
-    if (bad !== undefined) {
-      throw new Error(
-        `[game] config.native.ios.infoPlist.${bad} is not a plist value.\n  Use a string, a boolean, an array or an object.`
-      );
-    }
+    if (bad === undefined) continue;
+
+    throw new Error(
+      `[game] config.native.ios.infoPlist.${bad} is not a plist value.\n  Use a string, a boolean, an array or an object.`
+    );
   }
 }
 
