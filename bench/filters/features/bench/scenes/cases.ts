@@ -29,7 +29,10 @@ import {
   PromoMirror,
   PromoProcedural,
   PromoStroke,
+  RestShade,
   RootTint,
+  RowFlip,
+  RowFlipLive,
   Shadow
 } from "../filters";
 import { fullSprite, loop, PICTURE, ramped } from "./shared";
@@ -573,6 +576,139 @@ const fullScene: BenchScene = {
   }
 };
 
+/** The order rows of `rows` and `rows-live`. */
+const ROWS = 8;
+
+/** The kept pictures of `rest`. */
+const RESTING = 24;
+
+/** The drawn frames of `rows-enter`'s turn of writes before its views run on their shaders: the engine's third write. */
+const ENTRY_WRITE = 3;
+
+/** The drawn frames after the last write until its views leave their shaders: the engine's calm. */
+const LEAVE_AFTER = 30;
+
+/** Half a turn of `rows-enter`: it writes for this long, then rests for as long. */
+const ENTER_TURN_MS = 2000;
+
+/**
+ * Order rows flipping all the time.
+ *
+ * @param name - The scene.
+ * @param stands - What it stands for.
+ * @param filter - The filter of a row.
+ * @returns The scene.
+ */
+function rowScene(name: string, stands: string, filter: typeof RowFlip): BenchScene {
+  return {
+    name,
+    stands,
+    mount: stage => {
+      fullSprite(stage);
+
+      const rows: World.Entity[] = [];
+      const count = stage.n ?? ROWS;
+
+      for (let index = 0; index < count; index += 1) {
+        const row = stage.spawn(
+          Transform({ x: 25, y: 120 + index * 84 }),
+          Shape({ w: 340, h: 72, fill: 0xf2_b4_3d, radius: 12 }),
+          filter()
+        );
+
+        stage.child(
+          row,
+          Transform({ x: 12, y: 8 }),
+          Sprite({ texture: PICTURE, width: 56, height: 56, anchor: { x: 0, y: 0 } })
+        );
+        rows.push(row);
+      }
+
+      return {
+        tick: elapsedMs => {
+          for (const [index, row] of rows.entries()) {
+            stage.set(row, filter, { angle: elapsedMs / 500 + index * 0.4 });
+          }
+        }
+      };
+    }
+  };
+}
+
+/** Kept pictures that never change, over one small sprite moving so a frame is drawn. */
+const restScene: BenchScene = {
+  name: "rest",
+  stands: "kept pictures at rest: a batched sprite each, no shader running",
+  mount: stage => {
+    fullSprite(stage);
+
+    const mover = stage.spawn(
+      Transform({ x: 0, y: 700 }),
+      Sprite({ texture: PICTURE, width: 8, height: 8, anchor: { x: 0, y: 0 } })
+    );
+    const count = stage.n ?? RESTING;
+
+    for (let index = 0; index < count; index += 1) {
+      const item = stage.spawn(
+        Transform(itemAt(index)),
+        Shape({ w: ITEM_SIDE, h: ITEM_SIDE, fill: 0x33_88_ff, radius: 12 }),
+        RestShade()
+      );
+
+      stage.child(
+        item,
+        Transform({ x: 8, y: 8 }),
+        Sprite({ texture: PICTURE, width: 32, height: 32, anchor: { x: 0, y: 0 } })
+      );
+    }
+
+    return { tick: elapsedMs => stage.set(mover, Transform, { x: (elapsedMs / 20) % 300 }) };
+  }
+};
+
+/** Forty small views that write their numbers together, then rest together: every entry and leaving of a screen. */
+const rowsEnterScene: BenchScene = {
+  name: "rows-enter",
+  stands:
+    "40 views entering their shaders in one frame, leaving two a flush: the entry and leaving marked in the row",
+  mount: stage => {
+    fullSprite(stage);
+
+    const views: World.Entity[] = [];
+
+    for (let index = 0; index < ITEMS; index += 1) {
+      views.push(
+        stage.spawn(
+          Transform(itemAt(index)),
+          Shape({ w: ITEM_SIDE, h: ITEM_SIDE, fill: 0xf2_b4_3d, radius: 12 }),
+          RowFlip()
+        )
+      );
+    }
+
+    let writes = 0;
+    let rests = 0;
+
+    return {
+      tick: elapsedMs => {
+        if (elapsedMs % (2 * ENTER_TURN_MS) >= ENTER_TURN_MS) {
+          writes = 0;
+          rests += 1;
+          if (rests === LEAVE_AFTER) stage.mark("rows-enter leaving");
+
+          return;
+        }
+
+        rests = 0;
+        writes += 1;
+        if (writes === ENTRY_WRITE) stage.mark("rows-enter entry");
+
+        for (const view of views) stage.set(view, RowFlip, { angle: elapsedMs / 500 });
+      }
+    };
+  }
+};
+
 /** Every case scene. */
 export const CASE_SCENES: readonly BenchScene[] = [
   fullScene,
@@ -586,5 +722,13 @@ export const CASE_SCENES: readonly BenchScene[] = [
   scaleScene,
   scaleUpScene,
   lensScene,
-  promoScene
+  promoScene,
+  rowScene(
+    "rows",
+    "order rows flipping, kept: the filter's own body on a mesh in the canvas pass",
+    RowFlip
+  ),
+  rowScene("rows-live", "the same rows with cache: false, drawn live", RowFlipLive),
+  restScene,
+  rowsEnterScene
 ];

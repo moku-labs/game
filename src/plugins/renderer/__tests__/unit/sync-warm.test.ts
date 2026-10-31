@@ -2,6 +2,7 @@ import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Config, PixiContainer, PixiFilter } from "../../types";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
+import { quadOfFilter } from "../quad-harness";
 import { type StagePixi, stagePixi } from "../stage-pixi";
 
 // ---------------------------------------------------------------------------
@@ -575,6 +576,155 @@ describe("the warm-up of a filter", () => {
     expect(
       warn.mock.calls.filter(call => call.some(part => String(part).includes("[BindGroup]")))
     ).toEqual([]);
+  });
+});
+
+/**
+ * A renderer past its content probes, with a named filter handed over with its quad.
+ *
+ * @param options - As `startWarm`.
+ * @param options.kind - The backend.
+ * @returns The renderer, and the answer of the hand-over.
+ */
+async function handed(
+  options: { kind?: "webgpu" | "webgl" } = {}
+): Promise<{ warmed: Warmed; answer: { answer: boolean | undefined }; content: number }> {
+  const warmed = await startWarm(options);
+  const filter = new pixi.AlphaFilter();
+  const content = options.kind === "webgl" ? CONTENT.length : CONTENT.length * VARIANTS.length;
+
+  warmed.frames(content);
+  warmed.name(filter, "probe");
+
+  return {
+    warmed,
+    content,
+    answer: watchAnswer(warmed.mock.api.sync.filters.warm(filter, quadOfFilter("kind.quad")))
+  };
+}
+
+describe("the warm-up of a filter's quad", () => {
+  // Bug: a pipeline compiled in play, in the first frame of a view on its shader.
+  it("draws the quad in every variant after its filter, and the promise answers after the last", async () => {
+    const { warmed, answer, content } = await handed();
+
+    warmed.frames(7);
+    await settle();
+
+    expect(answer.answer).toBeUndefined();
+
+    warmed.frame();
+    await settle();
+
+    expect(answer.answer).toBe(true);
+    expect(warmed.probes().slice(content)).toEqual([...inFour("probe"), ...inFour("quad")]);
+    expect(warmed.stage.last().renderer.gpu?.scopes).toEqual({
+      opened: VARIANTS.map(() => "validation"),
+      open: 0
+    });
+  });
+
+  // Bug: a GPU program on WebGL: a probe that logs a warning, or a throw that ends the warm-up.
+  it("WebGL draws the filter alone", async () => {
+    const { warmed, answer, content } = await handed({ kind: "webgl" });
+
+    warmed.frames(1);
+    await settle();
+
+    expect(answer.answer).toBe(true);
+    expect(warmed.probes().slice(content)).toEqual(["probe canvas"]);
+  });
+
+  // Bug: the pipeline hangs off a geometry another module destroys, and a lost device abandons the whole warm-up.
+  it("draws on a geometry of its own, destroyed with the probe tree and with no shader left behind", async () => {
+    const { warmed } = await handed();
+
+    warmed.frames(8);
+
+    const { warm } = warmed.mock.ctx.state.sync;
+    const probe = warm.objects?.quad;
+
+    expect(probe?.shader).toBeUndefined();
+    expect(probe?.mesh.geometry).toBe(probe?.geometry);
+    expect(probe?.mesh.geometry).not.toBe(warmed.mock.ctx.state.kept.quadGeometry);
+
+    const geometry = vi.spyOn(probe?.geometry as pixi.MeshGeometry, "destroy");
+    const mesh = vi.spyOn(probe?.mesh as pixi.Mesh, "destroy");
+
+    warmed.mock.modules.sync.forget();
+    warmed.mock.modules.sync.rebuildAll();
+
+    expect(geometry).toHaveBeenCalledOnce();
+    expect(mesh).toHaveBeenCalledOnce();
+  });
+
+  // Bug: a silent blank view: a program that fails its pipeline fails asynchronously.
+  it("logs an error of the scope with the program's name, and the warm-up goes on", async () => {
+    const { warmed, answer } = await handed();
+    const gpu = warmed.stage.last().renderer.gpu;
+    const after = new pixi.AlphaFilter();
+
+    if (gpu === undefined) throw new Error("no device");
+
+    gpu.scopeError = { message: "layout mismatch" };
+
+    const next = watchAnswer(warmed.mock.api.sync.filters.warm(after));
+
+    warmed.frames(12);
+    await settle();
+
+    expect(warmed.mock.ctx.log.error).toHaveBeenCalledWith("renderer:warm-invalid", {
+      program: "kind.quad",
+      message: "layout mismatch"
+    });
+    expect(answer.answer).toBe(true);
+    expect(next.answer).toBe(true);
+    expect(warmed.mock.ctx.state.sync.warm.failed).toBe(false);
+  });
+
+  // Bug: the first quad of a restored device compiles in play.
+  it("is drawn again after a device restore", async () => {
+    const { warmed, content } = await handed();
+
+    warmed.frames(8);
+
+    const first = warmed.probes().slice(content);
+    const before = warmed.probes().length;
+
+    warmed.mock.modules.sync.forget();
+    warmed.mock.modules.sync.rebuildAll();
+    warmed.frames(content + 8);
+
+    expect(warmed.probes().slice(before + content)).toEqual(first);
+  });
+
+  // Bug: a program that throws leaves the scope open, and every later error lands in it.
+  it("closes the scope of a draw whose render threw, and ends the warm-up as any probe", async () => {
+    const { warmed, answer } = await handed();
+    const { renderer } = warmed.stage.last();
+
+    warmed.frames(4);
+
+    const render = renderer.render;
+
+    renderer.render = options => {
+      render(options);
+
+      if (typeof options === "object" && "label" in options) return;
+
+      throw new Error("no pipeline");
+    };
+    warmed.frame();
+    renderer.render = render;
+    await settle();
+
+    expect(answer.answer).toBe(false);
+    expect(renderer.gpu?.scopes.open).toBe(0);
+    expect(warmed.mock.ctx.state.sync.warm.quads.size).toBe(0);
+    expect(warmed.mock.ctx.log.error).toHaveBeenCalledWith(
+      "renderer:warm-failed",
+      expect.objectContaining({ subject: "filter", variant: "canvas" })
+    );
   });
 });
 

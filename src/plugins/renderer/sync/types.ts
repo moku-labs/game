@@ -18,9 +18,12 @@ import type {
   PixiFilterManager,
   PixiGpuProgram,
   PixiGraphics,
+  PixiMesh,
+  PixiMeshGeometry,
   PixiModule,
   PixiRectangle,
   PixiRenderTexture,
+  PixiShader,
   PixiSprite,
   PixiTexture,
   PixiTextureSource,
@@ -655,8 +658,10 @@ export type FiltersApi = {
    * frame. Answers `true` once every draw was made, `false` at once when there is nothing to warm (no device, a headless
    * app, `warm: 0`), and `false` when the renderer stops first or a probe's render threw, which ends the warm-up of the
    * application (`renderer:warm-failed`). A filter handed over again on the same device answers `true` at once when its
-   * draws were made. The renderer never destroys the filter. A `quad` asks for the pipelines of the filter's body on its
-   * mesh too, so a kept view that later draws through it compiles nothing in play.
+   * draws were made. The renderer never destroys the filter. On WebGPU a `quad` asks for the pipelines of the filter's body
+   * on its mesh too, after the filter, in the same four targets, so a kept view that later draws through it compiles
+   * nothing in play; each of those draws runs in an error scope, and a program that does not fit logs
+   * `renderer:warm-invalid` while the warm-up goes on. WebGL ignores it.
    *
    * @param filter - A filter the caller built and keeps alive while it waits.
    * @param quad - The filter's quad, for a kind whose body can run on one; `effects` leaves it out for a stage or a
@@ -669,7 +674,7 @@ export type FiltersApi = {
    * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true four drawn frames later (WebGPU, warm: 1)
    *
    * // A Tint's probe, whose body can also run on a kept view's quad: its pipelines are made with the filter's.
-   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true once its draws were made
+   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true eight drawn frames later (WebGPU, warm: 1)
    * ```
    */
   warm(filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean>;
@@ -694,7 +699,8 @@ export type DebugSwitches = {
 /**
  * One view of `sync.debug.why()`: the label the monitor names its view by; how it is drawn (`"direct"` is a stack of
  * `AlphaFilter`s drawn by its quad, F54); why it is live, `null` when it is not; the still frames left before a take, 0
- * when it waits for none; and the last take in the last full second, with the view whose mark caused it.
+ * when it waits for none; the last take in the last full second, with the view whose mark caused it; and `quad` on a
+ * kept view that runs on its filter's own shader.
  *
  * @example
  * ```ts
@@ -719,6 +725,18 @@ export type WhyEntry = {
   calmIn: number;
   /** The view's last take, when it fell in the last full second. */
   retake: { why: RetakeWhy; by: string | null } | null;
+  /**
+   * Present on a kept view drawn through its filter's own shader: its numbers change, and a change costs no pass.
+   * The field is absent on every other view, a kept sprite included.
+   *
+   * @example
+   * ```ts
+   * // A lens whose angle a tween writes every frame: from its third write on, it runs on the canvas pass.
+   * app.renderer.sync.debug.why()[0];
+   * // { view: "Shape#1048590 shop:lens", mode: "kept", reason: null, calmIn: 0, retake: null, quad: true }
+   * ```
+   */
+  quad?: true;
 };
 
 /**
@@ -1442,8 +1460,8 @@ export type AreaEntry = {
 
 /**
  * What one probe draw of the warm-up draws: a content subject of the renderer (the batch pipeline of sprites, with the
- * normal, the add and the screen blend, the graphics pipe's own, particles with either blend, distance-field text), or
- * a filter handed to `filters.warm`.
+ * normal, the add and the screen blend, the graphics pipe's own, particles with either blend, distance-field text), a
+ * filter handed to `filters.warm`, or its body on its quad.
  */
 export type WarmSubject =
   | "sprite"
@@ -1453,7 +1471,14 @@ export type WarmSubject =
   | "particles-normal"
   | "particles-add"
   | "text"
-  | PixiFilter;
+  | PixiFilter
+  | WarmQuad;
+
+/**
+ * A filter's body on its quad, as a probe of the warm-up draws it: on WebGPU, after the filter, in the same variants, so
+ * a kept view's first frame on its shader compiles nothing.
+ */
+export type WarmQuad = { readonly filter: PixiFilter; readonly quad: FilterSlotQuad };
 
 /**
  * Where a probe draws: straight onto the canvas, or into a texture under a filter of the module's own, each with or
@@ -1498,6 +1523,21 @@ export type WarmObjects = {
   particlesAdd: PixiContainer;
   /** A `BitmapText` of "0" in `WarmState.textFont`; made at its first draw. */
   text: PixiContainer | undefined;
+  /** The mesh a quad subject draws on; made at its first draw. */
+  quad: WarmMesh | undefined;
+};
+
+/**
+ * What a quad subject draws on. The module's own geometry, with the attributes of `kept`'s: a pipeline is keyed by the
+ * layout, so it hits the same pipeline, and a probe over `kept`'s geometry would throw after a lost device.
+ */
+export type WarmMesh = {
+  mesh: PixiMesh;
+  geometry: PixiMeshGeometry;
+  /** The global filter uniforms of the probes: nothing reads what they draw. */
+  gfu: PixiUniformGroup;
+  /** The shader of the draw being made; destroyed with its draw. */
+  shader: PixiShader | undefined;
 };
 
 /**
@@ -1510,6 +1550,8 @@ export type WarmState = {
   head: number;
   /** Every filter handed over on any device: queued again after a restore. */
   filters: Set<PixiFilter>;
+  /** The quad a filter was handed over with: queued with it, on WebGPU. */
+  quads: Map<PixiFilter, FilterSlotQuad>;
   /** The filters whose draws are not all made yet: the draws left, and the promises to answer. */
   waiting: Map<PixiFilter, { left: number; resolve: Array<(warmed: boolean) => void> }>;
   /** The text probe is queued for this device. */
