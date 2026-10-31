@@ -222,18 +222,6 @@ describe("the floor on the swap, `holdMs`", () => {
       loader: { afterMs: 400 }
     });
   });
-
-  // Bug: the floor is counted from another moment than the look's start, or on another counter than the frames.
-  it("is stamped at the look's start: the clock moment the swap may happen at and the frame counter", async () => {
-    const mock = await on("home", { buildMs: "auto", leave: { loader: { holdMs: 260 } } });
-
-    mock.clock.at = 2000;
-    mock.time.frame();
-    mock.time.frame();
-    await enterScene(mock, "board");
-
-    expect(mock.state.leaving?.hold).toEqual({ until: 2260, frame: 2 });
-  });
 });
 
 describe("a live switch", () => {

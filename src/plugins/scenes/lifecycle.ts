@@ -119,11 +119,6 @@ export function checkConfig(config: Readonly<Config>): void {
  *
  * @param ctx - Kernel context of the scenes plugin.
  * @throws {Error} When two features declare the same scene id.
- * @example
- * ```ts
- * startScenes(ctx);
- * ctx.state.scenes.get("board")?.bundle; // "board", read out of the feature description
- * ```
  */
 export function startScenes(ctx: KernelSlice): void {
   const scenes = withDeps(ctx);
@@ -150,11 +145,6 @@ export function startScenes(ctx: KernelSlice): void {
  *
  * @param teardown - What the teardown context carries.
  * @param teardown.state - The plugin state.
- * @example
- * ```ts
- * stopScenes({ state });
- * state.scenes.size; // 0, and the runner calls this plugin no more
- * ```
  */
 export function stopScenes(teardown: { state: State }): void {
   const state = teardown.state;

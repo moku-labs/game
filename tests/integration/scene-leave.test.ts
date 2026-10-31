@@ -774,7 +774,7 @@ describe("a floor on the swap, across the engine", () => {
     expect(later).toBeLessThan(early);
     expect(later).toBeGreaterThan(0);
 
-    await fixture.frames(240 / FRAME_MS + 1);
+    await fixture.frames(Math.ceil(240 / FRAME_MS) + 1);
 
     expect(fixture.app.world.projection.entitiesOf("leave.loading")).toEqual([]);
     expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();

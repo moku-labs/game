@@ -133,7 +133,10 @@ function holdOver(ctx: ScenesCtx, frame: number): boolean {
   const hold = ctx.state.leaving?.hold;
 
   if (hold === undefined) return true;
-  if (ctx.deps.clock.now() >= hold.until && frame >= hold.frame + HOLD_FRAMES) return true;
+
+  const floorPassed = ctx.deps.clock.now() >= hold.until && frame >= hold.frame + HOLD_FRAMES;
+
+  if (floorPassed) return true;
 
   ctx.deps.time.wake();
 
