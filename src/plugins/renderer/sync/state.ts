@@ -103,7 +103,17 @@ function createWarmState(): WarmState {
  * @returns The upload branch of the sync state.
  */
 function createUploadState(): UploadState {
-  return { queue: [], head: 0, waiting: emptyMap(), done: emptyWeakSet() };
+  const upload: UploadState = {
+    queue: [],
+    head: 0,
+    waiting: emptyMap(),
+    done: emptyWeakSet(),
+    forget: source => {
+      upload.done.delete(source);
+    }
+  };
+
+  return upload;
 }
 
 /**

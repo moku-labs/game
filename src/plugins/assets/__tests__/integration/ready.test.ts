@@ -40,6 +40,20 @@ const manifest: Manifest = {
         height: 128,
         mb: 0.063
       }))
+    },
+    "ep01.next": {
+      feature: "ep01",
+      tier: "lazy",
+      mb: 0.063,
+      files: [
+        {
+          key: "ep01.next",
+          path: "features/ep01/assets/next.png",
+          width: 128,
+          height: 128,
+          mb: 0.063
+        }
+      ]
     }
   }
 };
@@ -96,9 +110,10 @@ function pixiIo(): FakeIo {
 /**
  * Starts the game on `home`, its renderer drawing on demand on the fake page.
  *
+ * @param textureBudgetMb - The texture budget.
  * @returns The app, the io, the fake GPU's textures and the frame driver.
  */
-async function startGame() {
+async function startGame(textureBudgetMb = 250) {
   installFakeDom({ width: 1080, height: 1920 });
 
   const pixi = createFakePixi();
@@ -114,7 +129,7 @@ async function startGame() {
         warm: 0,
         onDemand: true
       },
-      assets: { manifest, io, preloadDepth: 0 }
+      assets: { manifest, io, preloadDepth: 0, textureBudgetMb }
     }
   });
 
@@ -195,5 +210,29 @@ describe("assets integration: ready and warm (F52, F60)", () => {
 
     expect(gpu.size).toBe(2);
     expect(warmed).toBe(true);
+  });
+
+  // Bug (F129): the budget lets a bundle go and the next warm finds it "on the GPU", so its screen uploads in its frames.
+  it("uploads a bundle again after the budget unloaded it", async () => {
+    const { app, io, gpu, frames } = await startGame(0.15);
+
+    app.assets.warm("ep01.memory").catch(() => undefined);
+    await frames(2);
+
+    const evicted = app.assets.texture("ep01.room");
+
+    app.assets.load("ep01.next").catch(() => undefined);
+    await frames(1);
+
+    expect(app.assets.isLoaded("ep01.memory")).toBe(false);
+    expect(io.destroyed).toContain(evicted);
+
+    app.assets.warm("ep01.memory").catch(() => undefined);
+    await frames(2);
+
+    const back = app.assets.texture("ep01.room");
+
+    expect(back).not.toBe(evicted);
+    expect(gpu.has(back?.source as object)).toBe(true);
   });
 });

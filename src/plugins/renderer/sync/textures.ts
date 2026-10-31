@@ -148,7 +148,7 @@ function defaultBordersOf(nine: NineBorders): {
 }
 
 /**
- * Makes a Pixi texture out of a decoded image, on behalf of `assets`.
+ * Makes a Pixi texture out of a decoded image, on behalf of `assets`, which decides when it leaves the GPU.
  *
  * @param sctx - Domain context of the sync module.
  * @param image - The decoded image.
@@ -167,6 +167,10 @@ export function createTexture(
       ? pixi.Texture.from({ resource: image, autoGenerateMipmaps: true })
       : pixi.Texture.from(image);
   const nine = options?.nine;
+
+  // `ImageSource` writes true after its options, so only this reaches it. Its owner frees it with `destroyTexture`:
+  // Pixi's collector would take a warmed picture off the GPU a minute later, with no event, under the budget (F129).
+  base.source.autoGarbageCollect = false;
 
   if (nine === undefined) return base;
 
