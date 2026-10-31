@@ -16,6 +16,7 @@ import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
 import type { FakeTexture } from "../../../renderer/__tests__/fake-pixi";
 import type {
   FilterSlot,
+  FilterSlotQuad,
   PixiFilter,
   Api as RendererApi,
   RendererKind
@@ -74,6 +75,8 @@ export type FakeRendererState = {
   areas: Array<{ entity: Entity; area: readonly [number, number, number, number] | undefined }>;
   /** Every filter handed to `sync.filters.warm`, in order. */
   warms: PixiFilter[];
+  /** The quad handed with each of `warms`, at the same index; `undefined` for a filter handed alone. */
+  warmQuads: Array<FilterSlotQuad | undefined>;
   /**
    * What `sync.filters.warm` answers, at once: `false` by default (a renderer with nothing to warm, `warm: 0`);
    * `"later"` keeps every answer for `answerWarm`.
@@ -183,6 +186,7 @@ export function createMockEffects(
     sets: [],
     areas: [],
     warms: [],
+    warmQuads: [],
     warmAnswer: false,
     answerWarm: (warmed: boolean): void => {
       for (const resolve of warmWaiting.splice(0)) resolve(warmed);
@@ -275,8 +279,9 @@ export function createMockEffects(
         ): void => {
           renderer.areas.push({ entity, area });
         },
-        warm: (filter: PixiFilter): Promise<boolean> => {
+        warm: (filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean> => {
           renderer.warms.push(filter);
+          renderer.warmQuads.push(quad);
 
           if (renderer.warmAnswer !== "later") return Promise.resolve(renderer.warmAnswer);
 

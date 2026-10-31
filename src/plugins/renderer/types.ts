@@ -144,6 +144,16 @@ export type PixiNineSliceSprite = InstanceType<PixiModule["NineSliceSprite"]>;
 export type PixiMesh = InstanceType<PixiModule["Mesh"]>;
 
 /**
+ * A Pixi GPU program: the WebGPU half of a shader. `effects` builds the one a filter's body runs on its quad.
+ */
+export type PixiGpuProgram = InstanceType<PixiModule["GpuProgram"]>;
+
+/**
+ * A Pixi uniform group: what a shader binds its numbers from.
+ */
+export type PixiUniformGroup = InstanceType<PixiModule["UniformGroup"]>;
+
+/**
  * A Pixi graphics object: what a `Shape` component is drawn with, and what clips its children.
  */
 export type PixiGraphics = InstanceType<PixiModule["Graphics"]>;
@@ -693,6 +703,7 @@ export type {
   DisplaysApi,
   FilterSlot,
   FilterSlotInputs,
+  FilterSlotQuad,
   FiltersApi,
   FontsApi,
   HitBox,

@@ -20,7 +20,7 @@ import type {
   UniformDeclaration,
   UniformSpec
 } from "./types";
-import { assemble } from "./wgsl";
+import { assemble, assembleQuad } from "./wgsl";
 
 /** The most inputs one filter reads: each is a texture the body samples. */
 const MAX_INPUTS = 4;
@@ -886,6 +886,9 @@ export function defineFilter<
     id,
     source: assemble(uniforms, inputs, spec.wgsl, origin, backdrop),
     glsl: assembleGlsl(uniforms, inputs, spec.glsl, origin, backdrop),
+    // A mesh binds neither a second texture nor the canvas under it.
+    quadSource:
+      inputs.length === 0 && !backdrop ? assembleQuad(uniforms, spec.wgsl, origin) : undefined,
     uniforms,
     passes,
     padding,

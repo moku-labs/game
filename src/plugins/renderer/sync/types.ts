@@ -16,6 +16,7 @@ import type {
   PixiContainer,
   PixiFilter,
   PixiFilterManager,
+  PixiGpuProgram,
   PixiGraphics,
   PixiModule,
   PixiRectangle,
@@ -23,6 +24,7 @@ import type {
   PixiSprite,
   PixiTexture,
   PixiTextureSource,
+  PixiUniformGroup,
   RendererCtx
 } from "../types";
 import type { Point, ViewportApi, ViewportInternal } from "../viewport/types";
@@ -494,6 +496,28 @@ export type FilterSlot = {
    * it holds the loops under it (spec 22).
    */
   blurs?: boolean;
+  /** The filter's own body as a program for its quad, for a kept view whose numbers change; filled by effects. */
+  quad?: FilterSlotQuad;
+};
+
+/**
+ * What the kept cache needs to draw a filter's own body on its quad; effects fills it, a game's own slot leaves it out.
+ * The renderer holds no WGSL: it gets the built program and binds its own global filter uniforms and texture beside `fu`.
+ * The object stands for the instance's life, so a list handed over again does not build a shader again.
+ *
+ * @example
+ * ```ts
+ * // `effects` hands a Tint on a kept row: 8 rows of the kind share the program, each binds its own numbers.
+ * const quad: FilterSlotQuad = { program: tintProgram, fu: tintOfRow.group };
+ * ctx.require(rendererPlugin).sync.filters.set(row, [{ filter: tintOfRow.filter, passes: 1, cache: "local", quad }]);
+ * quad.program.vertex?.entryPoint; // "mainVertex"
+ * ```
+ */
+export type FilterSlotQuad = {
+  /** The filter's body behind Pixi's mesh groups; `GpuProgram.from` of the text effects assembles and checks. */
+  readonly program: PixiGpuProgram;
+  /** The uniform group of the filter's instance; `undefined` for a filter that binds none. */
+  readonly fu: PixiUniformGroup | undefined;
 };
 
 /**
@@ -631,18 +655,24 @@ export type FiltersApi = {
    * frame. Answers `true` once every draw was made, `false` at once when there is nothing to warm (no device, a headless
    * app, `warm: 0`), and `false` when the renderer stops first or a probe's render threw, which ends the warm-up of the
    * application (`renderer:warm-failed`). A filter handed over again on the same device answers `true` at once when its
-   * draws were made. The renderer never destroys the filter.
+   * draws were made. The renderer never destroys the filter. A `quad` asks for the pipelines of the filter's body on its
+   * mesh too, so a kept view that later draws through it compiles nothing in play.
    *
    * @param filter - A filter the caller built and keeps alive while it waits.
+   * @param quad - The filter's quad, for a kind whose body can run on one; `effects` leaves it out for a stage or a
+   *   fallback, and for a body the mesh cannot carry.
    * @returns Whether the filter's pipelines were created.
    * @example
    * ```ts
    * // `effects`, during the splash: a probe of the Frost's body, before the shop is ever opened.
    * const renderer = ctx.require(rendererPlugin);
    * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true four drawn frames later (WebGPU, warm: 1)
+   *
+   * // A Tint's probe, whose body can also run on a kept view's quad: its pipelines are made with the filter's.
+   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true once its draws were made
    * ```
    */
-  warm(filter: PixiFilter): Promise<boolean>;
+  warm(filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean>;
 };
 
 /**

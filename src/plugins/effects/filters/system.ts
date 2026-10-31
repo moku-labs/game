@@ -7,7 +7,8 @@
  * starts the shader checks; a kind whose check is pending gets no instance, a broken kind its
  * stand-in. A view whose filters declare an `area` gets the union of their areas handed to
  * `renderer.sync.filters.area` when it changes (B4). Once the checks settled, every checked
- * definition and every Pixi-core kind is handed to `renderer.sync.filters.warm` as a probe (F4).
+ * definition and every Pixi-core kind is handed to `renderer.sync.filters.warm` as a probe (F4). A filter of ours whose
+ * body can run on a mesh hands its quad over the slot and with its probe; a stand-in never does.
  *
  * Per frame it brings up to date only the views marked dirty: a filter component changed (the change sets of every
  * kind), came or left, a map was retired, a kind still waits for its instance, a chain left places to destroy; a debug
@@ -15,7 +16,14 @@
  * happened syncs no view and allocates nothing.
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
-import type { FilterCache, FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
+import type {
+  FilterCache,
+  FilterSlot,
+  FilterSlotQuad,
+  PixiGpuProgram,
+  PixiModule,
+  ViewportSize
+} from "../../renderer/types";
 import type { AnySystem, Entity } from "../../world/types";
 import type { EffectsCtx } from "../types";
 import { CORE_CACHE } from "./builtins";
@@ -25,6 +33,7 @@ import {
   createStandIn,
   createWarmFilter,
   destroyFilter,
+  quadProgramOf,
   refreshInputs,
   writeFilter
 } from "./instance";
@@ -355,14 +364,65 @@ function byOrder(a: FilterInstance, b: FilterInstance): number {
 }
 
 /**
- * Tells whether the sorted instances of this frame differ from the last list handed over: other
- * instances, another order, other passes, or other stage filters of their inputs.
+ * The quad program an instance hands over now: one of ours with a usable quad. Never a stand-in: the mesh path does not
+ * run `apply`, so the dev mark of a broken kind, which only a stand-in carries, would be lost.
  *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param instance - The instance.
+ * @returns The program, or `undefined`.
+ */
+function quadProgramFor(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  instance: FilterInstance
+): PixiGpuProgram | undefined {
+  if (instance.kind !== "wgsl" || instance.standIn) return undefined;
+
+  return quadProgramOf(ectx, pixi, instance.definition);
+}
+
+/**
+ * What an instance's slot carries for the quad, one object for the instance's life: the renderer builds its shader
+ * again for another one.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param instance - The instance.
+ * @returns The quad, or `undefined` for an instance that hands none.
+ */
+function quadOf(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  instance: FilterInstance
+): FilterSlotQuad | undefined {
+  if (instance.kind !== "wgsl") return undefined;
+
+  const program = quadProgramFor(ectx, pixi, instance);
+
+  if (program === undefined) return undefined;
+
+  instance.quad ??= { program, fu: instance.group };
+
+  return instance.quad;
+}
+
+/**
+ * Tells whether the sorted instances of this frame differ from the last list handed over: other
+ * instances, another order, other passes, other stage filters of their inputs, or another quad.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
  * @param assigned - The last list handed over.
  * @param placed - The sorted instances of this frame.
  * @returns True when the renderer must get a new list.
  */
-function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstance[]): boolean {
+function differs(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  assigned: readonly FilterSlot[],
+  placed: readonly FilterInstance[]
+): boolean {
   if (assigned.length !== placed.length) return true;
 
   // Walk both lists side by side; a counter instead of `entries()`, which builds a pair per item.
@@ -376,6 +436,7 @@ function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstanc
     if (slot?.filter !== instance.filter || slot.passes !== instance.passes) return true;
     if (instance.kind === "wgsl" && slot.inputs !== instance.inputs?.slot) return true;
     if (slot.cache !== cacheOfInstance(instance) || slot.blurs !== blursOf(instance)) return true;
+    if (slot.quad?.program !== quadProgramFor(ectx, pixi, instance)) return true;
   }
 
   return false;
@@ -568,13 +629,16 @@ function syncKind(
 /**
  * The slot of one instance: its filter, its passes, its kind id for the performance log, the
  * seam of its inputs when it has some, and what the kept-picture cache may do with it (its
- * category, a placed filter's origin, whether it shows a blurred copy).
+ * category, a placed filter's origin, whether it shows a blurred copy, the quad its body runs on).
  *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
  * @param instance - The instance.
  * @returns The slot.
  */
-function slotOf(instance: FilterInstance): FilterSlot {
+function slotOf(ectx: EffectsCtx, pixi: PixiModule, instance: FilterInstance): FilterSlot {
   const cache = cacheOfInstance(instance);
+  const quad = quadOf(ectx, pixi, instance);
   const slot: FilterSlot = {
     filter: instance.filter,
     passes: instance.passes,
@@ -584,6 +648,7 @@ function slotOf(instance: FilterInstance): FilterSlot {
 
   if (instance.kind === "wgsl" && instance.inputs !== undefined) slot.inputs = instance.inputs.slot;
   if (blursOf(instance)) slot.blurs = true;
+  if (quad !== undefined) slot.quad = quad;
 
   // A placed filter hands over its `keptOrigin` by reference, once: the renderer writes it in place.
   if (cache === "placed" && instance.kind === "wgsl") {
@@ -593,6 +658,23 @@ function slotOf(instance: FilterInstance): FilterSlot {
   }
 
   return slot;
+}
+
+/**
+ * The slot list of a view's instances. Its own function: a closure over `ectx` and `pixi` inside `syncView` would put
+ * them in a context made at every call of it (48 B), also in a sync that hands nothing over.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param placed - The sorted instances.
+ * @returns The slots.
+ */
+function slotsOf(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  placed: readonly FilterInstance[]
+): FilterSlot[] {
+  return placed.map(instance => slotOf(ectx, pixi, instance));
 }
 
 /**
@@ -642,10 +724,10 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, view: FilteredView): void 
   // Hand the renderer a new frozen list only when the sorted instances changed; a sort only when an order did.
   if (!inOrder(placed)) placed.sort(byOrder);
 
-  const relisted = differs(view.assigned, placed);
+  const relisted = differs(ectx, pixi, view.assigned, placed);
 
   if (relisted) {
-    const slots = placed.map(instance => slotOf(instance));
+    const slots = slotsOf(ectx, pixi, placed);
 
     // A despawned entity gets no call: the renderer forgot its slots when it let the view go.
     const needsSet = slots.length > 0 || ectx.deps.world.ecs.ownerOf(entity) !== undefined;
@@ -952,14 +1034,19 @@ function coreProbe(ectx: EffectsCtx, pixi: PixiModule, id: string): WarmProbe | 
 
   instance.filter.enabled = true;
 
-  return { filter: instance.filter, destroy: (): void => destroyFilter(instance) };
+  return {
+    filter: instance.filter,
+    quad: undefined,
+    destroy: (): void => destroyFilter(instance)
+  };
 }
 
 /**
  * The probes of the warm-up, built one at a time in hand-over order: every Pixi-core kind, then every definition
  * `warmDefinitions` lists (the body of every ready kind, every stage of its inputs, every checked fallback), each in
- * its own order. A core kind goes first: when the renderer has nothing to warm, the one probe built to learn it is one
- * of Pixi's own filters, and no program of a game's shader is compiled for nothing.
+ * its own order. Only the body of a kind brings its quad: stages and fallbacks never shade, so the check compiles none
+ * for them. A core kind goes first: when the renderer has nothing to warm, the one probe built to learn it is one of
+ * Pixi's own filters, and no program of a game's shader is compiled for nothing.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -972,7 +1059,9 @@ function* probesOf(ectx: EffectsCtx, pixi: PixiModule): Generator<WarmProbe> {
     if (probe !== undefined) yield probe;
   }
 
-  for (const entry of warmDefinitions(ectx)) yield createWarmFilter(pixi, entry.definition);
+  for (const { definition } of warmDefinitions(ectx)) {
+    yield createWarmFilter(pixi, definition, quadProgramOf(ectx, pixi, definition));
+  }
 }
 
 /**
@@ -983,7 +1072,7 @@ function* probesOf(ectx: EffectsCtx, pixi: PixiModule): Generator<WarmProbe> {
  * @returns The renderer's answer: true once the probe was warmed, false when there is nothing to warm.
  */
 function handProbe(ectx: EffectsCtx, probe: WarmProbe): Promise<boolean> {
-  const answer = ectx.deps.renderer.sync.filters.warm(probe.filter);
+  const answer = ectx.deps.renderer.sync.filters.warm(probe.filter, probe.quad);
 
   ectx.state.warm.probes.push(probe);
   answer.then(warmed => {
