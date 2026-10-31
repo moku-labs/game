@@ -125,6 +125,23 @@ function emptyEntitySet(): Set<Entity> {
 }
 
 /**
+ * The entities a rebuild makes a view for: the ones that name a layer, then the ones that name a parent. A child of a
+ * ui tree names no layer (F131).
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @returns The entities to build, each once.
+ */
+function hungEntities(ctx: RendererCtx): Set<Entity> {
+  const ecs = ctx.deps.world.ecs;
+  const waiting = emptyEntitySet();
+
+  for (const [entity] of ecs.query(Layer)) waiting.add(entity);
+  for (const [entity] of ecs.query(Parent)) waiting.add(entity);
+
+  return waiting;
+}
+
+/**
  * Where the walk of `shown` stopped for an entity's view, walked again only when `passesVersion` moved since (E4): an
  * entity with several endless loops is walked once, and the loops of a still board are answered from their records
  * (spec 26 R1.7.3). A record is made at an entity's first ask and written in place after.
@@ -766,8 +783,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Builds the root, the layers and a view for every entity that names a layer, then starts the
-   * warm-up of the device (F4).
+   * Builds the root, the layers and a view for every entity hung in a layer or under a parent, then starts the warm-up
+   * of the device (F4).
    */
   const rebuildAll = (): void => {
     forgetTree();
@@ -785,10 +802,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     deps.viewport.apply(root);
     syncLayers(sctx);
 
-    const waiting = emptyEntitySet();
-
-    for (const [entity] of ctx.deps.world.ecs.query(Layer)) waiting.add(entity);
-    buildParentFirst(waiting);
+    buildParentFirst(hungEntities(ctx));
 
     state.added.clear();
     state.removed.clear();
