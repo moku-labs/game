@@ -1040,15 +1040,15 @@ What each stage depends on, and the only stage redone when it changes:
 
 Moving and changing. A view that moves keeps its picture: only the quad's position is written. A move
 of a fraction of a texel draws the quad off its grid (sampled linearly) while it moves; at rest it is
-taken once more at its new phase (a settle retake, for which one frame is asked), at most four pictures
-a frame, the others in the next frames: forty pictures that stop together refine over ten frames. Adaptivity: a view
+taken once more at its new phase (a settle retake, for which one frame is asked), at most two pictures
+a frame, the others in the next frames: forty pictures that stop together refine over twenty frames. Adaptivity: a view
 is taken after it stood still for 2 drawn frames; a kept view whose subtree changes in 3 drawn frames
 in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
 more than live). A kept view inside another is rendered first; its change retakes the outer one too.
 
 A step of the renderer resolution (F126). A step is neither a move nor a change of a picture: a picture drawn at a
 higher or equal resolution than the canvas stays as it is, drawn as a sprite resampled, and a step back finds it current.
-A picture drawn lower is taken again, also while it moves: at most four takes a frame, shared with the settle retakes
+A picture drawn lower is taken again, also while it moves: at most two takes a frame, shared with the settle retakes
 above, each frame with a debt asking for the next. A picture on a stack of a fixed resolution only redoes its output. A
 kept view around refined ones waits for them and is taken once, when it is itself coarser and takes a new stack
 resolution; any other outer view is marked as above, which does not count as churn. A settle waits for the end of a step, except after a zoom. Pictures

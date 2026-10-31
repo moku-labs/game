@@ -434,7 +434,7 @@ function expectWhole(drawn: Drawn, entity: Entity, from: number): void {
 }
 
 /**
- * Runs four frames and answers the inner pictures taken in each.
+ * Runs six frames and answers the inner pictures taken in each.
  *
  * @param drawn - The running renderer.
  * @param inner - The inner pictures.
@@ -443,7 +443,7 @@ function expectWhole(drawn: Drawn, entity: Entity, from: number): void {
 function takesEachInner(drawn: Drawn, inner: readonly Entity[]): number[] {
   const labels = new Set(inner.map(entity => textureLabel(drawn, entity, "#1")));
 
-  return [0, 1, 2, 3].map(() => {
+  return [0, 1, 2, 3, 4, 5].map(() => {
     const from = drawn.stage.targets().length;
 
     drawn.frame();
@@ -557,9 +557,9 @@ describe("a step down", () => {
 describe("a step up", () => {
   // Bug: the limit off by one, or a picture left behind.
   it.each([
-    [4, [4, 0]],
-    [5, [4, 1]],
-    [10, [4, 4, 2, 0]]
+    [2, [2, 0]],
+    [3, [2, 1]],
+    [5, [2, 2, 1, 0]]
   ])("takes %i pictures %j a flush, each at the new resolution", async (count, expected) => {
     const drawn = await open();
     const entities = pictures(drawn, count);
@@ -578,7 +578,7 @@ describe("a step up", () => {
   it("under onDemand and no mark asks for a frame while a debt stands, and for none after", async () => {
     const drawn = await open(true);
     const lamp = withLamp(drawn);
-    const entities = pictures(drawn, 10, inherit, lamp);
+    const entities = pictures(drawn, 5, inherit, lamp);
 
     drawn.frames(2);
     expect(drawn.frame()).toBe(false);
@@ -598,11 +598,11 @@ describe("a step up", () => {
   // Bug: the debt tied to rest: a view that keeps moving stays coarse.
   it("takes a view that moves every frame", async () => {
     const drawn = await open();
-    const entities = pictures(drawn, 5);
+    const entities = pictures(drawn, 3);
 
     setResolution(drawn, 2);
 
-    expect(takesEach(drawn, 2, () => pan(drawn, entities, 1))).toEqual([4, 1]);
+    expect(takesEach(drawn, 2, () => pan(drawn, entities, 1))).toEqual([2, 1]);
 
     for (const entity of entities) expect(recordOf(drawn, entity).key[KEY.r]).toBe(2);
   });
@@ -610,11 +610,11 @@ describe("a step up", () => {
   // Bug: a stack of alphas read through its stale `r`, or never brought up.
   it("takes a stack drawn direct whole, under the limit", async () => {
     const drawn = await open();
-    const entities = pictures(drawn, 5, () => alphaAt("inherit"));
+    const entities = pictures(drawn, 3, () => alphaAt("inherit"));
 
     setResolution(drawn, 2);
 
-    expect(takesEach(drawn, 2)).toEqual([4, 1]);
+    expect(takesEach(drawn, 2)).toEqual([2, 1]);
 
     for (const entity of entities) expect(recordOf(drawn, entity).key[KEY.rs]).toBe(2);
   });
@@ -650,7 +650,7 @@ describe("nested pictures on a step up", () => {
   // Bug: an outer that is not coarser keeps its inner at the old resolution for good.
   it("marks an outer that is not coarser any more", async () => {
     const drawn = await open();
-    const { outer, inner } = nested(drawn, 9);
+    const { outer, inner } = nested(drawn, 5);
     const last = inner.at(-1) as Entity;
 
     outerWaited.add(drawn);
@@ -720,7 +720,7 @@ describe("nested pictures on a step up", () => {
     expect(recordOf(drawn, outer).cut).toBe(panel === CUT_PANEL);
 
     setResolution(drawn, 2);
-    drawn.frames(4);
+    drawn.frames(6);
 
     expect(recordOf(drawn, outer)).toMatchObject({
       mode: "kept",
@@ -767,7 +767,7 @@ describe("nested pictures on a step up", () => {
   // the outer: its own mark of that flush would pass as an inner's take. Nothing was drawn, so nothing marks the outer.
   it("keeps the debt of a stage-3 refining that fails and spares nothing above it", async () => {
     const drawn = await open();
-    const { outer, inner } = nested(drawn, 5, inherit(), () => fixedAt(1));
+    const { outer, inner } = nested(drawn, 3, inherit(), () => fixedAt(1));
     const last = inner.at(-1) as Entity;
 
     outerWaited.add(drawn);
@@ -810,7 +810,7 @@ describe("nested pictures on a step up", () => {
   // Bug: an outer picture left stale: the mark read as one more refining.
   it("a mark under an inner during the refining reaches the coarse outer in that flush", async () => {
     const drawn = await open();
-    const { outer, inner } = nested(drawn, 5);
+    const { outer, inner } = nested(drawn, 3);
     const last = inner.at(-1) as Entity;
 
     outerWaited.add(drawn);
@@ -956,17 +956,17 @@ describe("a stack on a fixed resolution", () => {
   // Bug: a stage-3 refining left outside the count: 40 passes in the flush.
   it("is refined by stage 3 alone on a step up, counted under the limit", async () => {
     const drawn = await open();
-    const entities = pictures(drawn, 5, () => fixedAt(1));
+    const entities = pictures(drawn, 3, () => fixedAt(1));
     const from = drawn.stage.targets().length;
 
     setResolution(drawn, 2);
     drawn.frame();
 
-    expect(renders(drawn, from, "#3")).toHaveLength(4);
+    expect(renders(drawn, from, "#3")).toHaveLength(2);
 
     drawn.frame();
 
-    expect(renders(drawn, from, "#3")).toHaveLength(5);
+    expect(renders(drawn, from, "#3")).toHaveLength(3);
     expect(renders(drawn, from, "#1")).toEqual([]);
 
     for (const entity of entities) {
@@ -1032,7 +1032,7 @@ describe("a zoom on the frame of a stage-3 refining", () => {
   it("owes its one take at rest", async () => {
     const drawn = await open(true);
     const lamp = withLamp(drawn);
-    const entities = pictures(drawn, 5, () => fixedAt(1), lamp);
+    const entities = pictures(drawn, 3, () => fixedAt(1), lamp);
     const last = entities.at(-1) as Entity;
     const { root } = drawn.mock.ctx.state.sync;
 
@@ -1041,7 +1041,7 @@ describe("a zoom on the frame of a stage-3 refining", () => {
     drawn.frames(2);
     setResolution(drawn, 2);
     drawn.frame();
-    // The fifth is refined in the next flush, the first frame of the zoom.
+    // The third is refined in the next flush, the first frame of the zoom.
     root.scale.set(1.1);
     drawn.frame();
 
@@ -1167,7 +1167,7 @@ describe("a stack drawn direct", () => {
 
 describe("settle retakes share the limit", () => {
   // Bug: the limit lost, or a held settle never asked for: the last pictures stay off their grid until a mark.
-  it("40 pictures that stop off their grid take at most 4 a flush, finished without a mark", async () => {
+  it("40 pictures that stop off their grid take at most 2 a flush, finished without a mark", async () => {
     const drawn = await open(true);
     const lamp = withLamp(drawn);
     const entities = pictures(drawn, 40, inherit, lamp);
@@ -1177,11 +1177,11 @@ describe("settle retakes share the limit", () => {
 
     const takes: number[] = [];
 
-    for (let frame = 0; frame < 12 && drawn.frame(); frame += 1) {
+    for (let frame = 0; frame < 22 && drawn.frame(); frame += 1) {
       takes.push(keptOf(drawn).frameTakes);
     }
 
-    expect(takes).toEqual(Array.from({ length: 10 }, () => 4));
+    expect(takes).toEqual(Array.from({ length: 20 }, () => 2));
 
     for (const entity of entities) {
       expectSharp(drawn, entity, 1);
@@ -1189,7 +1189,7 @@ describe("settle retakes share the limit", () => {
     }
   });
 
-  // Bug: the outer churned to live by a settle spread over three flushes.
+  // Bug: the outer churned to live by a settle spread over five flushes.
   it("a nested outer over 9 inner settle takes spread over frames stays kept", async () => {
     const drawn = await open();
     const { outer, inner } = nested(drawn, 9);
@@ -1197,12 +1197,12 @@ describe("settle retakes share the limit", () => {
     pan(drawn, inner, 0.25);
     drawn.frame();
 
-    expect(takesEachInner(drawn, inner)).toEqual([4, 4, 1, 0]);
+    expect(takesEachInner(drawn, inner)).toEqual([2, 2, 2, 2, 1, 0]);
     expect(recordOf(drawn, outer)).toMatchObject({ mode: "kept", retakeWhy: RETAKE.innerFirst });
   });
 
   // Bug: the storm back at rest: a pan across the step retakes every picture when it stops.
-  it("a pan across a step up that then rests takes at most 4 a flush", async () => {
+  it("a pan across a step up that then rests takes at most 2 a flush", async () => {
     const drawn = await open();
     const entities = pictures(drawn, 40);
 
@@ -1210,9 +1210,9 @@ describe("settle retakes share the limit", () => {
       if (frame === 1) setResolution(drawn, 2);
       pan(drawn, entities, 0.25);
     });
-    const resting = takesEach(drawn, 22);
+    const resting = takesEach(drawn, 44);
 
-    expect(Math.max(...moving, ...resting)).toBe(4);
+    expect(Math.max(...moving, ...resting)).toBe(2);
 
     for (const entity of entities) expectSharp(drawn, entity, 2);
   });
@@ -1262,7 +1262,7 @@ describe("settle retakes share the limit", () => {
     ["on inherit, a step back", inherit, 2, 1.5, 2],
     ["on a fixed resolution, a step back", () => fixedAt(1), 2, 1.5, 2],
     ["on a fixed resolution, a step up past its drawn one", () => fixedAt(1), 1.5, 1, 2]
-  ])("a pan at a lowered resolution, %s: at most 4 a flush, all on their grid", async (_kind, slot, taken, lowered, last) => {
+  ])("a pan at a lowered resolution, %s: at most 2 a flush, all on their grid", async (_kind, slot, taken, lowered, last) => {
     const drawn = await open();
 
     setResolution(drawn, taken);
@@ -1276,15 +1276,15 @@ describe("settle retakes share the limit", () => {
 
     setResolution(drawn, last);
 
-    const takes = takesEach(drawn, 30);
+    const takes = takesEach(drawn, 60);
 
-    expect(Math.max(...takes)).toBe(4);
+    expect(Math.max(...takes)).toBe(2);
 
     for (const entity of entities) expectSharp(drawn, entity, last);
   });
 
-  // Bug: `coarse` and `settle` both firing in a flush: eight takes.
-  it("a pan that crosses the step and rests while the debts are paid takes at most 4 a flush", async () => {
+  // Bug: `coarse` and `settle` both firing in a flush: four takes.
+  it("a pan that crosses the step and rests while the debts are paid takes at most 2 a flush", async () => {
     const drawn = await open();
     const entities = pictures(drawn, 40);
 
@@ -1296,9 +1296,9 @@ describe("settle retakes share the limit", () => {
 
     setResolution(drawn, 2);
 
-    const resting = takesEach(drawn, 24);
+    const resting = takesEach(drawn, 48);
 
-    expect(Math.max(...moving, ...resting)).toBeLessThanOrEqual(4);
+    expect(Math.max(...moving, ...resting)).toBeLessThanOrEqual(2);
 
     for (const entity of entities) expectSharp(drawn, entity, 2);
   });

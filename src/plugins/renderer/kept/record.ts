@@ -77,10 +77,10 @@ export const CROWD_TAKES = 10;
 
 /**
  * Limited takes a flush (F126): the refining of a picture coarser than the canvas after a step of the resolution and
- * the settle of a picture at rest off its grid, together. Forty pictures that owe one are taken over ten frames; on the
- * bench a picture is 4 passes, about 3 ms on the A26.
+ * the settle of a picture at rest off its grid, together. Forty pictures that owe one are taken over twenty frames; on
+ * the bench a picture is 4 passes, 5–6 ms on the A26 at 221 MHz: two keep the frame near 29 ms, four took it to 44.
  */
-export const REFINE_TAKES = 4;
+export const REFINE_TAKES = 2;
 
 /** The reasons an ancestor may be hidden by and still draw the view: an overlay's range, a kept ancestor's picture. */
 const DRAWN_ANYWAY = ["freeze", "kept"] as const;
