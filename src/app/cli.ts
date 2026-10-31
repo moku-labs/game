@@ -2,9 +2,9 @@
  * @file The command line of `moku-game`: the arguments read per command with `node:util`
  * `parseArgs`, then one of `dev`, `build`, `native <verb>`, `keys`, `pack`, `visual` or `help`.
  * Every seam of the process (the console, the environment, spawning, signals, the watcher, the
- * keys watch, the asset scanner, native, Bun's resolver, the visual test runner) comes in as
- * `deps`, so a test runs a command with stubs. It returns the exit code and never exits itself. A
- * plain function, on no API.
+ * keys watch, the asset scanner, native, Bun's resolver, the visual test runner, the home folder,
+ * the file check, the game's version) comes in as `deps`, so a test runs a command with stubs. It
+ * returns the exit code and never exits itself. A plain function, on no API.
  */
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -108,7 +108,16 @@ export type CliDeps = {
   visual: () => Promise<VisualRunner>;
   /** Wall-clock ms; the build id of a debug build. */
   now: () => number;
+  /** The home folder a `~/` of a keystore path starts from. */
+  home: string;
+  /** Tells whether a file is there; the keystore check of `--store`. */
+  exists: (path: string) => boolean;
+  /** The `version` of `<root>/package.json`, `undefined` for a missing file or field. */
+  readPackageVersion: (root: string) => string | undefined;
 };
+
+/** What `--store` and `--build-number` read to: a store build with its number, or nothing. */
+type NativeStoreFlags = { store: true; buildNumber: number } | { store?: never };
 
 /** The commands of the line that run something; `help` only prints. */
 type Command = "dev" | "build" | "native" | "keys" | "pack" | "visual";
@@ -138,7 +147,9 @@ const ALL_OPTIONS = {
   dir: { type: "string" },
   webgl: { type: "boolean" },
   debug: { type: "string" },
-  editor: { type: "string" }
+  editor: { type: "string" },
+  store: { type: "boolean" },
+  "build-number": { type: "string" }
 } as const;
 
 /** The flags of `visual` that `parseVisualArgv` reads, in the runner's words. */
@@ -148,7 +159,7 @@ const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl|no-verify-frame
 const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIONS)[]>> = {
   dev: ["port", "packed"],
   build: ["out", "debug", "editor"],
-  native: ["simulator", "debug", "editor"],
+  native: ["simulator", "debug", "editor", "store", "build-number"],
   keys: ["check"],
   pack: ["no-cache"],
   visual: [
@@ -179,6 +190,9 @@ const DEFAULT_PORT = "3000";
 /** The highest port number. */
 const MAX_PORT = 65_535;
 
+/** The highest `--build-number`, the top of an Android `versionCode`. */
+const MAX_BUILD_NUMBER = 2_100_000_000;
+
 /** A host of `--editor`: a name or an IPv4 address, or an IPv6 address in brackets. */
 const EDITOR_HOST = /^(?:[\w.-]+|\[[\da-f:.]+\])$/i;
 
@@ -195,6 +209,7 @@ const USAGE = [
   "  dev [--port 3000] [--packed]          serve the game with hot reload",
   "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
   "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
+  "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
   "  native dev <target>                   run the native shell on the dev server",
   "  native doctor | native clean          check or remove the native project",
   "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -515,16 +530,24 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
 
   refuseExtra(parsed, 2);
 
+  // `--store` reads first: its refusal of `--debug` names the store on every target.
+  const store = nativeStoreOf(parsed, verb, target);
   const debug = nativeDebugOf(parsed, verb, target);
 
   noteFullAlias(parsed, deps.ui);
 
   const settings = await loadSettings(parsed.root);
-  const where: NativeWhere = { cwd: parsed.root, command: selfCommand(parsed, deps) };
+  const version = deps.readPackageVersion(parsed.root);
+  const where: NativeWhere = {
+    cwd: parsed.root,
+    command: selfCommand(parsed, deps),
+    home: deps.home
+  };
   const options: NativeVerbOptions = {
     ...(target === undefined ? {} : { target }),
     ...(verb === "build" && parsed.values.simulator === true ? { simulator: true } : {}),
-    ...debug
+    ...debug,
+    ...(version === undefined ? {} : { version })
   };
 
   if (debug.debug !== undefined && target === "android") {
@@ -533,7 +556,37 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
     );
   }
 
+  if (store.store === true) {
+    options.store = { buildNumber: store.buildNumber, env: deps.env, exists: deps.exists };
+    warnIosStore(settings, target, deps.ui);
+  }
+
   return (await deps.native(verb, settings, where, options)) ? 0 : 1;
+}
+
+/**
+ * Warns about what App Store Connect asks for on an iOS store build. Neither stops the build.
+ *
+ * @param settings - The resolved `config.ts` of the game.
+ * @param target - The target the command line names.
+ * @param ui - The console.
+ */
+function warnIosStore(settings: ResolvedGameConfig, target: string | undefined, ui: CliUi): void {
+  const native = settings.native;
+
+  if (target !== "ios" || native === undefined) return;
+
+  if (native.ios?.privacyManifest === undefined) {
+    ui.warn(
+      "native: --store on ios with no native.ios.privacyManifest. App Store Connect asks for one."
+    );
+  }
+
+  if (native.ios?.infoPlist?.ITSAppUsesNonExemptEncryption === undefined) {
+    ui.warn(
+      "native: --store on ios with no ITSAppUsesNonExemptEncryption in native.ios.infoPlist. App Store Connect asks on every upload without it."
+    );
+  }
 }
 
 /**
@@ -564,6 +617,66 @@ function nativeDebugOf(
   }
 
   return editor === undefined ? { debug } : { debug, editor: editorOf(editor, "native") };
+}
+
+/**
+ * Reads `--build-number`: a whole number from 1 to the top of an Android `versionCode`.
+ *
+ * @param value - The value of the flag.
+ * @returns The number.
+ * @throws {Error} When the value is anything else.
+ * @example
+ * ```ts
+ * buildNumberOf("12"); // 12
+ * ```
+ */
+function buildNumberOf(value: string): number {
+  const number = Number(value);
+
+  if (/^\d+$/.test(value) && number >= 1 && number <= MAX_BUILD_NUMBER) return number;
+
+  throw new Error(
+    `[game] native: --build-number takes an integer from 1 to ${MAX_BUILD_NUMBER}, got "${value}".`
+  );
+}
+
+/**
+ * Reads `--store` and `--build-number` of `moku-game native`, before any config is read: they go
+ * with `native build ios` and `native build android` only, one number for both stores.
+ *
+ * @param parsed - The command line.
+ * @param verb - The native verb.
+ * @param target - The target the command line names, unchecked.
+ * @returns The store flag and the number, or nothing without them.
+ * @throws {Error} When either goes without the other or with another verb or target, when `--debug`,
+ *   `--editor` or `--simulator` comes along, or when the number is refused.
+ */
+function nativeStoreOf(
+  parsed: Parsed,
+  verb: NativeVerb,
+  target: string | undefined
+): NativeStoreFlags {
+  const { store, "build-number": number } = parsed.values;
+
+  if (store !== true && number === undefined) return {};
+  if (store !== true) throw new Error("[game] native: --build-number goes with --store.");
+  if (verb !== "build") throw new Error("[game] native: --store goes with native build only.");
+
+  const clash = (["debug", "editor", "simulator"] as const).find(
+    flag => parsed.values[flag] !== undefined
+  );
+
+  if (clash !== undefined) throw new Error(`[game] native: --store does not go with --${clash}.`);
+
+  if (target !== "ios" && target !== "android") {
+    throw new Error(`[game] native: --store builds ios or android, got ${target ?? "no target"}.`);
+  }
+
+  if (number === undefined) {
+    throw new Error("[game] native: --store needs --build-number, the number of this upload.");
+  }
+
+  return { store: true, buildNumber: buildNumberOf(number) };
 }
 
 /**

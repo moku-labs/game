@@ -1,15 +1,21 @@
 /**
- * @file `nativeConfigOf` and `runNative`: a game's `config.ts` as the config of `@moku-labs/native`,
- * and the four native verbs over a recording fake of that package.
+ * @file `nativeConfigOf`, `storeProblems` and `runNative`: a game's `config.ts` as the config of
+ * `@moku-labs/native`, the checks of a store build, and the four native verbs over a recording fake
+ * of that package.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../../../src/app/config";
-import type { NativeConfig } from "../../../src/app/native";
-import { nativeConfigOf, runNative } from "../../../src/app/native";
+import type { NativeConfig, NativeStore, StoreInput } from "../../../src/app/native";
+import { nativeConfigOf, runNative, storeProblems } from "../../../src/app/native";
 import type { GameConfig, ResolvedGameConfig } from "../../../src/app/types";
 
 /** The options a fake cli verb was called with. */
-type VerbCall = { target?: string | undefined; simulator?: boolean | undefined };
+type VerbCall = {
+  target?: string | undefined;
+  simulator?: boolean | undefined;
+  debug?: boolean | undefined;
+  aab?: boolean | undefined;
+};
 
 /** What the fake native app saw: the configs it was made with, and every call in order. */
 type Recorder = {
@@ -74,7 +80,32 @@ const { recorder, fakeNative } = vi.hoisted(() => {
 
 vi.mock("@moku-labs/native", () => fakeNative());
 
-const where = { cwd: "/g", command: '"bun" "/g/bin/moku-game.mjs" "--root" "/g"' };
+const where = {
+  cwd: "/g",
+  command: '"bun" "/g/bin/moku-game.mjs" "--root" "/g"',
+  home: "/home/a"
+};
+
+/** The name of the variable with the keystore password. */
+const STORE_VARIABLE = "KS_PASS";
+
+/** The name of the variable with the key password. */
+const KEY_VARIABLE = "KEY_PASS";
+
+/** The Android signing of a store game: the two password variables by name. */
+const android = {
+  keystorePath: "keys/k.jks",
+  keystorePasswordEnv: STORE_VARIABLE,
+  keyPasswordEnv: KEY_VARIABLE,
+  keyAlias: "upload"
+};
+
+/** A native section that can ship: every signing block and a real identifier. */
+const shippable: NonNullable<GameConfig["native"]> = {
+  name: "T",
+  identifier: "com.acme.t",
+  signing: { android, apple: { teamId: "ABCDE12345" } }
+};
 
 /**
  * A resolved config of a game with a native section.
@@ -88,6 +119,67 @@ function settingsOf(config: Partial<GameConfig> = {}): ResolvedGameConfig {
     native: { name: "Лесной городок", identifier: "com.mokulabs.timber", icon: "assets/icon.png" },
     ...config
   });
+}
+
+/**
+ * The keystore path native gets for a path in `config.ts`.
+ *
+ * @param keystorePath - The path as the game writes it.
+ * @returns The path in the native config.
+ */
+function keystoreOf(keystorePath: string): string | undefined {
+  const settings = settingsOf({
+    native: { ...shippable, signing: { android: { ...android, keystorePath } } }
+  });
+
+  return nativeConfigOf(settings, where, "android").signing?.android?.keystorePath;
+}
+
+/**
+ * The Apple block of a native config.
+ *
+ * @param config - The native config.
+ * @returns The block.
+ */
+function appleOf(config: NativeConfig): NonNullable<NativeConfig["signing"]>["apple"] {
+  return config.signing?.apple;
+}
+
+/**
+ * The seams of a store build that has everything: the passwords set and every file there.
+ *
+ * @param change - Seams to replace.
+ * @returns The seams.
+ */
+function storeOf(change: Partial<NativeStore> = {}): NativeStore {
+  return {
+    buildNumber: 12,
+    env: { KS_PASS: "ks-secret-value", KEY_PASS: "key-secret-value" },
+    exists: () => true,
+    ...change
+  };
+}
+
+/**
+ * The input of the store checks for a game that passes every one of them on Android.
+ *
+ * @param change - Fields to replace.
+ * @param native - Fields over the native section.
+ * @returns The input.
+ */
+function storeInput(
+  change: Partial<StoreInput> = {},
+  native: Partial<NonNullable<GameConfig["native"]>> = {}
+): StoreInput {
+  return {
+    settings: settingsOf({ native: { ...shippable, ...native } }),
+    target: "android",
+    cwd: "/g",
+    home: "/home/a",
+    version: "1.2.3",
+    store: storeOf(),
+    ...change
+  };
 }
 
 afterEach(() => {
@@ -169,10 +261,9 @@ describe("nativeConfigOf", () => {
   it("with debug builds the web page with the profile and --editor, and keeps the game's name and identifier", () => {
     const store = nativeConfigOf(settingsOf(), where, "android");
     const full = nativeConfigOf(settingsOf(), where, "android", {
-      level: "full",
-      editor: "192.168.1.20:47600"
+      debug: { level: "full", editor: "192.168.1.20:47600" }
     });
-    const read = nativeConfigOf(settingsOf(), where, "android", { level: "read" });
+    const read = nativeConfigOf(settingsOf(), where, "android", { debug: { level: "read" } });
 
     expect(full.web.build).toBe(
       '"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug --editor 192.168.1.20:47600'
@@ -204,6 +295,232 @@ describe("nativeConfigOf", () => {
         "[game] config.ts has no native section.\n  Add native: { name, identifier } to config.ts."
       )
     );
+  });
+
+  // Bug: Gradle resolves a relative path under gen/android/app and finds no keystore.
+  it("a keystore path comes out absolute: ~/ from the home folder, a relative one from the game", () => {
+    expect(keystoreOf("~/k.jks")).toBe("/home/a/k.jks");
+    expect(keystoreOf("keys/k.jks")).toBe("/g/keys/k.jks");
+    expect(keystoreOf("/keys/k.jks")).toBe("/keys/k.jks");
+  });
+
+  // Bug: the passwords or the alias never reach native, and Gradle signs with nothing.
+  it("the Android signing goes to native whole, the passwords by their variable names", () => {
+    const settings = settingsOf({ native: shippable });
+
+    expect(nativeConfigOf(settings, where, "android").signing?.android).toEqual({
+      ...android,
+      keystorePath: "/g/keys/k.jks"
+    });
+  });
+
+  // Bug: a debug or plain build carries a store number.
+  it("a build number comes only with a store build, as a string", () => {
+    const settings = settingsOf({ native: shippable });
+
+    expect(nativeConfigOf(settings, where, "android", { buildNumber: 12 }).app.buildNumber).toBe(
+      "12"
+    );
+    expect(nativeConfigOf(settings, where, "android").app).not.toHaveProperty("buildNumber");
+  });
+
+  // Bug: a device build asks for an App Store export and fails without Distribution rights.
+  it("exportMethod comes only with a store build on iOS", () => {
+    const settings = settingsOf({ native: shippable });
+
+    expect(appleOf(nativeConfigOf(settings, where, "ios", { buildNumber: 12 }))).toEqual({
+      teamId: "ABCDE12345",
+      iosMinimumSystemVersion: "26.0",
+      exportMethod: "app-store-connect"
+    });
+    expect(appleOf(nativeConfigOf(settings, where, "ios"))).toEqual({
+      teamId: "ABCDE12345",
+      iosMinimumSystemVersion: "26.0"
+    });
+    expect(appleOf(nativeConfigOf(settings, where, "android", { buildNumber: 12 }))).toEqual({
+      teamId: "ABCDE12345"
+    });
+  });
+
+  // Bug: iOS stays at native's 15.0, or an Android config grows an Apple block of nothing.
+  it("the iOS minimum is 26.0 on an iOS target, a game's own wins, and other targets write none", () => {
+    const own = settingsOf({ native: { ...shippable, ios: { minimumVersion: "26.2" } } });
+
+    expect(nativeConfigOf(settingsOf(), where, "ios").signing).toEqual({
+      apple: { iosMinimumSystemVersion: "26.0" }
+    });
+    expect(nativeConfigOf(own, where, "ios").signing?.apple?.iosMinimumSystemVersion).toBe("26.2");
+    expect(nativeConfigOf(settingsOf(), where, "android")).not.toHaveProperty("signing");
+  });
+
+  // Bug: the screen sleeps through a game that asked to stay awake, or stays on in one that did not.
+  it("keepScreenOn follows keepAwake in config.system", () => {
+    const awake = settingsOf({ system: ["back", "keepAwake"] });
+    const plain = settingsOf({ system: ["back"] });
+
+    expect(nativeConfigOf(awake, where, "ios").app.keepScreenOn).toBe(true);
+    expect(nativeConfigOf(plain, where, "ios").app).not.toHaveProperty("keepScreenOn");
+  });
+
+  // Bug: the debug app is signed with the upload key, or leaves native's SDK key out.
+  it("a debug build keeps no store keystore", () => {
+    const settings = settingsOf({ native: { ...shippable, signing: { android } } });
+    const debug = nativeConfigOf(settings, where, "android", { debug: { level: "full" } });
+
+    expect(debug).not.toHaveProperty("signing");
+  });
+
+  // Bug: every build ships as native's fallback version.
+  it("the version goes to app.version when given, and stays out when not", () => {
+    expect(nativeConfigOf(settingsOf(), where, "ios", { version: "1.2.3" }).app.version).toBe(
+      "1.2.3"
+    );
+    expect(nativeConfigOf(settingsOf(), where, "ios").app).not.toHaveProperty("version");
+  });
+
+  // Bug: native's createApp refuses a relative manifest, or the game's plist keys never land.
+  it("ios carries infoPlist and the manifest as an absolute path; a game with a minimum only writes none", () => {
+    const infoPlist = { ITSAppUsesNonExemptEncryption: false };
+    const both = settingsOf({
+      native: { ...shippable, ios: { infoPlist, privacyManifest: "ios/PrivacyInfo.xcprivacy" } }
+    });
+    const plist = settingsOf({ native: { ...shippable, ios: { infoPlist } } });
+    const minimum = settingsOf({ native: { ...shippable, ios: { minimumVersion: "26.0" } } });
+
+    expect(nativeConfigOf(both, where, "ios").ios).toEqual({
+      infoPlist,
+      privacyManifest: "/g/ios/PrivacyInfo.xcprivacy"
+    });
+    expect(nativeConfigOf(plist, where, "ios").ios).toEqual({ infoPlist });
+    expect(nativeConfigOf(minimum, where, "ios")).not.toHaveProperty("ios");
+  });
+});
+
+describe("storeProblems", () => {
+  it("a game with everything has no problem", () => {
+    expect(storeProblems(storeInput())).toEqual([]);
+    expect(storeProblems(storeInput({ target: "ios" }))).toEqual([]);
+  });
+
+  // Bug: a store build starts with no signing and fails long after the compile.
+  it("Android without native.signing.android names the field, and only that", () => {
+    expect(
+      storeProblems(
+        storeInput({ store: storeOf({ env: {}, exists: () => false }) }, { signing: {} })
+      )
+    ).toEqual([
+      "No native.signing.android in config.ts. Add keystorePath, keystorePasswordEnv and keyAlias."
+    ]);
+  });
+
+  // Bug: the check looks at the path as written, and passes for a file Gradle will not find.
+  it("a missing keystore names the resolved path", () => {
+    const seen: string[] = [];
+    const store = storeOf({
+      exists: file => {
+        seen.push(file);
+
+        return false;
+      }
+    });
+
+    expect(storeProblems(storeInput({ store }))).toEqual([
+      "The keystore /g/keys/k.jks is not a file."
+    ]);
+    expect(seen).toEqual(["/g/keys/k.jks"]);
+  });
+
+  // Bug: a store build with an unset password fails at the signing step.
+  it("an unset or empty password variable is named, both of them", () => {
+    expect(storeProblems(storeInput({ store: storeOf({ env: {} }) }))).toEqual([
+      "The env var KS_PASS is not set. It holds a signing password.",
+      "The env var KEY_PASS is not set. It holds a signing password."
+    ]);
+    expect(
+      storeProblems(storeInput({ store: storeOf({ env: { KS_PASS: "", KEY_PASS: "set" } }) }))
+    ).toEqual(["The env var KS_PASS is not set. It holds a signing password."]);
+  });
+
+  // Bug: one variable named twice prints the same line twice.
+  it("a key password left out, or the same variable twice, reads as one variable", () => {
+    const oneVariable = {
+      keystorePath: "k.jks",
+      keystorePasswordEnv: STORE_VARIABLE,
+      keyAlias: "a"
+    };
+    const same = { ...android, keyPasswordEnv: android.keystorePasswordEnv };
+    const unset = storeOf({ env: {} });
+    const line = ["The env var KS_PASS is not set. It holds a signing password."];
+
+    expect(
+      storeProblems(storeInput({ store: unset }, { signing: { android: oneVariable } }))
+    ).toEqual(line);
+    expect(storeProblems(storeInput({ store: unset }, { signing: { android: same } }))).toEqual(
+      line
+    );
+  });
+
+  // Bug: an iOS store build starts with no team and fails at the export.
+  it("iOS without native.signing.apple names the field, and takes no Android row", () => {
+    expect(
+      storeProblems(
+        storeInput(
+          { target: "ios", store: storeOf({ env: {}, exists: () => false }) },
+          { signing: { android } }
+        )
+      )
+    ).toEqual(["No native.signing.apple in config.ts. Add teamId."]);
+  });
+
+  // Bug: a store build ships native's 0.1.0, or a version a store refuses.
+  it("package.json with no version, or one that is not x.y.z, is named with its value", () => {
+    expect(storeProblems(storeInput({ version: undefined }))).toEqual([
+      "package.json has no version. Add one, such as 1.0.0."
+    ]);
+    expect(storeProblems(storeInput({ version: "1.2" }))).toEqual([
+      'package.json has version "1.2". Use x.y.z, such as 1.0.0.'
+    ]);
+    expect(storeProblems(storeInput({ version: "1.2.3-beta.1" }))).toEqual([
+      'package.json has version "1.2.3-beta.1". Use x.y.z, such as 1.0.0.'
+    ]);
+  });
+
+  // Bug: a test identifier goes to a store, and that app record cannot be renamed.
+  it("an identifier that ends in a test word is named; a test word in the middle passes", () => {
+    for (const word of ["soak", "debug", "dev", "test", "staging"]) {
+      const identifier = `com.acme.t.${word}`;
+
+      expect(storeProblems(storeInput({}, { identifier })), word).toEqual([
+        `The identifier ${identifier} ends in .${word}. A store build ships the real identifier.`
+      ]);
+    }
+
+    expect(storeProblems(storeInput({}, { identifier: "com.test.t" }))).toEqual([]);
+    expect(storeProblems(storeInput({}, { identifier: "com.acme.devices" }))).toEqual([]);
+  });
+
+  it("every Android problem at once comes as one line each, so one run shows every fix", () => {
+    const input = storeInput(
+      { version: "1.2", store: storeOf({ env: {}, exists: () => false }) },
+      { identifier: "com.acme.t.soak" }
+    );
+
+    expect(storeProblems(input)).toEqual([
+      "The keystore /g/keys/k.jks is not a file.",
+      "The env var KS_PASS is not set. It holds a signing password.",
+      "The env var KEY_PASS is not set. It holds a signing password.",
+      'package.json has version "1.2". Use x.y.z, such as 1.0.0.',
+      "The identifier com.acme.t.soak ends in .soak. A store build ships the real identifier."
+    ]);
+  });
+
+  // Bug: a password lands in the log of a CI run.
+  it("a message never carries the value of a variable", () => {
+    const store = storeOf({ env: { KS_PASS: "ks-secret-value" }, exists: () => false });
+    const text = storeProblems(storeInput({ store, version: "1.2" })).join("\n");
+
+    expect(text).toContain("KEY_PASS");
+    expect(text).not.toContain("ks-secret-value");
   });
 });
 
@@ -237,6 +554,87 @@ describe("runNative", () => {
       ["stop"]
     ]);
     expect(recorder.configs[0]?.web.build).toContain("build --debug --editor 192.168.1.20:47600");
+  });
+
+  // Bug: a store build makes an .apk Play refuses, or an iOS or plain build gets the Android flag.
+  it("aab goes to native's build with --store on Android only", async () => {
+    const settings = settingsOf({ native: shippable });
+    const options = { version: "1.2.3", store: storeOf() };
+
+    expect(await runNative("build", settings, where, { target: "android", ...options })).toBe(true);
+    expect(await runNative("build", settings, where, { target: "ios", ...options })).toBe(true);
+    expect(await runNative("build", settings, where, { target: "android" })).toBe(true);
+    expect(recorder.calls.filter(call => call[0] === "build")).toEqual([
+      ["build", { target: "android", simulator: undefined, aab: true }],
+      ["build", { target: "ios", simulator: undefined }],
+      ["build", { target: "android", simulator: undefined }]
+    ]);
+  });
+
+  // Bug: a store build drops its number or its version on the way to native.
+  it("a store build hands native the version and the number", async () => {
+    await runNative("build", settingsOf({ native: shippable }), where, {
+      target: "android",
+      version: "1.2.3",
+      store: storeOf({ buildNumber: 40 })
+    });
+
+    expect(recorder.configs[0]?.app).toMatchObject({ version: "1.2.3", buildNumber: "40" });
+  });
+
+  // Bug: a plain build stops on a package.json version native would refuse, or loses a good one.
+  it("a plain build takes a valid version, and leaves another one to native's fallback", async () => {
+    await runNative("build", settingsOf(), where, { target: "ios", version: "1.2.3" });
+    await runNative("build", settingsOf(), where, { target: "ios", version: "1.2" });
+
+    expect(recorder.configs[0]?.app.version).toBe("1.2.3");
+    expect(recorder.configs[1]?.app).not.toHaveProperty("version");
+  });
+
+  // Bug: a refused store build compiles first, and fails long after.
+  it("a store problem refuses with one error, a line per problem, and starts nothing", async () => {
+    const settings = settingsOf({ native: { ...shippable, identifier: "com.acme.t.soak" } });
+    const store = storeOf({ env: {} });
+
+    await expect(
+      runNative("build", settings, where, { target: "android", version: "1.2.3", store })
+    ).rejects.toThrow(
+      new Error(
+        "[game] native --store: fix these before a store build.\n" +
+          "  The env var KS_PASS is not set. It holds a signing password.\n" +
+          "  The env var KEY_PASS is not set. It holds a signing password.\n" +
+          "  The identifier com.acme.t.soak ends in .soak. A store build ships the real identifier."
+      )
+    );
+    expect(recorder.configs).toEqual([]);
+    expect(recorder.calls).toEqual([]);
+  });
+
+  // Bug: the iOS checks ask for an Android keystore, or the other way round.
+  it("the store checks follow the target of the command", async () => {
+    const settings = settingsOf({ native: { name: "T", identifier: "com.acme.t" } });
+
+    await expect(
+      runNative("build", settings, where, { target: "ios", version: "1.2.3", store: storeOf() })
+    ).rejects.toThrow("No native.signing.apple in config.ts.");
+    await expect(
+      runNative("build", settings, where, { target: "android", version: "1.2.3", store: storeOf() })
+    ).rejects.toThrow("No native.signing.android in config.ts.");
+  });
+
+  // Bug: the store checks land on the plain device build, which Р6 keeps free of them.
+  it("a plain iOS build with signing and ios set runs no store check", async () => {
+    const native = {
+      name: "T",
+      identifier: "com.acme.t.soak",
+      signing: { apple: { teamId: "ABCDE12345" } },
+      ios: { privacyManifest: "ios/PrivacyInfo.xcprivacy" }
+    };
+
+    expect(await runNative("build", settingsOf({ native }), where, { target: "ios" })).toBe(true);
+    expect(recorder.configs[0]?.app).not.toHaveProperty("buildNumber");
+    expect(recorder.configs[0]?.signing?.apple).not.toHaveProperty("exportMethod");
+    expect(recorder.calls).toContainEqual(["build", { target: "ios", simulator: undefined }]);
   });
 
   it("dev runs the native shell on the target", async () => {
@@ -326,9 +724,32 @@ describe("runNative", () => {
         fresh.runNative("build", settingsOf(), where, { target: "ios" })
       ).rejects.toThrow(
         new Error(
-          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.9."
+          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.12."
         )
       );
+    } finally {
+      vi.doMock("@moku-labs/native", () => fakeNative());
+      vi.resetModules();
+    }
+  });
+
+  // Bug: a refused store build waits for native to load, or hides its problem behind the install hint.
+  it("the store checks run before native is imported", async () => {
+    vi.resetModules();
+    vi.doMock("@moku-labs/native", () => {
+      throw new Error("Cannot find package '@moku-labs/native'");
+    });
+
+    try {
+      const fresh = await import("../../../src/app/native");
+
+      await expect(
+        fresh.runNative("build", settingsOf(), where, {
+          target: "android",
+          version: "1.2.3",
+          store: storeOf()
+        })
+      ).rejects.toThrow("[game] native --store:");
     } finally {
       vi.doMock("@moku-labs/native", () => fakeNative());
       vi.resetModules();

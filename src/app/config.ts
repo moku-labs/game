@@ -18,6 +18,12 @@ const BOOT_WIDTH = "40vmin";
 /** The fade of a boot picture whose config names none, ms. */
 const BOOT_FADE_MS = 300;
 
+/** The strings a `native.signing.android` cannot go without. */
+const ANDROID_SIGNING_FIELDS = ["keystorePath", "keystorePasswordEnv", "keyAlias"] as const;
+
+/** An iOS version as native takes it: `26.0` or `26.0.1`. */
+const IOS_VERSION = /^\d+\.\d+(\.\d+)?$/;
+
 /**
  * The save kinds a config may name.
  *
@@ -59,12 +65,101 @@ function overlayStarts(): ReadonlySet<string> {
 }
 
 /**
+ * Tells whether a field of a config is a string with something in it.
+ *
+ * @param value - The field, unchecked.
+ * @returns False for a missing field, an empty string and any other type.
+ * @example
+ * ```ts
+ * isFilled(""); // false
+ * ```
+ */
+function isFilled(value: unknown): boolean {
+  return typeof value === "string" && value !== "";
+}
+
+/**
+ * Finds the first value under an `Info.plist` value that a plist cannot hold.
+ *
+ * @param value - The value, unchecked.
+ * @param at - Its dotted path.
+ * @returns The path of the bad value, or `undefined` when all of it is fine.
+ * @example
+ * ```ts
+ * badPlistValue({ a: [true, 7] }, "Key"); // "Key.a.1"
+ * ```
+ */
+function badPlistValue(value: unknown, at: string): string | undefined {
+  if (typeof value === "string" || typeof value === "boolean") return undefined;
+  if (!(value instanceof Object)) return at;
+
+  for (const [key, child] of Object.entries(value)) {
+    const bad = badPlistValue(child, `${at}.${key}`);
+
+    if (bad !== undefined) return bad;
+  }
+
+  return undefined;
+}
+
+/**
+ * Throws for a half-filled `native.signing`.
+ *
+ * @param signing - `native.signing` of the config.
+ * @throws {Error} When `android` misses one of its required strings, or `apple` has no `teamId`.
+ */
+function checkSigning(signing: NonNullable<GameConfig["native"]>["signing"]): void {
+  const android = signing?.android;
+  const missing = ANDROID_SIGNING_FIELDS.find(field => !isFilled(android?.[field]));
+
+  if (android !== undefined && missing !== undefined) {
+    throw new Error(
+      `[game] config.native.signing.android has no ${missing}.\n  Name keystorePath, keystorePasswordEnv and keyAlias.`
+    );
+  }
+
+  if (signing?.apple !== undefined && !isFilled(signing.apple.teamId)) {
+    throw new Error(
+      "[game] config.native.signing.apple has no teamId.\n  Name the Apple Developer team id."
+    );
+  }
+}
+
+/**
+ * Throws for a value of `native.ios` that would fail deep in a build.
+ *
+ * @param ios - `native.ios` of the config.
+ * @throws {Error} When `minimumVersion` is no iOS version, or a value of `infoPlist`, at any depth,
+ * is no plist value.
+ */
+function checkIos(ios: NonNullable<GameConfig["native"]>["ios"]): void {
+  const minimum: unknown = ios?.minimumVersion;
+
+  if (minimum !== undefined && !(typeof minimum === "string" && IOS_VERSION.test(minimum))) {
+    throw new Error(
+      `[game] config.native.ios.minimumVersion is ${JSON.stringify(minimum)}.\n  Use a version such as "26.0" or "26.0.1".`
+    );
+  }
+
+  for (const [key, value] of Object.entries(ios?.infoPlist ?? {})) {
+    const bad = badPlistValue(value, key);
+
+    if (bad !== undefined) {
+      throw new Error(
+        `[game] config.native.ios.infoPlist.${bad} is not a plist value.\n  Use a string, a boolean, an array or an object.`
+      );
+    }
+  }
+}
+
+/**
  * Throws for the first value of a config that TypeScript would have refused.
  *
  * @param config - The default export of `config.ts`.
  * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
- * `debug.overlay` is not a start mode, `page.boot` has no image, or `page.boot.fadeMs` is not a finite number of 0
- * or more.
+ * `debug.overlay` is not a start mode, `page.boot` has no image, `page.boot.fadeMs` is not a finite number of 0
+ * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, or a value of
+ * `native.ios.infoPlist` is no plist value.
  */
 function checkConfig(config: GameConfig): void {
   if (config.save !== undefined && !saveKinds().has(config.save)) {
@@ -110,6 +205,9 @@ function checkConfig(config: GameConfig): void {
       `[game] config.page.boot.fadeMs is ${String(fadeMs)}.\n  Use a number of milliseconds, 0 or more.`
     );
   }
+
+  checkSigning(config.native?.signing);
+  checkIos(config.native?.ios);
 }
 
 /**
@@ -139,8 +237,9 @@ function resolveBoot(boot: NonNullable<GameConfig["page"]["boot"]>): ResolvedPag
  * @param config - The default export of `config.ts`.
  * @returns The config with every field set.
  * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
- * `debug.overlay` is not a start mode, `page.boot` has no image, or `page.boot.fadeMs` is not a finite number of 0
- * or more.
+ * `debug.overlay` is not a start mode, `page.boot` has no image, `page.boot.fadeMs` is not a finite number of 0
+ * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, or a value of
+ * `native.ios.infoPlist` is no plist value.
  * @example
  * ```ts
  * resolveConfig({ page: { title: "T" } }).save; // "memory"
