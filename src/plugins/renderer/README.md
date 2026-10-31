@@ -210,7 +210,7 @@ internal markup: select them by nothing, set the properties instead.
 | `boundsOf(entity)` | The axis-aligned bounds, in reference units, of the four corners of the view's hit box brought through its `Transform` and `Parent` chain, rotation included. `undefined` without a view, for a view in no tree, hidden or at an effective alpha of 0.01 or less, and for bounds without area (a scale of 0 too), so a located element is one the player sees. A fresh object. Inert: `undefined`. The `game.locate` source of `ui` and the legend of `capture()` read it. |
 | `hitBoxOf(entity)` | The very box `hitTest` tests for the view, in the entity's own units, before the `Transform` and the `Parent` chain: `{ x: -32, y: -32, width: 64, height: 64 }` for a 64 x 64 `Sprite` with the default anchor, `{ x: 0, y: 0, width: w, height: h }` for a `Shape`. A fresh object; `undefined` without a view. `input` fits the circle of a trace in it. |
 | `textures.provide(fn)` | Adds a provider to the chain; the newest is asked first. Returns the remover. Works while inert. |
-| `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Throws while the renderer does not draw. |
+| `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Once uploaded it stays on the GPU until `textures.destroy`: Pixi's collector leaves it alone (F129). Throws while the renderer does not draw. |
 | `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
 | `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. Before a source goes, the `change` listeners of the source and of its style are removed: Pixi 8.22 keeps batch bind groups forever, and each would warn `[BindGroup] ... destroyed while still bound to a shader`. |
 | `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once (sprites, nine-slices, hollow nine-slices). No-op while inert. |
@@ -350,10 +350,15 @@ hands up to `renderer.uploads` of them to Pixi's public `renderer.texture.initSo
 the warm-up's probes and before the stage pass. While sources wait it asks for the next frame, so a
 screen drawing on demand keeps drawing until the queue is empty; an empty queue costs one compare a
 frame and allocates nothing. Each call answers `true` after its last source, at once when every
-source is on this device already. A source whose upload throws is logged once
+source is on this device already; a source that left the GPU since is queued again. A source whose upload throws is logged once
 (`renderer:upload-failed`, a warning) and counted done: its first draw uploads it, as before. A
 source destroyed while it waits is skipped. A stop or a lost WebGPU device answers every waiting call
 `false` and forgets what was uploaded: the new device holds none of it.
+
+A texture of `textures.create` stays uploaded until its owner calls `textures.destroy`. Pixi's collector
+(60 s unused, checked every 30 s) would take an `ImageSource` off the GPU with no event, so its first
+draw would upload it again (F129). The collector stays on for everything else: buffers, render targets
+and every source that does not opt out.
 
 ```ts
 // `assets.warm("ep01.memory")`: the bundle is loaded, its textures go up one a drawn frame.

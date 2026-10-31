@@ -281,7 +281,8 @@ export type TexturesApi = {
   provide(fn: TextureProvider): () => void;
 
   /**
-   * Makes a Pixi texture from a decoded image, so `assets` never imports Pixi.
+   * Makes a Pixi texture from a decoded image, so `assets` never imports Pixi. Once uploaded it stays on the GPU until
+   * `destroy`: Pixi's collector leaves it alone.
    *
    * @param image - The decoded image.
    * @param options - `nine` is left, top, right and bottom in pixels; it becomes the texture's
@@ -292,6 +293,7 @@ export type TexturesApi = {
    * ```ts
    * // `assets` uploads one file of a bundle it just decoded.
    * const renderer = ctx.require(rendererPlugin);
+   * const response = await fetch("/assets/board/panel.png");
    * const bitmap = await createImageBitmap(await response.blob());
    * const texture = renderer.sync.textures.create(bitmap, { nine: [12, 12, 12, 12] });
    * ```
@@ -358,7 +360,8 @@ export type TexturesApi = {
    * and the renderer asks for the next frame while sources wait. The slices of one atlas page share its source, so the
    * page is uploaded once. On a Galaxy A26 one upload costs about 9 ms whatever its size: the frame that showed 6 cold
    * textures took 55 ms, 8 ms once they were uploaded before. Answers `true` once every source of this call went
-   * through, at once when they all did on this device; `false` at once while nothing draws (headless, a lost device)
+   * through, at once when they all did on this device and none left it since; `false` at once while nothing draws
+   * (headless, a lost device)
    * or with `uploads: 0`, and `false` when the renderer stops or the device is lost before the queue reached them. A
    * source whose upload throws is logged (`renderer:upload-failed`) and counted done: its first draw uploads it, as
    * before. A source destroyed while it waits is skipped. The renderer never destroys a texture it was handed.
@@ -1517,9 +1520,11 @@ export type UploadState = {
   waiting: Map<PixiTextureSource, UploadWaiter[]>;
   /**
    * The sources that went through `initSource` on this device, or threw there: a call naming only these answers at
-   * once.
+   * once. A source leaves it at its `unload`.
    */
   done: WeakSet<PixiTextureSource>;
+  /** The one listener on `unload` of every source in `done`. */
+  forget(source: PixiTextureSource): void;
 };
 
 /**
