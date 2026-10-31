@@ -46,7 +46,13 @@ export async function startEpisodes<App extends Pick<EpisodesGame, "start" | "fl
   app.flow.run().catch((error: unknown) => {
     loop.failure = error;
   });
-  await until(app, () => loop.failure !== undefined || app.flow.state().path === "home");
+  await until(app, () => {
+    const state = app.flow.state();
+
+    return (
+      loop.failure !== undefined || (state.path === "home" && state.pending.gate !== undefined)
+    );
+  });
 
   if (loop.failure !== undefined) throw loop.failure;
 
