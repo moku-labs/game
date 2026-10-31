@@ -293,6 +293,7 @@ export type TexturesApi = {
    * ```ts
    * // `assets` uploads one file of a bundle it just decoded.
    * const renderer = ctx.require(rendererPlugin);
+   * const response = await fetch("/assets/board/panel.png");
    * const bitmap = await createImageBitmap(await response.blob());
    * const texture = renderer.sync.textures.create(bitmap, { nine: [12, 12, 12, 12] });
    * ```
