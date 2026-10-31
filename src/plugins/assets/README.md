@@ -45,7 +45,9 @@ A26 (Chrome, WebGPU, Pixi 8.22) one upload costs about 9 ms whatever its size: t
 the 6 cold textures (9.4 MB) of A Memory Missing's memory screen took 55 ms, and 8 ms once they were
 uploaded before. `warm` moves that work into the frames before the scene mounts. A live scene
 switch warms the bundles of the new scene by itself (scenes README, the switch); a game calls `warm`
-for what shows without a switch, such as a popup over the mounted scene.
+for what shows without a switch, such as a popup over the mounted scene. A warmed bundle stays on the
+GPU until `unloadBundle` frees it, however long a screen stands: the budget owns its life, not Pixi's
+collector (F129).
 
 `load` has no `signal` parameter. Internal callers — the enter callback, the `load` effect and the
 preload queue — call `loadBundle(ctx, bundle, signal, reason)` of `tiers.ts` directly.
