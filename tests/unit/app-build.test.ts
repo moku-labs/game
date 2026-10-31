@@ -104,6 +104,9 @@ async function build(
     loadPage: unused,
     visual: unused,
     now: unused,
+    home: "/home/tester",
+    exists: unused,
+    readPackageVersion: unused,
     ...change(seen)
   };
   const exit = await runCommand(["build", "--root", root, ...argv], deps);
