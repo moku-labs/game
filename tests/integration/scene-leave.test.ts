@@ -705,6 +705,98 @@ describe("the picture of a scene being left, across the engine", () => {
   });
 });
 
+/** The opening of the game this floor was made for: no veil, a loader from the first frame, 260 ms before the swap. */
+const OPENING = { cover: { alpha: 0, inMs: 0, outMs: 240 } };
+
+describe("a floor on the swap, across the engine", () => {
+  // Bug: bundles in memory swap within a frame or two, so the sharp scene stands round a half-open circle: the loader
+  // shows after the first drawn frame, the floor is counted wrong, or the gate opens during the wait.
+  it("shows the loader from the first painted frame and keeps the old scene until 260 ms, then swaps", async () => {
+    const fixture = await open({
+      ...OPENING,
+      loader: { afterMs: 0, holdMs: 260, projection: "leave.loading" }
+    });
+    const { app, clock } = fixture;
+    const held = heldLoader(fixture);
+    const dueIn = watchDue(fixture);
+    const startedAt = clock.now();
+
+    app.flow.gate.answer({ intent: "board" });
+    await fixture.frames(1);
+
+    expect(dueIn.frames).toEqual([0]);
+    expect(leaveNode(fixture, "renderer.leave.layer")?.visible).toBe(true);
+
+    await fixture.frames(1);
+
+    expect(hangsUnder(fixture, held, leaveNode(fixture, "renderer.leave.layer"))).toBe(true);
+    expect(drawnAlpha(fixture, held)).toBe(1);
+
+    const waited: Array<{ sinceStart: number; current: string | undefined; open: boolean }> = [];
+
+    for (let frame = 0; frame < 20; frame += 1) {
+      await fixture.frames(1);
+      waited.push({
+        sinceStart: clock.now() - startedAt,
+        current: app.scenes.current(),
+        open: app.flow.gate.state().open && app.flow.state().path === "board"
+      });
+    }
+
+    const before = waited.filter(frame => frame.sinceStart < 260);
+    const after = waited.filter(frame => frame.sinceStart >= 260);
+
+    expect(before.length).toBeGreaterThan(0);
+    expect(before.every(frame => frame.current === "ward" && !frame.open)).toBe(true);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every(frame => frame.current === "board")).toBe(true);
+  });
+
+  // Bug: `cover.alpha: 0` is read as no veil, so a layer loader goes at once at the swap instead of fading over `outMs`.
+  it("still fades a layer loader over `outMs` with `cover.alpha: 0`", async () => {
+    const fixture = await open({
+      ...OPENING,
+      loader: { afterMs: 0, holdMs: 260, projection: "leave.loading" }
+    });
+    const held = heldLoader(fixture);
+
+    fixture.app.flow.gate.answer({ intent: "board" });
+    await arrive(fixture, "board");
+    await fixture.frames(1);
+
+    const early = drawnAlpha(fixture, held);
+
+    await fixture.frames(5);
+
+    const later = drawnAlpha(fixture, held);
+
+    expect(early).toBeLessThan(1);
+    expect(later).toBeLessThan(early);
+    expect(later).toBeGreaterThan(0);
+
+    await fixture.frames(Math.ceil(240 / FRAME_MS) + 1);
+
+    expect(fixture.app.world.projection.entitiesOf("leave.loading")).toEqual([]);
+    expect(leaveNode(fixture, "renderer.leave")).toBeUndefined();
+  });
+
+  // Bug: a ring stays over the new scene for the veil's `outMs`.
+  it("takes a ring down at once at the swap, whatever `outMs` says", async () => {
+    const fixture = await open({ ...OPENING, loader: { afterMs: 0, holdMs: 260 } });
+
+    fixture.app.flow.gate.answer({ intent: "board" });
+    await fixture.frames(2);
+
+    expect(leaveNode(fixture, "renderer.leave.ring")?.visible).toBe(true);
+
+    await arrive(fixture, "board");
+    await fixture.frames(1);
+
+    expect(leaveNode(fixture, "renderer.leave.ring")?.visible).toBe(false);
+    expect(leaveNode(fixture, "renderer.leave")).toBeDefined();
+  });
+});
+
 /**
  * Answers the ward with an intent and steps one frame: the veil is up while the board's file downloads.
  *

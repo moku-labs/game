@@ -1,14 +1,15 @@
 /**
  * @file scenes plugin — shared fakes for the unit tests. Not a test file: the unit project only
  * collects `*.test.ts`. The real state, API, lifecycle and switch run over a fake `flow`, a fake
- * `world`, a fake `assets`, a fake `time`, a fake `model` and a fake `renderer`, so nothing loads,
- * nothing is drawn and nothing needs a DOM. The renderer draws nothing by default
+ * `world`, a fake `assets`, a fake `time`, a fake `clock`, a fake `model` and a fake `renderer`, so
+ * nothing loads, nothing is drawn and nothing needs a DOM. The renderer draws nothing by default
  * (`host.ready()` is false), so a switch takes the one-block path unless a test turns it on.
  */
 import type { Log } from "@moku-labs/common/browser";
 import { type Mock, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Api as AssetsApi } from "../../../assets/types";
+import type { Api as ClockApi } from "../../../clock/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { EnterCallback, Api as FlowApi, NodeInfo, Stage } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
@@ -138,12 +139,21 @@ export type FakeTime = {
   clock: { now: number } | undefined;
   /** What `rate().fps` answers: the frame rate the loop runs at, 60 unless a test moves it. */
   fps: number;
+  /** The frame counter: what `snapshot().frame` answers, one up with every `frame()`. */
+  frames: number;
   /**
    * Runs one frame: every registered callback, phase by phase, as `time.step` does, with a `Time` of 16 ms at scale 1
-   * unless the test gives other fields.
+   * and the frame counter unless the test gives other fields.
    */
   frame(time?: Partial<Time>): void;
   api: TimeApi;
+};
+
+/** The fake `clock`: `now()` answers `at`, which a test moves. */
+export type FakeClock = {
+  /** The clock now, ms; 1000 unless a test moves it. */
+  at: number;
+  api: ClockApi;
 };
 
 /**
@@ -183,6 +193,7 @@ export type MockScenes = {
   world: FakeWorld;
   assets: FakeAssets;
   time: FakeTime;
+  clock: FakeClock;
   model: FakeModel;
   renderer: FakeRenderer;
   /** The plugin's hooks, as the kernel registers them: a test calls one the way `assets` emits its event. */
@@ -463,8 +474,8 @@ function createFakeWorld(journal: string[]): FakeWorld {
 
 /**
  * Creates the fake `time`: the members `scenes` calls, counting the wakes and the new scenes,
- * keeping the frame callbacks for `frame()`, and answering the page clock of `clock` and the
- * frame rate of `fps`.
+ * keeping the frame callbacks for `frame()`, and answering the page clock of `clock`, the frame
+ * rate of `fps` and the frame counter of `frames`.
  *
  * @param journal - The order of every call into the fakes.
  * @returns The fake time and its recording.
@@ -476,8 +487,11 @@ function createFakeTime(journal: string[]): FakeTime {
     callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
     clock: undefined,
     fps: 60,
+    frames: 0,
     frame: (time: Partial<Time> = {}): void => {
-      const step = { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false, ...time };
+      fake.frames += 1;
+
+      const step = { delta: 16, elapsed: 16, scale: 1, frame: fake.frames, idle: false, ...time };
 
       for (const callbacks of Object.values(fake.callbacks)) {
         // eslint-disable-next-line unicorn/no-useless-spread -- a callback that removes itself does not skip the next one
@@ -510,8 +524,22 @@ function createFakeTime(journal: string[]): FakeTime {
 
       return clock === undefined ? undefined : () => clock.now;
     },
-    rate: (): { fps: number } => ({ fps: fake.fps })
+    rate: (): { fps: number } => ({ fps: fake.fps }),
+    snapshot: (): { frame: number } => ({ frame: fake.frames })
   } as unknown as TimeApi;
+
+  return fake;
+}
+
+/**
+ * Creates the fake `clock`: the one member `scenes` calls, answering `at`.
+ *
+ * @returns The fake clock.
+ */
+function createFakeClock(): FakeClock {
+  const fake: FakeClock = { at: 1000, api: undefined as unknown as ClockApi };
+
+  fake.api = { now: (): number => fake.at } as unknown as ClockApi;
 
   return fake;
 }
@@ -633,6 +661,7 @@ export function createMockScenes(config?: Config): MockScenes {
   const world = createFakeWorld(journal);
   const assets = createFakeAssets(journal);
   const time = createFakeTime(journal);
+  const clock = createFakeClock();
   const model = createFakeModel();
   const leaves: FakeRenderer["leaves"] = [];
   const renderer: FakeRenderer = {
@@ -662,6 +691,7 @@ export function createMockScenes(config?: Config): MockScenes {
     world: world.api,
     assets: assets.api,
     time: time.api,
+    clock: clock.api,
     model: model.api,
     renderer
   };
@@ -689,6 +719,7 @@ export function createMockScenes(config?: Config): MockScenes {
     world,
     assets,
     time,
+    clock,
     model,
     renderer,
     hooks: createHandlers(ctx),
