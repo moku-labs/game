@@ -181,6 +181,34 @@ describe("the budget of the kept pictures", () => {
     expect(again?.s1?.source.label).toBe(`kept:Shape#${back}#1`);
   });
 
+  // Bug F132: a view that keeps coming back at a size the pool does not hold left two more textures each time, until
+  // the budget was full: a splash taken at 399 and left at 401 grew the phone's graphics memory with every return.
+  it("a take of a size the pool does not hold reuses a pooled texture at the asked size, so the pool stays as it is", async () => {
+    const drawn = await withRoomFor(8);
+    const kept = drawn.mock.ctx.state.kept;
+
+    for (let round = 0; round < 4; round += 1) {
+      const entity = drawn.spawn(
+        Transform({ x: 100, y: 100 }),
+        Shape({ w: 40 + (round % 2), h: 40 })
+      );
+
+      drawn.mock.api.sync.filters.set(entity, [
+        { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
+      ]);
+      drawn.frames(3);
+
+      expect(isKept(drawn, entity)).toBe(true);
+      expect(kept.byEntity.get(entity)?.s1?.source.width).toBe(40 + (round % 2));
+
+      drawn.mock.world.ecs.despawn(entity);
+      drawn.frame();
+    }
+
+    expect(kept.pool).toHaveLength(2);
+    expect(kept.bytes).toBe(kept.poolBytes);
+  });
+
   // Bug: the pool held its textures past the budget, or past a reset (device loss, stop).
   it("the pool's textures are destroyed and unregistered from host.keep when a take needs their room, and at a reset", async () => {
     const drawn = await withRoomFor(1);

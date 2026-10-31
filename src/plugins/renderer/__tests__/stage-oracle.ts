@@ -704,6 +704,8 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
     const leaves = new Set<object>();
 
     drawnBy(container, lines, leaves);
+    // A pooled texture changes roles: what was a filter output is a subtree picture now, not a stand-in's render.
+    standInRenders.delete(target);
     pictureRenders.set(target, { container, lines, leaves, transform });
   };
 
