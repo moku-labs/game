@@ -1122,7 +1122,8 @@ drawn in this frame, the least recently drawn first; an evicted view draws live 
 destroyed. A take that still does not fit is refused, the view drawn live, `renderer:kept-budget`
 logged once per run, and it is not offered again until it fits. The textures of a view that leaves wait in a pool
 (F119), counted in the budget, and the next take of the same size takes them: a scene that leaves and comes back makes
-no render target. The pool is emptied first when a take needs room. Every texture is registered with
+no render target. A take of a size the pool does not hold resizes one of them (F132), so a view that leaves at one size
+and comes back at another does not pile textures up. The pool is emptied first when a take needs room. Every texture is registered with
 `host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on an eviction, a device loss, a rebuild and
 at `onStop`, as `textures.destroy` frees a source, its `change` listeners removed first, so the bind
 groups Pixi keeps over a drawn picture print no `[BindGroup]` warning. The warm-up's probe target

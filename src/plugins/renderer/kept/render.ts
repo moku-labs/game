@@ -130,15 +130,17 @@ export function fitTexture(
 }
 
 /**
- * Takes a texture of the asked size out of the pool (F119): the first one of the same CSS size and resolution, its
- * bytes no longer the pool's. The last one fills its place: the pool keeps no order.
+ * Takes a texture out of the pool (F119): the first one of the same CSS size and resolution, its bytes no longer the
+ * pool's. The last one fills its place: the pool keeps no order. With none of that size the last one is resized to it
+ * (F132): a view that keeps leaving at one size and coming back at another would otherwise pile up textures of a size
+ * no take asks for, until the budget is full.
  *
  * @param kctx - The kept context.
  * @param size - CSS px and texels per CSS px.
  * @param size.width - CSS width.
  * @param size.height - CSS height.
  * @param size.resolution - Texels per CSS px.
- * @returns The texture, or `undefined` when none fits.
+ * @returns The texture, or `undefined` when the pool is empty.
  */
 function fromPool(
   kctx: KeptCtx,
@@ -164,7 +166,14 @@ function fromPool(
     return texture;
   }
 
-  return undefined;
+  const other = pool.pop();
+
+  if (other === undefined) return undefined;
+
+  unpool(kctx, other);
+  other.resize(size.width, size.height, size.resolution);
+
+  return other;
 }
 
 /**
