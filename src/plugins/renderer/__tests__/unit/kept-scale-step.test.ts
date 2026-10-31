@@ -854,6 +854,7 @@ describe("a stale picture is never a mix of two resolutions", () => {
     expect(recordOf(drawn, entity).retakeWhy).toBe(RETAKE.filter);
   });
 
+  // Bug: stages 2 and 3 redone at the new resolution over a stage 1 of the old one.
   it("a chain version takes it whole, not stages 2 and 3", async () => {
     const { slot, version } = chainSlot();
     const { drawn, entity } = await stale(slot);
@@ -867,6 +868,7 @@ describe("a stale picture is never a mix of two resolutions", () => {
     expect(recordOf(drawn, entity).retakeWhy).toBe(RETAKE.chain);
   });
 
+  // Bug: a new padding on the grid of the new resolution around a picture on the old one.
   it("a padding takes it whole", async () => {
     const slot = inherit();
     const { drawn, entity } = await stale(slot);
@@ -1237,6 +1239,7 @@ describe("settle retakes share the limit", () => {
     expect(drawn.stage.targets().length).toBe(from);
   });
 
+  // Bug: the settle of a stepped picture fires at rest, and a step down costs a storm after all.
   it("a pan across a step down that then rests takes nothing while the step holds", async () => {
     const drawn = await open();
 

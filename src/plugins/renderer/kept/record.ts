@@ -1706,7 +1706,10 @@ function resolutionStepped(record: KeptRecord): boolean {
 
   if (drawn === NOW.r) return false;
 
-  return key[KEY.rs] === NOW.rs || (key[KEY.rs] === drawn && NOW.rs === NOW.r);
+  const fixedStack = key[KEY.rs] === NOW.rs;
+  const followsCanvas = key[KEY.rs] === drawn && NOW.rs === NOW.r;
+
+  return fixedStack || followsCanvas;
 }
 
 /**
@@ -1918,13 +1921,12 @@ function chainOwed(record: KeptRecord, inputs: FilterSlotInputs): boolean {
  */
 function outputOwed(record: KeptRecord, hold: boolean): boolean {
   const { key } = record;
+  const resolutionOwed = !hold && NOW.r !== key[KEY.r];
+  const paddingOwed = hold && record.direct ? NOW.P !== 0 : NOW.P !== key[KEY.P];
+  const placedMoved =
+    record.category === "placed" && (NOW.tx !== key[KEY.s3Tx] || NOW.ty !== key[KEY.s3Ty]);
 
-  return (
-    record.dirtyS3 ||
-    (!hold && NOW.r !== key[KEY.r]) ||
-    (hold && record.direct ? NOW.P !== 0 : NOW.P !== key[KEY.P]) ||
-    (record.category === "placed" && (NOW.tx !== key[KEY.s3Tx] || NOW.ty !== key[KEY.s3Ty]))
-  );
+  return record.dirtyS3 || resolutionOwed || paddingOwed || placedMoved;
 }
 
 /**
@@ -2050,18 +2052,14 @@ function drawingChanged(kctx: KeptCtx, record: KeptRecord, before: Readonly<Draw
 }
 
 /**
- * The frame of a kept record in a calm frame (no mark, no whole-frame reason) that owes nothing: no dirty flag, no
- * settle or refining take, no churn, not bypassed. Its step would find every key as it stands and its quad where it is, so it is
- * counted as drawn from its picture and left alone (E5).
+ * Tells whether a kept record has anything to do in this frame: the frame is not calm, or a flag or a debt is on it.
  *
- * @param kctx - The kept context.
+ * @param state - The kept state.
  * @param record - The record.
- * @returns True when the record was drawn as it stands; false when it is to be stepped.
+ * @returns True when it is to be stepped.
  */
-export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
-  const { state } = kctx;
-
-  if (
+function owesStep(state: KeptState, record: KeptRecord): boolean {
+  return (
     !state.calm ||
     state.bypassed ||
     record.mode !== "kept" ||
@@ -2071,9 +2069,22 @@ export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
     record.settle ||
     record.coarse ||
     record.churn !== 0
-  ) {
-    return false;
-  }
+  );
+}
+
+/**
+ * The frame of a kept record in a calm frame (no mark, no whole-frame reason) that owes nothing: no dirty flag, no
+ * settle or refining take, no churn, not bypassed. Its step would find every key as it stands and its quad where it
+ * is, so it is counted as drawn from its picture and left alone (E5).
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @returns True when the record was drawn as it stands; false when it is to be stepped.
+ */
+export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
+  const { state } = kctx;
+
+  if (owesStep(state, record)) return false;
 
   record.lastDrawn = state.frame;
   state.drawnPictures += 1;

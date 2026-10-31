@@ -68,6 +68,9 @@ const SCALE_UP_LOW = 0.75;
 /** How long after the step down the pictures of `scale-up` change: they are taken low from then on. */
 const SCALE_UP_CHANGE_MS = 300;
 
+/** One turn of `scale-up`: a step low, then a step back. */
+const SCALE_UP_TURN_MS = 2 * SCALE_STEP_MS;
+
 /** The cross-dissolve of `fade`. */
 const DISSOLVE_MS = 420;
 
@@ -439,14 +442,16 @@ export const scaleUpScene: BenchScene = {
 
     return {
       tick: elapsedMs => {
-        const turn = Math.floor(elapsedMs / (2 * SCALE_STEP_MS));
-        const at = elapsedMs % (2 * SCALE_STEP_MS);
+        const turn = Math.floor(elapsedMs / SCALE_UP_TURN_MS);
+        const at = elapsedMs % SCALE_UP_TURN_MS;
 
+        // Down first: the fill change below is taken at the low scale.
         if (turn !== state.lowered) {
           state.lowered = turn;
           stage.setResolution(base * SCALE_UP_LOW);
         }
 
+        // A new fill, so the pictures are taken again at the low scale.
         if (at >= SCALE_UP_CHANGE_MS && turn !== state.changed) {
           const fill = turn % 2 === 0 ? SCALE_UP_FILL : SCALE_FILL;
 
@@ -454,6 +459,7 @@ export const scaleUpScene: BenchScene = {
           for (const picture of pictures) stage.set(picture, Shape, { fill });
         }
 
+        // Back up: all 40 pictures now owe a take at once.
         if (at >= SCALE_STEP_MS && turn !== state.raised) {
           state.raised = turn;
           stage.setResolution(base);
