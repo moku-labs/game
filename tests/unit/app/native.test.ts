@@ -370,6 +370,14 @@ describe("nativeConfigOf", () => {
     expect(debug).not.toHaveProperty("signing");
   });
 
+  // Bug: Gradle refuses a signing block with no password after a whole compile.
+  it("an unsigned build leaves the key out", () => {
+    const settings = settingsOf({ native: { ...shippable, signing: { android } } });
+    const unsigned = nativeConfigOf(settings, where, "android", { unsigned: true });
+
+    expect(unsigned).not.toHaveProperty("signing");
+  });
+
   // Bug: every build ships as native's fallback version.
   it("the version goes to app.version when given, and stays out when not", () => {
     expect(nativeConfigOf(settingsOf(), where, "ios", { version: "1.2.3" }).app.version).toBe(

@@ -55,6 +55,8 @@ export type NativeVerbOptions = {
   version?: string;
   /** A store build: `native build ios` or `android` with `--store`. */
   store?: NativeStore;
+  /** A plain Android build whose passwords are not set: the upload key stays out of it. */
+  unsigned?: true;
 };
 
 /** What `storeProblems` checks: one store build, before anything compiles. */
@@ -77,7 +79,12 @@ export type StoreInput = {
 type NativeDebug = { level: DebugLevel; editor?: string | undefined };
 
 /** What one run adds to `config.ts`: a build number means a store build. */
-type NativeExtras = { debug?: NativeDebug; buildNumber?: number; version?: string };
+type NativeExtras = {
+  debug?: NativeDebug;
+  buildNumber?: number;
+  version?: string;
+  unsigned?: true;
+};
 
 /** The native section of a resolved config. */
 type NativeSection = NonNullable<ResolvedGameConfig["native"]>;
@@ -141,6 +148,32 @@ function resolveKeystore(keystore: string, cwd: string, home: string): string {
 }
 
 /**
+ * The password variables of an Android signing block that are unset or empty, by name only. The
+ * key password falls back to the keystore's.
+ *
+ * @param android - `native.signing.android`, when the game has one.
+ * @param env - The environment.
+ * @returns The names of the variables.
+ * @example
+ * ```ts
+ * missingPasswords({ keystorePath: "k.jks", keystorePasswordEnv: "KS", keyAlias: "a" }, { KS: "" }); // ["KS"]
+ * ```
+ */
+export function missingPasswords(
+  android: NonNullable<NativeSection["signing"]>["android"],
+  env: NativeStore["env"]
+): readonly string[] {
+  if (android === undefined) return [];
+
+  const names = new Set([
+    android.keystorePasswordEnv,
+    android.keyPasswordEnv ?? android.keystorePasswordEnv
+  ]);
+
+  return [...names].filter(name => (env[name] ?? "") === "");
+}
+
+/**
  * The problems of the Android row of a store build: the signing block, the keystore file, and the
  * two password variables, by name only.
  *
@@ -158,16 +191,12 @@ function androidProblems(native: NativeSection, input: StoreInput): readonly str
   }
 
   const keystore = resolveKeystore(android.keystorePath, input.cwd, input.home);
-  const names = new Set([
-    android.keystorePasswordEnv,
-    android.keyPasswordEnv ?? android.keystorePasswordEnv
-  ]);
 
   return [
     ...(input.store.exists(keystore) ? [] : [`The keystore ${keystore} is not a file.`]),
-    ...[...names]
-      .filter(name => (input.store.env[name] ?? "") === "")
-      .map(name => `The env var ${name} is not set. It holds a signing password.`)
+    ...missingPasswords(android, input.store.env).map(
+      name => `The env var ${name} is not set. It holds a signing password.`
+    )
   ];
 }
 
@@ -326,7 +355,8 @@ function appOf(
 
 /**
  * The signing block of the native config. A debug build keeps native's SDK key, so it takes no
- * upload key; a store build on iOS exports for App Store Connect, and only that one does.
+ * upload key, and neither does a plain build without its passwords, which Gradle would refuse only
+ * after the compile; a store build on iOS exports for App Store Connect, and only that one does.
  *
  * @param native - The native section.
  * @param where - The game folder and the home folder.
@@ -343,7 +373,8 @@ function signingOf(
   const android = native.signing?.android;
   const teamId = native.signing?.apple?.teamId;
   const isStoreIos = target === "ios" && extras.buildNumber !== undefined;
-  const keepsSdkKey = android === undefined || extras.debug !== undefined;
+  const keyStaysOut =
+    android === undefined || extras.debug !== undefined || extras.unsigned === true;
 
   // The Apple block: the team, the iOS minimum, the export of a store build.
   const apple: Config["signing"]["apple"] = {
@@ -355,7 +386,7 @@ function signingOf(
   };
 
   return {
-    ...(keepsSdkKey
+    ...(keyStaysOut
       ? {}
       : {
           android: {
@@ -532,11 +563,12 @@ async function runVerb(
  * @returns The extras of `nativeConfigOf`.
  */
 function extrasOf(options: NativeVerbOptions): NativeExtras {
-  const { debug, editor, store, version } = options;
+  const { debug, editor, store, unsigned, version } = options;
 
   return {
     ...(debug === undefined ? {} : { debug: { level: debug, editor } }),
     ...(store === undefined ? {} : { buildNumber: store.buildNumber }),
+    ...(unsigned === undefined ? {} : { unsigned }),
     ...(version !== undefined && STORE_VERSION.test(version) ? { version } : {})
   };
 }

@@ -1490,6 +1490,30 @@ describe("native --store", () => {
     expect(seen.warnings).toEqual([]);
   });
 
+  // Bug: a plain build with a signing block and no passwords fails after a whole compile.
+  it("a plain android build without its passwords leaves the key out and says so", async () => {
+    const root = makeGame({
+      "config.ts":
+        'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", signing: { android: { keystorePath: "k.jks", keystorePasswordEnv: "KS_PASS", keyPasswordEnv: "KEY_PASS", keyAlias: "a" } } } };\n'
+    });
+    const argv = ["native", "build", "android"];
+    const without = await run(argv, root, { env: { KS_PASS: "ks-secret-value" } });
+
+    expect(without.seen.natives[0]?.options.unsigned).toBe(true);
+    expect(without.seen.warnings).toEqual([
+      "native: KEY_PASS not set, so this build is an unsigned .apk."
+    ]);
+
+    const both = await run(argv, root, { env: { KS_PASS: "a", KEY_PASS: "b" } });
+
+    expect(both.seen.natives[0]?.options).not.toHaveProperty("unsigned");
+    expect(both.seen.warnings).toEqual([]);
+
+    const debug = await run([...argv, "--debug"], root);
+
+    expect(debug.seen.natives[0]?.options).not.toHaveProperty("unsigned");
+  });
+
   // Bug: the store checks land on the plain device build, which Р6 keeps free of them.
   it("native build ios with signing and ios set prints no store warning and carries no store block", async () => {
     const root = makeGame({

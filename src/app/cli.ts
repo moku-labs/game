@@ -19,7 +19,12 @@ import {
   runBuild
 } from "./build";
 import type { KeysWatcher } from "./keys";
-import type { NativeVerb, NativeVerbOptions, NativeWhere } from "./native";
+import {
+  missingPasswords,
+  type NativeVerb,
+  type NativeVerbOptions,
+  type NativeWhere
+} from "./native";
 import { checkFiles, loadSettings, type ServeRun, serveChild, serveParent } from "./serve";
 import type { ResolvedGameConfig } from "./types";
 import { runVisual } from "./visual";
@@ -559,9 +564,32 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
   if (store.store === true) {
     options.store = { buildNumber: store.buildNumber, env: deps.env, exists: deps.exists };
     warnIosStore(settings, target, deps.ui);
+  } else if (verb === "build" && target === "android" && debug.debug === undefined) {
+    leaveKeyOut(settings, options, deps);
   }
 
   return (await deps.native(verb, settings, where, options)) ? 0 : 1;
+}
+
+/**
+ * Keeps a plain Android build going without its passwords: Gradle would refuse the signing block
+ * only after the compile, and a teammate with no key still builds. The result is an unsigned `.apk`.
+ *
+ * @param settings - The resolved `config.ts` of the game.
+ * @param options - The verb options.
+ * @param deps - The seams of the process.
+ */
+function leaveKeyOut(
+  settings: ResolvedGameConfig,
+  options: NativeVerbOptions,
+  deps: CliDeps
+): void {
+  const missing = missingPasswords(settings.native?.signing?.android, deps.env);
+
+  if (missing.length === 0) return;
+
+  options.unsigned = true;
+  deps.ui.warn(`native: ${missing.join(", ")} not set, so this build is an unsigned .apk.`);
 }
 
 /**

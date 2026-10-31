@@ -349,7 +349,7 @@ const { app } = game.screen({ platform: fromSystem(system) }); // Back, pause, h
 | `system` | One row per name that needs a Tauri capability: `back`, `haptics`, `store`. A `"store"` save adds `store` |
 | `targets` | `native.targets`, else the target of the command |
 | `projectDir`, `outDir` | `<game>/.moku/tauri`, `<game>/dist-native` |
-| `signing.android` | `native.signing.android` with an absolute keystore path. A debug app leaves it out and keeps the SDK key |
+| `signing.android` | `native.signing.android` with an absolute keystore path. A debug app leaves it out and keeps the SDK key. A plain `native build android` with a password variable unset leaves it out too and warns: an unsigned `.apk`, no failure after the compile |
 | `signing.apple` | `teamId` of `native.signing.apple`; on iOS `iosMinimumSystemVersion`, `native.ios.minimumVersion` or `"26.0"`; with `--store` on iOS `exportMethod: "app-store-connect"` |
 | `ios` | `infoPlist` and an absolute `privacyManifest` of `native.ios`, when set |
 
