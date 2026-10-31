@@ -48,6 +48,26 @@ describe("the checks of `leave`", () => {
   });
 });
 
+describe("the checks of `leave.loader.holdMs`", () => {
+  // Bug: a floor of the wrong shape reaches the switch: `until` is NaN, so the swap never comes and the switch hangs.
+  it.each([
+    ["-1", -1],
+    ["NaN", Number.NaN],
+    ['"260"', "260"]
+  ])("refuses %s, naming the field", (_case, holdMs) => {
+    const leave = { loader: { holdMs } } as SceneLeave;
+
+    expect(() => checkConfig({ buildMs: "auto", leave })).toThrow(
+      `[game] scenes.leave.loader.holdMs is ${String(holdMs)}.\n  Give the milliseconds the swap waits for, 0 or more.`
+    );
+  });
+
+  // Bug: 0 is refused, so a scene cannot lift the floor of the config.
+  it("takes 0, the value that lifts a floor", () => {
+    expect(() => checkConfig({ buildMs: "auto", leave: { loader: { holdMs: 0 } } })).not.toThrow();
+  });
+});
+
 describe("the checks of `enter`", () => {
   // Bug: a scene's wrong `enter.cover` reaches the renderer at its first switch: a veil that never shows, or a colour
   // Pixi reads as another.

@@ -5,9 +5,9 @@
  * `leave` over `config.leave` over the engine's default, field by field. The renderer draws both
  * (`renderer.sync.leave`); this file resolves the look, with the veil's colour and alpha of the scene being entered on
  * top (`enter.cover`), hands the renderer the `due` of a loader projection (`loader.ts` shows or mounts it), starts
- * feeding that loader the switch (`progress.ts`), and lands the look at the swap or drops it on an abort or a throw. A
- * stage of the node that throws aborts the node (flow), so the abort listener drops the look then too; the next node's
- * `begin` drops one left over all the same.
+ * feeding that loader the switch (`progress.ts`), stamps a loader's floor on the swap for `build.ts` to read, and lands
+ * the look at the swap or drops it on an abort or a throw. A stage of the node that throws aborts the node (flow), so the
+ * abort listener drops the look then too; the next node's `begin` drops one left over all the same.
  */
 import type { LeaveLoader, LeaveLook } from "../renderer/types";
 import { dropLoader, dueLoader, landLoader } from "./loader";
@@ -117,9 +117,10 @@ function lookOf(loader: Readonly<SceneLoader> | Readonly<FullLoader>): {
 }
 
 /**
- * Merges one level's loader over the one below. `afterMs` is a field of its own; `texture` and `projection` are one
- * choice: a level that names either replaces both of the level below. `false` turns it off; a loader written over
- * `false` starts from the engine's.
+ * Merges one level's loader over the one below. `afterMs` and `holdMs` are fields of their own; `texture` and
+ * `projection` are one choice: a level that names either replaces both of the level below. A floor is written only when
+ * above 0, so `holdMs: 0` lifts the one below. `false` turns it off; a loader written over `false` starts from the
+ * engine's.
  *
  * @param below - The loader of the levels below, or `false`.
  * @param over - What this level writes: nothing, `false` or fields.
@@ -138,8 +139,15 @@ function loaderOver(
 
   const base = below === false ? FALLBACK_LEAVE.loader : below;
   const named = over.texture !== undefined || over.projection !== undefined;
+  const merged: FullLoader = {
+    afterMs: over.afterMs ?? base.afterMs,
+    ...lookOf(named ? over : base)
+  };
+  const holdMs = over.holdMs ?? base.holdMs ?? 0;
 
-  return { afterMs: over.afterMs ?? base.afterMs, ...lookOf(named ? over : base) };
+  if (holdMs > 0) merged.holdMs = holdMs;
+
+  return merged;
 }
 
 /**
@@ -253,10 +261,28 @@ function leftScene(ctx: ScenesCtx, run: RunContext): SceneDefinition | undefined
 }
 
 /**
+ * Stamps the floor of a loader on the look of a switch that starts now: the clock moment the swap may happen at, and the
+ * frame counter, read once here (`snapshot()` copies). A loader without one leaves the look as it is.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param leaving - The look of the switch.
+ * @param loader - The resolved loader.
+ */
+function stampHold(ctx: ScenesCtx, leaving: Leaving, loader: Readonly<FullLoader>): void {
+  if (loader.holdMs === undefined) return;
+
+  leaving.hold = {
+    until: ctx.deps.clock.now() + loader.holdMs,
+    frame: ctx.deps.time.snapshot().frame
+  };
+}
+
+/**
  * Shows the veil and the loader of a switch that starts now, before its bundles are awaited: the scene being left
  * decides, and the scene being entered sets the veil's colour and alpha (`enter.cover`). A loader projection is fed
- * the switch from now on, and shown or mounted only once its loader is due. An abort of the node drops both at once,
- * from its listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over.
+ * the switch from now on, and shown or mounted only once its loader is due. A loader with a floor stamps it here, on the
+ * look's clock and frame counter: the swap of `build.ts` waits for it. An abort of the node drops both at once, from its
+ * listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene being switched to.
@@ -295,6 +321,7 @@ export function startLeave(
   if (cover !== false) look.cover = cover;
   if (leave.loader !== false) {
     look.loader = loaderLook(ctx, leave.loader, { from, to: scene }, leaving);
+    stampHold(ctx, leaving, leave.loader);
   }
 
   // Shown now, before the bundles are awaited; an abort of the node drops it at once.

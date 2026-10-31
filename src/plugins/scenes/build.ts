@@ -2,8 +2,9 @@
  * @file scenes plugin — the next scene built aside on a live switch (spec 31, F61 S2). The world
  * mounts the coming projections into a table of its own while the old scene stays current, drawn
  * and alive; `ui` and the renderer do their part under the budget of a frame (`buildMs`); the frame
- * `world.projection.built()` first answers true commits it with the swap of a one-block switch. An
- * abort of the node discards the build and leaves the world as it stood.
+ * `world.projection.built()` first answers true commits it with the swap of a one-block switch, or,
+ * under a floor on the swap (`leave.loader.holdMs`, F130), the first such frame the floor passed
+ * in. An abort of the node discards the build and leaves the world as it stood.
  */
 import { swapIn } from "./swap";
 import type { SceneBuild, SceneDefinition, ScenesCtx } from "./types";
@@ -16,6 +17,13 @@ const BUILD_SHARE = 2 / 3;
 
 /** The frame interval when `time` answers no usable frame rate: a 60 Hz frame, ≈ 16.7 ms. */
 const FALLBACK_FRAME_MS = SECOND_MS / 60;
+
+/**
+ * The frames past the counter at the look's start a floor asks for: `signals` runs before `render`, so a swap in the
+ * first frame has no `render` of the look behind it, and a swap in the second has one, even when one long frame ate the
+ * whole floor.
+ */
+const HOLD_FRAMES = 2;
 
 /**
  * Tells whether a value is a number a frame can count with: finite and above 0. Pure.
@@ -112,17 +120,43 @@ function endBuild(ctx: ScenesCtx, build: SceneBuild, how: "commit" | "mount"): v
 }
 
 /**
+ * Tells whether the floor on the swap lets a built scene commit: no floor, or the clock passed it and the look was drawn
+ * once. The count is the look's, never the build's, so a switch slower than the floor is many frames past it and the
+ * floor adds no frame. While it holds, the loop is kept awake: it may stop at `idleFps: 0` during a long floor. No floor
+ * is one read; no allocation either way.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param frame - The frame counter now.
+ * @returns True when the build may commit.
+ */
+function holdOver(ctx: ScenesCtx, frame: number): boolean {
+  const hold = ctx.state.leaving?.hold;
+
+  if (hold === undefined) return true;
+
+  const floorPassed = ctx.deps.clock.now() >= hold.until && frame >= hold.frame + HOLD_FRAMES;
+
+  if (floorPassed) return true;
+
+  ctx.deps.time.wake();
+
+  return false;
+}
+
+/**
  * The `signals` callback of a running build: counts the frame and commits the build the frame
- * every part of it is done. A world that stopped running live during the build (a walk that went
- * fast, as the restore of a repro walks its route, or a pause) skips its `layout` phase, so `ui`
- * would never lay the coming scene out: the build is given up and the scene mounted in one block,
- * as a switch in that mode is. While the build is not done, a counter step and two calls, no
- * allocation.
+ * every part of it is done and the floor on the swap passed. A world that stopped running live
+ * during the build or its wait (a walk that went fast, as the restore of a repro walks its route,
+ * or a pause) skips its `layout` phase, so `ui` would never lay the coming scene out: the build is
+ * given up and the scene mounted in one block, as a switch in that mode is. While the build is not
+ * done, a counter step and two calls, and while a floor holds it two calls more, no allocation:
+ * the frame comes with the callback, as `snapshot()` copies.
  *
  * @param ctx - Domain context of the plugin.
  * @param build - The running build.
+ * @param frame - The frame counter of this frame.
  */
-function stepBuild(ctx: ScenesCtx, build: SceneBuild): void {
+function stepBuild(ctx: ScenesCtx, build: SceneBuild, frame: number): void {
   build.frames += 1;
 
   const world = ctx.deps.world;
@@ -133,7 +167,7 @@ function stepBuild(ctx: ScenesCtx, build: SceneBuild): void {
     return;
   }
 
-  if (world.projection.built()) endBuild(ctx, build, "commit");
+  if (world.projection.built() && holdOver(ctx, frame)) endBuild(ctx, build, "commit");
 }
 
 /**
@@ -196,7 +230,7 @@ function startBuildRecord(
  */
 function watchBuild(ctx: ScenesCtx, build: SceneBuild, signal: AbortSignal): void {
   const onAbort = (): void => abortBuild(ctx, build);
-  const offFrame = ctx.deps.time.onFrame("signals", () => stepBuild(ctx, build));
+  const offFrame = ctx.deps.time.onFrame("signals", time => stepBuild(ctx, build, time.frame));
 
   signal.addEventListener("abort", onAbort, { once: true });
   build.off = (): void => {
@@ -210,9 +244,9 @@ function watchBuild(ctx: ScenesCtx, build: SceneBuild, signal: AbortSignal): voi
  * Starts the build of a scene aside and answers the promise of the switch. The world mounts what
  * only the coming scene lists, against the committed state, and gets the budget of a frame
  * (`budgetOf`); the coming bundles are held from now.
- * When nothing is left for `ui` and the renderer the commit runs at once, with no frame between.
- * Otherwise a `signals` callback asks every frame whether the build is done, and an abort of the
- * node discards it.
+ * When nothing is left for `ui` and the renderer and no floor holds the swap, the commit runs at
+ * once, with no frame between. Otherwise a `signals` callback asks every frame whether the build is
+ * done and the floor passed, and an abort of the node discards it.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundles are there.
@@ -252,7 +286,7 @@ export function buildAside(
     const build = startBuildRecord(ctx, scene, named, budgetMs, { resolve, reject });
 
     // A build with nothing left for ui and the renderer swaps now: fake-clock tests keep their frames.
-    if (projection.built()) {
+    if (projection.built() && holdOver(ctx, ctx.deps.time.snapshot().frame)) {
       endBuild(ctx, build, "commit");
 
       return;

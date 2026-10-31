@@ -6,6 +6,7 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
+import type { Api as ClockApi } from "../clock/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Json, Api as ModelApi } from "../model/types";
 import type { Api as RendererApi } from "../renderer/types";
@@ -154,7 +155,8 @@ export type SceneCover = {
  * both of the level below, and with both named `projection` is drawn. A projection loader draws in a layer of its own
  * that the scene being left declares: kept built and hidden while that scene stands, shown once the loader is due (the
  * whole layer is drawn above the veil while it shows), and faded out with the veil after the swap. `scenes` hands its
- * `from` the switch (`SceneSwitch`): where it goes and how far its bundles loaded.
+ * `from` the switch (`SceneSwitch`): where it goes and how far its bundles loaded. `holdMs` is a floor on the swap: the
+ * next scene builds at once and the old one stays until the floor passed.
  *
  * @example
  * ```ts
@@ -162,11 +164,18 @@ export type SceneCover = {
  * const loader: SceneLoader<"ui.loader.ring"> = { texture: "ui.loader.ring" };
  * // The game's own loading screen, the projection "loading" in the layer "loading", after 250 ms.
  * const screen: SceneLoader = { afterMs: 250, projection: "loading" };
+ * // A circle that opens over 260 ms, however fast the scene comes: shown from the first drawn frame, the swap held.
+ * const opening: SceneLoader = { afterMs: 0, holdMs: 260, projection: "opening" };
  * ```
  */
 export type SceneLoader<Asset extends string = string> = {
-  /** Milliseconds after the switch start the loader waits for. Default 400. */
+  /** Milliseconds after the switch start the loader waits for; 0 shows it from the first drawn frame. Default 400. */
   afterMs?: number;
+  /**
+   * Milliseconds after the switch start before the swap may happen, on the clock of the look: a floor, so a switch
+   * slower than it gets nothing added. Merged like `afterMs`: 0 lifts the floor of the level below. Default 0.
+   */
+  holdMs?: number;
   /** An asset key of the game: the texture turns at the centre of the frame. */
   texture?: Asset;
   /**
@@ -363,7 +372,7 @@ export type Config = {
   /**
    * What a live switch shows over the scene being left, for every scene; a scene's own `leave` is merged over it field
    * by field. A field left out keeps the engine's default, `{ cover: { color: 0x000000, alpha: 0.45, inMs: 50,
-   * outMs: 150 }, loader: { afterMs: 400 } }`; `false` turns a part or the whole off.
+   * outMs: 150 }, loader: { afterMs: 400 } }`, which holds no swap (no `holdMs`); `false` turns a part or the whole off.
    *
    * @example
    * ```ts
@@ -371,6 +380,11 @@ export type Config = {
    * createApp({
    *   plugins: [...screen, boardFeature],
    *   pluginConfigs: { scenes: { leave: { cover: { alpha: 0.6 }, loader: { afterMs: 300, texture: "ui.loader.ring" } } } }
+   * });
+   * // A circle that opens over 260 ms from the first drawn frame, however fast the next scene comes.
+   * createApp({
+   *   plugins: [...screen, boardFeature],
+   *   pluginConfigs: { scenes: { leave: { loader: { afterMs: 0, holdMs: 260, projection: "opening" } } } }
    * });
    * // No veil and no loader on any switch.
    * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { leave: false } } });
@@ -507,6 +521,12 @@ export type Leaving = {
   /** Milliseconds the veil fades out over after the swap, 0 without a veil: a loader shown goes with it. */
   outMs: number;
   /**
+   * The floor on the swap (F130), for a loader that is on with `holdMs` above 0: the clock moment the swap may happen at,
+   * and the frame counter at the look's start. Absent: no floor. `state.leaving` is always the running switch's look
+   * (`dropLeftOver` and `leaveFor` keep it so), which is why the build reads it there.
+   */
+  hold?: { until: number; frame: number };
+  /**
    * The loader projection the switch feeds its `SceneSwitch` (F107 part 1), from its start to its swap or drop. Absent
    * when it feeds none: a ring, a texture, a loader turned off, or a projection another owner shows.
    */
@@ -561,9 +581,15 @@ export type BundleProgress = AssetsEvents["assets:bundle-progress"];
 export type FullCover = Required<SceneCover>;
 
 /**
- * A loader with its delay and at most one look: what a level of `leave` resolves to.
+ * A loader with its delay, at most one look and its floor on the swap, absent for no floor: what a level of `leave`
+ * resolves to.
  */
-export type FullLoader = { afterMs: number; texture?: string; projection?: string };
+export type FullLoader = {
+  afterMs: number;
+  holdMs?: number;
+  texture?: string;
+  projection?: string;
+};
 
 /**
  * What a switch shows over the scene being left, every level merged: each part resolved or off.
@@ -643,6 +669,8 @@ export type Deps = {
   world: WorldApi;
   assets: AssetsApi;
   time: TimeApi;
+  /** The clock of the look, which a floor on the swap is counted on. */
+  clock: ClockApi;
   model: ModelApi;
   /**
    * Whether the renderer draws, which chooses the path of a switch, and the performance log of

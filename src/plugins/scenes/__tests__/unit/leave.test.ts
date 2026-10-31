@@ -167,6 +167,63 @@ describe("the merge of `leave`", () => {
   });
 });
 
+describe("the floor on the swap, `holdMs`", () => {
+  // Bug: a level replaces the floor of the level below, or a scene that writes another field of its loader loses the
+  // config's floor.
+  it("takes it from the highest level that writes it: the scene's, the config's", () => {
+    const config = { loader: { holdMs: 260 } };
+
+    expect(leaveOf(config, { loader: { holdMs: 100 } })?.loader).toStrictEqual({
+      afterMs: 400,
+      holdMs: 100
+    });
+    expect(leaveOf(config, { loader: { afterMs: 100 } })?.loader).toStrictEqual({
+      afterMs: 100,
+      holdMs: 260
+    });
+    expect(leaveOf(config, { cover: { alpha: 0.6 } })?.loader).toStrictEqual({
+      afterMs: 400,
+      holdMs: 260
+    });
+  });
+
+  // Bug: `0` keeps the config's floor (a scene cannot lift it), or is written, and `undefined` on the field breaks
+  // `exactOptionalPropertyTypes`.
+  it("lifts the floor of the level below with `holdMs: 0`, the field absent", () => {
+    expect(leaveOf({ loader: { holdMs: 260 } }, { loader: { holdMs: 0 } })?.loader).toStrictEqual({
+      afterMs: 400
+    });
+  });
+
+  // Bug: a loader turned off keeps the floor it had, or one written over `false` inherits a floor the level turned off.
+  it("has none for `loader: false`, and a loader written over it starts with none", () => {
+    expect(leaveOf({ loader: { holdMs: 260 } }, { loader: false })?.loader).toBe(false);
+    expect(leaveOf({ loader: false }, { loader: { afterMs: 100 } })?.loader).toStrictEqual({
+      afterMs: 100
+    });
+  });
+
+  // Bug: the merge writes `holdMs: 0` or `undefined` into every look, so the default a game gets stops being `{ afterMs:
+  // 400 }`.
+  it("keeps exactly `{ afterMs: 400 }` when no level writes it", () => {
+    expect(leaveOf({ loader: { afterMs: 400 } }, undefined)?.loader).toStrictEqual({
+      afterMs: 400
+    });
+  });
+
+  // Bug: the floor reaches `LeaveLoader`, a renderer type that has no such field.
+  it("is not handed to the renderer", async () => {
+    const mock = await on("home", { buildMs: "auto", leave: { loader: { holdMs: 260 } } });
+
+    await enterScene(mock, "board");
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: VEIL,
+      loader: { afterMs: 400 }
+    });
+  });
+});
+
 describe("a live switch", () => {
   // Bug: the look waits for the bundles (a cold first visit shows nothing for seconds), or the coming scene decides.
   it("shows the look of the scene being left at its start, before its bundles are in", async () => {
