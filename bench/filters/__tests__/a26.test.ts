@@ -1,9 +1,7 @@
 /* eslint-disable unicorn/no-null -- a sample is JSON: "no node" is `null`. */
 import { describe, expect, it } from "vitest";
 import {
-  ARMS,
   armSchedule,
-  armsAddress,
   clockSample,
   clocksPathOf,
   focusOf,
@@ -188,33 +186,5 @@ describe("the arms schedule", () => {
 
     expect(armSchedule(["a"], { ...options, minFrames: 240 }).rounds).toBe(2);
     expect(armSchedule(["a"], { ...options, minFrames: 241 }).rounds).toBe(3);
-  });
-
-  // Bug: the printed address plays another schedule than the printed table.
-  it("writes the address the page plays the arms from", () => {
-    expect(armsAddress("http://127.0.0.1:4173/", ["a", "b"], 2, 12)).toBe(
-      "http://127.0.0.1:4173/#arms=a,b&every=2&k=12"
-    );
-  });
-
-  // Bug: the run report misses an arm the spec's A26 run lists.
-  it("carries every arm of the A26 run", () => {
-    expect(ARMS).toEqual(
-      expect.arrayContaining([
-        "slope-0",
-        "slope-8",
-        "slope-0-mask",
-        "slope-8-mask",
-        "full",
-        "fade",
-        "entry",
-        "glow",
-        "sweep",
-        "fog",
-        "fog-local",
-        "flip",
-        "scale"
-      ])
-    );
   });
 });

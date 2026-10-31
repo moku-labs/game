@@ -189,6 +189,22 @@ export function onGrid(delta: number, stackResolution: number, resolution: numbe
 }
 
 /**
+ * The resolution a kept picture was drawn at: its filter output's, or the subtree picture's for a stack drawn direct,
+ * which has no stage 3, so its key `r` is stale.
+ *
+ * @param key - The record's key.
+ * @param direct - The quad draws the subtree picture itself.
+ * @returns Texels per CSS px.
+ * @example
+ * ```ts
+ * drawnResolution(Float64Array.of(1, 0, 0, 1, 1.5, 0, 0, 0, 0, 0, 0, 0, 2), true); // 1.5
+ * ```
+ */
+export function drawnResolution(key: Float64Array, direct: boolean): number {
+  return (direct ? key[KEY.rs] : key[KEY.r]) ?? 1;
+}
+
+/**
  * Tells whether a picture can be taken at this size: not empty, and at most 4096 device pixels on a side.
  *
  * @param width - CSS px.

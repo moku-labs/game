@@ -2,16 +2,18 @@
  * @file renderer/kept — one cached view: whether it may be kept, the keys of its stages, its two lives and the policy
  * between them (P4). A view that stood still for two drawn frames is taken, a stack drawn direct in its first frame
  * without a change, at most one first take a frame and none while an alpha is due (F114); a kept view whose subtree
- * changes in three drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A view with a node under
+ * changes in three drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A step
+ * of the renderer resolution keeps the pictures: one drawn lower is refined a few a flush (F126). A view with a node under
  * its top that blends otherwise than normally is never taken (F68). Taking and releasing happen inside the flush,
  * before the stage pass, both halves in the same frame (K3).
  */
 import type { FilterSlot, SyncState, SyncWriters, View } from "../sync/types";
-import type { PixiContainer, PixiFilter, PixiModule } from "../types";
+import type { FilterSlotInputs, PixiContainer, PixiFilter, PixiModule } from "../types";
 import { makeRoom, warnRefused } from "./budget";
 import { drawnBounds } from "./drawn-bounds";
 import {
   cutSpan,
+  drawnResolution,
   fitsTexture,
   gridSpan,
   KEY,
@@ -73,6 +75,13 @@ export const CROWD = 4;
  */
 export const CROWD_TAKES = 10;
 
+/**
+ * Limited takes a flush (F126): the refining of a picture coarser than the canvas after a step of the resolution and
+ * the settle of a picture at rest off its grid, together. Forty pictures that owe one are taken over twenty frames; on
+ * the bench a picture is 4 passes, 5–6 ms on the A26 at 221 MHz: two keep the frame near 29 ms, four took it to 44.
+ */
+export const REFINE_TAKES = 2;
+
 /** The reasons an ancestor may be hidden by and still draw the view: an overlay's range, a kept ancestor's picture. */
 const DRAWN_ANYWAY = ["freeze", "kept"] as const;
 
@@ -122,7 +131,10 @@ type Drawing = {
   shown: boolean;
 };
 
-/** The stack of a record looked at before the step (F114). One object: the look allocates nothing. */
+/** What a kept record owes `refresh`: nothing, the filter output, or the pre-pass results and the filter output. */
+const OWED = { none: 0, output: 1, chain: 2 } as const;
+
+/** The stack of a record looked at before the step (F114), or above it (F126). One object: the look allocates nothing. */
 const DUE: Stack = { enabled: 0, rs: 1, P: 0, alpha: Number.NaN, passes: 0 };
 
 /** What the record being stepped drew before its step. One object: a step allocates nothing. */
@@ -581,6 +593,8 @@ export function createRecord(
     depth: 0,
     bytes: 0,
     settle: false,
+    coarse: false,
+    refined: false,
     refused: 0,
     cut: false,
     direct: false,
@@ -738,6 +752,23 @@ function writeSeen(record: KeptRecord, now: Numbers): void {
 }
 
 /**
+ * Tells whether this frame's linear part differs from the one a set of keys holds. Pure.
+ *
+ * @param key - The record's key.
+ * @param now - This frame's numbers.
+ * @param base - The index of `a` in the set: `KEY.a` (the take) or `KEY.seenA` (the last frame).
+ * @returns True when one number differs.
+ */
+function linearMoved(key: Float64Array, now: Numbers, base: number): boolean {
+  return (
+    key[base] !== now.a ||
+    key[base + 1] !== now.b ||
+    key[base + 2] !== now.c ||
+    key[base + 3] !== now.d
+  );
+}
+
+/**
  * Tells whether this frame's linear part or stack resolution differs from the ones a set of keys holds.
  *
  * @param key - The record's key.
@@ -747,13 +778,7 @@ function writeSeen(record: KeptRecord, now: Numbers): void {
  * @returns True when one differs.
  */
 function linearDiffers(key: Float64Array, now: Numbers, base: number, rsAt: number): boolean {
-  return (
-    key[base] !== now.a ||
-    key[base + 1] !== now.b ||
-    key[base + 2] !== now.c ||
-    key[base + 3] !== now.d ||
-    key[rsAt] !== now.rs
-  );
+  return linearMoved(key, now, base) || key[rsAt] !== now.rs;
 }
 
 /**
@@ -959,6 +984,7 @@ function takePicture(
   const ok = renderStages(kctx, pixi, matrices, record, view, now);
 
   record.settle = false;
+  record.coarse &&= !ok;
   writeSeen(record, now);
 
   return ok;
@@ -1181,18 +1207,20 @@ function scaledQuad(
 
 /**
  * Tells whether a kept picture may be drawn scaled to this frame's linear part instead of taken again (F67): its
- * subtree and its stack resolution are as at the take, its filters follow the view (not its canvas place), it was not
- * cut to the canvas, and the area scale stays within `SCALED_LIMIT` of the take's either way.
+ * subtree and its stack resolution are as at the take (a stepped picture's resolution followed the canvas: F126), its
+ * filters follow the view (not its canvas place), it was not cut to the canvas, and the area scale stays within
+ * `SCALED_LIMIT` of the take's either way.
  *
  * @param record - The record, kept.
+ * @param stepped - A step of the resolution passed over the picture.
  * @returns True when the quad may scale.
  */
-function scalable(record: KeptRecord): boolean {
+function scalable(record: KeptRecord, stepped: boolean): boolean {
   const { key } = record;
 
   const unscalable = record.dirtyS1 || record.cut || record.category === "placed";
 
-  if (unscalable || key[KEY.rs] !== NOW.rs) return false;
+  if (unscalable || (!stepped && key[KEY.rs] !== NOW.rs)) return false;
 
   const taken = Math.abs(
     (key[KEY.a] ?? 1) * (key[KEY.d] ?? 1) - (key[KEY.b] ?? 0) * (key[KEY.c] ?? 0)
@@ -1426,8 +1454,8 @@ function noteTake(kctx: KeptCtx, record: KeptRecord, why: number): void {
 }
 
 /**
- * Marks every kept record above a record that was just first taken: their retake in this flush is not churn (F114),
- * so the inner takes spread over frames do not drop the outer picture to live.
+ * Marks every kept record above a record that was just first taken, settled or refined: their retake in this flush is
+ * not churn (F114, F126), so the inner takes spread over frames do not drop the outer picture to live.
  *
  * @param kctx - The kept context.
  * @param record - The record just taken.
@@ -1525,6 +1553,7 @@ function stepLive(
  * @param record - The record, kept.
  * @param view - Its view.
  * @param why - The `RETAKE` of the take.
+ * @returns True when every stage rendered.
  */
 function retakeOrGoLive(
   kctx: KeptCtx,
@@ -1533,15 +1562,17 @@ function retakeOrGoLive(
   record: KeptRecord,
   view: View,
   why: number
-): void {
+): boolean {
   if (takePicture(kctx, pixi, matrices, record, view, NOW)) {
     noteTake(kctx, record, why);
 
-    return;
+    return true;
   }
 
   goLive(kctx, record, view, true);
   noteHeld(kctx.state, record, false, false);
+
+  return false;
 }
 
 /**
@@ -1579,47 +1610,70 @@ function churn(
 
 /**
  * What a retake of a kept record owes itself to: a new stack resolution, a change under its top, or a linear part it may
- * not be drawn at.
+ * not be drawn at. A stepped record owes the step nothing here.
  *
  * @param record - The record, kept, about to be retaken.
+ * @param stepped - A step of the resolution passed over the picture.
  * @returns The `RETAKE`.
  */
-function retakeWhy(record: KeptRecord): number {
-  if (record.key[KEY.rs] !== NOW.rs) return RETAKE.resolution;
+function retakeWhy(record: KeptRecord, stepped: boolean): number {
+  if (!stepped && record.key[KEY.rs] !== NOW.rs) return RETAKE.resolution;
   if (record.dirtyS1) return RETAKE.mark;
 
   return record.cut || record.category === "placed" ? RETAKE.placedMove : RETAKE.scaleLimit;
 }
 
 /**
- * What a refresh of a kept record owes itself to, read before the render writes its keys.
+ * What a refresh of a kept record owes itself to, read before the render writes its keys. Under `hold` the resolution
+ * is no reason: what is owed is the filter's.
  *
  * @param record - The record, kept.
  * @param chain - Stage 2 is redone too.
+ * @param hold - A step of the resolution owes no stage.
  * @returns The `RETAKE`.
  */
-function refreshWhy(record: KeptRecord, chain: boolean): number {
+function refreshWhy(record: KeptRecord, chain: boolean, hold: boolean): number {
   if (chain) return RETAKE.chain;
 
-  return NOW.r === record.key[KEY.r] ? RETAKE.filter : RETAKE.resolution;
+  return hold || NOW.r === record.key[KEY.r] ? RETAKE.filter : RETAKE.resolution;
 }
 
 /**
  * Notes a move of a kept record: a quad that left its picture's texel grid owes one settle retake at rest, and asks
- * for the frame it happens in.
+ * for the frame it happens in. The grid is the picture's own: a step of the resolution leaves it where it was (F126).
  *
  * @param kctx - The kept context.
  * @param record - The record, kept.
  */
 function noteMove(kctx: KeptCtx, record: KeptRecord): void {
   const { key } = record;
+  const rs = key[KEY.rs] ?? 1;
+  const drawn = drawnResolution(key, record.direct);
 
   record.settle =
-    !onGrid(NOW.tx - (key[KEY.tx] ?? 0), NOW.rs, NOW.r) ||
-    !onGrid(NOW.ty - (key[KEY.ty] ?? 0), NOW.rs, NOW.r);
+    !onGrid(NOW.tx - (key[KEY.tx] ?? 0), rs, drawn) ||
+    !onGrid(NOW.ty - (key[KEY.ty] ?? 0), rs, drawn);
 
   // The settle retake happens at rest: a frame is asked for, in which the view stands where it is now.
   if (record.settle) kctx.demand.request();
+}
+
+/**
+ * Notes what a frame of a kept record left it owing at rest: a move off its grid, and a picture drawn scaled, which is
+ * sampled off its grid too and owes one settle retake, in a frame asked for.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record, kept.
+ * @param moved - It moved in this frame.
+ * @param scaled - It is drawn at another linear part than at the take.
+ */
+function noteRest(kctx: KeptCtx, record: KeptRecord, moved: boolean, scaled: boolean): void {
+  if (moved) noteMove(kctx, record);
+
+  if (scaled && !record.settle) {
+    record.settle = true;
+    kctx.demand.request();
+  }
 }
 
 /**
@@ -1636,9 +1690,157 @@ function canvasChanged(kctx: KeptCtx, key: Float64Array): boolean {
 }
 
 /**
- * A kept record's frame (P4.3): a stage-1 change retakes (three in a row go live and calm); otherwise a new chain
- * version redoes stages 2 and 3, a filter value, the resolution, the padding or (placed) a move stage 3; at rest after
- * an off-grid move one settle retake is owed.
+ * Tells whether a step of the renderer resolution passed over a kept picture (F126): drawn at another resolution than
+ * the canvas, with a stack that followed the canvas there: a resolution of its own, or `"inherit"`. A picture cut to the
+ * canvas or placed, a filter that wrote its own resolution and a mixed stack whose fixed resolution the step crossed
+ * are no step: their change is read as a change of the stack.
+ *
+ * @param record - The record, kept.
+ * @returns True when the picture was stepped over.
+ */
+function resolutionStepped(record: KeptRecord): boolean {
+  if (record.cut || record.category === "placed") return false;
+
+  const { key } = record;
+  const drawn = drawnResolution(key, record.direct);
+
+  if (drawn === NOW.r) return false;
+
+  const fixedStack = key[KEY.rs] === NOW.rs;
+  const followsCanvas = key[KEY.rs] === drawn && NOW.rs === NOW.r;
+
+  return fixedStack || followsCanvas;
+}
+
+/**
+ * Tells whether a take under `REFINE_TAKES` is left in this flush, and counts it; with none left the next frame is
+ * asked for, in which the debt is paid.
+ *
+ * @param kctx - The kept context.
+ * @returns True when the take may happen now.
+ */
+function limitLeft(kctx: KeptCtx): boolean {
+  const { state } = kctx;
+
+  if (state.frameRefines >= REFINE_TAKES) {
+    kctx.demand.request();
+
+    return false;
+  }
+
+  state.frameRefines += 1;
+
+  return true;
+}
+
+/**
+ * Refines a picture coarser than the canvas, the limit counted (P4.3): whole for a stack drawn direct and one whose
+ * resolution moved, stage 3 alone for one on a fixed resolution. `refined` tells the pictures above that this change
+ * was nothing else, and only once it rendered; it spares them, so refinements spread over frames do not churn an outer
+ * picture that is marked to live.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, kept and `coarse`.
+ * @param view - Its view.
+ * @param moved - It moved in this frame.
+ * @param scaled - It is drawn at another linear part than at the take.
+ */
+function refine(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View,
+  moved: boolean,
+  scaled: boolean
+): void {
+  const { key } = record;
+  const alone = drawsDirect(NOW) || stagesOwed(record, true) === OWED.none;
+
+  if (record.direct || key[KEY.rs] !== NOW.rs) {
+    record.refined = retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.resolution) && alone;
+    if (record.refined) spareAbove(kctx, record);
+
+    return;
+  }
+
+  refresh(kctx, pixi, matrices, record, view, false);
+  record.coarse = drawnResolution(key, record.direct) !== NOW.r;
+  record.refined = !record.coarse && alone;
+  if (record.refined) spareAbove(kctx, record);
+  noteRest(kctx, record, moved, scaled);
+  // The take keys stand: a settle owed from before fires at rest, in a frame asked for.
+  if (record.settle) kctx.demand.request();
+}
+
+/**
+ * The retake a stage-1 change or a zoom past the limit owes a kept record, which counts as churn unless an inner
+ * record's spread take alone caused it (F114).
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, kept.
+ * @param view - Its view.
+ * @param stepped - A step of the resolution passed over the picture.
+ * @param scaled - It is drawn at another linear part than at the take.
+ * @returns True when one was owed.
+ */
+function retakeOwed(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View,
+  stepped: boolean,
+  scaled: boolean
+): boolean {
+  if (!record.dirtyS1 && (!scaled || scalable(record, stepped))) return false;
+
+  // Retaken for an inner record's spread take alone: not churn (F114).
+  if (record.spared && !scaled) {
+    retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.innerFirst);
+  } else {
+    churn(kctx, pixi, matrices, record, view, retakeWhy(record, stepped));
+  }
+
+  return true;
+}
+
+/**
+ * The settle retake of a kept record at rest, under the limit (P2.5, F114): it spares the pictures above it, so a settle
+ * spread over frames does not churn an outer picture to live. With the limit spent `settle` stays set.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, kept.
+ * @param view - Its view.
+ * @returns True when the picture was taken again.
+ */
+function settleTake(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View
+): boolean {
+  if (!limitLeft(kctx)) return false;
+
+  spareAbove(kctx, record);
+  retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.settle);
+
+  return true;
+}
+
+/**
+ * A kept record's frame (P4.3): a stage-1 change retakes (three in a row go live and calm); otherwise a picture coarser
+ * than the canvas after a step of the resolution is refined under the limit, at rest after an off-grid move or a zoom
+ * one settle retake is owed under the same limit, and a new chain version redoes stages 2 and 3, a filter value, the
+ * resolution, the padding or (placed) a move stage 3. A step is neither a move nor a scale, and on the way down it owes
+ * nothing (F126).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1654,28 +1856,16 @@ function stepKept(
   view: View
 ): void {
   const { key } = record;
+  const stepped = resolutionStepped(record);
   // The linear part moved since the last frame: the view turns or scales under an ancestor's zoom.
-  const turned = linearDiffers(key, NOW, KEY.seenA, KEY.seenRs);
-  const scaled = linearDiffers(key, NOW, KEY.a, KEY.rs);
+  const turned = stepped
+    ? linearMoved(key, NOW, KEY.seenA)
+    : linearDiffers(key, NOW, KEY.seenA, KEY.seenRs);
+  const scaled = stepped ? linearMoved(key, NOW, KEY.a) : linearDiffers(key, NOW, KEY.a, KEY.rs);
 
   writeSeen(record, NOW);
 
-  const retake = record.dirtyS1 || (scaled && !scalable(record));
-
-  // Retaken for an inner record's first take alone: not churn (F114).
-  const spareRetake = retake && record.spared && !scaled;
-
-  if (spareRetake) {
-    retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.innerFirst);
-
-    return;
-  }
-
-  if (retake) {
-    churn(kctx, pixi, matrices, record, view, retakeWhy(record));
-
-    return;
-  }
+  if (retakeOwed(kctx, pixi, matrices, record, view, stepped, scaled)) return;
 
   const moved = turned || NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
 
@@ -1687,80 +1877,134 @@ function stepKept(
   }
 
   record.churn = 0;
+  // Not tied to rest: under a move `settle` never fires, and a picture that keeps moving must still get sharp.
+  record.coarse = stepped && NOW.r > drawnResolution(key, record.direct);
 
-  if (!moved && record.settle) {
-    retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.settle);
+  if (record.coarse && limitLeft(kctx)) {
+    refine(kctx, pixi, matrices, record, view, moved, scaled);
 
     return;
   }
 
-  refresh(kctx, pixi, matrices, record);
+  // A stepped picture is resampled anyway: its settle waits for the end of the step. A zoom still owes its take at rest.
+  const atRest = !moved && record.settle && (scaled || !stepped);
 
-  if (moved) noteMove(kctx, record);
+  if (atRest && settleTake(kctx, pixi, matrices, record, view)) return;
+  if (refresh(kctx, pixi, matrices, record, view, stepped)) return;
 
-  // A picture drawn scaled is sampled off its grid: one settle retake is owed at rest, in a frame asked for.
-  if (scaled && !record.settle) {
-    record.settle = true;
-    kctx.demand.request();
-  }
+  noteRest(kctx, record, moved, scaled);
 }
 
 /**
- * Redoes stage 2 and 3, or stage 3 alone, when their keys changed (P4.3): a refresh never counts as churn.
+ * Tells whether stage 2 is owed: a new chain, a new chain version, or a new subtree picture under it.
+ *
+ * @param record - The record, kept.
+ * @param inputs - The seam of its first filter with inputs.
+ * @returns True when it is.
+ */
+function chainOwed(record: KeptRecord, inputs: FilterSlotInputs): boolean {
+  return (
+    record.dirtyS2 ||
+    inputs !== record.s2Of ||
+    inputs.version() !== record.s2InputsVersion ||
+    record.s1Version !== record.s2PictureVersion
+  );
+}
+
+/**
+ * Tells whether stage 3 is owed for its own keys: a filter value, the resolution, the padding, a placed filter's move.
+ * Under `hold` the resolution is no reason, and a stack drawn direct has no padding: its key is stale.
+ *
+ * @param record - The record, kept.
+ * @param hold - A step of the resolution owes no stage.
+ * @returns True when it is.
+ */
+function outputOwed(record: KeptRecord, hold: boolean): boolean {
+  const { key } = record;
+  const resolutionOwed = !hold && NOW.r !== key[KEY.r];
+  const paddingOwed = hold && record.direct ? NOW.P !== 0 : NOW.P !== key[KEY.P];
+  const placedMoved =
+    record.category === "placed" && (NOW.tx !== key[KEY.s3Tx] || NOW.ty !== key[KEY.s3Ty]);
+
+  return record.dirtyS3 || resolutionOwed || paddingOwed || placedMoved;
+}
+
+/**
+ * What a kept record that does not draw direct owes `refresh`: read by it and by the refining. Stage 3 follows stage 2,
+ * and a chain that left.
+ *
+ * @param record - The record, kept.
+ * @param hold - A step of the resolution owes no stage.
+ * @returns The `OWED`.
+ */
+function stagesOwed(record: KeptRecord, hold: boolean): number {
+  const inputs = firstInputs(record.slots)?.inputs;
+
+  if (inputs !== undefined && chainOwed(record, inputs)) return OWED.chain;
+
+  const inputsLeft = inputs === undefined && record.s2Of !== undefined;
+
+  return inputsLeft || outputOwed(record, hold) ? OWED.output : OWED.none;
+}
+
+/**
+ * Redoes stage 2 and 3, or stage 3 alone, when their keys changed (P4.3): a refresh never counts as churn. Under `hold`
+ * the resolution owes nothing, and what else is owed lands on one resolution: a stack whose resolution moved is taken
+ * whole, before anything is released or rendered, so stage 3 is never drawn at a new `rs` over a stage 1 of an old one.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
  * @param matrices - The scratch matrices.
  * @param record - The record, kept.
+ * @param view - Its view.
+ * @param hold - A step of the resolution owes no stage.
+ * @returns True when the record was taken whole.
  */
 function refresh(
   kctx: KeptCtx,
   pixi: PixiModule,
   matrices: KeptMatrices,
-  record: KeptRecord
-): void {
-  const { key } = record;
-
+  record: KeptRecord,
+  view: View,
+  hold: boolean
+): boolean {
   // A stack of alphas owes nothing: its quad takes the new alpha (F54).
   if (drawsDirect(NOW)) {
-    if (record.direct) return;
+    if (record.direct) return false;
 
     goDirect(kctx, record);
     account(kctx, record);
 
-    return;
+    return false;
   }
 
-  const first = firstInputs(record.slots);
-  const inputs = first?.inputs;
-  // Stage 2 is owed for a new chain, a new chain version, or a new subtree picture under it.
-  const stageTwoOwed =
-    inputs !== undefined &&
-    (record.dirtyS2 ||
-      inputs !== record.s2Of ||
-      inputs.version() !== record.s2InputsVersion ||
-      record.s1Version !== record.s2PictureVersion);
-  const inputsLeft = inputs === undefined && record.s2Of !== undefined;
-  // Stage 3 follows stage 2, a chain that left, a filter value, the resolution, the padding, and a placed filter's move.
-  const stageThreeOwed =
-    stageTwoOwed ||
-    inputsLeft ||
-    record.dirtyS3 ||
-    NOW.r !== key[KEY.r] ||
-    NOW.P !== key[KEY.P] ||
-    (record.category === "placed" && (NOW.tx !== key[KEY.s3Tx] || NOW.ty !== key[KEY.s3Ty]));
+  const owed = stagesOwed(record, hold);
 
-  if (inputsLeft) releaseInputs(kctx, record);
-  if (stageTwoOwed) {
+  if (owed === OWED.none) return false;
+
+  const chain = owed === OWED.chain;
+  const why = refreshWhy(record, chain, hold);
+
+  if (hold && record.key[KEY.rs] !== NOW.rs) {
+    retakeOrGoLive(kctx, pixi, matrices, record, view, why);
+
+    return true;
+  }
+
+  const inputs = firstInputs(record.slots)?.inputs;
+
+  if (inputs === undefined && record.s2Of !== undefined) releaseInputs(kctx, record);
+  if (chain && inputs !== undefined) {
     renderStage2(kctx, pixi, matrices, record, { inputs, resolution: NOW.r, padding: NOW.P });
   }
-  if (!stageThreeOwed) return;
 
-  noteTake(kctx, record, refreshWhy(record, stageTwoOwed));
+  noteTake(kctx, record, why);
   record.direct = false;
   renderStage3(kctx, pixi, matrices, record, NOW);
   account(kctx, record);
-  if (!stageTwoOwed) kctx.state.refreshesOpen += 1;
+  if (!chain) kctx.state.refreshesOpen += 1;
+
+  return false;
 }
 
 /**
@@ -1808,9 +2052,30 @@ function drawingChanged(kctx: KeptCtx, record: KeptRecord, before: Readonly<Draw
 }
 
 /**
+ * Tells whether a kept record has anything to do in this frame: the frame is not calm, or a flag or a debt is on it.
+ *
+ * @param state - The kept state.
+ * @param record - The record.
+ * @returns True when it is to be stepped.
+ */
+function owesStep(state: KeptState, record: KeptRecord): boolean {
+  return (
+    !state.calm ||
+    state.bypassed ||
+    record.mode !== "kept" ||
+    record.dirtyS1 ||
+    record.dirtyS2 ||
+    record.dirtyS3 ||
+    record.settle ||
+    record.coarse ||
+    record.churn !== 0
+  );
+}
+
+/**
  * The frame of a kept record in a calm frame (no mark, no whole-frame reason) that owes nothing: no dirty flag, no
- * settle retake, no churn, not bypassed. Its step would find every key as it stands and its quad where it is, so it is
- * counted as drawn from its picture and left alone (E5).
+ * settle or refining take, no churn, not bypassed. Its step would find every key as it stands and its quad where it
+ * is, so it is counted as drawn from its picture and left alone (E5).
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -1819,18 +2084,7 @@ function drawingChanged(kctx: KeptCtx, record: KeptRecord, before: Readonly<Draw
 export function stepCalm(kctx: KeptCtx, record: KeptRecord): boolean {
   const { state } = kctx;
 
-  if (
-    !state.calm ||
-    state.bypassed ||
-    record.mode !== "kept" ||
-    record.dirtyS1 ||
-    record.dirtyS2 ||
-    record.dirtyS3 ||
-    record.settle ||
-    record.churn !== 0
-  ) {
-    return false;
-  }
+  if (owesStep(state, record)) return false;
 
   record.lastDrawn = state.frame;
   state.drawnPictures += 1;
@@ -1931,12 +2185,13 @@ export function stepRecord(
   if (why === 0) stepEligible(kctx, pixi, matrices, record, view);
   else stepIneligible(kctx, record, view, why);
 
-  if (drawingChanged(kctx, record, BEFORE)) dirtyAbove(kctx, record);
+  if (drawingChanged(kctx, record, BEFORE)) dirtyAbove(kctx, pixi, record);
 
   record.quiet = record.dirtyS1 ? 0 : record.quiet + 1;
   record.dirtyS1 = false;
   record.dirtyS2 = false;
   record.dirtyS3 = false;
+  record.refined = false;
   record.markBy = 0;
   record.spared = false;
   // A due alpha that could not be taken holds the others back once, not every frame (F114).
@@ -2015,17 +2270,39 @@ function rangeHolds(entries: readonly PixiContainer[], node: PixiContainer): boo
 }
 
 /**
+ * Tells whether a record above a refined picture will be taken whole under the limit, after its inner ones: kept,
+ * coarser than the canvas, on a stack that follows the canvas (a stack on a fixed resolution would get stage 3 alone), or
+ * drawn direct. Read here because that record has not stepped yet. Deepest first, so it comes up once, and needs no mark.
+ *
+ * @param pixi - The module that draws.
+ * @param above - The record above.
+ * @returns True when it needs no mark.
+ */
+function takenAfterInner(pixi: PixiModule, above: KeptRecord): boolean {
+  const { key } = above;
+  const drawn = drawnResolution(key, above.direct);
+
+  if (above.mode !== "kept" || drawn >= NOW.r || key[KEY.rs] !== drawn) return false;
+
+  readStack(above.slots, NOW.r, pixi.AlphaFilter, DUE);
+
+  return above.direct || DUE.rs === NOW.r;
+}
+
+/**
  * Marks every record above a record as changed: its picture holds what this one drew, and the flush renders inner
- * records first, so they are retaken in the same flush (P4.5).
+ * records first, so they are retaken in the same flush (P4.5). A refining alone leaves a record above that is taken
+ * whole after it (F126).
  *
  * @param kctx - The kept context.
+ * @param pixi - The module that draws.
  * @param record - The record whose drawing changed.
  */
-function dirtyAbove(kctx: KeptCtx, record: KeptRecord): void {
+function dirtyAbove(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
   for (let node = record.top.parent; node !== null; node = node.parent) {
     const above = kctx.state.byTop.get(node);
 
-    if (above !== undefined) {
+    if (above !== undefined && !(record.refined && takenAfterInner(pixi, above))) {
       above.dirtyS1 = true;
       above.markBy = record.entity;
     }

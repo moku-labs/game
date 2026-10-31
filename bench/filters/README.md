@@ -43,7 +43,8 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `fog` | Round wipes on 12 tiles and a 2048 × 1024 layer, `cache: false`. | FogWipe and FogDevelop, live. |
 | `fog-local` | The same with `cache: "local"`. Half of each turn writes nothing, so the pictures rest. | What keeping the fog would win. |
 | `flip` | A perspective flip and fold that reads the canvas origin. | A card flip. |
-| `scale` | 40 kept pictures, the page's resolution stepping × 1, 0.85, 0.75, 0.85 every 2 s. Works on a debug or dev page only: a release page does not switch resolution. | The adaptive render scale: what a retake of everything costs. |
+| `scale` | 40 kept pictures, the page's resolution stepping × 1, 0.85, 0.75, 0.85 every 2 s. Works on a debug or dev page only: a release page does not switch resolution. | The adaptive render scale: the pictures are taken at the top, so a step costs no take. |
+| `scale-up` | The same 40 pictures in a 4 s loop: × 0.75 at the start, every fill changed once 300 ms later so the pictures are taken at 0.75, × 1 at 2 s. Debug or dev page only. Opened by address (`#scale-up&k=8`), not in the schedule of the phone. | The step up of the render scale: all 40 pictures owe a take at once, a limited number a frame. |
 | `lens` | A soft round window opening over a picture and a subtree. | LensWindow. |
 | `promo` | A perspective map of live text, a time-driven procedural quad, a mirrored column with a gradient, a stroke sweep. | The promo screen. |
 

@@ -95,6 +95,7 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     flushPasses: 0,
     calm: false,
     firstTakes: 0,
+    frameRefines: 0,
     alphaDue: false,
     liveWaiting: 0
   };
@@ -205,6 +206,7 @@ export function stopKept(state: KeptState): void {
   state.flushPasses = 0;
   state.drawnPictures = 0;
   state.firstTakes = 0;
+  state.frameRefines = 0;
   state.alphaDue = false;
   state.liveWaiting = 0;
   state.warnedBudget = false;

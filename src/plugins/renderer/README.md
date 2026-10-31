@@ -137,8 +137,9 @@ The drawing resolution has four sources and one rule: `override ?? min(devicePix
   on a GPU-bound screen 0.85, then 0.75, down to the floor, before the frame rate drops. `time:rate` carries it; the
   renderer draws at it from the next frame, reason `"rate"`. The default, `{ floor: 0.75, devices: "phone" }`, applies
   on a phone only (a coarse pointer and a short side of at most 820 CSS px, read at start), so a phone at resolution 2
-  draws the memory screen at 1.5 before it drops to 60 fps. Every change redraws the canvas and retakes each kept
-  picture once; the rule holds a lower scale at least twice its dwell, so a picture never goes live from it.
+  draws the memory screen at 1.5 before it drops to 60 fps. Every change redraws the canvas. A kept picture keeps its
+  textures: a step down retakes nothing, a step back finds it at its resolution, and a step up past it is paid at most
+  four pictures a frame (see "Kept pictures"); the rule holds a lower scale at least twice its dwell.
 - `app.renderer.monitor.setResolution(n)` overrides them all, in every build: a player's graphics
   setting is applied by it from an effect, and the A/B runs of a debug build switch with it.
   `undefined` hands the choice back. Outside 0.5 to 4 it throws a `RangeError`. While it holds the
@@ -1032,20 +1033,32 @@ What each stage depends on, and the only stage redone when it changes:
 
 | Change | Redone |
 |---|---|
-| A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, the stack resolution | stages 1, 2, 3 |
+| A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, a filter that writes its own `resolution` | stages 1, 2, 3 |
+| A step of the renderer resolution down, or back to the resolution of the picture | nothing: the quad draws its picture resampled; a picture cut to the canvas or with a `"placed"` filter: stages 1, 2, 3, or stage 3 on a stack of a fixed resolution |
+| A step of the renderer resolution up, past the resolution of the picture | at most four pictures a frame: stages 1, 2, 3, or stage 3 on a stack of a fixed resolution |
 | Its world scale or rotation (an ancestor's zoom) | nothing: the quad is drawn scaled within 2× of the take either way, past it stages 1, 2, 3, and once at rest |
 | An ancestor's alpha | nothing: the quad hangs in the view's parent and is faded with it |
 | What the chain of the first filter with inputs draws (`inputs.version()`) | stages 2, 3 |
-| A filter value (`effects` calls `invalidate` before the write), the renderer resolution, the padding, a `"placed"` filter's move | stage 3; for a stack of alphas nothing: the quad's alpha |
+| A filter value (`effects` calls `invalidate` before the write), the padding, a `"placed"` filter's move | stage 3; on a stack whose resolution followed a step stages 1, 2, 3, so a picture is never a mix of two; for a stack of alphas nothing: the quad's alpha |
 | A move of the view itself | nothing: the quad moves; a picture cut to the canvas: stages 1, 2, 3 |
 | The canvas size, for a picture cut to it | stages 1, 2, 3 |
 
 Moving and changing. A view that moves keeps its picture: only the quad's position is written. A move
 of a fraction of a texel draws the quad off its grid (sampled linearly) while it moves; at rest it is
-taken once more at its new phase (a settle retake, for which one frame is asked). Adaptivity: a view
+taken once more at its new phase (a settle retake, for which one frame is asked), at most two pictures
+a frame, the others in the next frames: forty pictures that stop together refine over twenty frames. Adaptivity: a view
 is taken after it stood still for 2 drawn frames; a kept view whose subtree changes in 3 drawn frames
 in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
 more than live). A kept view inside another is rendered first; its change retakes the outer one too.
+
+A step of the renderer resolution (F126). A step is neither a move nor a change of a picture: a picture drawn at a
+higher or equal resolution than the canvas stays as it is, drawn as a sprite resampled, and a step back finds it current.
+A picture drawn lower is taken again, also while it moves: at most two takes a frame, shared with the settle retakes
+above, each frame with a debt asking for the next. A picture on a stack of a fixed resolution only redoes its output. A
+kept view around refined ones waits for them and is taken once, when it is itself coarser and takes a new stack
+resolution; any other outer view is marked as above, which does not count as churn. A settle waits for the end of a step, except after a zoom. Pictures
+cut to the canvas or with a `"placed"` filter keep their retake, as does a mixed stack whose fixed resolution the step
+crosses. Overlay range pictures are retaken on a step, one render each.
 
 First takes in a frame (F114). A view whose filters are all alphas is taken in its first frame unchanged (the first
 frame it is drawn counts as unchanged): its picture costs one pass, live costs two. Any other view takes its first
@@ -1123,7 +1136,8 @@ A call without a boolean switches nothing and warns `renderer:debug-kept-needs-b
 reads the switch.
 With `debug.verifyFrames` on (dev and debug builds), every drawn frame in which a picture stood is
 read twice, as drawn and with every picture drawn live, and compared; a difference logs
-`renderer:stale-picture` and draws every view live until the policy takes it again. A frame in which a picture
+`renderer:stale-picture` and draws every view live until the policy takes it again. A frame with a picture drawn at
+another resolution than the canvas (F126) is resampled, not stale: it is skipped and counted. A frame in which a picture
 moves off its grid or hangs under a translucent ancestor is skipped and counted, not compared: a fading ancestor fades
 the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design.
 
@@ -1173,14 +1187,14 @@ from two append-only lists.
 |---|---|
 | `"first"` | Taken from live. |
 | `"mark"` | Its subtree changed: `by` the marked view, or the inner kept view whose drawing changed. |
-| `"inner-first"` | A view inside it took its first picture (F114): `by` that view. |
-| `"resolution"` | The stack's or the canvas's resolution moved. |
-| `"settle"` | It came to rest off its picture's grid. |
+| `"inner-first"` | A view inside it took its first picture (F114), or was settled or refined (F126): `by` the view of the mark, not counted as churn. |
+| `"resolution"` | The stack's resolution moved by a filter of its own, or a step up, or a step over a picture that keeps no step (cut to the canvas, `"placed"`, a mixed stack). |
+| `"settle"` | It came to rest off its picture's grid, at most four a frame. |
 | `"scale-limit"` | A zoom past 2× from the take. |
 | `"placed-move"` | A zoom on a picture that is not drawn scaled: `"placed"`, or cut to the canvas. |
 | `"canvas"` | A picture cut to the canvas moved, or the canvas changed size. |
-| `"filter"` | Stage 3 alone. |
-| `"chain"` | Stages 2 and 3. |
+| `"filter"` | Stage 3 alone; a whole take on a stack whose resolution followed a step. |
+| `"chain"` | Stages 2 and 3; a whole take on a stack whose resolution followed a step. |
 
 ### Range pictures
 
