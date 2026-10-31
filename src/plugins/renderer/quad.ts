@@ -18,34 +18,62 @@ export const VECTOR = 4;
 /** A uniform of the group as Pixi takes it. */
 type Vector = { value: Float32Array; type: "vec4<f32>" };
 
+/** The six vectors of the group, under the names Pixi's filter system fills. */
+export type FilterGlobals = {
+  uInputSize: Float32Array;
+  uInputPixel: Float32Array;
+  uInputClamp: Float32Array;
+  uOutputFrame: Float32Array;
+  uGlobalFrame: Float32Array;
+  uOutputTexture: Float32Array;
+};
+
+/** The group of the global filter uniforms, and its vectors: the arrays the group itself reads. */
+export type FilterGlobalsHandle = {
+  readonly group: PixiUniformGroup;
+  readonly vectors: FilterGlobals;
+};
+
 /**
- * One vector of the group, all zeros.
+ * One vector of the group, over an array the caller keeps.
  *
+ * @param value - The array.
  * @returns The uniform.
  */
-function vector(): Vector {
-  return { value: new Float32Array(VECTOR), type: "vec4<f32>" };
+function vector(value: Float32Array): Vector {
+  return { value, type: "vec4<f32>" };
 }
 
 /**
- * The group of the numbers a filter pass hands a body, under the names Pixi's filter system fills. Static: a group that
- * is not is uploaded on every draw, and a shaded view changes these only when it moves or its picture changes size.
+ * The group of the numbers a filter pass hands a body, under the names Pixi's filter system fills, and the arrays it
+ * reads, typed. Static: a group that is not is uploaded on every draw, and a shaded view changes these only when it
+ * moves or its picture changes size.
  *
  * @param pixi - The module that draws.
- * @returns The group, zeros.
+ * @returns The group, zeros, and its vectors.
  */
-export function filterGlobals(pixi: PixiModule): PixiUniformGroup {
-  return new pixi.UniformGroup(
+export function filterGlobals(pixi: PixiModule): FilterGlobalsHandle {
+  const vectors: FilterGlobals = {
+    uInputSize: new Float32Array(VECTOR),
+    uInputPixel: new Float32Array(VECTOR),
+    uInputClamp: new Float32Array(VECTOR),
+    uOutputFrame: new Float32Array(VECTOR),
+    uGlobalFrame: new Float32Array(VECTOR),
+    uOutputTexture: new Float32Array(VECTOR)
+  };
+  const group = new pixi.UniformGroup(
     {
-      uInputSize: vector(),
-      uInputPixel: vector(),
-      uInputClamp: vector(),
-      uOutputFrame: vector(),
-      uGlobalFrame: vector(),
-      uOutputTexture: vector()
+      uInputSize: vector(vectors.uInputSize),
+      uInputPixel: vector(vectors.uInputPixel),
+      uInputClamp: vector(vectors.uInputClamp),
+      uOutputFrame: vector(vectors.uOutputFrame),
+      uGlobalFrame: vector(vectors.uGlobalFrame),
+      uOutputTexture: vector(vectors.uOutputTexture)
     },
     { isStatic: true }
   );
+
+  return { group, vectors };
 }
 
 /**

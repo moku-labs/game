@@ -242,13 +242,11 @@ function shadeFits(kctx: KeptCtx, record: KeptRecord): boolean {
   if (NOW.rs !== NOW.r || drawsDirect(NOW)) return false;
 
   const slot = enabledSlot(record.slots);
+  const bodyOnQuad = slot?.quad !== undefined && slot.inputs === undefined;
+  const followsCanvas = slot?.filter.resolution === "inherit";
+  const meshStands = !record.shaded || record.shade?.mesh.destroyed !== true;
 
-  return (
-    slot?.quad !== undefined &&
-    slot.inputs === undefined &&
-    slot.filter.resolution === "inherit" &&
-    (!record.shaded || record.shade?.mesh.destroyed !== true)
-  );
+  return bodyOnQuad && followsCanvas && meshStands;
 }
 
 /**
@@ -2075,6 +2073,7 @@ function refreshOutput(
   view: View,
   hold: boolean
 ): boolean {
+  // A stack that stopped fitting leaves first: what follows draws for a sprite.
   const fits = shadeFits(kctx, record);
   const unfit = record.shaded && !fits;
 
@@ -2083,27 +2082,32 @@ function refreshOutput(
   // What a record left holds is the padded picture, not a filter output: stage 3 is owed whatever the keys say.
   const owed = Math.max(stagesOwed(record, hold), unfit ? OWED.output : OWED.none);
 
+  // Nothing owed: the one thing left to ask is whether a shaded record rested long enough.
   if (owed === OWED.none) return leaveAtRest(kctx, pixi, matrices, record, view, hold);
 
   const chain = owed === OWED.chain;
   const why = refreshWhy(record, chain, hold);
 
+  // Under a held step what is owed lands on one resolution: the record is taken whole.
   if (hold && record.key[KEY.rs] !== NOW.rs) {
     retakeOrGoLive(kctx, pixi, matrices, record, view, why);
 
     return true;
   }
 
+  // A chain that left goes before the mesh or stage 3 draws without it.
   const inputs = firstInputs(record.slots)?.inputs;
 
   if (inputs === undefined && record.s2Of !== undefined) releaseInputs(kctx, record);
 
-  if (!unfit && enteredOrShaded(kctx, pixi, record, owed, fits)) {
+  // On the mesh a change is no take and no filter pass.
+  if (!unfit && enterShadeWhenDue(kctx, pixi, record, owed, fits)) {
     redrawShade(kctx, pixi, matrices, record);
 
     return false;
   }
 
+  // The tail of a sprite: stage 2 when its chain is owed, stage 3 over it.
   if (chain && inputs !== undefined) {
     renderStage2(kctx, pixi, matrices, record, { inputs, resolution: NOW.r, padding: NOW.P });
   }
@@ -2157,9 +2161,9 @@ function redrawShade(
 }
 
 /**
- * Tells whether a refresh of a record is drawn by its mesh: it is shaded, or stage 3 alone was owed more than `QUAD_AFTER`
- * times without a gap of `CALM_AFTER` frames and it fits, and it enters now. The gap rule, not a reset on a quiet frame: a
- * tween that writes every second frame reaches the mode.
+ * Counts an output owed by a record on its sprite, and puts the record on its mesh when it is due: stage 3 alone was owed
+ * more than `QUAD_AFTER` times without a gap of `CALM_AFTER` frames, and it fits. The gap rule, not a reset on a quiet
+ * frame: a tween that writes every second frame reaches the mode. A shaded record counts nothing.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -2168,7 +2172,7 @@ function redrawShade(
  * @param fits - It fits the mode.
  * @returns True when the mesh draws the change.
  */
-function enteredOrShaded(
+function enterShadeWhenDue(
   kctx: KeptCtx,
   pixi: PixiModule,
   record: KeptRecord,
@@ -2183,14 +2187,23 @@ function enteredOrShaded(
   record.outputAt = frame;
 
   const quad = enabledSlot(record.slots)?.quad;
+  const outputAlone = owed === OWED.output;
+  const ranLong = record.outputRuns > QUAD_AFTER;
 
-  if (owed !== OWED.output || !fits || record.outputRuns <= QUAD_AFTER || quad === undefined) {
-    return false;
-  }
+  if (!outputAlone || !fits || !ranLong || quad === undefined) return false;
 
-  enterShade(kctx, pixi, record, quad, NOW);
+  return enterShade(kctx, pixi, record, quad, NOW);
+}
 
-  return true;
+/**
+ * Tells whether a shaded record went `QUAD_CALM` drawn frames without a change: it is due to leave.
+ *
+ * @param state - The kept state.
+ * @param record - The record.
+ * @returns True when it is.
+ */
+function shadedCalm(state: KeptState, record: KeptRecord): boolean {
+  return record.shaded && state.frame - record.shadedAt >= QUAD_CALM;
 }
 
 /**
@@ -2217,7 +2230,8 @@ function leaveAtRest(
 ): boolean {
   const { state } = kctx;
 
-  if (!record.shaded || state.frame - record.shadedAt < QUAD_CALM || !limitLeft(kctx)) return false;
+  // The limit is read last: asking it counts a take.
+  if (!shadedCalm(state, record) || !limitLeft(kctx)) return false;
 
   leaveShade(record);
 
@@ -2299,7 +2313,7 @@ function owesStep(state: KeptState, record: KeptRecord): boolean {
     record.settle ||
     record.coarse ||
     record.churn !== 0 ||
-    (record.shaded && state.frame - record.shadedAt >= QUAD_CALM)
+    shadedCalm(state, record)
   );
 }
 

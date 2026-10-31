@@ -990,6 +990,25 @@ describe("what a shaded view frees", () => {
     expect(shadeOf(record).gfu).toBe(gfu);
   });
 
+  // Bug: an entry with no sprite to take the place of throws inside the flush.
+  it("a record that lost its sprite stays on stage 3 and gets a sprite back", async () => {
+    const drawn = await open();
+    const card = keptCard(drawn);
+    const record = recordOf(drawn, card);
+
+    write(drawn, card);
+    write(drawn, card);
+    record.quad?.destroy();
+    record.quad = undefined;
+    // A sprite made again takes its matrix only from a key that differs.
+    record.key[KEY.qa] = Number.NaN;
+    write(drawn, card);
+
+    expect(record.shaded).toBe(false);
+    expect(record.shade).toBeUndefined();
+    expect(record.quad).toBeInstanceOf(pixi.Sprite);
+  });
+
   // Bug: a `fu: undefined` key throws in Pixi's shader.
   it("a filter that binds no numbers enters with no fu", async () => {
     const drawn = await open();
@@ -1014,6 +1033,31 @@ describe("the reports", () => {
     shaded(drawn, card);
 
     expect(drawn.mock.api.sync.debug.why()[0]).toMatchObject({ mode: "kept", quad: true });
+  });
+
+  // Bug: the docs of `quad` show a report no game session ever reads: the two stage 3 passes before the entry are takes.
+  it("why() names the outputs before the entry for the second they fell in, then no take", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const drawn = await open();
+    const { kept } = drawn.mock.modules;
+    const card = keptCard(drawn);
+
+    kept.drainTakes();
+    shaded(drawn, card);
+    kept.drainTakes();
+
+    expect(drawn.mock.api.sync.debug.why()[0]).toMatchObject({
+      // eslint-disable-next-line unicorn/no-null -- the report says `null` for no entity behind a take.
+      retake: { why: "filter", by: null },
+      quad: true
+    });
+
+    write(drawn, card);
+    kept.drainTakes();
+
+    // eslint-disable-next-line unicorn/no-null -- the report says `null` for no take.
+    expect(drawn.mock.api.sync.debug.why()[0]).toMatchObject({ retake: null, quad: true });
   });
 
   // Bug: the counter that gates the A26 line reads wrong.

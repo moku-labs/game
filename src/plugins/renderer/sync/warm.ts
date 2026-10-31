@@ -199,7 +199,7 @@ function quadMesh(pixi: PixiModule): WarmMesh {
   mesh.label = "renderer.warm.quad";
   mesh.scale.set(PROBE_SIZE);
 
-  return { mesh, geometry, gfu: filterGlobals(pixi), shader: undefined };
+  return { mesh, geometry, gfu: filterGlobals(pixi).group, shader: undefined };
 }
 
 /**
@@ -470,13 +470,13 @@ export function warmFilter(
 }
 
 /**
- * Tells a filter's quad from the filter among the subjects that are no names.
+ * Tells a filter's quad from every other subject.
  *
  * @param subject - The subject.
  * @returns True for a quad.
  */
-function isQuad(subject: Exclude<WarmSubject, string>): subject is WarmQuad {
-  return "quad" in subject;
+function isQuadSubject(subject: WarmSubject): subject is WarmQuad {
+  return typeof subject !== "string" && "quad" in subject;
 }
 
 /**
@@ -486,7 +486,7 @@ function isQuad(subject: Exclude<WarmSubject, string>): subject is WarmQuad {
  * @returns The filter.
  */
 function filterOf(subject: Exclude<WarmSubject, string>): PixiFilter {
-  return isQuad(subject) ? subject.filter : subject;
+  return isQuadSubject(subject) ? subject.filter : subject;
 }
 
 /**
@@ -525,7 +525,7 @@ function nodeOf(
   subject: WarmSubject
 ): PixiContainer | undefined {
   if (typeof subject !== "string") {
-    if (isQuad(subject)) return quadNode(pixi, objects, subject);
+    if (isQuadSubject(subject)) return quadNode(pixi, objects, subject);
 
     objects.list[0] = subject;
     objects.holder.filters = objects.list;
@@ -599,7 +599,7 @@ function scopeLost(): void {
  * @returns The device whose scope is open, `undefined` for any other subject or with no device.
  */
 function openScope(sctx: SyncCtx, subject: WarmSubject): GPUDevice | undefined {
-  if (typeof subject === "string" || !isQuad(subject)) return undefined;
+  if (!isQuadSubject(subject)) return undefined;
 
   const device = sctx.deps.host.device();
 
@@ -617,7 +617,7 @@ function openScope(sctx: SyncCtx, subject: WarmSubject): GPUDevice | undefined {
  * @param subject - The subject of the draw.
  */
 function closeScope(sctx: SyncCtx, device: GPUDevice, subject: WarmSubject): void {
-  const program = typeof subject !== "string" && isQuad(subject) ? subject.quad.program.name : "";
+  const program = isQuadSubject(subject) ? subject.quad.program.name : "";
 
   device
     .popErrorScope()
@@ -627,6 +627,28 @@ function closeScope(sctx: SyncCtx, device: GPUDevice, subject: WarmSubject): voi
       }
     })
     .catch(scopeLost);
+}
+
+/**
+ * Takes a subject out of the probe tree after its render, thrown or not: the tree holds it only during its own render.
+ * A filter comes off the holder, and a quad's shader goes: it was made for this draw.
+ *
+ * @param objects - The probe tree.
+ * @param node - The node the subject hung from.
+ */
+function takeDown(objects: WarmObjects, node: PixiContainer): void {
+  node.removeFromParent();
+  objects.clipFrame.removeFromParent();
+
+  if (node === objects.holder) {
+    clearFilters(objects.holder);
+    objects.list.length = 0;
+  }
+
+  if (node === objects.quad?.mesh) {
+    objects.quad.shader?.destroy();
+    objects.quad.shader = undefined;
+  }
 }
 
 /**
@@ -669,18 +691,7 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
   } finally {
     if (scope !== undefined) closeScope(sctx, scope, draw.subject);
 
-    node.removeFromParent();
-    objects.clipFrame.removeFromParent();
-
-    if (node === objects.holder) {
-      clearFilters(objects.holder);
-      objects.list.length = 0;
-    }
-
-    if (node === objects.quad?.mesh) {
-      objects.quad.shader?.destroy();
-      objects.quad.shader = undefined;
-    }
+    takeDown(objects, node);
   }
 }
 

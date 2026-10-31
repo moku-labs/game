@@ -733,7 +733,8 @@ export type WhyEntry = {
    * ```ts
    * // A lens whose angle a tween writes every frame: from its third write on, it runs on the canvas pass.
    * app.renderer.sync.debug.why()[0];
-   * // { view: "Shape#1048590 shop:lens", mode: "kept", reason: null, calmIn: 0, retake: null, quad: true }
+   * // { view: "Shape#1048590 shop:lens", mode: "kept", reason: null, calmIn: 0, retake: { why: "filter", by: null }, quad: true }
+   * // A full second on: no take is left in the last one, `retake` is null and `quad` stays true.
    * ```
    */
   quad?: true;

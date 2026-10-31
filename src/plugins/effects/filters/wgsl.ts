@@ -75,7 +75,9 @@ export function uniformStruct(uniforms: readonly UniformSpec[], group = 1): stri
  * @returns The WGSL lines, or `""`.
  * @example
  * ```ts
- * inputBindings([blurInput]).includes("fn sampleBlur(uv: vec2<f32>) -> vec4<f32>"); // true
+ * const soft = { name: "soft", from: "input", texture: "uSoft", sampler: "uSoftSampler", sample: "sampleSoft", scale: { name: "softScale", type: "f32", form: "number", size: 1 }, clamp: { name: "softClamp", type: "vec4<f32>", form: "vector", size: 4 }, stages: [], chain: () => [] } as const;
+ *
+ * inputBindings([soft]).includes("fn sampleSoft(uv: vec2<f32>) -> vec4<f32>"); // true
  * ```
  */
 export function inputBindings(inputs: readonly FilterInputDefinition[]): string {
@@ -148,7 +150,7 @@ fn sampleBack(uv: vec2<f32>) -> vec4<f32> {
  * @returns The WGSL source both stages are built from.
  * @example
  * ```ts
- * assemble([], [], body, undefined, true).includes("fn sampleBack(uv: vec2<f32>) -> vec4<f32>"); // true
+ * assemble([], [], "", undefined, true).includes("fn sampleBack(uv: vec2<f32>) -> vec4<f32>"); // true
  * ```
  */
 export function assemble(

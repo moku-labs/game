@@ -25,15 +25,8 @@ import type { KeptCtx, KeptMatrices, KeptQuad, KeptRecord, KeptShade, KeptState 
 /** The numbers `renderShade` wants in the group this frame, in the order of `writeGlobals`. One array: it allocates nothing. */
 const WANTED = new Float32Array(6 * VECTOR);
 
-/** The global filter uniforms as `uniforms` holds them: what Pixi's filter system fills for a filter pass. */
-type FilterGlobals = {
-  uInputSize: Float32Array;
-  uInputPixel: Float32Array;
-  uInputClamp: Float32Array;
-  uOutputFrame: Float32Array;
-  uGlobalFrame: Float32Array;
-  uOutputTexture: Float32Array;
-};
+/** `uOutputTexture.z` of a pass that ends on the canvas: Pixi's sign for a root target, which turns `y` over. */
+const ROOT_TARGET = -1;
 
 /**
  * The first enabled slot of a stack: the one slot of a stack that fits the mode.
@@ -112,6 +105,7 @@ function meshOf(
  * @param record - The record.
  * @param quad - The slot's quad.
  * @param output - The texture the record draws from.
+ * @param sprite - The sprite of the record's picture.
  * @returns The shade.
  */
 function makeShade(
@@ -119,18 +113,19 @@ function makeShade(
   pixi: PixiModule,
   record: KeptRecord,
   quad: FilterSlotQuad,
-  output: PixiRenderTexture
+  output: PixiRenderTexture,
+  sprite: PixiSprite
 ): KeptShade {
-  const gfu = filterGlobals(pixi);
+  const { group, vectors } = filterGlobals(pixi);
   const { source } = output;
-  const shader = quadShader(pixi, quad, gfu, source);
+  const shader = quadShader(pixi, quad, group, source);
 
   return {
     mesh: meshOf(kctx, pixi, record, shader),
     shader,
-    gfu,
-    // Out of the mode the quad is the sprite.
-    sprite: record.quad as PixiSprite,
+    gfu: group,
+    vectors,
+    sprite,
     quad,
     source,
     copied: -1,
@@ -166,6 +161,7 @@ function swapQuad(from: KeptQuad, to: KeptQuad): void {
  * @param now - The frame's numbers.
  * @param now.r - The renderer resolution.
  * @param now.P - The padding sum of the enabled filters.
+ * @returns True when the record is on its mesh; false for a record with no sprite to take the place of.
  */
 export function enterShade(
   kctx: KeptCtx,
@@ -173,20 +169,27 @@ export function enterShade(
   record: KeptRecord,
   quad: FilterSlotQuad,
   now: { readonly r: number; readonly P: number }
-): void {
+): boolean {
+  const sprite = record.quad;
+
+  // Out of the mode the quad is the sprite `placeQuad` made.
+  if (!(sprite instanceof pixi.Sprite)) return false;
+
   const output = outputOf(kctx, pixi, record, now.r, now.P);
-  const shade = record.shade ?? makeShade(kctx, pixi, record, quad, output);
+  const shade = record.shade ?? makeShade(kctx, pixi, record, quad, output, sprite);
 
   record.shade = shade;
 
   if (shade.mesh.destroyed) shade.mesh = meshOf(kctx, pixi, record, shade.shader);
 
-  shade.sprite = record.quad as PixiSprite;
-  swapQuad(shade.sprite, shade.mesh);
+  shade.sprite = sprite;
+  swapQuad(sprite, shade.mesh);
   record.quad = shade.mesh;
   record.shaded = true;
   shade.copied = -1;
   record.key[KEY.qa] = Number.NaN;
+
+  return true;
 }
 
 /**
@@ -266,8 +269,8 @@ function writeVector(target: Float32Array, at: number): boolean {
  * @param source - The padded picture.
  * @param now - The frame's numbers.
  * @param now.r - The renderer resolution.
- * @param now.tx - The top's translation now.
- * @param now.ty - The top's translation now.
+ * @param now.tx - The top's x translation now.
+ * @param now.ty - The top's y translation now.
  */
 function writeGlobals(
   kctx: KeptCtx,
@@ -283,42 +286,84 @@ function writeGlobals(
   const screenHeight = screen?.height ?? 0;
   const Ps = key[KEY.Ps] ?? 0;
 
+  // `uInputSize`: the padded picture is the whole input, CSS px and their inverse.
   WANTED[0] = width;
   WANTED[1] = height;
   WANTED[2] = 1 / width;
   WANTED[3] = 1 / height;
+  // `uInputPixel`: the same in device pixels.
   WANTED[4] = pixelWidth;
   WANTED[5] = pixelHeight;
   WANTED[6] = 1 / pixelWidth;
   WANTED[7] = 1 / pixelHeight;
+  // `uInputClamp`: half a texel in from each edge of the whole texture.
   WANTED[8] = 0.5 / pixelWidth;
   WANTED[9] = 0.5 / pixelHeight;
   WANTED[10] = 1 - 0.5 / pixelWidth;
   WANTED[11] = 1 - 0.5 / pixelHeight;
+  // `uOutputFrame`: the padded picture's canvas place `O + Δ`, at its CSS size.
   WANTED[12] = (key[KEY.X0] ?? 0) - Ps + now.tx - (key[KEY.tx] ?? 0);
   WANTED[13] = (key[KEY.Y0] ?? 0) - Ps + now.ty - (key[KEY.ty] ?? 0);
   WANTED[14] = width;
   WANTED[15] = height;
-  // Pixi's numbers for a pass that ends on the canvas: no parent filter, so no offset.
+  // `uGlobalFrame`: Pixi's numbers for a pass that ends on the canvas: no parent filter, so no offset.
   WANTED[16] = 0;
   WANTED[17] = 0;
   WANTED[18] = screenWidth * now.r;
   WANTED[19] = screenHeight * now.r;
+  // `uOutputTexture`: the canvas is the target.
   WANTED[20] = screenWidth;
   WANTED[21] = screenHeight;
-  WANTED[22] = -1;
+  WANTED[22] = ROOT_TARGET;
   WANTED[23] = 0;
 
-  const globals = shade.gfu.uniforms as FilterGlobals;
-  let differs = writeVector(globals.uInputSize, 0);
+  const { vectors } = shade;
+  let differs = writeVector(vectors.uInputSize, 0);
 
-  differs = writeVector(globals.uInputPixel, VECTOR) || differs;
-  differs = writeVector(globals.uInputClamp, 2 * VECTOR) || differs;
-  differs = writeVector(globals.uOutputFrame, 3 * VECTOR) || differs;
-  differs = writeVector(globals.uGlobalFrame, 4 * VECTOR) || differs;
-  differs = writeVector(globals.uOutputTexture, 5 * VECTOR) || differs;
+  differs = writeVector(vectors.uInputPixel, VECTOR) || differs;
+  differs = writeVector(vectors.uInputClamp, 2 * VECTOR) || differs;
+  differs = writeVector(vectors.uOutputFrame, 3 * VECTOR) || differs;
+  differs = writeVector(vectors.uGlobalFrame, 4 * VECTOR) || differs;
+  differs = writeVector(vectors.uOutputTexture, 5 * VECTOR) || differs;
 
   if (differs) shade.gfu.update();
+}
+
+/**
+ * Copies the subtree picture into the output at `translate(Ps, Ps)`, no filter, a cleared target: the padded picture the
+ * body reads. One pass, counted.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, shaded, its `Ps` written.
+ * @param output - The output.
+ * @returns True when Pixi rendered it.
+ */
+function copyPadded(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  output: PixiRenderTexture
+): boolean {
+  const { key, shade } = record;
+  const copy = copyOf(kctx.state, pixi);
+  const Ps = key[KEY.Ps] ?? 0;
+
+  copy.texture = record.s1 ?? pixi.Texture.EMPTY;
+  matrices.m3.set(1, 0, 0, 1, Ps, Ps);
+
+  if (shade === undefined || !kctx.host.renderTo(copy, output, matrices.m3, true)) return false;
+
+  const { source } = output;
+
+  kctx.state.flushPasses += 1;
+  shade.copied = record.s1Version;
+  shade.copiedWidth = source.pixelWidth;
+  shade.copiedHeight = source.pixelHeight;
+
+  return true;
 }
 
 /**
@@ -335,8 +380,8 @@ function writeGlobals(
  * @param now - The frame's numbers.
  * @param now.r - The renderer resolution.
  * @param now.P - The padding sum of the enabled filters.
- * @param now.tx - The top's translation now.
- * @param now.ty - The top's translation now.
+ * @param now.tx - The top's x translation now.
+ * @param now.ty - The top's y translation now.
  * @returns True when the copy, if one was owed, rendered.
  */
 export function renderShade(
@@ -350,10 +395,12 @@ export function renderShade(
 
   if (shade === undefined) return false;
 
+  // The output at its size, without a size object or a label while the size stands.
   const output = outputOf(kctx, pixi, record, now.r, now.P);
   const { source } = output;
   const quad = enabledSlot(record.slots)?.quad;
 
+  // The numbers of the instance the slot holds now: the old one may go at any moment.
   if (quad !== undefined && quad !== shade.quad) rebuildShader(pixi, shade, quad, source);
 
   // An evicted record comes back on another texture from the pool.
@@ -366,27 +413,22 @@ export function renderShade(
     shade.copied = -1;
   }
 
+  // `outputOf` resizes `s3` in place, which blanks it without moving `s1Version`.
   const resized =
     source.pixelWidth !== shade.copiedWidth || source.pixelHeight !== shade.copiedHeight;
 
-  if (shade.copied !== record.s1Version || resized) {
-    const copy = copyOf(kctx.state, pixi);
-    const Ps = key[KEY.Ps] ?? 0;
-
-    copy.texture = record.s1 ?? pixi.Texture.EMPTY;
-    matrices.m3.set(1, 0, 0, 1, Ps, Ps);
-
-    if (!kctx.host.renderTo(copy, output, matrices.m3, true)) return false;
-
-    kctx.state.flushPasses += 1;
-    shade.copied = record.s1Version;
-    shade.copiedWidth = source.pixelWidth;
-    shade.copiedHeight = source.pixelHeight;
+  if (
+    (shade.copied !== record.s1Version || resized) &&
+    !copyPadded(kctx, pixi, matrices, record, output)
+  ) {
+    return false;
   }
 
+  // What the body reads of its place: in `uOutputFrame.xy`, so `keptOrigin` stays 0.
   writeGlobals(kctx, record, shade, source, now);
   setOrigins(record.slots, 0, 0);
 
+  // The keys stage 3 writes: what `outputOwed` compares with the next frame.
   key[KEY.r] = now.r;
   key[KEY.P] = now.P;
   key[KEY.s3Tx] = now.tx;

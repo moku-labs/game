@@ -618,8 +618,8 @@ export function setOrigins(slots: readonly FilterSlot[], x: number, y: number): 
  * @param now - The frame's numbers.
  * @param now.r - The renderer resolution.
  * @param now.P - The padding sum of the enabled filters.
- * @param now.tx - The top's translation now.
- * @param now.ty - The top's translation now.
+ * @param now.tx - The top's x translation now.
+ * @param now.ty - The top's y translation now.
  * @returns True when Pixi rendered it.
  */
 export function renderStage3(

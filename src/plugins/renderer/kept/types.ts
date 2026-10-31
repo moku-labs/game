@@ -3,6 +3,7 @@
  * keeps.
  */
 import type { Entity } from "../../world/types";
+import type { FilterGlobals } from "../quad";
 import type {
   FilterSlot,
   FilterSlotInputs,
@@ -290,6 +291,8 @@ export type KeptShade = {
   shader: PixiShader;
   /** The global filter uniforms a filter pass would hand the body; static, uploaded only when a value changed. */
   readonly gfu: PixiUniformGroup;
+  /** The arrays `gfu` reads, typed. */
+  readonly vectors: FilterGlobals;
   /** The sprite of the record's picture, out of the tree while the mesh draws. */
   sprite: PixiSprite;
   /** The slot's quad the shader was built from. */
