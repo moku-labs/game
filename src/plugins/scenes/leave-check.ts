@@ -106,6 +106,7 @@ const ENTER_COVER_RULES: Readonly<Record<string, FieldRule>> = Object.freeze({
 /** The fields of a loader. */
 const LOADER_RULES: Readonly<Record<string, FieldRule>> = Object.freeze({
   afterMs: { ok: isDuration, hint: "the milliseconds the loader waits for, 0 or more" },
+  holdMs: { ok: isDuration, hint: "the milliseconds the swap waits for, 0 or more" },
   texture: { ok: isName, hint: 'an asset key such as "ui.loader.ring"' },
   projection: { ok: isName, hint: 'the name of a registered projection such as "loading"' }
 });

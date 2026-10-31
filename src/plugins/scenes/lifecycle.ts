@@ -4,6 +4,7 @@
  * teardown that removes exactly those registrations.
  */
 import { assetsPlugin } from "../assets";
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
@@ -18,11 +19,11 @@ import { beginScene, enterScene } from "./switch";
 import type { Config, Deps, KernelSlice, ScenesCtx, State } from "./types";
 
 /**
- * Resolves the dependency APIs `flow`, `world`, `assets`, `time`, `model` and `renderer` with
- * `ctx.require`.
+ * Resolves the dependency APIs `flow`, `world`, `assets`, `time`, `clock`, `model` and `renderer`
+ * with `ctx.require`.
  *
  * @param ctx - Kernel context of the scenes plugin.
- * @returns The six dependency APIs.
+ * @returns The seven dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
@@ -30,6 +31,7 @@ export function resolveDeps(ctx: KernelSlice): Deps {
     world: ctx.require(worldPlugin),
     assets: ctx.require(assetsPlugin),
     time: ctx.require(timePlugin),
+    clock: ctx.require(clockPlugin),
     model: ctx.require(modelPlugin),
     renderer: ctx.require(rendererPlugin)
   };
