@@ -364,6 +364,68 @@ describe("anim/tween driver", () => {
     expect(mock.world.ecs.get(entity, Transform)?.y).toBeCloseTo(5, 6);
   });
 
+  it.each([
+    [
+      "a release: the pose is written, then the way home starts",
+      (mock: MockAnim, driver: TweenDriver, entity: Entity): void => {
+        mock.world.ecs.set(entity, Transform, { x: 300 });
+        driver.track(entity, Transform, { x: 0 }, { ms: 100, ease: "linear" }, open);
+      }
+    ],
+    [
+      "a press: the lift starts, then the pose is written in the same frame",
+      (mock: MockAnim, driver: TweenDriver, entity: Entity): void => {
+        driver.track(entity, Transform, { x: 0 }, { ms: 100, ease: "linear" }, open);
+        mock.world.ecs.set(entity, Transform, { x: 300 });
+      }
+    ]
+  ] as const)("starts a track that takes a field over from the written pose on %s", (_what, take) => {
+    const { mock, driver, entity } = setup();
+
+    driver.track(entity, Transform, { x: 100 }, { ms: 100, ease: "linear" }, open);
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(50);
+
+    take(mock, driver, entity);
+    step(mock, 50);
+
+    // Half the way from 300, not from the 50 the old track left in its base.
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(150);
+  });
+
+  it("does not fold an additive offset into the start of a track that takes a field over", () => {
+    const { mock, driver, entity } = setup();
+
+    driver.track(
+      entity,
+      Transform,
+      { x: 0 },
+      {
+        ms: 400,
+        ease: "linear",
+        additive: true,
+        repeat: "forever",
+        segments: [
+          { at: 0.5, to: { x: 10 } },
+          { at: 1, to: { x: 0 } }
+        ]
+      },
+      open
+    );
+    driver.track(entity, Transform, { x: 100 }, { ms: 100, ease: "linear" }, open);
+    step(mock, 50);
+
+    // The field reads the base 50 plus the loop's 2.5.
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(52.5);
+
+    driver.track(entity, Transform, { x: 0 }, { ms: 100, ease: "linear" }, open);
+    step(mock, 50);
+
+    // Half the way from the base 50, plus the loop's 5 at 100 ms.
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(30);
+  });
+
   it("counts the Animation component up per track and removes it with cancelAll", () => {
     const { mock, driver, entity } = setup();
 
