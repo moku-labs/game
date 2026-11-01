@@ -779,9 +779,11 @@ export async function serveChild(run: ServeRun, deps: CliDeps): Promise<number> 
   const page = await deps.loadPage(path.join(run.root, ".moku", "index.html"));
   const server = serveOn(run, page.default);
   const assets = run.packed ? "packed build" : "raw assets";
+  // Listens first: the URL line says the server runs, and Ctrl+C right after it must find a listener.
+  const stopped = untilStopped(server, deps);
 
   deps.ui.info(`${path.basename(run.root)}: dev server, ${assets}. Ctrl+C stops it.`);
   deps.ui.line(server.url.href);
 
-  return untilStopped(server, deps);
+  return stopped;
 }

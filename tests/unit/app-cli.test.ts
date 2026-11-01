@@ -919,6 +919,27 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
     await expect(fetch(url)).rejects.toThrow();
   });
 
+  // Bug: a Ctrl+C right after the URL line finds no listener, and the child dies with 130.
+  it("listens to the stop signals before it prints the URL", async () => {
+    const root = makeGame({});
+    const { deps, seen } = fakeDeps(root, { env: { MOKU_GAME_CHILD: "1" } });
+    const listening: string[][] = [];
+    const print = deps.ui.line;
+
+    deps.ui.line = text => {
+      listening.push([...seen.handlers.keys()]);
+      print(text);
+    };
+
+    const running = runCommand(["dev", "--port", "0"], deps);
+
+    await waitFor(() => seen.out.length >= 2);
+    interrupt(seen);
+    await running;
+
+    expect(listening[0]?.toSorted()).toEqual(["SIGINT", "SIGTERM"]);
+  });
+
   it("answers a file and the manifest with no-store, so a reload shows the new bytes of an image", async () => {
     const root = makeGame({ "features/ui/assets/dot.png": "png" });
     const { running, seen, url } = await startChild(root);
