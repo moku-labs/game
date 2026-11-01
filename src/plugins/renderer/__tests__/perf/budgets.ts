@@ -166,6 +166,10 @@ export const BUDGET = {
   // F107 part 3: a frame after the fade-out while the loader's layer waits, at alpha 0, for its views to leave. New:
   // two fields and one length read.
   leaveWait: 0,
+  // F134: `shots.after` right after the stage render of a frame with nothing wanted, one shot held. New: one length read.
+  shotsIdle: 0,
+  // F134: the same in a game without `shots`. New: the same length read of an empty list.
+  shotsOff: 0,
   // F61 S3 slice B+D: a still pass over 300 views while two warm windows rest held, each a root with 300 elements
   // built aside and ready. New: the held list's count and world's membership version compared, `left()` read.
   warmHeldPass: 0,

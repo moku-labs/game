@@ -345,6 +345,8 @@ export type {
   PerfThermalLine,
   PoolTrim,
   AdaptiveScale,
+  ShotsApi,
+  ShotsConfig,
   PoolTrimDetail,
   ProblemEventDetail,
   ProblemRule,

@@ -281,6 +281,7 @@ export function createMockRenderer(
     uploads: 1,
     // The phone check of the engine's default asks `matchMedia` once more: the tests of the scale turn it on.
     adaptiveScale: false,
+    shots: undefined,
     ...options.config
   };
   const state = createRendererState({ config });

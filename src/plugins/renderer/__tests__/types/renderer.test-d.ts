@@ -34,6 +34,7 @@ import type {
   RenderStats,
   RetakeWhy,
   SafeArea,
+  ShotsConfig,
   SliceFrame,
   Under,
   ViewportSize,
@@ -433,3 +434,19 @@ filtersApi.area(1_048_590, [107, 101, 176]);
 // The warm-up answers whether the pipelines were created.
 expectTypeOf(filtersApi.warm(someFilter)).toEqualTypeOf<Promise<boolean>>();
 expectTypeOf<Config["warm"]>().toEqualTypeOf<number>();
+
+// `shots` is left out or whole: a size without its blur is no config; `keep` alone is optional.
+const shotsKept: ShotsConfig = { width: 96, height: 208, blur: 0, keep: 2 };
+// @ts-expect-error — a shot needs its height and its blur
+const shotsHalf: ShotsConfig = { width: 96 };
+
+declare const shotsApi: Api["shots"];
+
+expectTypeOf<Config["shots"]>().toEqualTypeOf<ShotsConfig | undefined>();
+expectTypeOf(shotsKept.keep).toEqualTypeOf<number | undefined>();
+expectTypeOf(shotsHalf.blur).toEqualTypeOf<number>();
+// @ts-expect-error — a key is an asset key, a string
+shotsApi.take(1);
+expectTypeOf(shotsApi.has("shot.room")).toEqualTypeOf<boolean>();
+// @ts-expect-error — the frame's half is the renderer's own, not on the public API
+shotsApi.after(true);
