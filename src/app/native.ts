@@ -5,7 +5,7 @@
  * loads it.
  */
 import path from "node:path";
-import type { Cli, Config, Target } from "@moku-labs/native";
+import type { Cli, Config, createApp, Target } from "@moku-labs/native";
 import type { DebugLevel } from "./build";
 import type { ResolvedGameConfig } from "./types";
 
@@ -17,6 +17,21 @@ const IOS_MINIMUM = "26.0";
 
 /** The version shape a store takes, and the only one the engine hands native: `1.2.3`. */
 const STORE_VERSION = /^\d+\.\d+\.\d+$/;
+
+/** The Tauri project of the players' app, and of an Android debug app beside it. */
+const STORE_PROJECT = ".moku/tauri";
+
+/** The project of the test app: a full Rust build of its own. */
+const DEV_PROJECT = ".moku/tauri-dev";
+
+/** The project of the iOS debug app: tauri refuses a renamed app in one tree. */
+const DEBUG_PROJECT = ".moku/tauri-debug";
+
+/** Where the players' apps land, and the debug ones, which native files under `-debug` folders. */
+const STORE_OUT = "dist-native";
+
+/** Where the test apps land: native delivers one to `<outDir>/<target>`, as it does a store app. */
+const DEV_OUT = "dist-native-dev";
 
 /** A native verb of `moku-game native`. */
 export type NativeVerb = "build" | "dev" | "doctor" | "clean";
@@ -35,6 +50,8 @@ export type NativeWhere = {
 export type NativeStore = {
   /** The `--build-number`, one number for both stores. */
   buildNumber: number;
+  /** `--dev`: the test app of `native.dev`, not the players' app. */
+  dev?: true;
   /** The environment the password variables are looked up in. */
   env: Readonly<Record<string, string | undefined>>;
   /** Tells whether a file is there. */
@@ -47,7 +64,7 @@ export type NativeVerbOptions = {
   target?: string;
   /** iOS: build the simulator slice instead of a device archive. */
   simulator?: boolean;
-  /** Build a debug app: the web page with the editor agent and its control profile; `native build` on Android only. */
+  /** Build a debug app: the web page with the editor agent and its control profile; `native build` on Android and iOS only. */
   debug?: DebugLevel;
   /** The `host:port` the page agent of the debug app dials, when `--editor` gave one. */
   editor?: string;
@@ -57,6 +74,8 @@ export type NativeVerbOptions = {
   store?: NativeStore;
   /** A plain Android build whose passwords are not set: the upload key stays out of it. */
   unsigned?: true;
+  /** `clean`: the test projects that exist, absolute, each cleaned after `.moku/tauri`. */
+  testProjects?: readonly string[];
 };
 
 /** What `storeProblems` checks: one store build, before anything compiles. */
@@ -84,20 +103,29 @@ type NativeExtras = {
   buildNumber?: number;
   version?: string;
   unsigned?: true;
+  dev?: true;
 };
 
 /** The native section of a resolved config. */
 type NativeSection = NonNullable<ResolvedGameConfig["native"]>;
 
+/** The part of the `@moku-labs/native` module a verb runs on. */
+type NativeModule = { createApp: typeof createApp };
+
+/** The name, the identifier and the icon of the app one run builds. */
+type AppIdentity = Pick<NativeSection, "name" | "identifier"> & { icon: string | undefined };
+
 /**
  * What `cli.build` of `@moku-labs/native` takes: the target, the iOS simulator slice, the debug
  * profile, which native's `BuildFlavor.debug` reads (the debug app installs beside the store app;
- * the engine renames nothing), and the store bundle of a store build on Android.
+ * the engine renames it on iOS only), the dev profile of a test app, which `BuildFlavor.dev` reads,
+ * and the store bundle of a store build on Android.
  */
 type BuildOptions = {
   target: Target | undefined;
   simulator: boolean | undefined;
   debug?: true;
+  dev?: true;
   aab?: true;
 };
 
@@ -245,6 +273,24 @@ function testSuffixes(): ReadonlySet<string> {
 }
 
 /**
+ * The problem of a test app's identifier: it must end in `.dev`, the word the real one may not.
+ *
+ * @param dev - `native.dev` of a raw config: the checks of `resolveConfig` have not run on it.
+ * @returns One line, or none for a good identifier.
+ * @example
+ * ```ts
+ * devIdentifierProblems({ identifier: "com.acme.t.dev" }); // []
+ * ```
+ */
+function devIdentifierProblems(dev: NativeSection["dev"]): readonly string[] {
+  if (dev === undefined) return ["No native.dev in config.ts. Add identifier, ending in .dev."];
+
+  return dev.identifier.endsWith(".dev")
+    ? []
+    : [`The test identifier ${dev.identifier} does not end in .dev. Fix native.dev.identifier.`];
+}
+
+/**
  * The problem of an identifier that names a test build.
  *
  * @param identifier - `native.identifier`.
@@ -282,7 +328,9 @@ export function storeProblems(input: StoreInput): readonly string[] {
   return [
     ...(input.target === "android" ? androidProblems(native, input) : appleProblems(native)),
     ...versionProblems(input.version),
-    ...identifierProblems(native.identifier)
+    ...(input.store.dev === true
+      ? devIdentifierProblems(native.dev)
+      : identifierProblems(native.identifier))
   ];
 }
 
@@ -329,24 +377,57 @@ function webBuildOf(where: NativeWhere, debug: NativeDebug | undefined): string 
 }
 
 /**
+ * The app this run builds: the game's, the test app of a dev build, or on iOS the debug app, which
+ * the engine names since native renames only on Android.
+ *
+ * @param native - The native section.
+ * @param target - The target of the verb.
+ * @param extras - The debug profile and the dev flag of this run.
+ * @returns The name, the identifier and the icon, when there is one.
+ * @example
+ * ```ts
+ * appIdentityOf({ name: "T", identifier: "com.x.t" }, "ios", { debug: { level: "full" } }); // { name: "T (debug)", identifier: "com.x.t.debug", icon: undefined }
+ * ```
+ */
+function appIdentityOf(
+  native: NativeSection,
+  target: Target | undefined,
+  extras: NativeExtras
+): AppIdentity {
+  const { name, identifier, icon, dev } = native;
+
+  if (extras.dev === true && dev !== undefined) {
+    return {
+      name: dev.name ?? `${name} DEV`,
+      identifier: dev.identifier,
+      icon: dev.icon ?? icon
+    };
+  }
+
+  return target === "ios" && extras.debug !== undefined
+    ? { name: `${name} (debug)`, identifier: `${identifier}.debug`, icon }
+    : { name, identifier, icon };
+}
+
+/**
  * The app block of the native config: the identity and the window, and what this run adds.
  *
  * @param settings - The resolved `config.ts` of the game.
- * @param native - The native section.
+ * @param identity - The app this run builds.
  * @param extras - The version and the build number of this run.
  * @returns The app block.
  */
 function appOf(
   settings: ResolvedGameConfig,
-  native: NativeSection,
+  identity: AppIdentity,
   extras: NativeExtras
 ): NativeConfig["app"] {
   return {
-    name: native.name,
-    identifier: native.identifier,
+    name: identity.name,
+    identifier: identity.identifier,
     orientation: settings.page.orientation,
     backgroundColor: settings.page.background,
-    ...(native.icon === undefined ? {} : { icon: native.icon }),
+    ...(identity.icon === undefined ? {} : { icon: identity.icon }),
     ...(extras.version === undefined ? {} : { version: extras.version }),
     ...(extras.buildNumber === undefined ? {} : { buildNumber: String(extras.buildNumber) }),
     ...(settings.system.includes("keepAwake") ? { keepScreenOn: true } : {})
@@ -416,17 +497,51 @@ function iosBundleOf(native: NativeSection, cwd: string): NonNullable<Config["io
 }
 
 /**
+ * The project folder of one run: a test app and an iOS debug app each have their own, since tauri
+ * refuses to rename an app in one tree.
+ *
+ * @param target - The target of the verb.
+ * @param extras - The debug profile and the dev flag of this run.
+ * @returns The folder, relative to the game.
+ * @example
+ * ```ts
+ * projectOf("android", { debug: { level: "full" } }); // ".moku/tauri"
+ * ```
+ */
+function projectOf(target: Target | undefined, extras: NativeExtras): string {
+  if (extras.dev === true) return DEV_PROJECT;
+
+  return target === "ios" && extras.debug !== undefined ? DEBUG_PROJECT : STORE_PROJECT;
+}
+
+/**
+ * Lists the test projects of a game, which `moku-game native clean` removes too.
+ *
+ * @param cwd - The game folder.
+ * @returns The absolute folders, whether they exist or not.
+ * @example
+ * ```ts
+ * testProjectsOf("/g"); // ["/g/.moku/tauri-dev", "/g/.moku/tauri-debug"]
+ * ```
+ */
+export function testProjectsOf(cwd: string): readonly string[] {
+  return [DEV_PROJECT, DEBUG_PROJECT].map(folder => path.join(cwd, folder));
+}
+
+/**
  * Maps a game's resolved `config.ts` to the config of `@moku-labs/native`: the app from `native`
  * and `page`, the web build through `moku-game`, the system rows, the targets, the signing, the
  * iOS bundle, and the Tauri project and output folders under the game. An Android app composes
  * native's `shell` system first, the one that sets `globalThis.__MOKU_NATIVE__`. A debug app
- * builds its web page with the same profile and `--editor`; its name and identifier stay the
- * game's. A build number means a store build.
+ * builds its web page with the same profile and `--editor`; on Android its name and identifier stay
+ * the game's and native renames it, on iOS the engine does, in a project of its own. A dev build is
+ * a store build of the test app of `native.dev`, in its own project and output folders, with the
+ * full debug page. A build number means a store build.
  *
  * @param settings - The resolved `config.ts` of the game.
  * @param where - The game folder, the command that runs `moku-game` and the home folder.
  * @param target - The target of the verb, used when `config.ts` names no targets.
- * @param extras - What this run adds: the debug profile, the build number, the version.
+ * @param extras - What this run adds: the debug profile, the dev flag, the build number, the version.
  * @returns The config for `createApp({ config })` of `@moku-labs/native`.
  * @throws {Error} When `config.ts` has no native section.
  * @example
@@ -444,10 +559,11 @@ export function nativeConfigOf(
   const native = nativeSectionOf(settings);
   const rows = systemRowsOf(settings);
   const config: NativeConfig = {
-    app: appOf(settings, native, extras),
+    app: appOf(settings, appIdentityOf(native, target, extras), extras),
     web: {
       cwd: where.cwd,
-      build: webBuildOf(where, extras.debug),
+      // A dev page is `--debug` as it is: the profile in native's env does the rest.
+      build: webBuildOf(where, extras.dev === true ? { level: "full" } : extras.debug),
       devCommand: `${where.command} dev --port ${DEV_PORT}`,
       devUrl: `http://127.0.0.1:${DEV_PORT}`,
       dist: path.join(where.cwd, "dist/web")
@@ -457,8 +573,8 @@ export function nativeConfigOf(
       target === "android"
         ? [{ name: "shell" }, ...rows.filter(row => row.name !== "shell")]
         : rows,
-    projectDir: path.join(where.cwd, ".moku/tauri"),
-    outDir: path.join(where.cwd, "dist-native")
+    projectDir: path.join(where.cwd, projectOf(target, extras)),
+    outDir: path.join(where.cwd, extras.dev === true ? DEV_OUT : STORE_OUT)
   };
   const targets = native.targets ?? (target === undefined ? undefined : [target]);
   const signing = signingOf(native, where, target, extras);
@@ -535,6 +651,7 @@ async function runVerb(
         target,
         simulator: options.simulator,
         ...(options.debug === undefined ? {} : { debug: true }),
+        ...(options.store?.dev === true ? { dev: true } : {}),
         ...(options.store !== undefined && target === "android" ? { aab: true } : {})
       };
 
@@ -568,6 +685,7 @@ function extrasOf(options: NativeVerbOptions): NativeExtras {
   return {
     ...(debug === undefined ? {} : { debug: { level: debug, editor } }),
     ...(store === undefined ? {} : { buildNumber: store.buildNumber }),
+    ...(store?.dev === true ? { dev: true } : {}),
     ...(unsigned === undefined ? {} : { unsigned }),
     ...(version !== undefined && STORE_VERSION.test(version) ? { version } : {})
   };
@@ -606,14 +724,47 @@ function refuseStoreProblems(
 }
 
 /**
- * Runs one native verb through `@moku-labs/native` over the game's config. Native's cli prints
- * the progress and the failure itself.
+ * Runs one verb on a native app of its own over one config, and stops the app.
+ *
+ * @param native - The `@moku-labs/native` module.
+ * @param config - The native config.
+ * @param verb - The native verb.
+ * @param target - The checked target.
+ * @param options - The verb options.
+ * @returns True when the verb succeeded, false when it failed.
+ */
+async function runApp(
+  native: NativeModule,
+  config: NativeConfig,
+  verb: NativeVerb,
+  target: Target | undefined,
+  options: NativeVerbOptions
+): Promise<boolean> {
+  const app = native.createApp({ config });
+
+  await app.start();
+
+  try {
+    return await runVerb(app.cli, verb, target, options);
+  } catch {
+    // Native's cli has printed the failure with the last lines of the toolchain.
+    return false;
+  } finally {
+    await app.stop();
+  }
+}
+
+/**
+ * Runs one native verb through `@moku-labs/native` over the game's config: once, or for `clean`
+ * once per project folder, one after the other. Native's cli prints the progress and the failure
+ * itself.
  *
  * @param verb - The native verb: build, dev, doctor or clean.
  * @param settings - The resolved `config.ts` of the game.
  * @param where - The game folder, the command that runs `moku-game` and the home folder.
- * @param options - The target, the simulator flag, the debug profile, the version, the store build.
- * @returns True when the verb succeeded, false when it failed.
+ * @param options - The target, the simulator flag, the debug profile, the version, the store build,
+ *   the test projects of a `clean`.
+ * @returns True when the verb succeeded, false when it failed on any folder.
  * @throws {Error} When `config.ts` has no native section, a store build has a problem, before
  * anything loads, `@moku-labs/native` is not installed, or the target is unknown or missing.
  */
@@ -628,23 +779,20 @@ export async function runNative(
 
   const native = await import("@moku-labs/native").catch((error: unknown) => {
     throw new Error(
-      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.12.",
+      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.13.",
       { cause: error }
     );
   });
   const target = targetOf(native.TARGETS, verb, options.target);
-  const app = native.createApp({
-    config: nativeConfigOf(settings, where, target, extrasOf(options))
-  });
+  const config = nativeConfigOf(settings, where, target, extrasOf(options));
+  let passed = await runApp(native, config, verb, target, options);
 
-  await app.start();
+  // One folder that will not go stops none of the others.
+  for (const project of options.testProjects ?? []) {
+    const cleaned = await runApp(native, { ...config, projectDir: project }, verb, target, options);
 
-  try {
-    return await runVerb(app.cli, verb, target, options);
-  } catch {
-    // Native's cli has printed the failure with the last lines of the toolchain.
-    return false;
-  } finally {
-    await app.stop();
+    passed &&= cleaned;
   }
+
+  return passed;
 }

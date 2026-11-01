@@ -15,6 +15,7 @@ type VerbCall = {
   simulator?: boolean | undefined;
   debug?: boolean | undefined;
   aab?: boolean | undefined;
+  dev?: boolean | undefined;
 };
 
 /** What the fake native app saw: the configs it was made with, and every call in order. */
@@ -22,11 +23,13 @@ type Recorder = {
   configs: NativeConfig[];
   calls: (readonly [string] | readonly [string, VerbCall])[];
   fail: boolean;
+  /** The call of a verb that throws, counted from 1; 0 for none. */
+  failAfter: number;
   doctor: boolean;
 };
 
 const { recorder, fakeNative } = vi.hoisted(() => {
-  const recorder: Recorder = { configs: [], calls: [], fail: false, doctor: true };
+  const recorder: Recorder = { configs: [], calls: [], fail: false, failAfter: 0, doctor: true };
 
   /**
    * Records a verb call, then throws when the test asks it to fail.
@@ -37,7 +40,9 @@ const { recorder, fakeNative } = vi.hoisted(() => {
   function verb(name: string, options: VerbCall): void {
     recorder.calls.push([name, options]);
 
-    if (recorder.fail) {
+    const count = recorder.calls.filter(call => call[0] === name).length;
+
+    if (recorder.fail || count === recorder.failAfter) {
       throw new Error("[native] tauri compile failed.");
     }
   }
@@ -105,6 +110,13 @@ const shippable: NonNullable<GameConfig["native"]> = {
   name: "T",
   identifier: "com.acme.t",
   signing: { android, apple: { teamId: "ABCDE12345" } }
+};
+
+/** A shippable native section with the test app, named and drawn by the game. */
+const withTestApp: NonNullable<GameConfig["native"]> = {
+  ...shippable,
+  icon: "assets/icon.png",
+  dev: { identifier: "com.acme.t.dev", name: "T Test", icon: "assets/icon-dev.png" }
 };
 
 /**
@@ -186,6 +198,7 @@ afterEach(() => {
   recorder.configs.length = 0;
   recorder.calls.length = 0;
   recorder.fail = false;
+  recorder.failAfter = 0;
   recorder.doctor = true;
 });
 
@@ -272,6 +285,64 @@ describe("nativeConfigOf", () => {
     expect(store.web.build).toBe('"bun" "/g/bin/moku-game.mjs" "--root" "/g" build');
     expect({ ...full, web: store.web }).toEqual(store);
     expect(full.app).toMatchObject({ name: "Лесной городок", identifier: "com.mokulabs.timber" });
+  });
+
+  // Bug: the test app overwrites the players' project, ships the players' icon, or goes unsigned.
+  it("a dev build is the test app: its id, name and icon, its own folders, the debug page, the same signing", () => {
+    const settings = settingsOf({ native: withTestApp });
+    const config = nativeConfigOf(settings, where, "android", { dev: true, buildNumber: 13 });
+
+    expect(config.app).toMatchObject({
+      identifier: "com.acme.t.dev",
+      name: "T Test",
+      icon: "assets/icon-dev.png",
+      buildNumber: "13"
+    });
+    expect(config.projectDir).toBe("/g/.moku/tauri-dev");
+    expect(config.outDir).toBe("/g/dist-native-dev");
+    expect(config.web.build).toBe('"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug');
+    expect(config.signing?.android?.keystorePath).toBe("/g/keys/k.jks");
+  });
+
+  it("a dev build on iOS exports for App Store Connect, as a store build does", () => {
+    const settings = settingsOf({ native: withTestApp });
+    const config = nativeConfigOf(settings, where, "ios", { dev: true, buildNumber: 13 });
+
+    expect(appleOf(config)?.exportMethod).toBe("app-store-connect");
+  });
+
+  // Bug: the test app shows up nameless on a phone, or with a placeholder for an icon.
+  it("a test app with no name reads <name> DEV, and one with no icon takes the game's", () => {
+    const dev = { identifier: "com.acme.t.dev" };
+    const settings = settingsOf({ native: { ...withTestApp, dev } });
+    const { app } = nativeConfigOf(settings, where, "android", { dev: true, buildNumber: 13 });
+
+    expect(app).toMatchObject({ name: "T DEV", icon: "assets/icon.png" });
+  });
+
+  // Bug: a players' build goes out under the test id, or into the test folders.
+  it("without dev nothing of native.dev reaches the config", () => {
+    const players = { ...shippable, icon: "assets/icon.png" };
+    const extras = { buildNumber: 13 };
+
+    expect(nativeConfigOf(settingsOf({ native: withTestApp }), where, "android", extras)).toEqual(
+      nativeConfigOf(settingsOf({ native: players }), where, "android", extras)
+    );
+  });
+
+  // Bug: tauri refuses a renamed app in one tree, and gen/apple regenerates on each swap.
+  it("an iOS debug app has the .debug id, the (debug) name and a project of its own; its apps stay in dist-native", () => {
+    const store = nativeConfigOf(settingsOf(), where, "ios");
+    const debug = nativeConfigOf(settingsOf(), where, "ios", { debug: { level: "full" } });
+
+    expect(debug.app).toEqual({
+      ...store.app,
+      identifier: "com.mokulabs.timber.debug",
+      name: "Лесной городок (debug)"
+    });
+    expect(debug.projectDir).toBe("/g/.moku/tauri-debug");
+    expect(debug.outDir).toBe("/g/dist-native");
+    expect(debug.web.build).toContain("build --debug");
   });
 
   it("an android config composes the native shell once, first; an ios config does not", () => {
@@ -507,6 +578,48 @@ describe("storeProblems", () => {
     expect(storeProblems(storeInput({}, { identifier: "com.acme.devices" }))).toEqual([]);
   });
 
+  // Bug: a signing problem of the test app shows up only after the compile.
+  it("a dev build checks native.dev.identifier in place of the real one, and every other row as before", () => {
+    const store = storeOf({ dev: true });
+    const dev = { identifier: "com.acme.t.dev" };
+
+    expect(storeProblems(storeInput({ store }, { dev }))).toEqual([]);
+    expect(storeProblems(storeInput({ store }, { identifier: "com.acme.t.soak", dev }))).toEqual(
+      []
+    );
+    expect(
+      storeProblems(
+        storeInput(
+          { version: "1.2", store: storeOf({ dev: true, env: {}, exists: () => false }) },
+          { dev }
+        )
+      )
+    ).toEqual([
+      "The keystore /g/keys/k.jks is not a file.",
+      "The env var KS_PASS is not set. It holds a signing password.",
+      "The env var KEY_PASS is not set. It holds a signing password.",
+      'package.json has version "1.2". Use x.y.z, such as 1.0.0.'
+    ]);
+  });
+
+  // Bug: runNative is called without the checks of the config, and the test app takes the real id.
+  it("a dev build refuses a test identifier that does not end in .dev, or none at all", () => {
+    const store = storeOf({ dev: true });
+    const settings = settingsOf({ native: shippable });
+    const wrong = { ...settings.native, dev: { identifier: "com.acme.t.soak" } };
+
+    expect(
+      storeProblems(
+        storeInput({ store, settings: { ...settings, native: wrong as typeof shippable } })
+      )
+    ).toEqual([
+      "The test identifier com.acme.t.soak does not end in .dev. Fix native.dev.identifier."
+    ]);
+    expect(storeProblems(storeInput({ store }))).toEqual([
+      "No native.dev in config.ts. Add identifier, ending in .dev."
+    ]);
+  });
+
   it("every Android problem at once comes as one line each, so one run shows every fix", () => {
     const input = storeInput(
       { version: "1.2", store: storeOf({ env: {}, exists: () => false }) },
@@ -576,6 +689,23 @@ describe("runNative", () => {
       ["build", { target: "android", simulator: undefined, aab: true }],
       ["build", { target: "ios", simulator: undefined }],
       ["build", { target: "android", simulator: undefined }]
+    ]);
+  });
+
+  // Bug: native's store profile refuses the agent page, or a test app ships as an .apk.
+  it("a dev store build passes dev to native, with aab on Android only, over the test app's config", async () => {
+    const settings = settingsOf({ native: withTestApp });
+    const options = { version: "1.2.3", store: storeOf({ dev: true }) };
+
+    expect(await runNative("build", settings, where, { target: "android", ...options })).toBe(true);
+    expect(await runNative("build", settings, where, { target: "ios", ...options })).toBe(true);
+    expect(recorder.calls.filter(call => call[0] === "build")).toEqual([
+      ["build", { target: "android", simulator: undefined, aab: true, dev: true }],
+      ["build", { target: "ios", simulator: undefined, dev: true }]
+    ]);
+    expect(recorder.configs.map(config => config.projectDir)).toEqual([
+      "/g/.moku/tauri-dev",
+      "/g/.moku/tauri-dev"
     ]);
   });
 
@@ -664,6 +794,32 @@ describe("runNative", () => {
     expect(recorder.configs[0]).not.toHaveProperty("targets");
   });
 
+  // Bug: an 8 GB test project stays behind, since nothing removes it.
+  it("clean runs native once per folder, the given test projects after .moku/tauri", async () => {
+    const testProjects = ["/g/.moku/tauri-dev", "/g/.moku/tauri-debug"];
+
+    expect(await runNative("clean", settingsOf(), where, { target: "ios", testProjects })).toBe(
+      true
+    );
+    expect(recorder.configs.map(config => config.projectDir)).toEqual([
+      "/g/.moku/tauri",
+      "/g/.moku/tauri-dev",
+      "/g/.moku/tauri-debug"
+    ]);
+    expect(recorder.calls.filter(call => call[0] === "clean")).toHaveLength(3);
+  });
+
+  // Bug: one folder that will not go hides behind the two that did, or stops them.
+  it("a clean that fails on one folder still cleans the others, and answers false", async () => {
+    const testProjects = ["/g/.moku/tauri-dev", "/g/.moku/tauri-debug"];
+
+    recorder.failAfter = 2;
+
+    expect(await runNative("clean", settingsOf(), where, { testProjects })).toBe(false);
+    expect(recorder.configs).toHaveLength(3);
+    expect(recorder.calls.filter(call => call[0] === "stop")).toHaveLength(3);
+  });
+
   it("a throwing verb answers false and still stops the app", async () => {
     recorder.fail = true;
 
@@ -732,7 +888,7 @@ describe("runNative", () => {
         fresh.runNative("build", settingsOf(), where, { target: "ios" })
       ).rejects.toThrow(
         new Error(
-          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.12."
+          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.13."
         )
       );
     } finally {

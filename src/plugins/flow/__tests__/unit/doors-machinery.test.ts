@@ -165,7 +165,10 @@ describe("defineSource and defineCommand", () => {
 /** The body of a command the type tests below never run. */
 const runNothing = (_app: ControlApp): boolean => true;
 
-/** Six command shapes the overlay cannot use: each must fail to compile, so none is ever built. */
+/** A row of the refused shapes below. */
+const twoChoices = ["a", "b"] as const;
+
+/** The command shapes the overlay cannot use: each must fail to compile, so none is ever built. */
 const refusedShapes = () => [
   // @ts-expect-error — a toggle the overlay cannot draw: no value.
   defineCommand({
@@ -221,6 +224,94 @@ const refusedShapes = () => [
     title: "F",
     input: {},
     effect: "cosmetic",
+    value: () => true,
+    run: runNothing
+  }),
+  defineCommand({
+    id: "t.g",
+    title: "G",
+    // @ts-expect-error — choices with no input for the pick: a switch with nothing to hand over.
+    input: { on: "boolean" },
+    effect: "cheat",
+    overlay: "toggle",
+    choices: twoChoices,
+    choice: () => "a",
+    value: () => true,
+    run: runNothing
+  }),
+  defineCommand({
+    id: "t.h",
+    title: "H",
+    // @ts-expect-error — the input takes a choice, but no choices are listed.
+    input: { on: "boolean", choice: "string" },
+    effect: "cheat",
+    overlay: "toggle",
+    value: () => true,
+    run: runNothing
+  }),
+  // @ts-expect-error — choices with no choice(app): nothing is marked, the switch sends the first.
+  defineCommand({
+    id: "t.i",
+    title: "I",
+    input: { on: "boolean", choice: "string" },
+    effect: "cheat",
+    overlay: "toggle",
+    choices: twoChoices,
+    value: () => true,
+    run: runNothing
+  }),
+  defineCommand({
+    id: "t.j",
+    title: "J",
+    // @ts-expect-error — a choice is a string: the registry refuses the command at start.
+    input: { on: "boolean", choice: "number" },
+    effect: "cheat",
+    overlay: "toggle",
+    choices: twoChoices,
+    choice: () => "a",
+    value: () => true,
+    run: runNothing
+  }),
+  defineCommand({
+    id: "t.k",
+    title: "K",
+    input: { on: "boolean", choice: "string" },
+    effect: "cheat",
+    overlay: "toggle",
+    // @ts-expect-error — a row with no choice in it draws nothing.
+    choices: [],
+    choice: () => "a",
+    value: () => true,
+    run: runNothing
+  }),
+  // @ts-expect-error — a button runs with {}: it hands no choice over.
+  defineCommand({
+    id: "t.l",
+    title: "L",
+    input: {},
+    effect: "cheat",
+    overlay: "button",
+    choices: twoChoices,
+    choice: () => "a",
+    run: runNothing
+  }),
+  // @ts-expect-error — choices without the toggle marker draw nothing.
+  defineCommand({
+    id: "t.m",
+    title: "M",
+    input: {},
+    effect: "cheat",
+    choices: twoChoices,
+    run: runNothing
+  }),
+  // @ts-expect-error — a choice(app) with no choices marks nothing.
+  defineCommand({
+    id: "t.n",
+    title: "N",
+    input: { on: "boolean" },
+    effect: "cheat",
+    overlay: "toggle",
+    choice: () => "a",
     value: () => true,
     run: runNothing
   })
@@ -303,8 +394,77 @@ describe("defineCommand with an overlay marker", () => {
     expect([toggled.value, switchOf(glowSwitch), pressed.value]).toEqual([false, false, 1]);
   });
 
-  it("refuses at compile time a toggle without value, a toggle with another input, a button with a required input or a value, and a value without a toggle", () => {
+  it("refuses at compile time a toggle without value, a toggle with another input, a button with a required input or a value, a value without a toggle, and every half of a choice toggle", () => {
     expectTypeOf(refusedShapes).toBeFunction();
+  });
+
+  // Bug: the overlay's row cannot be declared, so a tester on a phone cannot pick a purchase mode.
+  it("takes a toggle with choices: run gets the pick, value and choice draw the row", async () => {
+    const fake = createDoorsFake();
+    const picked = { on: false, choice: "success" };
+    const simulate = defineCommand({
+      id: "test.simulate",
+      title: "Simulated purchases",
+      input: { on: "boolean", choice: "string" },
+      effect: "cheat",
+      overlay: "toggle",
+      choices: ["success", "failure"],
+      value: () => picked.on,
+      choice: () => picked.choice,
+      run: (_app: ControlApp, input) => {
+        Object.assign(picked, input);
+
+        return input.choice;
+      }
+    });
+
+    vi.stubGlobal("__MOKU_GAME_CONTROL__", true);
+
+    const ran = await run(fake.app, simulate, { on: true, choice: "failure" });
+
+    expect(ran.value).toBe("failure");
+    expect([simulate.value?.(fake.app), simulate.choice?.(fake.app)]).toEqual([true, "failure"]);
+    expect(simulate.choices).toEqual(["success", "failure"]);
+  });
+
+  it("types an optional choice as a string that may be left out", () => {
+    const simulate = defineCommand({
+      id: "test.simulateOptional",
+      title: "Simulated purchases",
+      input: { on: "boolean", choice: "string?" },
+      effect: "cheat",
+      overlay: "toggle",
+      choices: ["success"],
+      value: () => false,
+      choice: () => "success",
+      run: (_app: ControlApp, { choice }) => choice ?? "success"
+    });
+
+    expectTypeOf<InputOf<typeof simulate.input>>().toEqualTypeOf<{
+      on: boolean;
+      choice?: string | undefined;
+    }>();
+  });
+
+  // Bug: two rows of one name in the overlay: a tap on the second runs the first's mode.
+  it("refuses a choice listed twice", () => {
+    expect(() =>
+      defineCommand({
+        id: "test.twice",
+        title: "Twice",
+        input: { on: "boolean", choice: "string" },
+        effect: "cheat",
+        overlay: "toggle",
+        choices: ["success", "failure", "success"],
+        value: () => false,
+        choice: () => "success",
+        run: runNothing
+      })
+    ).toThrow(
+      new Error(
+        '[game] The command test.twice lists the choice "success" twice.\n  Name each choice once.'
+      )
+    );
   });
 });
 

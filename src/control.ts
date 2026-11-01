@@ -11,4 +11,4 @@ export { defineCommand } from "./plugins/flow/doors/define";
 export type { ControlReadOnlyError, ControlRefusedError } from "./plugins/flow/doors/dev";
 export { controlReadOnly, controlRefused } from "./plugins/flow/doors/dev";
 export { run } from "./plugins/flow/doors/run";
-export type { Command, Ran } from "./plugins/flow/doors/types";
+export type { ChoiceInput, Command, Ran } from "./plugins/flow/doors/types";

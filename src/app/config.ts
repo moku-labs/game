@@ -154,13 +154,54 @@ function checkIos(ios: NonNullable<GameConfig["native"]>["ios"]): void {
 }
 
 /**
+ * Throws for a `native.dev` that cannot name a test app.
+ *
+ * @param native - `native` of the config.
+ * @throws {Error} When the block has no `identifier`, or one that does not end in `.dev` or is
+ * `native.identifier` itself, or when `name` or `icon` is an empty string.
+ */
+function checkTestApp(native: GameConfig["native"]): void {
+  const dev = native?.dev;
+
+  if (dev === undefined) return;
+
+  if (!isFilled(dev.identifier)) {
+    throw new Error("[game] config.native.dev has no identifier.\n  Name one that ends in .dev.");
+  }
+
+  if (!dev.identifier.endsWith(".dev")) {
+    throw new Error(
+      `[game] config.native.dev.identifier is "${dev.identifier}".\n  Use one that ends in .dev.`
+    );
+  }
+
+  if (dev.identifier === native?.identifier) {
+    throw new Error(
+      `[game] config.native.dev.identifier is "${dev.identifier}", the same as native.identifier.\n  The test app needs an id of its own.`
+    );
+  }
+
+  if (dev.name === "") {
+    throw new Error(
+      "[game] config.native.dev.name is empty.\n  Name the test app, or leave the field out."
+    );
+  }
+
+  if (dev.icon === "") {
+    throw new Error(
+      "[game] config.native.dev.icon is empty.\n  Name a 1024 px PNG, or leave the field out."
+    );
+  }
+}
+
+/**
  * Throws for the first value of a config that TypeScript would have refused.
  *
  * @param config - The default export of `config.ts`.
  * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
  * `debug.overlay` is not a start mode, `page.boot` has no image, `page.boot.fadeMs` is not a finite number of 0
- * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, or a value of
- * `native.ios.infoPlist` is no plist value.
+ * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, a value of
+ * `native.ios.infoPlist` is no plist value, or `native.dev` cannot name a test app.
  */
 function checkConfig(config: GameConfig): void {
   if (config.save !== undefined && !saveKinds().has(config.save)) {
@@ -209,6 +250,7 @@ function checkConfig(config: GameConfig): void {
 
   checkSigning(config.native?.signing);
   checkIos(config.native?.ios);
+  checkTestApp(config.native);
 }
 
 /**
@@ -239,8 +281,8 @@ function resolveBoot(boot: NonNullable<GameConfig["page"]["boot"]>): ResolvedPag
  * @returns The config with every field set.
  * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
  * `debug.overlay` is not a start mode, `page.boot` has no image, `page.boot.fadeMs` is not a finite number of 0
- * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, or a value of
- * `native.ios.infoPlist` is no plist value.
+ * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, a value of
+ * `native.ios.infoPlist` is no plist value, or `native.dev` cannot name a test app.
  * @example
  * ```ts
  * resolveConfig({ page: { title: "T" } }).save; // "memory"

@@ -6,7 +6,8 @@
  * `--debug` the page is a debug page instead: the editor's page agent, the game's `.dev` modules,
  * the agent and control flags, a marked title, a build id and the app id. The output works from any
  * http sub-path and from the Tauri protocol: every link starts with `./`, and the page reads
- * `manifest.json` next to itself. Node and Bun only: the bin bundles it.
+ * `manifest.json` next to itself. Under `MOKU_NATIVE_PROFILE=dev`, a test app's web build, the page
+ * must be a debug page, with control and no link to the editor. Node and Bun only: the bin bundles it.
  */
 import {
   constants,
@@ -23,7 +24,12 @@ import { pathToFileURL } from "node:url";
 import type { BunPlugin } from "bun";
 import { findFeatureOwners } from "../project/features";
 import type { CliDeps } from "./cli";
-import { type EngineFingerprint, engineFingerprint, engineLine } from "./engine";
+import {
+  type EngineFingerprint,
+  engineFingerprint,
+  engineLine,
+  packageVersionAbove
+} from "./engine";
 import {
   agentFlag,
   buildMain,
@@ -59,7 +65,7 @@ export type BuildRun = {
   servePlugins: readonly string[];
   /** Absent: a release page. `full` or `read`: a debug page with the editor agent and that control profile. */
   debug?: DebugLevel;
-  /** The `host:port` the page agent dials; debug only, `editorOf` already applied the default. */
+  /** The `host:port` of `--editor`; debug only. Left out, the page agent dials `DEFAULT_EDITOR`. */
   editor?: string;
 };
 
@@ -76,7 +82,19 @@ type DebugPage = {
 };
 
 /** The address the page agent of a debug page dials without `--editor`. */
-export const DEFAULT_EDITOR = "127.0.0.1:47600";
+const DEFAULT_EDITOR = "127.0.0.1:47600";
+
+/**
+ * What a test app's page holds in place of an address: the editor's agent opens no socket and the
+ * overlay works alone. A contract with the editor, see `__MOKU_GAME_EDITOR__`.
+ */
+const EDITOR_OFF = "off";
+
+/** The package of the editor. */
+const EDITOR_PACKAGE = "@moku-labs/editor";
+
+/** The first editor that reads `EDITOR_OFF`: any before it takes the word for an address. */
+const EDITOR_READS_OFF = "0.10.19";
 
 /**
  * The two strings the editor's agent bundle always carries: the bridge's default path and the
@@ -300,23 +318,48 @@ export function buildIdOf(now: number): string {
 /**
  * The app id a debug page carries, so the editor pairs a device stream with its project: the
  * native bundle identifier, with `.debug` when native builds its debug app
- * (`MOKU_NATIVE_PROFILE=debug`), which installs under that id.
+ * (`MOKU_NATIVE_PROFILE=debug`), which installs under that id, and `native.dev.identifier` for a
+ * test app (`MOKU_NATIVE_PROFILE=dev`).
  *
- * @param identifier - `native.identifier` of `config.ts`, `undefined` without a native section.
+ * @param native - `native` of `config.ts`, `undefined` without a native section.
  * @param profile - `MOKU_NATIVE_PROFILE` of the run.
- * @returns The app id, or `undefined` without an identifier.
+ * @returns The app id, or `undefined` without a native section.
  * @example
  * ```ts
- * appIdOf("com.mokulabs.timber", "debug"); // "com.mokulabs.timber.debug"
+ * appIdOf({ name: "Timber", identifier: "com.mokulabs.timber" }, "debug"); // "com.mokulabs.timber.debug"
  * ```
  */
 export function appIdOf(
-  identifier: string | undefined,
+  native: ResolvedGameConfig["native"],
   profile: string | undefined
 ): string | undefined {
-  if (identifier === undefined) return undefined;
+  if (native === undefined) return undefined;
+  if (profile === "debug") return `${native.identifier}.debug`;
 
-  return profile === "debug" ? `${identifier}.debug` : identifier;
+  return profile === "dev" ? (native.dev?.identifier ?? native.identifier) : native.identifier;
+}
+
+/**
+ * Tells whether an editor reads `"off"` in `__MOKU_GAME_EDITOR__` and opens no socket.
+ *
+ * @param version - The version of the installed editor, unchecked.
+ * @returns True for `0.10.19` and any later `x.y.z`; false for anything older or unreadable.
+ * @example
+ * ```ts
+ * editorReadsOff("0.9.30"); // false
+ * ```
+ */
+export function editorReadsOff(version: string | undefined): boolean {
+  const parts = /^(\d+)\.(\d+)\.(\d+)$/.exec(version ?? "")?.slice(1);
+  const lowest = EDITOR_READS_OFF.split(".");
+
+  if (parts === undefined) return false;
+
+  const first = parts
+    .map((part, index) => Number(part) - Number(lowest[index]))
+    .find(difference => difference !== 0);
+
+  return first === undefined || first > 0;
 }
 
 /**
@@ -604,16 +647,92 @@ function refuseStoreDebug(run: BuildRun, env: CliDeps["env"]): void {
 }
 
 /**
+ * Refuses a release page when Tauri runs the web build of a test app: `MOKU_NATIVE_PROFILE=dev`.
+ * Native lets the agent through that profile, so its own check would not stop a page with no
+ * overlay.
+ *
+ * @param run - The flags of the run.
+ * @param env - The environment the bin started with.
+ * @throws {Error} When the profile is `dev` and the run is a release run.
+ */
+function refuseTestAppRelease(run: BuildRun, env: CliDeps["env"]): void {
+  if (run.debug !== undefined || env.MOKU_NATIVE_PROFILE !== "dev") return;
+
+  throw new Error("[game] build: MOKU_NATIVE_PROFILE is dev: a dev page carries the overlay.");
+}
+
+/**
+ * Refuses the flags that have no place on a test app's page: its agent dials nothing, and a tester
+ * runs every command.
+ *
+ * @param run - The flags of the run.
+ * @param level - The profile of the run.
+ * @throws {Error} When `--editor` or `--debug=read` was given.
+ */
+function refuseTestAppFlags(run: BuildRun, level: DebugLevel): void {
+  if (run.editor !== undefined) {
+    throw new Error(
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page has no editor link.\n  Build it without --editor."
+    );
+  }
+
+  if (level === "read") {
+    throw new Error(
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page runs every command.\n  Build it with --debug."
+    );
+  }
+}
+
+/**
+ * Refuses an editor that does not read `"off"`: its agent would take the word for an address and
+ * dial for ever on a tester's phone. A version that cannot be read is refused too.
+ *
+ * @param agent - The file the editor's page agent resolves to.
+ * @throws {Error} Naming the version found.
+ */
+function refuseOldEditor(agent: string): void {
+  const version = packageVersionAbove(agent, EDITOR_PACKAGE);
+
+  if (editorReadsOff(version)) return;
+
+  throw new Error(
+    `[game] build: a dev page needs ${EDITOR_PACKAGE} ${EDITOR_READS_OFF} or newer, found ${version ?? "no readable version"}.\n  An older one dials the editor for ever. Run: bun add -d ${EDITOR_PACKAGE}@latest.`
+  );
+}
+
+/**
+ * Finds the editor's page agent the game resolves.
+ *
+ * @param root - The game folder.
+ * @param resolve - Bun's resolver.
+ * @returns The file.
+ * @throws {Error} With the install line when the game cannot resolve `@moku-labs/editor`.
+ */
+function resolveAgent(root: string, resolve: CliDeps["resolve"]): string {
+  try {
+    return resolve(DEBUG_AGENT, root);
+  } catch (error) {
+    throw new Error(
+      "[game] build --debug needs @moku-labs/editor in the game.\n  Install it: bun add -d @moku-labs/editor.",
+      { cause: error }
+    );
+  }
+}
+
+/**
  * What a debug run builds its page with: the editor's page agent must resolve from the game, the
- * engine the page bundles is fingerprinted, and the app id comes from the native identifier.
+ * engine the page bundles is fingerprinted, and the app id comes from the native identifier. A test
+ * app's page (`MOKU_NATIVE_PROFILE=dev`) holds `EDITOR_OFF` for an address, over an editor that
+ * reads it.
  *
  * @param run - The flags of a debug run.
  * @param level - Its profile.
  * @param settings - The resolved config, for the native identifier.
  * @param deps - The resolver, the clock and the environment.
  * @returns The debug page and the engine fingerprint.
- * @throws {Error} With the install line when the game cannot resolve `@moku-labs/editor`, and
- *   when it cannot resolve `@moku-labs/game/hot`.
+ * @throws {Error} With the install line when the game cannot resolve `@moku-labs/editor`, when it
+ *   cannot resolve `@moku-labs/game/hot`, and under the dev profile for `--editor`, `--debug=read`
+ *   and an editor that does not read `"off"`.
  */
 function debugPageOf(
   run: BuildRun,
@@ -621,22 +740,22 @@ function debugPageOf(
   settings: ResolvedGameConfig,
   deps: CliDeps
 ): { page: DebugPage; engine: EngineFingerprint } {
-  try {
-    deps.resolve(DEBUG_AGENT, run.root);
-  } catch (error) {
-    throw new Error(
-      "[game] build --debug needs @moku-labs/editor in the game.\n  Install it: bun add -d @moku-labs/editor.",
-      { cause: error }
-    );
-  }
+  const profile = deps.env.MOKU_NATIVE_PROFILE;
+  const isTestApp = profile === "dev";
+
+  if (isTestApp) refuseTestAppFlags(run, level);
+
+  const agent = resolveAgent(run.root, deps.resolve);
+
+  if (isTestApp) refuseOldEditor(agent);
 
   const engine = engineFingerprint(run.root, hotPluginOf(run.root, deps.resolve));
   const page: DebugPage = {
     level,
     build: buildIdOf(deps.now()),
     engine: engine.id,
-    editor: run.editor ?? DEFAULT_EDITOR,
-    app: appIdOf(settings.native?.identifier, deps.env.MOKU_NATIVE_PROFILE)
+    editor: isTestApp ? EDITOR_OFF : (run.editor ?? DEFAULT_EDITOR),
+    app: appIdOf(settings.native, profile)
   };
 
   return { page, engine };
@@ -644,7 +763,7 @@ function debugPageOf(
 
 /**
  * The warning a debug build prints before its size line: the profile, the build id, the engine and
- * the editor address.
+ * the editor address, and what the page is for: never a store, or a test app's track.
  *
  * @param run - The flags of the run.
  * @param debug - The debug page and the engine fingerprint.
@@ -662,8 +781,12 @@ function debugWarning(
       ? "every command, the state-changing ones too"
       : "read and cosmetic commands";
   const engineText = engineLine(engine, run.root).slice("engine ".length);
+  const use =
+    page.editor === EDITOR_OFF
+      ? "This is a DEV page for the store test track: overlay, no editor link."
+      : "Never ship it to a store.";
 
-  return `build: a DEBUG page with the editor agent, control: ${control}. Build ${page.build}, engine ${engineText}, editor ${page.editor}. Never ship it to a store.`;
+  return `build: a DEBUG page with the editor agent, control: ${control}. Build ${page.build}, engine ${engineText}, editor ${page.editor}. ${use}`;
 }
 
 /**
@@ -681,6 +804,7 @@ function debugWarning(
  */
 export async function runBuild(run: BuildRun, deps: CliDeps): Promise<number> {
   refuseStoreDebug(run, deps.env);
+  refuseTestAppRelease(run, deps.env);
 
   const settings = await loadGame(run.root);
 
