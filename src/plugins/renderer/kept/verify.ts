@@ -6,10 +6,13 @@
  * it inline, so a production bundle drops this module.
  */
 import { CHANNELS, differingPixels, NAMED, withinRatio } from "../pixels";
-import type { PixiContainer } from "../types";
+import type { PixiContainer, PixiFilter, PixiModule, PixiRectangle } from "../types";
 import { drawnBounds } from "./drawn-bounds";
 import { drawnResolution, KEY, linearBounds, onGrid } from "./geometry";
 import type { KeptCtx, KeptRecord, RangeRecord } from "./types";
+
+/** What the read of the live frame answers when the frame is not compared. */
+const PLACE_DIFFERS = "place";
 
 /**
  * Tells whether a kept record's quad stands off its picture's grid: it is moving, drawn scaled to another linear part
@@ -54,25 +57,81 @@ function faded(record: KeptRecord): boolean {
 }
 
 /**
- * Tells whether a node's filters run in a pass of their own: it holds them, or a kept picture of it took them over.
+ * Where a filter pass starts on one axis, as Pixi works it out (`FilterSystem._calculateFilterBounds`): the bounds cut to
+ * the canvas, floored to the pass's grid, then padded. Pure.
+ *
+ * @param start - The bounds' start on the canvas, CSS px.
+ * @param resolution - The pass's resolution.
+ * @param padding - The pass's padding, whole px.
+ * @returns The pass's start, CSS px.
+ * @example
+ * ```ts
+ * passStart(0, 1, 8); // -8
+ * ```
+ */
+function passStart(start: number, resolution: number, padding: number): number {
+  return Math.floor(Math.max(start, 0) * resolution) / resolution - padding;
+}
+
+/**
+ * The box a filter pass over a node measures, on the node's own axes: its filter area when it holds one, which replaces
+ * the bounds, else what its subtree draws. Read with every picture live: the tree then holds the views, not their quads,
+ * which stand padded.
+ *
+ * @param pixi - The module that draws.
+ * @param node - The node.
+ * @returns The box.
+ */
+function passBox(
+  pixi: PixiModule,
+  node: PixiContainer
+): { minX: number; minY: number; maxX: number; maxY: number } {
+  // Pixi answers `undefined` or `null` for a node with no area, which its getter type does not say.
+  const area: PixiRectangle | null | undefined = node.filterArea;
+
+  if (area === null || area === undefined) return drawnBounds(pixi, node);
+
+  const { x, y, width, height } = area;
+
+  return { minX: x, minY: y, maxX: x + width, maxY: y + height };
+}
+
+/**
+ * Tells whether a filter pass over a node starts off the canvas origin.
  *
  * @param kctx - The kept context.
+ * @param pixi - The module that draws.
  * @param node - The node.
- * @returns True when it filters what is under it.
+ * @param filters - Its enabled filters.
+ * @returns True when it does.
  */
-function filtersBelow(kctx: KeptCtx, node: PixiContainer): boolean {
-  const filters: readonly unknown[] | null | undefined = node.filters;
+function passOffOrigin(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  node: PixiContainer,
+  filters: readonly PixiFilter[]
+): boolean {
+  const canvas = kctx.host.resolution();
+  const resolutions = filters.map(({ resolution }) =>
+    resolution === "inherit" ? canvas : resolution
+  );
+  const resolution = Math.min(...resolutions);
+  // Whole px, as Pixi's `padding | 0`.
+  const padding = Math.trunc(filters.reduce((sum, filter) => sum + filter.padding, 0));
+  const { a, b, c, d, tx, ty } = node.getGlobalTransform(new pixi.Matrix(), false);
+  const box = linearBounds(a, b, c, d, passBox(pixi, node));
 
   return (
-    (filters !== null && filters !== undefined && filters.length > 0) ||
-    kctx.state.byTop.get(node)?.mode === "kept"
+    passStart(tx + box.x0, resolution, padding) !== 0 ||
+    passStart(ty + box.y0, resolution, padding) !== 0
   );
 }
 
 /**
  * Tells whether a shaded placed record hangs under a filter whose pass starts off the canvas origin. Live, its body
  * reads a place relative to that pass's texture; on the mesh it reads the canvas (spec 23 P8.3). The two differ by that
- * origin by design, not by a stale picture. Only the closest filter counts: Pixi offsets by that one alone.
+ * origin by design, not by a stale picture. Only the closest filter counts: Pixi offsets by that one alone. Read with
+ * every picture live: a kept ancestor's filters are back on its top, and the views are back in the tree.
  *
  * @param kctx - The kept context.
  * @param record - The record, kept.
@@ -84,12 +143,10 @@ function placeDiffers(kctx: KeptCtx, record: KeptRecord): boolean {
   if (!record.shaded || record.category !== "placed" || pixi === undefined) return false;
 
   for (let node = record.top.parent; node !== null; node = node.parent) {
-    if (filtersBelow(kctx, node)) {
-      const { a, b, c, d, tx, ty } = node.getGlobalTransform(record.matrix, false);
-      const box = linearBounds(a, b, c, d, drawnBounds(pixi, node));
+    const held: readonly PixiFilter[] | null | undefined = node.filters;
+    const filters = held?.filter(filter => filter.enabled) ?? [];
 
-      return tx + box.x0 > 0 || ty + box.y0 > 0;
-    }
+    if (filters.length > 0) return passOffOrigin(kctx, pixi, node, filters);
   }
 
   return false;
@@ -248,11 +305,8 @@ export function verifyPictures(
   if (records.length === 0 && ranges.length === 0) return;
 
   // A picture moving off its grid or kept through a step of the resolution is sampled linearly, a fading one or one under
-  // a fading ancestor is faded after its filters, a place read under a filter off the origin differs from live by that
-  // origin: the frame is skipped and counted.
-  const uncomparable = records.some(
-    record => offGrid(kctx, record) || faded(record) || placeDiffers(kctx, record)
-  );
+  // a fading ancestor is faded after its filters: the frame is skipped and counted.
+  const uncomparable = records.some(record => offGrid(kctx, record) || faded(record));
 
   if (uncomparable) {
     state.verifySkipped += 1;
@@ -267,7 +321,16 @@ export function verifyPictures(
 
   if (drawn === undefined) return;
 
-  const live = drawLive(kctx, bypass, () => host.pixels(resolution));
+  // A place read under a filter off the origin differs from live by that origin: skipped and counted as well.
+  const live = drawLive(kctx, bypass, () =>
+    records.some(record => placeDiffers(kctx, record)) ? PLACE_DIFFERS : host.pixels(resolution)
+  );
+
+  if (live === PLACE_DIFFERS) {
+    state.verifySkipped += 1;
+
+    return;
+  }
 
   if (live === undefined || live.length !== drawn.length) return;
 

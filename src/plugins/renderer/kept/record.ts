@@ -2141,6 +2141,9 @@ function refreshOutput(
 
   if (inputs === undefined && record.s2Of !== undefined) releaseInputs(kctx, record);
 
+  // What follows draws an output, on the mesh or on a sprite: a stack that drew direct does not any more.
+  record.direct = false;
+
   // On the mesh a change is no take and no filter pass.
   if (!unfit && enterShadeWhenDue(kctx, pixi, record, owed, fits)) {
     redrawShade(kctx, pixi, matrices, record);
@@ -2154,7 +2157,6 @@ function refreshOutput(
   }
 
   noteTake(kctx, record, why);
-  record.direct = false;
   renderStage3(kctx, pixi, matrices, record, NOW);
   account(kctx, record);
   if (!chain) kctx.state.refreshesOpen += 1;

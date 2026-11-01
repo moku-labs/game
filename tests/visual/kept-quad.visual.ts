@@ -141,6 +141,12 @@ try {
         );
       }
 
+      const clip = answer.clipFirstFrames;
+
+      console.log(
+        `  measured, ${clip.name}: quads ${JSON.stringify(clip.quads)}, others ${JSON.stringify(clip.others)}`
+      );
+
       for (const row of answer.rows) {
         if (row.live !== undefined) console.log(`  ${row.name}: live misses by ${row.live}`);
       }

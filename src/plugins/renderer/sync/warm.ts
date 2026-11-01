@@ -803,6 +803,18 @@ function ridesAlong(warm: WarmState): boolean {
 }
 
 /**
+ * Tells whether a warm frame draws one more probe: one is queued, and the budget has room or it asks for none.
+ *
+ * @param warm - The warm branch of the sync state.
+ * @param drawn - The draws of this frame so far.
+ * @param budget - `renderer.warm`.
+ * @returns True when it does.
+ */
+function wantsDraw(warm: WarmState, drawn: number, budget: number): boolean {
+  return warm.head < warm.queue.length && (drawn < budget || ridesAlong(warm));
+}
+
+/**
  * Draws up to `renderer.warm` probes before the stage pass of a drawn frame, and the plain draw of a quad with the draw
  * before it; answers whether it drew any, so the frame is told to `time` as a probed one. A draw is counted only after
  * its own render call ran; a queue that still holds draws asks for the next frame; a probe that threw ends the warm-up
@@ -825,7 +837,7 @@ export function warmStep(sctx: SyncCtx): boolean {
   const budget = sctx.ctx.config.warm;
   let drawn = 0;
 
-  while ((drawn < budget || ridesAlong(warm)) && warm.head < warm.queue.length) {
+  while (wantsDraw(warm, drawn, budget)) {
     const draw = warm.queue[warm.head];
 
     warm.head += 1;

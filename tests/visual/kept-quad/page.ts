@@ -58,6 +58,8 @@ export type KeptQuadResult = {
   warmed: number;
   /** A view's first frames on its shader, each on a program no row drew yet, with the frame oracle off. */
   firstFrames: Array<{ name: string; quads: string[]; others: string[] }>;
+  /** The same under a real clip on the canvas: measured, not held to none, since no warm draw uses a clip. */
+  clipFirstFrames: { name: string; quads: string[]; others: string[] };
 };
 
 /** One game frame of the paused clock. */
@@ -156,6 +158,17 @@ const Veil = defineFilter("visual.veil", {
   cache: false
 });
 
+/** The same with a padding: Pixi's pass starts that far before the bounds, which `RootTint` of the bench never shows. */
+const PaddedVeil = defineFilter("visual.veil-padded", {
+  wgsl: `${OPEN}
+  return vec4<f32>(c.rgb * fu.amount, c.a);
+}`,
+  glsl: GLSL_PASS,
+  uniforms: { amount: 0.9 },
+  padding: 8,
+  cache: false
+});
+
 /** One number over a whole picture, the outer picture of its row: a body that reads no place. */
 const Dim = defineFilter("visual.dim", {
   wgsl: `${OPEN}
@@ -201,6 +214,9 @@ const LampUnderLive = lampFilter("visual.lamp-live", 2);
 /** A lamp only the first frame inside a kept picture draws. */
 const LampInPicture = lampFilter("visual.lamp-picture", 3);
 
+/** A lamp only the first frame under a clip draws. */
+const LampUnderClip = lampFilter("visual.lamp-clip", 4);
+
 /** The kit of the page's game. */
 const kit = defineGame<{
   player: Record<string, never>;
@@ -230,7 +246,20 @@ const main = kit.defineScene("main", {
 });
 const feature = kit.defineFeature("visual", {
   scenes: [main],
-  filters: [Tone, Reach, Wide, Pane, Dim, Lamp, Veil, LampOnCanvas, LampUnderLive, LampInPicture]
+  filters: [
+    Tone,
+    Reach,
+    Wide,
+    Pane,
+    Dim,
+    Lamp,
+    Veil,
+    PaddedVeil,
+    LampOnCanvas,
+    LampUnderLive,
+    LampInPicture,
+    LampUnderClip
+  ]
 });
 
 /** The manifest of the page: the mini game's `ui` bundle without its files, so the scene loads nothing. */
@@ -262,7 +291,9 @@ function pipelineLine(descriptor: GPURenderPipelineDescriptor): string {
     descriptor.label ?? "",
     target?.format ?? "",
     stencil?.format ?? "no-stencil",
-    stencil?.stencilFront?.compare ?? "",
+    stencil?.stencilFront === undefined
+      ? "no-mask"
+      : `mask ${stencil.stencilFront.compare} ${stencil.stencilFront.passOp}`,
     `samples ${descriptor.multisample?.count ?? 1}`,
     descriptor.primitive?.frontFace ?? ""
   ].join(" ");
@@ -692,6 +723,31 @@ async function play(): Promise<KeptQuadResult> {
   };
 
   /**
+   * Counts the pipelines since a point, and takes the row's entities away.
+   *
+   * @param name - The case.
+   * @param from - How many there were.
+   * @param entities - The entities, children first.
+   * @returns What it made.
+   */
+  const madeSince = async (
+    name: string,
+    from: number,
+    entities: readonly World.Entity[]
+  ): Promise<KeptQuadResult["firstFrames"][number]> => {
+    const made = pipelines.slice(from);
+
+    for (const entity of entities) ecs.despawn(entity);
+    await step(app, 3);
+
+    return {
+      name,
+      quads: made.filter(line => line.includes(".quad")),
+      others: made.filter(line => !line.includes(".quad"))
+    };
+  };
+
+  /**
    * Counts the quad pipelines a view's first frames on its shader make, with the oracle off: its extract draws into a
    * target of its own, which no game draws into.
    *
@@ -723,17 +779,32 @@ async function play(): Promise<KeptQuadResult> {
     // Time for a kept room to be taken, and its picture to draw the mesh.
     await step(app, 12);
 
-    const made = pipelines.slice(from);
+    return madeSince(name, from, view.lamp === undefined ? [view.room] : [view.lamp, view.room]);
+  };
 
-    if (view.lamp !== undefined) ecs.despawn(view.lamp);
-    ecs.despawn(view.room);
-    await step(app, 3);
+  /**
+   * The same under a real clip on the canvas, as a scroll list hangs its rows.
+   *
+   * @returns What it made.
+   */
+  const clippedFirstFrame = async (): Promise<KeptQuadResult["clipFirstFrames"]> => {
+    const from = pipelines.length;
+    const list = spawn(
+      Transform(at(100, 60)),
+      Shape({ w: css(200), h: css(100), fill: 0x22_22_44, clip: true })
+    );
+    const row = child(
+      list,
+      Transform({ x: css(10), y: css(10) }),
+      Shape({ w: css(260), h: css(140), fill: 0xff_ee_aa }),
+      LampUnderClip()
+    );
 
-    return {
-      name,
-      quads: made.filter(line => line.includes(".quad")),
-      others: made.filter(line => !line.includes(".quad"))
-    };
+    await shade(app, turn => ecs.set(row, LampUnderClip, { amount: turn }));
+
+    const shaded = shadedNow(app);
+
+    return madeSince(`under a clip, ${shaded} on its shader`, from, [row, list]);
   };
 
   app.renderer.sync.debug.verifyFrames(false);
@@ -743,6 +814,7 @@ async function play(): Promise<KeptQuadResult> {
     await firstFrame("under a live filter", LampUnderLive, Veil()),
     await firstFrame("inside a kept picture", LampInPicture, Dim())
   ];
+  const clipFirstFrames = await clippedFirstFrame();
 
   app.renderer.sync.debug.verifyFrames(true);
 
@@ -893,6 +965,36 @@ async function play(): Promise<KeptQuadResult> {
     )
   );
 
+  // A padding before the bounds: the pass at the canvas's corner starts at -8, off the origin, and live differs by it.
+  const corner = roomWithLamp({ x: 0, y: 0, side: 480 }, PaddedVeil());
+
+  rows.push(
+    await byHand(app, {
+      name: "under a padded live filter, at the corner",
+      resolution,
+      entities: [corner.lamp, corner.room],
+      value: {
+        box: { x: 20, y: 40, w: 240, h: 80 },
+        rgb: [0xff, 0xee, 0xaa],
+        amount: WRITES - 1,
+        above: 0.9
+      },
+      write: turn => ecs.set(corner.lamp, Lamp, { amount: turn })
+    })
+  );
+
+  // The bounds as far in as the padding: the pass starts at the origin, so the frame is compared, and live agrees.
+  const pulledBack = roomWithLamp({ x: 8, y: 8, side: 300 }, PaddedVeil());
+
+  rows.push(
+    await measure(
+      app,
+      "under a padded live filter, its pass at the origin",
+      [pulledBack.lamp, pulledBack.room],
+      turn => ecs.set(pulledBack.lamp, Lamp, { amount: turn })
+    )
+  );
+
   /** What the lamp of a room off the origin draws, the room's corner at 100, 60 and `moved` px further right. */
   const handValue = (above: number, moved: number): HandValue => ({
     box: { x: 120 + moved, y: 100, w: 240, h: 80 },
@@ -976,6 +1078,7 @@ async function play(): Promise<KeptQuadResult> {
     scopes,
     warmed,
     firstFrames,
+    clipFirstFrames,
     warnings: [...warnings, ...gpuErrors.map(data => ({ event: "gpu-error", data }))]
   };
 }

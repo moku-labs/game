@@ -509,6 +509,38 @@ describe("every way out leaves the same way", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  // Bug: a stack back from an alpha enters with `direct` still set: the mesh draws `s1`'s size at no padding, at a NaN alpha.
+  it("a direct record that enters the mode draws s3 at alpha 1", async () => {
+    const drawn = await open();
+    const slot = shadedSlot();
+    const alpha = new pixi.AlphaFilter({ alpha: 0.5 });
+
+    slot.filter.padding = 8;
+    alpha.resolution = "inherit";
+    alpha.enabled = false;
+
+    const card = keptCard(drawn, [slot, { filter: alpha, passes: 1, cache: "local" }]);
+    const record = recordOf(drawn, card);
+
+    write(drawn, card);
+    write(drawn, card);
+    slot.filter.enabled = false;
+    alpha.enabled = true;
+    write(drawn, card);
+
+    expect(record.direct).toBe(true);
+
+    slot.filter.enabled = true;
+    alpha.enabled = false;
+    write(drawn, card);
+
+    expect(record.shaded).toBe(true);
+    expect(record.direct).toBe(false);
+    expect(record.quad?.alpha).toBe(1);
+    expect(record.quad?.scale.x).toBe(56);
+    expect(shadeOf(record).shader.resources.uTexture).toBe(record.s3?.source);
+  });
+
   // Bug: a throw inside the render: the shader still binds a destroyed source.
   it("an evicted shaded view comes back on another texture, bound to it", async () => {
     const drawn = await open();

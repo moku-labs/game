@@ -388,8 +388,13 @@ describe("the warm-up of a game while its splash stands", () => {
 
     expect(last).toBeGreaterThan(0);
     expect(last).toBeLessThan(SPLASH_FRAMES);
-    // One a frame, a quad's second draw with its first: it adds no frame.
-    expect(Math.max(...frames)).toBe(2);
+    // One a frame; only a quad's two draws share one, so it adds no frame.
+    for (const drawn of game.probes.filter(probes => probes.length > 0)) {
+      const holdsQuad = drawn.some(probe => QUADS.some(quad => probe.startsWith(quad)));
+
+      expect(drawn).toHaveLength(holdsQuad ? 2 : 1);
+    }
+
     // The queue is empty: the still splash draws nothing more.
     expect(await game.frames(10)).toBe(0);
   });

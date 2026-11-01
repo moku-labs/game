@@ -1197,8 +1197,9 @@ no pass, and marks the pictures above, so a kept ancestor takes its picture agai
 
 Live under a filter whose bounds start off the canvas origin, Pixi's `uOutputFrame.xy` is relative to that filter's texture;
 on the mesh `canvasPixel` answers the canvas position there too (spec 23 P8.3). The two differ by that origin on purpose:
-the view jumps by it once, at its first take. `debug.verifyFrames` skips and counts such a frame, for a view whose closest
-filter starts at the origin it compares as usual. The take makes no mark, so with `onDemand` off the oracle in shadow names
+the view jumps by it once, at its first take. The pass starts where Pixi says: the bounds, or the filter area in their place,
+cut to the canvas, floored to the pass's grid, padded, so a padded filter at the corner starts off the origin. `debug.verifyFrames`
+skips and counts such a frame; for a view whose closest filter pass starts at the origin it compares as usual. The take makes no mark, so with `onDemand` off the oracle in shadow names
 it once as `renderer:missed-frame`.
 
 A mesh draws onto the canvas, whose target holds a stencil, or inside a filter pass or an outer picture, whose target does
