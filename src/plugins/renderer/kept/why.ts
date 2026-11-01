@@ -68,7 +68,10 @@ function recordEntry(kctx: KeptCtx, record: KeptRecord, view: string): WhyEntry 
   const retake = lastTake(kctx, record);
 
   if (record.mode === "kept") {
-    return { view, mode: record.direct ? "direct" : "kept", reason: null, calmIn: 0, retake };
+    const mode = record.direct ? "direct" : "kept";
+    const entry: WhyEntry = { view, mode, reason: null, calmIn: 0, retake };
+
+    return record.shaded ? { ...entry, quad: true } : entry;
   }
 
   const why = record.why === 0 ? WHY.waiting : record.why;

@@ -21,6 +21,7 @@ Open `http://127.0.0.1:4173/#slope-4`. Change the part after `#` and the scene c
 | `#slope-4-mask` | That scene. No token opens `ballast`. |
 | `#slope-4&k=12` | The scene with 12 ballast sprites under it. K stays until an address names another. |
 | `#glow&n=24` | A scene that takes a count (`glow`, 12 by default). |
+| `#rows&hold=500` | The scene's time held at 500 ms, for a compare of pixels at one value; with `arms=`, every arm's. An address without it lets the scenes run. |
 | `#arms=slope-0,slope-2&every=2&k=8` | Turns through the scenes, 2 s each, for as long as the page is open. |
 
 From the editor: open this folder as a game. The command `bench.scene` (`{ scene, k? }`) switches the
@@ -45,6 +46,10 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `flip` | A perspective flip and fold that reads the canvas origin. | A card flip. |
 | `scale` | 40 kept pictures, the page's resolution stepping × 1, 0.85, 0.75, 0.85 every 2 s. Works on a debug or dev page only: a release page does not switch resolution. | The adaptive render scale: the pictures are taken at the top, so a step costs no take. |
 | `scale-up` | The same 40 pictures in a 4 s loop: × 0.75 at the start, every fill changed once 300 ms later so the pictures are taken at 0.75, × 1 at 2 s. Debug or dev page only. Opened by address (`#scale-up&k=8`), not in the schedule of the phone. | The step up of the render scale: all 40 pictures owe a take at once, a limited number a frame. |
+| `rows` | 8 rows 340 × 72, padding 8, `cache: "local"`, the angle written each frame. After their third write the engine draws them through the filter's own body on a mesh in the canvas pass: `canvasPasses` = 1, no filter pass. | A kept view whose numbers change: OrderFlip, PromoQuad. |
+| `rows-live` | The same rows with `cache: false`: `canvasPasses` = 9 until slice C of F126 stage 2. | The same rows drawn live. |
+| `rest` | 24 pictures at rest, one small sprite moving so frames are drawn: a batched sprite each. | What a view costs once it left its shader. |
+| `rows-enter` | 40 views of 64 px that write their numbers for 2 s and rest for 2 s, all together. `marks` in the row hold the frame of the entry and the frame the leaving starts, two a flush. Opened by address (`#rows-enter&k=8`), not in the schedule of the phone: it needs a 4 s turn. | The frame a whole screen goes on its shaders. |
 | `lens` | A soft round window opening over a picture and a subtree. | LensWindow. |
 | `promo` | A perspective map of live text, a time-driven procedural quad, a mirrored column with a gradient, a stroke sweep. | The promo screen. |
 
@@ -62,7 +67,8 @@ Everything is on `game.bench` in the page console, or through CDP.
   `depth`, `empty`). `stats` is `renderer.stats()` at that moment.
 - `game.bench.rows()`: one such row per finished arm, with `frames`, each drawn frame's `t`, `gpuMs`,
   `workMs` and `canvasPasses`. `origin + t` is the phone's epoch time in ms, the time of the clock
-  samples, so frames can be binned by clock.
+  samples, so frames can be binned by clock. `marks` names the frames a scene marked, `frame` an
+  index into `frames`: `rows-enter` marks the frame of the entry and the frame the leaving starts.
 - The perf log of the monitor (`game.renderer.monitor.stream`, the editor's recorder) carries a mark
   at each arm: `arm slope-2 k=8` when it starts, `arm end slope-2 canvas=3 gpu=1.90` when it ends.
 - `game.renderer.sync.debug.why()` says why each filtered view is kept or live.

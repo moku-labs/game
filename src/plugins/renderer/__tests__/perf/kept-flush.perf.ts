@@ -11,6 +11,7 @@ import {
   keptFadeBoard,
   keptFractionalBoard,
   keptOwnFadeBoard,
+  keptShadedBoard,
   keptSteppedBoard,
   keptWhyBoard,
   keptZoomBoard
@@ -108,6 +109,14 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for 10 live views changed every frame, their reasons noted (F126)", async () => {
     expect(bytesPerCall(await keptWhyBoard(10), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptWhy + NOISE
+    );
+  });
+
+  // Bug: a shaded view makes a size object and a label for its output, walks a frozen list with `for…of`, or an iterator
+  // walks the ranges for every view that redraws: a mesh frame must cost what the spike measured, and no collection.
+  it("allocates nothing for 40 shaded views whose numbers are written every frame (F126)", async () => {
+    expect(bytesPerCall(await keptShadedBoard(40), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptShaded + NOISE
     );
   });
 

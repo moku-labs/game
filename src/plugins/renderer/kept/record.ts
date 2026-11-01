@@ -3,12 +3,20 @@
  * between them (P4). A view that stood still for two drawn frames is taken, a stack drawn direct in its first frame
  * without a change, at most one first take a frame and none while an alpha is due (F114); a kept view whose subtree
  * changes in three drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A step
- * of the renderer resolution keeps the pictures: one drawn lower is refined a few a flush (F126). A view with a node under
- * its top that blends otherwise than normally is never taken (F68). Taking and releasing happen inside the flush,
- * before the stage pass, both halves in the same frame (K3).
+ * of the renderer resolution keeps the pictures: one drawn lower is refined a few a flush (F126). A kept view whose filter
+ * numbers keep changing goes on its filter's own shader and back to a sprite at rest (F126 stage 2, `shade.ts`). A view
+ * with a node under its top that blends otherwise than normally is never taken (F68). Taking and releasing happen inside
+ * the flush, before the stage pass, both halves in the same frame (K3).
  */
 import type { FilterSlot, SyncState, SyncWriters, View } from "../sync/types";
-import type { FilterSlotInputs, PixiContainer, PixiFilter, PixiModule } from "../types";
+import type {
+  FilterSlotInputs,
+  PixiContainer,
+  PixiFilter,
+  PixiModule,
+  PixiRenderTexture,
+  PixiTexture
+} from "../types";
 import { makeRoom, warnRefused } from "./budget";
 import { drawnBounds } from "./drawn-bounds";
 import {
@@ -37,10 +45,12 @@ import {
   setOrigins,
   standInOf
 } from "./render";
+import { enabledSlot, enterShade, leaveShade, renderShade } from "./shade";
 import { destroyRecord } from "./state";
 import {
   type KeptCtx,
   type KeptMatrices,
+  type KeptQuad,
   type KeptRecord,
   type KeptState,
   RETAKE,
@@ -81,6 +91,19 @@ export const CROWD_TAKES = 10;
  * the bench a picture is 4 passes, 5–6 ms on the A26 at 221 MHz: two keep the frame near 29 ms, four took it to 44.
  */
 export const REFINE_TAKES = 2;
+
+/**
+ * Times stage 3 alone is owed before a record goes on its own shader (F126 stage 2): a stage 3 pass costs about 1.9 ms on
+ * the A26, a mesh frame 0.08 ms, so a view that keeps writing pays twice and then stops paying.
+ */
+export const QUAD_AFTER = 2;
+
+/**
+ * Drawn frames without a change before a shaded record goes back to a sprite, about a second at the 30 frames of the
+ * A26. Staying costs 0.08 ms GPU and 0.03 ms CPU a frame on the bench's small body, and the whole body's fill on a heavy
+ * one; going back costs one stage 3 pass and a rebuild of the render group's instructions.
+ */
+export const QUAD_CALM = 30;
 
 /** The reasons an ancestor may be hidden by and still draw the view: an overlay's range, a kept ancestor's picture. */
 const DRAWN_ANYWAY = ["freeze", "kept"] as const;
@@ -201,6 +224,29 @@ function readStack(
  */
 function drawsDirect(stack: Stack): boolean {
   return !Number.isNaN(stack.alpha) && stack.P === 0 && stack.rs === NOW.r;
+}
+
+/**
+ * Tells whether the record being stepped may draw through its filter's own body (F126 stage 2): on WebGPU, one enabled
+ * filter with a quad, no inputs, on `"inherit"`, at the canvas resolution, and not drawn direct. An `Alpha` beside it does
+ * not fit: stage 3 draws `F(A·x)` in stack order, the mesh would draw `A·F(x)`, and for a body that is not alpha-linear
+ * the picture would pop at every entry. A top that blends otherwise never gets here: `pictureWhy` refuses it. A mesh
+ * destroyed with a parent around it has nothing left to draw on. Read on `NOW`, once a step; allocates nothing.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @returns True when it fits.
+ */
+function shadeFits(kctx: KeptCtx, record: KeptRecord): boolean {
+  if (kctx.host.kind() !== "webgpu" || NOW.enabled !== 1) return false;
+  if (NOW.rs !== NOW.r || drawsDirect(NOW)) return false;
+
+  const slot = enabledSlot(record.slots);
+  const bodyOnQuad = slot?.quad !== undefined && slot.inputs === undefined;
+  const followsCanvas = slot?.filter.resolution === "inherit";
+  const meshStands = !record.shaded || record.shade?.mesh.destroyed !== true;
+
+  return bodyOnQuad && followsCanvas && meshStands;
 }
 
 /**
@@ -550,6 +596,11 @@ export function createRecord(
     standIn: undefined,
     keeperStandIn: undefined,
     quad: undefined,
+    shade: undefined,
+    shaded: false,
+    outputRuns: 0,
+    outputAt: 0,
+    shadedAt: 0,
     keeper: undefined,
     s1: undefined,
     s2: [],
@@ -573,6 +624,7 @@ export function createRecord(
     settle: false,
     coarse: false,
     refined: false,
+    redrawn: false,
     refused: 0,
     cut: false,
     direct: false,
@@ -616,6 +668,7 @@ export function goLive(
   view: View | undefined,
   putBack: boolean
 ): void {
+  leaveShade(record);
   endLoan(record.s2Of);
   setOrigins(record.slots, 0, 0);
 
@@ -1069,6 +1122,9 @@ function renderStages(
 
   record.direct = false;
 
+  // A stack that stopped fitting leaves before anything is drawn for it: the frame draws a sprite of stage 3.
+  if (record.shaded && !shadeFits(kctx, record)) leaveShade(record);
+
   if (ok && first !== undefined) {
     renderStage2(kctx, pixi, matrices, record, {
       inputs: first.inputs,
@@ -1079,7 +1135,10 @@ function renderStages(
     releaseInputs(kctx, record);
   }
 
-  ok = ok && renderStage3(kctx, pixi, matrices, record, now);
+  // Under the mode a retake costs stage 1 and one copy.
+  if (record.shaded) record.shadedAt = kctx.state.frame;
+
+  ok = ok && (record.shaded ? renderShade : renderStage3)(kctx, pixi, matrices, record, now);
   account(kctx, record);
 
   if (!ok && live) putFiltersBack(kctx, record, view);
@@ -1108,6 +1167,8 @@ function putFiltersBack(kctx: KeptCtx, record: KeptRecord, view: View): void {
  * @param record - The record.
  */
 function goDirect(kctx: KeptCtx, record: KeptRecord): void {
+  leaveShade(record);
+
   if (record.s2Of !== undefined) releaseInputs(kctx, record);
 
   if (record.s3 !== undefined) {
@@ -1212,6 +1273,44 @@ function scalable(record: KeptRecord, stepped: boolean): boolean {
 }
 
 /**
+ * The quad of a kept record, drawing `output`: made once, the mesh of a shaded record reading its texture through its
+ * shader (`Mesh.texture` does not reach it).
+ *
+ * @param pixi - The module that draws.
+ * @param record - The record, kept.
+ * @param output - What it draws.
+ * @returns The quad.
+ */
+function quadDrawing(
+  pixi: PixiModule,
+  record: KeptRecord,
+  output: PixiRenderTexture | PixiTexture
+): KeptQuad {
+  if (record.quad === undefined || record.quad.destroyed) {
+    record.quad = new pixi.Sprite(output);
+    record.quad.label = `kept:${labelOf(record.top)}`;
+  }
+
+  if (!record.shaded && record.quad.texture !== output) record.quad.texture = output;
+
+  return record.quad;
+}
+
+/**
+ * Hangs a quad right above its top in the same parent.
+ *
+ * @param quad - The quad.
+ * @param top - The top.
+ * @param parent - The top's parent.
+ */
+function hangQuad(quad: KeptQuad, top: PixiContainer, parent: PixiContainer): void {
+  if (quad.parent === parent && parent.children[parent.getChildIndex(top) + 1] === quad) return;
+
+  quad.removeFromParent();
+  parent.addChildAt(quad, parent.getChildIndex(top) + 1);
+}
+
+/**
  * Places the quad of a kept record (P3.5, P2.4): beside its top in the same parent, at the top's depth, drawing the
  * filter output at its canvas place `O + Δ` with an identity world scale, or scaled to this frame's linear part when
  * it differs from the take's (F67); shown while the top is visible and no cover or alpha hides it. Every value is compared before it is written.
@@ -1236,29 +1335,19 @@ function placeQuad(
   const output = (record.direct ? record.s1 : record.s3) ?? pixi.Texture.EMPTY;
   const alpha = (record.direct ? NOW.alpha : 1) * top.alpha;
 
-  // The quad: made once, drawing the filter output.
-  if (record.quad === undefined || record.quad.destroyed) {
-    record.quad = new pixi.Sprite(output);
-    record.quad.label = `kept:${labelOf(top)}`;
-  }
+  const quad = quadDrawing(pixi, record, output);
 
-  const quad = record.quad;
-
-  if (quad.texture !== output) quad.texture = output;
   if (parent === null) return;
 
-  // Right above its top in the same parent, at the top's depth and blend.
-  if (quad.parent !== parent || parent.children[parent.getChildIndex(top) + 1] !== quad) {
-    quad.removeFromParent();
-    parent.addChildAt(quad, parent.getChildIndex(top) + 1);
-  }
+  hangQuad(quad, top, parent);
 
   if (quad.zIndex !== top.zIndex) quad.zIndex = top.zIndex;
   if (quad.blendMode !== top.blendMode) quad.blendMode = top.blendMode;
   if (quad.alpha !== alpha) quad.alpha = alpha;
 
   // The filter output at its canvas place `O + Δ`, brought into the parent's space: with an identity world scale, or
-  // through `W · W₀⁻¹` when the linear part moved since the take (F67).
+  // through `W · W₀⁻¹` when the linear part moved since the take (F67). Inline: in a helper of its own V8 boxes a number
+  // of this frame (16 B on a fading quad, `keptFade`).
   const inverse = parent.getGlobalTransform(matrices.parent, false).invert();
   const Ps = record.direct ? 0 : (key[KEY.Ps] ?? 0);
   const { local } = matrices;
@@ -1276,6 +1365,14 @@ function placeQuad(
     local.d = inverse.d;
     local.tx = inverse.a * x + inverse.c * y + inverse.tx;
     local.ty = inverse.b * x + inverse.d * y + inverse.ty;
+  }
+
+  // The mesh's geometry is the unit square: its matrix carries the size a sprite takes from its texture.
+  if (record.shaded) {
+    local.a *= output.width;
+    local.b *= output.width;
+    local.c *= output.height;
+    local.d *= output.height;
   }
 
   if (storeMatrix(key, KEY.qa, local)) quad.setFromMatrix(local);
@@ -1948,30 +2045,69 @@ function refresh(
 ): boolean {
   // A stack of alphas owes nothing: its quad takes the new alpha (F54).
   if (drawsDirect(NOW)) {
-    if (record.direct) return false;
-
-    goDirect(kctx, record);
-    account(kctx, record);
+    turnDirect(kctx, record);
 
     return false;
   }
 
-  const owed = stagesOwed(record, hold);
+  return refreshOutput(kctx, pixi, matrices, record, view, hold);
+}
 
-  if (owed === OWED.none) return false;
+/**
+ * Redoes what a record that does not draw direct owes, on its mesh when it is shaded or goes on it now: a stack that
+ * stopped fitting leaves and owes stage 3, one at rest may leave, and what is left is today's tail of stage 2 and 3.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, kept.
+ * @param view - Its view.
+ * @param hold - A step of the resolution owes no stage.
+ * @returns True when the record was taken whole.
+ */
+function refreshOutput(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View,
+  hold: boolean
+): boolean {
+  // A stack that stopped fitting leaves first: what follows draws for a sprite.
+  const fits = shadeFits(kctx, record);
+  const unfit = record.shaded && !fits;
+
+  if (unfit) leaveShade(record);
+
+  // What a record left holds is the padded picture, not a filter output: stage 3 is owed whatever the keys say.
+  const owed = Math.max(stagesOwed(record, hold), unfit ? OWED.output : OWED.none);
+
+  // Nothing owed: the one thing left to ask is whether a shaded record rested long enough.
+  if (owed === OWED.none) return leaveAtRest(kctx, pixi, matrices, record, view, hold);
 
   const chain = owed === OWED.chain;
   const why = refreshWhy(record, chain, hold);
 
+  // Under a held step what is owed lands on one resolution: the record is taken whole.
   if (hold && record.key[KEY.rs] !== NOW.rs) {
     retakeOrGoLive(kctx, pixi, matrices, record, view, why);
 
     return true;
   }
 
+  // A chain that left goes before the mesh or stage 3 draws without it.
   const inputs = firstInputs(record.slots)?.inputs;
 
   if (inputs === undefined && record.s2Of !== undefined) releaseInputs(kctx, record);
+
+  // On the mesh a change is no take and no filter pass.
+  if (!unfit && enterShadeWhenDue(kctx, pixi, record, owed, fits)) {
+    redrawShade(kctx, pixi, matrices, record);
+
+    return false;
+  }
+
+  // The tail of a sprite: stage 2 when its chain is owed, stage 3 over it.
   if (chain && inputs !== undefined) {
     renderStage2(kctx, pixi, matrices, record, { inputs, resolution: NOW.r, padding: NOW.P });
   }
@@ -1981,6 +2117,135 @@ function refresh(
   renderStage3(kctx, pixi, matrices, record, NOW);
   account(kctx, record);
   if (!chain) kctx.state.refreshesOpen += 1;
+
+  return false;
+}
+
+/**
+ * Lets a record that stayed kept draw its subtree picture itself, when it does not yet: a stack became all alphas.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record, kept.
+ */
+function turnDirect(kctx: KeptCtx, record: KeptRecord): void {
+  if (record.direct) return;
+
+  goDirect(kctx, record);
+  account(kctx, record);
+}
+
+/**
+ * A change of a shaded record: no take and no pass, unless the padded picture must be copied, and the mesh draws what
+ * changed, so the pictures above it hold something else now.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, shaded.
+ */
+function redrawShade(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord
+): void {
+  const { state } = kctx;
+  const passes = state.flushPasses;
+
+  renderShade(kctx, pixi, matrices, record, NOW);
+  record.shadedAt = state.frame;
+  record.redrawn = true;
+
+  // Only a copy changes a texture: the bytes are counted through an array that a frame of the mesh does not make.
+  if (state.flushPasses !== passes) account(kctx, record);
+}
+
+/**
+ * Counts an output owed by a record on its sprite, and puts the record on its mesh when it is due: stage 3 alone was owed
+ * more than `QUAD_AFTER` times without a gap of `CALM_AFTER` frames, and it fits. The gap rule, not a reset on a quiet
+ * frame: a tween that writes every second frame reaches the mode. A shaded record counts nothing.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param record - The record, kept.
+ * @param owed - What it owes, not none.
+ * @param fits - It fits the mode.
+ * @returns True when the mesh draws the change.
+ */
+function enterShadeWhenDue(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  record: KeptRecord,
+  owed: number,
+  fits: boolean
+): boolean {
+  if (record.shaded) return true;
+
+  const { frame } = kctx.state;
+
+  record.outputRuns = frame - record.outputAt > CALM_AFTER ? 1 : record.outputRuns + 1;
+  record.outputAt = frame;
+
+  const quad = enabledSlot(record.slots)?.quad;
+  const outputAlone = owed === OWED.output;
+  const ranLong = record.outputRuns > QUAD_AFTER;
+
+  if (!outputAlone || !fits || !ranLong || quad === undefined) return false;
+
+  return enterShade(kctx, pixi, record, quad, NOW);
+}
+
+/**
+ * Tells whether a shaded record went `QUAD_CALM` drawn frames without a change: it is due to leave.
+ *
+ * @param state - The kept state.
+ * @param record - The record.
+ * @returns True when it is.
+ */
+function shadedCalm(state: KeptState, record: KeptRecord): boolean {
+  return record.shaded && state.frame - record.shadedAt >= QUAD_CALM;
+}
+
+/**
+ * A shaded record that owes nothing and stood `QUAD_CALM` frames goes back to its sprite (F126 stage 2): a resting mesh
+ * runs the whole body every frame. Under `limitLeft`, shared with the refining and the settle, it stays shaded in a frame
+ * the limit is spent. It counts as a refresh. The pixels do not change, so the pass marks nothing above; a stack whose
+ * resolution moved under a held step is taken whole, as `refresh` takes it, and that does change them.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, kept.
+ * @param view - Its view.
+ * @param hold - A step of the resolution owes no stage.
+ * @returns True when the record was taken whole.
+ */
+function leaveAtRest(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View,
+  hold: boolean
+): boolean {
+  const { state } = kctx;
+
+  // The limit is read last: asking it counts a take.
+  if (!shadedCalm(state, record) || !limitLeft(kctx)) return false;
+
+  leaveShade(record);
+
+  if (hold && record.key[KEY.rs] !== NOW.rs) {
+    retakeOrGoLive(kctx, pixi, matrices, record, view, RETAKE.filter);
+
+    return true;
+  }
+
+  noteTake(kctx, record, RETAKE.filter);
+  renderStage3(kctx, pixi, matrices, record, NOW);
+  account(kctx, record);
+  state.refreshesOpen += 1;
+  BEFORE.passes = state.flushPasses;
 
   return false;
 }
@@ -2021,6 +2286,7 @@ function noteDrawing(kctx: KeptCtx, record: KeptRecord, into: Drawing): void {
  */
 function drawingChanged(kctx: KeptCtx, record: KeptRecord, before: Readonly<Drawing>): boolean {
   return (
+    record.redrawn ||
     before.mode !== record.mode ||
     before.passes !== kctx.state.flushPasses ||
     !Object.is(before.qtx, record.key[KEY.qtx]) ||
@@ -2046,7 +2312,8 @@ function owesStep(state: KeptState, record: KeptRecord): boolean {
     record.dirtyS3 ||
     record.settle ||
     record.coarse ||
-    record.churn !== 0
+    record.churn !== 0 ||
+    shadedCalm(state, record)
   );
 }
 
@@ -2170,6 +2437,7 @@ export function stepRecord(
   record.dirtyS2 = false;
   record.dirtyS3 = false;
   record.refined = false;
+  record.redrawn = false;
   record.markBy = 0;
   record.spared = false;
   // A due alpha that could not be taken holds the others back once, not every frame (F114).
@@ -2285,6 +2553,9 @@ function dirtyAbove(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
       above.markBy = record.entity;
     }
   }
+
+  // Per frame of a shaded view: no iterator while no overlay holds a picture.
+  if (kctx.state.ranges.size === 0) return;
 
   // A range picture of an overlay that holds the record draws it too: rendered again after the records (spec 22 K1).
   for (const range of kctx.state.ranges.values()) {

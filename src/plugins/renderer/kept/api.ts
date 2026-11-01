@@ -28,6 +28,7 @@ import {
   stepRecord
 } from "./record";
 import { canKeep, dropTexture, emptyPool, matricesOf } from "./render";
+import { dropQuadParts } from "./shade";
 import { destroyRange } from "./state";
 import {
   type KeptCtx,
@@ -478,6 +479,7 @@ export function createKeptApi(
       }
 
       emptyPool(kctx);
+      dropQuadParts(state);
       state.bytes = 0;
       state.poolBytes = 0;
       state.drawnPictures = 0;

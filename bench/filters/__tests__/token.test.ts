@@ -26,6 +26,12 @@ describe("the #scene token", () => {
     expect(parseToken("#full&every=0").every).toBe(2);
   });
 
+  // Bug: a compare of pixels runs on a moving value: the mode and live are never at one number.
+  it("reads a held time, and drops one that is no whole number", () => {
+    expect(parseToken("#rows&hold=500").hold).toBe(500);
+    expect(parseToken("#rows&hold=soon").hold).toBeUndefined();
+  });
+
   // Bug: the schedule the a26 script prints opens one scene, and the arms never turn.
   it("reads a list of arms, the first one as the scene", () => {
     expect(parseToken("#arms=slope-0,slope-2&every=3&k=8")).toEqual({

@@ -369,7 +369,8 @@ export function standInOf(
 
 /**
  * The output texture of stage 3 at its size: the subtree picture padded by the stack's padding on its grid, at the
- * renderer resolution. Stage 2 renders into it too, before stage 3 clears it.
+ * renderer resolution. Stage 2 renders into it too, before stage 3 clears it, and a shaded record copies its picture
+ * into it (`shade.ts`).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -378,26 +379,36 @@ export function standInOf(
  * @param padding - The padding sum of the enabled filters.
  * @returns The texture.
  */
-function outputOf(
+export function outputOf(
   kctx: KeptCtx,
   pixi: PixiModule,
   record: KeptRecord,
   resolution: number,
   padding: number
 ): PixiRenderTexture {
-  const { key } = record;
+  const { key, s3 } = record;
   const Ps = paddingOnGrid(padding, key[KEY.rs] ?? 1);
+  const width = (key[KEY.w1] ?? 0) + 2 * Ps;
+  const height = (key[KEY.h1] ?? 0) + 2 * Ps;
 
   key[KEY.Ps] = Ps;
+
+  // Per frame of a shaded view: the size asked for stands, so no size object and no label are made. In device pixels:
+  // the CSS size Pixi keeps may differ from the asked one in its last bits.
+  if (s3 !== undefined && !s3.destroyed) {
+    const { source } = s3;
+    const sameDevice =
+      source.pixelWidth === Math.round(width * resolution) &&
+      source.pixelHeight === Math.round(height * resolution);
+
+    if (sameDevice && source.resolution === resolution) return s3;
+  }
+
   record.s3 = fitTexture(
     kctx,
     pixi,
     record.s3,
-    {
-      width: (key[KEY.w1] ?? 0) + 2 * Ps,
-      height: (key[KEY.h1] ?? 0) + 2 * Ps,
-      resolution
-    },
+    { width, height, resolution },
     `kept:${labelOf(record.top)}#3`
   );
 
@@ -583,10 +594,14 @@ function noteStage2(record: KeptRecord, inputs: FilterSlotInputs): void {
  * @param y - The origin's y, canvas px.
  */
 export function setOrigins(slots: readonly FilterSlot[], x: number, y: number): void {
-  for (const slot of slots) {
-    if (slot.origin !== undefined) {
-      slot.origin[0] = x;
-      slot.origin[1] = y;
+  // Per frame of a shaded view: a frozen list, walked by index (`for…of` allocates over a frozen array).
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const origin = slots[index]?.origin;
+
+    if (origin !== undefined) {
+      origin[0] = x;
+      origin[1] = y;
     }
   }
 }
@@ -603,8 +618,8 @@ export function setOrigins(slots: readonly FilterSlot[], x: number, y: number): 
  * @param now - The frame's numbers.
  * @param now.r - The renderer resolution.
  * @param now.P - The padding sum of the enabled filters.
- * @param now.tx - The top's translation now.
- * @param now.ty - The top's translation now.
+ * @param now.tx - The top's x translation now.
+ * @param now.ty - The top's y translation now.
  * @returns True when Pixi rendered it.
  */
 export function renderStage3(

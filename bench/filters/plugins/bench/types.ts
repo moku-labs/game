@@ -12,6 +12,8 @@ export type ShowOptions = {
   k?: number;
   /** The count of a scene that takes one. */
   n?: number;
+  /** The scene's time held at this many milliseconds; left out keeps what stands. */
+  hold?: number;
 };
 
 /** The numbers of the renderer at the end of an arm: they exist in a release build too. */
@@ -23,6 +25,9 @@ export type ArmStats = {
   evicted: number;
   refused: number;
 };
+
+/** A frame a scene marked: where it stands in the row's `frames`. */
+export type ArmMark = { label: string; frame: number };
 
 /** One arm's numbers. */
 export type ArmRow = {
@@ -36,6 +41,8 @@ export type ArmRow = {
   origin: number;
   /** Each drawn frame of the ring, on a debug page; none on a release page. */
   frames: FrameSample[];
+  /** The frames the scene marked. */
+  marks: ArmMark[];
   /** How many canvas passes began for each reason, on a debug page. */
   restarts: Record<string, number>;
   /** The medians, on a debug page. */
@@ -85,7 +92,7 @@ export type BenchApi = {
    * Puts a scene on screen in place of the one there, and ends a run of arms.
    *
    * @param scene - The name.
-   * @param options - K and n.
+   * @param options - K, n and the held time.
    * @throws {Error} When the table has no such scene.
    * @example
    * ```ts
@@ -155,6 +162,10 @@ export type BenchState = {
   mountedMs: number;
   /** The game time of the last frame. */
   nowMs: number;
+  /** The time a scene is held at, from the address; `undefined` lets it run. */
+  hold: number | undefined;
+  /** The frames the scene on screen marked. */
+  marks: ArmMark[];
   /** The sprites of the ballast. */
   ballast: World.Entity[];
   k: number;

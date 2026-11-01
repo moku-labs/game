@@ -21,6 +21,7 @@ import type {
   FilterCache,
   FilterSlot,
   FilterSlotInputs,
+  FilterSlotQuad,
   HitBox,
   KeptStats,
   LegendEntry,
@@ -292,6 +293,7 @@ expectTypeOf<FilterSlot>().toEqualTypeOf<{
   cache?: FilterCache;
   origin?: Float32Array;
   blurs?: boolean;
+  quad?: FilterSlotQuad;
 }>();
 expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void

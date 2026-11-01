@@ -4,7 +4,9 @@
  * kind gets no instance until all of its own answered; one that fails breaks the kind (E5). The WGSL goes through the
  * renderer's device on WebGPU, the GLSL through its WebGL context on WebGL, in parallel where the driver can
  * (`KHR_parallel_shader_compile`). An error is logged with its line, once per definition. The `load` stage of a node
- * entry waits for the answers, so no mounted scene shows a filtered view unfiltered while its shader is checked.
+ * entry waits for the answers, so no mounted scene shows a filtered view unfiltered while its shader is checked. On
+ * WebGPU a kind's quad program is compiled after its body answered, and the definition answers with it: a quad that
+ * fails logs one line and only takes the quad away, the kind stays ok and its views keep today's path.
  */
 import type { NodeInfo } from "../../flow/types";
 import { pageNow } from "../../renderer/monitor/clock";
@@ -90,6 +92,23 @@ function checkList(ectx: EffectsCtx): FilterDefinition[] {
 }
 
 /**
+ * The definitions the registered kinds draw as themselves: a stage or a fallback never runs on a quad, unless it is a
+ * kind too.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @returns The main body of every kind of ours.
+ */
+function kindBodies(ectx: EffectsCtx): Set<FilterDefinition> {
+  const bodies = new Set<FilterDefinition>();
+
+  for (const kind of ectx.state.kinds.values()) {
+    if (kind.source === "wgsl") bodies.add(kind.definition);
+  }
+
+  return bodies;
+}
+
+/**
  * Logs the line of a fallback that fails its own check, once: no kind can draw it in place of its own.
  *
  * @param ectx - Domain context of the effects plugin.
@@ -159,19 +178,90 @@ function finish(
 }
 
 /**
- * Takes the WGSL compilation messages of one definition: every error is one log line, and one error breaks it. An
- * answer of an earlier run is ignored.
+ * Takes the compilation messages of a quad program: clean, the definition's quad is usable; an error is one log line,
+ * however many the compiler found, and costs the quad only. Either way the definition answers ok: its body compiled.
+ * An answer of an earlier run is ignored.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param run - The run the check was started in.
  * @param definition - The definition.
  * @param messages - What the compiler said.
  */
-function settle(
+function settleQuad(
   ectx: EffectsCtx,
   run: number,
   definition: FilterDefinition,
   messages: readonly GPUCompilationMessage[]
+): void {
+  const { checks } = ectx.state;
+
+  if (checks.run !== run || checks.status.get(definition) !== "pending") return;
+
+  const error = messages.find(message => message.type === "error");
+
+  if (error === undefined) {
+    checks.quads.add(definition);
+  } else {
+    ectx.log.error("effects:wgsl", {
+      filter: definition.id,
+      quad: true,
+      line: error.lineNum,
+      column: error.linePos,
+      message: error.message
+    });
+  }
+
+  finish(ectx, run, definition, true);
+}
+
+/**
+ * Starts the compile of a definition's quad program, after its body compiled clean. With no device (lost since), or
+ * info it cannot read, the definition is ok without a quad: an unchecked text never reaches the GPU.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param run - The current run.
+ * @param definition - The definition.
+ * @param source - Its quad program.
+ */
+function checkQuad(
+  ectx: EffectsCtx,
+  run: number,
+  definition: FilterDefinition,
+  source: string
+): void {
+  const device = ectx.deps.renderer.host.device();
+
+  if (device === undefined) {
+    finish(ectx, run, definition, true);
+
+    return;
+  }
+
+  device
+    .createShaderModule({ code: source })
+    .getCompilationInfo()
+    .then(
+      info => settleQuad(ectx, run, definition, info.messages),
+      () => finish(ectx, run, definition, true)
+    );
+}
+
+/**
+ * Takes the WGSL compilation messages of one definition: every error is one log line, and one error breaks it. A body
+ * that compiled goes on to its quad program, if it has one to check. An answer of an earlier run is ignored.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param run - The run the check was started in.
+ * @param definition - The definition.
+ * @param messages - What the compiler said.
+ * @param quad - The quad program to check after the body; `undefined` for none.
+ */
+function settle(
+  ectx: EffectsCtx,
+  run: number,
+  definition: FilterDefinition,
+  messages: readonly GPUCompilationMessage[],
+  quad: string | undefined
 ): void {
   const { checks } = ectx.state;
 
@@ -188,18 +278,26 @@ function settle(
     });
   }
 
-  finish(ectx, run, definition, errors.length === 0);
+  if (errors.length === 0 && quad !== undefined) checkQuad(ectx, run, definition, quad);
+  else finish(ectx, run, definition, errors.length === 0);
 }
 
 /**
- * Starts the WGSL check of a definition through the renderer's device. With no device (lost) it is ok at once;
- * otherwise it answers when `getCompilationInfo()` resolves. A check that cannot read its info counts as ok.
+ * Starts the WGSL check of a definition through the renderer's device. With no device (lost) it is ok at once, with no
+ * quad; otherwise it answers when `getCompilationInfo()` resolves, and a quad's after that. A check that cannot read
+ * its info counts as ok.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param run - The current run.
  * @param definition - The definition.
+ * @param quad - Its quad program, for a kind that can run on one.
  */
-function checkWgsl(ectx: EffectsCtx, run: number, definition: FilterDefinition): void {
+function checkWgsl(
+  ectx: EffectsCtx,
+  run: number,
+  definition: FilterDefinition,
+  quad: string | undefined
+): void {
   const device = ectx.deps.renderer.host.device();
 
   if (device === undefined) {
@@ -212,8 +310,8 @@ function checkWgsl(ectx: EffectsCtx, run: number, definition: FilterDefinition):
     .createShaderModule({ code: definition.source })
     .getCompilationInfo()
     .then(
-      info => settle(ectx, run, definition, info.messages),
-      () => settle(ectx, run, definition, [])
+      info => settle(ectx, run, definition, info.messages, quad),
+      () => settle(ectx, run, definition, [], quad)
     );
 }
 
@@ -316,6 +414,8 @@ export function startChecks(ectx: EffectsCtx): void {
 
   checks.startedAt = pageNow();
 
+  const bodies = kindBodies(ectx);
+
   for (const definition of checkList(ectx)) {
     if (checks.status.has(definition)) continue;
 
@@ -323,8 +423,14 @@ export function startChecks(ectx: EffectsCtx): void {
     checks.waiting += 1;
     checks.checked += 1;
 
-    if (backend === "webgpu") checkWgsl(ectx, checks.run, definition);
-    else if (backend === "webgl") checkGlsl(ectx, checks.run, definition);
+    if (backend === "webgpu") {
+      checkWgsl(
+        ectx,
+        checks.run,
+        definition,
+        bodies.has(definition) ? definition.quadSource : undefined
+      );
+    } else if (backend === "webgl") checkGlsl(ectx, checks.run, definition);
     else finish(ectx, checks.run, definition, true);
   }
 

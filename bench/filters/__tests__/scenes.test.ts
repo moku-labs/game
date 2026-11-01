@@ -9,6 +9,7 @@ import { scaleScene, scaleUpScene } from "../features/bench/scenes/cases";
 import type { Stage } from "../features/bench/scenes/types";
 import game from "../index";
 import { ARMS } from "../lib/a26";
+import { type BenchHost, benchFrame, createBenchState, followAddress } from "../plugins/bench/api";
 
 /** The bench folder: the manifest and the files of the game. */
 const FOLDER = new URL("../", import.meta.url);
@@ -37,7 +38,11 @@ const EVERY_SCENE = [
   "scale",
   "scale-up",
   "lens",
-  "promo"
+  "promo",
+  "rows",
+  "rows-live",
+  "rest",
+  "rows-enter"
 ] as const;
 
 /** The running game of a test. */
@@ -163,6 +168,82 @@ describe("the canvas estimate", () => {
     app.bench.show("slope-0");
     await driver.frames(3);
     expect(app.renderer.stats().canvasPasses).toBe(1);
+  });
+});
+
+describe("the rows on their shaders", () => {
+  // Bug: a kept filter written every frame still breaks the canvas pass or costs a filter pass: the A26 line reads 9.
+  it("rows runs no filter pass and no canvas break once its numbers were written, rows-live one a row", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const { app, driver } = await open();
+
+    app.bench.show("rows", { k: 0 });
+    await driver.frames(20);
+
+    const entries = app.renderer.sync.debug.why();
+
+    expect(entries).toHaveLength(8);
+    expect(entries.every(entry => entry.quad === true)).toBe(true);
+    expect(app.renderer.stats().canvasPasses).toBe(1);
+    expect(app.renderer.stats().kept.retakes).toBe(0);
+
+    app.bench.show("rows-live");
+    await driver.frames(20);
+
+    expect(app.renderer.stats().canvasPasses).toBe(9);
+  });
+
+  // Bug: the frame of the entry cannot be told in a row, and the gate on it reads the wrong frame.
+  it("rows-enter marks its entry and its leaving", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const { app, driver } = await open();
+
+    app.bench.show("rows-enter", { k: 0 });
+
+    expect(app.bench.read().marks).toEqual([]);
+
+    // One turn of writes and rests, and the calm after it.
+    await driver.frames(290);
+
+    const [entry, leaving] = app.bench.read().marks;
+
+    expect(entry?.label).toBe("rows-enter entry");
+    expect(leaving?.label).toBe("rows-enter leaving");
+    expect(leaving?.frame).toBeGreaterThan(entry?.frame ?? 0);
+  });
+
+  // Bug: a run of arms drops the held time of its address: the compare on the phone reads a moving value.
+  it("an address holds a run of arms, and the next one lets them go", () => {
+    const state = createBenchState();
+    const host = {
+      ecs: { despawnOwnedBy: vi.fn(), spawn: vi.fn(() => 1) },
+      screen: () => ({ width: 1, height: 1 }),
+      monitor: { frames: () => ({ written: 0 }), mark: vi.fn() }
+    } as unknown as BenchHost;
+
+    followAddress(state, host, "#arms=ballast&hold=500");
+
+    expect(state.hold).toBe(500);
+
+    state.scene = undefined;
+    followAddress(state, host, "#ballast");
+
+    expect(state.hold).toBeUndefined();
+  });
+
+  // Bug: the value keeps moving under a compare of pixels.
+  it("a held scene writes one number", async () => {
+    const state = createBenchState();
+    const tick = vi.fn();
+
+    state.mounted = { tick };
+    state.hold = 500;
+    benchFrame(state, {} as BenchHost, 900);
+    benchFrame(state, {} as BenchHost, 933);
+
+    expect(tick.mock.calls).toEqual([[500], [500]]);
   });
 });
 
@@ -320,7 +401,8 @@ function recordingStage(asked: Asked[]): Stage {
       asked.push(resolution);
 
       return 2;
-    }
+    },
+    mark: () => undefined
   };
 }
 
