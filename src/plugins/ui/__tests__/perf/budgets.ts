@@ -162,5 +162,11 @@ export const BUDGET = {
    * fields are written on the stored values, which are only marked changed. The lock keeps the same
    * window object. 0 B.
    */
-  guideMoving: 0
+  guideMoving: 0,
+  /**
+   * F135 (change 2026-11-01-f135-bound-format): the remeasure of a text with a built-in bind, which a
+   * rolling counter asks at every change of its shown string. A format of a game costs it one more
+   * compare: it reads no `Text.style` and asks no format, and nothing is built. 0 B.
+   */
+  remeasureBound: 0
 } as const;

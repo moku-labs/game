@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineAnimation, mark, play, projection } from "../../../../index";
 import type { CompiledMessages } from "../../../i18n/types";
 import { defineScene } from "../../../scenes/define";
-import { defineTextStyles, Text } from "../../../text/components";
+import { defineTextFormats, defineTextStyles, Text } from "../../../text/components";
 import type { TextValue } from "../../../text/types";
 import { Box } from "../../components";
 import { defineComponent } from "../../jsx/component";
@@ -284,6 +284,11 @@ describe("dev hot swap", () => {
       "homeScene",
       defineScene("home", { bundle: "home", layers: { board: {} }, projections: [] }),
       'exports "homeScene", registered at start'
+    ],
+    [
+      "pillFormats",
+      defineTextFormats({ "pill.number": value => ({ content: String(value), style: "body" }) }),
+      'exports "pillFormats", registered at start'
     ],
     [
       "sparkle",

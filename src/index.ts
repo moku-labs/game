@@ -149,6 +149,7 @@ import type {
   GameTypes,
   HudKeysOf,
   SceneIdOf,
+  TextFormatsOf,
   TextStylesOf
 } from "./plugins/flow/types";
 import { i18nFor } from "./plugins/i18n/tr";
@@ -205,7 +206,9 @@ export const createPlugin = framework.createPlugin;
  * a string key written in code (a key that comes from data is checked with `app.i18n.isKey`).
  *
  * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`,
- *   `emitters` and `hud` (the HUD part keys of `HudPart` and `Overlay`).
+ *   `textStyles`, `textFormats` (the format names of `bind`, next to the four built-in ones, with
+ *   `defineTextFormats` answering the game's styles), `emitters` and `hud` (the HUD part keys of
+ *   `HudPart` and `Overlay`).
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
@@ -223,7 +226,7 @@ export function defineGame<Types extends GameTypes>() {
     ...scenesFor<Types["assets"], BundlesOf<Types>, Types["player"], Types["session"]>(),
     ...animFor<Types["assets"]>(),
     ...i18nFor<Types["strings"]>(),
-    ...textFor<TextStylesOf<Types>, Types["assets"]>(),
+    ...textFor<TextStylesOf<Types>, Types["assets"], TextFormatsOf<Types>>(),
     ...uiFor<Types["assets"], TextStylesOf<Types>, Extract<keyof Types["strings"], string>>(),
     ...audioFor<Types["assets"], Types["player"]>(),
     ...effectsFor<Types["assets"], EmitterIdOf<Types>>()
@@ -403,8 +406,23 @@ export type { HapticKind } from "./plugins/anim/timeline/types";
 export { messageArgument, messageDuration } from "./plugins/i18n/intl";
 export { tr } from "./plugins/i18n/tr";
 // text: the Text component, board labels, text styles, bound numbers and countdowns
-export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
-export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
+export {
+  bind,
+  Countdown,
+  defineTextFormats,
+  defineTextStyles,
+  label,
+  Text
+} from "./plugins/text/components";
+export type {
+  BindOptions,
+  CountdownValue,
+  FormattedNumber,
+  TextFormat,
+  TextFormatAnswer,
+  TextFormatFunction,
+  TextFormats
+} from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
 export { Box, DebugTrigger, LocalWrite, popup, ScrollState } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";
