@@ -25,7 +25,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `generated/` | What `moku-game keys` writes, and `moku-game dev` writes again on save: `assets.ts`, `strings.ts`, `strings.<locale>.ts` and `manifest.json`, the dev manifest |
 | `tests/` | The tests. `tests/scenarios/<name>.ts` are the prepared saves of `?player=<name>` |
 | `.moku/` | What `moku-game` writes: the dev page, its `bunfig.toml`, the page of `visual` in `.moku/visual/`, the Tauri project. Git ignores it |
-| `dist/assets/`, `dist/web/`, `dist-native/` | The pack, the web build, the native apps |
+| `dist/assets/`, `dist/web/`, `dist-native/`, `dist-native-dev/` | The pack, the web build, the native apps, the test apps |
 
 A game has no `web/`, no `native.ts`, no `platform-bridge.ts` and no `bunfig.toml`.
 
@@ -209,7 +209,7 @@ export default {
 | `page.icons` | none | `{ favicon?, appleTouch? }`: files relative to the game, written as `<link>` tags |
 | `page.head` | none | Raw tags for `<head>`, verbatim, in order |
 | `page.boot` | none | `{ image, width?, fadeMs? }`: the boot picture, shown from the first paint until the first scene drew. `image` is a file relative to the game; `width` its CSS width, `"40vmin"`; `fadeMs` the fade, `300` (`0` removes it in that frame). The page writes `<img id="moku-boot">` before `#game`, centred, above the canvas; the build copies it beside the page like the icons |
-| `native` | none | `{ name, identifier, icon?, targets?, signing?, ios? }`. Left out, the game has no native build. See [Store builds](#store-builds) |
+| `native` | none | `{ name, identifier, icon?, targets?, signing?, ios?, dev? }`. Left out, the game has no native build. See [Store builds](#store-builds) and [The test app](#the-test-app) |
 | `system` | `[]` | The system plugins the shell wires: `lifecycle`, `back`, `haptics`, `keepAwake`, `store` |
 | `save` | `"memory"` | `"memory"`, `"local"` or `"store"` |
 | `assets.layers` | `{}` | Asset layers by folder: `{ shared: "ui" }` becomes `--layer shared=ui` |
@@ -293,7 +293,7 @@ A store save that cannot be read rejects the load: `[game] The save could not be
 | Package | When | Install |
 |---|---|---|
 | `@moku-labs/system` | `config.ts` names a `system` plugin, or `save` is `"store"` | `bun add @moku-labs/system@^0.3.1` |
-| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.12` |
+| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.13` |
 
 The page imports the shell only when the game needs it. The generated `main.ts` then imports `systemShellOf` from `@moku-labs/game/app/system` and passes `systemShellOf({ ... })` to `startPage`. It writes one `import()` for the package and one per named plugin, in the order `lifecycle`, `back`, `haptics`, `keepAwake`, `store`; the store when `system` names it or `save` is `"store"`. The engine holds no `import()` of the package, so the page bundles only the named plugins. A game with `system: ["haptics"]` and a memory save builds without `@tauri-apps/plugin-store`.
 
@@ -338,17 +338,17 @@ const { app } = game.screen({ platform: fromSystem(system) }); // Back, pause, h
 
 | Native config | From |
 |---|---|
-| `app.name`, `app.identifier`, `app.icon` | `native.name`, `native.identifier`, `native.icon` |
+| `app.name`, `app.identifier`, `app.icon` | `native.name`, `native.identifier`, `native.icon`. An iOS debug app: `<name> (debug)`, `<identifier>.debug`. A test app: `native.dev` |
 | `app.orientation`, `app.backgroundColor` | `page.orientation`, `page.background` |
 | `app.version` | `version` of the game's `package.json` when it is `x.y.z`, else left out and native falls back to `0.1.0` |
 | `app.buildNumber` | `--build-number`, as a string, with `--store` only |
 | `app.keepScreenOn` | `true` when `system` names `keepAwake`: the iOS idle timer stays off |
-| `web.build` | `moku-game build`, with the runner flags; a debug app's adds `--debug` (or `--debug=read` for the read-only profile), and `--editor host:port` when one was given |
+| `web.build` | `moku-game build`, with the runner flags; a debug app's adds `--debug` (or `--debug=read` for the read-only profile), and `--editor host:port` when one was given; a test app's adds `--debug` |
 | `web.devCommand`, `web.devUrl` | `moku-game dev --port 5173`, `http://127.0.0.1:5173` |
 | `web.dist` | `<game>/dist/web` |
 | `system` | One row per name that needs a Tauri capability: `back`, `haptics`, `store`. A `"store"` save adds `store` |
 | `targets` | `native.targets`, else the target of the command |
-| `projectDir`, `outDir` | `<game>/.moku/tauri`, `<game>/dist-native` |
+| `projectDir`, `outDir` | `<game>/.moku/tauri`, `<game>/dist-native`. An iOS debug app: `<game>/.moku/tauri-debug`, and native delivers to `dist-native/ios-debug`. A test app: `<game>/.moku/tauri-dev`, `<game>/dist-native-dev`. Each extra project is a full Rust build of its own |
 | `signing.android` | `native.signing.android` with an absolute keystore path. A debug app leaves it out and keeps the SDK key. A plain `native build android` with a password variable unset leaves it out too and warns: an unsigned `.apk`, no failure after the compile |
 | `signing.apple` | `teamId` of `native.signing.apple`; on iOS `iosMinimumSystemVersion`, `native.ios.minimumVersion` or `"26.0"`; with `--store` on iOS `exportMethod: "app-store-connect"` |
 | `ios` | `infoPlist` and an absolute `privacyManifest` of `native.ios`, when set |
@@ -362,6 +362,7 @@ moku-game <command> [options]
   build [--out dist/web]                pack the assets and build the page
   native build <target> [--simulator]   build the native app (ios, macos, android)
   native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios
+  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev
   native dev <target>                   run the native shell on the dev server
   native doctor | native clean          check or remove the native project
   keys [--check]                        write generated/assets.ts and generated/manifest.json
@@ -384,6 +385,7 @@ Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>
 | `--out <dir>` | `build` | `<game>/dist/web` | The output folder, replaced by the run |
 | `--simulator` | `native build` | off | iOS: the simulator build |
 | `--store` | `native build` | off | A store build for `ios` or `android`. See [Store builds](#store-builds) |
+| `--dev` | `native build` | off | With `--store`: the test app of `native.dev`. See [The test app](#the-test-app) |
 | `--build-number <n>` | `native build` | none | With `--store`, and required by it. An integer from 1 to 2100000000 |
 | `--check` | `keys` | off | Fails when an output is out of date |
 | `--no-cache` | `pack` | off | A cold pack |
@@ -438,16 +440,17 @@ The page carries no scenario, no agent, no `.dev` module and no `/control`. Ever
 
 - **What it carries.** `main.ts` imports `script.ts` first, then `agent.ts`, which sets `__MOKU_GAME_BUILD__`, `__MOKU_GAME_ENGINE__`, `__MOKU_GAME_EDITOR__`, `__MOKU_GAME_APP__` when the game has one, CONTROL, AGENT `true` and DEV `false`; then the page entry, the game's `**/*.dev.ts` modules and `@moku-labs/editor/agent/page`, which `startPage` starts after the app. The defines match: DEV `false`, AGENT `true`, CONTROL `true` for `--debug` (every command) or `false` for `--debug=read` (read and cosmetic commands), and the strings. No hot swap, no frame recorder, no audio journal, no scenario. The title reads `<title> Debug`.
 - **The build id** is `debug-<UTC stamp>` for both profiles, such as `debug-20261014T153012Z`; the CONTROL flag tells them apart. The page logs it first: `page:build` with `{ build, engine, control }`.
-- **The app id** is `native.identifier` of `config.ts`, with `.debug` when native builds its debug app (`MOKU_NATIVE_PROFILE=debug`), the id that app installs under: `com.mokulabs.timber.debug`. It is defined and set as `__MOKU_GAME_APP__`, so the editor pairs a device stream with its project. A game with no native section has none.
+- **The app id** is `native.identifier` of `config.ts`, with `.debug` when native builds its debug app (`MOKU_NATIVE_PROFILE=debug`), the id that app installs under: `com.mokulabs.timber.debug`, and `native.dev.identifier` for a test app (`MOKU_NATIVE_PROFILE=dev`). It is defined and set as `__MOKU_GAME_APP__`, so the editor pairs a device stream with its project. A game with no native section has none.
 - **The engine id** names the engine the page bundles: its version, a hash of its installed `dist/` and of the patch the install root declares for that version, `0.14.12+9c41e0.patch.3f2a7b`; `+src` when the game resolves the engine's sources. The dev page and `preparePage` carry the same id.
 - **`--editor`** is where the agent's bridge dials, written as `__MOKU_GAME_EDITOR__`: `127.0.0.1:47600` by default (a phone reaches it through `adb reverse tcp:47600 tcp:47600`), or the computer's LAN address. A value that is not `host:port` is refused, and so is `--editor` without `--debug`.
 - **The editor is the game's.** `@moku-labs/editor` must resolve from the game, else `[game] build --debug needs @moku-labs/editor in the game.` with `Install it: bun add -d @moku-labs/editor.`
 - **One warning** goes before the size line: `build: a DEBUG page with the editor agent, control: every command, the state-changing ones too. Build debug-20261014T153012Z, engine 0.14.12+9c41e0, editor 127.0.0.1:47600. Never ship it to a store.`
-- **A store page refuses it.** Tauri runs the web build with `MOKU_NATIVE_PROFILE=debug|store`; `store` with `--debug` fails before anything is built.
+- **A store page refuses it.** Tauri runs the web build with `MOKU_NATIVE_PROFILE=debug|store|dev`; `store` with `--debug` fails before anything is built.
+- **A test app's page needs it.** Under `dev` a build without `--debug` fails with `[game] build: MOKU_NATIVE_PROFILE is dev: a dev page carries the overlay.`, and `--debug` builds a page with every command whose `__MOKU_GAME_EDITOR__` is `"off"`: the agent opens no socket and the overlay works alone. `--editor` and `--debug=read` are refused, and so is an `@moku-labs/editor` below 0.10.19, or one whose version cannot be read: an older one takes `"off"` for an address and dials for ever. The warning ends `This is a DEV page for the store test track: overlay, no editor link.`
 
 ### native
 
-`moku-game native <verb> [<target>]` runs one verb of `@moku-labs/native` over the native config above. `build` and `dev` need a target, such as `ios`. `doctor` and `clean` take one or none. Native prints its own progress and failures. An Android app composes native's `shell` system first, the one that sets `globalThis.__MOKU_NATIVE__`. `native build android --debug [--editor host:port]` builds a debug app (`--debug=full` is the alias with its one line, `--debug=read` the read-only profile): native gets `debug: true` and installs it beside the store app with its own save (move a tester's progress with `game.saveExport` and `game.saveImport`); the web build is the [debug build](#debug-build) with the same profile and `--editor`; the engine renames nothing. It warns once: `native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store.` Other verbs refuse `--debug`, and so do the other targets in this release.
+`moku-game native <verb> [<target>]` runs one verb of `@moku-labs/native` over the native config above. `build` and `dev` need a target, such as `ios`. `doctor` and `clean` take one or none. `clean` also cleans `.moku/tauri-dev` and `.moku/tauri-debug` when they exist, one native clean per folder; `doctor` stays on `.moku/tauri`, it checks the machine. Native prints its own progress and failures. An Android app composes native's `shell` system first, the one that sets `globalThis.__MOKU_NATIVE__`. `native build android --debug [--editor host:port]` builds a debug app (`--debug=full` is the alias with its one line, `--debug=read` the read-only profile): native gets `debug: true` and installs it beside the store app with its own save (move a tester's progress with `game.saveExport` and `game.saveImport`); the web build is the [debug build](#debug-build) with the same profile and `--editor`; the engine renames nothing, native does. `native build ios --debug [--simulator] [--editor host:port]` builds the same app on iOS: the engine names it `<name> (debug)` and `<identifier>.debug`, in a project of its own, `.moku/tauri-debug`, since tauri refuses to rename an app in one tree, and native delivers to `dist-native/ios-debug`. Both warn once: `native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store.` Other verbs refuse `--debug`, and so do the other targets for now. The save of a debug app keeps the `native.identifier` namespace, so a `game.saveExport` of one app imports into another.
 
 ### Store builds
 
@@ -504,11 +507,50 @@ Then, before anything compiles, every problem comes at once in one `[game] nativ
 | Android, a password variable is unset or empty | The variable's name, never a value |
 | iOS, no `native.signing.apple` | The field |
 | `package.json` has no `version`, or it is not `x.y.z` | The value |
-| The identifier ends in `.soak`, `.debug`, `.dev`, `.test` or `.staging` | The identifier |
+| The identifier ends in `.soak`, `.debug`, `.dev`, `.test` or `.staging`. With `--dev`: `native.dev.identifier` does not end in `.dev` | The identifier |
 
 `--store` on iOS warns, and goes on, when `ios.privacyManifest` is left out and when `infoPlist` has no `ITSAppUsesNonExemptEncryption`.
 
 A build without `--store` runs none of this. `moku-game native build ios` is a device build, with no store check and no store warning, and it asks for no App Store export.
+
+### The test app
+
+A store-signed app for a tester on a test track, under an id of its own, so it can never replace the players' app. It carries the overlay and the game's `.dev` modules, and no link to the editor. A phone can hold three apps of one game:
+
+| App | Command | Id | Signed with |
+|---|---|---|---|
+| The players' | `native build <target> --store --build-number <n>` | `native.identifier` | The store key |
+| The test app | `native build <target> --store --dev --build-number <n>` | `native.dev.identifier` | The store key |
+| The local debug app | `native build <target> --debug` | `<native.identifier>.debug` | The SDK key on Android, the team on iOS |
+
+```ts
+// config.ts
+native: {
+  name: "Лесной городок",
+  identifier: "com.mokulabs.timber",
+  icon: "assets/icon.png",
+  dev: {
+    identifier: "com.mokulabs.timber.dev",
+    name: "Городок DEV",
+    icon: "assets/icon-dev.png"
+  }
+}
+```
+
+```bash
+moku-game native build android --store --dev --build-number 13   # dist-native-dev/android/*.aab
+moku-game native build ios --store --dev --build-number 13       # dist-native-dev/ios/*.ipa, app-store-connect
+```
+
+| Field | What |
+|---|---|
+| `dev.identifier` | Required in the block. Ends in `.dev`, and is not `native.identifier` |
+| `dev.name` | The name under the icon. `"<name> DEV"` by default |
+| `dev.icon` | A second 1024 px PNG, relative to the game folder. `native.icon` by default. The engine draws nothing on an icon |
+
+The block is checked when the config is read: `[game] config.native.dev…`. `--dev` without `--store` is refused before `config.ts` is read, `--dev` with no `native.dev` right after, `[game] native --dev: config.ts has no native.dev.`, and `--store --debug` stays refused: one word must not turn a players' build into a test build.
+
+A test build runs every `--store` check, and the identifier row reads `native.dev.identifier`. It keeps `signing`, with `exportMethod` on iOS, and the web build is the [dev page](#debug-build). The project is `.moku/tauri-dev`, a full Rust build of its own, so `.moku/tauri` stays as it is; the apps land in `dist-native-dev`. The save keeps the `native.identifier` namespace, so a `game.saveExport` from the debug app imports into the test app.
 
 ### visual
 
