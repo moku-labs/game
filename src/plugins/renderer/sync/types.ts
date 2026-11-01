@@ -659,7 +659,7 @@ export type FiltersApi = {
    * app, `warm: 0`), and `false` when the renderer stops first or a probe's render threw, which ends the warm-up of the
    * application (`renderer:warm-failed`). A filter handed over again on the same device answers `true` at once when its
    * draws were made. The renderer never destroys the filter. On WebGPU a `quad` asks for the pipelines of the filter's body
-   * on its mesh too, once, after the filter, so a kept view that later draws through it compiles
+   * on its mesh too, two draws in one frame after the filter, so a kept view that later draws through it compiles
    * nothing in play; each of those draws runs in an error scope, and a program that does not fit logs
    * `renderer:warm-invalid` while the warm-up goes on. WebGL ignores it.
    *
@@ -1477,16 +1477,18 @@ export type WarmSubject =
   | WarmQuad;
 
 /**
- * A filter's body on its quad, as a probe of the warm-up draws it: on WebGPU, once, after the filter, in the first of
- * the device's variants, so a kept view's first frame on its shader compiles nothing.
+ * A filter's body on its quad, as a probe of the warm-up draws it: on WebGPU, after the filter, in the first of the
+ * device's variants and into a target with no stencil, so a kept view's first frame on its shader compiles nothing: on
+ * the canvas, under a filter of an ancestor, or inside an outer picture.
  */
 export type WarmQuad = { readonly filter: PixiFilter; readonly quad: FilterSlotQuad };
 
 /**
  * Where a probe draws: straight onto the canvas, or into a texture under a filter of the module's own, each with or
- * without a stencil clip. A WebGPU pipeline is keyed by all four.
+ * without a stencil clip. A WebGPU pipeline is keyed by all four. `"plain"` is a texture no clip ever drew into: the
+ * texture of the texture variants keeps the stencil of its first clip, and a quad needs a target without one.
  */
-export type WarmVariant = "canvas" | "canvas+clip" | "texture" | "texture+clip";
+export type WarmVariant = "canvas" | "canvas+clip" | "texture" | "texture+clip" | "plain";
 
 /**
  * One probe draw: one subject in one variant.
@@ -1511,6 +1513,8 @@ export type WarmObjects = {
    * filter around it, and a texture variant never touches the canvas.
    */
   target: PixiRenderTexture;
+  /** The texture of a `"plain"` draw: no stencil, since no clip ever draws into it. */
+  plain: PixiRenderTexture;
   /** A filter subject's container: its `filters` is the draw's filter, during the draw only. */
   holder: PixiContainer;
   /** The one-entry list `holder.filters` is set from. */
