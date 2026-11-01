@@ -21,6 +21,9 @@ const BOOT_FADE_MS = 300;
 /** The strings a `native.signing.android` cannot go without. */
 const ANDROID_SIGNING_FIELDS = ["keystorePath", "keystorePasswordEnv", "keyAlias"] as const;
 
+/** The last part of a test app's identifier. */
+export const TEST_APP_SUFFIX = ".dev";
+
 /** An iOS version as native takes it: `26.0` or `26.0.1`. */
 const IOS_VERSION = /^\d+\.\d+(\.\d+)?$/;
 
@@ -169,7 +172,7 @@ function checkTestApp(native: GameConfig["native"]): void {
     throw new Error("[game] config.native.dev has no identifier.\n  Name one that ends in .dev.");
   }
 
-  if (!dev.identifier.endsWith(".dev")) {
+  if (!dev.identifier.endsWith(TEST_APP_SUFFIX)) {
     throw new Error(
       `[game] config.native.dev.identifier is "${dev.identifier}".\n  Use one that ends in .dev.`
     );

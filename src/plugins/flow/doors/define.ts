@@ -168,12 +168,7 @@ export function defineSource<S extends InputSchema, O, App = HeadlessApp>(
  *   value: (app: { readonly purchases: PurchasesApi }) => app.purchases.overridden(),
  *   choice: () => readSetting().mode, // the game's own .dev module remembers the pick
  *   run: (app, { on, choice }) => {
- *     if (
- *       (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
- *       (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
- *     ) {
- *       throw controlRefused();
- *     }
+ *     // The control guard, then:
  *     writeSetting({ mode: choice });
  *     app.purchases.simulate(on ? choice : undefined);
  *   }

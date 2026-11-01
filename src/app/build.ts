@@ -90,6 +90,9 @@ const DEFAULT_EDITOR = "127.0.0.1:47600";
  */
 const EDITOR_OFF = "off";
 
+/** `MOKU_NATIVE_PROFILE` of a test app's web build. */
+const TEST_APP_PROFILE = "dev";
+
 /** The package of the editor. */
 const EDITOR_PACKAGE = "@moku-labs/editor";
 
@@ -336,7 +339,9 @@ export function appIdOf(
   if (native === undefined) return undefined;
   if (profile === "debug") return `${native.identifier}.debug`;
 
-  return profile === "dev" ? (native.dev?.identifier ?? native.identifier) : native.identifier;
+  return profile === TEST_APP_PROFILE
+    ? (native.dev?.identifier ?? native.identifier)
+    : native.identifier;
 }
 
 /**
@@ -351,15 +356,15 @@ export function appIdOf(
  */
 export function editorReadsOff(version: string | undefined): boolean {
   const parts = /^(\d+)\.(\d+)\.(\d+)$/.exec(version ?? "")?.slice(1);
-  const lowest = EDITOR_READS_OFF.split(".");
 
   if (parts === undefined) return false;
 
-  const first = parts
+  const lowest = EDITOR_READS_OFF.split(".");
+  const firstDifference = parts
     .map((part, index) => Number(part) - Number(lowest[index]))
     .find(difference => difference !== 0);
 
-  return first === undefined || first > 0;
+  return firstDifference === undefined || firstDifference > 0;
 }
 
 /**
@@ -656,7 +661,7 @@ function refuseStoreDebug(run: BuildRun, env: CliDeps["env"]): void {
  * @throws {Error} When the profile is `dev` and the run is a release run.
  */
 function refuseTestAppRelease(run: BuildRun, env: CliDeps["env"]): void {
-  if (run.debug !== undefined || env.MOKU_NATIVE_PROFILE !== "dev") return;
+  if (run.debug !== undefined || env.MOKU_NATIVE_PROFILE !== TEST_APP_PROFILE) return;
 
   throw new Error("[game] build: MOKU_NATIVE_PROFILE is dev: a dev page carries the overlay.");
 }
@@ -741,10 +746,11 @@ function debugPageOf(
   deps: CliDeps
 ): { page: DebugPage; engine: EngineFingerprint } {
   const profile = deps.env.MOKU_NATIVE_PROFILE;
-  const isTestApp = profile === "dev";
+  const isTestApp = profile === TEST_APP_PROFILE;
 
   if (isTestApp) refuseTestAppFlags(run, level);
 
+  // The agent the page bundles: a test app's must read `"off"`.
   const agent = resolveAgent(run.root, deps.resolve);
 
   if (isTestApp) refuseOldEditor(agent);

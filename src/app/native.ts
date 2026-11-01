@@ -7,6 +7,7 @@
 import path from "node:path";
 import type { Cli, Config, createApp, Target } from "@moku-labs/native";
 import type { DebugLevel } from "./build";
+import { TEST_APP_SUFFIX } from "./config";
 import type { ResolvedGameConfig } from "./types";
 
 /** The port of the dev server Tauri's shell starts and loads. */
@@ -285,7 +286,7 @@ function testSuffixes(): ReadonlySet<string> {
 function devIdentifierProblems(dev: NativeSection["dev"]): readonly string[] {
   if (dev === undefined) return ["No native.dev in config.ts. Add identifier, ending in .dev."];
 
-  return dev.identifier.endsWith(".dev")
+  return dev.identifier.endsWith(TEST_APP_SUFFIX)
     ? []
     : [`The test identifier ${dev.identifier} does not end in .dev. Fix native.dev.identifier.`];
 }
@@ -558,12 +559,13 @@ export function nativeConfigOf(
 ): NativeConfig {
   const native = nativeSectionOf(settings);
   const rows = systemRowsOf(settings);
+  const isTestApp = extras.dev === true;
   const config: NativeConfig = {
     app: appOf(settings, appIdentityOf(native, target, extras), extras),
     web: {
       cwd: where.cwd,
       // A dev page is `--debug` as it is: the profile in native's env does the rest.
-      build: webBuildOf(where, extras.dev === true ? { level: "full" } : extras.debug),
+      build: webBuildOf(where, isTestApp ? { level: "full" } : extras.debug),
       devCommand: `${where.command} dev --port ${DEV_PORT}`,
       devUrl: `http://127.0.0.1:${DEV_PORT}`,
       dist: path.join(where.cwd, "dist/web")
@@ -574,7 +576,7 @@ export function nativeConfigOf(
         ? [{ name: "shell" }, ...rows.filter(row => row.name !== "shell")]
         : rows,
     projectDir: path.join(where.cwd, projectOf(target, extras)),
-    outDir: path.join(where.cwd, extras.dev === true ? DEV_OUT : STORE_OUT)
+    outDir: path.join(where.cwd, isTestApp ? DEV_OUT : STORE_OUT)
   };
   const targets = native.targets ?? (target === undefined ? undefined : [target]);
   const signing = signingOf(native, where, target, extras);

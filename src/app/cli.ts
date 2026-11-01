@@ -572,21 +572,40 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
     );
   }
 
-  if (store.store === true) {
-    if (store.dev === true) refuseNoTestApp(settings);
+  const isPlainAndroidBuild = verb === "build" && target === "android" && debug.debug === undefined;
 
-    options.store = {
-      buildNumber: store.buildNumber,
-      ...(store.dev === true ? { dev: true } : {}),
-      env: deps.env,
-      exists: deps.exists
-    };
+  if (store.store === true) {
+    options.store = storeBlockOf(store, settings, deps);
     warnIosStore(settings, target, deps.ui);
-  } else if (verb === "build" && target === "android" && debug.debug === undefined) {
+  } else if (isPlainAndroidBuild) {
     leaveKeyOut(settings, options, deps);
   }
 
   return (await deps.native(verb, settings, where, options)) ? 0 : 1;
+}
+
+/**
+ * The store block of a verb: the number, the test app's mark, and the seams of the store checks.
+ *
+ * @param store - What `--store` read to.
+ * @param settings - The resolved `config.ts` of the game.
+ * @param deps - The seams of the process.
+ * @returns The block.
+ * @throws {Error} When `--dev` comes with no `native.dev`.
+ */
+function storeBlockOf(
+  store: Extract<NativeStoreFlags, { store: true }>,
+  settings: ResolvedGameConfig,
+  deps: CliDeps
+): NonNullable<NativeVerbOptions["store"]> {
+  if (store.dev === true) refuseNoTestApp(settings);
+
+  return {
+    buildNumber: store.buildNumber,
+    ...(store.dev === true ? { dev: true } : {}),
+    env: deps.env,
+    exists: deps.exists
+  };
 }
 
 /**
