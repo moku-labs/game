@@ -69,6 +69,18 @@ function packageOf(folder: string): PackageFields | undefined {
 }
 
 /**
+ * Reads the `version` of a folder's `package.json`.
+ *
+ * @param folder - The folder.
+ * @returns The version, or `undefined` for a missing or broken file, or one with no string there.
+ */
+export function packageVersionOf(folder: string): string | undefined {
+  const version = packageOf(folder)?.version;
+
+  return typeof version === "string" ? version : undefined;
+}
+
+/**
  * Tells whether a path lies inside a folder, the folder itself left out.
  *
  * @param file - The path.
