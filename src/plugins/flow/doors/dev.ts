@@ -76,20 +76,24 @@ declare global {
 
   /**
    * Where the page agent of a debug build finds the editor: `host:port`, written by `--editor` (default
-   * `"127.0.0.1:47600"`). Undefined on the dev page, whose agent talks to the server that served it, and on a release
-   * build.
+   * `"127.0.0.1:47600"`). Exactly `"off"` on the page of a test app (`native build --store --dev`): the agent opens no
+   * socket and the overlay works alone, a contract with `@moku-labs/editor` 0.10.19 and later. Any other string is an
+   * address. Undefined on the dev page, whose agent talks to the server that served it, and on a release build.
    *
    * @example
    * ```ts
    * // moku-game build --debug --editor 192.168.1.20:47600
    * globalThis.__MOKU_GAME_EDITOR__; // "192.168.1.20:47600"
+   * // moku-game native build android --store --dev --build-number 13
+   * globalThis.__MOKU_GAME_EDITOR__; // "off"
    * ```
    */
   var __MOKU_GAME_EDITOR__: string | undefined;
 
   /**
    * The app id of a debug build, so the editor pairs a device stream with its project: `native.identifier` of
-   * `config.ts`, with `.debug` in the native debug app (`MOKU_NATIVE_PROFILE=debug`), which installs under that id.
+   * `config.ts`, with `.debug` in the native debug app (`MOKU_NATIVE_PROFILE=debug`), which installs under that id, and
+   * `native.dev.identifier` in a test app (`MOKU_NATIVE_PROFILE=dev`).
    * Undefined on a debug build of a game with no native section, on the dev page and on a release build.
    *
    * @example

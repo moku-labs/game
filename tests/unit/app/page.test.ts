@@ -317,6 +317,26 @@ describe("startPage: the save and the scenarios", () => {
     expect(app.flow.state().path).toBe("home");
   });
 
+  // Bug: a saveExport from the .debug app does not import into the .dev one.
+  it("a local save stays under native.identifier in a game with a test app", async () => {
+    const { storage, items } = fakeStorage();
+
+    vi.stubGlobal("localStorage", storage);
+
+    await open({
+      ...miniConfig,
+      save: "local",
+      native: {
+        name: "Mini",
+        identifier: "com.example.mini",
+        dev: { identifier: "com.example.mini.dev" }
+      }
+    });
+
+    await vi.waitFor(() => expect(items.has("com.example.mini:save")).toBe(true));
+    expect(items.has("com.example.mini.dev:save")).toBe(false);
+  });
+
   it("save store runs on the shell's save", async () => {
     const screen = vi.spyOn(game, "screen");
     const save = memory();

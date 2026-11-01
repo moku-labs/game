@@ -103,18 +103,35 @@ function isBelow(file: string, folder: string): boolean {
 }
 
 /**
- * Walks up from a folder to the first one whose `package.json` names the engine.
+ * Walks up from a folder to the first one whose `package.json` names a package.
  *
  * @param start - The folder to start in.
- * @returns The engine folder and its fields, or `undefined` at the top of the disk.
+ * @param name - The name of the package.
+ * @returns The package folder and its fields, or `undefined` at the top of the disk.
  */
-function engineFolderOf(start: string): { folder: string; fields: PackageFields } | undefined {
+function packageFolderOf(
+  start: string,
+  name: string
+): { folder: string; fields: PackageFields } | undefined {
   for (let folder = start; ; folder = path.dirname(folder)) {
     const fields = packageOf(folder);
 
-    if (fields?.name === ENGINE_PACKAGE) return { folder, fields };
+    if (fields?.name === name) return { folder, fields };
     if (path.dirname(folder) === folder) return undefined;
   }
+}
+
+/**
+ * Reads the version of the package a resolved file belongs to.
+ *
+ * @param file - The file, absolute.
+ * @param name - The name of the package.
+ * @returns The version, or `undefined` with no such package above the file or no string there.
+ */
+export function packageVersionAbove(file: string, name: string): string | undefined {
+  const version = packageFolderOf(path.dirname(file), name)?.fields.version;
+
+  return typeof version === "string" ? version : undefined;
 }
 
 /**
@@ -250,7 +267,7 @@ export function installRootOf(root: string): string | undefined {
  * ```
  */
 export function engineFingerprint(root: string, hotPlugin: string): EngineFingerprint {
-  const found = engineFolderOf(path.dirname(hotPlugin));
+  const found = packageFolderOf(path.dirname(hotPlugin), ENGINE_PACKAGE);
 
   if (found === undefined) {
     return { id: "unknown", version: "unknown", dist: "unknown", folder: path.dirname(hotPlugin) };

@@ -23,6 +23,24 @@ function checkId(kind: "source" | "command", id: string): void {
   );
 }
 
+/**
+ * Refuses a choice listed twice: the overlay would draw two rows of one name, and a tap on the
+ * second would run the first's.
+ *
+ * @param id - The id of the command, for the message.
+ * @param choices - The choices of the command, when it has some.
+ * @throws {Error} Naming the first choice that comes twice.
+ */
+function checkChoices(id: string, choices: readonly string[] | undefined): void {
+  const twice = choices?.find((choice, index) => choices.indexOf(choice) !== index);
+
+  if (twice === undefined) return;
+
+  throw new Error(
+    `[game] The command ${id} lists the choice "${twice}" twice.\n  Name each choice once.`
+  );
+}
+
 /** One field of an input schema: its name, then its kind. */
 type InputEntry = readonly [name: string, kind: InputKind | `${InputKind}?`];
 
@@ -91,12 +109,14 @@ export function defineSource<S extends InputSchema, O, App = HeadlessApp>(
  * control form for the others (see docs/doors.md), so a production build drops it. A game's
  * `.dev` command with only the `__MOKU_GAME_DEV__` guard runs in dev and is refused on a debug
  * page. `overlay` shows it in the editor's overlay: `"toggle"` with the input `{ on: "boolean" }`
- * and a `value(app)` the switch is drawn from, `"button"` with no required input and no value;
- * any other combination is a type error.
+ * and a `value(app)` the switch is drawn from, or with `choices` and a `choice(app)` too and
+ * `choice` in the input, `"button"` with no required input and no value; any other combination is
+ * a type error.
  *
  * @param command - The descriptor.
  * @returns The same descriptor, frozen.
- * @throws {Error} When the id is not a dotted name such as `"game.answer"`.
+ * @throws {Error} When the id is not a dotted name such as `"game.answer"`, or `choices` holds a
+ * word twice.
  * @example
  * ```ts
  * // A game's .dev module: open the shop from anywhere, through the graph.
@@ -135,11 +155,32 @@ export function defineSource<S extends InputSchema, O, App = HeadlessApp>(
  * });
  * // The overlay draws a switch "Glow", on; a tap runs it with { on: false } and the next frame draws no glow.
  * ```
+ * @example
+ * ```ts
+ * // features/purchases/simulate.dev.ts — a tester on a phone picks how a purchase ends.
+ * export const simulate = defineCommand({
+ *   id: "purchases.simulate",
+ *   title: "Simulated purchases",
+ *   input: { on: "boolean", choice: "string" },
+ *   effect: "cheat",
+ *   overlay: "toggle",
+ *   choices: ["success", "failure", "delay"],
+ *   value: (app: { readonly purchases: PurchasesApi }) => app.purchases.overridden(),
+ *   choice: () => readSetting().mode, // the game's own .dev module remembers the pick
+ *   run: (app, { on, choice }) => {
+ *     // The control guard, then:
+ *     writeSetting({ mode: choice });
+ *     app.purchases.simulate(on ? choice : undefined);
+ *   }
+ * });
+ * // The overlay draws a switch with the row success, failure, delay; a tap on failure runs { on: true, choice: "failure" }.
+ * ```
  */
 export function defineCommand<S extends InputSchema, O, App = HeadlessApp>(
   command: Command<S, O, App>
 ): Command<S, O, App> {
   checkId("command", command.id);
+  checkChoices(command.id, command.choices);
   Object.freeze(command.input);
 
   return Object.freeze(command);

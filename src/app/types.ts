@@ -80,7 +80,8 @@ export type PlistValue =
  *       android: { keystorePath: "~/keys/upload.jks", keystorePasswordEnv: "TIMBER_KEYSTORE_PASSWORD", keyAlias: "upload" },
  *       apple: { teamId: "ABCDE12345" }
  *     },
- *     ios: { infoPlist: { ITSAppUsesNonExemptEncryption: false }, privacyManifest: "ios/PrivacyInfo.xcprivacy" }
+ *     ios: { infoPlist: { ITSAppUsesNonExemptEncryption: false }, privacyManifest: "ios/PrivacyInfo.xcprivacy" },
+ *     dev: { identifier: "com.mokulabs.timber.dev", icon: "assets/icon-dev.png" } // name: "Лесной городок DEV"
  *   },
  *   system: ["lifecycle", "back", "haptics", "keepAwake"],
  *   save: "memory",
@@ -157,6 +158,18 @@ export type GameConfig = {
       infoPlist?: Readonly<Record<string, PlistValue>>;
       /** The privacy manifest, relative to the game folder. The bundle holds it as `PrivacyInfo.xcprivacy`. */
       privacyManifest?: string;
+    };
+    /**
+     * The test app of `--store --dev`: signed as the store app, with the overlay and no link to the
+     * editor, beside the players' app on a phone. Left out, `--dev` is refused.
+     */
+    dev?: {
+      /** Its bundle identifier, ending in `.dev`, never `identifier` itself. Required in the block. */
+      identifier: string;
+      /** The app name under the icon. `"<name> DEV"` by default. */
+      name?: string;
+      /** Its own 1024 px PNG, relative to the game folder. The game's `icon` by default. */
+      icon?: string;
     };
   };
   /** The system plugins the shell wires. Default `[]`, a web page with no shell. */

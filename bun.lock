@@ -17,7 +17,7 @@
         "@moku-labs/ci": "1.5.7",
         "@moku-labs/common": "0.3.10",
         "@moku-labs/core": "1.7.6",
-        "@moku-labs/native": "0.3.12",
+        "@moku-labs/native": "0.3.13",
         "@moku-labs/system": "0.3.7",
         "@types/bun": "1.4.2",
         "@vitest/coverage-istanbul": "4.0.18",
@@ -42,7 +42,7 @@
       "peerDependencies": {
         "@moku-labs/common": "^0.3.4",
         "@moku-labs/core": "^1.7.1",
-        "@moku-labs/native": "^0.3.12",
+        "@moku-labs/native": "^0.3.13",
         "@moku-labs/system": "^0.3.1",
         "pixi.js": "^8.22.0",
         "playwright-core": ">=1.50.0",
@@ -279,7 +279,7 @@
 
     "@moku-labs/core": ["@moku-labs/core@1.7.6", "", {}, "sha512-CdCxX/9zwJ9Czv45I/CmDuV8sV1r9uiOSfUzckD3MZC8eumO1QcT4PY4yiSXd0zspsTgdsntFxfDHkUUYVp5Iw=="],
 
-    "@moku-labs/native": ["@moku-labs/native@0.3.12", "", { "dependencies": { "@tauri-apps/cli": "^2" }, "peerDependencies": { "@moku-labs/common": "^0.3.4", "@moku-labs/core": "^1.7.1" } }, "sha512-90skAM+Bo/SIISxZObS+a4WJi3i4ZNAQNVd0zAe8qSujBvSMbGq5euLtWfMSli+AmRzInM+S0E+ZW3JjqpRuNw=="],
+    "@moku-labs/native": ["@moku-labs/native@0.3.13", "", { "dependencies": { "@tauri-apps/cli": "^2" }, "peerDependencies": { "@moku-labs/common": "^0.3.4", "@moku-labs/core": "^1.7.1" } }, "sha512-PsBk0O40+ltOyTJFOCNwTSHusYtzXZq2nWRJywoQlHPVoVFD46I+4QoZD+pdyCnCAidno80siTK4dV/X6MH7Rw=="],
 
     "@moku-labs/system": ["@moku-labs/system@0.3.7", "", { "dependencies": { "idb-keyval": "6.3.0" }, "peerDependencies": { "@moku-labs/common": "^0.3.4", "@moku-labs/core": "^1.7.1", "@tauri-apps/api": "^2.12.0", "@tauri-apps/plugin-clipboard-manager": "^2.3.0", "@tauri-apps/plugin-deep-link": "^2.4.0", "@tauri-apps/plugin-haptics": "^2.4.0", "@tauri-apps/plugin-notification": "^2.3.0", "@tauri-apps/plugin-store": "^2.4.0" }, "optionalPeers": ["@tauri-apps/api", "@tauri-apps/plugin-clipboard-manager", "@tauri-apps/plugin-deep-link", "@tauri-apps/plugin-haptics", "@tauri-apps/plugin-notification", "@tauri-apps/plugin-store"] }, "sha512-UtxvJDOoe030Ns7eXxO8snn/y6Rs+WlodIBMGLNpD0ZtaZyt6qdSxDY4ln6YXT3AB76Ax86MHqoMGEuV0bWE0Q=="],
 

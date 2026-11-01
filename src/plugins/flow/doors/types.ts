@@ -160,11 +160,33 @@ export type OverlayMarker = "toggle" | "button";
  */
 export type ToggleInput = { readonly on: "boolean" };
 
+/**
+ * The input schema of an overlay toggle with `choices`: the state the switch asks for and the pick
+ * of the row under it. `choice` is `"string"` or `"string?"`: the editor's registry refuses any other
+ * kind at start.
+ *
+ * @example
+ * ```ts
+ * // A tester on a phone picks how a purchase ends: the overlay runs { on: true, choice: "failure" }.
+ * const input: ChoiceInput = { on: "boolean", choice: "string" };
+ * ```
+ */
+export type ChoiceInput = { readonly on: "boolean"; readonly choice: "string" | "string?" };
+
 /** The schema a toggle accepts: exactly `{ on: "boolean" }`; any schema while `S` is the wide one. */
 type ToggleSchema<S extends InputSchema> = string extends keyof S
   ? S
   : [Exclude<keyof S, "on">] extends [never]
     ? S extends ToggleInput
+      ? S
+      : never
+    : never;
+
+/** The schema a toggle with `choices` accepts: exactly `ChoiceInput`; any schema while `S` is the wide one. */
+type ChoiceSchema<S extends InputSchema> = string extends keyof S
+  ? S
+  : [Exclude<keyof S, keyof ChoiceInput>] extends [never]
+    ? S extends ChoiceInput
       ? S
       : never
     : never;
@@ -177,9 +199,10 @@ type ButtonSchema<S extends InputSchema> = string extends keyof S
     : never;
 
 /**
- * The overlay part of a command, one of three shapes told apart by `overlay`: none, a toggle
- * with its input `{ on: "boolean" }` and its `value`, or a button with no required input and no
- * `value`. Any other combination does not compile.
+ * The overlay part of a command, one of four shapes: none, a toggle with its input
+ * `{ on: "boolean" }` and its `value`, a toggle with `choices`, whose input adds `choice` and which
+ * has a `choice(app)` too, or a button with no required input and no `value`. Any other combination
+ * does not compile.
  */
 type CommandOverlay<S extends InputSchema, App> =
   | {
@@ -187,6 +210,10 @@ type CommandOverlay<S extends InputSchema, App> =
       readonly overlay?: never;
       /** Only a toggle has a value. */
       readonly value?: never;
+      /** Only a toggle with a row of choices has them. */
+      readonly choices?: never;
+      /** Only a toggle with a row of choices reads one. */
+      readonly choice?: never;
     }
   | {
       /** A switch of the overlay, run with `{ on: !value(app) }`. */
@@ -194,6 +221,21 @@ type CommandOverlay<S extends InputSchema, App> =
       readonly input: ToggleSchema<S>;
       /** The current value of the switch, read by the overlay to draw it. */
       readonly value: (app: App) => boolean;
+      /** Only a toggle with a row of choices has them. */
+      readonly choices?: never;
+      /** Only a toggle with a row of choices reads one. */
+      readonly choice?: never;
+    }
+  | {
+      /** A switch of the overlay with a row of choices, run with `{ on, choice }`. */
+      readonly overlay: "toggle";
+      readonly input: ChoiceSchema<S>;
+      /** The current value of the switch, read by the overlay to draw it. */
+      readonly value: (app: App) => boolean;
+      /** The row under the switch, one word each, none twice. */
+      readonly choices: readonly [string, ...string[]];
+      /** The choice the row marks. The game keeps it, in its own `.dev` module. */
+      readonly choice: (app: App) => string;
     }
   | {
       /** A button of the overlay, run with `{}`. */
@@ -201,6 +243,10 @@ type CommandOverlay<S extends InputSchema, App> =
       readonly input: ButtonSchema<S>;
       /** Only a toggle has a value. */
       readonly value?: never;
+      /** Only a toggle with a row of choices has them. */
+      readonly choices?: never;
+      /** Only a toggle with a row of choices reads one. */
+      readonly choice?: never;
     };
 
 /**
@@ -209,8 +255,8 @@ type CommandOverlay<S extends InputSchema, App> =
  * form for `read` and `cosmetic`, the control form for the others (see docs/doors.md), so a
  * production build drops it. A game's `.dev` command with only the `__MOKU_GAME_DEV__` guard runs
  * in dev and is refused on a debug page. With `overlay` the editor's overlay shows it: a toggle
- * takes the input `{ on: "boolean" }` and a `value(app)`, a button no required input and no
- * value; the types refuse every other shape.
+ * takes the input `{ on: "boolean" }` and a `value(app)`, with `choices` also `choice` in the input
+ * and a `choice(app)`, a button no required input and no value; the types refuse every other shape.
  *
  * @example
  * ```ts
