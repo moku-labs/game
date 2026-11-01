@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { appIdOf, buildIdOf, definesOf } from "../../src/app/build";
+import { appIdOf, buildIdOf, definesOf, editorReadsOff } from "../../src/app/build";
 import type { CliDeps } from "../../src/app/cli";
 import { runCommand } from "../../src/app/cli";
 import { copyMiniGame, removeCopies } from "../integration/app-helpers";
@@ -184,9 +184,37 @@ describe("the defines and the build id of a page", () => {
   });
 
   it("the app id is the native identifier, with .debug when native builds its debug app", () => {
-    expect(appIdOf("com.mokulabs.timber", "debug")).toBe("com.mokulabs.timber.debug");
-    expect(appIdOf("com.mokulabs.timber", undefined)).toBe("com.mokulabs.timber");
+    const native = { name: "Timber", identifier: "com.mokulabs.timber" };
+
+    expect(appIdOf(native, "debug")).toBe("com.mokulabs.timber.debug");
+    expect(appIdOf(native, undefined)).toBe("com.mokulabs.timber");
     expect(appIdOf(undefined, "debug")).toBeUndefined();
+  });
+
+  // Bug: the editor pairs the stream of a test app with the wrong game.
+  it("under the dev profile the app id is native.dev.identifier", () => {
+    const native = {
+      name: "Timber",
+      identifier: "com.mokulabs.timber",
+      dev: { identifier: "com.mokulabs.timber.dev" }
+    };
+
+    expect(appIdOf(native, "dev")).toBe("com.mokulabs.timber.dev");
+    expect(appIdOf(native, "debug")).toBe("com.mokulabs.timber.debug");
+    expect(appIdOf(native, "store")).toBe("com.mokulabs.timber");
+    expect(appIdOf({ name: "Timber", identifier: "com.mokulabs.timber" }, "dev")).toBe(
+      "com.mokulabs.timber"
+    );
+  });
+
+  // Bug: 0.9.30 reads as newer than 0.10.19 in a text compare, and a test phone dials for ever.
+  it("the editor reads off from 0.10.19 on, and an unreadable version does not", () => {
+    const seen = ["0.10.19", "0.10.20", "0.11.0", "1.0.0", "0.9.30", "0.10.18", "0.10", "x"].map(
+      version => editorReadsOff(version)
+    );
+
+    expect(seen).toEqual([true, true, true, true, false, false, false, false]);
+    expect(editorReadsOff(undefined)).toBe(false);
   });
 
   it("names a debug build debug-<stamp> by the UTC time of the run, whatever its profile", () => {
@@ -373,14 +401,16 @@ const AGENT_MARKER = "fake-editor-agent-3c9e1f";
  * logs a marker.
  *
  * @param root - The game folder.
+ * @param version - The version of its `package.json`.
  */
-function fakeEditor(root: string): void {
+function fakeEditor(root: string, version = "0.10.19"): void {
   const folder = path.join(root, "node_modules", "@moku-labs", "editor");
 
   put(
     path.join(folder, "package.json"),
     JSON.stringify({
       name: "@moku-labs/editor",
+      version,
       type: "module",
       exports: { "./agent/page": "./page.js" }
     })
@@ -453,5 +483,55 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build --debug, the bundle
     expect(bundled).toContain('"debug-20261014T153012Z"');
     expect(bundled).toContain('"com.mini.game.debug"');
     expect(bundled).toMatch(/__MOKU_GAME_CONTROL__\s*=\s*(?:false|!1)/);
+  });
+
+  // Bug: a tester's phone dials for ever, the overlay's toggles are greyed out, the editor pairs the
+  // wrong game, or the build tells its maker never to ship it.
+  it("under the dev profile --debug builds a full page that never dials: EDITOR off, CONTROL true, the test app's id", async () => {
+    const root = game();
+
+    fakeEditor(root);
+    put(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "mini-game" }, native: { name: "Mini", identifier: "com.mini.game", dev: { identifier: "com.mini.game.dev" } } };\n'
+    );
+
+    const { code, seen } = await build(["--debug"], root, MANIFEST_ONLY, 0, recorded => ({
+      ...debugSeams(recorded),
+      env: { MOKU_NATIVE_PROFILE: "dev" }
+    }));
+    const out = path.join(root, "dist", "web");
+    const html = readFileSync(path.join(out, "index.html"), "utf8");
+    const script = /<script type="module" crossorigin src="([^"]+)"/.exec(html)?.[1] ?? "";
+    const bundled = readFileSync(path.join(out, script), "utf8");
+
+    expect(seen.errors).toEqual([]);
+    expect(code).toBe(0);
+    expect(seen.warnings).toEqual([
+      `build: a DEBUG page with the editor agent, control: every command, the state-changing ones too. Build debug-20261014T153012Z, engine ${VERSION}+src, editor off. This is a DEV page for the store test track: overlay, no editor link.`
+    ]);
+    expect(bundled).toContain(AGENT_MARKER);
+    expect(bundled).toMatch(/__MOKU_GAME_EDITOR__\s*=\s*"off"/);
+    expect(bundled).toMatch(/__MOKU_GAME_CONTROL__\s*=\s*(?:true|!0)/);
+    expect(bundled).toContain('"com.mini.game.dev"');
+  });
+
+  // Bug: a page for an editor that does not read "off" dials for ever on a tester's phone.
+  it("under the dev profile an editor below 0.10.19 is refused, naming it, and nothing is written", async () => {
+    const root = game();
+
+    fakeEditor(root, "0.10.18");
+
+    const { code, seen } = await build(["--debug"], root, MANIFEST_ONLY, 0, recorded => ({
+      ...debugSeams(recorded),
+      env: { MOKU_NATIVE_PROFILE: "dev" }
+    }));
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] build: a dev page needs @moku-labs/editor 0.10.19 or newer, found 0.10.18.\n  An older one dials the editor for ever. Run: bun add -d @moku-labs/editor@latest."
+    ]);
+    expect(seen.scans).toEqual([]);
+    expect(existsSync(path.join(root, "dist"))).toBe(false);
   });
 });

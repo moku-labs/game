@@ -8,16 +8,19 @@ import type { ElementNode, Message } from "../i18n/types";
 import { system } from "../world/ecs/define";
 import type { AnyComponent, AnySystem, Entity } from "../world/ecs/types";
 import { builtInStyles, Countdown, Text } from "./components";
-import { formatBound, isTextFormat, unitOf } from "./format";
+import { formatBound, isTextFormat, unitOf, wholeValue } from "./format";
 import { layoutRuns } from "./measure";
 import { parseTags } from "./tags";
 import type {
+  FormattedNumber,
   SeenText,
   Size,
   State,
   TextBind,
   TextCtx,
   TextFormat,
+  TextFormatAnswer,
+  TextFormatFunction,
   TextLayout,
   TextStyle,
   TextValue,
@@ -334,13 +337,70 @@ function boundValue(
 function formatOf(ctx: TextCtx, entity: Entity, bind: TextBind, value: number): TextFormat {
   if (isTextFormat(bind.format) && Number.isFinite(value)) return bind.format;
 
+  warnBadFormat(ctx, entity, bind);
+
+  return "int";
+}
+
+/**
+ * Reports a bind that names no format, or a value that is not finite, once per entity.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity the label sits on.
+ * @param bind - What the label carries.
+ */
+function warnBadFormat(ctx: TextCtx, entity: Entity, bind: TextBind): void {
   warnOnce(ctx, `bind-format:${entity}`, "text: bad bind format", {
     component: bind.component,
     field: bind.field,
     format: bind.format
   });
+}
 
-  return "int";
+/**
+ * Asks a format a feature registered. A format that throws is reported once per name.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param name - The name it was registered under.
+ * @param format - The function.
+ * @param value - The whole value.
+ * @returns What it answered, or `undefined` when it threw.
+ */
+function askFormat(
+  ctx: TextCtx,
+  name: string,
+  format: TextFormatFunction,
+  value: number
+): TextFormatAnswer | undefined {
+  try {
+    return format(value);
+  } catch (error) {
+    warnOnce(ctx, `bind-format-threw:${name}`, "text: bind format threw", { format: name, error });
+
+    return undefined;
+  }
+}
+
+/**
+ * What a format a feature registered answers for a number, before any label shows it.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param name - The format name.
+ * @param value - The number; rounded as `"int"` rounds it.
+ * @returns The string and the style, or `undefined` for a name no feature registered and for a
+ *   format that threw.
+ */
+export function formattedBy(
+  ctx: TextCtx,
+  name: string,
+  value: number
+): FormattedNumber | undefined {
+  const format = ctx.state.formats.get(name);
+  const answer = format === undefined ? undefined : askFormat(ctx, name, format, wholeValue(value));
+
+  return answer === undefined
+    ? undefined
+    : { text: sourceOf(ctx, answer.content), style: answer.style };
 }
 
 /**
@@ -382,20 +442,22 @@ function isSameBind(seen: SeenText, bind: TextBind | undefined): boolean {
  * @param text - Its component value.
  * @param frame - What this run of the system shares.
  * @param unit - What a bound label's string was built from; `undefined` for any other label.
+ * @param style - The style the label shows: the one a format answered may be newer than `text`.
  */
 function remember(
   ctx: TextCtx,
   entity: Entity,
   text: Readonly<TextValue>,
   frame: TextFrame,
-  unit?: number
+  unit?: number,
+  style: string = text.style
 ): void {
   const seen = ctx.state.seen.get(entity);
 
   if (seen === undefined) {
     ctx.state.seen.set(entity, {
       content: text.content,
-      style: text.style,
+      style,
       bindRef: text.bind,
       bind: bindKeyOf(text.bind),
       locale: frame.locale,
@@ -412,7 +474,7 @@ function remember(
   }
 
   seen.content = text.content;
-  seen.style = text.style;
+  seen.style = style;
   seen.locale = frame.locale;
   seen.unit = unit;
   seen.box = text.box;
@@ -459,12 +521,13 @@ function keepSize(ctx: TextCtx, entity: Entity, layout: TextLayout): void {
 
 /**
  * Tells whether a bound label already shows what its value would build: the same unit, style and
- * binding, and for a `"duration"` the same locale.
+ * binding, and for a format whose words depend on the language, the same locale. Reads and
+ * compares: no key is built, nothing is kept, no format is called.
  *
  * @param seen - What was resolved for the label last.
  * @param text - Its component value.
  * @param unit - The unit of the value this frame.
- * @param format - The format it is shown in.
+ * @param worded - Whether the shown string depends on the locale: a `"duration"` or a named format.
  * @param frame - What this run of the system shares.
  * @returns True when nothing has to be formatted or written.
  */
@@ -472,14 +535,14 @@ function isShown(
   seen: SeenText,
   text: Readonly<TextValue>,
   unit: number | undefined,
-  format: TextFormat,
+  worded: boolean,
   frame: TextFrame
 ): boolean {
   return (
     seen.unit === unit &&
     seen.style === text.style &&
     isSameBind(seen, text.bind) &&
-    (format !== "duration" || seen.locale === frame.locale)
+    (!worded || seen.locale === frame.locale)
   );
 }
 
@@ -492,18 +555,21 @@ function isShown(
  * @param text - Its component value.
  * @param next - The string the label shows now.
  * @param value - The bound number, the time left for a countdown.
+ * @param style - The style it shows it in: another one only for what a named format answered.
  */
 function showBound(
   ctx: TextCtx,
   entity: Entity,
   text: Readonly<TextValue>,
   next: string,
-  value: number | undefined
+  value: number | undefined,
+  style: string = text.style
 ): void {
-  const changed = next !== text.resolved;
+  const restyled = style !== text.style;
+  const changed = restyled || next !== text.resolved;
 
   if (changed) {
-    ctx.deps.world.ecs.set(entity, Text, { resolved: next });
+    ctx.deps.world.ecs.set(entity, Text, restyled ? { resolved: next, style } : { resolved: next });
 
     if (value !== undefined && text.bind !== undefined && isCountdownLeft(text.bind)) {
       ctx.deps.world.ecs.set(entity, Countdown, { left: value });
@@ -511,7 +577,7 @@ function showBound(
   }
 
   if (changed || !ctx.state.measured.has(entity)) {
-    keepSize(ctx, entity, layoutFor(ctx, next, text.style, text.box));
+    keepSize(ctx, entity, layoutFor(ctx, next, style, text.box));
   }
 }
 
@@ -553,7 +619,8 @@ function warnWithoutDigits(ctx: TextCtx, styleName: string): void {
  * nothing: no tag is parsed, no key is built. A marked label that stands still is written once
  * with the string it shows; one of a `"box"` style that ui laid out at another box is measured at
  * it. The style is checked for digits only when the label is written, so a label on a wrong style
- * builds no warning key per frame.
+ * builds no warning key per frame. A bind that names a format a feature registered goes its own
+ * way; the name is looked up only after it proved none of the four built-in ones.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
@@ -570,6 +637,14 @@ function stepBound(
 ): void {
   // The number of this frame, and the unit its string is built from.
   const value = boundValue(ctx, entity, bind, frame);
+  const named = isTextFormat(bind.format) ? undefined : ctx.state.formats.get(bind.format);
+
+  if (named !== undefined) {
+    stepNamed(ctx, entity, text, bind, named, value, frame);
+
+    return;
+  }
+
   const format = value === undefined ? "int" : formatOf(ctx, entity, bind, value);
   const unit = value === undefined ? undefined : unitOf(value, format);
 
@@ -579,7 +654,9 @@ function stepBound(
 
   // The unit stands still: no string is built. A label that was marked is written once as it is;
   // a label of a `"box"` style that ui laid out at another box is measured at it.
-  if (seen !== undefined && isShown(seen, text, unit, format, frame)) {
+  if (seen !== undefined && isShown(seen, text, unit, format === "duration", frame)) {
+    if (marked) warnWithoutDigits(ctx, text.style);
+
     standStill(ctx, entity, text, seen, marked);
 
     return;
@@ -591,6 +668,56 @@ function stepBound(
 
   showBound(ctx, entity, text, next, value);
   remember(ctx, entity, text, frame, unit);
+}
+
+/**
+ * One frame of a label whose bind names a format a feature registered. Its unit is the whole value.
+ * While that, the locale, the bind and the style stand the frame is reads and compares: the format
+ * is not called, a mark included, and nothing is kept. Else it is asked once, and its answer is
+ * written only when it differs. The format picks the style, so no style is checked for digits. A
+ * bound field that holds no number shows nothing, as under a built-in format.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ * @param bind - What it carries: the name of the format.
+ * @param format - The function of the format.
+ * @param value - The number of this frame, when there is one.
+ * @param frame - What this run of the system shares.
+ */
+function stepNamed(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  bind: TextBind,
+  format: TextFormatFunction,
+  value: number | undefined,
+  frame: TextFrame
+): void {
+  if (value !== undefined && !Number.isFinite(value)) warnBadFormat(ctx, entity, bind);
+
+  const unit = value === undefined ? undefined : wholeValue(value);
+  const marked = ctx.state.dirty.delete(entity);
+  const seen = ctx.state.seen.get(entity);
+
+  if (seen !== undefined && isShown(seen, text, unit, true, frame)) {
+    standStill(ctx, entity, text, seen, marked);
+
+    return;
+  }
+
+  const answer = unit === undefined ? undefined : askFormat(ctx, bind.format, format, unit);
+
+  if (answer === undefined) {
+    // Nothing to ask, or a format that threw: digits, and `Text.style` stays.
+    showBound(ctx, entity, text, unit === undefined ? "" : String(unit), value);
+    remember(ctx, entity, text, frame, unit);
+
+    return;
+  }
+
+  showBound(ctx, entity, text, sourceOf(ctx, answer.content), value, answer.style);
+  remember(ctx, entity, text, frame, unit, answer.style);
 }
 
 /**
@@ -611,7 +738,6 @@ function standStill(
   marked: boolean
 ): void {
   if (marked) {
-    warnWithoutDigits(ctx, text.style);
     showAgain(ctx, entity, text);
   } else if (boxMoved(ctx, seen, text)) {
     keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));

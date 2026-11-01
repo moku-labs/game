@@ -216,6 +216,50 @@ describe("resolveConfig", () => {
   });
 
   // Bug: the checks refuse a good config, and a game cannot use the fields it was promised.
+  // Bug: a test app with the players' id replaces their game, or a block fails deep in a build.
+  it("refuses a native.dev with no identifier, one not ending in .dev, the real one, or an empty name or icon", () => {
+    const refusals: [object, string][] = [
+      [{}, "[game] config.native.dev has no identifier.\n  Name one that ends in .dev."],
+      [
+        { identifier: "" },
+        "[game] config.native.dev has no identifier.\n  Name one that ends in .dev."
+      ],
+      [
+        { identifier: "com.acme.t.debug" },
+        '[game] config.native.dev.identifier is "com.acme.t.debug".\n  Use one that ends in .dev.'
+      ],
+      [
+        { identifier: "com.acme.t.dev", name: "" },
+        "[game] config.native.dev.name is empty.\n  Name the test app, or leave the field out."
+      ],
+      [
+        { identifier: "com.acme.t.dev", icon: "" },
+        "[game] config.native.dev.icon is empty.\n  Name a 1024 px PNG, or leave the field out."
+      ]
+    ];
+
+    for (const [dev, message] of refusals) {
+      expect(() => resolveConfig(nativeWith({ dev }))).toThrow(new Error(message));
+    }
+
+    expect(() =>
+      resolveConfig(
+        nativeWith({ identifier: "com.acme.t.dev", dev: { identifier: "com.acme.t.dev" } })
+      )
+    ).toThrow(
+      new Error(
+        '[game] config.native.dev.identifier is "com.acme.t.dev", the same as native.identifier.\n  The test app needs an id of its own.'
+      )
+    );
+  });
+
+  it("takes a native.dev with its identifier alone, and one with a name and an icon", () => {
+    const dev = { identifier: "com.acme.t.dev", name: "T Test", icon: "assets/icon-dev.png" };
+
+    expect(resolveConfig(nativeWith({ dev })).native?.dev).toEqual(dev);
+    expect(() => resolveConfig(nativeWith({ dev: { identifier: dev.identifier } }))).not.toThrow();
+  });
+
   it("takes a full signing block and an ios block with nested plist values", () => {
     const native = {
       name: "T",

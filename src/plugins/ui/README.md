@@ -17,7 +17,7 @@ is anchored to the bottom or the right edge sits less than one unit past it (F11
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key, `value` on a text field, `window` on a windowed scroll, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key (`Text.style` when its bind names a format of the game), `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only, never one of a scene built aside or of a window held warm |
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
@@ -103,7 +103,12 @@ draw adds 0 to both, solves nothing and sets no component.
 A `text` without a fixed `width` and `height` is sized by `text.measure` of what it shows: its
 `content`, or for a bound text the string `text` shows for it, `Text.resolved`. Before the first
 resolve that is the bound field of its `components` value in the format of the bind, so a number
-a row centres is centred from the first frame. A new shown string asks for a solve only when it
+a row centres is centred from the first frame. A bind that names a format of the game (text README,
+"Number formats") picks the style too: before the first resolve `text.formatted` answers the string
+and the style, once per measure, and after it `Text.resolved` and `Text.style` are read. `ui` then
+leaves `Text.style` alone: a commit and a new viewport write every other field and record the style
+the label shows as its rest. A bind that goes back to a built-in format or leaves takes the `style`
+prop again. A new shown string asks for a solve only when it
 measures to another size: a counter that rolls through digits of one width solves nothing. A text
 without `bind` is measured again the same way when `text` resolves it again: a message after a new
 locale, any text when its font arrives. An `icon` without a `width` and `height` is square on one
@@ -1176,7 +1181,7 @@ Every export of the saved module is sorted, in this order:
 | an emitter: own string `id`, a `config` object | nothing in ui: `effects` takes it from the `ui:hot-swap` event; live particles keep their bake |
 | the `default` export of `generated/strings.<locale>.ts`, a record of functions | `i18n.replace(locale, messages)`, the locale read from the path: every label re-resolves |
 | text styles: `{ kind: "textStyles", map }` | `text.replaceStyles`: every label is laid out again and redrawn with the new style |
-| an own string `kind` of `component`, `tag`, `node`, `slot`, `flow`, `bundles` or `plugin`; without a `kind`, an object with an own string `id` or `name` | refused: a flow, node, slot, ECS component or tag, filter, bundles, scene, system, feature or plugin is registered by value at start |
+| an own string `kind` of `component`, `tag`, `node`, `slot`, `flow`, `bundles`, `plugin` or `textFormats`; without a `kind`, an object with an own string `id` or `name` | refused: a flow, node, slot, ECS component or tag, filter, bundles, scene, system, feature, plugin or text format is registered by value at start, and a format has no hot swap |
 | anything else: styles, tokens, motions, effect descriptors (`sfx`, `haptic`, `popup`, `play`, `music`, `guide`), timeline steps (`tween`, `mark`), numbers, plain functions, function components | nothing: Bun already gave the importers the new binding, and a node reads a descriptor through it |
 
 The strings files are written by `bun run assets:keys`, which compiles

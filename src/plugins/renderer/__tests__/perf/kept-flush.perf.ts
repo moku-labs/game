@@ -13,6 +13,7 @@ import {
   keptOwnFadeBoard,
   keptShadedBoard,
   keptSteppedBoard,
+  keptUnderBoard,
   keptWhyBoard,
   keptZoomBoard
 } from "./fixtures";
@@ -117,6 +118,14 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for 40 shaded views whose numbers are written every frame (F126)", async () => {
     expect(bytesPerCall(await keptShadedBoard(40), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptShaded + NOISE
+    );
+  });
+
+  // Bug: the walk up the ancestors of a view under a filter boxes a number or makes a closure per ancestor: it runs for
+  // every view of every frame, and the ward holds a dozen.
+  it("allocates nothing for 12 placed views under a filter whose numbers are written every frame (F126)", async () => {
+    expect(bytesPerCall(await keptUnderBoard(12), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptUnder + NOISE
     );
   });
 

@@ -164,17 +164,18 @@ The engine bin `moku-game` serves, builds and packs a game folder. A game writes
 |---|---|
 | `moku-game dev [--port 3000] [--packed]` | Serves the game with hot reload. Prints the bound URL, also for `--port 0`. On the raw files it runs the scan of `keys` at start and on a save of an asset or a strings file. Restarts its server when the installed engine changes |
 | `moku-game build [--out dist/web] [--debug[=full] [--editor host:port]]` | Packs the assets and builds the page; `--debug` adds the editor's page agent (read and cosmetic commands), `--debug=full` every command; `--editor` names where the agent finds the editor (default `127.0.0.1:47600`). A debug page is never shipped: a release page that carries the agent is refused |
-| `moku-game native build <target> [--simulator] [--debug[=full] [--editor host:port]]` | Builds the native app: `ios`, `macos`, `android`; `--debug` builds an Android debug app beside the store app |
+| `moku-game native build <target> [--simulator] [--debug[=full] [--editor host:port]]` | Builds the native app: `ios`, `macos`, `android`; `--debug` builds an Android or iOS debug app beside the store app |
 | `moku-game native build <target> --store --build-number <n>` | A store build: an `.aab` on `android`, an `.ipa` for App Store Connect on `ios`. The version comes from `package.json`, the signing from `native.signing`. Everything wrong is refused at once, before anything compiles |
+| `moku-game native build <target> --store --dev --build-number <n>` | The test app of `native.dev`: store-signed, under its own `.dev` id, with the overlay and no editor link, in `dist-native-dev` |
 | `moku-game native dev <target>` | Runs the native shell on the dev server |
-| `moku-game native doctor`, `native clean` | Checks or removes the native project |
+| `moku-game native doctor`, `native clean` | Checks or removes the native project; `clean` also the test and iOS debug projects |
 | `moku-game keys [--check]` | Writes `generated/assets.ts`, the strings and `generated/manifest.json` |
 | `moku-game pack [--no-cache]` | Packs the assets into `dist/assets` |
 | `moku-game visual [--update] [--only <name>] [--no-pixels]` | Runs the visual tests of `tests/visual/index.ts` against `tests/visual/baselines/`. The pixel leg runs on a Mac, on a page served for the run. Exit 1 when a checkpoint differs |
 
 Every command takes `--root <dir>`, `--preload <path>` and `--serve-plugin <path>`.
 
-`config.ts` names the system plugins the page wires, `system: ["lifecycle", "back", "haptics", "keepAwake"]`, and the save, `save: "memory" | "local" | "store"`. A `system` list and the `"store"` save need the optional peer `@moku-labs/system`; `moku-game native` needs `@moku-labs/native`. The game imports neither. The `native` keys are `name`, `identifier`, `icon`, `targets`, `signing` (`android`, `apple`: env var names and identifiers, never a secret) and `ios` (`minimumVersion`, `"26.0"` by default, `infoPlist`, `privacyManifest`). The whole shell is in [docs/shell.md](./docs/shell.md).
+`config.ts` names the system plugins the page wires, `system: ["lifecycle", "back", "haptics", "keepAwake"]`, and the save, `save: "memory" | "local" | "store"`. A `system` list and the `"store"` save need the optional peer `@moku-labs/system`; `moku-game native` needs `@moku-labs/native`. The game imports neither. The `native` keys are `name`, `identifier`, `icon`, `targets`, `signing` (`android`, `apple`: env var names and identifiers, never a secret), `ios` (`minimumVersion`, `"26.0"` by default, `infoPlist`, `privacyManifest`) and `dev` (`identifier`, ending in `.dev`, `name`, `icon`: the test app of `--store --dev`). The whole shell is in [docs/shell.md](./docs/shell.md).
 
 ## How it works
 

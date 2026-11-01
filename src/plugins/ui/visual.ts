@@ -14,6 +14,8 @@ import {
   type TransformValue
 } from "../renderer/components";
 import { Text } from "../text/components";
+import { isTextFormat } from "../text/format";
+import type { TextBind } from "../text/types";
 import type { AnyComponentType, AnyComponentValue } from "../world/types";
 import type { Element } from "./jsx/types";
 import type { ElementLookup, Rect } from "./layout/types";
@@ -80,6 +82,33 @@ function spriteFitOf(props: Record<string, unknown>): SpriteFit {
  */
 function contentOf(props: Record<string, unknown>): string {
   return (props.content ?? "") as string;
+}
+
+/**
+ * The bind of a text, when the markup gave it one.
+ *
+ * @param element - The element to ask about.
+ * @returns What `bind()` built, or `undefined` for any other element.
+ */
+export function bindOf(element: Element): TextBind | undefined {
+  const { bind } = element.node.props;
+  const isBound = element.type === "text" && typeof bind === "object" && bind !== null;
+
+  return isBound ? (bind as TextBind) : undefined;
+}
+
+/**
+ * Tells whether an element is a text whose bind names a format of the game, not one of the four
+ * built-in ones: such a format answers the style of the label too, so `Text.style` is what the
+ * label shows and its `style` prop is only where it starts.
+ *
+ * @param element - The element to ask about.
+ * @returns True for a text whose bind names a format.
+ */
+export function namesFormat(element: Element): boolean {
+  const bind = bindOf(element);
+
+  return bind !== undefined && !isTextFormat(bind.format);
 }
 
 /**
@@ -258,9 +287,11 @@ function leftSizes(width: boolean, height: boolean): readonly string[] {
 
 /**
  * The fields of a value ui does not write onto a live element, or record as its rest: those its component type gives
- * to a plugin and, for the `Sprite` of an image or an icon, the size on an axis its style does not state and the layout
- * left at 0. A game's own system sizes such a sprite; written again by ui (a new viewport, a covered root, a restore)
- * it went back to 0 by 0, drawn at its texture's size (F111). On a first add the size is 0 anyway, the texture's.
+ * to a plugin; for the `Sprite` of an image or an icon, the size on an axis its style does not state and the layout
+ * left at 0; and for the `Text` of a label whose bind names a format, the style its format answered (F135). A game's own
+ * system sizes such a sprite; written again by ui (a new viewport, a covered root, a restore) it went back to 0 by 0,
+ * drawn at its texture's size (F111). On a first add the size is 0 anyway, the texture's. `element.node` is the node of
+ * this render, so a bind that went back to a built-in format or left has its prop written as usual.
  *
  * @param element - The element.
  * @param type - The component type of the value.
@@ -272,6 +303,8 @@ export function fieldsLeftAlone(
   type: AnyComponentType,
   owned: readonly string[]
 ): readonly string[] {
+  if (type === Text) return namesFormat(element) ? [...owned, "style"] : owned;
+
   const { style, rect } = element;
   const isImage = element.type === "image" || element.type === "icon";
 

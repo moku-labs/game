@@ -81,6 +81,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const focus = createFocus(ctx, frame.markPointer, topRoot, fields);
   const resolvedOf = (entity: Entity): string | undefined =>
     ctx.deps.world.ecs.get(entity, Text)?.resolved;
+  const shownStyleOf = (entity: Entity): string | undefined =>
+    ctx.deps.world.ecs.get(entity, Text)?.style;
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
   const find = (key: string): Entity | undefined => {
     for (const root of sortedRoots(state, layerNames(), isAside)) {
@@ -99,7 +101,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
         layerNames(),
         resolvedOf,
         slot => rootPoseOf(ctx.deps.world.ecs, slot),
-        isAside
+        isAside,
+        shownStyleOf
       ),
 
     find,

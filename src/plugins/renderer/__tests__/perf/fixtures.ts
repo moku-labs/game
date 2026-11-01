@@ -768,6 +768,40 @@ async function startInheritBoard(count: number): Promise<KeptBoard> {
 }
 
 /**
+ * One frame of a board of shaded views: every view marked and its number written after the mark, then the kept cache
+ * collects and flushes.
+ *
+ * @param views - The views.
+ * @param numbers - The uniforms of each, in order.
+ * @param modules - The modules of the renderer.
+ * @param modules.demand - The demand module.
+ * @param modules.kept - The kept module.
+ * @returns The frame.
+ */
+function numbersFrame(
+  views: readonly Entity[],
+  numbers: ReadonlyArray<{ amount: number }>,
+  modules: Pick<MockRenderer["modules"], "demand" | "kept">
+): () => void {
+  const { demand, kept } = modules;
+  let low = false;
+
+  return (): void => {
+    low = !low;
+
+    // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+    for (let index = 0; index < views.length; index += 1) {
+      demand.invalidate(views[index] ?? 0);
+      // Whole numbers: a new double written to a field is boxed by the write, which the fixture does as `effects` does.
+      (numbers[index] ?? { amount: 0 }).amount = low ? 1 : 2;
+    }
+
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A board of `count` views on their filter's own shader (F126 stage 2), as `rows` of the bench draws them: every view
  * carries one filter with a quad, in a frozen list as `effects` hands it over, and every frame writes every view's number
  * after the mark, then the kept cache collects and flushes. The mesh reads the number itself: the frame renders nothing.
@@ -777,7 +811,7 @@ async function startInheritBoard(count: number): Promise<KeptBoard> {
  */
 export async function keptShadedBoard(count: number): Promise<() => void> {
   const stage = await startOverlayStage({ onDemand: false });
-  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const { sync } = stage.drawn.mock.modules;
   const views: Entity[] = [];
   const numbers: Array<{ amount: number }> = [];
 
@@ -797,20 +831,7 @@ export async function keptShadedBoard(count: number): Promise<() => void> {
 
   stage.frames(12);
 
-  let low = false;
-  const frame = (): void => {
-    low = !low;
-
-    // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
-    for (let index = 0; index < views.length; index += 1) {
-      demand.invalidate(views[index] ?? 0);
-      // Whole numbers: a new double written to a field is boxed by the write, which the fixture does as `effects` does.
-      (numbers[index] ?? { amount: 0 }).amount = low ? 1 : 2;
-    }
-
-    kept.collect();
-    kept.flush();
-  };
+  const frame = numbersFrame(views, numbers, stage.drawn.mock.modules);
 
   for (let index = 0; index < 4; index += 1) frame();
 
@@ -818,6 +839,55 @@ export async function keptShadedBoard(count: number): Promise<() => void> {
 
   if (records.length !== count || records.some(record => !record.shaded)) {
     throw new Error("perf fixture: a view of the shaded board is not shaded");
+  }
+
+  return frame;
+}
+
+/**
+ * A filtered room with `count` placed views under it on their filter's own shader (F126 stage 2, part B), as `glow` of
+ * the bench draws them: the room's filter stays live, every frame writes every view's number after the mark, and every
+ * step walks the view's ancestors up to the stage, noting the filter it hangs under.
+ *
+ * @param count - The shaded views.
+ * @returns One frame: the marks, the numbers, the collect and the flush.
+ */
+export async function keptUnderBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync } = stage.drawn.mock.modules;
+  const room = stage.view({ order: 1, x: 0, y: 0 });
+  const views: Entity[] = [];
+  const numbers: Array<{ amount: number }> = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(
+      stage.drawn.mock.world.ecs.spawn(OWNER, [
+        Transform({ x: (index % 4) * 120, y: Math.floor(index / 4) * 120 }),
+        Shape({ w: 40, h: 40 }),
+        Parent({ entity: room })
+      ])
+    );
+  }
+
+  stage.frame();
+  sync.filters.set(room, Object.freeze([{ filter: new pixi.ColorMatrixFilter(), passes: 1 }]));
+
+  for (const view of views) {
+    const slot = shadedSlot({ cache: "placed", origin: new Float32Array(2) });
+
+    if (slot.quad?.fu !== undefined) numbers.push(slot.quad.fu.uniforms as { amount: number });
+
+    sync.filters.set(view, Object.freeze([slot]));
+  }
+
+  stage.frames(12);
+
+  const frame = numbersFrame(views, numbers, stage.drawn.mock.modules);
+
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  if (records.length !== count || records.some(record => !record.shaded)) {
+    throw new Error("perf fixture: a view under the room is not shaded");
   }
 
   return frame;

@@ -10,20 +10,14 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import type { BrandConsole } from "@moku-labs/common/cli";
 import type { parseVisualArgv, runVisualTests } from "../visual";
-import {
-  type BuildRun,
-  DEFAULT_EDITOR,
-  type DebugLevel,
-  keysArguments,
-  packArguments,
-  runBuild
-} from "./build";
+import { type BuildRun, type DebugLevel, keysArguments, packArguments, runBuild } from "./build";
 import type { KeysWatcher } from "./keys";
 import {
   missingPasswords,
   type NativeVerb,
   type NativeVerbOptions,
-  type NativeWhere
+  type NativeWhere,
+  testProjectsOf
 } from "./native";
 import { checkFiles, loadSettings, type ServeRun, serveChild, serveParent } from "./serve";
 import type { ResolvedGameConfig } from "./types";
@@ -121,8 +115,11 @@ export type CliDeps = {
   readPackageVersion: (root: string) => string | undefined;
 };
 
-/** What `--store` and `--build-number` read to: a store build with its number, or nothing. */
-type NativeStoreFlags = { store: true; buildNumber: number } | { store?: never };
+/**
+ * What `--store`, `--build-number` and `--dev` read to: a store build with its number, the test app
+ * with `dev`, or nothing.
+ */
+type NativeStoreFlags = { store: true; buildNumber: number; dev?: true } | { store?: never };
 
 /** The commands of the line that run something; `help` only prints. */
 type Command = "dev" | "build" | "native" | "keys" | "pack" | "visual";
@@ -154,6 +151,7 @@ const ALL_OPTIONS = {
   debug: { type: "string" },
   editor: { type: "string" },
   store: { type: "boolean" },
+  dev: { type: "boolean" },
   "build-number": { type: "string" }
 } as const;
 
@@ -164,7 +162,7 @@ const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl|no-verify-frame
 const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIONS)[]>> = {
   dev: ["port", "packed"],
   build: ["out", "debug", "editor"],
-  native: ["simulator", "debug", "editor", "store", "build-number"],
+  native: ["simulator", "debug", "editor", "store", "dev", "build-number"],
   keys: ["check"],
   pack: ["no-cache"],
   visual: [
@@ -215,6 +213,7 @@ const USAGE = [
   "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
   "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
   "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
+  "  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev",
   "  native dev <target>                   run the native shell on the dev server",
   "  native doctor | native clean          check or remove the native project",
   "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -420,8 +419,7 @@ function noteFullAlias(parsed: Parsed, ui: CliUi): void {
 }
 
 /**
- * Reads `--editor`: the `host:port` the page agent of a debug page dials, 127.0.0.1:47600 when
- * left out.
+ * Reads `--editor`: the `host:port` the page agent of a debug page dials.
  *
  * @param value - The value of the flag.
  * @param command - The command word, for the message.
@@ -432,9 +430,7 @@ function noteFullAlias(parsed: Parsed, ui: CliUi): void {
  * editorOf("192.168.1.20:47600"); // "192.168.1.20:47600"
  * ```
  */
-function editorOf(value: string | undefined, command: Command = "build"): string {
-  if (value === undefined) return DEFAULT_EDITOR;
-
+function editorOf(value: string, command: Command = "build"): string {
   const colon = value.lastIndexOf(":");
   const host = value.slice(0, Math.max(colon, 0));
   const port = value.slice(colon + 1);
@@ -514,15 +510,13 @@ function selfCommand(parsed: Parsed, deps: CliDeps): string {
 }
 
 /**
- * Runs `moku-game native <verb> [<target>]` through native.
+ * Reads the verb of `moku-game native`.
  *
- * @param parsed - The command line.
- * @param deps - The process seams.
- * @returns `0` when the verb succeeded, `1` when native reported a failure.
- * @throws {Error} When the verb is missing or unknown, or native refuses the config or target.
+ * @param word - The first argument after `native`.
+ * @returns The verb.
+ * @throws {Error} When the verb is missing or unknown.
  */
-async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
-  const [word, target] = parsed.rest;
+function nativeVerbOf(word: string | undefined): NativeVerb {
   const verb = NATIVE_VERBS.find(name => name === word);
 
   if (word === undefined) {
@@ -532,6 +526,21 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
   if (verb === undefined) {
     throw new Error(`[game] native: no verb "${word}". Name one of build, dev, doctor, clean.`);
   }
+
+  return verb;
+}
+
+/**
+ * Runs `moku-game native <verb> [<target>]` through native.
+ *
+ * @param parsed - The command line.
+ * @param deps - The process seams.
+ * @returns `0` when the verb succeeded, `1` when native reported a failure.
+ * @throws {Error} When the verb is missing or unknown, or native refuses the config or target.
+ */
+async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
+  const [word, target] = parsed.rest;
+  const verb = nativeVerbOf(word);
 
   refuseExtra(parsed, 2);
 
@@ -552,23 +561,78 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
     ...(target === undefined ? {} : { target }),
     ...(verb === "build" && parsed.values.simulator === true ? { simulator: true } : {}),
     ...debug,
-    ...(version === undefined ? {} : { version })
+    ...(version === undefined ? {} : { version }),
+    ...(verb === "clean" ? testProjectsThere(parsed.root, deps) : {})
   };
 
-  if (debug.debug !== undefined && target === "android") {
+  // `nativeDebugOf` lets a named target through on Android and iOS only.
+  if (debug.debug !== undefined && target !== undefined) {
     deps.ui.warn(
       "native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store."
     );
   }
 
+  const isPlainAndroidBuild = verb === "build" && target === "android" && debug.debug === undefined;
+
   if (store.store === true) {
-    options.store = { buildNumber: store.buildNumber, env: deps.env, exists: deps.exists };
+    options.store = storeBlockOf(store, settings, deps);
     warnIosStore(settings, target, deps.ui);
-  } else if (verb === "build" && target === "android" && debug.debug === undefined) {
+  } else if (isPlainAndroidBuild) {
     leaveKeyOut(settings, options, deps);
   }
 
   return (await deps.native(verb, settings, where, options)) ? 0 : 1;
+}
+
+/**
+ * The store block of a verb: the number, the test app's mark, and the seams of the store checks.
+ *
+ * @param store - What `--store` read to.
+ * @param settings - The resolved `config.ts` of the game.
+ * @param deps - The seams of the process.
+ * @returns The block.
+ * @throws {Error} When `--dev` comes with no `native.dev`.
+ */
+function storeBlockOf(
+  store: Extract<NativeStoreFlags, { store: true }>,
+  settings: ResolvedGameConfig,
+  deps: CliDeps
+): NonNullable<NativeVerbOptions["store"]> {
+  if (store.dev === true) refuseNoTestApp(settings);
+
+  return {
+    buildNumber: store.buildNumber,
+    ...(store.dev === true ? { dev: true } : {}),
+    env: deps.env,
+    exists: deps.exists
+  };
+}
+
+/**
+ * Finds the test projects of a game, for `moku-game native clean`.
+ *
+ * @param root - The game folder.
+ * @param deps - The seams of the process.
+ * @returns The projects that exist, none of the key when there is no such folder.
+ */
+function testProjectsThere(root: string, deps: CliDeps): Pick<NativeVerbOptions, "testProjects"> {
+  const testProjects = testProjectsOf(root).filter(folder => deps.exists(folder));
+
+  return testProjects.length === 0 ? {} : { testProjects };
+}
+
+/**
+ * Refuses `--dev` for a game with no test app, with a line native could not give.
+ *
+ * @param settings - The resolved `config.ts` of the game.
+ * @throws {Error} When `config.ts` has no `native.dev`.
+ */
+function refuseNoTestApp(settings: ResolvedGameConfig): void {
+  if (settings.native?.dev !== undefined) return;
+
+  throw new Error(
+    "[game] native --dev: config.ts has no native.dev.\n  Add native.dev: { identifier } with an id ending in .dev."
+  );
 }
 
 /**
@@ -618,15 +682,15 @@ function warnIosStore(settings: ResolvedGameConfig, target: string | undefined, 
 }
 
 /**
- * Reads `--debug` and `--editor` of `moku-game native`: they go with `native build android`
- * only in this release.
+ * Reads `--debug` and `--editor` of `moku-game native`: they go with `native build android` and
+ * `native build ios` only for now.
  *
  * @param parsed - The command line.
  * @param verb - The native verb.
  * @param target - The target the command line names, unchecked.
  * @returns The profile and the editor address as given, each only when given.
  * @throws {Error} When either goes with another verb, `--editor` comes without `--debug`, a value
- *   is refused, or the target is not `android`.
+ *   is refused, or the target is neither `android` nor `ios`.
  */
 function nativeDebugOf(
   parsed: Parsed,
@@ -640,8 +704,8 @@ function nativeDebugOf(
   if (verb !== "build") throw new Error("[game] native: --debug goes with native build only.");
   if (debug === undefined) throw new Error("[game] native: --editor goes with --debug.");
 
-  if (target !== undefined && target !== "android") {
-    throw new Error(`[game] native: --debug builds Android only in this release (got ${target}).`);
+  if (target !== undefined && target !== "android" && target !== "ios") {
+    throw new Error(`[game] native: --debug builds Android and iOS only for now (got ${target}).`);
   }
 
   return editor === undefined ? { debug } : { debug, editor: editorOf(editor, "native") };
@@ -670,23 +734,26 @@ function buildNumberOf(value: string): number {
 }
 
 /**
- * Reads `--store` and `--build-number` of `moku-game native`, before any config is read: they go
- * with `native build ios` and `native build android` only, one number for both stores.
+ * Reads `--store`, `--build-number` and `--dev` of `moku-game native`, before any config is read:
+ * they go with `native build ios` and `native build android` only, one number for both stores, and
+ * `--dev` turns the store build into the test app.
  *
  * @param parsed - The command line.
  * @param verb - The native verb.
  * @param target - The target the command line names, unchecked.
- * @returns The store flag and the number, or nothing without them.
- * @throws {Error} When either goes without the other or with another verb or target, when `--debug`,
- *   `--editor` or `--simulator` comes along, or when the number is refused.
+ * @returns The store flag, the number and `dev`, or nothing without them.
+ * @throws {Error} When the first two go without each other or with another verb or target, when
+ *   `--dev` goes without `--store`, when `--debug`, `--editor` or `--simulator` comes along, or when
+ *   the number is refused.
  */
 function nativeStoreOf(
   parsed: Parsed,
   verb: NativeVerb,
   target: string | undefined
 ): NativeStoreFlags {
-  const { store, "build-number": number } = parsed.values;
+  const { store, dev, "build-number": number } = parsed.values;
 
+  if (store !== true && dev === true) throw new Error("[game] native: --dev goes with --store.");
   if (store !== true && number === undefined) return {};
   if (store !== true) throw new Error("[game] native: --build-number goes with --store.");
   if (verb !== "build") throw new Error("[game] native: --store goes with native build only.");
@@ -705,7 +772,9 @@ function nativeStoreOf(
     throw new Error("[game] native: --store needs --build-number, the number of this upload.");
   }
 
-  return { store: true, buildNumber: buildNumberOf(number) };
+  const buildNumber = buildNumberOf(number);
+
+  return dev === true ? { store: true, buildNumber, dev: true } : { store: true, buildNumber };
 }
 
 /**
@@ -814,7 +883,8 @@ function runBuildCommand(parsed: Parsed, deps: CliDeps): Promise<number> {
     root: parsed.root,
     out: path.resolve(deps.cwd, out),
     servePlugins: parsed.servePlugins,
-    ...(debug === undefined ? {} : { debug, editor: editorOf(editor) })
+    ...(debug === undefined ? {} : { debug }),
+    ...(editor === undefined ? {} : { editor: editorOf(editor) })
   };
 
   return runBuild(run, deps);

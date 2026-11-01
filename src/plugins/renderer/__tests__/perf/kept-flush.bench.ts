@@ -12,6 +12,7 @@ import {
   keptOwnFadeBoard,
   keptShadedBoard,
   keptSteppedBoard,
+  keptUnderBoard,
   keptWhyBoard,
   keptZoomBoard
 } from "./fixtures";
@@ -30,6 +31,7 @@ const noted = await keptWhyBoard(10);
 const fractional = await keptFractionalBoard(40);
 const steppedToFraction = await keptSteppedBoard(40, 1.5);
 const shaded = await keptShadedBoard(40);
+const under = await keptUnderBoard(12);
 
 describe("the kept flush of a quiet board", () => {
   bench("10 kept views, a calm frame", calm, BENCH_OPTIONS);
@@ -45,6 +47,7 @@ describe("the kept flush of a quiet board", () => {
   bench("40 kept views stepped at a fractional resolution", fractional, BENCH_OPTIONS);
   bench("40 kept views stepped after a step to a fraction", steppedToFraction, BENCH_OPTIONS);
   bench("40 shaded views, their numbers written every frame (F126)", shaded, BENCH_OPTIONS);
+  bench("12 placed views under a filter, their numbers written (F126)", under, BENCH_OPTIONS);
   bench(
     "10 kept views and a glowing filtered view drawn live, stepped (F68)",
     glowing,

@@ -60,6 +60,8 @@ describe("root index", () => {
     expect(kit.Displacement).toBe(engine.Displacement);
     expect(kit.Overlay).toBe(engine.Overlay);
     expect(kit.HudPart).toBe(engine.HudPart);
+    expect(kit.bind).toBe(engine.bind);
+    expect(kit.defineTextFormats).toBe(engine.defineTextFormats);
     expect(Object.keys(kit).toSorted()).toEqual([
       "Displacement",
       "Emitter",
@@ -68,6 +70,7 @@ describe("root index", () => {
       "NineSlice",
       "Overlay",
       "Sprite",
+      "bind",
       "defineAnimation",
       "defineBundles",
       "defineComponent",
@@ -77,6 +80,7 @@ describe("root index", () => {
       "defineNode",
       "defineScene",
       "defineStyle",
+      "defineTextFormats",
       "defineTextStyles",
       "defineTokens",
       "frames",

@@ -311,8 +311,10 @@ task, so a probe never shows. One probe draw is one subject in one target:
   ahead of the filters still waiting), every filter handed to `filters.warm` (`effects` hands it
   every checked definition, every stage of its inputs and every Pixi-core kind once the shader
   checks settled), and on WebGPU the quad a filter was handed over with: a mesh of its program on a
-  unit square of the module's own, drawn once after the filter, in the first target of the device, so
-  a view's first frame on its own shader (see "Kept pictures") compiles nothing;
+  unit square of the module's own, drawn after the filter in the first target of the device, and in the
+  same frame into a texture no clip ever draws into, so a view's first frame on its own shader (see
+  "Kept pictures") compiles nothing on the canvas, under a filter or inside an outer picture. The texture
+  of the targets below keeps the stencil of its first clip, so it would hit the canvas's pipeline again;
 - the targets on WebGPU: the canvas and a texture (a 4 × 4 render texture the module owns, cleared
   at each draw), each with and without a stencil clip, as `sync` hangs clips; on WebGL one draw, the
   program does not depend on the target. A canvas the stage pass does not clear
@@ -1160,7 +1162,7 @@ Not kept: a filter of category `"screen"` (see the effects README, "Filters that
 of a game that names no category, a filter that blends with the backdrop (`blendRequired`) or a blend
 mode other than normal, a top that blends otherwise, an ancestor that is tinted or blends otherwise, a
 `"placed"` filter
-under a filtered ancestor, a view hidden for the player, a picture over 4096 device pixels on a side,
+under a filtered ancestor that cannot run on its own shader, a view hidden for the player, a picture over 4096 device pixels on a side,
 and without `onDemand` a subtree holding a `Display` view: a game that never turned `onDemand` on
 never promised to call `renderer.invalidate` before writing into its own Pixi objects.
 
@@ -1205,7 +1207,10 @@ read twice, as drawn and with every picture drawn live, and compared; a differen
 `renderer:stale-picture` and draws every view live until the policy takes it again. A frame with a picture drawn at
 another resolution than the canvas (F126) is resampled, not stale: it is skipped and counted. A frame in which a picture
 moves off its grid or hangs under a translucent ancestor is skipped and counted, not compared: a fading ancestor fades
-the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design.
+the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design. A frame in which a
+placed view on its own shader hangs under a filter whose pass starts off the canvas origin is skipped and counted too: it
+differs from live by that origin on purpose (see "A view on its own shader"). Two known limits. Under a rotated ancestor
+the box is looser than Pixi's. A view on its shader under a filter off the origin skips the whole frame's compare.
 
 ### A view on its own shader
 
@@ -1237,10 +1242,33 @@ them, its group's uniform buffer first, before its textures; the geometry and th
 and at `onStop`.
 
 A change on the mesh marks the pictures above it and the ranges that hold it, as a pass would. It counts as no take and as no
-refresh. `debug.verifyFrames` compares the mesh with the live filter from its first frame on, as any picture. Off the padding
+refresh. `debug.verifyFrames` compares the mesh with the live filter from its first frame on, as any picture, except for a
+placed view under a filter whose pass starts off the canvas origin (below). Off the padding
 grid (a fractional resolution) a body's frame is up to one device pixel wider than live: nothing visible, and no more
-difference from live than a stage 3 picture has. Slices B and C of the change bring a placed view under a filter and
-`cache: false` views; both stay as they were until then.
+difference from live than a stage 3 picture has. Slice C of the change brings `cache: false` views; they stay as they were
+until then.
+
+A `"placed"` view under a filtered ancestor, live or kept, is kept only on its shader: a stage 3 picture would hold the
+wrong place. It fits the mode as any view does, one enabled filter of ours with a quad; a view that does not fit stays live,
+and `why()` says `"placed-under-filter"`. It enters at its first take, a sprite that comes under a filter enters in that
+frame, and it does not leave while the filter stands: `QUAD_AFTER` and `QUAD_CALM` do not apply, and it leaves at rest
+only after the filter is gone. A change under its top retakes it in every frame: stage 1 and one copy, never to live, so a
+glow does not jump. Only a refused take, an eviction, or a frame in which it may not be kept at all goes live. The place
+comes from the view's world transform, whatever target the ancestor renders into: a move of the ancestor is a refresh with
+no pass, and marks the pictures above, so a kept ancestor takes its picture again.
+
+Live under a filter whose bounds start off the canvas origin, Pixi's `uOutputFrame.xy` is relative to that filter's texture;
+on the mesh `canvasPixel` answers the canvas position there too (spec 23 P8.3). The two differ by that origin on purpose:
+the view jumps by it once, at its first take. The pass starts where Pixi says: the bounds, or the filter area in their
+place, cut to the canvas while every enabled filter of the stack has `clipToViewport` on, floored to the pass's grid,
+padded, so a padded filter at the corner starts off the origin. `debug.verifyFrames` skips and counts such a frame; for a
+view whose closest filter pass starts at the origin it compares as usual. The take makes no mark, so with `onDemand` off
+the oracle in shadow names it once as `renderer:missed-frame`.
+
+A mesh draws onto the canvas, whose target holds a stencil, or inside a filter pass or an outer picture, whose target does
+not: two pipelines (measured on Chrome, 2026-11-01: one of each per program). The warm-up draws a quad in both, the second
+into a texture of its own, in the frame of the first: 2 draws a quad, no frame more, and no pipeline in the first frame of
+a view on its shader in any of the three places.
 
 ### Why a view is drawn live
 
@@ -1274,7 +1302,7 @@ from two append-only lists.
 | `"top-blend"` | The top or its visual blends otherwise. |
 | `"hidden"` | A cover or a hidden reason of the top holds it. |
 | `"ancestor-hidden"`, `"ancestor-tint"`, `"ancestor-blend"` | An ancestor is not drawn, is tinted, or blends otherwise. |
-| `"placed-under-filter"` | A `"placed"` filter under a filtered ancestor. |
+| `"placed-under-filter"` | A `"placed"` filter under a filtered ancestor that cannot run on its own shader: no quad, a stack of more than one, a resolution of its own, WebGL. |
 | `"idle"` | A take had nothing to render (empty, off the canvas, too big), or would be cut to the canvas under a zoom. |
 | `"display"` | A `Display` hangs under the top without `onDemand`. |
 | `"budget"` | The budget refused its take, and the refusal holds. |

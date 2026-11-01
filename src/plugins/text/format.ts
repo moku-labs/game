@@ -1,6 +1,7 @@
 /**
- * @file text plugin — the four formats of a bound number. Pure: no ctx, no clock, no `Intl` of
- * its own. A `"duration"` goes through the formatter the caller hands in, which is `i18n`.
+ * @file text plugin — the four built-in formats of a bound number, and the whole value a format a
+ * game registered takes. Pure: no ctx, no clock, no `Intl` of its own. A `"duration"` goes through
+ * the formatter the caller hands in, which is `i18n`.
  */
 import type { TextFormat } from "./types";
 
@@ -14,7 +15,8 @@ const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_HOUR = 3600;
 
 /**
- * Tells whether a string is one of the four formats, for a bind that slipped past the type.
+ * Tells whether a string is one of the four built-in formats. Any other string a bind carries is a
+ * name a feature registered, or a bind that slipped past the type.
  *
  * @param format - What a bind carries.
  * @returns True for `"int"`, `"mm:ss"`, `"h:mm:ss"` and `"duration"`.
@@ -72,6 +74,21 @@ export function unitOf(value: number, format: TextFormat): number {
   if (format !== "int") return wholeSeconds(value);
 
   return Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+/**
+ * The whole number a format a game registered takes: rounded as `"int"` rounds, 0 for a value that
+ * is not finite, and never `-0`, which a format could tell from 0.
+ *
+ * @param value - The bound number.
+ * @returns The whole value.
+ * @example
+ * ```ts
+ * wholeValue(999.6); // 1000
+ * ```
+ */
+export function wholeValue(value: number): number {
+  return Number.isFinite(value) ? Math.round(value) || 0 : 0;
 }
 
 /**

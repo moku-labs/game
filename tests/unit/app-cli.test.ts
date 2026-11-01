@@ -919,6 +919,27 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
     await expect(fetch(url)).rejects.toThrow();
   });
 
+  // Bug: a Ctrl+C right after the URL line finds no listener, and the child dies with 130.
+  it("listens to the stop signals before it prints the URL", async () => {
+    const root = makeGame({});
+    const { deps, seen } = fakeDeps(root, { env: { MOKU_GAME_CHILD: "1" } });
+    const listening: string[][] = [];
+    const print = deps.ui.line;
+
+    deps.ui.line = text => {
+      listening.push([...seen.handlers.keys()]);
+      print(text);
+    };
+
+    const running = runCommand(["dev", "--port", "0"], deps);
+
+    await waitFor(() => seen.out.length >= 2);
+    interrupt(seen);
+    await running;
+
+    expect(listening[0]?.toSorted()).toEqual(["SIGINT", "SIGTERM"]);
+  });
+
   it("answers a file and the manifest with no-store, so a reload shows the new bytes of an image", async () => {
     const root = makeGame({ "features/ui/assets/dot.png": "png" });
     const { running, seen, url } = await startChild(root);
@@ -1073,6 +1094,7 @@ describe("the command line", () => {
       "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
       "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
       "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
+      "  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev",
       "  native dev <target>                   run the native shell on the dev server",
       "  native doctor | native clean          check or remove the native project",
       "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -1256,6 +1278,22 @@ describe("native", () => {
     });
   });
 
+  // Bug: a test project of 8 GB stays on the disk, since no command removes it.
+  it("native clean adds the test projects that exist, one by one; doctor stays on the store project", async () => {
+    const root = makeGame();
+    const dev = path.join(root, ".moku/tauri-dev");
+    const debug = path.join(root, ".moku/tauri-debug");
+    const both = await run(["native", "clean"], root, { exists: everyFileThere });
+    const one = await run(["native", "clean", "ios"], root, { exists: file => file === debug });
+    const none = await run(["native", "clean"], root);
+    const doctor = await run(["native", "doctor"], root, { exists: everyFileThere });
+
+    expect(both.seen.natives[0]?.options).toEqual({ testProjects: [dev, debug] });
+    expect(one.seen.natives[0]?.options).toEqual({ target: "ios", testProjects: [debug] });
+    expect(none.seen.natives[0]?.options).toEqual({});
+    expect(doctor.seen.natives[0]?.options).toEqual({});
+  });
+
   it("native doctor without a target passes no target, and --simulator only goes with build", async () => {
     const root = makeGame();
     const { seen } = await run(["native", "doctor", "--simulator"], root);
@@ -1366,6 +1404,19 @@ describe("native --store", () => {
         ["native", "build", "ios", "--store", "--build-number", "1", "--simulator"],
         "[game] native: --store does not go with --simulator."
       ],
+      [["native", "build", "ios", "--dev"], "[game] native: --dev goes with --store."],
+      [
+        ["native", "build", "android", "--dev", "--build-number", "1"],
+        "[game] native: --dev goes with --store."
+      ],
+      [
+        ["native", "build", "android", "--store", "--dev", "--build-number", "1", "--debug"],
+        "[game] native: --store does not go with --debug."
+      ],
+      [
+        ["native", "build", "ios", "--store", "--dev", "--build-number", "1", "--simulator"],
+        "[game] native: --store does not go with --simulator."
+      ],
       [
         ["native", "build", "macos", "--store", "--build-number", "1"],
         "[game] native: --store builds ios or android, got macos."
@@ -1436,6 +1487,43 @@ describe("native --store", () => {
       store: { buildNumber: 12, env, exists: everyFileThere }
     });
     expect(seen.natives[0]?.where.home).toBe(HOME);
+  });
+
+  // Bug: a test build goes down the players' road, with no dev flag for native and no test app.
+  it("--store --dev marks the store block, and the iOS warnings of a store build stay", async () => {
+    const config =
+      'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", dev: { identifier: "com.t.dev" } } };\n';
+    const root = makeGame({ "config.ts": config });
+    const env = { KS_PASS: "set" };
+    const { code, seen } = await run(
+      ["native", "build", "ios", "--store", "--dev", "--build-number", "13"],
+      root,
+      { env, exists: everyFileThere }
+    );
+
+    expect(code).toBe(0);
+    expect(seen.natives[0]?.options.store).toEqual({
+      buildNumber: 13,
+      dev: true,
+      env,
+      exists: everyFileThere
+    });
+    expect(seen.warnings).toEqual([noManifest, noEncryption]);
+  });
+
+  // Bug: a game without the block gets a cryptic failure from deep in native.
+  it("--store --dev with no native.dev is refused once config.ts is read, and nothing runs", async () => {
+    const root = makeGame({ "config.ts": bare });
+    const { code, seen } = await run(
+      ["native", "build", "android", "--store", "--dev", "--build-number", "13"],
+      root
+    );
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] native --dev: config.ts has no native.dev.\n  Add native.dev: { identifier } with an id ending in .dev."
+    ]);
+    expect(seen.natives).toEqual([]);
   });
 
   // Bug: a plain build ships native's 0.1.0 though the game has a version.
@@ -1581,14 +1669,32 @@ describe("--debug and --editor", () => {
     expect(await notes("--debug=read")).toEqual([]);
   });
 
-  it("native dev --debug is refused, native build ios --debug is refused as Android only, and --editor needs --debug", async () => {
+  // Bug: N4 stays closed, or the debug app of iOS goes out with no word on what it is.
+  it("native build ios takes --debug with its editor address and warns as on Android", async () => {
+    const root = makeGame({ "config.ts": native });
+    const { code, seen } = await run(
+      ["native", "build", "ios", "--debug", "--simulator", "--editor", "192.168.1.20:47600"],
+      root
+    );
+
+    expect(code).toBe(0);
+    expect(seen.natives[0]?.options).toEqual({
+      target: "ios",
+      simulator: true,
+      debug: "full",
+      editor: "192.168.1.20:47600"
+    });
+    expect(seen.warnings).toEqual([nativeWarning]);
+  });
+
+  it("native dev --debug is refused, native build macos --debug is refused as Android and iOS only, and --editor needs --debug", async () => {
     const root = makeGame({ "config.ts": native });
 
     expect(await errorsOf(["native", "dev", "android", "--debug"], root)).toEqual([
       "[game] native: --debug goes with native build only."
     ]);
-    expect(await errorsOf(["native", "build", "ios", "--debug"], root)).toEqual([
-      "[game] native: --debug builds Android only in this release (got ios)."
+    expect(await errorsOf(["native", "build", "macos", "--debug"], root)).toEqual([
+      "[game] native: --debug builds Android and iOS only for now (got macos)."
     ]);
     expect(await errorsOf(["native", "build", "android", "--editor", "h:1"], root)).toEqual([
       "[game] native: --editor goes with --debug."
@@ -1650,6 +1756,49 @@ describe("--debug and --editor", () => {
     // The release page went on to the pack: nothing refused it.
     expect(debug.code).toBe(2);
     expect(debug.seen.errors).toEqual([]);
+  });
+});
+
+describe("MOKU_NATIVE_PROFILE=dev", () => {
+  /** The profile of native's web build for a test app. */
+  const dev = { env: { MOKU_NATIVE_PROFILE: "dev" } };
+
+  // Bug: a test app with no overlay: native's own check lets the page through.
+  it("a release page is refused before anything is built", async () => {
+    const { code, seen } = await run(["build"], makeGame(), dev);
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page carries the overlay."
+    ]);
+    expect(seen.scans).toEqual([]);
+  });
+
+  // Bug: a tester's phone dials a Mac that is not there, or the overlay's toggles are greyed out.
+  it("--editor and --debug=read are refused, the read-only page and the address have no place on it", async () => {
+    const root = makeGame();
+    const editor = await run(["build", "--debug", "--editor", "127.0.0.1:47600"], root, dev);
+    const read = await run(["build", "--debug=read"], root, dev);
+
+    expect(editor.seen.errors).toEqual([
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page has no editor link.\n  Build it without --editor."
+    ]);
+    expect(read.seen.errors).toEqual([
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page runs every command.\n  Build it with --debug."
+    ]);
+    expect([...editor.seen.scans, ...read.seen.scans]).toEqual([]);
+  });
+
+  // Bug: an editor whose version nobody can read may be one that dials for ever.
+  it("an editor whose version cannot be read is refused", async () => {
+    // The stub resolver answers a path with no package.json above it.
+    const { code, seen } = await run(["build", "--debug"], makeGame(), dev);
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] build: a dev page needs @moku-labs/editor 0.10.19 or newer, found no readable version.\n  An older one dials the editor for ever. Run: bun add -d @moku-labs/editor@latest."
+    ]);
+    expect(seen.scans).toEqual([]);
   });
 });
 

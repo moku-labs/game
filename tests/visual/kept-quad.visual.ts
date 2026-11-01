@@ -4,11 +4,12 @@
  * run on its shader, equal its live frame within the thresholds of the frame oracle (a channel over 24, a ratio over
  * 0.001), and log no `renderer:stale-picture`, no shader or pipeline error. View alpha and an ancestor's alpha are the
  * stop rule of the slice: a double fade shows there. The fractional row holds the mode to no more difference from live
- * than stage 3 has. Not a vitest file: `bun tests/visual/kept-quad.visual.ts`. It bundles `kept-quad/page.ts` with the
- * flags of a dev page, serves it, and exits 1 when a run fails.
+ * than stage 3 has. A placed view under a filter whose bounds start off the origin is held against a value by hand, which
+ * its live frame must miss: live differs there on purpose. Not a vitest file: `bun tests/visual/kept-quad.visual.ts`. It
+ * bundles `kept-quad/page.ts` with the flags of a dev page, serves it, and exits 1 when a run fails.
  */
 import { launchChrome, loadChromium } from "../../src/visual/leg-browser";
-import type { KeptQuadResult } from "./kept-quad/page";
+import type { KeptQuadResult, RowResult } from "./kept-quad/page";
 
 /** The flags of a dev page: `why()` and the pixel leg of the kept oracle run in dev and agent builds only. */
 const DEV = {
@@ -24,27 +25,48 @@ const PIXEL_RATIO = 0.001;
 const RESOLUTIONS = [1, 2] as const;
 
 /**
+ * The problems of one row, in words.
+ *
+ * @param row - What the row answered.
+ * @returns The problems.
+ */
+function rowProblems(row: RowResult): string[] {
+  const problems: string[] = [];
+
+  if (row.shaded < 1) problems.push(`${row.name}: not on its shader`);
+  if (row.lit === 0) problems.push(`${row.name}: a blank capture`);
+
+  if (row.stage3 === undefined && row.differing > row.total * PIXEL_RATIO) {
+    const against = row.live === undefined ? "live" : "the value by hand";
+
+    problems.push(`${row.name}: ${row.differing} of ${row.total} pixels differ from ${against}`);
+  }
+
+  if (row.stage3 !== undefined && row.differing > row.stage3) {
+    problems.push(`${row.name}: ${row.differing} pixels differ, stage 3 ${row.stage3}`);
+  }
+
+  // Live must miss the value by hand, or the row cannot tell the two places apart.
+  if (row.live === 0) problems.push(`${row.name}: live hits the value by hand`);
+
+  return problems;
+}
+
+/**
  * The problems of one answer, in words; empty when the run proves what it should.
  *
  * @param result - What the page answered.
  * @returns The problems.
  */
 function problemsOf(result: KeptQuadResult): string[] {
-  const problems: string[] = [];
+  const problems = result.rows.flatMap(row => rowProblems(row));
 
   if (result.backend !== "webgpu") problems.push(`drew with ${result.backend}`);
   if (result.scopes === 0) problems.push("the warm-up drew no quad");
 
-  for (const row of result.rows) {
-    if (row.shaded < 1) problems.push(`${row.name}: not on its shader`);
-    if (row.lit === 0) problems.push(`${row.name}: a blank capture`);
-
-    if (row.stage3 === undefined && row.differing > row.total * PIXEL_RATIO) {
-      problems.push(`${row.name}: ${row.differing} of ${row.total} pixels differ from live`);
-    }
-
-    if (row.stage3 !== undefined && row.differing > row.stage3) {
-      problems.push(`${row.name}: ${row.differing} pixels differ, stage 3 ${row.stage3}`);
+  for (const first of result.firstFrames) {
+    if (first.quads.length > 0) {
+      problems.push(`${first.name}: a compile in play: ${first.quads.join(", ")}`);
     }
   }
 
@@ -103,6 +125,7 @@ try {
     console.log(
       `resolution ${resolution}: ${problems.length === 0 ? "ok" : "FAIL"}`,
       "error" in answer ? "" : `quad probes ${answer.scopes}`,
+      "error" in answer ? "" : `warm-up pipelines ${answer.warmed}`,
       "error" in answer
         ? ""
         : JSON.stringify(
@@ -110,6 +133,24 @@ try {
           ),
       problems.join("; ")
     );
+
+    if (!("error" in answer)) {
+      for (const first of answer.firstFrames) {
+        console.log(
+          `  first frames ${first.name}: quads ${JSON.stringify(first.quads)}, others ${JSON.stringify(first.others)}`
+        );
+      }
+
+      const clip = answer.clipFirstFrames;
+
+      console.log(
+        `  measured, ${clip.name}: quads ${JSON.stringify(clip.quads)}, others ${JSON.stringify(clip.others)}`
+      );
+
+      for (const row of answer.rows) {
+        if (row.live !== undefined) console.log(`  ${row.name}: live misses by ${row.live}`);
+      }
+    }
     await page.close();
   }
 } finally {

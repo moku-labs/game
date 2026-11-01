@@ -78,6 +78,23 @@ export type FeatureTextStyles = {
 };
 
 /**
+ * The number formats of a feature, as `defineTextFormats` returns them. Structural on purpose:
+ * `text` reads and checks each format, `flow` only carries the map.
+ *
+ * @example
+ * ```ts
+ * const formats: FeatureTextFormats = {
+ *   kind: "textFormats",
+ *   map: { "pill.number": (value: number) => ({ content: String(value), style: "digits.17" }) }
+ * };
+ * ```
+ */
+export type FeatureTextFormats = {
+  readonly kind: "textFormats";
+  readonly map: Readonly<Record<string, object>>;
+};
+
+/**
  * What a feature brings to the game. The logic keys are typed here; the keys of later milestones
  * pass through the index signature until their plugin types them. `flow` stores them untouched,
  * and `logicOnly` drops them. The V2 screen plugins read five of them through the index signature:
@@ -124,6 +141,8 @@ export type FeatureDescription = {
   strings?: Record<string, CompiledMessagesLike | (() => Promise<unknown>)>;
   /** Text styles the feature owns, read by `text`. */
   textStyles?: FeatureTextStyles;
+  /** Number formats the feature owns, named by a `bind` and read by `text`. */
+  textFormats?: FeatureTextFormats;
   /** Particle emitters the feature owns, read by `effects`. */
   emitters?: readonly FeatureEmitter[];
   /** Filters the feature puts on its interface components, read by `effects`. */
