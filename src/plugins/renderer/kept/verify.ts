@@ -7,7 +7,8 @@
  */
 import { CHANNELS, differingPixels, NAMED, withinRatio } from "../pixels";
 import type { PixiContainer } from "../types";
-import { drawnResolution, KEY, onGrid } from "./geometry";
+import { drawnBounds } from "./drawn-bounds";
+import { drawnResolution, KEY, linearBounds, onGrid } from "./geometry";
 import type { KeptCtx, KeptRecord, RangeRecord } from "./types";
 
 /**
@@ -47,6 +48,48 @@ function offGrid(kctx: KeptCtx, record: KeptRecord): boolean {
 function faded(record: KeptRecord): boolean {
   for (let node: PixiContainer | null = record.top; node !== null; node = node.parent) {
     if (node.alpha < 1) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tells whether a node's filters run in a pass of their own: it holds them, or a kept picture of it took them over.
+ *
+ * @param kctx - The kept context.
+ * @param node - The node.
+ * @returns True when it filters what is under it.
+ */
+function filtersBelow(kctx: KeptCtx, node: PixiContainer): boolean {
+  const filters: readonly unknown[] | null | undefined = node.filters;
+
+  return (
+    (filters !== null && filters !== undefined && filters.length > 0) ||
+    kctx.state.byTop.get(node)?.mode === "kept"
+  );
+}
+
+/**
+ * Tells whether a shaded placed record hangs under a filter whose pass starts off the canvas origin. Live, its body
+ * reads a place relative to that pass's texture; on the mesh it reads the canvas (spec 23 P8.3). The two differ by that
+ * origin by design, not by a stale picture. Only the closest filter counts: Pixi offsets by that one alone.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record, kept.
+ * @returns True when the frame is not compared.
+ */
+function placeDiffers(kctx: KeptCtx, record: KeptRecord): boolean {
+  const pixi = kctx.host.pixi();
+
+  if (!record.shaded || record.category !== "placed" || pixi === undefined) return false;
+
+  for (let node = record.top.parent; node !== null; node = node.parent) {
+    if (filtersBelow(kctx, node)) {
+      const { a, b, c, d, tx, ty } = node.getGlobalTransform(record.matrix, false);
+      const box = linearBounds(a, b, c, d, drawnBounds(pixi, node));
+
+      return tx + box.x0 > 0 || ty + box.y0 > 0;
+    }
   }
 
   return false;
@@ -184,9 +227,9 @@ function logStale(
 
 /**
  * The pixel leg after a drawn frame: the picture as drawn against the same frame with every picture live. Frames in
- * which a picture moves off its grid, was drawn at another resolution (F126), is translucent itself (F120) or hangs
- * under a translucent ancestor (F113) are skipped and counted; at rest, opaque, under opaque ancestors every picture is
- * compared.
+ * which a picture moves off its grid, was drawn at another resolution (F126), is translucent itself (F120), hangs
+ * under a translucent ancestor (F113) or reads its place under a filter off the canvas origin are skipped and counted;
+ * at rest, opaque, under opaque ancestors every picture is compared.
  *
  * @param kctx - The kept context.
  * @param bypass - Draws every kept record live (true) or as its picture again (false).
@@ -205,8 +248,11 @@ export function verifyPictures(
   if (records.length === 0 && ranges.length === 0) return;
 
   // A picture moving off its grid or kept through a step of the resolution is sampled linearly, a fading one or one under
-  // a fading ancestor is faded after its filters: the frame is skipped and counted.
-  const uncomparable = records.some(record => offGrid(kctx, record) || faded(record));
+  // a fading ancestor is faded after its filters, a place read under a filter off the origin differs from live by that
+  // origin: the frame is skipped and counted.
+  const uncomparable = records.some(
+    record => offGrid(kctx, record) || faded(record) || placeDiffers(kctx, record)
+  );
 
   if (uncomparable) {
     state.verifySkipped += 1;

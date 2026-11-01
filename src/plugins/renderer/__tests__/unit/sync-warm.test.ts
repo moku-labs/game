@@ -58,6 +58,18 @@ afterEach(() => {
 });
 
 /**
+ * The name of a probe's target.
+ *
+ * @param into - The texture it renders into, none for the canvas.
+ * @returns `"canvas"`, `"plain"` for the texture no clip draws into, else `"texture"`.
+ */
+function targetOf(into: pixi.Texture | undefined): string {
+  if (into === undefined) return "canvas";
+
+  return into.source.label === "renderer.warm.plain" ? "plain" : "texture";
+}
+
+/**
  * What a probe root holds while it is rendered: the subject, and the target it is drawn into.
  *
  * @param root - The probe root handed to `renderer.render`.
@@ -71,7 +83,7 @@ function probeOf(
   names: Map<unknown, string>
 ): string {
   let node: pixi.Container | undefined = root.children[0];
-  const target = into === undefined ? "canvas" : "texture";
+  const target = targetOf(into);
   let clip = "";
 
   if (node?.label === "renderer.warm.clip") {
@@ -605,7 +617,7 @@ async function handed(
 
 describe("the warm-up of a filter's quad", () => {
   // Bug: a pipeline compiled in play, in the first frame of a view on its shader.
-  it("draws the quad once after its filter, and the promise answers after that draw", async () => {
+  it("draws the quad after its filter in one frame, on two targets, and the promise answers after that frame", async () => {
     const { warmed, answer, content } = await handed();
 
     warmed.frames(4);
@@ -617,8 +629,61 @@ describe("the warm-up of a filter's quad", () => {
     await settle();
 
     expect(answer.answer).toBe(true);
-    expect(warmed.probes().slice(content)).toEqual([...inFour("probe"), "quad canvas"]);
-    expect(warmed.stage.last().renderer.gpu?.scopes).toEqual({ opened: ["validation"], open: 0 });
+    expect(warmed.probes().slice(content)).toEqual([
+      ...inFour("probe"),
+      "quad canvas",
+      "quad plain"
+    ]);
+    expect(warmed.stage.last().renderer.gpu?.scopes).toEqual({
+      opened: ["validation", "validation"],
+      open: 0
+    });
+  });
+
+  // Bug: the first frame of a glow under a filter compiles in play: the target of the texture variants holds the stencil
+  // of its first clip, so a draw there hits the pipeline of the canvas.
+  it("the plain draw goes into a texture of its own, which no clip draws into, and the tree destroys it", async () => {
+    const { warmed, content } = await handed();
+
+    warmed.frames(5);
+
+    const { warm } = warmed.mock.ctx.state.sync;
+    const plain = warm.objects?.plain as pixi.RenderTexture;
+    const target = warm.objects?.target as pixi.RenderTexture;
+
+    expect(plain).not.toBe(target);
+    expect(warmed.probes().slice(content).at(-1)).toBe("quad plain");
+    expect(
+      warmed.probes().filter(probe => probe.includes("plain") && probe.includes("+clip"))
+    ).toEqual([]);
+
+    warmed.mock.modules.sync.forget();
+    warmed.mock.modules.sync.rebuildAll();
+
+    expect(plain.destroyed).toBe(true);
+  });
+
+  // Bug: 16 quads make 16 warm frames more, over the line of the A26.
+  it("the plain draw asks for no frame of its own, at any budget", async () => {
+    const warmed = await startWarm({ config: { warm: 2 } });
+    const filter = new pixi.AlphaFilter();
+
+    warmed.frames(Math.ceil((CONTENT.length * VARIANTS.length) / 2));
+    warmed.name(filter, "probe");
+
+    const before = warmed.probes().length;
+
+    const answer = watchAnswer(
+      warmed.mock.api.sync.filters.warm(filter, quadOfFilter("kind.quad"))
+    );
+    const frames = warmed.frames(3);
+
+    await settle();
+
+    expect(answer.answer).toBe(true);
+    expect(warmed.probes().slice(before).slice(-2)).toEqual(["quad canvas", "quad plain"]);
+    expect(frames).toBe(3);
+    expect(warmed.frame()).toBe(false);
   });
 
   // Bug: a GPU program on WebGL: a probe that logs a warning, or a throw that ends the warm-up.

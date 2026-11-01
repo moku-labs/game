@@ -1096,3 +1096,380 @@ describe("the reports", () => {
     expect(drawn.mock.ctx.state.kept.flushPasses).toBe(0);
   });
 });
+
+/** A filter of no category: a panel that holds it has no record and draws it live in every frame. */
+const LIVE_SLOT = (): FilterSlot => ({ filter: new pixi.ColorMatrixFilter(), passes: 1 });
+
+/** A filter a panel may be kept with. */
+const KEPT_SLOT = (): FilterSlot => ({
+  filter: new pixi.ColorMatrixFilter(),
+  passes: 1,
+  cache: "local"
+});
+
+/**
+ * A panel and a lamp inside it with a placed filter on its quad, the panel's filter set first, and the frames of the
+ * lamp's take run.
+ *
+ * @param drawn - The running renderer.
+ * @param panelSlot - The panel's filter.
+ * @param lampSlot - The lamp's filter.
+ * @returns The panel, the lamp and the origin its filter reads.
+ */
+function lampUnder(
+  drawn: Drawn,
+  panelSlot: FilterSlot,
+  lampSlot: FilterSlot = shadedSlot({ cache: "placed", origin: new Float32Array(2) })
+): { panel: Entity; lamp: Entity; slot: FilterSlot } {
+  const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
+  const lamp = drawn.mock.world.ecs.spawn(OWNER, [
+    Transform({ x: 20, y: 20 }),
+    Shape({ w: 40, h: 40 }),
+    Parent({ entity: panel })
+  ]);
+
+  drawn.frame();
+  drawn.mock.api.sync.filters.set(panel, [panelSlot]);
+  drawn.mock.api.sync.filters.set(lamp, [lampSlot]);
+  drawn.frames(6);
+
+  return { panel, lamp, slot: lampSlot };
+}
+
+describe("a placed view under a filter", () => {
+  // Bug: a stage 3 picture of a placed view under a filter, at the wrong place; `canvasPixel` counts the place twice.
+  it("is kept on its mesh from its first take: no stage 3, one copy, keptOrigin at 0", async () => {
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
+    const lamp = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 20, y: 20 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: panel })
+    ]);
+    const origin = new Float32Array([9, 9]);
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(panel, [LIVE_SLOT()]);
+    drawn.mock.api.sync.filters.set(lamp, [shadedSlot({ cache: "placed", origin })]);
+
+    const from = drawn.stage.targets().length;
+
+    drawn.frames(6);
+
+    const record = recordOf(drawn, lamp);
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(true);
+    expect(record.quad).toBe(shadeOf(record).mesh);
+    expect(quadBesideTop(record)).toBe(true);
+    expect(rendersBy(drawn, record.standIn, from)).toBe(0);
+    expect(rendersBy(drawn, copyOf(drawn), from)).toBe(1);
+    expect([...origin]).toEqual([0, 0]);
+    expect((shadeOf(record).gfu.uniforms.uOutputFrame as Float32Array)[0]).toBe(70);
+  });
+
+  // Bug: a local view under a filter pays for a mesh it does not need: its body reads no place.
+  it("a local view there enters only by its writes, as anywhere", async () => {
+    const drawn = await open();
+    const { lamp } = lampUnder(drawn, LIVE_SLOT(), shadedSlot());
+
+    expect(recordOf(drawn, lamp).mode).toBe("kept");
+    expect(recordOf(drawn, lamp).shaded).toBe(false);
+  });
+
+  // Bug: a resting view under a filter goes back to a sprite, whose stage 3 holds the wrong place.
+  it("does not leave at rest while the filter stands, and renders nothing", async () => {
+    const drawn = await open();
+    const { lamp } = lampUnder(drawn, LIVE_SLOT());
+    const record = recordOf(drawn, lamp);
+    const from = drawn.stage.targets().length;
+
+    drawn.frames(QUAD_CALM * 3);
+
+    expect(record.shaded).toBe(true);
+    expect(drawn.stage.targets().length).toBe(from);
+  });
+
+  // Bug: a shaded view under a filter that owes nothing is stepped in every calm frame for as long as it stands.
+  it("a rest under the filter does not ask for a step in every calm frame", async () => {
+    const drawn = await open();
+    const { lamp } = lampUnder(drawn, LIVE_SLOT());
+    const record = recordOf(drawn, lamp);
+    const { kept: state } = drawn.mock.ctx.state;
+
+    drawn.frames(QUAD_CALM);
+
+    expect(state.frame - record.shadedAt).toBeLessThan(QUAD_CALM);
+  });
+
+  // Bug: a view whose filter ancestor left stays on a mesh for ever, or leaves with the origin of the mode.
+  it("leaves at rest once the filter is gone, its origin the picture's", async () => {
+    const drawn = await open();
+    const { panel, lamp, slot } = lampUnder(drawn, LIVE_SLOT());
+    const record = recordOf(drawn, lamp);
+
+    drawn.mock.api.sync.filters.set(panel, []);
+    drawn.frames(QUAD_CALM + 1);
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(false);
+    expect([...(slot.origin as Float32Array)]).toEqual([70, 70]);
+  });
+
+  // Bug: `churn` drops the view to live, and a glow jumps by the origin of the filter's texture.
+  it("a change under it in every frame retakes and stays on the mesh", async () => {
+    const drawn = await open();
+    const { lamp } = lampUnder(drawn, LIVE_SLOT());
+    const child = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 4, y: 4 }),
+      Shape({ w: 8, h: 8 }),
+      Parent({ entity: lamp })
+    ]);
+
+    drawn.frames(3);
+
+    const record = recordOf(drawn, lamp);
+    const from = drawn.stage.targets().length;
+
+    for (let frame = 1; frame <= 6; frame += 1) {
+      drawn.mock.world.ecs.set(child, Transform, { x: 4 + frame });
+      drawn.frame();
+    }
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(true);
+    expect(takesOf(drawn, record, from)).toBe(6);
+    expect(rendersBy(drawn, copyOf(drawn), from)).toBe(6);
+    expect(rendersBy(drawn, record.standIn, from)).toBe(0);
+  });
+
+  // Bug: the same view away from a filter stops churning to live: the rule leaks out of `NOW.under`.
+  it("the same view with no filter above churns to live", async () => {
+    const drawn = await open();
+    const card = keptCard(drawn, [shadedSlot({ cache: "placed", origin: new Float32Array(2) })]);
+    const child = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 4, y: 4 }),
+      Shape({ w: 8, h: 8 }),
+      Parent({ entity: card })
+    ]);
+
+    drawn.frames(6);
+
+    for (let frame = 1; frame <= 3; frame += 1) {
+      drawn.mock.world.ecs.set(child, Transform, { x: 4 + frame });
+      drawn.frame();
+    }
+
+    expect(recordOf(drawn, card).mode).toBe("live");
+  });
+
+  // Bug: a take the budget refuses leaves a mesh over a texture nobody counts.
+  it("a refused retake goes live, the one way down besides an eviction", async () => {
+    const drawn = await open();
+    const { lamp } = lampUnder(drawn, LIVE_SLOT());
+    const record = recordOf(drawn, lamp);
+    const { kept } = drawn.mock.ctx.state;
+
+    drawn.mock.world.ecs.set(lamp, Shape, { w: 400, h: 400 });
+    kept.budget = kept.bytes + 100;
+    drawn.frame();
+
+    expect(record.mode).toBe("live");
+    expect(record.shaded).toBe(false);
+    expect(shadeOf(record).mesh.parent).toBeNull();
+    expect(drawn.mock.api.stats().kept.refused + kept.frameRefused).toBe(1);
+  });
+
+  // Bug: an old place on the mesh: the ancestor moved the view and nothing owed a refresh.
+  it("a move of a live ancestor owes a refresh with no pass", async () => {
+    const drawn = await open();
+    const { panel, lamp } = lampUnder(drawn, LIVE_SLOT());
+    const record = recordOf(drawn, lamp);
+    const update = vi.spyOn(shadeOf(record).gfu, "update");
+    const from = drawn.stage.targets().length;
+
+    drawn.mock.world.ecs.set(panel, Transform, { x: 60 });
+    drawn.frame();
+
+    expect(drawn.stage.targets().length).toBe(from);
+    expect(update).toHaveBeenCalledOnce();
+    expect((shadeOf(record).gfu.uniforms.uOutputFrame as Float32Array)[0]).toBe(80);
+    expect(record.shaded).toBe(true);
+  });
+
+  // Bug: an old place inside the outer picture.
+  it("a move of a kept ancestor takes its picture again, with the place in it", async () => {
+    const drawn = await open();
+    const { panel, lamp } = lampUnder(drawn, KEPT_SLOT());
+    const record = recordOf(drawn, lamp);
+
+    // The panel churned on the lamp's take; it is taken once it stands.
+    drawn.frames(12);
+
+    const above = recordOf(drawn, panel);
+
+    expect(above.mode).toBe("kept");
+    expect(record.shaded).toBe(true);
+
+    const from = drawn.stage.targets().length;
+
+    drawn.mock.world.ecs.set(panel, Transform, { x: 60 });
+    drawn.frame();
+
+    expect(takesOf(drawn, above, from)).toBe(1);
+    expect(rendersBy(drawn, copyOf(drawn), from)).toBe(0);
+    expect((shadeOf(record).gfu.uniforms.uOutputFrame as Float32Array)[0]).toBe(80);
+  });
+
+  // Bug: a kept sprite that comes under a filter keeps a stage 3 of the wrong place.
+  it("a kept sprite that comes under a filter goes on its mesh in that frame, never live", async () => {
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
+    const lamp = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 20, y: 20 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: panel })
+    ]);
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(lamp, [
+      shadedSlot({ cache: "placed", origin: new Float32Array(2) })
+    ]);
+    drawn.frames(6);
+
+    const record = recordOf(drawn, lamp);
+
+    expect(record.shaded).toBe(false);
+    expect(record.mode).toBe("kept");
+
+    const from = drawn.stage.targets().length;
+
+    drawn.mock.api.sync.filters.set(panel, [LIVE_SLOT()]);
+    drawn.frame();
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(true);
+    expect(rendersBy(drawn, record.standIn, from)).toBe(0);
+    expect(rendersBy(drawn, copyOf(drawn), from)).toBe(1);
+  });
+
+  // Bug: a view that went live under a filter never finds its mesh again, or makes a new shader at every return.
+  it("comes back on its mesh after the switch was off, its mesh and shader reused", async () => {
+    const drawn = await open();
+    const { lamp } = lampUnder(drawn, LIVE_SLOT());
+    const record = recordOf(drawn, lamp);
+    const { mesh, shader } = shadeOf(record);
+
+    drawn.mock.api.sync.debug.kept(false);
+    drawn.frames(2);
+
+    expect(record.mode).toBe("live");
+    expect(record.shaded).toBe(false);
+
+    drawn.mock.api.sync.debug.kept(true);
+    drawn.frames(6);
+
+    expect(record.shaded).toBe(true);
+    expect(shadeOf(record).mesh).toBe(mesh);
+    expect(shadeOf(record).shader).toBe(shader);
+    expect(quadBesideTop(record)).toBe(true);
+    expect(mesh.visible).toBe(true);
+  });
+
+  /** Stacks that may not run on a mesh under a filter: a stage 3 picture there would hold the wrong place. */
+  const LIVE_UNDER: ReadonlyArray<[string, () => FilterSlot[]]> = [
+    [
+      "no quad",
+      () => [
+        {
+          filter: shadedSlot().filter,
+          passes: 1,
+          cache: "placed",
+          origin: new Float32Array(2)
+        }
+      ]
+    ],
+    [
+      "two filters",
+      () => [
+        shadedSlot({ cache: "placed", origin: new Float32Array(2) }),
+        shadedSlot({ cache: "placed", origin: new Float32Array(2) })
+      ]
+    ],
+    [
+      "a fixed resolution",
+      () => {
+        const slot = shadedSlot({ cache: "placed", origin: new Float32Array(2) });
+
+        slot.filter.resolution = 1;
+
+        return [slot];
+      }
+    ]
+  ];
+
+  // Bug: a slot that has a quad but does not fit is kept on a sprite, its glow at the wrong place.
+  it.each(LIVE_UNDER)("stays live for %s, and why() says so", async (_name, slots) => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
+    const lamp = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 20, y: 20 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: panel })
+    ]);
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(panel, [LIVE_SLOT()]);
+    drawn.mock.api.sync.filters.set(lamp, slots());
+    drawn.frames(6);
+
+    expect(recordOf(drawn, lamp).mode).toBe("live");
+    expect(drawn.mock.api.sync.debug.why().at(-1)).toMatchObject({
+      mode: "live",
+      reason: "placed-under-filter"
+    });
+  });
+
+  // Bug: a program the backend cannot run reaches a view: a quad on WebGL is a blank view, not a live one.
+  it("stays live on WebGL, quad or no quad", async () => {
+    const drawn = await open("webgl");
+    const { lamp } = lampUnder(drawn, LIVE_SLOT());
+
+    expect(recordOf(drawn, lamp).mode).toBe("live");
+  });
+
+  // Bug: a stack that stops fitting keeps a mesh, or falls back on a sprite at the wrong place.
+  it("a second filter switched on goes live in that frame", async () => {
+    const drawn = await open();
+    const second = shadedSlot({ cache: "placed", origin: new Float32Array(2) });
+
+    second.filter.enabled = false;
+
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
+    const lamp = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 20, y: 20 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: panel })
+    ]);
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(panel, [LIVE_SLOT()]);
+    drawn.mock.api.sync.filters.set(lamp, [
+      shadedSlot({ cache: "placed", origin: new Float32Array(2) }),
+      second
+    ]);
+    drawn.frames(6);
+
+    const record = recordOf(drawn, lamp);
+
+    expect(record.shaded).toBe(true);
+
+    second.filter.enabled = true;
+    write(drawn, lamp);
+
+    expect(record.mode).toBe("live");
+    expect(record.shaded).toBe(false);
+  });
+});

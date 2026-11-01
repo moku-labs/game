@@ -2,7 +2,8 @@ import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Entity } from "../../../world/types";
 import { Parent, Shape, Transform } from "../../components";
-import { type Drawn, startDrawn } from "../demand-harness";
+import { type Drawn, OWNER, startDrawn } from "../demand-harness";
+import { shadedSlot } from "../quad-harness";
 
 // ---------------------------------------------------------------------------
 // The pixel leg of the kept oracle (spec 23 P13.2), behind debug.verifyFrames
@@ -76,6 +77,63 @@ function staleLines(drawn: Drawn): unknown[] {
     .mocked(drawn.mock.log.warn)
     .mock.calls.filter(([event]) => event === "renderer:stale-picture")
     .map(([, detail]) => detail);
+}
+
+/**
+ * A room with a filter of its own and a lamp in it on its mesh, the oracle on and every frame reading a stale picture.
+ *
+ * @param place - The room's corner on the canvas.
+ * @param place.x - Its x.
+ * @param place.y - Its y.
+ * @param cache - The lamp's category. A local one is put on its mesh by the test's writes.
+ * @param roomCache - The category of the room's filter; none is drawn live in every frame.
+ * @returns The renderer, the lamp and the kept state.
+ */
+async function lampUnderRoom(
+  place: { x: number; y: number },
+  cache: "placed" | "local" = "placed",
+  roomCache?: "local"
+): Promise<{ drawn: Drawn; lamp: Entity; kept: Drawn["mock"]["ctx"]["state"]["kept"] }> {
+  const drawn = await startDrawn({ onDemand: false, dev: true });
+  const kept = drawn.mock.ctx.state.kept;
+  const room = drawn.spawn(Transform(place), Shape({ w: 200, h: 200 }));
+  const lamp = drawn.mock.world.ecs.spawn(OWNER, [
+    Transform({ x: 20, y: 20 }),
+    Shape({ w: 40, h: 40 }),
+    Parent({ entity: room })
+  ]);
+
+  running.push(drawn);
+  drawn.stage.last().renderer.extract.pixels = vi.fn(() => ({
+    pixels: picture(kept.bypassed),
+    width: 4,
+    height: 4
+  }));
+  drawn.frame();
+  drawn.mock.api.sync.filters.set(room, [
+    { filter: new pixi.ColorMatrixFilter(), passes: 1, ...(roomCache && { cache: roomCache }) }
+  ]);
+  drawn.mock.api.sync.filters.set(lamp, [shadedSlot({ cache, origin: new Float32Array(2) })]);
+  drawn.frames(6);
+
+  if (cache === "local") {
+    for (let frame = 0; frame < 3; frame += 1) {
+      drawn.mock.api.invalidate(lamp);
+      drawn.frame();
+    }
+  }
+
+  // A kept room stands once its lamp's take stopped marking it.
+  if (roomCache !== undefined) {
+    drawn.frames(12);
+    expect(kept.byEntity.get(room)?.mode).toBe("kept");
+  }
+
+  expect(kept.byEntity.get(lamp)?.shaded).toBe(true);
+  vi.mocked(drawn.mock.log.warn).mockClear();
+  drawn.mock.api.sync.debug.verifyFrames(true);
+
+  return { drawn, lamp, kept };
 }
 
 describe("the pixel leg of the kept oracle", () => {
@@ -187,6 +245,51 @@ describe("the pixel leg of the kept oracle", () => {
 
     expect(extract.mock.calls.length - reads).toBe(1);
     expect(drawn.mock.ctx.state.kept.verifySkipped).toBe(1);
+  });
+
+  // Bug: a glow under a filter off the origin is named a stale picture, sent live, taken, and sent live again: live, its
+  // body reads a place relative to that filter's texture, on purpose (spec 23 P8.3).
+  it("skips a frame in which a placed view reads its place under a filter off the origin", async () => {
+    const { drawn, lamp, kept } = await lampUnderRoom({ x: 50, y: 50 });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped + 3);
+    expect(staleLines(drawn)).toEqual([]);
+    expect(kept.byEntity.get(lamp)?.mode).toBe("kept");
+  });
+
+  // Bug: a kept room holds no filters of its own, its stand-in does, and its glow is named a stale picture.
+  it("skips such a frame under a kept picture off the origin", async () => {
+    const { drawn, kept } = await lampUnderRoom({ x: 50, y: 50 }, "placed", "local");
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped + 3);
+    expect(staleLines(drawn)).toEqual([]);
+  });
+
+  // Bug: the skip covers every view under a filter, and the glows of the ward are never compared.
+  it("compares such a view when the filter's bounds start at the canvas origin", async () => {
+    const { drawn, kept } = await lampUnderRoom({ x: 0, y: 0 });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped);
+    expect(staleLines(drawn)).not.toEqual([]);
+  });
+
+  // Bug: a local view under a filter stops being compared: its body reads no place, so live and the picture must agree.
+  it("compares a local view on its shader under a filter off the origin", async () => {
+    const { drawn, kept } = await lampUnderRoom({ x: 50, y: 50 }, "local");
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped);
   });
 
   it("does not run in a production build", async () => {

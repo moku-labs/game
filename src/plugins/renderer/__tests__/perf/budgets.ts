@@ -112,6 +112,9 @@ export const BUDGET = {
   // numbers as a kept view's; the output's size is compared before a size object or a label is made, the origins and
   // the slot are walked by index, the group's numbers go through one scratch array, and no iterator walks the ranges.
   keptShaded: 0,
+  // F126 stage 2, part B: 12 placed views under a live filter, a number of each written every frame. New. Every step walks
+  // the view's parents, a flag and a map read per ancestor, and asks whether the view fits its mesh, on one object.
+  keptUnder: 0,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
   filterSwitchStill: 0,

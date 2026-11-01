@@ -11,8 +11,11 @@
  * ends the warm-up of the application: a throw inside Pixi's render leaves its filter stack unbalanced, which no public
  * API rebalances, so another probe would only throw again. A filter handed over with its quad draws a mesh of that
  * program after it, on WebGPU, inside an error scope: a quad program that does not fit its pipeline fails asynchronously,
- * as a blank view with nothing in the logs, and this is the one place such a fault can be seen. The end of a run
- * reaches the monitor through `onWarm`; this file never imports the monitor (LEAD-FIXES-3 O24).
+ * as a blank view with nothing in the logs, and this is the one place such a fault can be seen. A mesh draws onto the
+ * canvas, or inside an outer filter pass or picture, whose target holds no stencil: another pipeline. The texture of the
+ * texture variants cannot make it (a clip gave it a stencil for good), so that draw goes into a second texture no clip
+ * ever draws into, in the frame of the first. The end of a run reaches the monitor through `onWarm`; this file never
+ * imports the monitor (LEAD-FIXES-3 O24).
  */
 
 import { filterGlobals, quadShader, unitQuad } from "../quad";
@@ -81,6 +84,9 @@ const CANVAS_VARIANT: readonly WarmVariant[] = Object.freeze(["canvas"]);
 
 /** WebGL on a canvas that is not cleared: the one variant that leaves no pixel. */
 const TEXTURE_VARIANT: readonly WarmVariant[] = Object.freeze(["texture"]);
+
+/** The second draw of a quad: a target with no stencil, as an outer filter pass or a picture is. */
+const PLAIN_VARIANT: readonly WarmVariant[] = Object.freeze(["plain"]);
 
 /**
  * The per-particle properties `effects` uploads every frame: the vertex layout its particle pipeline is keyed by.
@@ -152,6 +158,13 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     autoGarbageCollect: false,
     label: "renderer.warm.texture"
   });
+  const plain = pixi.RenderTexture.create({
+    width: PROBE_SIZE,
+    height: PROBE_SIZE,
+    antialias: false,
+    autoGarbageCollect: false,
+    label: "renderer.warm.plain"
+  });
   const holder = new pixi.Container();
   const graphics = new pixi.Graphics().rect(0, 0, PROBE_SIZE, PROBE_SIZE).fill(0xff_ff_ff);
 
@@ -173,6 +186,7 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     clip,
     mask,
     target,
+    plain,
     holder,
     list: [],
     sprite: whiteSprite(pixi),
@@ -247,6 +261,7 @@ function dropObjects(warm: WarmState): void {
 
   for (const node of nodes) node?.destroy({ children: true });
   destroyWhole(objects.target);
+  destroyWhole(objects.plain);
 }
 
 /**
@@ -300,8 +315,8 @@ function enqueue(warm: WarmState, subject: WarmSubject, variants: readonly WarmV
 }
 
 /**
- * Queues the draws of a filter, then the one draw of its quad. A quad program is a WebGPU program: WebGL draws the
- * filter alone.
+ * Queues the draws of a filter, then the two of its quad: one for the canvas, one for a target with no stencil. A quad
+ * program is a WebGPU program: WebGL draws the filter alone.
  *
  * @param sctx - Domain context of the sync module.
  * @param filter - The filter.
@@ -320,12 +335,14 @@ function enqueueFilter(
 
   if (quad === undefined || sctx.deps.host.kind() !== "webgpu") return variants.length;
 
-  // One draw: drawn in all four variants a quad made one pipeline, and the bench's warm-up on the A26 took 8.4 s, not 5.8.
+  // Not all four variants: they made one pipeline, and the bench's warm-up on the A26 took 8.4 s, not 5.8. The second
+  // draw is the frame's own: a queue entry more would be a frame more, per quad.
   const once = variants.slice(0, 1);
 
   enqueue(warm, { filter, quad }, once);
+  enqueue(warm, { filter, quad }, PLAIN_VARIANT);
 
-  return variants.length + once.length;
+  return variants.length + once.length + PLAIN_VARIANT.length;
 }
 
 /**
@@ -686,6 +703,7 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
 
   const clipped = draw.variant === "canvas+clip" || draw.variant === "texture+clip";
   const textured = draw.variant === "texture" || draw.variant === "texture+clip";
+  const target = textured ? objects.target : undefined;
 
   if (clipped) {
     objects.clip.addChild(node);
@@ -697,7 +715,7 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
   const scope = openScope(sctx, draw.subject);
 
   try {
-    sctx.deps.host.renderProbe(objects.root, textured ? objects.target : undefined);
+    sctx.deps.host.renderProbe(objects.root, draw.variant === "plain" ? objects.plain : target);
 
     return true;
   } catch (error) {
@@ -775,10 +793,21 @@ function objectsOf(sctx: SyncCtx, pixi: PixiModule): WarmObjects | undefined {
 }
 
 /**
- * Draws up to `renderer.warm` probes before the stage pass of a drawn frame; answers whether it drew any, so the frame
- * is told to `time` as a probed one. A draw is counted only after its own render call ran; a queue that still holds
- * draws asks for the next frame; a probe that threw ends the warm-up there. Allocates nothing while the queue is empty,
- * and nothing but Pixi's own work on a warm frame: the probe tree is made once per device.
+ * Tells whether the next draw of the queue goes with the one before it: a quad's draw into the plain texture.
+ *
+ * @param warm - The warm branch of the sync state.
+ * @returns True when it asks for no frame of its own.
+ */
+function ridesAlong(warm: WarmState): boolean {
+  return warm.queue[warm.head]?.variant === "plain";
+}
+
+/**
+ * Draws up to `renderer.warm` probes before the stage pass of a drawn frame, and the plain draw of a quad with the draw
+ * before it; answers whether it drew any, so the frame is told to `time` as a probed one. A draw is counted only after
+ * its own render call ran; a queue that still holds draws asks for the next frame; a probe that threw ends the warm-up
+ * there. Allocates nothing while the queue is empty, and nothing but Pixi's own work on a warm frame: the probe tree is
+ * made once per device.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when a probe was drawn in this frame.
@@ -796,7 +825,7 @@ export function warmStep(sctx: SyncCtx): boolean {
   const budget = sctx.ctx.config.warm;
   let drawn = 0;
 
-  while (drawn < budget && warm.head < warm.queue.length) {
+  while ((drawn < budget || ridesAlong(warm)) && warm.head < warm.queue.length) {
     const draw = warm.queue[warm.head];
 
     warm.head += 1;

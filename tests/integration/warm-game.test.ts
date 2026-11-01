@@ -365,12 +365,15 @@ describe("the warm-up of a game while its splash stands", () => {
         expect(seen, `${subject} ${variant}`).toContain(`${subject} ${variant}`);
     }
 
-    // A quad once: its four variants make one pipeline.
-    for (const quad of QUADS) expect(seen).toContain(`${quad} ${VARIANTS[0]}`);
+    // A quad on the canvas's target and on one with no stencil, as a filter pass or a picture is: the two pipelines it has.
+    for (const quad of QUADS) {
+      expect(seen).toContain(`${quad} ${VARIANTS[0]}`);
+      expect(seen).toContain(`${quad} texture`);
+    }
 
     // Each drawn exactly once: nothing warmed twice on one device.
     expect(game.probes.flat()).toHaveLength(
-      (CONTENT.length + FILTERS.length) * VARIANTS.length + QUADS.length
+      (CONTENT.length + FILTERS.length) * VARIANTS.length + 2 * QUADS.length
     );
   });
 
@@ -385,7 +388,8 @@ describe("the warm-up of a game while its splash stands", () => {
 
     expect(last).toBeGreaterThan(0);
     expect(last).toBeLessThan(SPLASH_FRAMES);
-    expect(Math.max(...frames)).toBe(1);
+    // One a frame, a quad's second draw with its first: it adds no frame.
+    expect(Math.max(...frames)).toBe(2);
     // The queue is empty: the still splash draws nothing more.
     expect(await game.frames(10)).toBe(0);
   });
