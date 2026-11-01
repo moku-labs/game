@@ -58,19 +58,22 @@ function faded(record: KeptRecord): boolean {
 
 /**
  * Where a filter pass starts on one axis, as Pixi works it out (`FilterSystem._calculateFilterBounds`): the bounds cut to
- * the canvas, floored to the pass's grid, then padded. Pure.
+ * the canvas while the stack clips to it, floored to the pass's grid, then padded. Pure.
  *
  * @param start - The bounds' start on the canvas, CSS px.
  * @param resolution - The pass's resolution.
  * @param padding - The pass's padding, whole px.
+ * @param clipped - Every enabled filter of the stack has `clipToViewport` on.
  * @returns The pass's start, CSS px.
  * @example
  * ```ts
- * passStart(0, 1, 8); // -8
+ * passStart(-5, 1, 8, true); // -8
  * ```
  */
-function passStart(start: number, resolution: number, padding: number): number {
-  return Math.floor(Math.max(start, 0) * resolution) / resolution - padding;
+function passStart(start: number, resolution: number, padding: number, clipped: boolean): number {
+  const cut = clipped ? Math.max(start, 0) : start;
+
+  return Math.floor(cut * resolution) / resolution - padding;
 }
 
 /**
@@ -111,19 +114,20 @@ function passOffOrigin(
   node: PixiContainer,
   filters: readonly PixiFilter[]
 ): boolean {
-  const canvas = kctx.host.resolution();
+  const canvasResolution = kctx.host.resolution();
   const resolutions = filters.map(({ resolution }) =>
-    resolution === "inherit" ? canvas : resolution
+    resolution === "inherit" ? canvasResolution : resolution
   );
   const resolution = Math.min(...resolutions);
+  const clipped = filters.every(filter => filter.clipToViewport);
   // Whole px, as Pixi's `padding | 0`.
   const padding = Math.trunc(filters.reduce((sum, filter) => sum + filter.padding, 0));
   const { a, b, c, d, tx, ty } = node.getGlobalTransform(new pixi.Matrix(), false);
   const box = linearBounds(a, b, c, d, passBox(pixi, node));
 
   return (
-    passStart(tx + box.x0, resolution, padding) !== 0 ||
-    passStart(ty + box.y0, resolution, padding) !== 0
+    passStart(tx + box.x0, resolution, padding, clipped) !== 0 ||
+    passStart(ty + box.y0, resolution, padding, clipped) !== 0
   );
 }
 

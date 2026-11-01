@@ -1,7 +1,7 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Entity } from "../../../world/types";
-import { Parent, Shape, Transform } from "../../components";
+import { Display, Parent, Shape, Transform } from "../../components";
 import { type Drawn, OWNER, startDrawn } from "../demand-harness";
 import { shadedSlot } from "../quad-harness";
 
@@ -79,6 +79,21 @@ function staleLines(drawn: Drawn): unknown[] {
     .map(([, detail]) => detail);
 }
 
+/**
+ * A filter switched off.
+ *
+ * @param padding - Its padding.
+ * @returns The filter.
+ */
+function disabled(padding: number): pixi.Filter {
+  const filter = new pixi.ColorMatrixFilter();
+
+  filter.padding = padding;
+  filter.enabled = false;
+
+  return filter;
+}
+
 /** How a room over a lamp stands: all but its place left out by the usual case. */
 type Room = {
   /** The room's corner on the canvas. */
@@ -91,7 +106,44 @@ type Room = {
   padding?: number;
   /** The room's filter area, in its own units: x, y, width, height. */
   area?: readonly [number, number, number, number];
+  /** `clipToViewport` of the room's filter. */
+  clips?: boolean;
+  /** The resolution of the room's filter. */
+  resolution?: number | "inherit";
+  /** The canvas resolution. */
+  canvas?: number;
+  /**
+   * The filters a game writes itself on the top of a `Display` between the room and the lamp, at the room's corner: `sync`
+   * hangs enabled ones only. Made after the renderer starts: a Pixi filter asks the page for a canvas.
+   */
+  own?: () => readonly pixi.Filter[];
+  /** A filter of a view between the room and the lamp, at the room's corner. Made as `own` is. */
+  inner?: () => pixi.Filter;
 };
+
+/**
+ * What hangs between a room and its lamp, a view at the room's corner that covers it, when a test asks for one.
+ *
+ * @param drawn - The running renderer.
+ * @param panel - The room.
+ * @param room - How it stands.
+ * @returns The entity the lamp hangs under.
+ */
+function between(drawn: Drawn, panel: Entity, room: Room): Entity {
+  const place = [Transform({ x: 0, y: 0 }), Parent({ entity: panel })];
+
+  if (room.inner !== undefined) {
+    return drawn.mock.world.ecs.spawn(OWNER, [...place, Shape({ w: 200, h: 200 })]);
+  }
+
+  if (room.own === undefined) return panel;
+
+  const object = new pixi.Container();
+
+  object.boundsArea = new pixi.Rectangle(0, 0, 200, 200);
+
+  return drawn.mock.world.ecs.spawn(OWNER, [...place, Display({ object })]);
+}
 
 /**
  * A room with a filter of its own and a lamp in it on its mesh, the oracle on and every frame reading a stale picture.
@@ -103,17 +155,27 @@ async function lampUnderRoom(
   room: Room
 ): Promise<{ drawn: Drawn; lamp: Entity; kept: Drawn["mock"]["ctx"]["state"]["kept"] }> {
   const { place, cache = "placed", roomCache, padding = 0, area } = room;
+  const { clips = true, resolution = 1, canvas, own, inner } = room;
   const drawn = await startDrawn({ onDemand: false, dev: true });
   const kept = drawn.mock.ctx.state.kept;
+
+  if (canvas !== undefined) {
+    drawn.mock.api.monitor.setResolution(canvas);
+    drawn.frames(2);
+  }
+
   const panel = drawn.spawn(Transform(place), Shape({ w: 200, h: 200 }));
+  const middle = between(drawn, panel, room);
   const lamp = drawn.mock.world.ecs.spawn(OWNER, [
     Transform({ x: 20, y: 20 }),
     Shape({ w: 40, h: 40 }),
-    Parent({ entity: panel })
+    Parent({ entity: middle })
   ]);
   const filter = new pixi.ColorMatrixFilter();
 
   filter.padding = padding;
+  filter.clipToViewport = clips;
+  filter.resolution = resolution;
   running.push(drawn);
   drawn.stage.last().renderer.extract.pixels = vi.fn(() => ({
     pixels: picture(kept.bypassed),
@@ -125,6 +187,17 @@ async function lampUnderRoom(
     { filter, passes: 1, ...(roomCache && { cache: roomCache }) }
   ]);
   if (area !== undefined) drawn.mock.api.sync.filters.area(panel, area);
+  if (inner !== undefined) {
+    drawn.mock.api.sync.filters.set(middle, [{ filter: inner(), passes: 1 }]);
+  }
+  if (own !== undefined) {
+    // Children hang in a parent's wrapper, beside its object: the wrapper is the lamp's ancestor.
+    const wrapper = drawn.mock.ctx.state.sync.views.get(middle)?.wrapper;
+
+    if (wrapper === undefined) throw new Error("no wrapper");
+
+    wrapper.filters = [...own()];
+  }
   drawn.mock.api.sync.filters.set(lamp, [shadedSlot({ cache, origin: new Float32Array(2) })]);
   drawn.frames(6);
 
@@ -335,6 +408,93 @@ describe("the pixel leg of the kept oracle", () => {
   // Bug: a room that reaches past the corner is taken for one off the origin: Pixi cuts its bounds to the canvas first.
   it("compares such a view when the bounds reach past the canvas corner", async () => {
     const { drawn, kept } = await lampUnderRoom({ place: { x: -20, y: -20 } });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped);
+    expect(staleLines(drawn)).not.toEqual([]);
+  });
+
+  // Bug: a stack that opts out of the canvas is cut to it anyway: its pass starts at -5, and a stale picture repeats.
+  it("skips such a frame when a filter of the stack does not clip to the canvas", async () => {
+    const { drawn, kept } = await lampUnderRoom({ place: { x: -5, y: -5 }, clips: false });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped + 3);
+    expect(staleLines(drawn)).toEqual([]);
+  });
+
+  // Bug: the padding of a filter that is off counts: Pixi leaves it out, the pass starts at the origin, and a glow goes
+  // uncompared under a stack that merely holds a filter switched off.
+  it("leaves a disabled filter of the stack out of the pass", async () => {
+    const { drawn, kept } = await lampUnderRoom({
+      place: { x: 0, y: 0 },
+      own: () => [disabled(8), new pixi.ColorMatrixFilter()]
+    });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped);
+    expect(staleLines(drawn)).not.toEqual([]);
+  });
+
+  // Bug: Pixi runs no pass for a stack that is all off, so the room above is the closest: the walk stops at it instead,
+  // measures a pass that never runs, and the glow is named stale.
+  it("walks on past an ancestor whose filters are all off", async () => {
+    const { drawn, kept } = await lampUnderRoom({
+      place: { x: 0, y: 0 },
+      padding: 8,
+      own: () => [disabled(0)]
+    });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped + 3);
+    expect(staleLines(drawn)).toEqual([]);
+  });
+
+  // Bug: a filter further up decides: Pixi offsets by the closest alone, and the room's -8 skips a frame that compares.
+  it("takes the closest of two nested filters", async () => {
+    const { drawn, kept } = await lampUnderRoom({
+      place: { x: 0, y: 0 },
+      padding: 8,
+      inner: () => new pixi.ColorMatrixFilter()
+    });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped);
+    expect(staleLines(drawn)).not.toEqual([]);
+  });
+
+  // Bug: `"inherit"` is read as no number, or as 1: at resolution 2 the pass's grid is half a px, so 0.75 floors to 0.5.
+  it("floors on the canvas's grid for a filter on inherit", async () => {
+    const { drawn, kept } = await lampUnderRoom({
+      place: { x: 0.75, y: 0.75 },
+      resolution: "inherit",
+      canvas: 2
+    });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped + 3);
+    expect(staleLines(drawn)).toEqual([]);
+  });
+
+  // Bug: a fixed resolution is taken for the canvas's: on its own grid of 1 the same place floors to 0.
+  it("floors on the filter's own grid for a fixed resolution", async () => {
+    const { drawn, kept } = await lampUnderRoom({
+      place: { x: 0.75, y: 0.75 },
+      resolution: 1,
+      canvas: 2
+    });
     const skipped = kept.verifySkipped;
 
     drawn.frames(3);

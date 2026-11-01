@@ -1149,7 +1149,10 @@ read twice, as drawn and with every picture drawn live, and compared; a differen
 `renderer:stale-picture` and draws every view live until the policy takes it again. A frame with a picture drawn at
 another resolution than the canvas (F126) is resampled, not stale: it is skipped and counted. A frame in which a picture
 moves off its grid or hangs under a translucent ancestor is skipped and counted, not compared: a fading ancestor fades
-the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design.
+the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design. A frame in which a
+placed view on its own shader hangs under a filter whose pass starts off the canvas origin is skipped and counted too: it
+differs from live by that origin on purpose (see "A view on its own shader"). Two known limits. Under a rotated ancestor
+the box is looser than Pixi's. A view on its shader under a filter off the origin skips the whole frame's compare.
 
 ### A view on its own shader
 
@@ -1181,7 +1184,8 @@ them, its group's uniform buffer first, before its textures; the geometry and th
 and at `onStop`.
 
 A change on the mesh marks the pictures above it and the ranges that hold it, as a pass would. It counts as no take and as no
-refresh. `debug.verifyFrames` compares the mesh with the live filter from its first frame on, as any picture. Off the padding
+refresh. `debug.verifyFrames` compares the mesh with the live filter from its first frame on, as any picture, except for a
+placed view under a filter whose pass starts off the canvas origin (below). Off the padding
 grid (a fractional resolution) a body's frame is up to one device pixel wider than live: nothing visible, and no more
 difference from live than a stage 3 picture has. Slice C of the change brings `cache: false` views; they stay as they were
 until then.
@@ -1197,10 +1201,11 @@ no pass, and marks the pictures above, so a kept ancestor takes its picture agai
 
 Live under a filter whose bounds start off the canvas origin, Pixi's `uOutputFrame.xy` is relative to that filter's texture;
 on the mesh `canvasPixel` answers the canvas position there too (spec 23 P8.3). The two differ by that origin on purpose:
-the view jumps by it once, at its first take. The pass starts where Pixi says: the bounds, or the filter area in their place,
-cut to the canvas, floored to the pass's grid, padded, so a padded filter at the corner starts off the origin. `debug.verifyFrames`
-skips and counts such a frame; for a view whose closest filter pass starts at the origin it compares as usual. The take makes no mark, so with `onDemand` off the oracle in shadow names
-it once as `renderer:missed-frame`.
+the view jumps by it once, at its first take. The pass starts where Pixi says: the bounds, or the filter area in their
+place, cut to the canvas while every enabled filter of the stack has `clipToViewport` on, floored to the pass's grid,
+padded, so a padded filter at the corner starts off the origin. `debug.verifyFrames` skips and counts such a frame; for a
+view whose closest filter pass starts at the origin it compares as usual. The take makes no mark, so with `onDemand` off
+the oracle in shadow names it once as `renderer:missed-frame`.
 
 A mesh draws onto the canvas, whose target holds a stencil, or inside a filter pass or an outer picture, whose target does
 not: two pipelines (measured on Chrome, 2026-11-01: one of each per program). The warm-up draws a quad in both, the second
