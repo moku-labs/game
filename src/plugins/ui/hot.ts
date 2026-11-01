@@ -30,8 +30,9 @@ const ASSETS_STAMP = "/.moku/assets-stamp.ts";
 
 /**
  * The `kind` of every value a game registers by value at start: ECS component and tag types
- * (filters too), nodes, slots, flows, asset bundles and plugin owners. Any other `kind` marks
- * data, an effect descriptor or a timeline step, which a node reads through the live binding.
+ * (filters too), nodes, slots, flows, asset bundles, plugin owners and text formats, which `text`
+ * reads once and never swaps. Any other `kind` marks data, an effect descriptor or a timeline step,
+ * which a node reads through the live binding.
  */
 const REGISTERED_KINDS: Readonly<Record<string, true>> = {
   component: true,
@@ -40,7 +41,8 @@ const REGISTERED_KINDS: Readonly<Record<string, true>> = {
   slot: true,
   flow: true,
   bundles: true,
-  plugin: true
+  plugin: true,
+  textFormats: true
 };
 
 /** The handler on the global: the new module namespace and the path of the saved module. */
@@ -216,8 +218,8 @@ function isTextStyles(value: unknown): value is TextStyles {
 
 /**
  * Tells whether an export is something the game registers by value at start. An own string
- * `kind` decides alone: a flow, a node, a slot, an ECS component or tag, a filter, bundles or a
- * plugin owner refuse, a descriptor such as `sfx(...)` or a step such as `mark(...)` passes.
+ * `kind` decides alone: a flow, a node, a slot, an ECS component or tag, a filter, bundles, a
+ * plugin owner or text formats refuse, a descriptor such as `sfx(...)` or a step such as `mark(...)` passes.
  * Without a `kind`, an object with an own string `id` or `name` refuses: a scene, a system, a
  * feature or a plugin. A function without a `kind` passes, since every function has an own `name`.
  *

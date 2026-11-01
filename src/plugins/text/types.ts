@@ -53,7 +53,8 @@ declare const textBind: unique symbol;
 /**
  * Which numeric component field a label shows, and how. Plain data in the component, so a
  * snapshot lists it; nominal, so only `bind()` makes one and a hand-written literal does not
- * compile.
+ * compile. `format` is one of the four of `TextFormat`, or a name a feature registered under its
+ * `textFormats` key: the function itself never sits here, so a bind stays data.
  *
  * @example
  * ```ts
@@ -65,7 +66,7 @@ declare const textBind: unique symbol;
 export type TextBind = {
   readonly component: string;
   readonly field: string;
-  readonly format: TextFormat;
+  readonly format: string;
 } & { readonly [textBind]: true };
 
 /**
@@ -79,14 +80,88 @@ export type TextBind = {
 export type BindField<Value extends object> = keyof NumericFields<Value> & string;
 
 /**
- * What `bind()` takes after the field. The format is `"int"` when left out.
+ * What `bind()` takes after the field. The format is `"int"` when left out. `FormatKey` is the
+ * format names of a game: the root `bind` has none and takes the four of `TextFormat`, the `bind`
+ * of `defineGame` takes the names the game passed as `textFormats` too.
  *
  * @example
  * ```ts
- * const options: BindOptions = { format: "mm:ss" };
+ * const timer: BindOptions = { format: "mm:ss" };
+ * const pill: BindOptions<"pill.number"> = { format: "pill.number" };
  * ```
  */
-export type BindOptions = { format?: TextFormat };
+export type BindOptions<FormatKey extends string = never> = { format?: TextFormat | FormatKey };
+
+/**
+ * What a named format answers for a whole number: what the label shows and the text style it is
+ * drawn in. `style` is required: a format owns the style of its label.
+ *
+ * @example
+ * ```ts
+ * const small: TextFormatAnswer = { content: "950", style: "digits.17" };
+ * // A sentence of the string table works too: it is formatted in the current locale.
+ * const big: TextFormatAnswer = { content: tr("ui.number.thousand", { n: "1.5" }), style: "digits.14.5" };
+ * ```
+ */
+export type TextFormatAnswer<StyleKey extends string = string> = {
+  content: string | Message;
+  style: StyleKey;
+};
+
+/**
+ * A number format of a game: takes the whole value of a bound field, rounded as `"int"` rounds it,
+ * and answers the content and the style. It must be pure over the value and the language: it is
+ * asked when the whole value or the locale moves, never on a frame where they stand, and `ui` may
+ * ask it again for the first solve of a label. A label bound to `Countdown.left` takes
+ * milliseconds, so its format is called every frame the countdown runs: keep such a format cheap.
+ *
+ * @example
+ * ```ts
+ * // Pure over the value and the language. On a `Countdown` it is called every frame.
+ * const pill: TextFormatFunction = value =>
+ *   value < 1000
+ *     ? { content: String(value), style: "digits.17" }
+ *     : { content: `${value / 1000}K`, style: "digits.14.5" };
+ *
+ * pill(950); // { content: "950", style: "digits.17" }
+ * pill(1500); // { content: "1.5K", style: "digits.14.5" }
+ * ```
+ */
+export type TextFormatFunction<StyleKey extends string = string> = (
+  value: number
+) => TextFormatAnswer<StyleKey>;
+
+/**
+ * What `defineTextFormats` returns and a feature registers under its `textFormats` key.
+ *
+ * @example
+ * ```ts
+ * const formats: TextFormats = defineTextFormats({
+ *   "pill.number": value => ({ content: String(value), style: "digits.17" })
+ * });
+ *
+ * formats.kind; // "textFormats"
+ * defineFeature("shared", { textStyles, textFormats: formats });
+ * ```
+ */
+export type TextFormats = {
+  readonly kind: "textFormats";
+  readonly map: Readonly<Record<string, TextFormatFunction>>;
+};
+
+/**
+ * What `app.text.formatted` answers: the finished string, tags and all, and the style a named
+ * format picked for the number.
+ *
+ * @example
+ * ```ts
+ * // "pill.number" shows a thousand and more as "1.5K" in a smaller style.
+ * const answer: FormattedNumber | undefined = app.text.formatted("pill.number", 1500);
+ *
+ * answer; // { text: "1.5K", style: "digits.14.5" }
+ * ```
+ */
+export type FormattedNumber = { text: string; style: string };
 
 /**
  * A moment to count down to, and how much is left. A game writes `until`, a moment of `clock` in
@@ -353,9 +428,10 @@ export type Warn = (key: string, message: string, data?: Record<string, unknown>
 export type LayoutOptions = { warn: Warn };
 
 /**
- * What was resolved for one entity last, so the frame step knows whether anything moved. `unit`
- * is what the shown string of a bound label was built from: the rounded value for `"int"`, whole
- * seconds for a time format. `bindRef` is the bind object `bind` was keyed from, so the key is
+ * What was resolved for one entity last, so the frame step knows whether anything moved. `style`
+ * is the style the label shows: for a named format the one its answer picked. `unit` is what the
+ * shown string of a bound label was built from: the rounded value for `"int"` and for a named
+ * format, whole seconds for a time format. `bindRef` is the bind object `bind` was keyed from, so the key is
  * built once per attached bind and a frame compares one reference. `box` is the `Text.box` the
  * label was laid out at: a label of a `"box"` style is laid out again when it moves.
  *
@@ -399,6 +475,10 @@ export type State = {
   styles: Map<string, TextStyle>;
   /** Style name to the feature that brought it, for the duplicate error. */
   styleOwner: Map<string, string>;
+  /** The number formats of every feature by name, in feature order. */
+  formats: Map<string, TextFormatFunction>;
+  /** Format name to the feature that brought it, for the duplicate error. */
+  formatOwner: Map<string, string>;
   /** The config fonts plus every `font`, `bold` and `italic` of every style. */
   fontKeys: Set<string>;
   /** The parsed advance table per font key, filled when `assets` has the font. */
@@ -442,9 +522,9 @@ export type State = {
 };
 
 /**
- * text plugin API, `app.text`. Two questions: how big a piece of text is, and which styles the
- * game registered; and one order, the dev hot swap of a styles file. Everything else happens in
- * the frame.
+ * text plugin API, `app.text`. Three questions: how big a piece of text is, which styles the game
+ * registered, and what a game's number format answers; and one order, the dev hot swap of a styles
+ * file. Everything else happens in the frame.
  *
  * @example
  * ```ts
@@ -498,6 +578,29 @@ export type TextApi = {
    * ```
    */
   hasGlyph(char: string, style: string): boolean;
+
+  /**
+   * What a format a feature registered answers for a number, before a label shows it: `ui` asks
+   * here in the first solve of a label, when there is no `Text` to read yet. The value is rounded
+   * as the `"int"` format rounds it (0 for one that is not finite), and a `Message` answer is
+   * formatted in the current locale. The format is called on every ask: it must be pure over the
+   * value and the language. A label bound to `Countdown.left` takes milliseconds, so its format is
+   * called every frame the countdown runs.
+   *
+   * @param name - A name a feature registered under its `textFormats` key.
+   * @param value - The number to show.
+   * @returns The string and the style; `undefined` for a name no feature registered, one of the
+   *   four built-in formats included, and for a format that threw (reported once per name).
+   * @example
+   * ```ts
+   * // "pill.number" is pure over the value and the language; on a `Countdown` it runs every frame.
+   * // Below a thousand it answers the digits in "digits.17", from there "1.5K" in "digits.14.5".
+   * app.text.formatted("pill.number", 949.6); // { text: "950", style: "digits.17" }
+   * app.text.formatted("pill.number", 1500); // { text: "1.5K", style: "digits.14.5" }
+   * app.text.formatted("mm:ss", 95_000); // undefined: a built-in format has no answer here
+   * ```
+   */
+  formatted(name: string, value: number): FormattedNumber | undefined;
 
   /**
    * The registered style names: the two built-ins first, then the styles of every feature in

@@ -7,13 +7,16 @@ import { parseTags } from "../../text/tags";
 import type { Warn } from "../../text/types";
 import type { Entity } from "../../world/types";
 import type { Rect } from "../layout/types";
-import { drawnRect } from "../visual";
+import { drawnRect, namesFormat } from "../visual";
 import { fieldValue } from "./fields";
 import type { AsideOf, Element, JsxState, Root, UiNode } from "./types";
 import { isOwnKey } from "./window";
 
 /** Reads the string `text` resolved for an entity: `Text.resolved`, empty before its first frame. */
 type ResolvedOf = (entity: Entity) => string | undefined;
+
+/** Reads the style an entity is drawn in: `Text.style`, nothing before it carries its `Text`. */
+type ShownStyleOf = (entity: Entity) => string | undefined;
 
 /**
  * The warning a tree read drops: `text` already reported a bad tag when it resolved the label.
@@ -80,14 +83,20 @@ function contentOf(element: Element, resolvedOf: ResolvedOf | undefined): string
 }
 
 /**
- * The text style key a text element was given: its `style` prop while that is a key.
+ * The text style key of a text element: the style a format of the game answered, for a text whose
+ * bind names one; else the `style` prop while that is a key.
  *
  * @param element - The element to read.
+ * @param shownStyleOf - Reads `Text.style` of an entity; none for a tree read without a world.
  * @returns The key, or `undefined` for any other element and for a text with a `Style` object or
  * no style.
  */
-function textStyleOf(element: Element): string | undefined {
+function textStyleOf(element: Element, shownStyleOf: ShownStyleOf | undefined): string | undefined {
   if (element.type !== "text") return undefined;
+
+  const shown = namesFormat(element) ? shownStyleOf?.(element.entity) : undefined;
+
+  if (shown !== undefined) return shown;
 
   const style = element.node.props.style;
 
@@ -104,6 +113,7 @@ function textStyleOf(element: Element): string | undefined {
  * @param state - The jsx state.
  * @param element - The element to read.
  * @param resolvedOf - Reads the resolved string of a text entity; none in a read without a world.
+ * @param shownStyleOf - Reads `Text.style` of a text entity; none in a read without a world.
  * @param place - Maps a rect of a slotted root into root coordinates; none for a root on the viewport.
  * @returns The node, with its children in child order.
  */
@@ -111,6 +121,7 @@ function nodeOf(
   state: JsxState,
   element: Element,
   resolvedOf: ResolvedOf | undefined,
+  shownStyleOf: ShownStyleOf | undefined,
   place?: (rect: Rect) => Rect
 ): UiNode {
   // The children, in child order; the spacers of a windowed scroll are skipped.
@@ -120,7 +131,7 @@ function nodeOf(
     const childElement = state.elements.get(child);
 
     if (childElement !== undefined && !isOwnKey(childElement.key)) {
-      children.push(nodeOf(state, childElement, resolvedOf, place));
+      children.push(nodeOf(state, childElement, resolvedOf, shownStyleOf, place));
     }
   }
 
@@ -139,7 +150,7 @@ function nodeOf(
   // scroll, the local of a component root.
   const content = contentOf(element, resolvedOf);
   const worded = content === undefined ? node : { ...node, content };
-  const textStyle = textStyleOf(element);
+  const textStyle = textStyleOf(element, shownStyleOf);
   const styled = textStyle === undefined ? worded : { ...worded, textStyle };
   const fitted = element.style.fit === "contain" ? { ...styled, fitScale: element.fit } : styled;
   const field = state.fields.get(element.entity);
@@ -218,6 +229,7 @@ function placeOf(
  * @param resolvedOf - Reads the string `text` resolved for an entity; none in a read without a world.
  * @param slotPose - The root pose of a slot, `rootPoseOf` of `renderer`; none in a read without a world.
  * @param isAside - Whether an entity belongs to the scene `world` builds aside: such a root is not read.
+ * @param shownStyleOf - Reads `Text.style` of an entity; none in a read without a world.
  * @returns One root node, or every root under a `screen` node.
  * @example
  * ```ts
@@ -229,7 +241,8 @@ export function readTree(
   layers: readonly string[] = [],
   resolvedOf?: ResolvedOf,
   slotPose?: (slot: Entity) => TransformValue,
-  isAside?: AsideOf
+  isAside?: AsideOf,
+  shownStyleOf?: ShownStyleOf
 ): UiNode {
   const nodes: UiNode[] = [];
 
@@ -237,7 +250,7 @@ export function readTree(
     const element = root.element === undefined ? undefined : state.elements.get(root.element);
 
     if (element !== undefined)
-      nodes.push(nodeOf(state, element, resolvedOf, placeOf(root, slotPose)));
+      nodes.push(nodeOf(state, element, resolvedOf, shownStyleOf, placeOf(root, slotPose)));
   }
 
   const single = nodes.length === 1 ? nodes[0] : undefined;

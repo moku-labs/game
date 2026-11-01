@@ -1,7 +1,7 @@
 /**
  * @file text plugin — lifecycle: the dependency resolution, the style table read out of the
- * feature descriptions and written again by the dev hot swap, the four registrations `onStart`
- * opens, and the teardown that closes exactly those.
+ * feature descriptions and written again by the dev hot swap, the number formats read out of them
+ * too, the four registrations `onStart` opens, and the teardown that closes exactly those.
  */
 import { assetsPlugin } from "../assets";
 import { clockPlugin } from "../clock";
@@ -12,6 +12,7 @@ import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { builtInStyles, readStyle, Text } from "./components";
 import { createTextAdapter, installFonts } from "./display";
+import { isTextFormat } from "./format";
 import {
   createTextFrame,
   createTextSystem,
@@ -20,7 +21,7 @@ import {
   noteAdded,
   resolveAdded
 } from "./resolve";
-import type { Deps, KernelSlice, State, TextCtx, TextStyles } from "./types";
+import type { Deps, KernelSlice, State, TextCtx, TextFormatFunction, TextStyles } from "./types";
 
 /** The owner of the two built-in styles, which no feature can collide with. */
 const BUILT_IN = "text";
@@ -113,6 +114,95 @@ function buildStyles(ctx: TextCtx): void {
 }
 
 /**
+ * Tells whether a feature entry is a format map `text` can read.
+ *
+ * @param entry - What the feature put under its `textFormats` key.
+ * @returns True when it carries a map of formats.
+ */
+function isFormatMap(entry: unknown): entry is { map: Record<string, unknown> } {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    "kind" in entry &&
+    entry.kind === "textFormats" &&
+    "map" in entry &&
+    typeof entry.map === "object" &&
+    entry.map !== null
+  );
+}
+
+/**
+ * Tells whether an entry of a format map is a function. What it answers shows only when it runs.
+ *
+ * @param value - What the feature put under a format name.
+ * @returns True for a function.
+ */
+function isFormatFunction(value: unknown): value is TextFormatFunction {
+  return typeof value === "function";
+}
+
+/**
+ * Refuses one entry of a feature's format map, or hands its function back.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param feature - The name of the feature that brought it.
+ * @param name - The format name.
+ * @param value - What the feature put under that name.
+ * @returns The function.
+ * @throws {Error} When the name is a built-in format, another feature's, or holds no function.
+ */
+function checkedFormat(
+  ctx: TextCtx,
+  feature: string,
+  name: string,
+  value: unknown
+): TextFormatFunction {
+  if (isTextFormat(name)) {
+    throw new Error(
+      `[game] Text format "${name}" of feature "${feature}" is a built-in format.\n` +
+        "  Rename it: the engine owns this name."
+    );
+  }
+
+  const owner = ctx.state.formatOwner.get(name);
+
+  if (owner !== undefined) {
+    throw new Error(
+      `[game] Text format "${name}" is defined by features "${owner}" and "${feature}".\n` +
+        "  Keep it in one feature or rename one of them."
+    );
+  }
+
+  if (!isFormatFunction(value)) {
+    throw new TypeError(
+      `[game] Text format "${name}" of feature "${feature}" is not a function.\n` +
+        "  Use a function of the value that answers { content, style }."
+    );
+  }
+
+  return value;
+}
+
+/**
+ * Fills the format table from every feature, in feature order.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @throws {Error} When a name is a built-in format, two features define it, or it holds no function.
+ */
+function buildFormats(ctx: TextCtx): void {
+  for (const feature of ctx.deps.flow.features.all()) {
+    const entry = feature.description.textFormats;
+
+    if (!isFormatMap(entry)) continue;
+
+    for (const [name, value] of Object.entries(entry.map)) {
+      ctx.state.formats.set(name, checkedFormat(ctx, feature.name, name, value));
+      ctx.state.formatOwner.set(name, feature.name);
+    }
+  }
+}
+
+/**
  * Collects every font a style can draw with: the two of the config, then the regular, bold and
  * italic font of every registered style.
  *
@@ -158,7 +248,7 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
 }
 
 /**
- * Opens what the plugin owns: the style table, the font keys, the layout system, the step after
+ * Opens what the plugin owns: the style table, the number formats, the font keys, the layout system, the step after
  * the layout flush, the two world hooks of `Text` and the display adapter. The step is a frame
  * callback of phase `layout`: `world` registered its own in its `onStart`, which runs before this
  * one (`text` depends on `world`), so the step runs after the world's layout phase and its flush,
@@ -167,6 +257,7 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
  *
  * @param ctx - Kernel context of the text plugin.
  * @throws {Error} When two features define the same style name.
+ * @throws {Error} When a number format is refused: see `buildFormats`.
  */
 export function startText(ctx: KernelSlice): void {
   const tctx = withDeps(ctx);
@@ -174,6 +265,7 @@ export function startText(ctx: KernelSlice): void {
   const frame = createTextFrame(tctx);
 
   buildStyles(tctx);
+  buildFormats(tctx);
   collectFonts(tctx);
 
   tctx.state.removers.push(
@@ -202,6 +294,8 @@ export function stopText(state: State): void {
   state.removers.length = 0;
   state.styles.clear();
   state.styleOwner.clear();
+  state.formats.clear();
+  state.formatOwner.clear();
   state.fontKeys.clear();
   state.tables.clear();
   state.installed.clear();

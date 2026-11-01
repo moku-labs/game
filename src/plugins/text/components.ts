@@ -1,6 +1,6 @@
 /**
  * @file text plugin — the components a game writes (`Text`, `Countdown`), the `bind` of a numeric
- * field, and the two pure helpers `defineGame` binds to one game's keys. Pure: no ctx, no state,
+ * field, and the pure helpers `defineGame` binds to one game's keys. Pure: no ctx, no state,
  * no Pixi. Made with the `component()` helper of `world`, so nothing has to be registered.
  */
 import type { Message } from "../i18n/types";
@@ -13,6 +13,8 @@ import type {
   CountdownValue,
   Point,
   TextBind,
+  TextFormatFunction,
+  TextFormats,
   TextShadow,
   TextStyle,
   TextStyleInput,
@@ -46,8 +48,9 @@ const countdownDefaults: CountdownValue = { until: 0, left: 0 };
 /**
  * Shows a numeric component field of the label's own entity: read every frame, written to
  * `Text.resolved` only when the shown string changes. The field must hold a number; the format
- * is `"int"` (rounded) unless named. Reads the component's own name, so a renamed component
- * cannot drift from its label.
+ * is `"int"` (rounded) unless named. This root `bind` takes the four built-in formats; the `bind`
+ * of `defineGame` is this function and takes the names of the game's `defineTextFormats` too. Reads
+ * the component's own name, so a renamed component cannot drift from its label.
  *
  * @param component - The component whose field the label shows.
  * @param field - A numeric field of that component.
@@ -253,6 +256,27 @@ export function defineTextStyles(map: Record<string, TextStyleInput>): TextStyle
 }
 
 /**
+ * Declares the number formats of a feature. The result goes under the `textFormats` key of the
+ * feature description, and `text` reads it in `onStart`; a label names a format in its `bind`. A
+ * format takes the whole value and answers what the label shows and its style.
+ *
+ * @param map - Format name to its function. The four built-in names are refused at start.
+ * @returns The registration a feature carries.
+ * @example
+ * ```ts
+ * const formats = defineTextFormats({
+ *   "pill.number": value => ({ content: String(value), style: "digits.17" })
+ * });
+ *
+ * formats.kind; // "textFormats"
+ * formats.map["pill.number"]?.(950); // { content: "950", style: "digits.17" }
+ * ```
+ */
+export function defineTextFormats(map: Readonly<Record<string, TextFormatFunction>>): TextFormats {
+  return { kind: "textFormats", map };
+}
+
+/**
  * Tells whether a value is a plain record, so its fields can be read one by one.
  *
  * @param value - What a feature put in its description.
@@ -370,8 +394,9 @@ export function builtInStyles(fonts: { body: string; digits: string }): {
 }
 
 /**
- * The text helpers bound to one game's style names and font keys: a label only takes a style the
- * game registered, and a style only takes a font the asset scanner generated.
+ * The text helpers bound to one game's style names, font keys and format names: a label only takes
+ * a style the game registered, a style only takes a font the asset scanner generated, a format
+ * only answers a style of the game, and a bind only takes a format the game named.
  *
  * @example
  * ```ts
@@ -379,8 +404,18 @@ export function builtInStyles(fonts: { body: string; digits: string }): {
  * kit.label({ text: "+5", style: "body", at: { x: 0, y: 0 } })[0].value.style; // "body"
  * ```
  */
-export type TextKit<StyleKey extends string, Font extends string> = {
+export type TextKit<
+  StyleKey extends string,
+  Font extends string,
+  FormatKey extends string = never
+> = {
   label: (options: Omit<LabelOptions, "style"> & { style: StyleKey }) => ReturnType<typeof label>;
+  bind: <Value extends object>(
+    component: ComponentHandle<Value>,
+    field: BindField<Value>,
+    options?: BindOptions<FormatKey>
+  ) => TextBind;
+  defineTextFormats: (map: Readonly<Record<string, TextFormatFunction<StyleKey>>>) => TextFormats;
   defineTextStyles: (
     map: Record<
       string,
@@ -393,16 +428,26 @@ export type TextKit<StyleKey extends string, Font extends string> = {
 };
 
 /**
- * Binds `label` and `defineTextStyles` to one game's style names and font keys. Type-only: the
- * same two functions.
+ * Binds `label`, `bind`, `defineTextStyles` and `defineTextFormats` to one game's style names, font
+ * keys and format names. Type-only: the same four functions.
  *
- * @returns The two helpers, with the style and font arguments narrowed.
+ * @returns The four helpers, with the style, font and format arguments narrowed.
  * @example
  * ```ts
  * const { label } = textFor<"body", "ui.font-body">();
  * label({ text: "+5", style: "body", at: { x: 90, y: 180 } })[1].value.x; // 90
  * ```
  */
-export function textFor<StyleKey extends string, Font extends string>(): TextKit<StyleKey, Font> {
-  return { label, defineTextStyles };
+export function textFor<
+  StyleKey extends string,
+  Font extends string,
+  FormatKey extends string = never
+>(): TextKit<StyleKey, Font, FormatKey> {
+  // The same function: the type of the kit only lets it take the names of this game too.
+  return {
+    label,
+    bind: bind as TextKit<StyleKey, Font, FormatKey>["bind"],
+    defineTextStyles,
+    defineTextFormats
+  };
 }
