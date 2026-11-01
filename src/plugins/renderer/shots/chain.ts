@@ -18,8 +18,17 @@ export const MAX_TAPS = 16;
 /** The widest radius of a kernel: the centre, and 15 pairs. */
 const MAX_RADIUS = (MAX_TAPS - 1) * 2;
 
-/** The widest blur, in texels of the shot: its radius of 3 sigma is the widest the uniform holds. */
-const MAX_SIGMA = MAX_RADIUS / 3;
+/** The radius of a kernel, in sigmas. */
+const RADIUS_SIGMAS = 3;
+
+/** The widest blur, in texels of the shot: its radius is the widest the uniform holds. */
+const MAX_SIGMA = MAX_RADIUS / RADIUS_SIGMAS;
+
+/** Taps a side of an exact box: each averages two source pixels, at 2 texels from the next. */
+const BOX_TAPS = 2;
+
+/** Taps a side of any other hop, spread evenly over it. */
+const SPREAD_TAPS = 3;
 
 /** Floats of the box uniform: `texel`, `step`, `size`, `count` and its padding. */
 const BOX_FLOATS = 8;
@@ -80,7 +89,7 @@ export function hopsOf(
 export function gaussianTaps(sigma: number): GaussianTap[] {
   if (sigma <= 0) return [];
 
-  const radius = Math.min(Math.ceil(3 * sigma), MAX_RADIUS);
+  const radius = Math.min(Math.ceil(RADIUS_SIGMAS * sigma), MAX_RADIUS);
   const spread = 2 * sigma * sigma;
   const weightAt = (texel: number): number => Math.exp(-(texel * texel) / spread);
   let total = 1;
@@ -139,17 +148,17 @@ export function boxData(
 ): Float32Array<ArrayBuffer> {
   const ratioX = source.width / target.width;
   const ratioY = source.height / target.height;
-  const paired = !last || (ratioX === HOP_FACTOR && ratioY === HOP_FACTOR);
+  const exactBox = !last || (ratioX === HOP_FACTOR && ratioY === HOP_FACTOR);
   const data = new Float32Array(BOX_FLOATS);
 
   data.set([
     1 / source.width,
     1 / source.height,
-    paired ? 2 : ratioX / 3,
-    paired ? 2 : ratioY / 3,
+    exactBox ? BOX_TAPS : ratioX / SPREAD_TAPS,
+    exactBox ? BOX_TAPS : ratioY / SPREAD_TAPS,
     target.width,
     target.height,
-    paired ? 2 : 3
+    exactBox ? BOX_TAPS : SPREAD_TAPS
   ]);
 
   return data;

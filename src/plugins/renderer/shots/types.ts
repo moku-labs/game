@@ -102,7 +102,7 @@ export type ShotsState = {
 /**
  * shots module API, `app.renderer.shots`: what a game calls to keep the frame it is about to leave, and to ask whether
  * it is there. A shot is the frame as drawn on the canvas, HUD included, reduced and blurred on the GPU. Its key
- * resolves like any asset key through the texture providers: `image`, `Sprite`, `leave.loader.texture`.
+ * resolves like any asset key through the texture providers: `image`, `Sprite`. `leave.loader.texture` reads its key once, as the look shows, so it needs a shot that already stands.
  *
  * @example
  * ```ts

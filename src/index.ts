@@ -51,6 +51,7 @@
  * | renderer | keptMb | 64, MiB the kept pictures may hold: a filtered view that did not change is drawn from its picture, the least recently drawn goes first; 0 keeps none |
  * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
  * | renderer | uploads | 1, texture sources `sync.textures.upload` puts on the GPU a drawn frame (~9 ms each on the A26); 0 turns the queue off |
+ * | renderer | shots | undefined, no shot is taken; { width, height, blur, keep? }: texels 1–512 a side, sigma in reference units, pictures kept (8); shallow merge: a game that sets `shots` gives width, height and blur |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
  * | input | dragStartPx | 8 |

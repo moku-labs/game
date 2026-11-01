@@ -136,10 +136,15 @@ export function drawShot(
   const run: Run = { device, pipes, encoder, spent: [] };
   const taps = gaussianTaps(sigma);
 
+  // The chain, then the blur when there is a kernel.
   drawHops(run, canvas, shot);
   if (taps.length > 0) drawBlur(run, shot, taps);
+
+  // Every other key of this frame gets the same picture.
   for (const copy of copies)
     encoder.copyTextureToTexture({ texture: shot }, { texture: copy }, shot);
+
+  // After the submit: what only this take needed may go.
   device.queue.submit([encoder.finish()]);
   for (const resource of run.spent) resource.destroy();
 }

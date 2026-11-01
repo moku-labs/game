@@ -929,14 +929,14 @@ app.renderer.shots.has("shot.panorama.bolt"); // true once the next frame was dr
 - **The look is not in it.** While a key waits, the step of `sync.leave` hides the container of the look, so the frame a
   take waits for shows none, and the look shows from the next frame on its own clock. `take` asked for that frame and
   a shot asks for one more, so `onDemand` draws both. The swap, `holdMs` and input do not change.
-- **A key.** It resolves like any asset key through the texture providers: `image`, `Sprite`, `leave.loader.texture`.
+- **A key.** It resolves like any asset key through the texture providers: `image`, `Sprite`. `leave.loader.texture` reads its key once, as the look shows, so it needs a shot that already stands, and it holds that texture for the whole look.
   A view that names it before the shot, or whose key went, looks again in the next pass. A retake draws into the same
   texture. With no shot under it a key is a missing texture like any other: the placeholder and one warning, which is
   why a game asks `has` and draws its baked picture otherwise.
 - **How many.** `keep`, 8 by default. The oldest taken goes first and a new key takes its texture, so a game holds at
   most `keep` textures of `width x height x 4` bytes, counted as `kept` in `host.textures()`. A retake counts as new.
 - **The chain.** One command encoder, submitted once. The canvas is divided by 4, rounding up, while that stays at least
-  the shot's size, and the last hop ends at the shot (`hopsOf`). A hop of 4 takes 2 x 2 bilinear taps at +-1 source
+  twice the shot's size, and the last hop ends at the shot (`hopsOf`). A hop of 4 takes 2 x 2 bilinear taps at +-1 source
   pixel: its output texel centre falls on a corner of source pixels, so that is an exact box of 4 x 4. The last hop
   takes 3 x 3 taps, a third of the ratio apart. Then, with `blur` above 0, a horizontal and a vertical Gaussian at the
   shot's size, through one extra texture of that size, neighbouring weights paired into bilinear taps, at most 16 a
