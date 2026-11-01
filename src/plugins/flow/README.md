@@ -515,13 +515,18 @@ body keeps working, with the same options. `GuideOptions`:
 
 `features.register(name, description)` stores the description untouched. `nodes`, `flows` and
 `contribute` are the logic keys `logicOnly` keeps; `animations` (`anim`), `ui` (`ui`), `strings`
-(`i18n`) and `textStyles` (`text`) are the V3 interface keys, typed next to the V2 screen keys
+(`i18n`), `textStyles` and `textFormats` (`text`) are the V3 interface keys, typed next to the V2 screen keys
 (`projections`, `systems`, `components`, `scenes`, `assets`). `emitters` and `filters` are the
 V5 keys `effects` reads. `logicOnly` drops every key that is not logic, so a headless test
 composes a feature without its screen set.
 
 `GameTypes.emitters` is the emitter id union of a game. `EmitterIdOf<Types>` reads it and falls
 back to `string`, as `TextStylesOf` does for `textStyles`.
+
+`GameTypes.textFormats` is the union of the game's number format names. `TextFormatsOf<Types>` reads
+it and falls back to `never`: a game that passed none has the four built-in formats, and a name it
+never declared does not compile. `textFormats` is structural (`FeatureTextFormats`), as
+`textStyles` is: `flow` carries the map, `text` checks it at start.
 
 `systemsRun`, the key of 0.15.3, is gone: the type refuses it (`never`). A system now runs while
 its query has an entity, and `scenes` on `system()` limits it to some scenes; delete the key. The

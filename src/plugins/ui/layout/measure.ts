@@ -1,7 +1,8 @@
 /**
  * @file ui/layout — the measure function of a text that sizes itself. Yoga calls it once per
  * invalidation; the answer comes from the advance table of `text`, never from a canvas. A text
- * with `bind` is sized by the string `text` shows for it. The node of a text is marked dirty when
+ * with `bind` is sized by the string `text` shows for it, in the style a format of the game
+ * answered when the bind names one. The node of a text is marked dirty when
  * `text` wrote it and it measures to another size: a new shown string, a new locale, a font that
  * arrived. A text whose style wraps at its box is measured at the width Yoga offers, and measured
  * again at that same width. An icon without a size is square on one line of the `body` style; the
@@ -13,6 +14,7 @@ import { formatBound, isTextFormat } from "../../text/format";
 import type { Size, TextBind } from "../../text/types";
 import type { AnyComponentValue } from "../../world/types";
 import type { Element } from "../jsx/types";
+import { bindOf } from "../visual";
 import type { LayoutState, TextSource } from "./types";
 
 /** What a text is drawn in when its `style` prop is a layout style instead of a style key. */
@@ -85,6 +87,18 @@ export function needsMeasure(element: Element): boolean {
 }
 
 /**
+ * Reads the style key of a text or an icon out of its props.
+ *
+ * @param element - The element.
+ * @returns The key `text.measure` takes.
+ */
+function styleKeyOf(element: Element): string {
+  const { style } = element.node.props;
+
+  return typeof style === "string" ? style : DEFAULT_TEXT_STYLE;
+}
+
+/**
  * Reads what a text draws out of its props.
  *
  * @param element - The text element.
@@ -94,8 +108,8 @@ export function contentOf(element: Element): {
   content: string | Message;
   style: string;
 } {
-  const { content, style } = element.node.props;
-  const styleKey = typeof style === "string" ? style : DEFAULT_TEXT_STYLE;
+  const { content } = element.node.props;
+  const styleKey = styleKeyOf(element);
 
   if (typeof content === "string") return { content, style: styleKey };
   if (typeof content === "object" && content !== null && "key" in content) {
@@ -103,19 +117,6 @@ export function contentOf(element: Element): {
   }
 
   return { content: "", style: styleKey };
-}
-
-/**
- * The bind of a text, when the markup gave it one.
- *
- * @param element - The element to ask about.
- * @returns What `bind()` built, or `undefined` for any other element.
- */
-function bindOf(element: Element): TextBind | undefined {
-  const { bind } = element.node.props;
-  const isBound = element.type === "text" && typeof bind === "object" && bind !== null;
-
-  return isBound ? (bind as TextBind) : undefined;
 }
 
 /**
@@ -153,8 +154,18 @@ function listedValueOf(element: Element, bind: TextBind): number | undefined {
 export function shownOf(element: Element, source: TextSource): string | undefined {
   const bind = bindOf(element);
 
-  if (bind === undefined) return undefined;
+  return bind === undefined ? undefined : boundShown(element, bind, source);
+}
 
+/**
+ * The string a text with this bind shows, see `shownOf`.
+ *
+ * @param element - The text element.
+ * @param bind - Its bind.
+ * @param source - Where `Text.resolved` and the duration words are read.
+ * @returns The string.
+ */
+function boundShown(element: Element, bind: TextBind, source: TextSource): string {
   const resolved = source.resolved(element.entity);
 
   if (resolved !== undefined) return resolved;
@@ -163,6 +174,60 @@ export function shownOf(element: Element, source: TextSource): string | undefine
   const format = isTextFormat(bind.format) ? bind.format : "int";
 
   return value === undefined ? "" : formatBound(value, format, ms => source.duration(ms));
+}
+
+/**
+ * The size of a text whose bind names a format of the game. A format picks the style too, so the
+ * string alone does not say it: once the entity carries its `Text` both are read from there.
+ * Before that, for the first solve, the format is asked on the bound field of its `components`
+ * value, so `text` resolves what was measured.
+ *
+ * @param element - The text element.
+ * @param bind - Its bind.
+ * @param source - What it is measured through.
+ * @param width - The width Yoga offers, or `undefined` when it bounds none.
+ * @returns The size, or `undefined` when there is no answer to measure: an unknown name, a format
+ *   that threw, or no listed value.
+ */
+function namedSize(
+  element: Element,
+  bind: TextBind,
+  source: TextSource,
+  width: number | undefined
+): Size | undefined {
+  const resolved = source.resolved(element.entity);
+
+  if (resolved !== undefined) {
+    return source.measure(resolved, source.style(element.entity) ?? styleKeyOf(element), width);
+  }
+
+  const value = listedValueOf(element, bind);
+  const answer = value === undefined ? undefined : source.formatted(bind.format, value);
+
+  return answer === undefined ? undefined : source.measure(answer.text, answer.style, width);
+}
+
+/**
+ * The size a text measures to: a bound one by what it shows, any other by its content.
+ *
+ * @param element - The text element.
+ * @param source - What it is measured through.
+ * @param width - The width Yoga offers, or `undefined` when it bounds none.
+ * @returns The size before it is rounded.
+ */
+function textSize(element: Element, source: TextSource, width: number | undefined): Size {
+  const bind = bindOf(element);
+
+  if (bind === undefined) {
+    const { content, style } = contentOf(element);
+
+    return source.measure(content, style, width);
+  }
+
+  // Per shown change of a rolling counter: a built-in bind asks nothing here and builds nothing.
+  const named = isTextFormat(bind.format) ? undefined : namedSize(element, bind, source, width);
+
+  return named ?? source.measure(boundShown(element, bind, source), styleKeyOf(element), width);
 }
 
 /**
@@ -178,13 +243,11 @@ export function shownOf(element: Element, source: TextSource): string | undefine
  * @returns The width and the height, in whole units.
  */
 function naturalSize(element: Element, source: TextSource, width?: number): Size {
-  const { content, style } = contentOf(element);
-
   // An icon is one line of its style squared; a text is the string it shows.
   const size =
     element.type === "icon"
-      ? squareOf(source.measure(LINE_SAMPLE, style))
-      : source.measure(shownOf(element, source) ?? content, style, width);
+      ? squareOf(source.measure(LINE_SAMPLE, styleKeyOf(element)))
+      : textSize(element, source, width);
 
   // Whole units, so Yoga sizes the parent from the same length it draws the text at.
   return {

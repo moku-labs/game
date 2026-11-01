@@ -48,7 +48,7 @@ A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effect
 | Emitters (`defineEmitter`) | Swap. `effects` takes them from the `ui:hot-swap` event; live particles keep their old config |
 | Generated strings | Swap through `i18n.replace`. Every label resolves its message again. A sub-feature's module whose bundle is not loaded is left alone: the next load of the bundle imports it |
 | Logic: `rules/`, `nodes/`, `flows/`, `state.ts`, `tables.ts`, `kit.ts`, a feature `index.ts`, `world/components/`, `world/systems/` | Reload and restore. These files never get the footer. A `world/layout/` module gets it: plain functions swap and repaint, but one that exports an object with its own `name` or `id` is refused and reloads |
-| Scenes, systems, ECS components, filters, features, flows, nodes, plugins | Reload and restore. They are registered by value at start |
+| Scenes, systems, ECS components, filters, features, flows, nodes, plugins, text formats (`defineTextFormats`) | Reload and restore. They are registered by value at start |
 | A new projection or a new animation | Reload and restore. A scene mounts a projection, a feature registers an animation |
 | A string value in `strings/<locale>.json` | Swap. The keys watch writes `generated/strings.<locale>.ts`, for a sub-feature `generated/strings.<feature>.<locale>.ts`, and `i18n.replace` takes it |
 | A new string key | Swap, the same way: the message is new in `generated/strings.<locale>.ts` (or the sub-feature's module). `generated/strings.ts` gets the key as a type only, and a type reloads nothing |
