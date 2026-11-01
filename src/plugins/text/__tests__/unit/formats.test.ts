@@ -49,7 +49,8 @@ function pill(value: number): TextFormatAnswer {
 }
 
 /**
- * The description of a feature that brings the styles and one format.
+ * The description of a feature that brings the styles and one format. The map is `unknown` so a
+ * test can hand in a value that is no function, as a feature outside the types can.
  *
  * @param map - What goes under the `textFormats` key.
  * @returns The description.

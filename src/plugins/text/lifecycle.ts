@@ -132,6 +132,16 @@ function isFormatMap(entry: unknown): entry is { map: Record<string, unknown> } 
 }
 
 /**
+ * Tells whether an entry of a format map is a function. What it answers shows only when it runs.
+ *
+ * @param value - What the feature put under a format name.
+ * @returns True for a function.
+ */
+function isFormatFunction(value: unknown): value is TextFormatFunction {
+  return typeof value === "function";
+}
+
+/**
  * Refuses one entry of a feature's format map, or hands its function back.
  *
  * @param ctx - Domain context of the text plugin.
@@ -163,14 +173,14 @@ function checkedFormat(
     );
   }
 
-  if (typeof value !== "function") {
+  if (!isFormatFunction(value)) {
     throw new TypeError(
       `[game] Text format "${name}" of feature "${feature}" is not a function.\n` +
         "  Use a function of the value that answers { content, style }."
     );
   }
 
-  return value as TextFormatFunction;
+  return value;
 }
 
 /**
