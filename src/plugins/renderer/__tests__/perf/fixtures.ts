@@ -35,6 +35,7 @@ import { FakeFilter, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 import { startOverlayStage } from "../overlay-harness";
 import { type AgentRenderer, startAgent } from "../perf-harness";
+import { shadedSlot } from "../quad-harness";
 
 /** The owner of every entity the fixtures spawn. */
 const OWNER = { kind: "plugin", name: "perf" } as const;
@@ -764,6 +765,62 @@ async function startInheritBoard(count: number): Promise<KeptBoard> {
   stage.frames(40);
 
   return board;
+}
+
+/**
+ * A board of `count` views on their filter's own shader (F126 stage 2), as `rows` of the bench draws them: every view
+ * carries one filter with a quad, in a frozen list as `effects` hands it over, and every frame writes every view's number
+ * after the mark, then the kept cache collects and flushes. The mesh reads the number itself: the frame renders nothing.
+ *
+ * @param count - The shaded views.
+ * @returns One frame: the marks, the numbers, the collect and the flush.
+ */
+export async function keptShadedBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const views: Entity[] = [];
+  const numbers: Array<{ amount: number }> = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: (index % 5) * 200, y: Math.floor(index / 5) * 200 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    const slot = shadedSlot({ origin: new Float32Array(2) });
+
+    if (slot.quad?.fu !== undefined) numbers.push(slot.quad.fu.uniforms as { amount: number });
+
+    sync.filters.set(view, Object.freeze([slot]));
+  }
+
+  stage.frames(12);
+
+  let low = false;
+  const frame = (): void => {
+    low = !low;
+
+    // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+    for (let index = 0; index < views.length; index += 1) {
+      demand.invalidate(views[index] ?? 0);
+      // Whole numbers: a new double written to a field is boxed by the write, which the fixture does as `effects` does.
+      (numbers[index] ?? { amount: 0 }).amount = low ? 1 : 2;
+    }
+
+    kept.collect();
+    kept.flush();
+  };
+
+  for (let index = 0; index < 4; index += 1) frame();
+
+  const records = stage.drawn.mock.ctx.state.kept.records;
+
+  if (records.length !== count || records.some(record => !record.shaded)) {
+    throw new Error("perf fixture: a view of the shaded board is not shaded");
+  }
+
+  return frame;
 }
 
 /**

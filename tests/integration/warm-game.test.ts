@@ -141,6 +141,14 @@ const FILTERS = [
   "AlphaFilter"
 ];
 
+/** The bodies a kept view can run on its quad: the kinds of a checked plain body, drawn after their filter. */
+const QUADS = [
+  "effects.glow.quad",
+  "effects.outline.quad",
+  "fixture.tint.quad",
+  "fixture.veil.quad"
+];
+
 /** The content subjects of the renderer. */
 const CONTENT = [
   "sprite",
@@ -203,6 +211,11 @@ function probeOf(root: pixi.Container, into: pixi.Texture | undefined): string {
 
   // Pixi's label is `null` until one is given.
   const label: string | null | undefined = node?.label;
+
+  if (label === "renderer.warm.quad") {
+    return `${(node as pixi.Mesh).shader?.gpuProgram?.name} ${target}${clip}`;
+  }
+
   const subject =
     label === "renderer.warm.filter"
       ? filterName(node?.filters?.[0])
@@ -352,8 +365,13 @@ describe("the warm-up of a game while its splash stands", () => {
         expect(seen, `${subject} ${variant}`).toContain(`${subject} ${variant}`);
     }
 
+    // A quad once: its four variants make one pipeline.
+    for (const quad of QUADS) expect(seen).toContain(`${quad} ${VARIANTS[0]}`);
+
     // Each drawn exactly once: nothing warmed twice on one device.
-    expect(game.probes.flat()).toHaveLength((CONTENT.length + FILTERS.length) * VARIANTS.length);
+    expect(game.probes.flat()).toHaveLength(
+      (CONTENT.length + FILTERS.length) * VARIANTS.length + QUADS.length
+    );
   });
 
   // Bug: the warm-up spills past the splash into the first screen, which then pays for it.

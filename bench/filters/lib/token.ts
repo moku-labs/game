@@ -1,6 +1,6 @@
 /**
  * @file The `#scene` token of the page address: `#slope-4-mask&k=12`, `#glow&n=24`,
- * `#arms=slope-0,slope-2&every=2&k=12`. Pure.
+ * `#arms=slope-0,slope-2&every=2&k=12`, `#rows&hold=500`. Pure.
  */
 
 /** The seconds of one arm when the address names none. */
@@ -17,6 +17,8 @@ export type Token = {
   k?: number;
   /** The count of a scene that takes one. */
   n?: number;
+  /** The scene's time held at this many milliseconds, for a compare of pixels at one value. */
+  hold?: number;
   /** The arms to turn through; empty for one scene. */
   arms: string[];
   /** The seconds of one arm. */
@@ -61,12 +63,14 @@ export function parseToken(hash: string): Token {
   const arms = fields.get("arms")?.split(",").filter(Boolean) ?? [];
   const k = wholeOf(fields.get("k"));
   const n = wholeOf(fields.get("n"));
+  const hold = wholeOf(fields.get("hold"));
   const every = wholeOf(fields.get("every")) || DEFAULT_EVERY;
 
   return {
     scene: arms[0] ?? (first === "" || first.includes("=") ? DEFAULT_SCENE : first),
     ...(k === undefined ? {} : { k }),
     ...(n === undefined ? {} : { n }),
+    ...(hold === undefined ? {} : { hold }),
     arms,
     every
   };

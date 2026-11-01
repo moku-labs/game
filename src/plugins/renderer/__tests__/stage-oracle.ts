@@ -12,7 +12,10 @@
  * subtree or the stand-in's filters differ from what was rendered, when the top is drawn too, when
  * the quad is not where the picture lands, and when a top hidden for its picture is shown by no
  * quad. A sprite beside the container whose picture it shows is a quad drawn direct (a stack of
- * alphas, F54), checked as a quad with no stand-in. Any other sprite that shows a picture of a
+ * alphas, F54), checked as a quad with no stand-in. A mesh whose shader reads a texture an engine
+ * render drew into is the quad of a shaded view (F126 stage 2): checked as a quad over the copy of
+ * its picture, on a unit square. A sprite that shows a copy with no filter over it is a padded
+ * picture left on the screen. Any other sprite that shows a picture of a
  * container directly is a range picture: its leaves must
  * not be drawn live beside it, its nodes must be as they were rendered, and it must not be in its
  * own picture. It imports nothing of the kept module either.
@@ -24,7 +27,7 @@ import type { RenderCall, StageApplication } from "./stage-pixi";
 /** The real Pixi classes the oracle tells nodes apart by. */
 type PixiClasses = Pick<
   typeof Pixi,
-  "BitmapText" | "Graphics" | "NineSliceSprite" | "ParticleContainer" | "Sprite" | "Text"
+  "BitmapText" | "Graphics" | "Mesh" | "NineSliceSprite" | "ParticleContainer" | "Sprite" | "Text"
 >;
 
 /**
@@ -66,6 +69,8 @@ type PictureRender = {
 /** A render of a sprite of a picture into a texture: the stand-in of a filter output, with its filters then. */
 type StandInRender = {
   standIn: Pixi.Sprite;
+  /** The picture it drew: one copy sprite draws every padded picture, its texture set before the render. */
+  picture: Pixi.Texture;
   filters: string;
   transform: NonNullable<RenderCall["transform"]>;
 };
@@ -150,6 +155,8 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
   const versions = new WeakMap<object, number>();
   const pictureRenders = new WeakMap<object, PictureRender>();
   const standInRenders = new WeakMap<object, StandInRender>();
+  /** The texture of each source a render drew into: a mesh's shader names the source. */
+  const targets = new WeakMap<object, Pixi.Texture>();
   /** Every top a filter output was drawn from: a view kept as a quad. */
   const pictured = new Set<Pixi.Container>();
   /** The tops the quads of the last check drew: walked as drawn by the frame oracle. */
@@ -448,16 +455,32 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
   };
 
   /**
-   * Every sprite the stage pass draws whose texture an engine render drew into: quads and range sprites.
+   * The texture a node draws: a sprite's own, or the one a mesh's shader reads, which a nine-slice's mesh has not.
+   *
+   * @param node - The node.
+   * @returns The texture, or `undefined`.
+   */
+  const shownBy = (node: Pixi.Container): Pixi.Texture | undefined => {
+    if (node instanceof pixi.Sprite) return node.texture;
+
+    const source: unknown = node instanceof pixi.Mesh ? node.shader?.resources.uTexture : undefined;
+
+    return typeof source === "object" && source !== null ? targets.get(source) : undefined;
+  };
+
+  /**
+   * Every sprite and mesh the stage pass draws whose texture an engine render drew into: quads and range sprites.
    *
    * @param node - The node walked now.
    * @param into - Where they go.
    * @returns The same list.
    */
-  const shownPictures = (node: Pixi.Container, into: Pixi.Sprite[] = []): Pixi.Sprite[] => {
+  const shownPictures = (node: Pixi.Container, into: Pixi.Container[] = []): Pixi.Container[] => {
     if (!node.visible || !node.renderable || node.alpha <= 0) return into;
 
-    if (node instanceof pixi.Sprite && versions.has(node.texture)) into.push(node);
+    const texture = shownBy(node);
+
+    if (texture !== undefined && versions.has(texture)) into.push(node);
 
     for (const child of node.children) shownPictures(child, into);
 
@@ -500,11 +523,11 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
    * Checks one quad (P13.1 a–d): the top's subtree and its linear part, the stand-in's filters, no double draw, the
    * place of the quad.
    *
-   * @param quad - The sprite of a filter output.
+   * @param quad - The sprite of a filter output, or the mesh over a copy of a picture.
    * @param standIn - The render of its stand-in.
    */
-  const checkQuad = (quad: Pixi.Sprite, standIn: StandInRender): void => {
-    const rendered = pictureRenders.get(standIn.standIn.texture);
+  const checkQuad = (quad: Pixi.Container, standIn: StandInRender): void => {
+    const rendered = pictureRenders.get(standIn.picture);
 
     if (rendered === undefined) {
       fail(quad.label, "a quad whose stand-in shows no picture");
@@ -524,6 +547,11 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
       fail(name, `filters: ${filtersText(standIn.standIn)}`);
     }
 
+    // The copy of a picture is for a shader to read: a sprite of it shows no filter at all.
+    if (quad !== standIn.standIn && quad instanceof pixi.Sprite && standIn.filters === "") {
+      fail(name, "a sprite shows the padded picture of a shaded view");
+    }
+
     if (drawnInStage(top)) fail(name, "the top is drawn beside its quad");
     // The picture leaves the top's own alpha out, the quad draws it (F120); a quad drawn direct (F54) also carries the
     // alpha of its stack, so only the quad of a stand-in is compared.
@@ -537,14 +565,18 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
     // the one it was taken at and of the stand-in's offset. A changed linear part draws it scaled (F67).
     const placed = quad.getGlobalTransform(undefined, false);
     const lands = times(times(world, inverted(transform)), inverted(standIn.transform));
+    // A mesh stands on the unit square: its transform carries the size a sprite takes from its texture.
+    const shown = quad instanceof pixi.Mesh ? shownBy(quad) : undefined;
+    const across = shown?.width ?? 1;
+    const down = shown?.height ?? 1;
 
     if (
       Math.abs(placed.tx - lands.tx) > PLACE_TOLERANCE ||
       Math.abs(placed.ty - lands.ty) > PLACE_TOLERANCE ||
-      Math.abs(placed.a - lands.a) > PLACE_TOLERANCE ||
-      Math.abs(placed.b - lands.b) > PLACE_TOLERANCE ||
-      Math.abs(placed.c - lands.c) > PLACE_TOLERANCE ||
-      Math.abs(placed.d - lands.d) > PLACE_TOLERANCE
+      Math.abs(placed.a - lands.a * across) > PLACE_TOLERANCE ||
+      Math.abs(placed.b - lands.b * across) > PLACE_TOLERANCE ||
+      Math.abs(placed.c - lands.c * down) > PLACE_TOLERANCE ||
+      Math.abs(placed.d - lands.d * down) > PLACE_TOLERANCE
     ) {
       fail(name, `quad at ${placed.tx},${placed.ty}, its picture lands at ${lands.tx},${lands.ty}`);
     }
@@ -591,14 +623,21 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
 
     throughTops = new Set();
 
-    for (const sprite of shownPictures(app.stage)) {
-      const standIn = standInRenders.get(sprite.texture);
-      const rendered = pictureRenders.get(sprite.texture);
+    for (const shown of shownPictures(app.stage)) {
+      const texture = shownBy(shown) as Pixi.Texture;
+      const standIn = standInRenders.get(texture);
+      const rendered = pictureRenders.get(texture);
+      const sprite = shown as Pixi.Sprite;
 
-      if (standIn !== undefined) checkQuad(sprite, standIn);
+      if (standIn !== undefined) checkQuad(shown, standIn);
       else if (rendered !== undefined && rendered.container.parent === sprite.parent) {
         // A quad that draws its top's subtree picture itself (a stack of alphas, F54): beside its top, no stand-in.
-        checkQuad(sprite, { standIn: sprite, filters: filtersText(sprite), transform: IDENTITY });
+        checkQuad(sprite, {
+          standIn: sprite,
+          picture: texture,
+          filters: filtersText(sprite),
+          transform: IDENTITY
+        });
         pictured.add(rendered.container);
       } else if (rendered !== undefined) {
         checkRange(sprite, rendered);
@@ -621,8 +660,9 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
     for (const node of rendered.lines.keys()) {
       inRanges.add(node);
 
-      const quad = node instanceof pixi.Sprite ? standInRenders.get(node.texture) : undefined;
-      const top = quad === undefined ? undefined : pictureRenders.get(quad.standIn.texture);
+      const texture = shownBy(node as Pixi.Container);
+      const quad = texture === undefined ? undefined : standInRenders.get(texture);
+      const top = quad === undefined ? undefined : pictureRenders.get(quad.picture);
       // A quad drawn direct (F54) shows its top's picture itself, beside the top.
       const direct = node instanceof pixi.Sprite ? pictureRenders.get(node.texture) : undefined;
 
@@ -683,6 +723,7 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
     }
 
     versions.set(target, (versions.get(target) ?? 0) + 1);
+    targets.set(target.source, target);
 
     const transform = call.transform ?? IDENTITY;
 
@@ -692,6 +733,7 @@ export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOrac
     if (container instanceof pixi.Sprite && picture !== undefined) {
       standInRenders.set(target, {
         standIn: container,
+        picture: container.texture,
         filters: filtersText(container),
         transform
       });

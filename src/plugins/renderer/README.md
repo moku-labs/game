@@ -227,7 +227,7 @@ internal markup: select them by nothing, set the properties instead.
 | `debug.state()` | `{ nineSlice, verifyFrames, kept, overdraw }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
-| `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
+| `filters.warm(filter, quad?)` | Creates the GPU pipelines of a filter before a screen needs them, and of its body on its `quad` when it has one: drawn invisibly before a frame (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
 | `leave.show(look)` | `scenes` at the start of a live switch: a veil over the whole canvas fading in, and a loader that waits for its `afterMs`, drawn above every layer; replaces a look that runs. See "The picture of a scene being left". Inert: nothing. |
 | `leave.land()` | `scenes` after the swap: the veil fades out over its `outMs` and leaves the stage; a ring or a texture loader goes at once, a layer loader that shows fades out with the veil. Nothing runs: nothing. |
 | `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once, a lifted layer back under the root. Nothing runs: nothing. |
@@ -262,7 +262,8 @@ them are disabled: a filter Pixi holds is pushed and popped around its view ever
 switched off (a button's press dim waits switched off). A filter switched on or off is handed over again by the draw
 callback's first step (`sync.stepFilters`), before anything reads the tree, so the switch is drawn in the frame it was
 made; uniform writes and `enabled` flips need no call. The render passes and the kept pictures read the slots, enabled
-or not, as before.
+or not, as before. A slot of `effects` may carry a `quad`: the filter's body built as a program for a mesh, one object per
+instance, which a kept view whose numbers change draws through (see "Kept pictures"). A game's own slot leaves it out.
 
 The filters come off the object and its wrapper when the view lets its object go: a pooled sprite
 never carries one into its next life, and a `Display` object leaves without them, on despawn as at
@@ -306,9 +307,11 @@ task, so a probe never shows. One probe draw is one subject in one target:
   plain bitmap text), the same sprite blending `"add"` and `"screen"` (`sprite-add`, `sprite-screen`: a glow's
   pipelines, see "Blend"), a `Graphics` with `batchMode: "no-batch"`, a `ParticleContainer` with the
   normal and the add blend, a `BitmapText` in the first font installed (queued when it arrives,
-  ahead of the filters still waiting), and every filter handed to `filters.warm` (`effects` hands it
+  ahead of the filters still waiting), every filter handed to `filters.warm` (`effects` hands it
   every checked definition, every stage of its inputs and every Pixi-core kind once the shader
-  checks settled);
+  checks settled), and on WebGPU the quad a filter was handed over with: a mesh of its program on a
+  unit square of the module's own, drawn once after the filter, in the first target of the device, so
+  a view's first frame on its own shader (see "Kept pictures") compiles nothing;
 - the targets on WebGPU: the canvas and a texture (a 4 × 4 render texture the module owns, cleared
   at each draw), each with and without a stencil clip, as `sync` hangs clips; on WebGL one draw, the
   program does not depend on the target. A canvas the stage pass does not clear
@@ -319,6 +322,10 @@ task, so a probe never shows. One probe draw is one subject in one target:
   stack. Pixi 8.21 reads the input texture of such a level as it last left it at its next push, and a
   pool trim destroys that texture in between: the push throws inside Pixi's render, and the stack it
   leaves unbalanced breaks every filter of the frames after it.
+- a quad's draw runs in a `device.pushErrorScope("validation")`: a program that does not fit its
+  pipeline fails asynchronously, as a blank view with nothing in the logs. An error logs
+  `renderer:warm-invalid` at error level with `program` and `message`, and the warm-up goes on: the
+  draw failed, not Pixi's filter stack.
 
 The probes hang in a tree of their own, never in the stage, and only during their own render. The
 queue asks `demand` for the next frame (`"request"`), so a renderer drawing on demand draws through
@@ -438,7 +445,7 @@ Where nothing counts (headless, a test stage, a fake application) both report th
 0 while inert; otherwise `1 + Σ over views drawn under the root with an enabled filter (1 + Σ passes of the
 enabled slots)`; a view drawn from its kept picture costs nothing, nor does a view inside one or under any node that
 is not drawn (an empty or alpha-0 view, a hidden layer: `visible` or `renderable` false up to the root), and the
-passes the last flush of the kept pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A filtered view costs one pass for its content and one per filter apply (spike
+passes the last flush of the kept pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A view on its own shader (see "Kept pictures") is no pass: its body runs on a mesh in the pass that draws the canvas, and only the copy of its padded picture counts, 1, when the picture, the padding or the resolution changed. A filtered view costs one pass for its content and one per filter apply (spike
 P10); a disabled filter costs nothing, and a view whose filters are all disabled counts 0. A view
 out of the tree (an unknown layer) counts 0. The pins from P10: no filter `1`; one glow of 1 pass
 on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and a tint on ten
@@ -1039,7 +1046,7 @@ What each stage depends on, and the only stage redone when it changes:
 | Its world scale or rotation (an ancestor's zoom) | nothing: the quad is drawn scaled within 2× of the take either way, past it stages 1, 2, 3, and once at rest |
 | An ancestor's alpha | nothing: the quad hangs in the view's parent and is faded with it |
 | What the chain of the first filter with inputs draws (`inputs.version()`) | stages 2, 3 |
-| A filter value (`effects` calls `invalidate` before the write), the padding, a `"placed"` filter's move | stage 3; on a stack whose resolution followed a step stages 1, 2, 3, so a picture is never a mix of two; for a stack of alphas nothing: the quad's alpha |
+| A filter value (`effects` calls `invalidate` before the write), the padding, a `"placed"` filter's move | stage 3; on a stack whose resolution followed a step stages 1, 2, 3, so a picture is never a mix of two; for a stack of alphas nothing: the quad's alpha; for a view on its own shader nothing: the mesh reads the number (see below) |
 | A move of the view itself | nothing: the quad moves; a picture cut to the canvas: stages 1, 2, 3 |
 | The canvas size, for a picture cut to it | stages 1, 2, 3 |
 
@@ -1142,6 +1149,41 @@ another resolution than the canvas (F126) is resampled, not stale: it is skipped
 moves off its grid or hangs under a translucent ancestor is skipped and counted, not compared: a fading ancestor fades
 the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design.
 
+### A view on its own shader
+
+A kept view whose filter numbers change would pay a stage 3 pass in every frame, 1.9 ms on the A26 at 221 MHz, and a live
+one a canvas break. From its third output in a row the engine draws such a view through the filter's own body instead (F126
+stage 2): a `Mesh` over the view's picture runs it in the pass that draws the canvas, and a new number is read by the mesh
+as it stands, with no pass and no take. On the A26, 8 small rows cost 34.4 ms live, 38.5 ms kept with a pass a frame and
+23.0 ms on the mesh (spike, GPU time at 221 MHz, whole frame), their pixels within 1/255 of live. A game does nothing:
+`cache` keeps its meaning, the mode enters and leaves by itself, and WebGL keeps stage 3.
+
+A record fits when it is on WebGPU with exactly one enabled filter, of `effects` (the slot has a `quad`), with no inputs, on
+`resolution: "inherit"`, and does not draw direct. An `Alpha` beside the filter does not fit: stage 3 draws `F(A·x)` in stack
+order, the mesh would draw `A·F(x)`, and a body that is not alpha-linear would pop at every entry. `s3` then holds the padded
+picture, the subtree picture copied at `translate(Ps, Ps)` with no filter: one pass, only when the picture, the padding or the
+resolution changed, so a retake on the mesh costs stage 1 and that copy. The mesh stands on one unit square of the run,
+scaled by the output's CSS size, and `uOutputFrame.xy` holds the picture's canvas place, so `keptOrigin` is 0 in the mode and
+`canvasPixel` answers what it answers live.
+
+It enters at the third output owed without a gap of more than `CALM_AFTER` frames (`QUAD_AFTER` = 2): a tween that writes every
+second frame reaches it, a write now and then does not. It goes back to a sprite after `QUAD_CALM` (30) drawn frames without
+a change, about a second on the A26: a resting mesh costs 0.08 ms GPU and 0.03 ms CPU a frame on a small body and the whole
+fill of a heavy one, where going back costs one stage 3 pass and a rebuild of the render group's instructions. Leaving at
+rest shares the limit of the refining and the settle, two a flush: forty views leave over twenty frames. It counts as a refresh
+(`"filter"`) and marks nothing above: the pixels stand. Every other way out goes through `goLive` or `goDirect`, which leave
+first, so a mesh never outlives its binding: an eviction, a churn, an ineligible frame, a stack that stopped fitting (in the
+frame it stopped, with its stage 3), a stack reduced to an `Alpha`. The mesh, its shader and the spare sprite stay with the
+record, so an entry after the first makes nothing; another instance of the filter builds the shader again. The record frees
+them, its group's uniform buffer first, before its textures; the geometry and the one sprite that copies go at a device loss
+and at `onStop`.
+
+A change on the mesh marks the pictures above it and the ranges that hold it, as a pass would. It counts as no take and as no
+refresh. `debug.verifyFrames` compares the mesh with the live filter from its first frame on, as any picture. Off the padding
+grid (a fractional resolution) a body's frame is up to one device pixel wider than live: nothing visible, and no more
+difference from live than a stage 3 picture has. Slices B and C of the change bring a placed view under a filter and
+`cache: false` views; both stay as they were until then.
+
 ### Why a view is drawn live
 
 `sync.debug.why()` (agent builds; every other build answers a frozen `[]`) answers one entry per view with an enabled
@@ -1158,7 +1200,8 @@ app.renderer.sync.debug.why();
 
 `view` is the label the monitor names the view by. `mode` is `"kept"`, `"direct"` (a stack of alphas drawn by its quad)
 or `"live"`. `calmIn` is the still frames left before a take, 0 when it waits for none. `retake` is the view's last
-take when it fell in the last full second. The step keeps numbers on the record, no string per frame; the names come
+take when it fell in the last full second. `quad: true` is there on a kept view that runs on its own shader, and on no other.
+The step keeps numbers on the record, no string per frame; the names come
 from two append-only lists.
 
 `reason`, `null` unless the view is live. The checks of a record's frame in their order, the first that fails names it:

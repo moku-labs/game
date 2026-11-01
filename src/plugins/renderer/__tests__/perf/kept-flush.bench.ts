@@ -10,6 +10,7 @@ import {
   keptFadeBoard,
   keptFractionalBoard,
   keptOwnFadeBoard,
+  keptShadedBoard,
   keptSteppedBoard,
   keptWhyBoard,
   keptZoomBoard
@@ -28,6 +29,7 @@ const crowd = await crowdWaitingBoard(10);
 const noted = await keptWhyBoard(10);
 const fractional = await keptFractionalBoard(40);
 const steppedToFraction = await keptSteppedBoard(40, 1.5);
+const shaded = await keptShadedBoard(40);
 
 describe("the kept flush of a quiet board", () => {
   bench("10 kept views, a calm frame", calm, BENCH_OPTIONS);
@@ -42,6 +44,7 @@ describe("the kept flush of a quiet board", () => {
   bench("10 live views changed every frame, their reasons noted (F126)", noted, BENCH_OPTIONS);
   bench("40 kept views stepped at a fractional resolution", fractional, BENCH_OPTIONS);
   bench("40 kept views stepped after a step to a fraction", steppedToFraction, BENCH_OPTIONS);
+  bench("40 shaded views, their numbers written every frame (F126)", shaded, BENCH_OPTIONS);
   bench(
     "10 kept views and a glowing filtered view drawn live, stepped (F68)",
     glowing,

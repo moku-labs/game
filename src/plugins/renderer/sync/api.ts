@@ -54,6 +54,7 @@ import type {
   DisplayAdapter,
   DisplayEntry,
   FilterSlot,
+  FilterSlotQuad,
   HitBox,
   LeaveLook,
   OverlayEventSink,
@@ -941,7 +942,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       area: (entity: Entity, area: readonly [number, number, number, number] | undefined): void =>
         setArea(sctx, entity, area),
 
-      warm: (filter: PixiFilter): Promise<boolean> => warmFilter(sctx, filter)
+      warm: (filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean> =>
+        warmFilter(sctx, filter, quad)
     },
 
     leave: {

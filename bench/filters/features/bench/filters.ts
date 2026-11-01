@@ -143,6 +143,41 @@ export const FlipFold = defineFilter("bench.flipFold", {
   padding: 8
 });
 
+/** The flip of an order row, shaped like OrderFlip: one number, written each frame. */
+const ROW_FLIP = body(`let lean = 1.0 + sin(fu.angle) * (n.x - 0.5) * 0.5;
+  let flat = max(abs(cos(fu.angle)), 0.02);
+  let p = vec2<f32>(0.5 + (n.x - 0.5) * lean, 0.5 + (n.y - 0.5) / flat * lean);
+  if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) {
+    return vec4<f32>(0.0);
+  }
+  return textureSampleLevel(uTexture, uSampler, p * gfu.uInputClamp.zw, 0.0);`);
+
+/** The row flip, kept: the engine draws it through its own shader while its number changes. */
+export const RowFlip = defineFilter("bench.rowFlip", {
+  wgsl: ROW_FLIP,
+  glsl: GLSL_PASS,
+  uniforms: { angle: 0 },
+  padding: 8,
+  cache: "local"
+});
+
+/** The row flip, drawn live. */
+export const RowFlipLive = defineFilter("bench.rowFlipLive", {
+  wgsl: ROW_FLIP,
+  glsl: GLSL_PASS,
+  uniforms: { angle: 0 },
+  padding: 8,
+  cache: false
+});
+
+/** The fixed drop of the rest arm: a kept picture that never changes. */
+export const RestShade = defineFilter("bench.restShade", {
+  wgsl: body("return vec4<f32>(c.rgb * fu.strength, c.a);"),
+  glsl: GLSL_PASS,
+  uniforms: { strength: 0.9 },
+  cache: "local"
+});
+
 /** A soft round window over a picture and a subtree: draws only the disc of its area. */
 export const LensWindow = defineFilter("bench.lensWindow", {
   wgsl: body("return c * smoothstep(0.5, 0.5 - fu.soft, distance(n, vec2<f32>(0.5, 0.5)));"),
@@ -198,6 +233,9 @@ export const BENCH_FILTERS = [
   FogDevelopLive,
   FogDevelopLocal,
   FlipFold,
+  RowFlip,
+  RowFlipLive,
+  RestShade,
   LensWindow,
   PromoMap,
   PromoProcedural,
