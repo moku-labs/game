@@ -52,6 +52,8 @@ export function createBenchState(): BenchState {
     mounted: undefined,
     mountedMs: 0,
     nowMs: 0,
+    hold: undefined,
+    marks: [],
     ballast: [],
     k: 0,
     n: undefined,
@@ -83,11 +85,12 @@ function sceneOf(name: string): BenchScene {
 /**
  * The stage a scene mounts on.
  *
+ * @param state - The state: where a mark goes.
  * @param host - The engine.
  * @param n - The count the address named.
  * @returns The stage.
  */
-function stageOf(host: BenchHost, n: number | undefined): Stage {
+function stageOf(state: BenchState, host: BenchHost, n: number | undefined): Stage {
   const { ecs } = host;
   const { width, height } = host.screen();
 
@@ -101,7 +104,11 @@ function stageOf(host: BenchHost, n: number | undefined): Stage {
     set: (entity, component, patch) => ecs.set(entity, component, patch),
     despawn: entity => ecs.despawn(entity),
     now: host.now,
-    setResolution: resolution => host.monitor.setResolution(resolution)
+    setResolution: resolution => host.monitor.setResolution(resolution),
+    mark: label => {
+      state.marks.push({ label, frame: host.monitor.frames().written - state.since });
+      host.monitor.mark(label);
+    }
   };
 }
 
@@ -144,6 +151,7 @@ function rowOf(state: BenchState, host: BenchHost): ArmRow {
     k: state.k,
     origin: typeof performance === "undefined" ? 0 : performance.timeOrigin,
     ...readArm(host.monitor.frames(), state.since, SETTLE_FRAMES),
+    marks: [...state.marks],
     stats: {
       canvasPasses: stats.canvasPasses,
       canvasPassesMax: stats.canvasPassesMax,
@@ -197,9 +205,11 @@ function openScene(
 
   state.k = scene.name === "ballast" && asked === 0 ? DEFAULT_K : asked;
   state.n = options.n ?? state.n;
+  state.hold = options.hold ?? state.hold;
+  state.marks = [];
   setBallast(state, host, state.k);
   state.scene = scene;
-  state.mounted = scene.mount(stageOf(host, state.n));
+  state.mounted = scene.mount(stageOf(state, host, state.n));
   state.mountedMs = state.nowMs;
   state.since = host.monitor.frames().written;
   host.monitor.mark(`arm ${scene.name} k=${state.k}`);
@@ -223,7 +233,7 @@ export function benchFrame(state: BenchState, host: BenchHost, elapsedMs: number
     openScene(state, host, sceneOf(cycle.arms[cycle.at] ?? ""), {});
   }
 
-  state.mounted?.tick?.(elapsedMs - state.mountedMs);
+  state.mounted?.tick?.(state.hold ?? elapsedMs - state.mountedMs);
 }
 
 /**
@@ -243,6 +253,9 @@ export function followAddress(state: BenchState, host: BenchHost, hash: string):
     ...(token.k === undefined ? {} : { k: token.k }),
     ...(token.n === undefined ? {} : { n: token.n })
   };
+
+  // For one scene and for a run of arms alike; an address that names none lets the scenes run.
+  state.hold = token.hold;
 
   if (unknown !== undefined) {
     host.warn("bench:unknown-scene", { scene: unknown });

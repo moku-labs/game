@@ -3,9 +3,11 @@
  * keeps.
  */
 import type { Entity } from "../../world/types";
+import type { FilterGlobals } from "../quad";
 import type {
   FilterSlot,
   FilterSlotInputs,
+  FilterSlotQuad,
   HiddenCtx,
   SyncWriters,
   View,
@@ -17,9 +19,14 @@ import type {
   PixiContainer,
   PixiFilter,
   PixiMatrix,
+  PixiMesh,
+  PixiMeshGeometry,
   PixiModule,
   PixiRenderTexture,
+  PixiShader,
   PixiSprite,
+  PixiTextureSource,
+  PixiUniformGroup,
   RendererCtx
 } from "../types";
 
@@ -270,6 +277,36 @@ export type KeptInternal = {
 /** The two lives of a record. */
 export type KeptMode = "live" | "kept";
 
+/** What draws a kept picture beside its top: a sprite of the picture, or the mesh of a shaded record. */
+export type KeptQuad = PixiSprite | PixiMesh;
+
+/**
+ * What a shaded record draws through (F126 stage 2): made at its first entry and kept while the record lives, so an entry
+ * after that makes nothing. While the record is not shaded the shader binds no texture of the record.
+ */
+export type KeptShade = {
+  /** Runs the filter's program over the padded picture, on the state's unit quad; destroyed with the record. */
+  mesh: PixiMesh;
+  /** The program of `quad` and what it binds: `gfu`, the padded picture, its sampler, and `quad.fu` when there is one. */
+  shader: PixiShader;
+  /** The global filter uniforms a filter pass would hand the body; static, uploaded only when a value changed. */
+  readonly gfu: PixiUniformGroup;
+  /** The arrays `gfu` reads, typed. */
+  readonly vectors: FilterGlobals;
+  /** The sprite of the record's picture, out of the tree while the mesh draws. */
+  sprite: PixiSprite;
+  /** The slot's quad the shader was built from. */
+  quad: FilterSlotQuad;
+  /** The texture source the shader binds. */
+  source: PixiTextureSource;
+  /** The `s1Version` the padded picture in `s3` was copied from; -1 when `s3` holds no copy. */
+  copied: number;
+  /** The device width of that copy: resizing `s3` in place blanks it without moving `s1Version`. */
+  copiedWidth: number;
+  /** The device height of that copy. */
+  copiedHeight: number;
+};
+
 /** One filtered view the cache watches. */
 export type KeptRecord = {
   readonly entity: Entity;
@@ -286,8 +323,18 @@ export type KeptRecord = {
   standIn: PixiSprite | undefined;
   /** A second Sprite(stage 1) whose filters are [keeper] only (P3.2). */
   keeperStandIn: PixiSprite | undefined;
-  /** Sprite(stage 3), in the tree beside the top. */
-  quad: PixiSprite | undefined;
+  /** Sprite(stage 3), in the tree beside the top; the mesh of `shade` while the record is shaded. */
+  quad: KeptQuad | undefined;
+  /** What the record draws through while shaded; made at its first entry, kept while the record lives. */
+  shade: KeptShade | undefined;
+  /** The record draws through the mesh: `s3` holds the padded picture, not a filter output. */
+  shaded: boolean;
+  /** Drawn frames that owed stage 3 alone, without a gap of `CALM_AFTER` frames. */
+  outputRuns: number;
+  /** The `KeptState.frame` of the last of them. */
+  outputAt: number;
+  /** The `KeptState.frame` of the last shaded change. */
+  shadedAt: number;
   /** The filter that runs stage 2 (P3.4). */
   keeper: PixiFilter | undefined;
   s1: PixiRenderTexture | undefined;
@@ -332,6 +379,8 @@ export type KeptRecord = {
   coarse: boolean;
   /** This step's change of the record was a refining take and nothing else: read by `dirtyAbove`, cleared with the dirty flags. */
   refined: boolean;
+  /** This step changed what the mesh draws without a pass: read by `drawingChanged`, cleared with the dirty flags. */
+  redrawn: boolean;
   /** Bytes a refused take asked for; the record is not offered again until they fit (P6.3). */
   refused: number;
   /**
@@ -416,6 +465,10 @@ export type KeptState = {
   ranges: Map<Entity, RangeRecord>;
   /** A canvas-sized texture a released range left, reused by the next take of the same size (LRU-evictable, P6). */
   spare: PixiRenderTexture | undefined;
+  /** The one unit quad every mesh of the run draws on: 3 GPU buffers, not 3 per view. Made on demand. */
+  quadGeometry: PixiMeshGeometry | undefined;
+  /** The one sprite that copies every padded picture, its texture set before the render. Made on demand. */
+  quadCopy: PixiSprite | undefined;
   /**
    * The textures of records whose views left, reused by the next take of the same size (F119); counted in `bytes`,
    * destroyed first when a take needs room.

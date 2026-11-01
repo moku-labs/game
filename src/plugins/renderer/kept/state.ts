@@ -4,6 +4,7 @@
 import { BYTES_PER_MB } from "../monitor/units";
 import { destroyWhole } from "../sources";
 import type { Config, PixiContainer, PixiRenderTexture } from "../types";
+import { destroyShade, dropQuadParts } from "./shade";
 import type { KeptRecord, KeptState, RangeRecord } from "./types";
 
 /**
@@ -67,6 +68,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     byTop: emptyMap(),
     ranges: emptyMap(),
     spare: undefined,
+    quadGeometry: undefined,
+    quadCopy: undefined,
     pool: emptyTextures(),
     poolBytes: 0,
     madeGroups: emptyWeakSet(),
@@ -103,7 +106,8 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
 
 /**
  * Destroys the engine objects of one record: the quad leaves the tree, the stand-ins drop the filters first (they
- * belong to `effects`), the keeper and every texture go.
+ * belong to `effects`), the keeper and every texture go. The shader goes before the textures: Pixi warns at a source
+ * destroyed while a shader binds it.
  *
  * @param record - The record.
  * @param drop - Destroys one texture: unregisters it from `host.keep` first while the host lives.
@@ -112,6 +116,8 @@ export function destroyRecord(
   record: KeptRecord,
   drop: (texture: PixiRenderTexture) => void
 ): void {
+  if (record.shade !== undefined) destroyShade(record.shade);
+
   if (record.standIn !== undefined) {
     // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
     record.standIn.filters = null;
@@ -129,6 +135,8 @@ export function destroyRecord(
   if (record.s1 !== undefined) drop(record.s1);
   if (record.s3 !== undefined) drop(record.s3);
   for (const texture of record.s2) drop(texture);
+  record.shade = undefined;
+  record.shaded = false;
   record.standIn = undefined;
   record.keeperStandIn = undefined;
   record.keeper = undefined;
@@ -182,6 +190,7 @@ export function stopKept(state: KeptState): void {
 
   if (state.spare !== undefined) destroyWhole(state.spare);
   state.spare = undefined;
+  dropQuadParts(state);
   for (const texture of state.pool) destroyTexture(texture);
   state.pool.length = 0;
   state.poolBytes = 0;

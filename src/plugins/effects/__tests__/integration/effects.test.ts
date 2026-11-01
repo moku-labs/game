@@ -324,7 +324,9 @@ describe("effects plugin integration", () => {
     expect(object.filterWrites).toBe(1);
     expect(FakeFxGpuProgram.made.map(program => program.options.name)).toEqual([
       "effects.glow",
-      "fx.tint"
+      "fx.tint",
+      "effects.glow.quad",
+      "fx.tint.quad"
     ]);
 
     const buffers = [glow, tint].map(filter => (filter?.resources.fu as FakeUniformGroup).buffer);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Glow } from "../../filters/builtins";
 import { BUDGET, NOISE } from "./budgets";
 import {
   bytesPerCall,
@@ -30,6 +31,16 @@ describe("effects:filters, heap bytes per frame step", () => {
     // The tween's own write of a fraction into the stored value: not the sync's bytes.
     const write = bytesPerCall(tweenWrite(fixture));
 
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
+  });
+
+  // Bug it guards: the look-up of the quad, asked at every sync of a view that writes its numbers, allocates per frame.
+  it("one Glow strength tweened on one of 12 filtered views, its quad handed over", () => {
+    const fixture = filtersFixture([Glow.filter]);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
+
+    expect(fixture.mock.renderer.sets.some(set => set.slots[0]?.quad !== undefined)).toBe(true);
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
   });
 

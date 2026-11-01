@@ -35,6 +35,8 @@ export type Stage = {
   now(): number;
   /** Draws at a resolution from the next frame on; `undefined` hands it back. A debug page only. */
   setResolution(resolution: number | undefined): number;
+  /** Marks this frame in the arm's row and in the perf log. */
+  mark(label: string): void;
 };
 
 /** One scene of the table. */

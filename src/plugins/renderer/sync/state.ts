@@ -85,6 +85,7 @@ function createWarmState(): WarmState {
     queue: [],
     head: 0,
     filters: emptySet(),
+    quads: emptyMap(),
     waiting: emptyMap(),
     textQueued: false,
     textFont: undefined,

@@ -42,6 +42,8 @@ function createCheckState(run: number): CheckState {
     run,
     started: false,
     status: new WeakMap(),
+    quads: new WeakSet(),
+    programs: new WeakMap(),
     waiting: 0,
     checked: 0,
     failed: 0,

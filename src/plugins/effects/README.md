@@ -214,9 +214,37 @@ let canvas = canvasPixel(uv);
 ```
 
 A body that does not call it assembles byte-identically. Each slot handed to the renderer carries its
-category (`cache`), a placed filter's `keptOrigin` array by reference (`origin`), and `blurs: true`
+category (`cache`), a placed filter's `keptOrigin` array by reference (`origin`), `blurs: true`
 for a `Blur` and a filter with an input from the view's own input (an overlay over it holds the loops under it,
-spec 22).
+spec 22), and the filter's `quad` when its body can run on one.
+
+### On the quad
+
+A kept view whose numbers change would pay a filter pass for every new value. The engine leaves that pass out by
+itself: the renderer runs the filter's own fragment body on a mesh, in the pass that draws the canvas, over the kept
+picture of the view (renderer README, "Kept pictures"). A game writes nothing for it: no call, no value, no option, and
+`cache` keeps its meaning.
+
+For that `defineFilter` assembles a second text beside `source`, `FilterDefinition.quadSource`: Pixi's mesh stage, the
+filter's uniforms at groups 2 and 3, the body renamed `filterBody`, and a `mainFragment` that multiplies it by the
+mesh's colour and alpha. The text of `source` does not change. On WebGPU the shader check compiles a kind's quad right
+after its body, and the kind answers when both did. The renderer gets the built program over the slot, `quad`, and
+over `sync.filters.warm`, so its pipelines are made while the game loads, one probe per kind; a stage or a fallback
+never runs on a quad and brings none. Every instance of a kind shares one program.
+
+A quad that does not compile logs one `effects:wgsl` line with `quad: true`. The kind stays ok and its views keep
+today's path: a pass for each new value.
+
+Some bodies cannot move, and stay on that path too:
+
+- a signature other than the plain one, `@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32>`.
+  Whitespace and newlines may vary, and the `uv` may have any name; a second parameter or `vec2f` does not fit;
+- a body that reads `@builtin(...)`, outside a comment;
+- a filter with inputs, and a backdrop;
+- a body that declares `filterBody`, `globalUniforms`, `localUniforms`, `GlobalUniforms` or `LocalUniforms`, the names
+  of the quad program.
+
+A stand-in hands no quad, so a broken kind keeps its dev mark, and WebGL has none.
 
 ### Built-in filters
 
@@ -240,7 +268,7 @@ An `Alpha` at `alpha: 1` and `resolution: 0` would copy its subtree unchanged th
 
 One system, `effects:filters`, phase `sync`, in every world mode. It walks the views the world hooks recorded, never the whole world, and brings up to date only the views something happened to: a filter component of the view changed (the change set of every kind, ours and the core kinds), came or left, its `Displacement` map was retired, a kind still waits for its instance (its check pending, its map not loaded), or a chain left places to destroy. A debug switch, and a filter that broke or ran its chains at a new resolution inside a render, bring every view up to date at the next sync. A frame where none of that happened syncs no view and allocates nothing:
 
-- One instance per view and kind, made the first frame the kind is seen and kept until the component or the entity leaves. An instance of ours carries both programs, a `GpuProgram` of the WGSL and a `GlProgram` of the GLSL over `defaultFilterVert`, and one uniform group: Pixi binds it as `fu` on WebGPU and by bare uniform name on WebGL. `GpuProgram.from` and `GlProgram.from` cache by source, so every view of a kind shares its programs.
+- One instance per view and kind, made the first frame the kind is seen and kept until the component or the entity leaves. An instance of ours carries both programs, a `GpuProgram` of the WGSL and a `GlProgram` of the GLSL over `defaultFilterVert`, and one uniform group: Pixi binds it as `fu` on WebGPU and by bare uniform name on WebGL. `GpuProgram.from` and `GlProgram.from` cache by source, so every view of a kind shares its programs. The quad program is built once per definition and looked up after that: `GpuProgram.from` builds a key of the whole source on every call.
 - Every write compares first. Ours compare each uniform with what the group holds (a number as it is, a colour or a tuple element by element as the `Float32Array` stores it, rounded to float32; two NaN are equal) and the padding named after a uniform; only what differs is written, no `update()`. The core kinds compare the fields their setters were last given, only on a frame their component changed, and call the setters only when one differs (`ColorMatrix` starts from `reset()`); an equal value written by a system calls no setter. `enabled` is written only when it flips.
 - A write the player can see, a filter switched on or off or a new value of a filter that is on, calls `renderer.invalidate(entity)` first, once per view and frame, so the renderer judges the view as it was last drawn. A filter that is off and stays off takes its new values silently; so does a kind a debug switch turned off. A new instance, a new order or new passes reach the renderer through `filters.set`, never through `invalidate`.
 - `renderer.sync.filters.set(entity, slots)` with a new frozen list of `{ filter, passes, kind, inputs? }` only when the kinds, their order, their passes or the stage filters of their inputs changed. A filter covers the entity's subtree: a glow on a button glows its label.
