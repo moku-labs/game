@@ -529,20 +529,19 @@ function pushWord(
   metrics: Metrics
 ): void {
   for (const [softIndex, between] of word.split(SOFT_HYPHEN).entries()) {
+    // A soft hyphen is a break that draws "-" only when the line ends there.
     if (softIndex > 0) pushSoft(tokens, { ...run, text: "-" }, metrics);
 
+    // The part between soft hyphens splits after its joining hyphens, one word token per piece.
     for (const [index, piece] of between.split(HYPHEN_BREAKS).entries()) {
       if (index > 0) pushSoft(tokens, undefined, metrics);
       if (piece.length === 0) continue;
 
       const part: TextRun = { ...run, text: piece };
       const width = measureRun(part, metrics.style, metrics.tables, metrics.options);
+      const first = touches && softIndex === 0 && index === 0;
 
-      pushToken(
-        tokens,
-        { kind: "word", runs: [part], width, tail: 0 },
-        touches && softIndex === 0 && index === 0
-      );
+      pushToken(tokens, { kind: "word", runs: [part], width, tail: 0 }, first);
     }
   }
 }
@@ -657,12 +656,16 @@ function placeWord(
 ): void {
   const space = pending?.kind === "space" ? pending : undefined;
   const lead = space?.width ?? 0;
+  const overflows =
+    builder.runs.length > 0 && builder.width + lead + token.width + token.tail > wrap;
 
-  if (builder.runs.length > 0 && builder.width + lead + token.width + token.tail > wrap) {
+  // The word goes to the next line when it does not fit; a soft hyphen leaves its "-" behind.
+  if (overflows) {
     if (pending?.kind === "soft") add(builder, pending);
     commit(builder);
   } else if (space !== undefined) add(builder, space);
 
+  // The word is placed whole, or glyph by glyph when it fits on no line.
   if (token.width <= wrap) add(builder, token);
   else breakWord(builder, token, wrap, metrics);
 }
@@ -681,6 +684,7 @@ function layoutWrapped(runs: readonly Run[], metrics: Metrics, wrap: number): Li
   let pending: Token | undefined;
 
   for (const token of tokenise(runs, metrics.style, metrics.tables, metrics.options)) {
+    // A line break closes the line.
     if (token.kind === "break") {
       commit(builder);
       pending = undefined;
@@ -688,12 +692,14 @@ function layoutWrapped(runs: readonly Run[], metrics: Metrics, wrap: number): Li
       continue;
     }
 
+    // Spaces wait for the word after them, and are dropped at the start of a line.
     if (token.kind === "space") {
       if (builder.runs.length > 0) pending = token;
 
       continue;
     }
 
+    // A break inside a word waits the same way; spaces before the word win over it.
     if (token.kind === "soft") {
       if (builder.runs.length > 0 && pending === undefined) pending = token;
 
