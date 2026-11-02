@@ -415,3 +415,71 @@ describe("layoutRuns — icons inside wrapped text", () => {
     expect(written.written).toEqual(["font:ui.font-body"]);
   });
 });
+
+/** The fixture glyphs plus `-` and U+2010, each 10 wide at size 32. */
+function hyphenTables(): Map<string, AdvanceTable> {
+  return new Map([
+    [
+      "ui.font-body",
+      parseAdvances(
+        JSON.stringify({
+          info: { size: 32 },
+          common: { lineHeight: 40 },
+          chars: [
+            { char: "1", xadvance: 16 },
+            { char: "A", xadvance: 24 },
+            { char: " ", xadvance: 8 },
+            { char: "-", xadvance: 10 },
+            { char: "\u2010", xadvance: 10 }
+          ]
+        }),
+        "ui.font-body"
+      )
+    ]
+  ]);
+}
+
+/** The glyphs of every line, as the display draws them. */
+function linesOf(value: string, wrap: number, written = options()): string[] {
+  return layoutRuns([text(value)], style({ wrap }), hyphenTables(), written).lines.map(line =>
+    line.runs.map(run => (run.kind === "text" ? run.text : "")).join("")
+  );
+}
+
+describe("breaks inside a word (F138)", () => {
+  it("breaks after a hyphen inside a word and keeps the hyphen on the first line", () => {
+    const layout = layoutRuns([text("A A-A")], style({ wrap: 70 }), hyphenTables(), options());
+
+    expect(linesOf("A A-A", 70)).toEqual(["A A-", "A"]);
+    expect(layout.lines.map(line => line.width)).toEqual([66, 24]);
+  });
+
+  it("breaks after the hyphen U+2010 the same way", () => {
+    expect(linesOf("A A‐A", 70)).toEqual(["A A‐", "A"]);
+  });
+
+  it("does not break after a leading hyphen or before a digit", () => {
+    expect(linesOf("A -A", 50)).toEqual(["A", "-A"]);
+    expect(linesOf("A A-1", 70)).toEqual(["A", "A-1"]);
+  });
+
+  it("draws a soft hyphen as - where the line breaks at it", () => {
+    const layout = layoutRuns([text("A A­A")], style({ wrap: 70 }), hyphenTables(), options());
+
+    expect(linesOf("A A­A", 70)).toEqual(["A A-", "A"]);
+    expect(layout.lines.map(line => line.width)).toEqual([66, 24]);
+  });
+
+  it("draws nothing for a soft hyphen the line does not break at, and warns of nothing", () => {
+    const written = options();
+    const fixed = layoutRuns([text("A­A")], style(), hyphenTables(), written);
+
+    expect(linesOf("A­A", 200, written)).toEqual(["AA"]);
+    expect(fixed.lines.map(line => line.width)).toEqual([48]);
+    expect(written.written).toEqual([]);
+  });
+
+  it("breaks before the word when the hyphen of a soft hyphen would stand past the wrap", () => {
+    expect(linesOf("A A­A", 60)).toEqual(["A", "AA"]);
+  });
+});

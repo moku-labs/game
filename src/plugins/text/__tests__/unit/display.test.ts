@@ -1068,3 +1068,31 @@ describe('the display adapter — wrap "box"', () => {
     expect(calls.filter(call => call[0] === 'text: wrap "box" outside layout')).toEqual([]);
   });
 });
+
+describe("the display adapter — breaks inside a word (F138)", () => {
+  // No font is loaded here: a glyph is 19.2 px, a line 38.4 px.
+
+  it("draws the lines the measure broke at a soft hyphen, the - on the first and no soft hyphen drawn", () => {
+    const mock = drawing();
+
+    wrapping(mock);
+
+    const object = build(mock, value({ resolved: "11­111", style: "wrapped", anchor: zero }));
+
+    expect(object.children.map(child => textOf(child))).toEqual(["11-", "111"]);
+    expect(object.children.map(child => rounded(child.x, child.y))).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 38.4 }
+    ]);
+  });
+
+  it("draws the lines the measure broke after a hyphen inside a word", () => {
+    const mock = drawing();
+
+    wrapping(mock);
+
+    const object = build(mock, value({ resolved: "AA-AAA", style: "wrapped", anchor: zero }));
+
+    expect(object.children.map(child => textOf(child))).toEqual(["AA-", "AAA"]);
+  });
+});

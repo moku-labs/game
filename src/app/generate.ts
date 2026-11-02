@@ -255,7 +255,8 @@ function bootImage(boot: Boot, toRoot: string): string {
  * icons as links (never `url()` in the style: `Bun.build` does not rewrite it), the `head` tags
  * verbatim after the style, then the body: the boot picture first when the page has one (an
  * `<img id="moku-boot">`, its rule in the style), `<div id="game">` and the module script. A page
- * without a boot is the same HTML as before `page.boot`.
+ * without a boot is the same HTML as before `page.boot`. The style turns off text selection, the
+ * iOS long-press callout and the tap highlight, except in `input` and `textarea`.
  *
  * @param page - The page of the resolved `config.ts`.
  * @param links - The path to the game folder and the script.
@@ -278,7 +279,11 @@ export function pageHtml(page: Page, links: PageLinks): string {
   );
   const style =
     `html, body { margin: 0; height: 100%; background: ${background}; } ` +
-    "#game { width: 100%; height: 100%; touch-action: none; }" +
+    "#game { width: 100%; height: 100%; touch-action: none; } " +
+    // A long press on iOS selects text and shows the loupe (F144); a text field keeps its selection.
+    "html, body, #game { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; " +
+    "-webkit-tap-highlight-color: transparent; } " +
+    "input, textarea { -webkit-user-select: text; user-select: text; }" +
     (page.boot === undefined ? "" : bootRule(page.boot));
 
   return [

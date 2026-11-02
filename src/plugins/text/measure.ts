@@ -31,6 +31,16 @@ const BOX_SLACK = 0.0001;
 const TOKENS = /(\n| +)/;
 
 /**
+ * Splits a word after a hyphen (`-` or U+2010) that joins two parts, the hyphen kept on the first:
+ * `купли-продажи` may break as `купли-` / `продажи`. No break after a leading hyphen, between two
+ * hyphens or before a digit (`-5`, `10-20`), as a browser keeps them.
+ */
+const HYPHEN_BREAKS = /(?<=[^\-\u2010][-\u2010])(?=[^\-\u2010\d])/;
+
+/** The soft hyphen: a break the text allows, drawn as `-` only when the line breaks there. */
+const SOFT_HYPHEN = "\u00AD";
+
+/**
  * Tells whether a value is a plain record, so its fields can be read one by one.
  *
  * @param value - Anything `JSON.parse` returned.
@@ -389,7 +399,7 @@ function layoutFixed(
       continue;
     }
 
-    const segments = run.text.split("\n");
+    const segments = run.text.replaceAll(SOFT_HYPHEN, "").split("\n");
 
     for (const [index, segment] of segments.entries()) {
       if (index > 0) push();
@@ -407,8 +417,17 @@ function layoutFixed(
   return lines;
 }
 
-/** One word, one run of spaces or one line break, with the runs it is made of. */
-type Token = { kind: "word" | "space" | "break"; runs: Run[]; width: number };
+/**
+ * One word, one run of spaces, one line break, or a break inside a word (`soft`): after a hyphen,
+ * with no runs, or at a soft hyphen, with the `-` it draws when the line breaks there. `tail` is
+ * the width of that `-` on the word right before it, so the word is placed where its hyphen fits.
+ */
+type Token = {
+  kind: "word" | "space" | "break" | "soft";
+  runs: Run[];
+  width: number;
+  tail: number;
+};
 
 /**
  * What one piece of a split run is: a line break, a run of spaces, or a word.
@@ -436,6 +455,7 @@ function pushToken(tokens: Token[], token: Token, touches: boolean): void {
   if (touches && token.kind === "word" && last?.kind === "word") {
     last.runs.push(...token.runs);
     last.width += token.width;
+    last.tail = token.tail;
 
     return;
   }
@@ -465,7 +485,7 @@ function tokenise(
     if (run.kind === "icon") {
       const width = measureRun(run, style, tables, options);
 
-      pushToken(tokens, { kind: "word", runs: [run], width }, true);
+      pushToken(tokens, { kind: "word", runs: [run], width, tail: 0 }, true);
 
       continue;
     }
@@ -473,15 +493,75 @@ function tokenise(
     for (const [index, piece] of run.text.split(TOKENS).entries()) {
       if (piece.length === 0) continue;
 
-      const part: TextRun = { ...run, text: piece };
       const kind = kindOf(piece);
+
+      if (kind === "word") {
+        pushWord(tokens, run, piece, index === 0, { style, tables, options });
+
+        continue;
+      }
+
+      const part: TextRun = { ...run, text: piece };
       const width = kind === "break" ? 0 : measureRun(part, style, tables, options);
 
-      pushToken(tokens, { kind, runs: [part], width }, index === 0);
+      pushToken(tokens, { kind, runs: [part], width, tail: 0 }, index === 0);
     }
   }
 
   return tokens;
+}
+
+/**
+ * Puts one word of a run into the tokens, split at its breaks: after a joining hyphen, and at a
+ * soft hyphen, which is dropped from the glyphs and becomes the `-` of a break there.
+ *
+ * @param tokens - The tokens so far.
+ * @param run - The run the word is part of.
+ * @param word - The word, with no spaces and no line break.
+ * @param touches - True when nothing stands between the word and the token before it.
+ * @param metrics - The style, the tables and the warning.
+ */
+function pushWord(
+  tokens: Token[],
+  run: TextRun,
+  word: string,
+  touches: boolean,
+  metrics: Metrics
+): void {
+  for (const [softIndex, between] of word.split(SOFT_HYPHEN).entries()) {
+    // A soft hyphen is a break that draws "-" only when the line ends there.
+    if (softIndex > 0) pushSoft(tokens, { ...run, text: "-" }, metrics);
+
+    // The part between soft hyphens splits after its joining hyphens, one word token per piece.
+    for (const [index, piece] of between.split(HYPHEN_BREAKS).entries()) {
+      if (index > 0) pushSoft(tokens, undefined, metrics);
+      if (piece.length === 0) continue;
+
+      const part: TextRun = { ...run, text: piece };
+      const width = measureRun(part, metrics.style, metrics.tables, metrics.options);
+      const first = touches && softIndex === 0 && index === 0;
+
+      pushToken(tokens, { kind: "word", runs: [part], width, tail: 0 }, first);
+    }
+  }
+}
+
+/**
+ * Puts a break inside a word into the tokens, and gives the word before it the width of the `-`
+ * the break draws.
+ *
+ * @param tokens - The tokens so far.
+ * @param hyphen - The `-` of a soft hyphen, or `undefined` after a hyphen the word already has.
+ * @param metrics - The style, the tables and the warning.
+ */
+function pushSoft(tokens: Token[], hyphen: TextRun | undefined, metrics: Metrics): void {
+  const width =
+    hyphen === undefined ? 0 : measureRun(hyphen, metrics.style, metrics.tables, metrics.options);
+  const last = tokens.at(-1);
+
+  if (last?.kind === "word") last.tail = width;
+
+  tokens.push({ kind: "soft", runs: hyphen === undefined ? [] : [hyphen], width, tail: 0 });
 }
 
 /** The metrics one wrapped block is laid out with. */
@@ -556,12 +636,14 @@ function breakWord(builder: Builder, token: Token, wrap: number, metrics: Metric
 }
 
 /**
- * Places one word: on the open line when it still fits there with the spaces before it, on the
- * next one when it does not, and glyph by glyph when it fits on no line at all.
+ * Places one word: on the open line when it still fits there with the spaces before it and the
+ * hyphen a break after it would draw, on the next one when it does not, and glyph by glyph when
+ * it fits on no line at all. A break inside a word stands before it with no width: the line ends
+ * there with the `-` of a soft hyphen, and the word goes on with nothing between when it fits.
  *
  * @param builder - The lines built so far.
  * @param token - The word to place.
- * @param pending - The spaces that stand before it, dropped at a line break.
+ * @param pending - The spaces or the break inside a word that stand before it.
  * @param wrap - The wrap width in reference pixels.
  * @param metrics - The style, the tables and the warning.
  */
@@ -572,18 +654,25 @@ function placeWord(
   wrap: number,
   metrics: Metrics
 ): void {
-  const lead = pending?.width ?? 0;
+  const space = pending?.kind === "space" ? pending : undefined;
+  const lead = space?.width ?? 0;
+  const overflows =
+    builder.runs.length > 0 && builder.width + lead + token.width + token.tail > wrap;
 
-  if (builder.runs.length > 0 && builder.width + lead + token.width > wrap) commit(builder);
-  else if (pending !== undefined) add(builder, pending);
+  // The word goes to the next line when it does not fit; a soft hyphen leaves its "-" behind.
+  if (overflows) {
+    if (pending?.kind === "soft") add(builder, pending);
+    commit(builder);
+  } else if (space !== undefined) add(builder, space);
 
+  // The word is placed whole, or glyph by glyph when it fits on no line.
   if (token.width <= wrap) add(builder, token);
   else breakWord(builder, token, wrap, metrics);
 }
 
 /**
- * Lays runs out into lines no wider than the wrap. Words break between them; a word wider than
- * the wrap breaks between its glyphs.
+ * Lays runs out into lines no wider than the wrap. Words break between them, after a hyphen that
+ * joins two parts and at a soft hyphen; a word wider than the wrap breaks between its glyphs.
  *
  * @param runs - The runs of the block.
  * @param metrics - The style, the tables and the warning.
@@ -595,6 +684,7 @@ function layoutWrapped(runs: readonly Run[], metrics: Metrics, wrap: number): Li
   let pending: Token | undefined;
 
   for (const token of tokenise(runs, metrics.style, metrics.tables, metrics.options)) {
+    // A line break closes the line.
     if (token.kind === "break") {
       commit(builder);
       pending = undefined;
@@ -602,8 +692,16 @@ function layoutWrapped(runs: readonly Run[], metrics: Metrics, wrap: number): Li
       continue;
     }
 
+    // Spaces wait for the word after them, and are dropped at the start of a line.
     if (token.kind === "space") {
       if (builder.runs.length > 0) pending = token;
+
+      continue;
+    }
+
+    // A break inside a word waits the same way; spaces before the word win over it.
+    if (token.kind === "soft") {
+      if (builder.runs.length > 0 && pending === undefined) pending = token;
 
       continue;
     }
