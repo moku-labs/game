@@ -6,6 +6,7 @@ import { createDemandState } from "./demand/state";
 import { createHostState } from "./host/state";
 import { createKeptState } from "./kept/state";
 import { createMonitorState } from "./monitor/state";
+import { createShotsState } from "./shots/state";
 import { createSyncState } from "./sync/state";
 import type { Config, State } from "./types";
 import { createViewportState } from "./viewport/state";
@@ -18,6 +19,9 @@ const MAX_WARM = 16;
 
 /** The most textures the upload queue may put on the GPU in one drawn frame: about 9 ms each on a Galaxy A26. */
 const MAX_UPLOADS = 8;
+
+/** The most texels a side of a shot may have. */
+const MAX_SHOT_SIDE = 512;
 
 /**
  * Tells a finite number of at least 0 from anything else a config can hold.
@@ -102,12 +106,72 @@ function checkAdaptiveScale(adaptiveScale: unknown): void {
 }
 
 /**
+ * Tells a side of a shot from anything else a config can hold.
+ *
+ * @param value - The config value.
+ * @returns True for a whole number from 1 to 512.
+ * @example
+ * ```ts
+ * isShotSide(512); // true
+ * ```
+ */
+function isShotSide(value: unknown): boolean {
+  return Number.isInteger(value) && Number(value) >= 1 && Number(value) <= MAX_SHOT_SIDE;
+}
+
+/**
+ * Checks the shots of the config: left out, or an object of a size, a blur and, when given, a limit.
+ *
+ * @param shots - What the config holds.
+ * @throws {Error} When it is no object, `width` or `height` is not a whole number from 1 to 512, `blur` is not a finite
+ *   number of at least 0, or `keep` is given and not a whole number of at least 1.
+ */
+function checkShots(shots: unknown): void {
+  if (shots === undefined) return;
+
+  if (typeof shots !== "object" || shots === null) {
+    throw new Error(
+      `[game] renderer.shots is ${String(shots)}.\n  Give { width, height, blur } or leave it out.`
+    );
+  }
+
+  const width = "width" in shots ? shots.width : undefined;
+  const height = "height" in shots ? shots.height : undefined;
+  const blur = "blur" in shots ? shots.blur : undefined;
+  const keep = "keep" in shots ? shots.keep : undefined;
+
+  if (!isShotSide(width)) {
+    throw new Error(
+      `[game] renderer.shots.width is ${String(width)}.\n  Give the texels across, a whole number from 1 to 512.`
+    );
+  }
+
+  if (!isShotSide(height)) {
+    throw new Error(
+      `[game] renderer.shots.height is ${String(height)}.\n  Give the texels down, a whole number from 1 to 512.`
+    );
+  }
+
+  if (!isCount(blur)) {
+    throw new Error(
+      `[game] renderer.shots.blur is ${String(blur)}.\n  Give the sigma in reference units, 0 or more.`
+    );
+  }
+
+  if (keep !== undefined && !(Number.isInteger(keep) && Number(keep) >= 1)) {
+    throw new Error(
+      `[game] renderer.shots.keep is ${String(keep)}.\n  Give the shots kept, a whole number of at least 1.`
+    );
+  }
+}
+
+/**
  * Checks the numbers of the config a game can get wrong, at `createApp`, in every build: the
  * resolution cap, the pool trim, the adaptive render scale, the performance monitor, the budget of the kept pictures,
- * the probe draws of the warm-up and the textures uploaded per drawn frame.
+ * the probe draws of the warm-up, the textures uploaded per drawn frame and the shots.
  *
  * @param config - The resolved plugin config.
- * @throws {Error} When `maxResolution` is not a number above 0, `poolTrim` or `adaptiveScale` fails its check,
+ * @throws {Error} When `maxResolution` is not a number above 0, `poolTrim`, `adaptiveScale` or `shots` fails its check,
  *   `monitor.budgetMs` is neither `"rate"` nor a number above 0, `monitor.frames` is not a whole
  *   number from 64 to 16384, `keptMb` is not a finite number of at least 0, `warm` is not a
  *   whole number from 0 to 16, or `uploads` is not a whole number from 0 to 8.
@@ -122,6 +186,7 @@ function checkConfig(config: Readonly<Config>): void {
 
   checkPoolTrim(config.poolTrim);
   checkAdaptiveScale(config.adaptiveScale);
+  checkShots(config.shots);
 
   if (budgetMs !== "rate" && !(Number.isFinite(budgetMs) && budgetMs > 0)) {
     throw new Error(
@@ -179,6 +244,7 @@ export function createRendererState(ctx: { readonly config: Readonly<Config> }):
     sync: createSyncState(ctx.config.debug),
     monitor: createMonitorState(ctx.config.monitor),
     demand: createDemandState(ctx.config.debug.verifyFrames === true),
-    kept: createKeptState(ctx.config)
+    kept: createKeptState(ctx.config),
+    shots: createShotsState()
   };
 }

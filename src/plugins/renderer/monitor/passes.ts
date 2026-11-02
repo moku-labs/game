@@ -8,7 +8,9 @@
  * being applied. On WebGPU the canvas is the view's render target, kept at attach and compared by identity: Pixi 8.22
  * marks every WebGPU target `isRoot` when it first binds it. On WebGL `isRoot` is the canvas's alone. Each pass also
  * gets its detail: the entity whose filter draws it and the filter's kind, the draw count of the frame when it began
- * (WebGPU), and its target's format and resolution.
+ * (WebGPU), and its target's format and resolution. A canvas pass is counted apart (`COUNT.canvas`): on WebGPU where the
+ * lazy canvas pass really begins it, which also names the reason in the ring's `restart` column, on WebGL at every bind
+ * of the canvas, its reason not known.
  */
 
 import type { GpuTimer } from "./gpu-timer";
@@ -94,6 +96,24 @@ function writeDetail(pc: PerfCtx, target: PassTarget, kind: number): void {
 }
 
 /**
+ * Writes why the canvas pass just begun began into its slot of the pass ring: the counting encoder wrote the slot when
+ * the pass began, before the lazy canvas pass told the monitor. Only while the slot was written: with the `passes`
+ * section off the newest slot is an older pass's.
+ *
+ * @param pc - The perf context.
+ * @param restart - The reason, an index into `CANVAS_RESTARTS`.
+ */
+export function noteRestart(pc: PerfCtx, restart: number): void {
+  const { sinks } = pc;
+
+  if (sinks.passes === undefined || (sinks.sections & SECTION.passes) === 0) return;
+
+  const { passes } = pc.perf.ring;
+
+  passes.restart[passes.newest] = restart;
+}
+
+/**
  * Creates the WebGPU pass sink the counting encoder calls: each pass of a frame goes into the pass ring, with the
  * frame number and its index in the frame, while the `passes` section is on, and gets the timer's timestamp writes
  * when there is a timer and the `gpu` section is on (a pass the ring does not keep has the number -1).
@@ -139,8 +159,9 @@ export function createPassSink(
 /**
  * Counts the WebGL passes of every frame on Pixi's public runners: a target change emitted by `bind` is one pass; at
  * `renderStart` (added after Pixi's systems, so the root is bound by then) the root is one pass when `bind` emitted
- * nothing, because the previous render call ended on the root. Only inside a frame. Every build counts (F8); `record`
- * also writes each pass into the ring of an agent build. Stencil is not measured on WebGL.
+ * nothing, because the previous render call ended on the root. A pass on the canvas counts as a canvas pass too. Only
+ * inside a frame. Every build counts (F8); `record` also writes each pass into the ring of an agent build. Stencil is
+ * not measured on WebGL.
  *
  * @param renderer - Pixi's WebGL renderer.
  * @param sinks - The sinks the count goes into.
@@ -164,6 +185,7 @@ export function countGlPasses(
     const index = cellF64(counts, COUNT.passes);
 
     counts[COUNT.passes] = index + 1;
+    if (target.isRoot) counts[COUNT.canvas] = cellF64(counts, COUNT.canvas) + 1;
     record?.(target, index);
   };
   const prerender = {

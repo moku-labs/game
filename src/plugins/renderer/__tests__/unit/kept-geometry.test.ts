@@ -6,6 +6,7 @@ import {
   linearBounds,
   onGrid,
   paddingOnGrid,
+  storeMatrix,
   textureBytes
 } from "../../kept/geometry";
 
@@ -83,5 +84,38 @@ describe("the picture grid", () => {
     expect(fitsTexture(2048.5, 300, 2)).toBe(false);
     expect(fitsTexture(0, 300, 2)).toBe(false);
     expect(textureBytes(384, 832, 2)).toBe(768 * 1664 * 4);
+  });
+});
+
+/**
+ * A row that holds a quad's local transform: a zoom of 1.1, placed at 1000, 500.
+ *
+ * @returns The row, written once.
+ */
+function held(): Float64Array {
+  const cells = new Float64Array(6).fill(Number.NaN);
+
+  storeMatrix(cells, 0, { a: 1.1, b: 0, c: 0, d: 1.1, tx: 1000, ty: 500 });
+
+  return cells;
+}
+
+describe("a held matrix", () => {
+  // Bug: the inverse of a parent's world transform rounds otherwise in every frame of a zoom (about 1e-13), and the
+  // quad was placed again in every frame.
+  it("stands for a number that differs by rounding", () => {
+    expect(
+      storeMatrix(held(), 0, { a: 1.1 + 1e-13, b: 0, c: 0, d: 1.1, tx: 1000 + 1e-10, ty: 500 })
+    ).toBe(false);
+  });
+
+  // Bug: a tolerance too loose stops a quad from following a real small move.
+  it("writes a move of a thousandth of a pixel, and a scale step of a millionth", () => {
+    expect(storeMatrix(held(), 0, { a: 1.1, b: 0, c: 0, d: 1.1, tx: 1000.001, ty: 500 })).toBe(
+      true
+    );
+    expect(storeMatrix(held(), 0, { a: 1.100_001, b: 0, c: 0, d: 1.1, tx: 1000, ty: 500 })).toBe(
+      true
+    );
   });
 });

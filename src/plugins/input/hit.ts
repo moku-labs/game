@@ -3,7 +3,8 @@
  * which answers `undefined` without a DOM, and every accept function refuses a view that is
  * already playing its exit. A trace takes a cell only inside a circle smaller than its box. The
  * scroll a press belongs to is found up the pressed view's own `Parent` chain, never under the
- * point: a view drawn over a scroll from another root keeps its press.
+ * point: a view drawn over a scroll from another root keeps its press. While the lock of a guide
+ * stands, a point outside its window finds no view at all.
  */
 import { localPoseOf, parentOf } from "../renderer/sync/pose";
 import { Exiting } from "../world/ecs/define";
@@ -19,7 +20,7 @@ import {
   Touchable,
   Traceable
 } from "./components";
-import type { InputCtx, Point, Target } from "./types";
+import type { InputCtx, Point, State, Target } from "./types";
 
 /** How deep a `Parent` chain is followed; deeper is treated as a loop. */
 const MAX_DEPTH = 32;
@@ -118,7 +119,26 @@ export function acceptTrace(ctx: InputCtx, point: Point): (entity: Entity) => bo
 }
 
 /**
- * The topmost view that takes the press at a point.
+ * Tells whether the lock of a guide keeps a point from every view: the lock holds everything, or
+ * the point lies outside its window. The edges belong to the window, as they belong to a hit box.
+ * Reads four numbers, allocates nothing.
+ *
+ * @param state - The input state, which holds the lock.
+ * @param x - Reference x.
+ * @param y - Reference y.
+ * @returns True when no view may take the point.
+ */
+export function lockedOut(state: State, x: number, y: number): boolean {
+  const window = state.lock;
+
+  if (window === undefined) return false;
+  if (window === null) return true;
+
+  return x < window.x || x > window.x + window.w || y < window.y || y > window.y + window.h;
+}
+
+/**
+ * The topmost view that takes the press at a point. Outside the window of a guide's lock: none.
  *
  * @param ctx - Domain context of the input plugin.
  * @param x - Reference x.
@@ -126,6 +146,8 @@ export function acceptTrace(ctx: InputCtx, point: Point): (entity: Entity) => bo
  * @returns The entity, or `undefined` when nothing was hit.
  */
 export function findPressed(ctx: InputCtx, x: number, y: number): Entity | undefined {
+  if (lockedOut(ctx.state, x, y)) return undefined;
+
   return ctx.deps.renderer.sync.hitTest(x, y, entity => acceptPress(ctx, entity));
 }
 
@@ -182,7 +204,8 @@ export function scrollOnAxisOf(
 }
 
 /**
- * The topmost drop target at a point.
+ * The topmost drop target at a point. Outside the window of a guide's lock: none, so the stack
+ * settles home.
  *
  * @param ctx - Domain context of the input plugin.
  * @param x - Reference x.
@@ -196,16 +219,21 @@ export function findDropTarget(
   y: number,
   excluded: readonly Entity[]
 ): Entity | undefined {
+  if (lockedOut(ctx.state, x, y)) return undefined;
+
   return ctx.deps.renderer.sync.hitTest(x, y, acceptDrop(ctx, excluded));
 }
 
 /**
- * The topmost trace cell whose inset circle holds a sample.
+ * The topmost trace cell whose inset circle holds a sample. Outside the window of a guide's lock:
+ * none, as over a gap.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - The sample, in reference units.
  * @returns The cell, or `undefined` over a gap.
  */
 export function findTraced(ctx: InputCtx, point: Point): Entity | undefined {
+  if (lockedOut(ctx.state, point.x, point.y)) return undefined;
+
   return ctx.deps.renderer.sync.hitTest(point.x, point.y, acceptTrace(ctx, point));
 }

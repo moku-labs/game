@@ -230,6 +230,7 @@ const createStoreFake = () => {
       restore: (input: { player: Json }): void => {
         restored.push(input.player);
       },
+      schemaVersion: () => 1,
       flush: async (): Promise<void> => undefined
     }
   };

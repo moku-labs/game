@@ -114,6 +114,7 @@ const createStoreFake = (calls: string[]) => {
         calls.push("restore");
         restored.push(input as Bookmark);
       },
+      schemaVersion: () => 1,
       flush: async (): Promise<void> => undefined
     }
   };

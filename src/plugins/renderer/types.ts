@@ -14,6 +14,7 @@ import type { HostApi, HostInternal, HostState } from "./host/types";
 import type { KeptInternal, KeptState } from "./kept/types";
 import type { MonitorSections } from "./monitor/log-types";
 import type { MonitorApi, MonitorInternal, MonitorState, PerfMonitorApi } from "./monitor/types";
+import type { ShotsApi, ShotsConfig, ShotsInternal, ShotsState } from "./shots/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
@@ -142,6 +143,26 @@ export type PixiNineSliceSprite = InstanceType<PixiModule["NineSliceSprite"]>;
  * A Pixi mesh: what the rim-only nine-slice of a `NineSlice` with `hollow: true` is drawn with.
  */
 export type PixiMesh = InstanceType<PixiModule["Mesh"]>;
+
+/**
+ * A Pixi GPU program: the WebGPU half of a shader. `effects` builds the one a filter's body runs on its quad.
+ */
+export type PixiGpuProgram = InstanceType<PixiModule["GpuProgram"]>;
+
+/**
+ * A Pixi uniform group: what a shader binds its numbers from.
+ */
+export type PixiUniformGroup = InstanceType<PixiModule["UniformGroup"]>;
+
+/**
+ * The geometry of a Pixi mesh: every shaded view of the kept cache draws through one unit quad of it.
+ */
+export type PixiMeshGeometry = InstanceType<PixiModule["MeshGeometry"]>;
+
+/**
+ * A Pixi shader: a program and what it binds, on a mesh. A shaded view of the kept cache holds one.
+ */
+export type PixiShader = InstanceType<PixiModule["Shader"]>;
 
 /**
  * A Pixi graphics object: what a `Shape` component is drawn with, and what clips its children.
@@ -300,10 +321,15 @@ export type AdaptiveScale = {
  * createApp({ pluginConfigs: { renderer: { mount: "#game", uploads: 2 } } });
  * // A game whose art must stay sharp: the adaptive frame rate drops the rate, never the resolution.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", adaptiveScale: false } } });
+ * // A loader that shows the place the player left, as a small soft picture.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", shots: { width: 96, height: 208, blur: 22 } } } });
  * ```
  */
 export type Config = {
-  /** Where the canvas goes: a selector or an element. `undefined` keeps the plugin inert. */
+  /**
+   * Where the canvas goes: a selector or an element. `undefined` keeps the plugin inert. The canvas takes the
+   * mount's border box, fractions of a CSS pixel kept, so the mount has no border, padding, scrollbar or transform.
+   */
   mount: string | HTMLElement | undefined;
   /** Clear colour. Also the colour of the bars around the frame. */
   background: number;
@@ -378,6 +404,11 @@ export type Config = {
    * of the scale redraws the canvas and retakes the kept pictures once.
    */
   adaptiveScale: AdaptiveScale | false;
+  /**
+   * The size and softness of the pictures `renderer.shots.take` keeps of the drawn frame. `undefined` by default: no
+   * pipeline is made and `take` does nothing. Bad values throw at `createApp`.
+   */
+  shots: ShotsConfig | undefined;
 };
 
 /**
@@ -430,6 +461,7 @@ export type State = {
   monitor: MonitorState;
   demand: DemandState;
   kept: KeptState;
+  shots: ShotsState;
 };
 
 /**
@@ -492,6 +524,17 @@ export type Api = {
    * ```
    */
   monitor: PerfMonitorApi;
+  /**
+   * Small soft pictures of the frame just drawn, kept under asset keys. Needs `shots` in the config.
+   *
+   * @example
+   * ```ts
+   * // The start of a switch out of the panorama: the next drawn frame is kept for the loader.
+   * app.renderer.shots.take("shot.panorama.bolt");
+   * app.renderer.shots.has("shot.panorama.bolt"); // true once that frame was drawn
+   * ```
+   */
+  shots: ShotsApi;
   /**
    * Tells the renderer that the Pixi object of an entity's view is about to be drawn differently in a way it cannot
    * see: a plugin or a game writes into its own `Display` object or a Pixi object it built, `effects` writes a filter
@@ -598,7 +641,12 @@ export type DemandModule = DemandInternal;
 export type KeptModule = KeptInternal;
 
 /**
- * The six modules in injection order.
+ * Both halves of the `shots` module: what a game calls and what the plugin root and the frame drive.
+ */
+export type ShotsModule = ShotsApi & ShotsInternal;
+
+/**
+ * The seven modules in injection order.
  */
 export type Modules = {
   host: HostModule;
@@ -606,6 +654,7 @@ export type Modules = {
   demand: DemandModule;
   kept: KeptModule;
   sync: SyncModule;
+  shots: ShotsModule;
   monitor: MonitorModule;
 };
 
@@ -617,7 +666,15 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 export type { HudPartValue, OverlayLevelValue, OverlayValue } from "./components";
 export type { DemandFrame, DemandReason, DemandState } from "./demand/types";
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
-export type { FilterCache, KeptInternal, KeptRange, KeptState, KeptStats } from "./kept/types";
+export type {
+  FilterCache,
+  KeptInternal,
+  KeptRange,
+  KeptState,
+  KeptStats,
+  RetakeWhy,
+  WhyLive
+} from "./kept/types";
 export type {
   FrameColumns,
   FrameReadout,
@@ -671,6 +728,8 @@ export type {
   PictureRect,
   RenderStats
 } from "./monitor/types";
+export type { CanvasRestart } from "./reasons";
+export type { ShotPipes, ShotsApi, ShotsConfig, ShotsInternal, ShotsState } from "./shots/types";
 export type {
   CoverFrame,
   CreateTextureOptions,
@@ -681,6 +740,7 @@ export type {
   DisplaysApi,
   FilterSlot,
   FilterSlotInputs,
+  FilterSlotQuad,
   FiltersApi,
   FontsApi,
   HitBox,
@@ -701,7 +761,8 @@ export type {
   TextureProvider,
   TexturesApi,
   View,
-  ViewKind
+  ViewKind,
+  WhyEntry
 } from "./sync/types";
 export type {
   Orientation,

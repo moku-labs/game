@@ -20,7 +20,14 @@ import {
   takeBuildWork
 } from "./build";
 import { eachEntity, isEmptyList } from "./each";
-import { applySwitched, forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
+import {
+  applySwitched,
+  canvasPassesOf,
+  forgetLeft,
+  renderPassesOf,
+  setArea,
+  setFilters
+} from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
 import { forgetBuild } from "./held";
 import { clearHidden } from "./hidden";
@@ -47,6 +54,7 @@ import type {
   DisplayAdapter,
   DisplayEntry,
   FilterSlot,
+  FilterSlotQuad,
   HitBox,
   LeaveLook,
   OverlayEventSink,
@@ -57,7 +65,8 @@ import type {
   SyncDeps,
   TextureProvider,
   View,
-  WarmListener
+  WarmListener,
+  WhyEntry
 } from "./types";
 import { stopUploads, uploadStep, uploadTextures } from "./upload";
 import {
@@ -114,6 +123,23 @@ function copyOf(entities: ReadonlySet<Entity>): Set<Entity> {
  */
 function emptyEntitySet(): Set<Entity> {
   return new Set();
+}
+
+/**
+ * The entities a rebuild makes a view for: the ones that name a layer, then the ones that name a parent. A child of a
+ * ui tree names no layer (F131).
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @returns The entities to build, each once.
+ */
+function hungEntities(ctx: RendererCtx): Set<Entity> {
+  const ecs = ctx.deps.world.ecs;
+  const waiting = emptyEntitySet();
+
+  for (const [entity] of ecs.query(Layer)) waiting.add(entity);
+  for (const [entity] of ecs.query(Parent)) waiting.add(entity);
+
+  return waiting;
 }
 
 /**
@@ -758,8 +784,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Builds the root, the layers and a view for every entity that names a layer, then starts the
-   * warm-up of the device (F4).
+   * Builds the root, the layers and a view for every entity hung in a layer or under a parent, then starts the warm-up
+   * of the device (F4).
    */
   const rebuildAll = (): void => {
     forgetTree();
@@ -777,10 +803,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     deps.viewport.apply(root);
     syncLayers(sctx);
 
-    const waiting = emptyEntitySet();
-
-    for (const [entity] of ctx.deps.world.ecs.query(Layer)) waiting.add(entity);
-    buildParentFirst(waiting);
+    buildParentFirst(hungEntities(ctx));
 
     state.added.clear();
     state.removed.clear();
@@ -866,7 +889,17 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       verifyFrames: (on: boolean): void => deps.demand.verifyFrames(on),
 
-      kept: (on: boolean): void => deps.kept.enabled(on),
+      kept: (on: boolean): void => {
+        // A call from a console without a boolean is a read by mistake: it switched every picture off (F121). Only this
+        // switch is on by default, so only here does such a read change what a frame draws.
+        if (typeof on !== "boolean") {
+          ctx.log.warn("renderer:debug-kept-needs-boolean", { on });
+
+          return;
+        }
+
+        deps.kept.enabled(on);
+      },
 
       overdraw: (on: boolean): void => {
         // Inline and positive: a production `define` folds the guard, and the switch stays off.
@@ -893,6 +926,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       overlays: (): readonly OverlayReport[] => overlayReports(sctx),
 
+      why: (): readonly WhyEntry[] => deps.kept.why(),
+
       state: (): DebugSwitches => ({
         ...state.debug,
         verifyFrames: deps.demand.verifying(),
@@ -907,7 +942,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       area: (entity: Entity, area: readonly [number, number, number, number] | undefined): void =>
         setArea(sctx, entity, area),
 
-      warm: (filter: PixiFilter): Promise<boolean> => warmFilter(sctx, filter)
+      warm: (filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean> =>
+        warmFilter(sctx, filter, quad)
     },
 
     leave: {
@@ -919,6 +955,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     },
 
     renderPasses: (): number => renderPassesOf(state, ctx.state.kept),
+
+    canvasPasses: (): number => canvasPassesOf(state),
 
     root: (): PixiContainer | undefined => state.root,
 

@@ -189,6 +189,22 @@ export function onGrid(delta: number, stackResolution: number, resolution: numbe
 }
 
 /**
+ * The resolution a kept picture was drawn at: its filter output's, or the subtree picture's for a stack drawn direct,
+ * which has no stage 3, so its key `r` is stale.
+ *
+ * @param key - The record's key.
+ * @param direct - The quad draws the subtree picture itself.
+ * @returns Texels per CSS px.
+ * @example
+ * ```ts
+ * drawnResolution(Float64Array.of(1, 0, 0, 1, 1.5, 0, 0, 0, 0, 0, 0, 0, 2), true); // 1.5
+ * ```
+ */
+export function drawnResolution(key: Float64Array, direct: boolean): number {
+  return (direct ? key[KEY.rs] : key[KEY.r]) ?? 1;
+}
+
+/**
  * Tells whether a picture can be taken at this size: not empty, and at most 4096 device pixels on a side.
  *
  * @param width - CSS px.
@@ -226,8 +242,16 @@ export function textureBytes(width: number, height: number, resolution: number):
 }
 
 /**
- * Keeps the six numbers of a matrix in `cells` from `at` on, written only when one differs from what they hold: a
- * frame whose transform stands writes nothing. A held NaN always differs, so a fresh row is written.
+ * How far a stored matrix number may lie from the one computed now, relative to its size (at least 1), and still
+ * stand: a quad under a camera zoom is placed through the inverse of its parent's world transform, which rounds
+ * differently in every frame of the zoom by about 1e-13 though the place stands.
+ */
+const MATRIX_NEAR = 1e-9;
+
+/**
+ * Keeps the six numbers of a matrix in `cells` from `at` on, written only when one differs from what they hold by
+ * more than rounding: a frame whose transform stands writes nothing, also under a zoom above it. A held NaN always
+ * differs, so a fresh row is written.
  *
  * @param cells - Where the numbers are kept.
  * @param at - The index of `a`; `b`, `c`, `d`, `tx` and `ty` follow it.
@@ -243,23 +267,26 @@ export function storeMatrix(
   at: number,
   matrix: Readonly<{ a: number; b: number; c: number; d: number; tx: number; ty: number }>
 ): boolean {
+  const { a, b, c, d, tx, ty } = matrix;
+
+  // Compared inline, not through a helper: a double handed to a call that is not inlined is boxed. NaN is never near.
   if (
-    cells[at] === matrix.a &&
-    cells[at + 1] === matrix.b &&
-    cells[at + 2] === matrix.c &&
-    cells[at + 3] === matrix.d &&
-    cells[at + 4] === matrix.tx &&
-    cells[at + 5] === matrix.ty
+    Math.abs((cells[at] ?? Number.NaN) - a) <= MATRIX_NEAR * Math.max(1, Math.abs(a)) &&
+    Math.abs((cells[at + 1] ?? Number.NaN) - b) <= MATRIX_NEAR * Math.max(1, Math.abs(b)) &&
+    Math.abs((cells[at + 2] ?? Number.NaN) - c) <= MATRIX_NEAR * Math.max(1, Math.abs(c)) &&
+    Math.abs((cells[at + 3] ?? Number.NaN) - d) <= MATRIX_NEAR * Math.max(1, Math.abs(d)) &&
+    Math.abs((cells[at + 4] ?? Number.NaN) - tx) <= MATRIX_NEAR * Math.max(1, Math.abs(tx)) &&
+    Math.abs((cells[at + 5] ?? Number.NaN) - ty) <= MATRIX_NEAR * Math.max(1, Math.abs(ty))
   ) {
     return false;
   }
 
-  cells[at] = matrix.a;
-  cells[at + 1] = matrix.b;
-  cells[at + 2] = matrix.c;
-  cells[at + 3] = matrix.d;
-  cells[at + 4] = matrix.tx;
-  cells[at + 5] = matrix.ty;
+  cells[at] = a;
+  cells[at + 1] = b;
+  cells[at + 2] = c;
+  cells[at + 3] = d;
+  cells[at + 4] = tx;
+  cells[at + 5] = ty;
 
   return true;
 }

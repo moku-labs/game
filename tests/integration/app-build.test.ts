@@ -1,6 +1,6 @@
 /**
- * @file `moku-game build` end to end, the test bin on a copy of the mini game with an icon and a
- * marked scenario: the assets packed, the page bundled with every link `./`, the packed manifest
+ * @file `moku-game build` end to end, the test bin on a copy of the mini game with an icon, a boot
+ * picture and a marked scenario: the assets packed, the page bundled with every link `./`, the packed manifest
  * beside it, the two startup marks, and no dev code in the output. Plus the refusal of an output
  * folder at the game root, a build run from another folder with the tree plugin, and the Bun log
  * of a page that does not bundle. Plus a game that names only `haptics` with a memory save: it
@@ -112,7 +112,7 @@ function filesUnder(folder: string): string[] {
 }
 
 /**
- * Copies the mini game with a favicon and a marked scenario.
+ * Copies the mini game with a favicon, a boot picture and a marked scenario.
  *
  * @param prefix - The start of the folder name.
  * @returns The copy.
@@ -123,7 +123,7 @@ function iconGame(prefix: string): string {
   made.push(root);
   writeFileSync(
     path.join(root, "config.ts"),
-    'export default { page: { title: "mini-game", icons: { favicon: "features/ui/assets/fx-spark.webp" } } };\n'
+    'export default { page: { title: "mini-game", icons: { favicon: "features/ui/assets/fx-spark.webp" }, boot: { image: "features/ui/assets/font-body.png" } } };\n'
   );
   writeFileSync(
     path.join(root, "tests", "scenarios", "marked.ts"),
@@ -196,6 +196,17 @@ describe("moku-game build", () => {
     expect(icon).toMatch(/^\.\//);
     expect(existsSync(path.join(built.out, icon))).toBe(true);
     expect(html).not.toContain("../");
+  });
+
+  // Bug: the built page links its boot picture into the game, so the release shows only the background.
+  it("the boot picture is a file of the output and the page links it with ./", () => {
+    const html = readFileSync(path.join(built.out, "index.html"), "utf8");
+    const boot = /<img id="moku-boot" src="([^"]+)"/.exec(html)?.[1] ?? "";
+
+    expect(boot).toMatch(/^\.\/.+\.png$/);
+    expect(readFileSync(path.join(built.out, boot))).toEqual(
+      readFileSync(path.join(built.root, "features", "ui", "assets", "font-body.png"))
+    );
   });
 
   it("build writes nothing under .moku", () => {

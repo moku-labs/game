@@ -47,6 +47,22 @@ export type SystemName = "lifecycle" | "back" | "haptics" | "keepAwake" | "store
 export type SaveKind = "memory" | "local" | "store";
 
 /**
+ * One `Info.plist` value of `native.ios.infoPlist`: a string, a boolean, an array or a dictionary,
+ * nested as deep as the key needs. A number, `null` or `undefined` is refused when the config is read.
+ *
+ * @example
+ * ```ts
+ * // config.ts of a game that talks to the Mac on the local network.
+ * const transport: PlistValue = { NSAllowsLocalNetworking: true }; // <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+ * ```
+ */
+export type PlistValue =
+  | string
+  | boolean
+  | readonly PlistValue[]
+  | { readonly [key: string]: PlistValue };
+
+/**
  * What `config.ts` of a game holds: plain data, no call. The page, the native build and the shell
  * read it; the game logic never does.
  *
@@ -55,8 +71,18 @@ export type SaveKind = "memory" | "local" | "store";
  * // config.ts of a game
  * import type { GameConfig } from "@moku-labs/game/app";
  * export default {
- *   page: { title: "Лесной городок", lang: "ru", background: "#10161d", orientation: "portrait", icons: { favicon: "assets/icon.png" } },
- *   native: { name: "Лесной городок", identifier: "com.mokulabs.timber", icon: "assets/icon.png" },
+ *   page: { title: "Лесной городок", lang: "ru", background: "#10161d", orientation: "portrait", icons: { favicon: "assets/icon.png" }, boot: { image: "assets/boot.png" } },
+ *   native: {
+ *     name: "Лесной городок",
+ *     identifier: "com.mokulabs.timber",
+ *     icon: "assets/icon.png",
+ *     signing: {
+ *       android: { keystorePath: "~/keys/upload.jks", keystorePasswordEnv: "TIMBER_KEYSTORE_PASSWORD", keyAlias: "upload" },
+ *       apple: { teamId: "ABCDE12345" }
+ *     },
+ *     ios: { infoPlist: { ITSAppUsesNonExemptEncryption: false }, privacyManifest: "ios/PrivacyInfo.xcprivacy" },
+ *     dev: { identifier: "com.mokulabs.timber.dev", icon: "assets/icon-dev.png" } // name: "Лесной городок DEV"
+ *   },
  *   system: ["lifecycle", "back", "haptics", "keepAwake"],
  *   save: "memory",
  *   assets: { layers: { shared: "ui" } }
@@ -78,6 +104,22 @@ export type GameConfig = {
     icons?: { favicon?: string; appleTouch?: string };
     /** Raw tags written into `<head>`, verbatim, in order. None by default. */
     head?: readonly string[];
+    /**
+     * The boot picture: an `<img>` centred over the canvas from the first paint, faded out after
+     * the first scene drew, then removed. Absent by default: the page shows only `background`
+     * until the first scene. `image` is a file relative to the game folder, never absolute, never
+     * `..`; `width` is its CSS width, default `"40vmin"`; `fadeMs` the fade, default `300`, `0`
+     * removes the picture in that frame.
+     *
+     * @example
+     * ```ts
+     * // config.ts of A Memory Missing: the logo from the icon tap to the splash scene's first frame.
+     * export default {
+     *   page: { title: "A Memory Missing", background: "#F4E6CA", boot: { image: "assets/boot.png", width: "52vmin" } }
+     * } satisfies GameConfig; // the logo fades over 300 ms, the default
+     * ```
+     */
+    boot?: { image: string; width?: string; fadeMs?: number };
   };
   /** The native app. Left out, the game has no native build. */
   native?: {
@@ -89,6 +131,46 @@ export type GameConfig = {
     icon?: string;
     /** The native targets a build makes. The target of the command by default. */
     targets?: readonly ("ios" | "android" | "macos")[];
+    /** How a store build signs. Names and identifiers only, never a secret. None by default. */
+    signing?: {
+      /** The upload key of a release build on Android. `--store` refuses Android without it. */
+      android?: {
+        /** The keystore file: absolute, `~/...`, or relative to the game folder. */
+        keystorePath: string;
+        /** The name of the env var with the keystore password, never the password. */
+        keystorePasswordEnv: string;
+        /** The name of the env var with the key password. The keystore's one by default. */
+        keyPasswordEnv?: string;
+        /** The alias of the key in the keystore. */
+        keyAlias: string;
+      };
+      /** The Apple team. Keys stay in the env, Tauri reads them. `--store` refuses iOS without it. */
+      apple?: {
+        /** The Apple Developer team id. */
+        teamId: string;
+      };
+    };
+    /** What an iOS app adds to its bundle. None by default. */
+    ios?: {
+      /** The lowest iOS the app runs on, `x.y` or `x.y.z`. Default `"26.0"`. */
+      minimumVersion?: string;
+      /** Keys merged into `Info.plist`. `page.orientation` wins a key it shares. */
+      infoPlist?: Readonly<Record<string, PlistValue>>;
+      /** The privacy manifest, relative to the game folder. The bundle holds it as `PrivacyInfo.xcprivacy`. */
+      privacyManifest?: string;
+    };
+    /**
+     * The test app of `--store --dev`: signed as the store app, with the overlay and no link to the
+     * editor, beside the players' app on a phone. Left out, `--dev` is refused.
+     */
+    dev?: {
+      /** Its bundle identifier, ending in `.dev`, never `identifier` itself. Required in the block. */
+      identifier: string;
+      /** The app name under the icon. `"<name> DEV"` by default. */
+      name?: string;
+      /** Its own 1024 px PNG, relative to the game folder. The game's `icon` by default. */
+      icon?: string;
+    };
   };
   /** The system plugins the shell wires. Default `[]`, a web page with no shell. */
   system?: readonly SystemName[];
@@ -110,6 +192,23 @@ export type GameConfig = {
 };
 
 /**
+ * `page.boot` of `config.ts` with every default filled, as `resolveConfig` returns it.
+ *
+ * @example
+ * ```ts
+ * resolveConfig({ page: { title: "T", boot: { image: "assets/boot.png" } } }).page.boot; // { image: "assets/boot.png", width: "40vmin", fadeMs: 300 }
+ * ```
+ */
+export type ResolvedPageBoot = {
+  /** The picture file, relative to the game folder. */
+  image: string;
+  /** The CSS width of the picture. */
+  width: string;
+  /** The fade-out after the first scene drew, ms. */
+  fadeMs: number;
+};
+
+/**
  * How the editor's overlay shows when a debug page starts, `config.ts` `debug.overlay`.
  *
  * @example
@@ -122,7 +221,8 @@ export type OverlayStart = "closed" | "pill" | "open";
 
 /**
  * `GameConfig` with every default filled, as `resolveConfig` returns it. The page, the CLI and the
- * shell read this one, never the raw config.
+ * shell read this one, never the raw config. `page.boot` is the one key left out when the game
+ * names no boot picture.
  *
  * @example
  * ```ts
@@ -130,11 +230,12 @@ export type OverlayStart = "closed" | "pill" | "open";
  *   page: { title: "mini-game", lang: "en", background: "#000000", orientation: "portrait", icons: {}, head: [] },
  *   native: undefined, system: [], save: "memory", assets: { layers: {} }, debug: { overlay: "closed" }
  * };
+ * settings.page.boot; // undefined: no boot picture, the page as before
  * ```
  */
 export type ResolvedGameConfig = {
-  /** The page, every field set. */
-  page: Required<GameConfig["page"]>;
+  /** The page, every field set; `boot` only when the game names a boot picture. */
+  page: Required<Omit<GameConfig["page"], "boot">> & { boot?: ResolvedPageBoot };
   /** The native app, or `undefined` for a game with no native build. */
   native: GameConfig["native"];
   /** The system plugins the shell wires. */

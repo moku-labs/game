@@ -9,7 +9,8 @@ tab; `viewport` maps the window to the reference space, fitting `referenceSide` 
 `referenceLong` along inside the safe area; `sync`
 is the ONE system that builds display objects from components, puts them in the named layers that
 `world.projection.layers()` lists, pools them, labels them and answers hit tests; `monitor` keeps
-the frame counters and takes a picture of a frame for the editor.
+the frame counters and takes a picture of a frame for the editor. `shots` keeps a small soft picture of a drawn frame
+under an asset key (see "Shots of the frame").
 
 ```ts
 app.renderer.host.canvas();                      // host
@@ -137,8 +138,9 @@ The drawing resolution has four sources and one rule: `override ?? min(devicePix
   on a GPU-bound screen 0.85, then 0.75, down to the floor, before the frame rate drops. `time:rate` carries it; the
   renderer draws at it from the next frame, reason `"rate"`. The default, `{ floor: 0.75, devices: "phone" }`, applies
   on a phone only (a coarse pointer and a short side of at most 820 CSS px, read at start), so a phone at resolution 2
-  draws the memory screen at 1.5 before it drops to 60 fps. Every change redraws the canvas and retakes each kept
-  picture once; the rule holds a lower scale at least twice its dwell, so a picture never goes live from it.
+  draws the memory screen at 1.5 before it drops to 60 fps. Every change redraws the canvas. A kept picture keeps its
+  textures: a step down retakes nothing, a step back finds it at its resolution, and a step up past it is paid at most
+  four pictures a frame (see "Kept pictures"); the rule holds a lower scale at least twice its dwell.
 - `app.renderer.monitor.setResolution(n)` overrides them all, in every build: a player's graphics
   setting is applied by it from an effect, and the A/B runs of a debug build switch with it.
   `undefined` hands the choice back. Outside 0.5 to 4 it throws a `RangeError`. While it holds the
@@ -147,7 +149,9 @@ The drawing resolution has four sources and one rule: `override ?? min(devicePix
 Every change goes through one mechanism: it is remembered, and the next frame applies it on the
 resize path (`viewport` lays out, `host.resize(w, h)` calls Pixi's `renderer.resize(w, h, r)`), so
 a burst of changes costs one resize, the CSS size, the frame and the scale stay, only the backing
-store changes. A restore after a lost device comes back at the current target, override
+store changes. The CSS size is the mount's border box with its fractions (`getBoundingClientRect`):
+the canvas box is set to it, and the backing store is rounded up to whole device pixels, so the
+canvas covers the mount to its last device pixel at a fractional `devicePixelRatio` (F116). A restore after a lost device comes back at the current target, override
 included. `host.onResolution(fn)` (internal) hears every applied change with `(from, to, reason)`, the reason
 `"dpr"`, `"setting"`, `"debug"` or `"rate"`;
 the monitor writes it into the log, and B1, F12, C14 and PX1 subscribe in later blocks.
@@ -207,7 +211,7 @@ internal markup: select them by nothing, set the properties instead.
 | `boundsOf(entity)` | The axis-aligned bounds, in reference units, of the four corners of the view's hit box brought through its `Transform` and `Parent` chain, rotation included. `undefined` without a view, for a view in no tree, hidden or at an effective alpha of 0.01 or less, and for bounds without area (a scale of 0 too), so a located element is one the player sees. A fresh object. Inert: `undefined`. The `game.locate` source of `ui` and the legend of `capture()` read it. |
 | `hitBoxOf(entity)` | The very box `hitTest` tests for the view, in the entity's own units, before the `Transform` and the `Parent` chain: `{ x: -32, y: -32, width: 64, height: 64 }` for a 64 x 64 `Sprite` with the default anchor, `{ x: 0, y: 0, width: w, height: h }` for a `Shape`. A fresh object; `undefined` without a view. `input` fits the circle of a trace in it. |
 | `textures.provide(fn)` | Adds a provider to the chain; the newest is asked first. Returns the remover. Works while inert. |
-| `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Throws while the renderer does not draw. |
+| `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Once uploaded it stays on the GPU until `textures.destroy`: Pixi's collector leaves it alone (F129). Throws while the renderer does not draw. |
 | `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
 | `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. Before a source goes, the `change` listeners of the source and of its style are removed: Pixi 8.22 keeps batch bind groups forever, and each would warn `[BindGroup] ... destroyed while still bound to a shader`. |
 | `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once (sprites, nine-slices, hollow nine-slices). No-op while inert. |
@@ -220,13 +224,14 @@ internal markup: select them by nothing, set the properties instead.
 | `debug.overlays()` | Every overlay, bottom first: `{ entity, label, phase, mode, level, range, kept }`, a fresh array; `[]` with none. |
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.overdraw(on)` | Dev and debug builds: draws every frame as the overdraw heat map (see "Overdraw heat map"); off draws the game again from the next frame. Elsewhere the switch stays off. |
+| `debug.why()` | Agent builds: why every view with an enabled filter is drawn as it is, in draw order: `{ view, mode, reason, calmIn, retake }`, a fresh array, built when called. Every other build, and while inert: a frozen `[]`. See "Why a view is drawn live". |
 | `debug.state()` | `{ nineSlice, verifyFrames, kept, overdraw }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
-| `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
+| `filters.warm(filter, quad?)` | Creates the GPU pipelines of a filter before a screen needs them, and of its body on its `quad` when it has one: drawn invisibly before a frame (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
 | `leave.show(look)` | `scenes` at the start of a live switch: a veil over the whole canvas fading in, and a loader that waits for its `afterMs`, drawn above every layer; replaces a look that runs. See "The picture of a scene being left". Inert: nothing. |
-| `leave.land()` | `scenes` after the swap: the loader goes, the veil fades out over its `outMs` and leaves the stage. Nothing runs: nothing. |
-| `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once. Nothing runs: nothing. |
+| `leave.land()` | `scenes` after the swap: the veil fades out over its `outMs` and leaves the stage; a ring or a texture loader goes at once, a layer loader that shows fades out with the veil. Nothing runs: nothing. |
+| `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once, a lifted layer back under the root. Nothing runs: nothing. |
 | `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
@@ -235,6 +240,15 @@ read at attach, as a `Display` object's is. A point outside the rectangle of a `
 (a `Shape` or a `NineSlice`) hits nothing inside it. The hit test moves the point into the view's local space through the pose
 helpers below, pivot included. A box without area holds no point: a particle container measures
 `0 × 0` and is never hit, not even at its origin.
+
+The hit test runs on every pointer move, the hover of a mouse and the drop lookup of a drag, so it
+allocates nothing (F118): it walks the layer containers in draw order without a sorted copy (children
+Pixi left in `zIndex` order are walked as they stand, others through a stable index order kept per
+depth), carries the alpha down the walk instead of walking up from each view, and writes its poses
+into pooled scratch; an accept function that asks again gets a walk of its own. The renderer also
+turns Pixi's own event handling off at `app.init` (`eventMode: "none"`, every `eventFeatures` flag
+false): no engine part listens to a Pixi event, and Pixi would hit-test every move again. `input`
+owns the pointer listeners, the cursor, `touch-action` and `preventDefault`.
 
 ### Filters
 
@@ -249,7 +263,8 @@ them are disabled: a filter Pixi holds is pushed and popped around its view ever
 switched off (a button's press dim waits switched off). A filter switched on or off is handed over again by the draw
 callback's first step (`sync.stepFilters`), before anything reads the tree, so the switch is drawn in the frame it was
 made; uniform writes and `enabled` flips need no call. The render passes and the kept pictures read the slots, enabled
-or not, as before.
+or not, as before. A slot of `effects` may carry a `quad`: the filter's body built as a program for a mesh, one object per
+instance, which a kept view whose numbers change draws through (see "Kept pictures"). A game's own slot leaves it out.
 
 The filters come off the object and its wrapper when the view lets its object go: a pooled sprite
 never carries one into its next life, and a `Display` object leaves without them, on despawn as at
@@ -293,9 +308,13 @@ task, so a probe never shows. One probe draw is one subject in one target:
   plain bitmap text), the same sprite blending `"add"` and `"screen"` (`sprite-add`, `sprite-screen`: a glow's
   pipelines, see "Blend"), a `Graphics` with `batchMode: "no-batch"`, a `ParticleContainer` with the
   normal and the add blend, a `BitmapText` in the first font installed (queued when it arrives,
-  ahead of the filters still waiting), and every filter handed to `filters.warm` (`effects` hands it
+  ahead of the filters still waiting), every filter handed to `filters.warm` (`effects` hands it
   every checked definition, every stage of its inputs and every Pixi-core kind once the shader
-  checks settled);
+  checks settled), and on WebGPU the quad a filter was handed over with: a mesh of its program on a
+  unit square of the module's own, drawn after the filter in the first target of the device, and in the
+  same frame into a texture no clip ever draws into, so a view's first frame on its own shader (see
+  "Kept pictures") compiles nothing on the canvas, under a filter or inside an outer picture. The texture
+  of the targets below keeps the stencil of its first clip, so it would hit the canvas's pipeline again;
 - the targets on WebGPU: the canvas and a texture (a 4 × 4 render texture the module owns, cleared
   at each draw), each with and without a stencil clip, as `sync` hangs clips; on WebGL one draw, the
   program does not depend on the target. A canvas the stage pass does not clear
@@ -306,6 +325,10 @@ task, so a probe never shows. One probe draw is one subject in one target:
   stack. Pixi 8.21 reads the input texture of such a level as it last left it at its next push, and a
   pool trim destroys that texture in between: the push throws inside Pixi's render, and the stack it
   leaves unbalanced breaks every filter of the frames after it.
+- a quad's draw runs in a `device.pushErrorScope("validation")`: a program that does not fit its
+  pipeline fails asynchronously, as a blank view with nothing in the logs. An error logs
+  `renderer:warm-invalid` at error level with `program` and `message`, and the warm-up goes on: the
+  draw failed, not Pixi's filter stack.
 
 The probes hang in a tree of their own, never in the stage, and only during their own render. The
 queue asks `demand` for the next frame (`"request"`), so a renderer drawing on demand draws through
@@ -337,10 +360,15 @@ hands up to `renderer.uploads` of them to Pixi's public `renderer.texture.initSo
 the warm-up's probes and before the stage pass. While sources wait it asks for the next frame, so a
 screen drawing on demand keeps drawing until the queue is empty; an empty queue costs one compare a
 frame and allocates nothing. Each call answers `true` after its last source, at once when every
-source is on this device already. A source whose upload throws is logged once
+source is on this device already; a source that left the GPU since is queued again. A source whose upload throws is logged once
 (`renderer:upload-failed`, a warning) and counted done: its first draw uploads it, as before. A
 source destroyed while it waits is skipped. A stop or a lost WebGPU device answers every waiting call
 `false` and forgets what was uploaded: the new device holds none of it.
+
+A texture of `textures.create` stays uploaded until its owner calls `textures.destroy`. Pixi's collector
+(60 s unused, checked every 30 s) would take an `ImageSource` off the GPU with no event, so its first
+draw would upload it again (F129). The collector stays on for everything else: buffers, render targets
+and every source that does not opt out.
 
 ```ts
 // `assets.warm("ep01.memory")`: the bundle is loaded, its textures go up one a drawn frame.
@@ -348,6 +376,15 @@ const renderer = ctx.require(rendererPlugin);
 await renderer.sync.textures.upload(record.textures); // true 6 drawn frames later (uploads: 1)
 await renderer.sync.textures.upload(record.textures); // true at once: they are on this device
 ```
+
+### `shots` — `app.renderer.shots`
+
+| Method | Behaviour |
+|---|---|
+| `take(key: string): void` | Keeps what the next drawn frame shows under `key`, replacing a shot of that key, and asks for that frame. Two keys taken before a frame is drawn get the same picture; a key taken twice is kept once. Does nothing, and warns nothing, without `shots` in the config, while the renderer does not draw, on WebGL, before the pipelines compiled, and while `world.ecs.mode()` is not `"live"`. |
+| `has(key: string): boolean` | A shot stands under the key. False before its frame was drawn, after the oldest went for a newer key, and after a lost device. |
+
+See "Shots of the frame".
 
 ### `invalidate` — `app.renderer.invalidate(entity)`
 
@@ -359,7 +396,7 @@ await renderer.sync.textures.upload(record.textures); // true at once: they are 
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, canvasPasses, canvasPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }`. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `scene:build` at the start of a scene built aside, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
@@ -399,9 +436,10 @@ the render targets Pixi draws into, and the pictures the engine keeps (`host.kee
   `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
   level, in MiB.
 - `views` and `pooled` are read from the `sync` state. `renderPasses` is the measured count of the last drawn frame,
-  `renderPassesMax` the most of one drawn frame in the last full second (see "Render passes"). `kept` reports the
-  kept pictures (see "Kept pictures"): the quads drawn in the last drawn frame, the MiB their textures hold, the
-  pictures taken in the last full second.
+  `renderPassesMax` the most of one drawn frame in the last full second (see "Render passes"). `canvasPasses` and
+  `canvasPassesMax` are the same two numbers for the passes on the canvas alone (see "Canvas passes"). `kept` reports
+  the kept pictures (see "Kept pictures"): the quads drawn in the last drawn frame, the MiB their textures hold, and
+  in the last full second the pictures taken, the pictures the budget evicted and the takes it refused.
 - The frame timing costs two `clock.now()` calls and a few number writes per frame; no allocation.
   The rest is read only when `stats()` is called.
 
@@ -419,13 +457,29 @@ Where nothing counts (headless, a test stage, a fake application) both report th
 0 while inert; otherwise `1 + Σ over views drawn under the root with an enabled filter (1 + Σ passes of the
 enabled slots)`; a view drawn from its kept picture costs nothing, nor does a view inside one or under any node that
 is not drawn (an empty or alpha-0 view, a hidden layer: `visible` or `renderable` false up to the root), and the
-passes the last flush of the kept pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A filtered view costs one pass for its content and one per filter apply (spike
+passes the last flush of the kept pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A view on its own shader (see "Kept pictures") is no pass: its body runs on a mesh in the pass that draws the canvas, and only the copy of its padded picture counts, 1, when the picture, the padding or the resolution changed. A filtered view costs one pass for its content and one per filter apply (spike
 P10); a disabled filter costs nothing, and a view whose filters are all disabled counts 0. A view
 out of the tree (an unknown layer) counts 0. The pins from P10: no filter `1`; one glow of 1 pass
 on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and a tint on ten
 buttons `31`. The renderer is the one owner of this number; `effects` declares the passes per kind
 and reads `sync.renderPasses()` for its budget warnings: the same number, without the texture walk
 and the fresh object of `stats()`.
+
+#### Canvas passes
+
+`renderPasses` counts every pass; `stats().canvasPasses` counts the passes on the canvas, in every build. Each one
+after the first is a break of the canvas: on a tiled GPU a store and a reload of the whole canvas, so breaks =
+`canvasPasses - 1`. On WebGPU the lazy canvas pass tells the monitor at every real begin, through `host.onCanvasPass`
+(`host/render-pass.ts` never imports the monitor): one typed-array increment, inside a frame only. On WebGL the runners
+of `renderPasses` count a bind of the canvas. `canvasPassesMax` is the most of one drawn frame in the last full second,
+and a frame that is not drawn keeps the numbers of the last drawn one, as for `renderPasses`.
+
+Where nothing counts (headless, a test stage, a fake application, and a canvas with multisampling, which is left to
+Pixi: see "The canvas pass on WebGPU") both report the estimate: 0 while inert, otherwise 1 + the views drawn live
+under the root with an enabled filter, by the walk of `sync.renderPasses()`. A kept view, a stack of alphas drawn by
+its quad, a view inside a picture and a view not drawn add 0; a view drawn live adds 1 however many applies it has. The
+pins: no filter `1`; one view drawn live `2`; ten `11`; a kept view `1`. It is counted at every read, so a take shows at
+once.
 
 #### Draw calls
 
@@ -552,11 +606,12 @@ frame, index, kind (`PASS_KINDS[kind]`), stencil, size, GPU time and label:
 | `kind2` | The filter's kind, **1-based** into `frames().kindNames` (`kindNames[kind2 - 1]`, `"other"` first), 0 for none: the rule of the frame's `fltKind` column too. |
 | `drawsAt` | The frame's draws when the pass began (WebGPU; draws are not counted on WebGL): a pass drew up to the next pass's `drawsAt`, the last one up to the frame's `draws`. |
 | `format`, `resolution` | The target's texture format (by reference) and resolution; `null` / NaN when unknown. |
+| `restart` | Why a canvas pass began, an index into the root export `CANVAS_RESTARTS` (append-only): `"first"` the first begin of a render call, `"filter"` a begin after a pass into another target, `"mask"` a restart for a stencil push, `"depth"` a restart for the first depth use, `"empty"` an owed clear or a settle with no draw. 0, `"none"`, for any other pass and on WebGL. A verify draw inside a frame is a render call of its own: it may add a second `"first"`. |
 
 A spike's `passes[]` reads the same: `owner` and `view` (the owner's view label when the line is
 built), `filter` (the kind id), `draws` (`null` where draws are not counted; they add up to the
-frame's draws), `format`, `resolution`, and `kept: true` for the take of a kept picture (its label
-starts with `kept:`). A filter chain is the passes of one owner in a row. `frames().systemNames` names
+frame's draws), `format`, `resolution`, `kept: true` for the take of a kept picture (its label
+starts with `kept:`), and `restart` as its name, no key for `"none"`. A filter chain is the passes of one owner in a row. `frames().systemNames` names
 `sysIdx`; a world that registers a system makes a new array, so a reader sees the growth by identity.
 
 #### Shader events
@@ -733,6 +788,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |
 | `uploads` | `number` | `1` | Texture sources `sync.textures.upload` puts on the GPU per drawn frame (see "Uploading textures before they show"). One upload costs about 9 ms on a Galaxy A26 whatever its size, so the budget counts textures, not bytes. `0` turns the queue off: `upload` answers `false` and the first draw uploads, as before. Not a whole number from 0 to 8 throws at `createApp`. |
+| `shots` | `{ width, height, blur, keep? } \| undefined` | `undefined` | The size in texels (whole numbers from 1 to 512), the softness (sigma in reference units of the frame's width, finite, 0 or more, 0 is no blur) and the number of pictures `shots.take` keeps (a whole number of at least 1, 8 by default). `undefined`: no pipeline is made and `take` does nothing. A bad value throws at `createApp`. See "Shots of the frame". |
 | `adaptiveScale` | `{ floor, devices } \| false` | `{ floor: 0.75, devices: "phone" }` | The render scale of the adaptive frame rate on a GPU-bound screen (see "Resolution"): the steps 1, 0.85, 0.75, 0.6 and 0.5 down to `floor` (one of them; 1 allows none), on `"phone"` only or on `"all"` devices. Needs `time.adaptive`. `false` keeps the resolution. Shallow merge: a game that sets it gives both fields. Anything else throws at `createApp`. |
 
 ```ts
@@ -752,7 +808,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views world released (a committed scene build, an opened warm window), added views, changed components, invalidated texture keys; then, while a scene or a warm window is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then a shot of that frame while the canvas texture holds it (`shots.after`, one length read with no key waiting), then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -766,7 +822,7 @@ current, drawn and alive (spec 31, F61 S2), and `world` flags its entities as bu
 - **Aside queue.** World flags a view before the `onAdded` hooks of its components, and the pass
   sorts the building entities out of its added set (one `isBuilding` lookup each) into an aside queue. After the live half of the pass, their views are made in chunks while
   `world.projection.left()` is above 0, at least one a frame, the clock read after the first view and
-  every 8 after it. A chunk carries the queued parents of its views first, as the one-block build
+  every 2 after it. A chunk carries the queued parents of its views first, as the one-block build
   does (U2.3), so a child made in a later frame still hangs under its parent.
 - **Held views.** A made view of the build with no parent, or with a live parent (a kept projection,
   a `ui` slot host), is held: it hangs nowhere in the stage, its live parent gets no wrapper for it,
@@ -827,16 +883,31 @@ README). The renderer's part, `sync.leave`:
 - **The clock.** Every render phase steps the look on `clock.now()`, before the draw decision: the veil's level rises by
   the clock milliseconds since the last step over `inMs` and, after `land`, falls over `outMs` from where it stands;
   at 0 the container leaves the stage. A look shown while the last one still fades out starts from that level. The
-  loader shows once `clock.now()` is `afterMs` past `show`, until `land`.
+  loader shows once `clock.now()` is `afterMs` past `show`, until `land`; a layer loader that shows then stays through
+  the fade-out (below).
 - **The loader.** `texture` resolves the key through the texture providers at `show` and turns the texture at the
   centre, one turn a second; a key nothing answers is warned once (`renderer: no texture for asset key`) and draws the
   ring. Neither: a white three-quarter ring 96 u across, 10 u wide, drawn once and turned the same way. `due`: called
   once, in the first frame the loader is due and before it is drawn (never for a switch done sooner), it makes what the
   loader draws (`scenes` mounts its loader projection there) and answers a layer of the scene; that layer's container
-  is moved into the look, above the veil, from that frame on, and put back under the root at the place of its layer at
-  `land` or `drop` (a layer list that changed before takes it back itself). No layer, or a throw (logged,
-  `renderer: the loader of a scene being left threw`), draws the ring. Its views stay views of the scene: their own motions run, and a hidden or shown loader moves the walks of
-  `shown`, so their loops run while it shows.
+  is moved into the look, above the veil, from that frame on. No layer, or a throw (logged,
+  `renderer: the loader of a scene being left threw`), draws the ring. Its views stay views of the scene: their own
+  motions run, and a hidden or shown loader moves the walks of `shown`, so their loops run while it shows.
+- **The loader at the swap (F107).** A ring or a texture goes at `land`. A layer loader that shows stays above the veil
+  and fades out with it: every step writes the veil's level over its level at the swap as the alpha of its layer's
+  container, so the loader goes from whole to nothing on the veil's curve, also when the veil was not full at the swap. The look keeps that container whatever layer list the next scene brings: one that
+  declares the layer does not take it back under the root, one that does not let it go and names none of its views as
+  left without a layer. When the veil is gone the layer goes back under the root at alpha 1, at its place in the layer
+  list as it stands then (let go when that list does not declare it), but only once no view hangs in it: `scenes`
+  unmounts the loader projection in the first frame `outMs` has passed in, which can come a frame after the veil is
+  gone, and under the root the layer would draw the loader whole for that frame. Until then it waits above the veil at
+  alpha 0, unseen; a look with `outMs: 0`, or no veil, leaves it waiting the same at `land`. The wait is bounded:
+  `outMs / 50 + 2` frames at most (50 ms is the cap of a `time` delta, which `scenes` counts in), and a frame is asked
+  for each of them. Views another owner draws in that layer, the scene that stands or a loader the game mounted, never
+  leave it: after the bound the layer goes back whole, views and all. One layer waits at a time
+  (an older one goes back when another starts waiting), a look shown meanwhile whose `due` answers that layer takes it
+  over at alpha 1, and a lost device or a stop forgets it. `drop` puts a lifted layer back at once, views and all:
+  `scenes` unmounts the loader at once then.
 - **No tap.** The hit test walks the layers of the root only, and a lifted layer is not under the root: neither the
   veil nor the loader takes a tap.
 - **Frames.** A step asks for a frame (`"request"`) while the veil's level moves, when the loader comes or goes, and
@@ -846,7 +917,54 @@ README). The renderer's part, `sync.leave`:
   the first step that needs them and kept for the life of the application: a switch makes no Pixi object. A lost
   device takes them with its stage; the step makes them again on the restored one, and a look that ran on goes on. A
   stop frees them; the game's texture and a lifted layer are not freed with them. With no look running a step reads
-  one field: 0 B a frame (`leave.perf.ts`).
+  two fields: 0 B a frame, and 0 B a frame of the fade-out and of the wait too (`leave.perf.ts`).
+
+## Shots of the frame
+
+`renderer.shots` (F134, spec 35) keeps what stood on the screen as a small soft texture under an asset key: the picture
+of the place the player left, ready before the frame that asks for it. A game declares the size once and takes from a
+live node at the start of a switch.
+
+```ts
+createApp({ pluginConfigs: { renderer: { mount: "#game", shots: { width: 96, height: 208, blur: 22 } } } });
+
+app.renderer.shots.take("shot.panorama.bolt"); // at the start of the switch, in a live node
+app.renderer.shots.has("shot.panorama.bolt"); // true once the next frame was drawn
+```
+
+- **What it holds.** The frame as drawn on the canvas, HUD included, read after the stage render of that frame and
+  before the task ends, while the canvas texture still holds it. No new pass of the scene. The heat map of `overdraw`
+  is never kept: its frame takes nothing and lets the request go, as a frame Pixi did not render does.
+- **The look is not in it.** While a key waits, the step of `sync.leave` hides the container of the look, so the frame a
+  take waits for shows none, and the look shows from the next frame on its own clock. `take` asked for that frame and
+  a shot asks for one more, so `onDemand` draws both. The swap, `holdMs` and input do not change.
+- **A key.** It resolves like any asset key through the texture providers: `image`, `Sprite`. `leave.loader.texture` reads its key once, as the look shows, so it needs a shot that already stands, and it holds that texture for the whole look.
+  A view that names it before the shot, or whose key went, looks again in the next pass. A retake draws into the same
+  texture. With no shot under it a key is a missing texture like any other: the placeholder and one warning, which is
+  why a game asks `has` and draws its baked picture otherwise.
+- **How many.** `keep`, 8 by default. The oldest taken goes first and a new key takes its texture, so a game holds at
+  most `keep` textures of `width x height x 4` bytes, counted as `kept` in `host.textures()`. A retake counts as new.
+- **The chain.** One command encoder, submitted once. The canvas is divided by 4, rounding up, while that stays at least
+  twice the shot's size, and the last hop ends at the shot (`hopsOf`). A hop of 4 takes 2 x 2 bilinear taps at +-1 source
+  pixel: its output texel centre falls on a corner of source pixels, so that is an exact box of 4 x 4. The last hop
+  takes 3 x 3 taps, a third of the ratio apart. Then, with `blur` above 0, a horizontal and a vertical Gaussian at the
+  shot's size, through one extra texture of that size, neighbouring weights paired into bilinear taps, at most 16 a
+  side: `blur * width / viewport.size().width` texels, 10 at most, so the softness is the same on every screen. Two
+  keys of one frame cost one chain and a copy. Hop textures and uniforms live for the take: at rest nothing runs.
+- **The texture.** A Pixi `RenderTexture` of its own, no atlas, no mipmaps: resolution 1, linear, clamped at the edge,
+  `bgra8unorm`, out of Pixi's collector.
+- **The cost.** On a Galaxy A26 (spike, 1080 x 2340, 96 x 208): GPU 1.8 ms median, 2.9 ms p90, main thread 1.5 ms, once
+  a take. In Chrome on a Mac, against the exact area average and Gaussian of the same frame, on a test scene of 700
+  sharp white squares: 0.31 of 255 RMSE at sigma 4.8. Per frame `after` reads one length: 0 B (`shots.perf.ts`). A game
+  without `shots` compiles no pipeline.
+- **The pipelines.** Both compile with `createRenderPipelineAsync`, off the main thread, when the renderer comes up and
+  `shots` is set: 43 ms on the A26. A take before they are ready takes no shot and waits for no frame: a game draws its
+  baked picture, never a sync compile in the tap frame. A failed compile logs `renderer:shots-unavailable` once and
+  leaves `take` a no-op. A compile that ends on a device that went is dropped.
+- **A lost device** loses the shots and the waiting takes, silently: `has` answers false, and the pipelines compile
+  again on the new device. A view that still names a key gets the placeholder and its warning, as for any key nothing
+  answers. A shot is not saved.
+- **WebGPU only.** On WebGL nothing compiles and `take` does nothing.
 
 ## Render on demand
 
@@ -982,24 +1100,69 @@ What each stage depends on, and the only stage redone when it changes:
 
 | Change | Redone |
 |---|---|
-| A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, its world scale or rotation, the stack resolution | stages 1, 2, 3 |
+| A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, a filter that writes its own `resolution` | stages 1, 2, 3 |
+| A step of the renderer resolution down, or back to the resolution of the picture | nothing: the quad draws its picture resampled; a picture cut to the canvas or with a `"placed"` filter: stages 1, 2, 3, or stage 3 on a stack of a fixed resolution |
+| A step of the renderer resolution up, past the resolution of the picture | at most four pictures a frame: stages 1, 2, 3, or stage 3 on a stack of a fixed resolution |
+| Its world scale or rotation (an ancestor's zoom) | nothing: the quad is drawn scaled within 2× of the take either way, past it stages 1, 2, 3, and once at rest |
+| An ancestor's alpha | nothing: the quad hangs in the view's parent and is faded with it |
 | What the chain of the first filter with inputs draws (`inputs.version()`) | stages 2, 3 |
-| A filter value (`effects` calls `invalidate` before the write), the renderer resolution, the padding, a `"placed"` filter's move | stage 3; for a stack of alphas nothing: the quad's alpha |
+| A filter value (`effects` calls `invalidate` before the write), the padding, a `"placed"` filter's move | stage 3; on a stack whose resolution followed a step stages 1, 2, 3, so a picture is never a mix of two; for a stack of alphas nothing: the quad's alpha; for a view on its own shader nothing: the mesh reads the number (see below) |
 | A move of the view itself | nothing: the quad moves; a picture cut to the canvas: stages 1, 2, 3 |
 | The canvas size, for a picture cut to it | stages 1, 2, 3 |
 
 Moving and changing. A view that moves keeps its picture: only the quad's position is written. A move
 of a fraction of a texel draws the quad off its grid (sampled linearly) while it moves; at rest it is
-taken once more at its new phase (a settle retake, for which one frame is asked). Adaptivity: a view
+taken once more at its new phase (a settle retake, for which one frame is asked), at most two pictures
+a frame, the others in the next frames: forty pictures that stop together refine over twenty frames. Adaptivity: a view
 is taken after it stood still for 2 drawn frames; a kept view whose subtree changes in 3 drawn frames
 in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
 more than live). A kept view inside another is rendered first; its change retakes the outer one too.
 
+A step of the renderer resolution (F126). A step is neither a move nor a change of a picture: a picture drawn at a
+higher or equal resolution than the canvas stays as it is, drawn as a sprite resampled, and a step back finds it current.
+A picture drawn lower is taken again, also while it moves: at most two takes a frame, shared with the settle retakes
+above, each frame with a debt asking for the next. A picture on a stack of a fixed resolution only redoes its output. A
+kept view around refined ones waits for them and is taken once, when it is itself coarser and takes a new stack
+resolution; any other outer view is marked as above, which does not count as churn. A settle waits for the end of a step, except after a zoom. Pictures
+cut to the canvas or with a `"placed"` filter keep their retake, as does a mixed stack whose fixed resolution the step
+crosses. Overlay range pictures are retaken on a step, one render each.
+
+First takes in a frame (F114). A view whose filters are all alphas is taken in its first frame unchanged (the first
+frame it is drawn counts as unchanged): its picture costs one pass, live costs two. Any other view takes its first
+picture at most one per frame, in drawing order, and none in a frame where an alpha may be taken; the others wait one
+more frame each, drawn live as before (never hidden), so a whole board that appears at once spreads its take passes
+over several frames. An alpha that may be taken but is not (cut to the canvas under a zoom) holds the others back once.
+A crowd is spread less (F119): while four or more views with a filter are drawn live, not yet kept, up to ten of the
+views drawn live are first taken in a frame, so a board of forty shadows is taken in four frames instead of forty. Waiting,
+each live filter breaks the canvas pass every frame; its take renders into small targets before the stage pass. A view
+under a range picture or a kept picture is not drawn live, and its take keeps the spread. A first take inside a kept
+picture does not count as churn of the outer one. A
+take that renders nothing (a view off the canvas, empty, too large) is not offered again until the view moves or
+changes.
+
+The view's own alpha (F120). A kept view that fades keeps its picture: the picture is taken without the alpha of the
+view's top (Pixi applies a root's own alpha to its render), and its quad draws it at that alpha, as it draws it at
+another place when the view moves. An alpha write is marked as a move of the view: no stage is redone, and the picture
+around the view (a kept parent, a range) is retaken as for any change inside it. As under a fading ancestor, the
+picture is drawn at `A·F(x)` where live draws `F(A·x)`. A move, a scale or a turn is drawn from the picture too, and
+taken once more only when the view comes to rest off the grid of its take (a nudge or a pulse that returns costs none).
+
+Under a fading or zooming ancestor (F113). A view that stands still is taken while an ancestor fades or zooms, as in
+the entry of a screen, after 2 drawn frames as anywhere: an ancestor's alpha is not read, and a change of the view's
+world scale or rotation does not count as a change of the view. Its quad is faded with the ancestor and drawn scaled
+(within 2× of the take, as under a camera zoom), and taken once more at rest. The picture is drawn at `A·F(x)` where
+live draws `F(A·x)`: the same for a filter that is linear in alpha (a blur, a colour matrix that keeps alpha, a shadow
+made of the input's alpha), the whole picture faded for one that is not (an outline thins as the content fades live,
+it fades whole from the picture). At an ancestor the engine fades to alpha 0 the subtree is not drawn at all: the view is live, draws
+nothing, and is taken again 2 frames after it shows. Not taken under a zoom: a `"placed"` filter (never drawn scaled),
+a picture cut to the canvas (it is taken again on every move), and a view that churned (it waits for real rest). A
+view under an ancestor that pulses or spins for ever is drawn scaled for ever, never taken again at rest.
+
 Not kept: a filter of category `"screen"` (see the effects README, "Filters that are kept"), a slot
 of a game that names no category, a filter that blends with the backdrop (`blendRequired`) or a blend
-mode other than normal, a top that blends otherwise, an ancestor that is translucent, tinted or blends
-otherwise (its alpha would be applied after the filter instead of before it), a `"placed"` filter
-under a filtered ancestor, a view hidden for the player, a picture over 4096 device pixels on a side,
+mode other than normal, a top that blends otherwise, an ancestor that is tinted or blends otherwise, a
+`"placed"` filter
+under a filtered ancestor that cannot run on its own shader, a view hidden for the player, a picture over 4096 device pixels on a side,
 and without `onDemand` a subtree holding a `Display` view: a game that never turned `onDemand` on
 never promised to call `renderer.invalidate` before writing into its own Pixi objects.
 
@@ -1024,17 +1187,148 @@ area, cut from its bounds: its filters draw nothing outside it, so a full-screen
 costs the disc, not the screen. A take that would pass it evicts the pictures not
 drawn in this frame, the least recently drawn first; an evicted view draws live and its textures are
 destroyed. A take that still does not fit is refused, the view drawn live, `renderer:kept-budget`
-logged once per run, and it is not offered again until it fits. Every texture is registered with
-`host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on a drop, a device loss, a rebuild and
-at `onStop`. `stats().kept` is `{ pictures, mb, retakes }`.
+logged once per run, and it is not offered again until it fits. The textures of a view that leaves wait in a pool
+(F119), counted in the budget, and the next take of the same size takes them: a scene that leaves and comes back makes
+no render target. A take of a size the pool does not hold resizes one of them (F132), so a view that leaves at one size
+and comes back at another does not pile textures up. The pool is emptied first when a take needs room. Every texture is registered with
+`host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on an eviction, a device loss, a rebuild and
+at `onStop`, as `textures.destroy` frees a source, its `change` listeners removed first, so the bind
+groups Pixi keeps over a drawn picture print no `[BindGroup]` warning. The warm-up's probe target
+goes the same way. `stats().kept` is `{ pictures, mb, retakes, evicted, refused }`: `evicted` the pictures the budget
+evicted and `refused` the takes it refused in the last full second, drained with the takes; a refusal that holds for
+many frames counts once, a range's take that evicts a picture counts in `evicted`.
 
 `sync.debug.kept(false)` (door `game.debug { kept: false }`) draws every filtered view live from the
 next drawn frame, `true` lets them be taken again: the A/B switch of a measurement, in every build.
+A call without a boolean switches nothing and warns `renderer:debug-kept-needs-boolean`; `sync.debug.state().kept`
+reads the switch.
 With `debug.verifyFrames` on (dev and debug builds), every drawn frame in which a picture stood is
 read twice, as drawn and with every picture drawn live, and compared; a difference logs
-`renderer:stale-picture` and draws every view live until the policy takes it again.
+`renderer:stale-picture` and draws every view live until the policy takes it again. A frame with a picture drawn at
+another resolution than the canvas (F126) is resampled, not stale: it is skipped and counted. A frame in which a picture
+moves off its grid or hangs under a translucent ancestor is skipped and counted, not compared: a fading ancestor fades
+the picture after its filters, which a filter that is not alpha-linear draws otherwise live, by design. A frame in which a
+placed view on its own shader hangs under a filter whose pass starts off the canvas origin is skipped and counted too: it
+differs from live by that origin on purpose (see "A view on its own shader"). Two known limits. Under a rotated ancestor
+the box is looser than Pixi's. A view on its shader under a filter off the origin skips the whole frame's compare.
 
-Range pictures. The same machinery renders the canvas-sized picture of an overlay's range that
+### A view on its own shader
+
+A kept view whose filter numbers change would pay a stage 3 pass in every frame, 1.9 ms on the A26 at 221 MHz, and a live
+one a canvas break. From its third output in a row the engine draws such a view through the filter's own body instead (F126
+stage 2): a `Mesh` over the view's picture runs it in the pass that draws the canvas, and a new number is read by the mesh
+as it stands, with no pass and no take. On the A26, 8 small rows cost 34.4 ms live, 38.5 ms kept with a pass a frame and
+23.0 ms on the mesh (spike, GPU time at 221 MHz, whole frame), their pixels within 1/255 of live. A game does nothing:
+`cache` keeps its meaning, the mode enters and leaves by itself, and WebGL keeps stage 3.
+
+A record fits when it is on WebGPU with exactly one enabled filter, of `effects` (the slot has a `quad`), with no inputs, on
+`resolution: "inherit"`, and does not draw direct. An `Alpha` beside the filter does not fit: stage 3 draws `F(A·x)` in stack
+order, the mesh would draw `A·F(x)`, and a body that is not alpha-linear would pop at every entry. `s3` then holds the padded
+picture, the subtree picture copied at `translate(Ps, Ps)` with no filter: one pass, only when the picture, the padding or the
+resolution changed, so a retake on the mesh costs stage 1 and that copy. The mesh stands on one unit square of the run,
+scaled by the output's CSS size, and `uOutputFrame.xy` holds the picture's canvas place, so `keptOrigin` is 0 in the mode and
+`canvasPixel` answers what it answers live.
+
+It enters at the third output owed without a gap of more than `CALM_AFTER` frames (`QUAD_AFTER` = 2): a tween that writes every
+second frame reaches it, a write now and then does not. It goes back to a sprite after `QUAD_CALM` (30) drawn frames without
+a change, about a second on the A26: a resting mesh costs 0.08 ms GPU and 0.03 ms CPU a frame on a small body and the whole
+fill of a heavy one, where going back costs one stage 3 pass and a rebuild of the render group's instructions. Leaving at
+rest shares the limit of the refining and the settle, two a flush: forty views leave over twenty frames. It counts as a refresh
+(`"filter"`) and marks nothing above: the pixels stand. Every other way out goes through `goLive` or `goDirect`, which leave
+first, so a mesh never outlives its binding: an eviction, a churn, an ineligible frame, a stack that stopped fitting (in the
+frame it stopped, with its stage 3), a stack reduced to an `Alpha`. The mesh, its shader and the spare sprite stay with the
+record, so an entry after the first makes nothing; another instance of the filter builds the shader again. The record frees
+them, its group's uniform buffer first, before its textures; the geometry and the one sprite that copies go at a device loss
+and at `onStop`.
+
+A change on the mesh marks the pictures above it and the ranges that hold it, as a pass would. It counts as no take and as no
+refresh. `debug.verifyFrames` compares the mesh with the live filter from its first frame on, as any picture, except for a
+placed view under a filter whose pass starts off the canvas origin (below). Off the padding
+grid (a fractional resolution) a body's frame is up to one device pixel wider than live: nothing visible, and no more
+difference from live than a stage 3 picture has. Slice C of the change brings `cache: false` views; they stay as they were
+until then.
+
+A `"placed"` view under a filtered ancestor, live or kept, is kept only on its shader: a stage 3 picture would hold the
+wrong place. It fits the mode as any view does, one enabled filter of ours with a quad; a view that does not fit stays live,
+and `why()` says `"placed-under-filter"`. It enters at its first take, a sprite that comes under a filter enters in that
+frame, and it does not leave while the filter stands: `QUAD_AFTER` and `QUAD_CALM` do not apply, and it leaves at rest
+only after the filter is gone. A change under its top retakes it in every frame: stage 1 and one copy, never to live, so a
+glow does not jump. Only a refused take, an eviction, or a frame in which it may not be kept at all goes live. The place
+comes from the view's world transform, whatever target the ancestor renders into: a move of the ancestor is a refresh with
+no pass, and marks the pictures above, so a kept ancestor takes its picture again.
+
+Live under a filter whose bounds start off the canvas origin, Pixi's `uOutputFrame.xy` is relative to that filter's texture;
+on the mesh `canvasPixel` answers the canvas position there too (spec 23 P8.3). The two differ by that origin on purpose:
+the view jumps by it once, at its first take. The pass starts where Pixi says: the bounds, or the filter area in their
+place, cut to the canvas while every enabled filter of the stack has `clipToViewport` on, floored to the pass's grid,
+padded, so a padded filter at the corner starts off the origin. `debug.verifyFrames` skips and counts such a frame; for a
+view whose closest filter pass starts at the origin it compares as usual. The take makes no mark, so with `onDemand` off
+the oracle in shadow names it once as `renderer:missed-frame`.
+
+A mesh draws onto the canvas, whose target holds a stencil, or inside a filter pass or an outer picture, whose target does
+not: two pipelines (measured on Chrome, 2026-11-01: one of each per program). The warm-up draws a quad in both, the second
+into a texture of its own, in the frame of the first: 2 draws a quad, no frame more, and no pipeline in the first frame of
+a view on its shader in any of the three places.
+
+### Why a view is drawn live
+
+`sync.debug.why()` (agent builds; every other build answers a frozen `[]`) answers one entry per view with an enabled
+filter, in draw order, built when called:
+
+```ts
+app.renderer.sync.debug.why();
+// [
+//   { view: "Shape#1048590 board:bottom", mode: "live", reason: "churn", calmIn: 6, retake: { why: "mark", by: "Text#1048612 tags:timer" } },
+//   { view: "Sprite#1048633 ward:glow3", mode: "live", reason: "placed-under-filter", calmIn: 0, retake: null },
+//   { view: "Sprite#1048640 board:g1", mode: "kept", reason: null, calmIn: 0, retake: { why: "resolution", by: null } }
+// ]
+```
+
+`view` is the label the monitor names the view by. `mode` is `"kept"`, `"direct"` (a stack of alphas drawn by its quad)
+or `"live"`. `calmIn` is the still frames left before a take, 0 when it waits for none. `retake` is the view's last
+take when it fell in the last full second. `quad: true` is there on a kept view that runs on its own shader, and on no other.
+The step keeps numbers on the record, no string per frame; the names come
+from two append-only lists.
+
+`reason`, `null` unless the view is live. The checks of a record's frame in their order, the first that fails names it:
+
+| `reason` | Why it is drawn live |
+|---|---|
+| `"off"` | The switch `sync.debug.kept` is off, `keptMb` is 0, or the frame draws everything live for a check. |
+| `"backdrop"` | A filter reads what is under it. Also a view without a record. |
+| `"filter-blend"` | A filter blends otherwise than normally. |
+| `"cache-false"` | The cache may not keep a slot (`cache: false`, a slot that names no category): the view has no record. |
+| `"faded-out"` | The top is at alpha 0 or invisible. |
+| `"top-blend"` | The top or its visual blends otherwise. |
+| `"hidden"` | A cover or a hidden reason of the top holds it. |
+| `"ancestor-hidden"`, `"ancestor-tint"`, `"ancestor-blend"` | An ancestor is not drawn, is tinted, or blends otherwise. |
+| `"placed-under-filter"` | A `"placed"` filter under a filtered ancestor that cannot run on its own shader: no quad, a stack of more than one, a resolution of its own, WebGL. |
+| `"idle"` | A take had nothing to render (empty, off the canvas, too big), or would be cut to the canvas under a zoom. |
+| `"display"` | A `Display` hangs under the top without `onDemand`. |
+| `"budget"` | The budget refused its take, and the refusal holds. |
+| `"blend-below"` | A node under the top blends otherwise (F68). |
+| `"churn"` | It changed in 3 drawn frames in a row: `calmIn` is 8 less the still frames since. |
+| `"waiting"` | `calmIn` still frames left, or `calmIn` 0: the first takes of this frame went to others (F114, F119). |
+| `"alpha-due"` | A stack of alphas goes first in this frame (F114). |
+
+`retake.why`, what the last take was for; `by` is the label of the view that caused it, `null` for none:
+
+| `why` | The take |
+|---|---|
+| `"first"` | Taken from live. |
+| `"mark"` | Its subtree changed: `by` the marked view, or the inner kept view whose drawing changed. |
+| `"inner-first"` | A view inside it took its first picture (F114), or was settled or refined (F126): `by` the view of the mark, not counted as churn. |
+| `"resolution"` | The stack's resolution moved by a filter of its own, or a step up, or a step over a picture that keeps no step (cut to the canvas, `"placed"`, a mixed stack). |
+| `"settle"` | It came to rest off its picture's grid, at most four a frame. |
+| `"scale-limit"` | A zoom past 2× from the take. |
+| `"placed-move"` | A zoom on a picture that is not drawn scaled: `"placed"`, or cut to the canvas. |
+| `"canvas"` | A picture cut to the canvas moved, or the canvas changed size. |
+| `"filter"` | Stage 3 alone; a whole take on a stack whose resolution followed a step. |
+| `"chain"` | Stages 2 and 3; a whole take on a stack whose resolution followed a step. |
+
+### Range pictures
+
+The same machinery renders the canvas-sized picture of an overlay's range that
 `Overlay` (spec 22) asks for (`take`, `retake`, `move`, `release`): one render of the stage root with
 only the range drawn, shown by a sprite placed before the overlay, kept in the same budget. A kept
 view inside a range that switches between its picture and live takes the range's picture again in
@@ -1434,7 +1728,8 @@ pass fewer than `sync.renderPasses()` estimates.
 | Restore fails | the unsupported-device screen; the pause reason stays | the same |
 
 A hidden tab is `lifecycle.push("background")`, a visible one `pop`. Textures are not reloaded by
-the renderer: a texture source keeps its CPU image and Pixi uploads it again.
+the renderer: a texture source keeps its CPU image and Pixi uploads it again. A shot of `renderer.shots` has no CPU
+image: it goes with the device, and `has` answers false.
 
 ## Events
 
@@ -1449,11 +1744,13 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
   pass's render target and pipeline systems, creates the
   application and appends the canvas; then, in the `onReady` callback, `viewport` creates the two safe-area probes, the
   two resize observers and the `moku-native:insets` listener, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
-  `render` frame callback is registered, and the warm-up queues its probes; in an agent build the monitor then attaches (and again
+  `render` frame callback is registered, and the warm-up queues its probes; with `shots` set the texture provider goes in
+  once and the pipelines compile (again after every rebuilt restore); in an agent build the monitor then attaches (and again
   after every restore). Inert without a document or without a mount: nothing is created and nothing
   is registered.
 - **onStop** `({ config, state }) => stopRenderer({ config, state })` answers a waiting capture
-  with `undefined` and forgets the frame counters, then runs the cleanups of `sync`,
+  with `undefined` and forgets the frame counters, destroys the kept pictures and the shots and removes the shots'
+  provider, then runs the cleanups of `sync`,
   `viewport` and `host` in that order, destroys the pooled objects and the application
   (`{ removeView: true }`, `{ children: true, texture: false }`), swaps Pixi's own draw classes
   back, removes the two safe-area probes and the unsupported element and clears every map, the filter slots too, and
@@ -1505,7 +1802,8 @@ in direct mode, so motions in flight when the command started are finished after
 clock), and `snapshot()` and `step()` (the frames of a sheet), `lifecycle` for `push`/`pop` of
 `"background"` and `"device-lost"` and for the `lifecycle:changed` hook that serves the captures a
 pause left waiting, `clock` for `now()`, the time source of the frame counters,
-`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot`,
+`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot`, `ecs.mode` (a take of `shots`
+keeps to a world that runs live),
 `projection.layers`/`keyOf` and, in an agent build, `systemTimes()`, `flow` for the flow path of
 the frames in the performance log (`state()`, and the `flow:edge`/`flow:rest` hooks), `time` also
 for `frameDrawn()` (every build: the render phase reports a frame Pixi drew, for the adaptive frame
@@ -1529,7 +1827,10 @@ and a diff picture, and a `layers` capture that leaves the drawn frame pixel-ide
 player, belong to the e2e station too. The real `drawCalls` number needs a GPU: it is pinned once
 measured on the board screen of the merge game in moku-labs/demos, which has no filter and no
 emitter, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
+A shot needs a GPU too: its WGSL, that the canvas texture holds the frame after `render`, the result against the exact
+area average and Gaussian, and a real `device.destroy()`: the throwaway page of the design folder drives them in Chrome.
 How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,
 a label under a 0.6 parent at 0.6, and the same pixels as the per-label shader drew, in the browser, under
 WebGPU and under WebGL. So does the alpha of a parent: the icon of a disabled round button measured
-at 0.6 in the browser.
+at 0.6 in the browser. The canvas count and `passes.restart` are tested over Pixi's real systems on a stand-in of the
+GPU; `canvasPasses` on a real frame loop, and that it matches the passes a device really began, belong to the phone run.

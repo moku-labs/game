@@ -184,7 +184,7 @@ function answerTrace(ctx: InputCtx, path: readonly Target[]): boolean {
 
 /**
  * Creates the input API: `app.input.tap`, `.press`, `.drag`, `.swipe`, `.trace`, `.onTap`,
- * `.onPointer`, `.onKey`, `.pressKey`, `.cursor`, `.listeners` and `.controls`.
+ * `.onPointer`, `.onKey`, `.pressKey`, `.cursor`, `.listeners`, `.lock` and `.controls`.
  *
  * @param ctx - Kernel context of the input plugin.
  * @returns The plugin API.
@@ -204,6 +204,11 @@ export function createInputApi(ctx: KernelSlice): InputApi {
     pressKey: (key, options) => runKeys(inputCtx, { key, shift: options?.shift ?? false }),
     cursor: () => inputCtx.state.cursor ?? inputCtx.config.cursor.idle,
     listeners: () => countListeners(inputCtx.state),
+    lock: {
+      window: rect => {
+        inputCtx.state.lock = rect;
+      }
+    },
     controls: { add: component => addControl(inputCtx.state, component) }
   };
 }

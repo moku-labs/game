@@ -172,21 +172,27 @@ function readRest(value: Json): Bookmark["rest"] {
 }
 
 /**
- * Reads the optional fields of a bookmark onto it: the `scene` the `game.bookmark` door added and
- * the `rest` point of a bookmark taken at a transit node. An absent field leaves no key.
+ * Reads the optional fields of a bookmark onto it: the `scene` the `game.bookmark` door added, the
+ * `rest` point of a bookmark taken at a transit node and the schema `version` of its trees. An
+ * absent field leaves no key.
  *
  * @param value - The JSON object of the bookmark.
  * @param bookmark - The bookmark with its required fields.
  * @returns The bookmark with its scene and its rest point.
- * @throws {Error} When the scene or the rest point has the wrong shape.
+ * @throws {Error} When the scene, the rest point or the version has the wrong shape.
  */
 function readBookmarkOptions(value: JsonRecord, bookmark: Bookmark): Bookmark {
-  const { scene, rest } = value;
+  const { scene, rest, version } = value;
   const sceneIsMalformed = scene !== undefined && typeof scene !== "string";
+  const versionIsMalformed = version !== undefined && !Number.isInteger(version);
 
   // The scene the `game.bookmark` door added: a string when it is there.
   if (sceneIsMalformed) throw invalidBookmark();
   if (scene !== undefined) bookmark.scene = scene;
+
+  // The schema version of the trees: a whole number when it is there.
+  if (versionIsMalformed) throw invalidBookmark();
+  if (typeof version === "number") bookmark.version = version;
 
   // The rest point before a transit node: a path and an input when it is there.
   if (rest !== undefined) {

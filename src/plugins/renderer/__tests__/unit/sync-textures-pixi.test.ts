@@ -2,7 +2,8 @@ import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { createSyncState } from "../../sync/state";
 import { createTexture, destroyTexture } from "../../sync/textures";
-import type { SyncCtx } from "../../sync/types";
+import type { CreateTextureOptions, SyncCtx } from "../../sync/types";
+import { uploadStep, uploadTextures } from "../../sync/upload";
 
 // ---------------------------------------------------------------------------
 // Unit test against the real pixi.js module, no GPU: what `destroyTexture`
@@ -185,5 +186,150 @@ describe("creating a texture with the real Pixi", () => {
 
     mipped.destroy(true);
     plain.destroy(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same real module and Pixi's real collector, on a source with a stand-in GPU copy (F129): the
+// A Memory Missing board warmed 218 MiB, and a minute later 166 MiB of it had left the GPU with no
+// unload event, under the budget, so the next screen uploaded them in its frames.
+// ---------------------------------------------------------------------------
+
+/** Stands in for a decoded file: Pixi makes an `ImageSource` of an `ImageBitmap`. */
+class FakeBitmap {
+  public readonly width = 4;
+  public readonly height = 4;
+}
+
+/** The renderer id the stand-in GPU copy is filed under. */
+const RENDERER_UID = 1;
+
+/**
+ * A sync context over the real Pixi module, on a device that draws.
+ *
+ * @param initSource - What the host does with a source.
+ * @returns The context.
+ */
+function drawing(initSource: (source: pixi.TextureSource) => void = vi.fn()): SyncCtx {
+  return {
+    ctx: {
+      state: { sync: createSyncState({ nineSlice: false }) },
+      config: { uploads: 1 },
+      log: { warn: vi.fn() }
+    },
+    deps: {
+      host: { pixi: () => pixi, ready: () => true, initSource },
+      demand: { request: vi.fn() }
+    }
+  } as unknown as SyncCtx;
+}
+
+/**
+ * Puts a stand-in GPU copy on a source, and hands the source to Pixi's collector the way the
+ * texture system does at an upload.
+ *
+ * @param gc - The collector.
+ * @param source - The source.
+ * @returns The stand-in, whose `destroy` tells that the copy left the GPU.
+ */
+function onGpu(gc: pixi.GCSystem, source: pixi.TextureSource): { destroy: MockInstance } {
+  const copy = { destroy: vi.fn() };
+
+  (source._gpuData as Record<number, unknown>)[RENDERER_UID] = copy;
+  gc.addResource(source, "resource");
+
+  return copy;
+}
+
+/**
+ * Pixi's collector with its timer off, for which everything is unused at once.
+ *
+ * @returns The collector.
+ */
+function impatientCollector(): pixi.GCSystem {
+  const gc = new pixi.GCSystem({ scheduler: {}, tick: 0 } as never);
+
+  gc.init({ gcActive: false, gcMaxUnusedTime: 0, gcFrequency: 1 });
+
+  return gc;
+}
+
+describe("a loaded texture and Pixi's collector (F129)", () => {
+  it("collects a plain image source: the reason for the fix", () => {
+    vi.stubGlobal("ImageBitmap", FakeBitmap);
+
+    const gc = impatientCollector();
+    const texture = pixi.Texture.from(new FakeBitmap() as unknown as ImageBitmap);
+    const copy = onGpu(gc, texture.source);
+
+    gc.run();
+
+    // The CI pin: when a Pixi release stops collecting here, `createTexture` can stop opting out.
+    expect(copy.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  // Bug: a warmed bundle leaves the GPU a minute later and its screen uploads it in its frames.
+  it.each<[string, CreateTextureOptions | undefined]>([
+    ["plain", undefined],
+    ["with mips and borders", { mips: true, nine: [1, 1, 1, 1] }]
+  ])("never collects a source of `create` (%s)", (_name, options) => {
+    vi.stubGlobal("ImageBitmap", FakeBitmap);
+
+    const gc = impatientCollector();
+    const bitmap = new FakeBitmap() as unknown as ImageBitmap;
+    const texture = createTexture(drawing(), bitmap, options);
+    const copy = onGpu(gc, texture.source);
+
+    gc.run();
+
+    expect(copy.destroy).not.toHaveBeenCalled();
+  });
+
+  // Bug: with the collector off for the source nothing frees it, and the budget counts memory that stays.
+  it("frees the GPU copy through `destroyTexture`, which is what `unloadBundle` calls", () => {
+    vi.stubGlobal("ImageBitmap", FakeBitmap);
+
+    const sctx = drawing();
+    const texture = createTexture(sctx, new FakeBitmap() as unknown as ImageBitmap);
+    const copy = onGpu(impatientCollector(), texture.source);
+
+    destroyTexture(sctx.ctx.state.sync, texture);
+
+    expect(copy.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  // Bug: `upload` answers true with nothing on the GPU, so the screen uploads in its frames all the same.
+  it("uploads a source again after it left the GPU", async () => {
+    const initSource = vi.fn();
+    const sctx = drawing(initSource);
+    const texture = loose();
+
+    const first = uploadTextures(sctx, [texture]);
+
+    uploadStep(sctx);
+    await first;
+    texture.source.unload();
+
+    const second = uploadTextures(sctx, [texture]);
+
+    uploadStep(sctx);
+
+    await expect(second).resolves.toBe(true);
+    expect(initSource).toHaveBeenCalledTimes(2);
+  });
+
+  // Bug: forgetting too much: a source still on the GPU costs a frame of its queue at every warm.
+  it("does not upload a source that stayed on the GPU", async () => {
+    const initSource = vi.fn();
+    const sctx = drawing(initSource);
+    const texture = loose();
+
+    const first = uploadTextures(sctx, [texture]);
+
+    uploadStep(sctx);
+    await first;
+
+    await expect(uploadTextures(sctx, [texture])).resolves.toBe(true);
+    expect(initSource).toHaveBeenCalledTimes(1);
   });
 });

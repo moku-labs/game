@@ -765,6 +765,63 @@ describe("restore", () => {
     expect(() => api.restore({ player: { coins: 99 } })).toThrow(/^\[game] /);
     expect(() => api.restore({ player: { coins: 99 } })).toThrow(/\n {2}.*\.$/);
   });
+
+  /** Version 1 kept the coins as `gold`; version 2 calls them `coins`. */
+  const goldToCoins: Migration = {
+    from: 1,
+    up: state => ({
+      ...record(state),
+      player: { coins: record(record(state).player ?? {}).gold ?? 0 }
+    })
+  };
+
+  it("migrates trees of an older schema version first (bug F106: a dev reload restored a v1 player under v2)", async () => {
+    const { api, state } = setup({ config: { schemaVersion: 2, migrations: [goldToCoins] } });
+    await api.load();
+
+    api.restore({ player: { gold: 7 }, version: 1 });
+
+    expect(api.snapshot().player).toEqual({ coins: 7 });
+    expect(state.store.pending).toEqual([{ op: "replace", path: [], value: state.store.doc }]);
+  });
+
+  it("takes trees of the current version, or of no version, as they are", async () => {
+    const { api } = setup({ config: { schemaVersion: 2, migrations: [goldToCoins] } });
+    await api.load();
+
+    api.restore({ player: { coins: 3 }, version: 2 });
+    expect(api.snapshot().player).toEqual({ coins: 3 });
+
+    api.restore({ player: { coins: 4 } });
+    expect(api.snapshot().player).toEqual({ coins: 4 });
+  });
+
+  it("refuses trees newer than this build and keeps the state", async () => {
+    const { api } = setup({ config: { schemaVersion: 2, migrations: [goldToCoins] } });
+    await api.load();
+    const before = api.snapshot();
+
+    expect(() => api.restore({ player: { coins: 9 }, version: 3 })).toThrow(SaveUnreadableError);
+    expect(api.snapshot()).toBe(before);
+  });
+
+  it("keeps the state when a step of the chain throws, and leaves the input as it was", async () => {
+    const throwing: Migration = {
+      from: 1,
+      up: state => {
+        (record(record(state).player ?? {}) as { gold?: number }).gold = 0;
+        throw new Error("step broke");
+      }
+    };
+    const { api } = setup({ config: { schemaVersion: 2, migrations: [throwing] } });
+    await api.load();
+    const before = api.snapshot();
+    const player = { gold: 7 };
+
+    expect(() => api.restore({ player, version: 1 })).toThrow(SaveUnreadableError);
+    expect(api.snapshot()).toBe(before);
+    expect(player).toEqual({ gold: 7 });
+  });
 });
 
 // ─── flush ───────────────────────────────────────────────────

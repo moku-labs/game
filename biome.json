@@ -5,12 +5,14 @@
       "src/**",
       "scripts/**",
       "tests/**",
+      "bench/**",
       "bin/**",
       "*.config.ts",
       "!tests/visual/**/*.json",
       "!tests/visual-sheets/**/*.json",
       "!tests/fixtures/mini-game/dist",
       "!tests/fixtures/layout-game",
+      "!bench/filters/dist",
       "!**/.moku"
     ]
   },

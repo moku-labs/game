@@ -30,7 +30,7 @@ function openWindow(state: MonitorState): void {
 
 /**
  * Turns the open window into the reported numbers and opens the next one: the most passes of a
- * frame in it become `renderPassesMax`.
+ * frame in it become `renderPassesMax`, the most canvas passes `canvasPassesMax`.
  *
  * @param state - The monitor branch of the plugin state.
  */
@@ -42,6 +42,8 @@ function closeWindow(state: MonitorState): void {
   state.rebuilds = (state.rebuildsOpen * WINDOW_MS) / state.windowMs;
   state.passes.max = state.passes.open;
   state.passes.open = 0;
+  state.canvas.max = state.canvas.open;
+  state.canvas.open = 0;
   openWindow(state);
 }
 
@@ -142,4 +144,7 @@ export function resetWindow(state: MonitorState): void {
   state.passes.last = 0;
   state.passes.open = 0;
   state.passes.max = 0;
+  state.canvas.last = 0;
+  state.canvas.open = 0;
+  state.canvas.max = 0;
 }

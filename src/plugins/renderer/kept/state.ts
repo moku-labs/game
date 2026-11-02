@@ -2,7 +2,9 @@
  * @file renderer/kept — the state of the kept-picture cache, and its stop from state alone.
  */
 import { BYTES_PER_MB } from "../monitor/units";
+import { destroyWhole } from "../sources";
 import type { Config, PixiContainer, PixiRenderTexture } from "../types";
+import { destroyShade, dropQuadParts } from "./shade";
 import type { KeptRecord, KeptState, RangeRecord } from "./types";
 
 /**
@@ -12,6 +14,15 @@ import type { KeptRecord, KeptState, RangeRecord } from "./types";
  * @returns An empty list.
  */
 function emptyRecords(): KeptRecord[] {
+  return [];
+}
+
+/**
+ * Creates an empty texture list. Same reason as `emptyRecords`.
+ *
+ * @returns An empty list.
+ */
+function emptyTextures(): PixiRenderTexture[] {
   return [];
 }
 
@@ -57,6 +68,10 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     byTop: emptyMap(),
     ranges: emptyMap(),
     spare: undefined,
+    quadGeometry: undefined,
+    quadCopy: undefined,
+    pool: emptyTextures(),
+    poolBytes: 0,
     madeGroups: emptyWeakSet(),
     frame: 0,
     unsorted: false,
@@ -66,6 +81,13 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     takesWindow: 0,
     refreshesOpen: 0,
     frameTakes: 0,
+    frameEvicted: 0,
+    frameRefused: 0,
+    evictedWindow: 0,
+    refusedWindow: 0,
+    windowStart: 0,
+    windowEnd: -1,
+    windowNext: 0,
     drawnPictures: 0,
     on: allowed && config.debug.kept !== false,
     allowed,
@@ -74,13 +96,18 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     verifySkipped: 0,
     bypassed: false,
     flushPasses: 0,
-    calm: false
+    calm: false,
+    firstTakes: 0,
+    frameRefines: 0,
+    alphaDue: false,
+    liveWaiting: 0
   };
 }
 
 /**
  * Destroys the engine objects of one record: the quad leaves the tree, the stand-ins drop the filters first (they
- * belong to `effects`), the keeper and every texture go.
+ * belong to `effects`), the keeper and every texture go. The shader goes before the textures: Pixi warns at a source
+ * destroyed while a shader binds it.
  *
  * @param record - The record.
  * @param drop - Destroys one texture: unregisters it from `host.keep` first while the host lives.
@@ -89,6 +116,8 @@ export function destroyRecord(
   record: KeptRecord,
   drop: (texture: PixiRenderTexture) => void
 ): void {
+  if (record.shade !== undefined) destroyShade(record.shade);
+
   if (record.standIn !== undefined) {
     // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
     record.standIn.filters = null;
@@ -106,6 +135,8 @@ export function destroyRecord(
   if (record.s1 !== undefined) drop(record.s1);
   if (record.s3 !== undefined) drop(record.s3);
   for (const texture of record.s2) drop(texture);
+  record.shade = undefined;
+  record.shaded = false;
   record.standIn = undefined;
   record.keeperStandIn = undefined;
   record.keeper = undefined;
@@ -135,7 +166,7 @@ export function destroyRange(range: RangeRecord, drop: (texture: PixiRenderTextu
  * @param texture - The texture.
  */
 function destroyTexture(texture: PixiRenderTexture): void {
-  texture.destroy(true);
+  destroyWhole(texture);
 }
 
 /**
@@ -157,8 +188,12 @@ export function stopKept(state: KeptState): void {
 
   for (const range of state.ranges.values()) destroyRange(range, destroyTexture);
 
-  state.spare?.destroy(true);
+  if (state.spare !== undefined) destroyWhole(state.spare);
   state.spare = undefined;
+  dropQuadParts(state);
+  for (const texture of state.pool) destroyTexture(texture);
+  state.pool.length = 0;
+  state.poolBytes = 0;
   state.records.length = 0;
   state.byEntity.clear();
   state.byTop.clear();
@@ -170,8 +205,19 @@ export function stopKept(state: KeptState): void {
   state.takesWindow = 0;
   state.refreshesOpen = 0;
   state.frameTakes = 0;
+  state.frameEvicted = 0;
+  state.frameRefused = 0;
+  state.evictedWindow = 0;
+  state.refusedWindow = 0;
+  state.windowStart = 0;
+  state.windowEnd = -1;
+  state.windowNext = 0;
   state.flushPasses = 0;
   state.drawnPictures = 0;
+  state.firstTakes = 0;
+  state.frameRefines = 0;
+  state.alphaDue = false;
+  state.liveWaiting = 0;
   state.warnedBudget = false;
   state.warnedBlend.clear();
   state.verifySkipped = 0;

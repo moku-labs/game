@@ -141,6 +141,14 @@ const FILTERS = [
   "AlphaFilter"
 ];
 
+/** The bodies a kept view can run on its quad: the kinds of a checked plain body, drawn after their filter. */
+const QUADS = [
+  "effects.glow.quad",
+  "effects.outline.quad",
+  "fixture.tint.quad",
+  "fixture.veil.quad"
+];
+
 /** The content subjects of the renderer. */
 const CONTENT = [
   "sprite",
@@ -203,6 +211,11 @@ function probeOf(root: pixi.Container, into: pixi.Texture | undefined): string {
 
   // Pixi's label is `null` until one is given.
   const label: string | null | undefined = node?.label;
+
+  if (label === "renderer.warm.quad") {
+    return `${(node as pixi.Mesh).shader?.gpuProgram?.name} ${target}${clip}`;
+  }
+
   const subject =
     label === "renderer.warm.filter"
       ? filterName(node?.filters?.[0])
@@ -352,8 +365,16 @@ describe("the warm-up of a game while its splash stands", () => {
         expect(seen, `${subject} ${variant}`).toContain(`${subject} ${variant}`);
     }
 
+    // A quad on the canvas's target and on one with no stencil, as a filter pass or a picture is: the two pipelines it has.
+    for (const quad of QUADS) {
+      expect(seen).toContain(`${quad} ${VARIANTS[0]}`);
+      expect(seen).toContain(`${quad} texture`);
+    }
+
     // Each drawn exactly once: nothing warmed twice on one device.
-    expect(game.probes.flat()).toHaveLength((CONTENT.length + FILTERS.length) * VARIANTS.length);
+    expect(game.probes.flat()).toHaveLength(
+      (CONTENT.length + FILTERS.length) * VARIANTS.length + 2 * QUADS.length
+    );
   });
 
   // Bug: the warm-up spills past the splash into the first screen, which then pays for it.
@@ -367,7 +388,13 @@ describe("the warm-up of a game while its splash stands", () => {
 
     expect(last).toBeGreaterThan(0);
     expect(last).toBeLessThan(SPLASH_FRAMES);
-    expect(Math.max(...frames)).toBe(1);
+    // One a frame; only a quad's two draws share one, so it adds no frame.
+    for (const drawn of game.probes.filter(probes => probes.length > 0)) {
+      const holdsQuad = drawn.some(probe => QUADS.some(quad => probe.startsWith(quad)));
+
+      expect(drawn).toHaveLength(holdsQuad ? 2 : 1);
+    }
+
     // The queue is empty: the still splash draws nothing more.
     expect(await game.frames(10)).toBe(0);
   });

@@ -4,7 +4,7 @@
  * write of the per-frame path here is an indexed store into a typed array allocated once.
  */
 
-import { DEMAND_REASONS } from "../reasons";
+import { CANVAS_RESTARTS, DEMAND_REASONS } from "../reasons";
 import type {
   FrameColumns,
   FrameReadout,
@@ -237,7 +237,8 @@ function createPasses(capacity: number): RingPasses {
     kind2: new Uint8Array(capacity),
     drawsAt: new Uint16Array(capacity),
     format: Array.from<string | null>({ length: capacity }).fill(null),
-    resolution: new Float32Array(capacity).fill(Number.NaN)
+    resolution: new Float32Array(capacity).fill(Number.NaN),
+    restart: new Uint8Array(capacity)
   };
 }
 
@@ -529,6 +530,7 @@ export function writePass(
   passes.drawsAt[slot] = 0;
   passes.format[slot] = null;
   passes.resolution[slot] = Number.NaN;
+  passes.restart[slot] = 0;
   passes.newest = slot;
   passes.size = Math.min(passes.size + 1, passes.capacity);
   passes.written = sequence + 1;
@@ -798,7 +800,7 @@ function splitDraws(found: Array<{ draws?: number | null }>, total: number): voi
 /**
  * The render passes of a frame still in the pass ring, in their order, with their detail: the entity whose filter drew
  * each and its view's label, the filter kind, the draws, the target's format and resolution, whether it was a kept
- * picture's.
+ * picture's, and for a canvas pass why it began.
  *
  * @param ring - The ring.
  * @param frame - The frame number.
@@ -826,6 +828,7 @@ export function passesOf(
     const label = passes.label[slot] ?? null;
     const owner = cellU32(passes.owner, slot);
     const kind2 = cellU8(passes.kind2, slot);
+    const restart = CANVAS_RESTARTS[cellU8(passes.restart, slot)] ?? "none";
 
     found.unshift({
       index: cellU8(passes.index, slot),
@@ -841,7 +844,8 @@ export function passesOf(
       draws: cellU16(passes.drawsAt, slot),
       format: passes.format[slot] ?? null,
       resolution: measured(cellF32(passes.resolution, slot)),
-      kept: label?.startsWith(KEPT_PREFIX) === true
+      kept: label?.startsWith(KEPT_PREFIX) === true,
+      ...(restart === "none" ? {} : { restart })
     });
   }
 

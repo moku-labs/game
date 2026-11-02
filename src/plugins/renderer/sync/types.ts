@@ -2,10 +2,10 @@
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
-import type { OverlayValue, ShapeValue } from "../components";
+import type { OverlayValue, ShapeValue, TransformValue } from "../components";
 import type { Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
-import type { FilterCache, KeptState } from "../kept/types";
+import type { FilterCache, KeptState, RetakeWhy, WhyLive } from "../kept/types";
 import type {
   DemandModule,
   KeptModule,
@@ -16,13 +16,18 @@ import type {
   PixiContainer,
   PixiFilter,
   PixiFilterManager,
+  PixiGpuProgram,
   PixiGraphics,
+  PixiMesh,
+  PixiMeshGeometry,
   PixiModule,
   PixiRectangle,
   PixiRenderTexture,
+  PixiShader,
   PixiSprite,
   PixiTexture,
   PixiTextureSource,
+  PixiUniformGroup,
   RendererCtx
 } from "../types";
 import type { Point, ViewportApi, ViewportInternal } from "../viewport/types";
@@ -281,7 +286,8 @@ export type TexturesApi = {
   provide(fn: TextureProvider): () => void;
 
   /**
-   * Makes a Pixi texture from a decoded image, so `assets` never imports Pixi.
+   * Makes a Pixi texture from a decoded image, so `assets` never imports Pixi. Once uploaded it stays on the GPU until
+   * `destroy`: Pixi's collector leaves it alone.
    *
    * @param image - The decoded image.
    * @param options - `nine` is left, top, right and bottom in pixels; it becomes the texture's
@@ -292,6 +298,7 @@ export type TexturesApi = {
    * ```ts
    * // `assets` uploads one file of a bundle it just decoded.
    * const renderer = ctx.require(rendererPlugin);
+   * const response = await fetch("/assets/board/panel.png");
    * const bitmap = await createImageBitmap(await response.blob());
    * const texture = renderer.sync.textures.create(bitmap, { nine: [12, 12, 12, 12] });
    * ```
@@ -358,7 +365,8 @@ export type TexturesApi = {
    * and the renderer asks for the next frame while sources wait. The slices of one atlas page share its source, so the
    * page is uploaded once. On a Galaxy A26 one upload costs about 9 ms whatever its size: the frame that showed 6 cold
    * textures took 55 ms, 8 ms once they were uploaded before. Answers `true` once every source of this call went
-   * through, at once when they all did on this device; `false` at once while nothing draws (headless, a lost device)
+   * through, at once when they all did on this device and none left it since; `false` at once while nothing draws
+   * (headless, a lost device)
    * or with `uploads: 0`, and `false` when the renderer stops or the device is lost before the queue reached them. A
    * source whose upload throws is logged (`renderer:upload-failed`) and counted done: its first draw uploads it, as
    * before. A source destroyed while it waits is skipped. The renderer never destroys a texture it was handed.
@@ -491,6 +499,28 @@ export type FilterSlot = {
    * it holds the loops under it (spec 22).
    */
   blurs?: boolean;
+  /** The filter's own body as a program for its quad, for a kept view whose numbers change; filled by effects. */
+  quad?: FilterSlotQuad;
+};
+
+/**
+ * What the kept cache needs to draw a filter's own body on its quad; effects fills it, a game's own slot leaves it out.
+ * The renderer holds no WGSL: it gets the built program and binds its own global filter uniforms and texture beside `fu`.
+ * The object stands for the instance's life, so a list handed over again does not build a shader again.
+ *
+ * @example
+ * ```ts
+ * // `effects` hands a Tint on a kept row: 8 rows of the kind share the program, each binds its own numbers.
+ * const quad: FilterSlotQuad = { program: tintProgram, fu: tintOfRow.group };
+ * ctx.require(rendererPlugin).sync.filters.set(row, [{ filter: tintOfRow.filter, passes: 1, cache: "local", quad }]);
+ * quad.program.vertex?.entryPoint; // "mainVertex"
+ * ```
+ */
+export type FilterSlotQuad = {
+  /** The filter's body behind Pixi's mesh groups; `GpuProgram.from` of the text effects assembles and checks. */
+  readonly program: PixiGpuProgram;
+  /** The uniform group of the filter's instance; `undefined` for a filter that binds none. */
+  readonly fu: PixiUniformGroup | undefined;
 };
 
 /**
@@ -628,18 +658,27 @@ export type FiltersApi = {
    * frame. Answers `true` once every draw was made, `false` at once when there is nothing to warm (no device, a headless
    * app, `warm: 0`), and `false` when the renderer stops first or a probe's render threw, which ends the warm-up of the
    * application (`renderer:warm-failed`). A filter handed over again on the same device answers `true` at once when its
-   * draws were made. The renderer never destroys the filter.
+   * draws were made. The renderer never destroys the filter. On WebGPU a `quad` asks for the pipelines of the filter's body
+   * on its mesh too, two draws in one frame after the filter, so a kept view that later draws through it compiles
+   * nothing in play; each of those draws runs in an error scope, and a program that does not fit logs
+   * `renderer:warm-invalid` while the warm-up goes on. WebGL ignores it.
    *
    * @param filter - A filter the caller built and keeps alive while it waits.
+   * @param quad - The filter's quad, for a kind whose body can run on one; `effects` leaves it out for a stage or a
+   *   fallback, and for a body the mesh cannot carry.
    * @returns Whether the filter's pipelines were created.
    * @example
    * ```ts
    * // `effects`, during the splash: a probe of the Frost's body, before the shop is ever opened.
    * const renderer = ctx.require(rendererPlugin);
-   * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true four drawn frames later (WebGPU, warm: 1)
+   * // Four drawn frames later on WebGPU at `warm: 1` with a cleared canvas:
+   * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true
+   *
+   * // A Tint's probe, whose body can also run on a kept view's quad: its pipelines are made with the filter's.
+   * await renderer.sync.filters.warm(tintProbe.filter, tintProbe.quad); // true, one drawn frame after those four
    * ```
    */
-  warm(filter: PixiFilter): Promise<boolean>;
+  warm(filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean>;
 };
 
 /**
@@ -656,6 +695,50 @@ export type DebugSwitches = {
   verifyFrames: boolean;
   kept: boolean;
   overdraw: boolean;
+};
+
+/**
+ * One view of `sync.debug.why()`: the label the monitor names its view by; how it is drawn (`"direct"` is a stack of
+ * `AlphaFilter`s drawn by its quad, F54); why it is live, `null` when it is not; the still frames left before a take, 0
+ * when it waits for none; the last take in the last full second, with the view whose mark caused it; and `quad` on a
+ * kept view that runs on its filter's own shader.
+ *
+ * @example
+ * ```ts
+ * // A panel whose timer text changes every frame: taken again and again, then left live until it stands still.
+ * const entry: WhyEntry = {
+ *   view: "Shape#1048590 board:bottom",
+ *   mode: "live",
+ *   reason: "churn",
+ *   calmIn: 6,
+ *   retake: { why: "mark", by: "Text#1048612 tags:timer" }
+ * };
+ * ```
+ */
+export type WhyEntry = {
+  /** The label of the view's display object, as the performance log names it. */
+  view: string;
+  /** How the view is drawn in this frame. */
+  mode: "kept" | "direct" | "live";
+  /** Why it is drawn live; `null` when kept or direct. */
+  reason: WhyLive | null;
+  /** Still frames left before a take; 0 when it waits for none. */
+  calmIn: number;
+  /** The view's last take, when it fell in the last full second. */
+  retake: { why: RetakeWhy; by: string | null } | null;
+  /**
+   * Present on a kept view drawn through its filter's own shader: its numbers change, and a change costs no pass.
+   * The field is absent on every other view, a kept sprite included.
+   *
+   * @example
+   * ```ts
+   * // A lens whose angle a tween writes every frame: from its third write on, it runs on the canvas pass.
+   * app.renderer.sync.debug.why()[0];
+   * // { view: "Shape#1048590 shop:lens", mode: "kept", reason: null, calmIn: 0, retake: { why: "filter", by: null }, quad: true }
+   * // A full second on: no take is left in the last one, `retake` is null and `quad` stays true.
+   * ```
+   */
+  quad?: true;
 };
 
 /**
@@ -709,7 +792,9 @@ export type DebugApi = {
   /**
    * Draws every kept picture live again (false) or lets the renderer keep them (true): the A/B switch of a measurement.
    * Off takes effect in the next drawn frame, all views at once; on lets each view be taken again by the usual rule.
-   * Works in every build; with `keptMb: 0` the pictures stay off.
+   * Works in every build; with `keptMb: 0` the pictures stay off. A call without a boolean switches nothing and warns
+   * `renderer:debug-kept-needs-boolean`: `state().kept` reads the switch. The other switches are off by default, so a
+   * read by mistake there leaves the frame as it was.
    *
    * @param on - False to draw every filtered view live.
    * @example
@@ -757,6 +842,26 @@ export type DebugApi = {
   overlays(): readonly OverlayReport[];
 
   /**
+   * Why every view with an enabled filter is drawn as it is, in draw order: from its picture, by its quad, or live and
+   * why, how many still frames are left before a take, and what its last take was for. Built when called, never per
+   * frame, so a tool may ask at any moment. Agent builds only (dev and `--debug`); every other build answers a frozen
+   * `[]`, and an inert renderer an empty array.
+   *
+   * @returns One entry per view, a fresh array.
+   * @example
+   * ```ts
+   * // The memory screen in a debug build: the board churns, a lamp under a filtered room stays live, a picture stands.
+   * app.renderer.sync.debug.why();
+   * // [
+   * //   { view: "Shape#1048590 board:bottom", mode: "live", reason: "churn", calmIn: 6, retake: { why: "mark", by: "Text#1048612 tags:timer" } },
+   * //   { view: "Sprite#1048633 ward:glow3", mode: "live", reason: "placed-under-filter", calmIn: 0, retake: null },
+   * //   { view: "Sprite#1048640 board:g1", mode: "kept", reason: null, calmIn: 0, retake: { why: "resolution", by: null } }
+   * // ]
+   * ```
+   */
+  why(): readonly WhyEntry[];
+
+  /**
    * What the debug switches are set to, as a fresh object.
    *
    * @returns The switches.
@@ -794,7 +899,7 @@ export type LeaveCover = {
  * The loader of a scene being left, drawn above the veil when the switch is not done `afterMs` after its start, until
  * the swap: a game texture turning at the centre (`texture`), a layer of the scene drawn above the veil (`due`, which
  * makes what the loader draws only once it is due and answers its layer: `scenes` mounts a loader projection there),
- * or, with neither, a white ring the engine draws.
+ * or, with neither, a white ring the engine draws. A layer that shows at the swap fades out with the veil.
  *
  * @example
  * ```ts
@@ -812,8 +917,10 @@ export type LeaveLoader = {
   /**
    * Called once, in the first frame the loader is due and before it is drawn, never for a switch done sooner: it
    * makes what the loader draws and answers the layer of the scene that holds it, whose container is drawn above the
-   * veil from then until the swap. `undefined`, or a throw, draws the ring; a layer the scene does not declare draws
-   * nothing.
+   * veil from then on. After the swap it stays there and fades out with the veil, its alpha the veil's level; once the
+   * veil is gone it waits there at alpha 0 until no view hangs in it (the switch unmounts the loader), then goes back
+   * under the root at alpha 1. A drop puts it back at once. `undefined`, or a throw, draws the ring; a layer the scene
+   * does not declare draws nothing.
    *
    * @returns The layer, or `undefined` for the ring.
    */
@@ -869,8 +976,9 @@ export type LeaveApi = {
   show(look: LeaveLook): void;
 
   /**
-   * The switch swapped the next scene in: the loader goes at once, the veil fades out over its `outMs` from where it
-   * stands and is taken off the stage. Nothing runs: nothing happens.
+   * The switch swapped the next scene in: the veil fades out over its `outMs` from where it stands and is taken off the
+   * stage. A ring or a texture loader goes at once; a layer loader that shows stays above the veil and fades out with
+   * it, and its layer goes back under the root once the loader's views left it. Nothing runs: nothing happens.
    *
    * @example
    * ```ts
@@ -922,6 +1030,8 @@ export type LeaveRun = {
   steppedAt: number;
   level: number;
   landed: boolean;
+  /** The veil's level at the swap: a layer loader fades from whole to nothing over the rest of it. 1 before the swap. */
+  landedLevel: number;
   loader: LoaderKind;
   /** The texture of a `"texture"` loader, resolved at `show`. */
   texture?: PixiTexture;
@@ -929,17 +1039,33 @@ export type LeaveRun = {
   asked: boolean;
   /** The layer a `"layer"` loader's `due` answered; absent before. */
   layer?: string;
-  /** The layer container a `"layer"` loader drew above the veil; absent while none hangs there. */
+  /** The layer container a `"layer"` loader drew above the veil, kept through the fade-out; absent while none is. */
   lifted?: PixiContainer;
-  /** The loader is shown: past its `afterMs`, before the swap. */
+  /** The loader is shown: past its `afterMs`, before the swap; after it, a layer loader that showed, while it fades. */
   shown: boolean;
 };
 
 /**
- * The picture of a scene being left (spec 33, slice A2): the running look, absent while none runs, and the engine's
- * objects, absent until the first look needs them and after the application that held them was lost. Not public.
+ * A loader layer that faded out with the veil and waits above it, at alpha 0, until the loader's views left it: under
+ * the root it would draw them whole. Not public.
  */
-export type LeaveState = { run?: LeaveRun; objects?: LeaveObjects };
+export type LeaveParked = {
+  container: PixiContainer;
+  /** The layer, whose place in the layer list it goes back to. */
+  layer: string | undefined;
+  /**
+   * Frames it waits at most: views another owner draws in the layer (the scene that stands, a loader the game mounted)
+   * never leave it, and the layer goes back whole then.
+   */
+  framesLeft: number;
+};
+
+/**
+ * The picture of a scene being left (spec 33, slice A2): the running look, absent while none runs; the engine's
+ * objects, absent until the first look needs them and after the application that held them was lost; and the loader
+ * layer that waits for its views to leave, absent while none does. Not public.
+ */
+export type LeaveState = { run?: LeaveRun; objects?: LeaveObjects; parked?: LeaveParked };
 
 /**
  * sync module API, `app.renderer.sync`. The one owner of every display object: it builds them
@@ -1162,6 +1288,9 @@ export type SyncInternal = {
    */
   start(): void;
 
+  /** The canvas passes of a frame estimated from the filter slots, read by `stats()` where nothing counts them. */
+  canvasPasses(): number;
+
   /**
    * Drops every view, rebuilds the root, the layers and every view. Used after a restore, where
    * the old application and all its objects are gone.
@@ -1333,8 +1462,8 @@ export type AreaEntry = {
 
 /**
  * What one probe draw of the warm-up draws: a content subject of the renderer (the batch pipeline of sprites, with the
- * normal, the add and the screen blend, the graphics pipe's own, particles with either blend, distance-field text), or
- * a filter handed to `filters.warm`.
+ * normal, the add and the screen blend, the graphics pipe's own, particles with either blend, distance-field text), a
+ * filter handed to `filters.warm`, or its body on its quad.
  */
 export type WarmSubject =
   | "sprite"
@@ -1344,13 +1473,22 @@ export type WarmSubject =
   | "particles-normal"
   | "particles-add"
   | "text"
-  | PixiFilter;
+  | PixiFilter
+  | WarmQuad;
+
+/**
+ * A filter's body on its quad, as a probe of the warm-up draws it: on WebGPU, after the filter, in the first of the
+ * device's variants and into a target with no stencil, so a kept view's first frame on its shader compiles nothing: on
+ * the canvas, under a filter of an ancestor, or inside an outer picture.
+ */
+export type WarmQuad = { readonly filter: PixiFilter; readonly quad: FilterSlotQuad };
 
 /**
  * Where a probe draws: straight onto the canvas, or into a texture under a filter of the module's own, each with or
- * without a stencil clip. A WebGPU pipeline is keyed by all four.
+ * without a stencil clip. A WebGPU pipeline is keyed by all four. `"plain"` is a texture no clip ever drew into: the
+ * texture of the texture variants keeps the stencil of its first clip, and a quad needs a target without one.
  */
-export type WarmVariant = "canvas" | "canvas+clip" | "texture" | "texture+clip";
+export type WarmVariant = "canvas" | "canvas+clip" | "texture" | "texture+clip" | "plain";
 
 /**
  * One probe draw: one subject in one variant.
@@ -1375,6 +1513,8 @@ export type WarmObjects = {
    * filter around it, and a texture variant never touches the canvas.
    */
   target: PixiRenderTexture;
+  /** The texture of a `"plain"` draw: no stencil, since no clip ever draws into it. */
+  plain: PixiRenderTexture;
   /** A filter subject's container: its `filters` is the draw's filter, during the draw only. */
   holder: PixiContainer;
   /** The one-entry list `holder.filters` is set from. */
@@ -1389,6 +1529,21 @@ export type WarmObjects = {
   particlesAdd: PixiContainer;
   /** A `BitmapText` of "0" in `WarmState.textFont`; made at its first draw. */
   text: PixiContainer | undefined;
+  /** The mesh a quad subject draws on; made at its first draw. */
+  quad: WarmMesh | undefined;
+};
+
+/**
+ * What a quad subject draws on. The module's own geometry, with the attributes of `kept`'s: a pipeline is keyed by the
+ * layout, so it hits the same pipeline, and a probe over `kept`'s geometry would throw after a lost device.
+ */
+export type WarmMesh = {
+  mesh: PixiMesh;
+  geometry: PixiMeshGeometry;
+  /** The global filter uniforms of the probes: nothing reads what they draw. */
+  gfu: PixiUniformGroup;
+  /** The shader of the draw being made; destroyed with its draw. */
+  shader: PixiShader | undefined;
 };
 
 /**
@@ -1401,6 +1556,8 @@ export type WarmState = {
   head: number;
   /** Every filter handed over on any device: queued again after a restore. */
   filters: Set<PixiFilter>;
+  /** The quad a filter was handed over with: queued with it, on WebGPU. */
+  quads: Map<PixiFilter, FilterSlotQuad>;
   /** The filters whose draws are not all made yet: the draws left, and the promises to answer. */
   waiting: Map<PixiFilter, { left: number; resolve: Array<(warmed: boolean) => void> }>;
   /** The text probe is queued for this device. */
@@ -1441,9 +1598,11 @@ export type UploadState = {
   waiting: Map<PixiTextureSource, UploadWaiter[]>;
   /**
    * The sources that went through `initSource` on this device, or threw there: a call naming only these answers at
-   * once.
+   * once. A source leaves it at its `unload`.
    */
   done: WeakSet<PixiTextureSource>;
+  /** The one listener on `unload` of every source in `done`. */
+  forget(source: PixiTextureSource): void;
 };
 
 /**
@@ -1673,6 +1832,31 @@ export type HeldViews = {
   reported: boolean;
 };
 
+/** The scratch of one hit test (F118), taken from `SyncState.hitWalks` and given back when it ends. */
+export type HitWalk = {
+  /** Per depth, the child indices of an out-of-order container, sorted by `zIndex`; only ever grown. */
+  orders: number[][];
+  /**
+   * Per depth, the alpha the objects at that depth draw with, their own included. Kept here, not passed: a double
+   * handed to a call that is not inlined is boxed, once per view.
+   */
+  alphas: Float64Array;
+  /** The root pose of the entity whose box is tested, written in place. */
+  pose: TransformValue;
+  /** The reference point brought into an entity's own space, written in place. */
+  local: Point;
+  /** The reference x. */
+  x: number;
+  /** The reference y. */
+  y: number;
+  /** The filter of `hitTest`; `undefined` while `hitAll` collects. */
+  accept: ((entity: Entity) => boolean) | undefined;
+  /** Where `hitAll` collects; `undefined` while `hitTest` looks for one. */
+  out: Entity[] | undefined;
+  /** The entity `hitTest` accepted. */
+  found: Entity | undefined;
+};
+
 /**
  * sync module state.
  */
@@ -1760,6 +1944,8 @@ export type SyncState = {
   viewOfTop: WeakMap<PixiContainer, View>;
   /** The overlays, their ranges, dims and HUD parts (spec 22). */
   overlay: OverlayState;
+  /** Hit test walks no call holds now: one, unless an accept function asked again (F118). */
+  hitWalks: HitWalk[];
   /** `Graphics` paths drawn since the monitor last took them: shapes, clip masks, outlines (spec 26 R2.3). */
   redraws: number;
   /**

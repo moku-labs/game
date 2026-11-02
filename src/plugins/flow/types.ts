@@ -179,6 +179,8 @@ export type GameTypes = {
   scenes?: string;
   strings: StringTableLike;
   textStyles?: string;
+  /** The names of the game's number formats: what `format` of the `bind` of `defineGame` takes next to the four built-in ones. */
+  textFormats?: string;
   emitters?: string;
   /** The keys of the game's HUD parts: what `HudPart({ key })` and the `hud` list of `Overlay` take. */
   hud?: string;
@@ -212,6 +214,22 @@ export type TextStylesOf<Types extends GameTypes> = Types extends {
 }
   ? Keys
   : string;
+
+/**
+ * The number format name union of a game, `never` when the game passed none: then its `bind` takes
+ * the four built-in formats only, and a name that was never declared does not compile.
+ *
+ * @example
+ * ```ts
+ * type Keys = TextFormatsOf<{ player: {}; session: {}; assets: string; strings: {}; textFormats: "pill.number" }>; // "pill.number"
+ * type None = TextFormatsOf<{ player: {}; session: {}; assets: string; strings: {} }>; // never
+ * ```
+ */
+export type TextFormatsOf<Types extends GameTypes> = Types extends {
+  textFormats: infer Keys extends string;
+}
+  ? Keys
+  : never;
 
 /**
  * The emitter id union of a game, `string` when the game passed none. `defineGame` types
@@ -285,6 +303,7 @@ export type {
   FeatureFilter,
   FeaturePlugin,
   FeaturesApi,
+  FeatureTextFormats,
   FeatureTree,
   RegisteredFeature
 } from "./features/types";

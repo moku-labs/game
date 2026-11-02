@@ -15,7 +15,7 @@ import {
   utimesSync,
   writeFileSync
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliDeps, Signal, SpawnOptions } from "../../src/app/cli";
@@ -56,6 +56,9 @@ const BUN = "/bin/bun";
 
 /** The bin the stubs re-run. */
 const SELF = "/game/node_modules/@moku-labs/game/bin/moku-game.mjs";
+
+/** The home folder the stubs answer. */
+const HOME = "/home/tester";
 
 /** The temp folders of a test, removed after it. */
 const made: string[] = [];
@@ -181,6 +184,9 @@ function fakeDeps(
     loadPage: async () => ({ default: new Response("<html>the page</html>") }),
     visual: () => Promise.reject(new Error("the visual runner is not loaded here")),
     now: () => Date.UTC(2026, 9, 14, 15, 30, 12),
+    home: HOME,
+    exists: () => false,
+    readPackageVersion: () => undefined,
     ...change
   };
 
@@ -604,6 +610,24 @@ describe("moku-game dev, the parent", () => {
     ]);
   });
 
+  // Bug: the dev page links a boot picture that is not there, or writes a page with a broken fade.
+  it("dev refuses a boot picture that is not a file and a negative boot fade", async () => {
+    const missing = makeGame({
+      "config.ts": 'export default { page: { title: "t", boot: { image: "boot.png" } } };\n'
+    });
+    const fade = makeGame({
+      "config.ts":
+        'export default { page: { title: "t", boot: { image: "boot.png", fadeMs: -1 } } };\n'
+    });
+
+    expect(await errorsOf(["dev"], missing)).toEqual([
+      '[game] moku-game: page.boot.image "boot.png" is not a file in the game.'
+    ]);
+    expect(await errorsOf(["dev"], fade)).toEqual([
+      "[game] config.page.boot.fadeMs is -1.\n  Use a number of milliseconds, 0 or more."
+    ]);
+  });
+
   it("dev hands Ctrl+C, SIGTERM and SIGHUP to the child and exits with its code", async () => {
     const root = makeGame();
     const ended: { exit: (code: number) => void } = { exit: () => undefined };
@@ -895,6 +919,27 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
     await expect(fetch(url)).rejects.toThrow();
   });
 
+  // Bug: a Ctrl+C right after the URL line finds no listener, and the child dies with 130.
+  it("listens to the stop signals before it prints the URL", async () => {
+    const root = makeGame({});
+    const { deps, seen } = fakeDeps(root, { env: { MOKU_GAME_CHILD: "1" } });
+    const listening: string[][] = [];
+    const print = deps.ui.line;
+
+    deps.ui.line = text => {
+      listening.push([...seen.handlers.keys()]);
+      print(text);
+    };
+
+    const running = runCommand(["dev", "--port", "0"], deps);
+
+    await waitFor(() => seen.out.length >= 2);
+    interrupt(seen);
+    await running;
+
+    expect(listening[0]?.toSorted()).toEqual(["SIGINT", "SIGTERM"]);
+  });
+
   it("answers a file and the manifest with no-store, so a reload shows the new bytes of an image", async () => {
     const root = makeGame({ "features/ui/assets/dot.png": "png" });
     const { running, seen, url } = await startChild(root);
@@ -1048,6 +1093,8 @@ describe("the command line", () => {
       "  dev [--port 3000] [--packed]          serve the game with hot reload",
       "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
       "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
+      "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
+      "  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev",
       "  native dev <target>                   run the native shell on the dev server",
       "  native doctor | native clean          check or remove the native project",
       "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -1215,6 +1262,7 @@ describe("native", () => {
     expect(call?.options).toEqual({ target: "ios", simulator: true });
     expect(call?.where).toEqual({
       cwd: root,
+      home: HOME,
       command: [
         BUN,
         SELF,
@@ -1228,6 +1276,22 @@ describe("native", () => {
         .map(word => JSON.stringify(word))
         .join(" ")
     });
+  });
+
+  // Bug: a test project of 8 GB stays on the disk, since no command removes it.
+  it("native clean adds the test projects that exist, one by one; doctor stays on the store project", async () => {
+    const root = makeGame();
+    const dev = path.join(root, ".moku/tauri-dev");
+    const debug = path.join(root, ".moku/tauri-debug");
+    const both = await run(["native", "clean"], root, { exists: everyFileThere });
+    const one = await run(["native", "clean", "ios"], root, { exists: file => file === debug });
+    const none = await run(["native", "clean"], root);
+    const doctor = await run(["native", "doctor"], root, { exists: everyFileThere });
+
+    expect(both.seen.natives[0]?.options).toEqual({ testProjects: [dev, debug] });
+    expect(one.seen.natives[0]?.options).toEqual({ target: "ios", testProjects: [debug] });
+    expect(none.seen.natives[0]?.options).toEqual({});
+    expect(doctor.seen.natives[0]?.options).toEqual({});
   });
 
   it("native doctor without a target passes no target, and --simulator only goes with build", async () => {
@@ -1267,6 +1331,288 @@ describe("native", () => {
 
     expect(code).toBe(1);
     expect(seen.errors).toEqual(["[game] config.ts has no native section."]);
+  });
+});
+
+/**
+ * A `config.ts` with the given `native.ios`.
+ *
+ * @param ios - The block as source text.
+ * @returns The text of the file.
+ */
+function withIos(ios: string): string {
+  return `export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", ios: ${ios} } };\n`;
+}
+
+/**
+ * The file check of a game whose files are all there.
+ *
+ * @returns True.
+ */
+function everyFileThere(): boolean {
+  return true;
+}
+
+describe("native --store", () => {
+  /** A config with a native section and nothing else, for the refusals. */
+  const bare =
+    'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t" } };\n';
+
+  /** What `--store` needs on iOS for no warning at all. */
+  const complete = withIos(
+    '{ privacyManifest: "ios/PrivacyInfo.xcprivacy", infoPlist: { ITSAppUsesNonExemptEncryption: false } }'
+  );
+
+  /** The warning of an iOS store build without a privacy manifest. */
+  const noManifest =
+    "native: --store on ios with no native.ios.privacyManifest. App Store Connect asks for one.";
+
+  /** The warning of an iOS store build that does not answer the encryption question. */
+  const noEncryption =
+    "native: --store on ios with no ITSAppUsesNonExemptEncryption in native.ios.infoPlist. App Store Connect asks on every upload without it.";
+
+  // Bug: a store build starts wrong and fails after a long compile, or Play refuses the number.
+  it("refuses every wrong line before config.ts is read", async () => {
+    const root = makeGame({}, ["config.ts"]);
+    const refusals: [string[], string][] = [
+      [["native", "dev", "ios", "--store"], "[game] native: --store goes with native build only."],
+      [
+        ["native", "doctor", "--store", "--build-number", "1"],
+        "[game] native: --store goes with native build only."
+      ],
+      [
+        ["native", "build", "ios", "--build-number", "12"],
+        "[game] native: --build-number goes with --store."
+      ],
+      [
+        ["native", "build", "ios", "--store"],
+        "[game] native: --store needs --build-number, the number of this upload."
+      ],
+      [
+        ["native", "build", "android", "--store", "--build-number", "1", "--debug"],
+        "[game] native: --store does not go with --debug."
+      ],
+      [
+        ["native", "build", "ios", "--store", "--build-number", "1", "--debug"],
+        "[game] native: --store does not go with --debug."
+      ],
+      [
+        ["native", "build", "android", "--store", "--build-number", "1", "--editor", "h:1"],
+        "[game] native: --store does not go with --editor."
+      ],
+      [
+        ["native", "build", "ios", "--store", "--build-number", "1", "--simulator"],
+        "[game] native: --store does not go with --simulator."
+      ],
+      [["native", "build", "ios", "--dev"], "[game] native: --dev goes with --store."],
+      [
+        ["native", "build", "android", "--dev", "--build-number", "1"],
+        "[game] native: --dev goes with --store."
+      ],
+      [
+        ["native", "build", "android", "--store", "--dev", "--build-number", "1", "--debug"],
+        "[game] native: --store does not go with --debug."
+      ],
+      [
+        ["native", "build", "ios", "--store", "--dev", "--build-number", "1", "--simulator"],
+        "[game] native: --store does not go with --simulator."
+      ],
+      [
+        ["native", "build", "macos", "--store", "--build-number", "1"],
+        "[game] native: --store builds ios or android, got macos."
+      ],
+      [
+        ["native", "build", "--store", "--build-number", "1"],
+        "[game] native: --store builds ios or android, got no target."
+      ]
+    ];
+
+    for (const [argv, message] of refusals) {
+      const { code, seen } = await run(argv, root);
+
+      expect(code, argv.join(" ")).toBe(1);
+      expect(seen.errors).toEqual([message]);
+      expect(seen.natives).toEqual([]);
+    }
+  });
+
+  it("--build-number takes an integer from 1 to 2100000000, boundaries included", async () => {
+    const root = makeGame({ "config.ts": bare });
+    const argv = ["native", "build", "android", "--store"];
+
+    for (const number of ["0", "-1", "1.5", "12a", "2100000001", "1e3", " 7"]) {
+      const { code, seen } = await run([...argv, `--build-number=${number}`], root);
+
+      expect(code, number).toBe(1);
+      expect(seen.errors).toEqual([
+        `[game] native: --build-number takes an integer from 1 to 2100000000, got "${number}".`
+      ]);
+      expect(seen.natives).toEqual([]);
+    }
+
+    for (const [text, number] of [
+      ["1", 1],
+      ["2100000000", 2_100_000_000]
+    ] as const) {
+      const { seen } = await run([...argv, "--build-number", text], root);
+
+      expect(seen.natives[0]?.options.store?.buildNumber).toBe(number);
+    }
+  });
+
+  // Bug: runNative gets the checks' seams from nowhere, or the version of the wrong folder.
+  it("--store hands native the number and the seams of its checks", async () => {
+    const root = makeGame({ "config.ts": bare });
+    const env = { KS_PASS: "set" };
+    const roots: string[] = [];
+    const { code, seen } = await run(
+      ["native", "build", "android", "--store", "--build-number", "12"],
+      root,
+      {
+        env,
+        exists: everyFileThere,
+        readPackageVersion: from => {
+          roots.push(from);
+
+          return "1.2.3";
+        }
+      }
+    );
+
+    expect(code).toBe(0);
+    expect(roots).toEqual([root]);
+    expect(seen.natives[0]?.options).toEqual({
+      target: "android",
+      version: "1.2.3",
+      store: { buildNumber: 12, env, exists: everyFileThere }
+    });
+    expect(seen.natives[0]?.where.home).toBe(HOME);
+  });
+
+  // Bug: a test build goes down the players' road, with no dev flag for native and no test app.
+  it("--store --dev marks the store block, and the iOS warnings of a store build stay", async () => {
+    const config =
+      'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", dev: { identifier: "com.t.dev" } } };\n';
+    const root = makeGame({ "config.ts": config });
+    const env = { KS_PASS: "set" };
+    const { code, seen } = await run(
+      ["native", "build", "ios", "--store", "--dev", "--build-number", "13"],
+      root,
+      { env, exists: everyFileThere }
+    );
+
+    expect(code).toBe(0);
+    expect(seen.natives[0]?.options.store).toEqual({
+      buildNumber: 13,
+      dev: true,
+      env,
+      exists: everyFileThere
+    });
+    expect(seen.warnings).toEqual([noManifest, noEncryption]);
+  });
+
+  // Bug: a game without the block gets a cryptic failure from deep in native.
+  it("--store --dev with no native.dev is refused once config.ts is read, and nothing runs", async () => {
+    const root = makeGame({ "config.ts": bare });
+    const { code, seen } = await run(
+      ["native", "build", "android", "--store", "--dev", "--build-number", "13"],
+      root
+    );
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] native --dev: config.ts has no native.dev.\n  Add native.dev: { identifier } with an id ending in .dev."
+    ]);
+    expect(seen.natives).toEqual([]);
+  });
+
+  // Bug: a plain build ships native's 0.1.0 though the game has a version.
+  it("a plain build carries the version of package.json too, and no store block", async () => {
+    const root = makeGame({ "config.ts": bare });
+    const { seen } = await run(["native", "build", "ios"], root, {
+      readPackageVersion: () => "1.2.3"
+    });
+
+    expect(seen.natives[0]?.options).toEqual({ target: "ios", version: "1.2.3" });
+  });
+
+  // Bug: a store upload goes without the two things App Store Connect asks for, and nobody says so.
+  it("an iOS store build warns about a missing manifest and encryption key, and still builds", async () => {
+    const argv = ["native", "build", "ios", "--store", "--build-number", "12"];
+    const neither = await run(argv, makeGame({ "config.ts": bare }));
+    const plist = await run(
+      argv,
+      makeGame({ "config.ts": withIos("{ infoPlist: { ITSAppUsesNonExemptEncryption: true } }") })
+    );
+    const manifest = await run(
+      argv,
+      makeGame({ "config.ts": withIos('{ privacyManifest: "p.xcprivacy" }') })
+    );
+    const both = await run(argv, makeGame({ "config.ts": complete }));
+
+    expect([neither, plist, manifest, both].map(ran => ran.seen.warnings)).toEqual([
+      [noManifest, noEncryption],
+      [noManifest],
+      [noEncryption],
+      []
+    ]);
+    expect([neither, plist, manifest, both].map(ran => ran.code)).toEqual([0, 0, 0, 0]);
+  });
+
+  // Bug: an iOS warning lands on an Android store build, which has no such questions.
+  it("an Android store build prints no iOS warning", async () => {
+    const root = makeGame({ "config.ts": bare });
+    const { seen } = await run(
+      ["native", "build", "android", "--store", "--build-number", "12"],
+      root
+    );
+
+    expect(seen.warnings).toEqual([]);
+  });
+
+  // Bug: a store warning speaks over the plain error of a game with no native section.
+  it("a game with no native section gets no store warning", async () => {
+    const root = makeGame();
+    const { seen } = await run(["native", "build", "ios", "--store", "--build-number", "1"], root);
+
+    expect(seen.warnings).toEqual([]);
+  });
+
+  // Bug: a plain build with a signing block and no passwords fails after a whole compile.
+  it("a plain android build without its passwords leaves the key out and says so", async () => {
+    const root = makeGame({
+      "config.ts":
+        'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", signing: { android: { keystorePath: "k.jks", keystorePasswordEnv: "KS_PASS", keyPasswordEnv: "KEY_PASS", keyAlias: "a" } } } };\n'
+    });
+    const argv = ["native", "build", "android"];
+    const without = await run(argv, root, { env: { KS_PASS: "ks-secret-value" } });
+
+    expect(without.seen.natives[0]?.options.unsigned).toBe(true);
+    expect(without.seen.warnings).toEqual([
+      "native: KEY_PASS not set, so this build is an unsigned .apk."
+    ]);
+
+    const both = await run(argv, root, { env: { KS_PASS: "a", KEY_PASS: "b" } });
+
+    expect(both.seen.natives[0]?.options).not.toHaveProperty("unsigned");
+    expect(both.seen.warnings).toEqual([]);
+
+    const debug = await run([...argv, "--debug"], root);
+
+    expect(debug.seen.natives[0]?.options).not.toHaveProperty("unsigned");
+  });
+
+  // Bug: the store checks land on the plain device build, which Р6 keeps free of them.
+  it("native build ios with signing and ios set prints no store warning and carries no store block", async () => {
+    const root = makeGame({
+      "config.ts":
+        'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", signing: { apple: { teamId: "T1" } }, ios: { minimumVersion: "26.0" } } };\n'
+    });
+    const { code, seen } = await run(["native", "build", "ios"], root);
+
+    expect(code).toBe(0);
+    expect(seen.warnings).toEqual([]);
+    expect(seen.natives[0]?.options).toEqual({ target: "ios" });
   });
 });
 
@@ -1323,14 +1669,32 @@ describe("--debug and --editor", () => {
     expect(await notes("--debug=read")).toEqual([]);
   });
 
-  it("native dev --debug is refused, native build ios --debug is refused as Android only, and --editor needs --debug", async () => {
+  // Bug: N4 stays closed, or the debug app of iOS goes out with no word on what it is.
+  it("native build ios takes --debug with its editor address and warns as on Android", async () => {
+    const root = makeGame({ "config.ts": native });
+    const { code, seen } = await run(
+      ["native", "build", "ios", "--debug", "--simulator", "--editor", "192.168.1.20:47600"],
+      root
+    );
+
+    expect(code).toBe(0);
+    expect(seen.natives[0]?.options).toEqual({
+      target: "ios",
+      simulator: true,
+      debug: "full",
+      editor: "192.168.1.20:47600"
+    });
+    expect(seen.warnings).toEqual([nativeWarning]);
+  });
+
+  it("native dev --debug is refused, native build macos --debug is refused as Android and iOS only, and --editor needs --debug", async () => {
     const root = makeGame({ "config.ts": native });
 
     expect(await errorsOf(["native", "dev", "android", "--debug"], root)).toEqual([
       "[game] native: --debug goes with native build only."
     ]);
-    expect(await errorsOf(["native", "build", "ios", "--debug"], root)).toEqual([
-      "[game] native: --debug builds Android only in this release (got ios)."
+    expect(await errorsOf(["native", "build", "macos", "--debug"], root)).toEqual([
+      "[game] native: --debug builds Android and iOS only for now (got macos)."
     ]);
     expect(await errorsOf(["native", "build", "android", "--editor", "h:1"], root)).toEqual([
       "[game] native: --editor goes with --debug."
@@ -1392,6 +1756,49 @@ describe("--debug and --editor", () => {
     // The release page went on to the pack: nothing refused it.
     expect(debug.code).toBe(2);
     expect(debug.seen.errors).toEqual([]);
+  });
+});
+
+describe("MOKU_NATIVE_PROFILE=dev", () => {
+  /** The profile of native's web build for a test app. */
+  const dev = { env: { MOKU_NATIVE_PROFILE: "dev" } };
+
+  // Bug: a test app with no overlay: native's own check lets the page through.
+  it("a release page is refused before anything is built", async () => {
+    const { code, seen } = await run(["build"], makeGame(), dev);
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page carries the overlay."
+    ]);
+    expect(seen.scans).toEqual([]);
+  });
+
+  // Bug: a tester's phone dials a Mac that is not there, or the overlay's toggles are greyed out.
+  it("--editor and --debug=read are refused, the read-only page and the address have no place on it", async () => {
+    const root = makeGame();
+    const editor = await run(["build", "--debug", "--editor", "127.0.0.1:47600"], root, dev);
+    const read = await run(["build", "--debug=read"], root, dev);
+
+    expect(editor.seen.errors).toEqual([
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page has no editor link.\n  Build it without --editor."
+    ]);
+    expect(read.seen.errors).toEqual([
+      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page runs every command.\n  Build it with --debug."
+    ]);
+    expect([...editor.seen.scans, ...read.seen.scans]).toEqual([]);
+  });
+
+  // Bug: an editor whose version nobody can read may be one that dials for ever.
+  it("an editor whose version cannot be read is refused", async () => {
+    // The stub resolver answers a path with no package.json above it.
+    const { code, seen } = await run(["build", "--debug"], makeGame(), dev);
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] build: a dev page needs @moku-labs/editor 0.10.19 or newer, found no readable version.\n  An older one dials the editor for ever. Run: bun add -d @moku-labs/editor@latest."
+    ]);
+    expect(seen.scans).toEqual([]);
   });
 });
 
@@ -1471,6 +1878,69 @@ describe.skipIf(typeof Bun === "undefined")("runCli", () => {
       removeCopies(copies);
     }
   }, 30_000);
+
+  // Bug: the real seams read the wrong folder, or leave `~/` to Gradle.
+  it("runs the store checks over the real home folder, the real file check and package.json", async () => {
+    const root = makeGame({
+      "config.ts":
+        'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", signing: { android: { keystorePath: "~/moku-no-such-key.jks", keystorePasswordEnv: "MOKU_NO_SUCH_VAR", keyAlias: "a" } } } };\n',
+      "package.json": '{ "version": "1.2" }\n'
+    });
+    const errors: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+      errors.push(String(line));
+    });
+
+    try {
+      const { code } = await runReal([
+        "native",
+        "build",
+        "android",
+        "--store",
+        "--build-number",
+        "12",
+        "--root",
+        root
+      ]);
+
+      expect(code).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+
+    const text = errors.join("\n");
+
+    expect(text).toContain(
+      `The keystore ${path.join(homedir(), "moku-no-such-key.jks")} is not a file.`
+    );
+    expect(text).toContain("The env var MOKU_NO_SUCH_VAR is not set.");
+    expect(text).toContain('package.json has version "1.2".');
+  });
+
+  // Bug: a broken package.json stops the build with a parse error instead of the plain problem.
+  it("the real seam reads a broken or version-less package.json as no version", async () => {
+    const config =
+      'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t" } };\n';
+    const roots = [
+      makeGame({ "config.ts": config, "package.json": "{ broken" }),
+      makeGame({ "config.ts": config, "package.json": '{ "version": 1 }\n' }),
+      makeGame({ "config.ts": config })
+    ];
+    const errors: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+      errors.push(String(line));
+    });
+
+    try {
+      for (const root of roots) {
+        await runReal(["native", "build", "ios", "--store", "--build-number", "1", "--root", root]);
+      }
+    } finally {
+      error.mockRestore();
+    }
+
+    expect(errors.filter(line => line.includes("package.json has no version."))).toHaveLength(3);
+  });
 
   it("runs keys through the real scanner on a game with no string file", async () => {
     const copies = [copyMiniGame("cli-keys-bare")];

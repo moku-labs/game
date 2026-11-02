@@ -29,7 +29,8 @@ const styles: TextStyles = {
       align: "left",
       wrap: "none",
       digits: false,
-      shadow: undefined
+      shadow: undefined,
+      lineHeight: undefined
     }
   }
 };
@@ -50,7 +51,8 @@ const centred: TextStyle = {
   align: "center",
   wrap: "none",
   digits: false,
-  shadow: undefined
+  shadow: undefined,
+  lineHeight: undefined
 };
 
 /** A started plugin whose renderer draws. */
@@ -781,6 +783,68 @@ describe("the display adapter — icons inside wrapped text", () => {
   });
 });
 
+describe("the display adapter — the line of a style", () => {
+  // No font is loaded here: the font's line is 38.4 px. A lineHeight of 1.5 makes the line 48, and
+  // the glyphs sit (48 - 38.4) / 2 = 4.8 lower inside it, as CSS half-leading does.
+
+  // The bug: the glyphs sit at the top of a taller line, or the icon moves down with them.
+  it("puts the glyphs in the middle of the line and the icon on the line", () => {
+    const mock = drawing();
+
+    mock.state.styles.set("tall", { ...centred, align: "left", lineHeight: 1.5 });
+
+    const object = build(
+      mock,
+      value({ resolved: "1\n<icon=hud.coin>1", style: "tall", anchor: zero })
+    );
+    const [top, sprite, after] = object.children;
+
+    expect(rounded(top?.x ?? -1, top?.y ?? -1)).toEqual({ x: 0, y: 4.8 });
+    expect(rounded(sprite?.x ?? -1, sprite?.y ?? -1)).toEqual({ x: 0, y: 48 });
+    expect(sprite?.height).toBeCloseTo(48, 5);
+    expect(rounded(after?.x ?? -1, after?.y ?? -1)).toEqual({ x: 48, y: 52.8 });
+  });
+
+  // The bug: the half-leading is clamped at 0, so a line shorter than the font's leaves the glyphs
+  // at its top and they spill below it.
+  it("lifts the glyphs in a line shorter than the font's", () => {
+    const mock = drawing();
+
+    mock.state.styles.set("short", { ...centred, align: "left", lineHeight: 1 });
+
+    const object = build(mock, value({ resolved: "1\n1", style: "short", anchor: zero }));
+
+    expect(object.children.map(child => rounded(child.x, child.y))).toEqual([
+      { x: 0, y: -3.2 },
+      { x: 0, y: 28.8 }
+    ]);
+  });
+
+  // The bug: a ticking counter writes its glyphs back at the top of the line.
+  it("keeps the glyphs in the middle of the line when a tick writes them in place", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+
+    mock.state.styles.set("tall", { ...centred, align: "left", lineHeight: 1.5 });
+
+    const previous = value({ resolved: "1\n1", style: "tall", anchor: zero });
+    const object = build(mock, previous);
+    const before = [...object.children];
+
+    entry?.adapter.update(
+      object,
+      previous,
+      value({ resolved: "2\n2", style: "tall", anchor: zero })
+    );
+
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+    expect(object.children.map(child => rounded(child.x, child.y))).toEqual([
+      { x: 0, y: 4.8 },
+      { x: 0, y: 52.8 }
+    ]);
+  });
+});
+
 describe("the alpha of a Text", () => {
   // The renderer's SDF shader applies every alpha once, so the alpha of the `Text` is the alpha of
   // its container and Pixi multiplies it into each run, shadow and icon.
@@ -1002,5 +1066,33 @@ describe('the display adapter — wrap "box"', () => {
     const calls = vi.mocked(mock.log.warn).mock.calls;
 
     expect(calls.filter(call => call[0] === 'text: wrap "box" outside layout')).toEqual([]);
+  });
+});
+
+describe("the display adapter — breaks inside a word (F138)", () => {
+  // No font is loaded here: a glyph is 19.2 px, a line 38.4 px.
+
+  it("draws the lines the measure broke at a soft hyphen, the - on the first and no soft hyphen drawn", () => {
+    const mock = drawing();
+
+    wrapping(mock);
+
+    const object = build(mock, value({ resolved: "11­111", style: "wrapped", anchor: zero }));
+
+    expect(object.children.map(child => textOf(child))).toEqual(["11-", "111"]);
+    expect(object.children.map(child => rounded(child.x, child.y))).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 38.4 }
+    ]);
+  });
+
+  it("draws the lines the measure broke after a hyphen inside a word", () => {
+    const mock = drawing();
+
+    wrapping(mock);
+
+    const object = build(mock, value({ resolved: "AA-AAA", style: "wrapped", anchor: zero }));
+
+    expect(object.children.map(child => textOf(child))).toEqual(["AA-", "AAA"]);
   });
 });

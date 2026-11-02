@@ -59,9 +59,20 @@ describe("host init", () => {
       background: 0x00_00_00,
       antialias: false,
       resolution: 2,
-      autoDensity: true,
+      autoDensity: false,
       autoStart: false,
       sharedTicker: false
+    });
+  });
+
+  it("turns Pixi's own pointer handling off, so a move is hit-tested once, by the engine", async () => {
+    const mock = createMockRenderer();
+
+    await mock.start();
+
+    expect(mock.pixi.last().initOptions).toMatchObject({
+      eventMode: "none",
+      eventFeatures: { move: false, globalMove: false, click: false, wheel: false }
     });
   });
 

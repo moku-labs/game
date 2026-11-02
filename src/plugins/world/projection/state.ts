@@ -38,7 +38,8 @@ function emptySet<Value>(): Set<Value> {
  * Creates the initial projection state: nothing registered, nothing mounted, no layer list, no
  * running track and no driver, so every motion is instant until `anim` installs one. No build
  * runs: `building` is absent. No warm window is held, and none is being built: `warmActive` is
- * absent. The warm budget starts at two thirds of a 60 Hz frame until a step reads the rate.
+ * absent. The warm budget starts at two thirds of a 60 Hz frame until a step reads the rate. No
+ * projection is held, no `show` is owed, and nothing was fed.
  *
  * @returns The projection branch of the plugin state.
  */
@@ -72,6 +73,10 @@ export function createProjectionState(): ProjectionState {
     warmList: [],
     warmHeld: emptySet(),
     warmStale: false,
-    warmBudgetMs: FALLBACK_WARM_MS
+    warmBudgetMs: FALLBACK_WARM_MS,
+    held: emptySet(),
+    showing: [],
+    fed: emptyMap(),
+    heldFed: emptyMap()
   };
 }

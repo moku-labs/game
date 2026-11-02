@@ -16,7 +16,13 @@
  */
 
 import { CALM_AFTER } from "../../renderer/kept/record";
-import type { PixiFilter, PixiFilterManager, PixiModule, PixiTexture } from "../../renderer/types";
+import type {
+  PixiFilter,
+  PixiFilterManager,
+  PixiGpuProgram,
+  PixiModule,
+  PixiTexture
+} from "../../renderer/types";
 import type { EffectsCtx } from "../types";
 import { MAX_RESOLUTION } from "./define";
 import { breakInstance, drawBroken, guardApply, messageOf } from "./guard";
@@ -36,7 +42,8 @@ import type {
   OursBody,
   Place,
   UniformSpec,
-  UniformValues
+  UniformValues,
+  WarmProbe
 } from "./types";
 import { BACK_CLAMP, BACK_SCALE } from "./wgsl";
 
@@ -301,8 +308,44 @@ function createOurs(
     inputs: undefined,
     mark: undefined,
     area: { x: 0, y: 0, width: 0, height: 0, some: false },
-    areaStale: false
+    areaStale: false,
+    quad: undefined
   };
+}
+
+/**
+ * The program a definition's body runs on a kept view's quad, once its quad text compiled clean on this run's device.
+ * Built at the first ask and looked up after that: `GpuProgram.from` builds a key of the whole source on every call,
+ * and this is asked for every instance and at every sync of a changed view.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param definition - The filter definition.
+ * @returns The shared program, or `undefined` for a definition with no usable quad.
+ */
+export function quadProgramOf(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  definition: FilterDefinition
+): PixiGpuProgram | undefined {
+  const { quadSource: source } = definition;
+  const { quads, programs } = ectx.state.checks;
+
+  if (source === undefined || !quads.has(definition)) return undefined;
+
+  const held = programs.get(definition);
+
+  if (held !== undefined) return held;
+
+  const program = pixi.GpuProgram.from({
+    name: `${definition.id}.quad`,
+    vertex: { source, entryPoint: "mainVertex" },
+    fragment: { source, entryPoint: "mainFragment" }
+  });
+
+  programs.set(definition, program);
+
+  return program;
 }
 
 /**
@@ -1520,15 +1563,21 @@ export function createStandIn(
  *
  * @param pixi - The module the renderer loaded.
  * @param definition - A definition whose check answered ok.
- * @returns The probe's filter and its teardown.
+ * @param program - The quad program of a kind that hands one over, drawn with the probe's own uniform group.
+ * @returns The probe's filter, its quad and its teardown.
  */
 export function createWarmFilter(
   pixi: PixiModule,
-  definition: FilterDefinition
-): { filter: PixiFilter; destroy(): void } {
+  definition: FilterDefinition,
+  program?: PixiGpuProgram
+): WarmProbe {
   const body = createOurs(pixi, definition, PROBE_VALUE);
 
-  return { filter: body.filter, destroy: (): void => destroyBody(body) };
+  return {
+    filter: body.filter,
+    quad: program === undefined ? undefined : { program, fu: body.group },
+    destroy: (): void => destroyBody(body)
+  };
 }
 
 /**

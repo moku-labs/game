@@ -4,7 +4,7 @@
  * picture (one render of the stage root, with only the range drawn), places its sprite and keeps it in the budget.
  */
 import type { Entity } from "../../world/types";
-import type { PixiModule, PixiSprite } from "../types";
+import type { PixiContainer, PixiModule, PixiSprite } from "../types";
 import { makeRoom } from "./budget";
 import { MATRIX_CELLS, storeMatrix, textureBytes } from "./geometry";
 import { canKeep, dropTexture, fitTexture, matricesOf } from "./render";
@@ -259,6 +259,49 @@ export function spriteOf(kctx: KeptCtx, id: Entity): PixiSprite | undefined {
   return kctx.state.ranges.get(id)?.sprite;
 }
 
+/** The quads a range render hides for its duration: one list for the module, emptied after each render. */
+const HIDDEN_QUADS: PixiContainer[] = [];
+
+/**
+ * Hides, without a mark, for one render, the visible quad of a kept record whose top a range leaves out: the owner's
+ * root it is drawn before, and every node of its others.
+ *
+ * @param kctx - The kept context.
+ * @param before - The owner's root.
+ * @param others - The nodes the range leaves out.
+ * @returns The quads hidden, to show again after the render.
+ */
+function hideQuadsOf(
+  kctx: KeptCtx,
+  before: PixiContainer,
+  others: readonly PixiContainer[]
+): PixiContainer[] {
+  hideQuadOf(kctx, before);
+  for (const node of others) hideQuadOf(kctx, node);
+
+  return HIDDEN_QUADS;
+}
+
+/**
+ * Hides the visible quad of the kept record of a node, if it has one, into the module's list: the node is the record's
+ * top, or the object of its view under the wrapper the record's top is.
+ *
+ * @param kctx - The kept context.
+ * @param node - The node.
+ */
+function hideQuadOf(kctx: KeptCtx, node: PixiContainer): void {
+  const { state } = kctx;
+  const entity = kctx.ctx.state.sync.entityOf.get(node);
+  const record =
+    state.byTop.get(node) ?? (entity === undefined ? undefined : state.byEntity.get(entity));
+  const quad = record?.quad;
+
+  if (quad === undefined || !quad.visible) return;
+
+  quad.visible = false;
+  HIDDEN_QUADS.push(quad);
+}
+
 /**
  * Renders the picture of one range: one render of the stage root, inside `liftFor` (the entries hidden only by
  * `"freeze"` lifted, the others hidden, every node back from its mask after, without a mark). The root becomes a
@@ -289,8 +332,16 @@ function renderRange(
   const rendered = kctx.sync.liftFor(kctx.hidden, range.entries, range.others, "freeze", () => {
     // The estimate of the frame as the lift leaves it: the frame's own pass, the flush so far, the filtered views.
     filtered = kctx.sync.renderPassesOf(kctx.ctx.state.sync, state) - 1 - state.flushPasses;
+    // A view left out draws through its quad once kept: the quad is left out too, also one made after the others were
+    // listed (a first take in this flush, F114).
+    const quads = hideQuadsOf(kctx, range.slot.before, range.others);
 
-    return host.renderTo(root, picture, transform, true);
+    try {
+      return host.renderTo(root, picture, transform, true);
+    } finally {
+      for (const quad of quads) quad.visible = true;
+      quads.length = 0;
+    }
   });
 
   if (!rendered) return;

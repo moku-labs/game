@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Yoga } from "yoga-layout/load";
 import { bind } from "../../../text/components";
 import { component } from "../../../world/ecs/define";
@@ -40,6 +40,8 @@ function sourceOf(resolved: Map<Entity, string>): TextSource {
       height: 20
     }),
     resolved: entity => resolved.get(entity),
+    style: () => undefined,
+    formatted: () => undefined,
     duration: ms => `${ms / 1000}s`
   };
 }
@@ -236,6 +238,8 @@ describe("the measure function of a bound text", () => {
         height: 20
       }),
       resolved: () => "Play",
+      style: () => undefined,
+      formatted: () => undefined,
       duration: ms => `${ms / 1000}s`
     };
     const plain = textElement({ content: "Play" });
@@ -301,6 +305,8 @@ function lineSource(line: { height: number }): TextSource {
       height: line.height
     }),
     resolved: () => undefined,
+    style: () => undefined,
+    formatted: () => undefined,
     duration: ms => `${ms / 1000}s`
   };
 }
@@ -353,5 +359,91 @@ describe("the line an icon without a size is squared on", () => {
     expect(node.isDirty()).toBe(true);
     expect(solved(row, node)).toEqual({ x: 135, w: 30 });
     expect(remeasureShown(state, icon, source)).toBe(false);
+  });
+});
+
+/**
+ * A fake `text` whose width tells the style: 10 a character in `big`, 5 in `small`.
+ *
+ * @param patch - What this case changes about it.
+ * @returns The source.
+ */
+function pillSource(patch: Partial<TextSource>): TextSource {
+  return {
+    ...sourceOf(new Map()),
+    measure: (content, style) => ({
+      width: (typeof content === "string" ? content.length : 0) * (style === "small" ? 5 : 10),
+      height: 20
+    }),
+    ...patch
+  };
+}
+
+/**
+ * The width a text measures to through its measure function.
+ *
+ * @param element - The text element.
+ * @param source - What it is measured through.
+ * @returns The width Yoga gave it.
+ */
+function widthOf(element: Element, source: TextSource): number {
+  const { row, node } = centredText(element, source);
+
+  return solved(row, node).w;
+}
+
+describe("a text whose bind names a format", () => {
+  /** A built-in bind. */
+  const named = bind(Tally, "value");
+
+  /** The bind of a game's pill: the `bind` of `defineGame` writes the same three fields. */
+  const pillBind = { ...named, format: "pill.number" };
+
+  it("before Text: one answer per natural size, on the listed value, for string and style", () => {
+    const formatted = vi.fn(() => ({ text: "1.5K", style: "small" }));
+    const element = textElement({
+      bind: pillBind,
+      style: "big",
+      components: [Tally({ value: 1500 })]
+    });
+
+    expect(widthOf(element, pillSource({ formatted }))).toBe(20);
+    // Measured twice: at the width Yoga offers, and on one line, to tell whether it wrapped.
+    expect(formatted).toHaveBeenCalledTimes(2);
+    expect(formatted).toHaveBeenCalledWith("pill.number", 1500);
+  });
+
+  it("before Text, with no answer: the int string in the style of the prop", () => {
+    const element = textElement({
+      bind: pillBind,
+      style: "big",
+      components: [Tally({ value: 1500 })]
+    });
+
+    expect(widthOf(element, pillSource({}))).toBe(40);
+  });
+
+  it("after Text: reads Text.resolved and Text.style, and asks nothing", () => {
+    const formatted = vi.fn(() => ({ text: "wrong", style: "big" }));
+    const source = pillSource({
+      resolved: () => "1.5K",
+      style: () => "small",
+      formatted
+    });
+    const element = textElement({ bind: pillBind, style: "big" });
+
+    expect(widthOf(element, source)).toBe(20);
+    expect(formatted).not.toHaveBeenCalled();
+  });
+
+  it("a built-in bind stays in the style of its prop and asks neither", () => {
+    const formatted = vi.fn(() => ({ text: "wrong", style: "small" }));
+    const style = vi.fn(() => "small");
+    const source = pillSource({ resolved: () => "1500", style, formatted });
+    const element = textElement({ bind: named, style: "big" });
+
+    expect(widthOf(element, source)).toBe(40);
+    expect(formatted).not.toHaveBeenCalled();
+    expect(style).not.toHaveBeenCalled();
   });
 });

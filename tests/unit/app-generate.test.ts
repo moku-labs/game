@@ -95,7 +95,9 @@ describe("pageHtml", () => {
         "    <title>Лесной городок</title>",
         '    <link rel="icon" href="../assets/icon.png" />',
         '    <link rel="apple-touch-icon" href="../assets/icon-180.png" />',
-        "    <style>html, body { margin: 0; height: 100%; background: #10161d; } #game { width: 100%; height: 100%; touch-action: none; }</style>",
+        "    <style>html, body { margin: 0; height: 100%; background: #10161d; } #game { width: 100%; height: 100%; touch-action: none; } " +
+          "html, body, #game { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; } " +
+          "input, textarea { -webkit-user-select: text; user-select: text; }</style>",
         "  </head>",
         "  <body>",
         '    <div id="game"></div>',
@@ -163,6 +165,41 @@ describe("pageHtml", () => {
 
     expect(style).not.toBe("");
     expect(style).not.toContain("url(");
+  });
+
+  // Bug: the boot picture is missing, lands after the canvas, or its width and fade never reach the style.
+  it("pageHtml with a boot writes the picture right before #game and its rule in the style; without one no moku-boot", () => {
+    const boot = { image: "assets/boot.png", width: "52vmin", fadeMs: 250 };
+    const lines = pageHtml(pageWith({ boot }), { toRoot: "../../", script: "./main.ts" }).split(
+      "\n"
+    );
+    const style = lines.find(line => line.startsWith("    <style>")) ?? "";
+
+    expect(lines.indexOf('    <img id="moku-boot" src="../../assets/boot.png" alt="" />')).toBe(
+      lines.indexOf('    <div id="game"></div>') - 1
+    );
+    expect(style).toContain(
+      " #moku-boot { position: fixed; left: 50%; top: 50%; width: 52vmin; height: auto; transform: translate(-50%, -50%); z-index: 1; pointer-events: none; transition: opacity 250ms linear; }</style>"
+    );
+    expect(style).not.toContain("url(");
+    expect(pageHtml(plain.page, devLinks)).not.toContain("moku-boot");
+  });
+
+  // Bug: a boot picture outside the game, or a width that closes the rule, reaches the page.
+  it("pageHtml refuses a boot picture outside the game and a width that is not a CSS length", () => {
+    const boot = { image: "assets/boot.png", width: "40vmin", fadeMs: 300 };
+
+    for (const image of ["../boot.png", "/abs/boot.png", ""]) {
+      expect(() => pageHtml(pageWith({ boot: { ...boot, image } }), devLinks)).toThrow(
+        new Error(`[game] moku-game: page.boot.image "${image}" is not a file in the game.`)
+      );
+    }
+
+    const width = "40vmin; background: red";
+
+    expect(() => pageHtml(pageWith({ boot: { ...boot, width } }), devLinks)).toThrow(
+      new Error(`[game] moku-game: page.boot.width "${width}" is not a CSS length.`)
+    );
   });
 });
 

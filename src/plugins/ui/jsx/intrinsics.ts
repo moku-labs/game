@@ -6,6 +6,7 @@
 import type { Message } from "../../i18n/types";
 import type { Json } from "../../model/types";
 import type { TextBind } from "../../text/types";
+import type { AnchorTarget } from "../../world/projection/types";
 import type { AnyComponentValue } from "../../world/types";
 import type { Style } from "../styles/types";
 import type {
@@ -298,7 +299,40 @@ export type InputProps = CommonProperties & {
 };
 
 /**
- * The thirteen tags a screen is written with.
+ * What an anchor sits on: one view or element by its projection and key, or a list of them, whose
+ * shown ones it spans.
+ */
+export type AnchorTo = (AnchorTarget | readonly AnchorTarget[]) & Brand<"AnchorTo">;
+
+/**
+ * How far an anchor reaches past its targets on each side, in its root's units; 0 by default. A
+ * value below 0 pulls it inward; past half the targets the size stops at 0, at their centre.
+ */
+export type AnchorPad = number & Brand<"AnchorPad">;
+
+/**
+ * What an anchor takes: the common props, `to` and `pad`. Its rect is the drawn rect of its
+ * targets, padded, in the frame they are laid out, and its children lay out inside it; its style
+ * gives its look, and a `width`, `height` or `position` there is ignored (`ui:anchor-style`, dev
+ * builds). While no target is shown it is not drawn and takes no tap. On a target of no area it
+ * stands at the point at size 0: it takes no tap itself, and its children overflow it and take
+ * theirs. Its `change.Box` motion plays only when its targets change: a new `to`, or keys that name
+ * other entities, a point included.
+ *
+ * @example
+ * ```tsx
+ * // The tutorial's window sits on the first seat of the board's order strip, 4 u outside it.
+ * <anchor key="window" to={{ projection: "board.strip", key: "seat0" }} pad={4}>
+ *   <stack key="rim" style={{ nineSlice: "tutorial.rim", hollow: true, width: "100%", height: "100%" }} />
+ * </anchor>;
+ * // the seat is drawn at { x: 40, y: 1500, w: 116, h: 120 }
+ * app.ui.rectOf({ projection: "tutorial", key: "window" }); // { x: 36, y: 1496, w: 124, h: 128 }
+ * ```
+ */
+export type AnchorProps = CommonProperties & { to: AnchorTo; pad?: AnchorPad };
+
+/**
+ * The fourteen tags a screen is written with.
  *
  * @example
  * ```ts
@@ -319,6 +353,7 @@ export type UiIntrinsicElements = {
   button: ButtonTagProps;
   scroll: ScrollProps;
   input: InputProps;
+  anchor: AnchorProps;
 };
 
 /**

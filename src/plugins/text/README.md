@@ -7,11 +7,13 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
 
 - **Config:** `fonts: { body, digits }`, the two boot fonts behind the built-in styles. No glyph
   is drawn or measured in place of a missing one (see Missing glyphs).
-- **API:** `measure(content, style, width?)`, `hasGlyph(char, style)`, `styles()`. `width` is
+- **API:** `measure(content, style, width?)`, `hasGlyph(char, style)`,
+  `formatted(name, value)`, `styles()`. `width` is
   the width a `wrap: "box"` style wraps at (`ui` passes the width Yoga offers); without it such a
   style measures one line, and any other style ignores it. `hasGlyph` answers
   whether the loaded font of a style has a character, the lookup Pixi draws by; it is true while
   the font is not loaded. `ui` measures a text field's caret over the characters it is true for.
+  `formatted` answers `{ text, style }` of a format a feature registered, see Number formats.
   `replaceStyles(styles)` is the dev hot swap of a saved styles file, called by `ui`: every style
   of the map is written over the table (a new name is added, a known one keeps its owner), the
   fonts are read, the layout cache is dropped, every label is marked and the loop is woken. The
@@ -23,10 +25,15 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   nothing by Pixi, so it measures 0 wide, letter spacing included, and is reported once per font
   and character. `"ab😀"` measures as `"ab"`, and a label is as wide as what is drawn.
 - **Helpers:** `Text`, `Countdown`, `bind(Component, field, { format })`,
-  `label({ text, style, at, anchor? })`, `defineTextStyles(map)`,
-  `textFor<TextStyles, Fonts>()` for `defineGame`.
+  `label({ text, style, at, anchor? })`, `defineTextStyles(map)`, `defineTextFormats(map)`,
+  `textFor<TextStyles, Fonts, TextFormats>()` for `defineGame`.
 - **Styles:** `font`, `size` and `fill` are required. `bold`, `italic`, `stroke`, `strokeWidth`,
-  `letterSpacing`, `align`, `wrap`, `digits` and `shadow` have defaults.
+  `letterSpacing`, `align`, `wrap`, `digits`, `shadow` and `lineHeight` have defaults.
+  `lineHeight` is the line as a multiple of `size`, like a unitless CSS `line-height`:
+  `{ font: "text-medium", size: 14, fill: 0, lineHeight: 1.28 }` lays every line 17.92 px high, so
+  three lines measure 53.76. The glyphs sit in the middle of the line (half the leading above,
+  half below, as CSS does), and an inline icon fills the line. Left out, the line is the font's.
+  It must be a number above 0. Wrap widths do not change with it.
   `shadow: { color, dx, dy, alpha? }` is a drop shadow under every glyph run. The offset is in
   reference px at the style size. `alpha` defaults to 1, and the shadow draws at it: `0.55` is
   0.55. A shadow never changes what `measure` answers.
@@ -41,7 +48,11 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   | a width, `480` | wrapped at that many reference px |
   | `"box"` | wrapped at the laid-out width of its `ui` text element, which `ui` writes into `Text.box`; one line outside a ui layout, with a dev warning `text: wrap "box" outside layout` once per style; a style a layout measured at a width (`measure(content, style, width)`) never warns: its label with no box fits its row (F65) |
 
-  Words break between them; a word wider than the wrap breaks between its glyphs. A `"box"` text
+  Words break between them, and inside a word after a hyphen (`-` or U+2010) that joins two parts,
+  the hyphen kept on the first line: `купли-продажи` may break as `купли-` / `продажи`; never after
+  a leading hyphen or before a digit. A soft hyphen (U+00AD) draws nothing unless the line breaks
+  there, then it draws `-`; the word before it moves to the next line when that `-` would not fit.
+  The display draws exactly the measured lines. A word wider than the wrap breaks between its glyphs. A `"box"` text
   is measured at the width Yoga offers, so its element is as high as its lines, and is drawn again
   only when its box changes: a still frame compares one number per label and allocates nothing. A
   box is laid out per width and string, a number or `"none"` style once per string. Shrink is 0
@@ -69,6 +80,48 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `duration` reads as words in the current locale through `i18n.duration(ms)` and is built again
   after a locale change. `bind(Counter, "name")` on a string field does not compile, and neither
   does a hand-written `{ component, field }`: only `bind()` makes a `TextBind`.
+- **Number formats:** a game's own format, for what the four cannot say: `1.5K`, and a smaller
+  style from a thousand on. A feature declares it by name under its `textFormats` key, and a bind
+  names it. Nothing of a game (the K, the tiers, the sizes) enters the engine.
+
+  ```ts
+  export const { bind, defineTextFormats } = defineGame<{ /* … */ textStyles: StyleKey; textFormats: "pill.number" }>();
+
+  export const pillFormats = defineTextFormats({
+    "pill.number": value =>
+      value < 1000
+        ? { content: String(value), style: "digits.17" }
+        : { content: tr("ui.number.thousand", { n: String(value / 1000) }), style: "digits.14.5" }
+  });
+
+  defineFeature("shared", { textStyles, textFormats: pillFormats });
+
+  <text bind={bind(Counter, "value", { format: "pill.number" })} style="digits.17" components={[Counter({ value })]} />;
+
+  app.text.formatted("pill.number", 1500); // { text: "1.5K", style: "digits.14.5" }
+  ```
+
+  A format takes the whole value (`Math.round`, 0 for a value that is not finite, never `-0`) and
+  answers `{ content, style }`; `content` is a string or a `Message`, and `style` is required. It
+  must be pure over the value and the language: it is asked once when the whole value or the
+  locale moves, or when another writer put another `Text.style` on the label. While they stand a
+  frame is reads and compares, nothing is kept and the format is not called, also over fractions
+  of one whole number and for a mark. An answer that says the same writes nothing. A
+  `Countdown.left` is in milliseconds, so a countdown calls its format every frame.
+
+  The format owns `Text.style`: the `style` prop is where the label starts, `ui` measures by the
+  answer and leaves the style alone on a commit and on a new viewport. No style is checked for
+  `digits` under a named format. The root `bind` keeps the four built-in formats; the `bind` of
+  `defineGame` takes the game's names, and `TextBind.format` is a `string`.
+
+  | What goes wrong | What happens |
+  |---|---|
+  | two features define a name, a name is a built-in format, a value is no function | a thrown `[game]` error at start |
+  | the format throws | `text: bind format threw` once per name; the label shows the whole value as digits, `Text.style` stays; `formatted` answers `undefined` |
+  | a name no feature registered | `text: bad bind format` once per entity; shown as `"int"`, `Text.style` stays; `formatted` answers `undefined` |
+  | a value that is not finite | `text: bad bind format` once per entity; the format takes 0 |
+
+  A format has no hot swap: a saved module that exports one reloads the page (ui README).
 - **The spawn frame:** a label shows its string in the frame it is spawned. The layout system
   resolves every label that exists when phase `layout` starts; `ui` adds the `Text` of a JSX
   label in its solve, after that system, and the flush at the end of the phase attaches it with

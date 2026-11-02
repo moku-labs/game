@@ -308,7 +308,7 @@ export function stopEffects(state: State): void {
   state.filterSync = createFilterSync();
   state.warned.clear();
   state.particles = 0;
-  state.over = { particles: false, passes: false, fullScreen: false };
+  state.over = { particles: false, passes: 0, fullScreen: false };
   // A switch does not survive a stop: the next start begins with every kind on.
   state.diagnostics.off.clear();
   state.diagnostics.kinds = NO_KINDS;

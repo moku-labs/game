@@ -115,6 +115,7 @@ function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
     session: snapshot.session,
     rng: { seed: snapshot.rng.seed, streams: { ...snapshot.rng.streams } },
     graph: graphHash(graphOf(ctx, modules.features)),
+    version: ctx.deps.model.store.schemaVersion(),
     // `exactOptionalPropertyTypes`: a bookmark without a rest point has no key.
     ...(rest === undefined ? {} : { rest })
   };
@@ -258,7 +259,11 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
         );
       }
 
+      const previous = ctx.state.fx.mode;
+
       modules.fx.setMode(mode);
+      // The guide of the node that stands was not shown in fast mode: live shows it, once.
+      if (previous === "fast" && mode === "live") state.guide?.reshow();
     }
   };
 }

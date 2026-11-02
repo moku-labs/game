@@ -188,6 +188,7 @@ function createFakeModel(record: Recorder): ModelApi {
       markBarrier: vi.fn(),
       rollback: vi.fn(),
       restore: vi.fn(),
+      schemaVersion: () => 1,
       flush: (): Promise<void> => {
         record.flushes += 1;
 

@@ -1,6 +1,6 @@
 import { bench, describe } from "vitest";
 import { BENCH_OPTIONS } from "../../../../../tests/perf/alloc";
-import { currentLabelFixture, resolveFixture } from "./fixtures";
+import { currentLabelFixture, namedFixture, resolveFixture } from "./fixtures";
 
 describe("text resolve", () => {
   bench("frame, 100 labels, 20 bound, idle", resolveFixture("nothing"), BENCH_OPTIONS);
@@ -22,4 +22,7 @@ describe("text resolve", () => {
     BENCH_OPTIONS
   );
   bench("adapter update, box label written again as it is", currentLabelFixture(), BENCH_OPTIONS);
+  bench("frame, 100 labels, 20 named, idle", namedFixture("nothing"), BENCH_OPTIONS);
+  bench("frame, 100 labels, one named step, same answer", namedFixture("same"), BENCH_OPTIONS);
+  bench("frame, 100 labels, one named step, new text", namedFixture("text"), BENCH_OPTIONS);
 });

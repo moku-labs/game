@@ -32,7 +32,8 @@ import type {
  * const stats: RenderStats = {
  *   fps: 60, drawn: 60, frameMs: 3.4, textures: 12, textureMb: 41.25,
  *   textureMbSplit: { art: 30.1, targets: 9.75, kept: 1.4 }, views: 180, pooled: 24,
- *   renderPasses: 1, renderPassesMax: 3, kept: { pictures: 1, mb: 1.4, retakes: 0 }, drawCalls: 14
+ *   renderPasses: 1, renderPassesMax: 3, canvasPasses: 1, canvasPassesMax: 2,
+ *   kept: { pictures: 1, mb: 1.4, retakes: 0, evicted: 0, refused: 0 }, drawCalls: 14
  * };
  * // The same board at rest with `onDemand`: the loop runs, nothing is drawn.
  * const still: RenderStats = { ...stats, drawn: 0 };
@@ -80,8 +81,33 @@ export type RenderStats = {
   /** The most render passes of one drawn frame in the last full second: the frame that took a picture shows here. */
   renderPassesMax: number;
   /**
-   * Kept pictures: views drawn as one texture in the last drawn frame, the MiB their textures hold, and the pictures
-   * taken in the last full second. `{ pictures: 0, mb: 0, retakes: 0 }` while inert or with `keptMb: 0`.
+   * Canvas render passes begun in the last drawn frame: every build, counted where the lazy canvas pass really begins
+   * one (WebGPU) or the canvas is bound (WebGL). Each pass after the first is a break of the canvas, the cost on a tiled
+   * GPU: breaks = `canvasPasses - 1`. Where nothing counts (headless, a test stage, a canvas with multisampling) it is
+   * estimated from the filter slots: 1 + the views drawn live with an enabled filter. 0 while inert.
+   *
+   * @example
+   * ```ts
+   * // A board with two buttons whose glows are drawn live: the first pass, and one back from each filter.
+   * app.renderer.stats().canvasPasses; // 3
+   * ```
+   */
+  canvasPasses: number;
+  /**
+   * The most canvas render passes of one drawn frame in the last full second.
+   *
+   * @example
+   * ```ts
+   * // The same two buttons a second after they were kept as pictures: no break now, two in the second before.
+   * app.renderer.stats().canvasPasses; // 1
+   * app.renderer.stats().canvasPassesMax; // 3
+   * ```
+   */
+  canvasPassesMax: number;
+  /**
+   * Kept pictures: views drawn as one texture in the last drawn frame, the MiB their textures hold, the pictures taken,
+   * the pictures the budget evicted and the takes it refused in the last full second.
+   * `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }` while inert or with `keptMb: 0`.
    */
   kept: KeptStats;
   /**
@@ -141,7 +167,8 @@ export const COUNT = {
   marks: 7,
   rebuilds: 8,
   targetsCreated: 9,
-  targetsDestroyed: 10
+  targetsDestroyed: 10,
+  canvas: 11
 } as const;
 
 /**
@@ -344,6 +371,7 @@ export type RingPasses = {
   drawsAt: Uint16Array;
   format: (string | null)[];
   resolution: Float32Array;
+  restart: Uint8Array;
 };
 
 /**
@@ -656,6 +684,8 @@ export type MonitorState = {
    * last closed one. Zeros until a counter saw a drawn frame.
    */
   passes: { last: number; open: number; max: number };
+  /** The canvas passes (F126), kept as `passes`: of the last drawn frame, the open window and the last closed one. */
+  canvas: { last: number; open: number; max: number };
   /** Removers of the count-only WebGL pass items of a build without the agent flag (F8). */
   passDetach: Array<() => void>;
 };
@@ -667,7 +697,7 @@ export type MonitorState = {
  * @example
  * ```ts
  * // A headless test: nothing is drawn, so every counter is 0 and there is no picture.
- * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0 } }
+ * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, canvasPasses: 0, canvasPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
  * await app.renderer.capture(); // undefined
  * ```
  */
@@ -675,22 +705,22 @@ export type MonitorApi = {
   /**
    * The counters of the renderer, as a fresh object. The frame timing, the draw calls and the
    * render passes are kept each frame without an allocation; the rest is read at call time from
-   * `sync`, the kept pictures and Pixi. `renderPasses` is measured on the GPU path in every build
+   * `sync`, the kept pictures and Pixi. `renderPasses` and `canvasPasses` are measured on the GPU path in every build
    * (the estimate of the filter slots where nothing counts). `drawCalls`, `redraws` and `rebuilds` are there in a dev
    * build only.
    *
    * @returns Frames per second, frame work, GPU textures and their memory, views, pooled objects,
-   *   render passes and their most in the last second, the kept pictures, and in a dev build the
+   *   render passes and canvas passes with their most in the last second, the kept pictures, and in a dev build the
    *   draw calls of the last frame and the Graphics redraws and Pixi rebuilds per second. Inert: all 0.
    * @example
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
-   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0 } }
+   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, canvasPasses: 1, canvasPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
    * // The same frame in a dev build also counts the one sprite batch, and the one instruction build of the first
    * // frame: { ..., drawCalls: 1, redraws: 0, rebuilds: 1 }
    * app.renderer.stats(); // { fps: 120, drawn: 0, … }: a still board with onDemand
-   * // the ward at rest with its lamps kept: { renderPasses: 1, renderPassesMax: 1, kept: { pictures: 4, mb: 1.6, retakes: 0 }, … }
+   * // the ward at rest with its lamps kept: { renderPasses: 1, renderPassesMax: 1, canvasPasses: 1, canvasPassesMax: 1, kept: { pictures: 4, mb: 1.6, retakes: 0, evicted: 0, refused: 0 }, … }
    * ```
    */
   stats(): RenderStats;

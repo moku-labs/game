@@ -4,6 +4,7 @@ import { BENCH_OPTIONS } from "../../../../../tests/perf/alloc";
 import { createLazyCanvasClasses } from "../../host/render-pass";
 import type { PixiModule } from "../../types";
 import { createPassStage } from "../pass-stage";
+import { canvasBeginStep } from "./fixtures";
 
 // The lazy canvas pass (B3) against Pixi's own systems, on the quiet stand-in of the GPU: the CPU side of a frame that
 // starts with a filter, and of one draw inside a frame. Reported only.
@@ -51,4 +52,10 @@ describe("ten draws on the canvas", () => {
     },
     BENCH_OPTIONS
   );
+});
+
+const begin = await canvasBeginStep(true, "real");
+
+describe("the canvas pass count", () => {
+  bench("one canvas begin, an agent build", begin, BENCH_OPTIONS);
 });

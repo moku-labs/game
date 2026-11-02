@@ -14,6 +14,7 @@ export type {
   HeadlessSeams,
   MemoryProvider,
   PageAgent,
+  PlistValue,
   SaveKind,
   Scenario,
   ScreenSeams,

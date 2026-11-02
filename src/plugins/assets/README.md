@@ -45,7 +45,9 @@ A26 (Chrome, WebGPU, Pixi 8.22) one upload costs about 9 ms whatever its size: t
 the 6 cold textures (9.4 MB) of A Memory Missing's memory screen took 55 ms, and 8 ms once they were
 uploaded before. `warm` moves that work into the frames before the scene mounts. A live scene
 switch warms the bundles of the new scene by itself (scenes README, the switch); a game calls `warm`
-for what shows without a switch, such as a popup over the mounted scene.
+for what shows without a switch, such as a popup over the mounted scene. A warmed bundle stays on the
+GPU until `unloadBundle` frees it, however long a screen stands: the budget owns its life, not Pixi's
+collector (F129).
 
 `load` has no `signal` parameter. Internal callers — the enter callback, the `load` effect and the
 preload queue — call `loadBundle(ctx, bundle, signal, reason)` of `tiers.ts` directly.
@@ -427,8 +429,11 @@ a built game and headless.
 No plugin event belongs to `ready`: it posts the world event `{ type: "ready" }` into `flow.inbox`,
 which a rest node takes when its `inbox` lists `"ready"` (see "Resting on a load: `ready`").
 
-`assets:bundle-progress` is for the game: no engine plugin listens to it. A splash screen fills
-its loading bar from it.
+`assets:bundle-progress` is for the game, and for `scenes`: during a live switch whose leave loader
+is a projection, `scenes` listens to it and feeds that loader the share of the switch's bundles
+loaded (scenes README, "The switch it reads"). A game's own hook comes after the one of `scenes`
+(the kernel awaits each handler of an event in plugin order), so it runs a microtask after the
+emit. A splash screen fills its loading bar from it.
 
 ```ts
 createPlugin("loadingBar", {
@@ -569,7 +574,7 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 | Rule | Value |
 |---|---|
 | Page | 2048 × 2048 at most, as small as its content (not a power of two, not square). |
-| Padding | 2 px between frames and a 2 px border, transparent, no extrude. |
+| Padding | 2 px between frames and a 2 px border. Each frame's edge pixels are copied 1 px out into it (extrude), so a picture drawn at a fractional place samples its own edge, never transparent black (F105); the rest stays transparent. |
 | Trim, rotation | Never: a rotated or trimmed nine-slice would lose its borders. |
 | Loose by size | A texture with a side above 512 px stays a file of its own. |
 | Loose by mipmaps | A texture with `mips` stays a file of its own, whatever its key or size: Pixi builds the full chain, and from the second level on the neighbours on a page would bleed into it. The pack check refuses a mipmapped frame. The packed bundle keeps `parent`, `dir` and `release`; a loose mipmapped file keeps `mips` and its chain `mb`. |

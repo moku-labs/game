@@ -4,7 +4,8 @@
  * so the shader and the uniform layout cannot drift. For each input the engine declares the texture,
  * its sampler (WGSL only), its scale and clamp uniforms and `sample<Name>(uv)`; for a backdrop, the
  * texture Pixi copies the canvas under the view into (`uBackTexture`, group 0 binding 3), its scale
- * and clamp uniforms and `sampleBack(uv)`. Pure strings.
+ * and clamp uniforms and `sampleBack(uv)`. For a kept view whose numbers change, the quad program: the same fragment
+ * body on a mesh, in the pass that draws the canvas (F126 stage 2). Pure strings.
  */
 import type { FilterInputDefinition, UniformSpec } from "./types";
 
@@ -48,20 +49,21 @@ fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
  * resource key of the instance is `fu` too. Nothing without uniforms.
  *
  * @param uniforms - The uniforms in declaration order.
+ * @param group - The bind group of `fu`: 1 in a filter's source, 3 in a quad program's.
  * @returns The WGSL lines, or `""`.
  * @example
  * ```ts
  * uniformStruct([{ name: "amount", type: "f32", form: "number", size: 1 }]); // "struct FilterUniforms {\n  amount: f32,\n};\n\n@group(1) @binding(0) var<uniform> fu: FilterUniforms;\n"
  * ```
  */
-export function uniformStruct(uniforms: readonly UniformSpec[]): string {
+export function uniformStruct(uniforms: readonly UniformSpec[], group = 1): string {
   if (uniforms.length === 0) return "";
 
   const fields = uniforms.map(uniform => `  ${uniform.name}: ${uniform.type},\n`).join("");
 
   return (
     `struct FilterUniforms {\n${fields}};\n\n` +
-    "@group(1) @binding(0) var<uniform> fu: FilterUniforms;\n"
+    `@group(${group}) @binding(0) var<uniform> fu: FilterUniforms;\n`
   );
 }
 
@@ -73,7 +75,9 @@ export function uniformStruct(uniforms: readonly UniformSpec[]): string {
  * @returns The WGSL lines, or `""`.
  * @example
  * ```ts
- * inputBindings([blurInput]).includes("fn sampleBlur(uv: vec2<f32>) -> vec4<f32>"); // true
+ * const soft = { name: "soft", from: "input", texture: "uSoft", sampler: "uSoftSampler", sample: "sampleSoft", scale: { name: "softScale", type: "f32", form: "number", size: 1 }, clamp: { name: "softClamp", type: "vec4<f32>", form: "vector", size: 4 }, stages: [], chain: () => [] } as const;
+ *
+ * inputBindings([soft]).includes("fn sampleSoft(uv: vec2<f32>) -> vec4<f32>"); // true
  * ```
  */
 export function inputBindings(inputs: readonly FilterInputDefinition[]): string {
@@ -146,7 +150,7 @@ fn sampleBack(uv: vec2<f32>) -> vec4<f32> {
  * @returns The WGSL source both stages are built from.
  * @example
  * ```ts
- * assemble([], [], body, undefined, true).includes("fn sampleBack(uv: vec2<f32>) -> vec4<f32>"); // true
+ * assemble([], [], "", undefined, true).includes("fn sampleBack(uv: vec2<f32>) -> vec4<f32>"); // true
  * ```
  */
 export function assemble(
@@ -166,4 +170,134 @@ export function assemble(
   const helper = origin === undefined ? "" : CANVAS_PIXEL;
 
   return `${HEADER}${struct}${inputBindings(inputs)}${back}${helper}${body}`;
+}
+
+/**
+ * The head of a quad program. Pixi fills groups 0 and 1 by the names `globalUniforms` and `localUniforms`
+ * (`GpuProgram.mjs:34-35`, `GpuMeshAdapter.mjs:44-50`), so the filter's bindings of `HEADER` move to group 2 and the
+ * vertex stage becomes the mesh's. A literal, like `HEADER`: a game without `effectsPlugin` carries neither.
+ */
+const QUAD_HEADER = /* wgsl */ `struct GlobalFilterUniforms {
+  uInputSize: vec4<f32>,
+  uInputPixel: vec4<f32>,
+  uInputClamp: vec4<f32>,
+  uOutputFrame: vec4<f32>,
+  uGlobalFrame: vec4<f32>,
+  uOutputTexture: vec4<f32>,
+};
+
+@group(2) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+struct VSOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+struct GlobalUniforms {
+  uProjectionMatrix: mat3x3<f32>,
+  uWorldTransformMatrix: mat3x3<f32>,
+  uWorldColorAlpha: vec4<f32>,
+  uResolution: vec2<f32>,
+};
+struct LocalUniforms { uTransformMatrix: mat3x3<f32>, uColor: vec4<f32>, uRound: f32 };
+@group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
+@group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
+
+@vertex
+fn mainVertex(@location(0) aPosition: vec2<f32>, @location(1) aUV: vec2<f32>) -> VSOutput {
+  let mvp = globalUniforms.uProjectionMatrix * globalUniforms.uWorldTransformMatrix * localUniforms.uTransformMatrix;
+  let clip = mvp * vec3<f32>(aPosition, 1.0);
+
+  return VSOutput(vec4<f32>(clip.xy, 0.0, 1.0), aUV);
+}
+
+`;
+
+/**
+ * The entry point of a quad program: the body times what Pixi's own mesh shader multiplies by
+ * (`defaultProgramTemplate.mjs:42`), `uColor` premultiplied, so the view's alpha and tint reach the mesh.
+ */
+const QUAD_TAIL = /* wgsl */ `
+
+@fragment
+fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  return filterBody(uv) * localUniforms.uColor * globalUniforms.uWorldColorAlpha;
+}
+`;
+
+/** A line comment or a block comment of WGSL. */
+const COMMENT = /\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
+
+/** What the rewrite looks at: a comment, which it leaves alone, or the head of an entry point up to its opening brace. */
+const QUAD_WALK = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|@fragment\s[^{]*[^{\s]/g;
+
+/** The one head the rewrite fits, without its whitespace: its group names the `uv`. */
+const PLAIN_HEAD =
+  /^@fragmentfnmainFragment\(@location\(0\)(\w+):vec2<f32>\)->@location\(0\)vec4<f32>$/;
+
+/** Whitespace, which a head may hold anywhere the plain one has a space, a newline or nothing. */
+const SPACE = /\s/g;
+
+/** What a body cannot carry onto the mesh: a builtin the wrapper does not pass, a name the quad program declares. */
+const QUAD_REFUSED = /@builtin\s*\(|\b(?:filterBody|[Gg]lobalUniforms|[Ll]ocalUniforms)\b/;
+
+/**
+ * A fragment body as a function the wrapper calls: the plain signature found once outside a comment, rewritten to
+ * `filterBody`, the rest of the text as it is. Whitespace and newlines of the signature may vary. A body read outside
+ * its comments that takes a `@builtin` or declares a name of the quad program stays out.
+ *
+ * @param wgsl - The fragment body the game wrote.
+ * @returns The rewritten body, or `undefined` when the rewrite does not fit.
+ * @example
+ * ```ts
+ * quadBody("@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return vec4<f32>(uv, 0.0, 1.0); }"); // "fn filterBody(uv: vec2<f32>) -> vec4<f32> { return vec4<f32>(uv, 0.0, 1.0); }"
+ * ```
+ */
+function quadBody(wgsl: string): string | undefined {
+  let found = 0;
+
+  const rewritten = wgsl.replaceAll(QUAD_WALK, head => {
+    const name = PLAIN_HEAD.exec(head.replaceAll(SPACE, ""))?.[1];
+
+    if (name === undefined) return head;
+
+    found += 1;
+
+    return `fn filterBody(${name}: vec2<f32>) -> vec4<f32>`;
+  });
+
+  return found === 1 && !QUAD_REFUSED.test(wgsl.replaceAll(COMMENT, "")) ? rewritten : undefined;
+}
+
+/**
+ * The quad program of a filter: the head of the mesh, the uniform struct at group 3 (the uniforms, then the engine's
+ * `keptOrigin` of a body that calls `canvasPixel`, as `assemble` lists them, so the struct matches the instance's group
+ * member for member: a shader that asks for more than the group holds fails only as an asynchronous GPU validation
+ * error, a blank view with nothing in the logs), the `canvasPixel` helper, the body as `filterBody`, the entry point.
+ *
+ * @param uniforms - The uniforms in declaration order.
+ * @param body - The fragment body the game wrote.
+ * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
+ * @returns The WGSL source of both stages, or `undefined` for a body the rewrite does not fit.
+ * @example
+ * ```ts
+ * assembleQuad([], "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return vec4<f32>(uv, 0.0, 1.0); }")?.includes("fn filterBody(uv: vec2<f32>) -> vec4<f32>"); // true
+ * assembleQuad([], "@fragment fn mainFragment(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> { return at; }"); // undefined
+ * ```
+ */
+export function assembleQuad(
+  uniforms: readonly UniformSpec[],
+  body: string,
+  origin?: UniformSpec
+): string | undefined {
+  const rewritten = quadBody(body);
+
+  if (rewritten === undefined) return undefined;
+
+  const struct = uniformStruct(origin === undefined ? uniforms : [...uniforms, origin], 3);
+  const helper = origin === undefined ? "" : CANVAS_PIXEL;
+
+  return `${QUAD_HEADER}${struct}${helper}${rewritten}${QUAD_TAIL}`;
 }

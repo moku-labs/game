@@ -5,7 +5,8 @@
 import type { ViewportCtx, ViewportState } from "./types";
 
 /**
- * Measures the mount in CSS pixels.
+ * Measures the mount in CSS pixels, fractions kept: at a fractional `devicePixelRatio` the window is 844.8 CSS px
+ * tall, and `clientHeight` would round it to whole pixels and leave the last device rows of the page uncovered (F116).
  *
  * @param vctx - Domain context of the viewport module.
  * @returns The size of the mount, or zero while inert.
@@ -15,7 +16,9 @@ export function measureMount(vctx: ViewportCtx): { width: number; height: number
 
   if (mount === undefined) return { width: 0, height: 0 };
 
-  return { width: mount.clientWidth, height: mount.clientHeight };
+  const box = mount.getBoundingClientRect();
+
+  return { width: box.width, height: box.height };
 }
 
 /**

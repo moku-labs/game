@@ -21,7 +21,7 @@ import type {
   PerfEventName,
   PerfLogLine
 } from "./log-types";
-import { countGlPasses } from "./passes";
+import { countGlPasses, noteRestart } from "./passes";
 import {
   attachPerf,
   beginAgent,
@@ -114,7 +114,7 @@ function takesResolution(value: number | undefined): boolean {
 export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorModule {
   const state = ctx.state.monitor;
   const clock = ctx.deps.clock;
-  const { passes, sinks } = state;
+  const { canvas, passes, sinks } = state;
   const mctx: MonitorCtx = { ctx, deps };
   // Inline and positive: a production `define` folds it to `undefined`, and every branch below
   // that reads it goes with it.
@@ -133,18 +133,50 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     sinks.measuring && counted > 0 ? counted : deps.sync.renderPasses();
 
   /**
-   * Closes the pass count of a frame: a drawn frame whose passes a counter saw is the new `renderPasses`; a skipped
-   * frame keeps both numbers. The frame closes here, except in an agent build, whose commit closes it after the
-   * record is written.
+   * A measured canvas pass number, or the estimate of the filter slots where nothing counted one: headless, a test
+   * stage, a canvas with multisampling, which Pixi begins itself.
+   *
+   * @param counted - The measured number; 0 before a counter saw one.
+   * @returns The number `stats()` reports.
+   */
+  const measuredCanvas = (counted: number): number =>
+    counted > 0 ? counted : deps.sync.canvasPasses();
+
+  /**
+   * Hears a canvas pass that really began on WebGPU, in every build: one increment inside a frame, and in an agent
+   * build its reason in the pass ring. Made once: `host/render-pass.ts` calls it through the host's state.
+   *
+   * @param restart - The reason, an index into `CANVAS_RESTARTS`.
+   */
+  const canvasBegan = (restart: number): void => {
+    if (!sinks.inFrame) return;
+
+    sinks.counts[COUNT.canvas] = cellF64(sinks.counts, COUNT.canvas) + 1;
+
+    if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+      noteRestart(pc, restart);
+    }
+  };
+
+  /**
+   * Closes the pass counts of a frame: a drawn frame whose passes a counter saw is the new `renderPasses` and
+   * `canvasPasses`; a skipped frame keeps the numbers. The frame closes here, except in an agent build, whose commit
+   * closes it after the record is written.
    *
    * @param drawn - True when the render phase drew the frame.
    */
   const notePasses = (drawn: boolean): void => {
     const count = cellF64(sinks.counts, COUNT.passes);
+    const canvasCount = cellF64(sinks.counts, COUNT.canvas);
 
     if (drawn && count > 0) {
       passes.last = count;
       passes.open = Math.max(passes.open, count);
+    }
+
+    if (drawn && canvasCount > 0) {
+      canvas.last = canvasCount;
+      canvas.open = Math.max(canvas.open, canvasCount);
     }
 
     if (pc === undefined) sinks.inFrame = false;
@@ -186,6 +218,8 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
         pooled: counts.pooled,
         renderPasses: measured(passes.last),
         renderPassesMax: measured(passes.max),
+        canvasPasses: measuredCanvas(canvas.last),
+        canvasPassesMax: measuredCanvas(canvas.max),
         kept: deps.kept.stats()
       };
 
@@ -302,6 +336,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       state.draws.frame = 0;
       // The passes of this frame, counted in every build (F8); a pass between frames is not.
       sinks.counts[COUNT.passes] = 0;
+      sinks.counts[COUNT.canvas] = 0;
       sinks.inFrame = true;
 
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
@@ -345,6 +380,9 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     },
 
     attachPasses: (): void => {
+      // Every build hears the canvas passes through the host: the file that begins them never imports the monitor.
+      deps.host.onCanvasPass(canvasBegan);
+
       // An agent build counts through `attach`; WebGPU through the encoder `host` installed.
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) return;
 

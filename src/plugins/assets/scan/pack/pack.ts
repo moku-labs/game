@@ -776,8 +776,8 @@ function countLoose(bundles: readonly ManifestBundle[]): number {
 
 /**
  * Packs the art of a game for production: per bundle, the textures of the `fx` group and of the
- * `main` group go onto WebP atlas pages (2048 px at most, 2 px padding and border, never trimmed
- * or rotated), a texture with a side above 512 px and a group of one stay loose files, fonts and
+ * `main` group go onto WebP atlas pages (2048 px at most, 2 px padding and border with each frame's
+ * edge extruded 1 px into it, never trimmed or rotated), a texture with a side above 512 px and a group of one stay loose files, fonts and
  * sounds are copied, every file name carries the hash of its bytes, and the packed manifest
  * (version 2) names it all. Nothing is written while a problem is open; afterwards the pack folder
  * holds exactly what the manifest references, plus `manifest.json`. Two runs on the same tree and

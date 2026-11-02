@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { Sprite } from "../../../renderer/components";
+import { Text } from "../../../text/components";
 import type { Element } from "../../jsx/types";
 import { restTransform } from "../../layout/motion";
 import { fitInto } from "../../layout/solve";
-import { fitScaleOf, samePose, scaleByFits, visualOf, visualRectOf } from "../../visual";
+import {
+  fieldsLeftAlone,
+  fitScaleOf,
+  samePose,
+  scaleByFits,
+  visualOf,
+  visualRectOf
+} from "../../visual";
 
 /**
  * Builds the smallest element the visual helpers read.
@@ -56,6 +65,27 @@ function elementOf(patch: Partial<Element> = {}): Element {
 }
 
 // ─── the visual component of an element ───────────────────────
+
+/**
+ * The alpha of the sprite of an image with a style, laid out at a size.
+ *
+ * @param style - The resolved style.
+ * @param w - The laid-out width.
+ * @param h - The laid-out height.
+ * @returns The alpha written into its `Sprite`.
+ */
+function imageAlpha(style: Element["style"], w: number, h: number): number | undefined {
+  const value = visualOf(
+    elementOf({
+      type: "image",
+      style,
+      rect: { x: 0, y: 0, w, h },
+      node: { type: "image", props: { texture: "ui.rim" }, children: [] }
+    })
+  )[0]?.value;
+
+  return typeof value === "object" ? (value as { alpha?: number }).alpha : undefined;
+}
 
 describe("visualOf", () => {
   it("draws the nine-slice of the style on any tag, at the rect, with alpha and tint", () => {
@@ -115,6 +145,42 @@ describe("visualOf", () => {
     expect(glow?.value).toMatchObject({ texture: "art.glow", alpha: 0.8, blend: "screen" });
     expect(halo?.type.componentName).toBe("NineSlice");
     expect(halo?.value).toMatchObject({ texture: "glass.frost", blend: "add" });
+  });
+
+  // Bug: an image hidden by a size of 0 the layout did not give it (its style states none, a
+  // game's system sizes its sprite), or shown at its texture's size when its edges squeeze it to 0.
+  it("puts an image at alpha 0 only on an axis its style sizes and the layout makes 0", () => {
+    const edges = { position: "absolute", left: 20, right: 20, top: 0, bottom: 0 } as const;
+
+    expect(imageAlpha({ position: "absolute", left: 0, top: 0, alpha: 0.5 }, 0, 0)).toBe(0.5);
+    expect(imageAlpha(edges, 0, 0)).toBe(0);
+    expect(imageAlpha({ ...edges, alpha: 0.5 }, 40, 8)).toBe(0.5);
+    expect(imageAlpha({ left: 20, right: 20, height: 8 }, 0, 8)).toBe(1);
+    // One axis stated by its edges alone: that axis decides.
+    expect(imageAlpha({ position: "absolute", left: 0, top: 0, bottom: 0 }, 40, 0)).toBe(0);
+    expect(imageAlpha({ position: "absolute", top: 0, left: 0, right: 0 }, 0, 40)).toBe(0);
+    expect(imageAlpha({ position: "absolute", left: 0, top: 0, bottom: 0 }, 0, 40)).toBe(1);
+  });
+
+  // Bug F111 (W1): ui wrote the laid-out 0 by 0 over the size a game's system gave a self-sized image whenever it wrote
+  // the element again; or it stops writing the size of an image the layout sizes (a flex child, a stated size).
+  it("leaves alone only the size of a sprite its style does not state and the layout left at 0", () => {
+    const image = (style: Element["style"], w: number, h: number) =>
+      elementOf({
+        type: "image",
+        style,
+        rect: { x: 0, y: 0, w, h },
+        node: { type: "image", props: { texture: "ui.rim" }, children: [] }
+      });
+
+    expect(
+      fieldsLeftAlone(image({ position: "absolute", left: 0, top: 0 }, 0, 0), Sprite, [])
+    ).toEqual(["width", "height"]);
+    expect(fieldsLeftAlone(image({ grow: 1 }, 300, 0), Sprite, [])).toEqual(["height"]);
+    expect(fieldsLeftAlone(image({ grow: 1 }, 300, 120), Sprite, [])).toEqual([]);
+    expect(fieldsLeftAlone(image({ width: 40, height: 40 }, 0, 0), Sprite, [])).toEqual([]);
+    expect(fieldsLeftAlone(image({}, 0, 0), Text, ["resolved"])).toEqual(["resolved"]);
+    expect(fieldsLeftAlone(elementOf({ type: "stack" }), Sprite, [])).toEqual([]);
   });
 
   it("sizes an image to its rect with the fit of its prop, contain by default", () => {

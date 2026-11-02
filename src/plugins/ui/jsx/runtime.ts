@@ -136,7 +136,7 @@ export function Fragment(props: JsxProperties): DescriptionNode {
 export declare namespace JSX {
   /** What a tag evaluates to. */
   interface Element extends DescriptionNode {}
-  /** The thirteen tags a screen is written with. */
+  /** The fourteen tags a screen is written with. */
   interface IntrinsicElements extends UiIntrinsicElements {}
   /** The prop children are collected into. */
   interface ElementChildrenAttribute {

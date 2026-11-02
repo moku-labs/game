@@ -55,5 +55,22 @@ export const BUDGET = {
    * writes a text whose rect moved and whose width stood. `isCurrent` compares the box as one more
    * number; nothing is laid out or kept.
    */
-  textAdapterCurrent: 0
+  textAdapterCurrent: 0,
+  /**
+   * F135 (change 2026-11-01-f135-bound-format): the idle phase with the 20 bound labels through a
+   * format a feature registered. Reads and compares: the name read from the format table, one whole
+   * value, the seen record. No key is built and the format is not called.
+   */
+  textNamedStanding: 0,
+  /**
+   * F135: the same phase with one counter moving under a format whose answer stands: one call, no
+   * write. The format answers a kept object here, so what a game's format builds is not counted.
+   */
+  textNamedSameAnswer: 0,
+  /**
+   * F135: the same phase with one counter moving through a string of its own per value, the style
+   * standing. Stays 80 B, the cost of one changed label, as `textResolveWorking`: the `{ resolved }`
+   * patch and the layout cache key. A step that moves the style writes one more field.
+   */
+  textNamedChanged: 80
 } as const;

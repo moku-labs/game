@@ -28,28 +28,33 @@ function isPlainRecord(value: Json | undefined): value is Record<string, Json> {
 }
 
 /**
- * Reads the one answer a `guide` descriptor lets through.
+ * Reads one answer a `guide` descriptor names: the one it lets through (`allow`), or the one a
+ * press outside its window gives (`blocked`).
  *
  * @param payload - Payload of the descriptor, as JSON.
- * @returns The allowed answer, or `undefined` when the payload names none.
+ * @param key - Which answer: `"allow"` or `"blocked"`.
+ * @returns The answer, or `undefined` when the payload names none.
  * @example
  * ```ts
- * guideAllow({ allow: { intent: "merge" } }); // { intent: "merge" }
- * guideAllow({ text: "Tap here" }); // undefined
+ * guideAnswer({ allow: { intent: "merge" } }, "allow"); // { intent: "merge" }
+ * guideAnswer({ allow: { intent: "merge" } }, "blocked"); // undefined
  * ```
  */
-function guideAllow(payload: Json | undefined): Allow | undefined {
+export function guideAnswer(
+  payload: Json | undefined,
+  key: "allow" | "blocked"
+): Allow | undefined {
   if (!isPlainRecord(payload)) return undefined;
 
-  const allow = payload.allow;
+  const answer = payload[key];
 
-  if (!isPlainRecord(allow)) return undefined;
+  if (!isPlainRecord(answer)) return undefined;
 
-  const intent = allow.intent;
+  const intent = answer.intent;
 
   if (typeof intent !== "string") return undefined;
 
-  return allow.payload === undefined ? { intent } : { intent, payload: allow.payload };
+  return answer.payload === undefined ? { intent } : { intent, payload: answer.payload };
 }
 
 /**
@@ -122,9 +127,10 @@ export function nodeFx(
     if (step.signal.aborted) return refuseEffect(step.signal);
 
     if (descriptor.kind === "guide") {
-      const allow = guideAllow(descriptor.payload);
+      const allow = guideAnswer(descriptor.payload, "allow");
 
-      if (allow !== undefined) modules.gate.narrow(allow);
+      if (allow !== undefined)
+        modules.gate.narrow(allow, guideAnswer(descriptor.payload, "blocked"));
     }
 
     const value = modules.fx.run(descriptor, step.signal);
@@ -492,7 +498,7 @@ function waitForAnswer(modules: Modules, step: Step): Promise<NodeOutcome> {
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @param delivered - Holder of the event the inbox delivered.
- * @returns The outcome of that node.
+ * @returns The outcome of that node; read it through `failedOrAsIs`.
  */
 export function nodeOutcome(
   modules: Modules,
@@ -503,6 +509,28 @@ export function nodeOutcome(
   if (step.node.rest) return runRestBody(modules, step, delivered);
 
   return runBody(modules, step);
+}
+
+/**
+ * Reads the outcome of a node that may have been failed from outside its body. `step.fail` (a
+ * `guide` that threw after a commit) aborts the node with `"failed"`: its outcome is that failure,
+ * not an abort.
+ *
+ * @param step - The node run, with the failure `fail` recorded.
+ * @param outcome - What the wait of the node settled with.
+ * @returns The recorded failure for an abort that `fail` caused, the outcome otherwise.
+ * @example
+ * ```ts
+ * failedOrAsIs({ failure: { error: "no step" } }, { kind: "aborted", reason: "failed" });
+ * // { kind: "failed", error: "no step" }
+ * ```
+ */
+export function failedOrAsIs(step: Pick<Step, "failure">, outcome: NodeOutcome): NodeOutcome {
+  const failure = step.failure;
+
+  if (outcome.kind !== "aborted" || failure === undefined) return outcome;
+
+  return { kind: "failed", error: failure.error };
 }
 
 /**

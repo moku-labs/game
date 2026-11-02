@@ -167,6 +167,63 @@ describe("the merge of `leave`", () => {
   });
 });
 
+describe("the floor on the swap, `holdMs`", () => {
+  // Bug: a level replaces the floor of the level below, or a scene that writes another field of its loader loses the
+  // config's floor.
+  it("takes it from the highest level that writes it: the scene's, the config's", () => {
+    const config = { loader: { holdMs: 260 } };
+
+    expect(leaveOf(config, { loader: { holdMs: 100 } })?.loader).toStrictEqual({
+      afterMs: 400,
+      holdMs: 100
+    });
+    expect(leaveOf(config, { loader: { afterMs: 100 } })?.loader).toStrictEqual({
+      afterMs: 100,
+      holdMs: 260
+    });
+    expect(leaveOf(config, { cover: { alpha: 0.6 } })?.loader).toStrictEqual({
+      afterMs: 400,
+      holdMs: 260
+    });
+  });
+
+  // Bug: `0` keeps the config's floor (a scene cannot lift it), or is written, and `undefined` on the field breaks
+  // `exactOptionalPropertyTypes`.
+  it("lifts the floor of the level below with `holdMs: 0`, the field absent", () => {
+    expect(leaveOf({ loader: { holdMs: 260 } }, { loader: { holdMs: 0 } })?.loader).toStrictEqual({
+      afterMs: 400
+    });
+  });
+
+  // Bug: a loader turned off keeps the floor it had, or one written over `false` inherits a floor the level turned off.
+  it("has none for `loader: false`, and a loader written over it starts with none", () => {
+    expect(leaveOf({ loader: { holdMs: 260 } }, { loader: false })?.loader).toBe(false);
+    expect(leaveOf({ loader: false }, { loader: { afterMs: 100 } })?.loader).toStrictEqual({
+      afterMs: 100
+    });
+  });
+
+  // Bug: the merge writes `holdMs: 0` or `undefined` into every look, so the default a game gets stops being `{ afterMs:
+  // 400 }`.
+  it("keeps exactly `{ afterMs: 400 }` when no level writes it", () => {
+    expect(leaveOf({ loader: { afterMs: 400 } }, undefined)?.loader).toStrictEqual({
+      afterMs: 400
+    });
+  });
+
+  // Bug: the floor reaches `LeaveLoader`, a renderer type that has no such field.
+  it("is not handed to the renderer", async () => {
+    const mock = await on("home", { buildMs: "auto", leave: { loader: { holdMs: 260 } } });
+
+    await enterScene(mock, "board");
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: VEIL,
+      loader: { afterMs: 400 }
+    });
+  });
+});
+
 describe("a live switch", () => {
   // Bug: the look waits for the bundles (a cold first visit shows nothing for seconds), or the coming scene decides.
   it("shows the look of the scene being left at its start, before its bundles are in", async () => {
@@ -302,10 +359,22 @@ function dueOf(mock: MockScenes): () => string | undefined {
 /** A config whose loader is the projection "loading". */
 const LOADING: Config = { buildMs: "auto", leave: { loader: { projection: "loading" } } };
 
+/** Frames of 16 ms until the veil's 150 ms fade-out ran out: a loader fades out with it (F107 part 3). */
+const FADE_FRAMES = Math.ceil(VEIL.outMs / 16);
+
+/**
+ * Steps the frames of the veil's fade-out after a land: the frame the loader projection goes in.
+ *
+ * @param mock - The mock whose switch landed.
+ */
+function fadeOut(mock: MockScenes): void {
+  for (let frame = 0; frame < FADE_FRAMES; frame += 1) mock.time.frame();
+}
+
 describe("a loader projection", () => {
   // Bug: the loader projection is mounted at the tap (its `from` and `view` run in the frame of the first answer), its
-  // layer is not handed to the renderer, or it stays mounted over the next scene.
-  it("is mounted once its loader is due, drawn by its layer, and unmounted after the land", async () => {
+  // layer is not handed to the renderer, or it stays mounted over the next scene once the veil faded out.
+  it("is mounted once its loader is due, drawn by its layer, and unmounted after the land's fade", async () => {
     const mock = await on("home", LOADING);
 
     mock.world.viewLayers = { loading: "loading" };
@@ -327,6 +396,7 @@ describe("a loader projection", () => {
       expect(mock.world.unmounted).not.toContainEqual(["loading"]);
     });
     await finish(mock, entering);
+    fadeOut(mock);
 
     expect(mock.world.unmounted.at(-1)).toEqual(["loading"]);
   });
@@ -423,6 +493,7 @@ describe("a loader projection", () => {
     expect(mock.world.mounted.at(-1)?.names).toEqual(["loading"]);
 
     await finish(mock, entering);
+    fadeOut(mock);
 
     expect(mock.world.unmounted.at(-1)).toEqual(["loading"]);
   });
@@ -667,5 +738,88 @@ describe("the begin stage of a node that switches", () => {
 
     await expect(mock.enter({ rest: true, scene: "broken" })).rejects.toThrow("no episode");
     expect(mock.renderer.leaves.map(entry => entry.call)).toEqual(["show", "drop"]);
+  });
+});
+
+/** The night: every switch to it dims the scene being left in its own slate, at 70 %. */
+const nightScene = defineScene("night", {
+  bundle: "night",
+  layers: { sky: {} },
+  projections: [],
+  enter: { cover: { color: 0x22_33_44, alpha: 0.7 } }
+});
+
+/** The dawn: sets the colour only. */
+const dawnScene = defineScene("dawn", {
+  bundle: "dawn",
+  layers: { sky: {} },
+  projections: [],
+  enter: { cover: { color: 0xff_cc_99 } }
+});
+
+/**
+ * Starts the plugin with home, board, ward, night and dawn, stands the first scene in one block and switches to the
+ * second with a drawing renderer, up to its bundle wait.
+ *
+ * @param first - The scene that stands.
+ * @param next - The scene switched to.
+ * @param config - The config of the plugin.
+ * @returns The started mock.
+ */
+async function enterFrom(first: string, next: string, config?: Config): Promise<MockScenes> {
+  const mock = createMockScenes(config);
+
+  mock.flow.features.push({
+    name: "screens",
+    description: { scenes: [homeScene, boardScene, wardScene, nightScene, dawnScene] }
+  });
+  mock.start();
+  await mock.enter({ rest: true, scene: first });
+  mock.renderer.host.ready.mockReturnValue(true);
+  mock.assets.control.gated = true;
+  await enterScene(mock, next);
+
+  return mock;
+}
+
+describe("the veil of the scene being entered", () => {
+  // Bug: the scene being entered has no say (its veil is the left scene's), it takes the left scene's times too, or a
+  // field it leaves out drops the left scene's.
+  it.each([
+    ["colour and alpha", "night", { color: 0x22_33_44, alpha: 0.7 }],
+    ["colour, keeping the left scene's alpha", "dawn", { color: 0xff_cc_99, alpha: 0.6 }]
+  ] as const)("takes its %s over the left scene's veil, the times staying the left scene's", async (_case, next, look) => {
+    const mock = await enterFrom("board", next, {
+      buildMs: "auto",
+      leave: { cover: { inMs: 80, outMs: 200 } }
+    });
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: { ...look, inMs: 80, outMs: 200 },
+      loader: { afterMs: 400, texture: "ui.loader.ring" }
+    });
+    expect(mock.state.leaving?.outMs).toBe(200);
+  });
+
+  // Bug: `enter` turns on a veil the scene being left turned off.
+  it("leaves a veil turned off off", async () => {
+    const mock = await enterFrom("home", "night", { buildMs: "auto", leave: { cover: false } });
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      loader: { afterMs: 400 }
+    });
+  });
+
+  // Bug: the entered colour is written into the engine's frozen fallback (a throw in the switch), or into the veil
+  // every later switch starts from.
+  it("never writes into the engine's veil", async () => {
+    const mock = await enterFrom("home", "night");
+
+    expect(mock.renderer.sync.leave.show.mock.calls[0]?.[0].cover).toEqual({
+      ...VEIL,
+      color: 0x22_33_44,
+      alpha: 0.7
+    });
+    expect(FALLBACK_LEAVE.cover).toEqual(VEIL);
   });
 });

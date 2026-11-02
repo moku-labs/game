@@ -218,6 +218,7 @@ export type {
   ProjectionSpec,
   ReducedMotion,
   RestOptions,
+  SceneSwitch,
   TrackOptions,
   TrackSegment,
   TweenDriver,

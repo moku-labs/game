@@ -4,6 +4,7 @@
  */
 import type { Node as YogaNode } from "yoga-layout/load";
 import type { Element } from "../jsx/types";
+import { ANCHOR } from "../visual";
 import type { LayoutState } from "./types";
 
 /**
@@ -65,7 +66,9 @@ export function freeNode(state: LayoutState, element: Element): void {
 
 /**
  * Re-places the children of one parent: remove all, insert in order. Once per parent per
- * reconcile — per exiting child it made a thousand-row churn quadratic (spike P4, point 4).
+ * reconcile — per exiting child it made a thousand-row churn quadratic (spike P4, point 4). An
+ * `<anchor>` is left out: its node is a tree of its own, which the anchor pass lays out at the
+ * size of its targets, so it takes no room in the flow of its parent.
  *
  * @param state - The layout state.
  * @param parent - The element whose child list changed.
@@ -90,7 +93,7 @@ export function placeChildren(
   for (const child of children) {
     const childNode = state.byEntity.get(child.entity);
 
-    if (childNode === undefined) continue;
+    if (childNode === undefined || child.type === ANCHOR) continue;
 
     node.insertChild(childNode, index);
     index += 1;

@@ -28,7 +28,7 @@ describe("createEffectsState", () => {
     expect(state.phone).toBe(false);
     expect(state.seedCounter).toBe(0);
     expect(state.particles).toBe(0);
-    expect(state.over).toEqual({ particles: false, passes: false, fullScreen: false });
+    expect(state.over).toEqual({ particles: false, passes: 0, fullScreen: false });
   });
 
   it("gives every app its own tables", () => {
@@ -39,13 +39,13 @@ describe("createEffectsState", () => {
     first.broken.add("glow");
     first.checks.waiting = 3;
     first.removers.push(() => {});
-    first.over.passes = true;
+    first.over.passes = 3;
 
     expect(second.warned.size).toBe(0);
     expect(second.broken.size).toBe(0);
     expect(second.checks.waiting).toBe(0);
     expect(second.removers).toEqual([]);
-    expect(second.over.passes).toBe(false);
+    expect(second.over.passes).toBe(0);
     expect(second.views).not.toBe(first.views);
     expect(second.instances).not.toBe(first.instances);
   });

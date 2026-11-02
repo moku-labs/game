@@ -53,6 +53,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Tr
 | `cursor()` | The CSS cursor input last wrote on the canvas (`"pointer"` over a control, `""` elsewhere) |
 | `listeners()` | How many `onTap`, `onPointer` and `onKey` listeners and `controls.add` registrations are alive now (6 in a started app: ui's own). input's own DOM listeners are not counted. A count, no allocation: a screen entered and left returns it to where it was, a count that grows per visit is a listener left behind. `onStop` drops the three listener lists |
 | `controls.add(component)` | Counts a component type of another plugin as a control for the cursor; returns the remover. `ui` registers `LocalWrite` in `onStart` and removes it in `onStop` |
+| `lock.window(rect)` | The input lock of a guide: a press outside `rect` (`{ x, y, w, h }`, reference units) reaches no view and answers the guide's `blocked`; `null` locks everything, `undefined` lifts the lock. Kept by reference. See [The lock of a guide](#the-lock-of-a-guide) |
 
 `tap`, `press`, `drag`, `swipe` and `trace` return what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
 
@@ -175,6 +176,8 @@ Every raw sample carries its device: `pointerType` is `"mouse"`, `"touch"` or `"
 | any sample of a touch | the tag goes. A touch never hovers |
 | `pointercancel`, `pointerleave` of the canvas | the tag goes |
 | lost capture | nothing: the browser sends one after every click |
+
+A lost capture never moves `Pointer`: WebKit sends it about 9 ms after `pointerup` at `clientX/Y` 0, 0, and the lift would read as a drag to the corner. It cancels only a press that is still followed; after the lift it does nothing (F143).
 | world mode `paused` | the tag goes |
 
 The hit test runs once per drain, at the last hover move of that drain. A clear that comes after it in the same frame wins; a hover move after a clear wins.
@@ -186,6 +189,38 @@ At most one view carries `PointerOver`. It is not `Hovered`: that one marks the 
 After the frame's hover hit test, input writes `canvas.style.cursor`: `cursor.control` (`"pointer"`) while the view under the mouse is a control — it carries `Tappable`, `Draggable`, `Pressable`, `Swipeable` or a component another plugin registered through `controls.add`, such as ui's `LocalWrite` — and `cursor.idle` (`""`, the page's own cursor) everywhere else, on leave, on a touch and while the world is paused. A disabled or covered ui control has lost its `Tappable`, so it shows `idle`. The style is written only when it changes, and detach puts back what the canvas had. `app.input.cursor()` reads what is set.
 
 Every queued sample calls `time.wake()`, so a finger on the screen always runs at the full frame rate, whatever the idle cap says.
+
+## The lock of a guide
+
+While a tutorial `guide` stands, `ui` locks the finger outside the guide's window:
+`ctx.require(inputPlugin).lock.window(window)`, the window in reference units, edges included.
+input keeps the object by reference, so `ui` writes the same rect in place every frame and the lock
+follows a moving target. `null` locks everything (a guide with no target shown); `undefined` lifts
+the lock (the guide ended). `onStop` forgets it.
+
+| A point outside the window | What happens |
+|---|---|
+| A press | Reaches no view: no `Pressed`, no `Tappable` answer, no `onTap` listener (so no `LocalWrite`), no long press, no drag, no swipe, no trace, and a moving scroll is not stopped. The pointer is taken as over empty space. It answers `flow.gate.state().blocked`, the `blocked` answer of the running guide, with its payload, when the guide names one; otherwise it is dropped. Its release answers nothing more. |
+| A drop of a drag that started inside | Finds no drop target: the stack settles home and nothing is answered. |
+| A trace sample | Finds no cell, as over a gap. |
+| A hover | Finds no view: no `PointerOver`, the idle cursor. |
+
+Inside the window everything works as before, and the gate's narrow still refuses every answer but
+the guide's `allow` and `blocked`. A press it refuses there, another intent or the allowed intent
+with another payload (a drop on the wrong cell), answers the guide's `blocked` in its place, once,
+with its payload; without `blocked` it answers nothing. A press at a closed gate is held as it is,
+not converted. The `Pointer` resource reports the finger everywhere: a game
+system that reads it is not locked.
+
+- **One frame of lag.** The frame step of input runs in phase `input`, before `layout`, where `ui`
+  places the window: a press reads the window of the frame before.
+- **The doors.** `tap`, `press`, `drag`, `swipe` and `trace` do no hit test: the lock never applies
+  to them, so a test or an agent addresses any view.
+- **The keyboard.** The lock is a lock of the pointer. A focused element answers through the gate
+  as it does without a guide, so only `allow` and `blocked` pass there, and a press of it the
+  narrow refuses answers `blocked` as a pointer press does.
+- **Cost.** The check reads four numbers of the window before the hit test and allocates nothing;
+  without a lock it is one comparison.
 
 ## The drag
 
@@ -269,6 +304,18 @@ createApp({ plugins: [...screen], pluginConfigs: { input: { longPressMs: 300 } }
 createApp({ plugins: [...screen], pluginConfigs: { input: { traceStepPx: 16 } } });
 ```
 
+## The log of a lost tap
+
+A dev or agent debug build (`__MOKU_GAME_DEV__` or `__MOKU_GAME_AGENT__`, as on the phone debug build) tells a button that showed its press look and did nothing (F122).
+Each line names the view by its projection key (the entity when it has none). A good tap writes
+nothing and allocates nothing; a production build drops the code.
+
+| Line | Level | When | Payload |
+|---|---|---|---|
+| `input: pressed, but the tap was not counted` | warn | A pressed view that carries `Tappable` lets the press go without a tap | `{ view, reason }`: `moved-off` (released past `tapSlopPx`, no swipe answered), `scroll` (the press went to the scroll it pans), `cancelled` (`pointercancel`, or the canvas changed), `capture-lost`, `other-finger` (a second finger took the resting press over), `paused`, `fast` (the world stopped under the finger), `view-gone` (the view left before the release) |
+| `input: counted, but the gate took nothing` | warn | An answer `flow.gate` refused at an open gate | `{ view, intent, gate }`: `no-edge` (the resting node does not list the intent), `refused` (a guide's narrow dropped it and names no `blocked`), `blocked` (it answered the guide's `blocked` in its place) |
+| `input: counted, the gate is closed: held for the next gate` | debug | An answer at a closed gate: it is held, and `flow` warns `flow:answer-dropped` if no gate takes it | `{ view, intent }` |
+
 ## Events
 
 None. An answer goes down to `flow.gate` as a direct call; pointer work never goes through the event bus. Game systems read the tags and the resource.
@@ -294,7 +341,7 @@ reads a target without pulling command bodies into its bundle.
 | Plugin | Used for |
 |---|---|
 | `time` | `onFrame("input", fn)`, `time.delta` of the callback, and `wake()` on every pointer sample |
-| `flow` | `gate.answer`, `gate.pointer` |
+| `flow` | `gate.answer`, `gate.pointer`, and `gate.state()` for a press the lock of a guide keeps from every view or the narrow of an open gate refuses |
 | `world` | `ecs.get/set/add/remove/has/tag/untag/resource/mode`; `projection.mute/lift/settle/keyOf/entityOf/restOf`; the `Exiting` tag |
 | `renderer` | `sync.hitTest`, `sync.hitBoxOf`, `viewport.toReference`, `host.canvas`, the `Transform` and `Parent` components, the pose helpers `rootPoseOf`, `localPoseOf`, `poseUnder`, `parentOf` and `applyPose` of `renderer/sync/pose` |
 
@@ -302,7 +349,7 @@ No `pixi.js` import: the canvas is a DOM element and hit tests go through `rende
 
 ## Lifecycle
 
-`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`, and puts one `keydown` listener on `window`. The `pointerdown` listener calls `preventDefault()`: without it the compatibility `mousedown` blurs a text field right after an `onPointer` listener focused it. The engine uses no `click`, so nothing is lost. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. In an agent build (dev and `--debug`) `onStart` also registers `listeners()` with the renderer monitor's leak counts, `renderer.monitor.counts.register("inputListeners", …)`: the renderer cannot depend on input, so input pushes it, and `sample.counts.inputListeners` follows it once a second; the renderer's `onStop` drops the registration. `onStop` removes the six listeners, the `keydown` listener, the frame callback, the `onTap`, `onKey` and `onPointer` listeners and the mutes a drag still holds on the held view and on every carried view, forgets the path of a trace, and restores the touch action.
+`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`, and puts one `keydown` listener on `window`. The `pointerdown` listener calls `preventDefault()`: without it the compatibility `mousedown` blurs a text field right after an `onPointer` listener focused it. The engine uses no `click`, so nothing is lost. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. In an agent build (dev and `--debug`) `onStart` also registers `listeners()` with the renderer monitor's leak counts, `renderer.monitor.counts.register("inputListeners", …)`: the renderer cannot depend on input, so input pushes it, and `sample.counts.inputListeners` follows it once a second; the renderer's `onStop` drops the registration. `onStop` removes the six listeners, the `keydown` listener, the frame callback, the `onTap`, `onKey` and `onPointer` listeners and the mutes a drag still holds on the held view and on every carried view, forgets the path of a trace and the lock of a guide, and restores the touch action.
 
 ## Not in V2
 

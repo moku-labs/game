@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Layer } from "../../../world/ecs/define";
-import { Display, Sprite, Transform } from "../../components";
+import { component, Layer } from "../../../world/ecs/define";
+import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../../components";
 import { FakeContainer } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
@@ -179,6 +179,62 @@ describe("host device loss", () => {
     expect(mock.api.host.canvas()).toBe(mock.pixi.last().canvas);
     expect(mock.pauses.at(-1)).toEqual({ action: "pop", reason: "device-lost" });
     expect(mock.ctx.state.sync.root).toBeDefined();
+  });
+
+  it("gives every visual of a ui tree its view back: a child names a parent, no layer (F131)", async () => {
+    const mock = createMockRenderer();
+    const Label = component("test.restoreLabel", { text: "" });
+
+    await mock.start();
+    mock.api.sync.displays.provide(Label, {
+      create: () => new FakeContainer(),
+      update: () => false,
+      destroy: () => undefined
+    });
+    mock.world.projection.setLayers([
+      { name: "items", sort: "none" },
+      { name: "hud", sort: "none", above: "overlays" }
+    ]);
+
+    const ecs = mock.world.ecs;
+    const root = ecs.spawn(owner, [
+      Layer({ name: "hud" }),
+      Transform(),
+      Shape({ w: 100, h: 100, fillAlpha: 1 })
+    ]);
+    const under = (...visual: Parameters<typeof ecs.spawn>[1]) =>
+      ecs.spawn(owner, [Parent({ entity: root }), Transform(), ...visual]);
+    const children = [
+      under(Sprite({ texture: "hud.gem" })),
+      under(NineSlice({ texture: "hud.panel", width: 40, height: 40 })),
+      under(Shape({ w: 10, h: 10, fillAlpha: 1 })),
+      under(Display({ object: new FakeContainer() })),
+      under(Label({ text: "12" }))
+    ];
+    const item = ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "board.cell" })
+    ]);
+
+    mock.modules.sync.pass();
+    mock.pixi.last().lose("unknown");
+    await tick();
+
+    const { views, root: tree } = mock.ctx.state.sync;
+    const host = views.get(root)?.wrapper;
+
+    expect(host?.parent).toBe(mock.modules.sync.layerContainer("hud"));
+    expect(mock.modules.sync.layerContainer("hud")?.parent).toBe(tree);
+    expect(mock.modules.sync.layerContainer("items")?.parent).toBe(tree);
+    expect(views.get(item)?.object.parent).toBe(mock.modules.sync.layerContainer("items"));
+
+    for (const child of children) {
+      const view = views.get(child);
+
+      expect((view?.wrapper ?? view?.object)?.parent).toBe(host);
+      expect(view?.object.renderable).toBe(true);
+    }
   });
 
   it("shows the unsupported screen when the restore fails, and keeps the pause", async () => {

@@ -35,7 +35,7 @@ import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particl
 export type Config = {
   /** Live particles over all instances above which one dev warning fires per crossing. */
   maxParticles: number;
-  /** Render passes per frame above which one dev warning fires per crossing. */
+  /** Render passes per frame above which one dev warning fires once they stay over it 60 frames in a row. */
   maxPasses: number;
   /** Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart`. */
   phone: boolean | "auto";
@@ -85,8 +85,11 @@ export type State = {
   filterSync: FilterSyncState;
   /** Keys of the one-shot warnings: `"emitter:fx.x"`, `"texture:board.cell"`, `"atlas:fx.x"`. */
   warned: Set<string>;
-  /** Whether each budget warning is in force, so a crossing warns once. */
-  over: { particles: boolean; passes: boolean; fullScreen: boolean };
+  /**
+   * Whether each budget warning is in force, so a crossing warns once; for the passes, the frames in a row over the
+   * budget, so only a steady crossing warns.
+   */
+  over: { particles: boolean; passes: number; fullScreen: boolean };
   /** The teardown closure, the two systems and the world hooks. */
   removers: Array<() => void>;
   /**

@@ -66,7 +66,9 @@ describe("game.render", () => {
       pooled: 0,
       renderPasses: 0,
       renderPassesMax: 0,
-      kept: { pictures: 0, mb: 0, retakes: 0 }
+      canvasPasses: 0,
+      canvasPassesMax: 0,
+      kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }
     });
   });
 });

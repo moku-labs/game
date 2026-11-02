@@ -1,7 +1,7 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { component, Layer, Order } from "../../../world/ecs/define";
-import { Shape } from "../../components";
+import { Parent, Shape, Transform } from "../../components";
 import { endStage, type OverlayStage, startOverlayStage } from "../overlay-harness";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,44 @@ describe("overlay retakes", () => {
 
     expect(stage.frame()).toBe(true);
     expect(stage.rootRenders(from)).toHaveLength(1);
+  });
+
+  // Bug F113: a kept view under a fading ancestor stays kept, so the kept cache no longer marks the range for it; the
+  // range must still take the fade in, or it shows the panel at its old alpha.
+  it("takes the picture again when a panel fades above a kept view under the dim", async () => {
+    // Every frame drawn: the icon stands still two drawn frames and is taken.
+    const stage = await startOverlayStage({ onDemand: false });
+
+    running.push(stage);
+
+    const panel = stage.view({ order: 1 });
+    const icon = stage.drawn.mock.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Transform({ x: 10, y: 10 }),
+      Shape({ w: 20, h: 20 }),
+      Parent({ entity: panel })
+    ]);
+
+    stage.drawn.mock.api.sync.filters.set(icon, [
+      { filter: new pixi.ColorMatrixFilter(), passes: 1, cache: "local" }
+    ]);
+    stage.frames(4);
+
+    const shop = stage.overlay({ dim: 0.56 }, { order: 2 });
+
+    stage.level(shop, 1, true);
+    stage.frames(3);
+
+    const kept = stage.drawn.mock.ctx.state.kept;
+
+    expect(kept.byEntity.get(icon)?.mode).toBe("kept");
+
+    const from = stage.mark();
+
+    stage.drawn.mock.world.ecs.set(panel, Shape, { alpha: 0.5 });
+
+    expect(stage.frame()).toBe(true);
+    expect(stage.rootRenders(from)).toHaveLength(1);
+    expect(kept.byEntity.get(icon)?.mode).toBe("kept");
   });
 
   it("takes it again when the adapter of a label under the dim redraws it", async () => {

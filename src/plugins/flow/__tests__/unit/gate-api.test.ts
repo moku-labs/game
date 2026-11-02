@@ -1,5 +1,5 @@
 import type { Log } from "@moku-labs/common/browser";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Time, Api as TimeApi } from "../../../time/types";
 import { createGateApi } from "../../gate/api";
@@ -84,6 +84,7 @@ const createMockDeps = (time: TimeApi): Deps => ({
       markBarrier: vi.fn(),
       rollback: vi.fn(),
       restore: vi.fn(),
+      schemaVersion: () => 1,
       flush: vi.fn()
     },
     rng: { peek: vi.fn() }
@@ -622,6 +623,45 @@ describe("createGateApi", () => {
       ).toBe(true);
     });
 
+    // F98. Bug caught: a press outside a guide's window answers `blocked`, and the narrow refuses
+    // it, so the node never learns the player pressed elsewhere.
+    it("takes the blocked answer beside the allowed one, and nothing else", () => {
+      const { ctx } = createMockCtx();
+      const gate = createGateApi(ctx);
+
+      gate.narrow({ intent: "merge" }, { intent: "tutorialBlocked", payload: { step: 2 } });
+      gate.open({ allowed: ["merge", "sell", "tutorialBlocked"] });
+
+      expect(gate.answer({ intent: "sell" })).toBe(false);
+      expect(gate.answer({ intent: "tutorialBlocked", payload: { step: 3 } })).toBe(false);
+      expect(gate.answer({ intent: "tutorialBlocked", payload: { step: 2 } })).toBe(true);
+    });
+
+    it("reports the blocked answer as a copy, and drops it with the lift", () => {
+      const { ctx } = createMockCtx();
+      const gate = createGateApi(ctx);
+
+      gate.narrow({ intent: "merge" }, { intent: "tutorialBlocked", payload: { step: 2 } });
+
+      const read = gate.state();
+
+      expect(read).toEqual({
+        open: false,
+        allowed: [],
+        narrowed: true,
+        blocked: { intent: "tutorialBlocked", payload: { step: 2 } }
+      });
+      // A reader that writes its copy changes nothing the gate compares.
+      if (read.blocked?.payload !== undefined) read.blocked.payload = { step: 9 };
+      expect(gate.state().blocked).toEqual({ intent: "tutorialBlocked", payload: { step: 2 } });
+
+      gate.narrow(undefined, { intent: "tutorialBlocked" });
+      gate.open({ allowed: ["tutorialBlocked"] });
+
+      expect("blocked" in gate.state()).toBe(false);
+      expect(ctx.state.gate.blocked).toBeUndefined();
+    });
+
     it("reports the narrowed flag and clears it with undefined", () => {
       const { ctx } = createMockCtx();
       const gate = createGateApi(ctx);
@@ -684,5 +724,113 @@ describe("createGateApi", () => {
 
       expect(ctx.state.gate.pointerActive).toBe(false);
     });
+  });
+});
+
+describe("the dev log of a held answer no gate takes (F122)", () => {
+  const LINE = "flow:answer-dropped";
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * The reasons of every dropped-answer line the gate wrote.
+   *
+   * @param ctx - The flow context of the test.
+   * @returns The payloads, in order.
+   */
+  const drops = (ctx: FlowCtx): unknown[] =>
+    vi
+      .mocked(ctx.log.warn)
+      .mock.calls.filter(([event]) => event === LINE)
+      .map(([, data]) => data);
+
+  // Bug caught: a tap during a transition ages out of the hold and vanishes silently.
+  it("warns expired when the hold outlives its frame, and nothing for one the next gate takes", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { ctx, time } = createMockCtx();
+    const gate = createGateApi(ctx);
+
+    gate.answer({ intent: "play" });
+    playFrame(gate, time, 16);
+    playFrame(gate, time, 16);
+
+    expect(drops(ctx)).toEqual([{ intent: "play", payload: undefined, reason: "expired" }]);
+
+    gate.answer({ intent: "play" });
+    expect(await openForPlay(gate)).toEqual([{ intent: "play" }]);
+    expect(drops(ctx)).toHaveLength(1);
+  });
+
+  // Bug caught: a press made before a bookmark jump, a fast walk or a stopped clock is lost silently.
+  it("warns jumped, fast and stopped", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { ctx, time } = createMockCtx(Number.POSITIVE_INFINITY);
+    const gate = createGateApi(ctx);
+
+    gate.answer({ intent: "play" });
+    gate.dropHeld();
+    ctx.state.fx.mode = "fast";
+    gate.answer({ intent: "shop" });
+    ctx.state.fx.mode = "live";
+    time.setRunning(false);
+    gate.answer({ intent: "quit" });
+
+    expect(drops(ctx)).toEqual([
+      { intent: "play", payload: undefined, reason: "jumped" },
+      { intent: "shop", payload: undefined, reason: "fast" },
+      { intent: "quit", payload: undefined, reason: "stopped" }
+    ]);
+  });
+
+  // Bug caught: a tap held before a fast walk opens the next gate vanishes silently.
+  it("warns fast for a held answer offered to a gate that opens in fast mode", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { ctx } = createMockCtx(Number.POSITIVE_INFINITY);
+    const gate = createGateApi(ctx);
+
+    gate.answer({ intent: "play" });
+    ctx.state.fx.mode = "fast";
+
+    expect(await openForPlay(gate)).toEqual([]);
+    expect(drops(ctx)).toEqual([{ intent: "play", payload: undefined, reason: "fast" }]);
+  });
+
+  // Bug caught: with a hold time, an earlier tap replaced by a later one vanishes silently.
+  it("warns replaced for the held answer a newer one replaces", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { ctx } = createMockCtx(1100);
+    const gate = createGateApi(ctx);
+
+    gate.answer({ intent: "tap", payload: { cell: "c4" } });
+    gate.answer({ intent: "tap", payload: { cell: "c5" } });
+
+    expect(drops(ctx)).toEqual([{ intent: "tap", payload: { cell: "c4" }, reason: "replaced" }]);
+  });
+
+  // Bug caught: the phone debug build (agent flag only) is silent exactly where taps are lost.
+  it("warns with __MOKU_GAME_AGENT__ alone", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { ctx, time } = createMockCtx();
+    const gate = createGateApi(ctx);
+
+    gate.answer({ intent: "play" });
+    playFrame(gate, time, 16);
+    playFrame(gate, time, 16);
+
+    expect(drops(ctx)).toEqual([{ intent: "play", payload: undefined, reason: "expired" }]);
+  });
+
+  // Bug caught: a release build pays for the log, or prints it to the player.
+  it("logs nothing outside a dev build", () => {
+    const { ctx, time } = createMockCtx();
+    const gate = createGateApi(ctx);
+
+    gate.answer({ intent: "play" });
+    playFrame(gate, time, 16);
+    playFrame(gate, time, 16);
+
+    expect(drops(ctx)).toEqual([]);
   });
 });

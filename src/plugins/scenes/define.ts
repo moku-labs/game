@@ -4,7 +4,7 @@
  */
 import type { Json } from "../model/types";
 import type { LayerSpec } from "../world/types";
-import { checkLeave } from "./leave-check";
+import { checkEnter, checkLeave } from "./leave-check";
 import type {
   AnySceneProjection,
   DefineScene,
@@ -178,14 +178,15 @@ function namesOf(
  * `lift` is not among them does not compile — and throws here for a caller without types.
  * `bundles` names bundles that depend on the committed state: the scene is mounted once those
  * are in too. `leave` is what a live switch shows over the scene when it is left, merged over the
- * config's: `false` shows nothing.
+ * config's: `false` shows nothing. `enter` sets the colour and the alpha of the veil of every live switch to the scene.
  *
  * @param id - Id of the scene. A node names it with `defineNode({ scene: id })`.
  * @param scene - The bundle, the optional bundles of state, the layers, the projections, the
- *   optional music key and the optional `leave`.
+ *   optional music key, the optional `leave` and the optional `enter`.
  * @returns The scene as frozen data, ready for the `scenes` key of a feature.
  * @throws {Error} For an integer-like layer name, for a `layer` or `lift` that is not declared, for two HUD layers,
- *   an `above` other than `"overlays"`, a `ui` declared after the HUD layer, and a `leave` of the wrong shape.
+ *   an `above` other than `"overlays"`, a `ui` declared after the HUD layer, and a `leave` or an `enter` of the wrong
+ *   shape.
  * @example
  * ```ts
  * // features/board/view/scene.ts of a game.
@@ -218,6 +219,14 @@ function namesOf(
  *   projections: [],
  *   leave: { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } }
  * }).leave; // { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } }
+ *
+ * // Every switch to the night dims the scene being left in navy at 70 %, whatever that scene leaves with.
+ * defineScene("night", {
+ *   bundle: "night",
+ *   layers: { sky: {} },
+ *   projections: [],
+ *   enter: { cover: { color: 0x0b1020, alpha: 0.7 } }
+ * }).enter; // { cover: { color: 0x0b1020, alpha: 0.7 } }
  * ```
  */
 export function defineScene<
@@ -233,6 +242,7 @@ export function defineScene<
   const projections: readonly AnySceneProjection[] = scene.projections;
 
   checkLeave(`Scene "${id}": leave`, scene.leave);
+  checkEnter(`Scene "${id}": enter`, scene.enter);
 
   return Object.freeze({
     id,
@@ -241,7 +251,8 @@ export function defineScene<
     layers: Object.freeze(layers),
     projections: Object.freeze(namesOf(id, layers, projections)),
     ...(scene.bundles === undefined ? {} : { bundles: scene.bundles }),
-    ...(scene.leave === undefined ? {} : { leave: scene.leave })
+    ...(scene.leave === undefined ? {} : { leave: scene.leave }),
+    ...(scene.enter === undefined ? {} : { enter: scene.enter })
   });
 }
 

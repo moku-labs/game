@@ -295,8 +295,12 @@ An input schema written as a literal with the keys of data the game writes every
 
 The editor's overlay on a debug page has no buttons of its own: it lists the commands a game marked with `overlay`.
 `overlay: "toggle"` draws a switch: the input is exactly `{ on: "boolean" }`, and `value(app)` answers the switch's
-state; the overlay runs it with `{ on: !value(app) }`. `overlay: "button"` draws a button: no required input and no
-`value`; the overlay runs it with `{}`. Any other combination does not compile. An overlay command is still a door
+state; the overlay runs it with `{ on: !value(app) }`. With `choices` the switch has a row under it: the input is
+exactly `{ on: "boolean", choice: "string" }` (or `"string?"`, the type `ChoiceInput`), `choices` lists the words, each
+once and at least one, a word listed twice throws in `defineCommand`, `choice(app)` answers the one the row marks, and
+the overlay runs it with `{ on, choice }`. The game keeps the pick itself, in its `.dev` module. `overlay: "button"`
+draws a button: no required input and no `value`; the overlay runs it with `{}`. Any other combination does not
+compile. An overlay command is still a door
 command: its body starts with the guard of its effect, and the editor greys out a `route`, `cheat` or `raw` one while
 `__MOKU_GAME_CONTROL__ !== true`. The engine's own commands carry no marker.
 
@@ -324,4 +328,33 @@ export const glowSwitch = defineCommand({
   }
 });
 // The overlay draws a switch "Glow", on; a tap runs it with { on: false } and the next frame draws no glow.
+```
+
+```ts
+// features/purchases/simulate.dev.ts — a tester on a phone picks how a purchase ends.
+import { controlRefused, defineCommand } from "@moku-labs/game/control";
+import type { PurchasesApi } from "./types";
+import { readSetting, writeSetting } from "./setting.dev";
+
+export const simulate = defineCommand({
+  id: "purchases.simulate",
+  title: "Simulated purchases",
+  input: { on: "boolean", choice: "string" },
+  effect: "cheat",
+  overlay: "toggle",
+  choices: ["success", "failure", "delay"],
+  value: (app: { readonly purchases: PurchasesApi }) => app.purchases.overridden(),
+  choice: () => readSetting().mode,
+  run: (app, { on, choice }) => {
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
+    writeSetting({ mode: choice });
+    app.purchases.simulate(on ? choice : undefined);
+  }
+});
+// The overlay draws the switch with the row success, failure, delay; a tap on failure runs { on: true, choice: "failure" }.
 ```

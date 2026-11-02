@@ -2,22 +2,27 @@
 
 The interface as one more projection. A screen is a projection whose `view` returns JSX; `world`
 wraps that tree in `Tree` and `ui` reconciles it by identity into entities it owns, with a `Box`
-rect from one Yoga solve per change.
+rect from one Yoga solve per change. A root is solved in whole units rounded up: a viewport of
+874.31 units lays out 875, so a full-screen fill covers the frame to its last device row, and what
+is anchored to the bottom or the right edge sits less than one unit past it (F116).
 
 | Module | Owns |
 |---|---|
 | `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()`, `scroll()`, the tap counter of `DebugTrigger` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
-| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, the scroll on both axes (finger, fling, snap, offset, range) and the range of a windowed scroll, the `popup` and `guide` handlers |
+| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, the scroll on both axes (finger, fling, snap, offset, range) and the range of a windowed scroll, the `popup` and `guide` handlers, the system `ui.guide` that places a guide's veil and lock every frame (see [Guide](#guide)) |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
+| `drawn.ts` | where a view or an element is drawn in screen reference units: the resolver `<anchor>`, `app.ui.rectOf` and the guide share |
+| `anchor.ts` | the system `ui.anchor`: every `<anchor>` placed on its targets after the solve (see [Anchor](#anchor)) |
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key, `value` on a text field, `window` on a windowed scroll, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key (`Text.style` when its bind names a format of the game), `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only, never one of a scene built aside or of a window held warm |
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 | `app.ui.scroll(key, to)` | puts the `scroll` with that `key` at `to` from its start, at once, kept inside `0..max`: a fling or a glide stops and `ScrollState` reads `moving: false`; `false` and the warning `ui:scroll-without-scroll` `{ key }` when no live `scroll` has the key, `false` and the warning `ui:scroll-before-solve` `{ key }` when the `scroll` came in this frame and its first solve has not placed it yet. Works headless. See [Scroll](#scroll) |
+| `app.ui.rectOf(target)` | where a target is drawn, in screen reference units: `{ projection, key }` (an `AnchorTarget`) or a list of them, whose shown ones it spans; `{ x, y, w: 0, h: 0 }` for a target of no area; `undefined` when none is shown (an image whose stated size is laid out at 0 and a world sprite of no width or height count as not shown). Every build, headless too; a new object per call. See [Anchor](#anchor) |
 
 Config:
 
@@ -84,7 +89,7 @@ draw adds 0 to both, solves nothing and sets no component.
 
 | Tag | Visual | Input |
 |---|---|---|
-| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha`, `style.blend` | none |
+| `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha`, `style.blend`; a size its style states (`width`, `height`, or both edges of an absolute element) laid out at 0, alpha 0: it draws nothing and takes no tap (the renderer draws a sprite of width 0 at its texture's size), and its style's alpha comes back with a size; a style that states no size leaves it 0 by 0 at its own alpha, drawn as its `Sprite` says (its texture's size, or the size a game's own system writes; ui never writes that size again, so it survives a new viewport, a covered root and a restore, as does an axis the style does not state and the layout leaves at 0) | none |
 | `text` | `Text`; a string `style` is the text style key; `bind={bind(Counter, "value")}` shows a numeric field of a component the element carries (only `bind()` makes a bind) | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug`, `style.blend` | as below |
 | any other tag with `style.nineSlice` and `style.hollow: true` | the same `NineSlice` with `hollow: true`: the rim alone, the centre left unfilled; the hit box stays the whole rect | as below |
@@ -98,7 +103,12 @@ draw adds 0 to both, solves nothing and sets no component.
 A `text` without a fixed `width` and `height` is sized by `text.measure` of what it shows: its
 `content`, or for a bound text the string `text` shows for it, `Text.resolved`. Before the first
 resolve that is the bound field of its `components` value in the format of the bind, so a number
-a row centres is centred from the first frame. A new shown string asks for a solve only when it
+a row centres is centred from the first frame. A bind that names a format of the game (text README,
+"Number formats") picks the style too: before the first resolve `text.formatted` answers the string
+and the style, once per measure, and after it `Text.resolved` and `Text.style` are read. `ui` then
+leaves `Text.style` alone: a commit and a new viewport write every other field and record the style
+the label shows as its rest. A bind that goes back to a built-in format or leaves takes the `style`
+prop again. A new shown string asks for a solve only when it
 measures to another size: a counter that rolls through digits of one width solves nothing. A text
 without `bind` is measured again the same way when `text` resolves it again: a message after a new
 locale, any text when its font arrives. An `icon` without a `width` and `height` is square on one
@@ -664,7 +674,7 @@ again the elements stand on the rest `world` wrote in step 1. Two things keep th
 `fit: "contain"` lays the element out at its own style size, out of the flow, and centres it in
 the content box of its parent (the rect less its padding). Its rest `Transform.scale` is
 `min(1, contentW / w, contentH / h)`. Its children keep their natural rects: `Box` under a fitted
-element is natural space. `lint()` and the `guide` hole scale a rect by every fitted element on
+element is natural space. `lint()` and the `guide` window scale a rect by every fitted element on
 the way up; `tree()` reports the natural rect and adds `fitScale`.
 
 ```tsx
@@ -765,6 +775,154 @@ in the same frame. A slot takes a projection with one root, or roots that place 
 - While a scene is built aside, a host and a slot take nothing across the line: a live host no
   view or root of the build, a host of the build no live one. A kept host takes its coming guest in
   the frame after the swap. See [A scene built aside](#a-scene-built-aside).
+
+## Anchor
+
+`<anchor>` is an element whose rect is where its targets are drawn: a tutorial's window, a hint, an
+arrow sits on an element of another projection without reading where it landed (a view runs before
+the layout and reads none). `to` names one target, `{ projection, key }` (`AnchorTarget`), or a
+list, whose shown ones it spans; a ui element is keyed under the projection of its root. `pad`
+grows the rect outward on every side, in the units of the anchor's root (0 when left out); a `pad`
+below 0 pulls it inward, and past half the targets the size stops at 0, at their centre. Its
+children lay out inside it as in any element; its style gives its look, and a `width`, `height`,
+`position`, `left`, `top`, `right` or `bottom` there is ignored (a dev build warns once,
+`ui:anchor-style` `{ key }`).
+
+```tsx
+// The tutorial's window on the first seat of the board's order strip, a rim drawn around it.
+<anchor key="window" to={{ projection: "board.strip", key: "seat0" }} pad={4} motion={glide}>
+  <stack key="rim" style={{ nineSlice: "tutorial.rim", hollow: true, width: "100%", height: "100%" }} />
+</anchor>
+// the seat is drawn at { x: 40, y: 1500, w: 116, h: 120 }: the window at { x: 36, y: 1496, w: 124, h: 128 }
+```
+
+- **Where.** A target's local box (the layout box of a ui element, the panel of a nine-slice, the
+  rectangle of a shape, the anchor box of a sprite) through its root pose: every `Transform` on its
+  way up, so a fit, a slot, a scroll's offset and the motion of an ancestor move it. Axis-aligned:
+  the rotation is left out. `app.ui.rectOf` answers the same rect. The union is mapped into the
+  space of the anchor's parent through the parent's root pose, so the anchor may sit in a fitted,
+  scrolled or slotted container.
+- **When.** The system `ui.anchor` runs in phase `layout` right after `ui.solve`, so the anchor
+  sits on its targets in the frame they are laid out, scrolled or moved by a system before it: no
+  lag. A ui element spawned in this frame is found by its rest pose. An anchor and its subtree are
+  a Yoga tree of their own, out of the flow of the parent: Yoga runs for it only when its size
+  changes or a node of it is dirty (a child restyled, measured again, added or taken out); a pure
+  move writes the rects in place. Anchors are placed in the order they came: one whose target lies
+  inside another anchor that came after it sits a frame behind that anchor. A `scroll` (its first
+  `offset`) and a slot host inside an anchor are settled by the solve, before the anchor pass: they
+  take the anchor's rect a frame late.
+- **Not shown.** A target is not shown when its key names no entity, it or something it is drawn
+  under is leaving, it belongs to a scene built aside or a held warm window, it draws no box the
+  resolver knows (a world sprite of no width or height is drawn at its texture's size), or the
+  alphas on its way up multiply to 0.01 or less (an image whose style states a size laid out at 0 is drawn at alpha 0). The key of an element of a scene built aside or of
+  a closed warm window names no entity (`entityOf`), so an anchor on it waits, and a dev build
+  names it once after two frames. An anchor of such a scene or window is placed in the frame it
+  opens. With no target shown the anchor is drawn at alpha 0 (its subtree is not
+  drawn and takes no tap), stays, and shows again when a target does; one never shown yet waits
+  with no components. A dev build warns once, `ui:anchor-target-missing` `{ key, to }`, after a key
+  named no entity two frames in a row (a target spawned this frame is found a frame later). A
+  target inside the anchor itself counts as not shown and is logged once:
+  `[game] An anchor cannot point at its own child "key".` (`ui:anchor-own-child`).
+- **A point.** A target of no area (an empty element, a width or a height of 0) is shown at its
+  point. The anchor stands there at size 0, shown: its own view holds no point, so it takes no tap,
+  and its children are laid out from that corner and overflow it (no clip unless
+  `overflow: "hidden"`), drawn and tapped as always. `app.ui.rectOf` answers `{ x, y, w: 0, h: 0 }`.
+  A guide on a point with no `pad` covers the screen and locks every press, as for a target not
+  shown.
+- **Motion.** Its `change.Box` motion plays only when its targets change: a new `to`, or keys that
+  name other entities (a view spawned again), and the rect moved: from a point to a rect it grows,
+  back to a point it shrinks. Following a moving, resizing or
+  scrolling target starts no motion. While a motion that ends runs (the glide of a change, a look
+  tween of its visual), a follow carries it by how far the target moved since it began, so it lands
+  on the target with no jump; a new size sets the pivot at once. While a loop runs on the anchor, a
+  follow holds its `x` and `y` from every track (`world.projection.mute`) and writes them; the loop
+  gets them back in the frame the anchor stands and goes on from there. On a change of targets its
+  children play their `change` hooks as any element whose rect moved; a follow that resizes the
+  anchor gives them their rects with none.
+- **Cost.** A frame of a still anchor and one of an anchor following a moving target (fractional
+  numbers included), also under a loop, allocate nothing (`anchorStill`, `anchorMoving`,
+  `anchorMovingLoop`): rects in place, `previous` by value, the `Transform` written field by field
+  on its stored value. Three things happen once per follow instead of every frame: the hold of a
+  loop when the follow starts, and in the frame the anchor stands the `Box` of the anchor and of its
+  subtree (V8 boxes a fractional number written into a stored `Box` field: the shape of `Box`
+  values is shared with frozen ones) and the world's copy of the anchor's rest pose.
+- **Headless.** `app.input.tap(entity)` does not hit-test: a button inside a hidden anchor still
+  answers it.
+
+## Guide
+
+`ui` draws a `guide` (the awaited `await fx(guide(options))` of a node body, and the `guide` a node
+derives from state, see the flow README) as a veil over the screen with a window cut over its
+targets, and locks `input` outside that window. The narrow of the gate belongs to `flow`: only
+`allow` and `blocked` pass it.
+
+```ts
+// The tutorial's step on the strip: the first seat, a press anywhere else answers "tutorialBlocked".
+defineNode({
+  rest: true,
+  outcomes: { seat: type(), tutorialBlocked: type() },
+  guide: ({ session }) =>
+    session.tutorial === 1
+      ? {
+          allow: { intent: "seat" },
+          target: { projection: "board.strip", key: "seat0" },
+          pad: 4,
+          blocked: { intent: "tutorialBlocked" }
+        }
+      : undefined
+});
+// the seat drawn at { x: 40, y: 1500, w: 116, h: 120 }: the window at { x: 36, y: 1496, w: 124, h: 128 }
+```
+
+- **Where.** The window is the drawn rect of the target (the resolver of `<anchor>` and
+  `app.ui.rectOf`: through fits, slots, scrolls and ancestor motion, rotation left out), or the
+  bounding rect of the shown targets of a list, grown by `pad` on every side, in screen reference
+  units. The system `ui.guide` of phase `layout`, right after `ui.anchor`, places it every frame,
+  so the window follows a target that moves or scrolls, in the frame it moved.
+- **The veil.** Four rectangles around the window, at `Order` 1 000 000 of the `ui` layer, above
+  every popup: black at 0.6, or the guide's `veil: { color, alpha }`. `alpha: 0` draws nothing
+  visible; `veil: false` spawns no rectangle. Without a target the veil is one rectangle over the
+  screen. While no target is shown (not mounted yet, leaving, built aside, alpha 0), and while the
+  window has no area (a target of no area with no `pad`), the veil covers the screen and every press is
+  locked; it opens again when a target shows with an area.
+- **A target that never shows.** It keeps the whole screen veiled and every press locked: only the
+  guide's `blocked` answer and the keyboard reach the gate, so a key that names nothing (a typo, a
+  view of another scene) soft-locks the tutorial. A dev build names it once per guide,
+  `ui:guide-target-missing` `{ targets }`, after a key named no entity two frames in a row, as for
+  an `<anchor>`.
+- **A guide that follows itself.** A node that derives its guide again in the tick its edge
+  committed (it was left and entered again) may find a target the edge made that the world has
+  not laid out yet. A guide with the same targets as the one it replaced, shown now or ended in
+  this frame, keeps that guide's window for two frames while none of its targets is shown, so the
+  veil does not flash over the whole screen; a guide of other targets does as above.
+- **The lock.** `ui` hands `input` the window by reference (`input.lock.window(window)`) and writes
+  it in place every frame; `null` while no target is shown, `undefined` when the guide ends. A press
+  outside reaches no view (no `Tappable`, no `LocalWrite`, no scroll, no drag, no trace, no hover)
+  and answers the guide's `blocked` when it names one; a drop outside finds no target. A text field
+  outside opens no keyboard: `ui`'s pointer door, which finds the field under the finger on its own,
+  does nothing at a locked point. Inside the window everything works as before. `input` runs before `layout`, so a press reads the window of
+  the frame before: one frame of lag behind a moving target. The doors `app.input.tap`, `press`,
+  `drag` do no hit test and are not locked.
+- **One at a time.** A new guide replaces the one shown: its veil leaves and its lock goes. The
+  veil and the lock leave with the narrow that carried them, when the node is left. Fast mode draws
+  nothing and locks nothing.
+- **Your own look.** The rounded window, the rim, the glide between steps, the hand and the text
+  are the game's: `veil: false` (or `alpha: 0`) keeps the lock, and an `<anchor>` on the same
+  targets draws the look, glides with its `change.Box` motion and follows the target in the same
+  frame the window does. `hand`, `text` and `highlight` of `GuideOptions` are not drawn by the
+  engine (deprecated).
+
+```tsx
+// The game's tutorial window: the engine locks, the anchor draws the rim and glides between steps.
+<anchor key="tutorialWindow" to={{ projection: "board.strip", key: "seat0" }} pad={4} motion={glide}>
+  <stack key="rim" style={{ nineSlice: "tutorial.rim", hollow: true, width: "100%", height: "100%" }} />
+</anchor>
+```
+
+- **Cost.** A frame of a standing guide, and of one whose target moves (fractional numbers
+  included), allocates nothing (`guideStill`, `guideMoving`): the window and the rectangles are
+  written in place, the veil's `Transform` and `Shape` field by field on their stored values, and
+  the lock keeps the same window object.
 
 ## A scene built aside
 
@@ -1023,7 +1181,7 @@ Every export of the saved module is sorted, in this order:
 | an emitter: own string `id`, a `config` object | nothing in ui: `effects` takes it from the `ui:hot-swap` event; live particles keep their bake |
 | the `default` export of `generated/strings.<locale>.ts`, a record of functions | `i18n.replace(locale, messages)`, the locale read from the path: every label re-resolves |
 | text styles: `{ kind: "textStyles", map }` | `text.replaceStyles`: every label is laid out again and redrawn with the new style |
-| an own string `kind` of `component`, `tag`, `node`, `slot`, `flow`, `bundles` or `plugin`; without a `kind`, an object with an own string `id` or `name` | refused: a flow, node, slot, ECS component or tag, filter, bundles, scene, system, feature or plugin is registered by value at start |
+| an own string `kind` of `component`, `tag`, `node`, `slot`, `flow`, `bundles`, `plugin` or `textFormats`; without a `kind`, an object with an own string `id` or `name` | refused: a flow, node, slot, ECS component or tag, filter, bundles, scene, system, feature, plugin or text format is registered by value at start, and a format has no hot swap |
 | anything else: styles, tokens, motions, effect descriptors (`sfx`, `haptic`, `popup`, `play`, `music`, `guide`), timeline steps (`tween`, `mark`), numbers, plain functions, function components | nothing: Bun already gave the importers the new binding, and a node reads a descriptor through it |
 
 The strings files are written by `bun run assets:keys`, which compiles

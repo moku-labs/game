@@ -85,6 +85,7 @@ function createWarmState(): WarmState {
     queue: [],
     head: 0,
     filters: emptySet(),
+    quads: emptyMap(),
     waiting: emptyMap(),
     textQueued: false,
     textFont: undefined,
@@ -103,7 +104,17 @@ function createWarmState(): WarmState {
  * @returns The upload branch of the sync state.
  */
 function createUploadState(): UploadState {
-  return { queue: [], head: 0, waiting: emptyMap(), done: emptyWeakSet() };
+  const upload: UploadState = {
+    queue: [],
+    head: 0,
+    waiting: emptyMap(),
+    done: emptyWeakSet(),
+    forget: source => {
+      upload.done.delete(source);
+    }
+  };
+
+  return upload;
 }
 
 /**
@@ -168,6 +179,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     objectHidden: emptyWeakMap(),
     viewOfTop: emptyWeakMap(),
     overlay: createOverlayState(),
+    hitWalks: [],
     redraws: 0,
     held: emptyMap(),
     passesVersion: 0,

@@ -55,6 +55,7 @@ export function createHostState(): HostState {
     kept: emptyWeakSet(),
     pixelsFailed: false,
     pool: createPoolState(),
-    onTrim: []
+    onTrim: [],
+    onCanvasPass: undefined
   };
 }

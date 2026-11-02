@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutRuns, measureRun, parseAdvances } from "../../measure";
+import { fontLineOf, layoutRuns, lineHeightOf, measureRun, parseAdvances } from "../../measure";
 import type { AdvanceTable, LayoutOptions, Run, TextRun, TextStyle, Warn } from "../../types";
 import { latinFontJson, miniFontJson, miniFontXml } from "../fixtures/mini-font";
 
@@ -24,6 +24,7 @@ function style(over: Partial<TextStyle> = {}): TextStyle {
     wrap: "none",
     digits: false,
     shadow: undefined,
+    lineHeight: undefined,
     ...over
   };
 }
@@ -211,6 +212,49 @@ describe("layoutRuns — many lines", () => {
   });
 });
 
+describe("the line of a style", () => {
+  // The fixture font: a line of 40 at an export size of 32, so 17.5 at size 14; 16.8 headless.
+
+  it("is the font's line when the style names no lineHeight", () => {
+    expect(lineHeightOf(style({ size: 14 }), tables())).toBe(17.5);
+    expect(lineHeightOf(style({ size: 14 }), new Map())).toBeCloseTo(16.8, 10);
+  });
+
+  // The bug: the font's line wins over the line the style asked for, with or without a font.
+  it("is lineHeight times size when the style names one, whatever font is loaded", () => {
+    const plate = style({ size: 14, lineHeight: 1.28 });
+
+    expect(lineHeightOf(plate, tables())).toBeCloseTo(17.92, 10);
+    expect(lineHeightOf(plate, new Map())).toBeCloseTo(17.92, 10);
+  });
+
+  // The bug: the font's line reads the style's lineHeight, so the glyphs get no half-leading.
+  it("keeps the font's own line apart from the line the style asked for", () => {
+    expect(fontLineOf(style({ size: 14, lineHeight: 1.28 }), tables())).toBe(17.5);
+  });
+
+  it("lays three lines out at three of those lines", () => {
+    const plate = style({ size: 14, lineHeight: 1.28 });
+    const layout = layoutRuns([text("A\nA\nA")], plate, tables(), options());
+
+    expect(layout.lines).toHaveLength(3);
+    expect(layout.height).toBeCloseTo(53.76, 10);
+  });
+
+  // The bug: the line height leaks into the advances, so a taller line wraps its words elsewhere.
+  it("wraps the glyphs at the same widths as the font's line does", () => {
+    const tall = layoutRuns(
+      [text("A A A")],
+      style({ wrap: 60, lineHeight: 2 }),
+      tables(),
+      options()
+    );
+
+    expect(tall.lines.map(line => line.width)).toEqual([56, 24]);
+    expect(tall.width).toBe(56);
+  });
+});
+
 describe("layoutRuns — wrap box", () => {
   // The bug: a "box" style ignores the width ui laid its text out at, or lays it out at a box of 0.
   it("wraps a box style at the box it is handed", () => {
@@ -369,5 +413,73 @@ describe("layoutRuns — icons inside wrapped text", () => {
     ]);
     expect(layout.height).toBeCloseTo(76.8, 5);
     expect(written.written).toEqual(["font:ui.font-body"]);
+  });
+});
+
+/** The fixture glyphs plus `-` and U+2010, each 10 wide at size 32. */
+function hyphenTables(): Map<string, AdvanceTable> {
+  return new Map([
+    [
+      "ui.font-body",
+      parseAdvances(
+        JSON.stringify({
+          info: { size: 32 },
+          common: { lineHeight: 40 },
+          chars: [
+            { char: "1", xadvance: 16 },
+            { char: "A", xadvance: 24 },
+            { char: " ", xadvance: 8 },
+            { char: "-", xadvance: 10 },
+            { char: "\u2010", xadvance: 10 }
+          ]
+        }),
+        "ui.font-body"
+      )
+    ]
+  ]);
+}
+
+/** The glyphs of every line, as the display draws them. */
+function linesOf(value: string, wrap: number, written = options()): string[] {
+  return layoutRuns([text(value)], style({ wrap }), hyphenTables(), written).lines.map(line =>
+    line.runs.map(run => (run.kind === "text" ? run.text : "")).join("")
+  );
+}
+
+describe("breaks inside a word (F138)", () => {
+  it("breaks after a hyphen inside a word and keeps the hyphen on the first line", () => {
+    const layout = layoutRuns([text("A A-A")], style({ wrap: 70 }), hyphenTables(), options());
+
+    expect(linesOf("A A-A", 70)).toEqual(["A A-", "A"]);
+    expect(layout.lines.map(line => line.width)).toEqual([66, 24]);
+  });
+
+  it("breaks after the hyphen U+2010 the same way", () => {
+    expect(linesOf("A A‐A", 70)).toEqual(["A A‐", "A"]);
+  });
+
+  it("does not break after a leading hyphen or before a digit", () => {
+    expect(linesOf("A -A", 50)).toEqual(["A", "-A"]);
+    expect(linesOf("A A-1", 70)).toEqual(["A", "A-1"]);
+  });
+
+  it("draws a soft hyphen as - where the line breaks at it", () => {
+    const layout = layoutRuns([text("A A­A")], style({ wrap: 70 }), hyphenTables(), options());
+
+    expect(linesOf("A A­A", 70)).toEqual(["A A-", "A"]);
+    expect(layout.lines.map(line => line.width)).toEqual([66, 24]);
+  });
+
+  it("draws nothing for a soft hyphen the line does not break at, and warns of nothing", () => {
+    const written = options();
+    const fixed = layoutRuns([text("A­A")], style(), hyphenTables(), written);
+
+    expect(linesOf("A­A", 200, written)).toEqual(["AA"]);
+    expect(fixed.lines.map(line => line.width)).toEqual([48]);
+    expect(written.written).toEqual([]);
+  });
+
+  it("breaks before the word when the hyphen of a soft hyphen would stand past the wrap", () => {
+    expect(linesOf("A A­A", 60)).toEqual(["A", "AA"]);
   });
 });

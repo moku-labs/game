@@ -7,7 +7,8 @@
  * call waits for its own sources and answers true after the last of them. The queue is an array read from `head` and
  * emptied when the head reaches its end, the warm-up's pattern (`warm.ts`): an empty queue costs one compare a frame.
  * A source whose upload throws is logged and counted done, so its first draw uploads it the old way; one destroyed
- * while it waits is skipped. The device that goes (a stop, a lost WebGPU device) answers every waiting call false and
+ * while it waits is skipped. A source unloaded after its upload is forgotten, so a call queues it again and an answer of
+ * true means it is on the GPU. The device that goes (a stop, a lost WebGPU device) answers every waiting call false and
  * forgets what it had uploaded.
  */
 import type { PixiTexture, PixiTextureSource } from "../types";
@@ -105,6 +106,7 @@ function put(sctx: SyncCtx, upload: UploadState, source: PixiTextureSource): voi
   }
 
   upload.done.add(source);
+  source.once("unload", upload.forget);
 }
 
 /**

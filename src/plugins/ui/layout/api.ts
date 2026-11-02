@@ -43,7 +43,7 @@ import { loadYogaModule } from "./yoga";
 
 /**
  * What the text elements are measured through: `text.measure`, the string `text` resolved for an
- * entity, and the duration words of `i18n`.
+ * entity and its style, what a format of the game answers, and the duration words of `i18n`.
  *
  * @param ctx - Domain context of the ui plugin.
  * @returns The source every measure function reads.
@@ -52,6 +52,8 @@ function textSourceOf(ctx: UiCtx): TextSource {
   return {
     measure: (content, style, width) => ctx.deps.text.measure(content, style, width),
     resolved: entity => ctx.deps.world.ecs.get(entity, Text)?.resolved,
+    style: entity => ctx.deps.world.ecs.get(entity, Text)?.style,
+    formatted: (name, value) => ctx.deps.text.formatted(name, value),
     duration: ms => ctx.deps.i18n.duration(ms)
   };
 }

@@ -82,12 +82,39 @@ export const BUDGET = {
   // a stage-3 pass into its filter output every frame. Measured 16 B a frame, all of it Pixi's `AlphaFilter.alpha`
   // setter the fixture calls as `effects` does (0 B without that write); the mark, the collect and the flush add nothing.
   keptFade: 16,
+  // F120: new. A kept view whose own alpha changes every frame writes its quad's alpha and renders nothing; before, a
+  // stage-1 retake every frame, then live. Pixi's `alpha` setters box each new double: the fixture's write of the top
+  // (as `applyAlpha` does) and the quad's; the mark, the collect and the flush add nothing.
+  keptOwnFade: 32,
   // F67: 10 kept views drawn scaled under a camera zoom, a view elsewhere marked. Before: three retakes, then live.
   keptZoom: 0,
+  // F113: 10 kept views stepped under a root at alpha 0.5, a view elsewhere marked (the fade's own alpha write is Pixi's:
+  // 16 B a new value, its setter boxing the double). Before: every record went
+  // live, its filter pass in every frame of the fade. Now each keeps its picture, which Pixi draws at the root's alpha.
+  keptAncestorFade: 0,
+  // F113: a still panorama wider than the canvas under a zoom. A cut take is refused once and remembered: the record
+  // waits for rest. Before, a take was tried every third frame of the zoom, each try building its bounds (arrays, spans).
+  keptCutZoom: 0,
+  // F114: 10 views with an alpha filter off the canvas, stepped (a mark elsewhere). A take that rendered nothing is
+  // remembered: before, each was tried again every few frames, building its bounds (arrays, spans) at each attempt.
+  keptIdleAway: 0,
+  // F119: 10 live views with a filter that turn every frame, never taken, a view elsewhere marked. New: every flush
+  // counts the views drawn live that wait, each walk up to the stage by its parents, which allocates nothing.
+  keptCrowd: 0,
   // F68: 10 kept views and a filtered view with a glow inside, drawn live, every record stepped (a mark elsewhere). New,
   // measured 0.005 B a frame, under the 1 B the helper tolerates: the refusal is remembered on the record, so its
   // subtree is walked once (the walk itself, by index, allocates nothing), not at every step.
   keptBlend: 0,
+  // F126: new. 10 live views changed every frame: the step writes why each is live and how long it waits, and collect
+  // who marked it, numbers on the record. Measured 0 B.
+  keptWhy: 0,
+  // F126 stage 2: 40 views on their own shader, a number of each written every frame. New. The step reads the same
+  // numbers as a kept view's; the output's size is compared before a size object or a label is made, the origins and
+  // the slot are walked by index, the group's numbers go through one scratch array, and no iterator walks the ranges.
+  keptShaded: 0,
+  // F126 stage 2, part B: 12 placed views under a live filter, a number of each written every frame. New. Every step walks
+  // the view's parents, a flag and a map read per ancestor, and asks whether the view fits its mesh, on one object.
+  keptUnder: 0,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
   filterSwitchStill: 0,
@@ -106,6 +133,11 @@ export const BUDGET = {
   // B3: what a frame that starts with a filter adds over Pixi's own frame. New, measured −344 B: the empty canvas pass
   // Pixi begins at render start, its descriptor and attachment objects, is never begun.
   lazyCanvasFrame: 0,
+  // F126: new. The monitor's listener of a canvas begin in an agent build, every section on: one typed-array increment
+  // and one store into the pass ring. Measured 0 B.
+  canvasBegin: 0,
+  // F126: new. The listener of a build without the agent flag: one increment. Measured 0 B.
+  canvasBeginRelease: 0,
   // Change 2026-10-19-glass-arc, A2: a pass that syncs a still slot-timer ring (its Shape in the change set, nothing of
   // it changed). New, measured 0 B: the drawn fields are compared and no path is built; a sweep that moves builds it.
   arcStill: 0,
@@ -133,12 +165,27 @@ export const BUDGET = {
   // F61 S2: the renderer's readiness check of `world.projection.built()` while the views wait for the swap. New.
   buildReadyWaiting: 0,
   // F61 S3 slice A2: the step of the picture of a scene being left in a frame with no switch, after one look ran and
-  // its objects were kept. New: one field read.
+  // its objects were kept. New: one field read; two since F107 part 3 (the layer waiting for its views).
   leaveIdle: 0,
+  // F107 part 3: a frame of the fade-out after a swap, the loader's layer above the veil, its alpha the veil's level.
+  // New: the level, the veil's alpha and the layer's alpha written, a frame asked for.
+  leaveFade: 0,
+  // F107 part 3: a frame after the fade-out while the loader's layer waits, at alpha 0, for its views to leave. New:
+  // two fields and one length read.
+  leaveWait: 0,
+  // F134: `shots.after` right after the stage render of a frame with nothing wanted, one shot held. New: one length read.
+  shotsIdle: 0,
+  // F134: the same in a game without `shots`. New: the same length read of an empty list.
+  shotsOff: 0,
   // F61 S3 slice B+D: a still pass over 300 views while two warm windows rest held, each a root with 300 elements
   // built aside and ready. New: the held list's count and world's membership version compared, `left()` read.
   warmHeldPass: 0,
   // F61 S3 slice B+D: the build step of a dev build while the windows rest. Before: the frame request and the dev check
   // of building views, which walks every view into a list, every frame. Now it returns after a few field reads.
-  warmHeldStepDev: 0
+  warmHeldStepDev: 0,
+  // F118: the hover hit test, a miss over a board of 540 views. Before: a sorted copy of every container's children,
+  // the walk's list, two generators and two pose objects per view tested.
+  hitTestMiss: 0,
+  // F118: the drop lookup of a drag over the same board, found under an item and its shadow.
+  hitTestDrop: 0
 } as const;

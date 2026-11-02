@@ -50,7 +50,8 @@ export type PlatformProvider = {
 
 /**
  * What took one Back press: the Escape button of the top popup, the intent `back` of the resting
- * node, the provider leaving the app, or nothing at all because the app has no provider.
+ * node (`"intent"` also when a guide owns the screen and takes the press itself), the provider
+ * leaving the app, or nothing at all because the app has no provider.
  *
  * @example
  * ```ts
@@ -107,10 +108,11 @@ export type PlatformApi = {
    * then the intent `back` is answered to the resting node (`"intent"`), and otherwise the
    * provider leaves the app (`"exit"`). While the graph moves between nodes the gate is closed and
    * holds the answer for the next gate (one frame, or `flow.holdMs`), so the press answers
-   * `"intent"` and never leaves the app.
-   * Escape also ends the editing of a ui text field, so a
-   * press while a field is edited ends the edit and answers `"popup"`. Without a provider nothing
-   * is pressed and the answer is `"none"`.
+   * `"intent"` and never leaves the app. While a `guide` narrows the open gate, the guide owns the
+   * screen: Back is offered to it as the intent `back` and answers `"intent"` whatever the guide
+   * allows; Escape is not pressed and the app is not left. Escape also ends the editing of a ui
+   * text field, so a press while a field is edited ends the edit and answers `"popup"`. Without a
+   * provider nothing is pressed and the answer is `"none"`.
    *
    * @returns What took the press.
    * @example
@@ -119,6 +121,8 @@ export type PlatformApi = {
    * app.platform.back(); // "popup": the settings popup was open and closed like Escape
    * // ...the runner settles on Home, which does not list "back"...
    * app.platform.back(); // "exit": the provider leaves the app
+   * // On a tutorial step whose guide allows only "merge":
+   * app.platform.back(); // "intent": nothing happens, the step still waits
    * ```
    */
   back(): BackResult;

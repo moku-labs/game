@@ -166,7 +166,9 @@ function installRenderPass(ctx: RendererCtx, pixi: PixiModule): void {
   if (state.uninstallRenderPass !== undefined) return;
 
   try {
-    state.uninstallRenderPass = installLazyCanvasPass(pixi);
+    state.uninstallRenderPass = installLazyCanvasPass(pixi, restart => {
+      state.onCanvasPass?.(restart);
+    });
   } catch (error) {
     ctx.log.warn("renderer: the canvas pass begins at render start", { error });
   }
@@ -238,11 +240,16 @@ export async function createApplication(
     background: ctx.config.background,
     antialias: ctx.config.antialias,
     resolution: targetResolution(state.resolution),
-    autoDensity: true,
+    // The host sets the canvas box itself (`resizeAt`): Pixi's would be the rounded-up store, past the mount.
+    autoDensity: false,
     autoStart: false,
     sharedTicker: false,
-    useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all())
-  };
+    useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all()),
+    // `input` hit-tests every pointer sample itself (`sync.hitTest`) and owns the cursor, `touch-action` and
+    // `preventDefault`; nothing listens to a Pixi event. Pixi's own handling would hit-test the tree again (F118).
+    eventMode: "none",
+    eventFeatures: { move: false, globalMove: false, click: false, wheel: false }
+  } as const;
 
   // Inline and positive: a production `define` folds the condition to `app.init(options)`.
   await (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__
@@ -256,6 +263,10 @@ export async function createApplication(
   // A canvas is inline by default and leaves a line gap under it: the page grows past the window
   // and scrolls. Block layout keeps it exactly the size of its mount.
   app.canvas.style.display = "block";
+  // Until its first layout gives it the measured size, a canvas made again after a lost device fills its mount:
+  // with no size of its own it would show at its backing store's size.
+  app.canvas.style.width = "100%";
+  app.canvas.style.height = "100%";
   mount.append(app.canvas);
 }
 
@@ -312,6 +323,7 @@ export function stopHost(state: HostState): void {
   state.onLoss.length = 0;
   state.onResolutionChange.length = 0;
   state.onTrim.length = 0;
+  state.onCanvasPass = undefined;
   // The pool is module-global and another app on the page may draw: it is not cleared here.
   state.pool = createPoolState();
   state.resolution.pending = undefined;

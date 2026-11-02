@@ -107,6 +107,62 @@ describe("sync hit test", () => {
     expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(entity);
   });
 
+  it("carries a faded or hidden ancestor down to its children", async () => {
+    const mock = await started();
+    const parent = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 500 }),
+      Sprite({ texture: "a" })
+    ]);
+    const child = mock.world.ecs.spawn(owner, [
+      Transform({ x: -500 }),
+      Sprite({ texture: "a" }),
+      Parent({ entity: parent })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const holder = mock.ctx.state.sync.views.get(child)?.object.parent;
+
+    if (holder === undefined || holder === null) throw new Error("the child hangs in nothing");
+
+    holder.alpha = 0.005;
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBeUndefined();
+
+    holder.alpha = 0.5;
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(child);
+
+    holder.visible = false;
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBeUndefined();
+  });
+
+  it("keeps the outer walk when an accept function asks the hit test again", async () => {
+    const mock = await started([{ name: "items", sort: "order" }]);
+    const spawn = (x: number, order: number): number =>
+      mock.world.ecs.spawn(owner, [
+        Layer({ name: "items" }),
+        Transform({ x }),
+        Sprite({ texture: "a" }),
+        Order({ value: order })
+      ]);
+    const low = spawn(0, 1);
+
+    spawn(0, 5);
+    spawn(1000, 9);
+    spawn(1000, 2);
+    mock.modules.sync.pass();
+
+    const inner: Array<number | undefined> = [];
+    const found = mock.api.sync.hitTest(0, 0, entity => {
+      inner.push(mock.api.sync.hitTest(1000, 0, anyEntity));
+
+      return entity === low;
+    });
+
+    expect(found).toBe(low);
+    expect(inner).toHaveLength(2);
+  });
+
   it("moves the point through rotation and scale", async () => {
     const mock = await started();
     const entity = mock.world.ecs.spawn(owner, [

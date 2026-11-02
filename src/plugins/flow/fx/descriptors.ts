@@ -2,25 +2,8 @@
  * @file flow/fx — descriptor helpers. Pure: they produce plain data.
  */
 import type { Json } from "../../model/types";
-import type { Allow } from "../gate/types";
+import { guidePayload } from "../guide";
 import type { Descriptor, GuideOptions, Hint } from "./types";
-
-/**
- * Copies one allowed answer into plain JSON. The `payload` key is absent when there is none, so
- * the descriptor survives `JSON.stringify` unchanged.
- *
- * @param allow - The one answer a guide lets through.
- * @returns The answer as plain JSON.
- * @example
- * ```ts
- * allowJson({ intent: "merge" }); // { intent: "merge" }: no payload key
- * ```
- */
-function allowJson(allow: Allow): Json {
-  if (allow.payload === undefined) return { intent: allow.intent };
-
-  return { intent: allow.intent, payload: allow.payload };
-}
 
 /**
  * Creates a fire-and-forget cosmetic descriptor for `fx.emit`. It is dispatched only after the
@@ -63,12 +46,14 @@ export function schedule(moment: number | undefined): Descriptor<void> {
 }
 
 /**
- * Creates the tutorial descriptor: it narrows the gate to one answer until the node exits. Its
- * visual part (`target`, highlight, hand, text) is drawn by `ui`, which dims the screen and cuts
- * a hole over the target element. The highlight list and the target are copied, so a later change
- * of the caller's objects cannot reach the descriptor.
+ * Creates the tutorial descriptor: it narrows the gate to one answer, and to the `blocked` one a
+ * press outside the window gives, until the node exits. Its visual part is drawn by `ui`: a veil
+ * over the screen with a window cut over the targets (one or the union of a list), grown by `pad`,
+ * and the input lock outside that window; `veil: false` draws nothing and still locks. The targets,
+ * the veil and the highlight list are copied, so a later change of the caller's objects cannot
+ * reach the descriptor.
  *
- * @param options - The allowed answer and the visual hints.
+ * @param options - The allowed answer, the targets, the veil and the answer of a blocked press.
  * @returns The descriptor a node awaits.
  * @example
  * ```ts
@@ -79,15 +64,5 @@ export function schedule(moment: number | undefined): Descriptor<void> {
  * ```
  */
 export function guide(options: GuideOptions): Descriptor<void> {
-  const payload: { [key: string]: Json } = { allow: allowJson(options.allow) };
-
-  if (options.target !== undefined) {
-    payload.target = { projection: options.target.projection, key: options.target.key };
-  }
-
-  if (options.highlight !== undefined) payload.highlight = [...options.highlight];
-  if (options.hand !== undefined) payload.hand = options.hand;
-  if (options.text !== undefined) payload.text = options.text;
-
-  return { kind: "guide", payload };
+  return { kind: "guide", payload: guidePayload(options) };
 }

@@ -5,6 +5,7 @@
 import type { Json } from "../../model/types";
 import type * as Time from "../../time/types";
 import type { Entity } from "../../world/types";
+import type { CanvasRestart } from "../reasons";
 import type { OverlayMode } from "../sync/types";
 
 /**
@@ -143,6 +144,8 @@ export type FrameRing = {
     format: (string | null)[];
     /** The target's resolution; NaN when unknown. */
     resolution: Float32Array;
+    /** Why a canvas pass began, an index into `CANVAS_RESTARTS` (WebGPU); 0, `"none"`, for any other pass. */
+    restart: Uint8Array;
   };
   /** Path id → flow path. */
   readonly paths: readonly string[];
@@ -587,6 +590,8 @@ export type PassRecord = {
   resolution?: number | null;
   /** The pass took or refreshed a kept picture (its label starts with `kept:`). */
   kept?: boolean;
+  /** Why a canvas pass began (WebGPU); absent for any other pass and on WebGL. */
+  restart?: CanvasRestart;
 };
 
 /**

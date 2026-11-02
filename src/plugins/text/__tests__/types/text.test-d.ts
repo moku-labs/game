@@ -1,8 +1,10 @@
 import { expectTypeOf } from "vitest";
+import type { TextFormatsOf } from "../../../flow/types";
 import { component } from "../../../world/ecs/define";
 import {
   bind,
   Countdown,
+  defineTextFormats as looseFormats,
   label as looseLabel,
   defineTextStyles as looseStyles,
   Text,
@@ -12,9 +14,12 @@ import type {
   BindOptions,
   Config,
   CountdownValue,
+  FormattedNumber,
   Size,
+  TextApi,
   TextBind,
   TextFormat,
+  TextFormats,
   TextStyles,
   TextValue
 } from "../../types";
@@ -104,3 +109,43 @@ expectTypeOf(measured).toEqualTypeOf<{ width: number; height: number }>();
 declare const config: Config;
 
 expectTypeOf(config).toEqualTypeOf<{ fonts: { body: string; digits: string } }>();
+
+// ─── a game's own number format ───────────────────────────────
+
+/** The helpers of a game that named one format. */
+const pillKit = textFor<StyleKey, FontKey, "pill.number">();
+
+pillKit.bind(Counter, "value", { format: "pill.number" });
+pillKit.bind(Counter, "value", { format: "mm:ss" });
+
+// @ts-expect-error — the game named no format "pill.big"
+pillKit.bind(Counter, "value", { format: "pill.big" });
+
+// @ts-expect-error — the root `bind` takes the four built-in formats, no name of a game
+bind(Counter, "value", { format: "pill.number" });
+
+// @ts-expect-error — a game that named no format has the four built-in ones
+textFor<StyleKey, FontKey>().bind(Counter, "value", { format: "pill.number" });
+
+pillKit.defineTextFormats({ "pill.number": value => ({ content: `${value}`, style: "body" }) });
+
+pillKit.defineTextFormats({
+  // @ts-expect-error — "digits.14" is not one of the game's styles
+  "pill.number": value => ({ content: `${value}`, style: "digits.14" })
+});
+
+// @ts-expect-error — a format owns the style of its label: it must answer one
+pillKit.defineTextFormats({ "pill.number": value => ({ content: `${value}` }) });
+
+// The root helper takes any style name: `text` warns once about one it does not know.
+expectTypeOf(
+  looseFormats({ "pill.number": value => ({ content: `${value}`, style: "digits.14" }) })
+).toEqualTypeOf<TextFormats>();
+
+expectTypeOf<TextApi["formatted"]>().returns.toEqualTypeOf<FormattedNumber | undefined>();
+
+// The union `defineGame` binds: no names when a game passed none, so a typo does not compile.
+type BareGame = { player: number; session: number; assets: string; strings: Record<string, never> };
+
+expectTypeOf<TextFormatsOf<BareGame & { textFormats: "a" | "b" }>>().toEqualTypeOf<"a" | "b">();
+expectTypeOf<TextFormatsOf<BareGame>>().toBeNever();

@@ -1,11 +1,16 @@
 import { expectTypeOf } from "vitest";
 import { createPlugin } from "../../../../config";
 import {
+  CANVAS_RESTARTS,
+  type CanvasRestart,
   DEMAND_REASONS,
   frameAt,
   PERF_CAUSES,
   type PERF_GAP_BUCKETS,
-  type PERF_LOG_VERSION
+  type PERF_LOG_VERSION,
+  type RetakeWhy,
+  type WhyEntry,
+  type WhyLive
 } from "../../../../index";
 import { timePlugin } from "../../../time";
 import type { ThermalReading } from "../../../time/types";
@@ -27,6 +32,13 @@ import type {
 // ---------------------------------------------------------------------------
 
 declare const app: { renderer: Api };
+
+// ─── the reasons of the root: a reader of the ring names them ─
+
+expectTypeOf(CANVAS_RESTARTS).toEqualTypeOf<readonly CanvasRestart[]>();
+expectTypeOf<Uint8Array>().toEqualTypeOf(app.renderer.monitor.frames().passes.restart);
+expectTypeOf<WhyEntry["reason"]>().toEqualTypeOf<WhyLive | null>();
+expectTypeOf<NonNullable<WhyEntry["retake"]>["why"]>().toEqualTypeOf<RetakeWhy>();
 
 // ─── event names ──────────────────────────────────────────────
 

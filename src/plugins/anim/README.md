@@ -554,7 +554,9 @@ timers, no `pixi.js` import.
 ## Retarget and offsets
 
 A new absolute track on a field cancels the older owner **of that field**; a track that loses every
-field ends where it stands. An additive track never owns a field: it contributes
+field ends where it stands. The new track starts from the stored value, so a pose a game wrote
+between the two tracks stands; on a field an additive track adds to, it starts from the base, so
+an offset is never folded in. An additive track never owns a field: it contributes
 `(to − from) × ease(t)` to the field's offsets, and every write of that field is `base + Σ offsets`.
 An additive track with keyframe segments names its offsets directly: it starts at no offset and each
 segment's value is the delta it adds, so it keeps its shape whatever pose it starts on. When the last

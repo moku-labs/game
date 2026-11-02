@@ -43,8 +43,8 @@ import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
-import { CONTENT, visualOf } from "../visual";
-import { cancelExtra, livePatch, recordRest } from "./extras";
+import { ANCHOR, CONTENT, fieldsLeftAlone, livePatch, visualOf } from "../visual";
+import { cancelExtra, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
 import { dropHost, hostsMoved, hostsOf, hostViews, slotFor, slotOf, trackHost } from "./hosts";
@@ -57,6 +57,7 @@ import { settlePopups } from "./popups";
 import { createRange } from "./range";
 import { markResizedIcons, markResizedTexts } from "./remeasure";
 import { sameValue } from "./same";
+import { createAnchor } from "./state";
 import type {
   DescriptionNode,
   Element,
@@ -643,6 +644,26 @@ function identitySet(identities: readonly string[]): ReadonlySet<string> {
 }
 
 /**
+ * Tells whether an element is an `<anchor>` or lies under one: the anchor pass places it after
+ * the solve, by its targets, so the solve leaves it alone.
+ *
+ * @param element - The element.
+ * @param lookup - How a parent entity becomes its element.
+ * @returns True for an anchor and everything under it.
+ */
+function isAnchored(element: Element, lookup: (entity: Entity) => Element | undefined): boolean {
+  let current: Element | undefined = element;
+
+  while (current !== undefined) {
+    if (current.type === ANCHOR) return true;
+
+    current = current.parent === undefined ? undefined : lookup(current.parent);
+  }
+
+  return false;
+}
+
+/**
  * Tells whether an element whose `Box` just came arrives with an enter: new, and not a row a
  * range change scrolled in.
  *
@@ -698,6 +719,8 @@ export function createReconciler(
   const isAside = (entity: Entity): boolean => ctx.deps.world.projection.isBuilding(entity);
   // The reconcile of this frame found a committed build: its solve gives the held enters their start pose.
   let released = false;
+  // True while the anchor pass applies an element of an `<anchor>`: the solve leaves them alone.
+  let anchoring = false;
   // The membership version of the world's projections the last walk for a released root read, and the
   // one the last pass of the held enters read with the length of the queue it left: a frame with
   // windows held warm and at rest compares numbers and walks nothing (spec 33 B+D).
@@ -852,6 +875,8 @@ export function createReconciler(
       state.scrolls.add(entity);
       element.scroll = scrollMotionOf(node);
     }
+
+    if (element.type === ANCHOR) state.anchors.set(entity, createAnchor());
 
     modules.layout.attach(element);
     // The style is on the layout node: from here an equal description keeps it.
@@ -1119,7 +1144,8 @@ export function createReconciler(
    * @param type - Its component type.
    */
   function writeOthers(element: Element, value: object, type: AnyComponentType): void {
-    const others = otherFields(value, ecs.typeOf(type.componentName)?.owned ?? NO_OWNED);
+    const owned = fieldsLeftAlone(element, type, ecs.typeOf(type.componentName)?.owned ?? NO_OWNED);
+    const others = otherFields(value, owned);
 
     if (others !== undefined) ecs.set(element.entity, asHandle(type), others);
   }
@@ -1141,7 +1167,8 @@ export function createReconciler(
 
     if (value.value === true || SCROLL_STATE.has(value.type.componentName)) return;
 
-    const owned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
+    const typeOwned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
+    const owned = fieldsLeftAlone(element, value.type, typeOwned);
 
     ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
   }
@@ -1650,6 +1677,9 @@ export function createReconciler(
 
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
+    // An anchor that goes while a follow holds its position from a loop gives it back.
+    state.anchors.get(element.entity)?.held?.();
+    state.anchors.delete(element.entity);
     state.exiting.delete(element.entity);
     state.leading.delete(element.entity);
     state.overlays.delete(element.entity);
@@ -1816,12 +1846,16 @@ export function createReconciler(
   }
 
   /**
-   * Applies the solved rect of one element: a live one moves, a new one spawns its components.
+   * Applies the solved rect of one element: a live one moves, a new one spawns its components. An
+   * `<anchor>` and everything under it wait for the anchor pass, which places them by their targets.
    *
    * @param element - The element to apply.
    * @param quiet - Whether a live element takes its rect with no motion.
    */
   function applyElement(element: Element, quiet: boolean): void {
+    // Per solve: one number while no anchor exists.
+    if (!anchoring && state.anchors.size > 0 && isAnchored(element, lookup)) return;
+
     const parent = parentRect(element);
 
     if (element.live) {
@@ -2011,9 +2045,29 @@ export function createReconciler(
   }
 
   /**
+   * Tells whether the solve of a root built aside waits for the next frame: its first solve, when the frame's budget is
+   * spent (F61). A root that waited once is solved in the next frame whatever its budget, so a build always ends. A
+   * root on the screen never waits.
+   *
+   * @param root - A root that needs a solve.
+   * @returns True when it waits.
+   */
+  function solveWaits(root: Root): boolean {
+    if (root.aside === undefined || root.solveWaited === true || !isAside(root.entity))
+      return false;
+    if (ctx.deps.world.projection.left() > 0) return false;
+
+    root.solveWaited = true;
+
+    return true;
+  }
+
+  /**
    * Solves one root in a box and applies its rects: a root on the viewport when it is marked, a
    * root in a slot also when its slot was resized. A root built aside waits while parts of it wait,
-   * and is applied in parts. A root shown before its parts were done is applied whole and still.
+   * and is applied in parts. Its solve, which cannot be split (3–5 ms for a shop on a Galaxy A26),
+   * waits for the next frame once the frame's budget is spent, and runs there whatever it has left.
+   * A root shown before its parts were done is applied whole and still.
    *
    * @param root - The root.
    * @param box - The viewport, or the slot's content box.
@@ -2030,11 +2084,13 @@ export function createReconciler(
     const resized = root.slot !== undefined && !sameBox(root.slotRect, box);
 
     if (!root.needsSolve && !resized) return false;
+    if (solveWaits(root)) return false;
     // Kept: a copy, the box may be scratch.
     if (root.slot !== undefined) root.slotRect = { x: box.x, y: box.y, w: box.w, h: box.h };
 
     modules.layout.solve(element, box, lookup);
     root.needsSolve = false;
+    delete root.solveWaited;
 
     // A root not on the screen: its windowed ranges are cut once more in the next frame.
     if (root.aside !== undefined) asideSolved = true;
@@ -2801,6 +2857,23 @@ export function createReconciler(
   }
 
   /**
+   * Applies the rect the anchor pass gave one element of an `<anchor>` subtree, as the solve
+   * applies any other element.
+   *
+   * @param element - The anchor or an element under it.
+   * @param quiet - Whether a live element takes its rect with no motion.
+   */
+  function applyAnchored(element: Element, quiet: boolean): void {
+    anchoring = true;
+
+    try {
+      applyElement(element, quiet);
+    } finally {
+      anchoring = false;
+    }
+  }
+
+  /**
    * Re-resolves the style of one element whose pointer or focus flag changed: a press, a release,
    * the mouse coming over it or leaving it, the keyboard focus arriving or leaving. A new rect
    * waits for the solve; a new look and a new rest pose apply now. Only this element is restyled:
@@ -2850,6 +2923,7 @@ export function createReconciler(
     playEntered,
     sweep,
     converged,
-    asideBuilt
+    asideBuilt,
+    applyAnchored
   };
 }

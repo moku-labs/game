@@ -141,8 +141,34 @@ export function refreshResolution(ctx: RendererCtx, reason: ResolutionReason): b
 }
 
 /**
+ * How far past a whole device pixel a box of whole device pixels may measure: browsers keep layout sizes in 1/64 CSS
+ * px, so the A26's window of 2340 rows at 2.77 measures 844.765625 CSS px, 2340.0008 device px. One more row would
+ * be resampled over the whole canvas; a twentieth of a device pixel left uncovered is never seen.
+ */
+const PIXEL_SLACK = 0.05;
+
+/**
+ * The CSS length to hand Pixi so its backing store covers a CSS length: Pixi rounds `length × resolution` to whole
+ * device pixels, so the length is raised to the next whole device pixel first. A product a rounding error past a
+ * whole pixel stays on that pixel.
+ *
+ * @param length - The CSS length to cover.
+ * @param resolution - Device pixels per CSS pixel.
+ * @returns The CSS length of the covering backing store.
+ * @example
+ * ```ts
+ * coverLength(844.77, 2.625); // 2218 / 2.625, about 844.95
+ * ```
+ */
+function coverLength(length: number, resolution: number): number {
+  return Math.ceil(length * resolution - PIXEL_SLACK) / resolution;
+}
+
+/**
  * Resizes the renderer to a CSS-pixel size, at the pending resolution when one differs from what
  * Pixi draws at; the listeners hear the change. The pending change is gone afterwards either way.
+ * The backing store is rounded up to whole device pixels and the canvas box is the size itself,
+ * fractions kept, so the canvas covers its mount to the last device pixel (F116).
  *
  * @param state - The host branch of the plugin state.
  * @param width - New CSS width of the canvas.
@@ -157,14 +183,20 @@ export function resizeAt(state: HostState, width: number, height: number): void 
   const from = app.renderer.resolution;
 
   state.resolution.pending = undefined;
+  app.canvas.style.width = `${width}px`;
+  app.canvas.style.height = `${height}px`;
 
   if (pending === undefined || pending.value === from) {
-    app.renderer.resize(width, height);
+    app.renderer.resize(coverLength(width, from), coverLength(height, from));
 
     return;
   }
 
-  app.renderer.resize(width, height, pending.value);
+  app.renderer.resize(
+    coverLength(width, pending.value),
+    coverLength(height, pending.value),
+    pending.value
+  );
 
   for (const fn of state.onResolutionChange) fn(from, pending.value, pending.reason);
 }

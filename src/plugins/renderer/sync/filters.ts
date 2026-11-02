@@ -598,6 +598,43 @@ function countFiltered(state: SyncState, kept: KeptState): void {
   for (let index = cache.count; index < before; index += 1) cache.filters[index] = undefined;
 }
 
+/** What the count of the views drawn live reads while it walks the filters: set before the walk, one at a time. */
+const breaks: { sync: SyncState | undefined; count: number } = { sync: undefined, count: 0 };
+
+/**
+ * Adds a view drawn live with an enabled filter to the walk's count: it breaks the canvas pass once. A view drawn from
+ * its kept picture is hidden for the stage pass, and so is what hangs inside it: neither is drawn.
+ *
+ * @param slots - The filters of the view.
+ * @param entity - The entity.
+ */
+function addBreak(slots: readonly FilterSlot[], entity: Entity): void {
+  const { sync } = breaks;
+
+  if (sync?.root === undefined) return;
+  if (isDrawn(sync.views.get(entity), sync.root) && passesOf(slots) > 0) breaks.count += 1;
+}
+
+/**
+ * The canvas passes of a frame where nothing counts them: 1 for the frame, plus one break for every view drawn live
+ * under the root with an enabled filter, by the walk of `renderPassesOf`. Counted at every call, not through the cache
+ * of `renderPassesOf`, which a take does not move: `stats()` reads it, never a frame.
+ *
+ * @param state - The sync branch of the plugin state.
+ * @returns The canvas passes; 0 while inert.
+ */
+export function canvasPassesOf(state: SyncState): number {
+  if (state.root === undefined) return 0;
+
+  breaks.sync = state;
+  breaks.count = 0;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no entry arrays.
+  state.filters.forEach(addBreak);
+  breaks.sync = undefined;
+
+  return 1 + breaks.count;
+}
+
 /**
  * Tells whether a filter of the count was switched on or off since, by its field alone.
  *

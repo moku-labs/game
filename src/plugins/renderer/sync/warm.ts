@@ -9,16 +9,26 @@
  * filter of its render, so the warm-up never opens a second level of Pixi's filter stack (Pixi 8.21 reads the stale
  * input texture of that level at its next push, and a pool trim destroys it in between). A probe whose render throws
  * ends the warm-up of the application: a throw inside Pixi's render leaves its filter stack unbalanced, which no public
- * API rebalances, so another probe would only throw again. The end of a run reaches the monitor through `onWarm`; this
- * file never imports the monitor (LEAD-FIXES-3 O24).
+ * API rebalances, so another probe would only throw again. A filter handed over with its quad draws a mesh of that
+ * program after it, on WebGPU, inside an error scope: a quad program that does not fit its pipeline fails asynchronously,
+ * as a blank view with nothing in the logs, and this is the one place such a fault can be seen. A mesh draws onto the
+ * canvas, or inside an outer filter pass or picture, whose target holds no stencil: another pipeline. The texture of the
+ * texture variants cannot make it (a clip gave it a stencil for good), so that draw goes into a second texture no clip
+ * ever draws into, in the frame of the first. The end of a run reaches the monitor through `onWarm`; this file never
+ * imports the monitor (LEAD-FIXES-3 O24).
  */
-import type { PixiContainer, PixiFilter, PixiModule, PixiSprite } from "../types";
+
+import { filterGlobals, quadShader, unitQuad } from "../quad";
+import { destroyWhole } from "../sources";
+import type { FilterSlotQuad, PixiContainer, PixiFilter, PixiModule, PixiSprite } from "../types";
 import { clearFilters } from "./filters";
 import type {
   SyncCtx,
   SyncState,
   WarmDraw,
+  WarmMesh,
   WarmObjects,
+  WarmQuad,
   WarmState,
   WarmSubject,
   WarmVariant
@@ -47,15 +57,16 @@ const CONTENT: readonly WarmSubject[] = Object.freeze([
 ]);
 
 /** The probe object of each content subject the tree holds from its first warm frame on. */
-const FIXED_NODES: Readonly<Record<Exclude<WarmSubject, "text" | PixiFilter>, FixedNode>> =
-  Object.freeze({
-    sprite: "sprite",
-    "sprite-add": "spriteAdd",
-    "sprite-screen": "spriteScreen",
-    graphics: "graphics",
-    "particles-normal": "particlesNormal",
-    "particles-add": "particlesAdd"
-  });
+const FIXED_NODES: Readonly<
+  Record<Exclude<WarmSubject, "text" | PixiFilter | WarmQuad>, FixedNode>
+> = Object.freeze({
+  sprite: "sprite",
+  "sprite-add": "spriteAdd",
+  "sprite-screen": "spriteScreen",
+  graphics: "graphics",
+  "particles-normal": "particlesNormal",
+  "particles-add": "particlesAdd"
+});
 
 /** Every target a WebGPU pipeline is keyed by. */
 const ALL_VARIANTS: readonly WarmVariant[] = Object.freeze([
@@ -73,6 +84,9 @@ const CANVAS_VARIANT: readonly WarmVariant[] = Object.freeze(["canvas"]);
 
 /** WebGL on a canvas that is not cleared: the one variant that leaves no pixel. */
 const TEXTURE_VARIANT: readonly WarmVariant[] = Object.freeze(["texture"]);
+
+/** The second draw of a quad: a target with no stencil, as an outer filter pass or a picture is. */
+const PLAIN_VARIANT: readonly WarmVariant[] = Object.freeze(["plain"]);
 
 /**
  * The per-particle properties `effects` uploads every frame: the vertex layout its particle pipeline is keyed by.
@@ -144,6 +158,13 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     autoGarbageCollect: false,
     label: "renderer.warm.texture"
   });
+  const plain = pixi.RenderTexture.create({
+    width: PROBE_SIZE,
+    height: PROBE_SIZE,
+    antialias: false,
+    autoGarbageCollect: false,
+    label: "renderer.warm.plain"
+  });
   const holder = new pixi.Container();
   const graphics = new pixi.Graphics().rect(0, 0, PROBE_SIZE, PROBE_SIZE).fill(0xff_ff_ff);
 
@@ -165,6 +186,7 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     clip,
     mask,
     target,
+    plain,
     holder,
     list: [],
     sprite: whiteSprite(pixi),
@@ -173,8 +195,39 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     graphics,
     particlesNormal: particlesOf(pixi, "normal"),
     particlesAdd: particlesOf(pixi, "add"),
-    text: undefined
+    text: undefined,
+    quad: undefined
   };
+}
+
+/**
+ * The mesh of the quad subjects, made at their first draw: a trimmed Pixi that draws no quad has no need of its classes.
+ *
+ * @param pixi - The module that draws.
+ * @returns The mesh, its geometry and the uniforms its probes bind.
+ */
+function quadMesh(pixi: PixiModule): WarmMesh {
+  const geometry = unitQuad(pixi);
+  const mesh = new pixi.Mesh({ geometry });
+
+  mesh.label = "renderer.warm.quad";
+  mesh.scale.set(PROBE_SIZE);
+
+  return { mesh, geometry, gfu: filterGlobals(pixi).group, shader: undefined };
+}
+
+/**
+ * Frees the mesh of the quad subjects: the probes' uniform buffer by hand, as the kept cache frees a view's.
+ *
+ * @param probe - The mesh, when a quad was drawn on this device.
+ */
+function dropQuadMesh(probe: WarmMesh | undefined): void {
+  if (probe === undefined) return;
+
+  probe.shader?.destroy();
+  probe.gfu.buffer?.destroy();
+  probe.mesh.destroy();
+  probe.geometry.destroy(true);
 }
 
 /**
@@ -191,6 +244,7 @@ function dropObjects(warm: WarmState): void {
   warm.objects = undefined;
   clearFilters(objects.holder);
   objects.list.length = 0;
+  dropQuadMesh(objects.quad);
 
   const nodes = [
     objects.root,
@@ -206,7 +260,8 @@ function dropObjects(warm: WarmState): void {
   ];
 
   for (const node of nodes) node?.destroy({ children: true });
-  objects.target.destroy(true);
+  destroyWhole(objects.target);
+  destroyWhole(objects.plain);
 }
 
 /**
@@ -260,6 +315,37 @@ function enqueue(warm: WarmState, subject: WarmSubject, variants: readonly WarmV
 }
 
 /**
+ * Queues the draws of a filter, then the two of its quad: one for the canvas, one for a target with no stencil. A quad
+ * program is a WebGPU program: WebGL draws the filter alone.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param filter - The filter.
+ * @param variants - The variants of this device.
+ * @returns The draws queued.
+ */
+function enqueueFilter(
+  sctx: SyncCtx,
+  filter: PixiFilter,
+  variants: readonly WarmVariant[]
+): number {
+  const { warm } = sctx.ctx.state.sync;
+  const quad = warm.quads.get(filter);
+
+  enqueue(warm, filter, variants);
+
+  if (quad === undefined || sctx.deps.host.kind() !== "webgpu") return variants.length;
+
+  // Not all four variants: they made one pipeline, and the bench's warm-up on the A26 took 8.4 s, not 5.8. The second
+  // draw is the frame's own: a queue entry more would be a frame more, per quad.
+  const once = variants.slice(0, 1);
+
+  enqueue(warm, { filter, quad }, once);
+  enqueue(warm, { filter, quad }, PLAIN_VARIANT);
+
+  return variants.length + once.length + PLAIN_VARIANT.length;
+}
+
+/**
  * Tells whether the renderer can warm anything now: the config asks for draws, a device draws, and no probe threw on
  * this application.
  *
@@ -287,6 +373,7 @@ function canWarm(sctx: SyncCtx): boolean {
 function abandon(warm: WarmState): void {
   for (const [filter, entry] of warm.waiting) {
     warm.filters.delete(filter);
+    warm.quads.delete(filter);
     for (const resolve of entry.resolve) resolve(false);
   }
 
@@ -330,12 +417,11 @@ export function startWarm(sctx: SyncCtx): void {
   }
 
   for (const filter of warm.filters) {
+    const left = enqueueFilter(sctx, filter, variants);
     const entry = warm.waiting.get(filter);
 
-    if (entry === undefined) warm.waiting.set(filter, { left: variants.length, resolve: [] });
-    else entry.left = variants.length;
-
-    enqueue(warm, filter, variants);
+    if (entry === undefined) warm.waiting.set(filter, { left, resolve: [] });
+    else entry.left = left;
   }
 
   sctx.deps.demand.request();
@@ -372,9 +458,14 @@ export function queueText(sctx: SyncCtx, key: string): void {
  *
  * @param sctx - Domain context of the sync module.
  * @param filter - A filter the caller keeps alive while it waits.
+ * @param quad - Its body on a quad, drawn after it.
  * @returns Whether the filter's pipelines were created.
  */
-export function warmFilter(sctx: SyncCtx, filter: PixiFilter): Promise<boolean> {
+export function warmFilter(
+  sctx: SyncCtx,
+  filter: PixiFilter,
+  quad?: FilterSlotQuad
+): Promise<boolean> {
   const { warm } = sctx.ctx.state.sync;
 
   if (!canWarm(sctx)) return Promise.resolve(false);
@@ -386,12 +477,10 @@ export function warmFilter(sctx: SyncCtx, filter: PixiFilter): Promise<boolean> 
   const entry = waiting ?? { left: 0, resolve: [] };
 
   if (waiting === undefined) {
-    const variants = variantsOf(sctx);
-
-    entry.left = variants.length;
     warm.filters.add(filter);
+    if (quad !== undefined) warm.quads.set(filter, quad);
+    entry.left = enqueueFilter(sctx, filter, variantsOf(sctx));
     warm.waiting.set(filter, entry);
-    enqueue(warm, filter, variants);
     sctx.deps.demand.request();
   }
 
@@ -401,8 +490,68 @@ export function warmFilter(sctx: SyncCtx, filter: PixiFilter): Promise<boolean> 
 }
 
 /**
- * The node one subject hangs from: a content object, or the holder with the draw's filter on it. The text is made at
- * its first draw, in the font of the warm-up.
+ * Tells a filter's quad from every other subject.
+ *
+ * @param subject - The subject.
+ * @returns True for a quad.
+ */
+function isQuadSubject(subject: WarmSubject): subject is WarmQuad {
+  return typeof subject !== "string" && "quad" in subject;
+}
+
+/**
+ * The filter a subject that is no name belongs to.
+ *
+ * @param subject - A filter, or its quad.
+ * @returns The filter.
+ */
+function filterOf(subject: Exclude<WarmSubject, string>): PixiFilter {
+  return isQuadSubject(subject) ? subject.filter : subject;
+}
+
+/**
+ * The mesh of a quad subject, with a shader of this program over Pixi's white texture: the pipeline is what the probe
+ * is for, and a pipeline is keyed by the layout.
+ *
+ * @param pixi - The module that draws.
+ * @param objects - The probe tree.
+ * @param subject - The quad.
+ * @returns The mesh.
+ */
+function quadNode(pixi: PixiModule, objects: WarmObjects, subject: WarmQuad): PixiContainer {
+  const probe = objects.quad ?? quadMesh(pixi);
+
+  objects.quad = probe;
+  probe.shader = quadShader(pixi, subject.quad, probe.gfu, pixi.Texture.WHITE.source);
+  probe.mesh.shader = probe.shader;
+
+  return probe.mesh;
+}
+
+/**
+ * The node of a filter or a quad: the holder with the draw's filter on it, or the mesh of the quad.
+ *
+ * @param pixi - The module that draws.
+ * @param objects - The probe tree.
+ * @param subject - The filter or the quad.
+ * @returns The node.
+ */
+function filterNode(
+  pixi: PixiModule,
+  objects: WarmObjects,
+  subject: PixiFilter | WarmQuad
+): PixiContainer {
+  if (isQuadSubject(subject)) return quadNode(pixi, objects, subject);
+
+  objects.list[0] = subject;
+  objects.holder.filters = objects.list;
+
+  return objects.holder;
+}
+
+/**
+ * The node one subject hangs from: a content object, the holder with the draw's filter on it, or the mesh of a quad. The
+ * text is made at its first draw, in the font of the warm-up.
  *
  * @param pixi - The module that draws.
  * @param warm - The warm branch of the sync state.
@@ -416,13 +565,7 @@ function nodeOf(
   objects: WarmObjects,
   subject: WarmSubject
 ): PixiContainer | undefined {
-  if (typeof subject !== "string") {
-    objects.list[0] = subject;
-    objects.holder.filters = objects.list;
-
-    return objects.holder;
-  }
-
+  if (typeof subject !== "string") return filterNode(pixi, objects, subject);
   if (subject !== "text") return objects[FIXED_NODES[subject]];
   if (warm.textFont === undefined) return undefined;
 
@@ -470,8 +613,75 @@ function failWarm(sctx: SyncCtx, draw: WarmDraw, error: unknown): void {
     "renderer:warm-failed",
     typeof subject === "string"
       ? { subject, variant, error }
-      : { subject: "filter", filter: filterName(subject), variant, error }
+      : { subject: "filter", filter: filterName(filterOf(subject)), variant, error }
   );
+}
+
+/**
+ * What a scope of a device lost meanwhile answers: nothing to report, its restore warms everything again.
+ */
+function scopeLost(): void {
+  // The restore starts the warm-up over.
+}
+
+/**
+ * Opens the error scope of a quad's draw.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param subject - The subject of the draw.
+ * @returns The device whose scope is open, `undefined` for any other subject or with no device.
+ */
+function openScope(sctx: SyncCtx, subject: WarmSubject): GPUDevice | undefined {
+  if (!isQuadSubject(subject)) return undefined;
+
+  const device = sctx.deps.host.device();
+
+  device?.pushErrorScope("validation");
+
+  return device;
+}
+
+/**
+ * Closes the error scope of a quad's draw, and logs what it caught with the program's name. The warm-up goes on: the
+ * draw failed, not Pixi's filter stack, and the views of that kind fall back on a blank mesh only in that kind.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param device - The device of the scope.
+ * @param subject - The subject of the draw.
+ */
+function closeScope(sctx: SyncCtx, device: GPUDevice, subject: WarmSubject): void {
+  const program = isQuadSubject(subject) ? subject.quad.program.name : "";
+
+  device
+    .popErrorScope()
+    .then(error => {
+      if (error !== null) {
+        sctx.ctx.log.error("renderer:warm-invalid", { program, message: error.message });
+      }
+    })
+    .catch(scopeLost);
+}
+
+/**
+ * Takes a subject out of the probe tree after its render, thrown or not: the tree holds it only during its own render.
+ * A filter comes off the holder, and a quad's shader goes: it was made for this draw.
+ *
+ * @param objects - The probe tree.
+ * @param node - The node the subject hung from.
+ */
+function takeDown(objects: WarmObjects, node: PixiContainer): void {
+  node.removeFromParent();
+  objects.clipFrame.removeFromParent();
+
+  if (node === objects.holder) {
+    clearFilters(objects.holder);
+    objects.list.length = 0;
+  }
+
+  if (node === objects.quad?.mesh) {
+    objects.quad.shader?.destroy();
+    objects.quad.shader = undefined;
+  }
 }
 
 /**
@@ -493,6 +703,7 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
 
   const clipped = draw.variant === "canvas+clip" || draw.variant === "texture+clip";
   const textured = draw.variant === "texture" || draw.variant === "texture+clip";
+  const target = textured ? objects.target : undefined;
 
   if (clipped) {
     objects.clip.addChild(node);
@@ -501,8 +712,10 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
     objects.root.addChild(node);
   }
 
+  const scope = openScope(sctx, draw.subject);
+
   try {
-    sctx.deps.host.renderProbe(objects.root, textured ? objects.target : undefined);
+    sctx.deps.host.renderProbe(objects.root, draw.variant === "plain" ? objects.plain : target);
 
     return true;
   } catch (error) {
@@ -510,13 +723,9 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
 
     return false;
   } finally {
-    node.removeFromParent();
-    objects.clipFrame.removeFromParent();
+    if (scope !== undefined) closeScope(sctx, scope, draw.subject);
 
-    if (node === objects.holder) {
-      clearFilters(objects.holder);
-      objects.list.length = 0;
-    }
+    takeDown(objects, node);
   }
 }
 
@@ -584,10 +793,33 @@ function objectsOf(sctx: SyncCtx, pixi: PixiModule): WarmObjects | undefined {
 }
 
 /**
- * Draws up to `renderer.warm` probes before the stage pass of a drawn frame; answers whether it drew any, so the frame
- * is told to `time` as a probed one. A draw is counted only after its own render call ran; a queue that still holds
- * draws asks for the next frame; a probe that threw ends the warm-up there. Allocates nothing while the queue is empty,
- * and nothing but Pixi's own work on a warm frame: the probe tree is made once per device.
+ * Tells whether the next draw of the queue goes with the one before it: a quad's draw into the plain texture.
+ *
+ * @param warm - The warm branch of the sync state.
+ * @returns True when it asks for no frame of its own.
+ */
+function ridesAlong(warm: WarmState): boolean {
+  return warm.queue[warm.head]?.variant === "plain";
+}
+
+/**
+ * Tells whether a warm frame draws one more probe: one is queued, and the budget has room or it asks for none.
+ *
+ * @param warm - The warm branch of the sync state.
+ * @param drawn - The draws of this frame so far.
+ * @param budget - `renderer.warm`.
+ * @returns True when it does.
+ */
+function wantsDraw(warm: WarmState, drawn: number, budget: number): boolean {
+  return warm.head < warm.queue.length && (drawn < budget || ridesAlong(warm));
+}
+
+/**
+ * Draws up to `renderer.warm` probes before the stage pass of a drawn frame, and the plain draw of a quad with the draw
+ * before it; answers whether it drew any, so the frame is told to `time` as a probed one. A draw is counted only after
+ * its own render call ran; a queue that still holds draws asks for the next frame; a probe that threw ends the warm-up
+ * there. Allocates nothing while the queue is empty, and nothing but Pixi's own work on a warm frame: the probe tree is
+ * made once per device.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when a probe was drawn in this frame.
@@ -605,7 +837,7 @@ export function warmStep(sctx: SyncCtx): boolean {
   const budget = sctx.ctx.config.warm;
   let drawn = 0;
 
-  while (drawn < budget && warm.head < warm.queue.length) {
+  while (wantsDraw(warm, drawn, budget)) {
     const draw = warm.queue[warm.head];
 
     warm.head += 1;
@@ -617,7 +849,7 @@ export function warmStep(sctx: SyncCtx): boolean {
     // A throw ended the warm-up: the queue is empty and nothing more is drawn on this application.
     if (!drawProbe(sctx, pixi, objects, draw)) return true;
 
-    if (typeof draw.subject !== "string") drawnOnce(warm, draw.subject);
+    if (typeof draw.subject !== "string") drawnOnce(warm, filterOf(draw.subject));
   }
 
   warm.draws += drawn;
@@ -641,6 +873,7 @@ export function stopWarm(state: SyncState): void {
 
   warm.waiting.clear();
   warm.filters.clear();
+  warm.quads.clear();
   dropObjects(warm);
   warm.queue.length = 0;
   warm.head = 0;

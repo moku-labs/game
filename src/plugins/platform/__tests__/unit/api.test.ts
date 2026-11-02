@@ -56,6 +56,18 @@ describe("back", () => {
     expect(mock.fake.provider.exit).not.toHaveBeenCalled();
   });
 
+  // F109: a guide narrows the gate, but a popup in flight closes it; Back must still close the popup.
+  it("presses Escape over a guided node while the gate is closed", () => {
+    const mock = createMockPlatform();
+
+    mock.gate.open = false;
+    mock.gate.narrowed = true;
+    mock.input.escape = true;
+
+    expect(mock.api.back()).toBe("popup");
+    expect(mock.input.pressed).toEqual(["Escape"]);
+  });
+
   it("logs an exit that throws and still answers exit", () => {
     const mock = createMockPlatform();
     const failure = new Error("no permission");

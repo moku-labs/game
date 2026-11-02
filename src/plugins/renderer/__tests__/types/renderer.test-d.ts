@@ -21,6 +21,7 @@ import type {
   FilterCache,
   FilterSlot,
   FilterSlotInputs,
+  FilterSlotQuad,
   HitBox,
   KeptStats,
   LegendEntry,
@@ -32,10 +33,14 @@ import type {
   Point,
   PoolTrim,
   RenderStats,
+  RetakeWhy,
   SafeArea,
+  ShotsConfig,
   SliceFrame,
   Under,
-  ViewportSize
+  ViewportSize,
+  WhyEntry,
+  WhyLive
 } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -238,6 +243,8 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   pooled: number;
   renderPasses: number;
   renderPassesMax: number;
+  canvasPasses: number;
+  canvasPassesMax: number;
   kept: KeptStats;
   drawCalls?: number;
   redraws?: number;
@@ -250,7 +257,19 @@ expectTypeOf<RenderStats["kept"]>().toEqualTypeOf<{
   pictures: number;
   mb: number;
   retakes: number;
+  evicted: number;
+  refused: number;
 }>();
+
+// A report entry reads by its names: a tool switches on `reason` and `retake.why`.
+expectTypeOf<ReturnType<typeof renderer.sync.debug.why>>().toEqualTypeOf<readonly WhyEntry[]>();
+expectTypeOf<WhyEntry["reason"]>().toEqualTypeOf<WhyLive | null>();
+expectTypeOf<NonNullable<WhyEntry["retake"]>["why"]>().toEqualTypeOf<RetakeWhy>();
+
+declare const entry: WhyEntry;
+
+// @ts-expect-error — "cached" is no reason: a kept view's reason is `null`
+if (entry.reason === "cached") throw new Error("never");
 expectTypeOf<Config["keptMb"]>().toEqualTypeOf<number>();
 expectTypeOf(renderer.capture).toEqualTypeOf<
   (options?: CaptureOptions) => Promise<Captured | undefined>
@@ -274,6 +293,7 @@ expectTypeOf<FilterSlot>().toEqualTypeOf<{
   cache?: FilterCache;
   origin?: Float32Array;
   blurs?: boolean;
+  quad?: FilterSlotQuad;
 }>();
 expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void
@@ -416,3 +436,19 @@ filtersApi.area(1_048_590, [107, 101, 176]);
 // The warm-up answers whether the pipelines were created.
 expectTypeOf(filtersApi.warm(someFilter)).toEqualTypeOf<Promise<boolean>>();
 expectTypeOf<Config["warm"]>().toEqualTypeOf<number>();
+
+// `shots` is left out or whole: a size without its blur is no config; `keep` alone is optional.
+const shotsKept: ShotsConfig = { width: 96, height: 208, blur: 0, keep: 2 };
+// @ts-expect-error — a shot needs its height and its blur
+const shotsHalf: ShotsConfig = { width: 96 };
+
+declare const shotsApi: Api["shots"];
+
+expectTypeOf<Config["shots"]>().toEqualTypeOf<ShotsConfig | undefined>();
+expectTypeOf(shotsKept.keep).toEqualTypeOf<number | undefined>();
+expectTypeOf(shotsHalf.blur).toEqualTypeOf<number>();
+// @ts-expect-error — a key is an asset key, a string
+shotsApi.take(1);
+expectTypeOf(shotsApi.has("shot.room")).toEqualTypeOf<boolean>();
+// @ts-expect-error — the frame's half is the renderer's own, not on the public API
+shotsApi.after(true);

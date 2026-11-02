@@ -5,12 +5,13 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
-import type { Api as AssetsApi } from "../assets/types";
+import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
+import type { Api as ClockApi } from "../clock/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Json, Api as ModelApi } from "../model/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
-import type { LayerSort, LayerSpec, Owner, Api as WorldApi } from "../world/types";
+import type { LayerSort, LayerSpec, Owner, SceneSwitch, Api as WorldApi } from "../world/types";
 
 /**
  * How a layer orders what is drawn in it. The scene's name for the rule `world` stores.
@@ -128,7 +129,7 @@ export type CheckedProjections<Layer extends string, List> = {
  * The veil a live switch lays over the scene being left, from the switch start: a full-screen rect the engine draws
  * above every layer, fading from 0 to `alpha` over `inMs`; after the swap the next scene is under it and it fades out
  * over `outMs`. It takes no tap. A field left out keeps the one of the level below: the scene's over the config's over
- * the engine's.
+ * the engine's. The scene being entered has the last word on its `color` and `alpha` (`enter.cover`).
  *
  * @example
  * ```ts
@@ -152,8 +153,10 @@ export type SceneCover = {
  * texture turning at the centre (`texture`), a projection of the game drawn above the veil (`projection`), or, with
  * neither, a white ring the engine draws. `texture` and `projection` are one choice: a level that names either replaces
  * both of the level below, and with both named `projection` is drawn. A projection loader draws in a layer of its own
- * that the scene being left declares, mounted only once the loader is due: the whole layer is drawn above the veil
- * while the loader shows.
+ * that the scene being left declares: kept built and hidden while that scene stands, shown once the loader is due (the
+ * whole layer is drawn above the veil while it shows), and faded out with the veil after the swap. `scenes` hands its
+ * `from` the switch (`SceneSwitch`): where it goes and how far its bundles loaded. `holdMs` is a floor on the swap: the
+ * next scene builds at once and the old one stays until the floor passed.
  *
  * @example
  * ```ts
@@ -161,14 +164,26 @@ export type SceneCover = {
  * const loader: SceneLoader<"ui.loader.ring"> = { texture: "ui.loader.ring" };
  * // The game's own loading screen, the projection "loading" in the layer "loading", after 250 ms.
  * const screen: SceneLoader = { afterMs: 250, projection: "loading" };
+ * // A circle that opens over 260 ms, however fast the scene comes: shown from the first drawn frame, the swap held.
+ * const opening: SceneLoader = { afterMs: 0, holdMs: 260, projection: "opening" };
  * ```
  */
 export type SceneLoader<Asset extends string = string> = {
-  /** Milliseconds after the switch start the loader waits for. Default 400. */
+  /** Milliseconds after the switch start the loader waits for; 0 shows it from the first drawn frame. Default 400. */
   afterMs?: number;
+  /**
+   * Milliseconds after the switch start before the swap may happen, on the clock of the look: a floor, so a switch
+   * slower than it gets nothing added. Merged like `afterMs`: 0 lifts the floor of the level below. Default 0.
+   */
+  holdMs?: number;
   /** An asset key of the game: the texture turns at the centre of the frame. */
   texture?: Asset;
-  /** The name of a registered projection: mounted once the loader is due, its layer drawn above the veil. */
+  /**
+   * The name of a registered projection: kept built and hidden while the scene stands, shown once the loader is due,
+   * its layer drawn above the veil; it fades out with the veil after the swap. Its `from(player, session, sw)` reads the
+   * switch as its third argument: `{ from: "ward", to: "ward", progress: 0 }` while the ward stands, then `{ from:
+   * "ward", to: "board", progress }`, the share of the board's bundles loaded, in steps of 0.01 up to 1.
+   */
   projection?: string;
 };
 
@@ -176,8 +191,8 @@ export type SceneLoader<Asset extends string = string> = {
  * What a live switch shows over the scene being left: the veil and the loader. The scene being left decides: its
  * `leave` is merged field by field over `config.leave`, which is merged over the engine's default (`{ cover: { color:
  * 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }`). `false` turns a part or the whole off;
- * a part written over `false` starts from the engine's default. Fast mode, a headless app and the first scene of a run
- * show nothing.
+ * a part written over `false` starts from the engine's default. The scene being entered may set the veil's `color` and
+ * `alpha` on top (`enter.cover`). Fast mode, a headless app and the first scene of a run show nothing.
  *
  * @example
  * ```ts
@@ -191,6 +206,24 @@ export type SceneLoader<Asset extends string = string> = {
 export type SceneLeave<Asset extends string = string> =
   | { cover?: SceneCover | false; loader?: SceneLoader<Asset> | false }
   | false;
+
+/**
+ * What a live switch to this scene shows over the scene being left: the veil takes this scene's `color` and `alpha`,
+ * each over what the scene being left resolved (its `leave` over `config.leave` over the engine's). Only the look of
+ * the veil: `inMs` and `outMs` stay the left scene's, and a veil the scene being left turned off (`cover: false`)
+ * stays off, as `enter` never turns one on. Absent: the scene being left decides alone.
+ *
+ * @example
+ * ```ts
+ * // Every way into the night scene dims the scene being left in navy at 70 %: ward → night shows the veil
+ * // { color: 0x0b1020, alpha: 0.7, inMs: 50, outMs: 150 } over a ward that leaves with the engine's.
+ * const enter: SceneEnter = { cover: { color: 0x0b1020, alpha: 0.7 } };
+ * ```
+ */
+export type SceneEnter = {
+  /** The `color` and the `alpha` of the veil of a switch to this scene. */
+  cover?: Pick<SceneCover, "color" | "alpha">;
+};
 
 /**
  * What the author passes to `defineScene`. The layer names come from the keys of `layers` plus
@@ -233,6 +266,8 @@ export type SceneSpec<
   music?: Asset;
   /** What a live switch shows over this scene when it is left: merged field by field over `config.leave`. */
   leave?: SceneLeave<Asset>;
+  /** What a live switch to this scene shows: the `color` and `alpha` of the veil over the scene being left. */
+  enter?: SceneEnter;
 };
 
 /**
@@ -282,6 +317,8 @@ export type SceneDefinition = {
   bundles?(state: SceneState): readonly string[];
   /** What `defineScene` was given as `leave`; absent when the scene takes the config's. */
   readonly leave?: SceneLeave;
+  /** What `defineScene` was given as `enter`; absent when the scene being left decides the veil alone. */
+  readonly enter?: SceneEnter;
 };
 
 /**
@@ -335,7 +372,7 @@ export type Config = {
   /**
    * What a live switch shows over the scene being left, for every scene; a scene's own `leave` is merged over it field
    * by field. A field left out keeps the engine's default, `{ cover: { color: 0x000000, alpha: 0.45, inMs: 50,
-   * outMs: 150 }, loader: { afterMs: 400 } }`; `false` turns a part or the whole off.
+   * outMs: 150 }, loader: { afterMs: 400 } }`, which holds no swap (no `holdMs`); `false` turns a part or the whole off.
    *
    * @example
    * ```ts
@@ -343,6 +380,11 @@ export type Config = {
    * createApp({
    *   plugins: [...screen, boardFeature],
    *   pluginConfigs: { scenes: { leave: { cover: { alpha: 0.6 }, loader: { afterMs: 300, texture: "ui.loader.ring" } } } }
+   * });
+   * // A circle that opens over 260 ms from the first drawn frame, however fast the next scene comes.
+   * createApp({
+   *   plugins: [...screen, boardFeature],
+   *   pluginConfigs: { scenes: { leave: { loader: { afterMs: 0, holdMs: 260, projection: "opening" } } } }
    * });
    * // No veil and no loader on any switch.
    * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { leave: false } } });
@@ -414,6 +456,43 @@ export type State = {
    * one. Absent otherwise: deleted, never written as `undefined`.
    */
   leaving?: Leaving;
+  /**
+   * The leave loader projection scenes holds for the next switch of the scene that stands (F103): `world` keeps it
+   * built and hidden, and the loader's `due` only shows it. Absent while it holds none: deleted, never written as
+   * `undefined`.
+   */
+  held?: HeldLoader;
+  /**
+   * The loader projection the last switch showed, fading out with the veil after its swap (F107 part 3), until the
+   * veil's `outMs` passed. Absent otherwise: deleted, never written as `undefined`.
+   */
+  fading?: FadingLoader;
+};
+
+/**
+ * A leave loader projection scenes holds while a scene stands (F103): its name and the layer its spec names, which the
+ * renderer draws above the veil once the loader is due.
+ */
+export type HeldLoader = {
+  /** The projection. */
+  name: string;
+  /** The `layer` of its spec: the view a `show` brings has no `Layer` before the next frame's reconcile. */
+  layer: string;
+};
+
+/**
+ * A loader projection fading out with the veil after the swap of its switch (F107 part 3): unmounted once the veil's
+ * `outMs` passed, or held again for the next switch when the scene that stands leaves with the same loader.
+ */
+export type FadingLoader = {
+  /** The projection. */
+  name: string;
+  /** Milliseconds of the fade still to run, counted down by the frames since the swap. */
+  leftMs: number;
+  /** The loader the scene that stands holds once the fade is over: this projection again. Absent: it is unmounted. */
+  rehold?: HeldLoader;
+  /** Removes the frame callback of the fade. */
+  off: () => void;
 };
 
 /**
@@ -434,11 +513,67 @@ export type Leaving = {
   to: string;
   /** Landed or dropped: a second end does nothing. */
   done: boolean;
-  /** The loader projection the switch mounted, unmounted at the end; absent while it mounted none. */
+  /**
+   * The loader projection the switch mounted or showed once its loader was due: unmounted at once at a drop, faded out
+   * with the veil after a land. Absent while it mounted and showed none.
+   */
   projection?: string;
+  /** Milliseconds the veil fades out over after the swap, 0 without a veil: a loader shown goes with it. */
+  outMs: number;
+  /**
+   * The floor on the swap (F130), for a loader that is on with `holdMs` above 0: the clock moment the swap may happen at,
+   * and the frame counter at the look's start. Absent: no floor. `state.leaving` is always the running switch's look
+   * (`dropLeftOver` and `leaveFor` keep it so), which is why the build reads it there.
+   */
+  hold?: { until: number; frame: number };
+  /**
+   * The loader projection the switch feeds its `SceneSwitch` (F107 part 1), from its start to its swap or drop. Absent
+   * when it feeds none: a ring, a texture, a loader turned off, or a projection another owner shows.
+   */
+  feeding?: LoaderFeed;
   /** Removes the abort listener of the switch's node. */
   off: () => void;
 };
+
+/**
+ * One bundle of a switch and how much of it is loaded, in thousandths: 1000 once it is loaded.
+ */
+export type BundleShare = {
+  /** The bundle. */
+  readonly bundle: string;
+  /** The share of its files settled, in thousandths: 0 to 1000. */
+  share: number;
+};
+
+/**
+ * What a switch feeds its loader projection (F107 part 1): the name, both scenes, the table of its bundles made at the
+ * start, the progress last fed and the one `feed` call of the switch. The hook of `assets:bundle-progress` and the
+ * scene stage, once its loads are in, write the table and feed a new `SceneSwitch` only once the progress grew by 0.01
+ * or reached 1.
+ */
+export type LoaderFeed = {
+  /** The loader projection. */
+  readonly name: string;
+  /** The scene being left: `from` of every switch fed. */
+  readonly from: string;
+  /** The scene being switched to: `to` of every switch fed. */
+  readonly to: string;
+  /** The bundles the scene being switched to names, one row each, in the order it names them. */
+  readonly bundles: readonly BundleShare[];
+  /** The progress last fed, in thousandths: the mean of the shares, floored; 1000 with no bundle. */
+  fed: number;
+  /**
+   * Feeds the loader a switch: `world.projection.feed` bound to the name, made once per switch.
+   *
+   * @param sw - The switch, a new object for each new value.
+   */
+  readonly feed: (sw: SceneSwitch) => void;
+};
+
+/**
+ * The payload of the `assets:bundle-progress` hook: one more file of a running load settled.
+ */
+export type BundleProgress = AssetsEvents["assets:bundle-progress"];
 
 /**
  * A veil with every field: what a level of `leave` resolves to.
@@ -446,9 +581,15 @@ export type Leaving = {
 export type FullCover = Required<SceneCover>;
 
 /**
- * A loader with its delay and at most one look: what a level of `leave` resolves to.
+ * A loader with its delay, at most one look and its floor on the swap, absent for no floor: what a level of `leave`
+ * resolves to.
  */
-export type FullLoader = { afterMs: number; texture?: string; projection?: string };
+export type FullLoader = {
+  afterMs: number;
+  holdMs?: number;
+  texture?: string;
+  projection?: string;
+};
 
 /**
  * What a switch shows over the scene being left, every level merged: each part resolved or off.
@@ -528,6 +669,8 @@ export type Deps = {
   world: WorldApi;
   assets: AssetsApi;
   time: TimeApi;
+  /** The clock of the look, which a floor on the swap is counted on. */
+  clock: ClockApi;
   model: ModelApi;
   /**
    * Whether the renderer draws, which chooses the path of a switch, and the performance log of

@@ -3,20 +3,22 @@
  * names with `bundles`, layers, projections, music. The switch runs inside
  * `flow.onEnter("scene")` and mounts a scene once all its bundles are in; a live switch with a
  * drawing renderer builds it aside under `buildMs` a frame and swaps it in one frame, with a veil and
- * a loader over the scene being left from `flow.onEnter("begin")`, before any download (`leave`).
- * Emits `scenes:changed`.
+ * a loader over the scene being left from `flow.onEnter("begin")`, before any download (`leave`); a loader
+ * projection is fed the switch and the progress of its bundles (`assets:bundle-progress`). Emits `scenes:changed`.
  *
  * @see README.md
  */
 import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { assetsPlugin } from "../assets";
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createScenesApi } from "./api";
+import { createHandlers } from "./handlers";
 import { checkConfig, startScenes, stopScenes } from "./lifecycle";
 import { createScenesState } from "./state";
 import type { Config, Events } from "./types";
@@ -63,12 +65,21 @@ const defaultConfig: Config = {
  * ```
  */
 export const scenesPlugin = /*#__PURE__*/ createPlugin("scenes", {
-  depends: [flowPlugin, worldPlugin, assetsPlugin, timePlugin, modelPlugin, rendererPlugin],
+  depends: [
+    flowPlugin,
+    worldPlugin,
+    assetsPlugin,
+    timePlugin,
+    clockPlugin,
+    modelPlugin,
+    rendererPlugin
+  ],
   config: defaultConfig,
   events: (register: RegisterFunction) =>
     register.map<Events>({ "scenes:changed": "The mounted scene changed" }),
   createState: createScenesState,
   api: createScenesApi,
+  hooks: createHandlers,
   onInit: ({ config }) => checkConfig(config),
   onStart: startScenes,
   // @no-resource-check — onStop removes the onEnter callback; world.onStop clears the entities.

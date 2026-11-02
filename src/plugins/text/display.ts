@@ -5,7 +5,7 @@
  */
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiSprite, PixiTexture } from "../renderer/types";
-import { fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
+import { fontLineOf, fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
 import { drawsWith, layoutFor, markDirty, styleOf, warnFor, warnOnce } from "./resolve";
 import type {
   DrawnLabel,
@@ -540,7 +540,8 @@ function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
 
 /**
  * Calls `visit` with every run of a laid-out block and where it starts, anchored by the
- * component, line after line.
+ * component, line after line. A run of glyphs starts half the leading lower, so the glyphs sit in
+ * the middle of a line taller or shorter than the font's; an icon starts on the line it fills.
  *
  * @param ctx - Domain context of the text plugin.
  * @param label - The style and the laid-out block.
@@ -555,15 +556,17 @@ function eachRun(
 ): void {
   const { style, layout } = label;
   const height = lineHeightOf(style, ctx.state.tables);
+  const leading = (height - fontLineOf(style, ctx.state.tables)) / 2;
   const options = { warn: warnFor(ctx) };
   const left = -anchor.x * layout.width;
   let y = -anchor.y * layout.height;
 
+  // Lines top to bottom, runs left to right; a glyph run sits half the leading lower.
   for (const line of layout.lines) {
     let x = left + alignOffset(style, layout, line);
 
     for (const run of line.runs) {
-      visit(run, { x, y });
+      visit(run, { x, y: run.kind === "text" ? y + leading : y });
       x += measureRun(run, style, ctx.state.tables, options);
     }
 

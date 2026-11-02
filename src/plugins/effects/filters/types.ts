@@ -6,10 +6,13 @@ import type {
   FilterCache,
   FilterSlot,
   FilterSlotInputs,
+  FilterSlotQuad,
   PixiFilter,
+  PixiGpuProgram,
   PixiModule,
   PixiSprite,
-  PixiTexture
+  PixiTexture,
+  PixiUniformGroup
 } from "../../renderer/types";
 import type { ComponentHandle, ComponentType, Entity } from "../../world/types";
 
@@ -189,6 +192,11 @@ export type FilterDefinition = {
   readonly source: string;
   /** The assembled GLSL ES 3.0: the engine's header, one `uniform` per uniform, the inputs, the body. */
   readonly glsl: string;
+  /**
+   * The quad program: the same body on a mesh, in the pass that draws the canvas (renderer README, "Kept pictures").
+   * `undefined` for a definition with inputs, a backdrop, or a body the rewrite does not fit.
+   */
+  readonly quadSource: string | undefined;
   readonly uniforms: readonly UniformSpec[];
   readonly passes: number;
   readonly padding: number | string;
@@ -514,7 +522,7 @@ export type UniformValues = Record<string, number | Float32Array>;
 /**
  * The uniform group of one of our filter instances, as the instance writes it.
  */
-export type FilterUniforms = { readonly uniforms: UniformValues };
+export type FilterUniforms = PixiUniformGroup & { readonly uniforms: UniformValues };
 
 /**
  * The Pixi object of one kind on one view, with the passes one apply of it costs now: what the
@@ -536,6 +544,8 @@ export type FilterBody =
       readonly area: AreaBox;
       /** The value changed since the area was last asked: the next sync asks the definition again. */
       areaStale: boolean;
+      /** What the slot hands over for the quad, made once: the renderer compares it by identity. */
+      quad: FilterSlotQuad | undefined;
     }
   | {
       readonly kind: "blur";
@@ -592,9 +602,14 @@ export type FilterBody =
     };
 
 /**
- * A probe of the warm-up (spec 27 F4): the Pixi filter handed to `renderer.sync.filters.warm`, and its teardown.
+ * A probe of the warm-up (spec 27 F4): the Pixi filter handed to `renderer.sync.filters.warm`, the quad of a kind whose
+ * body can run on one, and its teardown.
  */
-export type WarmProbe = { readonly filter: PixiFilter; destroy(): void };
+export type WarmProbe = {
+  readonly filter: PixiFilter;
+  readonly quad: FilterSlotQuad | undefined;
+  destroy(): void;
+};
 
 /**
  * A filter area as the filter sync keeps it, written in place: the four numbers, and whether there is one.
@@ -683,6 +698,10 @@ export type CheckState = {
   started: boolean;
   /** Where each definition stands. */
   status: WeakMap<FilterDefinition, "pending" | "ok" | "broken">;
+  /** The definitions whose quad text compiled clean on this run's device: only they hand a quad over. */
+  quads: WeakSet<FilterDefinition>;
+  /** The program of each of them, built at the first ask: `GpuProgram.from` keys the whole source on every call. */
+  programs: WeakMap<FilterDefinition, PixiGpuProgram>;
   /** Definitions still pending. */
   waiting: number;
   /** Definitions started, for the `effects:checks` line. */

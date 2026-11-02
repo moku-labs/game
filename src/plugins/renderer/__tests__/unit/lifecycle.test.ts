@@ -130,6 +130,7 @@ describe("renderer lifecycle", () => {
 
     dom.mount.clientWidth = 1920;
     dom.mount.clientHeight = 1080;
+    dom.mount.rect = { left: 0, top: 0, width: dom.mount.clientWidth, height: 1080 };
     dom.observers[0]?.fire();
     mock.runPhase("render");
 
@@ -182,6 +183,7 @@ describe("renderer lifecycle", () => {
     mock.ctx.state.sync.root = undefined;
     dom.mount.clientWidth = 900;
     dom.mount.clientHeight = 1600;
+    dom.mount.rect = { left: 0, top: 0, width: dom.mount.clientWidth, height: 1600 };
     dom.observers[0]?.fire();
     mock.runPhase("render");
 

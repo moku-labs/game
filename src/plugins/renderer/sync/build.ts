@@ -17,8 +17,11 @@ import { parentOf } from "./pose";
 import type { AsideQueue, SyncCtx, SyncState } from "./types";
 import { attach, createView } from "./views";
 
-/** Views made between two reads of the clock: a read costs more than a small view. */
-const CLOCK_EVERY = 8;
+/**
+ * Views made between two reads of the clock. Eight views of a shop (text, nine-slices, filters) took 4–6 ms on a Galaxy
+ * A26, past a warm window's whole budget; two keep a chunk under a millisecond or so (F61).
+ */
+const CLOCK_EVERY = 2;
 
 /**
  * Tells whether a scene or a warm window is being built: `left()` answers a finite number only while a build runs
@@ -246,7 +249,7 @@ export function stepAside(sctx: SyncCtx, report: (entity: Entity, error: unknown
 /**
  * Tells whether held views may wait for the pass that attaches them: world's membership version moved since the list
  * was last scanned. A build ends only with such a move (a commit, a discard, the open of a warm window, a held view
- * dropped), so a list whose version stands holds building views only. Read by `still()`: two field reads.
+ * dropped), so a list whose version stands holds building views only. Read by `still()`, and by the HUD-part check of the overlay step, which judges no part in such a frame: two field reads.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when the pass has held views to look at again.

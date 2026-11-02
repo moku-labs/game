@@ -7,7 +7,7 @@
  */
 import type { Entity } from "../../world/types";
 import { BYTES_PER_MB, roundTo } from "../monitor/units";
-import type { FilterSlot, SyncWriters, View } from "../sync/types";
+import type { FilterSlot, SyncWriters, View, WhyEntry } from "../sync/types";
 import type {
   DemandModule,
   HostModule,
@@ -18,11 +18,31 @@ import type {
 } from "../types";
 import { flushRanges, moveRange, releaseRange, retakeRange, spriteOf, takeRange } from "./freeze";
 import { drawnThrough, NOT_THROUGH, slotsPadding } from "./readers";
-import { bypassRecord, createRecord, dropRecord, goLive, stepCalm, stepRecord } from "./record";
-import { canKeep, dropTexture, matricesOf } from "./render";
+import {
+  bypassRecord,
+  createRecord,
+  dropRecord,
+  goLive,
+  markAlphaDue,
+  stepCalm,
+  stepRecord
+} from "./record";
+import { canKeep, dropTexture, emptyPool, matricesOf } from "./render";
+import { dropQuadParts } from "./shade";
 import { destroyRange } from "./state";
-import type { KeptCtx, KeptMatrices, KeptRange, KeptRecord, KeptStats } from "./types";
+import {
+  type KeptCtx,
+  type KeptMatrices,
+  type KeptRange,
+  type KeptRecord,
+  type KeptStats,
+  WHY
+} from "./types";
 import { drawLive, verifyPictures } from "./verify";
+import { whyReport } from "./why";
+
+/** What `why()` answers in every build but an agent build. */
+const NO_WHY: readonly WhyEntry[] = Object.freeze([]);
 
 /**
  * The category a slot list lets the cache keep it under: the worst of its slots, `undefined` for an empty list, a
@@ -77,6 +97,17 @@ function renew(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): boolean {
     createRecord(kctx, pixi, record.entity, view, record.slots, record.category);
 
   return true;
+}
+
+/**
+ * Notes a change of a record's subtree, and who marked it.
+ *
+ * @param record - The record.
+ * @param entity - The marked entity.
+ */
+function changed(record: KeptRecord, entity: Entity): void {
+  record.dirtyS1 = true;
+  record.markBy = entity;
 }
 
 /**
@@ -220,18 +251,18 @@ export function createKeptApi(
     if (own !== undefined) {
       const demand = deps.demand;
 
-      if (demand.visual().has(entity) || demand.loose().has(entity)) own.dirtyS1 = true;
+      if (demand.visual().has(entity) || demand.loose().has(entity)) changed(own, entity);
 
       if (demand.published().has(entity)) {
         own.dirtyS3 = true;
-        if (view.kind === "Display" || view.kind === "adapter") own.dirtyS1 = true;
+        if (view.kind === "Display" || view.kind === "adapter") changed(own, entity);
       }
     }
 
     for (let node = top.parent; node !== null; node = node.parent) {
       const above = state.byTop.get(node);
 
-      if (above !== undefined) above.dirtyS1 = true;
+      if (above !== undefined) changed(above, entity);
     }
   };
 
@@ -311,11 +342,22 @@ export function createKeptApi(
 
       if (state.on) {
         sortRecords();
+        // The first and the limited takes of this flush start over, the alphas due are marked, then every record steps
+        // (F114, P4.3).
+        state.firstTakes = 0;
+        state.frameRefines = 0;
+        markAlphaDue(kctx, pixi);
         stepRecords(kctx, pixi, matrices);
         // A flush that no collect went before steps every record.
         state.calm = false;
       } else {
-        for (const record of state.records) if (record.mode === "kept") live(record);
+        // No step runs while the switch is off: this is the one place that says so.
+        for (const record of state.records) {
+          if (record.mode === "kept") live(record);
+
+          record.why = WHY.off;
+          record.calmIn = 0;
+        }
       }
 
       flushRanges(kctx);
@@ -358,14 +400,31 @@ export function createKeptApi(
     stats: (): KeptStats => ({
       pictures: state.drawnPictures,
       mb: roundTo(state.bytes / BYTES_PER_MB, 2),
-      retakes: state.takesWindow
+      retakes: state.takesWindow,
+      evicted: state.evictedWindow,
+      refused: state.refusedWindow
     }),
+
+    why: (): readonly WhyEntry[] => {
+      // Inline and positive: a production `define` folds the guard, and `why.ts` leaves the bundle.
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) return whyReport(kctx);
+
+      return NO_WHY;
+    },
 
     drainTakes: (): number => {
       const takes = state.takesOpen;
 
       state.takesWindow = takes;
       state.takesOpen = 0;
+      state.evictedWindow = state.frameEvicted;
+      state.frameEvicted = 0;
+      state.refusedWindow = state.frameRefused;
+      state.frameRefused = 0;
+      // The frames of the window that closes: a take among them is `why()`'s last take.
+      state.windowStart = state.windowNext;
+      state.windowEnd = state.frame;
+      state.windowNext = state.frame + 1;
 
       return takes;
     },
@@ -419,7 +478,10 @@ export function createKeptApi(
         state.spare = undefined;
       }
 
+      emptyPool(kctx);
+      dropQuadParts(state);
       state.bytes = 0;
+      state.poolBytes = 0;
       state.drawnPictures = 0;
     }
   };

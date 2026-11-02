@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { currentLabelFixture, resolveFixture } from "./fixtures";
+import { currentLabelFixture, namedFixture, resolveFixture } from "./fixtures";
 
 // X1: one call is one frame of the text system over 100 labels (80 plain, 20 bound), the world
 // walk included, then the clear of phase `signals`.
@@ -68,5 +68,27 @@ describe("text resolve: heap per frame", () => {
 
     await annotate(`text adapter, box label written again as it is: ${bytes} B a call`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.textAdapterCurrent + NOISE_BYTES);
+  }, 60_000);
+
+  // F135: a label whose format a feature registered costs what a built-in label costs.
+  it("an idle frame over 20 labels of a named format stays within budget", async ({ annotate }) => {
+    const bytes = alloc(namedFixture("nothing"), CALLS);
+
+    await annotate(`text resolve, idle, 20 named: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textNamedStanding + NOISE_BYTES);
+  }, 60_000);
+
+  it("a step whose answer stands stays within budget", async ({ annotate }) => {
+    const bytes = alloc(namedFixture("same"), CALLS);
+
+    await annotate(`text resolve, one named step, same answer: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textNamedSameAnswer + NOISE_BYTES);
+  }, 60_000);
+
+  it("a step that changes the text stays within budget", async ({ annotate }) => {
+    const bytes = alloc(namedFixture("text"), CALLS);
+
+    await annotate(`text resolve, one named step, new text: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textNamedChanged + NOISE_BYTES);
   }, 60_000);
 });

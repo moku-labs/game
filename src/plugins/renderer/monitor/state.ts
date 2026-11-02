@@ -326,6 +326,7 @@ export function createMonitorState(config: Readonly<MonitorConfig>): MonitorStat
         ? createPerfState(config, sinks)
         : undefined,
     passes: { last: 0, open: 0, max: 0 },
+    canvas: { last: 0, open: 0, max: 0 },
     passDetach: []
   };
 }

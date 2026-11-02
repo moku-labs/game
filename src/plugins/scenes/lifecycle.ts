@@ -4,6 +4,7 @@
  * teardown that removes exactly those registrations.
  */
 import { assetsPlugin } from "../assets";
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
@@ -13,15 +14,16 @@ import { dropBuild, isPositiveFinite } from "./build";
 import { isSceneDefinition } from "./bundles";
 import { forgetLeave } from "./leave";
 import { checkLeave } from "./leave-check";
+import { forgetLoader } from "./loader";
 import { beginScene, enterScene } from "./switch";
 import type { Config, Deps, KernelSlice, ScenesCtx, State } from "./types";
 
 /**
- * Resolves the dependency APIs `flow`, `world`, `assets`, `time`, `model` and `renderer` with
- * `ctx.require`.
+ * Resolves the dependency APIs `flow`, `world`, `assets`, `time`, `clock`, `model` and `renderer`
+ * with `ctx.require`.
  *
  * @param ctx - Kernel context of the scenes plugin.
- * @returns The six dependency APIs.
+ * @returns The seven dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
@@ -29,6 +31,7 @@ export function resolveDeps(ctx: KernelSlice): Deps {
     world: ctx.require(worldPlugin),
     assets: ctx.require(assetsPlugin),
     time: ctx.require(timePlugin),
+    clock: ctx.require(clockPlugin),
     model: ctx.require(modelPlugin),
     renderer: ctx.require(rendererPlugin)
   };
@@ -116,11 +119,6 @@ export function checkConfig(config: Readonly<Config>): void {
  *
  * @param ctx - Kernel context of the scenes plugin.
  * @throws {Error} When two features declare the same scene id.
- * @example
- * ```ts
- * startScenes(ctx);
- * ctx.state.scenes.get("board")?.bundle; // "board", read out of the feature description
- * ```
  */
 export function startScenes(ctx: KernelSlice): void {
   const scenes = withDeps(ctx);
@@ -140,17 +138,13 @@ export function startScenes(ctx: KernelSlice): void {
 /**
  * Removes the two `onEnter` callbacks in `onStop` and forgets every scene and the bundles the mounted
  * one named. A running build loses its frame callback and its switch returns; the look of a running
- * switch loses its abort listener (the renderer drops it at its own stop). Nothing is unmounted
- * or discarded: a teardown context may not call another plugin, and `world.onStop` clears every
- * entity and the build table anyway.
+ * switch loses its abort listener (the renderer drops it at its own stop), a loader fading out its
+ * frame callback, and the held loader is forgotten. Nothing is unmounted or discarded: a teardown
+ * context may not call another plugin, and `world.onStop` clears every entity and the build table
+ * anyway.
  *
  * @param teardown - What the teardown context carries.
  * @param teardown.state - The plugin state.
- * @example
- * ```ts
- * stopScenes({ state });
- * state.scenes.size; // 0, and the runner calls this plugin no more
- * ```
  */
 export function stopScenes(teardown: { state: State }): void {
   const state = teardown.state;
@@ -160,6 +154,7 @@ export function stopScenes(teardown: { state: State }): void {
   dropBuild(state.build);
   delete state.build;
   forgetLeave(state);
+  forgetLoader(state);
   state.scenes.clear();
   state.current = undefined;
   state.pending = undefined;

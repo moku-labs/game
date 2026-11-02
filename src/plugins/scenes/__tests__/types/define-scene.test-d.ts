@@ -141,6 +141,31 @@ createApp({
 // @ts-expect-error — `leave` is an object or `false`, never `true`.
 createApp({ plugins: [...screen], pluginConfigs: { scenes: { leave: true } } });
 
+// ─── enter: the veil's colour and alpha of the scene being entered ──
+
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  enter: { cover: { color: 0x0b_10_20, alpha: 0.7 } }
+});
+
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  // @ts-expect-error — the times of the veil stay the left scene's: `enter.cover` takes no `inMs`.
+  enter: { cover: { inMs: 80 } }
+});
+
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  // @ts-expect-error — `enter.cover` is an object of fields; `enter` never turns a veil off.
+  enter: { cover: false }
+});
+
 // ─── music is narrowed to the audio keys of the game ──────────
 
 /** What the scanner generates for the `.mp3` files of that game; the textures stay out. */

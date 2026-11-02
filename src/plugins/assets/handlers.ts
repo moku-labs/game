@@ -52,7 +52,10 @@ export function createHandlers(
       const live = assets.deps.flow.state().mode !== "fast";
 
       // The release waits for the arriving node's load stage: its bundles are not pinned yet.
-      if (live) assets.state.restPending = true;
+      if (live) {
+        assets.state.restPending = true;
+        assets.state.restedLive = true;
+      }
       enforceBudget(assets);
 
       if (!live) return;

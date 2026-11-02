@@ -435,7 +435,9 @@ function ownsAlpha(view: View): boolean {
  * Writes the alpha of a built-in visual. It fades the entity's whole subtree: on a view with a
  * wrapper it goes on the wrapper, over the visual and the children, and the visual inside stays
  * at 1, so the alpha is applied once. A view without a wrapper keeps it on its object. Only a
- * value that differs from what Pixi holds is written, and the entity is marked before. A view
+ * value that differs from what Pixi holds is written, and the entity is marked before, as a move
+ * of its top (F120): a kept picture of the view is taken without its top's alpha, and its quad
+ * draws it at that alpha, as a move draws it at another place. A view
  * drawn at alpha 0, its HUD factor counted, is not drawn at all (spec 26 B9): it leaves Pixi's
  * build, its bounds and the passes of its filters, with its subtree.
  *
@@ -451,7 +453,7 @@ function applyAlpha(sctx: SyncCtx, entity: Entity, view: View, look: Readonly<Fa
   const drawn = look.alpha * view.hud;
 
   if (target.alpha !== drawn) {
-    markView(sctx, entity);
+    markMoved(sctx, entity);
     target.alpha = drawn;
   }
 

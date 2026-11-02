@@ -115,7 +115,8 @@ export default defineConfig({
           name: "integration",
           include: [
             "tests/integration/**/*.test.{ts,tsx}",
-            "src/plugins/**/__tests__/integration/**/*.test.{ts,tsx}"
+            "src/plugins/**/__tests__/integration/**/*.test.{ts,tsx}",
+            "bench/filters/__tests__/**/*.test.ts"
           ]
         }
       },

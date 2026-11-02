@@ -4,7 +4,7 @@ import { createJsxState } from "../../jsx/state";
 import { readTree } from "../../jsx/tree";
 import type { Element } from "../../jsx/types";
 import { layoutChanged } from "../../layout/apply";
-import { dimRects, readTarget } from "../../layout/guide";
+import { readTarget } from "../../layout/guide";
 import { clampToMode, contentOf, needsMeasure } from "../../layout/measure";
 import { restTransform } from "../../layout/motion";
 import { readPayload } from "../../layout/popup";
@@ -166,17 +166,5 @@ describe("the pure payload readers", () => {
   it("reads the target of a guide descriptor", () => {
     expect(readTarget({ target: { projection: "hud", key: "play" } })?.key).toBe("play");
     expect(readTarget({ allow: { intent: "ok" } })).toBeUndefined();
-  });
-
-  it("cuts four rectangles around a hole and one without a target", () => {
-    const screen = { x: 0, y: 0, w: 100, h: 100 };
-
-    expect(dimRects(screen, undefined)).toEqual([screen]);
-    expect(dimRects(screen, { x: 40, y: 40, w: 20, h: 20 })).toEqual([
-      { x: 0, y: 0, w: 100, h: 40 },
-      { x: 0, y: 60, w: 100, h: 40 },
-      { x: 0, y: 40, w: 40, h: 20 },
-      { x: 60, y: 40, w: 40, h: 20 }
-    ]);
   });
 });

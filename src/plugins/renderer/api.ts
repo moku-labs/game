@@ -1,7 +1,7 @@
 /**
  * @file renderer plugin — API factory. The one place that builds `host`, `viewport`, `demand`,
- * `kept`, `sync` and `monitor` in the accepted injection order, and the one place that reduces
- * them to their public half.
+ * `kept`, `sync`, `shots` and `monitor` in the accepted injection order, and the one place that
+ * reduces them to their public half.
  */
 import { createDemandApi } from "./demand/api";
 import { createHostApi } from "./host/api";
@@ -11,6 +11,7 @@ import { createKeptApi } from "./kept/api";
 import { resolveDeps } from "./lifecycle";
 import { createMonitorApi } from "./monitor/api";
 import { installCounting, installPassCounting } from "./monitor/draw-calls";
+import { createShotsApi } from "./shots/api";
 import { createSyncApi } from "./sync/api";
 import { applyFilters, clearFilters, renderPassesOf } from "./sync/filters";
 import { hiddenBy, hiddenOnlyAmong, liftFor, swapHidden, transparentNode } from "./sync/hidden";
@@ -51,7 +52,7 @@ const syncWriters: SyncWriters = {
 };
 
 /**
- * Builds the six modules in the accepted order `host → viewport → demand → kept → sync → monitor`.
+ * Builds the seven modules in the accepted order `host → viewport → demand → kept → sync → shots → monitor`.
  * Each keeps its data in its branch of `ctx.state`, so these objects are views on the plugin
  * state, not owners of it. `host` gets the counting of `monitor` up front, because it installs
  * the classes before `monitor` exists (the six of a dev or debug build, the pass counter of the
@@ -59,11 +60,12 @@ const syncWriters: SyncWriters = {
  * keep their identity; `kept` reads the views of `sync` the same way, and gives a bare view its
  * wrapper through `sync.wrapForPicture` (spec 23 D4), reached through a holder filled once `sync`
  * exists; `sync` marks every write in
- * `demand` and asks `kept` where a view's filters hang; `monitor` gets the others, since a legend
+ * `demand` and asks `kept` where a view's filters hang; `shots` provides its textures through `sync`,
+ * which reads its waiting keys through the state alone; `monitor` gets the others, since a legend
  * places views on the picture and the performance log reads all of them.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @returns The six modules with their public and internal methods.
+ * @returns The seven modules with their public and internal methods.
  */
 export function createModules(ctx: RendererCtx): Modules {
   const host = createHostApi(ctx, {
@@ -88,9 +90,10 @@ export function createModules(ctx: RendererCtx): Modules {
   const sync = createSyncApi(ctx, { host, viewport, demand, kept });
 
   built.sync = sync;
+  const shots = createShotsApi(ctx, { host, viewport, demand, sync });
   const monitor = createMonitorApi(ctx, { host, viewport, sync, demand, kept });
 
-  return { host, viewport, demand, kept, sync, monitor };
+  return { host, viewport, demand, kept, sync, shots, monitor };
 }
 
 /**
@@ -138,7 +141,7 @@ function exposeSync(sync: SyncModule): SyncApi {
 }
 
 /**
- * Creates the renderer API: `app.renderer.host`, `.viewport`, `.sync` and `.monitor`, and
+ * Creates the renderer API: `app.renderer.host`, `.viewport`, `.sync`, `.shots` and `.monitor`, and
  * `stats()` and `capture()` of `monitor` on the plugin itself.
  *
  * @param ctx - Kernel context of the renderer plugin.
@@ -146,7 +149,7 @@ function exposeSync(sync: SyncModule): SyncApi {
  */
 export function createRendererApi(ctx: KernelSlice): Api {
   const rendererCtx: RendererCtx = { ...ctx, deps: resolveDeps(ctx) };
-  const { host, viewport, demand, sync, monitor } = createModules(rendererCtx);
+  const { host, viewport, demand, sync, shots, monitor } = createModules(rendererCtx);
   const publicViewport: ViewportApi = {
     toReference: viewport.toReference,
     toScreen: viewport.toScreen,
@@ -168,6 +171,7 @@ export function createRendererApi(ctx: KernelSlice): Api {
       sections: monitor.sections,
       counts: monitor.counts
     },
+    shots: { take: shots.take, has: shots.has },
     invalidate: demand.invalidate,
     stats: monitor.stats,
     capture: monitor.capture

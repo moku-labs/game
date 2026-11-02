@@ -32,7 +32,7 @@ Use `bun` exclusively — never npm, yarn, or pnpm.
 ## Packaging
 
 - ESM only. No CJS output. `"sideEffects"` lists the root entry only: under `false` Bun's dev server sends the root again with every hot update and reloads the page.
-- `pixi.js` v8 is a peer dependency. Rendering is WebGPU only.
+- `pixi.js` v8 is a peer dependency. WebGPU is the main path; Pixi falls back to WebGL by itself, and WebGL has no measurements. Minimum iOS 26.
 - Everything a game imports comes from the root `@moku-labs/game`.
 
 ## Architecture

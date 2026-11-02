@@ -1,54 +1,17 @@
 /**
- * @file ui/jsx — the extras of the `components` prop in motion: the patch a live element writes
- * into a component it carries, the rest pose recorded for every extra so its `change` hook can
+ * @file ui/jsx — the extras of the `components` prop in motion: the rest pose recorded for every extra so its `change` hook can
  * bring it home with `view.toRest`, and the motion of that hook, cancelled when its extra leaves.
  */
 import type { AnyComponentValue, ComponentType } from "../../world/types";
 import type { UiCtx } from "../types";
+import { fieldsLeftAlone, restValueOf } from "../visual";
 import type { Element } from "./types";
 
 /**
- * The patch a live element writes into one of its components: every field but the ones the
- * component type gives to a plugin. That plugin keeps such a field for the life of the entity, so
- * a re-render never puts it back to its default: a label keeps the string `text` resolved for it.
- *
- * @param value - The component value the element carries now.
- * @param owned - The fields the component type gives to a plugin.
- * @returns The fields to write.
- * @example
- * ```ts
- * livePatch({ content: "Play", resolved: "" }, ["resolved"]); // { content: "Play" }
- * ```
- */
-export function livePatch(value: object, owned: readonly string[]): object {
-  if (owned.length === 0) return value;
-
-  return Object.fromEntries(Object.entries(value).filter(([field]) => !owned.includes(field)));
-}
-
-/**
- * The rest pose recorded for an extra component: the value of this render, but the fields the
- * component type gives to a plugin stay as the entity carries them, so a render never resets them.
- *
- * @param current - The value the entity carries now; none before the component is added.
- * @param value - The value of this render.
- * @param owned - The fields the component type gives to a plugin.
- * @returns The rest value.
- * @example
- * ```ts
- * restValueOf({ until: 2000, left: 42 }, { until: 5000, left: 0 }, ["left"]); // { until: 5000, left: 42 }
- * ```
- */
-function restValueOf(current: object | undefined, value: object, owned: readonly string[]): object {
-  if (current === undefined || owned.length === 0) return value;
-
-  return { ...current, ...livePatch(value, owned) };
-}
-
-/**
  * Records the rest pose of one extra component with a value, so a `change` hook can bring it
- * home with `view.toRest`; a tag has no rest. The fields the type gives to a plugin are skipped.
- * The visual of a live element is recorded the same way each time its look is written.
+ * home with `view.toRest`; a tag has no rest. The fields the type gives to a plugin, and the size
+ * a game's own system gives a self-sized image (F111), stay as the entity carries them. The
+ * visual of a live element is recorded the same way each time its look is written or it moves.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element that carries the component.
@@ -59,7 +22,10 @@ export function recordRest(ctx: UiCtx, element: Element, value: AnyComponentValu
 
   // A value that is not `true` belongs to a component type, never to a tag.
   const type = value.type as ComponentType<object>;
-  const rest = restValueOf(ctx.deps.world.ecs.get(element.entity, type), value.value, type.owned);
+  const owned = fieldsLeftAlone(element, type, type.owned);
+  // The entity is read only when a field stays as it carries it.
+  const current = owned.length === 0 ? undefined : ctx.deps.world.ecs.get(element.entity, type);
+  const rest = restValueOf(current, value.value, owned);
 
   ctx.deps.world.projection.setRest(element.entity, type, rest);
 }

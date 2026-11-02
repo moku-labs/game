@@ -20,7 +20,7 @@ import { withDeps } from "../../../world/lifecycle";
 import type { AnyComponentValue, Entity, WorldPhase } from "../../../world/types";
 import { Alpha, Blur, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
-import type { FilterInstance } from "../../filters/types";
+import type { FilterDefinition, FilterInstance } from "../../filters/types";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
@@ -215,10 +215,13 @@ function viewComponents(index: number): AnyComponentValue[] {
  * Starts a mock with `FILTERED_VIEWS` filtered views, runs the frames that build and hand over their instances, and
  * clears every change set. The first view carries `Glow`, the view a tween case moves.
  *
+ * @param quads - The definitions whose quad passed its check: their slots hand a quad over.
  * @returns The fixture.
  */
-export function filtersFixture(): FiltersFixture {
+export function filtersFixture(quads: readonly FilterDefinition[] = []): FiltersFixture {
   const mock = createMockEffects();
+
+  for (const definition of quads) mock.state.checks.quads.add(definition);
 
   mock.features.push({ name: "perf", description: { filters: [Tint] } });
 

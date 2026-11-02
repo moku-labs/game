@@ -6,6 +6,7 @@ import type { Answer } from "../flow/types";
 import type { Json } from "../model/types";
 import type { Entity } from "../world/types";
 import type { CarryValue, IntentValue } from "./components";
+import { lostAnswer } from "./lost";
 import type { Direction, InputCtx, State, TapListener } from "./types";
 
 /**
@@ -137,15 +138,49 @@ export function notifyTap(ctx: InputCtx, entity: Entity): void {
  * and forgot to name it — so it is reported with the projection it came from and still offered,
  * which keeps the return value honest.
  *
+ * A press the narrow of a guide drops — another intent, or the allowed intent with another
+ * payload (a drop on the wrong cell) — answers the guide's `blocked` instead, once, when the gate
+ * is open and the guide names one. A closed gate holds the press as it is and converts nothing.
+ * The gate's state is read only for a refused answer, never for an accepted one. A dev or agent
+ * build logs the refusal with the view and what the gate said (F122).
+ *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view the answer came from, for the warning.
  * @param answer - The answer one of the builders produced.
- * @returns What `flow.gate.answer` returned.
+ * @returns What `flow.gate.answer` returned: for the answer, or for `blocked` in its place.
  */
 export function submit(ctx: InputCtx, entity: Entity, answer: Answer): boolean {
   if (answer.intent === "") {
     ctx.log.warn("input: empty intent", { view: ctx.deps.world.projection.keyOf(entity) });
   }
 
-  return ctx.deps.flow.gate.answer(answer);
+  const gate = ctx.deps.flow.gate;
+
+  if (gate.answer(answer)) return true;
+
+  // The gate keeps `blocked` only while a guide narrows it.
+  const read = gate.state();
+  // A guide's blocked answer takes the press's place, once, when the gate is open.
+  const taken = read.open && read.blocked !== undefined && gate.answer(read.blocked);
+
+  lostAnswer(ctx, entity, answer, read, taken);
+
+  return taken;
+}
+
+/**
+ * Answers a press the lock of a guide kept from every view: the gate's `blocked`, the answer the
+ * running guide names for a press outside its window, with its payload. A guide that names none
+ * drops the press: the gate is not called. A press inside the window that the narrow drops answers
+ * `blocked` through `submit`.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @returns What `flow.gate.answer` returned; `false` when the guide names no `blocked`.
+ */
+export function submitBlocked(ctx: InputCtx): boolean {
+  const blocked = ctx.deps.flow.gate.state().blocked;
+
+  if (blocked === undefined) return false;
+
+  return ctx.deps.flow.gate.answer(blocked);
 }

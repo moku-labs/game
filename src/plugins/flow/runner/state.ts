@@ -39,6 +39,7 @@ export function createRunnerState(): RunnerState {
     journalIndex: 0,
     running: undefined,
     abort: undefined,
-    failures: 0
+    failures: 0,
+    guide: undefined
   };
 }

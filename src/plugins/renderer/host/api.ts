@@ -26,7 +26,14 @@ import {
   targetResolution,
   watchPixelRatio
 } from "./resolution";
-import type { HostDeps, ResolutionListener, TextureUsage, TrimListener, TrimReason } from "./types";
+import type {
+  CanvasPassListener,
+  HostDeps,
+  ResolutionListener,
+  TextureUsage,
+  TrimListener,
+  TrimReason
+} from "./types";
 import { showUnsupported } from "./unsupported";
 import { watchVisibility } from "./visibility";
 
@@ -137,6 +144,19 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       app.renderer.texture.initSource(source);
     },
 
+    canvasTexture: (): GPUTexture | undefined =>
+      liveDevice(state) === undefined
+        ? undefined
+        : state.canvas?.getContext("webgpu")?.getCurrentTexture(),
+
+    gpuTexture: (source: PixiTextureSource): GPUTexture | undefined => {
+      const textures = state.ready ? state.app?.renderer.texture : undefined;
+
+      return textures !== undefined && "getGpuSource" in textures
+        ? textures.getGpuSource(source)
+        : undefined;
+    },
+
     clearsCanvas: (): boolean =>
       state.ready && state.app?.renderer.background.clearBeforeRender === true,
 
@@ -173,7 +193,12 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       return extractStage(ctx, app, hidden);
     },
 
-    resolution: (): number => state.app?.renderer.resolution ?? 1,
+    resolution: (): number => {
+      const app = state.app;
+
+      // No `?.` and `??`: they merge the number with `undefined`, which boxes a fractional one every frame.
+      return app === undefined ? 1 : app.renderer.resolution;
+    },
 
     textures: (): TextureUsage => {
       const app = state.app;
@@ -207,6 +232,10 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
 
     onTrim: (fn: TrimListener): void => {
       state.onTrim.push(fn);
+    },
+
+    onCanvasPass: (fn: CanvasPassListener): void => {
+      state.onCanvasPass = fn;
     },
 
     init: async (): Promise<void> => {

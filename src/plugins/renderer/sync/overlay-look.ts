@@ -8,6 +8,7 @@ import { HudPart } from "../components";
 import type { DemandReason } from "../demand/types";
 import type { PixiContainer, PixiModule, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
+import { heldWaiting } from "./build";
 import type { OverlayRecord, SyncCtx } from "./types";
 import { applyHud } from "./views";
 
@@ -218,7 +219,9 @@ function warnOutside(sctx: SyncCtx, entity: Entity, key: string): void {
 
 /**
  * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame, and the
- * parts leaving or not fully back take no tap. A part outside the HUD layer is warned once and drawn as it is.
+ * parts leaving or not fully back take no tap. A part outside the HUD layer is warned once and drawn as it is. A part of
+ * a scene built aside is not warned while it builds, nor in the frame its build waits to be attached: the layers it is
+ * judged against are still the scene's being left (a splash with no HUD layer), or none on a cold page (F117).
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -230,7 +233,10 @@ export function stepParts(sctx: SyncCtx): void {
 
   // per frame: the HUD layer's name kept with the layers, no walk of the layer table.
   const hud = state.hudLayer;
+  // A build committed after this frame's pass: its layers and its held views come with the next one.
+  const settling = heldWaiting(sctx);
   const ecs = sctx.ctx.deps.world.ecs;
+  const projection = sctx.ctx.deps.world.projection;
 
   // Only when it holds something: V8 gives an empty set a new table at every `clear()`, and the step runs every frame.
   if (overlay.nextOff.size > 0) overlay.nextOff.clear();
@@ -243,7 +249,10 @@ export function stepParts(sctx: SyncCtx): void {
     const key = ecs.get(entity, HudPart)?.key ?? "";
 
     if (hud === undefined || layerOf(sctx, entity) !== hud) {
-      warnOutside(sctx, entity, key);
+      // A part of a build is judged once its scene's layers stand: a HUD part is not outside a layer list not yet its own.
+      const building = settling || projection.isBuilding(entity);
+
+      if (!building) warnOutside(sctx, entity, key);
       applyHud(sctx, entity, view, 1);
 
       continue;

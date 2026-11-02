@@ -7,7 +7,7 @@ import * as pixi from "pixi.js";
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import type { FrameMeasure } from "../../../time/types";
-import { Layer } from "../../../world/ecs/define";
+import { Layer, Order } from "../../../world/ecs/define";
 import { projection } from "../../../world/projection/define";
 import type { AnyProjectionSpec } from "../../../world/projection/types";
 import type { Entity, SystemTiming } from "../../../world/types";
@@ -23,8 +23,11 @@ import {
   Transform,
   type TransformValue
 } from "../../components";
+import { KEY } from "../../kept/geometry";
+import { WHY } from "../../kept/types";
 import { withDeps } from "../../lifecycle";
 import { commitFrame } from "../../monitor/commit";
+import { COUNT } from "../../monitor/types";
 import type { SyncCtx } from "../../sync/types";
 import type { PixiFilter } from "../../types";
 import { box, demandAlone } from "../demand-harness";
@@ -32,6 +35,7 @@ import { FakeFilter, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 import { startOverlayStage } from "../overlay-harness";
 import { type AgentRenderer, startAgent } from "../perf-harness";
+import { shadedSlot } from "../quad-harness";
 
 /** The owner of every entity the fixtures spawn. */
 const OWNER = { kind: "plugin", name: "perf" } as const;
@@ -618,6 +622,33 @@ export async function keptFadeBoard(count: number): Promise<() => void> {
 }
 
 /**
+ * The board of `keptBoard` whose first view fades through its own alpha (F120), as `applyAlpha` writes it: the view is
+ * marked as a move, its top takes another alpha every frame, then the kept cache collects and flushes. Its picture is
+ * taken without the top's alpha: the frame writes the quad's alpha and renders nothing.
+ *
+ * @param count - The kept views.
+ * @returns One frame of the fade: the mark, the alpha, the collect and the flush.
+ */
+export async function keptOwnFadeBoard(count: number): Promise<() => void> {
+  const { stage, views } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const view = views[0] ?? 0;
+  const top = stage.drawn.mock.ctx.state.kept.byEntity.get(view)?.top;
+
+  if (top === undefined) throw new Error("perf fixture: the own-fade board has no kept view");
+
+  let low = false;
+
+  return () => {
+    low = !low;
+    demand.markMoved(view);
+    top.alpha = low ? 0.4 : 0.6;
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
  * A board whose `count` filtered views the kept cache draws from their pictures (E5), over the real Pixi of the
  * overlay stage, every frame drawn: each view carries one alpha filter the cache may keep, in a frozen list as
  * `effects` hands it over, and stood still long enough to be taken. A frame collects the marks and flushes the cache,
@@ -641,6 +672,225 @@ export async function keptBoard(count: number, marked = false): Promise<() => vo
         kept.collect();
         kept.flush();
       };
+}
+
+/**
+ * The board of `keptBoard` after a step of the renderer resolution from 2 to 1 (F126): the pictures keep their textures
+ * and owe nothing, and with a view elsewhere marked every record steps through the check of the step. Half of them draw
+ * direct, the others keep a filter output through a filter on `"inherit"`.
+ *
+ * @param count - The kept views.
+ * @param resolution - The resolution the step ends on.
+ * @returns One frame of the cache: the mark, the collect and the flush.
+ */
+export async function keptSteppedBoard(count: number, resolution = 1): Promise<() => void> {
+  const board = await startInheritBoard(count);
+  const { stage, other } = board;
+  const { kept, demand } = stage.drawn.mock.modules;
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  stage.drawn.mock.api.monitor.setResolution(2);
+  stage.frames(40);
+  stage.drawn.mock.api.monitor.setResolution(resolution);
+  stage.frames(2);
+
+  if (records.some(record => record.mode !== "kept" || record.key[KEY.rs] !== 2)) {
+    throw new Error("perf fixture: a view of the stepped board is not held through the step");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * The board of `keptBoard` settled at a fractional renderer resolution, as on a phone at 2.625: the pictures were taken
+ * there, half drawn direct, the others keeping a filter output through a filter on `"inherit"`, and with a view elsewhere
+ * marked every record steps.
+ *
+ * @param count - The kept views.
+ * @param resolution - The fractional resolution.
+ * @returns One frame of the cache: the mark, the collect and the flush.
+ */
+export async function keptFractionalBoard(count: number, resolution = 1.5): Promise<() => void> {
+  const { stage, other } = await startInheritBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  stage.drawn.mock.api.monitor.setResolution(resolution);
+  stage.frames(40);
+
+  if (records.some(record => record.mode !== "kept" || record.key[KEY.rs] !== resolution)) {
+    throw new Error("perf fixture: a view of the fractional board is not kept at its resolution");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * The kept board whose filters follow the canvas: every filter on `"inherit"`, every second one with a padding, so it
+ * keeps a filter output and the others draw direct.
+ *
+ * @param count - The kept views.
+ * @returns The board, its views taken.
+ */
+async function startInheritBoard(count: number): Promise<KeptBoard> {
+  const board = await startKeptBoard(count);
+  const { stage, views, filters } = board;
+  const { sync } = stage.drawn.mock.modules;
+
+  for (const [index, view] of views.entries()) {
+    const filter = filters[index];
+
+    if (filter === undefined) throw new Error("perf fixture: the stepped board has no filter");
+
+    filter.resolution = "inherit";
+
+    if (index % 2 === 1) filter.padding = 2;
+
+    sync.filters.set(
+      view,
+      Object.freeze([
+        { filter: filter as unknown as PixiFilter, passes: 1, cache: "local" as const }
+      ])
+    );
+  }
+
+  stage.frames(40);
+
+  return board;
+}
+
+/**
+ * One frame of a board of shaded views: every view marked and its number written after the mark, then the kept cache
+ * collects and flushes.
+ *
+ * @param views - The views.
+ * @param numbers - The uniforms of each, in order.
+ * @param modules - The modules of the renderer.
+ * @param modules.demand - The demand module.
+ * @param modules.kept - The kept module.
+ * @returns The frame.
+ */
+function numbersFrame(
+  views: readonly Entity[],
+  numbers: ReadonlyArray<{ amount: number }>,
+  modules: Pick<MockRenderer["modules"], "demand" | "kept">
+): () => void {
+  const { demand, kept } = modules;
+  let low = false;
+
+  return (): void => {
+    low = !low;
+
+    // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+    for (let index = 0; index < views.length; index += 1) {
+      demand.invalidate(views[index] ?? 0);
+      // Whole numbers: a new double written to a field is boxed by the write, which the fixture does as `effects` does.
+      (numbers[index] ?? { amount: 0 }).amount = low ? 1 : 2;
+    }
+
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * A board of `count` views on their filter's own shader (F126 stage 2), as `rows` of the bench draws them: every view
+ * carries one filter with a quad, in a frozen list as `effects` hands it over, and every frame writes every view's number
+ * after the mark, then the kept cache collects and flushes. The mesh reads the number itself: the frame renders nothing.
+ *
+ * @param count - The shaded views.
+ * @returns One frame: the marks, the numbers, the collect and the flush.
+ */
+export async function keptShadedBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync } = stage.drawn.mock.modules;
+  const views: Entity[] = [];
+  const numbers: Array<{ amount: number }> = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: (index % 5) * 200, y: Math.floor(index / 5) * 200 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    const slot = shadedSlot({ origin: new Float32Array(2) });
+
+    if (slot.quad?.fu !== undefined) numbers.push(slot.quad.fu.uniforms as { amount: number });
+
+    sync.filters.set(view, Object.freeze([slot]));
+  }
+
+  stage.frames(12);
+
+  const frame = numbersFrame(views, numbers, stage.drawn.mock.modules);
+
+  for (let index = 0; index < 4; index += 1) frame();
+
+  const records = stage.drawn.mock.ctx.state.kept.records;
+
+  if (records.length !== count || records.some(record => !record.shaded)) {
+    throw new Error("perf fixture: a view of the shaded board is not shaded");
+  }
+
+  return frame;
+}
+
+/**
+ * A filtered room with `count` placed views under it on their filter's own shader (F126 stage 2, part B), as `glow` of
+ * the bench draws them: the room's filter stays live, every frame writes every view's number after the mark, and every
+ * step walks the view's ancestors up to the stage, noting the filter it hangs under.
+ *
+ * @param count - The shaded views.
+ * @returns One frame: the marks, the numbers, the collect and the flush.
+ */
+export async function keptUnderBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync } = stage.drawn.mock.modules;
+  const room = stage.view({ order: 1, x: 0, y: 0 });
+  const views: Entity[] = [];
+  const numbers: Array<{ amount: number }> = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(
+      stage.drawn.mock.world.ecs.spawn(OWNER, [
+        Transform({ x: (index % 4) * 120, y: Math.floor(index / 4) * 120 }),
+        Shape({ w: 40, h: 40 }),
+        Parent({ entity: room })
+      ])
+    );
+  }
+
+  stage.frame();
+  sync.filters.set(room, Object.freeze([{ filter: new pixi.ColorMatrixFilter(), passes: 1 }]));
+
+  for (const view of views) {
+    const slot = shadedSlot({ cache: "placed", origin: new Float32Array(2) });
+
+    if (slot.quad?.fu !== undefined) numbers.push(slot.quad.fu.uniforms as { amount: number });
+
+    sync.filters.set(view, Object.freeze([slot]));
+  }
+
+  stage.frames(12);
+
+  const frame = numbersFrame(views, numbers, stage.drawn.mock.modules);
+
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  if (records.length !== count || records.some(record => !record.shaded)) {
+    throw new Error("perf fixture: a view under the room is not shaded");
+  }
+
+  return frame;
 }
 
 /**
@@ -707,6 +957,235 @@ export async function keptZoomBoard(count: number): Promise<() => void> {
   return () => {
     near = !near;
     root.scale.set(near ? 1.2 : 1.1);
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * The board of `keptBoard` under a translucent root (F113), as a scene fading over the board leaves it in a frame: the
+ * root above the kept views at alpha 0.5, a view elsewhere marked every frame, so every record steps and keeps its
+ * picture, drawn at the root's alpha by Pixi; none is retaken. The alpha is written once: Pixi's setter stores each new
+ * double into `localAlpha` as a heap number (16 B a write that changes it, Pixi's own, like F54's `AlphaFilter.alpha`),
+ * which is the fade's write, not the step of the kept cache.
+ *
+ * @param count - The kept views.
+ * @returns One frame under the fade: the mark, the collect and the flush.
+ */
+export async function keptAncestorFadeBoard(count: number): Promise<() => void> {
+  const { stage, other } = await startKeptBoard(count);
+  const { kept, demand } = stage.drawn.mock.modules;
+  const root = stage.drawn.mock.ctx.state.sync.root;
+
+  if (root === undefined) throw new Error("perf fixture: the fading board has no root");
+
+  root.alpha = 0.5;
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * `count` live views with a filter whose subtrees change every frame, so none is ever taken (F126): each step of a frame
+ * writes why the view is live and how many still frames it lacks, and `collect` notes who marked it.
+ *
+ * @param count - The views.
+ * @returns One frame: the marks, the collect and the flush.
+ */
+export async function keptWhyBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const views: Entity[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: 50 + index * 100, y: 100 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.ColorMatrixFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  const step = (): void => {
+    for (const view of views) demand.mark(view);
+
+    kept.collect();
+    kept.flush();
+  };
+
+  for (let frame = 0; frame < 4; frame += 1) step();
+
+  if (stage.drawn.mock.ctx.state.kept.records.some(record => record.why !== WHY.waiting)) {
+    throw new Error("perf fixture: a view of the why board is not waiting");
+  }
+
+  return step;
+}
+
+/**
+ * A started renderer of a build, its pass ring holding a pass in an agent build: a begin writes the newest slot.
+ *
+ * @param agent - True for an agent build.
+ * @param clock - `"plain"` for an alloc window, `"real"` for a bench.
+ * @returns The renderer.
+ */
+async function startedRenderer(agent: boolean, clock: "plain" | "real"): Promise<MockRenderer> {
+  if (agent) {
+    const started = await startPlainAgent(clock);
+
+    started.frame();
+
+    if (started.pc.perf.ring.passes.newest < 0)
+      throw new Error("perf fixture: no pass in the ring");
+
+    return started.mock;
+  }
+
+  // An agent build started before it left the flag on.
+  vi.unstubAllGlobals();
+
+  const started = createMockRenderer();
+
+  await started.start();
+
+  if (started.ctx.state.monitor.perf !== undefined) throw new Error("perf fixture: an agent build");
+
+  return started;
+}
+
+/**
+ * The listener of the canvas passes the monitor set on the host, inside a frame.
+ *
+ * @param agent - True for an agent build.
+ * @param clock - `"plain"` for an alloc window, `"real"` for a bench.
+ * @returns One canvas begin.
+ */
+export async function canvasBeginStep(
+  agent: boolean,
+  clock: "plain" | "real" = "plain"
+): Promise<() => void> {
+  const started = await startedRenderer(agent, clock);
+  const { host, monitor } = started.ctx.state;
+  const listen = host.onCanvasPass;
+
+  if (listen === undefined) throw new Error("perf fixture: no listener of the canvas passes");
+
+  monitor.sinks.inFrame = true;
+
+  return () => {
+    listen(2);
+    // A frame's count starts over: a window of calls keeps it a small number.
+    monitor.sinks.counts[COUNT.canvas] = 0;
+  };
+}
+
+/**
+ * A live panorama wider than the canvas, with a filter, under a camera zoom (F113): every frame the root scales by a
+ * step, in turn 1.01 and 1.02, a view elsewhere is marked, and the panorama stands still under it. Its take would be cut to the canvas, which is
+ * never drawn scaled: it is refused once and the record waits for rest, so a frame steps it and tries no take.
+ *
+ * @returns One frame of the zoom: the scale, the mark, the collect and the flush.
+ */
+export async function cutZoomBoard(): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const panorama = stage.view({ order: 1, x: -1000, y: 0, w: 3000, h: 400 });
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const root = stage.drawn.mock.ctx.state.sync.root;
+
+  if (root === undefined) throw new Error("perf fixture: the cut zoom board has no root");
+
+  stage.frame();
+  sync.filters.set(
+    panorama,
+    Object.freeze([
+      {
+        filter: new pixi.AlphaFilter() as unknown as PixiFilter,
+        passes: 1,
+        cache: "local" as const
+      }
+    ])
+  );
+
+  let near = false;
+  const scale = (): void => {
+    near = !near;
+    root.scale.set(near ? 1.02 : 1.01);
+  };
+
+  // Drawn frames under the zoom: the marks of the build settle, and the panorama is refused once.
+  for (let frame = 0; frame < 8; frame += 1) {
+    scale();
+    stage.frame();
+  }
+
+  if (stage.drawn.mock.ctx.state.kept.byEntity.get(panorama)?.mode !== "live") {
+    throw new Error("perf fixture: the cut panorama was taken under the zoom");
+  }
+
+  return () => {
+    scale();
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * `count` views with an alpha filter off the canvas (F114), a view on it marked every frame: each was tried once in its first
+ * eligible frame, rendered nothing and is remembered idle, so a frame steps them and tries no take.
+ *
+ * @param count - The views off the canvas.
+ * @returns One frame: the mark, the collect and the flush.
+ */
+export async function idleAwayBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const views: Entity[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: 5000 + index * 100, y: 100 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.AlphaFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  stage.frames(4);
+
+  const records = stage.drawn.mock.ctx.state.kept.records;
+
+  if (records.length !== count || records.some(record => !record.idle)) {
+    throw new Error("perf fixture: a view off the canvas is not idle");
+  }
+
+  return () => {
     demand.mark(other);
     kept.collect();
     kept.flush();
@@ -884,4 +1363,197 @@ export async function restingWarm(windows: number, elements: number): Promise<Wa
   const { host, viewport, demand, kept } = mock.modules;
 
   return { mock, sctx: { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } } };
+}
+
+/** A started renderer after a swap, its loader layer above the veil, and one frame's step of it. */
+export type FadingLoader = {
+  mock: MockRenderer;
+  /** One frame: the clock 1 ms on, then the step of the look. */
+  step: () => void;
+};
+
+/**
+ * Starts the mock renderer with the layer `loading` and one sprite of the loader in it, shows a look whose loader is
+ * that layer, lifts it above the veil and lands it. `"fade"`: a fade-out of a day, so every window steps it on without
+ * reaching its end. `"wait"`: a fade-out of 0 ms, so the layer waits for its view to leave, at alpha 0. The clock moves
+ * in whole milliseconds, which a call hands back unboxed.
+ *
+ * @param phase - `"fade"` or `"wait"`.
+ * @returns The renderer and its step.
+ */
+export async function fadingLoader(phase: "fade" | "wait"): Promise<FadingLoader> {
+  const mock = createMockRenderer();
+
+  await mock.start();
+  mock.world.projection.setLayers([{ name: "loading", sort: "none" }]);
+  mock.world.ecs.spawn(OWNER, [
+    Layer({ name: "loading" }),
+    Transform({ x: 540, y: 960 }),
+    Sprite({ width: 96, height: 96 })
+  ]);
+  mock.modules.sync.pass();
+  mock.api.sync.leave.show({
+    cover: { color: 0, alpha: 0.45, inMs: 0, outMs: phase === "fade" ? 86_400_000 : 0 },
+    loader: { afterMs: 0, due: () => "loading" }
+  });
+  mock.runPhase("render");
+  mock.api.sync.leave.land();
+
+  let now = 0;
+  const step = (): void => {
+    now += 1;
+    mock.setNow(now);
+    mock.modules.sync.stepLeave();
+  };
+
+  if (phase === "wait") {
+    // The first step parks the layer; its wait is bounded to a few frames, so a window of many calls keeps it open.
+    step();
+    const parked = mock.ctx.state.sync.leave.parked;
+
+    if (parked !== undefined) parked.framesLeft = Number.MAX_SAFE_INTEGER;
+  }
+
+  return { mock, step };
+}
+
+/** A started renderer with a board of A Memory Missing's size under the finger, and the drop target of its lookups. */
+export type HoverBoard = {
+  mock: MockRenderer;
+  /** A slot of the bottom row of the board: the first view a drop lookup at `(drop.x, drop.y)` accepts. */
+  target: Entity;
+  /** A point over the target, under an item and its shadow. */
+  drop: { x: number; y: number };
+};
+
+/**
+ * Starts the mock renderer with a board of 540 views for the hover hit test (F118): the layer `board` holds 90 slots,
+ * each with an item and the item's shadow under it; the layer `items` holds 200 loose pieces in `order`, their order
+ * values not in insertion order, and a clipping panel of 60 rows; the layer `hud` holds 10 buttons. The frames that
+ * build it have run.
+ *
+ * @returns The board, its drop target and the point over it.
+ */
+export async function hoverBoard(): Promise<HoverBoard> {
+  const mock = createMockRenderer();
+  const { ecs } = mock.world;
+  const owner = { kind: "plugin", name: "perf" } as const;
+  let target: Entity = 0;
+
+  await mock.start();
+  mock.api.sync.textures.provide(() => new FakeTexture({}) as never);
+  mock.world.projection.setLayers([
+    { name: "board", sort: "none" },
+    { name: "items", sort: "order" },
+    { name: "hud", sort: "none" }
+  ]);
+
+  for (let index = 0; index < 90; index += 1) {
+    const at = { x: 60 + (index % 9) * 110, y: 400 + Math.floor(index / 9) * 110 };
+    const slot = ecs.spawn(owner, [
+      Layer({ name: "board" }),
+      Transform(at),
+      Sprite({ texture: "slot" })
+    ]);
+    const item = ecs.spawn(owner, [
+      Transform(),
+      Sprite({ texture: "item" }),
+      Parent({ entity: slot })
+    ]);
+
+    ecs.spawn(owner, [
+      Transform({ y: 8 }),
+      Sprite({ texture: "shadow" }),
+      Parent({ entity: item })
+    ]);
+    if (index === 85) target = slot;
+  }
+
+  for (let index = 0; index < 200; index += 1) {
+    ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 3000 + index * 10, y: 200 }),
+      Sprite({ texture: "piece" }),
+      Order({ value: (index * 7) % 13 })
+    ]);
+  }
+
+  const panel = ecs.spawn(owner, [
+    Layer({ name: "items" }),
+    Transform({ x: 0, y: 1800 }),
+    Shape({ w: 1080, h: 200, clip: true }),
+    Order({ value: 20 })
+  ]);
+
+  for (let index = 0; index < 60; index += 1) {
+    ecs.spawn(owner, [
+      Transform({ x: 540, y: index * 40 }),
+      Sprite({ texture: "row" }),
+      Parent({ entity: panel })
+    ]);
+  }
+
+  for (let index = 0; index < 10; index += 1) {
+    ecs.spawn(owner, [
+      Layer({ name: "hud" }),
+      Transform({ x: 60 + index * 100, y: 60 }),
+      Sprite({ texture: "button" })
+    ]);
+  }
+
+  mock.modules.sync.pass();
+
+  return { mock, target, drop: { x: 60 + 4 * 110, y: 400 + 9 * 110 } };
+}
+
+/**
+ * A crowd of `count` views with a filter drawn live (F119) under a tinted root, which no picture draws as it is drawn,
+ * so none is ever taken; a view elsewhere is marked every frame, so every flush counts the crowd before the step, each
+ * walk up its parents to the stage.
+ *
+ * @param count - The views of the crowd.
+ * @returns One frame: the mark, the collect and the flush.
+ */
+export async function crowdWaitingBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync, kept, demand } = stage.drawn.mock.modules;
+  const other = stage.view({ order: 1, x: 900, y: 1500 });
+  const root = stage.drawn.mock.ctx.state.sync.root;
+  const views: Entity[] = [];
+
+  if (root === undefined) throw new Error("perf fixture: the crowd board has no root");
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: 50 + index * 100, y: 100 }));
+  }
+
+  stage.frame();
+  root.tint = 0xff_00_00;
+
+  for (const view of views) {
+    sync.filters.set(
+      view,
+      Object.freeze([
+        {
+          filter: new pixi.ColorMatrixFilter() as unknown as PixiFilter,
+          passes: 1,
+          cache: "local" as const
+        }
+      ])
+    );
+  }
+
+  stage.frames(4);
+
+  const state = stage.drawn.mock.ctx.state.kept;
+
+  if (state.liveWaiting !== count || state.records.some(record => record.mode !== "live")) {
+    throw new Error("perf fixture: the crowd is not drawn live");
+  }
+
+  return () => {
+    demand.mark(other);
+    kept.collect();
+    kept.flush();
+  };
 }

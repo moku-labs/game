@@ -292,17 +292,33 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     emitCommitted(allRoots, "rollback");
   };
 
-  const restore = (input: { player: Json; session?: Json; rng?: RngState }): void => {
+  const restore = (input: {
+    player: Json;
+    session?: Json;
+    rng?: RngState;
+    version?: number;
+  }): void => {
     if (store.transaction) {
       throw new Error(
         "[game] restore() was called while a model transaction is open.\n  Commit or discard the transaction first."
       );
     }
 
-    store.doc = deepFreeze({
+    // Trees of an older schema run through the chain first: put in place as they are, the next
+    // rest point would save them under this build's version, and no migration would run again.
+    // The trees are cloned first, so a step that writes in place leaves the caller's bookmark be.
+    const trees = {
       player: structuredClone(input.player),
-      rng: input.rng ? structuredClone(input.rng) : store.doc.rng
-    });
+      rng: structuredClone(input.rng ?? store.doc.rng)
+    };
+    const version = input.version ?? ctx.config.schemaVersion;
+    // `{ player, rng }` is the document of a save; `readSaveDoc` checks its shape after the chain.
+    const doc =
+      version === ctx.config.schemaVersion
+        ? trees
+        : documentOfSave({ state: trees as unknown as Json, version });
+
+    store.doc = deepFreeze(doc);
 
     if (input.session !== undefined) {
       store.session = deepFreeze(structuredClone(input.session));
@@ -323,5 +339,7 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     }
   };
 
-  return { load, snapshot, begin, markRest, markBarrier, rollback, restore, flush };
+  const schemaVersion = (): number => ctx.config.schemaVersion;
+
+  return { load, snapshot, begin, markRest, markBarrier, rollback, restore, flush, schemaVersion };
 }

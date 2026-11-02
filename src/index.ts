@@ -51,6 +51,7 @@
  * | renderer | keptMb | 64, MiB the kept pictures may hold: a filtered view that did not change is drawn from its picture, the least recently drawn goes first; 0 keeps none |
  * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
  * | renderer | uploads | 1, texture sources `sync.textures.upload` puts on the GPU a drawn frame (~9 ms each on the A26); 0 turns the queue off |
+ * | renderer | shots | undefined, no shot is taken; { width, height, blur, keep? }: texels 1–512 a side, sigma in reference units, pictures kept (8); shallow merge: a game that sets `shots` gives width, height and blur |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
  * | input | dragStartPx | 8 |
@@ -66,7 +67,7 @@
  * | assets | baseUrl | undefined |
  * | assets | io | undefined, the browser fetch and the renderer textures |
  * | scenes | buildMs | "auto", two thirds of a frame ((1000 / time.rate().fps) * 2 / 3, 11.1 ms at 60 Hz), read at each build start; a number fixes it |
- * | scenes | leave | { cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }, what a live switch shows over the scene being left: a veil from its start and a loader (the engine's ring, a `texture` or a `projection`) once it took `afterMs`; a scene's `leave` is merged over it field by field, a field left out keeps this default, `false` turns a part or the whole off |
+ * | scenes | leave | { cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }, what a live switch shows over the scene being left: a veil from its start and a loader (the engine's ring, a `texture` or a `projection`) once it took `afterMs`, with `loader.holdMs` (default 0) a floor on the swap; a scene's `leave` is merged over it field by field, a field left out keeps this default, `false` turns a part or the whole off |
  * | anim | maxTracks | 2000 |
  * | anim | reducedMotion | false |
  * | i18n | locale | "en" |
@@ -86,7 +87,7 @@
  * | audio | music | "decode", gapless; "stream" plays an `<audio>` element |
  * | audio | session | "ambient", iOS only |
  * | effects | maxParticles | 3000, live particles above which one dev warning fires per crossing |
- * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
+ * | effects | maxPasses | 24, render passes per frame above which one dev warning fires once they stay over it 60 frames in a row |
  * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |
  * | effects | blur | { quality: 2, phoneResolution: 0.5 }, what a Blur with quality 0 and resolution 0 resolves to; shallow merge: a game that sets `blur` gives both fields |
  * | platform | provider | undefined, inert: no subscription, no haptic handler, `back()` answers "none"; the engine page passes the system shell's provider |
@@ -149,6 +150,7 @@ import type {
   GameTypes,
   HudKeysOf,
   SceneIdOf,
+  TextFormatsOf,
   TextStylesOf
 } from "./plugins/flow/types";
 import { i18nFor } from "./plugins/i18n/tr";
@@ -205,7 +207,9 @@ export const createPlugin = framework.createPlugin;
  * a string key written in code (a key that comes from data is checked with `app.i18n.isKey`).
  *
  * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`,
- *   `emitters` and `hud` (the HUD part keys of `HudPart` and `Overlay`).
+ *   `textStyles`, `textFormats` (the format names of `bind`, next to the four built-in ones, with
+ *   `defineTextFormats` answering the game's styles), `emitters` and `hud` (the HUD part keys of
+ *   `HudPart` and `Overlay`).
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
@@ -223,7 +227,7 @@ export function defineGame<Types extends GameTypes>() {
     ...scenesFor<Types["assets"], BundlesOf<Types>, Types["player"], Types["session"]>(),
     ...animFor<Types["assets"]>(),
     ...i18nFor<Types["strings"]>(),
-    ...textFor<TextStylesOf<Types>, Types["assets"]>(),
+    ...textFor<TextStylesOf<Types>, Types["assets"], TextFormatsOf<Types>>(),
     ...uiFor<Types["assets"], TextStylesOf<Types>, Extract<keyof Types["strings"], string>>(),
     ...audioFor<Types["assets"], Types["player"]>(),
     ...effectsFor<Types["assets"], EmitterIdOf<Types>>()
@@ -280,6 +284,11 @@ export {
   Tree
 } from "./plugins/world/ecs/define";
 export { projection } from "./plugins/world/projection/define";
+export type {
+  AnchorTarget,
+  DescriptionNode,
+  SceneSwitch
+} from "./plugins/world/projection/types";
 // renderer: the display components
 export {
   Display,
@@ -303,8 +312,9 @@ export {
   SHADER_WHATS
 } from "./plugins/renderer/monitor/log-types";
 export { frameAt, PASS_KINDS } from "./plugins/renderer/monitor/ring";
-export { DEMAND_REASONS } from "./plugins/renderer/reasons";
+export { CANVAS_RESTARTS, DEMAND_REASONS } from "./plugins/renderer/reasons";
 export type {
+  CanvasRestart,
   FrameColumns,
   FrameReadout,
   FrameReadResult,
@@ -339,12 +349,17 @@ export type {
   PerfThermalLine,
   PoolTrim,
   AdaptiveScale,
+  ShotsApi,
+  ShotsConfig,
   PoolTrimDetail,
   ProblemEventDetail,
   ProblemRule,
+  RetakeWhy,
   ShaderEventDetail,
   ShaderWhat,
-  WarmDetail
+  WarmDetail,
+  WhyEntry,
+  WhyLive
 } from "./plugins/renderer/types";
 // input: gestures as data
 export {
@@ -393,10 +408,24 @@ export type { HapticKind } from "./plugins/anim/timeline/types";
 // i18n: messages as data, and the two helpers a generated strings module imports
 export { messageArgument, messageDuration } from "./plugins/i18n/intl";
 export { tr } from "./plugins/i18n/tr";
-export type { DescriptionNode } from "./plugins/world/projection/types";
 // text: the Text component, board labels, text styles, bound numbers and countdowns
-export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
-export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
+export {
+  bind,
+  Countdown,
+  defineTextFormats,
+  defineTextStyles,
+  label,
+  Text
+} from "./plugins/text/components";
+export type {
+  BindOptions,
+  CountdownValue,
+  FormattedNumber,
+  TextFormat,
+  TextFormatAnswer,
+  TextFormatFunction,
+  TextFormats
+} from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
 export { Box, DebugTrigger, LocalWrite, popup, ScrollState } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";

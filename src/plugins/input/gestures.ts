@@ -9,7 +9,7 @@ import { Transform } from "../renderer/components";
 import type { Time } from "../time/types";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
-import { notifyTap, submit, swipeAnswer, tapAnswer } from "./answers";
+import { notifyTap, submit, submitBlocked, swipeAnswer, tapAnswer } from "./answers";
 import {
   Draggable,
   Pointer,
@@ -22,8 +22,9 @@ import {
   Traceable
 } from "./components";
 import { abortDrag, grab, letGoOfLeavers, moveHeld, moveHover, release } from "./drag";
-import { findPressed, movingScrollOf, scrollOnAxisOf } from "./hit";
+import { findPressed, lockedOut, movingScrollOf, scrollOnAxisOf } from "./hit";
 import { clearPointerOver, endsHover, isHover, movePointerOver, syncCursor } from "./hover";
+import { type LostPress, lostPress } from "./lost";
 import { attach, detach, record } from "./pointer";
 import { abortTrace, beginTrace, endTrace, extendTrace, traceLost } from "./trace";
 import type { Direction, InputCtx, Point, RawSample } from "./types";
@@ -137,7 +138,9 @@ function press(ctx: InputCtx, entity: Entity): void {
  * trace — a second finger stays ignored. When the view under the finger sits in a moving scroll,
  * that scroll takes the press: the finger stops it, and the press is caught. A view drawn over a
  * moving scroll from another root, a HUD or a popup button, keeps its press. A view that carries
- * `Traceable` starts a trace instead of a press: it is not tagged `Pressed`.
+ * `Traceable` starts a trace instead of a press: it is not tagged `Pressed`. A press outside the
+ * window of a guide's lock reaches no view: it answers the guide's `blocked`, or nothing, and its
+ * release answers nothing more.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -156,6 +159,14 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
   pointer.down = true;
   pointer.justPressed = true;
   capture(ctx, true);
+
+  // Checked here, before `findPressed` (which also finds nothing there): an empty spot inside the
+  // window must stay a plain press on nothing, only a locked point answers the guide's `blocked`.
+  if (lockedOut(ctx.state, point.x, point.y)) {
+    submitBlocked(ctx);
+
+    return;
+  }
 
   const entity = findPressed(ctx, point.x, point.y);
 
@@ -205,6 +216,7 @@ function handOff(ctx: InputCtx, point: Point): void {
 
   if (scroll === undefined || scroll === entity) return;
 
+  lostPress(ctx, "scroll");
   ecs.untag(entity, Pressed);
   ctx.state.caught = true;
   press(ctx, scroll);
@@ -265,6 +277,7 @@ function answerRelease(ctx: InputCtx, entity: Entity, point: Point): void {
 
       return;
     }
+    if (!ecs.has(entity, Transform)) lostPress(ctx, "view-gone");
   }
 
   const swipeable = ecs.get(entity, Swipeable);
@@ -274,6 +287,8 @@ function answerRelease(ctx: InputCtx, entity: Entity, point: Point): void {
     travelled < ctx.config.swipeMinPx ||
     ctx.state.pressedMs > ctx.config.swipeMaxMs
   ) {
+    if (travelled > ctx.config.tapSlopPx) lostPress(ctx, "moved-off");
+
     return;
   }
 
@@ -308,11 +323,24 @@ function onUp(ctx: InputCtx, pointer: PointerValue, point: Point): void {
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
+ * @param reason - What took it away, for the dev log of a lost tap.
  */
-function onCancel(ctx: InputCtx, pointer: PointerValue): void {
+function onCancel(ctx: InputCtx, pointer: PointerValue, reason: LostPress): void {
+  lostPress(ctx, reason);
   pointer.down = false;
   letGestureGo(ctx);
   toIdle(ctx);
+}
+
+/**
+ * The capture was lost. The sample carries no place: WebKit sends it at (0, 0) about 9 ms after
+ * the lift (F143), so it never moves the pointer, and it cancels only a press still followed.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param pointer - The `Pointer` resource of this frame.
+ */
+function onLost(ctx: InputCtx, pointer: PointerValue): void {
+  if (ctx.state.pointerId !== undefined) onCancel(ctx, pointer, "capture-lost");
 }
 
 /**
@@ -361,7 +389,7 @@ function leavesSlop(ctx: InputCtx, point: Point): boolean {
  * thumb or palm never blocks the finger that plays. A move of an idle mouse or pen hit-tests
  * nothing: its point is returned, so the drain moves the hover once per frame. A move of a press
  * past the tap slop marks the press as moved for good and, in that one sample, hands it to the
- * scroll it pans. A lost capture ends the gesture like a cancel.
+ * scroll it pans. A lost capture ends a followed gesture like a cancel and never moves the pointer.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -376,7 +404,14 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
     if (sample.kind !== "down" || !rests(ctx)) return undefined;
     // The resting pointer gives way: its press is cancelled (no answer), its capture released,
     // the machine forgets it.
+    lostPress(ctx, "other-finger");
     toIdle(ctx);
+  }
+
+  if (sample.kind === "lost") {
+    onLost(ctx, pointer);
+
+    return undefined;
   }
 
   const point = ctx.deps.renderer.viewport.toReference(sample.clientX, sample.clientY);
@@ -404,7 +439,7 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
       break;
     }
     default: {
-      onCancel(ctx, pointer);
+      onCancel(ctx, pointer, "cancelled");
     }
   }
 
@@ -534,10 +569,12 @@ function syncCanvas(ctx: InputCtx): void {
  * at once.
  *
  * @param ctx - Domain context of the input plugin.
+ * @param reason - The mode that stopped the world, for the dev log of a lost tap.
  */
-function pauseGestures(ctx: InputCtx): void {
+function pauseGestures(ctx: InputCtx, reason: "paused" | "fast"): void {
   const pointer = ctx.deps.world.ecs.resource(Pointer);
 
+  lostPress(ctx, reason);
   ctx.state.samples = [];
   ctx.state.resolvedEarly = false;
   clearPointerOver(ctx);
@@ -608,13 +645,13 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
     // A gesture that was running when the mode turned fast is let go like a cancel. Leaving it
     // would leak `Held`, the mute, the lift and a pointer the gate believes is still down. With
     // nothing in the hand nothing at all is written, which is what fast mode promises.
-    if (ctx.state.phase !== "idle") pauseGestures(ctx);
+    if (ctx.state.phase !== "idle") pauseGestures(ctx, "fast");
 
     return;
   }
 
   if (mode === "paused") {
-    pauseGestures(ctx);
+    pauseGestures(ctx, "paused");
     syncCursor(ctx);
 
     return;

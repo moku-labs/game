@@ -76,7 +76,13 @@ export type StageRenderer = {
       createShaderModule(descriptor: { code: string }): {
         getCompilationInfo(): Promise<{ messages: unknown[] }>;
       };
+      pushErrorScope(filter: string): void;
+      popErrorScope(): Promise<{ message: string } | null>;
     };
+    /** The error scopes opened so far, by filter, and how many are open. */
+    scopes: { opened: string[]; open: number };
+    /** What the next error scope that closes answers; `null` for a clean one. */
+    scopeError: { message: string } | null;
   };
   /**
    * WebGL only: Pixi's runners the pass counter hangs on (`SystemRunner`, public). Nothing emits them, as no GPU pass
@@ -350,16 +356,31 @@ function createRenderer(
 
   if (kind === "webgpu") {
     let lose: ((info: { reason: string }) => void) | undefined;
+    const scopes = { opened: [] as string[], open: 0 };
 
-    renderer.gpu = {
+    const gpu: NonNullable<StageRenderer["gpu"]> = {
       // A device that is lost only when a test says so: until then the promise never settles.
       device: {
         lost: new Promise(resolve => {
           lose = resolve;
         }),
-        createShaderModule: compileShader
-      }
+        createShaderModule: compileShader,
+        pushErrorScope: filter => {
+          scopes.opened.push(filter);
+          scopes.open += 1;
+        },
+        popErrorScope: () => {
+          scopes.open -= 1;
+
+          return Promise.resolve(gpu.scopeError);
+        }
+      },
+      scopes,
+      // eslint-disable-next-line unicorn/no-null -- `null` is what a clean scope answers.
+      scopeError: null
     };
+
+    renderer.gpu = gpu;
     renderer.loseDevice = (reason = "destroyed") => lose?.({ reason });
   } else {
     renderer.runners = {

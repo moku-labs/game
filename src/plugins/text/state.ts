@@ -41,6 +41,8 @@ export function createTextState(): State {
   return {
     styles: emptyMap(),
     styleOwner: emptyMap(),
+    formats: emptyMap(),
+    formatOwner: emptyMap(),
     fontKeys: emptySet(),
     tables: emptyMap(),
     installed: emptySet(),

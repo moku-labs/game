@@ -42,6 +42,9 @@ export type ResolutionListener = (from: number, to: number, reason: ResolutionRe
  */
 export type TrimReason = PoolTrimDetail["reason"];
 
+/** Hears a canvas pass that really began (WebGPU), with its reason: an index into `CANVAS_RESTARTS`. Not public. */
+export type CanvasPassListener = (restart: number) => void;
+
 /**
  * A listener of a pool trim: why, and the MiB it freed (rounded to two decimals). The monitor of an agent build
  * registers one to write the `pool-trim` event line.
@@ -135,6 +138,8 @@ export type HostState = {
   pool: PoolState;
   /** The trim listeners: the monitor's, in an agent build. Emptied by `stopHost`. */
   onTrim: TrimListener[];
+  /** The listener of the canvas passes that really begin: the monitor's, set at every attach; cleared by `stopHost`. */
+  onCanvasPass: CanvasPassListener | undefined;
 };
 
 /**
@@ -391,6 +396,22 @@ export type HostInternal = {
   initSource(source: PixiTextureSource): void;
 
   /**
+   * The texture of the canvas for this frame, read to be sampled: after `render` returned it holds the frame just
+   * drawn, and it is gone when the task ends. Pixi configures the canvas with `TEXTURE_BINDING` and `COPY_SRC`.
+   *
+   * @returns The texture, or `undefined` while nothing draws and on WebGL.
+   */
+  canvasTexture(): GPUTexture | undefined;
+
+  /**
+   * The GPU texture Pixi holds for a source, made now when it has none.
+   *
+   * @param source - The source.
+   * @returns The texture, or `undefined` while nothing draws and on WebGL.
+   */
+  gpuTexture(source: PixiTextureSource): GPUTexture | undefined;
+
+  /**
    * Tells whether the stage pass clears the canvas before it draws (`renderer.background.clearBeforeRender`, Pixi's
    * default, which the engine never turns off): only then may a probe draw onto the canvas.
    *
@@ -522,4 +543,12 @@ export type HostInternal = {
    * @param fn - Called after every trim with the reason and the MiB freed.
    */
   onTrim(fn: TrimListener): void;
+
+  /**
+   * Sets the one listener of the canvas passes that really begin on WebGPU: `host/render-pass.ts` never imports the
+   * monitor (O24), which counts them here. Cleared by `stopHost`.
+   *
+   * @param fn - Called at every begin with the reason, an index into `CANVAS_RESTARTS`.
+   */
+  onCanvasPass(fn: CanvasPassListener): void;
 };

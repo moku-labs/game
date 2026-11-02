@@ -14,13 +14,18 @@ import {
   type TransformValue
 } from "../renderer/components";
 import { Text } from "../text/components";
-import type { AnyComponentValue } from "../world/types";
+import { isTextFormat } from "../text/format";
+import type { TextBind } from "../text/types";
+import type { AnyComponentType, AnyComponentValue } from "../world/types";
 import type { Element } from "./jsx/types";
 import type { ElementLookup, Rect } from "./layout/types";
 import type { ResolvedStyle } from "./styles/types";
 
 /** The tag of the one child a scroll container holds: everything inside it moves as one. */
 export const CONTENT = "content";
+
+/** The tag whose rect is where its targets are drawn: the anchor pass places it, not the solve. */
+export const ANCHOR = "anchor";
 
 /** The three ways a sized sprite fills its box, as the `fit` prop of `image` and `icon` names them. */
 const FITS: readonly SpriteFit[] = ["contain", "cover", "fill"];
@@ -29,14 +34,14 @@ const FITS: readonly SpriteFit[] = ["contain", "cover", "fill"];
  * Tells whether a tag draws nothing of its own, so its `Shape` is invisible unless its style fills.
  *
  * @param type - The intrinsic tag.
- * @returns True for the six container tags and the content of a scroll.
+ * @returns True for the seven container tags and the content of a scroll.
  * @example
  * ```ts
  * isContainer("row"); // true
  * ```
  */
 export function isContainer(type: string): boolean {
-  return ["screen", "layer", "row", "column", "stack", "spacer", CONTENT].includes(type);
+  return ["screen", "layer", "row", "column", "stack", "spacer", ANCHOR, CONTENT].includes(type);
 }
 
 /**
@@ -77,6 +82,33 @@ function spriteFitOf(props: Record<string, unknown>): SpriteFit {
  */
 function contentOf(props: Record<string, unknown>): string {
   return (props.content ?? "") as string;
+}
+
+/**
+ * The bind of a text, when the markup gave it one.
+ *
+ * @param element - The element to ask about.
+ * @returns What `bind()` built, or `undefined` for any other element.
+ */
+export function bindOf(element: Element): TextBind | undefined {
+  const { bind } = element.node.props;
+  const isBound = element.type === "text" && typeof bind === "object" && bind !== null;
+
+  return isBound ? (bind as TextBind) : undefined;
+}
+
+/**
+ * Tells whether an element is a text whose bind names a format of the game, not one of the four
+ * built-in ones: such a format answers the style of the label too, so `Text.style` is what the
+ * label shows and its `style` prop is only where it starts.
+ *
+ * @param element - The element to ask about.
+ * @returns True for a text whose bind names a format.
+ */
+export function namesFormat(element: Element): boolean {
+  const bind = bindOf(element);
+
+  return bind !== undefined && !isTextFormat(bind.format);
 }
 
 /**
@@ -151,7 +183,146 @@ function boxOf(element: Element): { box?: number } {
 }
 
 /**
- * The visual component of an element: a sprite for an image or an icon, the text for a text (with
+ * Tells whether a style states the width of its element: a width, or both side edges of an absolute element.
+ *
+ * @param style - The resolved style.
+ * @returns True when it does.
+ */
+function statesWidth(style: ResolvedStyle): boolean {
+  return (
+    style.width !== undefined ||
+    (style.position === "absolute" && style.left !== undefined && style.right !== undefined)
+  );
+}
+
+/**
+ * Tells whether a style states the height of its element: a height, or both top and bottom edges of an absolute
+ * element.
+ *
+ * @param style - The resolved style.
+ * @returns True when it does.
+ */
+function statesHeight(style: ResolvedStyle): boolean {
+  return (
+    style.height !== undefined ||
+    (style.position === "absolute" && style.top !== undefined && style.bottom !== undefined)
+  );
+}
+
+/**
+ * Whether the layout sized an image to nothing: an axis whose size its style states (a width or a
+ * height, or both edges of an absolute element) came out at 0. An image whose style states no size
+ * is 0 by 0 too, and draws as its `Sprite` says: at its texture's size, or at the size a game's own
+ * system writes into the sprite.
+ *
+ * @param style - The resolved style of the image.
+ * @param rect - Its laid-out rect.
+ * @returns True when it draws nothing.
+ */
+function sizedToNothing(style: ResolvedStyle, rect: Rect): boolean {
+  return (statesWidth(style) && rect.w <= 0) || (statesHeight(style) && rect.h <= 0);
+}
+
+/**
+ * The patch a live element writes into one of its components: every field but the ones the
+ * component type gives to a plugin. That plugin keeps such a field for the life of the entity, so
+ * a re-render never puts it back to its default: a label keeps the string `text` resolved for it.
+ *
+ * @param value - The component value the element carries now.
+ * @param owned - The fields the component type gives to a plugin.
+ * @returns The fields to write.
+ * @example
+ * ```ts
+ * livePatch({ content: "Play", resolved: "" }, ["resolved"]); // { content: "Play" }
+ * ```
+ */
+export function livePatch(value: object, owned: readonly string[]): object {
+  if (owned.length === 0) return value;
+
+  return Object.fromEntries(Object.entries(value).filter(([field]) => !owned.includes(field)));
+}
+
+/**
+ * The rest pose recorded for an extra component: the value of this render, but the fields the
+ * component type gives to a plugin stay as the entity carries them, so a render never resets them.
+ *
+ * @param current - The value the entity carries now; none before the component is added.
+ * @param value - The value of this render.
+ * @param owned - The fields the component type gives to a plugin.
+ * @returns The rest value.
+ * @example
+ * ```ts
+ * restValueOf({ until: 2000, left: 42 }, { until: 5000, left: 0 }, ["left"]); // { until: 5000, left: 42 }
+ * ```
+ */
+export function restValueOf(
+  current: object | undefined,
+  value: object,
+  owned: readonly string[]
+): object {
+  if (current === undefined || owned.length === 0) return value;
+
+  return { ...current, ...livePatch(value, owned) };
+}
+
+/** The sizes of a sprite ui leaves alone, by axis: one list each, never a new one. */
+const LEFT_NONE: readonly string[] = [];
+const LEFT_WIDTH: readonly string[] = ["width"];
+const LEFT_HEIGHT: readonly string[] = ["height"];
+const LEFT_BOTH: readonly string[] = ["width", "height"];
+
+/**
+ * The list of sizes left alone for the axes that are.
+ *
+ * @param width - The width is left alone.
+ * @param height - The height is left alone.
+ * @returns One of the four lists.
+ */
+function leftSizes(width: boolean, height: boolean): readonly string[] {
+  if (width && height) return LEFT_BOTH;
+  if (width) return LEFT_WIDTH;
+
+  return height ? LEFT_HEIGHT : LEFT_NONE;
+}
+
+/**
+ * The fields of a value ui does not write onto a live element, or record as its rest: those its component type gives
+ * to a plugin; for the `Sprite` of an image or an icon, the size on an axis its style does not state and the layout
+ * left at 0; and for the `Text` of a label whose bind names a format, the style its format answered (F135). A game's own
+ * system sizes such a sprite; written again by ui (a new viewport, a covered root, a restore) it went back to 0 by 0,
+ * drawn at its texture's size (F111). On a first add the size is 0 anyway, the texture's. `element.node` is the node of
+ * this render, so a bind that went back to a built-in format or left has its prop written as usual.
+ *
+ * @param element - The element.
+ * @param type - The component type of the value.
+ * @param owned - The fields its type gives to a plugin.
+ * @returns The fields left alone.
+ */
+export function fieldsLeftAlone(
+  element: Element,
+  type: AnyComponentType,
+  owned: readonly string[]
+): readonly string[] {
+  if (type === Text) return namesFormat(element) ? [...owned, "style"] : owned;
+
+  const { style, rect } = element;
+  const isImage = element.type === "image" || element.type === "icon";
+
+  if (!isImage || type !== Sprite) return owned;
+
+  const width = rect.w <= 0 && !statesWidth(style);
+  const height = rect.h <= 0 && !statesHeight(style);
+  const sizes = leftSizes(width, height);
+
+  if (owned.length === 0) return sizes;
+
+  return sizes.length === 0 ? owned : [...owned, ...sizes];
+}
+
+/**
+ * The visual component of an element: a sprite for an image or an icon (at alpha 0 while its style
+ * states a size the layout makes 0: the renderer draws a sprite of width 0 at its texture's size,
+ * so the size alone cannot say "nothing"), the text for a text (with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
  * when the style sets `debug`, its rim alone when it sets `hollow`; the sprite and the nine-slice
  * blended by the style's `blend`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
@@ -173,11 +344,14 @@ export function visualOf(element: Element): AnyComponentValue[] {
   const tint = style.tint ?? Sprite.defaults.tint;
 
   if (type === "image" || type === "icon") {
+    const hidden = sizedToNothing(style, rect);
+
     return [
       Sprite({
         texture: textureOf(node.props),
         tint,
-        alpha,
+        // Sized to nothing, it draws nothing and, below the hit test's alpha, takes no tap.
+        alpha: hidden ? 0 : alpha,
         anchor: { x: 0, y: 0 },
         width: rect.w,
         height: rect.h,

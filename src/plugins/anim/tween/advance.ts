@@ -124,8 +124,10 @@ function unfileAdditive(actx: AnimCtx, track: Track): void {
 }
 
 /**
- * Reads the start values of a track, once, when its delay has ended. The base of a field another
- * track already drives is used, so an additive offset is never folded into a start value.
+ * Reads the start values of a track, once, when its delay has ended. The base of a field an
+ * additive track adds to is used, so an offset is never folded into a start value. With no offset
+ * on the field the stored value is the truth: a pose written after the last track wrote stands
+ * there, and it becomes the base (F127).
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track that is about to write.
@@ -145,10 +147,14 @@ function beginTrack(actx: AnimCtx, track: Track, stored: Readonly<Record<string,
     const base = actx.state.bases.get(key);
     const current = stored[field];
     const read = typeof current === "number" ? current : (track.targets[slot] ?? 0);
-    const value = base === undefined ? read : cellValue(base);
 
-    track.starts[slot] = value;
-    if (base === undefined) setBase(actx, key, value);
+    // Only an offset stands between the field and its base; without one the field is read.
+    if (base !== undefined && actx.state.offsets.has(key)) {
+      track.starts[slot] = cellValue(base);
+    } else {
+      track.starts[slot] = read;
+      setBase(actx, key, read);
+    }
   }
 }
 

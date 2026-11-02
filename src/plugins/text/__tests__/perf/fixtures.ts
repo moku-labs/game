@@ -17,11 +17,14 @@ import { component } from "../../../world/ecs/define";
 import type { Entity, Owner } from "../../../world/ecs/types";
 import { withDeps } from "../../../world/lifecycle";
 import type { EcsModule } from "../../../world/types";
-import { bind, builtInStyles, Countdown, Text } from "../../components";
+import { bind as builtInBind, builtInStyles, Countdown, Text, textFor } from "../../components";
 import { createTextAdapter } from "../../display";
 import { createTextFrame, createTextSystem, resolveAdded } from "../../resolve";
 import { createTextState } from "../../state";
-import type { Config, Deps, TextCtx, TextValue } from "../../types";
+import type { Config, Deps, TextCtx, TextFormatAnswer, TextValue } from "../../types";
+
+/** The `bind` of a game that named the fixture's format, the same function as the root one. */
+const { bind } = textFor<string, string, "perf.pill">();
 
 /** The component the bound labels of a fixture show. */
 const Counter = component("Counter", { value: 0 });
@@ -135,6 +138,78 @@ function textCtx(world: MockWorld, now: Float64Array): TextCtx {
   } as unknown as TextCtx;
 }
 
+/** The answers of the format of the named fixture, kept: what is measured is the engine's cost. */
+const SAME_ANSWER: TextFormatAnswer = Object.freeze({ content: "few", style: "digits" });
+
+/** One kept answer per value of the counter of the named fixture, each with a string of its own. */
+const ANSWERS: readonly TextFormatAnswer[] = Object.freeze(
+  Array.from({ length: VALUES }, (_unused, value) =>
+    Object.freeze({ content: String(value), style: "digits" })
+  )
+);
+
+/**
+ * What moves between the frames of the named fixture: nothing, the counter of one label under a
+ * step whose answer stands, or under a step whose answer writes a new string.
+ */
+export type MovingNamed = "nothing" | "same" | "text";
+
+/**
+ * 100 labels: 80 with a plain string, 20 bound through a format a feature registered. The format
+ * answers kept objects, so a window measures what the engine keeps and not what a game's format
+ * allocates. With `"same"` the counter of the first label moves every frame and the answer stands:
+ * one call, no write. With `"text"` every step writes a new string.
+ *
+ * @param moving - What changes per frame.
+ * @returns One frame: phase `layout`, then the clear of phase `signals`.
+ */
+export function namedFixture(moving: MovingNamed): () => void {
+  const world = createMockWorld();
+  const ecs = stableEcs(world);
+  const ctx = textCtx(world, new Float64Array([CLOCK_START_MS]));
+  const time: Time = { delta: 16.6, elapsed: 0, scale: 1, frame: 1, idle: false };
+
+  ctx.state.formats.set("perf.pill", value =>
+    moving === "text" ? (ANSWERS[value % VALUES] ?? SAME_ANSWER) : SAME_ANSWER
+  );
+  world.api.ecs.system(createTextSystem(ctx, createTextFrame(ctx)));
+
+  for (let index = 0; index < PLAIN; index += 1) {
+    world.api.ecs.spawn(OWNER, [Text({ content: `label ${index}` })]);
+  }
+
+  let first: Entity | undefined;
+
+  for (let index = 0; index < BOUND; index += 1) {
+    const entity = world.api.ecs.spawn(OWNER, [
+      Counter({ value: index }),
+      Text({ style: "digits", bind: bind(Counter, "value", { format: "perf.pill" }) })
+    ]);
+
+    first ??= entity;
+  }
+
+  // The stored value, written in place so the fixture's own write keeps nothing.
+  const counter = world.api.ecs.get(first ?? 0, Counter) as { value: number };
+  let tick = 0;
+
+  const frame = (): void => {
+    time.frame += 1;
+
+    if (moving !== "nothing") {
+      tick = (tick + 1) % VALUES;
+      counter.value = tick;
+    }
+
+    ecs.runPhase("layout", time);
+    ecs.clearChanges();
+  };
+
+  for (let index = 0; index < WARM_FRAMES; index += 1) frame();
+
+  return frame;
+}
+
 /**
  * What moves between the frames of a fixture: nothing, the counter of one bound label, or the
  * clock under one running countdown label.
@@ -201,7 +276,7 @@ export function resolveFixture(
   for (let index = 0; index < BOUND; index += 1) {
     const entity = world.api.ecs.spawn(OWNER, [
       Counter({ value: index }),
-      Text({ style: "digits", bind: bind(Counter, "value") })
+      Text({ style: "digits", bind: builtInBind(Counter, "value") })
     ]);
 
     first ??= entity;
@@ -211,7 +286,7 @@ export function resolveFixture(
   const timer = world.api.ecs.spawn(OWNER, [
     Countdown({ until: CLOCK_START_MS + COUNTDOWN_MS }),
     ...(moving === "countdown"
-      ? [Text({ style: "digits", bind: bind(Countdown, "left", { format: "mm:ss" }) })]
+      ? [Text({ style: "digits", bind: builtInBind(Countdown, "left", { format: "mm:ss" }) })]
       : [])
   ]);
 

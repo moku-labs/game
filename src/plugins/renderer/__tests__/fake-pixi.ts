@@ -27,6 +27,10 @@ export type FakeSource = {
   released?: string[];
   style?: { removeAllListeners(event: string): void };
   removeAllListeners?(event: string): void;
+  /** Pixi's `once`: the listeners on `unload`, which `unload` calls. */
+  once?(event: "unload", listener: (source: FakeSource) => void): void;
+  /** Pixi's `unload`: the GPU copy goes, the source stays. */
+  unload?(): void;
 };
 
 /**
@@ -49,6 +53,15 @@ function listening(source: FakeSource): FakeSource {
   };
   source.removeAllListeners = (event: string): void => {
     released.push(event);
+  };
+
+  const unloading: Array<(source: FakeSource) => void> = [];
+
+  source.once = (_event, listener): void => {
+    unloading.push(listener);
+  };
+  source.unload = (): void => {
+    for (const listener of unloading.splice(0)) listener(source);
   };
 
   return source;

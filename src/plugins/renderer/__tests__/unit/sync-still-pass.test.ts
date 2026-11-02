@@ -154,7 +154,7 @@ describe("the sync pass of a still frame", () => {
 
   it("forgets the filters of an entity a rebuild left without a view, once it despawns", async () => {
     const mock = await started();
-    // No Layer: the pass builds its view, a rebuild builds the views of the layered entities only.
+    // No Layer, no Parent: the pass builds its view, a rebuild builds the views hung somewhere only.
     const entity = mock.world.ecs.spawn(owner, [Transform(), Sprite({ texture: "board.cell" })]);
 
     mock.modules.sync.pass();

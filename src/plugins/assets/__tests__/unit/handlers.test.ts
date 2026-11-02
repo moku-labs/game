@@ -140,6 +140,8 @@ describe("the release mark of a rest", () => {
     createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
 
     expect(mock.ctx.state.restPending).toBe(true);
+    // The preload had its chance: a bundle the next node waits for is warned from now on (F117).
+    expect(mock.ctx.state.restedLive).toBe(true);
     expect(mock.api.isLoaded("alpha")).toBe(true);
   });
 
@@ -156,6 +158,8 @@ describe("the release mark of a rest", () => {
     createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
 
     expect(mock.ctx.state.restPending).toBe(false);
+    // A restore walks fast: its rests run no preload, so the node it restores is not warned (F117).
+    expect(mock.ctx.state.restedLive).toBe(false);
     expect(mock.api.isLoaded("alpha")).toBe(false);
     expect(mock.api.isLoaded("beta")).toBe(true);
   });

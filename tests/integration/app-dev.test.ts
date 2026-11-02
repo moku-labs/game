@@ -192,6 +192,18 @@ describe("moku-game dev on the mini game", () => {
 });
 
 describe("moku-game dev on copies of the mini game", () => {
+  // Bug: the URL line came before the signal listeners, so this ended with 130 about half the time.
+  it("Ctrl+C right after the URL line exits 0", async () => {
+    const root = game("dev-first-stop");
+
+    for (let run = 0; run < 6; run += 1) {
+      const started = startBin(["dev", "--root", root, "--port", "0"]);
+
+      await urlOf(started);
+      expect(await interrupt(started)).toBe(0);
+    }
+  }, 60_000);
+
   it("a new scenario file rewrites main.ts with its key", async () => {
     const root = game("dev-scenario");
     const started = startBin(["dev", "--root", root, "--port", "0"]);

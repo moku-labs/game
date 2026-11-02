@@ -4,7 +4,8 @@
  * and the renderer build it in parts and keep it off stage. One step a frame, in the idle time of a live world, builds,
  * patches or drops a held view; the reconcile shows the held view when `from` brings its key, and a close leaves the
  * record cold, to be built again. A world that stops being live drops the view in work. An element registered for a
- * closed window is held with it, and the sweep forgets the held entities that are gone.
+ * closed window is held with it, and the sweep forgets the held entities that are gone. A projection `hold` mounted
+ * has a record too: it holds `from`'s first item instead of the `warm` one until `show` (`hold.ts`).
  */
 import type { Snapshot } from "../../model/types";
 import type { AnyComponentValue, Entity } from "../ecs/types";
@@ -18,6 +19,7 @@ import type {
   Mounted,
   ProjectionCtx,
   ProjectionState,
+  SceneSwitch,
   Track,
   View,
   WarmRecord
@@ -88,14 +90,16 @@ function isSeen(seen: Snapshot | undefined, snapshot: Snapshot): boolean {
 }
 
 /**
- * Gives a mounted projection that declares `warm` its record, cold, at the end of the warm list. A projection that
- * has one keeps it: a projection a scene before mounted and the coming one keeps (F23) keeps its held view.
+ * Gives a mounted projection that declares `warm`, or is held, its record, cold, at the end of the warm list. A
+ * projection that has one keeps it: a projection a scene before mounted and the coming one keeps (F23) keeps its held
+ * view.
  *
  * @param state - The projection branch of the plugin state.
  * @param spec - The projection spec.
  */
 export function ensureWarm(state: ProjectionState, spec: AnyProjectionSpec): void {
-  if (spec.warm === undefined || state.warm.has(spec.name)) return;
+  if (state.warm.has(spec.name)) return;
+  if (spec.warm === undefined && !state.held.has(spec.name)) return;
 
   const record: WarmRecord = { name: spec.name, entities: new Set<Entity>(), phase: "cold" };
 
@@ -226,7 +230,8 @@ export function forgetWarm(pctx: ProjectionCtx, name: string): void {
 }
 
 /**
- * Drops every held view and forgets every record: the clear of the projections.
+ * Drops every held view and forgets every record, every held name, every owed `show` and every value fed: the clear of
+ * the projections.
  *
  * @param pctx - Domain context of the projection module.
  */
@@ -238,6 +243,10 @@ export function clearWarm(pctx: ProjectionCtx): void {
   state.warm.clear();
   state.warmList.length = 0;
   state.warmHeld.clear();
+  state.held.clear();
+  state.showing.length = 0;
+  state.fed.clear();
+  state.heldFed.clear();
   delete state.warmActive;
   state.warmStale = false;
 }
@@ -471,11 +480,30 @@ function pollActive(state: ProjectionState, active: WarmRecord): void {
 }
 
 /**
- * Reads the warm item of a projection and its key. A `warm` or a `key` that throws is logged as a projection that
- * failed, and nothing is warm.
+ * The first item `from` gives: the first of a list, or the one object of a screen.
+ *
+ * @param spec - The projection spec.
+ * @param snapshot - The state now.
+ * @param sw - The switch `from` reads.
+ * @returns The item, or `undefined` for an empty list.
+ */
+function firstItem(
+  spec: AnyProjectionSpec,
+  snapshot: Snapshot,
+  sw: SceneSwitch | undefined
+): unknown {
+  const source: unknown = spec.from(snapshot.player, snapshot.session, sw);
+
+  return Array.isArray(source) ? (source as readonly unknown[])[0] : source;
+}
+
+/**
+ * Reads the item a record holds and its key: `from`'s first item while the projection is held, read with the value the
+ * first feed after `hold` stored (else the one fed before), so a later feed never makes it differ; else the item
+ * `warm` gives. A `warm`, a `from` or a `key` that throws is logged as a projection that failed, and nothing is held.
  *
  * @param pctx - Domain context of the projection module.
- * @param spec - The projection spec, which declares `warm`.
+ * @param spec - The projection spec, which declares `warm` or is held.
  * @param snapshot - The state now.
  * @returns The item and its key, or `undefined` for no item and for a throw.
  */
@@ -484,8 +512,12 @@ function readWarm(
   spec: AnyProjectionSpec,
   snapshot: Snapshot
 ): { item: unknown; key: string } | undefined {
+  const state = pctx.ctx.state.projection;
+
   try {
-    const item = spec.warm?.(snapshot.player, snapshot.session);
+    const item = state.held.has(spec.name)
+      ? firstItem(spec, snapshot, state.heldFed.get(spec.name) ?? state.fed.get(spec.name))
+      : spec.warm?.(snapshot.player, snapshot.session);
 
     if (item === undefined || item === null) return undefined;
 
@@ -622,8 +654,8 @@ function refreshWarm(
 
 /**
  * One record's turn in the warm step: a record shown, in work, or read against this state is passed over. Otherwise
- * `warm` is read: with no item, or with a key `from` shows, what is held is dropped; a cold record spawns its held
- * view, a ready one is brought up to date.
+ * its item is read (`warm`, or `from`'s first while held): with no item, or with a key `from` shows, what is held is
+ * dropped; a cold record spawns its held view, a ready one is brought up to date.
  *
  * @param pctx - Domain context of the projection module.
  * @param record - The record.

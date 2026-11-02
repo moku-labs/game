@@ -598,7 +598,9 @@ function exitGone(
 }
 
 /**
- * Reads the keyed items of one projection. A throw from `from` or `key` is reported and the
+ * Reads the keyed items of one projection, `from` reading the value last fed to it (`undefined`
+ * for one never fed). A held projection (`hold`) shows none: `from` is not read, and the warm step
+ * keeps its first item built and hidden. A throw from `from` or `key` is reported and the
  * projection is skipped for this reconcile.
  *
  * @param pctx - Domain context of the projection module.
@@ -612,9 +614,12 @@ function keyedItems(
   snapshot: Snapshot
 ): Map<string, unknown> | undefined {
   const next = new Map<string, unknown>();
+  const state = pctx.ctx.state.projection;
+
+  if (state.held.has(spec.name)) return next;
 
   try {
-    const source = spec.from(snapshot.player, snapshot.session);
+    const source = spec.from(snapshot.player, snapshot.session, state.fed.get(spec.name));
 
     if (!Array.isArray(source)) {
       // A screen: one plain object, drawn under the name of the projection.

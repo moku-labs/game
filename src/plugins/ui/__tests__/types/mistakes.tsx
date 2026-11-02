@@ -162,3 +162,26 @@ export const rowWithChildren = (
     <row key="extra" />
   </scroll>
 );
+
+/** An anchor that names nothing to sit on. */
+// @ts-expect-error — `to` is required: an anchor takes its rect from its targets.
+export const anchorWithoutTo = <anchor key="s" />;
+
+/** An anchor whose target is a bare key, not a projection and a key. */
+export const anchorOnKey = (
+  <anchor
+    key="t"
+    // @ts-expect-error — `to` is an AnchorTo: { projection, key } or a list of them.
+    to="seat0"
+  />
+);
+
+/** An anchor padded by a string. */
+export const anchorPadString = (
+  <anchor
+    key="u"
+    to={{ projection: "board.strip", key: "seat0" }}
+    // @ts-expect-error — `pad` is an AnchorPad, a number of the anchor root's units.
+    pad="4"
+  />
+);

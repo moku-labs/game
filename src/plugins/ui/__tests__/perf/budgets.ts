@@ -126,5 +126,47 @@ export const BUDGET = {
    * and the notes of the pass. A numbers-only change writes no other fields, so no patch is built;
    * the hook's own motion is not in the window. 0 B.
    */
-  lookWrite: 0
+  lookWrite: 0,
+  /**
+   * F99 (change 2026-10-27-f99-f98-layout-guide): the system `ui.anchor` over two anchors whose
+   * targets stand: the tutorial's window on a world sprite, and a window on a seat of the strip
+   * inside a container drawn at half its size. Each target's root pose is walked into the anchor's
+   * kept pose, the parent's pose mapped, the rest compared; nothing is written. 0 B.
+   */
+  anchorStill: 0,
+  /**
+   * F99: the same pass while the sprite moves between two fractional places, one a frame: the
+   * window, its rim and its button take the new rects in place (`previous` by value), and the
+   * window's `Box` and `Transform` and the children's `Box` are written field by field on the
+   * stored values, which are only marked changed: no `ecs.set` with a patch of doubles, which
+   * boxes 16 B a field. No Yoga run: the size stands. 0 B.
+   */
+  anchorMoving: 0,
+  /**
+   * F99 review: the same follow of a moving view by an anchor whose loop sways it forever (an
+   * additive `x` track). The follow holds `x` and `y` from the loop once, when it starts moving
+   * (`world.projection.mute`), and writes them in place every frame; the hold is let go in the
+   * frame the anchor stands. Was a `setRest` and a 0 ms rest track every frame. 0 B.
+   */
+  anchorMovingLoop: 0,
+  /**
+   * F98 (change 2026-10-27-f99-f98-layout-guide): the system `ui.guide` over the guide of a rest
+   * node standing on a world sprite: the target's root pose walked into the guide's kept pose, the
+   * window padded and the four rects of the veil written in place, the viewport read, nothing
+   * written on the stored components, the lock window handed to `input` once. 0 B.
+   */
+  guideStill: 0,
+  /**
+   * F98: the same pass while the sprite moves between two fractional places, one a frame: the
+   * window and the four rects take the new numbers in place, and the veil's `Transform` and `Shape`
+   * fields are written on the stored values, which are only marked changed. The lock keeps the same
+   * window object. 0 B.
+   */
+  guideMoving: 0,
+  /**
+   * F135 (change 2026-11-01-f135-bound-format): the remeasure of a text with a built-in bind, which a
+   * rolling counter asks at every change of its shown string. A format of a game costs it one more
+   * compare: it reads no `Text.style` and asks no format, and nothing is built. 0 B.
+   */
+  remeasureBound: 0
 } as const;

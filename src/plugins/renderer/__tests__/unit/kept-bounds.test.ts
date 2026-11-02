@@ -166,6 +166,34 @@ describe("a kept picture is cut to the canvas (F53)", () => {
     expect(drawn.mock.ctx.state.kept.byEntity.get(panorama)?.mode).toBe("kept");
   });
 
+  // Bug F113: a still panorama wider than the canvas under a zoom was taken while the zoom ran; a cut picture is never
+  // drawn scaled, so it was taken again in each of the next frames, went calm, and stayed live for eight frames after
+  // the zoom (A Memory Missing's ward: kept six frames later than before when a memory opened over it).
+  it("takes no cut picture while an ancestor zooms, and takes it two frames after the zoom", async () => {
+    const drawn = await open();
+    const camera = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 1, h: 1 }));
+    const panorama = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: -1000, y: 0 }),
+      Shape({ w: 3000, h: 400 }),
+      Parent({ entity: camera })
+    ]);
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(panorama, [slot()]);
+
+    for (let frame = 1; frame <= 8; frame += 1) {
+      drawn.mock.world.ecs.set(camera, Transform, { scale: 0.96 + frame * 0.005 });
+      drawn.frame();
+    }
+
+    expect(picturesOf(drawn, panorama)).toHaveLength(0);
+
+    drawn.frames(3);
+
+    expect(picturesOf(drawn, panorama)).toHaveLength(1);
+    expect(drawn.mock.ctx.state.kept.byEntity.get(panorama)?.mode).toBe("kept");
+  });
+
   it("only moves the quad of a picture wholly on the canvas", async () => {
     const drawn = await open();
     const card = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 200, h: 100 }));
