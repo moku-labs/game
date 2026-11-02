@@ -14,6 +14,7 @@ import type { HostApi, HostInternal, HostState } from "./host/types";
 import type { KeptInternal, KeptState } from "./kept/types";
 import type { MonitorSections } from "./monitor/log-types";
 import type { MonitorApi, MonitorInternal, MonitorState, PerfMonitorApi } from "./monitor/types";
+import type { ShotsApi, ShotsConfig, ShotsInternal, ShotsState } from "./shots/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
@@ -320,6 +321,8 @@ export type AdaptiveScale = {
  * createApp({ pluginConfigs: { renderer: { mount: "#game", uploads: 2 } } });
  * // A game whose art must stay sharp: the adaptive frame rate drops the rate, never the resolution.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", adaptiveScale: false } } });
+ * // A loader that shows the place the player left, as a small soft picture.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", shots: { width: 96, height: 208, blur: 22 } } } });
  * ```
  */
 export type Config = {
@@ -401,6 +404,11 @@ export type Config = {
    * of the scale redraws the canvas and retakes the kept pictures once.
    */
   adaptiveScale: AdaptiveScale | false;
+  /**
+   * The size and softness of the pictures `renderer.shots.take` keeps of the drawn frame. `undefined` by default: no
+   * pipeline is made and `take` does nothing. Bad values throw at `createApp`.
+   */
+  shots: ShotsConfig | undefined;
 };
 
 /**
@@ -453,6 +461,7 @@ export type State = {
   monitor: MonitorState;
   demand: DemandState;
   kept: KeptState;
+  shots: ShotsState;
 };
 
 /**
@@ -515,6 +524,17 @@ export type Api = {
    * ```
    */
   monitor: PerfMonitorApi;
+  /**
+   * Small soft pictures of the frame just drawn, kept under asset keys. Needs `shots` in the config.
+   *
+   * @example
+   * ```ts
+   * // The start of a switch out of the panorama: the next drawn frame is kept for the loader.
+   * app.renderer.shots.take("shot.panorama.bolt");
+   * app.renderer.shots.has("shot.panorama.bolt"); // true once that frame was drawn
+   * ```
+   */
+  shots: ShotsApi;
   /**
    * Tells the renderer that the Pixi object of an entity's view is about to be drawn differently in a way it cannot
    * see: a plugin or a game writes into its own `Display` object or a Pixi object it built, `effects` writes a filter
@@ -621,7 +641,12 @@ export type DemandModule = DemandInternal;
 export type KeptModule = KeptInternal;
 
 /**
- * The six modules in injection order.
+ * Both halves of the `shots` module: what a game calls and what the plugin root and the frame drive.
+ */
+export type ShotsModule = ShotsApi & ShotsInternal;
+
+/**
+ * The seven modules in injection order.
  */
 export type Modules = {
   host: HostModule;
@@ -629,6 +654,7 @@ export type Modules = {
   demand: DemandModule;
   kept: KeptModule;
   sync: SyncModule;
+  shots: ShotsModule;
   monitor: MonitorModule;
 };
 
@@ -703,6 +729,7 @@ export type {
   RenderStats
 } from "./monitor/types";
 export type { CanvasRestart } from "./reasons";
+export type { ShotPipes, ShotsApi, ShotsConfig, ShotsInternal, ShotsState } from "./shots/types";
 export type {
   CoverFrame,
   CreateTextureOptions,

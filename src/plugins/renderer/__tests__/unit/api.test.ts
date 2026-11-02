@@ -14,10 +14,12 @@ describe("renderer api", () => {
       "host",
       "invalidate",
       "monitor",
+      "shots",
       "stats",
       "sync",
       "viewport"
     ]);
+    expect(Object.keys(mock.api.shots).toSorted()).toEqual(["has", "take"]);
     expect(Object.keys(mock.api.viewport).toSorted()).toEqual(["size", "toReference", "toScreen"]);
     expect(Object.keys(mock.api.host).toSorted()).toEqual([
       "canvas",

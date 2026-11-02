@@ -1,8 +1,9 @@
 /**
  * Very Complex tier — pixels: one Pixi v8 application on one canvas. `host` creates it and
  * survives a lost device, `viewport` maps the window to the reference space, `sync` owns every
- * display object, `kept` draws a still filtered view from a picture, `monitor` counts and, in an
- * agent build, measures every frame. Emits
+ * display object, `kept` draws a still filtered view from a picture, `shots` keeps a small soft
+ * picture of the drawn frame under an asset key, `monitor` counts and, in an agent build, measures
+ * every frame. Emits
  * `renderer:device-lost`. Hooks `lifecycle:changed` (a pause serves the waiting captures, trims
  * Pixi's texture pool and, in an agent build, flushes the performance log), and in an agent build
  * `flow:edge`, `flow:rest` (the flow path of the frames) and `time:thermal` (the thermal line).
@@ -47,7 +48,8 @@ const config: Config = {
   keptMb: 64,
   warm: 1,
   uploads: 1,
-  adaptiveScale: { floor: 0.75, devices: "phone" }
+  adaptiveScale: { floor: 0.75, devices: "phone" },
+  shots: undefined
 };
 
 /**

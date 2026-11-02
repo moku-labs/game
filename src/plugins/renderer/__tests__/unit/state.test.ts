@@ -19,7 +19,8 @@ const config: Config = {
   keptMb: 64,
   warm: 1,
   uploads: 1,
-  adaptiveScale: { floor: 0.75, devices: "phone" }
+  adaptiveScale: { floor: 0.75, devices: "phone" },
+  shots: undefined
 };
 
 describe("renderer state", () => {

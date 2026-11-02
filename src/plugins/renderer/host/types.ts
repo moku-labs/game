@@ -396,6 +396,22 @@ export type HostInternal = {
   initSource(source: PixiTextureSource): void;
 
   /**
+   * The texture of the canvas for this frame, read to be sampled: after `render` returned it holds the frame just
+   * drawn, and it is gone when the task ends. Pixi configures the canvas with `TEXTURE_BINDING` and `COPY_SRC`.
+   *
+   * @returns The texture, or `undefined` while nothing draws and on WebGL.
+   */
+  canvasTexture(): GPUTexture | undefined;
+
+  /**
+   * The GPU texture Pixi holds for a source, made now when it has none.
+   *
+   * @param source - The source.
+   * @returns The texture, or `undefined` while nothing draws and on WebGL.
+   */
+  gpuTexture(source: PixiTextureSource): GPUTexture | undefined;
+
+  /**
    * Tells whether the stage pass clears the canvas before it draws (`renderer.background.clearBeforeRender`, Pixi's
    * default, which the engine never turns off): only then may a probe draw onto the canvas.
    *

@@ -144,6 +144,19 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       app.renderer.texture.initSource(source);
     },
 
+    canvasTexture: (): GPUTexture | undefined =>
+      liveDevice(state) === undefined
+        ? undefined
+        : state.canvas?.getContext("webgpu")?.getCurrentTexture(),
+
+    gpuTexture: (source: PixiTextureSource): GPUTexture | undefined => {
+      const textures = state.ready ? state.app?.renderer.texture : undefined;
+
+      return textures !== undefined && "getGpuSource" in textures
+        ? textures.getGpuSource(source)
+        : undefined;
+    },
+
     clearsCanvas: (): boolean =>
       state.ready && state.app?.renderer.background.clearBeforeRender === true,
 

@@ -304,6 +304,8 @@ function hang(
   // Last on the stage: above the root, so above every layer, overlay and HUD in it.
   if (stage.children.at(-1) !== objects.top) stage.addChild(objects.top);
 
+  // The frame a take of `shots` waits for shows no look: the look shows from the next frame, on its own clock.
+  objects.top.visible = sctx.ctx.state.shots.wanted.length === 0;
   // The white texture is 1 x 1: its scale is its size.
   objects.veil.position.set(screen.x, screen.y);
   objects.veil.scale.set(screen.width, screen.height);

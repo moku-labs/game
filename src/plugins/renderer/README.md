@@ -9,7 +9,8 @@ tab; `viewport` maps the window to the reference space, fitting `referenceSide` 
 `referenceLong` along inside the safe area; `sync`
 is the ONE system that builds display objects from components, puts them in the named layers that
 `world.projection.layers()` lists, pools them, labels them and answers hit tests; `monitor` keeps
-the frame counters and takes a picture of a frame for the editor.
+the frame counters and takes a picture of a frame for the editor. `shots` keeps a small soft picture of a drawn frame
+under an asset key (see "Shots of the frame").
 
 ```ts
 app.renderer.host.canvas();                      // host
@@ -375,6 +376,15 @@ const renderer = ctx.require(rendererPlugin);
 await renderer.sync.textures.upload(record.textures); // true 6 drawn frames later (uploads: 1)
 await renderer.sync.textures.upload(record.textures); // true at once: they are on this device
 ```
+
+### `shots` — `app.renderer.shots`
+
+| Method | Behaviour |
+|---|---|
+| `take(key: string): void` | Keeps what the next drawn frame shows under `key`, replacing a shot of that key, and asks for that frame. Two keys taken before a frame is drawn get the same picture; a key taken twice is kept once. Does nothing, and warns nothing, without `shots` in the config, while the renderer does not draw, on WebGL, before the pipelines compiled, and while `world.ecs.mode()` is not `"live"`. |
+| `has(key: string): boolean` | A shot stands under the key. False before its frame was drawn, after the oldest went for a newer key, and after a lost device. |
+
+See "Shots of the frame".
 
 ### `invalidate` — `app.renderer.invalidate(entity)`
 
@@ -778,6 +788,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |
 | `uploads` | `number` | `1` | Texture sources `sync.textures.upload` puts on the GPU per drawn frame (see "Uploading textures before they show"). One upload costs about 9 ms on a Galaxy A26 whatever its size, so the budget counts textures, not bytes. `0` turns the queue off: `upload` answers `false` and the first draw uploads, as before. Not a whole number from 0 to 8 throws at `createApp`. |
+| `shots` | `{ width, height, blur, keep? } \| undefined` | `undefined` | The size in texels (whole numbers from 1 to 512), the softness (sigma in reference units of the frame's width, finite, 0 or more, 0 is no blur) and the number of pictures `shots.take` keeps (a whole number of at least 1, 8 by default). `undefined`: no pipeline is made and `take` does nothing. A bad value throws at `createApp`. See "Shots of the frame". |
 | `adaptiveScale` | `{ floor, devices } \| false` | `{ floor: 0.75, devices: "phone" }` | The render scale of the adaptive frame rate on a GPU-bound screen (see "Resolution"): the steps 1, 0.85, 0.75, 0.6 and 0.5 down to `floor` (one of them; 1 allows none), on `"phone"` only or on `"all"` devices. Needs `time.adaptive`. `false` keeps the resolution. Shallow merge: a game that sets it gives both fields. Anything else throws at `createApp`. |
 
 ```ts
@@ -797,7 +808,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views world released (a committed scene build, an opened warm window), added views, changed components, invalidated texture keys; then, while a scene or a warm window is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then a shot of that frame while the canvas texture holds it (`shots.after`, one length read with no key waiting), then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -907,6 +918,53 @@ README). The renderer's part, `sync.leave`:
   device takes them with its stage; the step makes them again on the restored one, and a look that ran on goes on. A
   stop frees them; the game's texture and a lifted layer are not freed with them. With no look running a step reads
   two fields: 0 B a frame, and 0 B a frame of the fade-out and of the wait too (`leave.perf.ts`).
+
+## Shots of the frame
+
+`renderer.shots` (F134, spec 35) keeps what stood on the screen as a small soft texture under an asset key: the picture
+of the place the player left, ready before the frame that asks for it. A game declares the size once and takes from a
+live node at the start of a switch.
+
+```ts
+createApp({ pluginConfigs: { renderer: { mount: "#game", shots: { width: 96, height: 208, blur: 22 } } } });
+
+app.renderer.shots.take("shot.panorama.bolt"); // at the start of the switch, in a live node
+app.renderer.shots.has("shot.panorama.bolt"); // true once the next frame was drawn
+```
+
+- **What it holds.** The frame as drawn on the canvas, HUD included, read after the stage render of that frame and
+  before the task ends, while the canvas texture still holds it. No new pass of the scene. The heat map of `overdraw`
+  is never kept: its frame takes nothing and lets the request go, as a frame Pixi did not render does.
+- **The look is not in it.** While a key waits, the step of `sync.leave` hides the container of the look, so the frame a
+  take waits for shows none, and the look shows from the next frame on its own clock. `take` asked for that frame and
+  a shot asks for one more, so `onDemand` draws both. The swap, `holdMs` and input do not change.
+- **A key.** It resolves like any asset key through the texture providers: `image`, `Sprite`. `leave.loader.texture` reads its key once, as the look shows, so it needs a shot that already stands, and it holds that texture for the whole look.
+  A view that names it before the shot, or whose key went, looks again in the next pass. A retake draws into the same
+  texture. With no shot under it a key is a missing texture like any other: the placeholder and one warning, which is
+  why a game asks `has` and draws its baked picture otherwise.
+- **How many.** `keep`, 8 by default. The oldest taken goes first and a new key takes its texture, so a game holds at
+  most `keep` textures of `width x height x 4` bytes, counted as `kept` in `host.textures()`. A retake counts as new.
+- **The chain.** One command encoder, submitted once. The canvas is divided by 4, rounding up, while that stays at least
+  twice the shot's size, and the last hop ends at the shot (`hopsOf`). A hop of 4 takes 2 x 2 bilinear taps at +-1 source
+  pixel: its output texel centre falls on a corner of source pixels, so that is an exact box of 4 x 4. The last hop
+  takes 3 x 3 taps, a third of the ratio apart. Then, with `blur` above 0, a horizontal and a vertical Gaussian at the
+  shot's size, through one extra texture of that size, neighbouring weights paired into bilinear taps, at most 16 a
+  side: `blur * width / viewport.size().width` texels, 10 at most, so the softness is the same on every screen. Two
+  keys of one frame cost one chain and a copy. Hop textures and uniforms live for the take: at rest nothing runs.
+- **The texture.** A Pixi `RenderTexture` of its own, no atlas, no mipmaps: resolution 1, linear, clamped at the edge,
+  `bgra8unorm`, out of Pixi's collector.
+- **The cost.** On a Galaxy A26 (spike, 1080 x 2340, 96 x 208): GPU 1.8 ms median, 2.9 ms p90, main thread 1.5 ms, once
+  a take. In Chrome on a Mac, against the exact area average and Gaussian of the same frame, on a test scene of 700
+  sharp white squares: 0.31 of 255 RMSE at sigma 4.8. Per frame `after` reads one length: 0 B (`shots.perf.ts`). A game
+  without `shots` compiles no pipeline.
+- **The pipelines.** Both compile with `createRenderPipelineAsync`, off the main thread, when the renderer comes up and
+  `shots` is set: 43 ms on the A26. A take before they are ready takes no shot and waits for no frame: a game draws its
+  baked picture, never a sync compile in the tap frame. A failed compile logs `renderer:shots-unavailable` once and
+  leaves `take` a no-op. A compile that ends on a device that went is dropped.
+- **A lost device** loses the shots and the waiting takes, silently: `has` answers false, and the pipelines compile
+  again on the new device. A view that still names a key gets the placeholder and its warning, as for any key nothing
+  answers. A shot is not saved.
+- **WebGPU only.** On WebGL nothing compiles and `take` does nothing.
 
 ## Render on demand
 
@@ -1670,7 +1728,8 @@ pass fewer than `sync.renderPasses()` estimates.
 | Restore fails | the unsupported-device screen; the pause reason stays | the same |
 
 A hidden tab is `lifecycle.push("background")`, a visible one `pop`. Textures are not reloaded by
-the renderer: a texture source keeps its CPU image and Pixi uploads it again.
+the renderer: a texture source keeps its CPU image and Pixi uploads it again. A shot of `renderer.shots` has no CPU
+image: it goes with the device, and `has` answers false.
 
 ## Events
 
@@ -1685,11 +1744,13 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
   pass's render target and pipeline systems, creates the
   application and appends the canvas; then, in the `onReady` callback, `viewport` creates the two safe-area probes, the
   two resize observers and the `moku-native:insets` listener, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
-  `render` frame callback is registered, and the warm-up queues its probes; in an agent build the monitor then attaches (and again
+  `render` frame callback is registered, and the warm-up queues its probes; with `shots` set the texture provider goes in
+  once and the pipelines compile (again after every rebuilt restore); in an agent build the monitor then attaches (and again
   after every restore). Inert without a document or without a mount: nothing is created and nothing
   is registered.
 - **onStop** `({ config, state }) => stopRenderer({ config, state })` answers a waiting capture
-  with `undefined` and forgets the frame counters, then runs the cleanups of `sync`,
+  with `undefined` and forgets the frame counters, destroys the kept pictures and the shots and removes the shots'
+  provider, then runs the cleanups of `sync`,
   `viewport` and `host` in that order, destroys the pooled objects and the application
   (`{ removeView: true }`, `{ children: true, texture: false }`), swaps Pixi's own draw classes
   back, removes the two safe-area probes and the unsupported element and clears every map, the filter slots too, and
@@ -1741,7 +1802,8 @@ in direct mode, so motions in flight when the command started are finished after
 clock), and `snapshot()` and `step()` (the frames of a sheet), `lifecycle` for `push`/`pop` of
 `"background"` and `"device-lost"` and for the `lifecycle:changed` hook that serves the captures a
 pause left waiting, `clock` for `now()`, the time source of the frame counters,
-`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot`,
+`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot`, `ecs.mode` (a take of `shots`
+keeps to a world that runs live),
 `projection.layers`/`keyOf` and, in an agent build, `systemTimes()`, `flow` for the flow path of
 the frames in the performance log (`state()`, and the `flow:edge`/`flow:rest` hooks), `time` also
 for `frameDrawn()` (every build: the render phase reports a frame Pixi drew, for the adaptive frame
@@ -1765,6 +1827,8 @@ and a diff picture, and a `layers` capture that leaves the drawn frame pixel-ide
 player, belong to the e2e station too. The real `drawCalls` number needs a GPU: it is pinned once
 measured on the board screen of the merge game in moku-labs/demos, which has no filter and no
 emitter, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
+A shot needs a GPU too: its WGSL, that the canvas texture holds the frame after `render`, the result against the exact
+area average and Gaussian, and a real `device.destroy()`: the throwaway page of the design folder drives them in Chrome.
 How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,
 a label under a 0.6 parent at 0.6, and the same pixels as the per-label shader drew, in the browser, under
 WebGPU and under WebGL. So does the alpha of a parent: the icon of a disabled round button measured
