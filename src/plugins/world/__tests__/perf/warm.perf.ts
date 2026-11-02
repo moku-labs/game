@@ -33,9 +33,11 @@ describe("warm windows: heap per frame", () => {
     expect(bytes).toBeLessThanOrEqual(BUDGET.warmStepPoll + NOISE_BYTES);
   });
 
+  // Bug caught: ui and the renderer ask `left()` and `isBuilding` many times a frame while a held view builds; a heap
+  // number per call is a GC pause on the A26. Settled first: a tier-up of V8 inside a window reads as 16 B a call.
   it("left() and isBuilding(held) keep nothing while a held view builds", async ({ annotate }) => {
-    const left = alloc(building.left);
-    const flag = alloc(resting.isBuilding);
+    const left = alloc(settled(building.left));
+    const flag = alloc(settled(resting.isBuilding));
 
     await annotate(`left: ${left} B, isBuilding: ${flag} B`);
     expect(left).toBeLessThanOrEqual(BUDGET.warmLeft + NOISE_BYTES);
