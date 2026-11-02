@@ -176,6 +176,8 @@ Every raw sample carries its device: `pointerType` is `"mouse"`, `"touch"` or `"
 | any sample of a touch | the tag goes. A touch never hovers |
 | `pointercancel`, `pointerleave` of the canvas | the tag goes |
 | lost capture | nothing: the browser sends one after every click |
+
+A lost capture never moves `Pointer`: WebKit sends it about 9 ms after `pointerup` at `clientX/Y` 0, 0, and the lift would read as a drag to the corner. It cancels only a press that is still followed; after the lift it does nothing (F143).
 | world mode `paused` | the tag goes |
 
 The hit test runs once per drain, at the last hover move of that drain. A clear that comes after it in the same frame wins; a hover move after a clear wins.

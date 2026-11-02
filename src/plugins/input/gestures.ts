@@ -333,6 +333,17 @@ function onCancel(ctx: InputCtx, pointer: PointerValue, reason: LostPress): void
 }
 
 /**
+ * The capture was lost. The sample carries no place: WebKit sends it at (0, 0) about 9 ms after
+ * the lift (F143), so it never moves the pointer, and it cancels only a press still followed.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param pointer - The `Pointer` resource of this frame.
+ */
+function onLost(ctx: InputCtx, pointer: PointerValue): void {
+  if (ctx.state.pointerId !== undefined) onCancel(ctx, pointer, "capture-lost");
+}
+
+/**
  * Lets a running drag or trace go with no answer: the drag is released with no target, so the
  * stack settles home, and the trace drops its `Traced` tags.
  *
@@ -378,7 +389,7 @@ function leavesSlop(ctx: InputCtx, point: Point): boolean {
  * thumb or palm never blocks the finger that plays. A move of an idle mouse or pen hit-tests
  * nothing: its point is returned, so the drain moves the hover once per frame. A move of a press
  * past the tap slop marks the press as moved for good and, in that one sample, hands it to the
- * scroll it pans. A lost capture ends the gesture like a cancel.
+ * scroll it pans. A lost capture ends a followed gesture like a cancel and never moves the pointer.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -395,6 +406,12 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
     // the machine forgets it.
     lostPress(ctx, "other-finger");
     toIdle(ctx);
+  }
+
+  if (sample.kind === "lost") {
+    onLost(ctx, pointer);
+
+    return undefined;
   }
 
   const point = ctx.deps.renderer.viewport.toReference(sample.clientX, sample.clientY);
@@ -422,7 +439,7 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
       break;
     }
     default: {
-      onCancel(ctx, pointer, sample.kind === "lost" ? "capture-lost" : "cancelled");
+      onCancel(ctx, pointer, "cancelled");
     }
   }
 

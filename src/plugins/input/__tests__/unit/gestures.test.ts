@@ -1428,3 +1428,49 @@ describe("a press and a release from the canvas resolve at their event", () => {
     expect(mock.answers).toEqual([]);
   });
 });
+
+describe("a lost capture after the lift (F143: WebKit sends it at 0, 0)", () => {
+  it("keeps the pointer at the lift and answers the tap when the lost capture at 0, 0 follows the pointerup 9 ms later", () => {
+    const { mock, canvas } = onCanvas([Tappable({ intent: "found" })]);
+
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 50, clientY: 50 });
+    canvas.dispatch("pointerup", { pointerId: 1, clientX: 52, clientY: 50 });
+    canvas.dispatch("lostpointercapture", { pointerId: 1, clientX: 0, clientY: 0 });
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "found", payload: {} }]);
+    expect(pointerOf(mock)).toMatchObject({ x: 52, y: 50, down: false, justReleased: true });
+  });
+
+  it("keeps the pointer at the lift when the lost capture comes a frame after it", () => {
+    const mock = createMockInput();
+
+    view(mock, [Tappable({ intent: "found" })]);
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, up(52, 50));
+    mock.frame();
+    record(mock.state, sample("lost", "touch", 0, 0));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "found", payload: {} }]);
+    expect(pointerOf(mock)).toMatchObject({ x: 52, y: 50, down: false });
+  });
+
+  it("cancels a press still followed with no answer, and leaves the pointer where the finger was", () => {
+    const mock = createMockInput();
+    const entity = view(mock, [Tappable({ intent: "found" })]);
+
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, sample("lost", "touch", 0, 0));
+    mock.frame();
+
+    expect(mock.has(entity, Pressed)).toBe(false);
+    expect(mock.state.phase).toBe("idle");
+    expect(pointerOf(mock)).toMatchObject({ x: 50, y: 50, down: false });
+    record(mock.state, up(50, 50));
+    mock.frame();
+    expect(mock.answers).toEqual([]);
+  });
+});

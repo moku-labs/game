@@ -48,7 +48,11 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   | a width, `480` | wrapped at that many reference px |
   | `"box"` | wrapped at the laid-out width of its `ui` text element, which `ui` writes into `Text.box`; one line outside a ui layout, with a dev warning `text: wrap "box" outside layout` once per style; a style a layout measured at a width (`measure(content, style, width)`) never warns: its label with no box fits its row (F65) |
 
-  Words break between them; a word wider than the wrap breaks between its glyphs. A `"box"` text
+  Words break between them, and inside a word after a hyphen (`-` or U+2010) that joins two parts,
+  the hyphen kept on the first line: `купли-продажи` may break as `купли-` / `продажи`; never after
+  a leading hyphen or before a digit. A soft hyphen (U+00AD) draws nothing unless the line breaks
+  there, then it draws `-`; the word before it moves to the next line when that `-` would not fit.
+  The display draws exactly the measured lines. A word wider than the wrap breaks between its glyphs. A `"box"` text
   is measured at the width Yoga offers, so its element is as high as its lines, and is drawn again
   only when its box changes: a still frame compares one number per label and allocates nothing. A
   box is laid out per width and string, a number or `"none"` style once per string. Shrink is 0

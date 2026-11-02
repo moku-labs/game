@@ -278,7 +278,11 @@ export function pageHtml(page: Page, links: PageLinks): string {
   );
   const style =
     `html, body { margin: 0; height: 100%; background: ${background}; } ` +
-    "#game { width: 100%; height: 100%; touch-action: none; }" +
+    "#game { width: 100%; height: 100%; touch-action: none; } " +
+    // A long press on iOS selects text and shows the loupe (F144); a text field keeps its selection.
+    "html, body, #game { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; " +
+    "-webkit-tap-highlight-color: transparent; } " +
+    "input, textarea { -webkit-user-select: text; user-select: text; }" +
     (page.boot === undefined ? "" : bootRule(page.boot));
 
   return [
