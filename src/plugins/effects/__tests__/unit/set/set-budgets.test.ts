@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { FilterComponent, FilterFields } from "../../../filters/types";
+import { AURA_GLSL, AURA_WGSL, Aura } from "../../../set/aura";
+import { DISSOLVE_GLSL, DISSOLVE_WGSL, Dissolve } from "../../../set/dissolve";
 import { FLASH_GLSL, FLASH_WGSL, Flash } from "../../../set/flash";
+import { FOLD_GLSL, FOLD_WGSL, Fold } from "../../../set/fold";
 import { GRADE_GLSL, GRADE_WGSL, Grade } from "../../../set/grade";
+import { REVEAL_LINE_GLSL, REVEAL_LINE_WGSL, RevealLine } from "../../../set/reveal-line";
+import { REVEAL_ROUND_GLSL, REVEAL_ROUND_WGSL, RevealRound } from "../../../set/reveal-round";
+import { SHINE_GLSL, SHINE_WGSL, Shine } from "../../../set/shine";
 import { VIGNETTE_GLSL, VIGNETTE_WGSL, Vignette } from "../../../set/vignette";
 
 // ---------------------------------------------------------------------------
@@ -10,7 +16,9 @@ import { VIGNETTE_GLSL, VIGNETTE_WGSL, Vignette } from "../../../set/vignette";
 // read). Mpx = CSS area × resolution² × (1 + Σ scale²) of its chain's steps;
 // the screen frame is the A26's 384 × 693 CSS px (Chrome's viewport, read on the phone on 2026-11-04),
 // the tile 128 × 128; the bench runs at resolution 2. At 2 one pass over the
-// screen is 384 × 693 × 4 = 1.0644 Mpx.
+// screen is 384 × 693 × 4 = 1.0644 Mpx. A padded member draws its frame grown
+// by the padding on every side, as Pixi pads it, at its default padding; on the
+// screen Pixi cuts the frame to the screen.
 // ---------------------------------------------------------------------------
 
 /** A budget frame, CSS px. */
@@ -25,18 +33,36 @@ const TILE: Frame = { width: 128, height: 128 };
 /** The resolution the bench and the budgets are read at: the renderer's default `maxResolution`. */
 const RESOLUTION = 2;
 
-/** A member, with the bodies the test counts in. */
+/** A member, with the bodies the test counts in and the samples of the member table. */
 type Row = {
   readonly member: FilterComponent<FilterFields>;
   readonly wgsl: string;
   readonly glsl: string;
+  readonly samples: number;
+  /** The most Mpx it draws on a tile at resolution 2: a padded member pays its padding. */
+  readonly tile: number;
 };
 
-/** Every member of slice 1. */
+/**
+ * Every single-pass member of slices 1 and 2. `Aura` reads its pixel and 12 probes on a ring; `Aura` (at its default
+ * `spread` 8) and `Fold` are padded by 8 px: a tile's frame is 144 × 144, 0.083 Mpx at 2.
+ */
 const MEMBERS: readonly Row[] = [
-  { member: Flash, wgsl: FLASH_WGSL, glsl: FLASH_GLSL },
-  { member: Grade, wgsl: GRADE_WGSL, glsl: GRADE_GLSL },
-  { member: Vignette, wgsl: VIGNETTE_WGSL, glsl: VIGNETTE_GLSL }
+  { member: Flash, wgsl: FLASH_WGSL, glsl: FLASH_GLSL, samples: 1, tile: 0.066 },
+  { member: Grade, wgsl: GRADE_WGSL, glsl: GRADE_GLSL, samples: 1, tile: 0.066 },
+  { member: Vignette, wgsl: VIGNETTE_WGSL, glsl: VIGNETTE_GLSL, samples: 1, tile: 0.066 },
+  { member: RevealLine, wgsl: REVEAL_LINE_WGSL, glsl: REVEAL_LINE_GLSL, samples: 1, tile: 0.066 },
+  {
+    member: RevealRound,
+    wgsl: REVEAL_ROUND_WGSL,
+    glsl: REVEAL_ROUND_GLSL,
+    samples: 1,
+    tile: 0.066
+  },
+  { member: Dissolve, wgsl: DISSOLVE_WGSL, glsl: DISSOLVE_GLSL, samples: 1, tile: 0.066 },
+  { member: Shine, wgsl: SHINE_WGSL, glsl: SHINE_GLSL, samples: 1, tile: 0.066 },
+  { member: Aura, wgsl: AURA_WGSL, glsl: AURA_GLSL, samples: 13, tile: 0.083 },
+  { member: Fold, wgsl: FOLD_WGSL, glsl: FOLD_GLSL, samples: 1, tile: 0.083 }
 ];
 
 /** What a member costs, as the README's table states it. */
@@ -64,16 +90,64 @@ function chainScales(member: FilterComponent<FilterFields>, resolution: number):
 }
 
 /**
- * The reads of the input in a body: one per `sampleInput(` call, a loop's bound when the call is in a loop.
+ * The text between a `{` and the `}` that closes it.
+ *
+ * @param body - The text.
+ * @param open - Where the `{` stands.
+ * @returns What it holds.
+ */
+function blockAt(body: string, open: number): string {
+  let depth = 0;
+
+  for (let at = open; at < body.length; at += 1) {
+    if (body[at] === "{") depth += 1;
+    if (body[at] === "}") depth -= 1;
+    if (depth === 0) return body.slice(open + 1, at);
+  }
+
+  return body.slice(open + 1);
+}
+
+/**
+ * The `sampleInput(` calls in a text.
+ *
+ * @param text - A body, or a block of it.
+ * @returns How many.
+ */
+function callsIn(text: string): number {
+  return [...text.matchAll(/\bsampleInput\(/g)].length;
+}
+
+/**
+ * The reads of the input in a body: one per `sampleInput(` call, times a loop's bound for a call inside the loop.
  *
  * @param body - The member's own body, WGSL or GLSL.
  * @returns The samples a pixel takes.
  */
 function samplesOf(body: string): number {
-  const bound = /for \([^;]*; \w+ < (\d+);/.exec(body)?.[1];
-  const calls = [...body.matchAll(/\bsampleInput\(/g)].length;
+  let samples = callsIn(body);
 
-  return bound === undefined ? calls : calls * Number(bound);
+  for (const loop of body.matchAll(/for \([^;]*; \w+ < (\d+);[^{]*\{/g)) {
+    const inside = callsIn(blockAt(body, (loop.index ?? 0) + loop[0].length - 1));
+
+    samples += inside * (Number(loop[1]) - 1);
+  }
+
+  return samples;
+}
+
+/**
+ * The padding a member's frame grows by on every side, CSS px: its number, or its uniform's default; Pixi pads by the
+ * whole pixels of it.
+ *
+ * @param member - The member.
+ * @returns The padding.
+ */
+function paddingOf(member: FilterComponent<FilterFields>): number {
+  const { padding } = member.filter;
+  const value = typeof padding === "number" ? padding : member().value[padding];
+
+  return Math.trunc(typeof value === "number" ? value : 0);
 }
 
 /**
@@ -87,7 +161,10 @@ function samplesOf(body: string): number {
 function budgetOf(row: Row, frame: Frame, resolution: number): Budget {
   const { filter } = row.member;
   const scales = chainScales(row.member, resolution);
-  const area = frame.width * frame.height * resolution * resolution;
+  const padding = paddingOf(row.member);
+  const width = Math.min(frame.width + 2 * padding, SCREEN.width);
+  const height = Math.min(frame.height + 2 * padding, SCREEN.height);
+  const area = width * height * resolution * resolution;
 
   return {
     id: filter.id,
@@ -121,13 +198,13 @@ describe("the budgets of the set", () => {
   // Bug: a member that silently left the quad, a body that gained a sample loop, a pass more than one.
   it.each(
     MEMBERS
-  )("$member.filter.id: 1 pass, 1 sample, at most 1.065 Mpx a screen, quad on change", row => {
+  )("$member.filter.id: 1 pass, $samples samples, at most 1.065 Mpx a screen, quad on change", row => {
     const screen = budgetOf(row, SCREEN, RESOLUTION);
 
     expect(screen.passes).toBe(1);
-    expect(screen.samples).toBe(1);
+    expect(screen.samples).toBe(row.samples);
     expect(screen.mpx).toBeLessThanOrEqual(1.065);
     expect(screen.onChange).toBe("quad");
-    expect(budgetOf(row, TILE, RESOLUTION).mpx).toBeLessThanOrEqual(0.066);
+    expect(budgetOf(row, TILE, RESOLUTION).mpx).toBeLessThanOrEqual(row.tile);
   });
 });

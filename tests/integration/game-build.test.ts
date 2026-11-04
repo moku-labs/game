@@ -22,6 +22,19 @@ const rootModule = fileURLToPath(new URL("../../src/index.ts", import.meta.url))
 /** The folder of the effects plugin, read for the names of its log events. */
 const effectsFolder = fileURLToPath(new URL("../../src/plugins/effects/", import.meta.url));
 
+/** The ids of every member of the engine's effect set, as a bundle names them. */
+const SET_IDS = [
+  "effects.flash",
+  "effects.grade",
+  "effects.vignette",
+  "effects.revealLine",
+  "effects.revealRound",
+  "effects.dissolve",
+  "effects.shine",
+  "effects.aura",
+  "effects.fold"
+];
+
 /** The names Pixi's three WebGPU draw classes go by: only the counting subclasses name them. */
 const drawClasses = ["GpuBatchAdaptor", "GpuGraphicsAdaptor", "GpuEncoderSystem"];
 
@@ -238,8 +251,12 @@ describe("a game build with and without effectsPlugin", () => {
         const code = bundle("screen+effects", profile, shape);
 
         expect(code, `${profile}, ${shape}`).toContain("mainFragment");
-        expect(code, `${profile}, ${shape}`).not.toContain("effects.flash");
+        expect(
+          SET_IDS.filter(id => code.includes(id)),
+          `${profile}, ${shape}`
+        ).toEqual([]);
         expect(code, `${profile}, ${shape}`).not.toContain("inputPlace");
+        expect(code, `${profile}, ${shape}`).not.toContain("setHash");
       }
     }
   }, 60_000);
@@ -250,8 +267,7 @@ describe("a game build with and without effectsPlugin", () => {
 
     expect(code).toContain('"effects.flash"');
     expect(code).toContain("inputPlace");
-    expect(code).not.toContain("effects.grade");
-    expect(code).not.toContain("effects.vignette");
+    expect(SET_IDS.filter(id => id !== "effects.flash" && code.includes(id))).toEqual([]);
   }, 60_000);
 
   it("the striped mark of a broken filter leaves a release bundle and stays in a dev bundle", () => {

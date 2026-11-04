@@ -1,6 +1,6 @@
 /**
- * @file The browser leg of the engine's effect set (F126 stage 3 slice 1): `Flash`, `Grade` and `Vignette` on the real
- * Pixi and the real GPU, in Chrome, on WebGPU and on WebGL (`?renderer=webgl`), at resolution 1 and 2, with
+ * @file The browser leg of the engine's effect set (F126 stage 3 slices 1 and 2): every member on the real Pixi and the
+ * real GPU, in Chrome, on WebGPU and on WebGL (`?renderer=webgl`), at resolution 1 and 2, with
  * `debug.verifyFrames` on. Per member: a held value is kept as a picture and equals its live frame within the frame
  * oracle's thresholds (a channel over 24, a ratio over 0.001); a tweening value runs on the view's own quad on WebGPU
  * and stays within 1/255 of its live frame; one pixel by hand (Flash at amount 1 is its colour, Grade at saturation 0

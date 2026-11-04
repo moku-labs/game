@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { defineGame, type FilterArea, Flash, type FlashValue } from "../../../../index";
+import { defineGame, type FilterArea, Flash, type FlashValue, Fold } from "../../../../index";
 import { tween } from "../../../anim/timeline/steps";
 import type { Target } from "../../../anim/types";
 import type { EmitterIdOf } from "../../../flow/types";
@@ -105,6 +105,8 @@ expectTypeOf(Flash().value).toEqualTypeOf<Readonly<FlashValue>>();
 Flash({ amount: "1" });
 // @ts-expect-error — a colour is a 0xrrggbb number, not a name
 tween(card, Flash, { color: "gold" }, { ms: 160 });
+// @ts-expect-error — `axis` is a number, 0 or 1: a uniform is a number, a colour or a tuple, never a name
+Fold({ axis: "x" });
 
 // A reserved uniform name passes the type and is refused at run time (define-filter.test.ts).
 expectTypeOf(defineFilter).toBeCallableWith("fx.x", { wgsl: "", glsl: "", uniforms: { order: 1 } });

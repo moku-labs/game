@@ -150,3 +150,101 @@ describe.each(Object.entries(LANGUAGES))("the %s set head", (_language, helpers)
     expect(sampleAt(1.5, clamp)).toBeCloseTo(clamp[2], 12);
   });
 });
+
+/**
+ * `inputFrame()` of a language on one axis: the clamp's `.xy` and `.zw`, `uInputPixel.zw` and `uInputSize.xy` become
+ * the axis's numbers.
+ *
+ * @param source - `SET_WGSL` or `SET_GLSL`.
+ * @returns The frame's CSS size on that axis, from the clamp, the texel and the texture's CSS size.
+ */
+function frameOf(source: string): (clamp: Clamp, texel: number, size: number) => number {
+  const expression = /inputFrame\(\)[^{]*\{\s*return ([^;]+);/.exec(source)?.[1];
+
+  if (expression === undefined) throw new Error("no inputFrame in the head");
+
+  return new Function(
+    "c",
+    "texel",
+    "size",
+    `return ${expression
+      .replaceAll(/(?:gfu\.)?uInputClamp\.xy/g, "c[0]")
+      .replaceAll(/(?:gfu\.)?uInputClamp\.zw/g, "c[2]")
+      .replaceAll(/(?:gfu\.)?uInputPixel\.zw/g, "texel")
+      .replaceAll(/(?:gfu\.)?uInputSize\.xy/g, "size")};`
+  ) as (clamp: Clamp, texel: number, size: number) => number;
+}
+
+describe.each([
+  ["wgsl", SET_WGSL],
+  ["glsl", SET_GLSL]
+] as const)("the %s inputFrame", (_language, source) => {
+  const inputFrame = frameOf(source);
+
+  // Bug: a padded member maps its content box with the pooled texture's size, not the frame's: `Fold` off its centre
+  // live and right on the quad.
+  it("is the frame's CSS size live in a pooled texture larger than it, and on the quad", () => {
+    // A frame of 148 CSS px at resolution 2 (296 texels) in a pooled texture of 512 texels, 256 CSS px.
+    expect(inputFrame(liveClamp(296, 512), 1 / 512, 256)).toBeCloseTo(148, 9);
+    // The quad: the clamp and the texture are the whole padded picture, 148 CSS px in 296 texels.
+    expect(inputFrame(quadClamp(296), 1 / 296, 148)).toBeCloseTo(148, 9);
+  });
+});
+
+/** The multipliers and shifts of a language's `setHash`, in the order they stand. */
+function hashSteps(source: string): string[] {
+  const start = source.indexOf("setHash(");
+  const body = start === -1 ? "" : source.slice(start, source.indexOf("\n}", start));
+
+  return (body.match(/\b\d+u\b/g) ?? []).map(token => token.slice(0, -1));
+}
+
+/**
+ * The head's hash on the CPU, from the numbers of its text: 32-bit integers that wrap, as on a GPU.
+ *
+ * @param steps - The multipliers and shifts of `hashSteps`.
+ * @param x - The cell's column.
+ * @param y - The cell's row.
+ * @returns 0 up to 1.
+ */
+function hashOf(steps: readonly string[], x: number, y: number): number {
+  const [mx, my, s1, m2, s2, s3, unit] = steps.map(Number) as number[];
+  let h = (Math.imul(x, mx ?? 0) ^ Math.imul(y, my ?? 0)) >>> 0;
+
+  h = Math.imul(h ^ (h >>> (s1 ?? 0)), m2 ?? 0) >>> 0;
+  h = (h ^ (h >>> (s2 ?? 0))) >>> 0;
+
+  return (h >>> (s3 ?? 0)) / (unit ?? 1);
+}
+
+describe("the set head's hash", () => {
+  // Bug: a constant of the GLSL twin differs: WebGL phones dissolve other cells than WebGPU ones.
+  it("hashes with the same multipliers and shifts in both languages", () => {
+    expect(hashSteps(SET_GLSL)).toEqual(hashSteps(SET_WGSL));
+    expect(hashSteps(SET_WGSL)).toHaveLength(6);
+  });
+
+  // Bug: the GLSL integers are left at the fragment stage's mediump: 16 bits on a phone, a pattern of stripes.
+  it("keeps the GLSL integers highp", () => {
+    expect(SET_GLSL).toContain("highp uvec2 q = uvec2(ivec2(cell));");
+    expect(SET_GLSL).toContain("highp uint h =");
+  });
+
+  // Bug: a hash that reaches 1 keeps a pixel at the end of a dissolve, or one that clumps makes it eat in blocks.
+  it("answers 0 up to 1, spread over the range, for the cells of a view", () => {
+    const steps = [...hashSteps(SET_WGSL), "16777216"];
+    const values: number[] = [];
+
+    for (let x = 0; x < 32; x += 1) {
+      for (let y = 0; y < 32; y += 1) values.push(hashOf(steps, x, y));
+    }
+
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+
+    expect(Math.min(...values)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...values)).toBeLessThan(1);
+    expect(mean).toBeGreaterThan(0.45);
+    expect(mean).toBeLessThan(0.55);
+    expect(new Set(values).size).toBe(values.length);
+  });
+});

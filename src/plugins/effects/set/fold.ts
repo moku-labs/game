@@ -1,5 +1,5 @@
 /**
- * @file effects/set — `Fold`: a view turned about one of its axes, as a card flips, its far side leaning away and its
+ * @file effects/set — `Fold`: a view turned about one of its axes, as a card flips, its far side shrinking away and its
  * back in shade. One pass, one sample of the input, padded by 8 px; on WebGPU a value change rides the quad of stage 2
  * from its third write.
  */
@@ -12,8 +12,9 @@ import type { FoldValue } from "./types";
  * The WGSL body of `Fold`, the shape of the bench's `RowFlip` over the content box. The place in the padded frame maps
  * to the content box, `q = (n × S − P) / (S − 2P)` with `S = inputFrame()` and `P = FOLD_PADDING`, the definition's
  * padding of 8 CSS px. `axis` (0 or 1, read as `step(0.5, axis)`) picks the turned coordinate `u` and the other `v`.
- * Turned by `angle`, the content shrinks along `u` by `|cos angle|` (at least 0.02); along `v` it grows on the side that
- * comes near, by `1 + sin angle × (u − 0.5) × perspective`. Outside the turned content the pixel is transparent; inside
+ * Turned by `angle`, the content shrinks along `u` by `|cos angle|` (at least 0.02); along `v` the side that goes away
+ * shrinks, by `1 − perspective × (|sin angle| / 2 − sin angle × (u − 0.5))`: the near edge keeps its size, so the turned
+ * view never leaves its content box at any size or angle. Outside the turned content the pixel is transparent; inside
  * it reads the content back through the same map, and past a quarter turn the back is darkened to `1 − shade × −cos
  * angle`. At `angle: 0` it draws the view as it is.
  */
@@ -28,7 +29,7 @@ fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let u = mix(q.x, q.y, a);
   let v = mix(q.y, q.x, a);
   let su = 0.5 + (u - 0.5) / max(abs(cos(fu.angle)), 0.02);
-  let lean = 1.0 + sin(fu.angle) * (su - 0.5) * clamp(fu.perspective, 0.0, 1.0);
+  let lean = 1.0 - clamp(fu.perspective, 0.0, 1.0) * (0.5 * abs(sin(fu.angle)) - sin(fu.angle) * (su - 0.5));
   let sv = 0.5 + (v - 0.5) / max(lean, 0.05);
   let place = mix(vec2<f32>(su, sv), vec2<f32>(sv, su), a);
   let inside = step(0.0, place.x) * step(place.x, 1.0) * step(0.0, place.y) * step(place.y, 1.0);
@@ -50,7 +51,7 @@ void main() {
   float u = mix(q.x, q.y, a);
   float v = mix(q.y, q.x, a);
   float su = 0.5 + (u - 0.5) / max(abs(cos(angle)), 0.02);
-  float lean = 1.0 + sin(angle) * (su - 0.5) * clamp(perspective, 0.0, 1.0);
+  float lean = 1.0 - clamp(perspective, 0.0, 1.0) * (0.5 * abs(sin(angle)) - sin(angle) * (su - 0.5));
   float sv = 0.5 + (v - 0.5) / max(lean, 0.05);
   vec2 place = mix(vec2(su, sv), vec2(sv, su), a);
   float inside = step(0.0, place.x) * step(place.x, 1.0) * step(0.0, place.y) * step(place.y, 1.0);
@@ -70,9 +71,10 @@ const FOLD_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(FOLD_GLSL);
 /**
  * A view turned by `angle` radians about its vertical axis (`axis: 0`) or its horizontal one (`axis: 1`), as a card or
  * an order row flips: at a quarter turn it is edge-on, at a half turn it shows its back, unmirrored and darkened by
- * `shade` (0..1). `perspective` (0..1) leans it: the side that comes near grows. The view is padded by 8 px for the
- * leaning edge. For a card flip, a row that turns to its next order. List it in a feature's `filters`, as a game's own
- * filter. One render pass, one sample; on WebGPU a tween draws on the view's own quad, no pass, from its third frame.
+ * `shade` (0..1). `perspective` (0..1) leans it: the side that goes away shrinks, to `1 − perspective` of its height at
+ * a quarter turn, while the near side keeps its size, so the view never grows past its box. The view is padded by 8 px.
+ * For a card flip, a row that turns to its next order. List it in a feature's `filters`, as a game's own filter. One
+ * render pass, one sample; on WebGPU a tween draws on the view's own quad, no pass, from its third frame.
  *
  * @example
  * ```ts
