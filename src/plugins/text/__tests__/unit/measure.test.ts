@@ -483,3 +483,144 @@ describe("breaks inside a word (F138)", () => {
     expect(linesOf("A A­A", 60)).toEqual(["A", "AA"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F148: `balance` evens the lines of a wrapped block. The cases are in a
+// monospace font, every glyph 10 wide at size 32, so a line is ten times its
+// characters and the request's own sentence can be laid out as it was seen.
+// ---------------------------------------------------------------------------
+
+/** The sentence of the request: greedy it leaves «один.» alone on its second line. */
+const HINT = "Здесь то, что ждут ваши заказы. Возьмите один.";
+
+/** Every character of the balance cases, each 10 wide: a monospace font. */
+function monoTables(): Map<string, AdvanceTable> {
+  const chars = [...new Set(`${HINT}ABC-`)].map(char => ({ char, xadvance: 10 }));
+  const fnt = JSON.stringify({ info: { size: 32 }, common: { lineHeight: 40 }, chars });
+
+  return new Map([["ui.font-body", parseAdvances(fnt, "ui.font-body")]]);
+}
+
+/**
+ * The glyphs of every line of a block in the monospace font.
+ *
+ * @param value - The text.
+ * @param over - The wrap of the style, and `balance` when the case balances.
+ * @param box - The box a `"box"` style wraps at.
+ * @returns One string per line.
+ */
+function monoLines(value: string, over: Partial<TextStyle>, box = 0): string[] {
+  return layoutRuns([text(value)], style(over), monoTables(), options(), box).lines.map(line =>
+    line.runs.map(run => (run.kind === "text" ? run.text : "")).join("")
+  );
+}
+
+describe("layoutRuns — balance (F148)", () => {
+  // The bug: balance is ignored and the hint keeps one word on its last line; or the second pass
+  // reads tokens the first pass merged into (`appendRun` writing into a token's own run), and the
+  // balanced lines repeat the text.
+  it("evens a two-line block whose last line is one word, as the request shows", () => {
+    const layout = layoutRuns([text(HINT)], style({ wrap: 420, balance: true }), monoTables(), {
+      warn: () => undefined
+    });
+
+    expect(monoLines(HINT, { wrap: 420 })).toEqual([
+      "Здесь то, что ждут ваши заказы. Возьмите",
+      "один."
+    ]);
+    expect(monoLines(HINT, { wrap: 420, balance: true })).toEqual([
+      "Здесь то, что ждут ваши",
+      "заказы. Возьмите один."
+    ]);
+    expect(layout.lines.map(line => line.width)).toEqual([230, 220]);
+    expect(layout.width).toBe(230);
+  });
+
+  // The bug: the search stops early or keeps the wrong end, and a three-line block is laid out
+  // wider than the narrowest width that keeps three lines (170: one less makes four).
+  it("lays a three-line block at the narrowest width that keeps three lines", () => {
+    expect(monoLines(HINT, { wrap: 200 })).toEqual([
+      "Здесь то, что ждут",
+      "ваши заказы.",
+      "Возьмите один."
+    ]);
+    expect(monoLines(HINT, { wrap: 200, balance: true })).toEqual([
+      "Здесь то, что",
+      "ждут ваши заказы.",
+      "Возьмите один."
+    ]);
+  });
+
+  // The bug: the search runs above the wrap (from 59 to 73 «Возьмите» is wider than it), or lands
+  // on a width that wraps to a line more; the label then overflows its box, or ui gave it a height
+  // one line short.
+  it("keeps every line within the wrap and the greedy number of lines, at every wrap", () => {
+    for (let wrap = 59; wrap <= 470; wrap += 7) {
+      const greedy = layoutRuns([text(HINT)], style({ wrap }), monoTables(), options());
+      const even = layoutRuns(
+        [text(HINT)],
+        style({ wrap, balance: true }),
+        monoTables(),
+        options()
+      );
+
+      expect(even.lines).toHaveLength(greedy.lines.length);
+      expect(even.width).toBeLessThanOrEqual(Math.min(wrap, greedy.width));
+    }
+  });
+
+  // The bug: the cap of six lines is gone or off by one, and a long block pays the search and
+  // reflows where Chrome keeps it greedy.
+  it("balances up to six lines and keeps the greedy lines past six, as Chrome", () => {
+    const six = Array.from({ length: 3 }, () => HINT).join("\n");
+    const eight = Array.from({ length: 4 }, () => HINT).join("\n");
+
+    expect(monoLines(six, { wrap: 420, balance: true })).toEqual(
+      Array.from({ length: 3 }, () => ["Здесь то, что ждут ваши", "заказы. Возьмите один."]).flat()
+    );
+    expect(monoLines(eight, { wrap: 420, balance: true })).toEqual(monoLines(eight, { wrap: 420 }));
+  });
+
+  // The bug: a word wider than the wrap breaks between glyphs at a narrower width than the wrap,
+  // so its first line is cut shorter than the greedy layout cuts it ("AAAAA" instead of "AAAAAA");
+  // or the search starts at that word and climbs past the wrap, where "1 1 1" (64) fits a line.
+  it("keeps the greedy lines when a word is wider than the wrap", () => {
+    const even = style({ wrap: 60, balance: true });
+    const wide = layoutRuns([text("AAA 1 1 1 1")], even, hyphenTables(), options());
+
+    expect(monoLines("AAAAAAA BB CC", { wrap: 60, balance: true })).toEqual([
+      "AAAAAA",
+      "A BB",
+      "CC"
+    ]);
+    expect(wide.lines.map(line => line.width)).toEqual([48, 48, 40, 16]);
+  });
+
+  // The bug: the balanced pass loses the breaks inside a word (F138), or draws the `-` of a soft
+  // hyphen it did not break at.
+  it("breaks at a soft hyphen and after a hyphen inside a balanced block", () => {
+    expect(monoLines("AA BB­BBBBBB CC", { wrap: 120 })).toEqual(["AA BBBBBBBB", "CC"]);
+    expect(monoLines("AA BB­BBBBBB CC", { wrap: 120, balance: true })).toEqual([
+      "AA BB-",
+      "BBBBBB CC"
+    ]);
+    expect(monoLines("AA BB-BBBBB CC", { wrap: 120, balance: true })).toEqual([
+      "AA BB-",
+      "BBBBB CC"
+    ]);
+    expect(monoLines("Возьмите за­казы.", { wrap: 120, balance: true })).toEqual([
+      "Возьмите",
+      "заказы."
+    ]);
+  });
+
+  // The bug: balance reads only a numeric wrap, so a name that wraps at its box keeps its lone
+  // word; or it wraps a box style that has no box.
+  it("balances a box style at its box and leaves it one line without one", () => {
+    expect(monoLines(HINT, { wrap: "box", balance: true }, 420)).toEqual([
+      "Здесь то, что ждут ваши",
+      "заказы. Возьмите один."
+    ]);
+    expect(monoLines(HINT, { wrap: "box", balance: true })).toEqual([HINT]);
+  });
+});

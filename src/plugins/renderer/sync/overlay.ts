@@ -3,10 +3,10 @@
  * parts it fades, all written in one step of the render phase, after every writer of the frame and before the
  * decision (spec 22 O5–O10). A game without an overlay and a HUD part pays one size check.
  */
-import type { Entity } from "../../world/types";
+import type { Entity, LayerSpec } from "../../world/types";
 import { HudPart, Overlay, OverlayLevel, type OverlayValue } from "../components";
 import type { OverlayEventDetail, PixiContainer, PixiModule } from "../types";
-import { stepDims, stepParts } from "./overlay-look";
+import { dropUnder, dropUnders, stepDims, stepHold, stepParts } from "./overlay-look";
 import { clearRange, rangeHolds, stepRange } from "./overlay-range";
 import { isLeaving, parentOf } from "./pose";
 import type {
@@ -17,7 +17,8 @@ import type {
   OverlayRecord,
   OverlayReport,
   OverlayState,
-  SyncCtx
+  SyncCtx,
+  SyncState
 } from "./types";
 
 /** How deep a `Parent` chain or a walk up the tree goes. */
@@ -67,8 +68,8 @@ function isKeyList(value: unknown): value is readonly string[] {
 
 /**
  * Copies the marker into the record's own value, clamped (O1): `dim` into [0, 1], `fade` to 0 or more, an unknown
- * `cover` as `"none"`, a `hud` that is not `"all"`, `"none"` or a key list as `"all"`, a `hold` that is no boolean as
- * `false`; one dev warning per field.
+ * `cover` as `"none"`, a `hud` that is not `"all"`, `"none"`, `"under"` or a key list as `"all"`, a `hold` that is no
+ * boolean as `false`; one dev warning per field.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The marked entity.
@@ -84,7 +85,10 @@ function clampInto(
   const dim = Number.isFinite(raw.dim) ? Math.min(1, Math.max(0, raw.dim)) : 0;
   const fade = Number.isFinite(raw.fade) ? Math.max(0, raw.fade) : 0;
   const cover = raw.cover === "opaque" ? "opaque" : "none";
-  const hud = raw.hud === "all" || raw.hud === "none" || isKeyList(raw.hud) ? raw.hud : "all";
+  const hud =
+    raw.hud === "all" || raw.hud === "none" || raw.hud === "under" || isKeyList(raw.hud)
+      ? raw.hud
+      : "all";
   const hold = raw.hold === true;
 
   if (dim !== raw.dim) warnOnce(sctx, "renderer:overlay-value", entity, { field: "dim" });
@@ -123,30 +127,52 @@ function rootOf(sctx: SyncCtx, entity: Entity): Entity {
   return current;
 }
 
-/**
- * Where a root's top hangs: its layer and the layer's index in the scene's list.
- *
- * @param sctx - Domain context of the sync module.
- * @param container - The parent of the root's top.
- * @returns The layer name and index, and the index of the HUD layer (-1 without one); `undefined` for an orphan.
- */
-function layerSlotOf(
-  sctx: SyncCtx,
-  container: PixiContainer | null
-): { name: string; index: number; hud: number } | undefined {
-  const state = sctx.ctx.state.sync;
-  const list = state.layerList ?? [];
-  let found: { name: string; index: number } | undefined;
-  let hud = -1;
+/** The layer list of a scene that declared none: no array made per frame. */
+const NO_LAYERS: readonly LayerSpec[] = [];
 
-  for (const [index, spec] of list.entries()) {
-    if (spec.above === "overlays") hud = index;
-    if (container !== null && state.layers.get(spec.name)?.container === container) {
-      found = { name: spec.name, index };
-    }
+/**
+ * The index in the scene's list of the layer a root's top hangs in.
+ *
+ * @param state - The sync state.
+ * @param list - The scene's layers.
+ * @param container - The parent of the root's top.
+ * @returns The index, or -1 for an orphan.
+ */
+function layerIndexOf(
+  state: SyncState,
+  list: readonly LayerSpec[],
+  container: PixiContainer | null
+): number {
+  if (container === null) return -1;
+
+  // per frame: the list walked by index, the table read by name; `for…of` over the frozen list makes an iterator.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < list.length; index += 1) {
+    const name = list[index]?.name;
+
+    if (name !== undefined && state.layers.get(name)?.container === container) return index;
   }
 
-  return found === undefined ? undefined : { ...found, hud };
+  return -1;
+}
+
+/**
+ * The index of the HUD layer in a scene's list. Pure.
+ *
+ * @param list - The scene's layers.
+ * @returns The index of the layer above the overlays, -1 without one.
+ * @example
+ * ```ts
+ * hudIndexOf([{ name: "scene", sort: "none" }, { name: "hud", sort: "none", above: "overlays" }]); // 1
+ * ```
+ */
+function hudIndexOf(list: readonly LayerSpec[]): number {
+  // eslint-disable-next-line unicorn/no-for-loop -- the list is frozen: `for…of` over it makes an iterator.
+  for (let index = 0; index < list.length; index += 1) {
+    if (list[index]?.above === "overlays") return index;
+  }
+
+  return -1;
 }
 
 /**
@@ -176,6 +202,7 @@ function createRecord(
     turned: undefined,
     mode: "live",
     dim: undefined,
+    under: undefined,
     sized: false,
     seen: false,
     news: "open"
@@ -227,13 +254,17 @@ function seeOverlay(sctx: SyncCtx, entity: Entity): void {
   if (view === undefined || raw === undefined) return;
 
   const object = view.wrapper ?? view.object;
-  const slot = layerSlotOf(sctx, object.parent);
+  const list = state.layerList ?? NO_LAYERS;
+  const index = layerIndexOf(state, list, object.parent);
+  const layer = list[index];
 
-  if (slot === undefined || object.parent === null) return;
+  if (layer === undefined || object.parent === null) return;
+
+  const hud = hudIndexOf(list);
 
   // An overlay in or above the HUD layer is refused: the HUD stays over every overlay.
-  if (slot.hud !== -1 && slot.index >= slot.hud) {
-    warnOnce(sctx, "renderer:overlay-above-hud", entity, { layer: slot.name });
+  if (hud !== -1 && index >= hud) {
+    warnOnce(sctx, "renderer:overlay-above-hud", entity, { layer: layer.name });
 
     return;
   }
@@ -249,8 +280,8 @@ function seeOverlay(sctx: SyncCtx, entity: Entity): void {
   record.top = top;
   record.object = object;
   record.container = object.parent;
-  record.layer = slot.name;
-  record.layerIndex = slot.index;
+  record.layer = layer.name;
+  record.layerIndex = index;
   record.level = Math.min(1, Math.max(0, level?.level ?? 0));
   // A new record opens in whatever phase it is found in; a known one notes the turn.
   const turned = known === undefined || phase === record.phase ? undefined : phase;
@@ -287,12 +318,15 @@ function note(
 }
 
 /**
- * Drops a record whose entity lost `Overlay` or its view: its dim goes in this frame, `"gone"` is noted.
+ * Drops a record whose entity lost `Overlay` or its view: its dim and its HUD render layer go in this frame, the HUD
+ * let go first when it held it, `"gone"` is noted.
  *
  * @param sctx - Domain context of the sync module.
  * @param record - The overlay that left.
  */
 function dropRecord(sctx: SyncCtx, record: OverlayRecord): void {
+  dropUnder(sctx, record);
+
   if (record.dim !== undefined) {
     sctx.deps.demand.whole("overlay");
     if (!record.dim.destroyed) record.dim.destroy();
@@ -318,17 +352,17 @@ function compareRank(left: OverlayRecord, right: OverlayRecord): number {
 }
 
 /**
- * Fills `order` with the records bottom first: an insertion sort on the reused array.
+ * Fills `order` with the records bottom first: an insertion sort on the reused array, written in place and cut to the
+ * count (V8 gives an array set to length 0 a new backing store at the next write).
  *
  * @param overlay - The overlay state.
  */
 function sortOrder(overlay: OverlayState): void {
   const { order } = overlay;
-
-  order.length = 0;
+  let count = 0;
 
   for (const record of overlay.records.values()) {
-    let at = order.length;
+    let at = count;
 
     while (at > 0) {
       const before = order[at - 1];
@@ -340,7 +374,10 @@ function sortOrder(overlay: OverlayState): void {
     }
 
     order[at] = record;
+    count += 1;
   }
+
+  order.length = count;
 }
 
 /**
@@ -460,8 +497,9 @@ function overlaysIdle(overlay: OverlayState): boolean {
 
 /**
  * The overlay step of the render phase (the body of `SyncInternal.stepOverlays`): the records, their order and modes,
- * the dims, the range with its reasons and its picture, and the HUD parts, in that order. New layers let the range go
- * first; it is built again from the new layers in the same step.
+ * the dims and their HUD render layers, the range with its reasons and its picture, the overlay that holds the HUD
+ * under its dim, and the HUD parts, in that order. New layers let the range and the HUD go first; both are built again
+ * from the new layers in the same step.
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -475,7 +513,12 @@ export function stepOverlays(sctx: SyncCtx): void {
 
   // Only when it holds something: V8 gives an empty set a new table at every `clear()`, and the step runs every frame.
   if (overlay.flipped.size > 0) overlay.flipped.clear();
-  if (wholes.has("layers")) clearRange(sctx);
+
+  if (wholes.has("layers")) {
+    clearRange(sctx);
+    // New layers: the HUD is let go and every render layer made again where the records hang now (U5).
+    dropUnders(sctx);
+  }
 
   for (const record of overlay.records.values()) record.seen = false;
   for (const entity of overlay.entities) seeOverlay(sctx, entity);
@@ -492,6 +535,7 @@ export function stepOverlays(sctx: SyncCtx): void {
     record.news = undefined;
   }
 
+  stepHold(sctx);
   stepParts(sctx);
   overlay.left = false;
 }

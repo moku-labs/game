@@ -127,14 +127,14 @@ function drawnLeaves(
 }
 
 /**
- * Whether an overlay's `hud` keeps a part shown.
+ * Whether an overlay's `hud` keeps a part shown: `"under"` keeps every part, drawn under the dim.
  *
  * @param hud - The overlay's `hud`.
  * @param key - The part's key.
  * @returns 1 or 0.
  */
-function keepsOf(hud: "all" | "none" | readonly string[], key: string): number {
-  if (hud === "all") return 1;
+function keepsOf(hud: "all" | "none" | "under" | readonly string[], key: string): number {
+  if (hud === "all" || hud === "under") return 1;
   if (hud === "none") return 0;
 
   return hud.includes(key) ? 1 : 0;

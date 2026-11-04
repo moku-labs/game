@@ -37,7 +37,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `NineSlice({ texture, width, height, alpha, tint, debug, clip, hollow?, blend? })` | `"", 0, 0, 1, 0xffffff, false, false`; `hollow` and `blend` absent (read as `false` and `"normal"`) | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. `hollow: true` draws the rim alone, the eight border cells and never the centre (see "Hollow nine-slices"); the hit box stays the whole panel. `blend: "add"` or `"screen"` lays the panel, filled or hollow, over what is under it (see "Blend"). |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
-| `Overlay({ dim, dimColor, cover, hud, fade, hold })` | `0, 0x000000, "none", "all", 250, false` | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep. `hold: true` holds the endless loops under it while it stands. See "Overlays and the HUD". |
+| `Overlay({ dim, dimColor, cover, hud, fade, hold })` | `0, 0x000000, "none", "all", 250, false` | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep, or with `hud: "under"` draws the whole HUD under its dim. `hold: true` holds the endless loops under it while it stands. See "Overlays and the HUD". |
 | `HudPart({ key })` | `""` | A view of the HUD layer an overlay keeps shown or lets fade, by `key`. |
 | `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip, sweep?, cap? })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false`; `sweep` and `cap` absent (an arc reads them as `1` and `"round"`, `arcDefaults`) | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. With `kind: "arc"` a stroke on the circle inscribed in the box, `min(w, h) − strokeWidth` across and centred, so the stroke stays inside the box: from 12 o'clock clockwise over `sweep` of the circle (clamped to 0..1; 0 draws nothing and leaves the build, 1 is a closed ring with no ends), ended by `cap` (`"round"` or `"butt"`), in `stroke`, `strokeWidth` and `alpha`; `sweep` and `cap` are optional: only an arc reads them; a rectangle or a triangle ignores them. It is stroked in segments as many as its angle needs (48 for a ring). An arc draws no fill and ignores `radius` and `dash`; its `clip` masks the children to its box. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape and the entity's children (see the alpha rule under "Layers, sort and lift"). `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. The path is built again only when a field it is drawn from changed: a still arc costs nothing a frame, a new `sweep` builds it once, a new `fill` does not build it. Motions tween only the numeric fields (`sweep` among them), never `kind` or `cap`. |
 
@@ -1430,6 +1430,34 @@ its own level, written in the same step as the level: the top overlay decides. A
 leaving, or not fully back, takes no tap. A text part fades through a wrapper. A HUD view without
 `HudPart` is never faded. `HudPart({ key })` and the `hud` list are typed by the game's `hud` keys
 through `defineGame`.
+
+**The HUD under the veil (`hud: "under"`).** `Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })`
+draws the whole HUD layer under the overlay's own dim, dimmed with everything else, every part kept
+at 1. The engine attaches the HUD layer container to one Pixi `RenderLayer` the overlay owns, placed
+right before its dim at the dim's depth, and the range's picture stands right before that layer:
+
+```
+ui:  picture        ← the range, one sprite
+ui:  render layer   ← draws the HUD layer here while the overlay holds it
+ui:  dim
+ui:  overlay root   ← live
+hud layer           ← its own place, skipped while held
+```
+
+Nothing is drawn twice: the HUD once and the veil once, as with `"all"`, so the fill is the same. The
+HUD takes no tap while it is held, a view without `HudPart` included: it lies under the veil, and the
+HUD layer is hit-tested before every overlay, so a sheet's own full-screen button could not catch it.
+The holder is the topmost overlay with `"under"`, a dim above 0 and a level above 0, looked for from
+the top down to the overlay that owns the range: an overlay inside another one's picture holds
+nothing, so a sheet without `"under"` opened over one with it shows the HUD in its own place, above
+everything, until it goes, and the HUD goes back under the lower dim in the frame it leaves. Every
+hand-over draws the frame; a frame where the holder stands compares references and makes nothing. A
+dim of 0 is `"all"`: no render layer. The render layer is never an entry of a range, goes with its
+overlay, and is made again after new layers and a restore; nothing is left attached.
+`bun tests/visual/hud-under.visual.ts` checks it on the GPU, on WebGPU and on WebGL: a white HUD
+square reads `rgb(71, 64, 67)` under `dim: 0.82, dimColor: 0x1e161a` (white × 0.18 + the dim's
+colour × 0.82, as the veiled scene beside it), `rgb(255, 255, 255)` with `"all"`, and the panel of
+the overlay keeps its own colour.
 
 **The one owner of `renderable`.** `sync/hidden.ts` is the only writer of Pixi's `renderable` in the
 engine: a view is drawn when no reason (`empty`, `alpha`, `cover`, `freeze`, `kept`) holds. A game

@@ -16,6 +16,10 @@ Overlay({ cover: "opaque" });
 Overlay({ hud: "all" });
 Overlay({ hud: "none" });
 Overlay({ hud: ["energy", "gems"] as readonly string[] });
+Overlay({ dim: 0.82, dimColor: 0x1e_16_1a, hud: "under" });
+
+// @ts-expect-error — "below" is no hud: "all", "none", "under" or a list of keys.
+Overlay({ hud: "below" });
 
 // @ts-expect-error — "glass" is no cover.
 Overlay({ cover: "glass" });
@@ -42,6 +46,7 @@ kit.HudPart({ key: "energy" });
 kit.Overlay({ dim: 0.56, hud: ["energy", "gems"] });
 kit.Overlay({ dim: 0.56, hold: true, hud: ["energy", "gems"] });
 kit.Overlay({ hud: "none" });
+kit.Overlay({ dim: 0.82, dimColor: 0x1e_16_1a, hud: "under" });
 
 // @ts-expect-error — "energi" is not a HUD key of the game.
 kit.HudPart({ key: "energi" });
@@ -58,6 +63,7 @@ const game = defineGame<{
 }>();
 
 game.HudPart({ key: "gems" });
+game.Overlay({ dim: 0.82, hud: "under" });
 
 // @ts-expect-error — defineGame binds the same keys through its `hud` slot.
 game.HudPart({ key: "coins" });

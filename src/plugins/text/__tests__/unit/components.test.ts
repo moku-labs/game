@@ -259,6 +259,40 @@ describe("defineTextStyles — lineHeight", () => {
   });
 });
 
+describe("defineTextStyles — balance (F148)", () => {
+  // The bug: `balance: undefined` lands on every style, so a stored style no longer equals the
+  // literal its docs show, and a hot swap sees a field that changed from nothing to nothing.
+  it("stores balance only on a style that balances", () => {
+    const styles = defineTextStyles({
+      hint: { font: "ui.font-body", size: 32, fill: 0, wrap: 480, balance: true },
+      plain: { font: "ui.font-body", size: 32, fill: 0, wrap: 480 },
+      off: { font: "ui.font-body", size: 32, fill: 0, wrap: 480, balance: false }
+    });
+
+    expect(styles.map.hint?.balance).toBe(true);
+    expect(Object.hasOwn(styles.map.plain ?? {}, "balance")).toBe(false);
+    expect(Object.hasOwn(styles.map.off ?? {}, "balance")).toBe(false);
+  });
+
+  // The bug: a style written by a tool with `balance: "yes"` is kept, and nobody learns why its
+  // lines never even out.
+  it("refuses a balance that is not true or false", () => {
+    expect(() =>
+      readStyle("hint", { font: "ui.font-body", size: 32, fill: 0, balance: "yes" })
+    ).toThrow('[game] Text style "hint" has balance yes.\n  Use true or false.');
+  });
+
+  // The bug: the start reads a feature's styles back through readStyle and drops the field, so a
+  // balanced style draws greedy lines in the game.
+  it("reads the balance of a registered style back", () => {
+    const map = defineTextStyles({
+      hint: { font: "ui.font-body", size: 32, fill: 0, wrap: 480, balance: true }
+    }).map;
+
+    expect(readStyle("hint", map.hint ?? {})?.balance).toBe(true);
+  });
+});
+
 describe("builtInStyles", () => {
   it("makes `body` and `digits` out of the two configured fonts", () => {
     const styles = builtInStyles({ body: "ui.font-body", digits: "ui.font-digits" });

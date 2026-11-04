@@ -31,7 +31,8 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * and the batcher pipe it subclasses, and the WGSL and GLSL shader pieces of the batch's SDF shader, and the WebGPU
  * render target system with its adaptor, the pipeline system and the stencil system the lazy canvas pass of `host`
  * subclasses or registers again (`host/render-pass.ts`), and the mesh and its geometry the rim-only nine-slice of
- * `sync` is drawn with (`sync/hollow.ts`). The module object
+ * `sync` is drawn with (`sync/hollow.ts`), and the render layer an overlay with `hud: "under"` draws the HUD layer in,
+ * under its dim (`sync/overlay-look.ts`). The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
  * Pixi in its bundle.
  *
@@ -90,6 +91,7 @@ export type PixiModule = Pick<
   | "PipelineSystem"
   | "Rectangle"
   | "RenderGroupPipe"
+  | "RenderLayer"
   | "RenderTexture"
   | "Shader"
   | "Sprite"
@@ -133,6 +135,11 @@ export type PixiBounds = InstanceType<PixiModule["Bounds"]>;
  * A Pixi sprite.
  */
 export type PixiSprite = InstanceType<PixiModule["Sprite"]>;
+
+/**
+ * A Pixi render layer: it draws the containers attached to it at its own place in the tree, their parents unchanged.
+ */
+export type PixiRenderLayer = InstanceType<PixiModule["RenderLayer"]>;
 
 /**
  * A Pixi nine-slice sprite.

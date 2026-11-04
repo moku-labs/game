@@ -10,6 +10,7 @@ import {
   flingFrame,
   glideFrame,
   heldFrame,
+  jumpFrame,
   type ScrollCall,
   startScrollPerf,
   stillFrame
@@ -91,5 +92,15 @@ describe("scroll step: heap per frame of one x strip", () => {
 
     await annotate(`stepScroll, still: ${still} B a frame`);
     expect(still).toBeLessThanOrEqual(BUDGET.scrollStill + NOISE_BYTES);
+  });
+
+  it("a jump settle stays within budget", async ({ annotate }) => {
+    const jump = bytesPerCall(jumpFrame(scroll));
+
+    await annotate(`settleScroll, jump: ${jump} B a render`);
+    expect(jump).toBeLessThanOrEqual(BUDGET.scrollJump + NOISE_BYTES);
+    // The window measured the jump: the strip stands on the last prop, no glide started.
+    expect(scroll.motion.mode).toBe("still");
+    expect(scroll.motion.offset).toBe(scroll.element.node.props.offset);
   });
 });

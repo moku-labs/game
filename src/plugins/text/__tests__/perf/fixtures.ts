@@ -19,9 +19,19 @@ import { withDeps } from "../../../world/lifecycle";
 import type { EcsModule } from "../../../world/types";
 import { bind as builtInBind, builtInStyles, Countdown, Text, textFor } from "../../components";
 import { createTextAdapter } from "../../display";
+import { layoutRuns, parseAdvances } from "../../measure";
 import { createTextFrame, createTextSystem, resolveAdded } from "../../resolve";
 import { createTextState } from "../../state";
-import type { Config, Deps, TextCtx, TextFormatAnswer, TextValue } from "../../types";
+import type {
+  AdvanceTable,
+  Config,
+  Deps,
+  Run,
+  TextCtx,
+  TextFormatAnswer,
+  TextStyle,
+  TextValue
+} from "../../types";
 
 /** The `bind` of a game that named the fixture's format, the same function as the root one. */
 const { bind } = textFor<string, string, "perf.pill">();
@@ -40,6 +50,9 @@ const BOUND = 20;
 
 /** The style of the labels that wrap at their box: `body` with `wrap: "box"`. */
 const BOX_STYLE = "card.name";
+
+/** The style of the labels that wrap at their box and balance their lines: `card.name` evened (F148). */
+const BALANCED_STYLE = "card.hint";
 
 /** The box of the first label that wraps at its box; each next one is a unit wider. */
 const BOX_FROM = 120;
@@ -126,6 +139,7 @@ function textCtx(world: MockWorld, now: Float64Array): TextCtx {
   state.styles.set("body", styles.body);
   state.styles.set("digits", styles.digits);
   state.styles.set(BOX_STYLE, { ...styles.body, wrap: "box" });
+  state.styles.set(BALANCED_STYLE, { ...styles.body, wrap: "box", balance: true });
 
   return {
     config,
@@ -224,10 +238,11 @@ export type Moving = "nothing" | "value" | "countdown";
 export type Measured = "phase" | "added" | "rewrite";
 
 /**
- * How the 80 plain labels of a fixture wrap: in `body`, which does not, or in a style with
- * `wrap: "box"`, each laid out at a box of its own, as `ui` writes it (F50).
+ * How the 80 plain labels of a fixture wrap: in `body`, which does not, in a style with
+ * `wrap: "box"`, each laid out at a box of its own, as `ui` writes it (F50), or in the same style
+ * with `balance` (F148).
  */
-export type Wrap = "own" | "box";
+export type Wrap = "own" | "box" | "balanced";
 
 /**
  * 100 labels: 80 with a plain string, 20 bound to their entity's `Counter.value` in the digits
@@ -238,7 +253,8 @@ export type Wrap = "own" | "box";
  * once a second. With `measured` `"added"` a call is the step after the layout flush with no label
  * added, the frame every frame of a still screen runs (F22); with `"rewrite"` it is the phase
  * after a flush whose step resolved the 20 bound labels. With `wrap` `"box"` the 80 plain labels
- * are in a style that wraps at its box, from 120 wide on, so most of them are two lines.
+ * are in a style that wraps at its box, from 120 wide on, so most of them are two lines; with
+ * `"balanced"` that style evens its lines too.
  *
  * @param moving - What changes per frame.
  * @param measured - What one call runs; the whole phase when left out.
@@ -264,9 +280,13 @@ export function resolveFixture(
     const content = `label ${index}`;
 
     world.api.ecs.spawn(OWNER, [
-      wrap === "box"
-        ? Text({ content, style: BOX_STYLE, box: BOX_FROM + index })
-        : Text({ content })
+      wrap === "own"
+        ? Text({ content })
+        : Text({
+            content,
+            style: wrap === "box" ? BOX_STYLE : BALANCED_STYLE,
+            box: BOX_FROM + index
+          })
     ]);
   }
 
@@ -436,4 +456,47 @@ export function currentLabelFixture(): () => void {
   for (let index = 0; index < WARM_FRAMES; index += 1) update();
 
   return update;
+}
+
+/** The hint of request F148: greedy at the layout fixture's wrap it leaves «один.» alone. */
+const HINT_RUNS: readonly Run[] = Object.freeze([
+  {
+    kind: "text",
+    text: "Здесь то, что ждут ваши заказы. Возьмите один.",
+    bold: false,
+    italic: false,
+    color: undefined
+  }
+]);
+
+/**
+ * A monospace font with every glyph of the hint, 10 wide at size 32.
+ *
+ * @returns The advance tables, under the body font key.
+ */
+function hintTables(): Map<string, AdvanceTable> {
+  const glyphs = [...new Set("Здесь то, что ждут ваши заказы. Возьмите один.")];
+  const chars = glyphs.map(char => ({ char, xadvance: 10 }));
+  const fnt = JSON.stringify({ info: { size: 32 }, common: { lineHeight: 40 }, chars });
+
+  return new Map([["ui.font-body", parseAdvances(fnt, "ui.font-body")]]);
+}
+
+/**
+ * One fresh layout of the F148 hint, two lines at a wrap of 420, the cost a cache miss pays: the
+ * greedy pass, or with `balance` the greedy pass and the 16 halvings of the search on the same
+ * tokens.
+ *
+ * @param balance - True for the balanced style.
+ * @returns One layout.
+ */
+export function layoutFixture(balance: boolean): () => void {
+  const body = builtInStyles({ body: "ui.font-body", digits: "ui.font-digits" }).body;
+  const style: TextStyle = balance ? { ...body, wrap: 420, balance: true } : { ...body, wrap: 420 };
+  const tables = hintTables();
+  const options = { warn: (): void => {} };
+
+  return (): void => {
+    layoutRuns(HINT_RUNS, style, tables, options);
+  };
 }

@@ -10,6 +10,7 @@ import { system, Tree } from "../../../world/ecs/define";
 import { Box, Scroll, ScrollState } from "../../components";
 import {
   contentOf,
+  EARLY_TILE,
   FREE_TRACK,
   find,
   frames,
@@ -686,5 +687,129 @@ describe("app.ui.scroll and game.scroll", () => {
     expect(ran.value).toBe(true);
     expect(ran.state.tainted).toBe(false);
     expect(stateOf(app, "strip")).toEqual({ offset: 0, max: 390, moving: false });
+  });
+});
+
+/**
+ * Records, in phase `sync` of every frame, where the order card of the jump strip is drawn on x
+ * inside the strip: the content's pose plus the card's own.
+ *
+ * @param app - The running app.
+ * @returns The drawn x of each frame from now on, in order.
+ */
+function recordCard(app: ScrollApp): number[] {
+  const drawn: number[] = [];
+
+  app.world.ecs.system(
+    system({
+      name: "test.cardDrawn",
+      phase: "sync",
+      query: [],
+      run: () => {
+        const strip = app.ui.find("jumping");
+        const card = app.ui.find("jumpOrder");
+
+        if (strip === undefined || card === undefined) return;
+
+        const content = app.world.ecs.get(contentOf(app, strip), Transform)?.x ?? 0;
+
+        drawn.push(content + (app.world.ecs.get(card, Transform)?.x ?? 0));
+      }
+    })
+  );
+
+  return drawn;
+}
+
+describe("F141: jump on scroll", () => {
+  it("J1: stands at a new offset prop with jump in the render that shifts the track, the card kept in place", async () => {
+    // Bug caught: a jump render glides to its offset like any other, so the order card jumps 82 u
+    // to the right the frame the first tile comes in and slides back; or the scroll says it moves.
+    const app = await start("jump");
+    const drawn = recordCard(app);
+
+    frames(app, 1);
+
+    expect(stateOf(app, "jumping")).toEqual({ offset: 0, max: TRACK - PINNED, moving: false });
+
+    tapLocal(app, "shift");
+
+    expect(stateOf(app, "jumping")).toEqual({
+      offset: EARLY_TILE,
+      max: TRACK + EARLY_TILE - PINNED,
+      moving: false
+    });
+    expect(poseOf(app, "jumping")?.x).toBe(-EARLY_TILE);
+    expect(app.world.ecs.get(find(app, "jumping"), Scrollable)).toEqual({
+      axis: "x",
+      moving: false
+    });
+
+    frames(app, 20);
+
+    expect(stateOf(app, "jumping")?.offset).toBe(EARLY_TILE);
+    // The card's centre is drawn at 174 (116 + 58) in the frames before, the frame of the jump and
+    // every frame after.
+    expect(drawn.length).toBeGreaterThan(20);
+    expect(new Set(drawn)).toEqual(new Set([174]));
+  });
+
+  it("J2: only remembers a jump prop while the finger holds the scroll", async () => {
+    // Bug caught: a jump render pulls the strip out from under the finger.
+    const app = await start("jump");
+
+    press(app, "jumping", 500, 900);
+    moveTo(app, 450, 900);
+    tapLocal(app, "shift");
+
+    expect(stateOf(app, "jumping")).toMatchObject({ offset: 50, moving: true });
+
+    moveTo(app, 430, 900);
+
+    expect(stateOf(app, "jumping")?.offset).toBe(70);
+  });
+
+  it("J3: stands at the jump prop at once when it comes with a new range during a glide to an earlier prop", async () => {
+    // Bug caught: the new range re-aims the running glide (the glide branch of the resize) and the
+    // jump only moves its start, so the strip glides on instead of standing at 82.
+    const app = await start("jump");
+
+    tapLocal(app, "toOrders");
+    frames(app, 3);
+
+    expect(stateOf(app, "jumping")?.moving).toBe(true);
+
+    tapLocal(app, "shift");
+
+    expect(stateOf(app, "jumping")).toEqual({
+      offset: EARLY_TILE,
+      max: TRACK + EARLY_TILE - PINNED,
+      moving: false
+    });
+
+    frames(app, 40);
+
+    expect(stateOf(app, "jumping")?.offset).toBe(EARLY_TILE);
+  });
+
+  it("J4: glides to the same new offset prop without jump", async () => {
+    // Bug caught: every new offset prop stands at once, so a game's prop change no longer glides.
+    const app = await start("jump");
+
+    tapLocal(app, "shiftGlide");
+
+    expect(stateOf(app, "jumping")).toEqual({
+      offset: 0,
+      max: TRACK + EARLY_TILE - PINNED,
+      moving: true
+    });
+
+    frames(app, 1);
+
+    expect(stateOf(app, "jumping")?.offset).toBe(glidedTo(0, EARLY_TILE, 16));
+
+    frames(app, 40);
+
+    expect(stateOf(app, "jumping")).toMatchObject({ offset: EARLY_TILE, moving: false });
   });
 });

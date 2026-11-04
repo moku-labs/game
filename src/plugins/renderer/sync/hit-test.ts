@@ -400,7 +400,8 @@ function walkChildren(
 /**
  * Walks every view under the walk's point, topmost first: the layers from the last one of the
  * scene's list, inside a layer by draw order from the top. Nothing while inert or before the scene
- * declared its layers. A layer that hangs under no root, or that is hidden, holds no hit.
+ * declared its layers. A layer that hangs under no root, or that is hidden, holds no hit, and neither does the HUD
+ * layer while an overlay draws it under its dim.
  *
  * @param sctx - Domain context of the sync module.
  * @param walk - The walk.
@@ -417,7 +418,8 @@ function walkLayers(sctx: SyncCtx, walk: Walk): boolean {
     const name = list[index]?.name;
     const container = name === undefined ? undefined : state.layers.get(name)?.container;
 
-    if (container === undefined) continue;
+    // The HUD an overlay holds under its dim takes no tap: it lies under the veil (F147 U4).
+    if (container === undefined || container === state.overlay.held) continue;
 
     const alpha = effectiveAlpha(container, root, state.overlay.offTops);
     const steps = stepsToRoot(container, root);

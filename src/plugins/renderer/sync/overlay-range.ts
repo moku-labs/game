@@ -10,7 +10,15 @@ import type { KeptRange } from "../kept/types";
 import type { PixiBounds, PixiContainer } from "../types";
 import type { Rect } from "../viewport/types";
 import { type HiddenReason, hiddenBy, setHidden, setLayerHidden, setObjectHidden } from "./hidden";
-import type { ActiveRange, FilterSlot, OverlayRecord, SyncCtx, SyncState, View } from "./types";
+import type {
+  ActiveRange,
+  FilterSlot,
+  OverlayRecord,
+  RangeStep,
+  SyncCtx,
+  SyncState,
+  View
+} from "./types";
 
 /** A range retaken for a mark in this many frames in a row is drawn live instead (O8.4; spec 23's `CHURN_LIMIT`). */
 const RETAKE_STREAK = 3;
@@ -62,7 +70,18 @@ function createRange(owner: Entity): ActiveRange {
  * @returns The layer name, or `undefined` for a node that is no layer container.
  */
 function layerNameOf(state: SyncState, node: PixiContainer): string | undefined {
-  for (const [name, entry] of state.layers) if (entry.container === node) return name;
+  const list = state.layerList;
+
+  if (list === undefined) return undefined;
+
+  // per frame: the scene's list walked by index and the table read by name. The list is frozen: `for…of` over a frozen
+  // array makes an iterator.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < list.length; index += 1) {
+    const name = list[index]?.name;
+
+    if (name !== undefined && state.layers.get(name)?.container === node) return name;
+  }
 
   return undefined;
 }
@@ -138,62 +157,135 @@ function isPicture(sctx: SyncCtx, node: PixiContainer): boolean {
 function computeRange(sctx: SyncCtx, owner: OverlayRecord, root: PixiContainer): void {
   const { wantEntries: entries, wantOthers: others, wantSet: set } = sctx.ctx.state.sync.overlay;
 
-  entries.length = 0;
-  others.length = 0;
-  set.clear();
-  lowerLayers(sctx, owner, root);
-  rootsBelow(sctx, owner);
+  // per frame: both lists written in place by index and cut to their count: V8 gives an array set to length 0 a new
+  // backing store at the next push.
+  entries.length = rootsBelow(sctx, owner, lowerLayers(sctx, owner, root));
+  fillSet(set, entries);
+
+  let count = 0;
 
   for (const child of root.children) {
-    if (!set.has(child) && child !== owner.container) others.push(child);
+    if (!set.has(child) && child !== owner.container) count = writeAt(others, count, child);
   }
 
   for (const child of owner.container.children) {
-    if (!set.has(child) && !isPicture(sctx, child)) others.push(child);
+    if (!set.has(child) && !isPicture(sctx, child)) count = writeAt(others, count, child);
   }
+
+  others.length = count;
 }
 
 /**
- * Adds the layer containers below the owner's layer to the wanted entries, bottom first.
+ * Writes a node at a place of a reused list, only when another stands there.
+ *
+ * @param list - The list.
+ * @param at - The place, at most its length.
+ * @param node - The node.
+ * @returns The next place.
+ */
+function writeAt(list: PixiContainer[], at: number, node: PixiContainer): number {
+  if (list[at] !== node) list[at] = node;
+
+  return at + 1;
+}
+
+/**
+ * Writes the layer containers below the owner's layer at the start of the wanted entries, bottom first.
  *
  * @param sctx - Domain context of the sync module.
  * @param owner - The owner overlay.
  * @param root - The stage root of `sync`.
+ * @returns How many were written.
  */
-function lowerLayers(sctx: SyncCtx, owner: OverlayRecord, root: PixiContainer): void {
+function lowerLayers(sctx: SyncCtx, owner: OverlayRecord, root: PixiContainer): number {
   const state = sctx.ctx.state.sync;
-  const { wantEntries: entries, wantSet: set } = state.overlay;
+  const entries = state.overlay.wantEntries;
+  const list = state.layerList;
+  let count = 0;
 
-  for (const spec of (state.layerList ?? []).slice(0, owner.layerIndex)) {
-    const container = state.layers.get(spec.name)?.container;
+  if (list === undefined) return count;
 
-    if (container?.parent === root) {
-      entries.push(container);
-      set.add(container);
-    }
+  // per frame: the layers below walked by index, no copy of the list; `for…of` over the frozen list makes an iterator.
+  for (let index = 0; index < owner.layerIndex && index < list.length; index += 1) {
+    const name = list[index]?.name;
+    const container = name === undefined ? undefined : state.layers.get(name)?.container;
+
+    if (container?.parent === root) count = writeAt(entries, count, container);
   }
+
+  return count;
 }
 
 /**
- * Adds the children of the owner's layer container drawn before its root (rank: depth, then insertion) to the
- * wanted entries; its own dim and every picture left out.
+ * Tells whether a node is the HUD render layer of an overlay (`hud: "under"`): never part of a range, so the HUD it
+ * draws is never in a picture (U3).
+ *
+ * @param order - The overlays, bottom first.
+ * @param node - A child of a layer container.
+ * @returns True for the render layer of a known overlay.
+ */
+function isUnderLayer(order: readonly OverlayRecord[], node: PixiContainer): boolean {
+  for (const record of order) if (record.under === node) return true;
+
+  return false;
+}
+
+/**
+ * Writes the children of the owner's layer container drawn before its root (rank: depth, then insertion) into the
+ * wanted entries after the lower layers; its own dim, every HUD render layer and every picture left out.
  *
  * @param sctx - Domain context of the sync module.
  * @param owner - The owner overlay.
+ * @param from - How many entries the lower layers wrote.
+ * @returns How many entries there are now.
  */
-function rootsBelow(sctx: SyncCtx, owner: OverlayRecord): void {
-  const { wantEntries: entries, wantSet: set } = sctx.ctx.state.sync.overlay;
+function rootsBelow(sctx: SyncCtx, owner: OverlayRecord, from: number): number {
+  const { wantEntries: entries, order } = sctx.ctx.state.sync.overlay;
   const depth = owner.object.zIndex;
+  const children = owner.container.children;
   const at = owner.container.getChildIndex(owner.object);
+  let count = from;
+  let index = -1;
 
-  for (const [index, child] of owner.container.children.entries()) {
-    if (child === owner.dim || isPicture(sctx, child)) continue;
+  // per frame: the children walked with a counter, no entry pairs.
+  for (const child of children) {
+    index += 1;
+
+    if (child === owner.dim || isUnderLayer(order, child) || isPicture(sctx, child)) continue;
 
     if (child.zIndex < depth || (child.zIndex === depth && index < at)) {
-      entries.push(child);
-      set.add(child);
+      count = writeAt(entries, count, child);
     }
   }
+
+  return count;
+}
+
+/**
+ * Tells whether a set holds every node of a list.
+ *
+ * @param set - The set.
+ * @param nodes - The nodes.
+ * @returns True when none is missing.
+ */
+function holdsAll(set: ReadonlySet<PixiContainer>, nodes: readonly PixiContainer[]): boolean {
+  for (const node of nodes) if (!set.has(node)) return false;
+
+  return true;
+}
+
+/**
+ * Makes a set hold exactly these nodes, writing nothing when it does already: V8 gives a set a new table at every
+ * `clear()`, and the step runs every frame.
+ *
+ * @param set - The set.
+ * @param nodes - The nodes, each once.
+ */
+function fillSet(set: Set<PixiContainer>, nodes: readonly PixiContainer[]): void {
+  if (set.size === nodes.length && holdsAll(set, nodes)) return;
+  if (set.size > 0) set.clear();
+
+  for (const node of nodes) set.add(node);
 }
 
 /**
@@ -206,7 +298,10 @@ function rootsBelow(sctx: SyncCtx, owner: OverlayRecord): void {
 function sameList(left: readonly PixiContainer[], right: readonly PixiContainer[]): boolean {
   if (left.length !== right.length) return false;
 
-  for (const [index, node] of left.entries()) if (right[index] !== node) return false;
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot is matched against a second list.
+  for (let index = 0; index < left.length; index += 1) {
+    if (right[index] !== left[index]) return false;
+  }
 
   return true;
 }
@@ -449,13 +544,30 @@ function keepWanted(sctx: SyncCtx, range: ActiveRange): void {
  * @param from - The list wanted now.
  */
 function copyInto(into: PixiContainer[], from: readonly PixiContainer[]): void {
-  for (const [index, node] of from.entries()) if (into[index] !== node) into[index] = node;
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot is matched against a second list.
+  for (let index = 0; index < from.length; index += 1) {
+    const node = from[index];
+
+    if (node !== undefined && into[index] !== node) into[index] = node;
+  }
 
   into.length = from.length;
 }
 
 /**
- * The range handed to `kept`: the wanted lists and the slot right before the owner's dim, or its root.
+ * The node the picture of an owner's range stands right before: its HUD render layer, so a HUD drawn there lies over
+ * the picture and under the dim; else its dim; else its root.
+ *
+ * @param owner - The owner overlay.
+ * @returns The node.
+ */
+function pictureBefore(owner: OverlayRecord): PixiContainer {
+  return owner.under ?? owner.dim ?? owner.object;
+}
+
+/**
+ * The range handed to `kept`: the wanted lists and the slot right before the owner's HUD render layer, its dim, or its
+ * root.
  *
  * @param sctx - Domain context of the sync module.
  * @param owner - The owner overlay.
@@ -468,7 +580,7 @@ function keptRangeOf(sctx: SyncCtx, owner: OverlayRecord): KeptRange {
     id: owner.entity,
     entries: overlay.wantEntries,
     others: overlay.wantOthers,
-    slot: { container: owner.container, before: owner.dim ?? owner.object }
+    slot: { container: owner.container, before: pictureBefore(owner) }
   };
 }
 
@@ -502,7 +614,7 @@ function handOver(
   range.kept = true;
   range.refused = false;
   range.othersStale = false;
-  range.before = owner.dim ?? owner.object;
+  range.before = pictureBefore(owner);
   range.blurred = measureBlurred(sctx, sctx.ctx.state.sync.overlay.wantSet, root);
 
   return true;
@@ -551,6 +663,23 @@ function noteFallback(sctx: SyncCtx, owner: OverlayRecord, what: "live" | "kept"
 }
 
 /**
+ * Tells whether the whole reasons of a frame hold one of these. Pure.
+ *
+ * @param wholes - The whole-frame reasons of this decision.
+ * @param reasons - The reasons looked for.
+ * @returns True when one is there.
+ * @example
+ * ```ts
+ * wholeAmong(new Set(["layers", "resize"]), ["resize", "restore", "debug"]); // true
+ * ```
+ */
+function wholeAmong(wholes: ReadonlySet<DemandReason>, reasons: readonly DemandReason[]): boolean {
+  for (const reason of reasons) if (wholes.has(reason)) return true;
+
+  return false;
+}
+
+/**
  * The retake rules of a held picture whose lists stand (O8.3, O8.4): the catch-up of held loops, a mark in the range
  * (live after three frames in a row), the screen changed whole, and the landing and the first exit frame with a loop
  * held. Others that changed are handed over with the next retake.
@@ -560,8 +689,6 @@ function noteFallback(sctx: SyncCtx, owner: OverlayRecord, what: "live" | "kept"
  * @param owner - The owner overlay.
  * @param root - The stage root.
  * @param context - The frame: its whole reasons and whether the others changed.
- * @param context.wholes - The whole-frame reasons of this decision.
- * @param context.othersChanged - True when the others differ from the last frame.
  * @returns The reason the entries carry now: `"freeze"`, or none when the range went live.
  */
 function stepKept(
@@ -569,7 +696,7 @@ function stepKept(
   range: ActiveRange,
   owner: OverlayRecord,
   root: PixiContainer,
-  context: { wholes: ReadonlySet<DemandReason>; othersChanged: boolean }
+  context: Readonly<RangeStep>
 ): HiddenReason | undefined {
   if (context.othersChanged) range.othersStale = true;
 
@@ -578,7 +705,7 @@ function stepKept(
   if (owed === "live") return undefined;
 
   // The screen changed whole: the picture is taken again, unless this frame took it already.
-  if (owed === "none" && RETAKE_WHOLES.some(reason => context.wholes.has(reason))) {
+  if (owed === "none" && wholeAmong(context.wholes, RETAKE_WHOLES)) {
     retake(sctx, range, owner, root);
   }
 
@@ -642,11 +769,7 @@ function retakeOwed(
  * @param range - The range of this owner, counters reset when it is new.
  * @param owner - The owner overlay.
  * @param root - The stage root.
- * @param context - What changed since the last frame.
- * @param context.fresh - The owner is new, or was covering until now.
- * @param context.entriesChanged - The entries differ from the last frame.
- * @param context.othersChanged - The others differ from the last frame.
- * @param context.wholes - The whole-frame reasons of this decision.
+ * @param context - What changed since the last frame: a new owner, new entries or others, the whole reasons.
  * @returns `"freeze"` when a picture holds the range, none when it is drawn live.
  */
 function stepFreeze(
@@ -654,12 +777,7 @@ function stepFreeze(
   range: ActiveRange,
   owner: OverlayRecord,
   root: PixiContainer,
-  context: {
-    fresh: boolean;
-    entriesChanged: boolean;
-    othersChanged: boolean;
-    wholes: ReadonlySet<DemandReason>;
-  }
+  context: Readonly<RangeStep>
 ): HiddenReason | undefined {
   const overlay = sctx.ctx.state.sync.overlay;
 
@@ -812,11 +930,16 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
 
   range.mode = mode;
 
-  // The reason of this frame: `"cover"` for an opaque owner, otherwise what the freeze rules decide.
-  const to =
-    mode === "cover"
-      ? "cover"
-      : stepFreeze(sctx, range, owner, root, { fresh, entriesChanged, othersChanged, wholes });
+  // The reason of this frame: `"cover"` for an opaque owner, otherwise what the freeze rules decide, told what changed
+  // through the state's one scratch.
+  const { step } = overlay;
+
+  step.fresh = fresh;
+  step.entriesChanged = entriesChanged;
+  step.othersChanged = othersChanged;
+  step.wholes = wholes;
+
+  const to = mode === "cover" ? "cover" : stepFreeze(sctx, range, owner, root, step);
 
   if (mode === "cover") range.kept = false;
 
@@ -829,8 +952,8 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
   // The last owner's picture goes after the new one was taken.
   if (held !== undefined && (held !== owner.entity || !range.kept)) sctx.deps.kept.release(held);
 
-  // A held picture follows its owner's dim, or its root, in this frame.
-  const before = owner.dim ?? owner.object;
+  // A held picture follows its owner's HUD render layer, its dim, or its root, in this frame.
+  const before = pictureBefore(owner);
 
   if (range.kept && range.before !== before) {
     sctx.deps.kept.move(owner.entity, { container: owner.container, before });

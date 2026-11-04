@@ -189,13 +189,15 @@ function isLineHeight(lineHeight: unknown): lineHeight is number | undefined {
 
 /**
  * Fills the defaults of one style and refuses a wrap that is not a width, `"box"` or `"none"`,
- * and a line height that is not a number above zero.
+ * a line height that is not a number above zero, and a balance that is not true or false. The
+ * stored style carries `balance` only when it balances.
  *
  * @param name - The style name, for the error.
  * @param input - What the game wrote.
  * @returns The style with every field filled.
  * @throws {Error} When `wrap` is a number that is not greater than zero, or another word.
  * @throws {Error} When `lineHeight` is not a finite number greater than zero.
+ * @throws {Error} When `balance` is neither left out nor a boolean.
  */
 function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
   const wrap = input.wrap ?? "none";
@@ -213,7 +215,14 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     );
   }
 
-  return {
+  // A style read back from a feature may carry anything; a game's own literal is checked by tsc.
+  if (input.balance !== undefined && typeof input.balance !== "boolean") {
+    throw new Error(
+      `[game] Text style "${name}" has balance ${String(input.balance)}.\n  Use true or false.`
+    );
+  }
+
+  const style: TextStyle = {
     font: input.font,
     bold: input.bold,
     italic: input.italic,
@@ -228,6 +237,11 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     shadow: shadowOf(input.shadow),
     lineHeight: input.lineHeight
   };
+
+  // Present only on a style that balances, so every style that does not equals its old literal.
+  if (input.balance === true) style.balance = true;
+
+  return style;
 }
 
 /**
@@ -238,6 +252,7 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
  * @returns The registration a feature carries.
  * @throws {Error} When a style names a wrap that is not a width, `"box"` or `"none"`.
  * @throws {Error} When a style names a lineHeight that is not a number above 0.
+ * @throws {Error} When a style names a balance that is not true or false.
  * @example
  * ```ts
  * defineTextStyles({ "hud.digits": { font: "ui.font-digits", size: 40, fill: 0xffe082 } });
@@ -318,7 +333,8 @@ export function readStyle(name: string, value: object): TextStyle | undefined {
     wrap: value.wrap,
     digits: value.digits,
     shadow: readShadow(value.shadow),
-    lineHeight: value.lineHeight
+    lineHeight: value.lineHeight,
+    balance: value.balance
   };
 
   return normalizeStyle(name, { ...input, ...pruned(optional) });

@@ -3,8 +3,8 @@
  * strip of A Memory Missing's board (a 306 u window over a 696 u track, stops 0, 318 and 390,
  * opened on 318, and the pinned column that closes to a 390 u window with stops 0 and 306), a
  * free strip with no stops, a vertical list, a windowed list, an x strip inside a y list, a
- * windowed list on the x axis, a scroll whose axis changes, and a strip opened on 318 whose track
- * starts too short for it and grows. The finger lands the way `input` lands it: `Pressed` on the
+ * windowed list on the x axis, a scroll whose axis changes, a strip opened on 318 whose track
+ * starts too short for it and grows, and a strip whose track and offset shift in one render. The finger lands the way `input` lands it: `Pressed` on the
  * scroll and the `Pointer` resource. Real flow runner, plain Bun, inert
  * renderer, real Yoga.
  */
@@ -100,6 +100,47 @@ export const StripScreen = defineComponent("StripScreen", {
   )
 });
 
+/** The width of the tile that comes in at the start of the jump strip's track. */
+export const EARLY_TILE = 82;
+
+/**
+ * The order strip of F141 (`jump` on `scroll`), opened on 0 with no stops: `shift` brings a first
+ * tile of 82 u at the start of the track and the offset 82 with `jump` in one render, the place of
+ * the cards kept; `shiftGlide` brings the same tile and offset without `jump`; `toOrders` sets the
+ * offset prop to 318, a glide.
+ */
+export const JumpScreen = defineComponent("JumpScreen", {
+  local: { early: false, at: 0, jump: false },
+  view: (_props: object, local) => (
+    <column key="jumpRoot" style={rootStyle}>
+      <scroll
+        key="jumping"
+        axis="x"
+        offset={local.at}
+        jump={local.jump}
+        style={{ width: PINNED, height: 120 }}
+      >
+        <row key="jumpTrack" style={{ width: TRACK + (local.early ? EARLY_TILE : 0), height: 120 }}>
+          {local.early ? (
+            <button key="earlyTile" intent="event" style={{ width: EARLY_TILE, height: 120 }} />
+          ) : undefined}
+          <button key="jumpEvent" intent="event" style={tileStyle} />
+          <button key="jumpOrder" intent="order" style={tileStyle} />
+        </row>
+      </scroll>
+      <row key="jumpControls" style={{ width: 1080, height: 100 }}>
+        <button
+          key="shift"
+          local={{ early: true, at: EARLY_TILE, jump: true }}
+          style={controlStyle}
+        />
+        <button key="shiftGlide" local={{ early: true, at: EARLY_TILE }} style={controlStyle} />
+        <button key="toOrders" local={{ at: 318 }} style={controlStyle} />
+      </row>
+    </column>
+  )
+});
+
 /**
  * A scroll whose axis a local flag turns from `x` to `y`, and a second control that renders it
  * again with the turned axis.
@@ -180,6 +221,7 @@ export const scrollScreens = [
   screenOf("strip", () => <StripScreen key="stripScreen" />),
   screenOf("turn", () => <TurnScreen key="turnScreen" />),
   screenOf("grow", () => <GrowScreen key="growScreen" />),
+  screenOf("jump", () => <JumpScreen key="jumpScreen" />),
   screenOf("free", () => (
     <column key="freeRoot" style={rootStyle}>
       <scroll key="free" axis="x" style={{ width: PINNED, height: 120 }}>
@@ -258,7 +300,7 @@ const main = defineFlow("main", {
 export const scrollFeature = defineFeature("scroll", {
   flows: [main],
   projections: scrollScreens,
-  ui: [StripScreen, TurnScreen, GrowScreen]
+  ui: [StripScreen, TurnScreen, GrowScreen, JumpScreen]
 });
 
 /** Yields the microtask queue to the loop, the way a test waits without a timer. */
