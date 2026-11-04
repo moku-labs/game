@@ -16,6 +16,22 @@ import type { Json } from "../../model/types";
 export type Answer<Intent extends string = string> = { intent: Intent; payload?: Json };
 
 /**
+ * What `await fx(descriptor)` resolves with for a descriptor that takes answers, a `popup` among
+ * them: the gate's answer plus `at`, the moment of the answer in game ms of `clock`. `at` is read
+ * when the answer arrives, in live mode and in a fast walk alike, so a replayed route gives the same
+ * `at` for the same clock position. A payload-less answer stays without a `payload` key.
+ *
+ * @example
+ * ```ts
+ * // The popup opened at 60000; the player taps "again" 5 s later. The node is still at its own
+ * // `now` of 60000, so it times the closing animation from the answer.
+ * const answer = await fx(popup(Retry, {})); // { intent: "again", at: 65000 }
+ * const until = answer.at + 780; // 65780: the close ends 780 ms after the tap
+ * ```
+ */
+export type Answered<Intent extends string = string> = Answer<Intent> & { at: number };
+
+/**
  * The one answer a `guide` lets through. `payload` is compared by deep equality when present.
  *
  * @example

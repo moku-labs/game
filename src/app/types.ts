@@ -144,10 +144,34 @@ export type GameConfig = {
         /** The alias of the key in the keystore. */
         keyAlias: string;
       };
-      /** The Apple team. Keys stay in the env, Tauri reads them. `--store` refuses iOS without it. */
+      /**
+       * The Apple team, and the App Store Connect team key an iOS build signs with from the
+       * command line, where `xcodebuild` sees no Xcode account. The key is named by its two ids and
+       * the path of its `.p8` file, all three or none, never the key itself. Without them a build
+       * reads `APPLE_API_KEY`, `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH` from the env as Tauri
+       * does. `--store` refuses iOS without the block, `--upload` without a key.
+       *
+       * @example
+       * ```ts
+       * // config.ts of A Memory Missing: `tauri ios build` signs with the team key, and
+       * // `moku-game native build ios --store --build-number 12 --upload` sends the .ipa to TestFlight.
+       * signing: {
+       *   apple: { teamId: "ABCDE12345", apiKeyId: "ABC123DEF4", apiIssuer: "69a6de7e-1234-47e3-e053-5b8c7c11a4d1", apiKeyPath: "~/keys/AuthKey_ABC123DEF4.p8" }
+       * } // on a Mac with the home /Users/anya, tauri runs with APPLE_API_KEY "ABC123DEF4" and APPLE_API_KEY_PATH "/Users/anya/keys/AuthKey_ABC123DEF4.p8"
+       * ```
+       */
       apple?: {
         /** The Apple Developer team id. */
         teamId: string;
+        /** The key id of the App Store Connect key, such as `"ABC123DEF4"`. With the two others. */
+        apiKeyId?: string;
+        /** The issuer id of the team in App Store Connect, a UUID. With the two others. */
+        apiIssuer?: string;
+        /**
+         * The `.p8` file of the key: absolute, `~/...` from the home folder, or relative to the game
+         * folder. Keep it outside the repo. With the two others.
+         */
+        apiKeyPath?: string;
       };
     };
     /** What an iOS app adds to its bundle. None by default. */

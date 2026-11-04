@@ -334,7 +334,7 @@ export type FxInternal = {
  * @example
  * ```ts
  * // Inside a node body: wait for the player's pick, then sparkle once the edge has committed.
- * const pick = await fx(popup(Retry, {})); // Answer<"again" | "home">: { intent: "again" }
+ * const pick = await fx(popup(Retry, {})); // Answered<"again" | "home">: { intent: "again", at: 65000 }
  * fx.emit(hint("sparkle", { cell: "c3" }));
  * ```
  */

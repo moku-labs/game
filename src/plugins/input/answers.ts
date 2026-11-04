@@ -5,9 +5,9 @@
 import type { Answer } from "../flow/types";
 import type { Json } from "../model/types";
 import type { Entity } from "../world/types";
-import type { CarryValue, IntentValue } from "./components";
+import type { CarryValue, IntentValue, TapValue } from "./components";
 import { lostAnswer } from "./lost";
-import type { Direction, InputCtx, State, TapListener } from "./types";
+import type { Direction, InputCtx, Point, State, TapListener } from "./types";
 
 /**
  * Reads a component payload as a record. A payload that is not a plain JSON object is dropped:
@@ -28,18 +28,31 @@ function asRecord(payload: Json): Record<string, Json> {
 }
 
 /**
- * Builds the answer of a tap or of a long press: the component's own intent and payload.
+ * Builds the answer of a tap or of a long press: the component's own intent and payload. A
+ * `Tappable` with `point: true` given a point adds it to the payload under `point`, which wins a
+ * payload key of that name; a payload that is not an object becomes `{}` first. Without the flag
+ * or without a point the answer carries the payload as it is: no copy, no `point` key.
  *
  * @param gesture - The `Tappable` or `Pressable` value of the view.
+ * @param point - The press point in the view's own units; only a flagged view reads it.
  * @returns The answer to hand to the gate.
  * @example
  * ```ts
  * tapAnswer({ intent: "found", payload: { id: "lamp" } });
  * // { intent: "found", payload: { id: "lamp" } }
+ * tapAnswer({ intent: "kitTap", payload: { kit: "k1" }, point: true }, { x: 10, y: 60 });
+ * // { intent: "kitTap", payload: { kit: "k1", point: { x: 10, y: 60 } } }
  * ```
  */
-export function tapAnswer(gesture: IntentValue): Answer {
-  return { intent: gesture.intent, payload: gesture.payload };
+export function tapAnswer(gesture: Readonly<TapValue>, point?: Readonly<Point>): Answer {
+  if (gesture.point !== true || point === undefined) {
+    return { intent: gesture.intent, payload: gesture.payload };
+  }
+
+  return {
+    intent: gesture.intent,
+    payload: { ...asRecord(gesture.payload), point: { x: point.x, y: point.y } }
+  };
 }
 
 /**

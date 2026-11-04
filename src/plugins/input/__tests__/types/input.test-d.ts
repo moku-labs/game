@@ -107,11 +107,16 @@ export const stylusMove: RawSample = {
 
 declare const input: InputApi;
 
-expectTypeOf(input.tap).toEqualTypeOf<(target: Target) => boolean>();
+expectTypeOf(input.tap).toEqualTypeOf<
+  (target: Target, point?: { x: number; y: number }) => boolean
+>();
 expectTypeOf<Target>().toEqualTypeOf<{ projection: string; key: string } | Entity>();
 
 input.tap({ projection: "board.generators", key: "g1" });
 input.tap(button);
+input.tap(button, { x: 10, y: 60 });
+// @ts-expect-error a press point needs both coordinates
+input.tap(button, { x: 10 });
 
 // @ts-expect-error — a target is a projection key pair or an entity, not a bare key
 input.tap("g1");

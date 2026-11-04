@@ -167,6 +167,7 @@ The engine bin `moku-game` serves, builds and packs a game folder. A game writes
 | `moku-game native build <target> [--simulator] [--debug[=full] [--editor host:port]]` | Builds the native app: `ios`, `macos`, `android`; `--debug` builds an Android or iOS debug app beside the store app |
 | `moku-game native build <target> --store --build-number <n>` | A store build: an `.aab` on `android`, an `.ipa` for App Store Connect on `ios`. The version comes from `package.json`, the signing from `native.signing`. Everything wrong is refused at once, before anything compiles |
 | `moku-game native build <target> --store --dev --build-number <n>` | The test app of `native.dev`: store-signed, under its own `.dev` id, with the overlay and no editor link, in `dist-native-dev` |
+| `moku-game native build ios --store [--dev] --build-number <n> --upload` | The iOS store build, then the upload of its `.ipa` to App Store Connect with the App Store Connect key of `native.signing.apple`, or of `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH`; TestFlight shows it after Apple processes it |
 | `moku-game native dev <target>` | Runs the native shell on the dev server |
 | `moku-game native doctor`, `native clean` | Checks or removes the native project; `clean` also the test and iOS debug projects |
 | `moku-game keys [--check]` | Writes `generated/assets.ts`, the strings and `generated/manifest.json` |

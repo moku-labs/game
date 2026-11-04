@@ -176,8 +176,8 @@ const CONTENT_ROW_STYLE: Style = Object.freeze({ origin: "topLeft", direction: "
 
 /**
  * The props, besides `style`, `state` and `content`, that a live element is written from: `bind`,
- * `texture`, `name` and `fit` reach its visual, `intent`, `payload`, `local` and `escape` its
- * input, `components` its extras and `motion` its hooks. Every other prop is read from the node
+ * `texture`, `name` and `fit` reach its visual, `intent`, `payload`, `point`, `local` and `escape`
+ * its input, `components` its extras and `motion` its hooks. Every other prop is read from the node
  * where it is used, at every patch: `hosts`, the props of a windowed scroll, the props of a text
  * field, and the children.
  */
@@ -190,6 +190,7 @@ const WRITTEN: readonly string[] = [
   "motion",
   "intent",
   "payload",
+  "point",
   "local",
   "escape"
 ];
@@ -362,7 +363,9 @@ function checkTag(node: DescriptionNode): void {
 
 /**
  * What a button that answers carries: `Tappable` with its intent, or `Touchable` and
- * `LocalWrite` with its patch, or `Touchable` alone when it names neither.
+ * `LocalWrite` with its patch, or `Touchable` alone when it names neither. `point={true}` beside
+ * the intent writes `point: true` into `Tappable`; any other value writes no `point` key, never
+ * `false` or `undefined`, so a button without it stores and serialises as before.
  *
  * @param node - The node of the button.
  * @returns The component values.
@@ -372,7 +375,13 @@ function answerOf(node: DescriptionNode): AnyComponentValue[] {
   const local = node.props.local;
 
   if (typeof intent === "string") {
-    return [Tappable({ intent, payload: (node.props.payload ?? {}) as Json })];
+    const payload = (node.props.payload ?? {}) as Json;
+
+    return [
+      node.props.point === true
+        ? Tappable({ intent, payload, point: true })
+        : Tappable({ intent, payload })
+    ];
   }
 
   if (typeof local === "object" && local !== null) {
@@ -1151,15 +1160,30 @@ export function createReconciler(
   }
 
   /**
+   * Tells whether a value is the `Tappable` of a button that stopped asking for its press point
+   * while the entity still carries `point: true`. A patch keeps the fields it leaves out, so that
+   * value replaces the stored one whole.
+   *
+   * @param entity - The element's entity.
+   * @param value - The value of this render.
+   * @returns True when the stored `Tappable` has the flag and the new one has not.
+   */
+  function dropsPoint(entity: Entity, value: AnyComponentValue): boolean {
+    if (value.type !== Tappable || value.value === true) return false;
+
+    return ecs.get(entity, Tappable)?.point === true && !("point" in value.value);
+  }
+
+  /**
    * Writes one visual or input value onto a live element: added when the entity lacks it, else
    * its fields patched, but never a tag or the state of a scroll, and never a field its type gives
-   * to a plugin.
+   * to a plugin. A `Tappable` that drops `point` is added again: it replaces the stored one whole.
    *
    * @param element - The live element.
    * @param value - The value of this render.
    */
   function writeValue(element: Element, value: AnyComponentValue): void {
-    if (!ecs.has(element.entity, value.type)) {
+    if (!ecs.has(element.entity, value.type) || dropsPoint(element.entity, value)) {
       ecs.add(element.entity, value);
 
       return;

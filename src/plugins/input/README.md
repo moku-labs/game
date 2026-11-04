@@ -10,7 +10,7 @@ The drop TARGET names the intent. The engine owns the pointer capture, the lifti
 
 | Name | Kind | Defaults | Meaning |
 |---|---|---|---|
-| `Tappable({ intent, payload? })` | component | `{ intent: "", payload: {} }` | A tap answers `{ intent, payload }` |
+| `Tappable({ intent, payload?, point? })` | component | `{ intent: "", payload: {} }`, no `point` key | A tap answers `{ intent, payload }`. With `point: true` a finger tap answers `{ intent, payload: { ...payload, point: { x, y } } }`: the press-down point in the view's own units, the units of its hit box (a ui `button`: (0, 0) its top-left corner, (width, height) its bottom-right). A non-object payload becomes `{}` first. A long press never carries it |
 | `Pressable({ intent, payload? })` | component | same | A long press answers `{ intent, payload }` |
 | `Draggable({ payload?, carry?, aim? })` | component | `{ payload: {}, carry: [] }`, no `aim` | The view can be carried. It names no intent. `carry` lists projection keys of the same projection that ride along on top of it. `aim`, a point of the view in its own units: the hover and the drop look under it instead of under the finger |
 | `DropTarget({ intent, payload? })` | component | same as `Tappable` | A drop here answers THIS intent |
@@ -41,7 +41,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Tr
 
 | Method | Behaviour |
 |---|---|
-| `tap(target)` | Reads `Tappable` and answers `{ intent, payload }` |
+| `tap(target, point?)` | Reads `Tappable` and answers `{ intent, payload }`. On a view with `point: true` a given point, already in the view's own units, is added as `payload.point` as it is. Without a point (ui's keyboard taps give none) no `point` key |
 | `press(target)` | The same with `Pressable` |
 | `drag(from, to)` | Reads `Draggable` of `from` and `DropTarget` of `to`, answers `{ intent: target.intent, payload: { ...draggable.payload, ...target.payload } }` |
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |

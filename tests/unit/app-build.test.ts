@@ -106,6 +106,7 @@ async function build(
     now: unused,
     home: "/home/tester",
     exists: unused,
+    listFiles: unused,
     readPackageVersion: unused,
     ...change(seen)
   };
