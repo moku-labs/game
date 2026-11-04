@@ -12,7 +12,7 @@ import { Tree } from "../../../world/ecs/define";
 import type { AnySystem, Entity, SystemContext } from "../../../world/types";
 import { Box } from "../../components";
 import type { Element, ScrollMotion } from "../../jsx/types";
-import type { stepScroll } from "../../layout/scroll";
+import { settleScroll, type stepScroll } from "../../layout/scroll";
 import type { ElementLookup, LayoutState } from "../../layout/types";
 import type { UiCtx } from "../../types";
 import { createPerfApp, MOUNTED, type PerfApp, settlePerfApp, WARM_SHEETS } from "./app";
@@ -351,8 +351,12 @@ export type ScrollPerf = {
   strip: Entity;
   /** Its motion record, which a window sets back between frames. */
   motion: ScrollMotion;
+  /** Its element, whose last render's props a window sets between frames. */
+  element: Element;
   /** One frame of the scroll step over every live scroll. */
   frame: Step;
+  /** The settle of every live scroll after a render, as the solve calls it. */
+  settle: Step;
 };
 
 /**
@@ -374,7 +378,8 @@ export async function startScrollPerf(call: ScrollCall): Promise<ScrollPerf> {
 
   const { step, ctx, state, containers, lookup } = call;
   const strip = keyed(ui, "perfStrip");
-  const motion = containers?.find(element => element.entity === strip)?.scroll;
+  const element = containers?.find(container => container.entity === strip);
+  const motion = element?.scroll;
 
   if (
     step === undefined ||
@@ -382,12 +387,20 @@ export async function startScrollPerf(call: ScrollCall): Promise<ScrollPerf> {
     state === undefined ||
     containers === undefined ||
     lookup === undefined ||
+    element === undefined ||
     motion === undefined
   ) {
     throw new Error("perf: the scroll step never ran over the strip");
   }
 
-  return { ui, strip, motion, frame: (): void => step(ctx, state, containers, lookup, FRAME) };
+  return {
+    ui,
+    strip,
+    motion,
+    element,
+    frame: (): void => step(ctx, state, containers, lookup, FRAME),
+    settle: (): void => settleScroll(ctx, state, containers, lookup, FRAME)
+  };
 }
 
 /**
@@ -450,6 +463,29 @@ export function glideFrame(scroll: ScrollPerf): Step {
     scroll.motion.duration = 400;
     scroll.motion.elapsed = elapsed[0] ?? 0;
     scroll.frame();
+  };
+}
+
+/**
+ * The settle of a render that gives the standing strip a new `offset` prop with `jump` (F141):
+ * 1000, then 1082, then 1000 again, so every call stands at the new prop at once and writes
+ * `Scroll`, `ScrollState` and the content's pose. The render itself is left out: it builds its
+ * description nodes, the game's allocation, not the scroll's.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One settle.
+ */
+export function jumpFrame(scroll: ScrollPerf): Step {
+  const props = scroll.element.node.props;
+
+  scroll.ui.app.world.ecs.untag(scroll.strip, Pressed);
+  scroll.motion.mode = "still";
+  props.jump = true;
+  props.offset = 1000;
+
+  return (): void => {
+    props.offset = props.offset === 1000 ? 1082 : 1000;
+    scroll.settle();
   };
 }
 

@@ -62,7 +62,7 @@ component is set, so `changed()` names none of its components.
 | `style`, `state`, a pointer or focus flag, a covered root | its style is resolved again and its components are written. Its layout node is written and its root solves once when a rect may move, and for a new `style` prop |
 | `content` | its layout node is written and measured again, its root solves once, its components are written |
 | `bind`, `texture`, `name`, `fit`, `intent`, `payload`, `local`, `escape`, `components`, `motion` | its components are written. No style pass, no solve |
-| `hosts`, the props of a windowed `scroll`, the `snap` and `offset` of a `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
+| `hosts`, the props of a windowed `scroll`, the `snap`, `offset` and `jump` of a `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
 | the viewport (size, orientation, safe area), a dev hot swap | every element is patched in full once: style, layout node, components |
 | the locale, a font that arrives after the mount | no element is patched and no view runs. The texts `text` resolves again are measured in that frame; when the line of the `body` style moved, every `icon` without a size is too, on a screen with no text as well. A root solves once when a size in it changed |
 
@@ -336,6 +336,7 @@ they are drawn, and no solve runs.
 | `axis` | `"x"` or `"y"` (default). Read when the scroll spawns: another axis on a later render keeps the first, with one warning `ui:scroll-axis-fixed` `{ key, axis }`. `"x"` with `rows` throws `[game] A windowed scroll moves on y only.` |
 | `snap` | stops, as offsets from the start; each is kept inside `0..max`. A release glides to the stop nearest to `offset + v × 260` (`v` the offset's velocity in units a ms) |
 | `offset` | where the scroll stands, from the start, kept inside `0..max`; 0 when left out. Its first drawn frame stands there. A new value on a later render glides there; the same value does nothing, so a scroll the player moved stays. A scroll that stands at its prop, or glides to it, follows it through a new `max`: a prop the first range was too short for (a text measured before its font arrived) is reached once the content grows. A press and `app.ui.scroll` end that until the next new value |
+| `jump` | `true`: a new `offset` value of this render stands there at once instead of gliding, in the same solve as the content's new rects. A first tile of 82 u that comes in at the start of the track with `offset` 82 more keeps the cards where they were drawn. A running fling or glide stops, a glide a new `max` re-aimed too, and `ScrollState` says `moving: false`; the scroll follows the prop from then on. A scroll the finger holds only remembers the prop. Left out or `false`: a new value glides. A `snap` release always glides |
 
 All numbers are reference units and milliseconds of `time` (`time.delta`): a time scale and a pause
 apply.
@@ -367,7 +368,7 @@ apply.
 - The internal `Scroll` keeps the offset the way the windowed range is cut with: `Scroll.offset =
   −ScrollState.offset`, `Scroll.min = −max`. The internal `Scrollable` `{ axis, moving }` is what
   `input` reads for the hand-off and the catch. A game reads neither.
-- **No allocation.** A held, flinging, gliding or still frame allocates nothing: the exact numbers
+- **No allocation.** A held, flinging, gliding or still frame, and the settle of a `jump` render, allocate nothing: the exact numbers
   live on the element's motion record and in the layout state, written in place, and the components
   get whole units through patches kept in the layout state (`__tests__/perf/scroll.perf.ts`).
 

@@ -93,6 +93,25 @@ export type ScrollSnap = readonly number[] & Brand<"ScrollSnap">;
  * ```
  */
 export type ScrollOffset = number & Brand<"ScrollOffset">;
+
+/**
+ * Whether a new `offset` prop of this render stands there at once instead of gliding: in the same
+ * solve as the content's new rects, so content that moved inside the track and an offset that moves
+ * by as much keep what the player sees in place. A running fling or glide stops and `ScrollState`
+ * says `moving: false`. A scroll the finger holds only remembers the prop; left out or false, a new
+ * prop glides. A `snap` release always glides.
+ *
+ * @example
+ * ```tsx
+ * // The order strip opens on 0. A first tile of 82 u comes in at the start of the track: the
+ * // track and the offset shift 82 in one render, and the cards stay where they were drawn.
+ * <scroll key="strip" axis="x" offset={82} jump style={{ width: 306, height: 120 }}>
+ *   <row key="track" style={{ width: 778, height: 120 }} />
+ * </scroll>;
+ * // the frame of that render: ScrollState { offset: 82, max: 472, moving: false }
+ * ```
+ */
+export type ScrollJump = boolean & Brand<"ScrollJump">;
 /** How many rows a windowed scroll has. */
 export type ScrollRows = number & Brand<"ScrollRows">;
 /** The height of every row, in reference units; above 0. */
@@ -255,13 +274,16 @@ type ScrollWindowForm = {
 /**
  * What a scroll container takes: children for a short list, or `rows`, `rowHeight` and `row` for
  * a long one, whose rows exist only in the window; the `axis` it moves on, the `snap` stops a
- * release glides to, and the `offset` it stands at.
+ * release glides to, the `offset` it stands at, and whether a new `offset` stands there at once
+ * (`jump`).
  *
  * @example
  * ```ts
  * const props: ScrollProps = { axis: "y" };
  * // The order strip: sideways, three stops, opened on the orders.
  * const strip: ScrollProps = { axis: "x", snap: [0, 318, 390], offset: 318 };
+ * // A first tile of 82 u came in at the start of the track: the strip stands on 82 at once.
+ * const shifted: ScrollProps = { axis: "x", offset: 82, jump: true };
  * // 1000 orders of 120 u in a 1600 u list: rows 0 to 18 exist at offset 0.
  * const orders: ScrollProps = {
  *   style: { height: 1600 },
@@ -275,6 +297,7 @@ export type ScrollProps = CommonProperties & {
   axis?: ScrollAxis;
   snap?: ScrollSnap;
   offset?: ScrollOffset;
+  jump?: ScrollJump;
 } & (ScrollChildForm | ScrollWindowForm);
 
 /**
