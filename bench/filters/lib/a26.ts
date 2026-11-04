@@ -4,7 +4,10 @@
  * is free, the clock samples and the arms schedule. `../a26.ts` is the half that runs adb.
  */
 
-/** Every arm of the A26 run, in the order of one round. */
+/**
+ * Every arm of the A26 run, in the order of one round. `sweep` is left out: its blur pass hides the colour matrix's, and
+ * slice 3 of F126 stage 3 splits it into `sweep-blur`, `sweep-blur-q4` and `sweep-grade`.
+ */
 export const ARMS = [
   "slope-0",
   "slope-1",
@@ -23,13 +26,17 @@ export const ARMS = [
   "rows",
   "rows-live",
   "rest",
-  "sweep",
   "fog",
   "fog-local",
   "flip",
   "scale",
   "lens",
-  "promo"
+  "promo",
+  "set-flash",
+  "set-grade",
+  "set-vignette",
+  "set-grade-full",
+  "sweep-grade"
 ] as const;
 
 /** The apps that may stand in front of a free phone. */

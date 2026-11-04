@@ -7,12 +7,15 @@ import {
   bind,
   ColorMatrix,
   Countdown,
+  Flash,
   Glow,
+  Grade,
   Outline,
   Shape,
   Sprite,
   Text,
   Transform,
+  Vignette,
   type World
 } from "../../../../../src/index.ts";
 import { Emitter } from "../../../kit";
@@ -592,6 +595,37 @@ const LEAVE_AFTER = 30;
 const ENTER_TURN_MS = 2000;
 
 /**
+ * The rows of `rows`, `rows-live` and the `set-*` arms over a full-screen sprite: 340 × 72 each, a sprite in it.
+ *
+ * @param stage - The stage.
+ * @param filter - Makes the filter of one row.
+ * @returns The rows.
+ */
+function spawnRows(stage: Stage, filter: () => World.AnyComponentValue): World.Entity[] {
+  fullSprite(stage);
+
+  const rows: World.Entity[] = [];
+  const count = stage.n ?? ROWS;
+
+  for (let index = 0; index < count; index += 1) {
+    const row = stage.spawn(
+      Transform({ x: 25, y: 120 + index * 84 }),
+      Shape({ w: 340, h: 72, fill: 0xf2_b4_3d, radius: 12 }),
+      filter()
+    );
+
+    stage.child(
+      row,
+      Transform({ x: 12, y: 8 }),
+      Sprite({ texture: PICTURE, width: 56, height: 56, anchor: { x: 0, y: 0 } })
+    );
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+/**
  * Order rows flipping all the time.
  *
  * @param name - The scene.
@@ -604,25 +638,7 @@ function rowScene(name: string, stands: string, filter: typeof RowFlip): BenchSc
     name,
     stands,
     mount: stage => {
-      fullSprite(stage);
-
-      const rows: World.Entity[] = [];
-      const count = stage.n ?? ROWS;
-
-      for (let index = 0; index < count; index += 1) {
-        const row = stage.spawn(
-          Transform({ x: 25, y: 120 + index * 84 }),
-          Shape({ w: 340, h: 72, fill: 0xf2_b4_3d, radius: 12 }),
-          filter()
-        );
-
-        stage.child(
-          row,
-          Transform({ x: 12, y: 8 }),
-          Sprite({ texture: PICTURE, width: 56, height: 56, anchor: { x: 0, y: 0 } })
-        );
-        rows.push(row);
-      }
+      const rows = spawnRows(stage, () => filter());
 
       return {
         tick: elapsedMs => {
@@ -709,6 +725,127 @@ const rowsEnterScene: BenchScene = {
   }
 };
 
+/** A turn of a value the `set-*` arms write: a sine of the time, each row a step behind the one above. */
+const SET_TURN_MS = 500;
+
+/**
+ * Where a value of a `set-*` arm stands: a sine of the time, each row 0.4 rad behind the one above it.
+ *
+ * @param elapsedMs - The time.
+ * @param index - The row.
+ * @returns From -1 to 1.
+ * @example
+ * ```ts
+ * wave(0, 0); // 0
+ * ```
+ */
+function wave(elapsedMs: number, index: number): number {
+  return Math.sin(elapsedMs / SET_TURN_MS + index * 0.4);
+}
+
+/**
+ * The rows of `rows` under a member of the engine's effect set, its first number written in every frame: after its
+ * third write a row draws on its quad in the canvas pass.
+ *
+ * @param name - The scene.
+ * @param stands - What it stands for.
+ * @param member - The member.
+ * @param write - The patch of one row in one frame.
+ * @returns The scene.
+ */
+function memberRowScene<Value extends object>(
+  name: string,
+  stands: string,
+  member: World.ComponentType<Value>,
+  write: (elapsedMs: number, index: number) => Partial<Value>
+): BenchScene {
+  return {
+    name,
+    stands,
+    mount: stage => {
+      const rows = spawnRows(stage, () => member());
+
+      return {
+        tick: elapsedMs => {
+          for (const [index, row] of rows.entries())
+            stage.set(row, member, write(elapsedMs, index));
+        }
+      };
+    }
+  };
+}
+
+/**
+ * One full-screen view over the full-screen sprite, its filter written in every frame: the `full` shape.
+ *
+ * @param name - The scene.
+ * @param stands - What it stands for.
+ * @param filter - The filter, as a component.
+ * @param write - The patch of one frame.
+ * @returns The scene.
+ */
+function fullWriteScene<Value extends object>(
+  name: string,
+  stands: string,
+  filter: World.ComponentType<Value>,
+  write: (elapsedMs: number) => Partial<Value>
+): BenchScene {
+  return {
+    name,
+    stands,
+    mount: stage => {
+      fullSprite(stage);
+
+      const graded = stage.spawn(
+        Transform({ x: 0, y: 0 }),
+        Sprite({
+          texture: PICTURE,
+          width: stage.width,
+          height: stage.height,
+          anchor: { x: 0, y: 0 }
+        }),
+        filter()
+      );
+
+      return { tick: elapsedMs => stage.set(graded, filter, write(elapsedMs)) };
+    }
+  };
+}
+
+/** The arms of the engine's effect set (F126 stage 3 slice 1), and Pixi's colour matrix beside the full-screen grade. */
+const SET_SCENES: readonly BenchScene[] = [
+  memberRowScene(
+    "set-flash",
+    "the rows under Flash, its amount written each frame: on the quad",
+    Flash,
+    (elapsedMs, index) => ({ amount: 0.5 + 0.5 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-grade",
+    "the rows under Grade, its brightness written each frame: on the quad",
+    Grade,
+    (elapsedMs, index) => ({ brightness: 1 + 0.3 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-vignette",
+    "the rows under Vignette, its x written each frame: on the quad",
+    Vignette,
+    (elapsedMs, index) => ({ x: 0.5 + 0.2 * wave(elapsedMs, index) })
+  ),
+  fullWriteScene(
+    "set-grade-full",
+    "one full-screen Grade, its brightness written each frame: on the quad",
+    Grade,
+    elapsedMs => ({ brightness: 1 + 0.3 * wave(elapsedMs, 0) })
+  ),
+  fullWriteScene(
+    "sweep-grade",
+    "the same screen under Pixi's ColorMatrix, its brightness written each frame: a pass for every value",
+    ColorMatrix,
+    elapsedMs => ({ brightness: 1 + 0.3 * wave(elapsedMs, 0) })
+  )
+];
+
 /** Every case scene. */
 export const CASE_SCENES: readonly BenchScene[] = [
   fullScene,
@@ -730,5 +867,6 @@ export const CASE_SCENES: readonly BenchScene[] = [
   ),
   rowScene("rows-live", "the same rows with cache: false, drawn live", RowFlipLive),
   restScene,
-  rowsEnterScene
+  rowsEnterScene,
+  ...SET_SCENES
 ];
