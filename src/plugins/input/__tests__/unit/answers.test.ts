@@ -14,6 +14,47 @@ describe("tapAnswer", () => {
   it("answers with an empty payload when the component brought none", () => {
     expect(tapAnswer(Tappable({ intent: "pick" }).value)).toEqual({ intent: "pick", payload: {} });
   });
+
+  // Bug caught: a view that asks for the press point (F139) answers without it.
+  it("adds the point to the payload of a view that asks for it, the point winning its key", () => {
+    const value = Tappable({ intent: "kitTap", payload: { kit: "k1", point: "old" }, point: true });
+
+    expect(tapAnswer(value.value, { x: 10, y: 60 })).toEqual({
+      intent: "kitTap",
+      payload: { kit: "k1", point: { x: 10, y: 60 } }
+    });
+  });
+
+  // Bug caught: every tap answers a point, so a view that never asked changes its payload.
+  it("ignores a point on a view without the flag and answers its own payload object", () => {
+    const value = Tappable({ intent: "found", payload: { id: "lamp" } }).value;
+    const answer = tapAnswer(value, { x: 10, y: 60 });
+
+    expect(answer).toEqual({ intent: "found", payload: { id: "lamp" } });
+    expect(answer.payload).toBe(value.payload);
+  });
+
+  // Bug caught: a flagged view's non-object payload is spread as is, or the point is lost.
+  it("turns a payload that is not an object into one that holds only the point", () => {
+    expect(tapAnswer({ intent: "kitTap", payload: "lamp", point: true }, { x: 1, y: 2 })).toEqual({
+      intent: "kitTap",
+      payload: { point: { x: 1, y: 2 } }
+    });
+  });
+
+  // Bug caught: a flagged view tapped without a point (a keyboard tap) answers `point: undefined`.
+  it("answers a flagged view without a point with its payload unchanged", () => {
+    const answer = tapAnswer({ intent: "kitTap", payload: { kit: "k1" }, point: true });
+
+    expect(answer.payload).toEqual({ kit: "k1" });
+  });
+});
+
+describe("Tappable", () => {
+  // Bug caught: the point flag gets a default value, so every saved Tappable serialises a new key.
+  it("stores no point key unless a view asks for the point", () => {
+    expect(Object.keys(Tappable({ intent: "found" }).value)).toEqual(["intent", "payload"]);
+  });
 });
 
 describe("dropAnswer", () => {

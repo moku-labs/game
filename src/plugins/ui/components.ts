@@ -4,7 +4,7 @@
  * `world`, so nothing has to be registered.
  */
 import type { Descriptor } from "../flow/fx/types";
-import type { Answer } from "../flow/gate/types";
+import type { Answered } from "../flow/gate/types";
 import type { Json } from "../model/types";
 import { component, resource, tag } from "../world/ecs/define";
 import { defineComponent } from "./jsx/component";
@@ -204,7 +204,8 @@ export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
 
 /**
  * Builds the effect a node awaits to show a popup. The gate opens for the outcomes of the
- * component, so the node resolves with the intent one of its buttons answered. `over` names the
+ * component, so the node resolves with the intent one of its buttons answered, its payload, and
+ * `at`: the clock moment the answer arrived, in game ms. `over` names the
  * component of a popup that stays mounted beneath this one, drawn covered, until this one is gone.
  *
  * @param component - A component declared with `outcomes`.
@@ -220,7 +221,8 @@ export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
  * });
  * popup(Reward, { gold: 5 });
  * // { kind: "popup", payload: { component: "Reward", props: { gold: 5 } }, answers: ["claim"] }
- * await fx(popup(Reward, { gold: 5 })); // Answer<"claim">: { intent: "claim" }
+ * // The player claims 5 s after the popup opened at 60000.
+ * await fx(popup(Reward, { gold: 5 })); // Answered<"claim">: { intent: "claim", at: 65000 }
  * ```
  * @example
  * ```ts
@@ -242,7 +244,7 @@ export function popup<
   component: PopupComponent<Properties, Local, Outcomes>,
   props: Properties,
   options?: { over?: string }
-): Descriptor<Answer<keyof Outcomes & string>> {
+): Descriptor<Answered<keyof Outcomes & string>> {
   const over = options?.over;
   const payload =
     over === undefined
@@ -275,7 +277,7 @@ export type UiKit<Asset extends string, TextStyleKey extends string, StringKey e
     component: PopupComponent<Properties, Local, Outcomes>,
     props: Properties,
     options?: { over?: string }
-  ) => Descriptor<Answer<keyof Outcomes & string>>;
+  ) => Descriptor<Answered<keyof Outcomes & string>>;
   intrinsics: IntrinsicElementsFor<Asset, TextStyleKey, StringKey>;
 };
 

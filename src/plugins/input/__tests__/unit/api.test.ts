@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { Transform } from "../../../renderer/components";
 import { createInputApi } from "../../api";
 import {
   Draggable,
@@ -26,6 +27,35 @@ describe("app.input.tap", () => {
 
     expect(api.tap({ projection: "board.items", key: "i5" })).toBe(true);
     expect(mock.answers).toEqual([{ intent: "found", payload: { id: "o1" } }]);
+  });
+
+  // Bug caught: the point a test or an agent gives is dropped, or moved through the Transform again.
+  it("adds a given point as it is to the answer of a view that asks for it", () => {
+    const mock = createMockInput();
+
+    mock.spawn(
+      [Tappable({ intent: "kitTap", point: true }), Transform({ x: 300, y: 500, scale: 2 })],
+      { projection: "kit", key: "sphere" }
+    );
+
+    const api = createInputApi(mock.ctx);
+
+    expect(api.tap({ projection: "kit", key: "sphere" }, { x: 10, y: 60 })).toBe(true);
+    expect(mock.answers).toEqual([{ intent: "kitTap", payload: { point: { x: 10, y: 60 } } }]);
+  });
+
+  // Bug caught: a keyboard tap (no point) on a flagged view answers a `point` key anyway.
+  it("answers no point key when no point is given", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([
+      Tappable({ intent: "kitTap", payload: { kit: "k1" }, point: true })
+    ]);
+    const api = createInputApi(mock.ctx);
+
+    api.tap(entity);
+
+    expect(mock.answers).toEqual([{ intent: "kitTap", payload: { kit: "k1" } }]);
+    expect(Object.keys(mock.answers[0]?.payload ?? {})).toEqual(["kit"]);
   });
 
   it("takes an entity as a target too", () => {

@@ -304,18 +304,27 @@ export type State = {
  */
 export type InputApi = {
   /**
-   * Reads the `Tappable` of a view and answers its intent.
+   * Reads the `Tappable` of a view and answers its intent. On a view whose `Tappable` has
+   * `point: true`, a given point is added to the payload under `point`, as the finger's press
+   * point would be. It is already in the view's own units, the units of its hit box, and is used
+   * as it is. Without a point, or on a view without the flag, the payload is answered unchanged,
+   * with no `point` key: the keyboard taps of ui (Enter on the focused button, Escape) give none.
    *
    * @param target - The projection key of a live view, or an entity.
+   * @param point - The press point in the view's own units; read only by a view with `point: true`.
    * @returns What `flow.gate.answer` returned: true when the gate took the answer.
    * @example
    * ```ts
    * // A hidden-object test finds one object without touching a pixel.
    * app.input.tap({ projection: "scene.objects", key: "lamp" });
    * // true: answers { intent: "found", payload: { id: "lamp" } }
+   *
+   * // A headless test taps the gift sphere (Tappable { intent: "kitTap", point: true }) at its left edge.
+   * app.input.tap({ projection: "kit", key: "sphere" }, { x: 10, y: 60 });
+   * // true: answers { intent: "kitTap", payload: { point: { x: 10, y: 60 } } }
    * ```
    */
-  tap(target: Target): boolean;
+  tap(target: Target, point?: Point): boolean;
 
   /**
    * Reads the `Pressable` of a view and answers its intent, the way a long press would.
