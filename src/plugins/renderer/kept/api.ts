@@ -59,10 +59,9 @@ function categoryOf(slots: readonly FilterSlot[]): FilterCache | undefined {
   let worst: FilterCache = "local";
 
   for (const slot of slots) {
-    if (slot.cache === undefined || (slot.cache === "screen" && slot.quad === undefined)) {
-      return undefined;
-    }
+    const drawnLive = slot.cache === "screen" && slot.quad === undefined;
 
+    if (slot.cache === undefined || drawnLive) return undefined;
     if (slot.cache === "screen") worst = "screen";
     else if (slot.cache === "placed" && worst === "local") worst = "placed";
   }

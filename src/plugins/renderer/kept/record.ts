@@ -2259,9 +2259,9 @@ function enterShadeWhenDue(
  * @returns True when it is.
  */
 function shadedCalm(state: KeptState, record: KeptRecord): boolean {
-  return (
-    record.shaded && record.category !== "screen" && state.frame - record.shadedAt >= QUAD_CALM
-  );
+  const rested = state.frame - record.shadedAt >= QUAD_CALM;
+
+  return record.shaded && record.category !== "screen" && rested;
 }
 
 /**

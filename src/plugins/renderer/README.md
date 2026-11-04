@@ -1158,7 +1158,7 @@ nothing, and is taken again 2 frames after it shows. Not taken under a zoom: a `
 a picture cut to the canvas (it is taken again on every move), and a view that churned (it waits for real rest). A
 view under an ancestor that pulses or spins for ever is drawn scaled for ever, never taken again at rest.
 
-Not kept: a filter of category `"screen"` but on its own shader (see "A view on its own shader" and the effects README,
+Not kept: a filter output of category `"screen"`, whose view is kept only on its own shader (see "A view on its own shader" and the effects README,
 "Filters that are kept"), a slot of a game that names no category, a filter that blends with the backdrop (`blendRequired`) or a blend
 mode other than normal, a top that blends otherwise, an ancestor that is tinted or blends otherwise, a
 `"placed"` filter
@@ -1256,6 +1256,8 @@ does: a move is a refresh with no pass, a new scale takes it again, never drawn 
 and three in a row draw it live, calm, as any view; the next take puts it on its mesh again. Where it does not fit (WebGL, an
 `Alpha` beside it, a fixed resolution, a second filter) it is drawn live, and `why()` says `"cache-false"`; a slot without a
 quad (a body that reads `@builtin(position)`, a filter with inputs, a broken kind's stand-in) keeps no record at all.
+On the A26 (Chrome, 221 MHz, the bench's 8 `rows-live` rows with `cache: false`, 2026-11-04): 22.5 ms of GPU a frame and
+1 canvas pass, against 27.6 ms and 9 passes drawn live.
 
 A `"placed"` view under a filtered ancestor, live or kept, is kept only on its shader: a stage 3 picture would hold the
 wrong place. It fits the mode as any view does, one enabled filter of ours with a quad; a view that does not fit stays live,
