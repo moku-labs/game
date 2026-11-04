@@ -53,10 +53,25 @@ export type NativeStore = {
   buildNumber: number;
   /** `--dev`: the test app of `native.dev`, not the players' app. */
   dev?: true;
-  /** The environment the password variables are looked up in. */
+  /** `--upload`: after the build, the `.ipa` goes to App Store Connect. iOS only. */
+  upload?: true;
+  /** The environment the password variables and the App Store Connect key are looked up in. */
   env: Readonly<Record<string, string | undefined>>;
   /** Tells whether a file is there. */
   exists: (path: string) => boolean;
+};
+
+/**
+ * The App Store Connect key a build signs with and an upload sends: the two ids and the `.p8` file,
+ * from `native.signing.apple` or from the env vars Tauri reads.
+ */
+export type AppleKey = {
+  /** The key id, the value of `APPLE_API_KEY`. */
+  keyId: string;
+  /** The issuer id of the team, the value of `APPLE_API_ISSUER`. */
+  issuer: string;
+  /** The `.p8` file, the value of `APPLE_API_KEY_PATH`; absolute when `config.ts` names it. */
+  keyPath: string;
 };
 
 /** What the command line adds to a verb. */
@@ -110,6 +125,17 @@ type NativeExtras = {
 /** The native section of a resolved config. */
 type NativeSection = NonNullable<ResolvedGameConfig["native"]>;
 
+/** The env vars Tauri signs an iOS build with, from an App Store Connect key. */
+type AppleKeyVariables = {
+  APPLE_API_KEY: string;
+  APPLE_API_ISSUER: string;
+  APPLE_API_KEY_PATH: string;
+};
+
+/** The line of an `--upload` that finds no App Store Connect key, in `config.ts` or the env. */
+const NO_UPLOAD_KEY =
+  "--upload needs an App Store Connect key. Add apiKeyId, apiIssuer and apiKeyPath to native.signing.apple, or set APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_KEY_PATH.";
+
 /** The part of the `@moku-labs/native` module a verb runs on. */
 type NativeModule = { createApp: typeof createApp };
 
@@ -158,8 +184,8 @@ function nativeSectionOf(settings: ResolvedGameConfig): NativeSection {
 }
 
 /**
- * Makes a keystore path absolute, since Gradle reads a relative one under `gen/android/app`: `~/`
- * starts at the home folder, anything else at the game folder.
+ * Makes a keystore or `.p8` path absolute, since Gradle reads a relative one under
+ * `gen/android/app`: `~/` starts at the home folder, anything else at the game folder.
  *
  * @param keystore - The path `config.ts` gives.
  * @param cwd - The game folder.
@@ -174,6 +200,135 @@ function resolveKeystore(keystore: string, cwd: string, home: string): string {
   return keystore.startsWith("~/")
     ? path.join(home, keystore.slice(2))
     : path.resolve(cwd, keystore);
+}
+
+/**
+ * The App Store Connect key of `config.ts`, its `.p8` path made absolute as a keystore's is.
+ *
+ * @param native - `native` of the resolved config.
+ * @param where - The game folder and the home folder.
+ * @returns The key, or `undefined` when `native.signing.apple` names none.
+ * @example
+ * ```ts
+ * appleKeyOf({ name: "T", identifier: "com.acme.t", signing: { apple: { teamId: "ABCDE12345", apiKeyId: "ABC123DEF4", apiIssuer: "i-1", apiKeyPath: "keys/k.p8" } } }, { cwd: "/g", home: "/home/a" }); // { keyId: "ABC123DEF4", issuer: "i-1", keyPath: "/g/keys/k.p8" }
+ * ```
+ */
+export function appleKeyOf(
+  native: ResolvedGameConfig["native"],
+  where: Pick<NativeWhere, "cwd" | "home">
+): AppleKey | undefined {
+  const { apiKeyId, apiIssuer, apiKeyPath } = native?.signing?.apple ?? {};
+  const isKeyNamed = apiKeyId !== undefined && apiIssuer !== undefined && apiKeyPath !== undefined;
+
+  if (!isKeyNamed) return undefined;
+
+  return {
+    keyId: apiKeyId,
+    issuer: apiIssuer,
+    keyPath: resolveKeystore(apiKeyPath, where.cwd, where.home)
+  };
+}
+
+/**
+ * The App Store Connect key of the env: the three variables Tauri reads, each set and not empty.
+ *
+ * @param env - The environment.
+ * @returns The key, its path as the env gives it, or `undefined` without all three.
+ * @example
+ * ```ts
+ * envAppleKeyOf({ APPLE_API_KEY: "ABC123DEF4", APPLE_API_ISSUER: "i-1" }); // undefined
+ * ```
+ */
+function envAppleKeyOf(env: NativeStore["env"]): AppleKey | undefined {
+  const keyId = env.APPLE_API_KEY ?? "";
+  const issuer = env.APPLE_API_ISSUER ?? "";
+  const keyPath = env.APPLE_API_KEY_PATH ?? "";
+
+  return keyId === "" || issuer === "" || keyPath === "" ? undefined : { keyId, issuer, keyPath };
+}
+
+/**
+ * The App Store Connect key an upload sends: the one of `config.ts`, else the three env vars.
+ *
+ * @param native - `native` of the resolved config.
+ * @param where - The game folder and the home folder.
+ * @param env - The environment.
+ * @returns The key, or `undefined` when there is none.
+ * @example
+ * ```ts
+ * uploadKeyOf({ name: "T", identifier: "com.acme.t" }, { cwd: "/g", home: "/home/a" }, { APPLE_API_KEY: "ABC123DEF4", APPLE_API_ISSUER: "i-1", APPLE_API_KEY_PATH: "/k/AuthKey.p8" }); // { keyId: "ABC123DEF4", issuer: "i-1", keyPath: "/k/AuthKey.p8" }
+ * ```
+ */
+export function uploadKeyOf(
+  native: ResolvedGameConfig["native"],
+  where: Pick<NativeWhere, "cwd" | "home">,
+  env: NativeStore["env"]
+): AppleKey | undefined {
+  return appleKeyOf(native, where) ?? envAppleKeyOf(env);
+}
+
+/**
+ * The env vars of an App Store Connect key, by the names Tauri reads.
+ *
+ * @param key - The key.
+ * @returns The three variables.
+ * @example
+ * ```ts
+ * appleKeyVariablesOf({ keyId: "ABC123DEF4", issuer: "i-1", keyPath: "/k.p8" }).APPLE_API_KEY_PATH; // "/k.p8"
+ * ```
+ */
+function appleKeyVariablesOf(key: AppleKey): AppleKeyVariables {
+  return {
+    APPLE_API_KEY: key.keyId,
+    APPLE_API_ISSUER: key.issuer,
+    APPLE_API_KEY_PATH: key.keyPath
+  };
+}
+
+/**
+ * The command that uploads an `.ipa` to App Store Connect with a team key: `xcrun altool`, the
+ * path as one word, spaces and all.
+ *
+ * @param ipa - The `.ipa` file, absolute.
+ * @param key - The App Store Connect key.
+ * @returns The argv.
+ * @example
+ * ```ts
+ * uploadArgvOf("/g/dist-native/ios/T.ipa", { keyId: "ABC123DEF4", issuer: "i-1", keyPath: "/k.p8" }); // ["xcrun", "altool", "--upload-app", "-f", "/g/dist-native/ios/T.ipa", "-t", "ios", "--api-key", "ABC123DEF4", "--api-issuer", "i-1", "--p8-file-path", "/k.p8"]
+ * ```
+ */
+export function uploadArgvOf(ipa: string, key: AppleKey): string[] {
+  return [
+    "xcrun",
+    "altool",
+    "--upload-app",
+    "-f",
+    ipa,
+    "-t",
+    "ios",
+    "--api-key",
+    key.keyId,
+    "--api-issuer",
+    key.issuer,
+    "--p8-file-path",
+    key.keyPath
+  ];
+}
+
+/**
+ * The folder native leaves the `.ipa` of an iOS store build in: under `dist-native`, or under
+ * `dist-native-dev` for the test app.
+ *
+ * @param cwd - The game folder.
+ * @param store - The store block, for its `dev` mark.
+ * @returns The folder, absolute.
+ * @example
+ * ```ts
+ * uploadFolderOf("/g", { dev: true }); // "/g/dist-native-dev/ios"
+ * ```
+ */
+export function uploadFolderOf(cwd: string, store: Pick<NativeStore, "dev">): string {
+  return path.join(cwd, store.dev === true ? DEV_OUT : STORE_OUT, "ios");
 }
 
 /**
@@ -230,16 +385,51 @@ function androidProblems(native: NativeSection, input: StoreInput): readonly str
 }
 
 /**
- * The problem of the iOS row of a store build: the Apple signing block. Keys stay in the env, and
- * Tauri reads them.
+ * The problems of the App Store Connect key of an iOS store build: a `.p8` of `config.ts` that is
+ * not a file, and for `--upload` no key at all or an env key whose file is not there. A line names
+ * the resolved path of `config.ts` or the variable, never the value of a variable.
  *
  * @param native - The native section.
- * @returns One line, or none with the block.
+ * @param input - The store build.
+ * @returns One line, or none for a key that can go.
  */
-function appleProblems(native: NativeSection): readonly string[] {
-  return native.signing?.apple === undefined
-    ? ["No native.signing.apple in config.ts. Add teamId."]
-    : [];
+function appleKeyProblems(native: NativeSection, input: StoreInput): readonly string[] {
+  const key = appleKeyOf(native, input);
+
+  if (key !== undefined) {
+    return input.store.exists(key.keyPath)
+      ? []
+      : [
+          `The App Store Connect key ${key.keyPath} is not a file. Fix native.signing.apple.apiKeyPath.`
+        ];
+  }
+
+  if (input.store.upload !== true) return [];
+
+  const envKey = envAppleKeyOf(input.store.env);
+
+  if (envKey === undefined) return [NO_UPLOAD_KEY];
+
+  return input.store.exists(envKey.keyPath)
+    ? []
+    : ["The file of APPLE_API_KEY_PATH is not a file."];
+}
+
+/**
+ * The problems of the iOS row of a store build: the Apple signing block, and the App Store Connect
+ * key, which `config.ts` names or the env holds for Tauri.
+ *
+ * @param native - The native section.
+ * @param input - The store build.
+ * @returns One line per problem.
+ */
+function appleProblems(native: NativeSection, input: StoreInput): readonly string[] {
+  return [
+    ...(native.signing?.apple === undefined
+      ? ["No native.signing.apple in config.ts. Add teamId."]
+      : []),
+    ...appleKeyProblems(native, input)
+  ];
 }
 
 /**
@@ -327,7 +517,7 @@ export function storeProblems(input: StoreInput): readonly string[] {
   const native = nativeSectionOf(input.settings);
 
   return [
-    ...(input.target === "android" ? androidProblems(native, input) : appleProblems(native)),
+    ...(input.target === "android" ? androidProblems(native, input) : appleProblems(native, input)),
     ...versionProblems(input.version),
     ...(input.store.dev === true
       ? devIdentifierProblems(native.dev)
@@ -757,9 +947,98 @@ async function runApp(
 }
 
 /**
+ * Runs one verb over the native config, and for `clean` once more per test project, one after the
+ * other.
+ *
+ * @param native - The `@moku-labs/native` module.
+ * @param config - The native config.
+ * @param verb - The native verb.
+ * @param target - The checked target.
+ * @param options - The verb options.
+ * @returns True when the verb succeeded on every folder.
+ */
+async function runApps(
+  native: NativeModule,
+  config: NativeConfig,
+  verb: NativeVerb,
+  target: Target | undefined,
+  options: NativeVerbOptions
+): Promise<boolean> {
+  let passed = await runApp(native, config, verb, target, options);
+
+  // One folder that will not go stops none of the others.
+  for (const project of options.testProjects ?? []) {
+    const cleaned = await runApp(native, { ...config, projectDir: project }, verb, target, options);
+
+    passed &&= cleaned;
+  }
+
+  return passed;
+}
+
+/**
+ * The env an iOS `build` or `dev` signs with when `config.ts` names the App Store Connect key.
+ *
+ * @param native - The native section.
+ * @param where - The game folder and the home folder.
+ * @param verb - The native verb.
+ * @param target - The checked target.
+ * @returns The three variables, or `undefined` for another verb or target, or without the key.
+ */
+function keyVariablesOf(
+  native: NativeSection,
+  where: NativeWhere,
+  verb: NativeVerb,
+  target: Target | undefined
+): AppleKeyVariables | undefined {
+  const isIosSigningRun = target === "ios" && (verb === "build" || verb === "dev");
+
+  if (!isIosSigningRun) return undefined;
+
+  const key = appleKeyOf(native, where);
+
+  return key === undefined ? undefined : appleKeyVariablesOf(key);
+}
+
+/**
+ * Runs with the given variables in the env of this process, which native's Tauri spawn passes on,
+ * and puts back every earlier value, or its absence, when the run ends, also when it throws.
+ *
+ * @param values - The variables, or `undefined` to leave the env untouched.
+ * @param run - The run.
+ * @returns What the run answers.
+ */
+async function withProcessVariables(
+  values: AppleKeyVariables | undefined,
+  run: () => Promise<boolean>
+): Promise<boolean> {
+  if (values === undefined) return run();
+
+  const names = Object.keys(values);
+  const before = names.map(name => [name, process.env[name]] as const); // @env-allow: kept to restore
+
+  Object.assign(process.env, values); // @env-allow: native's Tauri spawn reads the key here
+
+  try {
+    return await run();
+  } finally {
+    // Every variable goes back to what it was, or away when it was not set.
+    for (const [name, value] of before) {
+      if (value === undefined) {
+        Reflect.deleteProperty(process.env, name); // @env-allow: the variable was not set before
+        continue;
+      }
+
+      process.env[name] = value; // @env-allow: the person's own value comes back
+    }
+  }
+}
+
+/**
  * Runs one native verb through `@moku-labs/native` over the game's config: once, or for `clean`
- * once per project folder, one after the other. Native's cli prints the progress and the failure
- * itself.
+ * once per project folder, one after the other. An iOS `build` or `dev` with the App Store Connect
+ * key in `config.ts` runs with the key in the env Tauri reads, the earlier env put back after.
+ * Native's cli prints the progress and the failure itself.
  *
  * @param verb - The native verb: build, dev, doctor or clean.
  * @param settings - The resolved `config.ts` of the game.
@@ -776,7 +1055,8 @@ export async function runNative(
   where: NativeWhere,
   options: NativeVerbOptions
 ): Promise<boolean> {
-  nativeSectionOf(settings);
+  const section = nativeSectionOf(settings);
+
   refuseStoreProblems(settings, where, options);
 
   const native = await import("@moku-labs/native").catch((error: unknown) => {
@@ -787,14 +1067,8 @@ export async function runNative(
   });
   const target = targetOf(native.TARGETS, verb, options.target);
   const config = nativeConfigOf(settings, where, target, extrasOf(options));
-  let passed = await runApp(native, config, verb, target, options);
 
-  // One folder that will not go stops none of the others.
-  for (const project of options.testProjects ?? []) {
-    const cleaned = await runApp(native, { ...config, projectDir: project }, verb, target, options);
-
-    passed &&= cleaned;
-  }
-
-  return passed;
+  return withProcessVariables(keyVariablesOf(section, where, verb, target), () =>
+    runApps(native, config, verb, target, options)
+  );
 }

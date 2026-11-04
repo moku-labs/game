@@ -6,11 +6,11 @@
  * while that page is open, and `watchEngine` tells when the installed engine changed under it. It imports no Pixi, and the root entry never imports it. The code
  * lives in `app/`; this file wires the real process into it.
  */
-import { existsSync, watch } from "node:fs";
+import { existsSync, readdirSync, statSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createBrandConsole } from "@moku-labs/common/cli";
-import { type CliDeps, runCommand, type Watcher } from "./app/cli";
+import { type CliDeps, type ListedFile, runCommand, type Watcher } from "./app/cli";
 import { type EngineFingerprint, engineFingerprint, packageVersionOf } from "./app/engine";
 import { type EngineChange, engineChangeLines, watchEngineAt } from "./app/engine-watch";
 import {
@@ -119,6 +119,22 @@ function watchFolder(folder: string, listener: (event: string) => void): Watcher
 }
 
 /**
+ * Lists the files of a folder with the time each was last written; folders in it are left out.
+ *
+ * @param folder - The folder.
+ * @returns The files, none for a folder that is not there.
+ */
+function listFiles(folder: string): readonly ListedFile[] {
+  if (!existsSync(folder)) return [];
+
+  return readdirSync(folder).flatMap(name => {
+    const stats = statSync(path.join(folder, name));
+
+    return stats.isFile() ? [{ name, mtimeMs: stats.mtimeMs }] : [];
+  });
+}
+
+/**
  * Bun's resolver: the file a specifier gives from a folder.
  *
  * @param specifier - The specifier.
@@ -157,8 +173,8 @@ function keysSeams(ui: KeysUi): KeysSeams {
  * The real process behind the command line: the branded console, the environment the bin
  * started with, Bun's spawn and resolver, the signals, `fs.watch`, the keys watch, the asset
  * scanner with the string tools, native, the visual test runner, loaded only by
- * `moku-game visual`, and what a native build reads: the home folder, the file check and the
- * version of the game's `package.json`.
+ * `moku-game visual`, and what a native build reads: the home folder, the file check, the folder
+ * listing of `--upload` and the version of the game's `package.json`.
  *
  * @returns The seams of this process.
  */
@@ -196,6 +212,7 @@ function processDeps(): CliDeps {
     now: () => Date.now(),
     home: homedir(),
     exists: existsSync,
+    listFiles,
     readPackageVersion: packageVersionOf
   };
 }

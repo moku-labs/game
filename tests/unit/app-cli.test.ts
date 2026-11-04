@@ -18,7 +18,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CliDeps, Signal, SpawnOptions } from "../../src/app/cli";
+import type { CliDeps, ListedFile, Signal, SpawnOptions } from "../../src/app/cli";
 import { runCommand } from "../../src/app/cli";
 import { resolveConfig } from "../../src/app/config";
 import { engineFingerprint } from "../../src/app/engine";
@@ -186,6 +186,7 @@ function fakeDeps(
     now: () => Date.UTC(2026, 9, 14, 15, 30, 12),
     home: HOME,
     exists: () => false,
+    listFiles: () => [],
     readPackageVersion: () => undefined,
     ...change
   };
@@ -1095,6 +1096,7 @@ describe("the command line", () => {
       "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
       "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
       "  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev",
+      "  native build ios --store --build-number <n> --upload  a store build, then the upload to App Store Connect",
       "  native dev <target>                   run the native shell on the dev server",
       "  native doctor | native clean          check or remove the native project",
       "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -1345,6 +1347,15 @@ function withIos(ios: string): string {
 }
 
 /**
+ * The folder listing of a build that left one `.ipa`.
+ *
+ * @returns The one file.
+ */
+function oneIpa(): readonly ListedFile[] {
+  return [{ name: "T.ipa", mtimeMs: 1 }];
+}
+
+/**
  * The file check of a game whose files are all there.
  *
  * @returns True.
@@ -1424,6 +1435,11 @@ describe("native --store", () => {
       [
         ["native", "build", "--store", "--build-number", "1"],
         "[game] native: --store builds ios or android, got no target."
+      ],
+      [["native", "build", "ios", "--upload"], "[game] native: --upload goes with --store."],
+      [
+        ["native", "build", "android", "--store", "--build-number", "1", "--upload"],
+        "[game] native: --upload goes with ios."
       ]
     ];
 
@@ -1524,6 +1540,124 @@ describe("native --store", () => {
       "[game] native --dev: config.ts has no native.dev.\n  Add native.dev: { identifier } with an id ending in .dev."
     ]);
     expect(seen.natives).toEqual([]);
+  });
+
+  // Bug: altool uploads an old build, the key of the wrong place, or the test app's .ipa from the players' folder.
+  it("--upload after a green build hands altool the newest .ipa and the key, the config's first, else the env's", async () => {
+    const keyed =
+      'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", dev: { identifier: "com.t.dev" }, signing: { apple: { teamId: "T1", apiKeyId: "CFG0KEY123", apiIssuer: "cfg-issuer", apiKeyPath: "keys/AuthKey.p8" } } } };\n';
+    const env = {
+      APPLE_API_KEY: "ENV0KEY123",
+      APPLE_API_ISSUER: "env-issuer",
+      APPLE_API_KEY_PATH: "/k/AuthKey_ENV.p8"
+    };
+    const folders: string[] = [];
+    const listFiles: CliDeps["listFiles"] = folder => {
+      folders.push(folder);
+
+      return [
+        { name: "Old.ipa", mtimeMs: 1 },
+        { name: "A Memory Missing.ipa", mtimeMs: 3 },
+        { name: "build.log", mtimeMs: 9 },
+        { name: "Older.ipa", mtimeMs: 2 }
+      ];
+    };
+    const argv = ["native", "build", "ios", "--store", "--build-number", "12", "--upload"];
+    const configRoot = makeGame({ "config.ts": keyed });
+    const envRoot = makeGame({ "config.ts": bare });
+    const fromConfig = await run(argv, configRoot, { env, listFiles });
+    const fromEnv = await run(argv, envRoot, { env, listFiles });
+    const testApp = await run([...argv, "--dev"], configRoot, { env, listFiles });
+    const ipa = path.join(configRoot, "dist-native", "ios", "A Memory Missing.ipa");
+
+    expect([fromConfig.code, fromEnv.code, testApp.code]).toEqual([0, 0, 0]);
+    expect(folders).toEqual([
+      path.join(configRoot, "dist-native", "ios"),
+      path.join(envRoot, "dist-native", "ios"),
+      path.join(configRoot, "dist-native-dev", "ios")
+    ]);
+    expect(fromConfig.seen.natives[0]?.options.store?.upload).toBe(true);
+    expect(fromConfig.seen.spawns).toEqual([
+      {
+        command: [
+          "xcrun",
+          "altool",
+          "--upload-app",
+          "-f",
+          ipa,
+          "-t",
+          "ios",
+          "--api-key",
+          "CFG0KEY123",
+          "--api-issuer",
+          "cfg-issuer",
+          "--p8-file-path",
+          path.join(configRoot, "keys", "AuthKey.p8")
+        ],
+        options: { env, stdio: ["inherit", "inherit", "inherit"] }
+      }
+    ]);
+    expect(fromEnv.seen.spawns[0]?.command.slice(4)).toEqual([
+      path.join(envRoot, "dist-native", "ios", "A Memory Missing.ipa"),
+      "-t",
+      "ios",
+      "--api-key",
+      "ENV0KEY123",
+      "--api-issuer",
+      "env-issuer",
+      "--p8-file-path",
+      "/k/AuthKey_ENV.p8"
+    ]);
+    expect(fromConfig.seen.out).toEqual([
+      `native: uploading ${ipa} to App Store Connect.`,
+      "native: uploaded. TestFlight shows the build after Apple processes it."
+    ]);
+
+    const printed = [fromConfig, fromEnv]
+      .flatMap(ran => [...ran.seen.out, ...ran.seen.warnings, ...ran.seen.errors])
+      .join("\n");
+
+    for (const secret of ["CFG0KEY123", "cfg-issuer", "AuthKey", "ENV0KEY123", "env-issuer"]) {
+      expect(printed).not.toContain(secret);
+    }
+  });
+
+  // Bug: a failed upload exits 0 and CI reports a TestFlight build that never left the machine.
+  it("an upload that cannot go exits 1 with its line: no .ipa, altool exit 1, no key; a failed build uploads nothing", async () => {
+    const root = makeGame({ "config.ts": bare });
+    const argv = ["native", "build", "ios", "--store", "--build-number", "12", "--upload"];
+    const env = { APPLE_API_KEY: "K1", APPLE_API_ISSUER: "I1", APPLE_API_KEY_PATH: "/k.p8" };
+    const none = await run(argv, root, { env, listFiles: () => [{ name: "T.app", mtimeMs: 1 }] });
+    const noKey = await run(argv, root, { listFiles: oneIpa });
+    const listed: string[] = [];
+    const failedBuild = await run(argv, root, {
+      env,
+      native: async () => false,
+      listFiles: folder => {
+        listed.push(folder);
+
+        return [];
+      }
+    });
+    const altool = fakeDeps(root, { env, listFiles: oneIpa }, Promise.resolve(1));
+    const altoolCode = await runCommand(argv, altool.deps);
+
+    expect(none.code).toBe(1);
+    expect(none.seen.errors).toEqual([
+      `[game] native: no .ipa in ${path.join(root, "dist-native", "ios")} to upload.`
+    ]);
+    expect(none.seen.spawns).toEqual([]);
+    expect(noKey.code).toBe(1);
+    expect(noKey.seen.errors).toEqual(["[game] native: --upload needs an App Store Connect key."]);
+    expect(noKey.seen.spawns).toEqual([]);
+    expect(altoolCode).toBe(1);
+    expect(altool.seen.errors).toEqual(["[game] native: the upload failed (altool exit 1)."]);
+    expect(altool.seen.out).toEqual([
+      `native: uploading ${path.join(root, "dist-native", "ios", "T.ipa")} to App Store Connect.`
+    ]);
+    expect(failedBuild.code).toBe(1);
+    expect(failedBuild.seen.spawns).toEqual([]);
+    expect(listed).toEqual([]);
   });
 
   // Bug: a plain build ships native's 0.1.0 though the game has a version.
