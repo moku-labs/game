@@ -1,12 +1,12 @@
 /**
- * @file audio plugin — lifecycle: the dependency resolution, the one context of the app with its
- * graph and its unlock, and the teardown that frees exactly what was opened.
+ * @file audio plugin — lifecycle: the dependency resolution, the start that puts the context of
+ * `context.ts` in with its graph and its unlock, and the teardown that frees exactly what was opened.
  */
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
-import { cancelRenewal, createContext } from "./context";
+import { cancelRenewal, createContext, ignoreFailure } from "./context";
 import { applyAllGains, buildGraph } from "./graph";
 import { stopAllNamed } from "./named";
 import { musicOf, playMusic, playSfx, stopMusic, stopNamedSfx } from "./playback";
@@ -43,18 +43,10 @@ export function withDeps(ctx: KernelSlice): AudioCtx {
 }
 
 /**
- * Swallows a close that failed. A context the browser already tore down is gone either way, and
- * a teardown has nobody left to report to.
- */
-function ignoreFailure(): void {
-  // Deliberately empty: there is no caller left to hand the failure to.
-}
-
-/**
  * Starts the plugin in `onStart`: the audio session first, before any sound exists, then the
- * three effect handlers, then the context with its graph and its unlock. The unlock asks the context to
- * run at once: a shell that lets audio play is unlocked with no touch, and a browser that wants a
- * gesture gets the two listeners. The handlers are registered even headless, so a node that
+ * three effect handlers, then the context with its graph and its unlock. The unlock asks the
+ * context to run at once: a shell that lets audio play is unlocked with no touch, and a browser
+ * that wants a gesture gets the two listeners. The handlers are registered even headless, so a node that
  * awaits a sound resolves in plain Bun exactly as it does in a browser.
  *
  * @param ctx - Kernel context of the audio plugin.
@@ -90,11 +82,10 @@ export function startAudio(ctx: KernelSlice): void {
 
 /**
  * Frees everything `onStart` opened: the three handler registrations, the two window listeners,
- * a renewal that waits or runs,
- * the music track, every named sound, every streamed track still fading with its timer, the
- * journal, the audio session and the context itself. The tracks are freed before the close, while their nodes can still
- * disconnect. A browser caps how many contexts a page may hold, so the close is the point of this
- * teardown.
+ * a renewal that waits or runs, the music track, every named sound, every streamed track still
+ * fading with its timer, the journal, the audio session and the context itself. The tracks are
+ * freed before the close, while their nodes can still disconnect. A browser caps how many
+ * contexts a page may hold, so the close is the point of this teardown.
  *
  * @param state - The plugin state, all a teardown context carries.
  * @returns A promise that resolves when the context is closed.

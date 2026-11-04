@@ -268,3 +268,63 @@ describe("the renewal after a return from the background (F149)", () => {
     expect(mock.state.context).toBeUndefined();
   });
 });
+
+describe("what leaves the renewal alone", () => {
+  it("takes the waiting renewal's listeners off when the app stops", async () => {
+    const { mock, fakeWindow, made } = phone();
+
+    await tick();
+    awayAndBack(mock);
+    await mock.stop();
+
+    // At once, not when the timer would have fired.
+    expect(fakeWindow.listeners).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(made).toHaveLength(1);
+  });
+
+  it("renews nothing on the pop of another reason", async () => {
+    const { mock, made } = phone();
+
+    await tick();
+    mock.hooks["lifecycle:changed"]({ ...AWAY, reason: "ad" });
+    mock.hooks["lifecycle:changed"]({ ...BACK, reason: "ad" });
+    vi.advanceTimersByTime(1000);
+    await tick();
+
+    expect(made).toHaveLength(1);
+  });
+
+  it("still makes the new context when the session refuses a type", async () => {
+    installFakeNavigator({ type: "auto", touchPoints: 5 });
+    installFakeWindow();
+
+    const made: FakeContext[] = [];
+    const mock = createMockAudio({
+      config: {
+        context: (): AudioContextLike => {
+          const context = createFakeContext({ autoplay: true });
+
+          made.push(context);
+
+          return context;
+        }
+      }
+    });
+
+    mock.start();
+    await tick();
+    // From now on the setter throws, as WebKit may for a type it refuses.
+    Object.defineProperty(mock.state.session, "type", {
+      set: () => {
+        throw new Error("NotAllowedError");
+      }
+    });
+    awayAndBack(mock);
+    vi.advanceTimersByTime(1000);
+    await tick();
+
+    expect(made).toHaveLength(2);
+    expect(made[1]?.state).toBe("running");
+  });
+});

@@ -400,8 +400,9 @@ export type AudioApi = {
    * Tells whether the audio context runs. A shell that lets audio play with no gesture, such as a
    * native webview with the requirement switched off, makes it true at start: at once when the
    * context is created running, otherwise when the `resume()` of `onStart` fulfils. A browser
-   * that wants a gesture keeps it false until the first pointer event on the page resumed the
-   * context. It is false for the whole of a headless run.
+   * that wants a gesture keeps it false until the first touch or click on the page resumed the
+   * context and it runs; on iOS that resume may stay pending until iOS gives the sound back. It is
+   * false for the whole of a headless run, and for the moment an iOS renewal closes the old context.
    *
    * @returns True once the context is running.
    * @example

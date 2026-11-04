@@ -82,6 +82,8 @@ export function scheduleRenewal(ctx: AudioCtx): void {
     cancelRenewal(state);
     void renewContext(ctx);
   };
+
+  // A second after the return, or at the first touch before that.
   const timer = setTimeout(renew, RENEW_DELAY_MS);
   const target = typeof globalThis.window === "undefined" ? undefined : globalThis.window;
 
@@ -91,6 +93,7 @@ export function scheduleRenewal(ctx: AudioCtx): void {
     }
   }
 
+  // One remover for the timer and both listeners.
   state.renewal = (): void => {
     clearTimeout(timer);
 
@@ -128,8 +131,9 @@ function dropInFlight(state: State): void {
 
   state.pendingSfx.clear();
 
-  if (key !== undefined)
+  if (key !== undefined) {
     state.music = { key, gain: undefined, source: undefined, stream: undefined };
+  }
 
   for (const [decodedKey, pending] of state.decoded) {
     pending.catch(() => {
@@ -153,6 +157,7 @@ async function renewContext(ctx: AudioCtx): Promise<void> {
 
   if (old === undefined) return;
 
+  // The old context goes, with every sound in it; the plugin is headless until the new one.
   const token = {};
 
   state.renewing = token;
@@ -163,10 +168,12 @@ async function renewContext(ctx: AudioCtx): Promise<void> {
   state.resuming = false;
   writeSession(state, "auto");
 
+  // Only a closed last context makes WebKit deactivate the session for real.
   await old.close().catch(ignoreFailure);
 
   if (state.renewing !== token) return;
 
+  // The session again, then a new context that activates it for real.
   state.renewing = undefined;
   writeSession(state, ctx.config.session);
 
@@ -185,8 +192,9 @@ async function renewContext(ctx: AudioCtx): Promise<void> {
 }
 
 /**
- * Swallows a close that failed: the old context is gone either way.
+ * Swallows a close that failed. A context the browser already tore down is gone either way, and
+ * neither a teardown nor a renewal has anybody to report it to.
  */
-function ignoreFailure(): void {
+export function ignoreFailure(): void {
   // Deliberately empty: a context that does not close is dropped all the same.
 }

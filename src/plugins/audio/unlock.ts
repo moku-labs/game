@@ -1,6 +1,7 @@
 /**
- * @file audio plugin — the unlock: with the renewal of `context.ts`, the only file that touches `window`. A browser starts an audio
- * context suspended and lets it run on a user gesture, so two listeners wait for the first one.
+ * @file audio plugin — the unlock: with the renewal of `context.ts`, the only file that touches
+ * `window`. A browser starts an audio context suspended and lets it run on a user gesture, so two
+ * listeners wait for the first one.
  * They sit on `window`, not on the canvas: the gesture may as well be a button of the game's
  * loading page, which `input` never sees. A shell that asks for no gesture, such as a native
  * webview with the requirement switched off, lets the context run at once. So the plugin also
@@ -14,8 +15,8 @@ const UNLOCK_EVENTS = ["pointerdown", "touchend"] as const;
 
 /**
  * Reacts to a resume that went through, of a gesture or of the start attempt. The context is
- * unlocked only when it really runs, and only then do the listeners come off; the sounds fired during the resume and the track a scene
- * declared while it was locked start here. A context that still does not run drops the sounds:
+ * unlocked only when it really runs, and only then do the listeners come off; the sounds fired
+ * during the resume and the track a scene declared while it was locked start here. A context that still does not run drops the sounds:
  * the next gesture is a new moment. A gesture and the start attempt that settle together both
  * come here, and the music still starts once: a track that is on its way or already plays is not
  * started again. A later gesture on an unlocked context tries a remembered track again.

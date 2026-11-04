@@ -10,6 +10,7 @@ import { withDeps } from "./lifecycle";
 import { pauseMusic, playMusic, resumeMusic, trackMusic } from "./playback";
 import type {
   AssetsReplaced,
+  AudioContextLike,
   AudioCtx,
   BundleUnloaded,
   Bus,
@@ -65,6 +66,16 @@ function read(ctx: AudioCtx, volumes: Volumes): Partial<Record<Bus, number>> | u
 }
 
 /**
+ * Tells whether the OS stopped a context: suspended, or Safari's `"interrupted"`.
+ *
+ * @param context - The audio context of this app.
+ * @returns True when the context waits for a resume.
+ */
+function isSilenced(context: AudioContextLike): boolean {
+  return context.state === "suspended" || context.state === "interrupted";
+}
+
+/**
  * Resumes a context the OS silenced while the game was away. Safari leaves it `"interrupted"`
  * after a call, a screenshot or Control Center, and WebKit may hold this resume pending for as
  * long as iOS keeps the audio session (F146). So the unlock listeners go on before the resume and
@@ -76,8 +87,7 @@ function resumeAfterPause(ctx: AudioCtx): void {
   const state = ctx.state;
   const context = state.context;
 
-  if (context === undefined || !state.unlocked) return;
-  if (context.state !== "suspended" && context.state !== "interrupted") return;
+  if (context === undefined || !state.unlocked || !isSilenced(context)) return;
 
   installUnlock(ctx);
   context.resume().then(
