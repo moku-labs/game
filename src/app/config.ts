@@ -21,6 +21,9 @@ const BOOT_FADE_MS = 300;
 /** The strings a `native.signing.android` cannot go without. */
 const ANDROID_SIGNING_FIELDS = ["keystorePath", "keystorePasswordEnv", "keyAlias"] as const;
 
+/** The fields of the App Store Connect key, all three or none, in the order a message names them. */
+const APPLE_KEY_FIELDS = ["apiKeyId", "apiIssuer", "apiKeyPath"] as const;
+
 /** The last part of a test app's identifier. */
 export const TEST_APP_SUFFIX = ".dev";
 
@@ -106,10 +109,33 @@ function badPlistValue(value: unknown, at: string): string | undefined {
 }
 
 /**
+ * Throws for an App Store Connect key named in part: one or two of its fields, or an empty one.
+ *
+ * @param apple - `native.signing.apple` of the config.
+ * @throws {Error} Naming the fields that are there and, in field order, the ones that are not.
+ */
+function checkAppleKey(
+  apple: NonNullable<NonNullable<GameConfig["native"]>["signing"]>["apple"]
+): void {
+  const written = APPLE_KEY_FIELDS.filter(field => apple?.[field] !== undefined);
+  const named = APPLE_KEY_FIELDS.filter(field => isFilled(apple?.[field]));
+
+  if (written.length === 0 || named.length === APPLE_KEY_FIELDS.length) return;
+
+  const missing = APPLE_KEY_FIELDS.filter(field => !named.includes(field));
+  const has = named.length === 0 ? "" : `${named.join(", ")} but `;
+
+  throw new Error(
+    `[game] config.native.signing.apple has ${has}no ${missing.join(", ")}.\n  Name all three of the App Store Connect key, or none.`
+  );
+}
+
+/**
  * Throws for a half-filled `native.signing`.
  *
  * @param signing - `native.signing` of the config.
- * @throws {Error} When `android` misses one of its required strings, or `apple` has no `teamId`.
+ * @throws {Error} When `android` misses one of its required strings, or `apple` has no `teamId` or
+ * a part of the App Store Connect key only.
  */
 function checkSigning(signing: NonNullable<GameConfig["native"]>["signing"]): void {
   const android = signing?.android;
@@ -126,6 +152,8 @@ function checkSigning(signing: NonNullable<GameConfig["native"]>["signing"]): vo
       "[game] config.native.signing.apple has no teamId.\n  Name the Apple Developer team id."
     );
   }
+
+  checkAppleKey(signing?.apple);
 }
 
 /**
