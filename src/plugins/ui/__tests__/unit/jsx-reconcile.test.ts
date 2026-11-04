@@ -649,7 +649,10 @@ const CASES: readonly Case[] = [
   { name: "intent", key: "go", props: { intent: "stop" }, resolved: 0, applied: false },
   { name: "payload", key: "go", props: { payload: { id: 2 } }, resolved: 0, applied: false },
   { name: "local", key: "tab", props: { local: { tab: "video" } }, resolved: 0, applied: false },
-  { name: "escape", key: "go", props: { escape: true }, resolved: 0, applied: false }
+  { name: "escape", key: "go", props: { escape: true }, resolved: 0, applied: false },
+  // Bug: `point` missing from WRITTEN: the description reads as equal, so a button that starts
+  // asking for its press point keeps a Tappable without the flag (F139).
+  { name: "point", key: "go", props: { point: true }, resolved: 0, applied: false }
 ];
 
 describe("one prop changed alone", () => {
@@ -1375,5 +1378,49 @@ describe("the end of a root built aside before the swap", () => {
 
     expect(h.layout.exit).not.toHaveBeenCalled();
     expect([h.state.jsx.roots.has(ROOT), h.state.jsx.removing.size]).toEqual([false, 0]);
+  });
+});
+
+// ─── the point prop of a button (F139) ─────────────────────────
+
+describe("the point prop of a button", () => {
+  // Bug: `point: node.props.point` writes `point: false` or `point: undefined` onto Tappable, which
+  // is no Json the world keeps, and a button without the prop serialises another way than before.
+  // `toStrictEqual` tells an absent key from `point: undefined`; `toEqual` does not.
+  it("writes point: true only for point={true}, and no key for false or none", () => {
+    const flagged = harness();
+    const unflagged = harness();
+    const plain = harness();
+
+    flagged.mount(screen({ go: { point: true } }));
+    unflagged.mount(screen({ go: { point: false } }));
+    plain.mount(screen());
+
+    expect(flagged.stored("go", Tappable)).toStrictEqual({
+      intent: "go",
+      payload: { id: 1 },
+      point: true
+    });
+    expect(unflagged.stored("go", Tappable)).toStrictEqual({ intent: "go", payload: { id: 1 } });
+    expect(plain.stored("go", Tappable)).toStrictEqual({ intent: "go", payload: { id: 1 } });
+  });
+
+  // Bug: the rewrite is a patch, which keeps fields the new value leaves out: a button that stops
+  // asking keeps `point: true` and its taps still carry the press point.
+  it("rewrites Tappable on a live button when point goes on and off again", () => {
+    const h = harness();
+
+    h.mount(screen());
+    h.render(screen({ go: { point: true } }));
+
+    expect(h.stored("go", Tappable)).toStrictEqual({
+      intent: "go",
+      payload: { id: 1 },
+      point: true
+    });
+
+    h.render(screen());
+
+    expect(h.stored("go", Tappable)).toStrictEqual({ intent: "go", payload: { id: 1 } });
   });
 });

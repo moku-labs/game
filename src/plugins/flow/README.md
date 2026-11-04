@@ -411,7 +411,7 @@ app.log.trace().filter(entry => entry.event === "flow:fx-cosmetic-failed");
 |---|---|---|
 | `schedule(moment)`, `guide(options)` | `void` | The handler returns nothing |
 | `load(bundle)` | `Assets.LoadResult \| undefined` | `{ loaded, mb }` from `assets`; `undefined` in an app without `assets`, the app of `game.headless()` included |
-| `popup(component, props)` | `Answer<outcome names>` | The gate's answer: one of the component's outcomes |
+| `popup(component, props)` | `Answered<outcome names>` | The gate's answer, one of the component's outcomes, with `at`: `clock.now()` when the answer arrived, in live and fast mode, so `until = answer.at + 780`. A payload-less answer has no `payload` key |
 | `music(key)`, `sfx(key)`, `haptic(kind)`, `play(animation, slots)` | `void` | Cosmetic: nothing to read |
 | A descriptor written by hand, `{ kind: "drop" }` | `unknown` | Nobody declared it |
 

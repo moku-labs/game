@@ -2,7 +2,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import type { VisualStep } from "../../../../visual/types";
 import { defineMotion } from "../../../anim/motion";
 import type { Descriptor, NodeFx } from "../../../flow/fx/types";
-import type { Answer } from "../../../flow/gate/types";
+import type { Answered } from "../../../flow/gate/types";
 import { Transform, type TransformValue } from "../../../renderer/components";
 import { bind } from "../../../text/components";
 import type { TextBind as TextPluginBind } from "../../../text/types";
@@ -111,26 +111,28 @@ describe("the text field", () => {
 
 describe("popup", () => {
   it("takes a component with outcomes and answers a descriptor", () => {
-    expectTypeOf(popup(Reward, { gold: 5 })).toEqualTypeOf<Descriptor<Answer<"claim">>>();
+    expectTypeOf(popup(Reward, { gold: 5 })).toEqualTypeOf<Descriptor<Answered<"claim">>>();
   });
 
   it("resolves the answer of one of the component's outcomes", async () => {
-    expectTypeOf(fx(popup(Shop, { gold: 3 }))).toEqualTypeOf<Promise<Answer<"buy" | "close">>>();
+    expectTypeOf(fx(popup(Shop, { gold: 3 }))).toEqualTypeOf<Promise<Answered<"buy" | "close">>>();
 
     const pick = await fx(popup(Shop, { gold: 3 }));
 
     // @ts-expect-error — Shop has no outcome "sell": this comparison can never be true.
     expectTypeOf(pick.intent === "sell").toEqualTypeOf<boolean>();
     expectTypeOf(pick.intent).toEqualTypeOf<"buy" | "close">();
+    // Bug: the popup still resolves a plain Answer, so a node cannot time its close from `at`.
+    expectTypeOf(pick.at).toEqualTypeOf<number>();
   });
 
   it("takes a component that keeps local state next to its outcomes", () => {
-    expectTypeOf(popup(Settings, { volume: 3 })).toEqualTypeOf<Descriptor<Answer<"close">>>();
+    expectTypeOf(popup(Settings, { volume: 3 })).toEqualTypeOf<Descriptor<Answered<"close">>>();
     expectTypeOf(Settings.local).toEqualTypeOf<{ tab: string }>();
   });
 
   it("takes a component with outcomes and no local state", () => {
-    expectTypeOf(popup(Stateless, {})).toEqualTypeOf<Descriptor<Answer<"ok">>>();
+    expectTypeOf(popup(Stateless, {})).toEqualTypeOf<Descriptor<Answered<"ok">>>();
   });
 
   it("refuses props a stateful component's view does not take", () => {
@@ -215,6 +217,17 @@ describe("the delta 6 vocabulary", () => {
     defineStyle({ shape: "arc", cap: "square" });
     // @ts-expect-error — the sweep is a share of the circle, a number.
     defineStyle({ shape: "arc", sweep: "42%" });
+  });
+
+  it("gives a button the point prop beside an intent, never beside local", () => {
+    // Bug: `point` is accepted on a local button, which answers no gate, so the point is lost.
+    const kit = uiFor<"ui.coin", "digits", "hud.coins">();
+    const sphere: typeof kit.intrinsics.button = { intent: "kitTap", point: true };
+    // @ts-expect-error — `point` goes with `intent`: a button with `local` answers nothing.
+    const wrongSphere: typeof kit.intrinsics.button = { local: { tab: "audio" }, point: true };
+
+    expectTypeOf(sphere).not.toBeUndefined();
+    expectTypeOf(wrongSphere).not.toBeUndefined();
   });
 
   it("gives a button the escape prop, the snapshot the focus flag and the config the ring", () => {

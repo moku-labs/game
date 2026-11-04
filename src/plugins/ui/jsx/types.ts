@@ -775,17 +775,22 @@ export type CommonProps = {
 
 /**
  * The payload a button sends to the gate, or the patch it writes into the nearest instance.
- * `escape` makes it the control the Escape key taps while its root is the top one.
+ * `escape` makes it the control the Escape key taps while its root is the top one. `point`, only
+ * beside `intent`, adds the press point of a finger tap to the payload under `point`, in the
+ * button's own layout units: (0, 0) its top-left corner. A keyboard tap adds none.
  *
  * @example
  * ```ts
  * const props: ButtonProps = { intent: "claim", payload: { orderId: "o1" } };
  * const close: ButtonProps = { intent: "close", escape: true };
+ * // A finger 10 in from the sphere's left edge and 150 down answers
+ * // { intent: "kitTap", payload: { point: { x: 10, y: 150 } } }.
+ * const sphere: ButtonProps = { intent: "kitTap", point: true };
  * ```
  */
 export type ButtonProps = CommonProps & { escape?: boolean } & (
-    | { intent?: string; payload?: Json; local?: never }
-    | { intent?: never; payload?: never; local?: Record<string, unknown> }
+    | { intent?: string; payload?: Json; point?: boolean; local?: never }
+    | { intent?: never; payload?: never; point?: never; local?: Record<string, unknown> }
   );
 
 /**

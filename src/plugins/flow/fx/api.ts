@@ -2,7 +2,7 @@
  * @file flow/fx — API factory. The gateway between node logic and everything that is not logic.
  */
 import type { Log } from "@moku-labs/common/browser";
-import type { Answer, GateInternal } from "../gate/types";
+import type { Answered, GateInternal } from "../gate/types";
 import type { FlowCtx } from "../types";
 import type {
   Descriptor,
@@ -262,16 +262,18 @@ function beginGuide(state: FxState, signal: AbortSignal): AbortSignal {
 
 /**
  * Opens the gate for a descriptor that carries `answers` and resolves with the player's answer in
- * both modes. In live mode the handler is called as well: it only shows the UI, the answer comes
- * through the gate, so its failure is logged and does not block the node. Its signal ends with the
- * answer — that is how the popup layer knows to unmount what it showed.
+ * both modes, stamped with `at`: `clock.now()` read when the gate's answer arrives, not when the
+ * gate opened. The spread keeps a payload-less answer without a `payload` key, and `at` replaces
+ * one a caller put on the answer. In live mode the handler is called as well: it only shows the UI,
+ * the answer comes through the gate, so its failure is logged and does not block the node. Its
+ * signal ends with the answer — that is how the popup layer knows to unmount what it showed.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param gate - Internal gate API.
  * @param descriptor - The awaited descriptor.
  * @param answers - Intents the gate accepts while the effect runs.
  * @param signal - The node's abort signal.
- * @returns The answer the gate accepted.
+ * @returns The answer the gate accepted, with the moment it arrived.
  */
 function openForAnswers(
   ctx: FlowCtx,
@@ -279,8 +281,10 @@ function openForAnswers(
   descriptor: Descriptor,
   answers: readonly string[],
   signal: AbortSignal
-): Promise<Answer> {
-  const answered = gate.open({ allowed: answers });
+): Promise<Answered> {
+  const answered = gate
+    .open({ allowed: answers })
+    .then((answer): Answered => ({ ...answer, at: ctx.deps.clock.now() }));
 
   if (ctx.state.fx.mode !== "live") return answered;
 

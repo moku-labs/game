@@ -607,6 +607,17 @@ export function setOrigins(slots: readonly FilterSlot[], x: number, y: number): 
 }
 
 /**
+ * Tells whether a record's filters read where its picture is drawn on the canvas: a placed filter, or a body that reads
+ * the screen. Such a record is never drawn scaled, owes its output to a move and steps as a placed one does.
+ *
+ * @param record - The record.
+ * @returns True for a `"placed"` or a `"screen"` record.
+ */
+export function readsPlace(record: Readonly<Pick<KeptRecord, "category">>): boolean {
+  return record.category !== "local";
+}
+
+/**
  * Stage 3, the filter output: the stand-in, carrying the record's filters, is rendered at `M3 = translate(Ps, Ps)`
  * into the output texture. A placed filter's origin gets the picture's canvas origin first, `O + Δ`; a local one
  * writes nothing.
@@ -634,7 +645,7 @@ export function renderStage3(
   const standIn = standInOf(pixi, record);
   const Ps = key[KEY.Ps] ?? 0;
 
-  if (record.category === "placed") {
+  if (readsPlace(record)) {
     setOrigins(
       record.slots,
       (key[KEY.X0] ?? 0) - Ps + now.tx - (key[KEY.tx] ?? 0),

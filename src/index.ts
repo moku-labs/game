@@ -377,6 +377,7 @@ export {
   Traceable,
   Traced
 } from "./plugins/input/components";
+export type { TapValue } from "./plugins/input/components";
 // assets and scenes: declarations
 export { defineBundles, load, ready } from "./plugins/assets/bundles";
 export { defineScene } from "./plugins/scenes/define";

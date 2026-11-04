@@ -30,7 +30,7 @@ import { addKeyListener, runKeys } from "./keys";
 import { withDeps } from "./lifecycle";
 import { addPointerListener } from "./pointer";
 import { countListeners } from "./state";
-import type { Direction, InputApi, InputCtx, KernelSlice, Target } from "./types";
+import type { Direction, InputApi, InputCtx, KernelSlice, Point, Target } from "./types";
 
 /** One resolved target: the entity and the component the gesture needs. */
 type Found<Value extends object> = { entity: number; value: Readonly<Value> };
@@ -83,13 +83,15 @@ function answerIntent(
 /**
  * Taps a view the way the finger does: the `onTap` listeners run first, then the `Tappable` is
  * answered. A view that carries only `Touchable` reaches the listeners and answers nothing, which
- * is what a ui button with local state does, so it is not reported as a mistake.
+ * is what a ui button with local state does, so it is not reported as a mistake. A given point is
+ * already in the view's own units and reaches the answer as it is, on a view that asks for it.
  *
  * @param ctx - Domain context of the input plugin.
  * @param target - What the caller pointed at.
+ * @param point - The press point in the view's own units, or `undefined`.
  * @returns What `flow.gate.answer` returned.
  */
-function answerTap(ctx: InputCtx, target: Target): boolean {
+function answerTap(ctx: InputCtx, target: Target, point: Point | undefined): boolean {
   const entity = resolveTarget(ctx, target);
 
   if (entity === undefined) {
@@ -110,7 +112,7 @@ function answerTap(ctx: InputCtx, target: Target): boolean {
     return false;
   }
 
-  return submit(ctx, entity, tapAnswer(tappable));
+  return submit(ctx, entity, tapAnswer(tappable, point));
 }
 
 /**
@@ -193,7 +195,7 @@ export function createInputApi(ctx: KernelSlice): InputApi {
   const inputCtx = withDeps(ctx);
 
   return {
-    tap: target => answerTap(inputCtx, target),
+    tap: (target, point) => answerTap(inputCtx, target, point),
     press: target => answerIntent(inputCtx, target, Pressable),
     drag: (from, to) => answerDrop(inputCtx, from, to),
     swipe: (target, direction) => answerSwipe(inputCtx, target, direction),

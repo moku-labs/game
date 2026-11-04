@@ -32,7 +32,8 @@ import type {
 
 /**
  * What a slot's filter lets the cache do with it: `"local"` (kept anywhere), `"placed"` (kept with its canvas origin
- * through `canvasPixel`), `"screen"` (drawn live).
+ * through `canvasPixel`), `"screen"` (a body that reads the screen: its subtree picture is kept while the body runs on
+ * its quad, on WebGPU; drawn live otherwise).
  *
  * @example
  * ```ts
@@ -178,6 +179,7 @@ export const WHY = {
   off: 1,
   backdrop: 2,
   filterBlend: 3,
+  cacheFalse: 4,
   hidden: 5,
   fadedOut: 6,
   topBlend: 7,
@@ -317,8 +319,11 @@ export type KeptRecord = {
   mode: KeptMode;
   /** The slots last handed over by effects (sync/filters), the record's own copy of the reference. */
   slots: readonly FilterSlot[];
-  /** "local" or "placed": the worst category of the enabled slots; a "screen" slot makes no record (P4.1). */
-  category: "local" | "placed";
+  /**
+   * The worst category of the slots (P4.1). A `"screen"` record is kept only on its quad, from its first take on, and
+   * never leaves it at rest; a `"screen"` slot without a quad makes no record.
+   */
+  category: FilterCache;
   /** Sprite(stage 1): carries the filters while kept (P3.3). */
   standIn: PixiSprite | undefined;
   /** A second Sprite(stage 1) whose filters are [keeper] only (P3.2). */

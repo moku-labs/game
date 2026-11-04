@@ -10,7 +10,9 @@
  * The clock is paused and every frame is a `time.step`, as in `kept-pictures/page.ts`. The fractional row compares the
  * mode with stage 3, not with zero: off the padding grid a body's frame is up to one device pixel wider than live. A
  * placed view under a filter whose bounds start off the canvas origin is compared with a value worked out by hand from
- * `canvasPixel`: live differs there by that origin on purpose (spec 23 P8.3). Before the rows, a view's first frames on
+ * `canvasPixel`: live differs there by that origin on purpose (spec 23 P8.3). A `cache: false` body that reads
+ * `uOutputFrame.xy` is kept on its shader from its first take and held against live, still, moved and scaled; the filters
+ * that stay live over a room read `@builtin(position)`, which no quad takes. Before the rows, a view's first frames on
  * its shader count the render pipelines they make, on the canvas, under a live filter and inside a kept picture: a quad
  * pipeline there is a compile in play, which the warm-up should have made.
  */
@@ -148,9 +150,17 @@ const Pane = defineFilter("visual.pane", {
   area: () => [100, 60, 120, 120]
 });
 
-/** A filter over a whole subtree that is never kept: its pass draws what is under it into a pooled texture. */
+/**
+ * The opening of a body that takes `@builtin(position)`: no quad runs it, so a view under it is never kept, and its pass
+ * draws what is under it into a pooled texture in every frame.
+ */
+const OPEN_LIVE = `@fragment
+fn mainFragment(@location(0) uv: vec2<f32>, @builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+  let c = textureSample(uTexture, uSampler, uv);`;
+
+/** A filter over a whole subtree that is never kept. */
 const Veil = defineFilter("visual.veil", {
-  wgsl: `${OPEN}
+  wgsl: `${OPEN_LIVE}
   return vec4<f32>(c.rgb * fu.amount, c.a);
 }`,
   glsl: GLSL_PASS,
@@ -160,12 +170,27 @@ const Veil = defineFilter("visual.veil", {
 
 /** The same with a padding: Pixi's pass starts that far before the bounds, which `RootTint` of the bench never shows. */
 const PaddedVeil = defineFilter("visual.veil-padded", {
-  wgsl: `${OPEN}
+  wgsl: `${OPEN_LIVE}
   return vec4<f32>(c.rgb * fu.amount, c.a);
 }`,
   glsl: GLSL_PASS,
   uniforms: { amount: 0.9 },
   padding: 8,
+  cache: false
+});
+
+/**
+ * A body that reads the screen: its band follows `uOutputFrame.xy`, where its frame stands on the canvas, so it declares
+ * `cache: false`. Kept, it runs on its quad, which writes the canvas place there.
+ */
+const Scan = defineFilter("visual.scan", {
+  wgsl: `${OPEN}
+  let spot = gfu.uOutputFrame.xy + at;
+  let band = 0.5 + 0.5 * sin(spot.x * 0.15 + fu.amount);
+  return vec4<f32>(c.rgb * band, c.a);
+}`,
+  glsl: GLSL_PASS,
+  uniforms: { amount: 0.5 },
   cache: false
 });
 
@@ -255,6 +280,7 @@ const feature = kit.defineFeature("visual", {
     Lamp,
     Veil,
     PaddedVeil,
+    Scan,
     LampOnCanvas,
     LampUnderLive,
     LampInPicture,
@@ -1044,6 +1070,42 @@ async function play(): Promise<KeptQuadResult> {
       value: handValue(0.8, 0),
       write: turn => ecs.set(picture.lamp, Lamp, { amount: turn })
     })
+  );
+
+  // `cache: false`: a body that reads `uOutputFrame.xy` on its quad, from its first take, the canvas place written there.
+  const scan = spawn(
+    Transform({ x: 80, y: 200 }),
+    Shape({ w: 240, h: 80, fill: 0xff_ee_aa }),
+    Scan()
+  );
+
+  rows.push(
+    await measure(app, "cache: false", [scan], turn => ecs.set(scan, Scan, { amount: turn }))
+  );
+
+  const scanMoved = spawn(
+    Transform({ x: 80, y: 200 }),
+    Shape({ w: 240, h: 80, fill: 0xff_ee_aa }),
+    Scan()
+  );
+
+  rows.push(
+    await measure(app, "cache: false, moved", [scanMoved], turn => {
+      ecs.set(scanMoved, Scan, { amount: turn });
+      ecs.set(scanMoved, Transform, { x: 80 + 3 * turn });
+    })
+  );
+
+  const scanScaled = spawn(
+    Transform({ x: 80, y: 160, scale: 1.5 }),
+    Shape({ w: 160, h: 80, fill: 0xff_ee_aa }),
+    Scan()
+  );
+
+  rows.push(
+    await measure(app, "cache: false, scaled", [scanScaled], turn =>
+      ecs.set(scanScaled, Scan, { amount: turn })
+    )
   );
 
   // Two sizes through the one copy sprite in one flush: its texture changes between two renders.

@@ -3,7 +3,7 @@ import type { Json } from "../../../model/types";
 import { guide, schedule } from "../../fx/descriptors";
 import { defineEffect } from "../../fx/effect";
 import type { Descriptor, FxApi, NodeFx } from "../../fx/types";
-import type { Answer } from "../../gate/types";
+import type { Answer, Answered } from "../../gate/types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -98,3 +98,14 @@ expectTypeOf(wrongResult).toEqualTypeOf<Descriptor<string>>();
 
 expectTypeOf<Answer>().toEqualTypeOf<{ intent: string; payload?: Json }>();
 expectTypeOf<Answer<"again">["intent"]>().toEqualTypeOf<"again">();
+
+// ─── Answered carries the moment of the answer (F137) ─────────
+
+// A node computes `until = answer.at + 780`: `at` is a required number, not optional.
+expectTypeOf<Answered<"a">["at"]>().toEqualTypeOf<number>();
+expectTypeOf<Answered<"a">["intent"]>().toEqualTypeOf<"a">();
+
+// @ts-expect-error — an awaited answer always has its moment.
+const unstamped: Answered<"a"> = { intent: "a" };
+
+expectTypeOf(unstamped).toEqualTypeOf<Answered<"a">>();

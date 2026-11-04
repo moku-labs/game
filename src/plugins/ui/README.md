@@ -94,7 +94,7 @@ draw adds 0 to both, solves nothing and sets no component.
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug`, `style.blend` | as below |
 | any other tag with `style.nineSlice` and `style.hollow: true` | the same `NineSlice` with `hollow: true`: the rim alone, the centre left unfilled; the hit box stays the whole rect | as below |
 | any other tag | a rounded `Shape`, drawing nothing on a container with no fill and no stroke (no fill, stroke width 0, the alpha of its style); with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash). `style.shape: "arc"` draws only the `stroke` of `strokeWidth` on the circle inscribed in the box (`min(width, height) − strokeWidth` across, centred), from 12 o'clock clockwise over `style.sweep` of it (0 to 1, default 1, clamped: 0 draws nothing, 1 a closed ring), its ends `style.cap` (`"round"`, the default, or `"butt"`); `fill`, `radius` and `dash` do nothing on an arc. An arc writes `sweep` and `cap` into its `Shape` in every render; a rectangle or a triangle writes neither, so after an arc they stay on its `Shape`: only an arc reads them; a rectangle or a triangle ignores them. A render with another `sweep` patches the `Shape`, and the arc is built again once: `<stack key="slotTimer" style={{ ...ring, sweep: left / total }} />` | as below |
-| `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
+| `button` | as above | `Tappable` with `intent` (with `point: true` when the `point` prop is `true`, else no `point` key), `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
 | `scroll` | `Shape` with `clip`; children for a short list, or `rows`, `rowHeight`, `overscan`, `row` for a long one, see [Scroll](#scroll) and [Scroll windowing](#scroll-windowing) | `Touchable`, `Scroll`, `Scrollable`, `ScrollState` |
 | `input` | as any other tag, with `clip` on the `Shape` or on the `NineSlice` of `style.nineSlice`; four ui-owned children draw the text, the caret, the selection and the IME underline, see [Text input](#text-input) | `Touchable` |
@@ -127,6 +127,20 @@ renderer applies it once, on the element's wrapper (see the renderer README).
 
 A live element follows its state: a button that becomes disabled loses `Tappable` and
 `LocalWrite` and keeps `Touchable`, so it stops answering the gate; enabled again, it answers.
+
+`point`, only beside `intent` (a compile error with `local`), asks for the press point: a finger
+tap answers `{ intent, payload: { ...payload, point: { x, y } } }`, the press-down point in the
+button's own layout units, (0, 0) its top-left corner and (width, height) its bottom-right,
+whatever its offset, its `scale` or the parents it sits in. A keyboard tap (Enter on the focused
+button, Escape) and `app.input.tap(entity)` without a point answer the payload as it is, with no
+`point` key; `app.input.tap(entity, { x, y })` hands a point already in the button's units. A
+re-render that turns `point` on or off rewrites the `Tappable`.
+
+```tsx
+// The gift sphere of 400 x 200: a finger 10 in from its left edge and 150 down answers
+// { intent: "kitTap", payload: { point: { x: 10, y: 150 } } }.
+<button key="sphere" intent="kitTap" point style={{ width: 400, height: 200 }} />
+```
 `Scroll`, `Scrollable` and `ScrollState` are only ever added: hover, a press, a new look or a new
 rect never resets where a scroll stands.
 
@@ -689,7 +703,10 @@ size): the fitted element never stretches it.
 ## Popups
 
 `popup(component, props, options?)` is an effect a node awaits. The gate opens for the
-component's outcomes; the node goes on with the answer and never waits for the exit motion.
+component's outcomes; the node goes on with the answer and never waits for the exit motion. The
+answer is a `Flow.Answered`: `{ intent, payload?, at }`, `at` the `clock.now()` moment the answer
+arrived in game ms (live and in a fast walk alike), so a node times what follows the tap from the
+tap, not from its own `now`: `const until = answer.at + 780`.
 
 - **Deferred unmount.** When the answer arrives (or the node is aborted) the root stays. It leaves
   at the first `ui.reconcile` where the flow rests on a node that shows no popup of its component:
