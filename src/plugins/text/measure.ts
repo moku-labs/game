@@ -348,6 +348,23 @@ export function measureRun(
 }
 
 /**
+ * Tells whether a glyph piece may join the last run of a line: both glyphs, with the same bold,
+ * italic and colour. An icon never merges.
+ *
+ * @param last - The last run of the line, if any.
+ * @param piece - The glyph piece to append.
+ * @returns True when the piece's text may be added to `last`.
+ */
+function canMerge(last: Run | undefined, piece: TextRun): last is TextRun {
+  return (
+    last?.kind === "text" &&
+    last.bold === piece.bold &&
+    last.italic === piece.italic &&
+    last.color === piece.color
+  );
+}
+
+/**
  * Appends a piece to a line, merging glyphs into the last run when both are glyphs with the same
  * flags. An icon is always a run of its own. A glyph piece is pushed as a copy, so the merge
  * writes into the line's own run and never into the token the piece came from: a balanced style
@@ -359,13 +376,7 @@ export function measureRun(
 function appendRun(runs: Run[], piece: Run): void {
   const last = runs.at(-1);
 
-  if (
-    piece.kind === "text" &&
-    last?.kind === "text" &&
-    last.bold === piece.bold &&
-    last.italic === piece.italic &&
-    last.color === piece.color
-  ) {
+  if (piece.kind === "text" && canMerge(last, piece)) {
     last.text += piece.text;
 
     return;

@@ -11,7 +11,7 @@
 import sharp from "sharp";
 import type { OverlayValue } from "../../src/index";
 import { launchChrome, loadChromium } from "../../src/visual/leg-browser";
-import type { ChromePage } from "../../src/visual/types";
+import type { ChromeContext, ChromePage } from "../../src/visual/types";
 import {
   DIM,
   DIM_COLOR,
@@ -163,6 +163,76 @@ function problemsOf(mode: "under" | "all", spots: Spots): string[] {
   ];
 }
 
+/**
+ * Reads the three places with the overlay's `hud` written under, all and under again: the problems of the reads.
+ *
+ * @param page - The page, its scene up.
+ * @param reads - Where the reads go, for the line of the run.
+ * @returns The problems.
+ */
+async function readModes(page: ShotPage, reads: Array<[string, Spots]>): Promise<string[]> {
+  const problems: string[] = [];
+
+  for (const mode of ["under", "all", "under"] as const) {
+    const spots = await switchTo(page, mode);
+
+    reads.push([mode, spots]);
+    problems.push(...problemsOf(mode, spots));
+  }
+
+  return problems;
+}
+
+/**
+ * Runs the leg on one backend: opens the page, checks it drew with that backend, reads the three modes, and prints one
+ * line.
+ *
+ * @param context - The browser context.
+ * @param url - The page's address.
+ * @param renderer - The backend asked for.
+ * @returns True when the run found no problem.
+ */
+async function runRenderer(
+  context: ChromeContext,
+  url: string,
+  renderer: (typeof RENDERERS)[number]
+): Promise<boolean> {
+  // The context is Playwright's: its pages take a screenshot, which the runner's structural type leaves out.
+  const page = (await context.newPage()) as ShotPage;
+  const reads: Array<[string, Spots]> = [];
+  const problems: string[] = [];
+
+  try {
+    await page.goto(`${url}${renderer === "webgl" ? "?renderer=webgl" : ""}`);
+    await page.waitForFunction(() => "hudUnder" in globalThis, undefined, { timeout: 60_000 });
+
+    const answer = (await page.evaluate(() => {
+      const value = Reflect.get(globalThis, "hudUnder") as HudUnderPage | { error: string };
+
+      return "error" in value ? value : { backend: value.backend };
+    }, undefined)) as { backend: string } | { error: string };
+
+    if ("error" in answer) {
+      problems.push(answer.error);
+
+      return false;
+    }
+
+    if (answer.backend !== renderer) problems.push(`drew with ${answer.backend}`);
+    problems.push(...(await readModes(page, reads)));
+
+    return problems.length === 0;
+  } finally {
+    console.log(
+      `${renderer}: ${problems.length === 0 ? "ok" : "FAIL"}`,
+      JSON.stringify(reads),
+      problems.join("; ")
+    );
+    await page.close();
+  }
+}
+
+// Build the page: the leg's own bundle of `hud-under/page.ts`, with the flags of a dev page.
 const built = await Bun.build({
   entrypoints: [new URL("hud-under/page.ts", import.meta.url).pathname],
   define: DEV,
@@ -174,6 +244,7 @@ if (!built.success || output === undefined) {
   throw new Error(`The page did not bundle.\n  ${built.logs.map(String).join(" ")}.`);
 }
 
+// Serve it: the bundle at /page.js, an empty page around it everywhere else.
 const script = await output.text();
 const server = Bun.serve({
   port: 0,
@@ -194,42 +265,10 @@ const context = await browser.newContext({
 });
 let failed = 0;
 
+// Run each renderer in turn; the browser and the server go whatever happens.
 try {
   for (const renderer of RENDERERS) {
-    // The context is Playwright's: its pages take a screenshot, which the runner's structural type leaves out.
-    const page = (await context.newPage()) as ShotPage;
-
-    await page.goto(`${server.url.href}${renderer === "webgl" ? "?renderer=webgl" : ""}`);
-    await page.waitForFunction(() => "hudUnder" in globalThis, undefined, { timeout: 60_000 });
-
-    const answer = (await page.evaluate(() => {
-      const value = Reflect.get(globalThis, "hudUnder") as HudUnderPage | { error: string };
-
-      return "error" in value ? value : { backend: value.backend };
-    }, undefined)) as { backend: string } | { error: string };
-    const problems: string[] = [];
-    const reads: Array<[string, Spots]> = [];
-
-    if ("error" in answer) problems.push(answer.error);
-    else {
-      if (answer.backend !== renderer) problems.push(`drew with ${answer.backend}`);
-
-      for (const mode of ["under", "all", "under"] as const) {
-        const spots = await switchTo(page, mode);
-
-        reads.push([mode, spots]);
-        problems.push(...problemsOf(mode, spots));
-      }
-    }
-
-    if (problems.length > 0) failed += 1;
-
-    console.log(
-      `${renderer}: ${problems.length === 0 ? "ok" : "FAIL"}`,
-      JSON.stringify(reads),
-      problems.join("; ")
-    );
-    await page.close();
+    if (!(await runRenderer(context, server.url.href, renderer))) failed += 1;
   }
 } finally {
   await browser.close();

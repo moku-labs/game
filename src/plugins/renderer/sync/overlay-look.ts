@@ -6,7 +6,7 @@
 import type { Entity } from "../../world/types";
 import { HudPart } from "../components";
 import type { DemandReason } from "../demand/types";
-import type { PixiModule, PixiRenderLayer, PixiSprite } from "../types";
+import type { PixiContainer, PixiModule, PixiRenderLayer, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
 import { heldWaiting } from "./build";
 import type { OverlayRecord, SyncCtx } from "./types";
@@ -181,12 +181,32 @@ export function stepDims(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): void
     if (resized || !record.sized) sizeDim(sctx, record, record.dim);
     lookDim(sctx, record, record.dim);
 
-    if (record.under === undefined && record.value.hud === "under" && record.value.dim > 0) {
-      record.under = makeUnder(pixi, record.entity);
-    }
-
+    if (needsUnder(record)) record.under = makeUnder(pixi, record.entity);
     if (record.under !== undefined) placeUnder(sctx, record, record.under, record.dim);
   }
+}
+
+/**
+ * Tells whether an overlay wants a HUD render layer it does not have yet: `hud: "under"` with a dim above 0 (U1, U6).
+ *
+ * @param record - The overlay.
+ * @returns True when the layer is to be made.
+ */
+function needsUnder(record: OverlayRecord): boolean {
+  return record.under === undefined && record.value.hud === "under" && record.value.dim > 0;
+}
+
+/**
+ * Tells whether an overlay holds the HUD under its dim now, if nothing above it does: its render layer is made, it says
+ * `hud: "under"`, and its dim and its level are above 0.
+ *
+ * @param record - The overlay.
+ * @returns True when it can hold the HUD.
+ */
+function isUnderHolder(record: OverlayRecord): boolean {
+  const { value } = record;
+
+  return record.under !== undefined && value.hud === "under" && value.dim > 0 && record.level > 0;
 }
 
 /**
@@ -202,12 +222,7 @@ function holderOf(order: readonly OverlayRecord[]): PixiRenderLayer | undefined 
     const record = order[index];
 
     if (record === undefined) continue;
-
-    const { value } = record;
-
-    if (record.under !== undefined && value.hud === "under" && value.dim > 0 && record.level > 0) {
-      return record.under;
-    }
+    if (isUnderHolder(record)) return record.under;
 
     // The owner of the range: everything under it is in its picture.
     if (record.mode !== "live") return undefined;
@@ -248,20 +263,17 @@ export function stepHold(sctx: SyncCtx): void {
   const overlay = state.overlay;
   const name = state.hudLayer;
   const container = name === undefined ? undefined : state.layers.get(name)?.container;
-  const holder =
-    container !== undefined && container.parent === state.root
-      ? holderOf(overlay.order)
-      : undefined;
-
+  // The HUD can be held only while its container hangs in the stage root, in the render group of the layers.
+  const holdable = container !== undefined && container.parent === state.root;
+  const holder = holdable ? holderOf(overlay.order) : undefined;
   // per frame: the holder, the container and Pixi's own link compared, nothing written while they stand.
-  if (holder === undefined && overlay.heldBy === undefined) return;
-  if (
+  const unchanged =
     holder === overlay.heldBy &&
     container === overlay.held &&
-    container?.parentRenderLayer === holder
-  ) {
-    return;
-  }
+    container?.parentRenderLayer === holder;
+
+  if (holder === undefined && overlay.heldBy === undefined) return;
+  if (unchanged) return;
 
   letGoHud(sctx);
 
@@ -351,6 +363,21 @@ function targetOf(order: readonly OverlayRecord[], key: string): number {
 }
 
 /**
+ * Tells whether a set holds exactly the nodes of a list: as many, and every one of them.
+ *
+ * @param list - The nodes, each once.
+ * @param set - The set.
+ * @returns True when they are the same nodes.
+ */
+function holdsSame(list: readonly PixiContainer[], set: ReadonlySet<PixiContainer>): boolean {
+  if (list.length !== set.size) return false;
+
+  for (const node of list) if (!set.has(node)) return false;
+
+  return true;
+}
+
+/**
  * Makes the tap set hold the faded tops of this frame, the first `count` of `offList`, only when they differ from it:
  * the set is built aside and swapped in, so a frame where nothing changed clears nothing (V8 gives a set a new table at
  * every `clear()`, and the step runs every frame).
@@ -364,18 +391,7 @@ function keepOff(sctx: SyncCtx, count: number): void {
 
   offList.length = count;
 
-  if (count === overlay.offTops.size) {
-    let same = true;
-
-    for (const top of offList) {
-      if (!overlay.offTops.has(top)) {
-        same = false;
-        break;
-      }
-    }
-
-    if (same) return;
-  }
+  if (holdsSame(offList, overlay.offTops)) return;
 
   const next = overlay.nextOff;
 

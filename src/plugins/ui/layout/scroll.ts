@@ -644,6 +644,29 @@ function place(ctx: UiCtx, container: Element, content: Element, motion: ScrollM
 }
 
 /**
+ * Takes a new `offset` prop: with `jump` the scroll stands at it at once and stops, without it
+ * glides there; either way it follows the prop from then on. A scroll the finger holds only
+ * remembers it.
+ *
+ * @param motion - The motion of the scroll, its range already the one of this solve.
+ * @param container - The scroll element.
+ * @param asked - The new `offset` prop, from the start.
+ */
+function followOffset(motion: ScrollMotion, container: Element, asked: number): void {
+  if (motion.mode === "held") return;
+
+  // After the resize: a jump wins over the glide a new range re-aimed at the earlier prop.
+  if (jumpsOf(container)) {
+    motion.offset = within(asked, motion.max);
+    stop(motion);
+  } else {
+    glideTo(motion, asked);
+  }
+
+  motion.atProp = true;
+}
+
+/**
  * Settles a placed scroll on what the solve and the render of this frame gave it: a new range at
  * once, then a glide to a new `offset` prop, which the scroll follows from then on. With `jump` it
  * stands at the new prop at once instead, in the solve that gave the content its new rects, and a
@@ -668,18 +691,7 @@ function settle(
 
   if (asked !== motion.seen) {
     motion.seen = asked;
-
-    if (motion.mode !== "held") {
-      // After the resize: a jump wins over the glide a new range re-aimed at the earlier prop.
-      if (jumpsOf(container)) {
-        motion.offset = within(asked, motion.max);
-        stop(motion);
-      } else {
-        glideTo(motion, asked);
-      }
-
-      motion.atProp = true;
-    }
+    followOffset(motion, container, asked);
   }
 
   show(ctx, state, container, content, motion);
