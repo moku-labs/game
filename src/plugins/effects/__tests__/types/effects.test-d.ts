@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { defineGame, type FilterArea } from "../../../../index";
+import { defineGame, type FilterArea, Flash, type FlashValue } from "../../../../index";
 import { tween } from "../../../anim/timeline/steps";
 import type { Target } from "../../../anim/types";
 import type { EmitterIdOf } from "../../../flow/types";
@@ -97,6 +97,14 @@ expectTypeOf(Tint().value.offset).toEqualTypeOf<readonly number[]>();
 expectTypeOf(Tint().value.enabled).toEqualTypeOf<boolean>();
 expectTypeOf(Tint.filter.passes).toEqualTypeOf<number>();
 expectTypeOf(Glow).toMatchTypeOf<FilterComponent<{ strength: number }>>();
+
+// The effect set, from the root: a member's numbers are tweenable numbers, its value type is exported beside it.
+tween(card, Flash, { amount: 0 }, { ms: 160 });
+expectTypeOf(Flash().value).toEqualTypeOf<Readonly<FlashValue>>();
+// @ts-expect-error — `amount` is a number, not a string
+Flash({ amount: "1" });
+// @ts-expect-error — a colour is a 0xrrggbb number, not a name
+tween(card, Flash, { color: "gold" }, { ms: 160 });
 
 // A reserved uniform name passes the type and is refused at run time (define-filter.test.ts).
 expectTypeOf(defineFilter).toBeCallableWith("fx.x", { wgsl: "", glsl: "", uniforms: { order: 1 } });

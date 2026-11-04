@@ -351,6 +351,9 @@ export type FilterComponent<Value extends object> = ComponentType<Value> & {
   readonly filter: FilterDefinition;
 };
 
+/** A component `defineFilter` made, its value type erased: what the dev check of a filter used but not listed reads. */
+export type MadeFilter = ComponentHandle<FilterFields> & { readonly filter: FilterDefinition };
+
 /**
  * One field of a stored filter value: a number, a switch, an asset key or a vector.
  *

@@ -34,8 +34,11 @@ const drawCallsMarker = '"renderer.monitor"';
 /** The two packages of the production packer: only the node door `./assets` may name them. */
 const packerPackages = ["sharp", "maxrects-packer"];
 
-/** What the game composes: the screen set, or the screen set and `effectsPlugin`. */
-type Composition = "screen" | "screen+effects";
+/**
+ * What the game composes: the screen set, the screen set and `effectsPlugin`, or both with a feature that lists the
+ * effect set's `Flash` in its `filters`.
+ */
+type Composition = "screen" | "screen+effects" | "screen+effects+flash";
 
 /** The flags as each page defines them. */
 const PROFILES = {
@@ -108,8 +111,11 @@ const telemetryMarkers = [
   "add-npm"
 ];
 
-/** The dev warning of the shader scan (LEAD-FIXES-4 item 3): dev-only, so a release bundle drops it. */
-const devOnlyEffectsMarkers = ["effects:filter-reads-screen"];
+/**
+ * The dev warnings of the shader scan (LEAD-FIXES-4 item 3) and of a filter on a view that no feature lists (F126 stage
+ * 3): dev-only, so a release bundle drops them.
+ */
+const devOnlyEffectsMarkers = ["effects:filter-reads-screen", "effects:filter-unlisted"];
 
 /** The bundles built so far, by composition and profile: each build takes a second. */
 const built = new Map<string, string>();
@@ -130,10 +136,12 @@ function bundle(composition: Composition, profile: Profile): string {
 
   if (known !== undefined) return known;
 
-  const effects = composition === "screen+effects";
+  const effects = composition !== "screen";
+  const flash = composition === "screen+effects+flash";
   const game = [
-    `import { createApp, defineGame, ${effects ? "effectsPlugin, " : ""}screen } from ${JSON.stringify(rootModule)};`,
+    `import { createApp, defineGame, ${effects ? "effectsPlugin, " : ""}${flash ? "defineFeature, Flash, " : ""}screen } from ${JSON.stringify(rootModule)};`,
     "export const kit = defineGame();",
+    ...(flash ? ['export const board = defineFeature("board", { filters: [Flash] });'] : []),
     `export function start() { return createApp({ plugins: [...screen${effects ? ", effectsPlugin" : ""}] }); }`
   ].join("\n");
   const script = `
@@ -195,8 +203,31 @@ describe("a game build with and without effectsPlugin", () => {
 
     expect(markers.filter(marker => !code.includes(marker))).toEqual([]);
     expect(devOnlyEffectsMarkers.filter(marker => code.includes(marker))).toEqual([]);
-    expect(bundle("screen+effects", "dev")).toContain(devOnlyEffectsMarkers[0]);
+
+    const dev = bundle("screen+effects", "dev");
+
+    expect(devOnlyEffectsMarkers.filter(marker => !dev.includes(marker))).toEqual([]);
     expect(code).toContain("mainFragment");
+  }, 60_000);
+
+  // Bug: a lost `/*#__PURE__*/` or a barrel of the set: every member's shader ships in a game that lists none.
+  it("carries no member of the effect set and no set head when the game lists none", () => {
+    for (const profile of ["release", "dev"] as const) {
+      const code = bundle("screen+effects", profile);
+
+      expect(code, profile).not.toContain("effects.flash");
+      expect(code, profile).not.toContain("inputPlace");
+    }
+  }, 60_000);
+
+  // Bug: listing one member drags the others in through a shared module.
+  it("carries the member a feature lists and no other", () => {
+    const code = bundle("screen+effects+flash", "release");
+
+    expect(code).toContain('"effects.flash"');
+    expect(code).toContain("inputPlace");
+    expect(code).not.toContain("effects.grade");
+    expect(code).not.toContain("effects.vignette");
   }, 60_000);
 
   it("the striped mark of a broken filter leaves a release bundle and stays in a dev bundle", () => {

@@ -447,6 +447,11 @@ export {
 } from "./plugins/effects/filters/builtins";
 export { defineFilter } from "./plugins/effects/filters/define";
 export type { FilterArea } from "./plugins/effects/filters/types";
+// effects: the engine's effect set, each member from its own file, listed in a feature's `filters` (no barrel)
+export { Flash } from "./plugins/effects/set/flash";
+export { Grade } from "./plugins/effects/set/grade";
+export type { FlashValue, GradeValue, VignetteValue } from "./plugins/effects/set/types";
+export { Vignette } from "./plugins/effects/set/vignette";
 export { Emitter } from "./plugins/effects/particles/component";
 export { defineEmitter } from "./plugins/effects/particles/define";
 // platform: the provider seam a game fills, and what one Back press ends in

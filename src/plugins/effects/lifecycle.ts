@@ -8,10 +8,10 @@ import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
 import { worldPlugin } from "../world";
-import type { ComponentHandle } from "../world/types";
+import type { ComponentHandle, Entity } from "../world/types";
 import { builtInKinds } from "./filters/builtins";
 import { dropChecks, gateChecks } from "./filters/check";
-import { readsScreen } from "./filters/define";
+import { filtersMade, readsScreen } from "./filters/define";
 import { createFilterSystem, forgetFilter, retireAllFilters, trackFilter } from "./filters/system";
 import type { FilterDefinition, FilterFields, FilterKind, KindEntry } from "./filters/types";
 import { Emitter } from "./particles/component";
@@ -179,10 +179,12 @@ function registerEmitters(ectx: EffectsCtx): void {
 
 /**
  * Registers the filter kinds: the built-ins first, then the `filters` of every feature in
- * feature order. The order is each kind's `index`, the tie-break of the filters on a view.
+ * feature order. The order is each kind's `index`, the tie-break of the filters on a view. An entry
+ * that is the same component as one already read is skipped, so two features may list one member of
+ * the effect set; the first feature's place sets its index.
  *
  * @param ectx - Domain context of the effects plugin.
- * @throws {Error} When a filter id is registered twice or is the id of a built-in.
+ * @throws {Error} When two components take one filter id, or one takes the id of a built-in.
  */
 function registerKinds(ectx: EffectsCtx): void {
   const builtIns = builtInKinds();
@@ -195,6 +197,9 @@ function registerKinds(ectx: EffectsCtx): void {
     if (builtIns.some(kind => kind.id === id)) {
       throw new Error(`[game] Filter "${id}" is built in.\n  Choose another id.`);
     }
+
+    // The same component listed again, by another feature or the same one: one kind.
+    if (entries.some(kind => kind.component === entry)) continue;
 
     if (entries.some(kind => kind.id === id)) {
       throw new Error(
@@ -258,6 +263,49 @@ function openWorld(ectx: EffectsCtx, kinds: readonly FilterKind[]): void {
   for (const kind of kinds) {
     for (const [entity] of ecs.query(kind.component)) trackFilter(ectx, kind, entity);
   }
+
+  // Inline and positive: a release bundle drops the check and its warning.
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) watchUnlisted(ectx);
+}
+
+/**
+ * Watches every filter `defineFilter` made that no kind holds: a view that gets one draws unfiltered, so the first
+ * such view of each id warns `effects:filter-unlisted`. An id the world holds under another object is skipped: a
+ * second object of a known name would throw "defined twice". Dev builds only.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ */
+function watchUnlisted(ectx: EffectsCtx): void {
+  const { ecs } = ectx.deps.world;
+
+  for (const [id, component] of filtersMade()) {
+    // Compared by identity alone: the world answers its own type, whatever its value.
+    const known: unknown = ecs.typeOf(id);
+
+    if (ectx.state.kinds.has(id) || (known !== undefined && known !== component)) continue;
+
+    ectx.state.removers.push(ecs.onAdded(component, entity => warnUnlisted(ectx, id, entity)));
+  }
+}
+
+/**
+ * Warns once per id that a view carries a filter no feature lists.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param id - The filter id.
+ * @param entity - The view that got it.
+ */
+function warnUnlisted(ectx: EffectsCtx, id: string, entity: Entity): void {
+  const key = `unlisted:${id}`;
+
+  if (ectx.state.warned.has(key)) return;
+
+  ectx.state.warned.add(key);
+  ectx.log.warn("effects:filter-unlisted", {
+    filter: id,
+    entity,
+    hint: `Filter "${id}" is on a view but no feature lists it in filters`
+  });
 }
 
 /**

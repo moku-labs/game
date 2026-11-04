@@ -314,3 +314,4 @@ export type {
   ResolvedEmitterConfig,
   Shape
 } from "./particles/types";
+export type { FlashValue, GradeValue, VignetteValue } from "./set/types";

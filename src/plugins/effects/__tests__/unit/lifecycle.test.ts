@@ -74,11 +74,13 @@ describe("startEffects", () => {
     );
   });
 
-  it("throws on a filter id registered twice and on the id of a built-in", () => {
+  it("throws on a filter id two components take and on the id of a built-in", () => {
     const twice = createMockEffects();
+    // Two objects under one id: the same object listed twice is one kind (the effect set, F126 stage 3).
     const Tint = defineFilter("fx.tint", { wgsl: BODY, glsl: GLSL });
+    const OtherTint = defineFilter("fx.tint", { wgsl: BODY, glsl: GLSL });
 
-    twice.features.push({ name: "board", description: { filters: [Tint, Tint] } });
+    twice.features.push({ name: "board", description: { filters: [Tint, OtherTint] } });
 
     expect(() => twice.start()).toThrow(
       '[game] Filter "fx.tint" is registered twice.\n  Keep one defineFilter per id.'
