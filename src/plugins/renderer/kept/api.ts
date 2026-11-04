@@ -10,6 +10,7 @@ import { BYTES_PER_MB, roundTo } from "../monitor/units";
 import type { FilterSlot, SyncWriters, View, WhyEntry } from "../sync/types";
 import type {
   DemandModule,
+  FilterCache,
   HostModule,
   KeptModule,
   PixiContainer,
@@ -45,23 +46,28 @@ import { whyReport } from "./why";
 const NO_WHY: readonly WhyEntry[] = Object.freeze([]);
 
 /**
- * The category a slot list lets the cache keep it under: the worst of its slots, `undefined` for an empty list, a
- * `"screen"` slot or a slot that names none (a game's own slot is drawn live).
+ * The category a slot list lets the cache keep it under: the worst of its slots, `undefined` for an empty list, a slot
+ * that names none (a game's own slot is drawn live) or a `"screen"` slot without a quad. A body that reads the screen is
+ * kept only while it runs on its quad (F126 stage 2).
  *
  * @param slots - The slots.
- * @returns `"local"`, `"placed"`, or `undefined` when no record is kept.
+ * @returns `"local"`, `"placed"`, `"screen"`, or `undefined` when no record is kept.
  */
-function categoryOf(slots: readonly FilterSlot[]): "local" | "placed" | undefined {
+function categoryOf(slots: readonly FilterSlot[]): FilterCache | undefined {
   if (slots.length === 0) return undefined;
 
-  let placed = false;
+  let worst: FilterCache = "local";
 
   for (const slot of slots) {
-    if (slot.cache === undefined || slot.cache === "screen") return undefined;
-    if (slot.cache === "placed") placed = true;
+    if (slot.cache === undefined || (slot.cache === "screen" && slot.quad === undefined)) {
+      return undefined;
+    }
+
+    if (slot.cache === "screen") worst = "screen";
+    else if (slot.cache === "placed" && worst === "local") worst = "placed";
   }
 
-  return placed ? "placed" : "local";
+  return worst;
 }
 
 /**

@@ -126,9 +126,11 @@ export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
    * default) keeps it as a picture, also while the view moves; `"placed"` keeps it with its canvas origin, for a body
    * that reads where it is drawn through `canvasPixel(uv)` (a body that calls the helper is placed by itself); set
    * `false` for a body whose look depends on where the view is drawn in a way the engine cannot see (a time read from
-   * a texture, a hash of the screen position): the view is then drawn live in every frame. A body that reads
-   * `uGlobalFrame`, `@builtin(position)`, `gl_FragCoord`, `uOutputTexture` or the origin of `uOutputFrame` and
-   * declares nothing is drawn live as well, and a dev build warns once: declare `cache: false`.
+   * a texture, a hash of the screen position): no output of it is kept. On WebGPU the view's subtree picture is kept
+   * and the body runs on its quad in every frame, the canvas place in `uOutputFrame.xy`; on WebGL, or when it does not
+   * fit the quad, it is drawn live in every frame. A body that reads `uGlobalFrame`, `@builtin(position)`,
+   * `gl_FragCoord`, `uOutputTexture` or the origin of `uOutputFrame` and declares nothing is treated as `false`, and a
+   * dev build warns once: declare `cache: false`.
    */
   readonly cache?: "local" | "placed" | false;
   /**

@@ -845,6 +845,46 @@ export async function keptShadedBoard(count: number): Promise<() => void> {
 }
 
 /**
+ * A board of `count` views whose bodies read the screen (`cache: false`) on their filter's own shader (F126 stage 2,
+ * part C), as `rows-live` of the bench draws them: each is on its mesh from its first take, every frame writes every
+ * view's number after the mark, and every step reads the view's place, as a placed view's does.
+ *
+ * @param count - The shaded views.
+ * @returns One frame: the marks, the numbers, the collect and the flush.
+ */
+export async function keptScreenBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync } = stage.drawn.mock.modules;
+  const views: Entity[] = [];
+  const numbers: Array<{ amount: number }> = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: (index % 5) * 200, y: Math.floor(index / 5) * 200 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    const slot = shadedSlot({ cache: "screen" });
+
+    if (slot.quad?.fu !== undefined) numbers.push(slot.quad.fu.uniforms as { amount: number });
+
+    sync.filters.set(view, Object.freeze([slot]));
+  }
+
+  stage.frames(12);
+
+  const frame = numbersFrame(views, numbers, stage.drawn.mock.modules);
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  if (records.length !== count || records.some(record => !record.shaded)) {
+    throw new Error("perf fixture: a view of the screen board is not shaded");
+  }
+
+  return frame;
+}
+
+/**
  * A filtered room with `count` placed views under it on their filter's own shader (F126 stage 2, part B), as `glow` of
  * the bench draws them: the room's filter stays live, every frame writes every view's number after the mark, and every
  * step walks the view's ancestors up to the stage, noting the filter it hangs under.

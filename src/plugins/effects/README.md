@@ -191,13 +191,15 @@ do with a filter is its category, `FilterDefinition.cache`:
   also while the view moves.
 - `"placed"` — the body reads its canvas position through `canvasPixel(uv)`, or declares
   `cache: "placed"`; kept, and a move redoes the output only, with the new origin.
-- `"screen"` — never kept: the view is drawn live in every frame. `cache: false`, a backdrop, Pixi's `Noise` and
-  `Displacement`.
+- `"screen"` — no filter output is kept. `cache: false`, a backdrop, Pixi's `Noise` and `Displacement`. A body that
+  reads the screen keeps its subtree picture and runs on its quad in every frame, on WebGPU, where the renderer writes
+  the canvas place in `uOutputFrame.xy` (see "On the quad"); it is drawn live in every frame on WebGL, when it does not
+  fit the quad, and for a filter that hands no quad (a backdrop, a core kind, a body that reads `@builtin(position)`).
 
 The category is the option `defineFilter(id, { cache?: "local" | "placed" | false })`. The engine reads
 only the bodies the game wrote, never its own header: a body that reads `uGlobalFrame`,
 `@builtin(position)`, `gl_FragCoord`, `uOutputTexture` or the origin of `uOutputFrame` (its size `.zw`
-is fine) and declares no `cache` is drawn live (the safe direction), and a dev build warns once
+is fine) and declares no `cache` is `"screen"` (the safe direction), and a dev build warns once
 (`effects:filter-reads-screen`: "Filter "X" reads the screen; declare cache: false"). A declared
 category is honoured. A filter with inputs takes the worst category of its body and its stages.
 
@@ -223,7 +225,8 @@ spec 22), and the filter's `quad` when its body can run on one.
 A kept view whose numbers change would pay a filter pass for every new value. The engine leaves that pass out by
 itself: the renderer runs the filter's own fragment body on a mesh, in the pass that draws the canvas, over the kept
 picture of the view (renderer README, "Kept pictures"). A game writes nothing for it: no call, no value, no option, and
-`cache` keeps its meaning.
+`cache` keeps its meaning. A `cache: false` body runs there too, from the view's first take on and also at rest: the mesh
+reads the canvas place, where a filter output would read the picture's target.
 
 For that `defineFilter` assembles a second text beside `source`, `FilterDefinition.quadSource`: Pixi's mesh stage, the
 filter's uniforms at groups 2 and 3, the body renamed `filterBody`, and a `mainFragment` that multiplies it by the
