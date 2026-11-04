@@ -40,6 +40,12 @@ const HYPHEN_BREAKS = /(?<=[^\-\u2010][-\u2010])(?=[^\-\u2010\d])/;
 /** The soft hyphen: a break the text allows, drawn as `-` only when the line breaks there. */
 const SOFT_HYPHEN = "\u00AD";
 
+/** The most lines a balanced style evens out; a longer block keeps its greedy lines, as Chrome. */
+const BALANCE_MAX_LINES = 6;
+
+/** How many halvings the search for the balanced width takes: 2⁻¹⁶ of the range is left. */
+const BALANCE_STEPS = 16;
+
 /**
  * Tells whether a value is a plain record, so its fields can be read one by one.
  *
@@ -342,8 +348,27 @@ export function measureRun(
 }
 
 /**
+ * Tells whether a glyph piece may join the last run of a line: both glyphs, with the same bold,
+ * italic and colour. An icon never merges.
+ *
+ * @param last - The last run of the line, if any.
+ * @param piece - The glyph piece to append.
+ * @returns True when the piece's text may be added to `last`.
+ */
+function canMerge(last: Run | undefined, piece: TextRun): last is TextRun {
+  return (
+    last?.kind === "text" &&
+    last.bold === piece.bold &&
+    last.italic === piece.italic &&
+    last.color === piece.color
+  );
+}
+
+/**
  * Appends a piece to a line, merging glyphs into the last run when both are glyphs with the same
- * flags. An icon is always a run of its own.
+ * flags. An icon is always a run of its own. A glyph piece is pushed as a copy, so the merge
+ * writes into the line's own run and never into the token the piece came from: a balanced style
+ * runs the wrap pass over the same tokens more than once.
  *
  * @param runs - The runs of the line so far.
  * @param piece - The piece to append.
@@ -351,19 +376,13 @@ export function measureRun(
 function appendRun(runs: Run[], piece: Run): void {
   const last = runs.at(-1);
 
-  if (
-    piece.kind === "text" &&
-    last?.kind === "text" &&
-    last.bold === piece.bold &&
-    last.italic === piece.italic &&
-    last.color === piece.color
-  ) {
+  if (piece.kind === "text" && canMerge(last, piece)) {
     last.text += piece.text;
 
     return;
   }
 
-  runs.push(piece);
+  runs.push(piece.kind === "text" ? { ...piece } : piece);
 }
 
 /**
@@ -671,19 +690,20 @@ function placeWord(
 }
 
 /**
- * Lays runs out into lines no wider than the wrap. Words break between them, after a hyphen that
- * joins two parts and at a soft hyphen; a word wider than the wrap breaks between its glyphs.
+ * Lays tokens out into lines no wider than the wrap: the greedy pass. Words break between them,
+ * after a hyphen that joins two parts and at a soft hyphen; a word wider than the wrap breaks
+ * between its glyphs. The tokens are read and never changed, so the pass may run on them again.
  *
- * @param runs - The runs of the block.
+ * @param tokens - The tokens of the block.
  * @param metrics - The style, the tables and the warning.
  * @param wrap - The wrap width in reference pixels.
  * @returns The lines, each with its width.
  */
-function layoutWrapped(runs: readonly Run[], metrics: Metrics, wrap: number): Line[] {
+function wrapTokens(tokens: readonly Token[], metrics: Metrics, wrap: number): Line[] {
   const builder: Builder = { lines: [], runs: [], width: 0 };
   let pending: Token | undefined;
 
-  for (const token of tokenise(runs, metrics.style, metrics.tables, metrics.options)) {
+  for (const token of tokens) {
     // A line break closes the line.
     if (token.kind === "break") {
       commit(builder);
@@ -713,6 +733,77 @@ function layoutWrapped(runs: readonly Run[], metrics: Metrics, wrap: number): Li
   commit(builder);
 
   return builder.lines;
+}
+
+/**
+ * The narrowest line a word may stand on whole: the widest word with the `-` a break after it
+ * draws. Below it a word breaks between its glyphs or its hyphen stands past the line.
+ *
+ * @param tokens - The tokens of the block.
+ * @returns The width in reference pixels; 0 for a block with no word.
+ * @example
+ * ```ts
+ * widestWord([{ kind: "word", runs: [], width: 80, tail: 0 }]); // 80
+ * ```
+ */
+function widestWord(tokens: readonly Token[]): number {
+  let widest = 0;
+
+  for (const token of tokens) {
+    if (token.kind === "word") widest = Math.max(widest, token.width + token.tail);
+  }
+
+  return widest;
+}
+
+/**
+ * Evens the greedy lines of a balanced style: the narrowest width in `[widest word, wrap]` that
+ * keeps their number, found in 16 halvings, and the lines at that width. A block of one line or of
+ * more than six, or with a word that does not fit the wrap whole, keeps its greedy lines.
+ *
+ * @param tokens - The tokens of the block, as the greedy pass read them.
+ * @param greedy - The greedy lines at the wrap.
+ * @param metrics - The style, the tables and the warning.
+ * @param wrap - The wrap width in reference pixels.
+ * @returns The balanced lines, or the greedy ones.
+ */
+function balanceLines(
+  tokens: readonly Token[],
+  greedy: Line[],
+  metrics: Metrics,
+  wrap: number
+): Line[] {
+  const count = greedy.length;
+  let low = widestWord(tokens);
+  let high = wrap;
+
+  if (count < 2 || count > BALANCE_MAX_LINES || low >= high) return greedy;
+
+  // A narrower width never gives fewer lines, so `high` always keeps the count.
+  for (let step = 0; step < BALANCE_STEPS; step += 1) {
+    const middle = (low + high) / 2;
+
+    if (wrapTokens(tokens, metrics, middle).length <= count) high = middle;
+    else low = middle;
+  }
+
+  return high === wrap ? greedy : wrapTokens(tokens, metrics, high);
+}
+
+/**
+ * Lays runs out into lines no wider than the wrap, evened out when the style balances. The tokens
+ * are made once; the balance runs the wrap pass on them again.
+ *
+ * @param runs - The runs of the block.
+ * @param metrics - The style, the tables and the warning.
+ * @param wrap - The wrap width in reference pixels.
+ * @returns The lines, each with its width.
+ */
+function layoutWrapped(runs: readonly Run[], metrics: Metrics, wrap: number): Line[] {
+  const tokens = tokenise(runs, metrics.style, metrics.tables, metrics.options);
+  const greedy = wrapTokens(tokens, metrics, wrap);
+
+  return metrics.style.balance === true ? balanceLines(tokens, greedy, metrics, wrap) : greedy;
 }
 
 /**

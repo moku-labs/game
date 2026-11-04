@@ -54,6 +54,13 @@ export const BUDGET = {
   /** The same strip standing: one tag check and nothing written. 0 B. */
   scrollStill: 0,
   /**
+   * F141 (change 2026-11-04-f141-f147-f148-ui-text): the settle of a render that gives the standing
+   * strip a new `offset` prop with `jump`, 1000 and 1082 in turn: one prop read, the offset set and
+   * the motion stopped in place, and the three writes through the kept patches. The render's own
+   * description nodes are the game's and stay out. 0 B.
+   */
+  scrollJump: 0,
+  /**
    * F42 (change 2026-10-21-exit-restore-fixes): `still` of one leaving element per frame, three motions held, one of
    * them endless (a hot pulse). Was an `every` with an arrow; now an array `for…of` and a set lookup. 0 B.
    */
