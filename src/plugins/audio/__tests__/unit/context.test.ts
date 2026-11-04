@@ -165,19 +165,16 @@ describe("the renewal after a return from the background (F149)", () => {
 
     await tick();
 
-    let reject: (error: Error) => void = () => undefined;
+    const decoding = Promise.withResolvers<AudioBuffer>();
     const old = made[0] as FakeContext;
 
-    old.decodeAudioData = (): Promise<AudioBuffer> =>
-      new Promise<AudioBuffer>((_resolve, fail) => {
-        reject = fail;
-      });
+    old.decodeAudioData = (): Promise<AudioBuffer> => decoding.promise;
     const lost = mock.fx("sfx", sfx("ui.click"));
 
     awayAndBack(mock);
     vi.advanceTimersByTime(1000);
     await tick();
-    reject(new Error("closed"));
+    decoding.reject(new Error("closed"));
     await lost;
     await tick();
     await mock.fx("sfx", sfx("ui.click"));
@@ -237,18 +234,15 @@ describe("the renewal after a return from the background (F149)", () => {
 
     await tick();
 
-    let closed: () => void = () => undefined;
+    const closing = Promise.withResolvers<void>();
     const old = made[0] as FakeContext;
 
-    old.close = (): Promise<void> =>
-      new Promise<void>(resolve => {
-        closed = resolve;
-      });
+    old.close = (): Promise<void> => closing.promise;
     awayAndBack(mock);
     vi.advanceTimersByTime(1000);
     await tick();
     await mock.stop();
-    closed();
+    closing.resolve();
     await tick();
 
     expect(made).toHaveLength(1);

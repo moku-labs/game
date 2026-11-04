@@ -190,7 +190,10 @@ export type Config = {
   sfxFadeMs: number;
   /** Reads the player's choice from the committed player. `undefined`: the buses stay at `buses`. */
   volumes: Volumes | undefined;
-  /** Context factory, the test seam. `undefined`: `new AudioContext()` when the global exists, otherwise headless. */
+  /**
+   * Context factory, the test seam. `undefined`: `new AudioContext()` when the global exists, otherwise headless.
+   * On iOS the plugin calls it again after a return from the background, so each call returns a new context.
+   */
   context: (() => AudioContextLike) | undefined;
   /** How many started sounds `journal()` keeps, newest last. `0` turns the journal off. */
   journal: number;
