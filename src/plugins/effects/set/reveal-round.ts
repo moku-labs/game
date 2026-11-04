@@ -54,7 +54,7 @@ const REVEAL_ROUND_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(REVEAL_ROUND_GLSL);
  * @example
  * ```ts
  * // A lens opens over the map: the window starts closed and grows to show the whole view.
- * spawn([Sprite({ texture: "map.ward" }), Transform(), RevealRound({ wobble: 0.04 })]);
+ * RevealRound({ wobble: 0.04 }).value.radius; // 0
  * view.tween(RevealRound, { radius: 1.2 }, { ms: 640 });
  * ```
  */

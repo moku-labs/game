@@ -10,8 +10,7 @@ import { defineFeature, Flash, Grade } from "@moku-labs/game";
 
 export const board = defineFeature("board", { filters: [Flash, Grade] });
 
-// A merged piece flashes gold, then a motion fades it out.
-spawn([Sprite({ texture: "board.piece" }), Transform(), Flash({ amount: 1, color: 0xffd700 })]);
+// A merged piece carries Flash({ amount: 1, color: 0xffd700 }) beside its Sprite, then a motion fades it out.
 view.tween(Flash, { amount: 0 }, { ms: 160 });
 ```
 

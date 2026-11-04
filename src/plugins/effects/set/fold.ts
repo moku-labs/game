@@ -79,7 +79,7 @@ const FOLD_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(FOLD_GLSL);
  * @example
  * ```ts
  * // An order row flips about its horizontal axis to show its next order.
- * spawn([Sprite({ texture: "orders.row" }), Transform(), Fold({ axis: 1 })]);
+ * Fold({ axis: 1 }).value.axis; // 1
  * view.tween(Fold, { angle: Math.PI }, { ms: 320 });
  * ```
  */

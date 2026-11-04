@@ -58,7 +58,7 @@ const SHINE_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(SHINE_GLSL);
  * @example
  * ```ts
  * // A new reward glints once: the band sweeps across it in half a second.
- * spawn([Sprite({ texture: "shop.chest" }), Transform(), Shine()]);
+ * Shine().value.position; // -0.5
  * view.tween(Shine, { position: 1.5 }, { ms: 500 });
  * ```
  */
