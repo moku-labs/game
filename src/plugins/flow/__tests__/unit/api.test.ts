@@ -169,7 +169,8 @@ describe("createFlowApi", () => {
 
       expect(flow.gate.state()).toEqual({ open: true, allowed: ["again"], narrowed: false });
       expect(flow.gate.answer({ intent: "again" })).toBe(true);
-      await expect(answered).resolves.toEqual({ intent: "again" });
+      // F137: the awaited answer carries the moment of the clock it arrived at (`now` is 1000 here).
+      await expect(answered).resolves.toEqual({ intent: "again", at: 1000 });
     });
   });
 });

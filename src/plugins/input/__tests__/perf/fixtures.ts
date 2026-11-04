@@ -20,6 +20,9 @@ const CALLS = 100_000;
 /** The pressed view. */
 const BUTTON = 7;
 
+/** The last answer `plainTap` built: kept here, so V8 cannot drop the object the window measures. */
+let kept: Answer | undefined;
+
 /**
  * The heap bytes one call keeps: the call run until V8 optimized it, outside the window, then `alloc` over a window
  * of `CALLS`.
@@ -106,4 +109,28 @@ export function untappedCheck(): () => void {
   return () => {
     lostPress(ctx, "cancelled");
   };
+}
+
+/**
+ * The tap answer of a view whose `Tappable` does not ask for the press point, built with a point in hand: what
+ * `answerRelease` and `app.input.tap` build for every view that never opted in (F139). The answer is kept.
+ *
+ * @returns One call.
+ */
+export function plainTap(): () => void {
+  const value = Tappable({ intent: "found", payload: { id: "lamp" } }).value;
+  const point = { x: 10, y: 60 };
+
+  return () => {
+    kept = tapAnswer(value, point);
+  };
+}
+
+/**
+ * The answer `plainTap` built last, so a test sees the window built the answer it means.
+ *
+ * @returns The answer, or `undefined` before the first call.
+ */
+export function lastAnswer(): Answer | undefined {
+  return kept;
 }

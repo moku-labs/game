@@ -26,6 +26,12 @@ export const bothAnswers = (
   <button key="b" intent="claim" local={{ tab: "audio" }} />
 );
 
+/** A button that asks for its press point but writes local state: there is no answer to carry it. */
+export const pointWithLocal = (
+  // @ts-expect-error — `point` goes with `intent` only; a `local` button answers nothing.
+  <button key="p" local={{ tab: "audio" }} point />
+);
+
 /** An image with no texture key. */
 // @ts-expect-error — `texture` is required on an image.
 export const noTexture = <image key="c" />;
