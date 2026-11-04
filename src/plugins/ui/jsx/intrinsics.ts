@@ -36,6 +36,8 @@ export type ButtonPayload = Json & Brand<"ButtonPayload">;
 export type ButtonLocal = Record<string, unknown> & Brand<"ButtonLocal">;
 /** Makes a button the control the Escape key taps while its root is the top one. */
 export type ButtonEscape = boolean & Brand<"ButtonEscape">;
+/** Asks a button that answers an intent to add the press point to its payload. */
+export type ButtonPoint = boolean & Brand<"ButtonPoint">;
 /** What a text draws: a plain string, or a message of the game's string table. */
 export type TextContent = (string | Message) & Brand<"TextContent">;
 /** The text style key, or a layout style when the built-in `body` is meant. */
@@ -191,18 +193,24 @@ export type HostProps = CommonProperties & { hosts?: HostedProjections };
 /**
  * What a button takes. `intent` and `local` exclude each other: a button either answers the gate
  * or writes local state. `escape` marks the control the Escape key taps: the close button or the
- * backdrop of a dismissable popup.
+ * backdrop of a dismissable popup. `point`, only beside `intent`, adds the press point of a finger
+ * tap to the payload under `point`, in the button's own layout units: (0, 0) its top-left corner,
+ * (width, height) its bottom-right, whatever its offset, scale or parent. A keyboard tap (Enter on
+ * the focused button, Escape) has no press point and answers the payload as it is.
  *
  * @example
  * ```ts
  * const props: ButtonTagProps = { intent: "claim", payload: { orderId: "o1" } };
  * // The close button of the settings popup: Escape taps it while the popup is on top.
  * const close: ButtonTagProps = { intent: "close", escape: true };
+ * // The gift sphere of 400 x 200, `<button intent="kitTap" point />`: a finger 10 in from its
+ * // left edge and 150 down answers { intent: "kitTap", payload: { point: { x: 10, y: 150 } } }.
+ * const sphere: ButtonTagProps = { intent: "kitTap", point: true };
  * ```
  */
 export type ButtonTagProps = CommonProperties & { escape?: ButtonEscape } & (
-    | { intent?: ButtonIntent; payload?: ButtonPayload; local?: never }
-    | { intent?: never; payload?: never; local?: ButtonLocal }
+    | { intent?: ButtonIntent; payload?: ButtonPayload; point?: ButtonPoint; local?: never }
+    | { intent?: never; payload?: never; point?: never; local?: ButtonLocal }
   );
 
 /**

@@ -6,6 +6,7 @@
  * machine in a test and a time scale or a pause applies to it.
  */
 import { Transform } from "../renderer/components";
+import { localPoseOf } from "../renderer/sync/pose";
 import type { Time } from "../time/types";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
@@ -19,6 +20,7 @@ import {
   type ScrollableValue,
   Swipeable,
   Tappable,
+  type TapValue,
   Traceable
 } from "./components";
 import { abortDrag, grab, letGoOfLeavers, moveHeld, moveHover, release } from "./drag";
@@ -251,6 +253,34 @@ function onMove(ctx: InputCtx, point: Point): void {
 }
 
 /**
+ * The press-down point in the view's own units, the units of its hit box, brought through its
+ * `Transform` and `Parent` chain as the trace hit test does. Only a `Tappable` with `point: true`
+ * asks for it, so a view without the flag allocates nothing here.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The tapped view.
+ * @param tappable - Its `Tappable` value.
+ * @returns The local press point, or `undefined` for a view that does not ask for it.
+ */
+function pressPointOf(
+  ctx: InputCtx,
+  entity: Entity,
+  tappable: Readonly<TapValue>
+): Point | undefined {
+  if (tappable.point !== true) return undefined;
+
+  const { start } = ctx.state;
+
+  return localPoseOf(ctx.deps.world.ecs, entity, {
+    x: start.x,
+    y: start.y,
+    rotation: 0,
+    scale: 1,
+    pivot: { x: 0, y: 0 }
+  });
+}
+
+/**
  * Answers the release of a press: a tap when the finger stayed inside the slop, a swipe when it
  * went far enough and fast enough. Neither: nothing happened, and nothing has to be undone. Every
  * release inside the slop runs the `onTap` listeners first, so a view that carries only
@@ -273,7 +303,7 @@ function answerRelease(ctx: InputCtx, entity: Entity, point: Point): void {
     const tappable = ecs.get(entity, Tappable);
 
     if (tappable !== undefined) {
-      submit(ctx, entity, tapAnswer(tappable));
+      submit(ctx, entity, tapAnswer(tappable, pressPointOf(ctx, entity, tappable)));
 
       return;
     }

@@ -1,12 +1,18 @@
 /**
- * @file `nativeConfigOf`, `storeProblems` and `runNative`: a game's `config.ts` as the config of
- * `@moku-labs/native`, the checks of a store build, and the four native verbs over a recording fake
- * of that package.
+ * @file `nativeConfigOf`, `storeProblems`, `runNative`, `appleKeyOf` and `uploadArgvOf`: a game's
+ * `config.ts` as the config of `@moku-labs/native`, the checks of a store build, the four native
+ * verbs over a recording fake of that package, and the App Store Connect key of a build and an upload.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../../../src/app/config";
 import type { NativeConfig, NativeStore, StoreInput } from "../../../src/app/native";
-import { nativeConfigOf, runNative, storeProblems } from "../../../src/app/native";
+import {
+  appleKeyOf,
+  nativeConfigOf,
+  runNative,
+  storeProblems,
+  uploadArgvOf
+} from "../../../src/app/native";
 import type { GameConfig, ResolvedGameConfig } from "../../../src/app/types";
 
 /** The options a fake cli verb was called with. */
@@ -18,10 +24,19 @@ type VerbCall = {
   dev?: boolean | undefined;
 };
 
+/** The variables of an App Store Connect key in `process.env`, as a verb saw them. */
+type KeyEnv = {
+  APPLE_API_KEY: string | undefined;
+  APPLE_API_ISSUER: string | undefined;
+  APPLE_API_KEY_PATH: string | undefined;
+};
+
 /** What the fake native app saw: the configs it was made with, and every call in order. */
 type Recorder = {
   configs: NativeConfig[];
   calls: (readonly [string] | readonly [string, VerbCall])[];
+  /** The key variables of `process.env` at every verb call, when Tauri would spawn. */
+  envs: KeyEnv[];
   fail: boolean;
   /** The call of a verb that throws, counted from 1; 0 for none. */
   failAfter: number;
@@ -29,16 +44,28 @@ type Recorder = {
 };
 
 const { recorder, fakeNative } = vi.hoisted(() => {
-  const recorder: Recorder = { configs: [], calls: [], fail: false, failAfter: 0, doctor: true };
+  const recorder: Recorder = {
+    configs: [],
+    calls: [],
+    envs: [],
+    fail: false,
+    failAfter: 0,
+    doctor: true
+  };
 
   /**
-   * Records a verb call, then throws when the test asks it to fail.
+   * Records a verb call and the key variables of the env, then throws when the test asks it to fail.
    *
    * @param name - The verb name.
    * @param options - The options it was called with.
    */
   function verb(name: string, options: VerbCall): void {
     recorder.calls.push([name, options]);
+    recorder.envs.push({
+      APPLE_API_KEY: process.env.APPLE_API_KEY,
+      APPLE_API_ISSUER: process.env.APPLE_API_ISSUER,
+      APPLE_API_KEY_PATH: process.env.APPLE_API_KEY_PATH
+    });
 
     const count = recorder.calls.filter(call => call[0] === name).length;
 
@@ -111,6 +138,48 @@ const shippable: NonNullable<GameConfig["native"]> = {
   identifier: "com.acme.t",
   signing: { android, apple: { teamId: "ABCDE12345" } }
 };
+
+/** The Apple block of a game that names its App Store Connect key, the `.p8` from the home folder. */
+const keyedApple = {
+  teamId: "ABCDE12345",
+  apiKeyId: "CFG0KEY123",
+  apiIssuer: "cfg-issuer-uuid",
+  apiKeyPath: "~/keys/AuthKey.p8"
+};
+
+/** A shippable native section with the App Store Connect key in `config.ts`. */
+const keyed: NonNullable<GameConfig["native"]> = { ...shippable, signing: { apple: keyedApple } };
+
+/** The key variables of `process.env` an iOS build of `keyed` runs with. */
+const keyedEnv: KeyEnv = {
+  APPLE_API_KEY: "CFG0KEY123",
+  APPLE_API_ISSUER: "cfg-issuer-uuid",
+  APPLE_API_KEY_PATH: "/home/a/keys/AuthKey.p8"
+};
+
+/** The three env vars of a key the person set, the `.p8` at a path of their own. */
+const envKey = {
+  APPLE_API_KEY: "ENV0KEY123",
+  APPLE_API_ISSUER: "env-issuer-uuid",
+  APPLE_API_KEY_PATH: "/secret/AuthKey_ENV.p8"
+};
+
+/** The line of an `--upload` with no key in `config.ts` and not all three env vars. */
+const NO_UPLOAD_KEY =
+  "--upload needs an App Store Connect key. Add apiKeyId, apiIssuer and apiKeyPath to native.signing.apple, or set APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_KEY_PATH.";
+
+/**
+ * The key variables of `process.env` now.
+ *
+ * @returns The three variables, `undefined` for an unset one.
+ */
+function keyEnvNow(): KeyEnv {
+  return {
+    APPLE_API_KEY: process.env.APPLE_API_KEY,
+    APPLE_API_ISSUER: process.env.APPLE_API_ISSUER,
+    APPLE_API_KEY_PATH: process.env.APPLE_API_KEY_PATH
+  };
+}
 
 /** A shippable native section with the test app, named and drawn by the game. */
 const withTestApp: NonNullable<GameConfig["native"]> = {
@@ -194,9 +263,21 @@ function storeInput(
   };
 }
 
+/**
+ * The store problems of an iOS build of a game with no key in `config.ts`.
+ *
+ * @param store - The seams of the build.
+ * @returns The lines.
+ */
+function iosProblems(store: NativeStore): readonly string[] {
+  return storeProblems(storeInput({ target: "ios", store }));
+}
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   recorder.configs.length = 0;
   recorder.calls.length = 0;
+  recorder.envs.length = 0;
   recorder.fail = false;
   recorder.failAfter = 0;
   recorder.doctor = true;
@@ -551,6 +632,39 @@ describe("storeProblems", () => {
     ).toEqual(["No native.signing.apple in config.ts. Add teamId."]);
   });
 
+  // Bug: a .p8 that is not there fails the signing step after a whole compile.
+  it("iOS with the key in config.ts names a .p8 that is not a file, by its resolved path", () => {
+    const seen: string[] = [];
+    const store = storeOf({
+      exists: file => {
+        seen.push(file);
+
+        return false;
+      }
+    });
+
+    expect(storeProblems(storeInput({ target: "ios", store }, keyed))).toEqual([
+      "The App Store Connect key /home/a/keys/AuthKey.p8 is not a file. Fix native.signing.apple.apiKeyPath."
+    ]);
+    expect(seen).toEqual(["/home/a/keys/AuthKey.p8"]);
+    expect(
+      storeProblems(storeInput({ target: "ios", store: storeOf({ upload: true, env: {} }) }, keyed))
+    ).toEqual([]);
+  });
+
+  // Bug: an upload fails after a long build for a key that is nowhere, or a line prints the key.
+  it("--upload with no key anywhere names both ways; an env key whose file is not there names the variable only", () => {
+    const gone = iosProblems(storeOf({ upload: true, env: envKey, exists: () => false }));
+
+    expect(iosProblems(storeOf({ upload: true, env: {} }))).toEqual([NO_UPLOAD_KEY]);
+    expect(
+      iosProblems(storeOf({ upload: true, env: { ...envKey, APPLE_API_ISSUER: "" } }))
+    ).toEqual([NO_UPLOAD_KEY]);
+    expect(iosProblems(storeOf({ env: {}, exists: () => false }))).toEqual([]);
+    expect(gone).toEqual(["The file of APPLE_API_KEY_PATH is not a file."]);
+    expect(iosProblems(storeOf({ upload: true, env: envKey }))).toEqual([]);
+  });
+
   // Bug: a store build ships native's 0.1.0, or a version a store refuses.
   it("package.json with no version, or one that is not x.y.z, is named with its value", () => {
     expect(storeProblems(storeInput({ version: undefined }))).toEqual([
@@ -775,6 +889,51 @@ describe("runNative", () => {
     expect(recorder.calls).toContainEqual(["build", { target: "ios", simulator: undefined }]);
   });
 
+  // Bug: tauri signs with no key or the person's, or the config key stays in the env after the run.
+  it("an iOS build or dev with the key in config.ts runs with it in process.env, and puts the earlier env back, also when the build throws", async () => {
+    const settings = settingsOf({ native: keyed });
+    const person = {
+      APPLE_API_KEY: "PERSON0KEY",
+      APPLE_API_ISSUER: undefined,
+      APPLE_API_KEY_PATH: undefined
+    };
+
+    vi.stubEnv("APPLE_API_KEY", "PERSON0KEY");
+    vi.stubEnv("APPLE_API_ISSUER", undefined);
+    vi.stubEnv("APPLE_API_KEY_PATH", undefined);
+
+    expect(await runNative("build", settings, where, { target: "ios" })).toBe(true);
+    expect(keyEnvNow()).toEqual(person);
+
+    recorder.fail = true;
+
+    expect(await runNative("build", settings, where, { target: "ios" })).toBe(false);
+    expect(await runNative("dev", settings, where, { target: "ios" })).toBe(false);
+    expect(recorder.envs).toEqual([keyedEnv, keyedEnv, keyedEnv]);
+    expect(keyEnvNow()).toEqual(person);
+    expect(Object.hasOwn(process.env, "APPLE_API_ISSUER")).toBe(false);
+  });
+
+  // Bug: a build without the key in config.ts drops the three variables the person set for Tauri.
+  it("without the key in config.ts, on another target or another verb, the env stays as it is", async () => {
+    const person = {
+      APPLE_API_KEY: "PERSON0KEY",
+      APPLE_API_ISSUER: "person-issuer",
+      APPLE_API_KEY_PATH: undefined
+    };
+
+    vi.stubEnv("APPLE_API_KEY", "PERSON0KEY");
+    vi.stubEnv("APPLE_API_ISSUER", "person-issuer");
+    vi.stubEnv("APPLE_API_KEY_PATH", undefined);
+
+    await runNative("build", settingsOf({ native: shippable }), where, { target: "ios" });
+    await runNative("build", settingsOf({ native: keyed }), where, { target: "android" });
+    await runNative("clean", settingsOf({ native: keyed }), where, { target: "ios" });
+
+    expect(recorder.envs).toEqual([person, person, person]);
+    expect(keyEnvNow()).toEqual(person);
+  });
+
   it("dev runs the native shell on the target", async () => {
     expect(await runNative("dev", settingsOf(), where, { target: "macos" })).toBe(true);
     expect(recorder.calls).toEqual([["start"], ["dev", { target: "macos" }], ["stop"]]);
@@ -918,5 +1077,47 @@ describe("runNative", () => {
       vi.doMock("@moku-labs/native", () => fakeNative());
       vi.resetModules();
     }
+  });
+});
+
+describe("appleKeyOf", () => {
+  // Bug: tauri or altool reads a relative .p8 against a folder of its own and finds no key.
+  it("makes the .p8 path absolute: ~/ from the home folder, a relative one from the game; none without the fields", () => {
+    const keyPathOf = (apiKeyPath: string): string | undefined =>
+      appleKeyOf({ ...shippable, signing: { apple: { ...keyedApple, apiKeyPath } } }, where)
+        ?.keyPath;
+
+    expect(keyPathOf("~/k.p8")).toBe("/home/a/k.p8");
+    expect(keyPathOf("keys/k.p8")).toBe("/g/keys/k.p8");
+    expect(keyPathOf("/keys/k.p8")).toBe("/keys/k.p8");
+    expect(appleKeyOf(keyed, where)).toEqual({
+      keyId: "CFG0KEY123",
+      issuer: "cfg-issuer-uuid",
+      keyPath: "/home/a/keys/AuthKey.p8"
+    });
+    expect(appleKeyOf(shippable, where)).toBeUndefined();
+  });
+});
+
+describe("uploadArgvOf", () => {
+  // Bug: altool gets the .ipa split at a space of the app name, or a flag it does not parse.
+  it("hands altool the .ipa as one word and the key by its three flags", () => {
+    const key = { keyId: "CFG0KEY123", issuer: "cfg-issuer-uuid", keyPath: "/home/a/k.p8" };
+
+    expect(uploadArgvOf("/g/dist-native/ios/A Memory Missing.ipa", key)).toEqual([
+      "xcrun",
+      "altool",
+      "--upload-app",
+      "-f",
+      "/g/dist-native/ios/A Memory Missing.ipa",
+      "-t",
+      "ios",
+      "--api-key",
+      "CFG0KEY123",
+      "--api-issuer",
+      "cfg-issuer-uuid",
+      "--p8-file-path",
+      "/home/a/k.p8"
+    ]);
   });
 });

@@ -318,7 +318,7 @@ export type {
   Hint,
   NodeFx
 } from "./fx/types";
-export type { Allow, Answer, GateApi } from "./gate/types";
+export type { Allow, Answer, Answered, GateApi } from "./gate/types";
 export type { InboxApi, WorldEvent } from "./inbox/types";
 export type {
   AnyFlow,

@@ -114,6 +114,45 @@ describe("the frame step", () => {
     expect(pointerOf(mock)).toMatchObject({ down: false, justReleased: true });
   });
 
+  // Bug caught: the finger's point is answered in reference units (not the view's own), the release
+  // point is taken for the press point, or the Parent chain is skipped (F139).
+  it("answers the press point in the view's own units on a moved, scaled view that asks for it", () => {
+    const mock = createMockInput();
+    const slot = mock.spawn([Transform({ x: 100, y: 40 })]);
+    // Root pose of the sphere: (120, 40), scale 2. The press at (140, 60) lies (10, 10) into it.
+    const sphere = view(mock, [
+      Tappable({ intent: "kitTap", payload: { kit: "k1" }, point: true }),
+      Transform({ x: 20, y: 0, scale: 2 }),
+      Parent({ entity: slot })
+    ]);
+
+    record(mock.state, down(140, 60));
+    mock.frame();
+    record(mock.state, up(146, 60));
+    mock.frame();
+
+    expect(mock.has(sphere, Pressed)).toBe(false);
+    expect(mock.answers).toEqual([
+      { intent: "kitTap", payload: { kit: "k1", point: { x: 10, y: 10 } } }
+    ]);
+  });
+
+  // Bug caught: a view without the flag gets a point in its payload from the finger.
+  it("answers the payload unchanged on a moved view that does not ask for the point", () => {
+    const mock = createMockInput();
+
+    view(mock, [
+      Tappable({ intent: "found", payload: { id: "o1" } }),
+      Transform({ x: 20, y: 0, scale: 2 })
+    ]);
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, up(50, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "found", payload: { id: "o1" } }]);
+  });
+
   it("clears justPressed and justReleased after one frame", () => {
     const mock = createMockInput();
 

@@ -695,6 +695,53 @@ describe("run with answers", () => {
   });
 });
 
+// ─── run: the moment of the answer (F137) ─────────────────────
+
+describe("the moment of an awaited answer", () => {
+  // Bug: `at` read when the gate opens (or the node's `now`): a node computes `until` from a
+  // moment 5 s stale and its closing animation is over before it is shown.
+  it("stamps the clock moment the answer arrived, not the moment the gate opened", async () => {
+    const { api, ctx, gateStub } = setup();
+    const now = vi.mocked(ctx.deps.clock.now);
+
+    now.mockReturnValue(60_000);
+    const pending = api.run({ kind: "popup", answers: ["again"] }, signal());
+    await tick();
+    now.mockReturnValue(65_000);
+    gateStub.reply({ intent: "again" });
+
+    await expect(pending).resolves.toEqual({ intent: "again", at: 65_000 });
+  });
+
+  // Bug: only the live branch stamps `at`: a replayed route (walk, headless) hands the node an
+  // answer without a moment, so the same route computes another `until` in fast mode.
+  it("stamps the answer in fast mode too", async () => {
+    const { api, ctx, gateStub } = setup();
+
+    vi.mocked(ctx.deps.clock.now).mockReturnValue(4200);
+    api.setMode("fast");
+    const pending = api.run({ kind: "popup", answers: ["again"] }, signal());
+    await tick();
+    gateStub.reply({ intent: "again", payload: { slot: 2 } });
+
+    await expect(pending).resolves.toEqual({ intent: "again", payload: { slot: 2 }, at: 4200 });
+  });
+
+  // Bug: the answer is rebuilt field by field (`payload: answer.payload`): a payload-less answer
+  // gets `payload: undefined`, which is no Json and breaks exact optional reads and the journal.
+  it("keeps a payload-less answer without a payload key", async () => {
+    const { api, ctx, gateStub } = setup();
+
+    vi.mocked(ctx.deps.clock.now).mockReturnValue(10);
+    const pending = api.run({ kind: "popup", answers: ["home"] }, signal());
+    await tick();
+    gateStub.reply({ intent: "home" });
+
+    // `toStrictEqual` tells `payload: undefined` from an absent key; `toEqual` does not.
+    await expect(pending).resolves.toStrictEqual({ intent: "home", at: 10 });
+  });
+});
+
 // ─── run: the signal of a popup handler ───────────────────────
 
 describe("the signal of a handler with answers", () => {

@@ -19,6 +19,26 @@ import { component, resource, tag } from "../world/ecs/define";
 export type IntentValue = { intent: string; payload: Json };
 
 /**
+ * What a `Tappable` carries: an intent and its payload, and `point` to ask for the press point.
+ * With `point: true` a finger tap answers `{ intent, payload: { ...payload, point: { x, y } } }`,
+ * the press-down point in the view's own units, the units of its hit box: (0, 0) the top-left
+ * corner of a ui button, (width, height) its bottom-right. Absent by default, so a view without it
+ * is stored and serialised exactly as before the point existed, and its tap answers the payload as
+ * it is.
+ *
+ * @example
+ * ```ts
+ * const value: TapValue = { intent: "found", payload: { id: "lamp" } };
+ * // A gift sphere that answers where on it the finger landed.
+ * const sphere: TapValue = { intent: "kitTap", payload: {}, point: true };
+ * ```
+ */
+export type TapValue = IntentValue & {
+  /** `true` asks for the press point in the answer; absent (the default) answers the payload as it is. */
+  point?: true;
+};
+
+/**
  * A view that can be carried. It names no intent: the drop target does. `carry` lists the
  * projection keys of views of the same projection that ride along on top of it, such as the cards
  * that lie on a solitaire card. `aim` is a point of the view in its own units, the units of its
@@ -93,6 +113,20 @@ function intentDefaults(): IntentValue {
 }
 
 /**
+ * Fresh defaults for `Tappable`: an intent and a payload, and no `point` key, so a view that does
+ * not ask for the press point stores and serialises as before.
+ *
+ * @returns An empty intent and an empty payload.
+ * @example
+ * ```ts
+ * tapDefaults(); // { intent: "", payload: {} }
+ * ```
+ */
+function tapDefaults(): TapValue {
+  return { intent: "", payload: {} };
+}
+
+/**
  * Fresh defaults for the one component that carries a payload without an intent.
  *
  * @returns An empty payload and nothing carried along.
@@ -115,9 +149,10 @@ const pointerDefaults: PointerValue = {
 };
 
 /**
- * A tap on this view answers `{ intent, payload }`.
+ * A tap on this view answers `{ intent, payload }`. With `point: true` a finger tap adds the
+ * press point, in the view's own units, to the payload under `point`.
  */
-export const Tappable = /*#__PURE__*/ component("Tappable", intentDefaults());
+export const Tappable = /*#__PURE__*/ component("Tappable", tapDefaults());
 
 /**
  * A long press on this view answers `{ intent, payload }`.
