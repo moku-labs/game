@@ -1796,7 +1796,7 @@ export type OverlayState = {
   active: ActiveRange | undefined;
   /** The range object, made once and reused. */
   range: ActiveRange | undefined;
-  /** Top objects of the HUD parts that take no tap, and the HUD layer container while an overlay holds it under. */
+  /** Top objects of the HUD parts that take no tap; a HUD layer held under a veil is skipped by the hit test through `held`. */
   offTops: Set<PixiContainer>;
   /** The HUD layer container attached to `heldBy`; `undefined` while it draws in its own place, above the overlays. */
   held: PixiContainer | undefined;
