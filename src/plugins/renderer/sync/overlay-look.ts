@@ -6,7 +6,7 @@
 import type { Entity } from "../../world/types";
 import { HudPart } from "../components";
 import type { DemandReason } from "../demand/types";
-import type { PixiContainer, PixiModule, PixiRenderLayer, PixiSprite } from "../types";
+import type { PixiModule, PixiRenderLayer, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
 import { heldWaiting } from "./build";
 import type { OverlayRecord, SyncCtx } from "./types";
@@ -351,18 +351,39 @@ function targetOf(order: readonly OverlayRecord[], key: string): number {
 }
 
 /**
- * Tells whether two sets hold the same nodes.
+ * Makes the tap set hold the faded tops of this frame, the first `count` of `offList`, only when they differ from it:
+ * the set is built aside and swapped in, so a frame where nothing changed clears nothing (V8 gives a set a new table at
+ * every `clear()`, and the step runs every frame).
  *
- * @param left - One set.
- * @param right - The other.
- * @returns True when they are equal.
+ * @param sctx - Domain context of the sync module.
+ * @param count - How many tops `offList` holds this frame.
  */
-function sameSet(left: ReadonlySet<PixiContainer>, right: ReadonlySet<PixiContainer>): boolean {
-  if (left.size !== right.size) return false;
+function keepOff(sctx: SyncCtx, count: number): void {
+  const overlay = sctx.ctx.state.sync.overlay;
+  const { offList } = overlay;
 
-  for (const node of left) if (!right.has(node)) return false;
+  offList.length = count;
 
-  return true;
+  if (count === overlay.offTops.size) {
+    let same = true;
+
+    for (const top of offList) {
+      if (!overlay.offTops.has(top)) {
+        same = false;
+        break;
+      }
+    }
+
+    if (same) return;
+  }
+
+  const next = overlay.nextOff;
+
+  if (next.size > 0) next.clear();
+  for (const top of offList) next.add(top);
+
+  overlay.nextOff = overlay.offTops;
+  overlay.offTops = next;
 }
 
 /**
@@ -405,8 +426,9 @@ export function stepParts(sctx: SyncCtx): void {
   const ecs = sctx.ctx.deps.world.ecs;
   const projection = sctx.ctx.deps.world.projection;
 
-  // Only when it holds something: V8 gives an empty set a new table at every `clear()`, and the step runs every frame.
-  if (overlay.nextOff.size > 0) overlay.nextOff.clear();
+  // per frame: the faded tops written in place into the reused list, the tap set touched only when they change.
+  const { offList } = overlay;
+  let count = 0;
 
   for (const entity of overlay.parts) {
     const view = state.views.get(entity);
@@ -430,14 +452,12 @@ export function stepParts(sctx: SyncCtx): void {
     applyHud(sctx, entity, view, factor);
 
     if (factor < 1 || targetOf(overlay.order, key) < 1) {
-      overlay.nextOff.add(view.wrapper ?? view.object);
+      const top = view.wrapper ?? view.object;
+
+      if (offList[count] !== top) offList[count] = top;
+      count += 1;
     }
   }
 
-  if (!sameSet(overlay.offTops, overlay.nextOff)) {
-    const next = overlay.nextOff;
-
-    overlay.nextOff = overlay.offTops;
-    overlay.offTops = next;
-  }
+  keepOff(sctx, count);
 }

@@ -71,6 +71,7 @@ function createOverlayState(): OverlayState {
     wantSet: emptySet(),
     flipped: emptySet(),
     nextOff: emptySet(),
+    offList: [],
     step: { fresh: false, entriesChanged: false, othersChanged: false, wholes: emptySet() },
     left: false,
     bounds: undefined

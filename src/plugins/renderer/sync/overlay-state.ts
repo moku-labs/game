@@ -50,6 +50,7 @@ export function forgetOverlays(state: SyncState): void {
   }
 
   overlay.offTops.clear();
+  overlay.offList.length = 0;
   overlay.order.length = 0;
 }
 

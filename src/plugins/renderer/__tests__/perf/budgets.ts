@@ -59,6 +59,11 @@ export const BUDGET = {
   // set is refilled only when the entries change, and the hold compares the holder, the HUD container and Pixi's
   // `parentRenderLayer`; nothing is attached, detached or added to a set while it stands.
   hudUnderStill: 0,
+  // F147 follow-up: the overlay step of a resting shop with `hud: ["energy"]` that fades the gems part. Before: 120 B a
+  // step, the tap set of the faded parts cleared and filled again every frame (V8 gives a set a new table at every
+  // `clear()`). Now 0 B: the faded tops are listed in place and compared with the tap set; it is built again only when
+  // they change.
+  hudPartsFaded: 0,
   // A26 heap profile: before 22 400 B (a new SDF shader made at every layout of a text and dropped by Pixi: its bind
   // groups, its resource accessors, its uniform group); then 2 831 B with the text's own shader kept. S: the text gets
   // no shader at all; measured 2 767 B, all of it Pixi laying the label out again (its graphics context's

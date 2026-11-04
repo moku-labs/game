@@ -1814,6 +1814,8 @@ export type OverlayState = {
   flipped: Set<Entity>;
   /** Scratch of the tap set. */
   nextOff: Set<PixiContainer>;
+  /** Scratch: the tops of the parts faded this frame, written in place; the tap set is built from it on a change. */
+  offList: PixiContainer[];
   /** Scratch of the freeze rules: what changed for the range this frame. */
   step: RangeStep;
   /** A view left its place in the held range since the last step (it moved, or its view went). */

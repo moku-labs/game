@@ -162,6 +162,8 @@ A debug or dev build draws its overdraw with `app.renderer.sync.debug.overdraw(t
 
 The engine's own browser leg proves it on the real GPU: `bun tests/visual/overdraw.visual.ts` stacks three white sprites with three tints from the left edge of a 480 × 640 page and reads the canvas from Chrome's screenshot, on WebGPU and on WebGL. The strip under three sprites must be three times as bright as the strip under one, flat grey whatever the tints (`[[45,45,45],[30,30,30],[15,15,15]]`), and the tints must come back when the map is off. It exits 1 when a run fails, like `bun tests/visual/kept-pictures.visual.ts`.
 
+`bun tests/visual/hud-under.visual.ts` proves `Overlay({ hud: "under" })` the same way, on WebGPU and on WebGL: under an overlay with `dim: 0.82, dimColor: 0x1e161a` a white HUD square reads `rgb(71, 64, 67)`, the white veiled like the scene beside it (`c·(1−a) + d·a`), the overlay's panel keeps its own colour, and with `hud: "all"` the square is white again. It exits 1 when a run fails.
+
 The test of the browser leg itself opens a real Chrome only on request: `MOKU_VISUAL_BROWSER=1 bunx vitest run tests/unit/visual/browser.test.ts`. It also proves the WebP is lossless: random opaque pixels come back byte for byte. Without the variable it skips with its reason, so `bun run test` opens no browser.
 
 
