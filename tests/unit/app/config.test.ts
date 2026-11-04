@@ -183,6 +183,38 @@ describe("resolveConfig", () => {
     }
   });
 
+  // Bug: a key named in part reaches tauri, which signs with nothing and fails after the compile.
+  it("refuses one or two of the App Store Connect key fields, naming the missing ones; takes none or all three", () => {
+    const key = { apiKeyId: "ABC123DEF4", apiIssuer: "issuer-uuid", apiKeyPath: "~/k.p8" };
+    const refusals: [object, string][] = [
+      [{ apiKeyId: key.apiKeyId }, "has apiKeyId but no apiIssuer, apiKeyPath."],
+      [{ apiIssuer: key.apiIssuer }, "has apiIssuer but no apiKeyId, apiKeyPath."],
+      [{ apiKeyPath: key.apiKeyPath }, "has apiKeyPath but no apiKeyId, apiIssuer."],
+      [
+        { apiKeyId: key.apiKeyId, apiKeyPath: key.apiKeyPath },
+        "has apiKeyId, apiKeyPath but no apiIssuer."
+      ],
+      [{ ...key, apiIssuer: "" }, "has apiKeyId, apiKeyPath but no apiIssuer."],
+      [{ apiKeyId: "" }, "has no apiKeyId, apiIssuer, apiKeyPath."]
+    ];
+
+    for (const [part, message] of refusals) {
+      expect(() =>
+        resolveConfig(nativeWith({ signing: { apple: { teamId: "ABCDE12345", ...part } } }))
+      ).toThrow(
+        new Error(
+          `[game] config.native.signing.apple ${message}\n  Name all three of the App Store Connect key, or none.`
+        )
+      );
+    }
+
+    for (const apple of [{ teamId: "ABCDE12345" }, { teamId: "ABCDE12345", ...key }]) {
+      expect(resolveConfig(nativeWith({ signing: { apple } })).native?.signing?.apple).toEqual(
+        apple
+      );
+    }
+  });
+
   // Bug: native fails later, or a number like 26.5 passes as text and lands as a bad plist value.
   it("refuses a minimumVersion that is not x.y or x.y.z", () => {
     for (const minimumVersion of ["26", "26.0.0.0.1", "v26.0", "26.0-beta", 26.5]) {

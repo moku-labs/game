@@ -350,7 +350,7 @@ const { app } = game.screen({ platform: fromSystem(system) }); // Back, pause, h
 | `targets` | `native.targets`, else the target of the command |
 | `projectDir`, `outDir` | `<game>/.moku/tauri`, `<game>/dist-native`. An iOS debug app: `<game>/.moku/tauri-debug`, and native delivers to `dist-native/ios-debug`. A test app: `<game>/.moku/tauri-dev`, `<game>/dist-native-dev`. Each extra project is a full Rust build of its own |
 | `signing.android` | `native.signing.android` with an absolute keystore path. A debug app leaves it out and keeps the SDK key. A plain `native build android` with a password variable unset leaves it out too and warns: an unsigned `.apk`, no failure after the compile |
-| `signing.apple` | `teamId` of `native.signing.apple`; on iOS `iosMinimumSystemVersion`, `native.ios.minimumVersion` or `"26.0"`; with `--store` on iOS `exportMethod: "app-store-connect"` |
+| `signing.apple` | `teamId` of `native.signing.apple`; on iOS `iosMinimumSystemVersion`, `native.ios.minimumVersion` or `"26.0"`; with `--store` on iOS `exportMethod: "app-store-connect"`. The App Store Connect key of `native.signing.apple` stays out of the native config: an iOS `build` or `dev` puts it into the env Tauri reads, `APPLE_API_KEY`, `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH` (absolute), and puts the earlier env back after |
 | `ios` | `infoPlist` and an absolute `privacyManifest` of `native.ios`, when set |
 
 ## Commands
@@ -363,6 +363,7 @@ moku-game <command> [options]
   native build <target> [--simulator]   build the native app (ios, macos, android)
   native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios
   native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev
+  native build ios --store --build-number <n> --upload  a store build, then the upload to App Store Connect
   native dev <target>                   run the native shell on the dev server
   native doctor | native clean          check or remove the native project
   keys [--check]                        write generated/assets.ts and generated/manifest.json
@@ -387,6 +388,7 @@ Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>
 | `--store` | `native build` | off | A store build for `ios` or `android`. See [Store builds](#store-builds) |
 | `--dev` | `native build` | off | With `--store`: the test app of `native.dev`. See [The test app](#the-test-app) |
 | `--build-number <n>` | `native build` | none | With `--store`, and required by it. An integer from 1 to 2100000000 |
+| `--upload` | `native build ios` | off | With `--store`: after a green build, the `.ipa` goes to App Store Connect. See [Upload to TestFlight](#upload-to-testflight) |
 | `--check` | `keys` | off | Fails when an output is out of date |
 | `--no-cache` | `pack` | off | A cold pack |
 | `--tests <file>` | `visual` | `<game>/tests/visual/index.ts` | The tests module, against the cwd |
@@ -465,7 +467,12 @@ native: {
       keystorePasswordEnv: "TIMBER_KEYSTORE_PASSWORD",
       keyAlias: "upload"
     },
-    apple: { teamId: "ABCDE12345" }
+    apple: {
+      teamId: "ABCDE12345",
+      apiKeyId: "ABC123DEF4",
+      apiIssuer: "69a6de7e-1234-47e3-e053-5b8c7c11a4d1",
+      apiKeyPath: "~/keys/AuthKey_ABC123DEF4.p8"
+    }
   },
   ios: {
     infoPlist: { ITSAppUsesNonExemptEncryption: false },
@@ -477,6 +484,7 @@ native: {
 ```bash
 moku-game native build android --store --build-number 12   # dist-native/android/*.aab
 moku-game native build ios --store --build-number 12       # dist-native/ios/*.ipa, app-store-connect
+moku-game native build ios --store --build-number 12 --upload  # the same, then to App Store Connect
 ```
 
 | Field | What |
@@ -485,18 +493,23 @@ moku-game native build ios --store --build-number 12       # dist-native/ios/*.i
 | `signing.android.keystorePasswordEnv` | The name of the env var with the keystore password |
 | `signing.android.keyPasswordEnv` | The name of the env var with the key password. The keystore's one by default |
 | `signing.android.keyAlias` | The alias of the key |
-| `signing.apple.teamId` | The Apple Developer team id. The keys stay in the env, and Tauri reads them |
+| `signing.apple.teamId` | The Apple Developer team id |
+| `signing.apple.apiKeyId` | The key id of the App Store Connect team key, such as `"ABC123DEF4"` |
+| `signing.apple.apiIssuer` | The issuer id of the team in App Store Connect, a UUID |
+| `signing.apple.apiKeyPath` | The `.p8` file of the key: absolute, `~/...` from the home folder, or relative to the game folder. Keep it outside the repo. The three key fields come all together or not at all |
 | `ios.minimumVersion` | The lowest iOS, `"26.0"` or `"26.0.1"`. Default `"26.0"`, on every iOS build |
 | `ios.infoPlist` | Keys merged into `Info.plist`: strings, booleans, arrays and dictionaries (`PlistValue`), nested as deep as a key needs. `page.orientation` wins a key it shares. A number or `null` is refused when the config is read |
 | `ios.privacyManifest` | The privacy manifest, relative to the game folder. The bundle holds it as `PrivacyInfo.xcprivacy` |
 
-Every field is optional, and a half-filled `signing` block is refused when the config is read. A game without them builds as before, except the iOS minimum.
+Every field is optional, and a half-filled `signing` block is refused when the config is read, an App Store Connect key named in part too: `[game] config.native.signing.apple has apiKeyId but no apiIssuer, apiKeyPath.` A game without them builds as before, except the iOS minimum.
 
-**Secrets.** `config.ts` lands in the page bundle, so it holds names, never a secret: an env var's name, a path, a team id. The password stays in the environment of the build, and no message ever prints its value.
+**Secrets.** `config.ts` lands in the page bundle, so it holds names, never a secret: an env var's name, a path, a team id, the ids of a key. The password stays in the environment of the build, the `.p8` in its file outside the repo, and no message ever prints a password, a key id, an issuer or the path of an env key.
+
+**The App Store Connect key.** `xcodebuild` on the command line does not see an Xcode account sign-in and fails with "No Accounts". An iOS build signs with a team key instead: `tauri ios build` adds `-allowProvisioningUpdates` and the key to `xcodebuild` when its env holds `APPLE_API_KEY` (the key id), `APPLE_API_ISSUER` (the issuer id) and `APPLE_API_KEY_PATH` (the `.p8`). With the three key fields in `native.signing.apple`, `native build ios` and `native dev ios` set these for the run, the path absolute, and put the earlier env back after. Without them the three variables a person sets reach Tauri as before; with both, `config.ts` wins.
 
 The version comes from `package.json`, the number from `--build-number`, one number for both stores. A build number is never kept in `config.ts` or on the machine. `--store` on Android makes an `.aab`; on iOS it exports for App Store Connect.
 
-`--store` is refused, before `config.ts` is read, outside `native build`, with `--debug`, `--editor` or `--simulator`, on a target other than `ios` or `android`, without `--build-number`, and with a number that is not an integer from 1 to 2100000000. `--build-number` without `--store` is refused too.
+`--store` is refused, before `config.ts` is read, outside `native build`, with `--debug`, `--editor` or `--simulator`, on a target other than `ios` or `android`, without `--build-number`, and with a number that is not an integer from 1 to 2100000000. `--build-number` and `--upload` without `--store` are refused too, and `--upload` on a target other than `ios`.
 
 Then, before anything compiles, every problem comes at once in one `[game] native --store: …` error, a line per problem:
 
@@ -506,12 +519,37 @@ Then, before anything compiles, every problem comes at once in one `[game] nativ
 | Android, the keystore is not a file | The resolved path |
 | Android, a password variable is unset or empty | The variable's name, never a value |
 | iOS, no `native.signing.apple` | The field |
+| iOS, the `.p8` of `signing.apple.apiKeyPath` is not a file | The resolved path |
+| `--upload`, no key in `config.ts` and not all three of `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH` set | The fields and the variables, by name |
+| `--upload` with the env key, the file of `APPLE_API_KEY_PATH` is not a file | The variable's name, never its value |
 | `package.json` has no `version`, or it is not `x.y.z` | The value |
 | The identifier ends in `.soak`, `.debug`, `.dev`, `.test` or `.staging`. With `--dev`: `native.dev.identifier` does not end in `.dev` | The identifier |
 
 `--store` on iOS warns, and goes on, when `ios.privacyManifest` is left out and when `infoPlist` has no `ITSAppUsesNonExemptEncryption`.
 
 A build without `--store` runs none of this. `moku-game native build ios` is a device build, with no store check and no store warning, and it asks for no App Store export.
+
+### Upload to TestFlight
+
+```bash
+moku-game native build ios --store --build-number 12 --upload
+moku-game native build ios --store --dev --build-number 13 --upload   # the test app, from dist-native-dev/ios
+```
+
+After a green build, `--upload` takes the newest `.ipa` of `dist-native/ios` (`dist-native-dev/ios` with `--dev`) and runs
+
+```bash
+xcrun altool --upload-app -f <ipa> -t ios --api-key <key id> --api-issuer <issuer id> --p8-file-path <.p8>
+```
+
+with the key of `config.ts`, else the three env vars. It prints `native: uploading <ipa> to App Store Connect.`, and on success `native: uploaded. TestFlight shows the build after Apple processes it.` It never prints a key id, an issuer or the path of the key.
+
+| Case | What happens |
+|---|---|
+| No key in `config.ts` and not all three env vars | A store problem: refused before anything compiles |
+| The build failed | No upload, exit 1 |
+| No `.ipa` in the folder | `[game] native: no .ipa in <folder> to upload.`, exit 1 |
+| altool exits with another code than 0 | `[game] native: the upload failed (altool exit <code>).`, exit 1. altool's own lines above it say why |
 
 ### The test app
 

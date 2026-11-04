@@ -3,8 +3,8 @@
  * `parseArgs`, then one of `dev`, `build`, `native <verb>`, `keys`, `pack`, `visual` or `help`.
  * Every seam of the process (the console, the environment, spawning, signals, the watcher, the
  * keys watch, the asset scanner, native, Bun's resolver, the visual test runner, the home folder,
- * the file check, the game's version) comes in as `deps`, so a test runs a command with stubs. It
- * returns the exit code and never exits itself. A plain function, on no API.
+ * the file check, the folder listing, the game's version) comes in as `deps`, so a test runs a
+ * command with stubs. It returns the exit code and never exits itself. A plain function, on no API.
  */
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -14,10 +14,14 @@ import { type BuildRun, type DebugLevel, keysArguments, packArguments, runBuild 
 import type { KeysWatcher } from "./keys";
 import {
   missingPasswords,
+  type NativeStore,
   type NativeVerb,
   type NativeVerbOptions,
   type NativeWhere,
-  testProjectsOf
+  testProjectsOf,
+  uploadArgvOf,
+  uploadFolderOf,
+  uploadKeyOf
 } from "./native";
 import { checkFiles, loadSettings, type ServeRun, serveChild, serveParent } from "./serve";
 import type { ResolvedGameConfig } from "./types";
@@ -67,6 +71,14 @@ export type Watcher = {
   close(): void;
 };
 
+/** A file of a folder, as `CliDeps.listFiles` lists it. */
+export type ListedFile = {
+  /** The file name, without the folder. */
+  name: string;
+  /** When the file was last written, ms since the epoch. */
+  mtimeMs: number;
+};
+
 /** The process seams of the command line. `src/cli.ts` gives the real ones, a test gives stubs. */
 export type CliDeps = {
   /** Where every line goes. */
@@ -111,15 +123,19 @@ export type CliDeps = {
   home: string;
   /** Tells whether a file is there; the keystore check of `--store`. */
   exists: (path: string) => boolean;
+  /** The files of a folder, none for a missing folder; `--upload` finds the newest `.ipa` with it. */
+  listFiles: (folder: string) => readonly ListedFile[];
   /** The `version` of `<root>/package.json`, `undefined` for a missing file or field. */
   readPackageVersion: (root: string) => string | undefined;
 };
 
 /**
- * What `--store`, `--build-number` and `--dev` read to: a store build with its number, the test app
- * with `dev`, or nothing.
+ * What `--store`, `--build-number`, `--dev` and `--upload` read to: a store build with its number,
+ * the test app with `dev`, the upload after the build with `upload`, or nothing.
  */
-type NativeStoreFlags = { store: true; buildNumber: number; dev?: true } | { store?: never };
+type NativeStoreFlags =
+  | { store: true; buildNumber: number; dev?: true; upload?: true }
+  | { store?: never };
 
 /** The commands of the line that run something; `help` only prints. */
 type Command = "dev" | "build" | "native" | "keys" | "pack" | "visual";
@@ -152,7 +168,8 @@ const ALL_OPTIONS = {
   editor: { type: "string" },
   store: { type: "boolean" },
   dev: { type: "boolean" },
-  "build-number": { type: "string" }
+  "build-number": { type: "string" },
+  upload: { type: "boolean" }
 } as const;
 
 /** The flags of `visual` that `parseVisualArgv` reads, in the runner's words. */
@@ -162,7 +179,7 @@ const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl|no-verify-frame
 const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIONS)[]>> = {
   dev: ["port", "packed"],
   build: ["out", "debug", "editor"],
-  native: ["simulator", "debug", "editor", "store", "dev", "build-number"],
+  native: ["simulator", "debug", "editor", "store", "dev", "build-number", "upload"],
   keys: ["check"],
   pack: ["no-cache"],
   visual: [
@@ -214,6 +231,7 @@ const USAGE = [
   "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
   "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
   "  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev",
+  "  native build ios --store --build-number <n> --upload  a store build, then the upload to App Store Connect",
   "  native dev <target>                   run the native shell on the dev server",
   "  native doctor | native clean          check or remove the native project",
   "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
@@ -535,8 +553,10 @@ function nativeVerbOf(word: string | undefined): NativeVerb {
  *
  * @param parsed - The command line.
  * @param deps - The process seams.
- * @returns `0` when the verb succeeded, `1` when native reported a failure.
- * @throws {Error} When the verb is missing or unknown, or native refuses the config or target.
+ * @returns `0` when the verb, and an `--upload` after it, succeeded, `1` when native reported a
+ *   failure.
+ * @throws {Error} When the verb is missing or unknown, native refuses the config or target, or the
+ *   upload fails.
  */
 async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
   const [word, target] = parsed.rest;
@@ -581,7 +601,72 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
     leaveKeyOut(settings, options, deps);
   }
 
-  return (await deps.native(verb, settings, where, options)) ? 0 : 1;
+  if (!(await deps.native(verb, settings, where, options))) return 1;
+
+  // A failed build never reaches the upload.
+  return options.store?.upload === true ? uploadIpa(settings, where, options.store, deps) : 0;
+}
+
+/**
+ * Picks the newest `.ipa` of a folder by the time it was written.
+ *
+ * @param folder - The folder native leaves the `.ipa` in.
+ * @param deps - The seams of the process.
+ * @returns The file, absolute, or `undefined` when the folder has none.
+ */
+function newestIpaOf(folder: string, deps: CliDeps): string | undefined {
+  let newest: ListedFile | undefined;
+
+  for (const file of deps.listFiles(folder)) {
+    const isNewer = newest === undefined || file.mtimeMs > newest.mtimeMs;
+
+    if (file.name.endsWith(".ipa") && isNewer) newest = file;
+  }
+
+  return newest === undefined ? undefined : path.join(folder, newest.name);
+}
+
+/**
+ * Uploads the newest `.ipa` of a green iOS store build to App Store Connect with `xcrun altool`
+ * and the team key, the one of `config.ts` or the env's. The lines name the `.ipa`, never an id
+ * or the key path.
+ *
+ * @param settings - The resolved `config.ts` of the game.
+ * @param where - The game folder and the home folder.
+ * @param store - The store block of the build.
+ * @param deps - The seams of the process.
+ * @returns `0` once altool uploaded.
+ * @throws {Error} When there is no key or no `.ipa`, or altool exits with another code than 0.
+ */
+async function uploadIpa(
+  settings: ResolvedGameConfig,
+  where: NativeWhere,
+  store: NativeStore,
+  deps: CliDeps
+): Promise<number> {
+  const key = uploadKeyOf(settings.native, where, deps.env);
+
+  // The store checks refuse a build with no key, so only a native that skips them gets here.
+  if (key === undefined) throw new Error("[game] native: --upload needs an App Store Connect key.");
+
+  const folder = uploadFolderOf(where.cwd, store);
+  const ipa = newestIpaOf(folder, deps);
+
+  if (ipa === undefined) throw new Error(`[game] native: no .ipa in ${folder} to upload.`);
+
+  deps.ui.info(`native: uploading ${ipa} to App Store Connect.`);
+
+  const child = deps.spawn(uploadArgvOf(ipa, key), {
+    env: deps.env,
+    stdio: ["inherit", "inherit", "inherit"]
+  });
+  const code = await child.exited;
+
+  if (code !== 0) throw new Error(`[game] native: the upload failed (altool exit ${code}).`);
+
+  deps.ui.info("native: uploaded. TestFlight shows the build after Apple processes it.");
+
+  return 0;
 }
 
 /**
@@ -603,6 +688,7 @@ function storeBlockOf(
   return {
     buildNumber: store.buildNumber,
     ...(store.dev === true ? { dev: true } : {}),
+    ...(store.upload === true ? { upload: true } : {}),
     env: deps.env,
     exists: deps.exists
   };
@@ -734,28 +820,46 @@ function buildNumberOf(value: string): number {
 }
 
 /**
- * Reads `--store`, `--build-number` and `--dev` of `moku-game native`, before any config is read:
- * they go with `native build ios` and `native build android` only, one number for both stores, and
- * `--dev` turns the store build into the test app.
+ * Refuses the flags that go with `--store` on a command line without it.
+ *
+ * @param parsed - The command line.
+ * @throws {Error} When `--dev`, `--upload` or `--build-number` is given, naming the first of them.
+ */
+function refuseWithoutStore(parsed: Parsed): void {
+  const { dev, upload, "build-number": number } = parsed.values;
+
+  if (dev === true) throw new Error("[game] native: --dev goes with --store.");
+  if (upload === true) throw new Error("[game] native: --upload goes with --store.");
+  if (number !== undefined) throw new Error("[game] native: --build-number goes with --store.");
+}
+
+/**
+ * Reads `--store`, `--build-number`, `--dev` and `--upload` of `moku-game native`, before any
+ * config is read: they go with `native build ios` and `native build android` only, one number for
+ * both stores, `--dev` turns the store build into the test app, and `--upload` sends an iOS one to
+ * App Store Connect.
  *
  * @param parsed - The command line.
  * @param verb - The native verb.
  * @param target - The target the command line names, unchecked.
- * @returns The store flag, the number and `dev`, or nothing without them.
+ * @returns The store flag, the number, `dev` and `upload`, or nothing without them.
  * @throws {Error} When the first two go without each other or with another verb or target, when
- *   `--dev` goes without `--store`, when `--debug`, `--editor` or `--simulator` comes along, or when
- *   the number is refused.
+ *   `--dev` or `--upload` goes without `--store`, when `--upload` goes with another target than
+ *   ios, when `--debug`, `--editor` or `--simulator` comes along, or when the number is refused.
  */
 function nativeStoreOf(
   parsed: Parsed,
   verb: NativeVerb,
   target: string | undefined
 ): NativeStoreFlags {
-  const { store, dev, "build-number": number } = parsed.values;
+  const { store, dev, upload, "build-number": number } = parsed.values;
 
-  if (store !== true && dev === true) throw new Error("[game] native: --dev goes with --store.");
-  if (store !== true && number === undefined) return {};
-  if (store !== true) throw new Error("[game] native: --build-number goes with --store.");
+  if (store !== true) {
+    refuseWithoutStore(parsed);
+
+    return {};
+  }
+
   if (verb !== "build") throw new Error("[game] native: --store goes with native build only.");
 
   const clash = (["debug", "editor", "simulator"] as const).find(
@@ -774,7 +878,16 @@ function nativeStoreOf(
 
   const buildNumber = buildNumberOf(number);
 
-  return dev === true ? { store: true, buildNumber, dev: true } : { store: true, buildNumber };
+  if (upload === true && target !== "ios") {
+    throw new Error("[game] native: --upload goes with ios.");
+  }
+
+  return {
+    store: true,
+    buildNumber,
+    ...(dev === true ? { dev: true as const } : {}),
+    ...(upload === true ? { upload: true as const } : {})
+  };
 }
 
 /**
