@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import { playMusic } from "../../playback";
 import type { Bus, Config, LifecycleChanged, Volumes } from "../../types";
-import { createFakeContext, type FakeContext, keyOf } from "../fake-audio-context";
+import {
+  createFakeContext,
+  type FakeContext,
+  type FakeWindow,
+  installFakeWindow,
+  keyOf
+} from "../fake-audio-context";
 import { type FakeAudio, type FakeUrls, installFakeAudio, installFakeUrl } from "../fake-media";
 import { createMockAudio, type MockAudio } from "./mock-audio";
 
@@ -10,6 +16,37 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+/** The pop that ends a trip to the background and empties the pause stack. */
+const BACKGROUND_POP: LifecycleChanged = {
+  reason: "background",
+  action: "pop",
+  reasons: [],
+  paused: false,
+  resumed: true
+};
+
+/** Yields the microtask queue, the way a test waits for `resume()` without a timer. */
+async function tick(times = 10): Promise<void> {
+  for (let index = 0; index < times; index += 1) await Promise.resolve();
+}
+
+/** A started plugin a first touch unlocked: the context runs and no listener is left. */
+async function unlockedByTouch(): Promise<{
+  fakeWindow: FakeWindow;
+  mock: MockAudio;
+  context: FakeContext;
+}> {
+  const fakeWindow = installFakeWindow();
+  const context = createFakeContext();
+  const mock = createMockAudio({ context });
+
+  mock.start();
+  fakeWindow.dispatch("pointerdown");
+  await tick();
+
+  return { fakeWindow, mock, context };
+}
 
 /** Reads `player.settings.audio`, the way the fixture game configures it. */
 const volumes: Volumes = (player: Json) =>
@@ -146,6 +183,36 @@ describe("lifecycle:changed", () => {
 
     // The start attempt, then the resume after the pause.
     expect(context.resumes).toBe(2);
+  });
+
+  it("keeps the touch armed while iOS holds the resume after a pause (F146)", async () => {
+    const { fakeWindow, mock, context } = await unlockedByTouch();
+
+    context.state = "interrupted";
+    context.hangs = true;
+    mock.hooks["lifecycle:changed"](BACKGROUND_POP);
+    await tick();
+
+    expect(fakeWindow.listeners.map(entry => entry.type)).toEqual(["pointerdown", "touchend"]);
+
+    context.hangs = false;
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+
+    expect(context.state).toBe("running");
+    expect(fakeWindow.listeners).toHaveLength(0);
+  });
+
+  it("takes the touch off once the resume after a pause runs the context", async () => {
+    const { fakeWindow, mock, context } = await unlockedByTouch();
+
+    context.state = "interrupted";
+    context.autoplay = true;
+    mock.hooks["lifecycle:changed"](BACKGROUND_POP);
+    await tick();
+
+    expect(context.state).toBe("running");
+    expect(fakeWindow.listeners).toHaveLength(0);
   });
 
   it("leaves a running context alone", () => {

@@ -91,6 +91,11 @@ export type FakeContext = {
   resumeFails: boolean;
   /** Set by a test: the state a `resume()` the page may call leaves the context in. */
   resumeState: AudioContext["state"] | "interrupted";
+  /**
+   * Set by a test: iOS keeps the audio session away (a screenshot, Control Center), and WebKit
+   * holds every `resume()` called meanwhile pending for good, gesture or not.
+   */
+  hangs: boolean;
 };
 
 /** How a test wants the context to be born. Nothing set: `"suspended"`, and a gesture is needed. */
@@ -246,6 +251,7 @@ export function createFakeContext(shell: FakeShell = {}): FakeContext {
     autoplay: shell.autoplay ?? false,
     resumeFails: false,
     resumeState: "running",
+    hangs: false,
     createGain: (): GainNode => {
       const gain = createFakeGain();
 
@@ -278,6 +284,8 @@ export function createFakeContext(shell: FakeShell = {}): FakeContext {
     },
     resume: (): Promise<void> => {
       context.resumes += 1;
+
+      if (context.hangs) return new Promise<void>(() => undefined);
 
       if (!context.autoplay && !pageActivated()) {
         return new Promise<void>(resolve => {
