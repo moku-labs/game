@@ -1,17 +1,18 @@
 /**
- * @file audio plugin — lifecycle: the dependency resolution, the one context of the app with its
- * graph and its unlock, and the teardown that frees exactly what was opened.
+ * @file audio plugin — lifecycle: the dependency resolution, the start that puts the context of
+ * `context.ts` in with its graph and its unlock, and the teardown that frees exactly what was opened.
  */
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
+import { cancelRenewal, createContext, ignoreFailure } from "./context";
 import { applyAllGains, buildGraph } from "./graph";
 import { stopAllNamed } from "./named";
 import { musicOf, playMusic, playSfx, stopMusic, stopNamedSfx } from "./playback";
 import { applySession, resetSession } from "./session";
 import { disposeStream } from "./stream";
-import type { AudioContextLike, AudioCtx, Config, Deps, KernelSlice, State } from "./types";
+import type { AudioCtx, Deps, KernelSlice, State } from "./types";
 import { removeUnlock, startUnlock } from "./unlock";
 
 /**
@@ -42,33 +43,10 @@ export function withDeps(ctx: KernelSlice): AudioCtx {
 }
 
 /**
- * Swallows a close that failed. A context the browser already tore down is gone either way, and
- * a teardown has nobody left to report to.
- */
-function ignoreFailure(): void {
-  // Deliberately empty: there is no caller left to hand the failure to.
-}
-
-/**
- * Makes the one context of the app: the configured factory, the browser's own constructor, or
- * nothing at all, which is a headless run.
- *
- * @param config - The resolved plugin config.
- * @returns The context, or `undefined` where the runtime has no WebAudio.
- */
-function createContext(config: Config): AudioContextLike | undefined {
-  if (config.context !== undefined) return config.context();
-
-  const browserContext = globalThis.AudioContext;
-
-  return typeof browserContext === "function" ? new browserContext() : undefined;
-}
-
-/**
  * Starts the plugin in `onStart`: the audio session first, before any sound exists, then the
- * three effect handlers, then the context with its graph and its unlock. The unlock asks the context to
- * run at once: a shell that lets audio play is unlocked with no touch, and a browser that wants a
- * gesture gets the two listeners. The handlers are registered even headless, so a node that
+ * three effect handlers, then the context with its graph and its unlock. The unlock asks the
+ * context to run at once: a shell that lets audio play is unlocked with no touch, and a browser
+ * that wants a gesture gets the two listeners. The handlers are registered even headless, so a node that
  * awaits a sound resolves in plain Bun exactly as it does in a browser.
  *
  * @param ctx - Kernel context of the audio plugin.
@@ -104,10 +82,10 @@ export function startAudio(ctx: KernelSlice): void {
 
 /**
  * Frees everything `onStart` opened: the three handler registrations, the two window listeners,
- * the music track, every named sound, every streamed track still fading with its timer, the
- * journal, the audio session and the context itself. The tracks are freed before the close, while their nodes can still
- * disconnect. A browser caps how many contexts a page may hold, so the close is the point of this
- * teardown.
+ * a renewal that waits or runs, the music track, every named sound, every streamed track still
+ * fading with its timer, the journal, the audio session and the context itself. The tracks are
+ * freed before the close, while their nodes can still disconnect. A browser caps how many
+ * contexts a page may hold, so the close is the point of this teardown.
  *
  * @param state - The plugin state, all a teardown context carries.
  * @returns A promise that resolves when the context is closed.
@@ -115,6 +93,8 @@ export function startAudio(ctx: KernelSlice): void {
 export async function stopAudio(state: State): Promise<void> {
   for (const remove of state.removers.splice(0)) remove();
 
+  cancelRenewal(state);
+  state.renewing = undefined;
   removeUnlock(state);
   stopMusic(state);
   stopAllNamed(state);

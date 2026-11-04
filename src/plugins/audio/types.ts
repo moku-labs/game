@@ -190,7 +190,10 @@ export type Config = {
   sfxFadeMs: number;
   /** Reads the player's choice from the committed player. `undefined`: the buses stay at `buses`. */
   volumes: Volumes | undefined;
-  /** Context factory, the test seam. `undefined`: `new AudioContext()` when the global exists, otherwise headless. */
+  /**
+   * Context factory, the test seam. `undefined`: `new AudioContext()` when the global exists, otherwise headless.
+   * On iOS the plugin calls it again after a return from the background, so each call returns a new context.
+   */
   context: (() => AudioContextLike) | undefined;
   /** How many started sounds `journal()` keeps, newest last. `0` turns the journal off. */
   journal: number;
@@ -298,6 +301,10 @@ export type State = {
   musicPending: MusicSwitch | undefined;
   /** Removes the two window listeners of the unlock. */
   unlock: (() => void) | undefined;
+  /** Cancels the renewal that waits after a return from the background: its timer and its two listeners. */
+  renewal: (() => void) | undefined;
+  /** The token of the renewal that runs; a stop or a newer renewal replaces it, and the old one makes nothing. */
+  renewing: object | undefined;
   /** The removers of the three fx handlers. */
   removers: Array<() => void>;
   /** The `navigator.audioSession` that took `config.session`; `stop` writes `"auto"` back to it. */
@@ -393,8 +400,9 @@ export type AudioApi = {
    * Tells whether the audio context runs. A shell that lets audio play with no gesture, such as a
    * native webview with the requirement switched off, makes it true at start: at once when the
    * context is created running, otherwise when the `resume()` of `onStart` fulfils. A browser
-   * that wants a gesture keeps it false until the first pointer event on the page resumed the
-   * context. It is false for the whole of a headless run.
+   * that wants a gesture keeps it false until the first touch or click on the page resumed the
+   * context and it runs; on iOS that resume may stay pending until iOS gives the sound back. It is
+   * false for the whole of a headless run, and for the moment an iOS renewal closes the old context.
    *
    * @returns True once the context is running.
    * @example

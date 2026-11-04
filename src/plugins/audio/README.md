@@ -84,7 +84,7 @@ pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.m
 | `musicFadeMs` | `600` | Cross-fade of a music switch, in real milliseconds |
 | `sfxFadeMs` | `120` | Fade of a named sound, in real milliseconds: when a sound with its `id` replaces it, or a stop ends it, and neither names `fadeMs` |
 | `volumes` | `undefined` | Reads the player's choice from the committed player. Absent: the buses stay at `buses` |
-| `context` | `undefined` | Context factory, the test seam. Absent: `new AudioContext()` where the global exists |
+| `context` | `undefined` | Context factory, the test seam. Absent: `new AudioContext()` where the global exists. Called again by the iOS renewal: return a new context each call |
 | `journal` | `0` | How many started sounds `journal()` keeps. `0`: off |
 | `music` | `"decode"` | How music plays: `"decode"` (one buffer per track, gapless) or `"stream"` (a media element, far less memory, a gap at every loop). See Memory |
 | `session` | `"ambient"` | What the page asks iOS for: `"ambient"`, `"playback"` or `"auto"`. See The audio session |
@@ -123,7 +123,11 @@ A gesture and the start attempt that settle together start the music once: the s
 
 ## Pause and iOS
 
-`lifecycle:changed` holds every bus at zero on a push and puts the stored volumes back on a pop — a bus muted by `mute` stays muted. When the pause ends and the context is `"suspended"` or `"interrupted"` (Safari, after a call or the lock screen), it is resumed; a refusal re-installs the unlock listeners.
+`lifecycle:changed` holds every bus at zero on a push and puts the stored volumes back on a pop — a bus muted by `mute` stays muted. When the pause ends and the context is `"suspended"` or `"interrupted"` (Safari, after a call, a screenshot, Control Center or the lock screen), it is resumed, and the unlock listeners go on before that resume: WebKit holds it pending for as long as iOS keeps the audio session away. They come off only once the context runs, so every touch until then tries again. A touch whose own resume hangs puts them back the same way.
+
+**The renewal after the background (iOS).** With `ambient`, a short trip to the background leaves WebKit silent for good: iOS deactivates the session, WebKit drops iOS's end of the interruption as spurious and keeps a stale "active" flag, so it never asks iOS again. A new context alone does not help; a closed last context does. So on the pop of the `"background"` reason the plugin renews its context: `navigator.audioSession.type = "auto"`, the old context closed, `session` written again, a new context from the same factory (`config.context` is called again: return a new context each call), the graph rebuilt at the same volumes and mutes, the unlock started on it. Decoded buffers are kept (an AudioBuffer is bound to no context); the music the scene wants starts again once the new context runs; sounds in flight are dropped. While the old context closes the plugin is headless for a moment: a sound is dropped and a music switch is remembered.
+
+It runs one second after the return, or at the first touch before that. `visibilitychange` fires about 0.3–0.7 s before iOS makes the app active, and iOS refuses an activation before that with no retry; a touch reaches only an active app. A new push of `"background"` cancels a renewal that waits. It runs only where WebKit has `navigator.audioSession`, the screen takes touches (iOS, iPadOS; not Safari on a Mac) and `session` is not `"playback"`, which iOS keeps active in the background. On a healthy session it costs the sounds in flight and starts the track from its beginning. A factory that hands back the closed context is one warning, and the game stays silent.
 
 At `music: "stream"` the push also pauses the playing element once the gains are at zero, so a backgrounded game burns no decoder and shows no Now Playing card. The pop that ends the pause plays it again; a refused `play()` is one warning per key and the track stays as it is, the next switch replaces it. A track still fading out is left to its timer.
 

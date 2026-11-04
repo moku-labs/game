@@ -81,3 +81,33 @@ export function resetSession(state: State): void {
     // Deliberately empty: the page is going away and the session goes with it.
   }
 }
+
+/**
+ * Tells whether the screen takes touches: iOS and iPadOS answer at least 1, Safari on a Mac 0.
+ *
+ * @returns True when the runtime reports a touch point.
+ */
+export function hasTouch(): boolean {
+  if (typeof globalThis.navigator === "undefined") return false;
+
+  return (globalThis.navigator.maxTouchPoints ?? 0) > 0;
+}
+
+/**
+ * Writes one type on the session the plugin holds. A setter that throws changes nothing: the
+ * renewal goes on with the session as it is.
+ *
+ * @param state - The plugin state, which holds the session.
+ * @param type - What to write, `"auto"` to lift the override.
+ */
+export function writeSession(state: State, type: string): void {
+  const session = state.session;
+
+  if (session === undefined) return;
+
+  try {
+    session.type = type;
+  } catch {
+    // Deliberately empty: the session refuses the type and the renewal goes on.
+  }
+}

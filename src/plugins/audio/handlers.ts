@@ -4,11 +4,13 @@
  * swap set what is still decoded.
  */
 import { setBusVolume } from "./api";
+import { cancelRenewal, scheduleRenewal } from "./context";
 import { applyAllGains, isBus } from "./graph";
 import { withDeps } from "./lifecycle";
 import { pauseMusic, playMusic, resumeMusic, trackMusic } from "./playback";
 import type {
   AssetsReplaced,
+  AudioContextLike,
   AudioCtx,
   BundleUnloaded,
   Bus,
@@ -19,7 +21,7 @@ import type {
   State,
   Volumes
 } from "./types";
-import { installUnlock } from "./unlock";
+import { installUnlock, removeUnlock } from "./unlock";
 
 /**
  * Applies the volumes of the committed player. A `volumes` that throws — a save without the
@@ -64,20 +66,52 @@ function read(ctx: AudioCtx, volumes: Volumes): Partial<Record<Bus, number>> | u
 }
 
 /**
+ * Tells whether the OS stopped a context: suspended, or Safari's `"interrupted"`.
+ *
+ * @param context - The audio context of this app.
+ * @returns True when the context waits for a resume.
+ */
+function isSilenced(context: AudioContextLike): boolean {
+  return context.state === "suspended" || context.state === "interrupted";
+}
+
+/**
  * Resumes a context the OS silenced while the game was away. Safari leaves it `"interrupted"`
- * after a call; a refused resume puts the unlock listeners back, so the next touch tries again.
+ * after a call, a screenshot or Control Center, and WebKit may hold this resume pending for as
+ * long as iOS keeps the audio session (F146). So the unlock listeners go on before the resume and
+ * come off only once the context runs: until then every touch tries again.
  *
  * @param ctx - Domain context of the plugin.
  */
 function resumeAfterPause(ctx: AudioCtx): void {
-  const context = ctx.state.context;
+  const state = ctx.state;
+  const context = state.context;
 
-  if (context === undefined || !ctx.state.unlocked) return;
-  if (context.state !== "suspended" && context.state !== "interrupted") return;
+  if (context === undefined || !state.unlocked || !isSilenced(context)) return;
 
-  context.resume().catch(() => {
-    installUnlock(ctx);
-  });
+  installUnlock(ctx);
+  context.resume().then(
+    () => {
+      if (state.context === context && context.state === "running") removeUnlock(state);
+    },
+    () => {
+      installUnlock(ctx);
+    }
+  );
+}
+
+/**
+ * Follows the `"background"` reason of the pause: its push cancels a renewal that waits, its pop
+ * schedules one (F149). Any other reason leaves the context alone.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param payload - What changed on the pause stack.
+ */
+function followBackground(ctx: AudioCtx, payload: LifecycleChanged): void {
+  if (payload.reason !== "background") return;
+
+  if (payload.action === "push") cancelRenewal(ctx.state);
+  else scheduleRenewal(ctx);
 }
 
 /**
@@ -149,7 +183,8 @@ export function createHandlers(ctx: KernelSlice): {
     /**
      * Holds every bus at zero while the game is paused and puts the volumes back when it is not.
      * The stored volumes and mutes are untouched, so nothing is lost over a pause. A streamed
-     * track is paused once the gains are at zero and plays again when the pause ends.
+     * track is paused once the gains are at zero and plays again when the pause ends. On iOS the
+     * return from the background also schedules the renewal of the context.
      *
      * @param payload - What changed on the pause stack.
      */
@@ -165,6 +200,8 @@ export function createHandlers(ctx: KernelSlice): {
         resumeAfterPause(audioCtx);
         resumeMusic(audioCtx);
       }
+
+      followBackground(audioCtx, payload);
     },
 
     /**

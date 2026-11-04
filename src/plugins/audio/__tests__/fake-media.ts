@@ -108,12 +108,14 @@ export function installFakeUrl(): FakeUrls {
 /**
  * Installs a global `navigator`. Without `session` it has no `audioSession`, as in Chromium and
  * Firefox. With it, every write of `type` is recorded (and pushed to `order` when given); with
- * `refuse` the setter throws instead.
+ * `refuse` the setter throws instead. `touchPoints` makes it a phone.
  */
 export function installFakeNavigator(session?: {
   type: string;
   refuse?: boolean;
   order?: string[];
+  /** `navigator.maxTouchPoints`: 5 on an iPhone, 0 (the default) on a Mac. */
+  touchPoints?: number;
 }): FakeSession {
   const fake: FakeSession = { writes: [] };
 
@@ -137,7 +139,7 @@ export function installFakeNavigator(session?: {
     }
   };
 
-  vi.stubGlobal("navigator", { audioSession });
+  vi.stubGlobal("navigator", { audioSession, maxTouchPoints: session.touchPoints ?? 0 });
 
   return fake;
 }

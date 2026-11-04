@@ -420,3 +420,28 @@ describe("removeUnlock", () => {
     expect(() => removeUnlock(mock.state)).not.toThrow();
   });
 });
+
+describe("a touch while iOS keeps the audio session away (F146)", () => {
+  it("tries again on every touch until the context runs, then listens no more", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    context.hangs = true;
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+
+    // The resume of that touch hangs, so the next touch must still be heard.
+    expect(fakeWindow.listeners.map(entry => entry.type)).toEqual(["pointerdown", "touchend"]);
+
+    context.hangs = false;
+    fakeWindow.dispatch("touchend");
+    await tick();
+
+    // The start attempt, the hanging touch, the touch that ran.
+    expect(context.resumes).toBe(3);
+    expect(mock.api.unlocked()).toBe(true);
+    expect(fakeWindow.listeners).toHaveLength(0);
+  });
+});
