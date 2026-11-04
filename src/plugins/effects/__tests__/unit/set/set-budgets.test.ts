@@ -8,16 +8,16 @@ import { VIGNETTE_GLSL, VIGNETTE_WGSL, Vignette } from "../../../set/vignette";
 // Unit test: the budget of every member of the set, from its definition and its
 // own bodies (never `filter.source`, which carries the set head and its one
 // read). Mpx = CSS area × resolution² × (1 + Σ scale²) of its chain's steps;
-// the screen frame is the A26's 411 × 891 CSS px (assumed, delta spec "Words"),
+// the screen frame is the A26's 384 × 693 CSS px (Chrome's viewport, read on the phone on 2026-11-04),
 // the tile 128 × 128; the bench runs at resolution 2. At 2 one pass over the
-// screen is 411 × 891 × 4 = 1.4648 Mpx: the delta spec rounds it to 1.46.
+// screen is 384 × 693 × 4 = 1.0644 Mpx.
 // ---------------------------------------------------------------------------
 
 /** A budget frame, CSS px. */
 type Frame = { readonly width: number; readonly height: number };
 
 /** The A26's viewport, as assumed until the first slice-1 run logs `viewport.size()`. */
-const SCREEN: Frame = { width: 411, height: 891 };
+const SCREEN: Frame = { width: 384, height: 693 };
 
 /** One tile of a board. */
 const TILE: Frame = { width: 128, height: 128 };
@@ -121,12 +121,12 @@ describe("the budgets of the set", () => {
   // Bug: a member that silently left the quad, a body that gained a sample loop, a pass more than one.
   it.each(
     MEMBERS
-  )("$member.filter.id: 1 pass, 1 sample, at most 1.465 Mpx a screen, quad on change", row => {
+  )("$member.filter.id: 1 pass, 1 sample, at most 1.065 Mpx a screen, quad on change", row => {
     const screen = budgetOf(row, SCREEN, RESOLUTION);
 
     expect(screen.passes).toBe(1);
     expect(screen.samples).toBe(1);
-    expect(screen.mpx).toBeLessThanOrEqual(1.465);
+    expect(screen.mpx).toBeLessThanOrEqual(1.065);
     expect(screen.onChange).toBe("quad");
     expect(budgetOf(row, TILE, RESOLUTION).mpx).toBeLessThanOrEqual(0.066);
   });

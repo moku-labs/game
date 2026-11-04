@@ -280,9 +280,10 @@ function watchUnlisted(ectx: EffectsCtx): void {
 
   for (const [id, component] of filtersMade()) {
     // Compared by identity alone: the world answers its own type, whatever its value.
-    const known: unknown = ecs.typeOf(id);
+    const known = ecs.typeOf(id);
+    const heldByOther = known !== undefined && !Object.is(known, component);
 
-    if (ectx.state.kinds.has(id) || (known !== undefined && known !== component)) continue;
+    if (ectx.state.kinds.has(id) || heldByOther) continue;
 
     ectx.state.removers.push(ecs.onAdded(component, entity => warnUnlisted(ectx, id, entity)));
   }

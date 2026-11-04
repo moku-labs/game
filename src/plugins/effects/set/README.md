@@ -26,9 +26,9 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
 
 | Member | Fields (default, range) | In A Memory Missing | Frame | Passes | Mpx at 2 | A value change costs | A26 ms (run) |
 |---|---|---|---|---|---|---|---|
-| `Flash` | `amount: 0` (0..1), `color: 0xffffff` | new: a flash of colour | screen | 1 | ≤ 1.465 | its quad | pending |
-| `Grade` | `brightness: 1`, `contrast: 1`, `saturation: 1` (each 0..2, 1 for none), `tint: 0xffffff` | the `ColorMatrix` cases C1–C5 | screen | 1 | ≤ 1.465 | its quad | pending |
-| `Vignette` | `x: 0.5`, `y: 0.5` (0..1 of the view), `radius: 0.5`, `soft: 0.25`, `color: 0x000000`, `amount: 1` (0..1) | new | screen | 1 | ≤ 1.465 | its quad | pending |
+| `Flash` | `amount: 0` (0..1), `color: 0xffffff` | new: a flash of colour | screen | 1 | ≤ 1.065 | its quad | 22.6 against `rest` 22.4 (perf/a26-2026-11-04-f126-s3-slice1) |
+| `Grade` | `brightness: 1`, `contrast: 1`, `saturation: 1` (each 0..2, 1 for none), `tint: 0xffffff` | the `ColorMatrix` cases C1–C5 | screen | 1 | ≤ 1.065 | its quad | 22.7 against `rest` 22.4; on the full screen 22.2 against Pixi's `ColorMatrix` 27.5 (perf/a26-2026-11-04-f126-s3-slice1) |
+| `Vignette` | `x: 0.5`, `y: 0.5` (0..1 of the view), `radius: 0.5`, `soft: 0.25`, `color: 0x000000`, `amount: 1` (0..1) | new | screen | 1 | ≤ 1.065 | its quad | 22.4 against `rest` 22.4 (perf/a26-2026-11-04-f126-s3-slice1) |
 
 - **`Flash`** mixes the view towards `color` by `amount`, at the view's own alpha: 0 draws it as it is, 1 draws its
   shape in `color`, the transparent pixels around it stay transparent. `amount` is clamped to 0..1, so a tween that
@@ -67,15 +67,15 @@ The head joins a body through a call, so a bundle that drops an unlisted member 
 
 `__tests__/unit/set/set-budgets.test.ts` pins every member: passes, samples, Mpx and what a value change costs, read
 from its definition and its own body. Mpx of a member is `css area × resolution² × (1 + Σ scale²)` of its chain's steps;
-the budget frames are the screen, 411 × 891 CSS px (the A26's viewport as assumed until the first slice-1 run logs
-`viewport.size()`), and a tile, 128 × 128. At resolution 2 one pass over the screen is 411 × 891 × 4 = 1.4648 Mpx; the
-delta spec's 1.46 is that number rounded, and the test holds it at ≤ 1.465. A tile is 0.066 Mpx.
+the budget frames are the screen, 384 × 693 CSS px (Chrome's viewport on the A26, read on the phone on 2026-11-04), and
+a tile, 128 × 128. At resolution 2 one pass over the screen is 384 × 693 × 4 = 1.0644 Mpx, and the test holds it at
+≤ 1.065. A tile is 0.066 Mpx.
 
 | Member | Passes | Samples | Screen at 2 | Tile at 2 | A value change |
 |---|---|---|---|---|---|
-| `Flash` | 1 | 1 | ≤ 1.465 Mpx | ≤ 0.066 Mpx | quad |
-| `Grade` | 1 | 1 | ≤ 1.465 Mpx | ≤ 0.066 Mpx | quad |
-| `Vignette` | 1 | 1 | ≤ 1.465 Mpx | ≤ 0.066 Mpx | quad |
+| `Flash` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
+| `Grade` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
+| `Vignette` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 
 A member adds no JavaScript per frame: `filters-sync.perf.ts` measures a `Flash` amount tweened on one of 12 filtered
 views, its quad handed over, at 0 B a frame, beside the `Glow` line of the same shape.
@@ -97,4 +97,7 @@ views, its quad handed over, at 0 B a frame, beside the `Glow` line of the same 
   written each frame), `set-grade-full` (one full-screen `Grade` written each frame) and `sweep-grade` (the same screen
   under Pixi's `ColorMatrix`). Lines of the delta spec: each `set-*` row arm ≤ `rest` + 1.0 ms with `canvasPasses` 1
   after the third write, `set-grade-full` ≤ `full` + 0.5 ms and ≤ `sweep-grade` − 1.0 ms. A member over its line is
-  pulled from the exports and named here as "out, over budget". The A26 column above is pending that run.
+  pulled from the exports and named here as "out, over budget". The run of 2026-11-04 (221 MHz on 96–99 % of frames,
+  k=8, whole GPU per frame, medians, `perf/a26-2026-11-04-f126-s3-slice1`): every member is in, every arm draws 1 canvas
+  pass, CPU work 3.1–3.6 ms against `rows` 3.6. `set-grade-full` 22.2 ms is under `full` 26.5 and 5.3 ms under
+  `sweep-grade` 27.5: Pixi's matrix pays a pass for every value, the member a body on its quad.

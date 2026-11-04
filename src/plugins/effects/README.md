@@ -308,6 +308,9 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 
 ## API — `app.effects`
 
+The filter components are root exports, not members of `app.effects`: the built-ins (`Glow`, `Blur`, …, see Built-in
+filters) and the effect set (`Flash`, `Grade`, `Vignette`, see `set/README.md`), each listed in a feature's `filters`.
+
 | Member | Behaviour |
 |---|---|
 | `stats()` | `{ particles, emitters, filters, renderPasses }`, a fresh object: live particles, instances plus orphans, filter instances over every view, and `renderer.sync.renderPasses()` read at call time. Headless every number is 0 |
