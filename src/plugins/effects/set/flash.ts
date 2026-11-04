@@ -4,7 +4,7 @@
  */
 import { defineFilter } from "../filters/define";
 import type { FilterComponent } from "../filters/types";
-import { SET_GLSL, SET_WGSL } from "./head";
+import { withSetGlsl, withSetWgsl } from "./head";
 import type { FlashValue } from "./types";
 
 /**
@@ -28,10 +28,10 @@ export const FLASH_GLSL = /* glsl */ `void main() {
 `;
 
 /** The whole WGSL `Flash` is defined with: the set head, then the body. */
-const FLASH_SOURCE = SET_WGSL + FLASH_WGSL;
+const FLASH_SOURCE = /*#__PURE__*/ withSetWgsl(FLASH_WGSL);
 
 /** The whole GLSL `Flash` is defined with. */
-const FLASH_GLSL_SOURCE = SET_GLSL + FLASH_GLSL;
+const FLASH_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(FLASH_GLSL);
 
 /**
  * A view washed with `color` by `amount`: 0 draws the view as it is, 1 draws its shape in `color`, its alpha kept.

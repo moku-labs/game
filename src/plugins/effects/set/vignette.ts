@@ -4,7 +4,7 @@
  */
 import { defineFilter } from "../filters/define";
 import type { FilterComponent } from "../filters/types";
-import { SET_GLSL, SET_WGSL } from "./head";
+import { withSetGlsl, withSetWgsl } from "./head";
 import type { VignetteValue } from "./types";
 
 /**
@@ -35,10 +35,10 @@ export const VIGNETTE_GLSL = /* glsl */ `void main() {
 `;
 
 /** The whole WGSL `Vignette` is defined with: the set head, then the body. */
-const VIGNETTE_SOURCE = SET_WGSL + VIGNETTE_WGSL;
+const VIGNETTE_SOURCE = /*#__PURE__*/ withSetWgsl(VIGNETTE_WGSL);
 
 /** The whole GLSL `Vignette` is defined with. */
-const VIGNETTE_GLSL_SOURCE = SET_GLSL + VIGNETTE_GLSL;
+const VIGNETTE_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(VIGNETTE_GLSL);
 
 /**
  * A view darkened outside a disc: inside `radius` of the point `x`, `y` it is drawn as it is, from there over `soft` it

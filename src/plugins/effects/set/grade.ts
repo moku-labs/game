@@ -5,7 +5,7 @@
  */
 import { defineFilter } from "../filters/define";
 import type { FilterComponent } from "../filters/types";
-import { SET_GLSL, SET_WGSL } from "./head";
+import { withSetGlsl, withSetWgsl } from "./head";
 import type { GradeValue } from "./types";
 
 /**
@@ -46,10 +46,10 @@ void main() {
 `;
 
 /** The whole WGSL `Grade` is defined with: the set head, then the body. */
-const GRADE_SOURCE = SET_WGSL + GRADE_WGSL;
+const GRADE_SOURCE = /*#__PURE__*/ withSetWgsl(GRADE_WGSL);
 
 /** The whole GLSL `Grade` is defined with. */
-const GRADE_GLSL_SOURCE = SET_GLSL + GRADE_GLSL;
+const GRADE_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(GRADE_GLSL);
 
 /**
  * A colour grade of a view: `contrast` about the middle grey, then `brightness`, then `saturation` against the luma,

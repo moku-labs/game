@@ -121,25 +121,35 @@ const devOnlyEffectsMarkers = ["effects:filter-reads-screen", "effects:filter-un
 const built = new Map<string, string>();
 
 /**
+ * Where the game's entry takes the engine from: the root module by path, or one module built from it first, as
+ * `dist/` ships the engine. Inside one module the bundler drops an unused export by statement, so only there a lost
+ * `/*#__PURE__*\/` or a concatenation at module scope keeps text a game never uses; by path the package's
+ * `sideEffects` drops whole files.
+ */
+type EngineShape = "source" | "package";
+
+/**
  * Bundles a game entry the way a game ships it: minified, for the browser, with the flags of a
- * page defined. The entry lives outside the package and imports the root module by path; it builds the
- * game's kit with `defineGame` and composes the app inside an exported function, so nothing runs.
+ * page defined. The entry lives outside the package and imports the root module by path, or a one-module build of it;
+ * it builds the game's kit with `defineGame` and composes the app inside an exported function, so nothing runs.
  * Vitest runs on Node, so the build runs in a Bun child process.
  *
  * @param composition - The plugins the entry composes.
  * @param profile - The page whose defines the bundle gets.
+ * @param shape - Where the entry takes the engine from.
  * @returns The bundled code.
  */
-function bundle(composition: Composition, profile: Profile): string {
-  const key = `${composition}:${profile}`;
+function bundle(composition: Composition, profile: Profile, shape: EngineShape = "source"): string {
+  const key = `${composition}:${profile}:${shape}`;
   const known = built.get(key);
 
   if (known !== undefined) return known;
 
   const effects = composition !== "screen";
   const flash = composition === "screen+effects+flash";
+  const engine = shape === "package" ? "./engine.mjs" : rootModule;
   const game = [
-    `import { createApp, defineGame, ${effects ? "effectsPlugin, " : ""}${flash ? "defineFeature, Flash, " : ""}screen } from ${JSON.stringify(rootModule)};`,
+    `import { createApp, defineGame, ${effects ? "effectsPlugin, " : ""}${flash ? "defineFeature, Flash, " : ""}screen } from ${JSON.stringify(engine)};`,
     "export const kit = defineGame();",
     ...(flash ? ['export const board = defineFeature("board", { filters: [Flash] });'] : []),
     `export function start() { return createApp({ plugins: [...screen${effects ? ", effectsPlugin" : ""}] }); }`
@@ -150,13 +160,23 @@ function bundle(composition: Composition, profile: Profile): string {
     const { tmpdir } = await import("node:os");
     const dir = mkdtempSync(join(tmpdir(), "moku-game-"));
     const entry = join(dir, "game.ts");
+    const define = ${JSON.stringify(PROFILES[profile])};
+    if (${JSON.stringify(shape)} === "package") {
+      await Bun.write(join(dir, "root.ts"), ${JSON.stringify(`export * from ${JSON.stringify(rootModule)};`)});
+      const engine = await Bun.build({ entrypoints: [join(dir, "root.ts")], define, target: "browser", packages: "external" });
+      if (!engine.success) {
+        console.error(engine.logs.map(String).join(" "));
+        process.exit(1);
+      }
+      await Bun.write(join(dir, "engine.mjs"), await engine.outputs[0].text());
+    }
     await Bun.write(entry, ${JSON.stringify(game)});
     const result = await Bun.build({
       entrypoints: [entry],
-      define: ${JSON.stringify(PROFILES[profile])},
+      define,
       minify: true,
       target: "browser",
-      external: ["pixi.js", "yoga-layout", "@moku-labs/*"]
+      ...(${JSON.stringify(shape)} === "package" ? { packages: "external" } : { external: ["pixi.js", "yoga-layout", "@moku-labs/*"] })
     });
     rmSync(dir, { recursive: true, force: true });
     if (!result.success) {
@@ -210,19 +230,23 @@ describe("a game build with and without effectsPlugin", () => {
     expect(code).toContain("mainFragment");
   }, 60_000);
 
-  // Bug: a lost `/*#__PURE__*/` or a barrel of the set: every member's shader ships in a game that lists none.
+  // Bug: a lost `/*#__PURE__*/`, a concatenation at module scope or a barrel of the set: every member's shader, or
+  // the set head, ships in a game that lists none.
   it("carries no member of the effect set and no set head when the game lists none", () => {
     for (const profile of ["release", "dev"] as const) {
-      const code = bundle("screen+effects", profile);
+      for (const shape of ["source", "package"] as const) {
+        const code = bundle("screen+effects", profile, shape);
 
-      expect(code, profile).not.toContain("effects.flash");
-      expect(code, profile).not.toContain("inputPlace");
+        expect(code, `${profile}, ${shape}`).toContain("mainFragment");
+        expect(code, `${profile}, ${shape}`).not.toContain("effects.flash");
+        expect(code, `${profile}, ${shape}`).not.toContain("inputPlace");
+      }
     }
   }, 60_000);
 
   // Bug: listing one member drags the others in through a shared module.
   it("carries the member a feature lists and no other", () => {
-    const code = bundle("screen+effects+flash", "release");
+    const code = bundle("screen+effects+flash", "release", "package");
 
     expect(code).toContain('"effects.flash"');
     expect(code).toContain("inputPlace");

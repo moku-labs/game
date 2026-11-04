@@ -31,3 +31,32 @@ vec4 sampleInput(vec2 n) {
 }
 
 `;
+
+/**
+ * A member's WGSL body with the set head before it. A call, so a bundle that drops the member drops the text too: a
+ * concatenation at module scope would stay, its strings with it.
+ *
+ * @param body - The member's WGSL body.
+ * @returns The head, then the body.
+ * @example
+ * ```ts
+ * withSetWgsl("@fragment fn mainFragment").startsWith("fn inputPlace("); // true
+ * ```
+ */
+export function withSetWgsl(body: string): string {
+  return SET_WGSL + body;
+}
+
+/**
+ * A member's GLSL body with the set head before it, for the same reason as `withSetWgsl`.
+ *
+ * @param body - The member's GLSL body.
+ * @returns The head, then the body.
+ * @example
+ * ```ts
+ * withSetGlsl("void main() {}").startsWith("vec2 inputPlace("); // true
+ * ```
+ */
+export function withSetGlsl(body: string): string {
+  return SET_GLSL + body;
+}
