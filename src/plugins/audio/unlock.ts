@@ -1,5 +1,5 @@
 /**
- * @file audio plugin — the unlock: the only file that touches `window`. A browser starts an audio
+ * @file audio plugin — the unlock: with the renewal of `context.ts`, the only file that touches `window`. A browser starts an audio
  * context suspended and lets it run on a user gesture, so two listeners wait for the first one.
  * They sit on `window`, not on the canvas: the gesture may as well be a button of the game's
  * loading page, which `input` never sees. A shell that asks for no gesture, such as a native
@@ -14,7 +14,7 @@ const UNLOCK_EVENTS = ["pointerdown", "touchend"] as const;
 
 /**
  * Reacts to a resume that went through, of a gesture or of the start attempt. The context is
- * unlocked only when it really runs; the sounds fired during the resume and the track a scene
+ * unlocked only when it really runs, and only then do the listeners come off; the sounds fired during the resume and the track a scene
  * declared while it was locked start here. A context that still does not run drops the sounds:
  * the next gesture is a new moment. A gesture and the start attempt that settle together both
  * come here, and the music still starts once: a track that is on its way or already plays is not
@@ -35,6 +35,7 @@ function onResumed(ctx: AudioCtx): void {
   }
 
   state.unlocked = true;
+  removeUnlock(state);
   drainSfx(ctx);
 
   const remembered = state.music;
@@ -59,9 +60,10 @@ function drainSfx(ctx: AudioCtx): void {
 }
 
 /**
- * Asks the context to run and marks it `resuming` until the answer comes. A browser that refuses
- * says so once in the log, drops the sounds that waited and gets the listeners back, so the next
- * gesture tries again.
+ * Asks the context to run and marks it `resuming` until the answer comes. The listeners go back on
+ * before the resume: while iOS keeps the audio session away, WebKit holds this promise pending, and
+ * the next gesture must try again (F146). A browser that refuses says so once in the log, drops the
+ * sounds that waited and keeps the listeners.
  *
  * @param ctx - Domain context of the plugin.
  */
@@ -71,6 +73,7 @@ function resumeContext(ctx: AudioCtx): void {
   if (context === undefined) return;
 
   ctx.state.resuming = true;
+  installUnlock(ctx);
   context.resume().then(
     () => {
       onResumed(ctx);

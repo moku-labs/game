@@ -298,6 +298,10 @@ export type State = {
   musicPending: MusicSwitch | undefined;
   /** Removes the two window listeners of the unlock. */
   unlock: (() => void) | undefined;
+  /** Cancels the renewal that waits after a return from the background: its timer and its two listeners. */
+  renewal: (() => void) | undefined;
+  /** The token of the renewal that runs; a stop or a newer renewal replaces it, and the old one makes nothing. */
+  renewing: object | undefined;
   /** The removers of the three fx handlers. */
   removers: Array<() => void>;
   /** The `navigator.audioSession` that took `config.session`; `stop` writes `"auto"` back to it. */
