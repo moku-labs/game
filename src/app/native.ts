@@ -217,20 +217,15 @@ export function appleKeyOf(
   native: ResolvedGameConfig["native"],
   where: Pick<NativeWhere, "cwd" | "home">
 ): AppleKey | undefined {
-  const apple = native?.signing?.apple;
+  const { apiKeyId, apiIssuer, apiKeyPath } = native?.signing?.apple ?? {};
+  const isKeyNamed = apiKeyId !== undefined && apiIssuer !== undefined && apiKeyPath !== undefined;
 
-  if (
-    apple?.apiKeyId === undefined ||
-    apple.apiIssuer === undefined ||
-    apple.apiKeyPath === undefined
-  ) {
-    return undefined;
-  }
+  if (!isKeyNamed) return undefined;
 
   return {
-    keyId: apple.apiKeyId,
-    issuer: apple.apiIssuer,
-    keyPath: resolveKeystore(apple.apiKeyPath, where.cwd, where.home)
+    keyId: apiKeyId,
+    issuer: apiIssuer,
+    keyPath: resolveKeystore(apiKeyPath, where.cwd, where.home)
   };
 }
 
@@ -996,7 +991,9 @@ function keyVariablesOf(
   verb: NativeVerb,
   target: Target | undefined
 ): AppleKeyVariables | undefined {
-  if (target !== "ios" || (verb !== "build" && verb !== "dev")) return undefined;
+  const isIosSigningRun = target === "ios" && (verb === "build" || verb === "dev");
+
+  if (!isIosSigningRun) return undefined;
 
   const key = appleKeyOf(native, where);
 
@@ -1025,12 +1022,14 @@ async function withProcessVariables(
   try {
     return await run();
   } finally {
+    // Every variable goes back to what it was, or away when it was not set.
     for (const [name, value] of before) {
       if (value === undefined) {
         Reflect.deleteProperty(process.env, name); // @env-allow: the variable was not set before
-      } else {
-        process.env[name] = value; // @env-allow: the person's own value comes back
+        continue;
       }
+
+      process.env[name] = value; // @env-allow: the person's own value comes back
     }
   }
 }

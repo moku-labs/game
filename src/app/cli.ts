@@ -860,6 +860,7 @@ function nativeStoreOf(
     return {};
   }
 
+  // A store build goes with `build` only, with no debug flag, on ios or android.
   if (verb !== "build") throw new Error("[game] native: --store goes with native build only.");
 
   const clash = (["debug", "editor", "simulator"] as const).find(
@@ -872,6 +873,7 @@ function nativeStoreOf(
     throw new Error(`[game] native: --store builds ios or android, got ${target ?? "no target"}.`);
   }
 
+  // The number, then the upload, which goes to App Store Connect only.
   if (number === undefined) {
     throw new Error("[game] native: --store needs --build-number, the number of this upload.");
   }
