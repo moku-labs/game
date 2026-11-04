@@ -444,6 +444,8 @@ export class FakeContainer {
   public parent: FakeContainer | null = null;
   /** What clips this container's children, as Pixi's `mask` does. */
   public mask: FakeContainer | null = null;
+  /** The render layer that draws this container at its own place, as Pixi's `parentRenderLayer`; `null` with none. */
+  public parentRenderLayer: FakeRenderLayer | null = null;
   /** How often `zIndex` was written with a different number. */
   public zIndexWrites = 0;
   /** How often `filters` was assigned: Pixi copies the list and may rebuild the render group. */
@@ -479,6 +481,14 @@ export class FakeContainer {
    * @returns The same child.
    */
   public addChild(child: FakeContainer): FakeContainer {
+    // As Pixi's: a child of this container moves to the end and keeps its render layer.
+    if (child.parent === this) {
+      this.children.splice(this.children.indexOf(child), 1);
+      this.children.push(child);
+
+      return child;
+    }
+
     child.parent?.removeChild(child);
     this.children.push(child);
     child.parent = this;
@@ -502,7 +512,7 @@ export class FakeContainer {
   }
 
   /**
-   * Detaches a child.
+   * Detaches a child; as Pixi's, it leaves the render layer that drew it too.
    *
    * @param child - The child.
    */
@@ -510,18 +520,22 @@ export class FakeContainer {
     const at = this.children.indexOf(child);
 
     if (at !== -1) this.children.splice(at, 1);
+    child.parentRenderLayer?.detach(child);
     child.parent = null;
   }
 
   /**
-   * Takes every child out, as Pixi's does when `text` redraws a label.
+   * Takes every child out, as Pixi's does when `text` redraws a label; each leaves its render layer too.
    *
    * @returns The children that were in it, in order.
    */
   public removeChildren(): FakeContainer[] {
     const children = this.children.splice(0);
 
-    for (const child of children) child.parent = null;
+    for (const child of children) {
+      child.parentRenderLayer?.detach(child);
+      child.parent = null;
+    }
 
     return children;
   }
@@ -576,6 +590,67 @@ export class FakeContainer {
       child.parent = null;
       child.destroy(options);
     }
+  }
+}
+
+/**
+ * A fake Pixi render layer: it draws the containers attached to it at its own place, their parents unchanged. As
+ * Pixi's: `attach` takes a container from the layer it was in, `detach` lets go of it, and a container that leaves its
+ * parent leaves the layer too (`FakeContainer.removeChild`). It never has children of its own.
+ */
+export class FakeRenderLayer extends FakeContainer {
+  /** The containers it draws, in the order they were attached. */
+  public renderLayerChildren: FakeContainer[] = [];
+
+  /**
+   * Attaches containers, each taken from the layer it was in.
+   *
+   * @param children - The containers.
+   * @returns The first one.
+   */
+  public attach(...children: FakeContainer[]): FakeContainer | undefined {
+    for (const child of children) {
+      if (child.parentRenderLayer === this) continue;
+
+      child.parentRenderLayer?.detach(child);
+      this.renderLayerChildren.push(child);
+      child.parentRenderLayer = this;
+    }
+
+    return children[0];
+  }
+
+  /**
+   * Lets containers go; as Pixi's, a container's link is cleared even when this layer did not hold it.
+   *
+   * @param children - The containers.
+   * @returns The first one.
+   */
+  public detach(...children: FakeContainer[]): FakeContainer | undefined {
+    for (const child of children) {
+      const at = this.renderLayerChildren.indexOf(child);
+
+      if (at !== -1) this.renderLayerChildren.splice(at, 1);
+      child.parentRenderLayer = null;
+    }
+
+    return children[0];
+  }
+
+  /** Lets every container go. */
+  public detachAll(): void {
+    for (const child of this.renderLayerChildren) child.parentRenderLayer = null;
+
+    this.renderLayerChildren.length = 0;
+  }
+
+  /**
+   * Refuses a child, as Pixi 8.22 does.
+   *
+   * @throws {Error} Always: a render layer attaches, it holds no children.
+   */
+  public override addChild(): FakeContainer {
+    throw new Error("RenderLayer.addChild() is not available. Please use RenderLayer.attach()");
   }
 }
 
@@ -2417,6 +2492,7 @@ export function createFakePixi(
     Geometry: FakeGeometry,
     ExtensionType: FakeExtensionType,
     RenderGroupPipe: FakeRenderGroupPipe,
+    RenderLayer: FakeRenderLayer,
     GpuRenderTargetAdaptor: FakeGpuRenderTargetAdaptor,
     GpuRenderTargetSystem: FakeGpuRenderTargetSystem,
     GpuStencilSystem: FakeGpuStencilSystem,

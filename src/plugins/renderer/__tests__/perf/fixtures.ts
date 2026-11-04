@@ -421,6 +421,47 @@ export async function hudStage(): Promise<MockRenderer> {
   return mock;
 }
 
+/**
+ * A resting sheet that holds the HUD under its dim (change 2026-11-04-f141-f147-f148-ui-text, F147), over the real Pixi
+ * of the overlay stage: 20 views of the ward, 5 HUD parts, and a landed overlay with `dim: 0.82` and `hud: "under"`,
+ * its range a kept picture and the HUD layer container attached to its render layer. The frames that build it and
+ * land the sheet have run.
+ *
+ * @returns One overlay step of a frame at rest.
+ */
+export async function hudUnderBoard(): Promise<() => void> {
+  const stage = await startOverlayStage();
+  const { sync } = stage.drawn.mock.modules;
+
+  for (let index = 0; index < 20; index += 1) {
+    stage.view({ layer: "scene", x: (index % 5) * 200, y: Math.floor(index / 5) * 200 });
+  }
+
+  for (let index = 0; index < 5; index += 1) {
+    stage.view({ layer: "hud", x: index * 120, extra: [HudPart({ key: `part${index}` })] });
+  }
+
+  const pyramid = stage.overlay({ dim: 0.82, dimColor: 0x1e_16_1a, hud: "under" }, { order: 2 });
+
+  stage.level(pyramid, 1, true);
+  stage.frames(3);
+
+  const { overlay } = stage.drawn.mock.ctx.state.sync;
+  const under = overlay.records.get(pyramid)?.under;
+
+  if (
+    under === undefined ||
+    stage.layer("hud").parentRenderLayer !== under ||
+    !overlay.active?.kept
+  ) {
+    throw new Error(
+      "perf fixture: the resting sheet does not hold the HUD under its dim over a kept range"
+    );
+  }
+
+  return () => sync.stepOverlays();
+}
+
 /** What an endless loop hands `loopsHeld`: what it writes that could show its view again. */
 type Reveals = "alpha" | "place" | "both" | undefined;
 

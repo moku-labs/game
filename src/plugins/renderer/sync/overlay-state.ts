@@ -5,7 +5,8 @@
 import type { OverlayState, SyncState } from "./types";
 
 /**
- * Destroys the dims the records hold, once each, and drops the references.
+ * Destroys the dims and the HUD render layers the records hold, once each, and drops the references; a render layer
+ * lets go of what it holds first, so the HUD layer container is left attached to nothing (U5).
  *
  * @param overlay - The overlay state.
  */
@@ -14,13 +15,23 @@ function destroyDims(overlay: OverlayState): void {
     if (record.dim !== undefined && !record.dim.destroyed) record.dim.destroy();
     record.dim = undefined;
     record.sized = false;
+
+    if (record.under !== undefined) {
+      record.under.detachAll();
+      if (!record.under.destroyed) record.under.destroy();
+    }
+
+    record.under = undefined;
   }
+
+  overlay.held = undefined;
+  overlay.heldBy = undefined;
 }
 
 /**
- * Forgets what the step applied to a tree that goes (a rebuild, a lost device): the dims, the range and the tap set.
- * The records stay, so the next step finds the overlays again in the new tree and takes their ranges anew; the views
- * and the layers it hid are new, so nothing is cleared on them.
+ * Forgets what the step applied to a tree that goes (a rebuild, a lost device): the dims, the HUD render layers and
+ * the HUD they held, the range and the tap set. The records stay, so the next step finds the overlays again in the new
+ * tree and takes their ranges anew; the views and the layers it hid are new, so nothing is cleared on them.
  *
  * @param state - The sync state.
  */
@@ -43,7 +54,8 @@ export function forgetOverlays(state: SyncState): void {
 }
 
 /**
- * Forgets every overlay at stop: dims destroyed, records, ranges, taps, events and the watched entities cleared.
+ * Forgets every overlay at stop: dims and HUD render layers destroyed, records, ranges, taps, events and the watched
+ * entities cleared.
  *
  * @param state - The sync state.
  */

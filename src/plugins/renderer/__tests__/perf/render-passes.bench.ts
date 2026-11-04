@@ -1,9 +1,10 @@
 import { bench, describe } from "vitest";
 import { BENCH_OPTIONS } from "../../../../../tests/perf/alloc";
-import { filteredStage, hudStage } from "./fixtures";
+import { filteredStage, hudStage, hudUnderBoard } from "./fixtures";
 
 const filtered = await filteredStage();
 const hud = await hudStage();
+const under = await hudUnderBoard();
 
 describe("a still frame", () => {
   bench(
@@ -14,4 +15,5 @@ describe("a still frame", () => {
     BENCH_OPTIONS
   );
   bench("the overlay step with 5 HUD parts", () => hud.modules.sync.stepOverlays(), BENCH_OPTIONS);
+  bench("the overlay step of a resting sheet with the HUD under its dim", under, BENCH_OPTIONS);
 });

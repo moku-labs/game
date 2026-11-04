@@ -3,7 +3,7 @@
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
 import type { OverlayValue, ShapeValue, TransformValue } from "../components";
-import type { Unseen } from "../demand/types";
+import type { DemandReason, Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { FilterCache, KeptState, RetakeWhy, WhyLive } from "../kept/types";
 import type {
@@ -22,6 +22,7 @@ import type {
   PixiMeshGeometry,
   PixiModule,
   PixiRectangle,
+  PixiRenderLayer,
   PixiRenderTexture,
   PixiShader,
   PixiSprite,
@@ -1711,6 +1712,11 @@ export type OverlayRecord = {
   mode: OverlayMode;
   /** The engine's dim, made when `dim` is above 0. */
   dim: PixiSprite | undefined;
+  /**
+   * The render layer right under the dim that draws the HUD layer there while this overlay holds it: made once, with
+   * the dim, for `hud: "under"`, and destroyed with the record, a restore or new layers.
+   */
+  under: PixiRenderLayer | undefined;
   /** The dim was sized for the canvas at least once. */
   sized: boolean;
   /** Seen by the step this frame; a record not seen is dropped. */
@@ -1734,7 +1740,7 @@ export type ActiveRange = {
   readonly others: PixiContainer[];
   /** The entries, for the membership walk. */
   set: Set<PixiContainer>;
-  /** The node the picture stands before: the owner's dim, or its root. */
+  /** The node the picture stands before: the owner's HUD render layer, its dim, or its root. */
   before: PixiContainer | undefined;
   /** A picture holds the range (freeze only). */
   kept: boolean;
@@ -1760,6 +1766,21 @@ export type ActiveRange = {
 };
 
 /**
+ * What changed for the range since the last frame, written in place by the overlay step for the freeze rules: one
+ * object for the life of the state, so a frame makes none. Private to the renderer.
+ */
+export type RangeStep = {
+  /** The owner is new, or changed between cover and freeze. */
+  fresh: boolean;
+  /** The entries differ from the last frame. */
+  entriesChanged: boolean;
+  /** The others differ from the last frame. */
+  othersChanged: boolean;
+  /** The whole-frame reasons of this decision. */
+  wholes: ReadonlySet<DemandReason>;
+};
+
+/**
  * The overlay step's state, `ctx.state.sync.overlay`. Collections and arrays are reused: a frame allocates nothing.
  * Private to the renderer.
  */
@@ -1775,8 +1796,12 @@ export type OverlayState = {
   active: ActiveRange | undefined;
   /** The range object, made once and reused. */
   range: ActiveRange | undefined;
-  /** Top objects of the HUD parts that take no tap. */
+  /** Top objects of the HUD parts that take no tap, and the HUD layer container while an overlay holds it under. */
   offTops: Set<PixiContainer>;
+  /** The HUD layer container attached to `heldBy`; `undefined` while it draws in its own place, above the overlays. */
+  held: PixiContainer | undefined;
+  /** The render layer of the overlay that holds the HUD under its dim (`hud: "under"`), or none. */
+  heldBy: PixiRenderLayer | undefined;
   /** `"<code>:<entity>"` of the warnings logged once. */
   warned: Set<string>;
   /** The `overlay` event lines of an agent build, until the frame hands them to the monitor. */
@@ -1789,6 +1814,8 @@ export type OverlayState = {
   flipped: Set<Entity>;
   /** Scratch of the tap set. */
   nextOff: Set<PixiContainer>;
+  /** Scratch of the freeze rules: what changed for the range this frame. */
+  step: RangeStep;
   /** A view left its place in the held range since the last step (it moved, or its view went). */
   left: boolean;
   /** Scratch of the cover test of `blurred`: made on first use from the Pixi module the renderer loaded. */

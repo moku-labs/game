@@ -277,6 +277,10 @@ export type SpriteOptions = {
  * const shop: OverlayValue = {
  *   dim: 0.56, dimColor: 0x1b1430, cover: "none", hud: ["energy", "gems"], fade: 270, hold: true
  * };
+ * // The pyramid choice: the board and the whole HUD dim to 82 % together under it.
+ * const pyramid: OverlayValue = {
+ *   dim: 0.82, dimColor: 0x1e161a, cover: "none", hud: "under", fade: 250, hold: false
+ * };
  * ```
  */
 export type OverlayValue = {
@@ -286,8 +290,12 @@ export type OverlayValue = {
   dimColor: number;
   /** `"opaque"`: the overlay covers the whole screen once it has landed at alpha 1, so nothing under it is drawn. */
   cover: "none" | "opaque";
-  /** The HUD parts that stay shown: every part, none, or the parts with these keys. */
-  hud: "all" | "none" | readonly string[];
+  /**
+   * The HUD parts that stay shown above the dim: every part, none, or the parts with these keys. `"under"`: the whole
+   * HUD layer is drawn under this overlay's dim, dimmed with the rest, every part kept, and it takes no tap while it is
+   * there; with a dim of 0 it is `"all"`.
+   */
+  hud: "all" | "none" | "under" | readonly string[];
   /**
    * Milliseconds the dim and the HUD parts take to come and go when the root plays no enter or exit motion; a root
    * with a motion is followed for its own length. 0 follows at once.
@@ -422,8 +430,9 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * Marks the view an overlay is drawn from. Everything drawn before the root of that view is kept as one picture while
  * the overlay is there, and drawn again in the same frame anything in it changes; `cover: "opaque"` draws nothing
  * under it while it is fully shown. The engine draws its dim and fades the HUD parts it does not keep, with the root's
- * own enter and exit motion (`fade` when it has none). `hold: true` holds the endless loops of what lies under it
- * while it stands, so a dimmed sheet over a sharp scene draws no frame at rest.
+ * own enter and exit motion (`fade` when it has none); `hud: "under"` draws the whole HUD under the dim instead.
+ * `hold: true` holds the endless loops of what lies under it while it stands, so a dimmed sheet over a sharp scene
+ * draws no frame at rest.
  *
  * @example
  * ```tsx
@@ -431,6 +440,8 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * <panel key="caseSheet" motion={sheetFade} components={[Overlay({ cover: "opaque" })]} />
  * // The shop: the ward dims to 56 % and its glints rest while the shop stands; the energy and the gems stay shown.
  * <stack key="shopDimLayer" components={[Overlay({ dim: 0.56, hold: true, hud: ["energy", "gems"] })]} />
+ * // The pyramid choice: the ward and the whole HUD dim to 82 % under it, and the HUD takes no tap until it leaves.
+ * <stack key="pyramidChoice" components={[Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })]} />
  * ```
  */
 export const Overlay = /*#__PURE__*/ component("Overlay", overlayDefaults);
@@ -493,6 +504,7 @@ export function sprite(
  * const kit: RendererKit<"board.cell", "energy" | "gems"> = componentsFor<"board.cell", "energy" | "gems">();
  * kit.sprite({ texture: "board.cell", at: { x: 90, y: 90 } });
  * kit.Overlay({ dim: 0.56, hud: ["energy"] }).value.hud; // ["energy"]
+ * kit.Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" }).value.hud; // "under"
  * ```
  */
 export type RendererKit<Asset extends string, HudKey extends string = string> = {
@@ -506,7 +518,7 @@ export type RendererKit<Asset extends string, HudKey extends string = string> = 
   >;
   Overlay: Narrowed<
     OverlayValue,
-    Partial<Omit<OverlayValue, "hud">> & { hud?: "all" | "none" | readonly HudKey[] }
+    Partial<Omit<OverlayValue, "hud">> & { hud?: "all" | "none" | "under" | readonly HudKey[] }
   >;
   HudPart: Narrowed<HudPartValue, { key: HudKey }>;
 };

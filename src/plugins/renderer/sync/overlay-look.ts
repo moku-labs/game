@@ -1,12 +1,12 @@
 /**
  * @file renderer/sync — what the overlay step draws itself: the dim of an overlay, one full-screen quad right under
- * its root (O6), and the HUD parts an overlay keeps or lets fade, written in the same step as the level they follow
- * (O7, K3).
+ * its root (O6), the render layer right under the dim an overlay with `hud: "under"` draws the HUD layer in (F147), and
+ * the HUD parts an overlay keeps or lets fade, written in the same step as the level they follow (O7, K3).
  */
 import type { Entity } from "../../world/types";
 import { HudPart } from "../components";
 import type { DemandReason } from "../demand/types";
-import type { PixiContainer, PixiModule, PixiSprite } from "../types";
+import type { PixiContainer, PixiModule, PixiRenderLayer, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
 import { heldWaiting } from "./build";
 import type { OverlayRecord, SyncCtx } from "./types";
@@ -109,8 +109,55 @@ function lookDim(sctx: SyncCtx, record: OverlayRecord, dim: PixiSprite): void {
 }
 
 /**
+ * Makes the render layer an overlay with `hud: "under"` draws the HUD layer in: never a view, nothing attached yet.
+ *
+ * @param pixi - The Pixi module.
+ * @param entity - The marked entity, for the label.
+ * @returns The render layer.
+ */
+function makeUnder(pixi: PixiModule, entity: Entity): PixiRenderLayer {
+  const under = new pixi.RenderLayer();
+
+  under.label = `overlay-hud:${entity}`;
+
+  return under;
+}
+
+/**
+ * Places an overlay's HUD render layer immediately before its dim, at the dim's depth, as the dim is placed before the
+ * root: what it draws lies under the dim, and a picture of the range stands right before it. A move marks the whole
+ * frame: the layer has no entity.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param record - The overlay.
+ * @param under - Its render layer.
+ * @param dim - Its dim, placed already.
+ */
+function placeUnder(
+  sctx: SyncCtx,
+  record: OverlayRecord,
+  under: PixiRenderLayer,
+  dim: PixiSprite
+): void {
+  const { container } = record;
+  const at = container.getChildIndex(dim);
+
+  if (under.parent !== container || container.children[at - 1] !== under) {
+    sctx.deps.demand.whole("overlay");
+    under.removeFromParent();
+    container.addChildAt(under, container.getChildIndex(dim));
+  }
+
+  if (under.zIndex !== dim.zIndex) {
+    sctx.deps.demand.whole("overlay");
+    under.zIndex = dim.zIndex;
+  }
+}
+
+/**
  * The dims of every overlay with a dim above 0: made once, placed under the root, sized to the canvas (again after a
- * resize, a resolution change or a restore), and their look written.
+ * resize, a resolution change or a restore), and their look written; the HUD render layer of one with `hud: "under"`
+ * made with its dim and placed right under it (U1). A dim of 0 makes neither (U6).
  *
  * @param sctx - Domain context of the sync module.
  * @param wholes - The whole-frame reasons of this decision.
@@ -133,11 +180,131 @@ export function stepDims(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): void
     placeDim(sctx, record, record.dim);
     if (resized || !record.sized) sizeDim(sctx, record, record.dim);
     lookDim(sctx, record, record.dim);
+
+    if (record.under === undefined && record.value.hud === "under" && record.value.dim > 0) {
+      record.under = makeUnder(pixi, record.entity);
+    }
+
+    if (record.under !== undefined) placeUnder(sctx, record, record.under, record.dim);
   }
 }
 
 /**
- * Whether one overlay keeps a HUD part shown: 1 for `hud: "all"`, 0 for `"none"`, and whether its list holds the key.
+ * The render layer the HUD layer is drawn in now (U2): the topmost overlay with `hud: "under"`, a dim above 0 and a
+ * level above 0, looked for from the top down to the overlay that owns the range. One under that owner holds nothing:
+ * it lies in the owner's picture, which would cover a HUD drawn under it.
+ *
+ * @param order - The overlays, bottom first, their modes decided.
+ * @returns The holder's render layer, or `undefined` while the HUD draws in its own place above the overlays.
+ */
+function holderOf(order: readonly OverlayRecord[]): PixiRenderLayer | undefined {
+  for (let index = order.length - 1; index >= 0; index -= 1) {
+    const record = order[index];
+
+    if (record === undefined) continue;
+
+    const { value } = record;
+
+    if (record.under !== undefined && value.hud === "under" && value.dim > 0 && record.level > 0) {
+      return record.under;
+    }
+
+    // The owner of the range: everything under it is in its picture.
+    if (record.mode !== "live") return undefined;
+  }
+
+  return undefined;
+}
+
+/**
+ * Lets the HUD layer container go from the render layer that holds it, so it draws in its own place again. Only a
+ * container still attached there is detached: Pixi already let go of one that left its parent.
+ *
+ * @param sctx - Domain context of the sync module.
+ */
+function letGoHud(sctx: SyncCtx): void {
+  const overlay = sctx.ctx.state.sync.overlay;
+  const { held, heldBy } = overlay;
+
+  overlay.held = undefined;
+  overlay.heldBy = undefined;
+
+  if (held === undefined || heldBy === undefined) return;
+
+  if (held.parentRenderLayer === heldBy) heldBy.detach(held);
+  sctx.deps.demand.whole("overlay");
+}
+
+/**
+ * Hands the HUD layer container to the overlay that holds it under its dim this frame, or back to its own place (U2):
+ * the old holder lets it go before the new one takes it, and either marks the whole frame. A frame where nothing
+ * changed compares references and writes nothing. The HUD is held only while its container hangs in the stage root,
+ * in the one render group of the layers.
+ *
+ * @param sctx - Domain context of the sync module.
+ */
+export function stepHold(sctx: SyncCtx): void {
+  const state = sctx.ctx.state.sync;
+  const overlay = state.overlay;
+  const name = state.hudLayer;
+  const container = name === undefined ? undefined : state.layers.get(name)?.container;
+  const holder =
+    container !== undefined && container.parent === state.root
+      ? holderOf(overlay.order)
+      : undefined;
+
+  // per frame: the holder, the container and Pixi's own link compared, nothing written while they stand.
+  if (holder === undefined && overlay.heldBy === undefined) return;
+  if (
+    holder === overlay.heldBy &&
+    container === overlay.held &&
+    container?.parentRenderLayer === holder
+  ) {
+    return;
+  }
+
+  letGoHud(sctx);
+
+  if (holder === undefined || container === undefined) return;
+
+  holder.attach(container);
+  overlay.held = container;
+  overlay.heldBy = holder;
+  sctx.deps.demand.whole("overlay");
+}
+
+/**
+ * Destroys an overlay's HUD render layer, the HUD let go first when it holds it, so nothing is left attached (U5).
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param record - The overlay.
+ */
+export function dropUnder(sctx: SyncCtx, record: OverlayRecord): void {
+  const { under } = record;
+
+  if (under === undefined) return;
+
+  if (sctx.ctx.state.sync.overlay.heldBy === under) letGoHud(sctx);
+
+  sctx.deps.demand.whole("overlay");
+  under.detachAll();
+  if (!under.destroyed) under.destroy();
+  record.under = undefined;
+}
+
+/**
+ * Destroys the HUD render layer of every overlay, for new layers: the next step of the frame makes them again where
+ * the records hang now (U5).
+ *
+ * @param sctx - Domain context of the sync module.
+ */
+export function dropUnders(sctx: SyncCtx): void {
+  for (const record of sctx.ctx.state.sync.overlay.records.values()) dropUnder(sctx, record);
+}
+
+/**
+ * Whether one overlay keeps a HUD part shown: 1 for `hud: "all"` and `"under"` (the whole HUD stays, under the dim), 0
+ * for `"none"`, and whether its list holds the key.
  *
  * @param record - The overlay.
  * @param key - The part's key.
@@ -146,7 +313,7 @@ export function stepDims(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): void
 function keeps(record: OverlayRecord, key: string): number {
   const { hud } = record.value;
 
-  if (hud === "all") return 1;
+  if (hud === "all" || hud === "under") return 1;
   if (hud === "none") return 0;
 
   return hud.includes(key) ? 1 : 0;
