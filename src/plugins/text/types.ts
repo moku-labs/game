@@ -292,12 +292,32 @@ export type TextStyleInput = {
    * ```
    */
   lineHeight?: number;
+  /**
+   * Evens the lines of a wrapped block, like CSS `text-wrap: balance`: a block that wraps to 2 to 6
+   * lines is laid out at the narrowest width that keeps its number of lines, so its last line is
+   * no lone word. `wrap` keeps the width, `balance` says how it is used; no line is wider than the
+   * wrap. One line, no wrap, more than 6 lines or a word wider than the wrap: the greedy lines.
+   * `measure`, the `ui` layout and the drawn label share the answer. False when left out.
+   *
+   * @example
+   * ```ts
+   * // The hint under the order board: greedy, its second line was «один.» alone.
+   * defineTextStyles({
+   *   "shop.hint": { font: "ui.font-body", size: 32, fill: 0x3b2a1a, wrap: 800, balance: true }
+   * });
+   *
+   * app.text.measure("Здесь то, что ждут ваши заказы. Возьмите один.", "shop.hint");
+   * // { width: 441.6, height: 76.8 } on the 0.6 em fallback: «Здесь то, что ждут ваши» /
+   * // «заказы. Возьмите один.». Without balance the width is its first line, 40 glyphs × 19.2.
+   * ```
+   */
+  balance?: boolean;
 };
 
 /**
  * One style as the plugin stores it: every field filled, `bold` and `italic` only when the game
  * shipped those MSDF fonts, `shadow` only when the style has one, `lineHeight` only when the style
- * names its line (`undefined` is the font's line).
+ * names its line (`undefined` is the font's line), and `balance` only on a style that balances.
  *
  * @example
  * ```ts
@@ -322,6 +342,7 @@ export type TextStyle = {
   digits: boolean;
   shadow: TextShadow | undefined;
   lineHeight: number | undefined;
+  balance?: true;
 };
 
 /**

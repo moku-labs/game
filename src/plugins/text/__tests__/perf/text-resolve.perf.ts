@@ -61,6 +61,16 @@ describe("text resolve: heap per frame", () => {
     expect(bytes).toBeLessThanOrEqual(BUDGET.textResolveBoxIdle + NOISE_BYTES);
   }, 60_000);
 
+  // F148: balanced labels are laid out once, on a cache miss; a still screen of them keeps nothing.
+  it("an idle frame over 80 labels balanced at their box stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(resolveFixture("nothing", "phase", "balanced"), CALLS);
+
+    await annotate(`text resolve, idle, 80 balanced at their box: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textResolveBalancedIdle + NOISE_BYTES);
+  }, 60_000);
+
   it("the update of a box label that shows its value already stays within budget", async ({
     annotate
   }) => {

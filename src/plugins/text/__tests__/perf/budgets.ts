@@ -51,6 +51,12 @@ export const BUDGET = {
    */
   textResolveBoxIdle: 0,
   /**
+   * F148 (change 2026-11-04-f141-f147-f148-ui-text): the same idle phase with the 80 labels in a
+   * box style that balances its lines. The search runs once per layout, on the cache miss; a frame
+   * that lays nothing out reads the cache as the box style does and keeps nothing.
+   */
+  textResolveBalancedIdle: 0,
+  /**
    * F50: the display adapter's update of a `"box"` label written again with what it shows, as `ui`
    * writes a text whose rect moved and whose width stood. `isCurrent` compares the box as one more
    * number; nothing is laid out or kept.

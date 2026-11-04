@@ -60,6 +60,15 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   its room instead of the text wrapping. A line may be 0.0001 px wider than its box, the tolerance
   `ui` rounds a measure to whole units with. Any other wrap, `0` or `-1`, is refused when the
   style is defined.
+- **Balance:** `balance: true` evens the lines of a wrapped style, like CSS `text-wrap: balance`
+  (F148): `wrap` keeps the width, `balance` says how it is used. A block that wraps to 2 to 6 lines
+  is laid out at the narrowest width that keeps its number of lines (16 halvings between the widest
+  word and the wrap), so «Здесь то, что ждут ваши заказы. Возьмите / один.» becomes «Здесь то, что
+  ждут ваши / заказы. Возьмите один.». No line is wider than the wrap, and hyphen and soft-hyphen
+  breaks work as in a greedy block. One line, no wrap, more than 6 lines (as Chrome) or a word wider
+  than the wrap keep the greedy lines. `measure`, the `ui` layout and the drawn label share one
+  answer, cached as any layout: a still frame over balanced labels allocates nothing. The stored
+  style carries `balance` only when it balances; anything but `true` or `false` is refused.
 - **Tags:** `<b>`, `<i>`, `<color=#rrggbb>`, `<icon=key>`, `\<`, `\n`. An unknown tag stays
   literal and is reported once.
 - **Icons:** `<icon=key>` is one glyph, square at the line height and as wide as the line is high
