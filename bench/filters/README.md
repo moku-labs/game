@@ -34,20 +34,20 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | Scene | What it measures | Stands for |
 |---|---|---|
 | `ballast` | No filter: K full-screen batched sprites. Runs under any other scene. | The fill that holds the GPU clock up, so `slope-N` is read at a known clock. |
-| `slope-N` (0, 1, 2, 4, 8) | N live breakers of 4 × 4 px, `cache: false`, a uniform written each frame, over a full-screen sprite. `canvasPasses` = 1 + N. The slope of GPU ms over N is the price of one break. | One canvas break and nothing else. |
+| `slope-N` (0, 1, 2, 4, 8) | N live breakers of 4 × 4 px, `cache: false` and a body that takes `@builtin(position)`, which no quad runs, a uniform written each frame, over a full-screen sprite. `canvasPasses` = 1 + N. The slope of GPU ms over N is the price of one break. | One canvas break and nothing else. |
 | `slope-N-mask` | The same with a clip mask on screen first: every pass after it keeps the stencil. | A scroll list on a board with live filters. |
-| `full` | One full-screen live filter. `canvasPasses` = 2. | A whole-screen grade: the price per Mpx. |
+| `full` | One full-screen live filter, its body taking `@builtin(position)` as the breakers do. `canvasPasses` = 2. | A whole-screen grade: the price per Mpx. |
 | `fade` | Two roots 390 wide, 40 shadowed items each, a countdown text, an emitter, a 420 ms cross-dissolve on loop. | The fade between two screens. |
 | `entry` | 40 items with shadow and outline mounting every 1.5 s. | A board entry. |
 | `glow` | N placed glows with breath and glint uniforms under a filtered root. | The ward at idle, ObjectGlow. |
 | `sweep` | Blur at quality 4 and a ColorMatrix over the full screen, a 1 s ramp on loop. | The connect sweep. |
-| `fog` | Round wipes on 12 tiles and a 2048 × 1024 layer, `cache: false`. | FogWipe and FogDevelop, live. |
+| `fog` | Round wipes on 12 tiles and a 2048 × 1024 layer, `cache: false`: on WebGPU each runs on its quad over its kept picture. | FogWipe and FogDevelop. |
 | `fog-local` | The same with `cache: "local"`. Half of each turn writes nothing, so the pictures rest. | What keeping the fog would win. |
 | `flip` | A perspective flip and fold that reads the canvas origin. | A card flip. |
 | `scale` | 40 kept pictures, the page's resolution stepping × 1, 0.85, 0.75, 0.85 every 2 s. Works on a debug or dev page only: a release page does not switch resolution. | The adaptive render scale: the pictures are taken at the top, so a step costs no take. |
 | `scale-up` | The same 40 pictures in a 4 s loop: × 0.75 at the start, every fill changed once 300 ms later so the pictures are taken at 0.75, × 1 at 2 s. Debug or dev page only. Opened by address (`#scale-up&k=8`), not in the schedule of the phone. | The step up of the render scale: all 40 pictures owe a take at once, a limited number a frame. |
 | `rows` | 8 rows 340 × 72, padding 8, `cache: "local"`, the angle written each frame. After their third write the engine draws them through the filter's own body on a mesh in the canvas pass: `canvasPasses` = 1, no filter pass. | A kept view whose numbers change: OrderFlip, PromoQuad. |
-| `rows-live` | The same rows with `cache: false`: `canvasPasses` = 9 until slice C of F126 stage 2. | The same rows drawn live. |
+| `rows-live` | The same rows with `cache: false`. On WebGPU each row's picture is kept from its first take and its body runs on its mesh in the canvas pass, the canvas place in `uOutputFrame.xy`: `canvasPasses` = 1, no filter pass. | A view whose body reads the screen: OrderFlip, CoverFold, FogWipe. |
 | `rest` | 24 pictures at rest, one small sprite moving so frames are drawn: a batched sprite each. | What a view costs once it left its shader. |
 | `rows-enter` | 40 views of 64 px that write their numbers for 2 s and rest for 2 s, all together. `marks` in the row hold the frame of the entry and the frame the leaving starts, two a flush. Opened by address (`#rows-enter&k=8`), not in the schedule of the phone: it needs a 4 s turn. | The frame a whole screen goes on its shaders. |
 | `lens` | A soft round window opening over a picture and a subtree. | LensWindow. |

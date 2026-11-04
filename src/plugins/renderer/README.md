@@ -457,7 +457,7 @@ Where nothing counts (headless, a test stage, a fake application) both report th
 0 while inert; otherwise `1 + Σ over views drawn under the root with an enabled filter (1 + Σ passes of the
 enabled slots)`; a view drawn from its kept picture costs nothing, nor does a view inside one or under any node that
 is not drawn (an empty or alpha-0 view, a hidden layer: `visible` or `renderable` false up to the root), and the
-passes the last flush of the kept pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A view on its own shader (see "Kept pictures") is no pass: its body runs on a mesh in the pass that draws the canvas, and only the copy of its padded picture counts, 1, when the picture, the padding or the resolution changed. A filtered view costs one pass for its content and one per filter apply (spike
+passes the last flush of the kept pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A view on its own shader (see "Kept pictures"), a `cache: false` one included, is no pass: its body runs on a mesh in the pass that draws the canvas, and only the copy of its padded picture counts, 1, when the picture, the padding or the resolution changed. A filtered view costs one pass for its content and one per filter apply (spike
 P10); a disabled filter costs nothing, and a view whose filters are all disabled counts 0. A view
 out of the tree (an unknown layer) counts 0. The pins from P10: no filter `1`; one glow of 1 pass
 on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and a tint on ten
@@ -1158,8 +1158,8 @@ nothing, and is taken again 2 frames after it shows. Not taken under a zoom: a `
 a picture cut to the canvas (it is taken again on every move), and a view that churned (it waits for real rest). A
 view under an ancestor that pulses or spins for ever is drawn scaled for ever, never taken again at rest.
 
-Not kept: a filter of category `"screen"` (see the effects README, "Filters that are kept"), a slot
-of a game that names no category, a filter that blends with the backdrop (`blendRequired`) or a blend
+Not kept: a filter output of category `"screen"`, whose view is kept only on its own shader (see "A view on its own shader" and the effects README,
+"Filters that are kept"), a slot of a game that names no category, a filter that blends with the backdrop (`blendRequired`) or a blend
 mode other than normal, a top that blends otherwise, an ancestor that is tinted or blends otherwise, a
 `"placed"` filter
 under a filtered ancestor that cannot run on its own shader, a view hidden for the player, a picture over 4096 device pixels on a side,
@@ -1245,8 +1245,19 @@ A change on the mesh marks the pictures above it and the ranges that hold it, as
 refresh. `debug.verifyFrames` compares the mesh with the live filter from its first frame on, as any picture, except for a
 placed view under a filter whose pass starts off the canvas origin (below). Off the padding
 grid (a fractional resolution) a body's frame is up to one device pixel wider than live: nothing visible, and no more
-difference from live than a stage 3 picture has. Slice C of the change brings `cache: false` views; they stay as they were
-until then.
+difference from live than a stage 3 picture has.
+
+A `cache: false` view, or one whose body reads the screen (category `"screen"`), is kept only on its shader too: no filter
+output of it is ever kept, since stage 3 would read the picture's target, not the canvas. Its subtree picture is, when every
+`"screen"` slot of the view carries a `quad`, and its body runs on the mesh in every frame, the canvas place in
+`uOutputFrame.xy`, `uOutputTexture` the canvas and `uGlobalFrame` as a pass on the canvas writes it. It enters at its first
+take and never leaves at rest: a resting one costs a mesh frame, never a step. It moves, scales and steps as a placed view
+does: a move is a refresh with no pass, a new scale takes it again, never drawn scaled. A change under its top retakes it,
+and three in a row draw it live, calm, as any view; the next take puts it on its mesh again. Where it does not fit (WebGL, an
+`Alpha` beside it, a fixed resolution, a second filter) it is drawn live, and `why()` says `"cache-false"`; a slot without a
+quad (a body that reads `@builtin(position)`, a filter with inputs, a broken kind's stand-in) keeps no record at all.
+On the A26 (Chrome, 221 MHz, the bench's 8 `rows-live` rows with `cache: false`, 2026-11-04): 22.5 ms of GPU a frame and
+1 canvas pass, against 27.6 ms and 9 passes drawn live.
 
 A `"placed"` view under a filtered ancestor, live or kept, is kept only on its shader: a stage 3 picture would hold the
 wrong place. It fits the mode as any view does, one enabled filter of ours with a quad; a view that does not fit stays live,
@@ -1297,7 +1308,7 @@ from two append-only lists.
 | `"off"` | The switch `sync.debug.kept` is off, `keptMb` is 0, or the frame draws everything live for a check. |
 | `"backdrop"` | A filter reads what is under it. Also a view without a record. |
 | `"filter-blend"` | A filter blends otherwise than normally. |
-| `"cache-false"` | The cache may not keep a slot (`cache: false`, a slot that names no category): the view has no record. |
+| `"cache-false"` | The cache may not keep a slot (a slot that names no category, a `cache: false` slot without a quad): the view has no record; or a `cache: false` view does not fit its quad in this frame (WebGL, an `Alpha` beside it, a fixed resolution, a second filter). |
 | `"faded-out"` | The top is at alpha 0 or invisible. |
 | `"top-blend"` | The top or its visual blends otherwise. |
 | `"hidden"` | A cover or a hidden reason of the top holds it. |

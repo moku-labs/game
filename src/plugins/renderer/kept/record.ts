@@ -5,9 +5,10 @@
  * changes in three drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A step
  * of the renderer resolution keeps the pictures: one drawn lower is refined a few a flush (F126). A kept view whose filter
  * numbers keep changing goes on its filter's own shader and back to a sprite at rest (F126 stage 2, `shade.ts`); a placed
- * view under a filtered ancestor is kept only on that shader, from its first take on, and stays there. A view with a node
- * under its top that blends otherwise than normally is never taken (F68). Taking and releasing happen inside the flush,
- * before the stage pass, both halves in the same frame (K3).
+ * view under a filtered ancestor and a view whose body reads the screen (`cache: false`) are kept only on that shader,
+ * from their first take on, and stay there. A view with a node under its top that blends otherwise than normally is
+ * never taken (F68). Taking and releasing happen inside the flush, before the stage pass, both halves in the same frame
+ * (K3).
  */
 import type { FilterSlot, SyncState, SyncWriters, View } from "../sync/types";
 import type {
@@ -40,6 +41,7 @@ import {
   firstInputs,
   labelOf,
   poolTexture,
+  readsPlace,
   renderStage1,
   renderStage2,
   renderStage3,
@@ -49,6 +51,7 @@ import {
 import { enabledSlot, enterShade, leaveShade, renderShade } from "./shade";
 import { destroyRecord } from "./state";
 import {
+  type FilterCache,
   type KeptCtx,
   type KeptMatrices,
   type KeptQuad,
@@ -390,19 +393,16 @@ function drawnAnyway(kctx: KeptCtx, node: PixiContainer): boolean {
 }
 
 /**
- * Tells whether an ancestor filters a placed record's view: a filter of its own or its kept picture. Live, the canvas
- * position of a placed filter is then relative to that filter's texture.
+ * Tells whether an ancestor filters a record's view whose filters read their place: a filter of its own or its kept
+ * picture. Live, the canvas position of a placed filter is then relative to that filter's texture.
  *
  * @param kctx - The kept context.
  * @param record - The record.
  * @param node - The ancestor.
- * @returns True when the record is placed and the ancestor filters it.
+ * @returns True when the record reads its place and the ancestor filters it.
  */
 function filtersPlaced(kctx: KeptCtx, record: KeptRecord, node: PixiContainer): boolean {
-  return (
-    record.category === "placed" &&
-    (holdsFilters(node) || kctx.state.byTop.get(node)?.mode === "kept")
-  );
+  return readsPlace(record) && (holdsFilters(node) || kctx.state.byTop.get(node)?.mode === "kept");
 }
 
 /**
@@ -460,8 +460,8 @@ function ancestorsWhy(
 
 /**
  * Whether a record may be kept this frame (P4.1): the switch on, an enabled filter, filters that draw like a picture, a
- * top and a visual that blend normally (the visual sits inside the wrapper of a kept bare view, D4), a top that is
- * drawn, ancestors that draw it as a picture would.
+ * body that reads the screen only on its quad, a top and a visual that blend normally (the visual sits inside the
+ * wrapper of a kept bare view, D4), a top that is drawn, ancestors that draw it as a picture would.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -477,6 +477,8 @@ function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): 
   const filters = filtersWhy(record.slots);
 
   if (filters !== 0) return filters;
+  // A body that reads the screen draws from a picture only on its quad: stage 3 would read the picture's target.
+  if (record.category === "screen" && !shadeFits(kctx, record, stack)) return WHY.cacheFalse;
 
   const picture = pictureWhy(record.top, view);
 
@@ -600,7 +602,7 @@ export function createRecord(
   entity: number,
   view: View,
   slots: readonly FilterSlot[],
-  category: "local" | "placed"
+  category: FilterCache
 ): KeptRecord {
   const top = view.wrapper ?? view.object;
   const key = new Float64Array(KEY_SIZE).fill(Number.NaN);
@@ -1164,9 +1166,21 @@ function renderStages(
 }
 
 /**
+ * Tells whether the record being stepped may be kept on its mesh alone: a placed view under a filter (`NOW.under`), where
+ * a stage 3 picture would hold the wrong place, or a body that reads the screen, whose stage 3 would read the picture's
+ * target. Its first take goes on the mesh, and it does not count its way there.
+ *
+ * @param record - The record.
+ * @returns True when it may draw no other way.
+ */
+function quadOnly(record: KeptRecord): boolean {
+  return NOW.under || record.category === "screen";
+}
+
+/**
  * Settles what a take draws through, before its output: a stack that stopped fitting leaves before anything is drawn
- * for it, and the frame draws a sprite of stage 3. Under a filter there is no sprite to draw, so a picture that rendered
- * goes on the mesh; the sprite a mesh takes the place of may not exist yet.
+ * for it, and the frame draws a sprite of stage 3. Under a filter, and for a body that reads the screen, there is no
+ * sprite to draw, so a picture that rendered goes on the mesh; the sprite a mesh takes the place of may not exist yet.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1178,7 +1192,7 @@ function meshForTake(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord, ok: bo
 
   const quad = enabledSlot(record.slots)?.quad;
 
-  if (!ok || !NOW.under || record.shaded || quad === undefined) return;
+  if (!ok || !quadOnly(record) || record.shaded || quad === undefined) return;
 
   quadDrawing(pixi, record, record.s3 ?? pixi.Texture.EMPTY);
   enterShade(kctx, pixi, record, quad, NOW);
@@ -1295,7 +1309,7 @@ function scaledQuad(
 function scalable(record: KeptRecord, stepped: boolean): boolean {
   const { key } = record;
 
-  const unscalable = record.dirtyS1 || record.cut || record.category === "placed";
+  const unscalable = record.dirtyS1 || record.cut || readsPlace(record);
 
   if (unscalable || (!stepped && key[KEY.rs] !== NOW.rs)) return false;
 
@@ -1503,16 +1517,14 @@ function wrapBare(kctx: KeptCtx, record: KeptRecord, view: View): void {
 /**
  * Tells whether a move of a live record's linear part or stack resolution resets its still frames (F113): a zoom or a
  * turn of an ancestor does not, the picture is taken at it and drawn scaled (F67). It does for a new stack resolution,
- * a `"placed"` record (never drawn scaled), a calm one (a picture that churned waits for real rest) and one cut to the
- * canvas at its last take or refusal (never drawn scaled either).
+ * a record that reads its place, `"placed"` or `"screen"` (never drawn scaled), a calm one (a picture that churned
+ * waits for real rest) and one cut to the canvas at its last take or refusal (never drawn scaled either).
  *
  * @param record - The record, live, whose linear part or stack resolution moved since the last frame.
  * @returns True when the move resets its still frames.
  */
 function linearResets(record: KeptRecord): boolean {
-  return (
-    record.key[KEY.seenRs] !== NOW.rs || record.category === "placed" || record.calm || record.cut
-  );
+  return record.key[KEY.seenRs] !== NOW.rs || readsPlace(record) || record.calm || record.cut;
 }
 
 /**
@@ -1691,7 +1703,8 @@ function retakeOrGoLive(
 /**
  * A stage-1 change of a kept record (P4.3): retaken, or after three in a row drawn live and calm, so it stands still
  * for eight frames before the next take. Under a filter it is always retaken: live, a body that reads its place reads
- * another one, and a glow would jump; only a refused take or an eviction goes live there.
+ * another one, and a glow would jump; only a refused take or an eviction goes live there. A body that reads the screen
+ * churns as any record does: live, it reads the same canvas.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1734,7 +1747,7 @@ function retakeWhy(record: KeptRecord, stepped: boolean): number {
   if (!stepped && record.key[KEY.rs] !== NOW.rs) return RETAKE.resolution;
   if (record.dirtyS1) return RETAKE.mark;
 
-  return record.cut || record.category === "placed" ? RETAKE.placedMove : RETAKE.scaleLimit;
+  return record.cut || readsPlace(record) ? RETAKE.placedMove : RETAKE.scaleLimit;
 }
 
 /**
@@ -1806,14 +1819,14 @@ function canvasChanged(kctx: KeptCtx, key: Float64Array): boolean {
 /**
  * Tells whether a step of the renderer resolution passed over a kept picture (F126): drawn at another resolution than
  * the canvas, with a stack that followed the canvas there: a resolution of its own, or `"inherit"`. A picture cut to the
- * canvas or placed, a filter that wrote its own resolution and a mixed stack whose fixed resolution the step crossed
- * are no step: their change is read as a change of the stack.
+ * canvas or one that reads its place, a filter that wrote its own resolution and a mixed stack whose fixed resolution
+ * the step crossed are no step: their change is read as a change of the stack.
  *
  * @param record - The record, kept.
  * @returns True when the picture was stepped over.
  */
 function resolutionStepped(record: KeptRecord): boolean {
-  if (record.cut || record.category === "placed") return false;
+  if (record.cut || readsPlace(record)) return false;
 
   const { key } = record;
   const drawn = drawnResolution(key, record.direct);
@@ -2037,8 +2050,7 @@ function outputOwed(record: KeptRecord, hold: boolean): boolean {
   const { key } = record;
   const resolutionOwed = !hold && NOW.r !== key[KEY.r];
   const paddingOwed = hold && record.direct ? NOW.P !== 0 : NOW.P !== key[KEY.P];
-  const placedMoved =
-    record.category === "placed" && (NOW.tx !== key[KEY.s3Tx] || NOW.ty !== key[KEY.s3Ty]);
+  const placedMoved = readsPlace(record) && (NOW.tx !== key[KEY.s3Tx] || NOW.ty !== key[KEY.s3Ty]);
 
   return record.dirtyS3 || resolutionOwed || paddingOwed || placedMoved;
 }
@@ -2120,7 +2132,7 @@ function refreshOutput(
 
   // What a record left holds is the padded picture, not a filter output: stage 3 is owed whatever the keys say. A sprite
   // that came under a filter holds the wrong place, and owes the same.
-  const unplaced = unfit || (NOW.under && !record.shaded);
+  const unplaced = unfit || (quadOnly(record) && !record.shaded);
   const owed = Math.max(stagesOwed(record, hold), unplaced ? OWED.output : OWED.none);
 
   // Nothing owed: the one thing left to ask is whether a shaded record rested long enough.
@@ -2206,8 +2218,8 @@ function redrawShade(
 /**
  * Counts an output owed by a record on its sprite, and puts the record on its mesh when it is due: stage 3 alone was owed
  * more than `QUAD_AFTER` times without a gap of `CALM_AFTER` frames, and it fits. The gap rule, not a reset on a quiet
- * frame: a tween that writes every second frame reaches the mode. Under a filter nothing is counted: it may draw no other
- * way. A shaded record counts nothing.
+ * frame: a tween that writes every second frame reaches the mode. Under a filter and for a body that reads the screen
+ * nothing is counted: it may draw no other way. A shaded record counts nothing.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -2231,7 +2243,7 @@ function enterShadeWhenDue(
   record.outputAt = frame;
 
   const quad = enabledSlot(record.slots)?.quad;
-  const due = NOW.under || (owed === OWED.output && record.outputRuns > QUAD_AFTER);
+  const due = quadOnly(record) || (owed === OWED.output && record.outputRuns > QUAD_AFTER);
 
   if (!due || !fits || quad === undefined) return false;
 
@@ -2239,14 +2251,17 @@ function enterShadeWhenDue(
 }
 
 /**
- * Tells whether a shaded record went `QUAD_CALM` drawn frames without a change: it is due to leave.
+ * Tells whether a shaded record went `QUAD_CALM` drawn frames without a change: it is due to leave. A body that reads the
+ * screen never is: it is kept on its mesh alone, so a calm frame does not step it.
  *
  * @param state - The kept state.
  * @param record - The record.
  * @returns True when it is.
  */
 function shadedCalm(state: KeptState, record: KeptRecord): boolean {
-  return record.shaded && state.frame - record.shadedAt >= QUAD_CALM;
+  const rested = state.frame - record.shadedAt >= QUAD_CALM;
+
+  return record.shaded && record.category !== "screen" && rested;
 }
 
 /**
@@ -2254,7 +2269,8 @@ function shadedCalm(state: KeptState, record: KeptRecord): boolean {
  * runs the whole body every frame. Under `limitLeft`, shared with the refining and the settle, it stays shaded in a frame
  * the limit is spent. It counts as a refresh. The pixels do not change, so the pass marks nothing above; a stack whose
  * resolution moved under a held step is taken whole, as `refresh` takes it, and that does change them. Under a filter
- * it stays: its clock starts over, so a calm frame leaves it alone until it comes round again.
+ * it stays: its clock starts over, so a calm frame leaves it alone until it comes round again. A body that reads the
+ * screen is never due (`shadedCalm`).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.

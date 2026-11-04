@@ -491,7 +491,10 @@ export type FilterSlot = {
   kind?: string;
   /** The stages of a filter's inputs and the seam of the kept-picture cache; filled by effects, left out by a game. */
   inputs?: FilterSlotInputs;
-  /** What the kept-picture cache may do with the filter; left out, it is `"screen"` (drawn live). */
+  /**
+   * What the kept-picture cache may do with the filter; left out, the view is drawn live. A `"screen"` slot is kept only
+   * on its `quad`: without one the view is drawn live too.
+   */
   cache?: FilterCache;
   /** The filter's `keptOrigin` uniform, which the renderer sets to the canvas origin of a picture. */
   origin?: Float32Array;

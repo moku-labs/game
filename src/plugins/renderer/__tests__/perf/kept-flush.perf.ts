@@ -11,6 +11,7 @@ import {
   keptFadeBoard,
   keptFractionalBoard,
   keptOwnFadeBoard,
+  keptScreenBoard,
   keptShadedBoard,
   keptSteppedBoard,
   keptUnderBoard,
@@ -118,6 +119,14 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for 40 shaded views whose numbers are written every frame (F126)", async () => {
     expect(bytesPerCall(await keptShadedBoard(40), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptShaded + NOISE
+    );
+  });
+
+  // Bug: the check that a body reading the screen fits its mesh, or the read of its place, boxes a number or makes a
+  // closure per view: forty `cache: false` rows run it in every frame.
+  it("allocates nothing for 40 cache: false views on their shader whose numbers are written every frame (F126)", async () => {
+    expect(bytesPerCall(await keptScreenBoard(40), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptScreen + NOISE
     );
   });
 

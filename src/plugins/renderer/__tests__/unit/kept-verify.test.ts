@@ -99,7 +99,7 @@ type Room = {
   /** The room's corner on the canvas. */
   place: { x: number; y: number };
   /** The lamp's category; a local one is put on its mesh by the test's writes. */
-  cache?: "placed" | "local";
+  cache?: "placed" | "local" | "screen";
   /** The category of the room's filter; none is drawn live in every frame. */
   roomCache?: "local";
   /** The padding of the room's filter. */
@@ -336,6 +336,19 @@ describe("the pixel leg of the kept oracle", () => {
   // body reads a place relative to that filter's texture, on purpose (spec 23 P8.3).
   it("skips a frame in which a placed view reads its place under a filter off the origin", async () => {
     const { drawn, lamp, kept } = await lampUnderRoom({ place: { x: 50, y: 50 } });
+    const skipped = kept.verifySkipped;
+
+    drawn.frames(3);
+
+    expect(kept.verifySkipped).toBe(skipped + 3);
+    expect(staleLines(drawn)).toEqual([]);
+    expect(kept.byEntity.get(lamp)?.mode).toBe("kept");
+  });
+
+  // Bug: a `cache: false` view under a filter off the origin is named a stale picture and sent live in every frame: its
+  // body reads the place as a placed one does.
+  it("skips such a frame for a cache: false view", async () => {
+    const { drawn, lamp, kept } = await lampUnderRoom({ place: { x: 50, y: 50 }, cache: "screen" });
     const skipped = kept.verifySkipped;
 
     drawn.frames(3);

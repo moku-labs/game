@@ -27,9 +27,27 @@ function body(lines: string): string {
   return `${OPEN}\n  ${lines}\n}`;
 }
 
+/**
+ * A fragment body that stays live: it takes `@builtin(position)`, which no quad runs, so a `cache: false` view under it
+ * breaks the canvas pass in every frame, as the arms that measure a break need.
+ *
+ * @param lines - The WGSL after `n` and `c`, down to the return.
+ * @returns The body.
+ * @example
+ * ```ts
+ * liveBody("return c;").includes("@builtin(position)"); // true
+ * ```
+ */
+function liveBody(lines: string): string {
+  return body(lines).replace(
+    "@location(0) uv: vec2<f32>)",
+    "@location(0) uv: vec2<f32>, @builtin(position) position: vec4<f32>)"
+  );
+}
+
 /** The tiny live breaker of `slope-N`: one uniform, written each frame, never kept. */
 export const Breaker = defineFilter("bench.breaker", {
-  wgsl: body("return vec4<f32>(c.rgb * (0.9 + 0.1 * sin(fu.phase + n.x)), c.a);"),
+  wgsl: liveBody("return vec4<f32>(c.rgb * (0.9 + 0.1 * sin(fu.phase + n.x)), c.a);"),
   glsl: GLSL_PASS,
   uniforms: { phase: 0 },
   cache: false
@@ -37,7 +55,7 @@ export const Breaker = defineFilter("bench.breaker", {
 
 /** One full-screen live filter: a grade with a vignette. */
 export const FullGrade = defineFilter("bench.fullGrade", {
-  wgsl: body(`let edge = 1.0 - 0.4 * distance(n, vec2<f32>(0.5, 0.5));
+  wgsl: liveBody(`let edge = 1.0 - 0.4 * distance(n, vec2<f32>(0.5, 0.5));
   return vec4<f32>(c.rgb * edge * (0.95 + 0.05 * sin(fu.phase)), c.a);`),
   glsl: GLSL_PASS,
   uniforms: { phase: 0 },

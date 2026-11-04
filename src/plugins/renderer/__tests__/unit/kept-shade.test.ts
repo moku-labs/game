@@ -1505,3 +1505,203 @@ describe("a placed view under a filter", () => {
     expect(record.shaded).toBe(false);
   });
 });
+
+/**
+ * A slot of a body that reads the screen (`cache: false`), on its quad as `effects` hands it over.
+ *
+ * @param fields - Other fields of the slot.
+ * @returns The slot.
+ */
+function screenSlot(fields: Partial<FilterSlot> = {}): FilterSlot {
+  return shadedSlot({ cache: "screen", ...fields });
+}
+
+describe("a cache: false view on its quad", () => {
+  // Bug: a `cache: false` view is drawn live for ever, or a body the mesh cannot run is kept on a sprite of stage 3.
+  it("a screen slot with a quad makes a record; without one, or beside a game's own slot, none", async () => {
+    const drawn = await open();
+    const { byEntity } = drawn.mock.ctx.state.kept;
+    const onQuad = keptCard(drawn, [screenSlot()]);
+    const bare = keptCard(drawn, [{ filter: shadedSlot().filter, passes: 1, cache: "screen" }], {
+      x: 300,
+      y: 100
+    });
+    const mixed = keptCard(drawn, [screenSlot(), { filter: shadedSlot().filter, passes: 1 }], {
+      x: 500,
+      y: 100
+    });
+
+    expect(byEntity.get(onQuad)?.category).toBe("screen");
+    expect(byEntity.has(bare)).toBe(false);
+    expect(byEntity.has(mixed)).toBe(false);
+  });
+
+  // Bug: the first take draws stage 3, whose body reads the picture's target, not the canvas.
+  it("its first take goes on the mesh at once: no stage 3, one copy, beside its top", async () => {
+    const drawn = await open();
+    const card = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(card, [screenSlot()]);
+
+    const from = drawn.stage.targets().length;
+
+    drawn.frames(4);
+
+    const record = recordOf(drawn, card);
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(true);
+    expect(record.quad).toBe(shadeOf(record).mesh);
+    expect(quadBesideTop(record)).toBe(true);
+    expect(rendersBy(drawn, record.standIn, from)).toBe(0);
+    expect(rendersBy(drawn, copyOf(drawn), from)).toBe(1);
+  });
+
+  // Bug: a resting `cache: false` view goes back to a sprite of stage 3, or is stepped in every calm frame for it.
+  it("never leaves at rest: 200 calm frames, still on its mesh, no render, no step", async () => {
+    const drawn = await open();
+    const record = recordOf(drawn, keptCard(drawn, [screenSlot()]));
+    const from = drawn.stage.targets().length;
+
+    // A step writes the frame's place on the record; a calm frame that leaves the record alone writes nothing.
+    record.key[KEY.lastTx] = Number.NaN;
+    drawn.frames(200);
+
+    expect(record.shaded).toBe(true);
+    expect(drawn.stage.targets().length).toBe(from);
+    expect(record.key[KEY.lastTx]).toBeNaN();
+  });
+
+  /** What a `cache: false` view may not run on its mesh. */
+  const LIVE_SCREEN: ReadonlyArray<[string, () => FilterSlot[], ("webgpu" | "webgl")?]> = [
+    ["on WebGL", () => [screenSlot()], "webgl"],
+    [
+      "an Alpha beside it",
+      () => [
+        screenSlot(),
+        { filter: new pixi.AlphaFilter({ alpha: 0.5 }), passes: 1, cache: "local" }
+      ]
+    ],
+    [
+      "a fixed resolution",
+      () => {
+        const slot = screenSlot();
+
+        slot.filter.resolution = 1;
+
+        return [slot];
+      }
+    ]
+  ];
+
+  // Bug: a body that reads the screen is drawn from a picture of stage 3 where the mesh cannot run it.
+  it.each(LIVE_SCREEN)("stays live %s, and why() says cache-false", async (_name, slots, kind) => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const drawn = await open(kind);
+    const card = keptCard(drawn, slots());
+
+    expect(recordOf(drawn, card).mode).toBe("live");
+    expect(drawn.mock.api.sync.debug.why()[0]).toMatchObject({
+      mode: "live",
+      reason: "cache-false"
+    });
+  });
+
+  // Bug: a game session cannot tell a `cache: false` view on its shader from one drawn live.
+  it("why() says quad: true when it fits", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const drawn = await open();
+
+    keptCard(drawn, [screenSlot()]);
+
+    expect(drawn.mock.api.sync.debug.why()[0]).toMatchObject({
+      mode: "kept",
+      // eslint-disable-next-line unicorn/no-null -- the report says `null` for no reason.
+      reason: null,
+      quad: true
+    });
+  });
+
+  // Bug: the rule of a view under a filter leaks: a `cache: false` view that changes in every frame retakes for ever, or
+  // after its churn it comes back on a sprite of stage 3.
+  it("churns to live like any record, and a later take goes on the mesh again", async () => {
+    const drawn = await open();
+    const card = keptCard(drawn, [screenSlot()]);
+    const child = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 4, y: 4 }),
+      Shape({ w: 8, h: 8 }),
+      Parent({ entity: card })
+    ]);
+
+    drawn.frames(6);
+
+    const record = recordOf(drawn, card);
+
+    for (let frame = 1; frame <= 3; frame += 1) {
+      drawn.mock.world.ecs.set(child, Transform, { x: 4 + frame });
+      drawn.frame();
+    }
+
+    expect(record.mode).toBe("live");
+    expect(record.shaded).toBe(false);
+
+    const from = drawn.stage.targets().length;
+
+    drawn.frames(12);
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(true);
+    expect(rendersBy(drawn, record.standIn, from)).toBe(0);
+    expect(rendersBy(drawn, copyOf(drawn), from)).toBe(1);
+  });
+
+  // Bug: a moved `cache: false` view reads its old place: a body that reads the screen draws what stood there.
+  it("a move owes a refresh with no pass, and uOutputFrame.xy follows the canvas place", async () => {
+    const drawn = await open();
+    const card = keptCard(drawn, [screenSlot()]);
+    const record = recordOf(drawn, card);
+    const update = vi.spyOn(shadeOf(record).gfu, "update");
+    const from = drawn.stage.targets().length;
+
+    drawn.mock.world.ecs.set(card, Transform, { x: 110 });
+    drawn.frame();
+
+    expect(drawn.stage.targets().length).toBe(from);
+    expect(update).toHaveBeenCalledOnce();
+    expect((shadeOf(record).gfu.uniforms.uOutputFrame as Float32Array)[0]).toBe(110);
+    expect(record.shaded).toBe(true);
+  });
+
+  // Bug: a `cache: false` view drawn scaled: its body reads a frame of another size than the canvas shows.
+  it("a scaled view is taken again at its scale, never drawn scaled", async () => {
+    const drawn = await open();
+    const card = keptCard(drawn, [screenSlot()]);
+    const record = recordOf(drawn, card);
+    const from = drawn.stage.targets().length;
+
+    drawn.mock.world.ecs.set(card, Transform, { scale: 1.5 });
+    drawn.frame();
+
+    expect(takesOf(drawn, record, from)).toBe(1);
+    expect(record.key[KEY.a]).toBe(1.5);
+    expect(record.shaded).toBe(true);
+  });
+
+  // Bug: a `cache: false` view still breaks the canvas pass: the counter that gates the A26 line reads 9.
+  it("sync.canvasPasses() stays 1 with eight cache: false views", async () => {
+    const drawn = await open();
+    const cards: Entity[] = [];
+
+    for (let index = 0; index < 8; index += 1) {
+      cards.push(keptCard(drawn, [screenSlot()], { x: 100, y: 100 + index * 84 }));
+    }
+
+    write(drawn, ...cards);
+
+    expect(cards.every(card => recordOf(drawn, card).shaded)).toBe(true);
+    expect(drawn.mock.modules.sync.canvasPasses()).toBe(1);
+  });
+});

@@ -9,6 +9,7 @@ import { CHANNELS, differingPixels, NAMED, withinRatio } from "../pixels";
 import type { PixiContainer, PixiFilter, PixiModule, PixiRectangle } from "../types";
 import { drawnBounds } from "./drawn-bounds";
 import { drawnResolution, KEY, linearBounds, onGrid } from "./geometry";
+import { readsPlace } from "./render";
 import type { KeptCtx, KeptRecord, RangeRecord } from "./types";
 
 /** What the read of the live frame answers when the frame is not compared. */
@@ -132,9 +133,9 @@ function passOffOrigin(
 }
 
 /**
- * Tells whether a shaded placed record hangs under a filter whose pass starts off the canvas origin. Live, its body
- * reads a place relative to that pass's texture; on the mesh it reads the canvas (spec 23 P8.3). The two differ by that
- * origin by design, not by a stale picture. Only the closest filter counts: Pixi offsets by that one alone. Read with
+ * Tells whether a shaded record that reads its place hangs under a filter whose pass starts off the canvas origin. Live,
+ * its body reads a place relative to that pass's texture; on the mesh it reads the canvas (spec 23 P8.3). The two differ
+ * by that origin by design, not by a stale picture. Only the closest filter counts: Pixi offsets by that one alone. Read with
  * every picture live: a kept ancestor's filters are back on its top, and the views are back in the tree.
  *
  * @param kctx - The kept context.
@@ -144,7 +145,7 @@ function passOffOrigin(
 function placeDiffers(kctx: KeptCtx, record: KeptRecord): boolean {
   const pixi = kctx.host.pixi();
 
-  if (!record.shaded || record.category !== "placed" || pixi === undefined) return false;
+  if (!record.shaded || !readsPlace(record) || pixi === undefined) return false;
 
   for (let node = record.top.parent; node !== null; node = node.parent) {
     const held: readonly PixiFilter[] | null | undefined = node.filters;
