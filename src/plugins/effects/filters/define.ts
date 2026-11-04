@@ -17,6 +17,7 @@ import type {
   FilterSpec,
   FilterStage,
   FilterValueOf,
+  MadeFilter,
   UniformDeclaration,
   UniformSpec
 } from "./types";
@@ -90,6 +91,37 @@ function emptyReaders(): WeakSet<FilterDefinition> {
 
 /** The definitions whose bodies read the screen: a dev build warns about the ones that declared no `cache: false`. */
 const screenReaders = emptyReaders();
+
+/**
+ * Creates the map of the components `defineFilter` made, by id. A function: the module-scope rule sees no collection
+ * literal.
+ *
+ * @returns An empty map.
+ */
+function emptyMade(): Map<string, MadeFilter> {
+  return new Map();
+}
+
+/**
+ * Every component `defineFilter` made in a dev build, by id, the last one winning: a hot reload makes a new object
+ * under the same id. The start of a dev build watches the ones no feature lists (`effects:filter-unlisted`). A release
+ * build fills nothing, and drops the map with its one reader.
+ */
+const madeFilters = /*#__PURE__*/ emptyMade();
+
+/**
+ * The components `defineFilter` made in a dev build, by id: nothing in a release build.
+ *
+ * @returns The map, read-only.
+ */
+export function filtersMade(): ReadonlyMap<string, MadeFilter> {
+  return madeFilters;
+}
+
+/** Forgets every component `defineFilter` made: for tests, which define the same id in many files. */
+export function resetMadeFilters(): void {
+  madeFilters.clear();
+}
 
 /** How bad a category is for the cache, for "the worst of": a screen read beats a placed one beats a local one. */
 const WORST: Readonly<Record<FilterCache, number>> = { local: 0, placed: 1, screen: 2 };
@@ -914,5 +946,10 @@ export function defineFilter<
     ["order", 0]
   ]) as FilterValueOf<Uniforms>;
 
-  return Object.assign(component(id, defaults), { filter });
+  const made = Object.assign(component(id, defaults), { filter });
+
+  // Inline and positive: a release bundle holds neither the map nor the call.
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) madeFilters.set(id, made);
+
+  return made;
 }

@@ -42,7 +42,12 @@ const EVERY_SCENE = [
   "rows",
   "rows-live",
   "rest",
-  "rows-enter"
+  "rows-enter",
+  "set-flash",
+  "set-grade",
+  "set-vignette",
+  "set-grade-full",
+  "sweep-grade"
 ] as const;
 
 /** The running game of a test. */

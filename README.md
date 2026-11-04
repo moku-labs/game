@@ -236,7 +236,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | [`i18n`](./src/plugins/i18n/README.md) | screen | Strings as data, ICU messages, compiled per locale; a sub-feature's strings travel with its bundle |
 | [`text`](./src/plugins/text/README.md) | screen | MSDF text, styles, inline tags and icons |
 | [`ui`](./src/plugins/ui/README.md) | screen | Screens in JSX, Yoga layout, popups, styles |
-| [`effects`](./src/plugins/effects/README.md) | opt-in | Particles and filters as components, WGSL and GLSL |
+| [`effects`](./src/plugins/effects/README.md) | opt-in | Particles and filters as components, WGSL and GLSL; the effect set `Flash`, `Grade`, `Vignette` ready to list ([set](./src/plugins/effects/set/README.md)) |
 | [`audio`](./src/plugins/audio/README.md) | opt-in | Music and sound effects on three buses |
 | [`platform`](./src/plugins/platform/README.md) | opt-in | The phone: Back button, haptics, keep-awake |
 

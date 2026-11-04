@@ -3,7 +3,7 @@
  * Rendering is WebGPU, so the WGSL body is what is measured. `defineFilter` asks for a GLSL twin
  * too: all of them share one pass-through, so WebGL draws the scenes without their looks.
  */
-import { defineFilter } from "../../../../src/index.ts";
+import { defineFilter, Flash, Grade, Vignette } from "../../../../src/index.ts";
 
 /** The GLSL twin the filter API asks for. */
 const GLSL_PASS = "void main() { finalColor = texture(uTexture, vTextureCoord); }";
@@ -239,7 +239,7 @@ export const PromoStroke = defineFilter("bench.promoStroke", {
   uniforms: { sweep: 0 }
 });
 
-/** Every filter of the bench, for the feature. */
+/** Every filter of the bench, for the feature: its own, then the members of the engine's effect set its arms draw. */
 export const BENCH_FILTERS = [
   Breaker,
   FullGrade,
@@ -258,5 +258,8 @@ export const BENCH_FILTERS = [
   PromoMap,
   PromoProcedural,
   PromoMirror,
-  PromoStroke
+  PromoStroke,
+  Flash,
+  Grade,
+  Vignette
 ];

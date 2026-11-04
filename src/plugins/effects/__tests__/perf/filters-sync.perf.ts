@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Glow } from "../../filters/builtins";
+import { Flash } from "../../set/flash";
 import { BUDGET, NOISE } from "./budgets";
 import {
   bytesPerCall,
   CROSSING,
+  FLASH_AMOUNT,
   fadeStep,
   fadeWrite,
   filtersFixture,
@@ -41,6 +43,17 @@ describe("effects:filters, heap bytes per frame step", () => {
     const write = bytesPerCall(tweenWrite(fixture));
 
     expect(fixture.mock.renderer.sets.some(set => set.slots[0]?.quad !== undefined)).toBe(true);
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
+  });
+
+  // Bug it guards: a member of the effect set allocates per frame of a tween where a game's own filter does not.
+  it("one Flash amount tweened on one of 12 filtered views, its quad handed over", () => {
+    const fixture = filtersFixture([Flash.filter], FLASH_AMOUNT);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
+    const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);
+
+    expect(handed.some(set => set.slots[0]?.quad !== undefined)).toBe(true);
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
   });
 

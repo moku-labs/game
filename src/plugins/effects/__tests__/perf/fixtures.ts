@@ -17,12 +17,13 @@ import type { PixiFilter, PixiTexture, ViewportSize } from "../../../renderer/ty
 import type { Time } from "../../../time/types";
 import { createModules } from "../../../world/api";
 import { withDeps } from "../../../world/lifecycle";
-import type { AnyComponentValue, Entity, WorldPhase } from "../../../world/types";
+import type { AnyComponentValue, ComponentHandle, Entity, WorldPhase } from "../../../world/types";
 import { Alpha, Blur, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
-import type { FilterDefinition, FilterInstance } from "../../filters/types";
+import type { FilterDefinition, FilterFields, FilterInstance } from "../../filters/types";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
+import { Flash } from "../../set/flash";
 import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
 import { Frosted, Under } from "../filter-fixtures";
 import { createMockEffects, type MockEffects } from "../unit/mock-effects";
@@ -168,15 +169,41 @@ export function phaseRunner(mock: MockEffects, phase: WorldPhase, delta = FRAME_
   };
 }
 
-/** A started mock with filtered views, the step of its `sync` phase and the stored `Glow` of one view. */
+/** The filter and the number field a tween case moves on the first view of the fixture. */
+export type TweenedField = {
+  /** The filter, as the world stores it. */
+  readonly component: ComponentHandle<FilterFields>;
+  /** The number field the tween writes. */
+  readonly field: string;
+  /** The filter's value on the first view, at a fraction of that field. */
+  readonly make: (start: number) => AnyComponentValue;
+};
+
+/** The `strength` of `Glow`: the tween of the first perf cases. */
+export const GLOW_STRENGTH: TweenedField = {
+  component: Glow,
+  field: "strength",
+  make: start => Glow({ strength: start })
+};
+
+/** The `amount` of the effect set's `Flash`, a member the fixture's feature lists. */
+export const FLASH_AMOUNT: TweenedField = {
+  component: Flash,
+  field: "amount",
+  make: start => Flash({ amount: start })
+};
+
+/** A started mock with filtered views, the step of its `sync` phase and the stored filter a tween moves. */
 export type FiltersFixture = {
   mock: MockEffects;
   /** One run of the `sync` phase: the filter sync (and the renderer's sync, absent from the mock). */
   run: () => void;
-  /** The view whose `Glow` a tween moves. */
+  /** The view whose filter a tween moves. */
   tweened: Entity;
-  /** The value the world holds for its `Glow`, writable: a tween case moves it in place. */
-  glow: { strength: number };
+  /** The filter and the field a tween moves. */
+  tween: TweenedField;
+  /** The value the world holds for that filter, writable: a tween case moves its field in place. */
+  value: Record<string, number>;
   /** The views whose `Alpha` a fade case moves, by name: `canvas` at the canvas's resolution, `half` at 0.5. */
   fades: Readonly<Record<FadeView, { entity: Entity; value: { alpha: number } }>>;
   /** How often the sync called `renderer.invalidate`. */
@@ -184,19 +211,20 @@ export type FiltersFixture = {
 };
 
 /**
- * The components of the filtered view `index` of the fixture: `Glow`, the game's `Tint`, `Blur` and `Alpha` in turn,
- * each on a sprite with its own place.
+ * The components of the filtered view `index` of the fixture: `Glow` (the tweened filter on the first view), the
+ * game's `Tint`, `Blur` and `Alpha` in turn, each on a sprite with its own place.
  *
  * @param index - The view.
+ * @param tween - The filter a tween moves on the first view.
  * @returns Its components.
  */
-function viewComponents(index: number): AnyComponentValue[] {
+function viewComponents(index: number, tween: TweenedField): AnyComponentValue[] {
   const sprite = Sprite({ texture: "board.cell", width: 64, height: 64 });
   const place = Transform({ x: index * 70, y: 100 });
 
   switch (index % 4) {
     case 0: {
-      return [sprite, place, Glow({ strength: 0.6 })];
+      return [sprite, place, index === 0 ? tween.make(0.6) : Glow({ strength: 0.6 })];
     }
     case 1: {
       return [sprite, place, Tint({ amount: 0.4 })];
@@ -213,17 +241,22 @@ function viewComponents(index: number): AnyComponentValue[] {
 
 /**
  * Starts a mock with `FILTERED_VIEWS` filtered views, runs the frames that build and hand over their instances, and
- * clears every change set. The first view carries `Glow`, the view a tween case moves.
+ * clears every change set. The first view carries the filter a tween case moves: `Glow` by default. The feature lists
+ * the game's `Tint` and the effect set's `Flash`.
  *
  * @param quads - The definitions whose quad passed its check: their slots hand a quad over.
+ * @param tween - The filter and the field a tween case moves on the first view.
  * @returns The fixture.
  */
-export function filtersFixture(quads: readonly FilterDefinition[] = []): FiltersFixture {
+export function filtersFixture(
+  quads: readonly FilterDefinition[] = [],
+  tween: TweenedField = GLOW_STRENGTH
+): FiltersFixture {
   const mock = createMockEffects();
 
   for (const definition of quads) mock.state.checks.quads.add(definition);
 
-  mock.features.push({ name: "perf", description: { filters: [Tint] } });
+  mock.features.push({ name: "perf", description: { filters: [Tint, Flash] } });
 
   const counter = plainRenderer(mock);
 
@@ -233,7 +266,7 @@ export function filtersFixture(quads: readonly FilterDefinition[] = []): Filters
   const views: Entity[] = [];
 
   for (let index = 0; index < FILTERED_VIEWS; index += 1) {
-    const entity = mock.spawn(viewComponents(index));
+    const entity = mock.spawn(viewComponents(index, tween));
 
     mock.renderer.displays.add(entity);
     views.push(entity);
@@ -243,12 +276,12 @@ export function filtersFixture(quads: readonly FilterDefinition[] = []): Filters
   for (let frame = 0; frame < 3; frame += 1) mock.frame(FRAME_MS);
 
   const tweened = views[0] ?? 0;
-  const glow = mock.world.ecs.get(tweened, Glow) as { strength: number } | undefined;
+  const value = mock.world.ecs.get(tweened, tween.component) as Record<string, number> | undefined;
   const fades = { canvas: fadeOf(mock, views[3] ?? 0), half: fadeOf(mock, views[7] ?? 0) };
 
-  if (glow === undefined) throw new Error("perf fixture: the first view has no Glow");
+  if (value === undefined) throw new Error("perf fixture: the first view has no tweened filter");
 
-  return { mock, run: phaseRunner(mock, "sync"), tweened, glow, fades, counter };
+  return { mock, run: phaseRunner(mock, "sync"), tweened, tween, value, fades, counter };
 }
 
 /**
@@ -266,11 +299,11 @@ function fadeOf(mock: MockEffects, entity: Entity): { entity: Entity; value: { a
   return { entity, value };
 }
 
-/** The two strengths a tween case moves between. */
+/** The two fractions a tween case moves between. */
 const STRENGTHS: readonly [number, number] = [0.55, 0.75];
 
 /**
- * The write of a tween on the `Glow` of one view, alone: its strength moves to the other fraction in place, the way a
+ * The write of a tween on the filter of one view, alone: its field moves to the other fraction in place, the way a
  * tween's write lands in the stored value. V8 boxes the fraction it stores (16 B): a tween's cost, which a perf case
  * measures with this step and subtracts. The change mark is made once, by `ecs.set`, and stays: no `signals` runs in
  * a window to clear it, so the world's own `set` stays out of the bytes.
@@ -279,20 +312,21 @@ const STRENGTHS: readonly [number, number] = [0.55, 0.75];
  * @returns The write.
  */
 export function tweenWrite(fixture: FiltersFixture): () => void {
-  const { mock, tweened, glow } = fixture;
+  const { mock, tweened, tween, value } = fixture;
+  const { field } = tween;
   let frame = 0;
 
-  mock.world.ecs.set(tweened, Glow, { strength: STRENGTHS[0] });
+  mock.world.ecs.set(tweened, tween.component, { [field]: STRENGTHS[0] });
 
   return (): void => {
     frame += 1;
     // per call: never the value of the call before, so every sync writes the uniform.
-    glow.strength = (frame & 1) === 0 ? STRENGTHS[0] : STRENGTHS[1];
+    value[field] = (frame & 1) === 0 ? STRENGTHS[0] : STRENGTHS[1];
   };
 }
 
 /**
- * The step of a tween on the `Glow` of one view: the write of `tweenWrite`, then the `sync` phase.
+ * The step of a tween on the filter of one view: the write of `tweenWrite`, then the `sync` phase.
  *
  * @param fixture - A fixture of `filtersFixture`.
  * @returns The step.

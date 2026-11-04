@@ -23,6 +23,7 @@ Open `http://127.0.0.1:4173/#slope-4`. Change the part after `#` and the scene c
 | `#glow&n=24` | A scene that takes a count (`glow`, 12 by default). |
 | `#rows&hold=500` | The scene's time held at 500 ms, for a compare of pixels at one value; with `arms=`, every arm's. An address without it lets the scenes run. |
 | `#arms=slope-0,slope-2&every=2&k=8` | Turns through the scenes, 2 s each, for as long as the page is open. |
+| `#arms=rest,full,rows,set-flash,set-grade,set-vignette,set-grade-full,sweep-grade&every=2&k=8` | The arms of the effect set's first slice with the arms its lines compare against. |
 
 From the editor: open this folder as a game. The command `bench.scene` (`{ scene, k? }`) switches the
 scene, the sources `bench.scenes` and `bench.readout` list the scenes and the numbers.
@@ -40,7 +41,7 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `fade` | Two roots 390 wide, 40 shadowed items each, a countdown text, an emitter, a 420 ms cross-dissolve on loop. | The fade between two screens. |
 | `entry` | 40 items with shadow and outline mounting every 1.5 s. | A board entry. |
 | `glow` | N placed glows with breath and glint uniforms under a filtered root. | The ward at idle, ObjectGlow. |
-| `sweep` | Blur at quality 4 and a ColorMatrix over the full screen, a 1 s ramp on loop. | The connect sweep. |
+| `sweep` | Blur at quality 4 and a ColorMatrix over the full screen, a 1 s ramp on loop. Opened by address only since F126 stage 3: the colour matrix's pass hides in the blur's, so slice 3 splits it into `sweep-blur`, `sweep-blur-q4` and `sweep-grade`. | The connect sweep. |
 | `fog` | Round wipes on 12 tiles and a 2048 × 1024 layer, `cache: false`: on WebGPU each runs on its quad over its kept picture. | FogWipe and FogDevelop. |
 | `fog-local` | The same with `cache: "local"`. Half of each turn writes nothing, so the pictures rest. | What keeping the fog would win. |
 | `flip` | A perspective flip and fold that reads the canvas origin. | A card flip. |
@@ -51,11 +52,17 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `rest` | 24 pictures at rest, one small sprite moving so frames are drawn: a batched sprite each. | What a view costs once it left its shader. |
 | `rows-enter` | 40 views of 64 px that write their numbers for 2 s and rest for 2 s, all together. `marks` in the row hold the frame of the entry and the frame the leaving starts, two a flush. Opened by address (`#rows-enter&k=8`), not in the schedule of the phone: it needs a 4 s turn. | The frame a whole screen goes on its shaders. |
 | `lens` | A soft round window opening over a picture and a subtree. | LensWindow. |
+| `set-flash` | The 8 rows of `rows` under the engine's `Flash`, its `amount` written each frame: after the third write each row draws the member's body on its quad, `canvasPasses` = 1. | A flash on a hit or a merge. |
+| `set-grade` | The same rows under `Grade`, its `brightness` written each frame. | A grade that moves: a ColorMatrix case. |
+| `set-vignette` | The same rows under `Vignette`, its `x` written each frame. | A vignette that follows a point. |
+| `set-grade-full` | One full-screen `Grade` over the full-screen sprite, its `brightness` written each frame: on its quad, no filter pass. Against `full`, the same screen under a live body. | A whole-screen grade that moves. |
+| `sweep-grade` | The same screen under Pixi's `ColorMatrix`, its `brightness` written each frame: a core kind has no quad, so every value pays a filter pass. | What `Grade` replaces. |
 | `promo` | A perspective map of live text, a time-driven procedural quad, a mirrored column with a gradient, a stroke sweep. | The promo screen. |
 
-Every filter body is the bench's own, shaped like the case, in WGSL. Rendering is WebGPU, so that is
-what is measured. `defineFilter` also asks for a GLSL body: all of them share one pass-through, so
-a WebGL page draws the scenes without their looks. Do not measure on WebGL.
+Every filter body is the bench's own, shaped like the case, in WGSL, but for the `set-*` arms, which
+draw the engine's effect set (`src/plugins/effects/set/`). Rendering is WebGPU, so that is what is
+measured. `defineFilter` also asks for a GLSL body: the bench's own share one pass-through, so a
+WebGL page draws the scenes without their looks. Do not measure on WebGL.
 
 ## Reading the numbers
 
