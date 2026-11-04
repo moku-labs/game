@@ -172,8 +172,9 @@ describe("the canvas estimate", () => {
 });
 
 describe("the rows on their shaders", () => {
-  // Bug: a kept filter written every frame still breaks the canvas pass or costs a filter pass: the A26 line reads 9.
-  it("rows runs no filter pass and no canvas break once its numbers were written, rows-live one a row", async () => {
+  // Bug: a kept filter written every frame, or a `cache: false` one, still breaks the canvas pass or costs a filter pass:
+  // the A26 line reads 9.
+  it("rows and rows-live run no filter pass and no canvas break once their numbers were written", async () => {
     vi.stubGlobal("__MOKU_GAME_AGENT__", true);
 
     const { app, driver } = await open();
@@ -191,7 +192,8 @@ describe("the rows on their shaders", () => {
     app.bench.show("rows-live");
     await driver.frames(20);
 
-    expect(app.renderer.stats().canvasPasses).toBe(9);
+    expect(app.renderer.sync.debug.why().every(entry => entry.quad === true)).toBe(true);
+    expect(app.renderer.stats().canvasPasses).toBe(1);
   });
 
   // Bug: the frame of the entry cannot be told in a row, and the gate on it reads the wrong frame.

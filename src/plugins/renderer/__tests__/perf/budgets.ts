@@ -115,6 +115,10 @@ export const BUDGET = {
   // F126 stage 2, part B: 12 placed views under a live filter, a number of each written every frame. New. Every step walks
   // the view's parents, a flag and a map read per ancestor, and asks whether the view fits its mesh, on one object.
   keptUnder: 0,
+  // F126 stage 2, part C: 40 views whose bodies read the screen (`cache: false`), on their own shader from their first
+  // take, a number of each written every frame. New. The step reads the place of each as a placed view's, through the
+  // category on the record, and asks whether it fits its mesh on the frame's one object.
+  keptScreen: 0,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
   filterSwitchStill: 0,
