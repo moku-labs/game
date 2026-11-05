@@ -899,6 +899,9 @@ const BLOOM_TILES = 12;
 /** The strength a `set-bloom` arm writes, the member's default. */
 const BLOOM_STRENGTH = 0.6;
 
+/** How far a moving `Bloom`'s strength swings around `BLOOM_STRENGTH`. */
+const BLOOM_WAVE = 0.4;
+
 /**
  * Twelve tiles of 128 × 128 under `Bloom`, three a row, and what the arm writes of them.
  *
@@ -954,7 +957,7 @@ const BLOOM_SCENES: readonly BenchScene[] = [
     BLOOM_STRENGTH,
     (stage, tiles) => elapsedMs => {
       for (const [index, tile] of tiles.entries()) {
-        stage.set(tile, Bloom, { strength: BLOOM_STRENGTH + 0.4 * wave(elapsedMs, index) });
+        stage.set(tile, Bloom, { strength: BLOOM_STRENGTH + BLOOM_WAVE * wave(elapsedMs, index) });
       }
     }
   ),
@@ -989,7 +992,7 @@ const BLOOM_SCENES: readonly BenchScene[] = [
 
       return elapsedMs => {
         if (moving !== undefined) {
-          stage.set(moving, Bloom, { strength: BLOOM_STRENGTH + 0.4 * wave(elapsedMs, 0) });
+          stage.set(moving, Bloom, { strength: BLOOM_STRENGTH + BLOOM_WAVE * wave(elapsedMs, 0) });
         }
       };
     }

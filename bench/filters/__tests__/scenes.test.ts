@@ -510,7 +510,7 @@ describe("the Bloom arms", () => {
     const strengths = (first ?? []).filter(([, patch]) => "strength" in patch);
 
     expect(new Set(strengths.map(([entity]) => entity)).size).toBe(12);
-    expect(strengths.every(([, patch]) => (patch as { strength: number }).strength === 0.6)).toBe(
+    expect(strengths.every(([, patch]) => "strength" in patch && patch.strength === 0.6)).toBe(
       true
     );
     expect(first).toHaveLength(13);

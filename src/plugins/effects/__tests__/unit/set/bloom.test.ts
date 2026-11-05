@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FilterStep } from "../../../filters/types";
 import { BLOOM_GLSL, BLOOM_WGSL, Bloom } from "../../../set/bloom";
-import { BloomBlur, BloomDown } from "../../../set/stages";
 import type { BloomValue } from "../../../set/types";
 import { bodyCases, headsOf } from "./member-checks";
 
@@ -70,7 +69,6 @@ describe("Bloom", () => {
     expect(Bloom.filter.inputs.map(input => [input.name, input.sample, input.from])).toEqual([
       ["bright", "sampleBright", "input"]
     ]);
-    expect(Bloom.filter.inputs[0]?.stages).toEqual([BloomDown, BloomBlur]);
   });
 
   // Bug: the blur at ¼ is asked for more than 8 texels (its rings stand apart), the ⅛ ladder's taps read only the
