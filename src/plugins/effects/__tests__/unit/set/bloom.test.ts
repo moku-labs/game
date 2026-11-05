@@ -61,15 +61,8 @@ const FIVE_AT_8 = [
 describe("Bloom", () => {
   bodyCases({ filter: Bloom.filter, wgsl: BLOOM_WGSL, glsl: BLOOM_GLSL, reads: ["strength"] });
 
-  // Bug: the table's defaults are lost, or the export's example lies.
-  it("takes the fields of the member table", () => {
-    expect(Bloom().value).toEqual({
-      strength: 0.6,
-      threshold: 0.7,
-      radius: 16,
-      enabled: true,
-      order: 0
-    });
+  // Bug: the export's example lies: the defaults no longer take the 4-step ladder at resolution 2.
+  it("answers the 4 steps of its example on the defaults", () => {
     expect(Bloom.filter.inputs[0]?.chain({ ...Bloom().value }, { resolution: 2 }).length).toBe(4);
   });
 

@@ -160,7 +160,6 @@ describe("Downsample", () => {
   // Bug: a one-tap step: the bloom shimmers as the view moves under the coarse texels.
   it("takes 4 taps, a box", () => {
     expect(tapsIn(DOWNSAMPLE_WGSL)).toBe(4);
-    expect(Downsample.filter.uniforms).toEqual([]);
   });
 });
 

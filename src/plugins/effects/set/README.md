@@ -149,9 +149,10 @@ A padded member draws its frame grown by the padding on every side: a tile under
 A member adds no JavaScript per frame: `filters-sync.perf.ts` measures a `Flash` amount tweened on one of 12 filtered
 views, its quad handed over, at 0 B a frame, beside the `Glow` line of the same shape. `Bloom`'s chain answers one of
 two arrays made once, written in place: called as a tween calls it, over both ladders, 0 B. Its `strength` tweened on
-one of the 12 views costs 2 920 B a frame (`budgets.ts`, `filtersBloomTween`, Node 24.21): a chain member's uniform write
-marks its chain stale, and the engine's `evaluate` walks the chain's answer again in every frame (`entries()` pairs,
-`Object.keys` of the step uniforms, an object per placed step). Those bytes are the engine's, not the member's.
+one of the 12 views costs 32 B a frame (`budgets.ts`, `filtersBloomTween`, Node 24.21; 2 920 B before the engine's
+`evaluate` walked its steps by index): a chain member's uniform write marks its chain stale, the engine checks and
+writes the chain's answer again in every frame, and V8 boxes the cut's fractional `threshold` at its check and at its
+compare-on-write. A chain whose step uniforms hold whole numbers measures 0.
 
 ## Checked
 

@@ -46,7 +46,7 @@ export const BLOOM_GLSL = /* glsl */ `void main() {
 type CutUniforms = { threshold: number };
 
 /** The uniforms of a Gaussian step, its sigma written in place by every run of the chain. */
-type AlongUniforms = { readonly dir: readonly number[]; sigma: number };
+type AlongUniforms = { readonly dir: readonly [number, number]; sigma: number };
 
 /** One ladder of the chain, made once: the steps the chain answers, and the uniform objects it writes in place. */
 type Ladder = {
@@ -67,8 +67,8 @@ type Ladder = {
 function ladderOf(boxes: readonly number[]): Ladder {
   const scale = boxes.at(-1) ?? QUARTER;
   const cut: CutUniforms = { threshold: 0 };
-  const alongX: AlongUniforms = { dir: Object.freeze([1, 0]), sigma: 0 };
-  const alongY: AlongUniforms = { dir: Object.freeze([0, 1]), sigma: 0 };
+  const alongX: AlongUniforms = { dir: Object.freeze([1, 0] as const), sigma: 0 };
+  const alongY: AlongUniforms = { dir: Object.freeze([0, 1] as const), sigma: 0 };
   const steps: readonly FilterStep[] = Object.freeze([
     Object.freeze({ stage: BloomCut, scale: HALF, uniforms: cut }),
     ...boxes.map(box => Object.freeze({ stage: Downsample, scale: box })),

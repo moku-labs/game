@@ -1155,9 +1155,6 @@ function fitsForm(uniform: UniformSpec, value: unknown): boolean {
   return true;
 }
 
-/** A step as a chain returned it, before its check: any of its fields may be missing or of another type. */
-type UncheckedStep = { readonly scale?: unknown };
-
 /**
  * The first problem of one step, as the message of the log line.
  *
@@ -1183,8 +1180,8 @@ function stepProblem(
 
   // A plain read on an object: `Reflect.get` answers the fraction boxed, a new number per step in every frame.
   const scale =
-    typeof step === "object" && step !== null
-      ? (step as UncheckedStep).scale
+    typeof step === "object" && step !== null && "scale" in step
+      ? step.scale
       : propertyOf(step, "scale");
 
   if (typeof scale !== "number" || !Number.isFinite(scale) || scale <= 0 || scale > 1) {
