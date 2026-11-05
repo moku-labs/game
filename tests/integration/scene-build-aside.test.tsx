@@ -107,6 +107,22 @@ const boardShade = system({
   }
 });
 
+/** The sprites `boardWatch` saw, one entry a run: what a game's system without `scenes` reads every frame. */
+const watched: Array<readonly World.Entity[]> = [];
+
+/** A system of every scene, as the game's orders.stage (F155): it lists the sprites it sees, phase `animate`. */
+const boardWatch = system({
+  name: "aside.boardWatch",
+  phase: "animate",
+  query: [Sprite],
+  run: rows => {
+    const seen: World.Entity[] = [];
+
+    for (const [entity] of rows) seen.push(entity);
+    watched.push(seen);
+  }
+});
+
 const wardScene = defineScene("ward", {
   bundle: "ward",
   layers: { room: {} },
@@ -132,7 +148,7 @@ const mainFlow = defineFlow("main", {
 const asideFeature = defineFeature("aside", {
   scenes: [wardScene, boardScene],
   projections: [wardRoom, wardHud, boardCells, boardPanel],
-  systems: [boardShade]
+  systems: [boardShade, boardWatch]
 });
 
 /** The projections of both scenes, by name. */
@@ -151,6 +167,8 @@ type Running = Watched & {
 const running: Running[] = [];
 
 afterEach(async () => {
+  watched.length = 0;
+
   for (const fixture of running.splice(0)) {
     fixture.oracle.expectNoMissedFrame();
     await fixture.app.stop();
@@ -368,6 +386,64 @@ describe("the next scene built aside, across the engine", () => {
     expect(
       aside.app.log.trace().filter(entry => entry.event === "renderer:building-drawn")
     ).toEqual([]);
+  });
+
+  // Bug (F155): a game's system without `scenes` sees the board's views arrive over the build frames, before the
+  // commit, and marks the board as seen before it is drawn.
+  it("hides the board from a feature's system until the commit, then shows it whole in one frame", async () => {
+    const aside = await open();
+
+    watched.length = 0;
+
+    const { app } = aside;
+    const cellsSeen = (seen: readonly World.Entity[]): number =>
+      seen.filter(entity => cellsOf(aside).includes(entity)).length;
+
+    expect(app.flow.gate.answer({ intent: "board" })).toBe(true);
+
+    const before: number[] = [];
+
+    for (let frame = 0; frame < 120 && app.scenes.current() !== "board"; frame += 1) {
+      await aside.frames(1);
+      if (app.scenes.current() !== "board") before.push(...watched.splice(0).map(seen => cellsSeen(seen)));
+    }
+
+    // The build spawned its cells in the first frames: the system ran through them and saw none.
+    expect(app.world.projection.isBuilding(cellsOf(aside)[0] ?? 0)).toBe(false);
+    expect(before.length).toBeGreaterThanOrEqual(CELLS.length);
+    expect(before.every(count => count === 0)).toBe(true);
+
+    // From the first run after the commit, every cell at once.
+    watched.length = 0;
+    await aside.frames(1);
+    expect(watched.map(seen => cellsSeen(seen))).toEqual([CELLS.length]);
+  });
+
+  // The engine's own systems still lay the build out and draw it: an engine system sees what a feature's does not.
+  it("lets an engine system see the board while it is built aside", async () => {
+    const aside = await open();
+    const engineSeen: number[] = [];
+    const off = aside.app.world.ecs.system(
+      system({
+        name: "test.engineWatch",
+        phase: "animate",
+        query: [Sprite],
+        run: rows => {
+          let cells = 0;
+
+          for (const [entity] of rows) {
+            if (aside.app.world.projection.isBuilding(entity)) cells += 1;
+          }
+
+          engineSeen.push(cells);
+        }
+      })
+    );
+
+    await switchToBoard(aside);
+    off();
+
+    expect(Math.max(...engineSeen)).toBeGreaterThan(0);
   });
 
   // Bug: the coming scene is drawn before any of its systems ran, so its first frame shows the values its views were

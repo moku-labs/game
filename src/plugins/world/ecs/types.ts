@@ -486,6 +486,8 @@ export type SystemEntry = {
   readonly scenes: readonly string[] | undefined;
   /** Its last chance to run was skipped: the next run is told so with `resumed`. */
   skipped: boolean;
+  /** A feature brought it: its rows pass over the entities of a scene built aside (F155). */
+  readonly hidesAside?: boolean;
   /**
    * The walk of the declared query, made at registration; `undefined` for an empty query, which
    * the runner never walks. An entry built without one gets it on its first run.
@@ -1295,6 +1297,15 @@ export type EcsApi = {
  * ecs methods the plugin root calls: frame phases, the owner listener, the clears. Not public.
  */
 export type EcsInternal = {
+  /**
+   * Registers a system a feature brought: as `system`, and its rows pass over the entities of a
+   * scene built aside until the commit (F155).
+   *
+   * @param definition - The system.
+   * @returns The remover.
+   */
+  featureSystem(definition: AnySystem): () => void;
+
   /**
    * Registers a listener for `despawnOwnedBy`, so `projection` can drop the views of an owner
    * that left.
