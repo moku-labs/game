@@ -279,6 +279,8 @@ export function pageHtml(page: Page, links: PageLinks): string {
   );
   const style =
     `html, body { margin: 0; height: 100%; background: ${background}; } ` +
+    // iOS ignores `user-scalable=no`: a pinch or a double tap on a node over the game zooms the page (F150).
+    "html, body { touch-action: pan-x pan-y; } " +
     "#game { width: 100%; height: 100%; touch-action: none; } " +
     // A long press on iOS selects text and shows the loupe (F144); a text field keeps its selection.
     "html, body, #game { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; " +

@@ -16,6 +16,7 @@ import type { PlayerStateProvider } from "../plugins/model/store/types";
 import { fadeBoot } from "./boot";
 import { resolveConfig } from "./config";
 import { pageSave } from "./save";
+import { guardZoom } from "./zoom";
 import type {
   AnyGameApp,
   GameConfig,
@@ -304,7 +305,7 @@ function openStartOverlay(app: PageApp, overlay: OverlayStart): void {
 }
 
 /**
- * Runs a game on its page: resolves `config.ts`, picks the start (a `?player=` scenario runs on a
+ * Runs a game on its page: resolves `config.ts`, puts the zoom guard on the window, picks the start (a `?player=` scenario runs on a
  * fresh memory save, never on the stored one), builds the system shell when the page has one,
  * picks the save, makes the screen app on `#game` over the device clock and the manifest next to
  * the page, sets `globalThis.game`, `system` and `doors`, follows reduced motion, starts the shell,
@@ -355,6 +356,9 @@ export async function startPage<Game extends AnyGameApp>(
 ): Promise<StartedPage<Game>> {
   const settings = resolveConfig(config);
   const query = new URLSearchParams(location.search);
+
+  // Before anything draws: iOS zooms the page under a pinch or a double tap on an overlay (F150).
+  guardZoom(globalThis, () => performance.now());
   const { report, attach } = lateReporter();
   const clock = pageClock();
   const start = scenarioStart(query.get("player"), options.scenarios ?? {}, clock.now(), report);
