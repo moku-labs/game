@@ -5,6 +5,12 @@
 import type { Api, ClockCtx, Elapsed, State } from "./types";
 
 /**
+ * The longest delay a platform timer keeps, 2^31−1 ms (24.8 days). A longer one overflows and
+ * fires at once (F151); a far moment waits in steps of this length through the early re-arm.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
  * Reads the source and raises the high-water mark. A source that goes back cannot move game time
  * back, and a fractional reading is cut to whole milliseconds.
  *
@@ -46,13 +52,14 @@ function deliverElapsed(state: State): void {
 /**
  * Arms the single timer for a due moment. The delay is counted from the RAW source reading, not
  * from trusted time: the source's timer runs on the device clock, so after the device clock was
- * moved back the wait is longer than `moment - now()`.
+ * moved back the wait is longer than `moment - now()`. A moment further than the longest timer
+ * waits in steps: the timer fires early and `fireDue` arms it again.
  *
  * @param state - Clock state.
  * @param moment - Due moment in epoch milliseconds.
  */
 function arm(state: State, moment: number): void {
-  const delayMs = Math.max(0, moment - Math.trunc(state.source.now()));
+  const delayMs = Math.min(MAX_TIMER_MS, Math.max(0, moment - Math.trunc(state.source.now())));
 
   state.dueAt = moment;
   state.handle = state.source.setTimer(() => fireDue(state), delayMs);
