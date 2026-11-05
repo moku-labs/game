@@ -83,6 +83,44 @@ describe("createClockApi", () => {
   });
 
   describe("scheduleAt", () => {
+    // Bug caught (F151): a delay over 2^31−1 ms overflows `setTimeout`, which fires at once; the
+    // early re-arm then loops every few ms for as long as the moment is far off.
+    it("arms a moment 88 days away with the longest timer, then waits out the rest", () => {
+      const day = 86_400_000;
+      let now = 1000;
+      let fire: (() => void) | undefined;
+      const delays: number[] = [];
+      const source: ClockSource = {
+        now: () => now,
+        setTimer: (callback, delayMs) => {
+          delays.push(delayMs);
+          fire = callback;
+          return delays.length;
+        },
+        clearTimer: () => {}
+      };
+      const api = createClockApi(createMockCtx(source));
+      const heard = vi.fn();
+      api.onElapsed(heard);
+
+      api.scheduleAt(1000 + 88 * day);
+      expect(delays).toEqual([2_147_483_647]);
+
+      now += 2_147_483_647;
+      fire?.();
+      expect(delays).toEqual([2_147_483_647, 2_147_483_647]);
+
+      now += 2_147_483_647 * 2;
+      fire?.();
+      expect(delays[2]).toBe(88 * day - 2_147_483_647 * 3);
+      expect(heard).not.toHaveBeenCalled();
+
+      now = 1000 + 88 * day;
+      fire?.();
+      expect(delays).toHaveLength(3);
+      expect(heard).toHaveBeenCalledOnce();
+    });
+
     it("stores the pending due moment", () => {
       const { ctx } = createFakeCtx();
       const api = createClockApi(ctx);

@@ -2,6 +2,7 @@
  * @file clock plugin — API factory. Holds the monotonic rule, the single pending due moment and
  * the `elapsed` listeners.
  */
+import { MAX_TIMER_MS } from "./system";
 import type { Api, ClockCtx, Elapsed, State } from "./types";
 
 /**
@@ -46,13 +47,14 @@ function deliverElapsed(state: State): void {
 /**
  * Arms the single timer for a due moment. The delay is counted from the RAW source reading, not
  * from trusted time: the source's timer runs on the device clock, so after the device clock was
- * moved back the wait is longer than `moment - now()`.
+ * moved back the wait is longer than `moment - now()`. A moment further than the longest timer
+ * waits in steps: the timer fires early and `fireDue` arms it again.
  *
  * @param state - Clock state.
  * @param moment - Due moment in epoch milliseconds.
  */
 function arm(state: State, moment: number): void {
-  const delayMs = Math.max(0, moment - Math.trunc(state.source.now()));
+  const delayMs = Math.min(MAX_TIMER_MS, Math.max(0, moment - Math.trunc(state.source.now())));
 
   state.dueAt = moment;
   state.handle = state.source.setTimer(() => fireDue(state), delayMs);

@@ -374,6 +374,19 @@ describe("startPage: the shell, the handles and the start", () => {
     expect(Reflect.get(globalThis, "doors")).toEqual({ read, watch, sources });
   });
 
+  // Bug caught (F150): the page starts without the zoom guard, so a pinch on the editor's overlay
+  // zooms the page on iOS.
+  it("the page puts the zoom guard on the window", async () => {
+    const listen = vi.spyOn(globalThis, "addEventListener");
+
+    await open();
+
+    expect(listen).toHaveBeenCalledWith("gesturestart", expect.any(Function), {
+      capture: true,
+      passive: false
+    });
+  });
+
   it("a page without a shell has no system handle", async () => {
     const { system } = await open();
 

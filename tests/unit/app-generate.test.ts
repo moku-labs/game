@@ -95,7 +95,8 @@ describe("pageHtml", () => {
         "    <title>Лесной городок</title>",
         '    <link rel="icon" href="../assets/icon.png" />',
         '    <link rel="apple-touch-icon" href="../assets/icon-180.png" />',
-        "    <style>html, body { margin: 0; height: 100%; background: #10161d; } #game { width: 100%; height: 100%; touch-action: none; } " +
+        "    <style>html, body { margin: 0; height: 100%; background: #10161d; } html, body { touch-action: pan-x pan-y; } " +
+          "#game { width: 100%; height: 100%; touch-action: none; } " +
           "html, body, #game { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; } " +
           "input, textarea { -webkit-user-select: text; user-select: text; }</style>",
         "  </head>",

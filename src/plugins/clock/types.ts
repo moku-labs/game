@@ -34,10 +34,12 @@ export type ClockSource = {
   now(): number;
 
   /**
-   * Schedules one callback. The plugin keeps at most one timer alive.
+   * Schedules one callback. The plugin keeps at most one timer alive, and never asks for more
+   * than 2^31−1 ms (24.8 days), the most a platform timer keeps: a farther moment is armed again
+   * when this timer fires.
    *
    * @param callback - Function to run when the delay has passed.
-   * @param delayMs - Delay in milliseconds, never negative.
+   * @param delayMs - Delay in milliseconds, from 0 to 2^31−1.
    * @returns A handle of any shape; the plugin only hands it back to `clearTimer`.
    */
   setTimer(callback: () => void, delayMs: number): unknown;
@@ -155,7 +157,8 @@ export type Api = {
 
   /**
    * Replaces the single pending due moment. A moment in the past is not delivered synchronously:
-   * it fires on the next macrotask of the source.
+   * it fires on the next macrotask of the source. A moment further than 2^31−1 ms (24.8 days) waits
+   * on one timer of that length at a time, armed again until the moment comes.
    *
    * @param moment - Moment in epoch milliseconds, or `undefined` to cancel.
    * @example

@@ -14,7 +14,7 @@ rule L3). Everything else, including `fake.ts`, goes through the `ClockSource` o
 | Method | Behaviour |
 |---|---|
 | `now(): number` | `last = max(last, source.now())`, truncated to whole milliseconds. Monotonic non-decreasing: a device clock moved back cannot move game time back. |
-| `scheduleAt(moment: number \| undefined): void` | Replaces the single pending due moment. `undefined` cancels it. A moment in the past is scheduled with a zero delay on the source, so it fires on the next macrotask, never synchronously. |
+| `scheduleAt(moment: number \| undefined): void` | Replaces the single pending due moment. `undefined` cancels it. A moment in the past is scheduled with a zero delay on the source, so it fires on the next macrotask, never synchronously. A delay longer than a platform timer keeps (2^31−1 ms, 24.8 days) is cut to it: the timer fires early and is armed again for the rest, one timer at a time. |
 | `onElapsed(fn: (input: { now: number }) => void): () => void` | Registers a listener; returns the unsubscribe. `flow` is the listener: it puts `elapsed { now }` into its inbox. |
 | `poke(): void` | Delivers `elapsed { now: now() }` to the listeners immediately, without touching the pending moment. `flow` calls it on resume from background. |
 | `dueAt(): number \| undefined` | The pending due moment, for inspection and tests. |
@@ -44,7 +44,7 @@ A node never touches the clock: it writes `await fx(schedule(rules.nextDue(playe
 createApp({ pluginConfigs: { clock: { source: fakeClock(1000) } } });
 ```
 
-A `ClockSource` is `now(): number`, `setTimer(fn, delayMs): unknown` and `clearTimer(handle): void`.
+A `ClockSource` is `now(): number`, `setTimer(fn, delayMs): unknown` and `clearTimer(handle): void`. The plugin never asks `setTimer` for more than 2^31−1 ms, the most a platform timer keeps; the system source itself also waits a longer delay in steps, so no path hands `setTimeout` a delay that overflows.
 
 ## Testing
 
