@@ -147,6 +147,19 @@ function holdOver(ctx: ScenesCtx, frame: number, elapsed: number): boolean {
 }
 
 /**
+ * Tells whether a running build may commit now: every part of it is done and the floor on the swap
+ * passed. Two calls, no allocation.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param frame - The frame counter now.
+ * @param elapsed - The game time now, in ms.
+ * @returns True when the build may commit.
+ */
+function readyToCommit(ctx: ScenesCtx, frame: number, elapsed: number): boolean {
+  return ctx.deps.world.projection.built() && holdOver(ctx, frame, elapsed);
+}
+
+/**
  * The `signals` callback of a running build: counts the frame and commits the build the frame
  * every part of it is done and the floor on the swap passed. A world that stopped running live
  * during the build or its wait (a walk that went fast, as the restore of a repro walks its route,
@@ -171,7 +184,7 @@ function stepBuild(ctx: ScenesCtx, build: SceneBuild, frame: number, elapsed: nu
     return;
   }
 
-  if (world.projection.built() && holdOver(ctx, frame, elapsed)) endBuild(ctx, build, "commit");
+  if (readyToCommit(ctx, frame, elapsed)) endBuild(ctx, build, "commit");
 }
 
 /**
@@ -294,7 +307,7 @@ export function buildAside(
     // A build with nothing left for ui and the renderer swaps now: fake-clock tests keep their frames.
     const { frame, elapsed } = ctx.deps.time.snapshot();
 
-    if (projection.built() && holdOver(ctx, frame, elapsed)) {
+    if (readyToCommit(ctx, frame, elapsed)) {
       endBuild(ctx, build, "commit");
 
       return;

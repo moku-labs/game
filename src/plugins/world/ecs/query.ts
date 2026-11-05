@@ -565,8 +565,8 @@ export class SystemWalk implements Iterator<readonly unknown[], undefined> {
 
   /**
    * Reads the stores of this run and collects the entities that carry every name, in the first
-   * store's order; a feature's system passes over the entities of a scene built aside. Structural changes are queued until the phase ends, so the matches stay true
-   * while the rows are consumed.
+   * store's order; a feature's system passes over the entities of a scene built aside. Structural
+   * changes are queued until the phase ends, so the matches stay true while the rows are consumed.
    */
   private start(): void {
     const all = this.ctx.state.ecs.stores;

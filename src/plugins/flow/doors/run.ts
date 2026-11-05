@@ -25,7 +25,8 @@ function envelopeOf(app: HeadlessApp): Envelope {
 /**
  * Runs a command in a dev build or a debug build. A `--debug` build and the dev page run every
  * command; a `--debug=read` build runs the read and cosmetic ones only. A `cheat` or `raw`
- * command taints the session and is journaled before it runs, so a failing one still counts.
+ * command taints the session and is journaled before it runs, once its input fits its schema, so
+ * one that fails in its body still counts.
  *
  * @param app - The app the command acts on.
  * @param command - The command.
@@ -36,6 +37,7 @@ function envelopeOf(app: HeadlessApp): Envelope {
  *   `route`, `cheat` or `raw` command on a `--debug=read` page, and whatever the command throws.
  * @throws {TypeError} When the input has a field the schema does not name, leaves out a field
  *   without `?`, or holds a value of another kind (a `number` must be finite); nothing runs then.
+ *   On a `--debug=read` page a `route` command throws "[game] The command game.tap changes the game: …".
  * @example
  * ```ts
  * // An e2e script: load the bug report, then tap Play.
@@ -44,7 +46,6 @@ function envelopeOf(app: HeadlessApp): Envelope {
  * ran.value; // true
  * ran.state; // { path: "board/awaitIntent", frame: 14, tainted: true }
  * await run(app, commands.scroll, { key: "strip", dy: 10 }); // throws '[game] The command game.scroll got the field "dy", which it does not take. …'
- * // On a --debug=read page: await run(app, commands.tap, { key: "play" }); // throws "[game] The command game.tap changes the game: …"
  * ```
  */
 export async function run<S extends InputSchema, O, App extends HeadlessApp>(

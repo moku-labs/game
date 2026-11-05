@@ -157,12 +157,13 @@ function storeSlots(count: number): Array<ComponentStore | undefined> {
 /**
  * Registers a system at the end of its phase list and returns the remover. In phase `sync` it goes
  * before `renderer.sync`, which stays last. Its query and its `scenes` are read here, once: a
- * later change to the definition is not seen. A dev build checks
- * the `scenes` against the scenes the features declare, once the world started.
+ * later change to the definition is not seen. A dev build checks the `scenes` against the scenes
+ * the features declare, once the world started.
  *
- * A feature's system (`hidesAside`) does not see the entities of a scene built aside: its rows
- * pass over them until the commit, so it meets the coming scene whole, in one frame (F155). The
- * engine's own systems lay that scene out and draw it, and see it.
+ * The rows of a feature's system (`hidesAside`) pass over the entities of a scene built aside
+ * until the commit, so it meets the coming scene whole, in one frame (F155); `world.query()`,
+ * `get` and `has` inside its `run` still read them. The engine's own systems lay that scene out
+ * and draw it, and see it.
  *
  * @param ctx - Domain context of the world plugin.
  * @param definition - The system.

@@ -1298,8 +1298,9 @@ export type EcsApi = {
  */
 export type EcsInternal = {
   /**
-   * Registers a system a feature brought: as `system`, and its rows pass over the entities of a
-   * scene built aside until the commit (F155).
+   * Registers a system a feature brought: as `system`, and the rows of its declared `query` pass
+   * over the entities of a scene built aside until the commit (F155). `world.query()`, `get` and
+   * `has` inside its `run` still read them.
    *
    * @param definition - The system.
    * @returns The remover.

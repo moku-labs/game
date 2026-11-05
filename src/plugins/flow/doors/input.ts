@@ -103,6 +103,43 @@ function inputError(id: string, problem: string, schema: InputSchema): TypeError
 }
 
 /**
+ * Splits a declared kind into its kind and whether it is optional. Pure.
+ *
+ * @param declared - The kind as the schema writes it.
+ * @returns The kind without its `?`, and whether it had one.
+ * @example
+ * ```ts
+ * splitKind("number?"); // { kind: "number", optional: true }
+ * ```
+ */
+function splitKind(declared: InputKind | `${InputKind}?`): { kind: InputKind; optional: boolean } {
+  const optional = declared.endsWith("?");
+  const kind = (optional ? declared.slice(0, -1) : declared) as InputKind;
+
+  return { kind, optional };
+}
+
+/**
+ * Checks one field of the schema against its given value.
+ *
+ * @param id - The id of the command, for the message.
+ * @param schema - The schema of the command.
+ * @param name - The field.
+ * @param value - Its given value, `undefined` when left out.
+ * @throws {TypeError} When a field without `?` is left out, or the value is of another kind.
+ */
+function checkField(id: string, schema: InputSchema, name: string, value: unknown): void {
+  const { kind, optional } = splitKind(schema[name] ?? "json?");
+
+  if (value === undefined && optional) return;
+  if (value === undefined) throw inputError(id, `no "${name}", which it needs`, schema);
+
+  if (!fitsKind(kind, value)) {
+    throw inputError(id, `${shown(value)} for "${name}", not ${kindName(kind)}`, schema);
+  }
+}
+
+/**
  * Checks a given input against the schema of its command before the command runs: an object, no
  * field the schema does not name, every field without `?` given, and every given value of its
  * kind. A field with `?` may be left out or be `undefined`. A door call, never a frame path.
@@ -119,32 +156,20 @@ function inputError(id: string, problem: string, schema: InputSchema): TypeError
  * ```
  */
 export function checkInput(id: string, schema: InputSchema, input: unknown): void {
+  // The input is a plain object.
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw inputError(id, "an input that is not an object", schema);
   }
 
   const given: Readonly<Record<string, unknown>> = input as Readonly<Record<string, unknown>>;
 
+  // No field outside the schema.
   for (const name of Object.keys(given)) {
     if (!Object.hasOwn(schema, name)) {
       throw inputError(id, `the field "${name}", which it does not take`, schema);
     }
   }
 
-  for (const name of Object.keys(schema)) {
-    const declared = schema[name] ?? "json?";
-    const optional = declared.endsWith("?");
-    const kind = (optional ? declared.slice(0, -1) : declared) as InputKind;
-    const value = given[name];
-
-    if (value === undefined) {
-      if (optional) continue;
-
-      throw inputError(id, `no "${name}", which it needs`, schema);
-    }
-
-    if (!fitsKind(kind, value)) {
-      throw inputError(id, `${shown(value)} for "${name}", not ${kindName(kind)}`, schema);
-    }
-  }
+  // Every field of the schema given when it needs one, and of its kind.
+  for (const name of Object.keys(schema)) checkField(id, schema, name, given[name]);
 }
