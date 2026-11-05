@@ -41,12 +41,16 @@ export const BUDGET = {
   // the two ladders. New. 0: it answers one of two arrays made once, their threshold and sigmas written in place.
   bloomChain: 0,
   // The same change: the `strength` of a `Bloom` tweened on one of 12 filtered views, the tween's own write subtracted.
-  // New, measured 2 920 B on Node 24.21 over a window of 10 000 steps. A chain member never rides the quad, and any
-  // uniform write marks its chain stale (`writeFilter`), so the sync runs the engine's `evaluate` again in every frame:
-  // its `entries()` walks and their `[index, item]` pairs (the inputs, the checked steps, the placed steps), `Object.keys`
+  // A chain member never rides the quad, and any uniform write marks its chain stale (`writeFilter`), so the sync runs
+  // the engine's `evaluate` again in every frame. Before: 2 920 B on Node 24.21 over a window of 10 000 steps: its
+  // `entries()` walks and their `[index, item]` pairs (the inputs, the checked steps, the placed steps), `Object.keys`
   // of each step's uniforms and the `for…of` iterators over frozen lists in `stepProblem`, and the `{ place, built }`
-  // `placeFor` answers per step. The chain's own answer is 0 B (`bloomChain`): the bytes are the engine's walk of it.
-  filtersBloomTween: 2920,
+  // `placeFor` answers per step, each step's `scale` boxed by `Reflect.get`. Now 32, over the usual window: index loops,
+  // a `for…in` over the step's own keys, the scale read plainly, the place answered alone (a rebuild seen as a new place
+  // in its slot), the places past the steps cut by index. The 32 B left are V8's: the cut's `threshold` (0.7), read by
+  // a uniform's name from step objects of more than one shape, comes back boxed (16 B) at both of its reads, the check
+  // and the compare-on-write. A chain whose uniforms hold whole numbers measures 0.
+  filtersBloomTween: 32,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the
   // frame's delta boxed into each step call). Now 0: nothing is written for a still host.

@@ -1095,8 +1095,14 @@ function listedDefinition(
   stage: unknown
 ): FilterDefinition | undefined {
   const candidate = propertyOf(stage, "filter");
+  const { stages } = input;
 
-  for (const listed of input.stages) if (listed.filter === candidate) return listed.filter;
+  // eslint-disable-next-line unicorn/no-for-loop -- a tween's chain walks a frozen list by index
+  for (let index = 0; index < stages.length; index += 1) {
+    const listed = stages[index];
+
+    if (listed !== undefined && listed.filter === candidate) return listed.filter;
+  }
 
   return undefined;
 }
@@ -1109,7 +1115,14 @@ function listedDefinition(
  * @returns The uniform, or `undefined`.
  */
 function uniformNamed(definition: FilterDefinition, name: string): UniformSpec | undefined {
-  for (const uniform of definition.uniforms) if (uniform.name === name) return uniform;
+  const { uniforms } = definition;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- a tween's chain walks a frozen list by index
+  for (let index = 0; index < uniforms.length; index += 1) {
+    const uniform = uniforms[index];
+
+    if (uniform?.name === name) return uniform;
+  }
 
   return undefined;
 }
@@ -1130,12 +1143,20 @@ function fitsForm(uniform: UniformSpec, value: unknown): boolean {
   if (uniform.form !== "vector") return typeof value === "number";
   if (!Array.isArray(value) || value.length !== uniform.size) return false;
 
-  for (const entry of value as readonly unknown[]) {
+  const entries: readonly unknown[] = value;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- a tween's chain walks a frozen list by index
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+
     if (typeof entry !== "number" || !Number.isFinite(entry)) return false;
   }
 
   return true;
 }
+
+/** A step as a chain returned it, before its check: any of its fields may be missing or of another type. */
+type UncheckedStep = { readonly scale?: unknown };
 
 /**
  * The first problem of one step, as the message of the log line.
@@ -1160,7 +1181,11 @@ function stepProblem(
     return `input "${name}" names stage "${String(id)}", which is not in its stages: only listed stages are checked and warmed up before they draw.`;
   }
 
-  const scale = propertyOf(step, "scale");
+  // A plain read on an object: `Reflect.get` answers the fraction boxed, a new number per step in every frame.
+  const scale =
+    typeof step === "object" && step !== null
+      ? (step as UncheckedStep).scale
+      : propertyOf(step, "scale");
 
   if (typeof scale !== "number" || !Number.isFinite(scale) || scale <= 0 || scale > 1) {
     return `input "${name}": step ${index} has scale ${String(scale)}; a scale is a share of the input's resolution above 0 and at most 1.`;
@@ -1170,7 +1195,10 @@ function stepProblem(
 
   if (typeof uniforms !== "object" || uniforms === null) return undefined;
 
-  for (const key of Object.keys(uniforms)) {
+  // `for…in` with an own-key check walks the keys of `Object.keys` in its order, without the array it makes per call.
+  for (const key in uniforms) {
+    if (!Object.hasOwn(uniforms, key)) continue;
+
     const uniform = uniformNamed(definition, key);
 
     if (uniform === undefined) {
@@ -1202,8 +1230,10 @@ function stepsProblem(input: FilterInputDefinition, steps: unknown): string | un
     return `input "${input.name}": chain returned ${list.length} steps; at most ${MAX_STEPS}.`;
   }
 
-  for (const [index, step] of list.entries()) {
-    const problem = stepProblem(input, step, index);
+  // An index over the list: `entries()` makes an iterator and an `[index, step]` pair per step.
+  // eslint-disable-next-line unicorn/no-for-loop -- a tween's chain walks the list by index
+  for (let index = 0; index < list.length; index += 1) {
+    const problem = stepProblem(input, list[index], index);
 
     if (problem !== undefined) return problem;
   }
@@ -1264,7 +1294,7 @@ function writeStep(place: Place, step: FilterStep): boolean {
  * @param places - The places of the input, changed in place.
  * @param at - The slot of the step.
  * @param step - The step.
- * @returns The place, and true in `built` when it was built for this step.
+ * @returns The place: the one at the slot when kept, a new one, put in the slot, when built for this step.
  */
 function placeFor(
   pixi: PixiModule,
@@ -1272,10 +1302,10 @@ function placeFor(
   places: Place[],
   at: number,
   step: FilterStep
-): { place: Place; built: boolean } {
+): Place {
   const kept = places[at];
 
-  if (kept?.definition === step.stage.filter) return { place: kept, built: false };
+  if (kept?.definition === step.stage.filter) return kept;
 
   if (kept !== undefined) retired.push(kept.body);
 
@@ -1287,7 +1317,30 @@ function placeFor(
 
   places[at] = place;
 
-  return { place, built: true };
+  return place;
+}
+
+/**
+ * Retires the places of an input past its steps, by index, and cuts them off: `splice` would answer an array of them
+ * in every frame.
+ *
+ * @param retired - The bodies to destroy after the frame.
+ * @param places - The places of the input, changed in place.
+ * @param count - How many steps the chain returned.
+ * @returns True when a place was retired.
+ */
+function retireLeft(retired: OursBody[], places: Place[], count: number): boolean {
+  if (places.length <= count) return false;
+
+  for (let at = count; at < places.length; at += 1) {
+    const left = places[at];
+
+    if (left !== undefined) retired.push(left.body);
+  }
+
+  places.length = count;
+
+  return true;
 }
 
 /**
@@ -1312,10 +1365,18 @@ function placeSteps(
   let changed = false;
   let rebuilt = false;
 
-  for (const [at, step] of steps.entries()) {
-    const { place, built } = placeFor(pixi, inputs.retired, places, at, step);
+  // An index over the steps: `entries()` makes an iterator and an `[at, step]` pair per step.
+  // eslint-disable-next-line unicorn/no-for-loop -- a tween's chain walks a frozen list by index
+  for (let at = 0; at < steps.length; at += 1) {
+    const step = steps[at];
 
-    if (built) rebuilt = true;
+    if (step === undefined) continue;
+
+    const before = places[at];
+    const place = placeFor(pixi, inputs.retired, places, at, step);
+
+    // A place other than the slot's before was built for this step.
+    if (place !== before) rebuilt = true;
 
     if (writeStep(place, step)) changed = true;
 
@@ -1325,10 +1386,7 @@ function placeSteps(
     }
   }
 
-  for (const left of places.splice(steps.length)) {
-    inputs.retired.push(left.body);
-    rebuilt = true;
-  }
+  if (retireLeft(inputs.retired, places, steps.length)) rebuilt = true;
 
   if (rebuilt) inputs.slot = Object.freeze({ ...inputs.slot, stages: stagesOf(inputs) });
 
@@ -1361,7 +1419,15 @@ function evaluate(
   let changed = resolution !== inputs.resolution || backResolution !== inputs.backResolution;
   let passes = 1;
 
-  for (const [index, input] of instance.definition.inputs.entries()) {
+  const declared = instance.definition.inputs;
+
+  // An index over the frozen list: `entries()` makes an iterator and an `[index, input]` pair per input.
+  // eslint-disable-next-line unicorn/no-for-loop -- a tween's chain walks a frozen list by index
+  for (let index = 0; index < declared.length; index += 1) {
+    const input = declared[index];
+
+    if (input === undefined) continue;
+
     let steps: readonly FilterStep[];
 
     inputs.context.resolution = input.from === "back" ? backResolution : resolution;

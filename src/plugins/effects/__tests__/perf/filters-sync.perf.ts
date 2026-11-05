@@ -23,12 +23,6 @@ import {
 // nothing changed, one uniform tweened on one of them, and one Alpha fading (change 2026-10-18-memory-render, M4).
 // ---------------------------------------------------------------------------
 
-/**
- * Calls of a window of the Bloom tween: its sync allocates in every frame (the engine's walk of the chain's answer),
- * and a tenth of the default window keeps a scavenge of the young generation out of it.
- */
-const BLOOM_CALLS = 10_000;
-
 describe("effects:filters, heap bytes per frame step", () => {
   it("12 filtered views, nothing changed", () => {
     const { run } = filtersFixture();
@@ -85,11 +79,11 @@ describe("effects:filters, heap bytes per frame step", () => {
     expect(bytesPerCall(call)).toBeLessThanOrEqual(BUDGET.bloomChain + NOISE);
   });
 
-  // Bug it guards: a strength tween of Bloom allocates more per frame than the engine's walk of the chain's answer.
+  // Bug it guards: the engine's walk of a chain's answer (its inputs, steps and places) allocates per frame of a tween.
   it("one Bloom strength tweened on one of 12 filtered views: the chain runs again, no quad", () => {
     const fixture = filtersFixture([Bloom.filter], BLOOM_STRENGTH);
-    const step = bytesPerCall(tweenStep(fixture), BLOOM_CALLS);
-    const write = bytesPerCall(tweenWrite(fixture), BLOOM_CALLS);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
     const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);
 
     expect(handed.some(set => set.slots[0]?.inputs?.count === 1)).toBe(true);
