@@ -893,43 +893,108 @@ const SET_SCENES: readonly BenchScene[] = [
   )
 ];
 
-/** The tiles of `set-bloom`: the 12 of `fog`, 128 × 128 each. */
+/** The tiles of the `set-bloom` arms: the 12 of `fog`, 128 × 128 each. */
 const BLOOM_TILES = 12;
 
-/** Bloom's tiles, its strength written in every frame: the chain and stage 3 of every tile, each frame. */
-const bloomScene: BenchScene = {
-  name: "set-bloom",
-  stands:
-    "12 tiles of 128 x 128 under Bloom, its strength written each frame: the chain and stage 3, no quad",
-  mount: stage => {
-    fullSprite(stage);
+/** The strength a `set-bloom` arm writes, the member's default. */
+const BLOOM_STRENGTH = 0.6;
 
-    const tiles: World.Entity[] = [];
+/**
+ * Twelve tiles of 128 × 128 under `Bloom`, three a row, and what the arm writes of them.
+ *
+ * @param name - The arm.
+ * @param stands - What it measures.
+ * @param start - The strength each tile's `Bloom` starts at.
+ * @param writes - Given the stage and the tiles once they stand, answers the write of each frame.
+ * @returns The scene.
+ */
+function bloomTilesScene(
+  name: string,
+  stands: string,
+  start: number,
+  writes: (stage: Stage, tiles: readonly World.Entity[]) => (elapsedMs: number) => void
+): BenchScene {
+  return {
+    name,
+    stands,
+    mount: stage => {
+      fullSprite(stage);
 
-    for (let index = 0; index < BLOOM_TILES; index += 1) {
-      tiles.push(
-        stage.spawn(
-          Transform({ x: (index % 3) * 130, y: Math.floor(index / 3) * 130 }),
-          Sprite({
-            texture: PICTURE,
-            width: FOG_TILE_SIDE,
-            height: FOG_TILE_SIDE,
-            anchor: { x: 0, y: 0 }
-          }),
-          Bloom()
-        )
-      );
-    }
+      const tiles: World.Entity[] = [];
 
-    return {
-      tick: elapsedMs => {
-        for (const [index, tile] of tiles.entries()) {
-          stage.set(tile, Bloom, { strength: 0.6 + 0.4 * wave(elapsedMs, index) });
-        }
+      for (let index = 0; index < BLOOM_TILES; index += 1) {
+        tiles.push(
+          stage.spawn(
+            Transform({ x: (index % 3) * 130, y: Math.floor(index / 3) * 130 }),
+            Sprite({
+              texture: PICTURE,
+              width: FOG_TILE_SIDE,
+              height: FOG_TILE_SIDE,
+              anchor: { x: 0, y: 0 }
+            }),
+            Bloom({ strength: start })
+          )
+        );
       }
-    };
-  }
-};
+
+      return { tick: writes(stage, tiles) };
+    }
+  };
+}
+
+/**
+ * The arms of `Bloom` (F126 stage 3 slice 3, its second shape): every tile moving, every tile kept, and one moving
+ * among eleven kept. A chain member has no quad, so a moving tile runs its chain and redraws stage 3, 3 passes, in
+ * every frame; a still one is a kept picture, a batched sprite.
+ */
+const BLOOM_SCENES: readonly BenchScene[] = [
+  bloomTilesScene(
+    "set-bloom",
+    "12 tiles of 128 x 128 under Bloom, its strength written each frame: the chain and stage 3, no quad",
+    BLOOM_STRENGTH,
+    (stage, tiles) => elapsedMs => {
+      for (const [index, tile] of tiles.entries()) {
+        stage.set(tile, Bloom, { strength: BLOOM_STRENGTH + 0.4 * wave(elapsedMs, index) });
+      }
+    }
+  ),
+  bloomTilesScene(
+    "set-bloom-held",
+    "the 12 Bloom tiles, their strength written once to 0.6, then at rest: kept pictures, one small sprite moving",
+    0,
+    (stage, tiles) => {
+      const mover = stage.spawn(
+        Transform({ x: 0, y: 700 }),
+        Sprite({ texture: PICTURE, width: 8, height: 8, anchor: { x: 0, y: 0 } })
+      );
+      let written = false;
+
+      return elapsedMs => {
+        if (!written) {
+          for (const tile of tiles) stage.set(tile, Bloom, { strength: BLOOM_STRENGTH });
+
+          written = true;
+        }
+
+        stage.set(mover, Transform, { x: (elapsedMs / 20) % 300 });
+      };
+    }
+  ),
+  bloomTilesScene(
+    "set-bloom-one",
+    "the 12 Bloom tiles, one of them its strength written each frame, the others still",
+    BLOOM_STRENGTH,
+    (stage, tiles) => {
+      const [moving] = tiles;
+
+      return elapsedMs => {
+        if (moving !== undefined) {
+          stage.set(moving, Bloom, { strength: BLOOM_STRENGTH + 0.4 * wave(elapsedMs, 0) });
+        }
+      };
+    }
+  )
+];
 
 /** The strongest blur of `sweep-blur-q4`, as the game's pan sweeps it. */
 const SWEEP_Q4_BLUR = 16;
@@ -992,6 +1057,6 @@ export const CASE_SCENES: readonly BenchScene[] = [
   restScene,
   rowsEnterScene,
   ...SET_SCENES,
-  bloomScene,
+  ...BLOOM_SCENES,
   ...SWEEP_SCENES
 ];

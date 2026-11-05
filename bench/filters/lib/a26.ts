@@ -44,6 +44,8 @@ export const ARMS = [
   "set-aura",
   "set-fold",
   "set-bloom",
+  "set-bloom-held",
+  "set-bloom-one",
   "sweep-blur",
   "sweep-blur-q4"
 ] as const;

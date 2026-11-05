@@ -1,6 +1,6 @@
 /**
- * @file effects/set — the shared stages a chain member of the set draws its second texture with: `BloomCut` (what is
- * above a threshold), `Downsample` (a 4-tap box) and `GaussAlong` (a 9-tap Gaussian along one axis). Each is a
+ * @file effects/set — the shared stages a chain member of the set draws its second texture with: `BloomDown` (what is
+ * above a threshold, boxed down in one pass) and `BloomBlur` (a 13-tap blur in two dimensions, one pass). Each is a
  * `defineFilter` that draws alone, listed in a member's `inputs` and named by its chain's steps; none is a root
  * export (a game that wants a chain writes its own stages). Before each body the set head and `inputTexel()`.
  */
@@ -56,141 +56,130 @@ export function withStageGlsl(body: string): string {
 }
 
 /**
- * The WGSL body of `BloomCut`: of the premultiplied input, what is above `threshold` of its own alpha,
- * `max(c.rgb − threshold × c.a, 0)`, so a half-transparent edge is cut at its share of the threshold. Its alpha is its
- * brightest channel: light covers as much as it shines, and where nothing is bright the cut is transparent black. One
- * sample: drawn at ½, it reads the 2 × 2 texels under it through the linear sampler.
+ * The WGSL body of `BloomDown`: drawn at ¼ or ⅛ of the view's input, it reads that input with 4 taps on the diagonals
+ * of its pixel, `reach` texels out on each axis (1 at ¼, 2 at ⅛: the centres of the four quarters of its footprint).
+ * Each tap stands on the corner of 4 texels, so the linear sampler reads a 2 × 2 block. Each tap is cut by
+ * `threshold` of its own alpha, premultiplied, `max(c.rgb − threshold × c.a, 0)`, so a half-transparent edge is cut at
+ * its share of the threshold, and its alpha is its brightest channel: light covers as much as it shines, and where
+ * nothing is bright the cut is transparent black. The four cuts are averaged. The corner turns a quarter each tap.
  */
-export const BLOOM_CUT_WGSL = /* wgsl */ `@fragment
-fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-  let c = sampleInput(inputPlace(uv));
-  let cut = max(c.rgb - fu.threshold * c.a, vec3<f32>(0.0));
-  let light = max(max(cut.r, cut.g), cut.b);
-
-  return vec4<f32>(cut, light);
-}
-`;
-
-/** The GLSL twin of `BLOOM_CUT_WGSL`. */
-export const BLOOM_CUT_GLSL = /* glsl */ `void main() {
-  vec4 c = sampleInput(inputPlace(vTextureCoord));
-  vec3 cut = max(c.rgb - threshold * c.a, vec3(0.0));
-  float light = max(max(cut.r, cut.g), cut.b);
-
-  finalColor = vec4(cut, light);
-}
-`;
-
-/**
- * The WGSL body of `Downsample`, a 4-tap box: drawn at half the scale of its input, each pixel stands on the corner of
- * 2 × 2 input texels, and its taps one texel out on both diagonals each read a 2 × 2 block through the linear sampler:
- * the mean of the 4 × 4 texels around it. No uniform.
- */
-export const DOWNSAMPLE_WGSL = /* wgsl */ `@fragment
+export const BLOOM_DOWN_WGSL = /* wgsl */ `@fragment
 fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let n = inputPlace(uv);
-  let d = inputTexel();
-  let falling = sampleInput(n - d) + sampleInput(n + d);
-  let rising = sampleInput(n + vec2<f32>(d.x, -d.y)) + sampleInput(n + vec2<f32>(-d.x, d.y));
-
-  return (falling + rising) * 0.25;
-}
-`;
-
-/** The GLSL twin of `DOWNSAMPLE_WGSL`. */
-export const DOWNSAMPLE_GLSL = /* glsl */ `void main() {
-  vec2 n = inputPlace(vTextureCoord);
-  vec2 d = inputTexel();
-  vec4 falling = sampleInput(n - d) + sampleInput(n + d);
-  vec4 rising = sampleInput(n + vec2(d.x, -d.y)) + sampleInput(n + vec2(-d.x, d.y));
-
-  finalColor = (falling + rising) * 0.25;
-}
-`;
-
-/**
- * The WGSL body of `GaussAlong`, a 9-tap Gaussian along `dir` (`[1, 0]` or `[0, 1]`) with `sigma` in texels of its
- * input: tap `k` (−4..4) stands `k × sigma / 2` texels out and weighs `exp(−k² / 8)`, the curve at that place, and
- * the sum is divided by the weights' sum. So the taps cover ±2 sigma, 95 % of the curve, at any sigma; the chain caps
- * sigma at 8, 4 texels between taps on an input already boxed down.
- */
-export const GAUSS_ALONG_WGSL = /* wgsl */ `@fragment
-fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-  let n = inputPlace(uv);
-  let reach = fu.sigma * 0.5;
-  let stride = fu.dir * inputTexel() * reach;
+  let d = fu.reach * inputTexel();
   var sum = vec4<f32>(0.0);
-  var total = 0.0;
+  var corner = vec2<f32>(1.0);
 
-  for (var k = -4; k <= 4; k++) {
-    let w = exp(-f32(k * k) / 8.0);
-    sum += sampleInput(n + stride * f32(k)) * w;
-    total += w;
+  for (var k = 0; k < 4; k++) {
+    let c = sampleInput(n + corner * d);
+    let cut = max(c.rgb - fu.threshold * c.a, vec3<f32>(0.0));
+    let light = max(max(cut.r, cut.g), cut.b);
+    sum += vec4<f32>(cut, light);
+    corner = vec2<f32>(-corner.y, corner.x);
   }
 
-  return sum / total;
+  return sum * 0.25;
 }
 `;
 
-/** The GLSL twin of `GAUSS_ALONG_WGSL`. */
-export const GAUSS_ALONG_GLSL = /* glsl */ `void main() {
+/** The GLSL twin of `BLOOM_DOWN_WGSL`. */
+export const BLOOM_DOWN_GLSL = /* glsl */ `void main() {
   vec2 n = inputPlace(vTextureCoord);
-  float reach = sigma * 0.5;
-  vec2 stride = dir * inputTexel() * reach;
+  vec2 d = reach * inputTexel();
   vec4 sum = vec4(0.0);
-  float total = 0.0;
+  vec2 corner = vec2(1.0);
 
-  for (int k = -4; k <= 4; k++) {
-    float w = exp(-float(k * k) / 8.0);
-    sum += sampleInput(n + stride * float(k)) * w;
-    total += w;
+  for (int k = 0; k < 4; k++) {
+    vec4 c = sampleInput(n + corner * d);
+    vec3 cut = max(c.rgb - threshold * c.a, vec3(0.0));
+    float light = max(max(cut.r, cut.g), cut.b);
+    sum += vec4(cut, light);
+    corner = vec2(-corner.y, corner.x);
   }
 
-  finalColor = sum / total;
+  finalColor = sum * 0.25;
 }
 `;
 
-/** The whole WGSL `BloomCut` is defined with: the set head, the stages' helper, then the body. */
-const BLOOM_CUT_SOURCE = /*#__PURE__*/ withStageWgsl(BLOOM_CUT_WGSL);
+/**
+ * The WGSL body of `BloomBlur`, a blur in two dimensions, in one pass at the scale of its input: the centre and two
+ * rings of 6 taps, the inner one at `0.5 × sigma` texels, the outer one at `sigma`. A tap `d` texels out weighs
+ * `exp(−d² / (2 × sigma²))`: `exp(−1 / 8)` on the inner ring, `exp(−1 / 2)` on the outer, 1 at the centre, and the sum
+ * is divided by the 13 weights' sum. The outer ring stands at 15° + 60° × k, the inner one 30° further, turned 60° a
+ * tap: at the chain's sigmas (8, 5.25 at the phone's 2.625) no tap stands on a texel's row or column, so the linear
+ * sampler reads the 4 texels around each. The chain caps sigma at 8.
+ */
+export const BLOOM_BLUR_WGSL = /* wgsl */ `@fragment
+fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  let n = inputPlace(uv);
+  let far = fu.sigma * inputTexel();
+  let near = far * 0.5;
+  let nearWeight = exp(-0.125);
+  let farWeight = exp(-0.5);
+  var sum = sampleInput(n);
+  var outer = vec2<f32>(0.9659258, 0.258819);
 
-/** The whole GLSL `BloomCut` is defined with. */
-const BLOOM_CUT_GLSL_SOURCE = /*#__PURE__*/ withStageGlsl(BLOOM_CUT_GLSL);
+  for (var k = 0; k < 6; k++) {
+    let inner = vec2<f32>(0.8660254 * outer.x - 0.5 * outer.y, 0.5 * outer.x + 0.8660254 * outer.y);
+    sum += sampleInput(n + inner * near) * nearWeight + sampleInput(n + outer * far) * farWeight;
+    outer = vec2<f32>(0.5 * outer.x - 0.8660254 * outer.y, 0.8660254 * outer.x + 0.5 * outer.y);
+  }
 
-/** The whole WGSL `Downsample` is defined with. */
-const DOWNSAMPLE_SOURCE = /*#__PURE__*/ withStageWgsl(DOWNSAMPLE_WGSL);
+  return sum / (1.0 + 6.0 * (nearWeight + farWeight));
+}
+`;
 
-/** The whole GLSL `Downsample` is defined with. */
-const DOWNSAMPLE_GLSL_SOURCE = /*#__PURE__*/ withStageGlsl(DOWNSAMPLE_GLSL);
+/** The GLSL twin of `BLOOM_BLUR_WGSL`. */
+export const BLOOM_BLUR_GLSL = /* glsl */ `void main() {
+  vec2 n = inputPlace(vTextureCoord);
+  vec2 far = sigma * inputTexel();
+  vec2 near = far * 0.5;
+  float nearWeight = exp(-0.125);
+  float farWeight = exp(-0.5);
+  vec4 sum = sampleInput(n);
+  vec2 outer = vec2(0.9659258, 0.258819);
 
-/** The whole WGSL `GaussAlong` is defined with. */
-const GAUSS_ALONG_SOURCE = /*#__PURE__*/ withStageWgsl(GAUSS_ALONG_WGSL);
+  for (int k = 0; k < 6; k++) {
+    vec2 inner = vec2(0.8660254 * outer.x - 0.5 * outer.y, 0.5 * outer.x + 0.8660254 * outer.y);
+    sum += sampleInput(n + inner * near) * nearWeight + sampleInput(n + outer * far) * farWeight;
+    outer = vec2(0.5 * outer.x - 0.8660254 * outer.y, 0.8660254 * outer.x + 0.5 * outer.y);
+  }
 
-/** The whole GLSL `GaussAlong` is defined with. */
-const GAUSS_ALONG_GLSL_SOURCE = /*#__PURE__*/ withStageGlsl(GAUSS_ALONG_GLSL);
+  finalColor = sum / (1.0 + 6.0 * (nearWeight + farWeight));
+}
+`;
 
-/** The first stage of `Bloom`: what is above `threshold`, premultiplied, at ½. One sample. */
-export const BloomCut: FilterComponent<{ threshold: number; enabled: boolean; order: number }> =
-  /*#__PURE__*/ defineFilter("effects.bloomCut", {
-    wgsl: BLOOM_CUT_SOURCE,
-    glsl: BLOOM_CUT_GLSL_SOURCE,
-    uniforms: { threshold: 0.7 }
-  });
+/** The whole WGSL `BloomDown` is defined with: the set head, the stages' helper, then the body. */
+const BLOOM_DOWN_SOURCE = /*#__PURE__*/ withStageWgsl(BLOOM_DOWN_WGSL);
 
-/** A step down to half the scale of its input: the mean of the 4 × 4 texels around each pixel. 4 samples. */
-export const Downsample: FilterComponent<{ enabled: boolean; order: number }> =
-  /*#__PURE__*/ defineFilter("effects.downsample", {
-    wgsl: DOWNSAMPLE_SOURCE,
-    glsl: DOWNSAMPLE_GLSL_SOURCE
-  });
+/** The whole GLSL `BloomDown` is defined with. */
+const BLOOM_DOWN_GLSL_SOURCE = /*#__PURE__*/ withStageGlsl(BLOOM_DOWN_GLSL);
 
-/** A Gaussian of `sigma` texels along `dir`, 9 taps over ±2 sigma. 9 samples. */
-export const GaussAlong: FilterComponent<{
-  dir: readonly number[];
-  sigma: number;
+/** The whole WGSL `BloomBlur` is defined with. */
+const BLOOM_BLUR_SOURCE = /*#__PURE__*/ withStageWgsl(BLOOM_BLUR_WGSL);
+
+/** The whole GLSL `BloomBlur` is defined with. */
+const BLOOM_BLUR_GLSL_SOURCE = /*#__PURE__*/ withStageGlsl(BLOOM_BLUR_GLSL);
+
+/**
+ * The first stage of `Bloom`: what is above `threshold` of the view's input, premultiplied, boxed down to the step's
+ * scale in one pass. 4 samples, `reach` texels out.
+ */
+export const BloomDown: FilterComponent<{
+  threshold: number;
+  reach: number;
   enabled: boolean;
   order: number;
-}> = /*#__PURE__*/ defineFilter("effects.gaussAlong", {
-  wgsl: GAUSS_ALONG_SOURCE,
-  glsl: GAUSS_ALONG_GLSL_SOURCE,
-  uniforms: { dir: [1, 0], sigma: 0 }
+}> = /*#__PURE__*/ defineFilter("effects.bloomDown", {
+  wgsl: BLOOM_DOWN_SOURCE,
+  glsl: BLOOM_DOWN_GLSL_SOURCE,
+  uniforms: { threshold: 0.7, reach: 1 }
 });
+
+/** The second stage of `Bloom`: a blur of `sigma` texels in both dimensions at once, 13 samples. */
+export const BloomBlur: FilterComponent<{ sigma: number; enabled: boolean; order: number }> =
+  /*#__PURE__*/ defineFilter("effects.bloomBlur", {
+    wgsl: BLOOM_BLUR_SOURCE,
+    glsl: BLOOM_BLUR_GLSL_SOURCE,
+    uniforms: { sigma: 0 }
+  });

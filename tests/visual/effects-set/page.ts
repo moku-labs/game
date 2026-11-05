@@ -676,8 +676,9 @@ async function run(): Promise<SetResult> {
         DARK
       )
     }),
-    // The blur reaches about 36 CSS px (±2 sigma of 16 px, and the boxes): the middle of the 80 px square sees only
-    // gold, so it gains 0.6 × its light over 0.7: green 0.8 + 0.6 × 0.1, 204 + 15.3; red is full, blue stays 0.
+    // The blur reaches about 26 CSS px (its outer ring at sigma, the radius 16 px, and a texel at ¼ for each linear
+    // read): the middle of the 80 px square, 40 px from its edges, sees only gold, and the blur's weights are
+    // normalised, so it gains 0.6 × its light over 0.7: green 0.8 + 0.6 × 0.1, 204 + 15.3; red is full, blue stays 0.
     await play(app, {
       name: "Bloom: probe, the middle of the gold square gains 0.6 of its light over 0.7",
       kind: "probe",

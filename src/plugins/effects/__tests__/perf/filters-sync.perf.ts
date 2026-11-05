@@ -71,7 +71,7 @@ describe("effects:filters, heap bytes per frame step", () => {
 
     const call = (): void => {
       frame += 1;
-      // Small integers, so the write of the radius boxes nothing: radius 16 takes the 4-step ladder, 32 the 5-step one.
+      // Small integers, so the write of the radius boxes nothing: radius 16 takes the ladder at ¼, 32 the one at ⅛.
       value.radius = (frame & 1) === 0 ? 16 : 32;
       chain(value as FilterFields, context);
     };

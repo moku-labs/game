@@ -34,9 +34,8 @@ const SET_IDS = [
   "effects.aura",
   "effects.fold",
   "effects.bloom",
-  "effects.bloomCut",
-  "effects.downsample",
-  "effects.gaussAlong"
+  "effects.bloomDown",
+  "effects.bloomBlur"
 ];
 
 /** The names Pixi's three WebGPU draw classes go by: only the counting subclasses name them. */

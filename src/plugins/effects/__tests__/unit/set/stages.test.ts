@@ -1,54 +1,67 @@
 import { describe, expect, it } from "vitest";
 import {
-  BLOOM_CUT_GLSL,
-  BLOOM_CUT_WGSL,
-  BloomCut,
-  DOWNSAMPLE_GLSL,
-  DOWNSAMPLE_WGSL,
-  Downsample,
-  GAUSS_ALONG_GLSL,
-  GAUSS_ALONG_WGSL,
-  GaussAlong,
+  BLOOM_BLUR_GLSL,
+  BLOOM_BLUR_WGSL,
+  BLOOM_DOWN_GLSL,
+  BLOOM_DOWN_WGSL,
+  BloomBlur,
+  BloomDown,
   STAGE_GLSL,
   STAGE_WGSL
 } from "../../../set/stages";
-import { evaluate } from "./body-eval";
+import { evaluate, turnsOf, type Vec2 } from "./body-eval";
 import { bodyCases, headsOf } from "./member-checks";
 
 // ---------------------------------------------------------------------------
 // Unit test: the stages of the set, which `Bloom`'s chain draws its `bright`
-// texture with: `BloomCut`, `Downsample`, `GaussAlong`. Not root exports. Bun
-// has no GPU: the pixels are the visual leg's; here their definitions, their
-// bodies in both languages, and their numbers evaluated on the CPU.
+// texture with: `BloomDown`, `BloomBlur`. Not root exports. Bun has no GPU: the
+// pixels are the visual leg's; here their definitions, their bodies in both
+// languages, and their numbers evaluated on the CPU.
 // ---------------------------------------------------------------------------
 
-/** Every stage with its two bodies and the uniforms they read. */
+/** Every stage with its two bodies. */
 const STAGES = [
-  { filter: BloomCut.filter, wgsl: BLOOM_CUT_WGSL, glsl: BLOOM_CUT_GLSL },
-  { filter: Downsample.filter, wgsl: DOWNSAMPLE_WGSL, glsl: DOWNSAMPLE_GLSL },
-  { filter: GaussAlong.filter, wgsl: GAUSS_ALONG_WGSL, glsl: GAUSS_ALONG_GLSL }
+  { filter: BloomDown.filter, wgsl: BLOOM_DOWN_WGSL, glsl: BLOOM_DOWN_GLSL },
+  { filter: BloomBlur.filter, wgsl: BLOOM_BLUR_WGSL, glsl: BLOOM_BLUR_GLSL }
 ] as const;
 
+/** The sigmas the chain asks the blur for at the defaults: 8 at the bench's 2, 5.25 at the phone's 2.625. */
+const CHAIN_SIGMAS = [8, 5.25];
+
 /**
- * The `sampleInput(` calls of a body.
+ * The `sampleInput(` calls of a text.
  *
- * @param body - A body, WGSL or GLSL.
+ * @param text - A body, WGSL or GLSL, or a part of it.
  * @returns How many.
  */
-function tapsIn(body: string): number {
-  return [...body.matchAll(/\bsampleInput\(/g)].length;
+function tapsIn(text: string): number {
+  return [...text.matchAll(/\bsampleInput\(/g)].length;
 }
 
 /**
- * The first and the last `k` of a body's loop, in either language.
+ * How many turns a body's loop takes, in either language, and the calls of `sampleInput` inside it.
  *
  * @param body - The body.
- * @returns The two bounds, or `undefined` without a loop.
+ * @returns The turns and the taps of one turn, or `undefined` without a loop.
  */
-function loopOf(body: string): [number, number] | undefined {
-  const match = /for \((?:var|int) k = (-?\d+); k <= (-?\d+); k\+\+\)/.exec(body);
+function loopOf(body: string): { turns: number; taps: number } | undefined {
+  const match = /for \((?:var|int) k = (\d+); k < (\d+); k\+\+\) \{([\s\S]*?)\n {2}\}/.exec(body);
 
-  return match === null ? undefined : [Number(match[1]), Number(match[2])];
+  if (match === null) return undefined;
+
+  return { turns: Number(match[2]) - Number(match[1]), taps: tapsIn(match[3] ?? "") };
+}
+
+/**
+ * The samples a pixel of a body takes: the calls outside its loop, and the loop's calls once a turn.
+ *
+ * @param body - The body.
+ * @returns How many.
+ */
+function samplesOf(body: string): number {
+  const loop = loopOf(body) ?? { turns: 0, taps: 0 };
+
+  return tapsIn(body) - loop.taps + loop.taps * loop.turns;
 }
 
 /**
@@ -76,7 +89,7 @@ function texelOf(source: string, frame: number, texture: number): number {
 }
 
 /**
- * `BloomCut`'s cut of a grey pixel, from its own WGSL: the three channels alike, premultiplied.
+ * `BloomDown`'s cut of a grey pixel, from its own WGSL: the three channels alike, premultiplied.
  *
  * @param grey - The straight grey, 0..1.
  * @param alpha - The pixel's alpha.
@@ -85,14 +98,14 @@ function texelOf(source: string, frame: number, texture: number): number {
  */
 function cut(grey: number, alpha: number, threshold: number): number {
   return evaluate(
-    BLOOM_CUT_WGSL,
+    BLOOM_DOWN_WGSL,
     { from: "cut", to: "cut" },
     { c: { rgb: grey * alpha, a: alpha }, threshold }
   );
 }
 
 /**
- * The alpha `BloomCut` gives a cut colour, from its own WGSL.
+ * The alpha `BloomDown` gives a cut colour, from its own WGSL.
  *
  * @param r - The cut's red.
  * @param g - Its green.
@@ -100,7 +113,27 @@ function cut(grey: number, alpha: number, threshold: number): number {
  * @returns The alpha.
  */
 function light(r: number, g: number, b: number): number {
-  return evaluate(BLOOM_CUT_WGSL, { from: "light", to: "light" }, { cut: { r, g, b } });
+  return evaluate(BLOOM_DOWN_WGSL, { from: "light", to: "light" }, { cut: { r, g, b } });
+}
+
+/**
+ * The angle of a direction, in whole degrees from 0 up to 360.
+ *
+ * @param direction - The direction.
+ * @returns The degrees.
+ */
+function degreesOf(direction: Vec2): number {
+  return Math.round(((Math.atan2(direction.y, direction.x) * 180) / Math.PI + 360) % 360);
+}
+
+/**
+ * How far a number is from the nearest whole one.
+ *
+ * @param value - The number.
+ * @returns 0 up to 0.5.
+ */
+function offGrid(value: number): number {
+  return Math.abs(value - Math.round(value));
 }
 
 describe.each(STAGES)("the stage $filter.id", stage => {
@@ -116,11 +149,12 @@ describe.each(STAGES)("the stage $filter.id", stage => {
     expect(stage.filter.cache).toBe("local");
   });
 
-  // Bug: a stage that reads its input around the head: a read off the clamp, a neighbour's pixels in a pooled texture.
+  // Bug: a stage that reads its input around the head: a read off the clamp, a neighbour's pixels in a pooled texture;
+  // or a GLSL twin that takes another count of taps.
   it("reads its input through sampleInput only, as many times in both languages", () => {
     expect(stage.wgsl).not.toMatch(/\btextureSample(?:Level)?\s*\(/);
     expect(stage.glsl).not.toMatch(/\btexture(?:Lod)?\s*\(/);
-    expect(tapsIn(stage.glsl)).toBe(tapsIn(stage.wgsl));
+    expect(samplesOf(stage.glsl)).toBe(samplesOf(stage.wgsl));
   });
 });
 
@@ -136,7 +170,7 @@ describe("the stages' texel", () => {
   });
 });
 
-describe("BloomCut", () => {
+describe("BloomDown", () => {
   // Bug: a bloom that lights the whole tile: the threshold is not taken off, or taken off the straight colour, so a
   // half-transparent edge blooms as an opaque one.
   it("keeps black at threshold 1 and, premultiplied, what is above the threshold", () => {
@@ -154,37 +188,89 @@ describe("BloomCut", () => {
     expect(light(0.3, 0.1, 0)).toBeCloseTo(0.3, 12);
     expect(light(0, 0, 0)).toBe(0);
   });
-});
 
-describe("Downsample", () => {
-  // Bug: a one-tap step: the bloom shimmers as the view moves under the coarse texels.
-  it("takes 4 taps, a box", () => {
-    expect(tapsIn(DOWNSAMPLE_WGSL)).toBe(4);
+  // Bug: four taps on one block (the bloom shimmers as the view moves under the coarse texels), taps one texel out
+  // at ⅛ whatever the reach (the middle of the footprint only), or the cuts summed, not averaged (four times the light).
+  it("takes 4 taps on the diagonals of its pixel, reach texels out, and averages their cuts", () => {
+    const loop = loopOf(BLOOM_DOWN_WGSL);
+    const corners = turnsOf(BLOOM_DOWN_WGSL, "corner", loop?.turns ?? 0);
+
+    expect(loop).toEqual({ turns: 4, taps: 1 });
+    expect(samplesOf(BLOOM_DOWN_WGSL)).toBe(4);
+    expect(corners.map(corner => [corner.x, corner.y])).toEqual([
+      [1, 1],
+      [-1, 1],
+      [-1, -1],
+      [1, -1]
+    ]);
+    expect(evaluate(BLOOM_DOWN_WGSL, { from: "d", to: "d" }, { reach: 2 })).toBe(2);
+    expect(evaluate(BLOOM_DOWN_WGSL, { from: "return", to: "return" }, { sum: 4 })).toBe(1);
   });
 });
 
-describe("GaussAlong", () => {
-  // Bug: taps a texel apart (the bloom never widens) or `k × sigma` apart (±4 sigma: rings at sigma 8), or a GLSL
-  // twin that takes another count of taps.
-  it("takes 9 taps, k × sigma / 2 texels apart, so the last stands at 2 sigma at any sigma", () => {
-    expect(loopOf(GAUSS_ALONG_WGSL)).toEqual([-4, 4]);
-    expect(loopOf(GAUSS_ALONG_GLSL)).toEqual([-4, 4]);
-    expect(tapsIn(GAUSS_ALONG_WGSL)).toBe(1);
+describe("BloomBlur", () => {
+  // Bug: a ring that collapses or doubles up (taps on top of each other: the bloom breaks into dots), rings at another
+  // distance than sigma and half of it, or a tap on a texel's row or column, where the linear sampler reads fewer
+  // than 4 texels.
+  it("takes 13 taps: the centre, a ring of 6 at sigma, another 30° off it at half of sigma, all off the texel grid", () => {
+    const loop = loopOf(BLOOM_BLUR_WGSL);
+    const outer = turnsOf(BLOOM_BLUR_WGSL, "outer", loop?.turns ?? 0);
+    const inner = outer.map(
+      direction =>
+        evaluate(
+          BLOOM_BLUR_WGSL,
+          { from: "inner", to: "inner" },
+          { outer: direction }
+        ) as unknown as Vec2
+    );
 
-    for (const sigma of [1, 5.25, 8]) {
-      const reach = evaluate(GAUSS_ALONG_WGSL, { from: "reach", to: "reach" }, { sigma });
+    expect(loop).toEqual({ turns: 6, taps: 2 });
+    expect(samplesOf(BLOOM_BLUR_WGSL)).toBe(13);
+    expect(outer.map(direction => degreesOf(direction))).toEqual([15, 75, 135, 195, 255, 315]);
+    expect(inner.map(direction => degreesOf(direction))).toEqual([45, 105, 165, 225, 285, 345]);
 
-      expect(4 * reach).toBeCloseTo(2 * sigma, 12);
+    for (const direction of [...outer, ...inner]) {
+      expect(Math.hypot(direction.x, direction.y)).toBeCloseTo(1, 6);
+    }
+
+    for (const sigma of CHAIN_SIGMAS) {
+      const far = evaluate(BLOOM_BLUR_WGSL, { from: "far", to: "far" }, { sigma });
+      const near = evaluate(BLOOM_BLUR_WGSL, { from: "near", to: "near" }, { far });
+
+      expect([far, near]).toEqual([sigma, sigma / 2]);
+
+      for (const [ring, reach] of [
+        [outer, far],
+        [inner, near]
+      ] as const) {
+        for (const direction of ring) {
+          expect(offGrid(direction.x * reach), `${sigma}: ${direction.x * reach}`).toBeGreaterThan(
+            0.01
+          );
+          expect(offGrid(direction.y * reach), `${sigma}: ${direction.y * reach}`).toBeGreaterThan(
+            0.01
+          );
+        }
+      }
     }
   });
 
-  // Bug: weights of another curve, or not normalised: the bloom brightens or darkens as sigma moves.
-  it("weighs tap k by exp(-k² / 8), normalised by their sum", () => {
-    const weights = [-4, -3, -2, -1, 0, 1, 2, 3, 4].map(k =>
-      evaluate(GAUSS_ALONG_WGSL, { from: "w", to: "w" }, { k })
-    );
+  // Bug: weights of another curve, or not normalised: the bloom brightens or darkens as the kernel changes.
+  it("weighs a tap d texels out by exp(-d² / (2 sigma²)), normalised by the 13 weights' sum", () => {
+    const turns = loopOf(BLOOM_BLUR_WGSL)?.turns ?? 0;
+    const nearWeight = evaluate(BLOOM_BLUR_WGSL, { from: "nearWeight", to: "nearWeight" }, {});
+    const farWeight = evaluate(BLOOM_BLUR_WGSL, { from: "farWeight", to: "farWeight" }, {});
 
-    expect(weights).toEqual([-4, -3, -2, -1, 0, 1, 2, 3, 4].map(k => Math.exp((-k * k) / 8)));
-    expect(GAUSS_ALONG_WGSL).toMatch(/total \+= w;[\s\S]*return sum \/ total;/);
+    for (const sigma of CHAIN_SIGMAS) {
+      expect(nearWeight).toBeCloseTo(Math.exp(-((sigma / 2) ** 2) / (2 * sigma * sigma)), 12);
+      expect(farWeight).toBeCloseTo(Math.exp(-(sigma ** 2) / (2 * sigma * sigma)), 12);
+    }
+
+    // An input of 1 everywhere: the centre weighs 1, each turn of the loop one tap of each ring.
+    const sum = 1 + turns * (nearWeight + farWeight);
+
+    expect(
+      evaluate(BLOOM_BLUR_WGSL, { from: "return", to: "return" }, { sum, nearWeight, farWeight })
+    ).toBeCloseTo(1, 12);
   });
 });

@@ -5,7 +5,7 @@ import type { Assets } from "../../../src/index.ts";
 import { fakeClock } from "../../../src/testing.ts";
 import { diskIo, openPage, type Watched, watch } from "../../../tests/integration/drawn-helpers";
 import { benchScene } from "../features/bench/bench.dev";
-import { scaleScene, scaleUpScene } from "../features/bench/scenes/cases";
+import { CASE_SCENES, scaleScene, scaleUpScene } from "../features/bench/scenes/cases";
 import type { Stage } from "../features/bench/scenes/types";
 import game from "../index";
 import { ARMS } from "../lib/a26";
@@ -55,6 +55,8 @@ const EVERY_SCENE = [
   "set-aura",
   "set-fold",
   "set-bloom",
+  "set-bloom-held",
+  "set-bloom-one",
   "sweep-blur",
   "sweep-blur-q4"
 ] as const;
@@ -476,5 +478,55 @@ describe("the scale-up scene", () => {
     mounted?.tick?.(0);
     mounted?.leave?.();
     expect(asked.at(-1)).toBeUndefined();
+  });
+});
+
+/**
+ * The writes an arm of `Bloom` makes in each of some frames, on a recording stage.
+ *
+ * @param name - The arm.
+ * @param times - The arm's time at each frame, ms.
+ * @returns For each frame, its writes: the entity and the patch.
+ */
+function writesOf(name: string, times: readonly number[]): Array<Array<[number, object]>> {
+  const asked: Asked[] = [];
+  const mounted = CASE_SCENES.find(scene => scene.name === name)?.mount(recordingStage(asked));
+
+  return times.map(elapsed => {
+    asked.length = 0;
+    mounted?.tick?.(elapsed);
+
+    return asked.flatMap(call =>
+      typeof call === "object" ? [[call.entity, call.patch] as [number, object]] : []
+    );
+  });
+}
+
+describe("the Bloom arms", () => {
+  // Bug: the held arm keeps writing its strength, so it measures the moving case and not the kept pictures; it never
+  // writes it, so its pictures are the spawn's; or it draws no frame at rest, and there is nothing to measure.
+  it("set-bloom-held writes the 12 strengths once, to 0.6, then only moves its small sprite", () => {
+    const [first, ...rest] = writesOf("set-bloom-held", [0, 33, 66, 2000]);
+    const strengths = (first ?? []).filter(([, patch]) => "strength" in patch);
+
+    expect(new Set(strengths.map(([entity]) => entity)).size).toBe(12);
+    expect(strengths.every(([, patch]) => (patch as { strength: number }).strength === 0.6)).toBe(
+      true
+    );
+    expect(first).toHaveLength(13);
+    expect(rest.map(frame => frame.map(([, patch]) => Object.keys(patch)))).toEqual([
+      [["x"]],
+      [["x"]],
+      [["x"]]
+    ]);
+  });
+
+  // Bug: the one arm moves more than one tile, or another tile in each frame, so no tile stays a kept picture.
+  it("set-bloom-one writes the strength of one tile in every frame, always the same one", () => {
+    const frames = writesOf("set-bloom-one", [0, 33, 66, 2000]);
+
+    expect(frames.map(frame => frame.length)).toEqual([1, 1, 1, 1]);
+    expect(new Set(frames.map(frame => frame[0]?.[0])).size).toBe(1);
+    expect(frames.every(frame => "strength" in (frame[0]?.[1] ?? {}))).toBe(true);
   });
 });

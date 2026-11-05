@@ -73,12 +73,13 @@ const PHONE_RESOLUTION = 2.625;
 const BLOOM: Row = { member: Bloom, wgsl: BLOOM_WGSL, glsl: BLOOM_GLSL, samples: 1, tile: 0.1 };
 
 /**
- * Bloom on a tile at the bench's 2 and at the phone's 2.625: the 4-step ladder (½, ¼, ¼, ¼), 5 passes, 0.094 Mpx;
- * at 2.625 radius 16 is 10.5 texels at ¼, over 8, so the 5-step ladder (½, ¼, ⅛, ⅛, ⅛), 6 passes, 0.153 Mpx.
+ * Bloom on a tile at the bench's 2 and at the phone's 2.625: two steps and the body, 3 passes at both. At 2 the
+ * ladder at ¼ (¼, ¼), 0.066 × (1 + 2 / 16) = 0.074 Mpx; at 2.625 radius 16 is 10.5 texels at ¼, over 8, so the
+ * ladder at ⅛ (⅛, ⅛), 0.113 × (1 + 2 / 64) = 0.116 Mpx.
  */
 const BLOOM_ROWS = [
-  { frame: TILE, resolution: RESOLUTION, passes: 5, mpx: 0.1 },
-  { frame: TILE, resolution: PHONE_RESOLUTION, passes: 6, mpx: 0.16 }
+  { frame: TILE, resolution: RESOLUTION, passes: 3, mpx: 0.1 },
+  { frame: TILE, resolution: PHONE_RESOLUTION, passes: 3, mpx: 0.16 }
 ] as const;
 
 /** What a member costs, as the README's table states it. */
