@@ -55,3 +55,110 @@ export type VignetteValue = {
   enabled: boolean;
   order: number;
 };
+
+/**
+ * `RevealLine`: the view shown up to a straight line that sweeps across it, `progress` 0 none of it, 1 all of it, the
+ * line at `angle` (radians, in the view's own 0..1 frame), its edge `soft` wide.
+ *
+ * @example
+ * ```ts
+ * const value: RevealLineValue = { progress: 0.5, angle: Math.PI / 4, soft: 0.1, enabled: true, order: 0 };
+ * ```
+ */
+export type RevealLineValue = {
+  progress: number;
+  angle: number;
+  soft: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `RevealRound`: the view shown inside a disc around `x`, `y` (0..1 of the view) of `radius`, its edge `soft` wide and
+ * wavy by `wobble`.
+ *
+ * @example
+ * ```ts
+ * const value: RevealRoundValue = { x: 0.5, y: 0.5, radius: 1.2, soft: 0.05, wobble: 0.04, enabled: true, order: 0 };
+ * ```
+ */
+export type RevealRoundValue = {
+  x: number;
+  y: number;
+  radius: number;
+  soft: number;
+  wobble: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `Dissolve`: the view eaten by a noise of `scale` cells across, `progress` 0 none of it, 1 all of it, the rim `edge`
+ * wide in `edgeColor`.
+ *
+ * @example
+ * ```ts
+ * const value: DissolveValue = { progress: 0.5, scale: 8, edge: 0.08, edgeColor: 0xffffff, enabled: true, order: 0 };
+ * ```
+ */
+export type DissolveValue = {
+  progress: number;
+  scale: number;
+  edge: number;
+  edgeColor: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `Shine`: a band of light `width` wide at `position` of its sweep (-0.5..1.5), across the view at `angle`, by
+ * `strength`.
+ *
+ * @example
+ * ```ts
+ * const value: ShineValue = { position: 0.5, width: 0.2, angle: 0.6, strength: 0.6, enabled: true, order: 0 };
+ * ```
+ */
+export type ShineValue = {
+  position: number;
+  width: number;
+  angle: number;
+  strength: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `Aura`: a halo of `color` by `strength` (0..2) around the shape of the view, `spread` CSS px wide, which is also the
+ * view's padding.
+ *
+ * @example
+ * ```ts
+ * const value: AuraValue = { color: 0xffd700, strength: 1, spread: 12, enabled: true, order: 0 };
+ * ```
+ */
+export type AuraValue = {
+  color: number;
+  strength: number;
+  spread: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `Fold`: the view turned by `angle` (radians) about its vertical axis (`axis: 0`) or its horizontal one (`axis: 1`),
+ * leaning by `perspective` (0..1), its back darkened by `shade` (0..1).
+ *
+ * @example
+ * ```ts
+ * const value: FoldValue = { angle: Math.PI / 2, axis: 1, perspective: 0.5, shade: 0.4, enabled: true, order: 0 };
+ * ```
+ */
+export type FoldValue = {
+  angle: number;
+  axis: number;
+  perspective: number;
+  shade: number;
+  enabled: boolean;
+  order: number;
+};

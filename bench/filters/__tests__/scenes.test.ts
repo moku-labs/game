@@ -47,7 +47,13 @@ const EVERY_SCENE = [
   "set-grade",
   "set-vignette",
   "set-grade-full",
-  "sweep-grade"
+  "sweep-grade",
+  "set-reveal-line",
+  "set-reveal-round",
+  "set-dissolve",
+  "set-shine",
+  "set-aura",
+  "set-fold"
 ] as const;
 
 /** The running game of a test. */

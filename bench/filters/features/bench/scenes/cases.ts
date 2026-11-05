@@ -1,23 +1,30 @@
 /**
  * @file The case scenes: each stands for one kind of filter work a real game does.
  */
+
 import {
   Alpha,
   Blur,
   bind,
   ColorMatrix,
   Countdown,
+  Dissolve,
   Flash,
+  Fold,
   Glow,
   Grade,
   Outline,
+  RevealLine,
+  RevealRound,
   Shape,
+  Shine,
   Sprite,
   Text,
   Transform,
   Vignette,
   type World
 } from "../../../../../src/index.ts";
+import { Aura } from "../../../../../src/plugins/effects/set/aura.ts";
 import { Emitter } from "../../../kit";
 import {
   FlipFold,
@@ -812,7 +819,10 @@ function fullWriteScene<Value extends object>(
   };
 }
 
-/** The arms of the engine's effect set (F126 stage 3 slice 1), and Pixi's colour matrix beside the full-screen grade. */
+/**
+ * The arms of the engine's effect set (F126 stage 3 slices 1 and 2), and Pixi's colour matrix beside the full-screen
+ * grade.
+ */
 const SET_SCENES: readonly BenchScene[] = [
   memberRowScene(
     "set-flash",
@@ -843,6 +853,43 @@ const SET_SCENES: readonly BenchScene[] = [
     "the same screen under Pixi's ColorMatrix, its brightness written each frame: a pass for every value",
     ColorMatrix,
     elapsedMs => ({ brightness: 1 + 0.3 * wave(elapsedMs, 0) })
+  ),
+  // Slice 2: each member's first number written each frame, over its range.
+  memberRowScene(
+    "set-reveal-line",
+    "the rows under RevealLine, its progress written each frame: on the quad",
+    RevealLine,
+    (elapsedMs, index) => ({ progress: 0.5 + 0.5 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-reveal-round",
+    "the rows under RevealRound, its radius written each frame: on the quad",
+    RevealRound,
+    (elapsedMs, index) => ({ radius: 0.75 + 0.75 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-dissolve",
+    "the rows under Dissolve, its progress written each frame: on the quad",
+    Dissolve,
+    (elapsedMs, index) => ({ progress: 0.5 + 0.5 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-shine",
+    "the rows under Shine, its position written each frame: on the quad",
+    Shine,
+    (elapsedMs, index) => ({ position: 0.5 + wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-aura",
+    "the rows under Aura, its strength written each frame: on the quad, 13 samples, padded by its spread",
+    Aura,
+    (elapsedMs, index) => ({ strength: 1 + wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-fold",
+    "the rows under Fold, its angle written each frame: on the quad, padded by 8, the shape of rows",
+    Fold,
+    (elapsedMs, index) => ({ angle: elapsedMs / 500 + index * 0.4 })
   )
 ];
 

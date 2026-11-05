@@ -1,11 +1,14 @@
 /**
- * @file The browser leg of the engine's effect set (F126 stage 3 slice 1): `Flash`, `Grade` and `Vignette` on the real
- * Pixi and the real GPU, in Chrome, on WebGPU and on WebGL (`?renderer=webgl`), at resolution 1 and 2, with
+ * @file The browser leg of the engine's effect set (F126 stage 3 slices 1 and 2): every member on the real Pixi and the
+ * real GPU, in Chrome, on WebGPU and on WebGL (`?renderer=webgl`), at resolution 1 and 2, with
  * `debug.verifyFrames` on. Per member: a held value is kept as a picture and equals its live frame within the frame
  * oracle's thresholds (a channel over 24, a ratio over 0.001); a tweening value runs on the view's own quad on WebGPU
  * and stays within 1/255 of its live frame; one pixel by hand (Flash at amount 1 is its colour, Grade at saturation 0
- * of red is the luma, Vignette's centre is the source) is within 2/255; and every WebGL capture is held against the
- * WebGPU capture of the same row: alpha within 2/255 and colour within 8/255 on 99.5 % of the pixels. No
+ * of red is the luma, Vignette's centre is the source; RevealLine's far corners at π/4 and progress 1, Shine's line and
+ * a transparent corner under it, Aura next to an edge, Fold at a half turn; `effects-set/page.ts` has the numbers) is
+ * within 2/255; and every WebGL capture is held against the WebGPU capture of the same row: alpha within 2/255 and
+ * colour within 8/255 on 99.5 % of the pixels. Both comparisons are of premultiplied pixels, what the canvas
+ * composites (Pixi's WebGL extract writes premultiplied pixels, its WebGPU one straight alpha). No
  * `renderer:stale-picture`, no shader, pipeline or GPU error, no unlisted member. Not a vitest file:
  * `bun tests/visual/effects-set.visual.ts`. It bundles `effects-set/page.ts` with the flags of a dev page, serves it,
  * and exits 1 when a run fails.

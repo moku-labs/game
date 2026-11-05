@@ -1,10 +1,11 @@
 /**
- * @file The page of the effect set's browser leg (`tests/visual/effects-set.visual.ts`, F126 stage 3 slice 1). Not a
- * test: the leg bundles it with the flags of a dev page and opens it in Chrome on WebGPU and on WebGL
- * (`?renderer=webgl`), at resolution 1 and 2 (`?resolution=2`). A small game lists `Flash`, `Grade` and `Vignette` and
+ * @file The page of the effect set's browser leg (`tests/visual/effects-set.visual.ts`, F126 stage 3 slices 1 and 2).
+ * Not a test: the leg bundles it with the flags of a dev page and opens it in Chrome on WebGPU and on WebGL
+ * (`?renderer=webgl`), at resolution 1 and 2 (`?resolution=2`). A small game lists every member of the set and
  * runs on the real engine, the real Pixi and the real GPU, with `debug.verifyFrames` on. Each member plays three rows:
  * a held value, kept as a picture and held against its live frame; a tweening value, which on WebGPU runs on the
- * view's own quad and is held against its live frame; and one pixel worked out by hand. Every capture stays in the
+ * view's own quad and is held against its live frame; and one pixel worked out by hand (`RevealLine` two, its corners
+ * at a quarter turn of the diagonal; `Shine` two, its line and a transparent corner). Every capture stays in the
  * page, so the leg can hand the WebGPU pictures to the WebGL page (`compareSet`) and hold the GLSL twins against the
  * WGSL bodies. It answers in `globalThis.effectsSet`.
  *
@@ -14,16 +15,22 @@
 import { defineGameApp } from "../../../src/app";
 import type { Assets, World } from "../../../src/index";
 import {
+  Dissolve,
   defineGame,
   Flash,
+  Fold,
   Grade,
   Layer,
   Parent,
+  RevealLine,
+  RevealRound,
   Shape,
+  Shine,
   Transform,
   type,
   Vignette
 } from "../../../src/index";
+import { Aura } from "../../../src/plugins/effects/set/aura";
 import manifestJson from "../../fixtures/mini-game/generated/manifest.json";
 
 /** What one row answered. */
@@ -133,7 +140,7 @@ const main = kit.defineScene("main", {
 });
 const feature = kit.defineFeature("visual", {
   scenes: [main],
-  filters: [Flash, Grade, Vignette]
+  filters: [Flash, Grade, Vignette, RevealLine, RevealRound, Dissolve, Shine, Aura, Fold]
 });
 
 /** The manifest of the page: the mini game's `ui` bundle without its files, so the scene loads nothing. */
@@ -147,6 +154,9 @@ type App = ReturnType<ReturnType<typeof defineGameApp>["screen"]>["app"];
 
 /** The captures of the rows, by name, as PNG data URLs: what `compareSet` holds another backend's against. */
 const captures = new Map<string, string>();
+
+/** The page's backend writes straight alpha into a capture (WebGPU) and the row compares premultiplied: `premultiplied`. */
+const page = { straight: false };
 
 /**
  * Waits for frames of the page, while the clock still runs on them.
@@ -302,13 +312,17 @@ async function play(
 
   captures.set(name, png);
 
-  const mode = await pixelsOf(png);
+  // Held against live as the canvas composites them, premultiplied: a straight-alpha capture rounds the colour of a
+  // half-transparent pixel by 255 / alpha.
+  const composited = async (shot: string): Promise<ImageData> =>
+    page.straight ? premultiplied(await pixelsOf(shot)) : pixelsOf(shot);
+  const mode = await composited(png);
   const answer: SetRow = {
     name,
     kind,
     pictures,
     shaded,
-    ...compare(mode, await pixelsOf(live))
+    ...compare(mode, await composited(live))
   };
 
   if (probe === undefined) return answer;
@@ -351,6 +365,7 @@ async function run(): Promise<SetResult> {
 
   await app.start();
   app.flow.run().catch(() => undefined);
+  page.straight = app.renderer.host.kind() === "webgpu";
 
   for (let frame = 0; frame < 300 && app.flow.state().path !== "rest"; frame += 1) await frames(1);
 
@@ -375,17 +390,19 @@ async function run(): Promise<SetResult> {
    * @param filter - The member's value.
    * @param fill - The card's fill.
    * @param square - Whether the card holds a square.
+   * @param rounded - Whether its corners are rounded, 12 CSS px; a square corner is a lit pixel at the corner.
    * @returns The card and the square, children first.
    */
   const card = (
     filter: World.AnyComponentValue,
     fill = 0x33_88_ff,
-    square = true
+    square = true,
+    rounded = true
   ): World.Entity[] => {
     const parent = ecs.spawn(OWNER, [
       Layer({ name: "main" }),
       Transform(at(120, 160)),
-      Shape({ w: css(240), h: css(160), fill, radius: css(12) }),
+      Shape({ w: css(240), h: css(160), fill, radius: rounded ? css(12) : 0 }),
       filter
     ]);
 
@@ -478,6 +495,151 @@ async function run(): Promise<SetResult> {
       kind: "probe",
       scene: { entities: card(Vignette(), 0x33_88_ff, false) },
       probe: { x: 240, y: 240, rgb: [0x33, 0x88, 0xff] }
+    }),
+    // RevealLine: half shown along a slant; the diagonal at progress 1 shows both far corners.
+    await play(app, {
+      name: "RevealLine: held",
+      kind: "held",
+      scene: { entities: card(RevealLine({ progress: 0.5, angle: 0.6, soft: 0.1 })) }
+    }),
+    await play(app, {
+      name: "RevealLine: tween",
+      kind: "tween",
+      scene: tweened(
+        () => RevealLine({ progress: 0.3, soft: 0.1 }),
+        (entity, turn) => ecs.set(entity, RevealLine, { progress: 0.3 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "RevealLine: probe, at π/4 and progress 1 the top-left corner is the source",
+      kind: "probe",
+      scene: {
+        entities: card(RevealLine({ progress: 1, angle: Math.PI / 4 }), 0x33_88_ff, false, false)
+      },
+      probe: { x: 121, y: 161, rgb: [0x33, 0x88, 0xff] }
+    }),
+    await play(app, {
+      name: "RevealLine: probe, at π/4 and progress 1 the bottom-right corner is the source",
+      kind: "probe",
+      scene: {
+        entities: card(RevealLine({ progress: 1, angle: Math.PI / 4 }), 0x33_88_ff, false, false)
+      },
+      probe: { x: 359, y: 319, rgb: [0x33, 0x88, 0xff] }
+    }),
+    // RevealRound: a window with a wavy edge; one off the centre shows its own centre.
+    await play(app, {
+      name: "RevealRound: held",
+      kind: "held",
+      scene: { entities: card(RevealRound({ radius: 0.4, soft: 0.1, wobble: 0.05 })) }
+    }),
+    await play(app, {
+      name: "RevealRound: tween",
+      kind: "tween",
+      scene: tweened(
+        () => RevealRound({ radius: 0.3, soft: 0.1 }),
+        (entity, turn) => ecs.set(entity, RevealRound, { radius: 0.3 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "RevealRound: probe, the centre of a window at x 0.25 is the source",
+      kind: "probe",
+      scene: {
+        entities: card(RevealRound({ x: 0.25, radius: 0.2, soft: 0.1 }), 0x33_88_ff, false)
+      },
+      probe: { x: 180, y: 240, rgb: [0x33, 0x88, 0xff] }
+    }),
+    // Dissolve: the defaults' rim, part eaten; at progress 0 the view is whole.
+    await play(app, {
+      name: "Dissolve: held",
+      kind: "held",
+      scene: { entities: card(Dissolve({ progress: 0.4 })) }
+    }),
+    await play(app, {
+      name: "Dissolve: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Dissolve({ progress: 0.2 }),
+        (entity, turn) => ecs.set(entity, Dissolve, { progress: 0.2 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Dissolve: probe, at progress 0 the centre is the source",
+      kind: "probe",
+      scene: { entities: card(Dissolve(), 0x33_88_ff, false) },
+      probe: { x: 240, y: 240, rgb: [0x33, 0x88, 0xff] }
+    }),
+    // Shine: the band in the middle; its light on the colour only.
+    await play(app, {
+      name: "Shine: held",
+      kind: "held",
+      scene: { entities: card(Shine({ position: 0.5 })) }
+    }),
+    await play(app, {
+      name: "Shine: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Shine({ position: 0.2 }),
+        (entity, turn) => ecs.set(entity, Shine, { position: 0.2 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Shine: probe, its line at the centre adds 0.6 of light",
+      kind: "probe",
+      scene: { entities: card(Shine({ position: 0.5, angle: 0 }), 0x33_88_ff, false) },
+      probe: { x: 240, y: 240, rgb: [204, 255, 255] }
+    }),
+    await play(app, {
+      name: "Shine: probe, a transparent corner under the line stays transparent",
+      kind: "probe",
+      scene: {
+        entities: card(Shine({ position: 0, angle: Math.PI / 4, strength: 2 }), 0x33_88_ff, false)
+      },
+      probe: { x: 121, y: 161, rgb: [0, 0, 0] }
+    }),
+    // Aura: a gold halo; next to a straight edge at strength 2 it is full.
+    await play(app, {
+      name: "Aura: held",
+      kind: "held",
+      scene: { entities: card(Aura({ color: 0xff_d7_00 })) }
+    }),
+    await play(app, {
+      name: "Aura: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Aura({ strength: 0.5 }),
+        (entity, turn) => ecs.set(entity, Aura, { strength: 0.5 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Aura: probe, next to a straight edge at strength 2 the halo is its colour",
+      kind: "probe",
+      scene: { entities: card(Aura({ strength: 2 }), 0x33_88_ff, false) },
+      probe: { x: 119, y: 240, rgb: [0xff, 0xff, 0xff] }
+    }),
+    // Fold: turned about each axis; a half turn shows the back in shade.
+    await play(app, {
+      name: "Fold: held",
+      kind: "held",
+      scene: { entities: card(Fold({ angle: 0.8 })) }
+    }),
+    await play(app, {
+      name: "Fold: held, axis 1",
+      kind: "held",
+      scene: { entities: card(Fold({ angle: 0.8, axis: 1 })) }
+    }),
+    await play(app, {
+      name: "Fold: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Fold({ angle: 0.3 }),
+        (entity, turn) => ecs.set(entity, Fold, { angle: 0.3 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Fold: probe, a half turn at the centre is the colour at 0.6",
+      kind: "probe",
+      scene: { entities: card(Fold({ angle: Math.PI }), 0x33_88_ff, false) },
+      probe: { x: 240, y: 240, rgb: [31, 82, 153] }
     })
   ];
 
@@ -495,9 +657,32 @@ async function run(): Promise<SetResult> {
 }
 
 /**
- * Holds this page's captures against another backend's of the same rows.
+ * A capture's colour multiplied by its alpha, in place: what the canvas composites. Pixi's WebGL extract reads the
+ * canvas back premultiplied and writes it as it is (`GlTextureSystem.getPixels` skips its `unpremultiplyAlpha`), while
+ * the WebGPU one writes straight alpha; so a WebGPU capture is premultiplied before a WebGL one is held against it. An
+ * opaque pixel is the same either way; a half-transparent one (a reveal's soft edge, a halo) differs by its alpha.
  *
- * @param others - The other backend's captures, by row name, as PNG data URLs.
+ * @param image - The pixels of a straight-alpha capture.
+ * @returns The same pixels, premultiplied.
+ */
+function premultiplied(image: ImageData): ImageData {
+  const { data } = image;
+
+  for (let at = 0; at < data.length; at += 4) {
+    const alpha = (data[at + 3] ?? 0) / 255;
+
+    for (let channel = 0; channel < 3; channel += 1) {
+      data[at + channel] = Math.round((data[at + channel] ?? 0) * alpha);
+    }
+  }
+
+  return image;
+}
+
+/**
+ * Holds this page's captures, WebGL's, against WebGPU's of the same rows, both premultiplied.
+ *
+ * @param others - The WebGPU page's captures, by row name, as PNG data URLs.
  * @returns One line per row both have.
  */
 async function compareSet(others: Readonly<Record<string, string>>): Promise<CrossRow[]> {
@@ -509,7 +694,7 @@ async function compareSet(others: Readonly<Record<string, string>>): Promise<Cro
     if (other === undefined) continue;
 
     const one = await pixelsOf(png);
-    const two = await pixelsOf(other);
+    const two = premultiplied(await pixelsOf(other));
     let within = 0;
     let color = 0;
     let alpha = 0;
