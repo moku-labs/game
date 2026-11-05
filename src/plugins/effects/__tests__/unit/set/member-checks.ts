@@ -34,8 +34,9 @@ function readsOf(body: string, declared: readonly string[]): string[] {
 
 /**
  * The statements of a body in one spelling for both languages: the WGSL's `let`, `var`, `fu.` and `<f32>` dropped, its
- * `uv` written as the GLSL's `vTextureCoord` and its `return` as the GLSL's `finalColor =`; the GLSL's declared type
- * dropped. Constants are left out: a member's test compares those.
+ * `uv` written as the GLSL's `vTextureCoord`, its `return` as the GLSL's `finalColor =` and its `f32(` cast as the
+ * GLSL's `float(`; the GLSL's declared type dropped. Constants are left out: a member's test compares those. A loop's
+ * head ends in `{`, so it is left out too: the budget test compares the loop's bound in both.
  *
  * @param body - A WGSL or GLSL body.
  * @param language - Which one it is.
@@ -56,6 +57,7 @@ function twinLines(body: string, language: "wgsl" | "glsl"): string[] {
       .replace(/^return /, "finalColor = ")
       .replaceAll("fu.", "")
       .replaceAll("<f32>", "")
+      .replaceAll(/\bf32\(/g, "float(")
       .replaceAll(/\buv\b/g, "vTextureCoord")
   );
 }

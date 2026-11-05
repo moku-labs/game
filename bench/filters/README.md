@@ -24,6 +24,7 @@ Open `http://127.0.0.1:4173/#slope-4`. Change the part after `#` and the scene c
 | `#rows&hold=500` | The scene's time held at 500 ms, for a compare of pixels at one value; with `arms=`, every arm's. An address without it lets the scenes run. |
 | `#arms=slope-0,slope-2&every=2&k=8` | Turns through the scenes, 2 s each, for as long as the page is open. |
 | `#arms=rest,full,rows,set-flash,set-grade,set-vignette,set-grade-full,sweep-grade&every=2&k=8` | The arms of the effect set's first slice with the arms its lines compare against. |
+| `#arms=rest,rows,set-reveal-line,set-reveal-round,set-dissolve,set-shine,set-aura,set-fold&every=2&k=8` | The arms of the effect set's second slice with `rest` and `rows`, which its lines compare against. |
 
 From the editor: open this folder as a game. The command `bench.scene` (`{ scene, k? }`) switches the
 scene, the sources `bench.scenes` and `bench.readout` list the scenes and the numbers.
@@ -57,6 +58,12 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `set-vignette` | The same rows under `Vignette`, its `x` written each frame. | A vignette that follows a point. |
 | `set-grade-full` | One full-screen `Grade` over the full-screen sprite, its `brightness` written each frame: on its quad, no filter pass. Against `full`, the same screen under a live body. | A whole-screen grade that moves. |
 | `sweep-grade` | The same screen under Pixi's `ColorMatrix`, its `brightness` written each frame: a core kind has no quad, so every value pays a filter pass. | What `Grade` replaces. |
+| `set-reveal-line` | The 8 rows of `rows` under `RevealLine`, its `progress` written each frame. | A wipe in of a card or a panel. |
+| `set-reveal-round` | The same rows under `RevealRound`, its `radius` written each frame from 0 to 1.5. | LensWindow, FogWipe. |
+| `set-dissolve` | The same rows under `Dissolve`, its `progress` written each frame: one sample and four hashes a pixel. | A piece that burns away. |
+| `set-shine` | The same rows under `Shine`, its `position` written each frame from -0.5 to 1.5. | A glint on a reward. |
+| `set-aura` | The same rows under `Aura`, its `strength` written each frame: 13 samples a pixel over the rows padded by 8. | A hinted tile, a selected card. |
+| `set-fold` | The same rows under `Fold`, its `angle` written each frame as `rows` writes its own, padded by 8 as `rows` is. | OrderFlip, CoverFold. |
 | `promo` | A perspective map of live text, a time-driven procedural quad, a mirrored column with a gradient, a stroke sweep. | The promo screen. |
 
 Every filter body is the bench's own, shaped like the case, in WGSL, but for the `set-*` arms, which
