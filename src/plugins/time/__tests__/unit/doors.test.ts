@@ -59,7 +59,8 @@ describe("game.step", () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const app = createApp();
 
-    await expect(run(app, stepCommand, { frames })).rejects.toThrow(
+    // The command itself, not `run`: `run` refuses a non-finite number first (F154); a direct call still meets this check.
+    await expect(Promise.resolve().then(() => stepCommand.run(app, { frames }))).rejects.toThrow(
       /^\[game] game\.step takes a whole number of frames\.\n {2}.*\.$/
     );
     expect(app.time.snapshot().frame).toBe(0);
@@ -120,7 +121,10 @@ describe("game.timeScale", () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const app = createApp();
 
-    await expect(run(app, timeScaleCommand, { scale })).rejects.toThrow(
+    // The command itself, not `run`: `run` refuses a non-finite number first (F154); a direct call still meets this check.
+    await expect(
+      Promise.resolve().then(() => timeScaleCommand.run(app, { scale }))
+    ).rejects.toThrow(
       `[game] game.timeScale takes a scale of 0 or more.\n  Pass a finite number, not ${shown}.`
     );
     expect(app.time.snapshot().scale).toBe(1);

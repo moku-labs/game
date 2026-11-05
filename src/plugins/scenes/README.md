@@ -240,7 +240,7 @@ defineScene("ward", { ..., leave: false });
 | | `inMs` | `50` | Clock milliseconds from 0 to `alpha`, from the switch start |
 | | `outMs` | `150` | Clock milliseconds back to 0, from the swap. `cover.alpha: 0` still times a layer loader's fade over it; a ring or a texture goes at once |
 | `loader` | `afterMs` | `400` | Clock milliseconds after the switch start the loader waits for; a switch done sooner shows none. `0` shows it from the first drawn frame |
-| | `holdMs` | `0` | Clock milliseconds after the switch start before the swap may happen: a floor, see **The floor** below |
+| | `holdMs` | `0` | Milliseconds after the switch start, on the clock or in game time, before the swap may happen: a floor, see **The floor** below |
 | | `texture` | none | An asset key: the game's texture turns at the centre of the frame, once a second |
 | | `projection` | none | A registered projection: kept built and hidden while the scene stands, shown once the loader is due, its layer drawn above the veil; it fades out with the veil after the swap |
 
@@ -270,14 +270,15 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   a loader projection fades out with the veil (F107 part 3, below). A swap before the look's first step, which runs in
   the `render` phase of a frame, shows nothing of the look, unless a floor holds it.
 - **The floor.** `holdMs` keeps the old scene until that many milliseconds after the switch start, counted on the clock
-  of the look, so a loader that opens over 260 ms is seen opening however fast the next scene comes. The scene builds at
+  of the look or in game time (`time.elapsed`), whichever passes first, so a loader that opens over 260 ms is seen opening however fast the next scene comes. The scene builds at
   once and the commit waits, and the swap also has one drawn frame of the look behind it, even when one long frame ate
   the whole floor. A switch slower than the floor gets nothing added, and `holdMs: 0` lifts the floor of the level below.
   A switch with no look, `loader: false`, a fast walk, a world that does not run live and a headless app have none. A
   world that leaves live during the wait ends it with a one-block mount, and an abort discards the build as always. A
   build the world refuses (`scenes:build-skipped`) swaps in one block without waiting. Input stays closed: the gate
-  opens after the swap, as for any switch. The loop is kept awake during the wait, as it may stop at `idleFps: 0`. A test
-  with a drawing renderer and a fake clock must move the clock, or the swap never comes. `buildMs` in the log of an agent
+  opens after the swap, as for any switch. The loop is kept awake during the wait, as it may stop at `idleFps: 0`. On a device the
+  two run together. A test with a drawing renderer on a fake clock that stands, as the pixel leg of a visual test, gets
+  the swap after `holdMs` of stepped frames (F156). `buildMs` in the log of an agent
   build counts the wait.
 - **Without a swap.** An abort of the node (a restore, the inbox, a stop of the runner) drops the veil and the loader
   at once, from the abort listener of the switch; a switch that throws (a failed load, a `bundles` or a `view` that
@@ -478,8 +479,8 @@ one, the hook returns at once.
 | `world` | `projection.hold` of the loader projection of a scene that stands and `projection.show` of it once its loader is due; `projection.feed` of the switch it reads, right after the hold and from the switch start to its swap or drop; `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection the scene did not hold, once its loader is due; `projection.unmount` of a loader at a drop, after the veil's fade, and of a held loader the next switch does not use; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `isLoaded(bundle)` at the switch start and the hook `assets:bundle-progress` for the progress a loader projection reads; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
 | `renderer` | `host.ready()`, which picks the path of a live switch and whether it shows a look; `sync.leave.show` at its start, `sync.leave.land` after its swap and `sync.leave.drop` on an abort or a throw; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
-| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard, and while a loader projection fades out with the veil, removed in the frame its `outMs` ran out; `rate().fps` at a build start, for the budget of `"auto"`, and for a fade frame at time scale 0; `agentClock()`, the page clock of a build's `buildMs` in an agent build; `snapshot().frame` at the start of a look with a floor and at a build with nothing left, and `wake()` every frame a floor holds a built scene |
-| `clock` | `now()`, the clock of the look, which a floor on the swap (`loader.holdMs`) is counted on |
+| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard, and while a loader projection fades out with the veil, removed in the frame its `outMs` ran out; `rate().fps` at a build start, for the budget of `"auto"`, and for a fade frame at time scale 0; `agentClock()`, the page clock of a build's `buildMs` in an agent build; `snapshot().frame` and `snapshot().elapsed` at the start of a look with a floor, the game time of every frame a floor holds a built scene and at a build with nothing left, and `wake()` every frame a floor holds a built scene |
+| `clock` | `now()`, the clock of the look, which a floor on the swap (`loader.holdMs`) is counted on, beside the game time |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle

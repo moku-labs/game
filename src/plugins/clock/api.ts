@@ -7,13 +7,13 @@ import type { Api, ClockCtx, Elapsed, State } from "./types";
 
 /**
  * Reads the source and raises the high-water mark. A source that goes back cannot move game time
- * back, and a fractional reading is cut to whole milliseconds.
+ * back, and a fractional reading is cut to whole milliseconds. The shift of `advance` is added.
  *
  * @param state - Clock state.
  * @returns The highest moment ever returned, in epoch milliseconds.
  */
 function readNow(state: State): number {
-  const moment = Math.trunc(state.source.now());
+  const moment = Math.trunc(state.source.now() + state.shift);
 
   if (moment > state.last) state.last = moment;
   return state.last;
@@ -45,8 +45,8 @@ function deliverElapsed(state: State): void {
 }
 
 /**
- * Arms the single timer for a due moment. The delay is counted from the RAW source reading, not
- * from trusted time: the source's timer runs on the device clock, so after the device clock was
+ * Arms the single timer for a due moment. The delay is counted from the RAW source reading plus
+ * the shift of `advance`, not from trusted time: the source's timer runs on the device clock, so after the device clock was
  * moved back the wait is longer than `moment - now()`. A moment further than the longest timer
  * waits in steps: the timer fires early and `fireDue` arms it again.
  *
@@ -54,7 +54,8 @@ function deliverElapsed(state: State): void {
  * @param moment - Due moment in epoch milliseconds.
  */
 function arm(state: State, moment: number): void {
-  const delayMs = Math.min(MAX_TIMER_MS, Math.max(0, moment - Math.trunc(state.source.now())));
+  const raw = Math.trunc(state.source.now() + state.shift);
+  const delayMs = Math.min(MAX_TIMER_MS, Math.max(0, moment - raw));
 
   state.dueAt = moment;
   state.handle = state.source.setTimer(() => fireDue(state), delayMs);
@@ -78,6 +79,37 @@ function fireDue(state: State): void {
 
   state.dueAt = undefined;
   deliverElapsed(state);
+}
+
+/**
+ * Moves the clock forward by `ms`: the shift every reading adds grows, and the pending moment is
+ * delivered at once when it is due now, or armed again for the rest of its wait.
+ *
+ * @param state - Clock state.
+ * @param ms - Milliseconds forward.
+ * @returns The trusted moment after the move.
+ * @throws {RangeError} When `ms` is not a finite number above 0.
+ */
+function advanceBy(state: State, ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    throw new RangeError(
+      `[game] clock.advance moves the clock forward, not by ${ms} ms.\n  Pass a finite number of milliseconds above 0.`
+    );
+  }
+
+  state.shift += ms;
+
+  const moment = state.dueAt;
+  const now = readNow(state);
+
+  if (moment === undefined) return now;
+
+  cancelPending(state);
+
+  if (now >= moment) deliverElapsed(state);
+  else arm(state, moment);
+
+  return now;
 }
 
 /**
@@ -122,6 +154,8 @@ export function createClockApi(ctx: ClockCtx): Api {
     poke: (): void => {
       deliverElapsed(ctx.state);
     },
+
+    advance: (ms: number): number => advanceBy(ctx.state, ms),
 
     dueAt: (): number | undefined => ctx.state.dueAt,
 

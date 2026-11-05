@@ -146,7 +146,7 @@ function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionM
 
   for (const feature of features) {
     registerEach(ctx, feature, "components", isComponentEntry, entry => registerType(ctx, entry));
-    registerEach(ctx, feature, "systems", isSystemEntry, entry => ecs.system(entry));
+    registerEach(ctx, feature, "systems", isSystemEntry, entry => ecs.featureSystem(entry));
     registerEach(ctx, feature, "projections", isProjectionEntry, entry =>
       projection.register(entry)
     );

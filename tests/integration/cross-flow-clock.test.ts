@@ -3,8 +3,9 @@
  * effect, and the `elapsed` that arrives reaches only a rest node that lists it in its inbox.
  */
 import { schedule, type } from "@moku-labs/game";
+import { commands, run } from "@moku-labs/game/control";
 import { createHeadless } from "@moku-labs/game/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createEdgeLog,
   createGame,
@@ -53,6 +54,40 @@ const main = defineFlow("timers", {
 });
 
 describe("flow against clock", () => {
+  // Bug (F157): a visual test or the editor moves frames but not the clock, so a moment a rest node waits on never
+  // comes; game.clock moves the clock forward and the moment arrives through the graph.
+  it("reaches the armed moment through the door game.clock, short of it only after the whole wait", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    try {
+      const log = createEdgeLog();
+      const { app } = createGame({ mainFlow: main, plugins: [log.plugin] });
+      const game = await createHeadless(app);
+
+      await game.walk([{ at: "home", intent: "play" }]);
+      expect(game.state().path).toBe("wait");
+
+      const short = await run(app, commands.clock, { advanceMs: 999 });
+
+      await tick();
+      expect(short.value).toEqual({ now: startMoment + 999 });
+      expect(game.state().path).toBe("wait");
+
+      const due = await run(app, commands.clock, { advanceMs: 1 });
+
+      await tick();
+      expect(due.value).toEqual({ now: startMoment + 1000 });
+      expect(game.state().path).toBe("home");
+      expect(log.edges).toEqual(["done", "play", "armed", "elapsed"]);
+      // It changes what the game sees: the session is tainted, as after a restore.
+      expect(due.state.tainted).toBe(true);
+
+      await game.stop();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("delivers the due moment to the rest node that lists elapsed", async () => {
     const log = createEdgeLog();
     const { app, clock } = createGame({ mainFlow: main, plugins: [log.plugin] });

@@ -584,6 +584,14 @@ each run from what is there at that moment; together they cost a few reads and a
    without `scenes` (a test of the world alone) mounts no scene, so a system with `scenes` never
    runs there.
 
+A system a feature brings does not see a scene being built aside: while a live switch builds the
+next scene (see [Building the next scene aside](#building-the-next-scene-aside)), the rows of its
+`query` pass over every entity of the build, and from the frame of the commit it sees the whole
+scene at once (F155). A system without `scenes` never meets the coming board in pieces, and needs
+no flag to tell a build is running. The engine's own systems (`ui`, the renderer) lay the build out
+and draw it, so they see it. Only the declared `query` hides it: `world.query()`, `get` and `has`
+inside a system read the build's entities as they are.
+
 `ctx.resumed` is true on the first run after one or more skipped runs, whichever rule skipped them,
 and false on every other run. `world.changed()` holds this frame's changes only, so a system that
 keeps in a resource what it drew, or what it saw last, starts over from the components then.

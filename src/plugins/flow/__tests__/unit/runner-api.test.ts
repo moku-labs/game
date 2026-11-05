@@ -218,6 +218,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
       scheduleAt: vi.fn(),
       onElapsed: vi.fn(),
       poke: vi.fn(),
+      advance: vi.fn(),
       dueAt: vi.fn(),
       pending: vi.fn(() => 0),
       listeners: vi.fn(() => 0)

@@ -160,6 +160,7 @@ const setup = (main: AnyFlow) => {
       scheduleAt: vi.fn(),
       onElapsed: () => unregister,
       poke: vi.fn(),
+      advance: vi.fn(),
       dueAt: vi.fn(),
       pending: vi.fn(() => 0),
       listeners: vi.fn(() => 0)
