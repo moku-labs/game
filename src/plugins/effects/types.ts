@@ -315,7 +315,6 @@ export type {
   Shape
 } from "./particles/types";
 export type {
-  AuraValue,
   DissolveValue,
   FlashValue,
   FoldValue,

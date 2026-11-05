@@ -22,19 +22,19 @@ lists it in filters' }`.
 
 Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tweened. Every member also carries
 `enabled: true` and `order: 0`. The value types `FlashValue`, `GradeValue`, `VignetteValue`, `RevealLineValue`,
-`RevealRoundValue`, `DissolveValue`, `ShineValue`, `AuraValue` and `FoldValue` are root exports.
+`RevealRoundValue`, `DissolveValue`, `ShineValue` and `FoldValue` are root exports. `Aura` is out, over budget: it stays in `set/` unexported (see the A26 line below).
 
 | Member | Fields (default, range) | In A Memory Missing | Frame | Passes | Mpx at 2 | A value change costs | A26 ms (run) |
 |---|---|---|---|---|---|---|---|
 | `Flash` | `amount: 0` (0..1), `color: 0xffffff` | new: a flash of colour | screen | 1 | ≤ 1.065 | its quad | 22.6 against `rest` 22.4 (perf/a26-2026-11-04-f126-s3-slice1) |
 | `Grade` | `brightness: 1`, `contrast: 1`, `saturation: 1` (each 0..2, 1 for none), `tint: 0xffffff` | the `ColorMatrix` cases C1–C5 | screen | 1 | ≤ 1.065 | its quad | 22.7 against `rest` 22.4; on the full screen 22.2 against Pixi's `ColorMatrix` 27.5 (perf/a26-2026-11-04-f126-s3-slice1) |
 | `Vignette` | `x: 0.5`, `y: 0.5` (0..1 of the view), `radius: 0.5`, `soft: 0.25`, `color: 0x000000`, `amount: 1` (0..1) | new | screen | 1 | ≤ 1.065 | its quad | 22.4 against `rest` 22.4 (perf/a26-2026-11-04-f126-s3-slice1) |
-| `RevealLine` | `progress: 0` (0..1; 0 hides all, 1 shows all), `angle: 0` (radians), `soft: 0.05` | new: a wipe | screen | 1 | ≤ 1.065 | its quad | pending |
-| `RevealRound` | `x: 0.5`, `y: 0.5`, `radius: 0` (0..1.5), `soft: 0.05`, `wobble: 0` (0..0.2) | LensWindow F12–F14, FogWipe | screen | 1 | ≤ 1.065 | its quad | pending |
-| `Dissolve` | `progress: 0` (0..1), `scale: 8` (cells across), `edge: 0.08`, `edgeColor: 0xffffff` | new | screen | 1 | ≤ 1.065 | its quad | pending |
-| `Shine` | `position: -0.5` (-0.5..1.5), `width: 0.2`, `angle: 0.6` (radians), `strength: 0.6` | new: a glint | screen | 1 | ≤ 1.065 | its quad | pending |
-| `Aura` | `color: 0xffffff`, `strength: 1` (0..2), `spread: 8` (CSS px, the padding) | a cheap `Glow` | tile | 1 | ≤ 0.083 | its quad | pending |
-| `Fold` | `angle: 0` (radians), `axis: 0` (0 about the vertical axis, 1 about the horizontal), `perspective: 0.5` (0..1), `shade: 0.4` (0..1) | OrderFlip, CoverFold | tile | 1 | ≤ 0.083 | its quad | pending |
+| `RevealLine` | `progress: 0` (0..1; 0 hides all, 1 shows all), `angle: 0` (radians), `soft: 0.05` | new: a wipe | screen | 1 | ≤ 1.065 | its quad | 22.9 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
+| `RevealRound` | `x: 0.5`, `y: 0.5`, `radius: 0` (0..1.5), `soft: 0.05`, `wobble: 0` (0..0.2) | LensWindow F12–F14, FogWipe | screen | 1 | ≤ 1.065 | its quad | 23.0 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
+| `Dissolve` | `progress: 0` (0..1), `scale: 8` (cells across), `edge: 0.08`, `edgeColor: 0xffffff` | new | screen | 1 | ≤ 1.065 | its quad | 23.2 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
+| `Shine` | `position: -0.5` (-0.5..1.5), `width: 0.2`, `angle: 0.6` (radians), `strength: 0.6` | new: a glint | screen | 1 | ≤ 1.065 | its quad | 22.8 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
+| `Aura` | `color: 0xffffff`, `strength: 1` (0..2), `spread: 8` (CSS px, the padding) | a cheap `Glow` | tile | 1 | ≤ 0.083 | its quad | out, over budget: 24.9 against the line 24.7 (`rest` + 2.0, perf/a26-2026-11-04-f126-s3-slice2) |
+| `Fold` | `angle: 0` (radians), `axis: 0` (0 about the vertical axis, 1 about the horizontal), `perspective: 0.5` (0..1), `shade: 0.4` (0..1) | OrderFlip, CoverFold | tile | 1 | ≤ 0.083 | its quad | 22.7 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
 
 - **`Flash`** mixes the view towards `color` by `amount`, at the view's own alpha: 0 draws it as it is, 1 draws its
   shape in `color`, the transparent pixels around it stay transparent. `amount` is clamped to 0..1, so a tween that
@@ -164,4 +164,4 @@ views, its quad handed over, at 0 B a frame, beside the `Glow` line of the same 
   k=8, whole GPU per frame, medians, `perf/a26-2026-11-04-f126-s3-slice1`): every member is in, every arm draws 1 canvas
   pass, CPU work 3.1–3.6 ms against `rows` 3.6. `set-grade-full` 22.2 ms is under `full` 26.5 and 5.3 ms under
   `sweep-grade` 27.5: Pixi's matrix pays a pass for every value, the member a body on its quad. Slice 2's lines: each
-  arm ≤ `rest` + 1.0 ms, `set-aura` ≤ `rest` + 2.0 (13 samples), `set-fold` ≤ `rows` + 0.5; its A26 run is pending.
+  arm ≤ `rest` + 1.0 ms, `set-aura` ≤ `rest` + 2.0 (13 samples), `set-fold` ≤ `rows` + 0.5; the run of 2026-11-04 (221 MHz on 94–100 % of frames, k=8, whole GPU, medians, `perf/a26-2026-11-04-f126-s3-slice2`): `rest` 22.7, `rows` 22.7; `set-reveal-line` 22.9, `set-reveal-round` 23.0, `set-dissolve` 23.2, `set-shine` 22.8, `set-fold` 22.7, each 1 canvas pass, CPU work 3.7–3.9 ms. `set-aura` 24.9 is 0.2 ms over its line, so `Aura` is pulled from the exports and stays in `set/` for a rework (fewer probes).

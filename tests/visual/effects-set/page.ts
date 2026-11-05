@@ -15,7 +15,6 @@
 import { defineGameApp } from "../../../src/app";
 import type { Assets, World } from "../../../src/index";
 import {
-  Aura,
   Dissolve,
   defineGame,
   Flash,
@@ -31,6 +30,7 @@ import {
   type,
   Vignette
 } from "../../../src/index";
+import { Aura } from "../../../src/plugins/effects/set/aura";
 import manifestJson from "../../fixtures/mini-game/generated/manifest.json";
 
 /** What one row answered. */
