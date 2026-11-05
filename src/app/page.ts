@@ -16,7 +16,6 @@ import type { PlayerStateProvider } from "../plugins/model/store/types";
 import { fadeBoot } from "./boot";
 import { resolveConfig } from "./config";
 import { pageSave } from "./save";
-import { guardZoom } from "./zoom";
 import type {
   AnyGameApp,
   GameConfig,
@@ -29,6 +28,7 @@ import type {
   StartedPage,
   SystemShell
 } from "./types";
+import { guardZoom } from "./zoom";
 
 /** The warn log a late problem goes to once the app exists. */
 type WarnLog = { warn(event: string): void };

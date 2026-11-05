@@ -88,7 +88,7 @@ describe("createClockApi", () => {
     it("arms a moment 88 days away with the longest timer, then waits out the rest", () => {
       const day = 86_400_000;
       let now = 1000;
-      let fire = (): void => {};
+      let fire: (() => void) | undefined;
       const delays: number[] = [];
       const source: ClockSource = {
         now: () => now,
@@ -107,16 +107,16 @@ describe("createClockApi", () => {
       expect(delays).toEqual([2_147_483_647]);
 
       now += 2_147_483_647;
-      fire();
+      fire?.();
       expect(delays).toEqual([2_147_483_647, 2_147_483_647]);
 
       now += 2_147_483_647 * 2;
-      fire();
+      fire?.();
       expect(delays[2]).toBe(88 * day - 2_147_483_647 * 3);
       expect(heard).not.toHaveBeenCalled();
 
       now = 1000 + 88 * day;
-      fire();
+      fire?.();
       expect(delays).toHaveLength(3);
       expect(heard).toHaveBeenCalledOnce();
     });

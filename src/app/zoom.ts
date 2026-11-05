@@ -12,9 +12,6 @@ type GuardWindow = Pick<Window, "addEventListener" | "removeEventListener">;
 /** The longest gap between two taps iOS reads as a double tap, ms. */
 const DOUBLE_TAP_MS = 350;
 
-/** The tags that keep their own double tap: it selects a word in a text field (F144). */
-const EDITABLE = new Set(["INPUT", "TEXTAREA"]);
-
 /**
  * Tells whether a node of the event path keeps its double tap: the game's own `#game` (its canvas
  * takes no zoom), or a text field.
@@ -37,9 +34,29 @@ export function keepsDoubleTap(node: unknown): boolean {
 
   return (
     id === "game" ||
-    (typeof tagName === "string" && EDITABLE.has(tagName)) ||
+    // A double tap selects a word in a text field (F144).
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
     isContentEditable === true
   );
+}
+
+/**
+ * Cancels an event: WebKit's pinch.
+ *
+ * @param event - `gesturestart` or `gesturechange`.
+ */
+function cancel(event: Event): void {
+  event.preventDefault();
+}
+
+/**
+ * Cancels a move with two fingers or more: a pinch inside a scroll box.
+ *
+ * @param event - A `touchmove`.
+ */
+function pinch(event: Event): void {
+  if ((event as TouchEvent).touches.length > 1) event.preventDefault();
 }
 
 /**
@@ -57,10 +74,6 @@ export function guardZoom(target: GuardWindow, now: () => number): () => void {
   const options = { capture: true, passive: false };
   let lastTap = Number.NEGATIVE_INFINITY;
 
-  const cancel = (event: Event): void => event.preventDefault();
-  const pinch = (event: Event): void => {
-    if ((event as TouchEvent).touches.length > 1) event.preventDefault();
-  };
   const tap = (event: Event): void => {
     // A finger still down is part of a pinch, not a tap.
     if ((event as TouchEvent).touches.length > 0) return;
