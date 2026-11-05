@@ -22,4 +22,14 @@ describe("world walk: heap per frame", () => {
     await annotate(`world walk, 300 matching: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.worldWalkAllMatch + NOISE_BYTES);
   }, 60_000);
+
+  // Bug caught (F155): the pass over a scene built aside copies the build's set or makes a closure per run.
+  it("the frame of 40 feature systems while half the entities are built aside keeps nothing", async ({
+    annotate
+  }) => {
+    const bytes = alloc(walkFixture(300, true), 100);
+
+    await annotate(`world walk, feature systems during a build aside: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.worldWalkAllMatch + NOISE_BYTES);
+  }, 60_000);
 });
