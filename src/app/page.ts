@@ -305,8 +305,9 @@ function openStartOverlay(app: PageApp, overlay: OverlayStart): void {
 }
 
 /**
- * Runs a game on its page: resolves `config.ts`, puts the zoom guard on the window, picks the start (a `?player=` scenario runs on a
- * fresh memory save, never on the stored one), builds the system shell when the page has one,
+ * Runs a game on its page: resolves `config.ts`, puts the zoom guard on the window, picks the
+ * start (a `?player=` scenario runs on a fresh memory save, never on the stored one), builds the
+ * system shell when the page has one,
  * picks the save, makes the screen app on `#game` over the device clock and the manifest next to
  * the page, sets `globalThis.game`, `system` and `doors`, follows reduced motion, starts the shell,
  * then the app, follows the boot picture of `page.boot` (it fades once the first scene drew, and

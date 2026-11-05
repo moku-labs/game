@@ -7,7 +7,7 @@
  */
 
 /** The part of the window the guard listens on. */
-type GuardWindow = Pick<Window, "addEventListener" | "removeEventListener">;
+type GuardWindow = Pick<Window, "addEventListener">;
 
 /** The longest gap between two taps iOS reads as a double tap, ms. */
 const DOUBLE_TAP_MS = 350;
@@ -26,18 +26,11 @@ const DOUBLE_TAP_MS = 350;
 export function keepsDoubleTap(node: unknown): boolean {
   if (typeof node !== "object" || node === null) return false;
 
-  const { id, tagName, isContentEditable } = node as {
-    id?: unknown;
-    tagName?: unknown;
-    isContentEditable?: unknown;
-  };
-
   return (
-    id === "game" ||
+    ("id" in node && node.id === "game") ||
     // A double tap selects a word in a text field (F144).
-    tagName === "INPUT" ||
-    tagName === "TEXTAREA" ||
-    isContentEditable === true
+    ("tagName" in node && (node.tagName === "INPUT" || node.tagName === "TEXTAREA")) ||
+    ("isContentEditable" in node && node.isContentEditable === true)
   );
 }
 
@@ -64,13 +57,13 @@ function pinch(event: Event): void {
  * from bubbling is still guarded. `gesturestart` and `gesturechange` (WebKit's pinch) are
  * cancelled, a `touchmove` with two fingers is cancelled, and the second `touchend` of a double
  * tap outside `#game` and outside a text field is cancelled. A single tap, a one-finger scroll
- * and the game's pointer events go through untouched.
+ * and the game's pointer events go through untouched. It stays for the life of the page: nothing
+ * takes it off.
  *
  * @param target - The window of the page.
  * @param now - The clock of the double tap, ms.
- * @returns The remover.
  */
-export function guardZoom(target: GuardWindow, now: () => number): () => void {
+export function guardZoom(target: GuardWindow, now: () => number): void {
   const options = { capture: true, passive: false };
   let lastTap = Number.NEGATIVE_INFINITY;
 
@@ -83,7 +76,9 @@ export function guardZoom(target: GuardWindow, now: () => number): () => void {
 
     lastTap = second ? Number.NEGATIVE_INFINITY : moment;
 
-    if (second && !event.composedPath().some(node => keepsDoubleTap(node))) event.preventDefault();
+    const zooms = second && !event.composedPath().some(node => keepsDoubleTap(node));
+
+    if (zooms) event.preventDefault();
   };
   const listeners: [string, (event: Event) => void][] = [
     ["gesturestart", cancel],
@@ -93,8 +88,4 @@ export function guardZoom(target: GuardWindow, now: () => number): () => void {
   ];
 
   for (const [type, listener] of listeners) target.addEventListener(type, listener, options);
-
-  return (): void => {
-    for (const [type, listener] of listeners) target.removeEventListener(type, listener, options);
-  };
 }

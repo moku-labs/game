@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { guardZoom } from "../../../src/app/zoom";
 
 /** A listener the fake window keeps, with the options it was added with. */
@@ -19,9 +19,6 @@ const fakeWindow = () => {
     added,
     addEventListener: (type: string, listener: (event: FakeEvent) => void, options: object) => {
       added.set(type, { listener, options });
-    },
-    removeEventListener: (type: string) => {
-      added.delete(type);
     },
     dispatch: (type: string, event: FakeEvent) => {
       added.get(type)?.listener(event);
@@ -46,11 +43,10 @@ const setup = () => {
   const target = fakeWindow();
   let now = 1000;
   // The guard reads only `touches`, `composedPath` and `preventDefault` of an event.
-  const off = guardZoom(target as unknown as Window, () => now);
+  guardZoom(target as unknown as Window, () => now);
 
   return {
     target,
-    off,
     advance: (ms: number) => {
       now += ms;
     }
@@ -160,15 +156,5 @@ describe("guardZoom", () => {
     target.dispatch("touchend", tap);
 
     expect(tap.cancelled).toBe(false);
-  });
-
-  it("takes every listener off", () => {
-    const { target, off } = setup();
-    const spy = vi.spyOn(target, "removeEventListener");
-
-    off();
-
-    expect(spy).toHaveBeenCalledTimes(4);
-    expect(target.added.size).toBe(0);
   });
 });
