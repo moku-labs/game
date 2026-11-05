@@ -1,9 +1,9 @@
 /**
  * @file The case scenes: each stands for one kind of filter work a real game does.
  */
-
 import {
   Alpha,
+  Aura,
   Blur,
   bind,
   ColorMatrix,
@@ -24,7 +24,6 @@ import {
   Vignette,
   type World
 } from "../../../../../src/index.ts";
-import { Aura } from "../../../../../src/plugins/effects/set/aura.ts";
 import { Emitter } from "../../../kit";
 import {
   FlipFold,
