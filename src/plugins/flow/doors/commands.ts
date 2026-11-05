@@ -6,6 +6,7 @@
  */
 import { reducedMotionCommand } from "../../anim/control";
 import { muteCommand } from "../../audio/control";
+import { clockCommand } from "../../clock/control";
 import { filterCommand } from "../../effects/control";
 import { dragCommand, keyCommand, traceCommand } from "../../input/control";
 import { pauseCommand, resumeCommand } from "../../lifecycle/control";
@@ -44,6 +45,7 @@ export const commands = Object.freeze({
   saveExport: saveExportCommand,
   saveImport: saveImportCommand,
   step: stepCommand,
+  clock: clockCommand,
   pause: pauseCommand,
   resume: resumeCommand,
   capture: captureCommand,

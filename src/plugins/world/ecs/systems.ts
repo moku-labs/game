@@ -157,20 +157,28 @@ function storeSlots(count: number): Array<ComponentStore | undefined> {
 /**
  * Registers a system at the end of its phase list and returns the remover. In phase `sync` it goes
  * before `renderer.sync`, which stays last. Its query and its `scenes` are read here, once: a
- * later change to the definition is not seen. A dev build checks
- * the `scenes` against the scenes the features declare, once the world started.
+ * later change to the definition is not seen. A dev build checks the `scenes` against the scenes
+ * the features declare, once the world started.
+ *
+ * The rows of a feature's system (`hidesAside`) pass over the entities of a scene built aside
+ * until the commit, so it meets the coming scene whole, in one frame (F155); `world.query()`,
+ * `get` and `has` inside its `run` still read them. The engine's own systems lay that scene out
+ * and draw it, and see it.
  *
  * @param ctx - Domain context of the world plugin.
  * @param definition - The system.
+ * @param hidesAside - True for a system a feature brought.
  * @returns The remover; calling it twice is a no-op.
  * @throws {Error} When a system of that name is already registered, and in a dev build for a
  *   name in `scenes` that no feature declares.
  */
-export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void {
+export function registerSystem(
+  ctx: WorldCtx,
+  definition: AnySystem,
+  hidesAside = false
+): () => void {
   const state = ctx.state.ecs;
-  const phases: WorldPhase[] = ["input", "animate", "layout", "sync"];
-
-  for (const phase of phases) {
+  for (const phase of WORLD_PHASES) {
     if (state.systems[phase].some(entry => entry.definition.name === definition.name)) {
       throw new Error(
         `[game] System "${definition.name}" is registered twice.\n` +
@@ -194,7 +202,8 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void
     stores: storeSlots(plan.names.length),
     scenes: definition.scenes === undefined ? undefined : [...definition.scenes],
     skipped: false,
-    walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan)
+    hidesAside,
+    walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan, hidesAside)
   };
   const list = state.systems[definition.phase];
   const draws = list.findIndex(known => known.definition.name === DRAWS_SYSTEM);

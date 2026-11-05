@@ -599,6 +599,107 @@ describe("watch", () => {
   });
 });
 
+describe("run checks the input against the schema (F154)", () => {
+  const optionalCommand = defineCommand({
+    id: "test.optional",
+    title: "Optional",
+    input: { last: "number?", tag: "string?" },
+    effect: "read",
+    run: (_app: ControlApp, { last }) => last ?? -1
+  });
+  const shapeCommand = defineCommand({
+    id: "test.shape",
+    title: "Shape",
+    input: { on: "boolean", data: "json?" },
+    effect: "cosmetic",
+    run: (_app: ControlApp, { on }) => on
+  });
+
+  /**
+   * Runs a command with an input the types do not allow, the way an editor sends plain JSON.
+   *
+   * @param command - The command.
+   * @param input - The input.
+   * @returns What `run` threw, or `undefined`.
+   */
+  async function refusal(
+    command: typeof tapCommand | typeof cheatCommand | typeof shapeCommand,
+    input: unknown
+  ): Promise<string | undefined> {
+    const fake = createDoorsFake();
+
+    return run(fake.app, command as typeof shapeCommand, input as { on: boolean }).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  it("refuses a field the schema does not name, and runs nothing", async () => {
+    // Bug caught: an unknown field goes through and the command reads undefined for the field it needs.
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+    const sent: unknown = { intent: "play", payload: 1 };
+
+    await expect(run(fake.app, tapCommand, sent as { intent: string })).rejects.toThrow(
+      '[game] The command test.tap got the field "payload", which it does not take.\n  It takes intent (string); a field ending in ? may be left out.'
+    );
+    expect(fake.answers).toEqual([]);
+  });
+
+  it("refuses a missing required field, also as undefined, before the cheat is journaled", async () => {
+    // Bug caught: a cheat with no coins runs as NaN, or taints the session though it never ran.
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    expect(await refusal(cheatCommand, {})).toContain('got no "coins", which it needs');
+    expect(await refusal(cheatCommand, { coins: undefined })).toContain('got no "coins"');
+
+    const fake = createDoorsFake();
+
+    await run(fake.app, cheatCommand, {} as { coins: number }).catch(() => undefined);
+    expect(isTainted(fake.app)).toBe(false);
+  });
+
+  it("refuses a value of another kind, NaN and Infinity as a number", async () => {
+    // Bug caught: "10" or NaN reaches a command that counts with it.
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    expect(await refusal(cheatCommand, { coins: "10" })).toContain(
+      'got "10" for "coins", not a finite number'
+    );
+    expect(await refusal(cheatCommand, { coins: Number.NaN })).toContain(
+      'got NaN for "coins", not a finite number'
+    );
+    expect(await refusal(cheatCommand, { coins: Number.POSITIVE_INFINITY })).toContain("Infinity");
+    expect(await refusal(shapeCommand, { on: 1 })).toContain('got 1 for "on", not a boolean');
+    expect(await refusal(tapCommand, { intent: 3 })).toContain('got 3 for "intent", not a string');
+  });
+
+  it("refuses an input that is not an object", async () => {
+    // Bug caught: an array or null is read field by field as if it were an input.
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    expect(await refusal(shapeCommand, [true])).toContain("got an input that is not an object");
+    // eslint-disable-next-line unicorn/no-null -- JSON from an editor may be null
+    expect(await refusal(shapeCommand, null)).toContain("got an input that is not an object");
+  });
+
+  it("lets an optional field be left out or undefined, and json take any value", async () => {
+    // Bug caught: the check refuses what the schema allows, and the editor's buttons stop working.
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+
+    const left = await run(fake.app, optionalCommand);
+    const undefinedField = await run(fake.app, optionalCommand, { last: undefined });
+    const given = await run(fake.app, optionalCommand, { last: 3 });
+    // eslint-disable-next-line unicorn/no-null -- a json field takes null
+    const nullJson = await run(fake.app, shapeCommand, { on: true, data: null });
+    const nested = await run(fake.app, shapeCommand, { on: false, data: [1, { a: 2 }] });
+
+    expect([left.value, undefinedField.value, given.value]).toEqual([-1, -1, 3]);
+    expect([nullJson.value, nested.value]).toEqual([true, false]);
+  });
+});
+
 describe("run", () => {
   it("refuses without the dev flag", async () => {
     const fake = createDoorsFake();

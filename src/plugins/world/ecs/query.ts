@@ -459,16 +459,21 @@ export class SystemWalk implements Iterator<readonly unknown[], undefined> {
   private started = false;
   /** The first store's size at the first step: a dev build compares it; -1 when not watched. */
   private size = -1;
+  /** The entities of the running aside build this run passes over, read at the first step; `undefined` for none. */
+  private aside: ReadonlySet<Entity> | undefined = undefined;
 
   /**
    * Prepares the walk of one system.
    *
    * @param ctx - Domain context of the world plugin.
    * @param plan - The system's resolved query.
+   * @param hidesAside - True for a feature's system: it passes over the entities of a scene built aside until the
+   *   commit (F155).
    */
   constructor(
     private readonly ctx: WorldCtx,
-    plan: QueryPlan
+    plan: QueryPlan,
+    private readonly hidesAside = false
   ) {
     this.names = plan.names;
     this.written = plan.written;
@@ -506,13 +511,15 @@ export class SystemWalk implements Iterator<readonly unknown[], undefined> {
   }
 
   /**
-   * Keeps one key of the first store when the entity carries every other name.
+   * Keeps one key of the first store when the entity carries every other name and is not built aside.
    *
    * @param entity - The key.
    */
   keep(entity: Entity): void {
     const stores = this.stores;
     const count = stores.length;
+
+    if (this.aside?.has(entity) === true) return;
 
     for (let index = 1; index < count; index += 1) {
       if (stores[index]?.has(entity) !== true) return;
@@ -558,8 +565,8 @@ export class SystemWalk implements Iterator<readonly unknown[], undefined> {
 
   /**
    * Reads the stores of this run and collects the entities that carry every name, in the first
-   * store's order. Structural changes are queued until the phase ends, so the matches stay true
-   * while the rows are consumed.
+   * store's order; a feature's system passes over the entities of a scene built aside. Structural
+   * changes are queued until the phase ends, so the matches stay true while the rows are consumed.
    */
   private start(): void {
     const all = this.ctx.state.ecs.stores;
@@ -579,6 +586,8 @@ export class SystemWalk implements Iterator<readonly unknown[], undefined> {
 
     if (first === undefined) return;
 
+    // Per run: one read while no scene is built aside; the build's own set, never a copy.
+    this.aside = this.hidesAside ? this.ctx.state.projection.building?.entities : undefined;
     collecting.walk = this;
     // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
     first.forEach(collectMatch);
@@ -673,7 +682,7 @@ export function mayMatch(stores: ReadonlyMap<string, ComponentStore>, entry: Sys
 export function systemRows(ctx: WorldCtx, entry: SystemEntry): Iterable<readonly unknown[]> {
   if (entry.plan.names.length === 0) return NO_ROWS;
 
-  entry.walk ??= new SystemWalk(ctx, entry.plan);
+  entry.walk ??= new SystemWalk(ctx, entry.plan, entry.hidesAside);
 
   return entry.walk.reset();
 }

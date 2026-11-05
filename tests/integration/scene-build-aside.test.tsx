@@ -10,9 +10,12 @@
 import type { Assets, World } from "@moku-labs/game";
 import { defineGame, Shape, Sprite, system, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
+import { commands, run } from "@moku-labs/game/control";
+import { read, sources } from "@moku-labs/game/inspect";
 import { fakeClock } from "@moku-labs/game/testing";
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { pageStep } from "../../src/visual/page-script";
 import { openPage, type Watched, watch } from "./drawn-helpers";
 
 const { defineNode, defineFlow, defineFeature, defineScene, projection } = defineGame<{
@@ -107,6 +110,22 @@ const boardShade = system({
   }
 });
 
+/** The sprites `boardWatch` saw, one entry a run: what a game's system without `scenes` reads every frame. */
+const watched: Array<readonly World.Entity[]> = [];
+
+/** A system of every scene, as the game's orders.stage (F155): it lists the sprites it sees, phase `animate`. */
+const boardWatch = system({
+  name: "aside.boardWatch",
+  phase: "animate",
+  query: [Sprite],
+  run: rows => {
+    const seen: World.Entity[] = [];
+
+    for (const [entity] of rows) seen.push(entity);
+    watched.push(seen);
+  }
+});
+
 const wardScene = defineScene("ward", {
   bundle: "ward",
   layers: { room: {} },
@@ -132,7 +151,7 @@ const mainFlow = defineFlow("main", {
 const asideFeature = defineFeature("aside", {
   scenes: [wardScene, boardScene],
   projections: [wardRoom, wardHud, boardCells, boardPanel],
-  systems: [boardShade]
+  systems: [boardShade, boardWatch]
 });
 
 /** The projections of both scenes, by name. */
@@ -151,6 +170,8 @@ type Running = Watched & {
 const running: Running[] = [];
 
 afterEach(async () => {
+  watched.length = 0;
+
   for (const fixture of running.splice(0)) {
     fixture.oracle.expectNoMissedFrame();
     await fixture.app.stop();
@@ -169,12 +190,24 @@ afterEach(async () => {
  *   unless given.
  * @param options.leave - True for the engine's default veil over the scene being left; off unless given, so the stage
  *   of the build frames can be compared with the ward's (spec 33 A2).
+ * @param options.holdMs - A floor on the swap (`leave.loader.holdMs`), with the default veil: none unless given.
+ * @param options.standing - True for a clock the frames do not move, as the fake clock of a visual test's pixel leg
+ *   (F86); the frames move it unless given.
  * @returns The running fixture, the ward drawn and its gate open.
  */
 async function open(
-  options: { rows?: number; stepMs?: number; leave?: boolean } = {}
+  options: {
+    rows?: number;
+    stepMs?: number;
+    leave?: boolean;
+    holdMs?: number;
+    standing?: boolean;
+  } = {}
 ): Promise<Running> {
-  const { rows = 0, stepMs = 0, leave = false } = options;
+  const { rows = 0, stepMs = 0, leave = false, holdMs, standing = false } = options;
+  const plainLeave = leave ? { buildMs: 1 } : { buildMs: 1, leave: false as const };
+  const scenesConfig =
+    holdMs === undefined ? plainLeave : { buildMs: 1, leave: { loader: { afterMs: 0, holdMs } } };
   const page = openPage();
   const clock = fakeClock(1000);
   const read = clock.now.bind(clock);
@@ -200,7 +233,7 @@ async function open(
     pluginConfigs: {
       log: { mode: "test" },
       flow: { holdMs: 0 },
-      scenes: leave ? { buildMs: 1 } : { buildMs: 1, leave: false }
+      scenes: scenesConfig
     }
   }).screen({ manifest: MANIFEST, renderer: page.renderer, clock });
 
@@ -216,7 +249,7 @@ async function open(
   app.flow.run().catch(() => undefined);
 
   const fixture: Running = {
-    ...watch(app, page, clock),
+    ...watch(app, page, standing ? undefined : clock),
     app,
     stage: () => page.stage.last().stage
   };
@@ -368,6 +401,102 @@ describe("the next scene built aside, across the engine", () => {
     expect(
       aside.app.log.trace().filter(entry => entry.event === "renderer:building-drawn")
     ).toEqual([]);
+  });
+
+  // Bug (F155): a game's system without `scenes` sees the board's views arrive over the build frames, before the
+  // commit, and marks the board as seen before it is drawn.
+  it("hides the board from a feature's system until the commit, then shows it whole in one frame", async () => {
+    const aside = await open();
+
+    watched.length = 0;
+
+    const { app } = aside;
+    const cellsSeen = (seen: readonly World.Entity[]): number =>
+      seen.filter(entity => cellsOf(aside).includes(entity)).length;
+
+    expect(app.flow.gate.answer({ intent: "board" })).toBe(true);
+
+    const before: number[] = [];
+
+    for (let frame = 0; frame < 120 && app.scenes.current() !== "board"; frame += 1) {
+      await aside.frames(1);
+      if (app.scenes.current() !== "board")
+        before.push(...watched.splice(0).map(seen => cellsSeen(seen)));
+    }
+
+    // The build spawned its cells in the first frames: the system ran through them and saw none.
+    expect(app.world.projection.isBuilding(cellsOf(aside)[0] ?? 0)).toBe(false);
+    expect(before.length).toBeGreaterThanOrEqual(CELLS.length);
+    expect(before.every(count => count === 0)).toBe(true);
+
+    // From the first run after the commit, every cell at once.
+    watched.length = 0;
+    await aside.frames(1);
+    expect(watched.map(seen => cellsSeen(seen))).toEqual([CELLS.length]);
+  });
+
+  // The engine's own systems still lay the build out and draw it: an engine system sees what a feature's does not.
+  it("lets an engine system see the board while it is built aside", async () => {
+    const aside = await open();
+    const engineSeen: number[] = [];
+    const off = aside.app.world.ecs.system(
+      system({
+        name: "test.engineWatch",
+        phase: "animate",
+        query: [Sprite],
+        run: rows => {
+          let cells = 0;
+
+          for (const [entity] of rows) {
+            if (aside.app.world.projection.isBuilding(entity)) cells += 1;
+          }
+
+          engineSeen.push(cells);
+        }
+      })
+    );
+
+    await switchToBoard(aside);
+    off();
+
+    expect(Math.max(...engineSeen)).toBeGreaterThan(0);
+  });
+
+  // Bug (F156): in the pixel leg of a visual test the page's fake clock stands, so a floor on the swap counted on the
+  // clock never passed: an `answer` that switches the scene waited for a commit that never came, and did not settle.
+  it("settles the pixel leg's answer step over a floor on a standing clock, after holdMs of stepped frames", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const holdMs = 260;
+    const aside = await open({ holdMs, standing: true });
+    const { app } = aside;
+    const startedAt = app.time.snapshot().elapsed;
+    let committedAt: number | undefined;
+    const off = app.time.onFrame("signals", time => {
+      if (committedAt === undefined && app.scenes.current() === "board") committedAt = time.elapsed;
+    });
+
+    vi.stubGlobal("game", app);
+    vi.stubGlobal("doors", { run, commands, read, sources });
+    vi.stubGlobal("requestAnimationFrame", (callback: (time: number) => void) => {
+      setTimeout(() => callback(0), 0);
+
+      return 0;
+    });
+
+    const answered = await pageStep({
+      test: "ward-to-board",
+      where: "step 1 (answer)",
+      name: "answer",
+      input: { intent: "board" },
+      settleFrames: 120
+    });
+
+    off();
+    expect(answered).toEqual({ ok: true, value: undefined });
+    expect(app.flow.state().path).toBe("board");
+    // The floor held the swap for holdMs of game time, not one frame less.
+    expect((committedAt ?? 0) - startedAt).toBeGreaterThanOrEqual(holdMs);
   });
 
   // Bug: the coming scene is drawn before any of its systems ran, so its first frame shows the values its views were

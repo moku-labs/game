@@ -10,7 +10,7 @@ import type { ClockCtx, ClockSource, Elapsed, FakeClock, State } from "../../typ
 const createMockCtx = (source: ClockSource): ClockCtx => ({
   global: {},
   config: { source },
-  state: { source, last: 0, dueAt: undefined, handle: undefined, listeners: [] },
+  state: { source, last: 0, shift: 0, dueAt: undefined, handle: undefined, listeners: [] },
   emit: () => {}
 });
 
@@ -504,6 +504,7 @@ describe("createClockApi", () => {
       const state: State = {
         source: clock,
         last: 0,
+        shift: 0,
         dueAt: undefined,
         handle: undefined,
         listeners: []
@@ -559,7 +560,7 @@ const createStopState = (): { state: State; clock: FakeClock } => {
 
   return {
     clock,
-    state: { source: clock, last: 0, dueAt: undefined, handle: undefined, listeners: [] }
+    state: { source: clock, last: 0, shift: 0, dueAt: undefined, handle: undefined, listeners: [] }
   };
 };
 
@@ -601,5 +602,72 @@ describe("cancelPending, the onStop of the plugin", () => {
     const { state } = createStopState();
 
     expect(() => cancelPending(state)).not.toThrow();
+  });
+});
+
+describe("advance, the move of the door game.clock (F157)", () => {
+  it("moves now() forward by the milliseconds on a source that stands, and keeps the shift", () => {
+    // Bug caught: the clock jumps back to the source on the next read, or moves by another amount.
+    const { ctx, clock } = createFakeCtx(1000);
+    const api = createClockApi(ctx);
+
+    expect(api.advance(60_000)).toBe(61_000);
+    expect(api.now()).toBe(61_000);
+
+    clock.advance(500);
+    expect(api.now()).toBe(61_500);
+  });
+
+  it("delivers a moment that is due after the move once, before it returns, and forgets it", () => {
+    // Bug caught: a visual test moves the clock past a board tick and the tick never arrives.
+    const { ctx, clock } = createFakeCtx(1000);
+    const api = createClockApi(ctx);
+    const seen: number[] = [];
+
+    api.onElapsed(({ now }) => seen.push(now));
+    api.scheduleAt(61_000);
+    api.advance(60_000);
+
+    expect(seen).toEqual([61_000]);
+    expect(api.dueAt()).toBeUndefined();
+
+    // The old timer of the source is gone: its delay running out later delivers nothing more.
+    clock.advance(120_000);
+    expect(seen).toEqual([61_000]);
+  });
+
+  it("re-arms a moment still ahead for the rest of its wait, from the shifted reading", () => {
+    // Bug caught: the timer keeps its old delay and the moment arrives late by the move.
+    const { ctx, clock } = createFakeCtx(1000);
+    const api = createClockApi(ctx);
+    const seen: number[] = [];
+
+    api.onElapsed(({ now }) => seen.push(now));
+    api.scheduleAt(61_000);
+    api.advance(59_000);
+
+    expect(seen).toEqual([]);
+    expect(api.dueAt()).toBe(61_000);
+
+    clock.advance(999);
+    expect(seen).toEqual([]);
+    clock.advance(1);
+    expect(seen).toEqual([61_000]);
+  });
+
+  it.each([
+    ["0", 0],
+    ["negative", -5],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY]
+  ])("refuses %s and leaves the clock where it stood", (_name, ms) => {
+    // Bug caught: the clock goes back, or a NaN shift turns every later reading into NaN.
+    const { ctx } = createFakeCtx(1000);
+    const api = createClockApi(ctx);
+
+    expect(() => api.advance(ms)).toThrow(
+      `[game] clock.advance moves the clock forward, not by ${ms} ms.\n  Pass a finite number of milliseconds above 0.`
+    );
+    expect(api.now()).toBe(1000);
   });
 });
