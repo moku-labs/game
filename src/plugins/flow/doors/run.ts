@@ -4,7 +4,7 @@
  */
 import type { HeadlessApp } from "../headless";
 import { controlReadOnly, controlRefused, isAgent, isControl, isDev } from "./dev";
-import { inputOrEmpty } from "./input";
+import { checkInput, inputOrEmpty } from "./input";
 import { isTainted, recordCheat } from "./session";
 import type { Command, Envelope, InputArguments, InputSchema, Ran } from "./types";
 
@@ -34,6 +34,8 @@ function envelopeOf(app: HeadlessApp): Envelope {
  * @throws {Error} Outside dev builds and debug builds (every command with `--debug`; the read and
  *   cosmetic ones alone with `--debug=read`), the read-only refusal of `controlReadOnly` for a
  *   `route`, `cheat` or `raw` command on a `--debug=read` page, and whatever the command throws.
+ * @throws {TypeError} When the input has a field the schema does not name, leaves out a field
+ *   without `?`, or holds a value of another kind (a `number` must be finite); nothing runs then.
  * @example
  * ```ts
  * // An e2e script: load the bug report, then tap Play.
@@ -41,6 +43,7 @@ function envelopeOf(app: HeadlessApp): Envelope {
  * const ran = await run(app, commands.answer, { intent: "play" });
  * ran.value; // true
  * ran.state; // { path: "board/awaitIntent", frame: 14, tainted: true }
+ * await run(app, commands.scroll, { key: "strip", dy: 10 }); // throws '[game] The command game.scroll got the field "dy", which it does not take. …'
  * // On a --debug=read page: await run(app, commands.tap, { key: "play" }); // throws "[game] The command game.tap changes the game: …"
  * ```
  */
@@ -58,6 +61,9 @@ export async function run<S extends InputSchema, O, App extends HeadlessApp>(
   }
 
   const given = inputOrEmpty<S>(input[0]);
+
+  // Before the journal and the run: an editor or a visual test sends plain JSON, which the types never saw (F154).
+  checkInput(command.id, command.input, given);
 
   if (command.effect === "cheat" || command.effect === "raw") {
     recordCheat(app, command.id, given, app.time.snapshot().frame);
