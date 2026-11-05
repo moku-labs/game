@@ -143,7 +143,9 @@ function isElementNode(value: unknown): value is ElementNode {
 
 /**
  * Escapes every `<` of a text parameter the way the tag pass of `text` reads a literal `<`, so a
- * player's name is never markup. A text without `<` comes back as the same string.
+ * player's name is never markup. A text without `<` comes back as the same string. It is the twin
+ * of `escapeTags` in `text/tags.ts` (`i18n` sits below `text` and cannot import it): a change
+ * edits both, and `tests/integration/escape-params.test.ts` holds them together.
  *
  * @param text - The parameter read as text.
  * @returns The text with every `<` written as `\<`.

@@ -669,6 +669,13 @@ const RUN_ANSWERS: readonly TextFormatAnswer[] = Object.freeze(
   )
 );
 
+/** The same answers with no tag: the words of the line as one run. */
+const PLAIN_ANSWERS: readonly TextFormatAnswer[] = Object.freeze(
+  Array.from({ length: VALUES }, (_unused, value) =>
+    Object.freeze({ content: `${value}★ можно ${value}`, style: ROW_STYLE })
+  )
+);
+
 /**
  * Puts the two fonts of the game's row into a state, every glyph of its lines in them, as a device
  * has them loaded: a frame measures from the tables, never on the fallback that warns per glyph.
@@ -692,10 +699,13 @@ function addRowFonts(state: State): void {
  * display adapter as phase `sync` does for a `changed(Text)`: the text step writes the new string,
  * and the adapter writes it into the objects already there (the same shape, so a retext).
  *
+ * With `runs` false the answers are the same words with no tag, one run.
+ *
+ * @param runs - False for the plain one-run answers.
  * @returns One frame: phase `layout`, the adapter update of the moving label, the clear of phase
  *   `signals`.
  */
-export function movingRunsFixture(): () => void {
+export function movingRunsFixture(runs = true): () => void {
   const world = createMockWorld();
   const ecs = stableEcs(world);
   const ctx = textCtx(world, new Float64Array([CLOCK_START_MS]));
@@ -705,7 +715,9 @@ export function movingRunsFixture(): () => void {
 
   addRowStyles(ctx.state);
   addRowFonts(ctx.state);
-  ctx.state.formats.set(RUN_FORMAT, value => RUN_ANSWERS[value % VALUES] ?? SAME_ANSWER);
+  const answers = runs ? RUN_ANSWERS : PLAIN_ANSWERS;
+
+  ctx.state.formats.set(RUN_FORMAT, value => answers[value % VALUES] ?? SAME_ANSWER);
   world.api.ecs.system(createTextSystem(ctx, createTextFrame(ctx)));
 
   let first: Entity | undefined;
@@ -729,7 +741,7 @@ export function movingRunsFixture(): () => void {
   // The world writes the stored value in place: what the container shows is kept in a copy, as the
   // renderer keeps the previous value, and written in place after each update.
   const shown: TextValue = { ...(world.api.ecs.get(label, Text) as TextValue) };
-  const object = adapter.create(shown, 1);
+  const object = adapter.create(shown, label);
   let tick = 0;
 
   const frame = (): void => {

@@ -16,6 +16,7 @@ import { isTextFormat } from "./format";
 import {
   createTextFrame,
   createTextSystem,
+  dropLayouts,
   forgetText,
   layoutOptionsOf,
   markDirty,
@@ -276,7 +277,7 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
   buildLooks(ctx.state);
   collectFonts(ctx);
   installFonts(ctx);
-  ctx.state.cache.clear();
+  dropLayouts(ctx.state);
   ctx.state.generation += 1;
   markDirty(ctx);
   ctx.deps.time.wake();
@@ -340,6 +341,9 @@ export function stopText(state: State): void {
   state.bindTypes.clear();
   state.measured.clear();
   state.cache.clear();
+  state.shown.clear();
+  state.cursor.container = undefined;
+  state.cursor.pixi = undefined;
   state.dirty.clear();
   state.added.length = 0;
   state.rewrite.length = 0;

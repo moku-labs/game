@@ -6,7 +6,7 @@
  */
 import { applyReplaced, installFonts, releaseFonts } from "./display";
 import { withDeps } from "./lifecycle";
-import { markDirty } from "./resolve";
+import { dropLayouts, markDirty } from "./resolve";
 import type {
   AssetsReplaced,
   BundleLoaded,
@@ -88,7 +88,7 @@ export function createHandlers(
       const tctx = domain();
 
       markDirty(tctx, label => typeof label.content !== "string");
-      tctx.state.cache.clear();
+      dropLayouts(tctx.state);
       tctx.deps.time.wake();
     }
   };

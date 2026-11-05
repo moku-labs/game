@@ -11,7 +11,7 @@ import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
 import type { Api as ClockApi } from "../clock/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { I18nApi, Events as I18nEvents, Message } from "../i18n/types";
-import type { Api as RendererApi } from "../renderer/types";
+import type { PixiContainer, PixiModule, Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
 import type { AnyComponent, Entity } from "../world/ecs/types";
 import type { NumericFields, Api as WorldApi } from "../world/types";
@@ -517,9 +517,42 @@ export type TextLayout = { lines: Line[]; width: number; height: number };
  * generation, the same anchor and the same lines and runs writes the new text and positions into
  * the objects already there. An older generation means a dev hot swap replaced a font, an icon or
  * the styles since: the objects hold textures that are destroyed, or are in a look that changed,
- * so they are built again.
+ * so they are built again. `entity` is the entity the container was built for, so an update reads
+ * the layout the text step fetched for it. A retext writes the new layout into this record.
  */
-export type DrawnLabel = { style: TextStyle; layout: TextLayout; generation: number };
+export type DrawnLabel = {
+  style: TextStyle;
+  layout: TextLayout;
+  generation: number;
+  entity: Entity | undefined;
+};
+
+/**
+ * The layout the text step measured a label with last, and what it was laid out from: the
+ * resolved string, the style name, the box and the epoch of the layout cache. The draw of the same
+ * label takes it when all four still hold, so a changing label builds its cache key once a frame.
+ * Made once per label, then written in place.
+ */
+export type ShownLayout = {
+  resolved: string;
+  style: string;
+  box: number | undefined;
+  epoch: number;
+  layout: TextLayout;
+};
+
+/**
+ * Where a draw is: the container it writes into, the Pixi module, the index of the next child, and
+ * where the run at hand starts (`at[0]` across, `at[1]` down, in a typed array so writing a spot
+ * boxes no number). One per plugin, written in place by every fill and retext, so neither builds a
+ * closure or a point.
+ */
+export type DrawCursor = {
+  container: PixiContainer | undefined;
+  pixi: PixiModule | undefined;
+  index: number;
+  at: Float64Array;
+};
 
 /**
  * A dev warning that is written once per key. Pure modules take it as an argument, so nothing
@@ -616,6 +649,18 @@ export type State = {
   measured: Map<Entity, Size>;
   /** Layout per `style + resolved`, and the box width for a `"box"` style; oldest dropped first. */
   cache: Map<string, TextLayout>;
+  /** Counts the times the layout cache was dropped, so a kept layout of an older count is stale. */
+  epoch: number;
+  /** The layout the text step measured each live label with last. */
+  shown: Map<Entity, ShownLayout>;
+  /** The draw in progress. */
+  cursor: DrawCursor;
+  /**
+   * The width of every run a draw measured, by run: a run belongs to one cached layout, laid out
+   * under one set of tables, so its width stands while the run lives. A retext reads it and
+   * measures no glyph.
+   */
+  runWidths: WeakMap<Run, number>;
   /** What every live label container was last filled from, by container. */
   drawn: WeakMap<object, DrawnLabel>;
   /** Entities to re-resolve in the next layout phase. */

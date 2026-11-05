@@ -89,13 +89,17 @@ export const BUDGET = {
   /**
    * F152 verify (change 2026-11-05-f152-text-runs): 50 bound labels of the game's row through a
    * format whose answer holds a `<b>` count in the bold look and a `<span>`, fonts loaded; one
-   * counter moves every frame and its container is updated through the display adapter (a retext).
-   * The first window of this fixture that measures the draw path of a changing label. 1 720 B: the
-   * text step's patch and the cache key of a long two-byte string, then the adapter update, which
-   * allocated before F152 too (the cache key again, the drawn record, the shape and retext
-   * closures, one point and one spot list per run, the one-character strings of non-Latin-1
-   * glyphs it measures). The same fixture on a plain one-run string is 1 000 B; the 720 B more are
-   * the three runs. Before the fix the draw built the layout options per call: 2 344 B.
+   * counter moves every frame and its container is updated through the display adapter (a retext
+   * of an unchanged shape). 328 B, all of it the text step: the `{ resolved }` patch (32 B) and the
+   * one layout cache key of the long two-byte string. The draw keeps nothing: it takes the layout
+   * the step kept for the label, walks the runs with the draw cursor (positions in a typed array,
+   * no closure, spots by index), keeps run widths by run, and writes the new layout into the drawn
+   * record. Was 1 720 B before this change (the draw path that predates F152).
    */
-  textRunsMoving: 1721
+  textRunsMoving: 328,
+  /**
+   * The same frame with the answers as one run of the same words, no tag. 232 B, the patch and the
+   * shorter key; the draw keeps nothing. Was 1 000 B.
+   */
+  textPlainMoving: 232
 } as const;

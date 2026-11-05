@@ -15,7 +15,7 @@ import {
 /** A window ten times the default, so a stray compile weighs nothing in a frame that keeps a few bytes. */
 const CALLS = 100_000;
 
-/** A window a tenth of the default for a frame that keeps 1.7 KB: wider, a GC lands in every one. */
+/** A window a tenth of the default for the frames that draw a changing label: a broken draw keeps KBs, and a GC lands in a wider window. */
 const MOVING_CALLS = 1000;
 
 describe("text resolve: heap per frame", () => {
@@ -130,5 +130,14 @@ describe("text resolve: heap per frame", () => {
 
     await annotate(`text resolve and draw, one label with runs moving: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.textRunsMoving + NOISE_BYTES);
+  }, 60_000);
+
+  it("the same frame with one plain run moving and drawn stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(movingRunsFixture(false), MOVING_CALLS);
+
+    await annotate(`text resolve and draw, one plain label moving: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textPlainMoving + NOISE_BYTES);
   }, 60_000);
 });

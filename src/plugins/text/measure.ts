@@ -704,12 +704,13 @@ function placeWord(
 ): void {
   const space = pending?.kind === "space" ? pending : undefined;
   const lead = space?.width ?? 0;
-  const overflows =
+  // The spaces, the word and the hyphen a break after it draws, added in that order.
+  const wontFit =
     builder.runs.length > 0 &&
     builder.indent + builder.width + lead + token.width + token.tail > wrap;
 
   // The word goes to the next line when it does not fit; a soft hyphen leaves its "-" behind.
-  if (overflows) {
+  if (wontFit) {
     if (pending?.kind === "soft") add(builder, pending);
     commit(builder);
   } else if (space !== undefined) add(builder, space);

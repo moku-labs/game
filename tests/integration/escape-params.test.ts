@@ -4,11 +4,13 @@
  * pins that copy to the tag grammar of `text`. A parameter formatted by `i18n` and read by `text`
  * is one run of exactly its characters, and nothing is reported.
  */
-import { messageArgument } from "@moku-labs/game";
+import { createApp, i18nPlugin, messageArgument, tr, type } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { createIntlKit } from "../../src/plugins/i18n/intl";
+import type { CompiledMessages } from "../../src/plugins/i18n/types";
 import { escapeTags, parseTags } from "../../src/plugins/text/tags";
 import type { Run, Warn } from "../../src/plugins/text/types";
+import { defineFeature, defineFlow, defineNode, startingPlayer, startingSession } from "./helpers";
 
 /**
  * Formats a parameter the way a compiled message does, and reads the part through `text`.
@@ -57,5 +59,46 @@ describe("a string parameter of a message, drawn by text", () => {
     const part = messageArgument("<i>a</i> < b", createIntlKit("en"));
 
     expect(part).toEqual({ kind: "text", text: escapeTags("<i>a</i> < b") });
+  });
+});
+
+/** The characters a player typed, markup and a lone `<` in them. */
+const TYPED = "<i>a</i> < b";
+
+/** A compiled module whose message is one part written by text's own escape. */
+const typed: CompiledMessages = {
+  "field.value": () => [{ kind: "text", text: escapeTags(TYPED) }]
+};
+
+/** The one resting node the app waits on. */
+const home = defineNode({ outcomes: { play: type() }, rest: true, checkpoint: true });
+
+/** The flow of the app: home, and nothing after it. */
+const main = defineFlow("escape", {
+  nodes: { home },
+  start: "home",
+  edges: { home: { play: "home" } }
+});
+
+describe("a part written by text's escape, read by i18n's plain", () => {
+  // The bug: `plain` undoes another escape than the one text writes, so an aria label or a game's
+  // plain text shows a backslash, or drops a `<`.
+  it("answers the characters the player typed", async () => {
+    const feature = defineFeature("field", { strings: { en: typed } });
+    const app = createApp({
+      plugins: [i18nPlugin, feature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        i18n: { locale: "en", fallback: "en" },
+        model: { initialPlayer: startingPlayer, initialSession: startingSession, seed: 1 }
+      }
+    });
+
+    await app.start();
+
+    expect(app.i18n.format(tr("field.value"))).toEqual([{ kind: "text", text: escapeTags(TYPED) }]);
+    expect(app.i18n.plain(tr("field.value"))).toBe(TYPED);
+
+    await app.stop();
   });
 });

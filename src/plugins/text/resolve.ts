@@ -9,7 +9,7 @@ import { system } from "../world/ecs/define";
 import type { AnyComponent, AnySystem, Entity } from "../world/ecs/types";
 import { builtInStyles, Countdown, Text } from "./components";
 import { formatBound, isTextFormat, unitOf, wholeValue } from "./format";
-import { fontOfRun, lookOf } from "./lines";
+import { fontOfRun, lookIn } from "./lines";
 import { layoutRuns } from "./measure";
 import { parseTags } from "./tags";
 import type {
@@ -558,23 +558,81 @@ function boxMoved(ctx: TextCtx, seen: SeenText, text: Readonly<TextValue>): bool
 }
 
 /**
- * Keeps the measured size of a label: made once, then overwritten in place.
+ * Drops every cached layout and moves the epoch, so a layout a label kept is stale too. Every
+ * place that throws the layouts away goes through here.
+ *
+ * @param state - The plugin state.
+ */
+export function dropLayouts(state: State): void {
+  state.cache.clear();
+  state.epoch += 1;
+}
+
+/**
+ * Lays out what a label shows and keeps its measured size and that layout, with what it was laid
+ * out from, so the draw of the label in the same frame takes it. Both records are made once per
+ * label, then overwritten in place.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
- * @param layout - The layout of what the label shows now.
+ * @param resolved - The string the label shows now.
+ * @param style - The style name it shows it in.
+ * @param box - The box of its `Text`.
  */
-function keepSize(ctx: TextCtx, entity: Entity, layout: TextLayout): void {
+function keepSize(
+  ctx: TextCtx,
+  entity: Entity,
+  resolved: string,
+  style: string,
+  box: number | undefined
+): void {
+  const layout = layoutFor(ctx, resolved, style, box);
   const size = ctx.state.measured.get(entity);
 
-  if (size === undefined) {
-    ctx.state.measured.set(entity, sizeOf(layout));
+  if (size === undefined) ctx.state.measured.set(entity, sizeOf(layout));
+  else {
+    size.width = layout.width;
+    size.height = layout.height;
+  }
+
+  const shown = ctx.state.shown.get(entity);
+
+  if (shown === undefined) {
+    ctx.state.shown.set(entity, { resolved, style, box, epoch: ctx.state.epoch, layout });
 
     return;
   }
 
-  size.width = layout.width;
-  size.height = layout.height;
+  shown.resolved = resolved;
+  shown.style = style;
+  shown.box = box;
+  shown.epoch = ctx.state.epoch;
+  shown.layout = layout;
+}
+
+/**
+ * The layout of a value a label shows: the one the text step kept for its entity when it was laid
+ * out from the same string, style and box under the same cache epoch, else from the cache.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity of the label, when the draw knows it.
+ * @param value - The component value to draw.
+ * @returns The layout.
+ */
+export function shownLayoutOf(
+  ctx: TextCtx,
+  entity: Entity | undefined,
+  value: Readonly<TextValue>
+): TextLayout {
+  const shown = entity === undefined ? undefined : ctx.state.shown.get(entity);
+  const stands =
+    shown !== undefined &&
+    shown.epoch === ctx.state.epoch &&
+    shown.resolved === value.resolved &&
+    shown.style === value.style &&
+    shown.box === value.box;
+
+  return stands ? shown.layout : layoutFor(ctx, value.resolved, value.style, value.box);
 }
 
 /**
@@ -631,7 +689,7 @@ function showBound(
 
   // The size follows the string; a label measured never is measured once.
   if (changed || !ctx.state.measured.has(entity)) {
-    keepSize(ctx, entity, layoutFor(ctx, next, style, text.box));
+    keepSize(ctx, entity, next, style, text.box);
   }
 }
 
@@ -677,7 +735,7 @@ function writeBound(
  */
 function showAgain(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): void {
   ctx.deps.world.ecs.set(entity, Text, { resolved: text.resolved });
-  keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
+  keepSize(ctx, entity, text.resolved, text.style, text.box);
 }
 
 /**
@@ -825,7 +883,7 @@ function standStill(
   if (!marked && !boxMoved(ctx, seen, text)) return;
 
   if (marked) showAgain(ctx, entity, text);
-  else keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
+  else keepSize(ctx, entity, text.resolved, text.style, text.box);
 
   seen.box = text.box;
 }
@@ -881,7 +939,7 @@ function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame
 
   const resolved = resolveContent(ctx, entity, text);
 
-  keepSize(ctx, entity, layoutFor(ctx, resolved, text.style, text.box));
+  keepSize(ctx, entity, resolved, text.style, text.box);
   ctx.state.dirty.delete(entity);
   remember(ctx, entity, text, frame);
 }
@@ -1133,8 +1191,9 @@ export function drawsWith(
   // `\<icon=…>` holds them too and goes on to the grammar, which reads it as text.
   const resolved = text.resolved;
   const bolds = style.boldStyle !== undefined && resolved.includes(BOLD_OPEN);
+  const holdsNoRuns = !bolds && !resolved.includes(ICON_OPEN) && !resolved.includes(SPAN_OPEN);
 
-  if (!bolds && !resolved.includes(ICON_OPEN) && !resolved.includes(SPAN_OPEN)) return false;
+  if (holdsNoRuns) return false;
 
   return parseTags(resolved, ctx.layoutOptions.warn).some(run =>
     runDrawsWith(ctx, style, run, keys)
@@ -1154,7 +1213,7 @@ export function drawsWith(
 function runDrawsWith(ctx: TextCtx, style: TextStyle, run: Run, keys: readonly string[]): boolean {
   if (run.kind === "icon") return keys.includes(run.key);
 
-  const look = lookOf(style, run, ctx.state.styles, ctx.state.looks);
+  const look = lookIn(style, run, ctx.layoutOptions);
 
   return keys.includes(fontOfRun(look, run));
 }
@@ -1169,5 +1228,6 @@ function runDrawsWith(ctx: TextCtx, style: TextStyle, run: Run, keys: readonly s
 export function forgetText(state: State, entity: Entity): void {
   state.seen.delete(entity);
   state.measured.delete(entity);
+  state.shown.delete(entity);
   state.dirty.delete(entity);
 }

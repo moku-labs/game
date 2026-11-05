@@ -249,7 +249,7 @@ export function boxLines(
  * @returns The height in reference pixels.
  * @example
  * ```ts
- * blockHeight([openLine([], 0)]); // 0
+ * blockHeight([{ runs: [], width: 0, height: 40, baseline: 32 }]); // 40
  * ```
  */
 export function blockHeight(lines: readonly Line[]): number {
