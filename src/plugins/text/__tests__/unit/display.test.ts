@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PixiTexture } from "../../../renderer/types";
 import { defineTextStyles, Text } from "../../components";
+import { parseAdvances } from "../../measure";
+import { dropLayouts } from "../../resolve";
 import type { TextStyle, TextStyles, TextValue } from "../../types";
 import { miniFontJson, miniFontMsdfXml } from "../fixtures/mini-font";
 import { createMockText, type FakeObject, type MockText } from "./mock-text";
@@ -1492,5 +1494,86 @@ describe('the display adapter — a "box" text aligns in its box (F153)', () => 
     );
 
     expect(object.children[0]?.x).toBe(-16.25);
+  });
+});
+
+/**
+ * Puts a label on entity 1, runs the text step, so it keeps the label's layout, and builds the
+ * container for that entity, as the renderer does.
+ *
+ * @param mock - A started plugin whose renderer draws.
+ * @param over - The fields of the `Text` the case is about.
+ * @returns The container and the value it was built from.
+ */
+function stepped(
+  mock: MockText,
+  over: Partial<TextValue>
+): { object: FakeObject; shown: TextValue } {
+  mock.world.put(1, Text, value(over));
+  mock.step();
+
+  const shown = mock.world.read(1, Text) as TextValue;
+
+  return { object: build(mock, shown), shown };
+}
+
+describe("the display adapter — the layout the text step kept (F152 verify)", () => {
+  // No font is loaded at first: a glyph of `body` is 19.2 px. The fixture font makes "1" 16 and
+  // "2" 20, so "12" is 36 wide.
+
+  // The bug: a cache drop that keeps the epoch, so the draw takes the layout the step kept under
+  // the old tables and places the runs where the old font put them.
+  it("draws the new positions after a cache drop and a change of the tables", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+    const { object, shown } = stepped(mock, { content: "12", anchor: zero });
+
+    expect(mock.state.shown.get(1)?.layout.width).toBeCloseTo(38.4, 5);
+
+    mock.state.tables.set("ui.font-body", parseAdvances(miniFontJson, "ui.font-body"));
+    dropLayouts(mock.state);
+    entry?.adapter.update(object, shown, { ...shown, anchor: { x: 0.5, y: 0 } });
+
+    expect(object.children[0]?.x).toBe(-18);
+  });
+
+  // The bug: the draw lays the string out again though the step kept its layout, and builds a
+  // cache key and a layout a frame for every changing label.
+  it("draws with the kept layout object while string, style, box and epoch stand", () => {
+    const mock = drawing();
+    const { object } = stepped(mock, { content: "12", anchor: zero });
+    const kept = mock.state.shown.get(1)?.layout;
+
+    // The cache alone loses the layout: only the kept record still holds it.
+    mock.state.cache.clear();
+
+    const again = build(mock, mock.world.read(1, Text) as TextValue);
+
+    expect(mock.state.drawn.get(object)?.layout).toBe(kept);
+    expect(mock.state.drawn.get(again)?.layout).toBe(kept);
+    expect(mock.state.cache.size).toBe(0);
+  });
+
+  // The bug: the kept layout is taken at another box, and a box label keeps the lines of the box
+  // it was measured at.
+  it("lays a box label out again when only its box moved", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+
+    boxed(mock);
+
+    const { object, shown } = stepped(mock, {
+      content: "11 11 11",
+      style: "boxed",
+      anchor: zero,
+      box: 80
+    });
+
+    expect(object.children.map(child => textOf(child))).toEqual(["11", "11", "11"]);
+
+    entry?.adapter.update(object, shown, { ...shown, box: 200 });
+
+    expect(object.children.map(child => textOf(child))).toEqual(["11 11 11"]);
+    expect(mock.state.drawn.get(object)?.layout).not.toBe(mock.state.shown.get(1)?.layout);
   });
 });
