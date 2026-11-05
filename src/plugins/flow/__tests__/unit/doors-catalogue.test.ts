@@ -52,6 +52,7 @@ describe("the base catalogue", () => {
       "saveExport",
       "saveImport",
       "step",
+      "clock",
       "pause",
       "resume",
       "capture",

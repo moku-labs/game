@@ -121,6 +121,8 @@ export type Config = {
 export type State = {
   source: ClockSource;
   last: number;
+  /** Milliseconds `advance` moved the clock forward, added to every reading of the source. */
+  shift: number;
   dueAt: number | undefined;
   handle: unknown;
   listeners: Array<(input: Elapsed) => void>;
@@ -199,6 +201,27 @@ export type Api = {
    * ```
    */
   poke(): void;
+
+  /**
+   * Moves the clock forward, as if `ms` passed at once: every later `now()` is `ms` further, and a
+   * pending moment that is due now is delivered at once, before the call returns; one still ahead
+   * waits for the rest. The door `game.clock` calls it, so a visual test or the editor reaches a
+   * moment the rules scheduled without waiting for it. Only forward.
+   *
+   * @param ms - Milliseconds forward, a finite number above 0.
+   * @returns The trusted moment after the move.
+   * @throws {RangeError} `[game] clock.advance moves the clock forward, not by 0 ms.` for 0, a
+   *   negative or a number that is not finite.
+   * @example
+   * ```ts
+   * // A board tick is due in 60 s; the visual test moves the clock and the tick arrives.
+   * app.clock.now(); // 1000000000
+   * app.clock.scheduleAt(1_000_060_000);
+   * app.clock.advance(60_000); // 1000060000: onElapsed listeners got { now: 1000060000 }
+   * app.clock.dueAt(); // undefined
+   * ```
+   */
+  advance(ms: number): number;
 
   /**
    * Reads the pending due moment, for inspection and tests.

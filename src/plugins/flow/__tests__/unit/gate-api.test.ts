@@ -94,6 +94,7 @@ const createMockDeps = (time: TimeApi): Deps => ({
     scheduleAt: vi.fn(),
     onElapsed: vi.fn(() => noop),
     poke: vi.fn(),
+    advance: vi.fn(),
     dueAt: vi.fn(),
     pending: vi.fn(() => 0),
     listeners: vi.fn(() => 0)

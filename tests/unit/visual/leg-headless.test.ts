@@ -174,6 +174,38 @@ describe("the headless leg", () => {
     });
   });
 
+  it("moves the game clock with a clock step and refuses a clock step with a field it does not take (F157, F154)", async () => {
+    // Bug caught: the step is not in the catalogue, moves nothing, or takes { ms } and sets the clock to NaN.
+    let moved: number | undefined;
+    const clocked: VisualSetup = {
+      app: (): VisualApp => {
+        const app = createTinyGame();
+
+        app.clock.onElapsed(({ now }) => {
+          moved = now;
+        });
+        app.clock.scheduleAt(61_000);
+
+        return app;
+      }
+    };
+    const [result] = await runHeadlessLeg(
+      clocked,
+      [openPopup(7, [{ clock: { advanceMs: 60_000 } }, { checkpoint: "later" }])],
+      runInto()
+    );
+
+    expect(result?.error).toBeUndefined();
+    expect(moved).toBe(61_000);
+
+    const wrong = { clock: { ms: 5 } } as unknown as VisualStep;
+    const [refused] = await runHeadlessLeg(clocked, [openPopup(7, [wrong])], runInto());
+
+    expect(String(refused?.error)).toContain(
+      'The command game.clock got the field "ms", which it does not take.'
+    );
+  });
+
   it("does not mount a popup that the last node of a walk opens", async () => {
     const test = openPopup(7, [
       { walk: { route: [{ at: "home", intent: "open" }] } },
