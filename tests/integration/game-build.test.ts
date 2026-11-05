@@ -22,7 +22,7 @@ const rootModule = fileURLToPath(new URL("../../src/index.ts", import.meta.url))
 /** The folder of the effects plugin, read for the names of its log events. */
 const effectsFolder = fileURLToPath(new URL("../../src/plugins/effects/", import.meta.url));
 
-/** The ids of every member of the engine's effect set, as a bundle names them. */
+/** The ids of every member of the engine's effect set and of the stages of its chain, as a bundle names them. */
 const SET_IDS = [
   "effects.flash",
   "effects.grade",
@@ -32,7 +32,11 @@ const SET_IDS = [
   "effects.dissolve",
   "effects.shine",
   "effects.aura",
-  "effects.fold"
+  "effects.fold",
+  "effects.bloom",
+  "effects.bloomCut",
+  "effects.downsample",
+  "effects.gaussAlong"
 ];
 
 /** The names Pixi's three WebGPU draw classes go by: only the counting subclasses name them. */

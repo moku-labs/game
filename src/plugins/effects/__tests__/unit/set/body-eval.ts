@@ -3,14 +3,18 @@
  * CPU. Not a test file. Bun has no GPU, so the test reads the body's own `let` lines and evaluates them in order with
  * the shading languages' functions, as `set-head.test.ts` does for the head and `glow-wgsl.test.ts` for the probe count:
  * a body that changes its formula changes what the test computes. Scalars and `vec2` values with `.x` and `.y` only; a
- * line that does vector arithmetic cannot run here, so a test evaluates the lines before it.
+ * line that does vector arithmetic cannot run here, so a test evaluates the lines before it. A colour runs as a grey: a
+ * `vec3` of one number is that number, so `c.rgb - threshold * c.a` runs for a pixel whose three channels are alike.
  */
 
 /** A `vec2<f32>` on the CPU. */
 export type Vec2 = { readonly x: number; readonly y: number };
 
+/** A pixel or a colour on the CPU, by its channels: `{ rgb: 0.5, a: 1 }` is an opaque mid grey. */
+export type Channels = { readonly [channel: string]: number };
+
 /** What a body is evaluated with: a member's value by its bare names, `uv` and any value a line before reads. */
-export type Scope = Readonly<Record<string, number | boolean | Vec2>>;
+export type Scope = Readonly<Record<string, number | boolean | Vec2 | Channels>>;
 
 /**
  * The value of `x` between `low` and `high`, eased: WGSL's and GLSL's `smoothstep`.
@@ -29,7 +33,11 @@ function smoothstep(low: number, high: number, x: number): number {
 /** The functions of the shading languages a body may call, and the head's two helpers stubbed for one pixel. */
 const FUNCTIONS = {
   vec2: (x: number, y: number = x): Vec2 => ({ x, y }),
+  // A grey colour: its three channels are one number.
+  vec3: (grey: number): number => grey,
+  f32: (x: number): number => x,
   abs: Math.abs,
+  exp: Math.exp,
   cos: Math.cos,
   sin: Math.sin,
   floor: Math.floor,
@@ -90,7 +98,7 @@ export function evaluate(
     throw new Error(`no lines ${range.from}..${range.to} in the body`);
 
   const statements = lines.slice(first, last + 1).map(([name, expression]) => {
-    const script = expression.replaceAll("fu.", "").replaceAll("vec2<f32>(", "vec2(");
+    const script = expression.replaceAll("fu.", "").replaceAll(/\bvec([23])<f32>\(/g, "vec$1(");
 
     return name === "return" ? `return ${script};` : `const ${name} = ${script};`;
   });

@@ -4,6 +4,7 @@
 import {
   Alpha,
   Aura,
+  Bloom,
   Blur,
   bind,
   ColorMatrix,
@@ -892,6 +893,82 @@ const SET_SCENES: readonly BenchScene[] = [
   )
 ];
 
+/** The tiles of `set-bloom`: the 12 of `fog`, 128 × 128 each. */
+const BLOOM_TILES = 12;
+
+/** Bloom's tiles, its strength written in every frame: the chain and stage 3 of every tile, each frame. */
+const bloomScene: BenchScene = {
+  name: "set-bloom",
+  stands:
+    "12 tiles of 128 x 128 under Bloom, its strength written each frame: the chain and stage 3, no quad",
+  mount: stage => {
+    fullSprite(stage);
+
+    const tiles: World.Entity[] = [];
+
+    for (let index = 0; index < BLOOM_TILES; index += 1) {
+      tiles.push(
+        stage.spawn(
+          Transform({ x: (index % 3) * 130, y: Math.floor(index / 3) * 130 }),
+          Sprite({
+            texture: PICTURE,
+            width: FOG_TILE_SIDE,
+            height: FOG_TILE_SIDE,
+            anchor: { x: 0, y: 0 }
+          }),
+          Bloom()
+        )
+      );
+    }
+
+    return {
+      tick: elapsedMs => {
+        for (const [index, tile] of tiles.entries()) {
+          stage.set(tile, Bloom, { strength: 0.6 + 0.4 * wave(elapsedMs, index) });
+        }
+      }
+    };
+  }
+};
+
+/** The strongest blur of `sweep-blur-q4`, as the game's pan sweeps it. */
+const SWEEP_Q4_BLUR = 16;
+
+/**
+ * The arms `sweep` splits into (F126 stage 3 slice 3): Pixi's `Blur` alone over the whole screen, at the config's
+ * quality and at the game's own, so the colour matrix's pass no longer hides in the blur's.
+ */
+const SWEEP_SCENES: readonly BenchScene[] = [
+  fullWriteScene(
+    "sweep-blur",
+    "a full-screen Blur of strength 6 at quality 0, the config's 2: 4 passes at 0.5 on a phone, written each frame",
+    Blur,
+    elapsedMs => ({ strength: 6 + 0.5 * wave(elapsedMs, 0) })
+  ),
+  {
+    name: "sweep-blur-q4",
+    stands:
+      "the game's pan: a full-screen Blur at quality 4, its strength 0 to 16 in a 1 s loop: 8 passes",
+    mount: stage => {
+      const root = stage.spawn(
+        Transform({ x: 0, y: 0 }),
+        Sprite({
+          texture: PICTURE,
+          width: stage.width,
+          height: stage.height,
+          anchor: { x: 0, y: 0 }
+        }),
+        Blur({ strength: 0, quality: 4 })
+      );
+
+      return {
+        tick: elapsedMs =>
+          stage.set(root, Blur, { strength: loop(elapsedMs, 1000) * SWEEP_Q4_BLUR })
+      };
+    }
+  }
+];
+
 /** Every case scene. */
 export const CASE_SCENES: readonly BenchScene[] = [
   fullScene,
@@ -914,5 +991,7 @@ export const CASE_SCENES: readonly BenchScene[] = [
   rowScene("rows-live", "the same rows with cache: false, drawn live", RowFlipLive),
   restScene,
   rowsEnterScene,
-  ...SET_SCENES
+  ...SET_SCENES,
+  bloomScene,
+  ...SWEEP_SCENES
 ];

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FilterComponent, FilterFields } from "../../../filters/types";
 import { AURA_GLSL, AURA_WGSL, Aura } from "../../../set/aura";
+import { BLOOM_GLSL, BLOOM_WGSL, Bloom } from "../../../set/bloom";
 import { DISSOLVE_GLSL, DISSOLVE_WGSL, Dissolve } from "../../../set/dissolve";
 import { FLASH_GLSL, FLASH_WGSL, Flash } from "../../../set/flash";
 import { FOLD_GLSL, FOLD_WGSL, Fold } from "../../../set/fold";
@@ -64,6 +65,21 @@ const MEMBERS: readonly Row[] = [
   { member: Aura, wgsl: AURA_WGSL, glsl: AURA_GLSL, samples: 13, tile: 0.083 },
   { member: Fold, wgsl: FOLD_WGSL, glsl: FOLD_GLSL, samples: 1, tile: 0.083 }
 ];
+
+/** The phone's full resolution: the A26's device pixel ratio, past the bench's `maxResolution` 2. */
+const PHONE_RESOLUTION = 2.625;
+
+/** The member that reads a second texture: its own body takes one sample, its chain the rest. */
+const BLOOM: Row = { member: Bloom, wgsl: BLOOM_WGSL, glsl: BLOOM_GLSL, samples: 1, tile: 0.1 };
+
+/**
+ * Bloom on a tile at the bench's 2 and at the phone's 2.625: the 4-step ladder (½, ¼, ¼, ¼), 5 passes, 0.094 Mpx;
+ * at 2.625 radius 16 is 10.5 texels at ¼, over 8, so the 5-step ladder (½, ¼, ⅛, ⅛, ⅛), 6 passes, 0.153 Mpx.
+ */
+const BLOOM_ROWS = [
+  { frame: TILE, resolution: RESOLUTION, passes: 5, mpx: 0.1 },
+  { frame: TILE, resolution: PHONE_RESOLUTION, passes: 6, mpx: 0.16 }
+] as const;
 
 /** What a member costs, as the README's table states it. */
 type Budget = {
@@ -189,7 +205,10 @@ function onChangeOf(member: FilterComponent<FilterFields>): Budget["onChange"] {
 
 describe("the budgets of the set", () => {
   // Bug: a body that reads its input around the head: a sample no budget counts, a read off the clamp.
-  it.each(MEMBERS)("$member.filter.id reads its input through sampleInput only", row => {
+  it.each([
+    ...MEMBERS,
+    BLOOM
+  ])("$member.filter.id reads its input through sampleInput only", row => {
     expect(row.wgsl).not.toMatch(/\btextureSample(?:Level)?\s*\(/);
     expect(row.glsl).not.toMatch(/\btexture(?:Lod)?\s*\(/);
     expect(samplesOf(row.glsl)).toBe(samplesOf(row.wgsl));
@@ -206,5 +225,18 @@ describe("the budgets of the set", () => {
     expect(screen.mpx).toBeLessThanOrEqual(1.065);
     expect(screen.onChange).toBe("quad");
     expect(budgetOf(row, TILE, RESOLUTION).mpx).toBeLessThanOrEqual(row.tile);
+  });
+
+  // Bug: a chain that grew a step at the phone's resolution, a body that gained a sample, or a chain member that
+  // claims the quad: a value change of it runs the chain and stage 3, a pass for each step.
+  it.each(
+    BLOOM_ROWS
+  )("Bloom on a tile at $resolution: $passes passes, at most $mpx Mpx, the chain and stage 3 on change", row => {
+    const tile = budgetOf(BLOOM, row.frame, row.resolution);
+
+    expect(tile.passes).toBe(row.passes);
+    expect(tile.mpx).toBeLessThanOrEqual(row.mpx);
+    expect(tile.samples).toBe(BLOOM.samples);
+    expect(tile.onChange).toBe("chain + stage 3");
   });
 });

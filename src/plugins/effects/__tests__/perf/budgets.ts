@@ -37,6 +37,16 @@ export const BUDGET = {
   // stores it in the uniform group, because here the stored value keeps it unboxed (the `Glow` case boxes it in the
   // write); a filter of ours that is no backdrop, of the same uniforms, measures the same 16. New.
   backdropTween: 16,
+  // Change 2026-11-05-f126-s3-bloom: the chain of `Bloom` alone, called as a tween calls it, its radius stepping between
+  // the two ladders. New. 0: it answers one of two arrays made once, their threshold and sigmas written in place.
+  bloomChain: 0,
+  // The same change: the `strength` of a `Bloom` tweened on one of 12 filtered views, the tween's own write subtracted.
+  // New, measured 2 920 B on Node 24.21 over a window of 10 000 steps. A chain member never rides the quad, and any
+  // uniform write marks its chain stale (`writeFilter`), so the sync runs the engine's `evaluate` again in every frame:
+  // its `entries()` walks and their `[index, item]` pairs (the inputs, the checked steps, the placed steps), `Object.keys`
+  // of each step's uniforms and the `for…of` iterators over frozen lists in `stepProblem`, and the `{ place, built }`
+  // `placeFor` answers per step. The chain's own answer is 0 B (`bloomChain`): the bytes are the engine's walk of it.
+  filtersBloomTween: 2920,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the
   // frame's delta boxed into each step call). Now 0: nothing is written for a still host.

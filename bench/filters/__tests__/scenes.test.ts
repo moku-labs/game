@@ -53,7 +53,10 @@ const EVERY_SCENE = [
   "set-dissolve",
   "set-shine",
   "set-aura",
-  "set-fold"
+  "set-fold",
+  "set-bloom",
+  "sweep-blur",
+  "sweep-blur-q4"
 ] as const;
 
 /** The running game of a test. */

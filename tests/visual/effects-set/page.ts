@@ -1,11 +1,13 @@
 /**
- * @file The page of the effect set's browser leg (`tests/visual/effects-set.visual.ts`, F126 stage 3 slices 1 and 2).
+ * @file The page of the effect set's browser leg (`tests/visual/effects-set.visual.ts`, F126 stage 3 slices 1 to 3).
  * Not a test: the leg bundles it with the flags of a dev page and opens it in Chrome on WebGPU and on WebGL
  * (`?renderer=webgl`), at resolution 1 and 2 (`?resolution=2`). A small game lists every member of the set and
  * runs on the real engine, the real Pixi and the real GPU, with `debug.verifyFrames` on. Each member plays three rows:
  * a held value, kept as a picture and held against its live frame; a tweening value, which on WebGPU runs on the
  * view's own quad and is held against its live frame; and one pixel worked out by hand (`RevealLine` two, its corners
- * at a quarter turn of the diagonal; `Shine` two, its line and a transparent corner). Every capture stays in the
+ * at a quarter turn of the diagonal; `Shine` two, its line and a transparent corner). `Bloom`, the member with a chain,
+ * has no quad: its held rows at radius 16 and 32 are its kept picture (stage 3) within 1/255 of live, and its tweening
+ * row runs without a quad and is kept again within 1/255 of live once the value stops. Every capture stays in the
  * page, so the leg can hand the WebGPU pictures to the WebGL page (`compareSet`) and hold the GLSL twins against the
  * WGSL bodies. It answers in `globalThis.effectsSet`.
  *
@@ -16,6 +18,7 @@ import { defineGameApp } from "../../../src/app";
 import type { Assets, World } from "../../../src/index";
 import {
   Aura,
+  Bloom,
   Dissolve,
   defineGame,
   Flash,
@@ -37,8 +40,10 @@ import manifestJson from "../../fixtures/mini-game/generated/manifest.json";
 export type SetRow = {
   /** `member: kind`. */
   name: string;
-  /** `held`, `tween` or `probe`. */
-  kind: "held" | "tween" | "probe";
+  /** `held`, `tween`, `probe`, or `chain`: the tween of a member with a chain, which no quad runs. */
+  kind: "held" | "tween" | "probe" | "chain";
+  /** Held within 1/255 of its live frame on both backends, not only within the frame oracle's thresholds. */
+  strict?: boolean;
   /** Pictures the renderer kept when the row was captured. */
   pictures: number;
   /** Views drawn through their own shader when the row was captured. */
@@ -108,6 +113,9 @@ const FAILS = new Set([
   "effects:filter-unlisted"
 ]);
 
+/** The fill of a card a bloom shows on: dark, so the gold square is the only bright part. */
+const DARK = 0x20_20_40;
+
 /** The owner of every view the page spawns. */
 const OWNER = { kind: "plugin", name: "visual" } as const;
 
@@ -140,7 +148,7 @@ const main = kit.defineScene("main", {
 });
 const feature = kit.defineFeature("visual", {
   scenes: [main],
-  filters: [Flash, Grade, Vignette, RevealLine, RevealRound, Dissolve, Shine, Aura, Fold]
+  filters: [Flash, Grade, Vignette, RevealLine, RevealRound, Dissolve, Shine, Aura, Fold, Bloom]
 });
 
 /** The manifest of the page: the mini game's `ui` bundle without its files, so the scene loads nothing. */
@@ -269,13 +277,14 @@ type Probe = { readonly x: number; readonly y: number; readonly rgb: readonly nu
  * @param row.kind - What it holds.
  * @param row.scene - What it draws.
  * @param row.probe - The pixel by hand of a probe row.
+ * @param row.strict - Whether the row is held within 1/255 of live.
  * @returns What it answered.
  */
 async function play(
   app: App,
-  row: { name: string; kind: SetRow["kind"]; scene: Scene; probe?: Probe }
+  row: { name: string; kind: SetRow["kind"]; scene: Scene; probe?: Probe; strict?: true }
 ): Promise<SetRow> {
-  const { name, kind, scene, probe } = row;
+  const { name, kind, scene, probe, strict } = row;
   const { write } = scene;
 
   if (write === undefined) {
@@ -320,6 +329,7 @@ async function play(
   const answer: SetRow = {
     name,
     kind,
+    ...(strict === undefined ? {} : { strict }),
     pictures,
     shaded,
     ...compare(mode, await composited(live))
@@ -422,13 +432,15 @@ async function run(): Promise<SetResult> {
    *
    * @param make - The member's value at the start.
    * @param write - The field's patch at a turn.
+   * @param fill - The card's fill.
    * @returns The scene.
    */
   const tweened = (
     make: () => World.AnyComponentValue,
-    write: (entity: World.Entity, turn: number) => void
+    write: (entity: World.Entity, turn: number) => void,
+    fill?: number
   ): Scene => {
-    const entities = card(make());
+    const entities = card(make(), fill);
     const parent = entities.at(-1) ?? 0;
 
     return { entities, write: turn => write(parent, turn) };
@@ -640,6 +652,43 @@ async function run(): Promise<SetResult> {
       kind: "probe",
       scene: { entities: card(Fold({ angle: Math.PI }), 0x33_88_ff, false) },
       probe: { x: 240, y: 240, rgb: [31, 82, 153] }
+    }),
+    // Bloom: the gold square on a dark card blooms; a chain member is kept as a picture and never takes the quad.
+    await play(app, {
+      name: "Bloom: held, radius 16",
+      kind: "held",
+      strict: true,
+      scene: { entities: card(Bloom(), DARK) }
+    }),
+    await play(app, {
+      name: "Bloom: held, radius 32",
+      kind: "held",
+      strict: true,
+      scene: { entities: card(Bloom({ radius: 32 }), DARK) }
+    }),
+    await play(app, {
+      name: "Bloom: tween",
+      kind: "chain",
+      strict: true,
+      scene: tweened(
+        () => Bloom({ strength: 0.2 }),
+        (entity, turn) => ecs.set(entity, Bloom, { strength: 0.2 + 0.1 * turn }),
+        DARK
+      )
+    }),
+    // The blur reaches about 36 CSS px (±2 sigma of 16 px, and the boxes): the middle of the 80 px square sees only
+    // gold, so it gains 0.6 × its light over 0.7: green 0.8 + 0.6 × 0.1, 204 + 15.3; red is full, blue stays 0.
+    await play(app, {
+      name: "Bloom: probe, the middle of the gold square gains 0.6 of its light over 0.7",
+      kind: "probe",
+      scene: { entities: card(Bloom(), DARK) },
+      probe: { x: 180, y: 220, rgb: [255, 219, 0] }
+    }),
+    await play(app, {
+      name: "Bloom: probe, at threshold 1 the centre is the source",
+      kind: "probe",
+      scene: { entities: card(Bloom({ threshold: 1 }), 0x33_88_ff, false) },
+      probe: { x: 240, y: 240, rgb: [0x33, 0x88, 0xff] }
     })
   ];
 

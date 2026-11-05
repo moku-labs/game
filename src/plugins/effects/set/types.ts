@@ -162,3 +162,20 @@ export type FoldValue = {
   enabled: boolean;
   order: number;
 };
+
+/**
+ * `Bloom`: light around the bright parts of the view: what is above `threshold` (0..1) of its light, blurred `radius`
+ * CSS px wide and added back by `strength` (0..2).
+ *
+ * @example
+ * ```ts
+ * const value: BloomValue = { strength: 0.6, threshold: 0.7, radius: 16, enabled: true, order: 0 };
+ * ```
+ */
+export type BloomValue = {
+  strength: number;
+  threshold: number;
+  radius: number;
+  enabled: boolean;
+  order: number;
+};
