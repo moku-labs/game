@@ -140,6 +140,20 @@ function checkField(id: string, schema: InputSchema, name: string, value: unknow
 }
 
 /**
+ * Tells whether a value is an object a call can read field by field: not `null`, not an array. Pure.
+ *
+ * @param value - The value.
+ * @returns True for a plain object.
+ * @example
+ * ```ts
+ * isPlainObject([true]); // false
+ * ```
+ */
+function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Checks a given input against the schema of its command before the command runs: an object, no
  * field the schema does not name, every field without `?` given, and every given value of its
  * kind. A field with `?` may be left out or be `undefined`. A door call, never a frame path.
@@ -157,11 +171,9 @@ function checkField(id: string, schema: InputSchema, name: string, value: unknow
  */
 export function checkInput(id: string, schema: InputSchema, input: unknown): void {
   // The input is a plain object.
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw inputError(id, "an input that is not an object", schema);
-  }
+  if (!isPlainObject(input)) throw inputError(id, "an input that is not an object", schema);
 
-  const given: Readonly<Record<string, unknown>> = input as Readonly<Record<string, unknown>>;
+  const given = input;
 
   // No field outside the schema.
   for (const name of Object.keys(given)) {

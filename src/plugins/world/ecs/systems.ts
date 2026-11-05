@@ -178,9 +178,7 @@ export function registerSystem(
   hidesAside = false
 ): () => void {
   const state = ctx.state.ecs;
-  const phases: WorldPhase[] = ["input", "animate", "layout", "sync"];
-
-  for (const phase of phases) {
+  for (const phase of WORLD_PHASES) {
     if (state.systems[phase].some(entry => entry.definition.name === definition.name)) {
       throw new Error(
         `[game] System "${definition.name}" is registered twice.\n` +
