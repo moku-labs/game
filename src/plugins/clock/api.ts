@@ -5,8 +5,9 @@
 import type { Api, ClockCtx, Elapsed, State } from "./types";
 
 /**
- * The longest delay a platform timer keeps, 2^31−1 ms (24.8 days). A longer one overflows and
- * fires at once (F151); a far moment waits in steps of this length through the early re-arm.
+ * The longest delay the plugin asks of a source, 2^31−1 ms (24.8 days): the most a platform timer
+ * keeps. A longer one overflows and fires at once (F151), on any source built on `setTimeout`, a
+ * game's own included; a far moment waits in steps of this length through the early re-arm.
  */
 const MAX_TIMER_MS = 2_147_483_647;
 

@@ -44,7 +44,7 @@ A node never touches the clock: it writes `await fx(schedule(rules.nextDue(playe
 createApp({ pluginConfigs: { clock: { source: fakeClock(1000) } } });
 ```
 
-A `ClockSource` is `now(): number`, `setTimer(fn, delayMs): unknown` and `clearTimer(handle): void`.
+A `ClockSource` is `now(): number`, `setTimer(fn, delayMs): unknown` and `clearTimer(handle): void`. The plugin never asks `setTimer` for more than 2^31−1 ms, the most a platform timer keeps; the system source itself also waits a longer delay in steps, so no path hands `setTimeout` a delay that overflows.
 
 ## Testing
 

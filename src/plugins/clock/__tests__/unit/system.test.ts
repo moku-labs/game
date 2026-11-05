@@ -40,6 +40,41 @@ describe("systemSource", () => {
       expect(fired).toHaveBeenCalledTimes(1);
     });
 
+    // Bug caught (F151): a delay over 2^31−1 ms overflows `setTimeout`, which fires at once. The
+    // test reads the delays handed to the platform: fake timers alone never overflow.
+    it("waits a delay of 88 days in steps the platform timer keeps, and fires once", () => {
+      const day = 86_400_000;
+      const platform = vi.spyOn(globalThis, "setTimeout");
+      const fired = vi.fn();
+
+      systemSource().setTimer(fired, 88 * day);
+      vi.advanceTimersByTime(2_147_483_647 * 3);
+      expect(fired).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(88 * day - 2_147_483_647 * 3);
+      expect(fired).toHaveBeenCalledOnce();
+      expect(platform.mock.calls.map(([, delay]) => delay)).toEqual([
+        2_147_483_647,
+        2_147_483_647,
+        2_147_483_647,
+        88 * day - 2_147_483_647 * 3
+      ]);
+    });
+
+    // Bug caught: a long wait cancelled after its first step fires anyway, because the handle
+    // still holds the first, finished timer.
+    it("cancels a long wait in its later steps", () => {
+      const source = systemSource();
+      const fired = vi.fn();
+
+      const handle = source.setTimer(fired, 2_147_483_647 + 1000);
+      vi.advanceTimersByTime(2_147_483_647);
+      source.clearTimer(handle);
+      vi.advanceTimersByTime(1000);
+
+      expect(fired).not.toHaveBeenCalled();
+    });
+
     it("returns a handle that is not the raw platform timer", () => {
       const source = systemSource();
 
