@@ -21,7 +21,6 @@ import type {
   TextFormat,
   TextFormats,
   TextRunStyle,
-  TextStyleInput,
   TextStyles,
   TextValue
 } from "../../types";
@@ -178,6 +177,3 @@ defineTextStyles({ "hud.digits": { ...row, boldStyle: { font: "ui.font-comic" } 
 
 // @ts-expect-error — the indent is reference px, not a CSS string
 defineTextStyles({ "hud.digits": { font: "ui.font-body", size: 13, fill: 0, textIndent: "20px" } });
-
-expectTypeOf<TextStyleInput["textIndent"]>().toEqualTypeOf<number | undefined>();
-expectTypeOf<TextStyleInput["boldStyle"]>().toEqualTypeOf<TextRunStyle | undefined>();

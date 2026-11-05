@@ -17,6 +17,7 @@ import {
   createTextFrame,
   createTextSystem,
   forgetText,
+  layoutOptionsOf,
   markDirty,
   noteAdded,
   resolveAdded
@@ -48,13 +49,14 @@ function resolveDeps(ctx: KernelSlice): Deps {
 }
 
 /**
- * Builds the domain context the API, the hooks and the frame step share.
+ * Builds the domain context the API, the hooks and the frame step share, with the layout options
+ * every layout and draw reads, made here once.
  *
  * @param ctx - Kernel context of the text plugin.
  * @returns The domain context of the text plugin.
  */
 export function withDeps(ctx: KernelSlice): TextCtx {
-  return { ...ctx, deps: resolveDeps(ctx) };
+  return { ...ctx, deps: resolveDeps(ctx), layoutOptions: layoutOptionsOf(ctx) };
 }
 
 /**
@@ -76,6 +78,26 @@ function isStyleMap(entry: unknown): entry is { map: Record<string, object> } {
 }
 
 /**
+ * Refuses a style name a second feature defines. A built-in name is free: a feature may
+ * override it.
+ *
+ * @param state - The plugin state, its owners so far.
+ * @param name - The style name.
+ * @param feature - The feature that defines it now.
+ * @throws {Error} When another feature defined the name already.
+ */
+function checkOwner(state: State, name: string, feature: string): void {
+  const owner = state.styleOwner.get(name);
+
+  if (owner === undefined || owner === BUILT_IN) return;
+
+  throw new Error(
+    `[game] Text style "${name}" is defined by features "${owner}" and "${feature}".\n` +
+      "  Keep it in one feature or rename one of them."
+  );
+}
+
+/**
  * Fills the style table: the two built-ins first, then the styles of every feature in feature
  * order. A feature may override a built-in; two features may not share a name.
  *
@@ -83,25 +105,20 @@ function isStyleMap(entry: unknown): entry is { map: Record<string, object> } {
  * @throws {Error} When two features define the same style name.
  */
 function buildStyles(ctx: TextCtx): void {
+  // The built-ins first: a feature may override them.
   for (const [name, style] of Object.entries(builtInStyles(ctx.config.fonts))) {
     ctx.state.styles.set(name, style);
     ctx.state.styleOwner.set(name, BUILT_IN);
   }
 
+  // Then every feature in feature order, each style read back from the plain map it carries.
   for (const feature of ctx.deps.flow.features.all()) {
     const entry = feature.description.textStyles;
 
     if (!isStyleMap(entry)) continue;
 
     for (const [name, value] of Object.entries(entry.map)) {
-      const owner = ctx.state.styleOwner.get(name);
-
-      if (owner !== undefined && owner !== BUILT_IN) {
-        throw new Error(
-          `[game] Text style "${name}" is defined by features "${owner}" and "${feature.name}".\n` +
-            "  Keep it in one feature or rename one of them."
-        );
-      }
+      checkOwner(ctx.state, name, feature.name);
 
       const style = readStyle(name, value);
 

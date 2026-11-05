@@ -9,10 +9,12 @@ import { system } from "../world/ecs/define";
 import type { AnyComponent, AnySystem, Entity } from "../world/ecs/types";
 import { builtInStyles, Countdown, Text } from "./components";
 import { formatBound, isTextFormat, unitOf, wholeValue } from "./format";
-import { fontOfRun, layoutRuns, lookOf } from "./measure";
+import { fontOfRun, lookOf } from "./lines";
+import { layoutRuns } from "./measure";
 import { parseTags } from "./tags";
 import type {
   FormattedNumber,
+  KernelSlice,
   LayoutOptions,
   Run,
   SeenText,
@@ -51,13 +53,13 @@ export const TEXT_SYSTEM_NAME = "text.resolve";
  * Writes one dev warning per key. Every warning of this plugin goes through here, so a font, a
  * style, a glyph or a bad tag is reported once and never floods a frame.
  *
- * @param ctx - Domain context of the text plugin.
+ * @param ctx - Kernel or domain context of the text plugin.
  * @param key - What makes this warning unique.
  * @param message - The log event.
  * @param data - What to log with it.
  */
 export function warnOnce(
-  ctx: TextCtx,
+  ctx: KernelSlice,
   key: string,
   message: string,
   data?: Record<string, unknown>
@@ -71,10 +73,10 @@ export function warnOnce(
 /**
  * The warning the pure modules are handed, bound to this app's `warned` set.
  *
- * @param ctx - Domain context of the text plugin.
+ * @param ctx - Kernel or domain context of the text plugin.
  * @returns A warning that repeats nothing.
  */
-export function warnFor(ctx: TextCtx): Warn {
+export function warnFor(ctx: KernelSlice): Warn {
   return (key, message, data): void => warnOnce(ctx, key, message, data);
 }
 
@@ -111,12 +113,12 @@ function wrapsAtBox(ctx: TextCtx, styleName: string): boolean {
 
 /**
  * What the pure layout and the draw are handed: the warning, the style table a span borrows its
- * look from, and the bold looks.
+ * look from, and the bold looks. Built once per domain context, so a draw builds none.
  *
- * @param ctx - Domain context of the text plugin.
+ * @param ctx - Kernel context of the text plugin.
  * @returns The layout options of this app.
  */
-export function layoutOptionsOf(ctx: TextCtx): LayoutOptions {
+export function layoutOptionsOf(ctx: KernelSlice): LayoutOptions {
   return { warn: warnFor(ctx), styles: ctx.state.styles, looks: ctx.state.looks };
 }
 
@@ -163,22 +165,34 @@ export function layoutFor(ctx: TextCtx, resolved: string, styleName: string, box
 
   if (hit !== undefined) return hit;
 
-  const options = layoutOptionsOf(ctx);
+  // A miss: the string is read through the grammar and laid out in its style.
+  const options = ctx.layoutOptions;
   const runs = parseTags(resolved, options.warn);
 
   if (resolved.includes(SPAN_OPEN)) warnUnknownSpan(ctx, resolved, runs);
 
   const layout = layoutRuns(runs, styleOf(ctx, styleName), ctx.state.tables, options, width);
 
-  if (ctx.state.cache.size >= CACHE_LIMIT) {
-    const oldest = ctx.state.cache.keys().next().value;
-
-    if (oldest !== undefined) ctx.state.cache.delete(oldest);
-  }
-
-  ctx.state.cache.set(key, layout);
+  keepLayout(ctx.state.cache, key, layout);
 
   return layout;
+}
+
+/**
+ * Keeps a fresh layout in the cache, the oldest one dropped first when the cache is full.
+ *
+ * @param cache - The layout cache of the plugin.
+ * @param key - The style, the box and the string the layout is for.
+ * @param layout - The layout.
+ */
+function keepLayout(cache: Map<string, TextLayout>, key: string, layout: TextLayout): void {
+  if (cache.size >= CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+
+  cache.set(key, layout);
 }
 
 /**
@@ -612,17 +626,43 @@ function showBound(
   const restyled = style !== text.style;
   const changed = restyled || next !== text.resolved;
 
-  if (changed) {
-    ctx.deps.world.ecs.set(entity, Text, restyled ? { resolved: next, style } : { resolved: next });
+  // A new string or style is written, with the time left of a countdown in the same step.
+  if (changed) writeBound(ctx, entity, text, next, value, restyled ? style : undefined);
 
-    if (value !== undefined && text.bind !== undefined && isCountdownLeft(text.bind)) {
-      ctx.deps.world.ecs.set(entity, Countdown, { left: value });
-    }
-  }
-
+  // The size follows the string; a label measured never is measured once.
   if (changed || !ctx.state.measured.has(entity)) {
     keepSize(ctx, entity, layoutFor(ctx, next, style, text.box));
   }
+}
+
+/**
+ * Writes the new string of a bound label, its new style when a named format picked another, and
+ * for a countdown the time left.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ * @param next - The string the label shows now.
+ * @param value - The bound number, the time left for a countdown.
+ * @param style - The style a named format picked, when it is another than `Text.style`.
+ */
+function writeBound(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  next: string,
+  value: number | undefined,
+  style: string | undefined
+): void {
+  ctx.deps.world.ecs.set(
+    entity,
+    Text,
+    style === undefined ? { resolved: next } : { resolved: next, style }
+  );
+
+  if (value === undefined || text.bind === undefined || !isCountdownLeft(text.bind)) return;
+
+  ctx.deps.world.ecs.set(entity, Countdown, { left: value });
 }
 
 /**
@@ -716,9 +756,9 @@ function stepBound(
 
 /**
  * One frame of a label whose bind names a format a feature registered. Its unit is the whole value.
- * While that, the locale, the bind and the style stand the frame is reads and compares: the format
- * is not called, a mark included, and nothing is kept. Else it is asked once, and its answer is
- * written only when it differs. The format picks the style, so no style is checked for digits. A
+ * While the whole value, the locale, the bind and the style stand still, the frame only reads and
+ * compares: the format is not called, even for a marked label, and nothing is kept. Else the
+ * format is asked once, and its answer is written only when it differs. The format picks the style, so no style is checked for digits. A
  * bound field that holds no number shows nothing, as under a built-in format.
  *
  * @param ctx - Domain context of the text plugin.
@@ -781,13 +821,11 @@ function standStill(
   seen: SeenText,
   marked: boolean
 ): void {
-  if (marked) {
-    showAgain(ctx, entity, text);
-  } else if (boxMoved(ctx, seen, text)) {
-    keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
-  } else {
-    return;
-  }
+  // Neither marked nor laid out at another box: nothing to write or measure.
+  if (!marked && !boxMoved(ctx, seen, text)) return;
+
+  if (marked) showAgain(ctx, entity, text);
+  else keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
 
   seen.box = text.box;
 }
@@ -1098,7 +1136,9 @@ export function drawsWith(
 
   if (!bolds && !resolved.includes(ICON_OPEN) && !resolved.includes(SPAN_OPEN)) return false;
 
-  return parseTags(resolved, warnFor(ctx)).some(run => runDrawsWith(ctx, style, run, keys));
+  return parseTags(resolved, ctx.layoutOptions.warn).some(run =>
+    runDrawsWith(ctx, style, run, keys)
+  );
 }
 
 /**

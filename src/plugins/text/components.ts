@@ -238,22 +238,25 @@ function checkRunStyle(
   name: string,
   record: Record<string, unknown>
 ): asserts record is Record<string, unknown> & TextRunStyle {
-  for (const key of Object.keys(record)) {
-    if (!RUN_STYLE_KEYS.includes(key)) {
-      throw boldStyleError(
-        name,
-        `.${key}`,
-        "Use only font, size, fill, letterSpacing, stroke, strokeWidth and shadow."
-      );
-    }
+  // Only the seven glyph fields: `wrap`, `align` and the rest are the paragraph's.
+  const unknown = Object.keys(record).find(key => !RUN_STYLE_KEYS.includes(key));
+
+  if (unknown !== undefined) {
+    throw boldStyleError(
+      name,
+      `.${unknown}`,
+      "Use only font, size, fill, letterSpacing, stroke, strokeWidth and shadow."
+    );
   }
 
   const { font, size, fill, letterSpacing, stroke, strokeWidth, shadow } = record;
 
+  // A size a run can be drawn at.
   if (size !== undefined && !(isFiniteNumber(size) && size > 0)) {
     throw boldStyleError(name, `.size ${String(size)}`, "Use a size above 0.");
   }
 
+  // Spacings, widths and colours that are numbers.
   for (const [key, value] of [
     ["letterSpacing", letterSpacing],
     ["strokeWidth", strokeWidth],
@@ -265,6 +268,7 @@ function checkRunStyle(
     }
   }
 
+  // A font key and a shadow the draw can read.
   if (font !== undefined && typeof font !== "string") {
     throw boldStyleError(name, `.font ${String(font)}`, "Use the asset key of a font.");
   }
@@ -344,6 +348,7 @@ function checkIndent(name: string, textIndent: unknown): void {
  * @throws {Error} When `boldStyle` or `textIndent` is bad: see `runStyleOf` and `checkIndent`.
  */
 function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
+  // What no label can be laid out with is refused, in the order the fields are documented.
   const wrap = input.wrap ?? "none";
 
   if (!isWrap(wrap)) {
@@ -366,6 +371,11 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     );
   }
 
+  checkIndent(name, input.textIndent);
+
+  const boldStyle = runStyleOf(name, input.boldStyle);
+
+  // Every field filled with its default.
   const style: TextStyle = {
     font: input.font,
     bold: input.bold,
@@ -381,10 +391,6 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     shadow: shadowOf(input.shadow),
     lineHeight: input.lineHeight
   };
-
-  checkIndent(name, input.textIndent);
-
-  const boldStyle = runStyleOf(name, input.boldStyle);
 
   // Present only on a style that names them, so every style that does not equals its old literal.
   if (input.balance === true) style.balance = true;
@@ -405,7 +411,10 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
  * @returns The look a `<b>` run of the style measures and draws with.
  * @example
  * ```ts
+ * const row = builtInStyles({ body: "ui.fonts.text-medium", digits: "ui.font-digits" }).body;
+ *
  * boldLookOf(row, { font: "ui.fonts.alt-bold", size: 16 }).bold; // "ui.fonts.alt-bold"
+ * boldLookOf(row, { font: "ui.fonts.alt-bold", size: 16 }).font; // "ui.fonts.text-medium"
  * ```
  */
 export function boldLookOf(style: TextStyle, bold: TextRunStyle): TextStyle {

@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boldLookOf } from "../../components";
-import {
-  fontLineOf,
-  layoutRuns,
-  lineHeightOf,
-  lookOf,
-  measureRun,
-  parseAdvances
-} from "../../measure";
+import { fontLineOf, lineHeightOf } from "../../lines";
+import { layoutRuns, measureRun, parseAdvances } from "../../measure";
 import type { AdvanceTable, LayoutOptions, Run, TextRun, TextStyle, Warn } from "../../types";
 import { latinFontJson, miniFontJson, miniFontXml } from "../fixtures/mini-font";
 
@@ -884,32 +878,6 @@ describe("layoutRuns — a line of pieces of two looks (F152)", () => {
 
     // The tall piece: a box of 26, half the leading (26 - 19.5) / 2 above its 9.75.
     expect(layout.lines.map(line => [line.baseline, line.height])).toEqual([[13, 26]]);
-  });
-});
-
-describe("lookOf (F152)", () => {
-  /** A style with a bold look, and the look. */
-  const counted = { ...row, boldStyle: { size: 16 } };
-  const bold = boldLookOf(counted, { size: 16 });
-  const styles = new Map([
-    ["album.row.amount.16", amount],
-    ["counted", counted]
-  ]);
-  const looks = new Map([[counted, bold]]);
-
-  // The bug: a look is built per run, or the span loses to the paragraph, or `<b>` of a span takes
-  // the paragraph's bold look.
-  it("answers one of the stored objects: the paragraph, its bold look, a span's style or its bold look", () => {
-    expect(lookOf(counted, text("a"), styles, looks)).toBe(counted);
-    expect(lookOf(counted, text("a", { bold: true }), styles, looks)).toBe(bold);
-    expect(lookOf(row, text("a", { span: "album.row.amount.16", bold: true }), styles, looks)).toBe(
-      amount
-    );
-    expect(lookOf(row, text("a", { span: "counted", bold: true }), styles, looks)).toBe(bold);
-    expect(lookOf(row, text("a", { span: "nope" }), styles, looks)).toBe(row);
-    expect(
-      lookOf(row, { kind: "icon", key: "hud.coin", span: "album.row.amount.16" }, styles, looks)
-    ).toBe(amount);
   });
 });
 

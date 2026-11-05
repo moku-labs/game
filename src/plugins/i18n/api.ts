@@ -187,8 +187,10 @@ function waitsForBundle(state: State, messages: CompiledMessages): boolean {
 function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages): void {
   const { state } = ctx;
 
+  // A locale nobody loaded has nothing in memory to swap: it reads the new file when it loads.
   if (!state.loaded.has(locale)) return;
 
+  // The one module in memory the new one replaces: a registry entry or the module of a held bundle.
   const entries = state.registered.get(locale) ?? [];
   const owners = entries.filter(entry => isReady(entry) && sharesKey(entry.messages, messages));
   const held = [...state.bundled.values()].filter(modules =>
@@ -196,9 +198,11 @@ function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages)
   );
   const found = owners.length + held.length;
 
+  // None yet for the strings of a bundle that is not loaded: they are read with the bundle.
   if (found === 0 && waitsForBundle(state, messages)) return;
   if (found !== 1) throw noSingleModule(locale);
 
+  // Swap it, merge the locale again, and let every key warn afresh.
   const [owner] = owners;
   const next = entries.map(entry => (entry === owner ? { from: entry.from, messages } : entry));
 
@@ -207,6 +211,7 @@ function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages)
   state.registered.set(locale, next);
   state.warned.clear();
 
+  // `text` reads the swapped strings when the locale is one a label shows.
   if (locale === state.locale || locale === ctx.config.fallback) {
     ctx.emit("i18n:locale-changed", { locale: state.locale });
   }

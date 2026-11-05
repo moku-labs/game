@@ -645,9 +645,9 @@ export type State = {
 };
 
 /**
- * text plugin API, `app.text`. Three questions: how big a piece of text is, which styles the game
- * registered, and what a game's number format answers; and one order, the dev hot swap of a styles
- * file. Everything else happens in the frame.
+ * text plugin API, `app.text`. Four questions: how big a piece of text is, whether a font has a
+ * glyph, which styles the game registered, and what a game's number format answers; and one order,
+ * the dev hot swap of a styles file. Everything else happens in the frame.
  *
  * @example
  * ```ts
@@ -660,8 +660,8 @@ export type TextApi = {
    * The size of a piece of text in reference pixels, from the advance table of the style's font.
    * A `Message` is formatted in the current locale first. Never touches a canvas, so the answer
    * is the same in a browser and in plain Bun. A block with pieces of other looks (`<span>`,
-   * `boldStyle`) is as high as the line boxes of its lines, and the width counts `textIndent`. Cached per style and resolved string, and per
-   * width for a `"box"` style. A call with a width is a layout's (`ui.layout` is the caller it is
+   * `boldStyle`) is as high as the line boxes of its lines, and the width counts `textIndent`.
+   * Cached per style and resolved string, and per width for a `"box"` style. A call with a width is a layout's (`ui.layout` is the caller it is
    * meant for): it marks the style as laid out, so a label of it with no box (one that fits its
    * row) no longer warns `wrap "box" outside layout` (F65).
    *
@@ -717,11 +717,14 @@ export type TextApi = {
    *   four built-in formats included, and for a format that threw (reported once per name).
    * @example
    * ```ts
-   * // "pill.number" is pure over the value and the language; on a `Countdown` it runs every frame.
-   * // Below a thousand it answers the digits in "digits.17", from there "1.5K" in "digits.14.5".
-   * app.text.formatted("pill.number", 949.6); // { text: "950", style: "digits.17" }
-   * app.text.formatted("pill.number", 1500); // { text: "1.5K", style: "digits.14.5" }
-   * app.text.formatted("mm:ss", 95_000); // undefined: a built-in format has no answer here
+   * // `ui` asks in the first solve of a label bound through "pill.number", before its `Text`
+   * // exists. Below a thousand the format answers the digits in "digits.17", from there "1.5K"
+   * // in "digits.14.5".
+   * const text = ctx.require(textPlugin);
+   *
+   * text.formatted("pill.number", 949.6); // { text: "950", style: "digits.17" }
+   * text.formatted("pill.number", 1500); // { text: "1.5K", style: "digits.14.5" }
+   * text.formatted("mm:ss", 95_000); // undefined: a built-in format has no answer here
    * ```
    */
   formatted(name: string, value: number): FormattedNumber | undefined;
@@ -787,9 +790,11 @@ export type KernelSlice = PluginCtx<Config, State> & {
 };
 
 /**
- * Domain context shared by the files of the plugin: the kernel slice plus the resolved deps.
+ * Domain context shared by the files of the plugin: the kernel slice, the resolved deps, and the
+ * layout options every layout and draw is handed, built once with the context: the warning of this
+ * app, the style table and the bold looks (both kept in place, so the references stand).
  */
-export type TextCtx = KernelSlice & { readonly deps: Deps };
+export type TextCtx = KernelSlice & { readonly deps: Deps; readonly layoutOptions: LayoutOptions };
 
 /**
  * Payload of the `assets:bundle-loaded` hook: a bundle landed, so a font may be readable now.

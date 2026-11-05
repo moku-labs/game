@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { currentLabelFixture, namedFixture, resolveFixture, runsFixture } from "./fixtures";
+import {
+  currentLabelFixture,
+  movingRunsFixture,
+  namedFixture,
+  resolveFixture,
+  runsFixture
+} from "./fixtures";
 
 // X1: one call is one frame of the text system over 100 labels (80 plain, 20 bound), the world
 // walk included, then the clear of phase `signals`.
 
 /** A window ten times the default, so a stray compile weighs nothing in a frame that keeps a few bytes. */
 const CALLS = 100_000;
+
+/** A window a tenth of the default for a frame that keeps 1.7 KB: wider, a GC lands in every one. */
+const MOVING_CALLS = 1000;
 
 describe("text resolve: heap per frame", () => {
   it("an idle frame over 100 labels, 20 bound, values unchanged, stays within budget", async ({
@@ -110,5 +119,16 @@ describe("text resolve: heap per frame", () => {
 
     await annotate(`text resolve, idle, 50 labels with runs: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.textRunsIdle + NOISE_BYTES);
+  }, 60_000);
+
+  // F152 verify: a label with runs whose bound value moves retexts every frame; its draw path
+  // builds the layout options of the context no more.
+  it("a frame where one bound label with <span> and boldStyle runs moves and is drawn stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(movingRunsFixture(), MOVING_CALLS);
+
+    await annotate(`text resolve and draw, one label with runs moving: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textRunsMoving + NOISE_BYTES);
   }, 60_000);
 });

@@ -2,6 +2,7 @@
  * @file ui/jsx — where the parts of a text field go, and how far the keyboard lifts it. Pure: the
  * mirror, the measured prefixes and the box in, numbers out. No ctx, no state, no DOM.
  */
+import { escapeTags } from "../../text/tags";
 import type { ResolvedStyle } from "../styles/types";
 import type { Composing, Mirror } from "./types";
 
@@ -283,20 +284,17 @@ export function liftOf(input: {
 }
 
 /**
- * A typed value as `text` takes it: plain text, where `<` is never markup. Every `<` is handed
- * as `text`'s escape `\<`, which draws a literal `<`; a value without one is handed as it is.
- * Only the string for `text` changes, never the indices of the caret and the selection.
+ * A typed value as `text` takes it: plain text, where `<` is never markup. It is `text`'s own
+ * `escapeTags`, so a field writes a `<` the way the tag grammar reads a literal one; a value
+ * without one is handed as it is. Only the string for `text` changes, never the indices of the
+ * caret and the selection.
  *
- * @param value - The typed text, or a piece of it.
- * @returns The string `text` draws and measures as exactly these characters.
  * @example
  * ```ts
  * literalText("<b>x"); // "\\<b>x"
  * ```
  */
-export function literalText(value: string): string {
-  return value.includes("<") ? value.replaceAll("<", String.raw`\<`) : value;
-}
+export const literalText: (value: string) => string = escapeTags;
 
 /** A high surrogate: the first half of a character outside the Basic Multilingual Plane. */
 const OPEN_SURROGATE = /[\uD800-\uDBFF]$/;

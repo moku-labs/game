@@ -510,7 +510,10 @@ export type TypedTr<Table extends StringTable> = {
  * ```
  */
 export type I18nKit<Table extends StringTable> = {
-  /** `tr`, checked against the game's table. */
+  /**
+   * `tr`, checked against the game's table: builds a `Message` for a key of the table; a key
+   * with parameters requires them.
+   */
   tr: TypedTr<Table>;
 
   /**

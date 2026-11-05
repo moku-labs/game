@@ -201,10 +201,12 @@ function escapeItems(items: readonly string[]): readonly string[] {
  * @returns The part.
  * @example
  * ```ts
- * // A compiled module written by hand, the shape `moku-game keys` writes for "Host: {name}".
+ * // A compiled module written by hand, the shape `moku-game keys` writes for "Host: {name}",
+ * // registered as the strings of `en`; `coin` is an icon element a game builds.
  * const lobby: I18n.CompiledMessages = {
  *   "lobby.host": (p, intl) => [{ kind: "text", text: "Host: " }, messageArgument(p.name, intl)]
  * };
+ * const coin: ElementNode = { type: "icon", props: { name: "hud.coin" }, children: [] };
  * app.i18n.plain(tr("lobby.host", { name: ["Ann", "Bob", "Cy"] })); // "Host: Ann, Bob, and Cy"
  * app.i18n.format(tr("lobby.host", { name: coin })); // [{ kind: "text", text: "Host: " }, { kind: "element", node: coin }]
  * app.i18n.format(tr("lobby.host", { name: "<b>x" })); // [{ kind: "text", text: "Host: \\<b>x" }]

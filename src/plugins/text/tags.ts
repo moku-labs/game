@@ -70,8 +70,24 @@ function spanOf(stack: readonly OpenTag[]): string | undefined {
 }
 
 /**
- * Appends text to the runs, merging it into the last one when the flags and the span are the
- * same.
+ * Tells whether two glyph runs are drawn in the same look: the same bold, italic, colour and span.
+ * Only then may their text be one run: the parse, the layout and the draw all ask this.
+ *
+ * @param first - One glyph run.
+ * @param second - The other.
+ * @returns True when nothing but the text tells them apart.
+ */
+export function sameLook(first: TextRun, second: TextRun): boolean {
+  return (
+    first.bold === second.bold &&
+    first.italic === second.italic &&
+    first.color === second.color &&
+    first.span === second.span
+  );
+}
+
+/**
+ * Appends text to the runs, merging it into the last one when it is in the same look.
  *
  * @param runs - The runs built so far.
  * @param text - The characters to append.
@@ -82,6 +98,7 @@ function pushText(runs: Run[], text: string, stack: readonly OpenTag[]): void {
 
   for (const open of stack) if (open.name === "color") color = open.color;
 
+  // The look the open tags give the text: the innermost colour and span win.
   const piece: TextRun = {
     kind: "text",
     text,
@@ -92,14 +109,8 @@ function pushText(runs: Run[], text: string, stack: readonly OpenTag[]): void {
   };
   const last = runs.at(-1);
 
-  if (
-    last !== undefined &&
-    last.kind === "text" &&
-    last.bold === piece.bold &&
-    last.italic === piece.italic &&
-    last.color === piece.color &&
-    last.span === piece.span
-  ) {
+  // Text in the look of the run before it joins that run.
+  if (last?.kind === "text" && sameLook(last, piece)) {
     last.text += text;
 
     return;
@@ -142,6 +153,7 @@ function flush(state: ParseState): void {
  * @param body - What stood between the angle brackets.
  */
 function applyTag(state: ParseState, body: string): void {
+  // An icon is a run of its own, in the span around it.
   const icon = ICON_TAG.exec(body);
 
   if (icon !== null) {
@@ -151,6 +163,7 @@ function applyTag(state: ParseState, body: string): void {
     return;
   }
 
+  // An opening tag changes the look of what follows.
   const open = openTag(body);
 
   if (open !== undefined) {
@@ -160,6 +173,7 @@ function applyTag(state: ParseState, body: string): void {
     return;
   }
 
+  // A close ends the innermost open tag of its name.
   const closes = body.startsWith("/");
   const at = closes ? state.stack.map(entry => entry.name).lastIndexOf(body.slice(1)) : -1;
 
@@ -170,8 +184,39 @@ function applyTag(state: ParseState, body: string): void {
     return;
   }
 
+  // Anything else stays visible, and the source is reported once.
   complain(state, closes ? "text: stray closing tag" : "text: unknown tag", body);
   state.buffer += `<${body}>`;
+}
+
+/**
+ * Tells whether the character at an index starts the escape `\<`, a literal `<`.
+ *
+ * @param source - The resolved string.
+ * @param index - Where the parse stands.
+ * @returns True for a backslash right before a `<`.
+ * @example
+ * ```ts
+ * isEscape(String.raw`a\<b`, 1); // true
+ * ```
+ */
+function isEscape(source: string, index: number): boolean {
+  return source[index] === "\\" && source[index + 1] === "<";
+}
+
+/**
+ * Writes a plain string so the grammar reads it as exactly these characters: every `<` becomes
+ * the escape `\<`. A string without `<` comes back as it is. A typed field value goes through it.
+ *
+ * @param text - The plain string.
+ * @returns The string `parseTags` reads as one run of the same characters.
+ * @example
+ * ```ts
+ * escapeTags("<b>x"); // "\\<b>x"
+ * ```
+ */
+export function escapeTags(text: string): string {
+  return text.includes("<") ? text.replaceAll("<", String.raw`\<`) : text;
 }
 
 /**
@@ -194,15 +239,16 @@ export function parseTags(source: string, warn: Warn): Run[] {
   let index = 0;
 
   while (index < source.length) {
-    const char = source[index] ?? "";
-
-    if (char === "\\" && source[index + 1] === "<") {
+    // The escape `\<` is a literal `<`.
+    if (isEscape(source, index)) {
       state.buffer += "<";
       index += 2;
 
       continue;
     }
 
+    // A character that opens no tag with a `>` after it is text.
+    const char = source[index] ?? "";
     const close = char === "<" ? source.indexOf(">", index + 1) : -1;
 
     if (close === -1) {
@@ -216,6 +262,7 @@ export function parseTags(source: string, warn: Warn): Run[] {
     index = close + 1;
   }
 
+  // What is left is text; a tag still open is closed by the end and reported.
   flush(state);
 
   if (state.stack.length > 0) complain(state, "text: unclosed tag", state.stack[0]?.name ?? "");

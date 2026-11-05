@@ -28,13 +28,14 @@ import {
 } from "../../components";
 import { createTextAdapter } from "../../display";
 import { layoutRuns, parseAdvances } from "../../measure";
-import { createTextFrame, createTextSystem, resolveAdded } from "../../resolve";
+import { createTextFrame, createTextSystem, layoutOptionsOf, resolveAdded } from "../../resolve";
 import { createTextState } from "../../state";
 import { parseTags } from "../../tags";
 import type {
   AdvanceTable,
   Config,
   Deps,
+  KernelSlice,
   Run,
   State,
   TextCtx,
@@ -151,15 +152,16 @@ function textCtx(world: MockWorld, now: Float64Array): TextCtx {
   state.styles.set(BOX_STYLE, { ...styles.body, wrap: "box" });
   state.styles.set(BALANCED_STYLE, { ...styles.body, wrap: "box", balance: true });
 
-  return {
+  const kernel = {
     config,
     state,
     emit: () => undefined,
     global: {},
     log: SILENT,
-    require: () => undefined,
-    deps
-  } as unknown as TextCtx;
+    require: () => undefined
+  } as unknown as KernelSlice;
+
+  return { ...kernel, deps, layoutOptions: layoutOptionsOf(kernel) };
 }
 
 /** The answers of the format of the named fixture, kept: what is measured is the engine's cost. */
@@ -649,4 +651,102 @@ export function gameDrawFixture(runs: boolean): () => void {
   for (let index = 0; index < WARM_FRAMES; index += 1) draw();
 
   return draw;
+}
+
+/** The format of the moving runs fixture. */
+const RUN_FORMAT = "perf.pill";
+
+/**
+ * One kept answer per value of the moving runs fixture: the game line with a bold count in the
+ * bold look of the row and the same number in a span of the amount style.
+ */
+const RUN_ANSWERS: readonly TextFormatAnswer[] = Object.freeze(
+  Array.from({ length: VALUES }, (_unused, value) =>
+    Object.freeze({
+      content: `<b>${value}★</b> можно <span style=${AMOUNT_STYLE}>${value}</span>`,
+      style: ROW_STYLE
+    })
+  )
+);
+
+/**
+ * Puts the two fonts of the game's row into a state, every glyph of its lines in them, as a device
+ * has them loaded: a frame measures from the tables, never on the fallback that warns per glyph.
+ *
+ * @param state - The text state.
+ */
+function addRowFonts(state: State): void {
+  const chars = [...new Set("0123456789★ можно")].map(char => ({ char, xadvance: 24 }));
+
+  for (const key of ["ui.fonts.text-medium", "ui.fonts.alt-bold"]) {
+    const fnt = JSON.stringify({ info: { size: 48 }, common: { lineHeight: 59, base: 46 }, chars });
+
+    state.tables.set(key, parseAdvances(fnt, key));
+  }
+}
+
+/**
+ * 50 labels of the game's row bound through a format whose answer holds a `<b>` count in the bold
+ * look of `boldStyle` and a `<span>` of another style. The counter of the first label moves every
+ * frame, through ten values whose layouts stay cached, and its container is updated through the
+ * display adapter as phase `sync` does for a `changed(Text)`: the text step writes the new string,
+ * and the adapter writes it into the objects already there (the same shape, so a retext).
+ *
+ * @returns One frame: phase `layout`, the adapter update of the moving label, the clear of phase
+ *   `signals`.
+ */
+export function movingRunsFixture(): () => void {
+  const world = createMockWorld();
+  const ecs = stableEcs(world);
+  const ctx = textCtx(world, new Float64Array([CLOCK_START_MS]));
+  const renderer = { host: { pixi: (): PixiModule => STUB_PIXI } } as unknown as RendererApi;
+  const adapter = createTextAdapter({ ...ctx, deps: { ...ctx.deps, renderer } });
+  const time: Time = { delta: 16.6, elapsed: 0, scale: 1, frame: 1, idle: false };
+
+  addRowStyles(ctx.state);
+  addRowFonts(ctx.state);
+  ctx.state.formats.set(RUN_FORMAT, value => RUN_ANSWERS[value % VALUES] ?? SAME_ANSWER);
+  world.api.ecs.system(createTextSystem(ctx, createTextFrame(ctx)));
+
+  let first: Entity | undefined;
+
+  for (let index = 0; index < RUN_LABELS; index += 1) {
+    const entity = world.api.ecs.spawn(OWNER, [
+      Counter({ value: index % VALUES }),
+      Text({ style: ROW_STYLE, box: ROW_BOX, bind: bind(Counter, "value", { format: RUN_FORMAT }) })
+    ]);
+
+    first ??= entity;
+  }
+
+  const label = first ?? 0;
+  // The stored value, written in place so the fixture's own write keeps nothing.
+  const counter = world.api.ecs.get(label, Counter) as { value: number };
+
+  ecs.runPhase("layout", time);
+  ecs.clearChanges();
+
+  // The world writes the stored value in place: what the container shows is kept in a copy, as the
+  // renderer keeps the previous value, and written in place after each update.
+  const shown: TextValue = { ...(world.api.ecs.get(label, Text) as TextValue) };
+  const object = adapter.create(shown, 1);
+  let tick = 0;
+
+  const frame = (): void => {
+    time.frame += 1;
+    tick = (tick + 1) % VALUES;
+    counter.value = tick;
+    ecs.runPhase("layout", time);
+
+    const next = world.api.ecs.get(label, Text) as TextValue;
+
+    adapter.update(object, shown, next);
+    shown.resolved = next.resolved;
+    shown.style = next.style;
+    ecs.clearChanges();
+  };
+
+  for (let index = 0; index < WARM_FRAMES; index += 1) frame();
+
+  return frame;
 }

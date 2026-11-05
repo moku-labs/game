@@ -6,17 +6,9 @@
  */
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiSprite, PixiTexture } from "../renderer/types";
-import {
-  ascentOf,
-  fontOfRun,
-  leadingOf,
-  lineHeightOf,
-  lookOf,
-  measureRun,
-  metricsFontOf,
-  parseAdvances
-} from "./measure";
-import { drawsWith, layoutFor, layoutOptionsOf, markDirty, styleOf, warnOnce } from "./resolve";
+import { ascentOf, fontOfRun, leadingOf, lineHeightOf, lookOf, metricsFontOf } from "./lines";
+import { measureRun, parseAdvances } from "./measure";
+import { drawsWith, layoutFor, markDirty, styleOf, warnOnce } from "./resolve";
 import type {
   DrawnLabel,
   IconRun,
@@ -594,7 +586,7 @@ function eachRun(
 ): void {
   const { style, layout } = label;
   const tables = ctx.state.tables;
-  const options = layoutOptionsOf(ctx);
+  const options = ctx.layoutOptions;
   const width = alignWidthOf(style, layout, value.box ?? 0);
   const left = -value.anchor.x * width;
   let top = -value.anchor.y * layout.height;

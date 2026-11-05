@@ -85,5 +85,17 @@ export const BUDGET = {
    * half with a price in a `<span>` of another style. The looks are built with the styles and the
    * layouts are cached, so a frame that lays nothing out keeps nothing.
    */
-  textRunsIdle: 0
+  textRunsIdle: 0,
+  /**
+   * F152 verify (change 2026-11-05-f152-text-runs): 50 bound labels of the game's row through a
+   * format whose answer holds a `<b>` count in the bold look and a `<span>`, fonts loaded; one
+   * counter moves every frame and its container is updated through the display adapter (a retext).
+   * The first window of this fixture that measures the draw path of a changing label. 1 720 B: the
+   * text step's patch and the cache key of a long two-byte string, then the adapter update, which
+   * allocated before F152 too (the cache key again, the drawn record, the shape and retext
+   * closures, one point and one spot list per run, the one-character strings of non-Latin-1
+   * glyphs it measures). The same fixture on a plain one-run string is 1 000 B; the 720 B more are
+   * the three runs. Before the fix the draw built the layout options per call: 2 344 B.
+   */
+  textRunsMoving: 1721
 } as const;

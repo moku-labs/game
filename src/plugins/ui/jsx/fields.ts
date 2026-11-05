@@ -13,6 +13,7 @@ import {
   Transform,
   type TransformValue
 } from "../../renderer/components";
+import type { ViewportApi } from "../../renderer/viewport/types";
 import { Text } from "../../text/components";
 import type { AnyComponentValue, Entity } from "../../world/types";
 import { UI_OWNER } from "../components";
@@ -61,6 +62,9 @@ const PLACEHOLDER_ALPHA = 0.5;
 
 /** The separator between the inputs of a field's fingerprint. */
 const FIELD_SEPARATOR = "\u0000";
+
+/** What a fingerprint holds for an input the field has not: no mirror, no composing range. */
+const NO_INPUT = "-";
 
 /** The props of an `input` tag a field record keeps. */
 type FieldAttributes = Pick<
@@ -241,6 +245,27 @@ function partValues(
 }
 
 /**
+ * Where a rect of reference units is on the page: its rect in screen px, and its bottom edge as
+ * the viewport maps it, which the keyboard lift is measured from.
+ *
+ * @param viewport - The viewport of the renderer.
+ * @param drawn - The rect in reference units.
+ * @returns The rect in screen px and its bottom.
+ */
+function screenRectOf(viewport: ViewportApi, drawn: Rect): { rect: Rect; bottom: number } {
+  const topLeft = viewport.toScreen({ x: drawn.x, y: drawn.y });
+  const bottomRight = viewport.toScreen({ x: drawn.x + drawn.w, y: drawn.y + drawn.h });
+  const rect = {
+    x: topLeft.x,
+    y: topLeft.y,
+    w: bottomRight.x - topLeft.x,
+    h: bottomRight.y - topLeft.y
+  };
+
+  return { rect, bottom: bottomRight.y };
+}
+
+/**
  * A cheap fingerprint of what a field is laid out from: the selection and the composing range
  * while it is edited, the box, the padding, the text style, the placeholder and the value. The
  * value goes last, so no character of it can shift another input.
@@ -259,17 +284,22 @@ function inputsOf(
   composing: Composing | undefined,
   value: string
 ): string {
-  const pad = paddingOf(element.style.padding);
+  // Where the caret and the composition stand, while the field is edited.
   const selection =
     mirror === undefined
-      ? "-"
+      ? NO_INPUT
       : `${mirror.selectionStart},${mirror.selectionEnd},${mirror.direction}`;
-  const range = composing === undefined ? "-" : `${composing.start},${composing.end}`;
+  const range = composing === undefined ? NO_INPUT : `${composing.start},${composing.end}`;
+
+  // The room the text has: the box and its padding.
+  const pad = paddingOf(element.style.padding);
   const box = `${element.rect.w},${element.rect.h},${pad.top},${pad.right},${pad.bottom},${pad.left}`;
 
+  // How it is drawn: the text style, and the placeholder quoted so no character of it shifts another.
   const placeholder = JSON.stringify(field.placeholder ?? "");
   const look = `${field.textStyle}${FIELD_SEPARATOR}${placeholder}`;
 
+  // The value last, so no character of it can shift another input.
   return [selection, range, box, look, value].join(FIELD_SEPARATOR);
 }
 
@@ -812,15 +842,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
 
     // Find the rect the field is drawn at, in screen px.
     const viewport = ctx.deps.renderer.viewport;
-    const drawn = rootRectOf(ctx, state, field, lookup);
-    const topLeft = viewport.toScreen({ x: drawn.x, y: drawn.y });
-    const bottomRight = viewport.toScreen({ x: drawn.x + drawn.w, y: drawn.y + drawn.h });
-    const rect = {
-      x: topLeft.x,
-      y: topLeft.y,
-      w: bottomRight.x - topLeft.x,
-      h: bottomRight.y - topLeft.y
-    };
+    const { rect, bottom } = screenRectOf(viewport, rootRectOf(ctx, state, field, lookup));
 
     // Lift by what the keyboard covers under the field.
     const keyboard = text.keyboard;
@@ -829,7 +851,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       keyboard.inset <= 0
         ? 0
         : liftOf({
-            fieldBottom: bottomRight.y,
+            fieldBottom: bottom,
             margin: ctx.config.textInput.keyboardMargin,
             innerHeight: keyboard.innerHeight,
             inset: keyboard.inset
