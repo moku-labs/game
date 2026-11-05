@@ -25,6 +25,7 @@ Open `http://127.0.0.1:4173/#slope-4`. Change the part after `#` and the scene c
 | `#arms=slope-0,slope-2&every=2&k=8` | Turns through the scenes, 2 s each, for as long as the page is open. |
 | `#arms=rest,full,rows,set-flash,set-grade,set-vignette,set-grade-full,sweep-grade&every=2&k=8` | The arms of the effect set's first slice with the arms its lines compare against. |
 | `#arms=rest,rows,set-reveal-line,set-reveal-round,set-dissolve,set-shine,set-aura,set-fold&every=2&k=8` | The arms of the effect set's second slice with `rest` and `rows`, which its lines compare against. |
+| `#arms=rest,set-bloom,set-bloom-held,set-bloom-one,sweep-blur,sweep-blur-q4,sweep-grade&every=2&k=8` | The arms of the effect set's third slice with `rest`, which the lines of `set-bloom-held` and `set-bloom-one` compare against, and the three arms `sweep` splits into. |
 
 From the editor: open this folder as a game. The command `bench.scene` (`{ scene, k? }`) switches the
 scene, the sources `bench.scenes` and `bench.readout` list the scenes and the numbers.
@@ -42,7 +43,7 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `fade` | Two roots 390 wide, 40 shadowed items each, a countdown text, an emitter, a 420 ms cross-dissolve on loop. | The fade between two screens. |
 | `entry` | 40 items with shadow and outline mounting every 1.5 s. | A board entry. |
 | `glow` | N placed glows with breath and glint uniforms under a filtered root. | The ward at idle, ObjectGlow. |
-| `sweep` | Blur at quality 4 and a ColorMatrix over the full screen, a 1 s ramp on loop. Opened by address only since F126 stage 3: the colour matrix's pass hides in the blur's, so slice 3 splits it into `sweep-blur`, `sweep-blur-q4` and `sweep-grade`. | The connect sweep. |
+| `sweep` | Blur at quality 4 and a ColorMatrix over the full screen, a 1 s ramp on loop. Opened by address only since F126 stage 3: the colour matrix's pass hides in the blur's, so slice 3 splits it into `sweep-blur`, `sweep-blur-q4` and `sweep-grade`, which the schedule of the phone runs. | The connect sweep. |
 | `fog` | Round wipes on 12 tiles and a 2048 × 1024 layer, `cache: false`: on WebGPU each runs on its quad over its kept picture. | FogWipe and FogDevelop. |
 | `fog-local` | The same with `cache: "local"`. Half of each turn writes nothing, so the pictures rest. | What keeping the fog would win. |
 | `flip` | A perspective flip and fold that reads the canvas origin. | A card flip. |
@@ -64,6 +65,11 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `set-shine` | The same rows under `Shine`, its `position` written each frame from -0.5 to 1.5. | A glint on a reward. |
 | `set-aura` | The same rows under `Aura`, its `strength` written each frame: 13 samples a pixel over the rows padded by 8. | A hinted tile, a selected card. |
 | `set-fold` | The same rows under `Fold`, its `angle` written each frame as `rows` writes its own, padded by 8 as `rows` is. | OrderFlip, CoverFold. |
+| `set-bloom` | 12 tiles 128 × 128 (the tiles of `fog`) under the engine's `Bloom`, its `strength` written each frame: a chain member has no quad, so every frame runs its chain in JavaScript and redraws stage 3, 3 passes a tile (the chain itself is kept: a change of `strength` leaves its steps as they were). The worst case, reported with its pass count. | A glow on a reward or a gem. |
+| `set-bloom-held` | The same 12 tiles, their `strength` written once to 0.6, then at rest, one small sprite moving so frames are drawn: 12 kept pictures, a batched sprite each. Against `rest`. | Blooming rewards that stand still. |
+| `set-bloom-one` | The same 12 tiles, one of them its `strength` written each frame, the other 11 kept: 3 passes a frame for the moving one. Against `rest`. | One reward pulsing among still ones. |
+| `sweep-blur` | A full-screen `Blur({ strength: 6 })` at quality 0, so the config's 2: 4 passes at 0.5 on a phone, its strength written each frame (6 ± 0.5). | The blur of an overlay, alone. |
+| `sweep-blur-q4` | The game's pan: a full-screen `Blur` at quality 4, its strength 0 to 16 in a 1 s loop: 8 passes. | The connect sweep's blur, without its colour matrix. |
 | `promo` | A perspective map of live text, a time-driven procedural quad, a mirrored column with a gradient, a stroke sweep. | The promo screen. |
 
 Every filter body is the bench's own, shaped like the case, in WGSL, but for the `set-*` arms, which

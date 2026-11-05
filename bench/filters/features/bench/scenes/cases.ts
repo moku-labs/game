@@ -4,6 +4,7 @@
 import {
   Alpha,
   Aura,
+  Bloom,
   Blur,
   bind,
   ColorMatrix,
@@ -892,6 +893,150 @@ const SET_SCENES: readonly BenchScene[] = [
   )
 ];
 
+/** The tiles of the `set-bloom` arms: the 12 of `fog`, 128 × 128 each. */
+const BLOOM_TILES = 12;
+
+/** The strength a `set-bloom` arm writes, the member's default. */
+const BLOOM_STRENGTH = 0.6;
+
+/** How far a moving `Bloom`'s strength swings around `BLOOM_STRENGTH`. */
+const BLOOM_WAVE = 0.4;
+
+/**
+ * Twelve tiles of 128 × 128 under `Bloom`, three a row, and what the arm writes of them.
+ *
+ * @param name - The arm.
+ * @param stands - What it measures.
+ * @param start - The strength each tile's `Bloom` starts at.
+ * @param writes - Given the stage and the tiles once they stand, answers the write of each frame.
+ * @returns The scene.
+ */
+function bloomTilesScene(
+  name: string,
+  stands: string,
+  start: number,
+  writes: (stage: Stage, tiles: readonly World.Entity[]) => (elapsedMs: number) => void
+): BenchScene {
+  return {
+    name,
+    stands,
+    mount: stage => {
+      fullSprite(stage);
+
+      const tiles: World.Entity[] = [];
+
+      for (let index = 0; index < BLOOM_TILES; index += 1) {
+        tiles.push(
+          stage.spawn(
+            Transform({ x: (index % 3) * 130, y: Math.floor(index / 3) * 130 }),
+            Sprite({
+              texture: PICTURE,
+              width: FOG_TILE_SIDE,
+              height: FOG_TILE_SIDE,
+              anchor: { x: 0, y: 0 }
+            }),
+            Bloom({ strength: start })
+          )
+        );
+      }
+
+      return { tick: writes(stage, tiles) };
+    }
+  };
+}
+
+/**
+ * The arms of `Bloom` (F126 stage 3 slice 3, its second shape): every tile moving, every tile kept, and one moving
+ * among eleven kept. A chain member has no quad, so a moving tile runs its chain and redraws stage 3, 3 passes, in
+ * every frame; a still one is a kept picture, a batched sprite.
+ */
+const BLOOM_SCENES: readonly BenchScene[] = [
+  bloomTilesScene(
+    "set-bloom",
+    "12 tiles of 128 x 128 under Bloom, its strength written each frame: the chain and stage 3, no quad",
+    BLOOM_STRENGTH,
+    (stage, tiles) => elapsedMs => {
+      for (const [index, tile] of tiles.entries()) {
+        stage.set(tile, Bloom, { strength: BLOOM_STRENGTH + BLOOM_WAVE * wave(elapsedMs, index) });
+      }
+    }
+  ),
+  bloomTilesScene(
+    "set-bloom-held",
+    "the 12 Bloom tiles, their strength written once to 0.6, then at rest: kept pictures, one small sprite moving",
+    0,
+    (stage, tiles) => {
+      const mover = stage.spawn(
+        Transform({ x: 0, y: 700 }),
+        Sprite({ texture: PICTURE, width: 8, height: 8, anchor: { x: 0, y: 0 } })
+      );
+      let written = false;
+
+      return elapsedMs => {
+        if (!written) {
+          for (const tile of tiles) stage.set(tile, Bloom, { strength: BLOOM_STRENGTH });
+
+          written = true;
+        }
+
+        stage.set(mover, Transform, { x: (elapsedMs / 20) % 300 });
+      };
+    }
+  ),
+  bloomTilesScene(
+    "set-bloom-one",
+    "the 12 Bloom tiles, one of them its strength written each frame, the others still",
+    BLOOM_STRENGTH,
+    (stage, tiles) => {
+      const [moving] = tiles;
+
+      return elapsedMs => {
+        if (moving !== undefined) {
+          stage.set(moving, Bloom, { strength: BLOOM_STRENGTH + BLOOM_WAVE * wave(elapsedMs, 0) });
+        }
+      };
+    }
+  )
+];
+
+/** The strongest blur of `sweep-blur-q4`, as the game's pan sweeps it. */
+const SWEEP_Q4_BLUR = 16;
+
+/**
+ * The arms `sweep` splits into (F126 stage 3 slice 3): Pixi's `Blur` alone over the whole screen, at the config's
+ * quality and at the game's own, so the colour matrix's pass no longer hides in the blur's.
+ */
+const SWEEP_SCENES: readonly BenchScene[] = [
+  fullWriteScene(
+    "sweep-blur",
+    "a full-screen Blur of strength 6 at quality 0, the config's 2: 4 passes at 0.5 on a phone, written each frame",
+    Blur,
+    elapsedMs => ({ strength: 6 + 0.5 * wave(elapsedMs, 0) })
+  ),
+  {
+    name: "sweep-blur-q4",
+    stands:
+      "the game's pan: a full-screen Blur at quality 4, its strength 0 to 16 in a 1 s loop: 8 passes",
+    mount: stage => {
+      const root = stage.spawn(
+        Transform({ x: 0, y: 0 }),
+        Sprite({
+          texture: PICTURE,
+          width: stage.width,
+          height: stage.height,
+          anchor: { x: 0, y: 0 }
+        }),
+        Blur({ strength: 0, quality: 4 })
+      );
+
+      return {
+        tick: elapsedMs =>
+          stage.set(root, Blur, { strength: loop(elapsedMs, 1000) * SWEEP_Q4_BLUR })
+      };
+    }
+  }
+];
+
 /** Every case scene. */
 export const CASE_SCENES: readonly BenchScene[] = [
   fullScene,
@@ -914,5 +1059,7 @@ export const CASE_SCENES: readonly BenchScene[] = [
   rowScene("rows-live", "the same rows with cache: false, drawn live", RowFlipLive),
   restScene,
   rowsEnterScene,
-  ...SET_SCENES
+  ...SET_SCENES,
+  ...BLOOM_SCENES,
+  ...SWEEP_SCENES
 ];

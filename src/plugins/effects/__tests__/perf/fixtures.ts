@@ -23,6 +23,7 @@ import { defineFilter } from "../../filters/define";
 import type { FilterDefinition, FilterFields, FilterInstance } from "../../filters/types";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
+import { Bloom } from "../../set/bloom";
 import { Flash } from "../../set/flash";
 import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
 import { Frosted, Under } from "../filter-fixtures";
@@ -193,6 +194,13 @@ export const FLASH_AMOUNT: TweenedField = {
   make: start => Flash({ amount: start })
 };
 
+/** The `strength` of the effect set's `Bloom`, the member with a chain: a change of it runs the chain again. */
+export const BLOOM_STRENGTH: TweenedField = {
+  component: Bloom,
+  field: "strength",
+  make: start => Bloom({ strength: start })
+};
+
 /** A started mock with filtered views, the step of its `sync` phase and the stored filter a tween moves. */
 export type FiltersFixture = {
   mock: MockEffects;
@@ -242,7 +250,7 @@ function viewComponents(index: number, tween: TweenedField): AnyComponentValue[]
 /**
  * Starts a mock with `FILTERED_VIEWS` filtered views, runs the frames that build and hand over their instances, and
  * clears every change set. The first view carries the filter a tween case moves: `Glow` by default. The feature lists
- * the game's `Tint` and the effect set's `Flash`.
+ * the game's `Tint` and the effect set's `Flash` and `Bloom`.
  *
  * @param quads - The definitions whose quad passed its check: their slots hand a quad over.
  * @param tween - The filter and the field a tween case moves on the first view.
@@ -256,7 +264,7 @@ export function filtersFixture(
 
   for (const definition of quads) mock.state.checks.quads.add(definition);
 
-  mock.features.push({ name: "perf", description: { filters: [Tint, Flash] } });
+  mock.features.push({ name: "perf", description: { filters: [Tint, Flash, Bloom] } });
 
   const counter = plainRenderer(mock);
 

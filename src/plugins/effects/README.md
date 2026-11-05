@@ -269,7 +269,7 @@ An `Alpha` at `alpha: 1` and `resolution: 0` would copy its subtree unchanged th
 
 ### The effect set
 
-Ready members a game lists in a feature's `filters`, as its own filters, from the root: `Flash` (a colour wash), `Grade` (contrast, brightness, saturation, tint), `Vignette` (darker, or coloured, outside a disc), `RevealLine` (shown up to a sweeping line), `RevealRound` (shown inside a growing disc), `Dissolve` (eaten by a noise, with a rim), `Shine` (a band of light sweeping across), `Aura` (a soft halo around the shape) and `Fold` (turned about an axis, as a card flips). Each is a `defineFilter` of the engine: one pass, `cache: "local"`, one sample of the input (`Aura` 13), no padding (`Aura` its live `spread`, `Fold` 8 px), so a still view is kept as a picture and a moving value draws on the view's own quad from its third write (WebGPU; on WebGL each frame of a tween is one filter pass). Nothing of the set is registered by itself, and a game that lists no member carries none of its shaders. The members, their fields, budgets and phone numbers: [set/README.md](set/README.md).
+Ready members a game lists in a feature's `filters`, as its own filters, from the root: `Flash` (a colour wash), `Grade` (contrast, brightness, saturation, tint), `Vignette` (darker, or coloured, outside a disc), `RevealLine` (shown up to a sweeping line), `RevealRound` (shown inside a growing disc), `Dissolve` (eaten by a noise, with a rim), `Shine` (a band of light sweeping across), `Aura` (a soft halo around the shape), `Fold` (turned about an axis, as a card flips) and `Bloom` (light around what is bright). Each is a `defineFilter` of the engine: one pass, `cache: "local"`, one sample of the input (`Aura` 13), no padding (`Aura` its live `spread`, `Fold` 8 px), so a still view is kept as a picture and a moving value draws on the view's own quad from its third write (WebGPU; on WebGL each frame of a tween is one filter pass). `Bloom` is the one with a chain: its input `bright` is drawn by two stages of the set (the light above `threshold` cut and boxed down to ¼, or ⅛ for a wide radius, in one pass, then a 13-tap blur there in one more), 3 passes with its body at any radius and resolution, so it is for an object, not the screen; a still one is kept as a picture, and a tween of it runs its chain in every frame it moves and redraws stage 3, 3 passes a frame for `strength`, 7 for `threshold` or `radius`, never the quad. Nothing of the set is registered by itself, and a game that lists no member carries none of its shaders. The members, their fields, budgets and phone numbers: [set/README.md](set/README.md).
 
 ### The filter sync
 
@@ -310,7 +310,7 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 
 The filter components are root exports, not members of `app.effects`: the built-ins (`Glow`, `Blur`, …, see Built-in
 filters) and the effect set (`Flash`, `Grade`, `Vignette`, `RevealLine`, `RevealRound`, `Dissolve`, `Shine`, `Aura`,
-`Fold`, see `set/README.md`), each listed in a feature's `filters`.
+`Fold`, `Bloom`, see `set/README.md`), each listed in a feature's `filters`.
 
 | Member | Behaviour |
 |---|---|

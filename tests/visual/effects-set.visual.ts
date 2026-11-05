@@ -1,12 +1,13 @@
 /**
- * @file The browser leg of the engine's effect set (F126 stage 3 slices 1 and 2): every member on the real Pixi and the
+ * @file The browser leg of the engine's effect set (F126 stage 3 slices 1 to 3): every member on the real Pixi and the
  * real GPU, in Chrome, on WebGPU and on WebGL (`?renderer=webgl`), at resolution 1 and 2, with
  * `debug.verifyFrames` on. Per member: a held value is kept as a picture and equals its live frame within the frame
  * oracle's thresholds (a channel over 24, a ratio over 0.001); a tweening value runs on the view's own quad on WebGPU
  * and stays within 1/255 of its live frame; one pixel by hand (Flash at amount 1 is its colour, Grade at saturation 0
  * of red is the luma, Vignette's centre is the source; RevealLine's far corners at π/4 and progress 1, Shine's line and
- * a transparent corner under it, Aura next to an edge, Fold at a half turn; `effects-set/page.ts` has the numbers) is
- * within 2/255; and every WebGL capture is held against the WebGPU capture of the same row: alpha within 2/255 and
+ * a transparent corner under it, Aura next to an edge, Fold at a half turn, Bloom at threshold 1; `effects-set/page.ts`
+ * has the numbers) is within 2/255; `Bloom`, which reads a chain and never takes the quad, is held within 1/255 of live
+ * at radius 16 and 32 and after its tween, on both backends, its tween off the quad; and every WebGL capture is held against the WebGPU capture of the same row: alpha within 2/255 and
  * colour within 8/255 on 99.5 % of the pixels. Both comparisons are of premultiplied pixels, what the canvas
  * composites (Pixi's WebGL extract writes premultiplied pixels, its WebGPU one straight alpha). No
  * `renderer:stale-picture`, no shader, pipeline or GPU error, no unlisted member. Not a vitest file:
@@ -39,6 +40,33 @@ const RESOLUTIONS = [1, 2] as const;
 const RENDERERS = ["webgpu", "webgl"] as const;
 
 /**
+ * The problems of a row of the member with a chain, in words, on either backend: its tween takes no quad and is kept
+ * again once the value stops, and a strict row is within 1/255 of its live frame.
+ *
+ * @param row - What the row answered.
+ * @returns The problems.
+ */
+function chainProblems(row: SetRow): string[] {
+  const problems: string[] = [];
+
+  if (row.kind === "chain" && row.shaded > 0) {
+    problems.push(`${row.name}: on a quad, which a chain member never takes`);
+  }
+
+  if (row.kind === "chain" && row.pictures < 1) {
+    problems.push(`${row.name}: not kept again once its value stopped`);
+  }
+
+  if (row.strict === true && row.largest > 1) {
+    problems.push(
+      `${row.name}: ${row.overOne} pixels more than 1/255 off live, at most ${row.largest}`
+    );
+  }
+
+  return problems;
+}
+
+/**
  * The problems of one row, in words.
  *
  * @param renderer - The backend.
@@ -56,6 +84,8 @@ function rowProblems(renderer: (typeof RENDERERS)[number], row: SetRow): string[
       problems.push(`${row.name}: ${row.differing} of ${row.total} pixels differ from live`);
     }
   }
+
+  problems.push(...chainProblems(row));
 
   if (row.kind === "tween" && renderer === "webgpu") {
     if (row.shaded < 1) problems.push(`${row.name}: not on its quad`);

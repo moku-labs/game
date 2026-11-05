@@ -1,13 +1,26 @@
 /**
  * @file effects/set — what every member's unit test checks, as one set of cases. Not a test file: the unit project
  * only collects `*.test.ts`. A member is one `defineFilter` of the set: the cases read its definition and its own
- * bodies, never `filter.source`, which carries the set head.
+ * bodies, never `filter.source`, which carries the set head. `bodyCases` is the part of them that holds for any body
+ * of the set: a chain member (`Bloom`) and the stages its chain draws, which no quad runs, take those alone.
  */
 import { expect, it } from "vitest";
-import type { FilterComponent, FilterFields } from "../../../filters/types";
+import type { FilterComponent, FilterDefinition, FilterFields } from "../../../filters/types";
 
 /** The one entry point a body may have for `assembleQuad` to rewrite it, whitespace dropped. */
 const PLAIN_HEAD = "@fragmentfnmainFragment(@location(0)uv:vec2<f32>)->@location(0)vec4<f32>";
+
+/** What the cases of a body read: its definition, its two bodies, and the uniforms the bodies read. */
+export type BodyUnderTest = {
+  /** The definition. */
+  readonly filter: FilterDefinition;
+  /** Its WGSL body, without the set head. */
+  readonly wgsl: string;
+  /** Its GLSL body, without the set head. */
+  readonly glsl: string;
+  /** The uniforms the bodies read, in declaration order; every declared one when left out (a chain reads the rest). */
+  readonly reads?: readonly string[];
+};
 
 /** What a member's case set reads. */
 export type MemberUnderTest = {
@@ -63,6 +76,16 @@ function twinLines(body: string, language: "wgsl" | "glsl"): string[] {
 }
 
 /**
+ * How often a WGSL body has the one entry point `assembleQuad` can rewrite.
+ *
+ * @param wgsl - The body, without the set head.
+ * @returns The count: 1 for a body of the set.
+ */
+export function headsOf(wgsl: string): number {
+  return wgsl.replaceAll(/\s/g, "").split(PLAIN_HEAD).length - 1;
+}
+
+/**
  * Declares the cases every member shares, inside the caller's `describe`.
  *
  * @param under - The member and its bodies.
@@ -70,13 +93,10 @@ function twinLines(body: string, language: "wgsl" | "glsl"): string[] {
 export function memberCases(under: MemberUnderTest): void {
   const { member, wgsl, glsl, padding } = under;
   const { filter } = member;
-  const declared = filter.uniforms.map(uniform => uniform.name);
 
   // Bug: a member that fell off the quad: a body `assembleQuad` cannot rewrite pays a filter pass for every value.
   it("has the plain signature once and rides the quad", () => {
-    const heads = wgsl.replaceAll(/\s/g, "").split(PLAIN_HEAD).length - 1;
-
-    expect(heads).toBe(1);
+    expect(headsOf(wgsl)).toBe(1);
     expect(filter.quadSource).toContain("fn filterBody(uv: vec2<f32>) -> vec4<f32>");
   });
 
@@ -88,16 +108,30 @@ export function memberCases(under: MemberUnderTest): void {
     expect(filter.padding).toBe(padding);
   });
 
+  bodyCases({ filter, wgsl, glsl });
+}
+
+/**
+ * Declares the cases of any body of the set, inside the caller's `describe`: its uniforms in both languages, its
+ * twins line for line, its place through `inputPlace`.
+ *
+ * @param under - The definition and its bodies.
+ */
+export function bodyCases(under: BodyUnderTest): void {
+  const { filter, wgsl, glsl } = under;
+  const declared = filter.uniforms.map(uniform => uniform.name);
+  const reads = under.reads ?? declared;
+
   // Bug: the WGSL reads a uniform the member never declared, or ignores one it did: a field that moves nothing.
   it("reads in its WGSL exactly the uniforms it declares", () => {
     const used = new Set([...wgsl.matchAll(/\bfu\.(\w+)/g)].map(match => match[1]));
 
-    expect(used).toEqual(new Set(declared));
+    expect(used).toEqual(new Set(reads));
   });
 
   // Bug: a twin that forgot a uniform: on WebGL the field moves nothing.
   it("reads every declared uniform by its bare name in its GLSL and sets finalColor", () => {
-    expect(readsOf(glsl, declared)).toEqual(declared);
+    expect(readsOf(glsl, declared)).toEqual(reads);
     expect(glsl).toMatch(/\bvoid\s+main\s*\(/);
     expect(glsl).toMatch(/\bfinalColor\s*=/);
     expect(filter.glsl.endsWith(glsl)).toBe(true);
