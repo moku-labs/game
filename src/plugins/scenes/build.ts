@@ -120,21 +120,24 @@ function endBuild(ctx: ScenesCtx, build: SceneBuild, how: "commit" | "mount"): v
 }
 
 /**
- * Tells whether the floor on the swap lets a built scene commit: no floor, or the clock passed it and the look was drawn
- * once. The count is the look's, never the build's, so a switch slower than the floor is many frames past it and the
- * floor adds no frame. While it holds, the loop is kept awake: it may stop at `idleFps: 0` during a long floor. No floor
- * is one read; no allocation either way.
+ * Tells whether the floor on the swap lets a built scene commit: no floor, or the clock or the game time passed it and
+ * the look was drawn once. On a device both run together; the stepped frames of a visual test move the game time while
+ * its fake clock stands (F86), so the floor passes there after `holdMs` of frames (F156). The count is the look's, never
+ * the build's, so a switch slower than the floor is many frames past it and the floor adds no frame. While it holds, the
+ * loop is kept awake: it may stop at `idleFps: 0` during a long floor. No floor is one read; no allocation either way.
  *
  * @param ctx - Domain context of the plugin.
  * @param frame - The frame counter now.
+ * @param elapsed - The game time now, in ms.
  * @returns True when the build may commit.
  */
-function holdOver(ctx: ScenesCtx, frame: number): boolean {
+function holdOver(ctx: ScenesCtx, frame: number, elapsed: number): boolean {
   const hold = ctx.state.leaving?.hold;
 
   if (hold === undefined) return true;
 
-  const floorPassed = ctx.deps.clock.now() >= hold.until && frame >= hold.frame + HOLD_FRAMES;
+  const timePassed = ctx.deps.clock.now() >= hold.until || elapsed >= hold.elapsedUntil;
+  const floorPassed = timePassed && frame >= hold.frame + HOLD_FRAMES;
 
   if (floorPassed) return true;
 
@@ -155,8 +158,9 @@ function holdOver(ctx: ScenesCtx, frame: number): boolean {
  * @param ctx - Domain context of the plugin.
  * @param build - The running build.
  * @param frame - The frame counter of this frame.
+ * @param elapsed - The game time of this frame, in ms.
  */
-function stepBuild(ctx: ScenesCtx, build: SceneBuild, frame: number): void {
+function stepBuild(ctx: ScenesCtx, build: SceneBuild, frame: number, elapsed: number): void {
   build.frames += 1;
 
   const world = ctx.deps.world;
@@ -167,7 +171,7 @@ function stepBuild(ctx: ScenesCtx, build: SceneBuild, frame: number): void {
     return;
   }
 
-  if (world.projection.built() && holdOver(ctx, frame)) endBuild(ctx, build, "commit");
+  if (world.projection.built() && holdOver(ctx, frame, elapsed)) endBuild(ctx, build, "commit");
 }
 
 /**
@@ -230,7 +234,9 @@ function startBuildRecord(
  */
 function watchBuild(ctx: ScenesCtx, build: SceneBuild, signal: AbortSignal): void {
   const onAbort = (): void => abortBuild(ctx, build);
-  const offFrame = ctx.deps.time.onFrame("signals", time => stepBuild(ctx, build, time.frame));
+  const offFrame = ctx.deps.time.onFrame("signals", time =>
+    stepBuild(ctx, build, time.frame, time.elapsed)
+  );
 
   signal.addEventListener("abort", onAbort, { once: true });
   build.off = (): void => {
@@ -286,7 +292,9 @@ export function buildAside(
     const build = startBuildRecord(ctx, scene, named, budgetMs, { resolve, reject });
 
     // A build with nothing left for ui and the renderer swaps now: fake-clock tests keep their frames.
-    if (projection.built() && holdOver(ctx, ctx.deps.time.snapshot().frame)) {
+    const { frame, elapsed } = ctx.deps.time.snapshot();
+
+    if (projection.built() && holdOver(ctx, frame, elapsed)) {
       endBuild(ctx, build, "commit");
 
       return;

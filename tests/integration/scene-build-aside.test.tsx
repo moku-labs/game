@@ -10,9 +10,12 @@
 import type { Assets, World } from "@moku-labs/game";
 import { defineGame, Shape, Sprite, system, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
+import { commands, run } from "@moku-labs/game/control";
+import { read, sources } from "@moku-labs/game/inspect";
 import { fakeClock } from "@moku-labs/game/testing";
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { pageStep } from "../../src/visual/page-script";
 import { openPage, type Watched, watch } from "./drawn-helpers";
 
 const { defineNode, defineFlow, defineFeature, defineScene, projection } = defineGame<{
@@ -187,12 +190,24 @@ afterEach(async () => {
  *   unless given.
  * @param options.leave - True for the engine's default veil over the scene being left; off unless given, so the stage
  *   of the build frames can be compared with the ward's (spec 33 A2).
+ * @param options.holdMs - A floor on the swap (`leave.loader.holdMs`), with the default veil: none unless given.
+ * @param options.standing - True for a clock the frames do not move, as the fake clock of a visual test's pixel leg
+ *   (F86); the frames move it unless given.
  * @returns The running fixture, the ward drawn and its gate open.
  */
 async function open(
-  options: { rows?: number; stepMs?: number; leave?: boolean } = {}
+  options: {
+    rows?: number;
+    stepMs?: number;
+    leave?: boolean;
+    holdMs?: number;
+    standing?: boolean;
+  } = {}
 ): Promise<Running> {
-  const { rows = 0, stepMs = 0, leave = false } = options;
+  const { rows = 0, stepMs = 0, leave = false, holdMs, standing = false } = options;
+  const plainLeave = leave ? { buildMs: 1 } : { buildMs: 1, leave: false as const };
+  const scenesConfig =
+    holdMs === undefined ? plainLeave : { buildMs: 1, leave: { loader: { afterMs: 0, holdMs } } };
   const page = openPage();
   const clock = fakeClock(1000);
   const read = clock.now.bind(clock);
@@ -218,7 +233,7 @@ async function open(
     pluginConfigs: {
       log: { mode: "test" },
       flow: { holdMs: 0 },
-      scenes: leave ? { buildMs: 1 } : { buildMs: 1, leave: false }
+      scenes: scenesConfig
     }
   }).screen({ manifest: MANIFEST, renderer: page.renderer, clock });
 
@@ -234,7 +249,7 @@ async function open(
   app.flow.run().catch(() => undefined);
 
   const fixture: Running = {
-    ...watch(app, page, clock),
+    ...watch(app, page, standing ? undefined : clock),
     app,
     stage: () => page.stage.last().stage
   };
@@ -405,7 +420,8 @@ describe("the next scene built aside, across the engine", () => {
 
     for (let frame = 0; frame < 120 && app.scenes.current() !== "board"; frame += 1) {
       await aside.frames(1);
-      if (app.scenes.current() !== "board") before.push(...watched.splice(0).map(seen => cellsSeen(seen)));
+      if (app.scenes.current() !== "board")
+        before.push(...watched.splice(0).map(seen => cellsSeen(seen)));
     }
 
     // The build spawned its cells in the first frames: the system ran through them and saw none.
@@ -444,6 +460,43 @@ describe("the next scene built aside, across the engine", () => {
     off();
 
     expect(Math.max(...engineSeen)).toBeGreaterThan(0);
+  });
+
+  // Bug (F156): in the pixel leg of a visual test the page's fake clock stands, so a floor on the swap counted on the
+  // clock never passed: an `answer` that switches the scene waited for a commit that never came, and did not settle.
+  it("settles the pixel leg's answer step over a floor on a standing clock, after holdMs of stepped frames", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const holdMs = 260;
+    const aside = await open({ holdMs, standing: true });
+    const { app } = aside;
+    const startedAt = app.time.snapshot().elapsed;
+    let committedAt: number | undefined;
+    const off = app.time.onFrame("signals", time => {
+      if (committedAt === undefined && app.scenes.current() === "board") committedAt = time.elapsed;
+    });
+
+    vi.stubGlobal("game", app);
+    vi.stubGlobal("doors", { run, commands, read, sources });
+    vi.stubGlobal("requestAnimationFrame", (callback: (time: number) => void) => {
+      setTimeout(() => callback(0), 0);
+
+      return 0;
+    });
+
+    const answered = await pageStep({
+      test: "ward-to-board",
+      where: "step 1 (answer)",
+      name: "answer",
+      input: { intent: "board" },
+      settleFrames: 120
+    });
+
+    off();
+    expect(answered).toEqual({ ok: true, value: undefined });
+    expect(app.flow.state().path).toBe("board");
+    // The floor held the swap for holdMs of game time, not one frame less.
+    expect((committedAt ?? 0) - startedAt).toBeGreaterThanOrEqual(holdMs);
   });
 
   // Bug: the coming scene is drawn before any of its systems ran, so its first frame shows the values its views were

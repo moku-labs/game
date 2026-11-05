@@ -261,8 +261,8 @@ function leftScene(ctx: ScenesCtx, run: RunContext): SceneDefinition | undefined
 }
 
 /**
- * Stamps the floor of a loader on the look of a switch that starts now: the clock moment the swap may happen at, and the
- * frame counter, read once here (`snapshot()` copies). A loader without one leaves the look as it is.
+ * Stamps the floor of a loader on the look of a switch that starts now: the clock moment and the game time the swap may
+ * happen at, and the frame counter, read once here (`snapshot()` copies). A loader without one leaves the look as it is.
  *
  * @param ctx - Domain context of the plugin.
  * @param leaving - The look of the switch.
@@ -271,9 +271,12 @@ function leftScene(ctx: ScenesCtx, run: RunContext): SceneDefinition | undefined
 function stampHold(ctx: ScenesCtx, leaving: Leaving, loader: Readonly<FullLoader>): void {
   if (loader.holdMs === undefined) return;
 
+  const { frame, elapsed } = ctx.deps.time.snapshot();
+
   leaving.hold = {
     until: ctx.deps.clock.now() + loader.holdMs,
-    frame: ctx.deps.time.snapshot().frame
+    elapsedUntil: elapsed + loader.holdMs,
+    frame
   };
 }
 
