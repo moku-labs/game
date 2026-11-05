@@ -3,8 +3,8 @@
  * Rendering is WebGPU, so the WGSL body is what is measured. `defineFilter` asks for a GLSL twin
  * too: all of them share one pass-through, so WebGL draws the scenes without their looks.
  */
-
 import {
+  Aura,
   Dissolve,
   defineFilter,
   Flash,
@@ -15,7 +15,6 @@ import {
   Shine,
   Vignette
 } from "../../../../src/index.ts";
-import { Aura } from "../../../../src/plugins/effects/set/aura.ts";
 
 /** The GLSL twin the filter API asks for. */
 const GLSL_PASS = "void main() { finalColor = texture(uTexture, vTextureCoord); }";

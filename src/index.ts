@@ -448,6 +448,7 @@ export {
 export { defineFilter } from "./plugins/effects/filters/define";
 export type { FilterArea } from "./plugins/effects/filters/types";
 // effects: the engine's effect set, each member from its own file, listed in a feature's `filters` (no barrel)
+export { Aura } from "./plugins/effects/set/aura";
 export { Dissolve } from "./plugins/effects/set/dissolve";
 export { Flash } from "./plugins/effects/set/flash";
 export { Fold } from "./plugins/effects/set/fold";
@@ -456,6 +457,7 @@ export { RevealLine } from "./plugins/effects/set/reveal-line";
 export { RevealRound } from "./plugins/effects/set/reveal-round";
 export { Shine } from "./plugins/effects/set/shine";
 export type {
+  AuraValue,
   DissolveValue,
   FlashValue,
   FoldValue,
