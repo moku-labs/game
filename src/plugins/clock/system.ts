@@ -5,14 +5,14 @@ import type { ClockSource } from "./types";
 
 /**
  * The longest delay a platform timer keeps, 2^31−1 ms (24.8 days). A longer one overflows and
- * fires at once (F151), so a longer wait is made of steps of this length.
+ * fires at once (F151), so a longer wait is made of steps of this length. `arm` asks no source
+ * for more, a game's own source included.
  */
-const MAX_TIMER_MS = 2_147_483_647;
+export const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * Handle handed out by the system source: the platform timer of the current step, wrapped so
  * that a foreign value passed to `clearTimer` is recognised and ignored.
- *
  */
 type SystemTimer = { timer: ReturnType<typeof setTimeout> | undefined };
 

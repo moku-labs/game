@@ -12,6 +12,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("systemSource", () => {
@@ -59,6 +60,20 @@ describe("systemSource", () => {
         2_147_483_647,
         88 * day - 2_147_483_647 * 3
       ]);
+    });
+
+    // Bug caught: a delay of exactly the longest timer takes a second, empty step, or a delay
+    // one past it overflows in one step.
+    it.each([
+      [2_147_483_647, [2_147_483_647]],
+      [2_147_483_648, [2_147_483_647, 1]]
+    ])("waits %d ms in the steps %j", (delay, steps) => {
+      const platform = vi.spyOn(globalThis, "setTimeout");
+
+      systemSource().setTimer(() => {}, delay);
+      vi.advanceTimersByTime(delay);
+
+      expect(platform.mock.calls.map(([, wait]) => wait)).toEqual(steps);
     });
 
     // Bug caught: a long wait cancelled after its first step fires anyway, because the handle

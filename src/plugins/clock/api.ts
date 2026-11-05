@@ -2,14 +2,8 @@
  * @file clock plugin — API factory. Holds the monotonic rule, the single pending due moment and
  * the `elapsed` listeners.
  */
+import { MAX_TIMER_MS } from "./system";
 import type { Api, ClockCtx, Elapsed, State } from "./types";
-
-/**
- * The longest delay the plugin asks of a source, 2^31−1 ms (24.8 days): the most a platform timer
- * keeps. A longer one overflows and fires at once (F151), on any source built on `setTimeout`, a
- * game's own included; a far moment waits in steps of this length through the early re-arm.
- */
-const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * Reads the source and raises the high-water mark. A source that goes back cannot move game time
