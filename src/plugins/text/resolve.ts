@@ -586,15 +586,20 @@ function keepSize(
   style: string,
   box: number | undefined
 ): void {
+  // Lay out and measure what the label shows.
   const layout = layoutFor(ctx, resolved, style, box);
+
+  // Keep the size `ui` reads.
   const size = ctx.state.measured.get(entity);
 
-  if (size === undefined) ctx.state.measured.set(entity, sizeOf(layout));
-  else {
+  if (size === undefined) {
+    ctx.state.measured.set(entity, sizeOf(layout));
+  } else {
     size.width = layout.width;
     size.height = layout.height;
   }
 
+  // Keep the layout the draw of this label takes, with what it was laid out from.
   const shown = ctx.state.shown.get(entity);
 
   if (shown === undefined) {

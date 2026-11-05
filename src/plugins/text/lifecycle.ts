@@ -11,7 +11,7 @@ import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { boldLookOf, builtInStyles, readStyle, Text } from "./components";
-import { createTextAdapter, installFonts } from "./display";
+import { closeCursor, createTextAdapter, installFonts } from "./display";
 import { isTextFormat } from "./format";
 import {
   createTextFrame,
@@ -274,9 +274,12 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
     if (!ctx.state.styleOwner.has(name)) ctx.state.styleOwner.set(name, HOT_SWAP);
   }
 
+  // The bold looks of the new styles, and the fonts they name.
   buildLooks(ctx.state);
   collectFonts(ctx);
   installFonts(ctx);
+
+  // Throw away what was measured with the old styles, and ask every label again.
   dropLayouts(ctx.state);
   ctx.state.generation += 1;
   markDirty(ctx);
@@ -326,9 +329,12 @@ export function startText(ctx: KernelSlice): void {
  * @param state - The plugin state, the only thing a teardown context carries.
  */
 export function stopText(state: State): void {
+  // What onStart opened.
   for (const off of state.removers) off();
 
   state.removers.length = 0;
+
+  // The tables read at start: styles, looks, formats and fonts.
   state.styles.clear();
   state.looks.clear();
   state.styleOwner.clear();
@@ -337,13 +343,16 @@ export function stopText(state: State): void {
   state.fontKeys.clear();
   state.tables.clear();
   state.installed.clear();
+
+  // What the frames kept about the labels, and the layouts.
   state.seen.clear();
   state.bindTypes.clear();
   state.measured.clear();
-  state.cache.clear();
+  dropLayouts(state);
   state.shown.clear();
-  state.cursor.container = undefined;
-  state.cursor.pixi = undefined;
+  closeCursor(state.cursor);
+
+  // The queues and the warnings.
   state.dirty.clear();
   state.added.length = 0;
   state.rewrite.length = 0;

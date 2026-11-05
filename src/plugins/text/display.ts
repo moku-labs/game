@@ -660,9 +660,21 @@ function openCursor(ctx: TextCtx, pixi: PixiModule, container: PixiContainer): D
  *
  * @param cursor - The cursor of the plugin.
  */
-function closeCursor(cursor: DrawCursor): void {
+export function closeCursor(cursor: DrawCursor): void {
   cursor.container = undefined;
   cursor.pixi = undefined;
+}
+
+/**
+ * Tells whether the draw cursor points at a container, as it does inside a fill or a retext.
+ *
+ * @param cursor - The cursor of the plugin.
+ * @returns True when a container and the Pixi module are set.
+ */
+function isOpen(
+  cursor: DrawCursor
+): cursor is DrawCursor & { container: PixiContainer; pixi: PixiModule } {
+  return cursor.container !== undefined && cursor.pixi !== undefined;
 }
 
 /**
@@ -673,9 +685,11 @@ function closeCursor(cursor: DrawCursor): void {
  * @param look - The look of the run.
  */
 function fillRun(ctx: TextCtx, run: Run, look: TextStyle): void {
-  const { container, pixi, at } = ctx.state.cursor;
+  const cursor = ctx.state.cursor;
 
-  if (container === undefined || pixi === undefined) return;
+  if (!isOpen(cursor)) return;
+
+  const { container, pixi, at } = cursor;
 
   const spot = { x: at[0] ?? 0, y: at[1] ?? 0 };
 
@@ -833,9 +847,10 @@ function moveRing(
  */
 function retextRun(ctx: TextCtx, run: Run, look: TextStyle): void {
   const cursor = ctx.state.cursor;
-  const { container, pixi } = cursor;
 
-  if (container === undefined || pixi === undefined) return;
+  if (!isOpen(cursor)) return;
+
+  const { container, pixi } = cursor;
 
   const x = cursor.at[0] ?? 0;
   const y = cursor.at[1] ?? 0;
