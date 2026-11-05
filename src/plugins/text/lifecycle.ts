@@ -10,7 +10,7 @@ import { i18nPlugin } from "../i18n";
 import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
-import { builtInStyles, readStyle, Text } from "./components";
+import { boldLookOf, builtInStyles, readStyle, Text } from "./components";
 import { createTextAdapter, installFonts } from "./display";
 import { isTextFormat } from "./format";
 import {
@@ -114,6 +114,20 @@ function buildStyles(ctx: TextCtx): void {
 }
 
 /**
+ * Builds the bold look of every style that has `boldStyle`, and forgets the looks of styles that
+ * are gone: a hot swap replaces the style objects the looks are keyed by.
+ *
+ * @param state - The plugin state, its style table filled.
+ */
+function buildLooks(state: State): void {
+  state.looks.clear();
+
+  for (const style of state.styles.values()) {
+    if (style.boldStyle !== undefined) state.looks.set(style, boldLookOf(style, style.boldStyle));
+  }
+}
+
+/**
  * Tells whether a feature entry is a format map `text` can read.
  *
  * @param entry - What the feature put under its `textFormats` key.
@@ -203,8 +217,8 @@ function buildFormats(ctx: TextCtx): void {
 }
 
 /**
- * Collects every font a style can draw with: the two of the config, then the regular, bold and
- * italic font of every registered style.
+ * Collects every font a style can draw with: the two of the config, then the regular, bold,
+ * italic and `boldStyle` font of every registered style.
  *
  * @param ctx - Domain context of the text plugin.
  */
@@ -217,14 +231,16 @@ function collectFonts(ctx: TextCtx): void {
 
     if (style.bold !== undefined) ctx.state.fontKeys.add(style.bold);
     if (style.italic !== undefined) ctx.state.fontKeys.add(style.italic);
+    if (style.boldStyle?.font !== undefined) ctx.state.fontKeys.add(style.boldStyle.font);
   }
 }
 
 /**
  * Writes the styles of a saved styles file over the table: a known name keeps its owner, a new
- * name is added. Then the fonts of the new styles are read, the layouts measured with the old
- * styles are dropped, and every label is marked, so the next frame lays it out again and the
- * display adapter redraws it with the new style object.
+ * name is added, and the bold looks are built again. Then the fonts of the new styles are read,
+ * the layouts measured with the old styles are dropped, every label is marked and the generation
+ * moves, so the next frame lays every label out again and the display adapter builds it again: a
+ * label whose own style stood still may draw a span or a bold look that changed.
  *
  * @param ctx - Domain context of the text plugin.
  * @param styles - What `defineTextStyles` returned in the saved module.
@@ -240,9 +256,11 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
     if (!ctx.state.styleOwner.has(name)) ctx.state.styleOwner.set(name, HOT_SWAP);
   }
 
+  buildLooks(ctx.state);
   collectFonts(ctx);
   installFonts(ctx);
   ctx.state.cache.clear();
+  ctx.state.generation += 1;
   markDirty(ctx);
   ctx.deps.time.wake();
 }
@@ -265,6 +283,7 @@ export function startText(ctx: KernelSlice): void {
   const frame = createTextFrame(tctx);
 
   buildStyles(tctx);
+  buildLooks(tctx.state);
   buildFormats(tctx);
   collectFonts(tctx);
 
@@ -293,6 +312,7 @@ export function stopText(state: State): void {
 
   state.removers.length = 0;
   state.styles.clear();
+  state.looks.clear();
   state.styleOwner.clear();
   state.formats.clear();
   state.formatOwner.clear();

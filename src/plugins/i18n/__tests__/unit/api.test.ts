@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CompiledMessages, ElementNode } from "../../types";
+import { messageOf } from "./evaluate";
 import { createMockI18n, type MockI18n, moduleOf } from "./mock-i18n";
 
 const coin: ElementNode = { type: "icon", props: { name: "hud.coin" }, children: [] };
@@ -146,6 +147,49 @@ describe("plain", () => {
     const mock = await startedMock();
 
     expect(mock.api.plain({ key: "hud.hint" })).toBe("⟦hud.hint⟧");
+  });
+});
+
+/**
+ * A mock whose one message, compiled as the build compiles it, has a literal tag and `{name}`.
+ *
+ * @returns The started mock.
+ */
+async function lobbyMock(): Promise<MockI18n> {
+  const mock = createMockI18n({ locale: "en", fallback: "en" });
+
+  mock.flow.features.push({
+    name: "lobby",
+    description: { strings: { en: { "lobby.host": messageOf("<b>Host</b>: {name}") } } }
+  });
+  await mock.start();
+
+  return mock;
+}
+
+describe("a string parameter that looks like markup", () => {
+  const host = { key: "lobby.host", params: { name: "<b>x</b>" } };
+
+  it("reaches format escaped, while the literal tag of the message stays a tag", async () => {
+    const mock = await lobbyMock();
+
+    expect(mock.api.format(host)).toEqual([
+      { kind: "text", text: String.raw`<b>Host</b>: \<b>x\</b>` }
+    ]);
+  });
+
+  it("reads in plain as the player wrote it", async () => {
+    const mock = await lobbyMock();
+
+    expect(mock.api.plain(host)).toBe("<b>Host</b>: <b>x</b>");
+  });
+
+  it("reads a list in plain as the players wrote their names", async () => {
+    const mock = await lobbyMock();
+
+    expect(mock.api.plain({ key: "lobby.host", params: { name: ["<b>Ann", "Bob"] } })).toBe(
+      "<b>Host</b>: <b>Ann and Bob"
+    );
   });
 });
 

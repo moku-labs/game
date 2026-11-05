@@ -2,7 +2,9 @@
  * @file text plugin — the measurement. A `.fnt` becomes an advance table, runs become lines, and
  * a block becomes a size in reference pixels. Pure and canvas-free: the same numbers on a screen
  * and in plain Bun, which is what keeps `ui.layout` honest. A character the font has no glyph for
- * measures 0 wide, because Pixi draws nothing for it.
+ * measures 0 wide, because Pixi draws nothing for it. Every run measures in its look: the
+ * paragraph's style, the style its `<span>` borrows, or the bold look of either; and every line is
+ * a CSS line box, as high as its looks need, all of them on one baseline.
  */
 import type {
   AdvanceTable,
@@ -19,6 +21,9 @@ const FALLBACK_ADVANCE = 0.6;
 
 /** Line height of a style whose font is not loaded, as a share of the style size. */
 const FALLBACK_LINE = 1.2;
+
+/** Baseline of a font that names none, or of a style whose font is not loaded, as a share of the size. */
+const FALLBACK_BASE = 0.8;
 
 /**
  * How much wider than its box a line of a `"box"` style may be. `ui` lays a text out in whole units
@@ -132,13 +137,30 @@ function readJson(fnt: string): AdvanceTable | undefined {
 
   if (size <= 0) return undefined;
 
-  const common = isRecord(data.common) ? (numberOf(data.common.lineHeight) ?? 0) : 0;
+  const common = isRecord(data.common) ? data.common : {};
+  const lineHeight = numberOf(common.lineHeight) ?? 0;
 
   return {
     size,
-    lineHeight: common > 0 ? common : size,
+    lineHeight: lineHeight > 0 ? lineHeight : size,
+    base: baseOf(numberOf(common.base), size),
     advances: readChars(data.chars)
   };
+}
+
+/**
+ * The baseline a file names, or 0.8 of its size when it names none above 0.
+ *
+ * @param base - The `base` of the file's `common` block, as it was read.
+ * @param size - The export size of the font.
+ * @returns How far the baseline sits below the top of a line, at the export size.
+ * @example
+ * ```ts
+ * baseOf(undefined, 40); // 32
+ * ```
+ */
+function baseOf(base: number | undefined, size: number): number {
+  return base !== undefined && base > 0 ? base : FALLBACK_BASE * size;
 }
 
 /**
@@ -178,6 +200,7 @@ function readXml(fnt: string): AdvanceTable | undefined {
   if (size <= 0) return undefined;
 
   const lineHeight = attribute(fnt, /<common[^>]*\slineHeight="(-?\d+)"/) ?? 0;
+  const base = attribute(fnt, /<common[^>]*\sbase="(-?\d+)"/);
   const advances = emptyAdvances();
 
   // An attribute value may hold a ">" (msdf-bmfont-xml writes char=">"), so quoted values are skipped whole.
@@ -191,7 +214,12 @@ function readXml(fnt: string): AdvanceTable | undefined {
     advances.set(String.fromCodePoint(id), advance);
   }
 
-  return { size, lineHeight: lineHeight > 0 ? lineHeight : size, advances };
+  return {
+    size,
+    lineHeight: lineHeight > 0 ? lineHeight : size,
+    base: baseOf(base, size),
+    advances
+  };
 }
 
 /**
@@ -200,12 +228,12 @@ function readXml(fnt: string): AdvanceTable | undefined {
  *
  * @param fnt - The `.fnt` file as text, in BMFont XML or BMFont JSON.
  * @param key - The asset key of the font, for the error.
- * @returns The export size, the line height and one advance per character.
+ * @returns The export size, the line height, the baseline and one advance per character.
  * @throws {Error} When the file is in neither format.
  * @example
  * ```ts
- * parseAdvances('{"info":{"size":32},"common":{"lineHeight":40},"chars":[]}', "ui.font-body");
- * // { size: 32, lineHeight: 40, advances: Map(0) }
+ * parseAdvances('{"info":{"size":32},"common":{"lineHeight":40,"base":30},"chars":[]}', "ui.font-body");
+ * // { size: 32, lineHeight: 40, base: 30, advances: Map(0) }
  * ```
  */
 export function parseAdvances(fnt: string, key: string): AdvanceTable {
@@ -222,16 +250,62 @@ export function parseAdvances(fnt: string, key: string): AdvanceTable {
 }
 
 /**
- * The font one run is drawn with: the bold or italic font when the style names it, else the
- * font of the style.
+ * The look one run measures and draws in, one of the objects already stored: the style its span
+ * borrows (the paragraph's when it is in none, or in one of a key no style has), or the bold look
+ * of that style for a `<b>` run when the style has `boldStyle`. Silent: the layout warns of an
+ * unknown key once per string.
+ *
+ * @param paragraph - The style of the label.
+ * @param run - The run.
+ * @param styles - The style table, by name; left out, every span is the paragraph's.
+ * @param looks - The bold looks, by the style they belong to.
+ * @returns The look of the run.
+ * @example
+ * ```ts
+ * const run: Run = { kind: "icon", key: "hud.coin", span: "price.22" };
+ *
+ * lookOf(bodyStyle, run, new Map([["price.22", priceStyle]]), new Map()); // priceStyle
+ * ```
+ */
+export function lookOf(
+  paragraph: TextStyle,
+  run: Run,
+  styles: ReadonlyMap<string, TextStyle> | undefined,
+  looks: ReadonlyMap<TextStyle, TextStyle> | undefined
+): TextStyle {
+  const own = (run.span === undefined ? undefined : styles?.get(run.span)) ?? paragraph;
+
+  if (run.kind === "icon" || !run.bold) return own;
+
+  return looks?.get(own) ?? own;
+}
+
+/**
+ * The look of a run under the style table and the bold looks a layout was handed.
  *
  * @param style - The style of the label.
+ * @param run - The run.
+ * @param options - What the layout was handed.
+ * @returns The look of the run.
+ */
+function lookIn(style: TextStyle, run: Run, options: LayoutOptions): TextStyle {
+  return lookOf(style, run, options.styles, options.looks);
+}
+
+/**
+ * The font one run is drawn with: the bold or italic font when its look names it, else the
+ * font of the look.
+ *
+ * @param style - The look of the run: the style of the label, or what `lookOf` answered.
  * @param run - The run to draw.
  * @returns The asset key of the font.
  * @example
  * ```ts
- * fontOfRun(bodyStyle, { kind: "text", text: "a", bold: true, italic: false, color: undefined });
- * // "ui.font-body": the body style names no bold font, so the bold is synthetic
+ * const run: TextRun = {
+ *   kind: "text", text: "a", bold: true, italic: false, color: undefined, span: undefined
+ * };
+ *
+ * fontOfRun(bodyStyle, run); // "ui.font-body": the body style names no bold font, so the bold is synthetic
  * ```
  */
 export function fontOfRun(style: TextStyle, run: TextRun): string {
@@ -242,35 +316,69 @@ export function fontOfRun(style: TextStyle, run: TextRun): string {
 }
 
 /**
- * The height of one line of a style: `lineHeight × size` when the style names its line, else the
- * line of its own font.
+ * The font whose metrics a run stands in its line by. A run in a look of its own, a span's style or
+ * a bold look of `boldStyle`, stands by the font its glyphs are drawn with (the bold or italic one
+ * when the look names it). A run in the paragraph's look, a plain `<b>` or `<i>` included, stands
+ * by the paragraph's own font, as every label did before runs had looks. An icon stands by the
+ * font of its look.
  *
- * @param style - The style of the label.
+ * @param paragraph - The style of the label.
+ * @param look - The look of the run, what `lookOf` answered.
+ * @param run - The run.
+ * @returns The asset key of the font.
+ * @example
+ * ```ts
+ * const bold: Run = { kind: "text", text: "1", bold: true, italic: false, color: undefined, span: undefined };
+ *
+ * metricsFontOf(boldFontStyle, boldFontStyle, bold); // boldFontStyle.font: a plain <b> keeps the paragraph's line
+ * ```
+ */
+export function metricsFontOf(paragraph: TextStyle, look: TextStyle, run: Run): string {
+  return run.kind === "icon" || look === paragraph ? look.font : fontOfRun(look, run);
+}
+
+/**
+ * The height of one line of a style: `lineHeight × size` when the style names its line, else the
+ * line of the font at the style size, its own font unless another is named.
+ *
+ * @param style - The style of the label, or the look of a run.
  * @param tables - The advance tables that are loaded.
+ * @param font - The font whose line it is: what `metricsFontOf` answers for a run.
  * @returns The line height in reference pixels.
  * @example
  * ```ts
  * lineHeightOf(bodyStyle, new Map()); // 38.4: 1.2 em of a 32 px style with no font loaded
  * ```
  */
-export function lineHeightOf(style: TextStyle, tables: Map<string, AdvanceTable>): number {
-  return style.lineHeight === undefined ? fontLineOf(style, tables) : style.lineHeight * style.size;
+export function lineHeightOf(
+  style: TextStyle,
+  tables: Map<string, AdvanceTable>,
+  font: string = style.font
+): number {
+  return style.lineHeight === undefined
+    ? fontLineOf(style, tables, font)
+    : style.lineHeight * style.size;
 }
 
 /**
- * The height of one line of a style's own font, whatever line the style names: what the glyphs
- * are drawn into, so the gap to `lineHeightOf` is the leading.
+ * The height of one line of a font at the style size, whatever line the style names: what the
+ * glyphs are drawn into, so the gap to `lineHeightOf` is the leading.
  *
- * @param style - The style of the label.
+ * @param style - The style of the label, or the look of a run.
  * @param tables - The advance tables that are loaded.
+ * @param font - The font whose line it is; the style's own when left out.
  * @returns The font's line height in reference pixels.
  * @example
  * ```ts
  * fontLineOf({ ...bodyStyle, lineHeight: 1.5 }, new Map()); // 38.4: the font's 1.2 em, not 48
  * ```
  */
-export function fontLineOf(style: TextStyle, tables: Map<string, AdvanceTable>): number {
-  const table = tables.get(style.font);
+export function fontLineOf(
+  style: TextStyle,
+  tables: Map<string, AdvanceTable>,
+  font: string = style.font
+): number {
+  const table = tables.get(font);
 
   return table === undefined
     ? FALLBACK_LINE * style.size
@@ -278,11 +386,55 @@ export function fontLineOf(style: TextStyle, tables: Map<string, AdvanceTable>):
 }
 
 /**
+ * How far the baseline sits below the top of a font's line: the `base` of the font at the style
+ * size, or 0.8 em while the font is not loaded.
+ *
+ * @param style - The look of a run.
+ * @param tables - The advance tables that are loaded.
+ * @param font - The font the run is drawn with; the style's own when left out.
+ * @returns The ascent in reference pixels.
+ * @example
+ * ```ts
+ * ascentOf(bodyStyle, new Map()); // 25.6: 0.8 em of a 32 px style with no font loaded
+ * ```
+ */
+export function ascentOf(
+  style: TextStyle,
+  tables: Map<string, AdvanceTable>,
+  font: string = style.font
+): number {
+  const table = tables.get(font);
+
+  return table === undefined ? FALLBACK_BASE * style.size : table.base * (style.size / table.size);
+}
+
+/**
+ * Half the leading of a style: how far below the top of its line its font's line starts, as CSS
+ * centres the glyphs in a line taller or shorter than the font's.
+ *
+ * @param style - The look of a run.
+ * @param tables - The advance tables that are loaded.
+ * @param font - The font the run is drawn with; the style's own when left out.
+ * @returns The half-leading in reference pixels; below 0 in a line shorter than the font's.
+ * @example
+ * ```ts
+ * leadingOf({ ...bodyStyle, lineHeight: 2 }, new Map()); // 12.8: (64 - 38.4) / 2
+ * ```
+ */
+export function leadingOf(
+  style: TextStyle,
+  tables: Map<string, AdvanceTable>,
+  font: string = style.font
+): number {
+  return (lineHeightOf(style, tables, font) - fontLineOf(style, tables, font)) / 2;
+}
+
+/**
  * The width of one character, letter spacing included. A character the loaded font has no glyph
  * for is 0 wide, spacing and all: Pixi skips it when it lays the run out and draws nothing.
  *
  * @param char - The character.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param fontKey - The font of the run.
  * @param tables - The advance tables that are loaded.
  * @param options - Where a warning goes.
@@ -319,16 +471,17 @@ function advanceOf(
 }
 
 /**
- * The width of one run: the advances of its glyphs, or a square at the line height for an icon.
+ * The width of one run in its look: the advances of its glyphs, or a square at the line of the
+ * look for an icon.
  *
  * @param run - The run to measure.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded.
- * @param options - Where a warning goes.
+ * @param options - Where a warning goes, and the styles and bold looks a run may take.
  * @returns The width in reference pixels.
  * @example
  * ```ts
- * measureRun({ kind: "icon", key: "hud.coin" }, bodyStyle, new Map(), options); // 38.4
+ * measureRun({ kind: "icon", key: "hud.coin", span: undefined }, bodyStyle, new Map(), options); // 38.4
  * ```
  */
 export function measureRun(
@@ -337,19 +490,21 @@ export function measureRun(
   tables: Map<string, AdvanceTable>,
   options: LayoutOptions
 ): number {
-  if (run.kind === "icon") return lineHeightOf(style, tables) + style.letterSpacing;
+  const look = lookIn(style, run, options);
 
-  const fontKey = fontOfRun(style, run);
+  if (run.kind === "icon") return lineHeightOf(look, tables) + look.letterSpacing;
+
+  const fontKey = fontOfRun(look, run);
   let width = 0;
 
-  for (const char of run.text) width += advanceOf(char, style, fontKey, tables, options);
+  for (const char of run.text) width += advanceOf(char, look, fontKey, tables, options);
 
   return width;
 }
 
 /**
  * Tells whether a glyph piece may join the last run of a line: both glyphs, with the same bold,
- * italic and colour. An icon never merges.
+ * italic, colour and span. An icon never merges.
  *
  * @param last - The last run of the line, if any.
  * @param piece - The glyph piece to append.
@@ -360,7 +515,8 @@ function canMerge(last: Run | undefined, piece: TextRun): last is TextRun {
     last?.kind === "text" &&
     last.bold === piece.bold &&
     last.italic === piece.italic &&
-    last.color === piece.color
+    last.color === piece.color &&
+    last.span === piece.span
   );
 }
 
@@ -386,7 +542,39 @@ function appendRun(runs: Run[], piece: Run): void {
 }
 
 /**
- * Lays runs out with no wrapping: one line per `\n` segment.
+ * Creates one line whose box is not measured yet: `boxLines` writes its height and baseline.
+ *
+ * @param runs - The runs of the line.
+ * @param width - How wide they are, the indent of the first line included.
+ * @returns The line.
+ * @example
+ * ```ts
+ * openLine([], 0); // { runs: [], width: 0, height: 0, baseline: 0 }
+ * ```
+ */
+function openLine(runs: Run[], width: number): Line {
+  return { runs, width, height: 0, baseline: 0 };
+}
+
+/**
+ * The width of a line with the indent it starts at: the first line of a block that holds a run is
+ * as wide as its runs plus the indent, every other line as its runs.
+ *
+ * @param runs - The runs of the line.
+ * @param width - How wide they are.
+ * @param indent - The indent the line starts at: `textIndent` on the first line, else 0.
+ * @returns The width of the line.
+ * @example
+ * ```ts
+ * indentedWidth([], 0, 20); // 0: an empty first line takes no indent
+ * ```
+ */
+function indentedWidth(runs: readonly Run[], width: number, indent: number): number {
+  return runs.length > 0 ? indent + width : width;
+}
+
+/**
+ * Lays runs out with no wrapping: one line per `\n` segment, the first one shifted by the indent.
  *
  * @param runs - The runs of the block.
  * @param style - The style of the label.
@@ -405,7 +593,9 @@ function layoutFixed(
   let width = 0;
 
   const push = (): void => {
-    lines.push({ runs: current, width });
+    const indent = lines.length === 0 ? (style.textIndent ?? 0) : 0;
+
+    lines.push(openLine(current, indentedWidth(current, width, indent)));
     current = [];
     width = 0;
   };
@@ -590,18 +780,24 @@ type Metrics = {
   options: LayoutOptions;
 };
 
-/** The lines built so far and the one that is still open. */
-type Builder = { lines: Line[]; runs: Run[]; width: number };
+/**
+ * The lines built so far and the one that is still open. `indent` is the room the open line
+ * starts after: `textIndent` on the first line of the block, 0 from the second on.
+ */
+type Builder = { lines: Line[]; runs: Run[]; width: number; indent: number };
 
 /**
- * Closes the open line and starts a new one.
+ * Closes the open line and starts a new one at the edge.
  *
  * @param builder - The lines built so far.
  */
 function commit(builder: Builder): void {
-  builder.lines.push({ runs: builder.runs, width: builder.width });
+  builder.lines.push(
+    openLine(builder.runs, indentedWidth(builder.runs, builder.width, builder.indent))
+  );
   builder.runs = [];
   builder.width = 0;
+  builder.indent = 0;
 }
 
 /**
@@ -634,7 +830,7 @@ function glyphsOf(run: Run): Run[] {
 }
 
 /**
- * Places a word that is wider than the wrap, glyph by glyph. An icon is one glyph.
+ * Places a word that is wider than the room of its line, glyph by glyph. An icon is one glyph.
  *
  * @param builder - The lines built so far.
  * @param token - The word to break.
@@ -646,7 +842,7 @@ function breakWord(builder: Builder, token: Token, wrap: number, metrics: Metric
     for (const piece of glyphsOf(part)) {
       const glyph = measureRun(piece, metrics.style, metrics.tables, metrics.options);
 
-      if (builder.runs.length > 0 && builder.width + glyph > wrap) commit(builder);
+      if (builder.runs.length > 0 && builder.indent + builder.width + glyph > wrap) commit(builder);
 
       appendRun(builder.runs, piece);
       builder.width += glyph;
@@ -657,8 +853,9 @@ function breakWord(builder: Builder, token: Token, wrap: number, metrics: Metric
 /**
  * Places one word: on the open line when it still fits there with the spaces before it and the
  * hyphen a break after it would draw, on the next one when it does not, and glyph by glyph when
- * it fits on no line at all. A break inside a word stands before it with no width: the line ends
- * there with the `-` of a soft hyphen, and the word goes on with nothing between when it fits.
+ * it fits on no line at all, or as the first word of a block not in the room its indent leaves. A
+ * break inside a word stands before it with no width: the line ends there with the `-` of a soft
+ * hyphen, and the word goes on with nothing between when it fits.
  *
  * @param builder - The lines built so far.
  * @param token - The word to place.
@@ -676,7 +873,8 @@ function placeWord(
   const space = pending?.kind === "space" ? pending : undefined;
   const lead = space?.width ?? 0;
   const overflows =
-    builder.runs.length > 0 && builder.width + lead + token.width + token.tail > wrap;
+    builder.runs.length > 0 &&
+    builder.indent + builder.width + lead + token.width + token.tail > wrap;
 
   // The word goes to the next line when it does not fit; a soft hyphen leaves its "-" behind.
   if (overflows) {
@@ -685,7 +883,7 @@ function placeWord(
   } else if (space !== undefined) add(builder, space);
 
   // The word is placed whole, or glyph by glyph when it fits on no line.
-  if (token.width <= wrap) add(builder, token);
+  if (builder.indent + token.width <= wrap) add(builder, token);
   else breakWord(builder, token, wrap, metrics);
 }
 
@@ -700,7 +898,12 @@ function placeWord(
  * @returns The lines, each with its width.
  */
 function wrapTokens(tokens: readonly Token[], metrics: Metrics, wrap: number): Line[] {
-  const builder: Builder = { lines: [], runs: [], width: 0 };
+  const builder: Builder = {
+    lines: [],
+    runs: [],
+    width: 0,
+    indent: metrics.style.textIndent ?? 0
+  };
   let pending: Token | undefined;
 
   for (const token of tokens) {
@@ -757,9 +960,31 @@ function widestWord(tokens: readonly Token[]): number {
 }
 
 /**
+ * The narrowest line the first word of a block stands on whole after the indent: the word, the
+ * `-` a break after it draws, and the indent. 0 for a block whose first line holds no word.
+ *
+ * @param tokens - The tokens of the block.
+ * @param indent - The `textIndent` of the style.
+ * @returns The width in reference pixels.
+ * @example
+ * ```ts
+ * firstWord([{ kind: "word", runs: [], width: 50, tail: 0 }], 45); // 95
+ * ```
+ */
+function firstWord(tokens: readonly Token[], indent: number): number {
+  for (const token of tokens) {
+    if (token.kind === "break") return 0;
+    if (token.kind === "word") return token.width + token.tail + indent;
+  }
+
+  return 0;
+}
+
+/**
  * Evens the greedy lines of a balanced style: the narrowest width in `[widest word, wrap]` that
- * keeps their number, found in 16 halvings, and the lines at that width. A block of one line or of
- * more than six, or with a word that does not fit the wrap whole, keeps its greedy lines.
+ * keeps their number, found in 16 halvings, and the lines at that width. The first word stands
+ * whole after the indent at every width tried. A block of one line or of more than six, or with
+ * a word that does not fit the wrap whole, keeps its greedy lines.
  *
  * @param tokens - The tokens of the block, as the greedy pass read them.
  * @param greedy - The greedy lines at the wrap.
@@ -774,7 +999,7 @@ function balanceLines(
   wrap: number
 ): Line[] {
   const count = greedy.length;
-  let low = widestWord(tokens);
+  let low = Math.max(widestWord(tokens), firstWord(tokens, metrics.style.textIndent ?? 0));
   let high = wrap;
 
   if (count < 2 || count > BALANCE_MAX_LINES || low >= high) return greedy;
@@ -816,6 +1041,7 @@ function onceOnly(options: LayoutOptions): LayoutOptions {
   const seen = emptyKeys();
 
   return {
+    ...options,
     warn: (key, message, data): void => {
       if (seen.has(key)) return;
 
@@ -854,21 +1080,92 @@ function wrapOf(style: TextStyle, box: number): number | undefined {
 }
 
 /**
- * Lays a block of runs out: the lines, the width of the widest one and the total height. The
- * alignment of the style changes nothing here; it moves the lines when they are drawn. A style
- * with `wrap: "box"` wraps at `box`, the width `ui` laid its text element out at, and is one line
- * without one; any other style ignores `box`.
+ * Writes the line box of every line, as CSS builds it: each run stands in the line of its look,
+ * the line of its metrics font (`metricsFontOf`) centred in it, and its baseline that font's
+ * `ascent` below that line's top. Every line holds a strut too, an empty piece of the paragraph's
+ * look, so a line is never shorter than the paragraph's line and its baseline never higher. The
+ * baseline of the line is the lowest of them, and the line reaches as far below it as the deepest.
+ * A line no run reaches past the strut, a line of the paragraph's look and an empty one included,
+ * is exactly the paragraph's line, to the last bit.
+ *
+ * @param lines - The lines of the block.
+ * @param style - The style of the label.
+ * @param tables - The advance tables that are loaded.
+ * @param options - The styles and bold looks a run may take.
+ */
+function boxLines(
+  lines: readonly Line[],
+  style: TextStyle,
+  tables: Map<string, AdvanceTable>,
+  options: LayoutOptions
+): void {
+  // The strut: the paragraph's own line, which every line holds.
+  const strutRaise = leadingOf(style, tables) + ascentOf(style, tables);
+  const strutBox = lineHeightOf(style, tables);
+  const strutBelow = strutBox - strutRaise;
+
+  for (const line of lines) {
+    let above = strutRaise;
+    let below = strutBelow;
+
+    for (const run of line.runs) {
+      const look = lookIn(style, run, options);
+      const font = metricsFontOf(style, look, run);
+      const raise = leadingOf(look, tables, font) + ascentOf(look, tables, font);
+
+      above = Math.max(above, raise);
+      below = Math.max(below, lineHeightOf(look, tables, font) - raise);
+    }
+
+    // No run past the strut: the paragraph's line to the last bit, so such a label stays as it was.
+    const strutOnly = above === strutRaise && below === strutBelow;
+
+    line.baseline = strutOnly ? strutRaise : above;
+    line.height = strutOnly ? strutBox : above + below;
+  }
+}
+
+/**
+ * The height of a block: the sum of its lines, or the count times the line when every line is
+ * as high, which is to the last bit what a block of one look measured before lines had boxes.
+ *
+ * @param lines - The lines, their boxes written.
+ * @returns The height in reference pixels.
+ * @example
+ * ```ts
+ * blockHeight([openLine([], 0)]); // 0
+ * ```
+ */
+function blockHeight(lines: readonly Line[]): number {
+  const first = lines[0]?.height ?? 0;
+  let sum = 0;
+  let even = true;
+
+  for (const line of lines) {
+    sum += line.height;
+    even &&= line.height === first;
+  }
+
+  return even ? lines.length * first : sum;
+}
+
+/**
+ * Lays a block of runs out: the lines with their boxes, the width of the widest one and the total
+ * height. The alignment of the style changes nothing here; it moves the lines when they are
+ * drawn. A style with `wrap: "box"` wraps at `box`, the width `ui` laid its text element out at,
+ * and is one line without one; any other style ignores `box`. `options` carries the style table
+ * and the bold looks a run in a span or in `<b>` takes its look from.
  *
  * @param runs - What `parseTags` made of the resolved string.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded, by font key.
- * @param options - Where a warning goes.
+ * @param options - Where a warning goes, and the styles and bold looks a run may take.
  * @param box - The width a `"box"` style wraps at, in reference pixels; 0 for none.
  * @returns The lines and the size of the block in reference pixels.
  * @example
  * ```ts
  * layoutRuns([], bodyStyle, new Map(), { warn: () => undefined });
- * // { lines: [{ runs: [], width: 0 }], width: 0, height: 38.4 }
+ * // { lines: [{ runs: [], width: 0, height: 38.4, baseline: 25.6 }], width: 0, height: 38.4 }
  * ```
  */
 export function layoutRuns(
@@ -886,7 +1183,9 @@ export function layoutRuns(
       : layoutWrapped(runs, { style, tables, options: once }, wrap);
   let width = 0;
 
+  boxLines(lines, style, tables, once);
+
   for (const line of lines) width = Math.max(width, line.width);
 
-  return { lines, width, height: lines.length * lineHeightOf(style, tables) };
+  return { lines, width, height: blockHeight(lines) };
 }

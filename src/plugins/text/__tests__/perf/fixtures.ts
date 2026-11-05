@@ -17,16 +17,26 @@ import { component } from "../../../world/ecs/define";
 import type { Entity, Owner } from "../../../world/ecs/types";
 import { withDeps } from "../../../world/lifecycle";
 import type { EcsModule } from "../../../world/types";
-import { bind as builtInBind, builtInStyles, Countdown, Text, textFor } from "../../components";
+import {
+  boldLookOf,
+  bind as builtInBind,
+  builtInStyles,
+  Countdown,
+  defineTextStyles,
+  Text,
+  textFor
+} from "../../components";
 import { createTextAdapter } from "../../display";
 import { layoutRuns, parseAdvances } from "../../measure";
 import { createTextFrame, createTextSystem, resolveAdded } from "../../resolve";
 import { createTextState } from "../../state";
+import { parseTags } from "../../tags";
 import type {
   AdvanceTable,
   Config,
   Deps,
   Run,
+  State,
   TextCtx,
   TextFormatAnswer,
   TextStyle,
@@ -465,7 +475,8 @@ const HINT_RUNS: readonly Run[] = Object.freeze([
     text: "Здесь то, что ждут ваши заказы. Возьмите один.",
     bold: false,
     italic: false,
-    color: undefined
+    color: undefined,
+    span: undefined
   }
 ]);
 
@@ -499,4 +510,143 @@ export function layoutFixture(balance: boolean): () => void {
   return (): void => {
     layoutRuns(HINT_RUNS, style, tables, options);
   };
+}
+
+/** The game's row style (F152): 13 px words that wrap at their box, a 16 px bold count. */
+const ROW_STYLE = "album.row.13";
+
+/** The style a span of the price borrows. */
+const AMOUNT_STYLE = "album.row.amount.16";
+
+/** Labels of the runs fixture. */
+const RUN_LABELS = 50;
+
+/** The box every label of the runs fixture is laid out at: the row's two lines. */
+const ROW_BOX = 200;
+
+/**
+ * Puts the game's row styles into a state, with the bold look of the row, as `startText` builds
+ * them.
+ *
+ * @param state - The text state.
+ */
+function addRowStyles(state: State): void {
+  const map = defineTextStyles({
+    [ROW_STYLE]: {
+      font: "ui.fonts.text-medium",
+      size: 13,
+      fill: 0x3b_2a_1a,
+      wrap: "box",
+      boldStyle: { font: "ui.fonts.alt-bold", size: 16 }
+    },
+    [AMOUNT_STYLE]: { font: "ui.fonts.alt-bold", size: 16, fill: 0x3b_2a_1a }
+  }).map;
+
+  for (const [name, style] of Object.entries(map)) {
+    state.styles.set(name, style);
+
+    if (style.boldStyle !== undefined) state.looks.set(style, boldLookOf(style, style.boldStyle));
+  }
+}
+
+/**
+ * One line of the game: a bold count in the row, or a price in the amount span.
+ *
+ * @param index - The label it is for; the number it shows.
+ * @param runs - False for the same words with no tag.
+ * @returns The tagged string.
+ */
+function gameLine(index: number, runs = true): string {
+  if (!runs) return `${index}★ можно потратить в магазине звёзд`;
+
+  return index % 2 === 0
+    ? `<b>${index}★</b> можно потратить в магазине звёзд`
+    : `<span style=${AMOUNT_STYLE}>${index}</span> монет за весь набор`;
+}
+
+/**
+ * 50 labels of the game's row, laid out at a box of 200: every even one a `<b>` count in the bold
+ * look of its style, every odd one a price in a `<span>` of another style. Nothing moves: a still
+ * frame of phase `layout`, then the clear of phase `signals`.
+ *
+ * @returns One frame.
+ */
+export function runsFixture(): () => void {
+  const world = createMockWorld();
+  const ecs = stableEcs(world);
+  const ctx = textCtx(world, new Float64Array([CLOCK_START_MS]));
+  const time: Time = { delta: 16.6, elapsed: 0, scale: 1, frame: 1, idle: false };
+
+  addRowStyles(ctx.state);
+  world.api.ecs.system(createTextSystem(ctx, createTextFrame(ctx)));
+
+  for (let index = 0; index < RUN_LABELS; index += 1) {
+    world.api.ecs.spawn(OWNER, [
+      Text({ content: gameLine(index), style: ROW_STYLE, box: ROW_BOX })
+    ]);
+  }
+
+  const frame = (): void => {
+    time.frame += 1;
+    ecs.runPhase("layout", time);
+    ecs.clearChanges();
+  };
+
+  for (let index = 0; index < WARM_FRAMES; index += 1) frame();
+
+  return frame;
+}
+
+/**
+ * One fresh layout of the game line at its box, the cost a cache miss pays: with a bold count in
+ * the bold look of the row, or the same words with no tag.
+ *
+ * @param runs - False for the plain text.
+ * @returns One layout.
+ */
+export function gameLayoutFixture(runs: boolean): () => void {
+  const state = createTextState();
+
+  addRowStyles(state);
+
+  const style = state.styles.get(ROW_STYLE) ?? builtInStyles({ body: "", digits: "" }).body;
+  const parsed = parseTags(gameLine(0, runs), (): void => {});
+  const options = { warn: (): void => {}, styles: state.styles, looks: state.looks };
+  const tables = new Map<string, AdvanceTable>();
+
+  return (): void => {
+    layoutRuns(parsed, style, tables, options, ROW_BOX);
+  };
+}
+
+/**
+ * The display adapter building the game line and freeing it: one `BitmapText` per run, the bold
+ * count in its look, or the same words with no tag. The layout is cached, as on a device.
+ *
+ * @param runs - False for the plain text.
+ * @returns One build and free.
+ */
+export function gameDrawFixture(runs: boolean): () => void {
+  const world = createMockWorld();
+  const ctx = textCtx(world, new Float64Array([CLOCK_START_MS]));
+  const renderer = { host: { pixi: (): PixiModule => STUB_PIXI } } as unknown as RendererApi;
+  const adapter = createTextAdapter({ ...ctx, deps: { ...ctx.deps, renderer } });
+  const line = gameLine(0, runs);
+  const shown: TextValue = {
+    ...Text.defaults,
+    content: line,
+    style: ROW_STYLE,
+    box: ROW_BOX,
+    resolved: line
+  };
+
+  addRowStyles(ctx.state);
+
+  const draw = (): void => {
+    adapter.destroy(adapter.create(shown, 1));
+  };
+
+  for (let index = 0; index < WARM_FRAMES; index += 1) draw();
+
+  return draw;
 }

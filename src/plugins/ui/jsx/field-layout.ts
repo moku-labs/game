@@ -282,6 +282,22 @@ export function liftOf(input: {
   return Math.max(0, input.fieldBottom + input.margin - (input.innerHeight - input.inset));
 }
 
+/**
+ * A typed value as `text` takes it: plain text, where `<` is never markup. Every `<` is handed
+ * as `text`'s escape `\<`, which draws a literal `<`; a value without one is handed as it is.
+ * Only the string for `text` changes, never the indices of the caret and the selection.
+ *
+ * @param value - The typed text, or a piece of it.
+ * @returns The string `text` draws and measures as exactly these characters.
+ * @example
+ * ```ts
+ * literalText("<b>x"); // "\\<b>x"
+ * ```
+ */
+export function literalText(value: string): string {
+  return value.includes("<") ? value.replaceAll("<", String.raw`\<`) : value;
+}
+
 /** A high surrogate: the first half of a character outside the Basic Multilingual Plane. */
 const OPEN_SURROGATE = /[\uD800-\uDBFF]$/;
 

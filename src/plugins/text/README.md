@@ -18,7 +18,8 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   of the map is written over the table (a new name is added, a known one keeps its owner), the
   fonts are read, the layout cache is dropped, every label is marked and the loop is woken. The
   next frame redraws a label with the new style even when its text and its style name did not
-  change: the display adapter compares the drawn style object with the current one. For a label
+  change: the swap moves the generation the display adapter compares, so a label whose `<span>`
+  or bold look changed under a style that stood is built again too. For a label
   it leaves as it was (the same string, style and anchor, and the same alpha) the adapter answers
   `false`, so a renderer drawing on demand (`renderer.onDemand`) skips the frame.
 - **Missing glyphs:** a character the loaded font has no glyph for (an emoji, CJK) is drawn as
@@ -28,7 +29,8 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `label({ text, style, at, anchor? })`, `defineTextStyles(map)`, `defineTextFormats(map)`,
   `textFor<TextStyles, Fonts, TextFormats>()` for `defineGame`.
 - **Styles:** `font`, `size` and `fill` are required. `bold`, `italic`, `stroke`, `strokeWidth`,
-  `letterSpacing`, `align`, `wrap`, `digits`, `shadow` and `lineHeight` have defaults.
+  `letterSpacing`, `align`, `wrap`, `digits`, `shadow`, `lineHeight`, `balance`, `boldStyle` and
+  `textIndent` have defaults.
   `lineHeight` is the line as a multiple of `size`, like a unitless CSS `line-height`:
   `{ font: "text-medium", size: 14, fill: 0, lineHeight: 1.28 }` lays every line 17.92 px high, so
   three lines measure 53.76. The glyphs sit in the middle of the line (half the leading above,
@@ -40,6 +42,38 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `stroke` and `strokeWidth` draw an outline: 8 white copies of each glyph run (12 when
   `strokeWidth` is 6 or more) on a circle of radius `strokeWidth`, tinted `stroke`. An outline
   never changes what `measure` answers.
+
+  `boldStyle` is the look of the `<b>` runs of the style (F152): a `TextRunStyle` of up to seven
+  fields, `font`, `size`, `fill`, `letterSpacing`, `stroke`, `strokeWidth` and `shadow`, laid over
+  the style. A field left out is the style's. `boldStyle.font` is the font a `<b>` run draws with
+  and wins over `bold`; a look with neither draws the synthetic bold at its own `size / 20`.
+
+  ```ts
+  defineTextStyles({
+    "album.row.13": {
+      font: "ui.fonts.text-medium", size: 13, fill: ink, wrap: "box",
+      boldStyle: { font: "ui.fonts.alt-bold", size: 16 }
+    }
+  });
+  // ru.json: "<b>{n}★</b> можно потратить в магазине звёзд"
+  ```
+
+  The stored style keeps the fields the game gave (a shadow with its alpha filled), and a style
+  with no `boldStyle` has no such field. Another field, a `size` that is not a number above 0, a
+  `letterSpacing` or `strokeWidth` (or a colour) that is not finite, or a `boldStyle` that is not
+  an object is a thrown `[game] Text style "<name>" has boldStyle…` error at start. A `<b>` run of
+  `boldStyle` stands by the metrics of the font it is drawn with (see Wrap, line box), so its
+  glyphs share the baseline of the words.
+
+  `textIndent` is the indent of the first line of the block in reference px, like CSS
+  `text-indent`: `{ font: "ui.font-body", size: 14, fill: ink, wrap: 200, textIndent: 20 }`. Only
+  the very first line is indented; a line after `\n` starts at the edge. The first line wraps at
+  the wrap less the indent (a box or a width), and a first word wider than that breaks between its
+  glyphs. The indent counts in the width of the first line, so `measure` and the block's width
+  include it; a `center` or `right` style aligns the first line in the room after the indent.
+  `balance` keeps the indent in every width it tries and never splits a first word that fits the
+  wrap. With `wrap: "none"` the first line is shifted and wider by the indent. Below 0 or not
+  finite is refused at start; 0 is not stored.
 - **Wrap:** `wrap` is one of three, `"none"` by default.
 
   | `wrap` | lines |
@@ -52,7 +86,8 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   the hyphen kept on the first line: `купли-продажи` may break as `купли-` / `продажи`; never after
   a leading hyphen or before a digit. A soft hyphen (U+00AD) draws nothing unless the line breaks
   there, then it draws `-`; the word before it moves to the next line when that `-` would not fit.
-  The display draws exactly the measured lines. A word wider than the wrap breaks between its glyphs. A `"box"` text
+  The display draws exactly the measured lines. A word wider than the wrap breaks between its glyphs. A word made
+  of pieces of two looks (`9<span style=small>%</span>`) wraps whole. A `"box"` text
   is measured at the width Yoga offers, so its element is as high as its lines, and is drawn again
   only when its box changes: a still frame compares one number per label and allocates nothing. A
   box is laid out per width and string, a number or `"none"` style once per string. Shrink is 0
@@ -60,6 +95,29 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   its room instead of the text wrapping. A line may be 0.0001 px wider than its box, the tolerance
   `ui` rounds a measure to whole units with. Any other wrap, `0` or `-1`, is refused when the
   style is defined.
+
+  **Box align (F153).** A `wrap: "box"` text with a box aligns its lines in
+  `max(widest line, box)`, not in its widest line, and its anchor moves by that width too. `ui`
+  writes a box only once the text wrapped at it: so a centred label centres in its box while it
+  wraps, and on its own widest line while it fits on one line. `measure` answers the widest line
+  either way, and every other wrap aligns in its widest line as before.
+
+  **Line box and baseline (F152).** Every line is a CSS line box. A piece in a look of its own,
+  a `<span>` of a known style or a `<b>` run of `boldStyle`, stands by the metrics of the font it
+  is drawn with (its `bold` / `italic` / `boldStyle.font` one for a `<b>` or `<i>` run): it stands
+  in the line of its look (`lineHeight × size`, else that font's line), that font's line centred
+  in it, and its baseline that font's `base` below that line's top (`common.base` of the `.fnt`,
+  0.8 of the size when the file names none or the font is not loaded). A plain `<b>` or `<i>`, in
+  the style's `bold` or `italic` font or synthetic, keeps the paragraph's line and the paragraph
+  font's metrics, as before. Every line also holds a strut, an empty piece of the paragraph's
+  look, as CSS does: a line is never shorter than the paragraph's line, and its baseline never
+  above the paragraph's. The baseline of the line is the lowest of its pieces' and the strut's,
+  the line reaches as far below it as the deepest of them, and every glyph and icon of the line
+  stands on that one baseline. So a piece of a larger look makes its line taller, and only that
+  line; a piece of a smaller look stands on the paragraph's baseline in the paragraph's line. A
+  line no piece reaches past the strut is exactly the paragraph's line: every label with no span
+  and no `boldStyle` measures and draws as before. A block is as high as the sum of its lines;
+  `measure`, the `ui` layout and the drawn label share the answer.
 - **Balance:** `balance: true` evens the lines of a wrapped style, like CSS `text-wrap: balance`
   (F148): `wrap` keeps the width, `balance` says how it is used. A block that wraps to 2 to 6 lines
   is laid out at the narrowest width that keeps its number of lines (16 halvings between the widest
@@ -69,10 +127,28 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   than the wrap keep the greedy lines. `measure`, the `ui` layout and the drawn label share one
   answer, cached as any layout: a still frame over balanced labels allocates nothing. The stored
   style carries `balance` only when it balances; anything but `true` or `false` is refused.
-- **Tags:** `<b>`, `<i>`, `<color=#rrggbb>`, `<icon=key>`, `\<`, `\n`. An unknown tag stays
-  literal and is reported once.
-- **Icons:** `<icon=key>` is one glyph, square at the line height and as wide as the line is high
-  plus `letterSpacing`. In a wrapped style it wraps with its word: `×<icon=hud.coin>5` moves to the
+- **Tags:** `<b>`, `<i>`, `<color=#rrggbb>`, `<span style=KEY>`, `<icon=key>`, `\<`, `\n`. An
+  unknown tag stays literal and is reported once.
+
+  `<span style=KEY>…</span>` draws what it holds in the glyph look of the style `KEY`: its font,
+  `bold` and `italic` fonts, size, fill, letter spacing, outline, shadow and line. `align`,
+  `wrap`, `balance`, `textIndent` and `digits` stay the paragraph's.
+
+  ```ts
+  "price.22": { font: "ui.fonts.alt-bold", size: 22, fill: teal, letterSpacing: 0.5 },
+  // "<span style=price.22>{n}</span> монет за весь набор"
+  ```
+
+  The key is unquoted: `<span style="price.22">` is not the grammar, stays literal and is
+  reported as an unknown tag. Inside a span `<b>` takes the span style's `bold` font or
+  `boldStyle`, `<i>`, `<color>` (over the fill) and `<icon>` work, and a nested span replaces the
+  outer one until it closes. A span may cross `\n` and wrap points; the space after `</span>` is
+  a space like any other. A key no style has draws in the paragraph's look and warns
+  `text: unknown span style` once per string, when the string is laid out.
+- **Icons:** `<icon=key>` is one glyph, square at the line of its look and as wide as that line is
+  high plus `letterSpacing`: the paragraph's, or inside a `<span>` the span style's, standing on
+  the baseline of its line. It is untinted: inside a 16 px span a star is about 19 px high, so a
+  game that wants a smaller or coloured star uses a pre-coloured asset or a `★` glyph of the font. In a wrapped style it wraps with its word: `×<icon=hud.coin>5` moves to the
   next line as one word, and `a <icon=hud.coin> b` makes the icon a word of its own. A word wider
   than `wrap` breaks between glyphs and never inside the icon; an icon wider than `wrap` gets a line
   of its own.
@@ -158,10 +234,14 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   tinted with `color`, at `alpha`, moved by `dx` and `dy`. It sits in the same container, so it
   follows every update, reflow and destroy of its run. Icons cast no shadow, as in CSS
   `text-shadow`. Drawing order per run: shadow, outline copies, synthetic bold copies (a `<b>` run
-  of a style with no `bold` font: 8 copies at `size / 20`, in the run colour), the glyphs. No
+  whose look names no bold font: 8 copies at `size / 20` of the look, in the run colour), the glyphs. No
   stroke is handed to Pixi `BitmapText`: it draws nothing on an MSDF font. Headless nothing is built and no font is installed.
-- **Hot swap:** `assets:replaced` (dev builds only) installs a replaced font again and marks the
-  labels drawn with a replaced font or inline icon. The next frame builds each of them again from
+- **Hot swap:** `replaceStyles` (a saved styles file) builds the bold looks again and moves the
+  generation, so every label is built again on the next frame: a label whose `<span>` style or
+  `boldStyle` changed redraws though its own style object stood still. A swapped style keeps its
+  `boldStyle` and `textIndent`. `assets:replaced` (dev builds only) installs a replaced font again
+  and marks the labels drawn with a replaced font or inline icon, a font a `<span>` look or a
+  `boldStyle` look of the label draws with included. The next frame builds each of them again from
   the new textures, even when its string did not change. No other font is read and no other label
   is written; a replaced font drops the layout cache once. A `.fnt` that cannot be read logs
   `text:font-replace-failed` and reloads the page.

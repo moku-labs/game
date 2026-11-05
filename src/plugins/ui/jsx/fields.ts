@@ -36,6 +36,7 @@ import {
   type FieldLayout,
   layoutField,
   liftOf,
+  literalText,
   type PartBox,
   paddingOf
 } from "./field-layout";
@@ -214,7 +215,8 @@ function boxPart(box: PartBox, fill: number, alpha: number): BoxPart {
  * The component values of the four parts of a laid-out field.
  *
  * @param layout - Where the parts go.
- * @param content - What the text part draws: the value, or the placeholder at half alpha.
+ * @param content - What the text part draws: the value as plain text, or the placeholder at half
+ *   alpha.
  * @param textStyle - The text style of the field.
  * @param look - The caret, selection and underline look of the config.
  * @returns The values, per part.
@@ -679,7 +681,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       lineHeight: measure("").height,
       caretWidth: look.caretWidth,
       underline: look.composingUnderline,
-      prefix: piece => measure(piece).width,
+      prefix: piece => measure(literalText(piece)).width,
       hasGlyph: char => ctx.deps.text.hasGlyph(char, field.textStyle)
     });
   }
@@ -696,7 +698,8 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
   function drawField(field: Field, layout: FieldLayout, value: string, inputs: string): void {
     // Resolve what the parts draw, and a fingerprint of it.
     const look = ctx.config.textInput;
-    const content = layout.content === "placeholder" ? (field.placeholder ?? "") : value;
+    const content =
+      layout.content === "placeholder" ? (field.placeholder ?? "") : literalText(value);
     const values = partValues(layout, content, field.textStyle, look);
     const drawn = JSON.stringify({ layout, content, look, style: field.textStyle });
 

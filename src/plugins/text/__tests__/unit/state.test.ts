@@ -11,6 +11,7 @@ describe("createTextState", () => {
     const state = createTextState();
 
     expect(state.styles.size).toBe(0);
+    expect(state.looks.size).toBe(0);
     expect(state.styleOwner.size).toBe(0);
     expect(state.fontKeys.size).toBe(0);
     expect(state.tables.size).toBe(0);

@@ -1296,6 +1296,10 @@ over the characters the font draws: a character the font has no glyph for (an em
 drawn as nothing by Pixi, so `text.hasGlyph` leaves it out and the caret and the selection never
 stand past the drawn text.
 
+A field value is plain text: `<` is never markup. A typed `<b>` draws and measures as its three
+characters, because the value reaches `text` with every `<` written as `\<`. The placeholder is
+the game's message and keeps its tags.
+
 ### The hidden input
 
 On a page, `ui` makes one `<input>` in `onStart` (found through the renderer's canvas), appended to

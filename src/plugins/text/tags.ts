@@ -1,12 +1,12 @@
 /**
- * @file text plugin — the one grammar of a resolved string: `<b>`, `<i>`, `<color=#rrggbb>` and
- * `<icon=key>`, the escape `\<`, and a line break that is a line break in every style. Pure: it
- * knows nothing about fonts or widths.
+ * @file text plugin — the one grammar of a resolved string: `<b>`, `<i>`, `<color=#rrggbb>`,
+ * `<span style=KEY>` and `<icon=key>`, the escape `\<`, and a line break that is a line break in
+ * every style. Pure: it knows nothing about fonts, widths or which style keys exist.
  */
 import type { Run, TextRun, Warn } from "./types";
 
 /** One tag that is still open, and what it does to the runs inside it. */
-type OpenTag = { name: string; color: number | undefined };
+type OpenTag = { name: string; color: number | undefined; span: string | undefined };
 
 /** What one parse carries along: what was built, what is open, and what is not written yet. */
 type ParseState = {
@@ -24,6 +24,9 @@ const COLOR_TAG = /^color=#([\da-f]{6})$/i;
 /** Matches an inline icon tag, which has no closing tag. */
 const ICON_TAG = /^icon=(\S+)$/;
 
+/** Matches an opening span tag. The key is unquoted: `style="x"` is not this grammar. */
+const SPAN_TAG = /^span style=([^\s"']+)$/;
+
 /**
  * Reads an opening tag.
  *
@@ -31,21 +34,44 @@ const ICON_TAG = /^icon=(\S+)$/;
  * @returns The tag, or `undefined` when it is not one this grammar knows.
  * @example
  * ```ts
- * openTag("color=#ff0000"); // { name: "color", color: 16711680 }
+ * openTag("color=#ff0000"); // { name: "color", color: 16711680, span: undefined }
  * ```
  */
 function openTag(body: string): OpenTag | undefined {
-  if (body === "b" || body === "i") return { name: body, color: undefined };
+  if (body === "b" || body === "i") return { name: body, color: undefined, span: undefined };
+
+  const span = SPAN_TAG.exec(body);
+
+  if (span !== null) return { name: "span", color: undefined, span: span[1] };
 
   const colour = COLOR_TAG.exec(body);
 
   if (colour === null) return undefined;
 
-  return { name: "color", color: Number.parseInt(colour[1] ?? "0", 16) };
+  return { name: "color", color: Number.parseInt(colour[1] ?? "0", 16), span: undefined };
 }
 
 /**
- * Appends text to the runs, merging it into the last one when the flags are the same.
+ * The key of the innermost open span: a nested span wins over the one around it.
+ *
+ * @param stack - The tags that are open.
+ * @returns The style key, or `undefined` outside a span.
+ * @example
+ * ```ts
+ * spanOf([{ name: "span", color: undefined, span: "price.22" }]); // "price.22"
+ * ```
+ */
+function spanOf(stack: readonly OpenTag[]): string | undefined {
+  let span: string | undefined;
+
+  for (const open of stack) if (open.name === "span") span = open.span;
+
+  return span;
+}
+
+/**
+ * Appends text to the runs, merging it into the last one when the flags and the span are the
+ * same.
  *
  * @param runs - The runs built so far.
  * @param text - The characters to append.
@@ -61,7 +87,8 @@ function pushText(runs: Run[], text: string, stack: readonly OpenTag[]): void {
     text,
     bold: stack.some(open => open.name === "b"),
     italic: stack.some(open => open.name === "i"),
-    color
+    color,
+    span: spanOf(stack)
   };
   const last = runs.at(-1);
 
@@ -70,7 +97,8 @@ function pushText(runs: Run[], text: string, stack: readonly OpenTag[]): void {
     last.kind === "text" &&
     last.bold === piece.bold &&
     last.italic === piece.italic &&
-    last.color === piece.color
+    last.color === piece.color &&
+    last.span === piece.span
   ) {
     last.text += text;
 
@@ -118,7 +146,7 @@ function applyTag(state: ParseState, body: string): void {
 
   if (icon !== null) {
     flush(state);
-    state.runs.push({ kind: "icon", key: icon[1] ?? "" });
+    state.runs.push({ kind: "icon", key: icon[1] ?? "", span: spanOf(state.stack) });
 
     return;
   }
@@ -148,16 +176,17 @@ function applyTag(state: ParseState, body: string): void {
 
 /**
  * Turns a resolved string into runs of glyphs and inline icons. Everything the grammar does not
- * know stays visible: the tag is kept as literal text and the source is reported once.
+ * know stays visible: the tag is kept as literal text and the source is reported once. A run in a
+ * `<span style=KEY>` carries `KEY`; whether a style has that key is the layout's question.
  *
  * @param source - The resolved string, as it was written or formatted.
  * @param warn - Called at most once per source, with the key `tag:<source>`.
  * @returns The runs, in reading order, with equal neighbours merged.
  * @example
  * ```ts
- * parseTags("<b>a</b>b", () => undefined);
- * // [{ kind: "text", text: "a", bold: true, italic: false, color: undefined },
- * //  { kind: "text", text: "b", bold: false, italic: false, color: undefined }]
+ * parseTags("<b>a</b><span style=price.22>b</span>", () => undefined);
+ * // [{ kind: "text", text: "a", bold: true, italic: false, color: undefined, span: undefined },
+ * //  { kind: "text", text: "b", bold: false, italic: false, color: undefined, span: "price.22" }]
  * ```
  */
 export function parseTags(source: string, warn: Warn): Run[] {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { currentLabelFixture, namedFixture, resolveFixture } from "./fixtures";
+import { currentLabelFixture, namedFixture, resolveFixture, runsFixture } from "./fixtures";
 
 // X1: one call is one frame of the text system over 100 labels (80 plain, 20 bound), the world
 // walk included, then the clear of phase `signals`.
@@ -100,5 +100,15 @@ describe("text resolve: heap per frame", () => {
 
     await annotate(`text resolve, one named step, new text: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.textNamedChanged + NOISE_BYTES);
+  }, 60_000);
+
+  // F152: labels with pieces of another look cost a still frame what a plain label costs.
+  it("a still frame over 50 labels with <span> and boldStyle runs stays within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(runsFixture(), CALLS);
+
+    await annotate(`text resolve, idle, 50 labels with runs: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.textRunsIdle + NOISE_BYTES);
   }, 60_000);
 });

@@ -78,5 +78,12 @@ export const BUDGET = {
    * standing. Stays 80 B, the cost of one changed label, as `textResolveWorking`: the `{ resolved }`
    * patch and the layout cache key. A step that moves the style writes one more field.
    */
-  textNamedChanged: 80
+  textNamedChanged: 80,
+  /**
+   * F152 (change 2026-11-05-f152-text-runs): a still frame of phase `layout` over 50 labels of the
+   * game's row, each laid out at its box, half with a `<b>` count in the bold look of `boldStyle`,
+   * half with a price in a `<span>` of another style. The looks are built with the styles and the
+   * layouts are cached, so a frame that lays nothing out keeps nothing.
+   */
+  textRunsIdle: 0
 } as const;

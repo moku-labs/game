@@ -95,6 +95,23 @@ function formatIn(ctx: I18nCtx, message: Message, locale?: string): readonly Par
 }
 
 /**
+ * Joins the text parts of a sentence, elements dropped, and reads every `\<` as the `<` it
+ * escapes, so plain text shows a parameter as the player wrote it.
+ *
+ * @param parts - What `formatIn` answered.
+ * @returns The sentence as text.
+ * @example
+ * ```ts
+ * plainOf([{ kind: "text", text: "Host: \\<b>x" }]); // "Host: <b>x"
+ * ```
+ */
+function plainOf(parts: readonly Part[]): string {
+  const text = parts.map(part => (part.kind === "text" ? part.text : "")).join("");
+
+  return text.replaceAll(String.raw`\<`, "<");
+}
+
+/**
  * Switches the current locale on the queue: load what is lazy (the modules of the held bundles
  * included), set the locale, send the event.
  *
@@ -226,10 +243,7 @@ export function createI18nApi(ctx: I18nCtx): I18nApi {
     locale: () => ctx.state.locale,
     setLocale: locale => setLocale(ctx, locale),
     format: (message: Message, locale?: string): readonly Part[] => formatIn(ctx, message, locale),
-    plain: message =>
-      formatIn(ctx, message)
-        .map(part => (part.kind === "text" ? part.text : ""))
-        .join(""),
+    plain: message => plainOf(formatIn(ctx, message)),
     has: key => resolve(ctx.state, key, ctx.state.locale, ctx.config.fallback) !== undefined,
     isKey: value => isKnownKey(ctx.state, ctx.config.fallback, value),
     duration: (ms: number, style: DurationStyle = "short"): string =>

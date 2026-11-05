@@ -312,7 +312,9 @@ export type I18nApi<Key extends string = string> = {
   format(message: Message, locale: string): readonly Part[];
 
   /**
-   * The parts joined into one string, elements dropped. For logs, tests and `flow.describe()`.
+   * The parts joined into one string, elements dropped. Every `\<` reads as `<`, so a string
+   * parameter shows as the player wrote it, without the escape `format` keeps for `text`. For
+   * logs, tests, aria-labels and `flow.describe()`.
    *
    * @param message - What `tr` returned.
    * @returns The sentence as text.
@@ -320,6 +322,8 @@ export type I18nApi<Key extends string = string> = {
    * ```ts
    * // A test asserts what the HUD says without touching the renderer.
    * app.i18n.plain(tr("hud.coins", { n: 25, icon: coinIcon })); // "25": the icon is dropped
+   * // "lobby.host" is "Host: {name}"; format answers "Host: \\<b>x" for the same message.
+   * app.i18n.plain(tr("lobby.host", { name: "<b>x" })); // "Host: <b>x"
    * ```
    */
   plain(message: Message): string;

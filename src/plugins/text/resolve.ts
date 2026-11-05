@@ -9,10 +9,12 @@ import { system } from "../world/ecs/define";
 import type { AnyComponent, AnySystem, Entity } from "../world/ecs/types";
 import { builtInStyles, Countdown, Text } from "./components";
 import { formatBound, isTextFormat, unitOf, wholeValue } from "./format";
-import { layoutRuns } from "./measure";
+import { fontOfRun, layoutRuns, lookOf } from "./measure";
 import { parseTags } from "./tags";
 import type {
   FormattedNumber,
+  LayoutOptions,
+  Run,
   SeenText,
   Size,
   State,
@@ -35,6 +37,12 @@ const CACHE_LIMIT = 1024;
 
 /** How every inline icon tag starts. A resolved text without it holds no icon. */
 const ICON_OPEN = "<icon=";
+
+/** How every span tag starts. A resolved text without it holds no span. */
+const SPAN_OPEN = "<span";
+
+/** How every bold tag starts. A resolved text without it holds no bold run. */
+const BOLD_OPEN = "<b>";
 
 /** The name the system is registered under; it shows up in a world error message. */
 export const TEXT_SYSTEM_NAME = "text.resolve";
@@ -102,9 +110,42 @@ function wrapsAtBox(ctx: TextCtx, styleName: string): boolean {
 }
 
 /**
+ * What the pure layout and the draw are handed: the warning, the style table a span borrows its
+ * look from, and the bold looks.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @returns The layout options of this app.
+ */
+export function layoutOptionsOf(ctx: TextCtx): LayoutOptions {
+  return { warn: warnFor(ctx), styles: ctx.state.styles, looks: ctx.state.looks };
+}
+
+/**
+ * Reports the first span of a resolved string whose key no style has, once per string. Such a
+ * run is laid out and drawn in the look of the paragraph.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param resolved - The tagged string.
+ * @param runs - What `parseTags` made of it.
+ */
+function warnUnknownSpan(ctx: TextCtx, resolved: string, runs: readonly Run[]): void {
+  for (const run of runs) {
+    if (run.span === undefined || ctx.state.styles.has(run.span)) continue;
+
+    warnOnce(ctx, `span:${resolved}`, "text: unknown span style", {
+      style: run.span,
+      text: resolved
+    });
+
+    return;
+  }
+}
+
+/**
  * The layout of one resolved string in one style, from the cache or freshly laid out. The cache
  * is what makes `measure` cheap enough for `ui` to ask per invalidation. A `"box"` style with a
- * box is cached per width too; any other style ignores the box and keeps one layout.
+ * box is cached per width too; any other style ignores the box and keeps one layout. A span whose
+ * key no style has is reported here, where the string is in hand, once per string.
  *
  * @param ctx - Domain context of the text plugin.
  * @param resolved - The tagged string.
@@ -122,9 +163,12 @@ export function layoutFor(ctx: TextCtx, resolved: string, styleName: string, box
 
   if (hit !== undefined) return hit;
 
-  const warn = warnFor(ctx);
-  const runs = parseTags(resolved, warn);
-  const layout = layoutRuns(runs, styleOf(ctx, styleName), ctx.state.tables, { warn }, width);
+  const options = layoutOptionsOf(ctx);
+  const runs = parseTags(resolved, options.warn);
+
+  if (resolved.includes(SPAN_OPEN)) warnUnknownSpan(ctx, resolved, runs);
+
+  const layout = layoutRuns(runs, styleOf(ctx, styleName), ctx.state.tables, options, width);
 
   if (ctx.state.cache.size >= CACHE_LIMIT) {
     const oldest = ctx.state.cache.keys().next().value;
@@ -1026,10 +1070,11 @@ export function markDirty(
 }
 
 /**
- * Tells whether a label is drawn with one of the asset keys: a font its style names, or an inline
- * icon of its resolved text. The text is read through the tag grammar, the way it is drawn, so an
- * escaped `\<icon=…>` is text and not an icon. A text that holds no `<icon=` at all is not read:
- * most labels have no icon, and this runs for every label of a swap.
+ * Tells whether a label is drawn with one of the asset keys: a font its style names, an inline
+ * icon of its resolved text, or the font a run of it draws with in its look, a span's or a bold
+ * one. The text is read through the tag grammar, the way it is drawn, so an escaped `\<icon=…>`
+ * is text and not an icon. A text that holds no icon, no span and, for a style with `boldStyle`,
+ * no bold tag is not read: most labels have none, and this runs for every label of a swap.
  *
  * @param ctx - Domain context of the text plugin.
  * @param text - The component value of the label.
@@ -1046,13 +1091,32 @@ export function drawsWith(
 
   if (fonts.some(font => font !== undefined && keys.includes(font))) return true;
 
-  // Every icon tag holds these characters, so the guard hides no icon. An escaped `\<icon=…>`
-  // holds them too and goes on to the grammar, which reads it as text.
-  if (!text.resolved.includes(ICON_OPEN)) return false;
+  // Every icon, span and bold tag holds these characters, so the guard hides none. An escaped
+  // `\<icon=…>` holds them too and goes on to the grammar, which reads it as text.
+  const resolved = text.resolved;
+  const bolds = style.boldStyle !== undefined && resolved.includes(BOLD_OPEN);
 
-  return parseTags(text.resolved, warnFor(ctx)).some(
-    run => run.kind === "icon" && keys.includes(run.key)
-  );
+  if (!bolds && !resolved.includes(ICON_OPEN) && !resolved.includes(SPAN_OPEN)) return false;
+
+  return parseTags(resolved, warnFor(ctx)).some(run => runDrawsWith(ctx, style, run, keys));
+}
+
+/**
+ * Tells whether one run is drawn with one of the asset keys: an icon of that key, or glyphs in a
+ * font of that key in the look of the run.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param style - The style of the label.
+ * @param run - One run of its text.
+ * @param keys - The asset keys to look for.
+ * @returns True when the run draws with one of `keys`.
+ */
+function runDrawsWith(ctx: TextCtx, style: TextStyle, run: Run, keys: readonly string[]): boolean {
+  if (run.kind === "icon") return keys.includes(run.key);
+
+  const look = lookOf(style, run, ctx.state.styles, ctx.state.looks);
+
+  return keys.includes(fontOfRun(look, run));
 }
 
 /**

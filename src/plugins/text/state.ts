@@ -40,6 +40,7 @@ function emptyWeakMap<Key extends object, Value>(): WeakMap<Key, Value> {
 export function createTextState(): State {
   return {
     styles: emptyMap(),
+    looks: emptyMap(),
     styleOwner: emptyMap(),
     formats: emptyMap(),
     formatOwner: emptyMap(),

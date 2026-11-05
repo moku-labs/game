@@ -1096,3 +1096,401 @@ describe("the display adapter — breaks inside a word (F138)", () => {
     expect(object.children.map(child => textOf(child))).toEqual(["AA-", "AAA"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F152: pieces of another look. Two mono fonts whose baselines sit apart, as in
+// the measure cases: text-medium is 32 px with a line of 48 and a baseline of
+// 24, every glyph 16 wide; alt-bold is 32 px with a line of 36 and a baseline
+// of 32, every glyph 20 wide. At 13 px a glyph is 6.5, a line 19.5 and the
+// baseline 9.75; at 16 px of alt-bold a glyph is 10, a line 18, the baseline 16.
+// ---------------------------------------------------------------------------
+
+/** The font of the game's words. */
+const TEXT = "ui.fonts.text-medium";
+
+/** The font of the game's count. */
+const BOLD = "ui.fonts.alt-bold";
+
+/**
+ * A mono font of the cases, every glyph they draw.
+ *
+ * @param lineHeight - The line of the font at 32 px.
+ * @param base - Its baseline at 32 px.
+ * @param advance - The advance of every glyph at 32 px.
+ * @returns The `.fnt` in BMFont JSON.
+ */
+function monoFont(lineHeight: number, base: number, advance: number): string {
+  const chars = [..."0123456789★ можнопотратить"].map(char => ({ char, xadvance: advance }));
+
+  return JSON.stringify({ info: { size: 32 }, common: { lineHeight, base }, chars });
+}
+
+/** The shadow of the price look. */
+const priceShadow = { color: 0x10_20_30, dx: 1, dy: 2, alpha: 0.5 };
+
+/** A started plugin whose renderer draws, with the two fonts loaded and the game's styles. */
+function looks(): MockText {
+  const mock = createMockText({
+    features: [
+      {
+        name: "album",
+        description: {
+          textStyles: defineTextStyles({
+            "album.row.13": {
+              font: TEXT,
+              size: 13,
+              fill: 0x3b_2a_1a,
+              wrap: "box",
+              boldStyle: { font: BOLD, size: 16, fill: 0xff_00_00 }
+            },
+            "album.row.synthetic": {
+              font: TEXT,
+              size: 13,
+              fill: 0x3b_2a_1a,
+              boldStyle: { size: 20 }
+            },
+            "album.row.amount.16": { font: BOLD, size: 16, fill: 0x00_80_80 },
+            "price.22": {
+              font: BOLD,
+              size: 22,
+              fill: 0x00_80_80,
+              letterSpacing: 0.5,
+              stroke: 0x00_00_00,
+              strokeWidth: 2,
+              shadow: priceShadow
+            },
+            "card.body": { font: TEXT, size: 13, fill: 0, textIndent: 20 },
+            "card.centre": { font: TEXT, size: 13, fill: 0, textIndent: 20, align: "center" },
+            "card.right": { font: TEXT, size: 13, fill: 0, textIndent: 20, align: "right" },
+            "card.box": { font: TEXT, size: 13, fill: 0, wrap: "box", align: "center" },
+            "card.wrap": { font: TEXT, size: 13, fill: 0, wrap: 100, align: "center" }
+          })
+        }
+      }
+    ]
+  });
+
+  mock.renderer.ready = true;
+  mock.assets.textures.set("hud.coin", coinTexture);
+  mock.assets.fonts.set(TEXT, { fnt: monoFont(48, 24, 16), texture: coinTexture });
+  mock.assets.fonts.set(BOLD, { fnt: monoFont(36, 32, 20), texture: coinTexture });
+  mock.start();
+
+  return mock;
+}
+
+describe("the display adapter — <b> in the look of boldStyle (F152)", () => {
+  // The bug: the bold look is not read, so the count draws in 13 px ink with synthetic copies.
+  it("draws a <b> run of a style whose boldStyle names a font in that font, size and fill, with no copies", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({ resolved: "<b>140</b>", style: "album.row.13", anchor: zero })
+    );
+
+    expect(object.children).toHaveLength(1);
+    expect(styleOfObject(object.children[0])).toMatchObject({
+      fontFamily: BOLD,
+      fontSize: 16,
+      fill: 0xff_00_00
+    });
+  });
+
+  // The bug: the synthetic bold copies are sized from the paragraph, or missing in the look.
+  it("thickens a <b> run whose look names no bold font at all, at the look's size / 20", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({ resolved: "<b>1</b>", style: "album.row.synthetic", anchor: zero })
+    );
+
+    expect(object.children).toHaveLength(9);
+    expect(styleOfObject(object.children[8])).toMatchObject({ fontFamily: TEXT, fontSize: 20 });
+    expect(offsetsOf(object.children.slice(0, 8), object.children[8])).toEqual(ring(8, 1));
+  });
+
+  // Verification: line 0 by the line box, line 1 the paragraph's line, its words from x 0.
+  it("draws the game line as one paragraph: line 1 under line 0's box, from x 0", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({
+        resolved: "<b>140★</b> можно потратить",
+        style: "album.row.13",
+        anchor: zero,
+        box: 100
+      })
+    );
+    const [count, words, next] = object.children;
+
+    expect([textOf(count), textOf(words), textOf(next)]).toEqual(["140★", " можно", "потратить"]);
+    // Line 0: the count stands by alt-bold at 16 px, its baseline 16 down; 25.75 high in all.
+    expect(rounded(count?.x ?? -1, count?.y ?? -1)).toEqual({ x: 0, y: 0 });
+    expect(rounded(words?.x ?? -1, words?.y ?? -1)).toEqual({ x: 40, y: 6.25 });
+    expect(rounded(next?.x ?? -1, next?.y ?? -1)).toEqual({ x: 0, y: 25.75 });
+  });
+
+  // The bug: the bold run stands by the metrics of the style's regular font while Pixi draws it
+  // from its bold font's line top, so the count sits off the words' baseline.
+  it("stands a <b> run of boldStyle.font and the words on one baseline, exactly", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({ resolved: "<b>140</b> можно", style: "album.row.13", anchor: zero })
+    );
+    const [count, words] = object.children;
+
+    // Each glyph's baseline is its top plus its font's base at its size: alt-bold 16, text 9.75.
+    expect((count?.y ?? 0) + 16).toBe((words?.y ?? 0) + 9.75);
+    expect([count?.y, words?.y]).toEqual([0, 6.25]);
+  });
+});
+
+/**
+ * A mono font at an export size of its own.
+ *
+ * @param size - The export size.
+ * @param lineHeight - The line of the font at that size.
+ * @param base - Its baseline at that size.
+ * @returns The `.fnt` in BMFont JSON.
+ */
+function shapedFont(size: number, lineHeight: number, base: number): string {
+  const chars = [..."0123456789 можно"].map(char => ({ char, xadvance: size / 2 }));
+
+  return JSON.stringify({ info: { size }, common: { lineHeight, base }, chars });
+}
+
+describe("the display adapter — existing content draws as before F152", () => {
+  /** The regular and the bold font, shaped as the shipped font-body and alt-bold. */
+  const REGULAR = "ui.fonts.body-shaped";
+  const BOLDER = "ui.fonts.alt-bold-shaped";
+
+  // The bug (existing content moves): a plain <b> in the style's bold font stands by that font's
+  // metrics, so a game label of `bold:` + `<b>` draws its words lower and its next line elsewhere.
+  it("draws a plain <b> in a bold font of other ratios at the top of the paragraph's line", () => {
+    const mock = createMockText({
+      features: [
+        {
+          name: "album",
+          description: {
+            textStyles: defineTextStyles({
+              "album.row.bold": { font: REGULAR, bold: BOLDER, size: 13, fill: 0 }
+            })
+          }
+        }
+      ]
+    });
+
+    mock.renderer.ready = true;
+    mock.assets.fonts.set(REGULAR, { fnt: shapedFont(44, 55, 41), texture: coinTexture });
+    mock.assets.fonts.set(BOLDER, { fnt: shapedFont(48, 59, 46), texture: coinTexture });
+    mock.start();
+
+    const object = build(
+      mock,
+      value({ resolved: "<b>140</b> можно\n<b>1</b>", style: "album.row.bold", anchor: zero })
+    );
+
+    // Before F152: every run at the top of its line, each line the regular font's 55 × 13 / 44.
+    expect(object.children.map(child => child.y)).toEqual([0, 0, 55 * (13 / 44)]);
+    expect(mock.api.measure("<b>140</b> можно\n<b>1</b>", "album.row.bold").height).toBe(
+      2 * (55 * (13 / 44))
+    );
+  });
+
+  // The bug: the strut is missing, so a run of a smaller span sits at the top of a short line.
+  it("stands a run of a smaller span on the paragraph's baseline", () => {
+    const mock = looks();
+
+    mock.state.styles.set("small", { ...(mock.state.styles.get("card.body") ?? centred), size: 8 });
+
+    const object = build(
+      mock,
+      value({ resolved: "<span style=small>1</span>", style: "album.row.13", anchor: zero })
+    );
+
+    // The strut's baseline is 9.75 down; the small run's baseline is 6 below its top.
+    expect(object.children[0]?.y).toBe(3.75);
+  });
+});
+
+describe("the display adapter — <span style=KEY> (F152)", () => {
+  // The bug: the glyphs of both looks start at the top of the line, so the words float above
+  // the count's baseline; or each run sits on a baseline of its own.
+  it("stands the glyphs of two looks on one baseline", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({
+        resolved: "<span style=album.row.amount.16>140</span> можно",
+        style: "album.row.13",
+        anchor: zero
+      })
+    );
+    const [count, words] = object.children;
+
+    // The baseline of the line is the count's 16: the count's top at 0, the words' 16 - 9.75 lower.
+    expect(count?.y).toBe(0);
+    expect(words?.y).toBe(6.25);
+    expect((count?.y ?? 0) + 16).toBe((words?.y ?? 0) + 9.75);
+    expect(words?.x).toBe(30);
+  });
+
+  // The bug: an icon is sized at the paragraph's line in a span, or sits at the top of a line a
+  // taller piece made deeper.
+  it("sizes an icon at the line of its look and stands it on the baseline", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({
+        resolved: "<span style=album.row.amount.16>1<icon=hud.coin></span><icon=hud.coin>",
+        style: "album.row.13",
+        anchor: zero
+      })
+    );
+    const [, inSpan, inParagraph] = object.children;
+
+    expect([inSpan?.kind, inParagraph?.kind]).toEqual(["Sprite", "Sprite"]);
+    expect([inSpan?.width, inSpan?.height, inSpan?.x, inSpan?.y]).toEqual([18, 18, 10, 0]);
+    // The paragraph's line is 19.5 with its baseline at 9.75: its top 16 - 9.75 below the line's.
+    expect([inParagraph?.width, inParagraph?.height, inParagraph?.x, inParagraph?.y]).toEqual([
+      19.5, 19.5, 28, 6.25
+    ]);
+  });
+
+  // The bug: the run is built from the paragraph style: its font, size, fill, spacing, outline
+  // or shadow is the paragraph's.
+  it("builds every object of a span run in the look of its style", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({ resolved: "<span style=price.22>12</span>", style: "album.row.13", anchor: zero })
+    );
+    const shadow = object.children[0];
+    const run = object.children[9];
+
+    expect(object.children).toHaveLength(10);
+    expect(shadow?.tint).toBe(priceShadow.color);
+    expect(shadow?.alpha).toBe(0.5);
+    expect(rounded((shadow?.x ?? 0) - (run?.x ?? 0), (shadow?.y ?? 0) - (run?.y ?? 0))).toEqual({
+      x: 1,
+      y: 2
+    });
+    expect(offsetsOf(object.children.slice(1, 9), run)).toEqual(ring(8, 2));
+    expect(object.children.slice(1, 9).map(copy => copy.tint)).toEqual(
+      Array.from({ length: 8 }, () => 0)
+    );
+    expect(styleOfObject(run)).toEqual({
+      fontFamily: BOLD,
+      fontSize: 22,
+      fill: 0x00_80_80,
+      letterSpacing: 0.5
+    });
+  });
+
+  // The bug: an unknown key throws or draws nothing; it draws in the paragraph look.
+  it("draws a span of an unknown key in the paragraph look and warns once", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({ resolved: "<span style=nope>12</span>", style: "album.row.13", anchor: zero })
+    );
+
+    build(
+      mock,
+      value({ resolved: "<span style=nope>12</span>", style: "album.row.13", anchor: zero })
+    );
+
+    expect(styleOfObject(object.children[0])).toMatchObject({ fontFamily: TEXT, fontSize: 13 });
+    expect(
+      vi.mocked(mock.log.warn).mock.calls.filter(call => call[0] === "text: unknown span style")
+    ).toHaveLength(1);
+  });
+
+  // The bug: a tick writes the new text into the objects of another look, which keep their font.
+  it("builds the runs again when the span of a run changed, and retexts them when it stood", () => {
+    const mock = looks();
+    const entry = mock.renderer.provided[0];
+    const previous = value({ resolved: "<span style=price.22>1</span>", style: "album.row.13" });
+    const object = build(mock, previous);
+    const before = object.children[0];
+    const kept = value({ resolved: "<span style=price.22>2</span>", style: "album.row.13" });
+
+    entry?.adapter.update(object, previous, kept);
+
+    expect(object.children[0]).toBe(before);
+
+    entry?.adapter.update(
+      object,
+      kept,
+      value({ resolved: "<span style=album.row.amount.16>2</span>", style: "album.row.13" })
+    );
+
+    expect(before?.destroyed).toBe(true);
+    expect(styleOfObject(object.children[0])).toMatchObject({ fontSize: 16 });
+  });
+});
+
+describe("the display adapter — textIndent (F152)", () => {
+  // "1\n1111": the first line is 20 + 6.5 wide, the second 26; the block is 26.5 wide.
+
+  // The bug: the first line starts at the edge though it was measured indented, or every line
+  // after a line break is indented too.
+  it("starts the first line after the indent and the next lines at the edge, left aligned", () => {
+    const mock = looks();
+    const object = build(mock, value({ resolved: "1\n1111", style: "card.body", anchor: zero }));
+
+    expect(object.children.map(child => child.x)).toEqual([20, 0]);
+  });
+
+  // The bug: a centred first line is centred over the indent, not in the room after it.
+  it("centres and right-aligns the first line in the room the indent leaves", () => {
+    const mock = looks();
+    const wide = build(mock, value({ resolved: "1\n111111", style: "card.centre", anchor: zero }));
+    const end = build(mock, value({ resolved: "1\n111111", style: "card.right", anchor: zero }));
+
+    // "1\n111111": the block is 39 wide, the room after the indent 19, the first line's glyph 6.5.
+    expect(wide.children.map(child => child.x)).toEqual([26.25, 0]);
+    expect(end.children.map(child => child.x)).toEqual([32.5, 0]);
+  });
+});
+
+describe('the display adapter — a "box" text aligns in its box (F153)', () => {
+  // The bug: a centred wrapped text centres on its widest line, off the middle of its box.
+  it("centres the lines of a box text in its box when the box is wider than the lines", () => {
+    const mock = looks();
+    // A glyph is 6.5: at its box of 150 the lines are 136.5 and 32.5 wide.
+    const object = build(
+      mock,
+      value({ resolved: "0000000000 0000000000 00000", style: "card.box", anchor: zero, box: 150 })
+    );
+
+    expect(object.children.map(child => textOf(child))).toEqual(["0000000000 0000000000", "00000"]);
+    expect(object.children.map(child => child.x)).toEqual([6.75, 58.75]);
+  });
+
+  // The bug: every style aligns in the box, or a box text with no box moves.
+  it("keeps a text with no box, and a style that wraps at a width of its own, on its widest line", () => {
+    const mock = looks();
+    const one = build(mock, value({ resolved: "00000", style: "card.box", anchor: zero }));
+    const own = build(
+      mock,
+      value({ resolved: "0000000000 0000000000 00000", style: "card.wrap", anchor: zero, box: 300 })
+    );
+
+    expect(one.children.map(child => child.x)).toEqual([0]);
+    // At its own wrap of 100: 65, 65 and 32.5 wide, centred on the widest.
+    expect(own.children.map(child => child.x)).toEqual([0, 0, 16.25]);
+  });
+
+  // The bug: the anchor centres the block on its widest line, so a centred box text moves off.
+  it("anchors a box text by its box", () => {
+    const mock = looks();
+    const object = build(
+      mock,
+      value({ resolved: "00000", style: "card.box", anchor: { x: 0.5, y: 0 }, box: 100 })
+    );
+
+    expect(object.children[0]?.x).toBe(-16.25);
+  });
+});

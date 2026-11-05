@@ -20,6 +20,8 @@ import type {
   TextBind,
   TextFormat,
   TextFormats,
+  TextRunStyle,
+  TextStyleInput,
   TextStyles,
   TextValue
 } from "../../types";
@@ -149,3 +151,33 @@ type BareGame = { player: number; session: number; assets: string; strings: Reco
 
 expectTypeOf<TextFormatsOf<BareGame & { textFormats: "a" | "b" }>>().toEqualTypeOf<"a" | "b">();
 expectTypeOf<TextFormatsOf<BareGame>>().toBeNever();
+
+// ─── F152: the look of <b>, and the first-line indent ─────────
+
+const count: TextRunStyle = { font: "any.bold", size: 16, fill: 0xff_00_00 };
+
+looseStyles({ anything: { font: "any.font", size: 13, fill: 0, boldStyle: count } });
+defineTextStyles({
+  "hud.digits": {
+    font: "ui.font-body",
+    size: 13,
+    fill: 0,
+    boldStyle: { font: "ui.font-digits", size: 16 }
+  }
+});
+defineTextStyles({ "hud.digits": { font: "ui.font-body", size: 13, fill: 0, textIndent: 20 } });
+
+/** A row style of the game with what a case puts in its boldStyle. */
+const row = { font: "ui.font-body", size: 13, fill: 0 } as const;
+
+// @ts-expect-error — a bold look is a glyph look: `wrap` is the paragraph's
+defineTextStyles({ "hud.digits": { ...row, boldStyle: { wrap: 200 } } });
+
+// @ts-expect-error — "ui.font-comic" is not an asset of this game, in boldStyle either
+defineTextStyles({ "hud.digits": { ...row, boldStyle: { font: "ui.font-comic" } } });
+
+// @ts-expect-error — the indent is reference px, not a CSS string
+defineTextStyles({ "hud.digits": { font: "ui.font-body", size: 13, fill: 0, textIndent: "20px" } });
+
+expectTypeOf<TextStyleInput["textIndent"]>().toEqualTypeOf<number | undefined>();
+expectTypeOf<TextStyleInput["boldStyle"]>().toEqualTypeOf<TextRunStyle | undefined>();

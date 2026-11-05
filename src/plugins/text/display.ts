@@ -1,12 +1,22 @@
 /**
  * @file text plugin — the screen half: the fonts handed to the renderer, and the display adapter
  * that turns one `Text` into one Pixi container of `BitmapText` runs, their shadows and icon
- * sprites. Pixi is never imported here: the classes come from the module the renderer loaded.
+ * sprites. Every run is built in its look and stands on the baseline of its line. Pixi is never
+ * imported here: the classes come from the module the renderer loaded.
  */
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiSprite, PixiTexture } from "../renderer/types";
-import { fontLineOf, fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
-import { drawsWith, layoutFor, markDirty, styleOf, warnFor, warnOnce } from "./resolve";
+import {
+  ascentOf,
+  fontOfRun,
+  leadingOf,
+  lineHeightOf,
+  lookOf,
+  measureRun,
+  metricsFontOf,
+  parseAdvances
+} from "./measure";
+import { drawsWith, layoutFor, layoutOptionsOf, markDirty, styleOf, warnOnce } from "./resolve";
 import type {
   DrawnLabel,
   IconRun,
@@ -220,26 +230,49 @@ export function applyReplaced(
 }
 
 /**
- * Where a line starts inside the widest one.
+ * The width the lines of a block align in, and its anchor moves by: the widest line, or for a
+ * `"box"` style laid out at a box the box when it is wider (F153). `measure` answers the widest
+ * line either way.
  *
  * @param style - The style of the label.
- * @param layout - The block the line belongs to.
+ * @param layout - The laid-out block.
+ * @param box - The box the label was laid out at; 0 for none.
+ * @returns The width in reference pixels.
+ * @example
+ * ```ts
+ * alignWidthOf({ ...bodyStyle, wrap: "box" }, { lines: [], width: 200, height: 0 }, 300); // 300
+ * ```
+ */
+function alignWidthOf(style: TextStyle, layout: TextLayout, box: number): number {
+  return style.wrap === "box" && box > 0 ? Math.max(layout.width, box) : layout.width;
+}
+
+/**
+ * Where a line starts inside the width the block aligns in. The first line of an indented block
+ * counts its indent in its width, so it aligns in the room after the indent.
+ *
+ * @param style - The style of the label.
+ * @param width - The width the block aligns in.
  * @param line - The line.
  * @returns The offset in reference pixels.
+ * @example
+ * ```ts
+ * alignOffset({ ...bodyStyle, align: "center" }, 300, { runs: [], width: 200, height: 0, baseline: 0 }); // 50
+ * ```
  */
-function alignOffset(style: TextStyle, layout: TextLayout, line: Line): number {
+function alignOffset(style: TextStyle, width: number, line: Line): number {
   if (style.align === "left") return 0;
 
-  const slack = layout.width - line.width;
+  const slack = width - line.width;
 
   return style.align === "center" ? slack / 2 : slack;
 }
 
 /**
- * The rings of copies one run is drawn over, bottom first: the outline of a stroked style, then the
- * synthetic bold in the fill when the style names no bold font.
+ * The rings of copies one run is drawn over, bottom first: the outline of a stroked look, then the
+ * synthetic bold in the fill when the look names no bold font.
  *
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param run - The run to draw.
  * @param fill - The colour the run is filled with.
  * @returns The rings, none for a plain run.
@@ -282,12 +315,12 @@ function iconTexture(ctx: TextCtx, pixi: PixiModule, run: IconRun): PixiTexture 
 }
 
 /**
- * Sizes the sprite of one inline icon square at the line height and puts it where the icon
+ * Sizes the sprite of one inline icon square at the line of its look and puts it where the icon
  * starts.
  *
  * @param ctx - Domain context of the text plugin.
  * @param sprite - The sprite of the icon.
- * @param style - The style of the label.
+ * @param style - The look of the icon.
  * @param at - Where the icon starts, in the local space of the block.
  */
 function placeIcon(ctx: TextCtx, sprite: PixiSprite, style: TextStyle, at: Point): void {
@@ -300,12 +333,12 @@ function placeIcon(ctx: TextCtx, sprite: PixiSprite, style: TextStyle, at: Point
 }
 
 /**
- * Builds the sprite of one inline icon, square at the line height.
+ * Builds the sprite of one inline icon, square at the line of its look.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The icon to draw.
- * @param style - The style of the label.
+ * @param style - The look of the icon.
  * @param at - Where the icon starts, in the local space of the block.
  * @returns The sprite.
  */
@@ -329,7 +362,7 @@ function buildIcon(
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs to draw.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param fill - The colour of the glyphs.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The display object.
@@ -365,8 +398,8 @@ function buildGlyphs(
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs that cast the shadow.
- * @param style - The style of the label.
- * @param shadow - The shadow of the style.
+ * @param style - The look of the run.
+ * @param shadow - The shadow of the look.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The display object, to be drawn under the run.
  */
@@ -416,7 +449,7 @@ function ringSpots(ring: Ring, at: Point): Point[] {
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs the ring surrounds.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param ring - The width and colour of the ring.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The copies, to be drawn under the run.
@@ -441,7 +474,7 @@ function buildRing(
  * Where every object of one glyph run sits, in the order `buildRun` adds them: its shadow, the
  * copies of its rings, then the run itself.
  *
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param run - The glyph run.
  * @param at - Where the run starts, in the local space of the block.
  * @returns One point per object.
@@ -461,12 +494,12 @@ function glyphSpots(style: TextStyle, run: TextRun, at: Point): Point[] {
 
 /**
  * Builds the Pixi objects of one run, bottom first: an icon is one sprite, and a glyph run is its
- * shadow when the style has one, its outline and synthetic bold rings, then the glyphs.
+ * shadow when its look has one, its outline and synthetic bold rings, then the glyphs.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The run to draw.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The display objects in drawing order.
  */
@@ -539,38 +572,51 @@ function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
 }
 
 /**
- * Calls `visit` with every run of a laid-out block and where it starts, anchored by the
- * component, line after line. A run of glyphs starts half the leading lower, so the glyphs sit in
- * the middle of a line taller or shorter than the font's; an icon starts on the line it fills.
+ * Calls `visit` with every run of a laid-out block, its look and where it starts, anchored by the
+ * component, line after line. The line of a run's look stands so that the run's baseline is the
+ * line's: a run of glyphs starts half its leading below the top of that line, so the glyphs sit in
+ * the middle of a line taller or shorter than the font's, and an icon starts on the line it fills.
+ * A run in a look of its own stands by the font it is drawn with, one in the paragraph's look by
+ * the paragraph's font (`metricsFontOf`). In a line no run reaches past the paragraph's line every
+ * run of the paragraph's look starts on the top of the line, as before lines had boxes. The first
+ * line starts after the indent.
  *
  * @param ctx - Domain context of the text plugin.
  * @param label - The style and the laid-out block.
- * @param anchor - The anchor of the component.
+ * @param value - The component value: its anchor, and the box it was laid out at.
  * @param visit - Called once per run, in reading order.
  */
 function eachRun(
   ctx: TextCtx,
   label: DrawnLabel,
-  anchor: Point,
-  visit: (run: Run, at: Point) => void
+  value: Readonly<TextValue>,
+  visit: (run: Run, at: Point, look: TextStyle) => void
 ): void {
   const { style, layout } = label;
-  const height = lineHeightOf(style, ctx.state.tables);
-  const leading = (height - fontLineOf(style, ctx.state.tables)) / 2;
-  const options = { warn: warnFor(ctx) };
-  const left = -anchor.x * layout.width;
-  let y = -anchor.y * layout.height;
+  const tables = ctx.state.tables;
+  const options = layoutOptionsOf(ctx);
+  const width = alignWidthOf(style, layout, value.box ?? 0);
+  const left = -value.anchor.x * width;
+  let top = -value.anchor.y * layout.height;
+  let indent = style.textIndent ?? 0;
 
-  // Lines top to bottom, runs left to right; a glyph run sits half the leading lower.
+  // Lines top to bottom, runs left to right; every run stands on the baseline of its line.
   for (const line of layout.lines) {
-    let x = left + alignOffset(style, layout, line);
+    let x = left + alignOffset(style, width, line) + indent;
 
     for (const run of line.runs) {
-      visit(run, { x, y: run.kind === "text" ? y + leading : y });
-      x += measureRun(run, style, ctx.state.tables, options);
+      const look = lookOf(style, run, options.styles, options.looks);
+      const font = metricsFontOf(style, look, run);
+      const leading = leadingOf(look, tables, font);
+      // How far the top of the run's own line sits below the top of the line: 0 when all stand alike.
+      const lift = line.baseline - (leading + ascentOf(look, tables, font));
+
+      visit(run, { x, y: run.kind === "text" ? top + lift + leading : top + lift }, look);
+      x += measureRun(run, style, tables, options);
     }
 
-    y += height;
+    top += line.height;
+    indent = 0;
   }
 }
 
@@ -592,22 +638,26 @@ function fill(
   value: Readonly<TextValue>,
   label: DrawnLabel
 ): void {
-  eachRun(ctx, label, value.anchor, (run, at) => {
-    for (const object of buildRun(ctx, pixi, run, label.style, at)) container.addChild(object);
+  eachRun(ctx, label, value, (run, at, look) => {
+    for (const object of buildRun(ctx, pixi, run, look, at)) container.addChild(object);
   });
   ctx.state.drawn.set(container, label);
 }
 
 /**
  * Tells whether two runs are drawn with the same objects: an icon of the same key, or glyphs with
- * the same bold, italic and colour. Only the text of a glyph run may differ.
+ * the same bold, italic and colour, both in the same span. Only the text of a glyph run may
+ * differ: a run of another span is in another look, with other fonts and copies.
  *
  * @param first - One run.
  * @param second - The other, or nothing.
  * @returns True when the objects of `first` can draw `second`.
  */
 function sameObjects(first: Run, second: Run | undefined): boolean {
-  if (second === undefined || first.kind !== second.kind) return false;
+  if (second === undefined || first.kind !== second.kind || first.span !== second.span) {
+    return false;
+  }
+
   if (first.kind === "icon") return second.kind === "icon" && first.key === second.key;
 
   return (
@@ -657,18 +707,18 @@ function retext(
 ): void {
   let index = 0;
 
-  eachRun(ctx, label, value.anchor, (run, at) => {
+  eachRun(ctx, label, value, (run, at, look) => {
     if (run.kind === "icon") {
       const sprite = container.getChildAt<PixiSprite>(index);
 
       sprite.texture = iconTexture(ctx, pixi, run);
-      placeIcon(ctx, sprite, label.style, at);
+      placeIcon(ctx, sprite, look, at);
       index += 1;
 
       return;
     }
 
-    for (const spot of glyphSpots(label.style, run, at)) {
+    for (const spot of glyphSpots(look, run, at)) {
       const glyphs = container.getChildAt<PixiBitmapText>(index);
 
       glyphs.text = run.text;
@@ -696,7 +746,9 @@ function samePoint(first: Point, second: Point): boolean {
  * was last updated with, drawn with the style object that is current and under the generation
  * that is current, and for a `"box"` style at the same box. A replaced style is a new object under
  * the same name. A font or an icon a dev hot swap replaced moves the generation, because the
- * objects hold textures that are destroyed. The box of any other style changes nothing drawn.
+ * objects hold textures that are destroyed, and so does a styles swap, because a span or a bold
+ * look of the label may have changed under a style that stood. The box of any other style changes
+ * nothing drawn.
  *
  * @param ctx - Domain context of the text plugin.
  * @param container - The container of this label.

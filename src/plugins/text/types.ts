@@ -243,6 +243,31 @@ export type TextWrap = number | "box" | "none";
 export type TextShadow = { color: number; dx: number; dy: number; alpha: number };
 
 /**
+ * The glyph look of a piece of a line: what `boldStyle` lays over a style for its `<b>` runs.
+ * Every field is optional; one left out comes from the style. `font` is the font the run draws
+ * with, so it wins over `bold`. `shadow` is a drop shadow as on a style, `alpha` 1 when left out.
+ *
+ * @example
+ * ```ts
+ * // The count of «<b>140★</b> можно потратить в магазине звёзд»: 16 px bold in a 13 px line.
+ * const count: TextRunStyle = { font: "ui.fonts.alt-bold", size: 16 };
+ *
+ * defineTextStyles({
+ *   "album.row.13": { font: "ui.fonts.text-medium", size: 13, fill: 0x3b2a1a, boldStyle: count }
+ * }).map["album.row.13"]?.boldStyle; // { font: "ui.fonts.alt-bold", size: 16 }
+ * ```
+ */
+export type TextRunStyle = {
+  font?: string;
+  size?: number;
+  fill?: number;
+  letterSpacing?: number;
+  stroke?: number;
+  strokeWidth?: number;
+  shadow?: { color: number; dx: number; dy: number; alpha?: number };
+};
+
+/**
  * One style as a game writes it: the font and the size are required, the rest has defaults.
  *
  * @example
@@ -312,12 +337,51 @@ export type TextStyleInput = {
    * ```
    */
   balance?: boolean;
+  /**
+   * The look of the `<b>` runs of this style: the style with these fields laid over it. Without
+   * it a `<b>` run draws in the `bold` font, or as a synthetic bold when the style names none.
+   * A key outside the seven of `TextRunStyle`, a `size` that is not a number above 0, or a
+   * `letterSpacing` or `strokeWidth` that is not finite is refused when the style is defined.
+   *
+   * @example
+   * ```ts
+   * // The game line: the count is 16 px alt-bold, the words 13 px text-medium.
+   * defineTextStyles({
+   *   "album.row.13": {
+   *     font: "ui.fonts.text-medium", size: 13, fill: 0x3b2a1a, wrap: "box",
+   *     boldStyle: { font: "ui.fonts.alt-bold", size: 16 }
+   *   }
+   * });
+   *
+   * // Every glyph 0.6 em while no font is loaded: "140" is 3 × 9.6, " можно" 6 × 7.8.
+   * app.text.measure("<b>140</b> можно", "album.row.13"); // { width: 75.6, height: 19.2 }
+   * ```
+   */
+  boldStyle?: TextRunStyle;
+  /**
+   * The indent of the first line of the block, in reference px, like CSS `text-indent`. The first
+   * line wraps at the wrap less the indent, and its width counts it; a line after `\n` starts at
+   * the edge. A number below 0 or not finite is refused; 0 is left out.
+   *
+   * @example
+   * ```ts
+   * defineTextStyles({
+   *   "card.body.14": { font: "ui.font-body", size: 14, fill: 0x3b2a1a, wrap: 200, textIndent: 20 }
+   * });
+   *
+   * // 0.6 em while no font is loaded: the indent and 12 glyphs of 8.4.
+   * app.text.measure("Once upon a.", "card.body.14"); // { width: 120.8, height: 16.8 }
+   * ```
+   */
+  textIndent?: number;
 };
 
 /**
  * One style as the plugin stores it: every field filled, `bold` and `italic` only when the game
  * shipped those MSDF fonts, `shadow` only when the style has one, `lineHeight` only when the style
  * names its line (`undefined` is the font's line), and `balance` only on a style that balances.
+ * `boldStyle` holds the fields the game gave, its shadow with the alpha filled, and `textIndent`
+ * is there only above 0: a style that names neither equals the literal below.
  *
  * @example
  * ```ts
@@ -343,6 +407,8 @@ export type TextStyle = {
   shadow: TextShadow | undefined;
   lineHeight: number | undefined;
   balance?: true;
+  boldStyle?: TextRunStyle;
+  textIndent?: number;
 };
 
 /**
@@ -358,21 +424,34 @@ export type TextStyles = { readonly kind: "textStyles"; readonly map: Record<str
 
 /**
  * The advances of one font at the size the `.fnt` was exported with. Widths scale by
- * `style.size / size`; kerning pairs are ignored.
+ * `style.size / size`; kerning pairs are ignored. `base` is how far the baseline sits below the
+ * top of a line of the font (`common.base`), 0.8 × `size` when the file names none.
  *
  * @example
  * ```ts
- * const table: AdvanceTable = { size: 32, lineHeight: 40, advances: new Map([["1", 18]]) };
+ * const table: AdvanceTable = {
+ *   size: 32, lineHeight: 40, base: 32, advances: new Map([["1", 18]])
+ * };
  * ```
  */
-export type AdvanceTable = { size: number; lineHeight: number; advances: Map<string, number> };
+export type AdvanceTable = {
+  size: number;
+  lineHeight: number;
+  base: number;
+  advances: Map<string, number>;
+};
 
 /**
- * One run of glyphs: the text and the flags every glyph in it shares.
+ * One run of glyphs: the text and the flags every glyph in it shares. `span` is the key of the
+ * style a `<span style=KEY>` around it borrows the look of, `undefined` outside a span.
  *
  * @example
  * ```ts
- * const run: TextRun = { kind: "text", text: "+5", bold: true, italic: false, color: 0xffe082 };
+ * const run: TextRun = {
+ *   kind: "text", text: "+5", bold: true, italic: false, color: 0xffe082, span: undefined
+ * };
+ * // "<span style=price.22>1 250</span>" is one run in the look of "price.22".
+ * const price: TextRun = { ...run, text: "1 250", bold: false, color: undefined, span: "price.22" };
  * ```
  */
 export type TextRun = {
@@ -381,40 +460,49 @@ export type TextRun = {
   bold: boolean;
   italic: boolean;
   color: number | undefined;
+  span: string | undefined;
 };
 
 /**
- * One inline icon: an asset key drawn square at the line height.
+ * One inline icon: an asset key drawn square at the line of its look, the span's when it sits in
+ * one.
  *
  * @example
  * ```ts
- * const run: IconRun = { kind: "icon", key: "hud.coin" };
+ * const run: IconRun = { kind: "icon", key: "hud.coin", span: undefined };
  * ```
  */
-export type IconRun = { kind: "icon"; key: string };
+export type IconRun = { kind: "icon"; key: string; span: string | undefined };
 
 /**
  * A piece of a line: glyphs or one inline icon.
  *
  * @example
  * ```ts
- * const runs: Run[] = [{ kind: "icon", key: "hud.coin" }];
+ * const runs: Run[] = [{ kind: "icon", key: "hud.coin", span: undefined }];
  * ```
  */
 export type Run = TextRun | IconRun;
 
 /**
- * One laid-out line and how wide it is.
+ * One laid-out line: its runs, how wide it is, how high its line box is, and where its baseline
+ * sits below its top. A line of one look is as high as that look's line; a piece of a taller look
+ * makes it taller, and every piece stands on the one baseline.
  *
  * @example
  * ```ts
- * const line: Line = { runs: [{ kind: "icon", key: "hud.coin" }], width: 38.4 };
+ * // An icon in `body` while no font is loaded: a line of 1.2 em, the baseline at 0.8 em.
+ * const line: Line = {
+ *   runs: [{ kind: "icon", key: "hud.coin", span: undefined }], width: 38.4, height: 38.4,
+ *   baseline: 25.6
+ * };
  * ```
  */
-export type Line = { runs: Run[]; width: number };
+export type Line = { runs: Run[]; width: number; height: number; baseline: number };
 
 /**
- * A laid-out block: its lines and the size `measure` answers with.
+ * A laid-out block: its lines and the size `measure` answers with. `height` is the sum of the
+ * heights of its lines.
  *
  * @example
  * ```ts
@@ -427,8 +515,9 @@ export type TextLayout = { lines: Line[]; width: number; height: number };
  * What one label container was last filled from: the style object, the laid-out block and the
  * generation of the state at that moment. An update with the same style object, the same
  * generation, the same anchor and the same lines and runs writes the new text and positions into
- * the objects already there. An older generation means a dev hot swap replaced a font or an icon
- * since: the objects hold textures that are destroyed, so they are built again.
+ * the objects already there. An older generation means a dev hot swap replaced a font, an icon or
+ * the styles since: the objects hold textures that are destroyed, or are in a look that changed,
+ * so they are built again.
  */
 export type DrawnLabel = { style: TextStyle; layout: TextLayout; generation: number };
 
@@ -439,14 +528,21 @@ export type DrawnLabel = { style: TextStyle; layout: TextLayout; generation: num
 export type Warn = (key: string, message: string, data?: Record<string, unknown>) => void;
 
 /**
- * What the pure layout needs next to the runs, the style and the tables.
+ * What the pure layout needs next to the runs, the style and the tables: where a warning goes,
+ * and the style table and the bold looks a run in a span or in `<b>` takes its look from. Left
+ * out, every run is in the look of the paragraph.
  *
  * @example
  * ```ts
  * const options: LayoutOptions = { warn: () => undefined };
+ * const looked: LayoutOptions = { warn: () => undefined, styles: state.styles, looks: state.looks };
  * ```
  */
-export type LayoutOptions = { warn: Warn };
+export type LayoutOptions = {
+  warn: Warn;
+  styles?: ReadonlyMap<string, TextStyle>;
+  looks?: ReadonlyMap<TextStyle, TextStyle>;
+};
 
 /**
  * What was resolved for one entity last, so the frame step knows whether anything moved. `style`
@@ -494,13 +590,19 @@ export type Config = {
 export type State = {
   /** Built-in styles first, then the styles of every feature in feature order. */
   styles: Map<string, TextStyle>;
+  /**
+   * A style that has `boldStyle` to the look of its `<b>` runs: the style with `boldStyle` laid
+   * over it. Built with the style table and again on every hot swap, so a layout and a draw read
+   * a look and build none.
+   */
+  looks: Map<TextStyle, TextStyle>;
   /** Style name to the feature that brought it, for the duplicate error. */
   styleOwner: Map<string, string>;
   /** The number formats of every feature by name, in feature order. */
   formats: Map<string, TextFormatFunction>;
   /** Format name to the feature that brought it, for the duplicate error. */
   formatOwner: Map<string, string>;
-  /** The config fonts plus every `font`, `bold` and `italic` of every style. */
+  /** The config fonts plus every `font`, `bold`, `italic` and `boldStyle.font` of every style. */
   fontKeys: Set<string>;
   /** The parsed advance table per font key, filled when `assets` has the font. */
   tables: Map<string, AdvanceTable>;
@@ -530,8 +632,8 @@ export type State = {
    */
   rewrite: Entity[];
   /**
-   * Counts the dev hot swaps that replaced a font or an inline icon of a live label. A label
-   * container drawn under an older count is built again on its next update.
+   * Counts the dev hot swaps that replaced a font, an inline icon or the styles of a live label. A
+   * label container drawn under an older count is built again on its next update.
    */
   generation: number;
   /** Warning keys already written, so a style, a tag, a glyph or a font warns once. */
@@ -557,7 +659,8 @@ export type TextApi = {
   /**
    * The size of a piece of text in reference pixels, from the advance table of the style's font.
    * A `Message` is formatted in the current locale first. Never touches a canvas, so the answer
-   * is the same in a browser and in plain Bun. Cached per style and resolved string, and per
+   * is the same in a browser and in plain Bun. A block with pieces of other looks (`<span>`,
+   * `boldStyle`) is as high as the line boxes of its lines, and the width counts `textIndent`. Cached per style and resolved string, and per
    * width for a `"box"` style. A call with a width is a layout's (`ui.layout` is the caller it is
    * meant for): it marks the style as laid out, so a label of it with no box (one that fits its
    * row) no longer warns `wrap "box" outside layout` (F65).
@@ -640,8 +743,9 @@ export type TextApi = {
    * The dev hot swap of a styles file: writes every style of the map over the table. A known
    * name keeps the feature that owns it, a new name is added and usable at once. The fonts the
    * styles name are read, the measured layouts are dropped, and every label is laid out again
-   * on the next frame and redrawn with the new style, even when its text and its style name did
-   * not change. The game loop is woken for that frame.
+   * on the next frame and built again, even when its text and its style name did not change: a
+   * label whose `<span>` or `boldStyle` look changed redraws too. The game loop is woken for that
+   * frame.
    *
    * @param styles - What `defineTextStyles` returned in the saved module.
    * @example

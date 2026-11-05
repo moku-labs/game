@@ -425,7 +425,8 @@ export type {
   TextFormat,
   TextFormatAnswer,
   TextFormatFunction,
-  TextFormats
+  TextFormats,
+  TextRunStyle
 } from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
 export { Box, DebugTrigger, LocalWrite, popup, ScrollState } from "./plugins/ui/components";

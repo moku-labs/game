@@ -41,7 +41,7 @@ export const ep01Feature = defineFeature("ep01", {
 | `setLocale(locale)` | Loads a lazy module once, then emits `i18n:locale-changed`. The modules of every sub-feature whose bundle is loaded are imported for the new locale before the event; one whose bundle is not loaded is left for its next load. An unknown locale throws |
 | `format(message)` | `Part[]` in the current locale, adjacent text merged. A key of a sub-feature whose bundle is not loaded gives `⟦key⟧`, and its one warning names the bundle |
 | `format(message, locale)` | The same in another registered locale, without switching. For `ui.lint`. Every loaded locale carries the strings of every loaded bundle |
-| `plain(message)` | The parts joined, elements dropped. For logs, tests and `describe()` |
+| `plain(message)` | The parts joined, elements dropped, every `\<` read as `<`. For logs, tests, aria-labels and `describe()` |
 | `has(key)` | The key exists in the current locale or in the fallback. A key of a sub-feature whose bundle is not loaded answers false |
 | `isKey(value)` | A value read from a save is a key of the game: a key of the current locale or the fallback, or the `<feature>.` prefix of a sub-feature whose strings are not loaded. Not a string: false. On the game's app a true answer types the value as `I18n.TextKey<Strings>`; through `ctx.require(i18nPlugin)` as a `string`. See [Keys that come from data](#keys-that-come-from-data) |
 | `duration(ms, style?)` | Milliseconds as text in the current locale: `"1 min, 35 sec"` for `95_000`. Style `"short"` by default. For `text`'s `format: "duration"` |
@@ -58,6 +58,8 @@ app.i18n.format(tr("hud.coins", { n: 25, icon: coin }));
 ```
 
 An element parameter keeps its place in the sentence, which is what makes an icon inside a line possible without string surgery. An array parameter is formatted through `Intl.ListFormat`, because ICU MessageFormat 1 has no list syntax. A number in a plain argument goes through `Intl.NumberFormat`.
+
+A string parameter, and every string item of a list parameter, is escaped for the tag pass of `text`: every `<` arrives as `\<`, so a player named `<b>x` shows `<b>x` and is never bold, also inside a list. Tags in the message itself stay tags. `format` keeps the `\<`, `plain` answers the parameter as written: `plain(tr("lobby.host", { name: "<b>x" }))` is `"Host: <b>x"`. Numbers and elements are not escaped. Edge: a parameter that ends in `\` right before a literal tag of the message is not specially treated.
 
 ## Strings per feature
 

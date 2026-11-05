@@ -211,3 +211,78 @@ describe("styles", () => {
     expect(Object.isFrozen(mock.api.styles())).toBe(true);
   });
 });
+
+/** A started plugin with the game's row style, a box style and an indented card body. */
+function rows(): MockText {
+  const mock = createMockText({
+    features: [
+      {
+        name: "album",
+        description: {
+          textStyles: defineTextStyles({
+            "album.row.13": {
+              font: "ui.fonts.text-medium",
+              size: 13,
+              fill: 0x3b_2a_1a,
+              wrap: "box",
+              boldStyle: { font: "ui.fonts.alt-bold", size: 16 }
+            },
+            "card.body.14": {
+              font: "ui.font-body",
+              size: 14,
+              fill: 0x3b_2a_1a,
+              wrap: 200,
+              textIndent: 20
+            }
+          })
+        }
+      }
+    ]
+  });
+
+  mock.start();
+
+  return mock;
+}
+
+describe("measure — pieces of another look and the first-line indent (F152)", () => {
+  // The bug: `measure` lays the block out without the style table and the bold looks, so ui sizes
+  // the row for 13 px glyphs and the 16 px count overflows it.
+  it("answers the size of a block with a <b> run in its bold look, as the docs show", () => {
+    expect(rows().api.measure("<b>140</b> можно", "album.row.13")).toEqual({
+      width: 75.6,
+      height: 19.2
+    });
+  });
+
+  it("answers the width of an indented block with the indent, as the docs show", () => {
+    expect(rows().api.measure("Once upon a.", "card.body.14")).toEqual({
+      width: 120.8,
+      height: 16.8
+    });
+  });
+
+  // The bug: a typo in a span key throws, draws in no look, or floods the log at every layout.
+  it("measures a span of an unknown key in the paragraph look and warns once per string", () => {
+    const mock = rows();
+    const source = "<span style=album.row.nope>12</span> можно";
+
+    expect(mock.api.measure(source, "album.row.13", 100)).toEqual(
+      mock.api.measure("12 можно", "album.row.13", 100)
+    );
+    mock.api.measure(source, "album.row.13", 200);
+
+    expect(warningsOf(mock, "text: unknown span style")).toEqual([
+      ["text: unknown span style", { style: "album.row.nope", text: source }]
+    ]);
+  });
+
+  // The bug: a known key is reported too.
+  it("says nothing of a span whose key a style has", () => {
+    const mock = rows();
+
+    mock.api.measure("<span style=card.body.14>12</span>", "album.row.13");
+
+    expect(warningsOf(mock, "text: unknown span style")).toEqual([]);
+  });
+});
