@@ -142,9 +142,60 @@ function isElementNode(value: unknown): value is ElementNode {
 }
 
 /**
+ * Escapes every `<` of a text parameter the way the tag pass of `text` reads a literal `<`, so a
+ * player's name is never markup. A text without `<` comes back as the same string. It is the twin
+ * of `escapeTags` in `text/tags.ts` (`i18n` sits below `text` and cannot import it): a change
+ * edits both, and `tests/integration/escape-params.test.ts` holds them together.
+ *
+ * @param text - The parameter read as text.
+ * @returns The text with every `<` written as `\<`.
+ * @example
+ * ```ts
+ * escapeTags("<b>x"); // "\\<b>x"
+ * ```
+ */
+function escapeTags(text: string): string {
+  return text.includes("<") ? text.replaceAll("<", String.raw`\<`) : text;
+}
+
+/**
+ * Tells whether one item of a list parameter is a string with a `<` in it.
+ *
+ * @param item - The item.
+ * @returns True when the item needs escaping.
+ * @example
+ * ```ts
+ * hasTag("<b>Ann"); // true
+ * ```
+ */
+function hasTag(item: unknown): boolean {
+  return typeof item === "string" && item.includes("<");
+}
+
+/**
+ * Escapes every `<` of every string item of a list parameter, so a name in a list is never
+ * markup either. A list with no `<` in any item comes back as the same array.
+ *
+ * @param items - The list parameter.
+ * @returns The items, every `<` written as `\<`.
+ * @example
+ * ```ts
+ * escapeItems(["<b>Ann", "Bob"]); // ["\\<b>Ann", "Bob"]
+ * ```
+ */
+function escapeItems(items: readonly string[]): readonly string[] {
+  for (const item of items) {
+    if (hasTag(item)) return items.map(each => escapeTags(each));
+  }
+
+  return items;
+}
+
+/**
  * One plain argument of a compiled message as a part: an element node keeps its place in the
  * sentence, a list goes through `Intl.ListFormat` and a number through `Intl.NumberFormat` of the
- * kit's locale, anything else is read as text. A generated `strings.<locale>.ts` imports it as
+ * kit's locale, anything else is read as text. Every `<` of a text or of a list item is escaped
+ * as `\<`, so the tag pass of `text` never reads a parameter as markup. A generated `strings.<locale>.ts` imports it as
  * `argument` for a message with `{name}`.
  *
  * @param value - The parameter of the message.
@@ -152,24 +203,29 @@ function isElementNode(value: unknown): value is ElementNode {
  * @returns The part.
  * @example
  * ```ts
- * // A compiled module written by hand, the shape `moku-game keys` writes for "Host: {name}".
+ * // A compiled module written by hand, the shape `moku-game keys` writes for "Host: {name}",
+ * // registered as the strings of `en`; `coin` is an icon element a game builds.
  * const lobby: I18n.CompiledMessages = {
  *   "lobby.host": (p, intl) => [{ kind: "text", text: "Host: " }, messageArgument(p.name, intl)]
  * };
+ * const coin: ElementNode = { type: "icon", props: { name: "hud.coin" }, children: [] };
  * app.i18n.plain(tr("lobby.host", { name: ["Ann", "Bob", "Cy"] })); // "Host: Ann, Bob, and Cy"
  * app.i18n.format(tr("lobby.host", { name: coin })); // [{ kind: "text", text: "Host: " }, { kind: "element", node: coin }]
+ * app.i18n.format(tr("lobby.host", { name: "<b>x" })); // [{ kind: "text", text: "Host: \\<b>x" }]
+ * app.i18n.plain(tr("lobby.host", { name: "<b>x" })); // "Host: <b>x"
+ * app.i18n.format(tr("lobby.host", { name: ["<b>Ann", "Bob"] })); // [{ kind: "text", text: "Host: \\<b>Ann and Bob" }]
  * ```
  */
 export function messageArgument(value: unknown, intl: IntlKit): Part {
   if (Array.isArray(value)) {
-    return { kind: "text", text: intl.list().format(value as readonly string[]) };
+    return { kind: "text", text: intl.list().format(escapeItems(value as readonly string[])) };
   }
 
   if (typeof value === "number") return { kind: "text", text: intl.number().format(value) };
 
   if (isElementNode(value)) return { kind: "element", node: value };
 
-  return { kind: "text", text: String(value) };
+  return { kind: "text", text: escapeTags(String(value)) };
 }
 
 /**

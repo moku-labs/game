@@ -40,6 +40,7 @@ function emptyWeakMap<Key extends object, Value>(): WeakMap<Key, Value> {
 export function createTextState(): State {
   return {
     styles: emptyMap(),
+    looks: emptyMap(),
     styleOwner: emptyMap(),
     formats: emptyMap(),
     formatOwner: emptyMap(),
@@ -50,6 +51,10 @@ export function createTextState(): State {
     bindTypes: emptyMap(),
     measured: emptyMap(),
     cache: emptyMap(),
+    epoch: 0,
+    shown: emptyMap(),
+    cursor: { container: undefined, pixi: undefined, index: 0, at: new Float64Array(2) },
+    runWidths: emptyWeakMap(),
     drawn: emptyWeakMap(),
     dirty: emptySet(),
     added: [],

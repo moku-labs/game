@@ -2,8 +2,12 @@
  * @file text plugin — the measurement. A `.fnt` becomes an advance table, runs become lines, and
  * a block becomes a size in reference pixels. Pure and canvas-free: the same numbers on a screen
  * and in plain Bun, which is what keeps `ui.layout` honest. A character the font has no glyph for
- * measures 0 wide, because Pixi draws nothing for it.
+ * measures 0 wide, because Pixi draws nothing for it. Every run measures in its look: the
+ * paragraph's style, the style its `<span>` borrows, or the bold look of either; and every line is
+ * a CSS line box, as high as its looks need, all of them on one baseline.
  */
+import { blockHeight, boxLines, FALLBACK_BASE, fontOfRun, lineHeightOf, lookIn } from "./lines";
+import { sameLook } from "./tags";
 import type {
   AdvanceTable,
   LayoutOptions,
@@ -16,9 +20,6 @@ import type {
 
 /** Advance of a glyph no table knows, as a share of the style size. */
 const FALLBACK_ADVANCE = 0.6;
-
-/** Line height of a style whose font is not loaded, as a share of the style size. */
-const FALLBACK_LINE = 1.2;
 
 /**
  * How much wider than its box a line of a `"box"` style may be. `ui` lays a text out in whole units
@@ -132,13 +133,30 @@ function readJson(fnt: string): AdvanceTable | undefined {
 
   if (size <= 0) return undefined;
 
-  const common = isRecord(data.common) ? (numberOf(data.common.lineHeight) ?? 0) : 0;
+  const common = isRecord(data.common) ? data.common : {};
+  const lineHeight = numberOf(common.lineHeight) ?? 0;
 
   return {
     size,
-    lineHeight: common > 0 ? common : size,
+    lineHeight: lineHeight > 0 ? lineHeight : size,
+    base: baseOf(numberOf(common.base), size),
     advances: readChars(data.chars)
   };
+}
+
+/**
+ * The baseline a file names, or 0.8 of its size when it names none above 0.
+ *
+ * @param base - The `base` of the file's `common` block, as it was read.
+ * @param size - The export size of the font.
+ * @returns How far the baseline sits below the top of a line, at the export size.
+ * @example
+ * ```ts
+ * baseOf(undefined, 40); // 32
+ * ```
+ */
+function baseOf(base: number | undefined, size: number): number {
+  return base !== undefined && base > 0 ? base : FALLBACK_BASE * size;
 }
 
 /**
@@ -178,6 +196,7 @@ function readXml(fnt: string): AdvanceTable | undefined {
   if (size <= 0) return undefined;
 
   const lineHeight = attribute(fnt, /<common[^>]*\slineHeight="(-?\d+)"/) ?? 0;
+  const base = attribute(fnt, /<common[^>]*\sbase="(-?\d+)"/);
   const advances = emptyAdvances();
 
   // An attribute value may hold a ">" (msdf-bmfont-xml writes char=">"), so quoted values are skipped whole.
@@ -191,7 +210,12 @@ function readXml(fnt: string): AdvanceTable | undefined {
     advances.set(String.fromCodePoint(id), advance);
   }
 
-  return { size, lineHeight: lineHeight > 0 ? lineHeight : size, advances };
+  return {
+    size,
+    lineHeight: lineHeight > 0 ? lineHeight : size,
+    base: baseOf(base, size),
+    advances
+  };
 }
 
 /**
@@ -200,12 +224,12 @@ function readXml(fnt: string): AdvanceTable | undefined {
  *
  * @param fnt - The `.fnt` file as text, in BMFont XML or BMFont JSON.
  * @param key - The asset key of the font, for the error.
- * @returns The export size, the line height and one advance per character.
+ * @returns The export size, the line height, the baseline and one advance per character.
  * @throws {Error} When the file is in neither format.
  * @example
  * ```ts
- * parseAdvances('{"info":{"size":32},"common":{"lineHeight":40},"chars":[]}', "ui.font-body");
- * // { size: 32, lineHeight: 40, advances: Map(0) }
+ * parseAdvances('{"info":{"size":32},"common":{"lineHeight":40,"base":30},"chars":[]}', "ui.font-body");
+ * // { size: 32, lineHeight: 40, base: 30, advances: Map(0) }
  * ```
  */
 export function parseAdvances(fnt: string, key: string): AdvanceTable {
@@ -222,67 +246,11 @@ export function parseAdvances(fnt: string, key: string): AdvanceTable {
 }
 
 /**
- * The font one run is drawn with: the bold or italic font when the style names it, else the
- * font of the style.
- *
- * @param style - The style of the label.
- * @param run - The run to draw.
- * @returns The asset key of the font.
- * @example
- * ```ts
- * fontOfRun(bodyStyle, { kind: "text", text: "a", bold: true, italic: false, color: undefined });
- * // "ui.font-body": the body style names no bold font, so the bold is synthetic
- * ```
- */
-export function fontOfRun(style: TextStyle, run: TextRun): string {
-  if (run.bold && style.bold !== undefined) return style.bold;
-  if (run.italic && style.italic !== undefined) return style.italic;
-
-  return style.font;
-}
-
-/**
- * The height of one line of a style: `lineHeight × size` when the style names its line, else the
- * line of its own font.
- *
- * @param style - The style of the label.
- * @param tables - The advance tables that are loaded.
- * @returns The line height in reference pixels.
- * @example
- * ```ts
- * lineHeightOf(bodyStyle, new Map()); // 38.4: 1.2 em of a 32 px style with no font loaded
- * ```
- */
-export function lineHeightOf(style: TextStyle, tables: Map<string, AdvanceTable>): number {
-  return style.lineHeight === undefined ? fontLineOf(style, tables) : style.lineHeight * style.size;
-}
-
-/**
- * The height of one line of a style's own font, whatever line the style names: what the glyphs
- * are drawn into, so the gap to `lineHeightOf` is the leading.
- *
- * @param style - The style of the label.
- * @param tables - The advance tables that are loaded.
- * @returns The font's line height in reference pixels.
- * @example
- * ```ts
- * fontLineOf({ ...bodyStyle, lineHeight: 1.5 }, new Map()); // 38.4: the font's 1.2 em, not 48
- * ```
- */
-export function fontLineOf(style: TextStyle, tables: Map<string, AdvanceTable>): number {
-  const table = tables.get(style.font);
-
-  return table === undefined
-    ? FALLBACK_LINE * style.size
-    : table.lineHeight * (style.size / table.size);
-}
-
-/**
  * The width of one character, letter spacing included. A character the loaded font has no glyph
  * for is 0 wide, spacing and all: Pixi skips it when it lays the run out and draws nothing.
  *
  * @param char - The character.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param fontKey - The font of the run.
  * @param tables - The advance tables that are loaded.
  * @param options - Where a warning goes.
@@ -319,16 +287,17 @@ function advanceOf(
 }
 
 /**
- * The width of one run: the advances of its glyphs, or a square at the line height for an icon.
+ * The width of one run in its look: the advances of its glyphs, or a square at the line of the
+ * look for an icon.
  *
  * @param run - The run to measure.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded.
- * @param options - Where a warning goes.
+ * @param options - Where a warning goes, and the styles and bold looks a run may take.
  * @returns The width in reference pixels.
  * @example
  * ```ts
- * measureRun({ kind: "icon", key: "hud.coin" }, bodyStyle, new Map(), options); // 38.4
+ * measureRun({ kind: "icon", key: "hud.coin", span: undefined }, bodyStyle, new Map(), options); // 38.4
  * ```
  */
 export function measureRun(
@@ -337,31 +306,28 @@ export function measureRun(
   tables: Map<string, AdvanceTable>,
   options: LayoutOptions
 ): number {
-  if (run.kind === "icon") return lineHeightOf(style, tables) + style.letterSpacing;
+  const look = lookIn(style, run, options);
 
-  const fontKey = fontOfRun(style, run);
+  if (run.kind === "icon") return lineHeightOf(look, tables) + look.letterSpacing;
+
+  const fontKey = fontOfRun(look, run);
   let width = 0;
 
-  for (const char of run.text) width += advanceOf(char, style, fontKey, tables, options);
+  for (const char of run.text) width += advanceOf(char, look, fontKey, tables, options);
 
   return width;
 }
 
 /**
  * Tells whether a glyph piece may join the last run of a line: both glyphs, with the same bold,
- * italic and colour. An icon never merges.
+ * italic, colour and span. An icon never merges.
  *
  * @param last - The last run of the line, if any.
  * @param piece - The glyph piece to append.
  * @returns True when the piece's text may be added to `last`.
  */
 function canMerge(last: Run | undefined, piece: TextRun): last is TextRun {
-  return (
-    last?.kind === "text" &&
-    last.bold === piece.bold &&
-    last.italic === piece.italic &&
-    last.color === piece.color
-  );
+  return last?.kind === "text" && sameLook(last, piece);
 }
 
 /**
@@ -386,7 +352,39 @@ function appendRun(runs: Run[], piece: Run): void {
 }
 
 /**
- * Lays runs out with no wrapping: one line per `\n` segment.
+ * Creates one line whose box is not measured yet: `boxLines` writes its height and baseline.
+ *
+ * @param runs - The runs of the line.
+ * @param width - How wide they are, the indent of the first line included.
+ * @returns The line.
+ * @example
+ * ```ts
+ * openLine([], 0); // { runs: [], width: 0, height: 0, baseline: 0 }
+ * ```
+ */
+function openLine(runs: Run[], width: number): Line {
+  return { runs, width, height: 0, baseline: 0 };
+}
+
+/**
+ * The width of a line with the indent it starts at: the first line of a block that holds a run is
+ * as wide as its runs plus the indent, every other line as its runs.
+ *
+ * @param runs - The runs of the line.
+ * @param width - How wide they are.
+ * @param indent - The indent the line starts at: `textIndent` on the first line, else 0.
+ * @returns The width of the line.
+ * @example
+ * ```ts
+ * indentedWidth([], 0, 20); // 0: an empty first line takes no indent
+ * ```
+ */
+function indentedWidth(runs: readonly Run[], width: number, indent: number): number {
+  return runs.length > 0 ? indent + width : width;
+}
+
+/**
+ * Lays runs out with no wrapping: one line per `\n` segment, the first one shifted by the indent.
  *
  * @param runs - The runs of the block.
  * @param style - The style of the label.
@@ -404,13 +402,17 @@ function layoutFixed(
   let current: Run[] = [];
   let width = 0;
 
+  // Closes the open line; the first one starts after the indent.
   const push = (): void => {
-    lines.push({ runs: current, width });
+    const indent = lines.length === 0 ? (style.textIndent ?? 0) : 0;
+
+    lines.push(openLine(current, indentedWidth(current, width, indent)));
     current = [];
     width = 0;
   };
 
   for (const run of runs) {
+    // An icon joins the open line whole.
     if (run.kind === "icon") {
       current.push(run);
       width += measureRun(run, style, tables, options);
@@ -418,6 +420,7 @@ function layoutFixed(
       continue;
     }
 
+    // Glyphs join it segment by segment: every `\n` closes a line. No soft hyphen is drawn.
     const segments = run.text.replaceAll(SOFT_HYPHEN, "").split("\n");
 
     for (const [index, segment] of segments.entries()) {
@@ -501,6 +504,7 @@ function tokenise(
   const tokens: Token[] = [];
 
   for (const run of runs) {
+    // An icon is a glyph: part of the word it touches.
     if (run.kind === "icon") {
       const width = measureRun(run, style, tables, options);
 
@@ -509,17 +513,20 @@ function tokenise(
       continue;
     }
 
+    // A glyph run splits into words, spaces and breaks; its first piece touches the token before.
     for (const [index, piece] of run.text.split(TOKENS).entries()) {
       if (piece.length === 0) continue;
 
       const kind = kindOf(piece);
 
+      // A word splits again at its hyphen breaks.
       if (kind === "word") {
         pushWord(tokens, run, piece, index === 0, { style, tables, options });
 
         continue;
       }
 
+      // Spaces are as wide as they are drawn; a line break takes no room.
       const part: TextRun = { ...run, text: piece };
       const width = kind === "break" ? 0 : measureRun(part, style, tables, options);
 
@@ -590,18 +597,24 @@ type Metrics = {
   options: LayoutOptions;
 };
 
-/** The lines built so far and the one that is still open. */
-type Builder = { lines: Line[]; runs: Run[]; width: number };
+/**
+ * The lines built so far and the one that is still open. `indent` is the room the open line
+ * starts after: `textIndent` on the first line of the block, 0 from the second on.
+ */
+type Builder = { lines: Line[]; runs: Run[]; width: number; indent: number };
 
 /**
- * Closes the open line and starts a new one.
+ * Closes the open line and starts a new one at the edge.
  *
  * @param builder - The lines built so far.
  */
 function commit(builder: Builder): void {
-  builder.lines.push({ runs: builder.runs, width: builder.width });
+  builder.lines.push(
+    openLine(builder.runs, indentedWidth(builder.runs, builder.width, builder.indent))
+  );
   builder.runs = [];
   builder.width = 0;
+  builder.indent = 0;
 }
 
 /**
@@ -624,7 +637,8 @@ function add(builder: Builder, token: Token): void {
  * @returns The pieces, in reading order.
  * @example
  * ```ts
- * glyphsOf({ kind: "icon", key: "hud.coin" }); // [{ kind: "icon", key: "hud.coin" }]
+ * glyphsOf({ kind: "icon", key: "hud.coin", span: undefined });
+ * // [{ kind: "icon", key: "hud.coin", span: undefined }]
  * ```
  */
 function glyphsOf(run: Run): Run[] {
@@ -634,7 +648,21 @@ function glyphsOf(run: Run): Run[] {
 }
 
 /**
- * Places a word that is wider than the wrap, glyph by glyph. An icon is one glyph.
+ * Tells whether a piece of this width no longer fits on the open line: the line holds something
+ * already, and its indent, its runs and the piece stand past the wrap. The first piece of a line
+ * always fits, so a glyph wider than the wrap gets a line of its own.
+ *
+ * @param builder - The lines built so far.
+ * @param width - The width of the piece.
+ * @param wrap - The wrap width in reference pixels.
+ * @returns True when the piece goes to the next line.
+ */
+function overflows(builder: Builder, width: number, wrap: number): boolean {
+  return builder.runs.length > 0 && builder.indent + builder.width + width > wrap;
+}
+
+/**
+ * Places a word that is wider than the room of its line, glyph by glyph. An icon is one glyph.
  *
  * @param builder - The lines built so far.
  * @param token - The word to break.
@@ -646,7 +674,7 @@ function breakWord(builder: Builder, token: Token, wrap: number, metrics: Metric
     for (const piece of glyphsOf(part)) {
       const glyph = measureRun(piece, metrics.style, metrics.tables, metrics.options);
 
-      if (builder.runs.length > 0 && builder.width + glyph > wrap) commit(builder);
+      if (overflows(builder, glyph, wrap)) commit(builder);
 
       appendRun(builder.runs, piece);
       builder.width += glyph;
@@ -657,8 +685,9 @@ function breakWord(builder: Builder, token: Token, wrap: number, metrics: Metric
 /**
  * Places one word: on the open line when it still fits there with the spaces before it and the
  * hyphen a break after it would draw, on the next one when it does not, and glyph by glyph when
- * it fits on no line at all. A break inside a word stands before it with no width: the line ends
- * there with the `-` of a soft hyphen, and the word goes on with nothing between when it fits.
+ * it fits on no line at all, or as the first word of a block not in the room its indent leaves. A
+ * break inside a word stands before it with no width: the line ends there with the `-` of a soft
+ * hyphen, and the word goes on with nothing between when it fits.
  *
  * @param builder - The lines built so far.
  * @param token - The word to place.
@@ -675,17 +704,19 @@ function placeWord(
 ): void {
   const space = pending?.kind === "space" ? pending : undefined;
   const lead = space?.width ?? 0;
-  const overflows =
-    builder.runs.length > 0 && builder.width + lead + token.width + token.tail > wrap;
+  // The spaces, the word and the hyphen a break after it draws, added in that order.
+  const wontFit =
+    builder.runs.length > 0 &&
+    builder.indent + builder.width + lead + token.width + token.tail > wrap;
 
   // The word goes to the next line when it does not fit; a soft hyphen leaves its "-" behind.
-  if (overflows) {
+  if (wontFit) {
     if (pending?.kind === "soft") add(builder, pending);
     commit(builder);
   } else if (space !== undefined) add(builder, space);
 
   // The word is placed whole, or glyph by glyph when it fits on no line.
-  if (token.width <= wrap) add(builder, token);
+  if (builder.indent + token.width <= wrap) add(builder, token);
   else breakWord(builder, token, wrap, metrics);
 }
 
@@ -700,7 +731,12 @@ function placeWord(
  * @returns The lines, each with its width.
  */
 function wrapTokens(tokens: readonly Token[], metrics: Metrics, wrap: number): Line[] {
-  const builder: Builder = { lines: [], runs: [], width: 0 };
+  const builder: Builder = {
+    lines: [],
+    runs: [],
+    width: 0,
+    indent: metrics.style.textIndent ?? 0
+  };
   let pending: Token | undefined;
 
   for (const token of tokens) {
@@ -757,9 +793,45 @@ function widestWord(tokens: readonly Token[]): number {
 }
 
 /**
+ * The narrowest line the first word of a block stands on whole after the indent: the word, the
+ * `-` a break after it draws, and the indent. 0 for a block whose first line holds no word.
+ *
+ * @param tokens - The tokens of the block.
+ * @param indent - The `textIndent` of the style.
+ * @returns The width in reference pixels.
+ * @example
+ * ```ts
+ * firstWord([{ kind: "word", runs: [], width: 50, tail: 0 }], 45); // 95
+ * ```
+ */
+function firstWord(tokens: readonly Token[], indent: number): number {
+  for (const token of tokens) {
+    if (token.kind === "break") return 0;
+    if (token.kind === "word") return token.width + token.tail + indent;
+  }
+
+  return 0;
+}
+
+/**
+ * Tells whether a block of this many lines is evened out: 2 to 6, as Chrome.
+ *
+ * @param count - The number of greedy lines.
+ * @returns True when the balance searches a narrower width.
+ * @example
+ * ```ts
+ * isBalanced(7); // false: past six lines a block keeps its greedy lines
+ * ```
+ */
+function isBalanced(count: number): boolean {
+  return count >= 2 && count <= BALANCE_MAX_LINES;
+}
+
+/**
  * Evens the greedy lines of a balanced style: the narrowest width in `[widest word, wrap]` that
- * keeps their number, found in 16 halvings, and the lines at that width. A block of one line or of
- * more than six, or with a word that does not fit the wrap whole, keeps its greedy lines.
+ * keeps their number, found in 16 halvings, and the lines at that width. The first word stands
+ * whole after the indent at every width tried. A block of one line or of more than six, or with
+ * a word that does not fit the wrap whole, keeps its greedy lines.
  *
  * @param tokens - The tokens of the block, as the greedy pass read them.
  * @param greedy - The greedy lines at the wrap.
@@ -774,10 +846,15 @@ function balanceLines(
   wrap: number
 ): Line[] {
   const count = greedy.length;
-  let low = widestWord(tokens);
+
+  if (!isBalanced(count)) return greedy;
+
+  // The search runs between the narrowest line every word stands on whole, the first one after
+  // the indent, and the wrap; a word that does not fit the wrap whole keeps the greedy lines.
+  let low = Math.max(widestWord(tokens), firstWord(tokens, metrics.style.textIndent ?? 0));
   let high = wrap;
 
-  if (count < 2 || count > BALANCE_MAX_LINES || low >= high) return greedy;
+  if (low >= high) return greedy;
 
   // A narrower width never gives fewer lines, so `high` always keeps the count.
   for (let step = 0; step < BALANCE_STEPS; step += 1) {
@@ -816,6 +893,7 @@ function onceOnly(options: LayoutOptions): LayoutOptions {
   const seen = emptyKeys();
 
   return {
+    ...options,
     warn: (key, message, data): void => {
       if (seen.has(key)) return;
 
@@ -854,21 +932,22 @@ function wrapOf(style: TextStyle, box: number): number | undefined {
 }
 
 /**
- * Lays a block of runs out: the lines, the width of the widest one and the total height. The
- * alignment of the style changes nothing here; it moves the lines when they are drawn. A style
- * with `wrap: "box"` wraps at `box`, the width `ui` laid its text element out at, and is one line
- * without one; any other style ignores `box`.
+ * Lays a block of runs out: the lines with their boxes, the width of the widest one and the total
+ * height. The alignment of the style changes nothing here; it moves the lines when they are
+ * drawn. A style with `wrap: "box"` wraps at `box`, the width `ui` laid its text element out at,
+ * and is one line without one; any other style ignores `box`. `options` carries the style table
+ * and the bold looks a run in a span or in `<b>` takes its look from.
  *
  * @param runs - What `parseTags` made of the resolved string.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded, by font key.
- * @param options - Where a warning goes.
+ * @param options - Where a warning goes, and the styles and bold looks a run may take.
  * @param box - The width a `"box"` style wraps at, in reference pixels; 0 for none.
  * @returns The lines and the size of the block in reference pixels.
  * @example
  * ```ts
  * layoutRuns([], bodyStyle, new Map(), { warn: () => undefined });
- * // { lines: [{ runs: [], width: 0 }], width: 0, height: 38.4 }
+ * // { lines: [{ runs: [], width: 0, height: 38.4, baseline: 25.6 }], width: 0, height: 38.4 }
  * ```
  */
 export function layoutRuns(
@@ -878,15 +957,20 @@ export function layoutRuns(
   options: LayoutOptions,
   box = 0
 ): TextLayout {
+  // The lines: one per `\n` segment, or wrapped at the wrap of the style.
   const once = onceOnly(options);
   const wrap = wrapOf(style, box);
   const lines =
     wrap === undefined
       ? layoutFixed(runs, style, tables, once)
       : layoutWrapped(runs, { style, tables, options: once }, wrap);
+
+  // The box of every line, then the size of the block.
+  boxLines(lines, style, tables, once);
+
   let width = 0;
 
   for (const line of lines) width = Math.max(width, line.width);
 
-  return { lines, width, height: lines.length * lineHeightOf(style, tables) };
+  return { lines, width, height: blockHeight(lines) };
 }

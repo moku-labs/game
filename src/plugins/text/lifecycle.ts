@@ -10,13 +10,15 @@ import { i18nPlugin } from "../i18n";
 import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
-import { builtInStyles, readStyle, Text } from "./components";
-import { createTextAdapter, installFonts } from "./display";
+import { boldLookOf, builtInStyles, readStyle, Text } from "./components";
+import { closeCursor, createTextAdapter, installFonts } from "./display";
 import { isTextFormat } from "./format";
 import {
   createTextFrame,
   createTextSystem,
+  dropLayouts,
   forgetText,
+  layoutOptionsOf,
   markDirty,
   noteAdded,
   resolveAdded
@@ -48,13 +50,14 @@ function resolveDeps(ctx: KernelSlice): Deps {
 }
 
 /**
- * Builds the domain context the API, the hooks and the frame step share.
+ * Builds the domain context the API, the hooks and the frame step share, with the layout options
+ * every layout and draw reads, made here once.
  *
  * @param ctx - Kernel context of the text plugin.
  * @returns The domain context of the text plugin.
  */
 export function withDeps(ctx: KernelSlice): TextCtx {
-  return { ...ctx, deps: resolveDeps(ctx) };
+  return { ...ctx, deps: resolveDeps(ctx), layoutOptions: layoutOptionsOf(ctx) };
 }
 
 /**
@@ -76,6 +79,26 @@ function isStyleMap(entry: unknown): entry is { map: Record<string, object> } {
 }
 
 /**
+ * Refuses a style name a second feature defines. A built-in name is free: a feature may
+ * override it.
+ *
+ * @param state - The plugin state, its owners so far.
+ * @param name - The style name.
+ * @param feature - The feature that defines it now.
+ * @throws {Error} When another feature defined the name already.
+ */
+function checkOwner(state: State, name: string, feature: string): void {
+  const owner = state.styleOwner.get(name);
+
+  if (owner === undefined || owner === BUILT_IN) return;
+
+  throw new Error(
+    `[game] Text style "${name}" is defined by features "${owner}" and "${feature}".\n` +
+      "  Keep it in one feature or rename one of them."
+  );
+}
+
+/**
  * Fills the style table: the two built-ins first, then the styles of every feature in feature
  * order. A feature may override a built-in; two features may not share a name.
  *
@@ -83,25 +106,20 @@ function isStyleMap(entry: unknown): entry is { map: Record<string, object> } {
  * @throws {Error} When two features define the same style name.
  */
 function buildStyles(ctx: TextCtx): void {
+  // The built-ins first: a feature may override them.
   for (const [name, style] of Object.entries(builtInStyles(ctx.config.fonts))) {
     ctx.state.styles.set(name, style);
     ctx.state.styleOwner.set(name, BUILT_IN);
   }
 
+  // Then every feature in feature order, each style read back from the plain map it carries.
   for (const feature of ctx.deps.flow.features.all()) {
     const entry = feature.description.textStyles;
 
     if (!isStyleMap(entry)) continue;
 
     for (const [name, value] of Object.entries(entry.map)) {
-      const owner = ctx.state.styleOwner.get(name);
-
-      if (owner !== undefined && owner !== BUILT_IN) {
-        throw new Error(
-          `[game] Text style "${name}" is defined by features "${owner}" and "${feature.name}".\n` +
-            "  Keep it in one feature or rename one of them."
-        );
-      }
+      checkOwner(ctx.state, name, feature.name);
 
       const style = readStyle(name, value);
 
@@ -110,6 +128,20 @@ function buildStyles(ctx: TextCtx): void {
       ctx.state.styles.set(name, style);
       ctx.state.styleOwner.set(name, feature.name);
     }
+  }
+}
+
+/**
+ * Builds the bold look of every style that has `boldStyle`, and forgets the looks of styles that
+ * are gone: a hot swap replaces the style objects the looks are keyed by.
+ *
+ * @param state - The plugin state, its style table filled.
+ */
+function buildLooks(state: State): void {
+  state.looks.clear();
+
+  for (const style of state.styles.values()) {
+    if (style.boldStyle !== undefined) state.looks.set(style, boldLookOf(style, style.boldStyle));
   }
 }
 
@@ -203,8 +235,8 @@ function buildFormats(ctx: TextCtx): void {
 }
 
 /**
- * Collects every font a style can draw with: the two of the config, then the regular, bold and
- * italic font of every registered style.
+ * Collects every font a style can draw with: the two of the config, then the regular, bold,
+ * italic and `boldStyle` font of every registered style.
  *
  * @param ctx - Domain context of the text plugin.
  */
@@ -217,14 +249,16 @@ function collectFonts(ctx: TextCtx): void {
 
     if (style.bold !== undefined) ctx.state.fontKeys.add(style.bold);
     if (style.italic !== undefined) ctx.state.fontKeys.add(style.italic);
+    if (style.boldStyle?.font !== undefined) ctx.state.fontKeys.add(style.boldStyle.font);
   }
 }
 
 /**
  * Writes the styles of a saved styles file over the table: a known name keeps its owner, a new
- * name is added. Then the fonts of the new styles are read, the layouts measured with the old
- * styles are dropped, and every label is marked, so the next frame lays it out again and the
- * display adapter redraws it with the new style object.
+ * name is added, and the bold looks are built again. Then the fonts of the new styles are read,
+ * the layouts measured with the old styles are dropped, every label is marked and the generation
+ * moves, so the next frame lays every label out again and the display adapter builds it again: a
+ * label whose own style stood still may draw a span or a bold look that changed.
  *
  * @param ctx - Domain context of the text plugin.
  * @param styles - What `defineTextStyles` returned in the saved module.
@@ -240,9 +274,14 @@ export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
     if (!ctx.state.styleOwner.has(name)) ctx.state.styleOwner.set(name, HOT_SWAP);
   }
 
+  // The bold looks of the new styles, and the fonts they name.
+  buildLooks(ctx.state);
   collectFonts(ctx);
   installFonts(ctx);
-  ctx.state.cache.clear();
+
+  // Throw away what was measured with the old styles, and ask every label again.
+  dropLayouts(ctx.state);
+  ctx.state.generation += 1;
   markDirty(ctx);
   ctx.deps.time.wake();
 }
@@ -265,6 +304,7 @@ export function startText(ctx: KernelSlice): void {
   const frame = createTextFrame(tctx);
 
   buildStyles(tctx);
+  buildLooks(tctx.state);
   buildFormats(tctx);
   collectFonts(tctx);
 
@@ -289,20 +329,30 @@ export function startText(ctx: KernelSlice): void {
  * @param state - The plugin state, the only thing a teardown context carries.
  */
 export function stopText(state: State): void {
+  // What onStart opened.
   for (const off of state.removers) off();
 
   state.removers.length = 0;
+
+  // The tables read at start: styles, looks, formats and fonts.
   state.styles.clear();
+  state.looks.clear();
   state.styleOwner.clear();
   state.formats.clear();
   state.formatOwner.clear();
   state.fontKeys.clear();
   state.tables.clear();
   state.installed.clear();
+
+  // What the frames kept about the labels, and the layouts.
   state.seen.clear();
   state.bindTypes.clear();
   state.measured.clear();
-  state.cache.clear();
+  dropLayouts(state);
+  state.shown.clear();
+  closeCursor(state.cursor);
+
+  // The queues and the warnings.
   state.dirty.clear();
   state.added.length = 0;
   state.rewrite.length = 0;

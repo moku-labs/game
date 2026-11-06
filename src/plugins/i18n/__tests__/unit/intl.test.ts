@@ -122,6 +122,26 @@ describe("messageArgument", () => {
     });
   });
 
+  it("escapes every < of a string, so a player's name is never markup", () => {
+    const intl = createIntlKit("en");
+
+    expect(messageArgument("<b>x", intl)).toEqual({ kind: "text", text: String.raw`\<b>x` });
+    expect(messageArgument("a<b<c", intl)).toEqual({ kind: "text", text: String.raw`a\<b\<c` });
+  });
+
+  it("escapes every < of every item of a list, so a name in a list is never markup", () => {
+    const intl = createIntlKit("en");
+
+    expect(messageArgument(["<b>Ann", "Bob"], intl)).toEqual({
+      kind: "text",
+      text: String.raw`\<b>Ann and Bob`
+    });
+    expect(messageArgument(["Ann", "Bob<i><b>"], intl)).toEqual({
+      kind: "text",
+      text: String.raw`Ann and Bob\<i>\<b>`
+    });
+  });
+
   it("reads anything else as text", () => {
     const intl = createIntlKit("en");
 

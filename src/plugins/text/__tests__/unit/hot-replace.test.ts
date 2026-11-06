@@ -153,3 +153,102 @@ describe("replaceStyles", () => {
     expect(object.children).toHaveLength(1);
   });
 });
+
+/** Puts a label whose number is in the price span, runs a frame and builds its container. */
+function priced(mock: MockText): { object: FakeObject; shown: TextValue } {
+  mock.world.put(
+    label,
+    Text,
+    value({ content: "<span style=hud.price>12</span> c", style: "hud.title" })
+  );
+  mock.step();
+
+  const shown = mock.world.read(label, Text) as TextValue;
+
+  return { object: adapterOf(mock).create(shown, 1) as FakeObject, shown };
+}
+
+describe("replaceStyles — runs of another look (F152)", () => {
+  /** The font only the price span draws with. */
+  const PRICE_FONT = "ui.font-price";
+
+  /** A started plugin whose renderer draws, with a paragraph style and the style a span borrows. */
+  function spans(): MockText {
+    const mock = createMockText({
+      features: [
+        {
+          name: "hud",
+          description: {
+            textStyles: defineTextStyles({
+              "hud.title": { font: "ui.font-body", size: 40, fill: 0xff_e0_82 },
+              "hud.price": { font: PRICE_FONT, size: 22, fill: 0x00_80_80 }
+            })
+          }
+        }
+      ]
+    });
+
+    mock.renderer.ready = true;
+    mock.start();
+
+    return mock;
+  }
+
+  // The bug: the label compares its paragraph style object only, which did not change, and keeps
+  // the old span look on the screen until its text changes.
+  it("redraws a label when only the style its span borrows was saved", () => {
+    const mock = spans();
+    const { object, shown } = priced(mock);
+
+    expect(glyphStyle(object)).toMatchObject({ fontFamily: PRICE_FONT, fontSize: 22 });
+
+    mock.api.replaceStyles(
+      defineTextStyles({ "hud.price": { font: PRICE_FONT, size: 64, fill: 0xff_00_00 } })
+    );
+    frame(mock, object, shown);
+
+    expect(glyphStyle(object)).toMatchObject({
+      fontFamily: PRICE_FONT,
+      fontSize: 64,
+      fill: 0xff_00_00
+    });
+  });
+
+  // The bug: the font scan of a label reads its paragraph fonts only, so a replaced font that only
+  // its span draws with leaves it drawing from a destroyed page.
+  it("marks a label whose span alone draws with a replaced font", () => {
+    const mock = spans();
+
+    priced(mock);
+    mock.state.dirty.clear();
+    mock.hooks["assets:replaced"]({ bundle: "ui", keys: [PRICE_FONT] });
+
+    expect(mock.state.dirty.has(label)).toBe(true);
+    expect(mock.state.generation).toBe(1);
+  });
+
+  // The bug: the swap reads the styles back without the new fields, or keeps the bold look of the
+  // style object it replaced.
+  it("keeps the boldStyle and the textIndent of a swapped style, and its bold look", () => {
+    const mock = spans();
+
+    mock.api.replaceStyles(
+      defineTextStyles({
+        "hud.title": {
+          font: "ui.font-body",
+          size: 40,
+          fill: 0,
+          textIndent: 20,
+          boldStyle: { font: "ui.font-bold", size: 48 }
+        }
+      })
+    );
+
+    const style = mock.state.styles.get("hud.title");
+
+    expect(style?.boldStyle).toStrictEqual({ font: "ui.font-bold", size: 48 });
+    expect(style?.textIndent).toBe(20);
+    expect(style === undefined ? undefined : mock.state.looks.get(style)?.size).toBe(48);
+    expect(mock.state.fontKeys.has("ui.font-bold")).toBe(true);
+  });
+});

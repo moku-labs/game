@@ -15,6 +15,7 @@ import type {
   TextBind,
   TextFormatFunction,
   TextFormats,
+  TextRunStyle,
   TextShadow,
   TextStyle,
   TextStyleInput,
@@ -187,10 +188,156 @@ function isLineHeight(lineHeight: unknown): lineHeight is number | undefined {
   return typeof lineHeight === "number" && Number.isFinite(lineHeight) && lineHeight > 0;
 }
 
+/** The fields `boldStyle` may name: the glyph look of a run. */
+const RUN_STYLE_KEYS: readonly string[] = Object.freeze([
+  "font",
+  "size",
+  "fill",
+  "letterSpacing",
+  "stroke",
+  "strokeWidth",
+  "shadow"
+]);
+
+/**
+ * Tells whether a value is a finite number.
+ *
+ * @param value - A field of a style, as it was stored.
+ * @returns True for a number that is not `NaN` or infinite.
+ * @example
+ * ```ts
+ * isFiniteNumber(Number.NaN); // false
+ * ```
+ */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * Builds the error of one bad `boldStyle` field.
+ *
+ * @param name - The style name.
+ * @param field - The field and its value, as the message shows them.
+ * @param fix - What to write instead.
+ * @returns The error to throw.
+ */
+function boldStyleError(name: string, field: string, fix: string): Error {
+  return new Error(`[game] Text style "${name}" has boldStyle${field}.\n  ${fix}`);
+}
+
+/**
+ * Refuses a field of `boldStyle` that is not one of the seven, and a value a run cannot be drawn
+ * with: a size that is not a number above 0, a spacing or an outline width that is not finite, a
+ * font that is not a key, a colour that is not a number, a shadow that is no shadow.
+ *
+ * @param name - The style name, for the error.
+ * @param record - What the game wrote under `boldStyle`.
+ * @throws {Error} When a field is unknown or its value is bad.
+ */
+function checkRunStyle(
+  name: string,
+  record: Record<string, unknown>
+): asserts record is Record<string, unknown> & TextRunStyle {
+  // Only the seven glyph fields: `wrap`, `align` and the rest are the paragraph's.
+  const unknown = Object.keys(record).find(key => !RUN_STYLE_KEYS.includes(key));
+
+  if (unknown !== undefined) {
+    throw boldStyleError(
+      name,
+      `.${unknown}`,
+      "Use only font, size, fill, letterSpacing, stroke, strokeWidth and shadow."
+    );
+  }
+
+  const { font, size, fill, letterSpacing, stroke, strokeWidth, shadow } = record;
+
+  // A size a run can be drawn at.
+  if (size !== undefined && !(isFiniteNumber(size) && size > 0)) {
+    throw boldStyleError(name, `.size ${String(size)}`, "Use a size above 0.");
+  }
+
+  // Spacings, widths and colours that are numbers.
+  for (const [key, value] of [
+    ["letterSpacing", letterSpacing],
+    ["strokeWidth", strokeWidth],
+    ["fill", fill],
+    ["stroke", stroke]
+  ] as const) {
+    if (value !== undefined && !isFiniteNumber(value)) {
+      throw boldStyleError(name, `.${key} ${String(value)}`, "Use a finite number.");
+    }
+  }
+
+  // A font key and a shadow the draw can read.
+  if (font !== undefined && typeof font !== "string") {
+    throw boldStyleError(name, `.font ${String(font)}`, "Use the asset key of a font.");
+  }
+
+  if (shadow !== undefined && readShadow(shadow) === undefined) {
+    throw boldStyleError(name, ".shadow", "Use { color, dx, dy, alpha? } of numbers.");
+  }
+}
+
+/**
+ * Checks the `boldStyle` of a style and stores the fields the game gave, the shadow with its
+ * alpha filled. A field left out stays out, so the stored look equals what the game wrote.
+ *
+ * @param name - The style name, for the error.
+ * @param input - What the game wrote under `boldStyle`, when it wrote one.
+ * @returns The look to store, or `undefined` for none.
+ * @throws {Error} When `boldStyle` is not a plain object, names another field, or has a bad value.
+ */
+function runStyleOf(name: string, input: unknown): TextRunStyle | undefined {
+  if (input === undefined) return undefined;
+
+  if (!isRecord(input)) {
+    throw boldStyleError(
+      name,
+      ` ${JSON.stringify(input) ?? String(input)}`,
+      "Use an object of font, size, fill, letterSpacing, stroke, strokeWidth and shadow."
+    );
+  }
+
+  checkRunStyle(name, input);
+
+  const look: TextRunStyle = input;
+  const stored: TextRunStyle = {};
+
+  if (look.font !== undefined) stored.font = look.font;
+  if (look.size !== undefined) stored.size = look.size;
+  if (look.fill !== undefined) stored.fill = look.fill;
+  if (look.letterSpacing !== undefined) stored.letterSpacing = look.letterSpacing;
+  if (look.stroke !== undefined) stored.stroke = look.stroke;
+  if (look.strokeWidth !== undefined) stored.strokeWidth = look.strokeWidth;
+
+  const shadow = shadowOf(look.shadow);
+
+  if (shadow !== undefined) stored.shadow = shadow;
+
+  return stored;
+}
+
+/**
+ * Refuses a first-line indent that is below 0 or not finite.
+ *
+ * @param name - The style name, for the error.
+ * @param textIndent - What the game wrote, when it wrote one.
+ * @throws {Error} When the indent is not a finite number of 0 or more.
+ */
+function checkIndent(name: string, textIndent: unknown): void {
+  if (textIndent === undefined || (isFiniteNumber(textIndent) && textIndent >= 0)) return;
+
+  throw new Error(
+    `[game] Text style "${name}" has textIndent ${String(textIndent)}.\n` +
+      "  Use reference px of 0 or more, such as 20."
+  );
+}
+
 /**
  * Fills the defaults of one style and refuses a wrap that is not a width, `"box"` or `"none"`,
- * a line height that is not a number above zero, and a balance that is not true or false. The
- * stored style carries `balance` only when it balances.
+ * a line height that is not a number above zero, a balance that is not true or false, a bad
+ * `boldStyle` and a bad `textIndent`. The stored style carries `balance` only when it balances,
+ * `boldStyle` only when the game gave one and `textIndent` only above 0.
  *
  * @param name - The style name, for the error.
  * @param input - What the game wrote.
@@ -198,8 +345,10 @@ function isLineHeight(lineHeight: unknown): lineHeight is number | undefined {
  * @throws {Error} When `wrap` is a number that is not greater than zero, or another word.
  * @throws {Error} When `lineHeight` is not a finite number greater than zero.
  * @throws {Error} When `balance` is neither left out nor a boolean.
+ * @throws {Error} When `boldStyle` or `textIndent` is bad: see `runStyleOf` and `checkIndent`.
  */
 function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
+  // What no label can be laid out with is refused, in the order the fields are documented.
   const wrap = input.wrap ?? "none";
 
   if (!isWrap(wrap)) {
@@ -222,6 +371,11 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     );
   }
 
+  checkIndent(name, input.textIndent);
+
+  const boldStyle = runStyleOf(name, input.boldStyle);
+
+  // Every field filled with its default.
   const style: TextStyle = {
     font: input.font,
     bold: input.bold,
@@ -238,10 +392,47 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     lineHeight: input.lineHeight
   };
 
-  // Present only on a style that balances, so every style that does not equals its old literal.
+  // Present only on a style that names them, so every style that does not equals its old literal.
   if (input.balance === true) style.balance = true;
+  if (boldStyle !== undefined) style.boldStyle = boldStyle;
+  if (input.textIndent !== undefined && input.textIndent > 0) style.textIndent = input.textIndent;
 
   return style;
+}
+
+/**
+ * The look of the `<b>` runs of a style: the style with the glyph fields of its `boldStyle` laid
+ * over it. The bold font is `boldStyle.font`, else the style's own `bold`; the font, the italic,
+ * the line and the paragraph fields stay the style's. Built once per style, at start and on every
+ * hot swap, so a layout and a draw read it and build nothing.
+ *
+ * @param style - A stored style.
+ * @param bold - Its `boldStyle`.
+ * @returns The look a `<b>` run of the style measures and draws with.
+ * @example
+ * ```ts
+ * const row = builtInStyles({ body: "ui.fonts.text-medium", digits: "ui.font-digits" }).body;
+ *
+ * boldLookOf(row, { font: "ui.fonts.alt-bold", size: 16 }).bold; // "ui.fonts.alt-bold"
+ * boldLookOf(row, { font: "ui.fonts.alt-bold", size: 16 }).font; // "ui.fonts.text-medium"
+ * ```
+ */
+export function boldLookOf(style: TextStyle, bold: TextRunStyle): TextStyle {
+  return {
+    font: style.font,
+    bold: bold.font ?? style.bold,
+    italic: style.italic,
+    size: bold.size ?? style.size,
+    fill: bold.fill ?? style.fill,
+    stroke: bold.stroke ?? style.stroke,
+    strokeWidth: bold.strokeWidth ?? style.strokeWidth,
+    letterSpacing: bold.letterSpacing ?? style.letterSpacing,
+    align: style.align,
+    wrap: style.wrap,
+    digits: style.digits,
+    shadow: shadowOf(bold.shadow) ?? style.shadow,
+    lineHeight: style.lineHeight
+  };
 }
 
 /**
@@ -253,6 +444,7 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
  * @throws {Error} When a style names a wrap that is not a width, `"box"` or `"none"`.
  * @throws {Error} When a style names a lineHeight that is not a number above 0.
  * @throws {Error} When a style names a balance that is not true or false.
+ * @throws {Error} When a style names a bad `boldStyle` or a `textIndent` below 0.
  * @example
  * ```ts
  * defineTextStyles({ "hud.digits": { font: "ui.font-digits", size: 40, fill: 0xffe082 } });
@@ -334,7 +526,9 @@ export function readStyle(name: string, value: object): TextStyle | undefined {
     digits: value.digits,
     shadow: readShadow(value.shadow),
     lineHeight: value.lineHeight,
-    balance: value.balance
+    balance: value.balance,
+    boldStyle: readRunStyle(value.boldStyle),
+    textIndent: value.textIndent
   };
 
   return normalizeStyle(name, { ...input, ...pruned(optional) });
@@ -361,6 +555,31 @@ function readShadow(value: unknown): TextStyleInput["shadow"] {
   }
 
   return typeof alpha === "number" ? { color, dx, dy, alpha } : { color, dx, dy };
+}
+
+/**
+ * Reads the `boldStyle` of a registered style back: the seven fields of a plain record, the shadow
+ * through `readShadow`. Anything else is handed on as it is, so `normalizeStyle` refuses it.
+ *
+ * @param value - The `boldStyle` field of a stored style.
+ * @returns The look as a game writes it, or the value to refuse.
+ * @example
+ * ```ts
+ * readRunStyle({ font: "ui.fonts.alt-bold", size: 16 }); // { font: "ui.fonts.alt-bold", size: 16 }
+ * ```
+ */
+function readRunStyle(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+
+  return pruned({
+    font: value.font,
+    size: value.size,
+    fill: value.fill,
+    letterSpacing: value.letterSpacing,
+    stroke: value.stroke,
+    strokeWidth: value.strokeWidth,
+    shadow: readShadow(value.shadow)
+  });
 }
 
 /**
@@ -411,7 +630,8 @@ export function builtInStyles(fonts: { body: string; digits: string }): {
 
 /**
  * The text helpers bound to one game's style names, font keys and format names: a label only takes
- * a style the game registered, a style only takes a font the asset scanner generated, a format
+ * a style the game registered, a style (and its `boldStyle`) only takes a font the asset scanner
+ * generated, a format
  * only answers a style of the game, and a bind only takes a format the game named.
  *
  * @example
@@ -435,9 +655,10 @@ export type TextKit<
   defineTextStyles: (
     map: Record<
       string,
-      Omit<TextStyleInput, "font" | "bold" | "italic"> & { font: Font } & {
+      Omit<TextStyleInput, "font" | "bold" | "italic" | "boldStyle"> & { font: Font } & {
         bold?: Font;
         italic?: Font;
+        boldStyle?: Omit<TextRunStyle, "font"> & { font?: Font };
       }
     >
   ) => TextStyles;

@@ -111,6 +111,79 @@ describe("startText", () => {
   });
 });
 
+describe("startText — the looks of boldStyle (F152)", () => {
+  /** The game's row style with its bold count, a style with a bold font and a plain one. */
+  const rowStyles: TextStyles = defineTextStyles({
+    "album.row.13": {
+      font: "ui.fonts.text-medium",
+      size: 13,
+      fill: 0x3b_2a_1a,
+      boldStyle: { font: "ui.fonts.alt-bold", size: 16, fill: 0xff_00_00 }
+    },
+    "album.row.bold": {
+      font: "ui.fonts.text-medium",
+      bold: "ui.fonts.text-bold",
+      size: 13,
+      fill: 0x3b_2a_1a,
+      boldStyle: { size: 16 }
+    },
+    "album.row.plain": { font: "ui.fonts.text-medium", size: 13, fill: 0x3b_2a_1a }
+  });
+
+  /** A started plugin with the row styles. */
+  function rows(): MockText {
+    const mock = createMockText({
+      features: [{ name: "album", description: { textStyles: rowStyles } }]
+    });
+
+    mock.start();
+
+    return mock;
+  }
+
+  // The bug: a `<b>` run of the style looks up no look and draws in the paragraph's; or the look
+  // keeps the paragraph's bold font, or swaps its regular font for the bold one.
+  it("builds the merged look of every style with boldStyle: its fields over the style", () => {
+    const mock = rows();
+    const style = mock.state.styles.get("album.row.13");
+
+    expect(style === undefined ? undefined : mock.state.looks.get(style)).toStrictEqual({
+      font: "ui.fonts.text-medium",
+      bold: "ui.fonts.alt-bold",
+      italic: undefined,
+      size: 16,
+      fill: 0xff_00_00,
+      stroke: 0,
+      strokeWidth: 0,
+      letterSpacing: 0,
+      align: "left",
+      wrap: "none",
+      digits: false,
+      shadow: undefined,
+      lineHeight: undefined
+    });
+  });
+
+  // The bug: a boldStyle with no font drops the style's bold font, so `<b>` turns synthetic.
+  it("keeps the style's bold font in a look whose boldStyle names no font, and builds none without one", () => {
+    const mock = rows();
+    const bold = mock.state.styles.get("album.row.bold");
+    const plain = mock.state.styles.get("album.row.plain");
+
+    expect(bold === undefined ? undefined : mock.state.looks.get(bold)?.bold).toBe(
+      "ui.fonts.text-bold"
+    );
+    expect(plain === undefined ? false : mock.state.looks.has(plain)).toBe(false);
+    expect(mock.state.looks.size).toBe(2);
+  });
+
+  // The bug: the font of a bold look is never installed, so its `<b>` runs measure on 0.6 em and
+  // Pixi draws them with no font.
+  it("collects the font every boldStyle names", () => {
+    expect([...rows().state.fontKeys]).toContain("ui.fonts.alt-bold");
+  });
+});
+
 describe("the clock dependency", () => {
   it("is listed in depends", () => {
     expect(textPlugin.spec.depends).toContain(clockPlugin);
@@ -141,6 +214,7 @@ describe("stopText", () => {
     expect(mock.renderer.removedDisplays).toBe(1);
     expect(mock.state.removers).toEqual([]);
     expect(mock.state.styles.size).toBe(0);
+    expect(mock.state.looks.size).toBe(0);
     expect(mock.state.fontKeys.size).toBe(0);
     expect(mock.state.tables.size).toBe(0);
   });

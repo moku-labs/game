@@ -78,5 +78,28 @@ export const BUDGET = {
    * standing. Stays 80 B, the cost of one changed label, as `textResolveWorking`: the `{ resolved }`
    * patch and the layout cache key. A step that moves the style writes one more field.
    */
-  textNamedChanged: 80
+  textNamedChanged: 80,
+  /**
+   * F152 (change 2026-11-05-f152-text-runs): a still frame of phase `layout` over 50 labels of the
+   * game's row, each laid out at its box, half with a `<b>` count in the bold look of `boldStyle`,
+   * half with a price in a `<span>` of another style. The looks are built with the styles and the
+   * layouts are cached, so a frame that lays nothing out keeps nothing.
+   */
+  textRunsIdle: 0,
+  /**
+   * F152 verify (change 2026-11-05-f152-text-runs): 50 bound labels of the game's row through a
+   * format whose answer holds a `<b>` count in the bold look and a `<span>`, fonts loaded; one
+   * counter moves every frame and its container is updated through the display adapter (a retext
+   * of an unchanged shape). 328 B, all of it the text step: the `{ resolved }` patch (32 B) and the
+   * one layout cache key of the long two-byte string. The draw keeps nothing: it takes the layout
+   * the step kept for the label, walks the runs with the draw cursor (positions in a typed array,
+   * no closure, spots by index), keeps run widths by run, and writes the new layout into the drawn
+   * record. Was 1 720 B before this change (the draw path that predates F152).
+   */
+  textRunsMoving: 328,
+  /**
+   * The same frame with the answers as one run of the same words, no tag. 232 B, the patch and the
+   * shorter key; the draw keeps nothing. Was 1 000 B.
+   */
+  textPlainMoving: 232
 } as const;

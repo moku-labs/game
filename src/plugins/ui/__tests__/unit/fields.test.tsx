@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Message } from "../../../i18n/types";
 import { Touchable } from "../../../input/components";
 import { Shape, Transform } from "../../../renderer/components";
 import { Text } from "../../../text/components";
+import { parseTags } from "../../../text/tags";
 import { Box } from "../../components";
 import {
   alphaOf,
@@ -53,6 +55,22 @@ async function start(): Promise<FieldApp> {
  */
 function shownValue(app: FieldApp, key: string): string | undefined {
   return nodeOf(app.ui.tree(), key)?.value;
+}
+
+/**
+ * The characters `text` draws for a content, read by its own tag grammar.
+ *
+ * @param content - What a text part holds, or what `text.measure` is handed.
+ * @returns The drawn characters, without the tags the grammar takes as markup.
+ */
+function drawnText(content: string | Message | undefined): string {
+  if (typeof content !== "string") return "";
+
+  let drawn = "";
+
+  for (const run of parseTags(content, () => undefined)) if (run.kind === "text") drawn += run.text;
+
+  return drawn;
 }
 
 describe("the input tag", () => {
@@ -223,6 +241,37 @@ describe("fill", () => {
 
     // The font of the fixture has "a" and "b" at 20 px and no emoji: Pixi draws nothing for it.
     expect(app.world.ecs.get(caret, Transform)?.x).toBe(40);
+  });
+
+  it("draws and measures a typed <i><b>x as its seven characters, never as markup", async () => {
+    const app = await start();
+
+    mountScreen(app, "profile");
+    vi.mocked(app.text.measure).mockImplementation(content => ({
+      width: drawnText(content).length * 10,
+      height: 40
+    }));
+    app.ui.fill("nickField", "<i><b>x");
+    app.time.step(16);
+
+    const parts = partsOf(app, find(app, "nickField"));
+
+    // As markup the text would draw "x" alone and the caret would stand at 10.
+    expect(drawnText(app.world.ecs.get(parts.text ?? 0, Text)?.content)).toBe("<i><b>x");
+    expect(app.world.ecs.get(parts.caret ?? 0, Transform)?.x).toBe(70);
+  });
+
+  it("hands a value without < to text unchanged, a backslash too", async () => {
+    const app = await start();
+
+    mountScreen(app, "profile");
+    app.ui.fill("nickField", String.raw`C:\a`);
+    app.time.step(16);
+
+    const parts = partsOf(app, find(app, "nickField"));
+
+    expect(app.world.ecs.get(parts.text ?? 0, Text)?.content).toBe(String.raw`C:\a`);
+    expect(app.world.ecs.get(parts.caret ?? 0, Transform)?.x).toBe(40);
   });
 });
 

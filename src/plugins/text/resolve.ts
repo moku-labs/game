@@ -9,10 +9,14 @@ import { system } from "../world/ecs/define";
 import type { AnyComponent, AnySystem, Entity } from "../world/ecs/types";
 import { builtInStyles, Countdown, Text } from "./components";
 import { formatBound, isTextFormat, unitOf, wholeValue } from "./format";
+import { fontOfRun, lookIn } from "./lines";
 import { layoutRuns } from "./measure";
 import { parseTags } from "./tags";
 import type {
   FormattedNumber,
+  KernelSlice,
+  LayoutOptions,
+  Run,
   SeenText,
   Size,
   State,
@@ -36,6 +40,12 @@ const CACHE_LIMIT = 1024;
 /** How every inline icon tag starts. A resolved text without it holds no icon. */
 const ICON_OPEN = "<icon=";
 
+/** How every span tag starts. A resolved text without it holds no span. */
+const SPAN_OPEN = "<span";
+
+/** How every bold tag starts. A resolved text without it holds no bold run. */
+const BOLD_OPEN = "<b>";
+
 /** The name the system is registered under; it shows up in a world error message. */
 export const TEXT_SYSTEM_NAME = "text.resolve";
 
@@ -43,13 +53,13 @@ export const TEXT_SYSTEM_NAME = "text.resolve";
  * Writes one dev warning per key. Every warning of this plugin goes through here, so a font, a
  * style, a glyph or a bad tag is reported once and never floods a frame.
  *
- * @param ctx - Domain context of the text plugin.
+ * @param ctx - Kernel or domain context of the text plugin.
  * @param key - What makes this warning unique.
  * @param message - The log event.
  * @param data - What to log with it.
  */
 export function warnOnce(
-  ctx: TextCtx,
+  ctx: KernelSlice,
   key: string,
   message: string,
   data?: Record<string, unknown>
@@ -63,10 +73,10 @@ export function warnOnce(
 /**
  * The warning the pure modules are handed, bound to this app's `warned` set.
  *
- * @param ctx - Domain context of the text plugin.
+ * @param ctx - Kernel or domain context of the text plugin.
  * @returns A warning that repeats nothing.
  */
-export function warnFor(ctx: TextCtx): Warn {
+export function warnFor(ctx: KernelSlice): Warn {
   return (key, message, data): void => warnOnce(ctx, key, message, data);
 }
 
@@ -102,9 +112,42 @@ function wrapsAtBox(ctx: TextCtx, styleName: string): boolean {
 }
 
 /**
+ * What the pure layout and the draw are handed: the warning, the style table a span borrows its
+ * look from, and the bold looks. Built once per domain context, so a draw builds none.
+ *
+ * @param ctx - Kernel context of the text plugin.
+ * @returns The layout options of this app.
+ */
+export function layoutOptionsOf(ctx: KernelSlice): LayoutOptions {
+  return { warn: warnFor(ctx), styles: ctx.state.styles, looks: ctx.state.looks };
+}
+
+/**
+ * Reports the first span of a resolved string whose key no style has, once per string. Such a
+ * run is laid out and drawn in the look of the paragraph.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param resolved - The tagged string.
+ * @param runs - What `parseTags` made of it.
+ */
+function warnUnknownSpan(ctx: TextCtx, resolved: string, runs: readonly Run[]): void {
+  for (const run of runs) {
+    if (run.span === undefined || ctx.state.styles.has(run.span)) continue;
+
+    warnOnce(ctx, `span:${resolved}`, "text: unknown span style", {
+      style: run.span,
+      text: resolved
+    });
+
+    return;
+  }
+}
+
+/**
  * The layout of one resolved string in one style, from the cache or freshly laid out. The cache
  * is what makes `measure` cheap enough for `ui` to ask per invalidation. A `"box"` style with a
- * box is cached per width too; any other style ignores the box and keeps one layout.
+ * box is cached per width too; any other style ignores the box and keeps one layout. A span whose
+ * key no style has is reported here, where the string is in hand, once per string.
  *
  * @param ctx - Domain context of the text plugin.
  * @param resolved - The tagged string.
@@ -122,19 +165,34 @@ export function layoutFor(ctx: TextCtx, resolved: string, styleName: string, box
 
   if (hit !== undefined) return hit;
 
-  const warn = warnFor(ctx);
-  const runs = parseTags(resolved, warn);
-  const layout = layoutRuns(runs, styleOf(ctx, styleName), ctx.state.tables, { warn }, width);
+  // A miss: the string is read through the grammar and laid out in its style.
+  const options = ctx.layoutOptions;
+  const runs = parseTags(resolved, options.warn);
 
-  if (ctx.state.cache.size >= CACHE_LIMIT) {
-    const oldest = ctx.state.cache.keys().next().value;
+  if (resolved.includes(SPAN_OPEN)) warnUnknownSpan(ctx, resolved, runs);
 
-    if (oldest !== undefined) ctx.state.cache.delete(oldest);
-  }
+  const layout = layoutRuns(runs, styleOf(ctx, styleName), ctx.state.tables, options, width);
 
-  ctx.state.cache.set(key, layout);
+  keepLayout(ctx.state.cache, key, layout);
 
   return layout;
+}
+
+/**
+ * Keeps a fresh layout in the cache, the oldest one dropped first when the cache is full.
+ *
+ * @param cache - The layout cache of the plugin.
+ * @param key - The style, the box and the string the layout is for.
+ * @param layout - The layout.
+ */
+function keepLayout(cache: Map<string, TextLayout>, key: string, layout: TextLayout): void {
+  if (cache.size >= CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+
+  cache.set(key, layout);
 }
 
 /**
@@ -500,23 +558,86 @@ function boxMoved(ctx: TextCtx, seen: SeenText, text: Readonly<TextValue>): bool
 }
 
 /**
- * Keeps the measured size of a label: made once, then overwritten in place.
+ * Drops every cached layout and moves the epoch, so a layout a label kept is stale too. Every
+ * place that throws the layouts away goes through here.
+ *
+ * @param state - The plugin state.
+ */
+export function dropLayouts(state: State): void {
+  state.cache.clear();
+  state.epoch += 1;
+}
+
+/**
+ * Lays out what a label shows and keeps its measured size and that layout, with what it was laid
+ * out from, so the draw of the label in the same frame takes it. Both records are made once per
+ * label, then overwritten in place.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
- * @param layout - The layout of what the label shows now.
+ * @param resolved - The string the label shows now.
+ * @param style - The style name it shows it in.
+ * @param box - The box of its `Text`.
  */
-function keepSize(ctx: TextCtx, entity: Entity, layout: TextLayout): void {
+function keepSize(
+  ctx: TextCtx,
+  entity: Entity,
+  resolved: string,
+  style: string,
+  box: number | undefined
+): void {
+  // Lay out and measure what the label shows.
+  const layout = layoutFor(ctx, resolved, style, box);
+
+  // Keep the size `ui` reads.
   const size = ctx.state.measured.get(entity);
 
   if (size === undefined) {
     ctx.state.measured.set(entity, sizeOf(layout));
+  } else {
+    size.width = layout.width;
+    size.height = layout.height;
+  }
+
+  // Keep the layout the draw of this label takes, with what it was laid out from.
+  const shown = ctx.state.shown.get(entity);
+
+  if (shown === undefined) {
+    ctx.state.shown.set(entity, { resolved, style, box, epoch: ctx.state.epoch, layout });
 
     return;
   }
 
-  size.width = layout.width;
-  size.height = layout.height;
+  shown.resolved = resolved;
+  shown.style = style;
+  shown.box = box;
+  shown.epoch = ctx.state.epoch;
+  shown.layout = layout;
+}
+
+/**
+ * The layout of a value a label shows: the one the text step kept for its entity when it was laid
+ * out from the same string, style and box under the same cache epoch, else from the cache.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity of the label, when the draw knows it.
+ * @param value - The component value to draw.
+ * @returns The layout.
+ */
+export function shownLayoutOf(
+  ctx: TextCtx,
+  entity: Entity | undefined,
+  value: Readonly<TextValue>
+): TextLayout {
+  const shown = entity === undefined ? undefined : ctx.state.shown.get(entity);
+  const stands =
+    shown !== undefined &&
+    shown.epoch === ctx.state.epoch &&
+    shown.resolved === value.resolved &&
+    shown.style === value.style &&
+    shown.box === value.box;
+
+  return stands ? shown.layout : layoutFor(ctx, value.resolved, value.style, value.box);
 }
 
 /**
@@ -568,17 +689,43 @@ function showBound(
   const restyled = style !== text.style;
   const changed = restyled || next !== text.resolved;
 
-  if (changed) {
-    ctx.deps.world.ecs.set(entity, Text, restyled ? { resolved: next, style } : { resolved: next });
+  // A new string or style is written, with the time left of a countdown in the same step.
+  if (changed) writeBound(ctx, entity, text, next, value, restyled ? style : undefined);
 
-    if (value !== undefined && text.bind !== undefined && isCountdownLeft(text.bind)) {
-      ctx.deps.world.ecs.set(entity, Countdown, { left: value });
-    }
-  }
-
+  // The size follows the string; a label measured never is measured once.
   if (changed || !ctx.state.measured.has(entity)) {
-    keepSize(ctx, entity, layoutFor(ctx, next, style, text.box));
+    keepSize(ctx, entity, next, style, text.box);
   }
+}
+
+/**
+ * Writes the new string of a bound label, its new style when a named format picked another, and
+ * for a countdown the time left.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ * @param next - The string the label shows now.
+ * @param value - The bound number, the time left for a countdown.
+ * @param style - The style a named format picked, when it is another than `Text.style`.
+ */
+function writeBound(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  next: string,
+  value: number | undefined,
+  style: string | undefined
+): void {
+  ctx.deps.world.ecs.set(
+    entity,
+    Text,
+    style === undefined ? { resolved: next } : { resolved: next, style }
+  );
+
+  if (value === undefined || text.bind === undefined || !isCountdownLeft(text.bind)) return;
+
+  ctx.deps.world.ecs.set(entity, Countdown, { left: value });
 }
 
 /**
@@ -593,7 +740,7 @@ function showBound(
  */
 function showAgain(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): void {
   ctx.deps.world.ecs.set(entity, Text, { resolved: text.resolved });
-  keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
+  keepSize(ctx, entity, text.resolved, text.style, text.box);
 }
 
 /**
@@ -672,9 +819,9 @@ function stepBound(
 
 /**
  * One frame of a label whose bind names a format a feature registered. Its unit is the whole value.
- * While that, the locale, the bind and the style stand the frame is reads and compares: the format
- * is not called, a mark included, and nothing is kept. Else it is asked once, and its answer is
- * written only when it differs. The format picks the style, so no style is checked for digits. A
+ * While the whole value, the locale, the bind and the style stand still, the frame only reads and
+ * compares: the format is not called, even for a marked label, and nothing is kept. Else the
+ * format is asked once, and its answer is written only when it differs. The format picks the style, so no style is checked for digits. A
  * bound field that holds no number shows nothing, as under a built-in format.
  *
  * @param ctx - Domain context of the text plugin.
@@ -737,13 +884,11 @@ function standStill(
   seen: SeenText,
   marked: boolean
 ): void {
-  if (marked) {
-    showAgain(ctx, entity, text);
-  } else if (boxMoved(ctx, seen, text)) {
-    keepSize(ctx, entity, layoutFor(ctx, text.resolved, text.style, text.box));
-  } else {
-    return;
-  }
+  // Neither marked nor laid out at another box: nothing to write or measure.
+  if (!marked && !boxMoved(ctx, seen, text)) return;
+
+  if (marked) showAgain(ctx, entity, text);
+  else keepSize(ctx, entity, text.resolved, text.style, text.box);
 
   seen.box = text.box;
 }
@@ -799,7 +944,7 @@ function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame
 
   const resolved = resolveContent(ctx, entity, text);
 
-  keepSize(ctx, entity, layoutFor(ctx, resolved, text.style, text.box));
+  keepSize(ctx, entity, resolved, text.style, text.box);
   ctx.state.dirty.delete(entity);
   remember(ctx, entity, text, frame);
 }
@@ -1026,10 +1171,11 @@ export function markDirty(
 }
 
 /**
- * Tells whether a label is drawn with one of the asset keys: a font its style names, or an inline
- * icon of its resolved text. The text is read through the tag grammar, the way it is drawn, so an
- * escaped `\<icon=…>` is text and not an icon. A text that holds no `<icon=` at all is not read:
- * most labels have no icon, and this runs for every label of a swap.
+ * Tells whether a label is drawn with one of the asset keys: a font its style names, an inline
+ * icon of its resolved text, or the font a run of it draws with in its look, a span's or a bold
+ * one. The text is read through the tag grammar, the way it is drawn, so an escaped `\<icon=…>`
+ * is text and not an icon. A text that holds no icon, no span and, for a style with `boldStyle`,
+ * no bold tag is not read: most labels have none, and this runs for every label of a swap.
  *
  * @param ctx - Domain context of the text plugin.
  * @param text - The component value of the label.
@@ -1046,13 +1192,35 @@ export function drawsWith(
 
   if (fonts.some(font => font !== undefined && keys.includes(font))) return true;
 
-  // Every icon tag holds these characters, so the guard hides no icon. An escaped `\<icon=…>`
-  // holds them too and goes on to the grammar, which reads it as text.
-  if (!text.resolved.includes(ICON_OPEN)) return false;
+  // Every icon, span and bold tag holds these characters, so the guard hides none. An escaped
+  // `\<icon=…>` holds them too and goes on to the grammar, which reads it as text.
+  const resolved = text.resolved;
+  const bolds = style.boldStyle !== undefined && resolved.includes(BOLD_OPEN);
+  const holdsNoRuns = !bolds && !resolved.includes(ICON_OPEN) && !resolved.includes(SPAN_OPEN);
 
-  return parseTags(text.resolved, warnFor(ctx)).some(
-    run => run.kind === "icon" && keys.includes(run.key)
+  if (holdsNoRuns) return false;
+
+  return parseTags(resolved, ctx.layoutOptions.warn).some(run =>
+    runDrawsWith(ctx, style, run, keys)
   );
+}
+
+/**
+ * Tells whether one run is drawn with one of the asset keys: an icon of that key, or glyphs in a
+ * font of that key in the look of the run.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param style - The style of the label.
+ * @param run - One run of its text.
+ * @param keys - The asset keys to look for.
+ * @returns True when the run draws with one of `keys`.
+ */
+function runDrawsWith(ctx: TextCtx, style: TextStyle, run: Run, keys: readonly string[]): boolean {
+  if (run.kind === "icon") return keys.includes(run.key);
+
+  const look = lookIn(style, run, ctx.layoutOptions);
+
+  return keys.includes(fontOfRun(look, run));
 }
 
 /**
@@ -1065,5 +1233,6 @@ export function drawsWith(
 export function forgetText(state: State, entity: Entity): void {
   state.seen.delete(entity);
   state.measured.delete(entity);
+  state.shown.delete(entity);
   state.dirty.delete(entity);
 }

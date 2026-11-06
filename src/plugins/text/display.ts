@@ -1,13 +1,17 @@
 /**
  * @file text plugin — the screen half: the fonts handed to the renderer, and the display adapter
  * that turns one `Text` into one Pixi container of `BitmapText` runs, their shadows and icon
- * sprites. Pixi is never imported here: the classes come from the module the renderer loaded.
+ * sprites. Every run is built in its look and stands on the baseline of its line. Pixi is never
+ * imported here: the classes come from the module the renderer loaded.
  */
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiSprite, PixiTexture } from "../renderer/types";
-import { fontLineOf, fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
-import { drawsWith, layoutFor, markDirty, styleOf, warnFor, warnOnce } from "./resolve";
+import type { Entity } from "../world/ecs/types";
+import { ascentOf, fontOfRun, leadingOf, lineHeightOf, lookIn, metricsFontOf } from "./lines";
+import { measureRun, parseAdvances } from "./measure";
+import { drawsWith, dropLayouts, markDirty, shownLayoutOf, styleOf, warnOnce } from "./resolve";
 import type {
+  DrawCursor,
   DrawnLabel,
   IconRun,
   Line,
@@ -41,6 +45,12 @@ const WHITE = 0xff_ff_ff;
 
 /** A ring of copies under a glyph run: its width, and the colour each white copy is tinted. */
 type Ring = { width: number; color: number };
+
+/**
+ * What `eachRun` calls per run with its look; where the run starts is in `state.cursor.at`. A module
+ * function, never a closure: it reaches the container through `state.cursor`.
+ */
+type RunVisitor = (ctx: TextCtx, run: Run, look: TextStyle) => void;
 
 /** A Pixi bitmap text: a glyph run, one copy of its rings or its shadow. */
 type PixiBitmapText = InstanceType<PixiModule["BitmapText"]>;
@@ -134,7 +144,7 @@ export function releaseFonts(ctx: TextCtx, keys: readonly string[]): void {
  * @param ctx - Domain context of the text plugin.
  */
 function refresh(ctx: TextCtx): void {
-  ctx.state.cache.clear();
+  dropLayouts(ctx.state);
   markDirty(ctx);
 }
 
@@ -210,7 +220,7 @@ export function applyReplaced(
   const fonts = keys.filter(key => ctx.state.fontKeys.has(key));
 
   // A layout is cached by style and string, not by font, so a replaced font drops all of them, once.
-  if (fonts.length > 0) ctx.state.cache.clear();
+  if (fonts.length > 0) dropLayouts(ctx.state);
 
   if (!reinstallFonts(ctx, fonts, reload)) return;
 
@@ -220,26 +230,49 @@ export function applyReplaced(
 }
 
 /**
- * Where a line starts inside the widest one.
+ * The width the lines of a block align in, and its anchor moves by: the widest line, or for a
+ * `"box"` style laid out at a box the box when it is wider (F153). `measure` answers the widest
+ * line either way.
  *
  * @param style - The style of the label.
- * @param layout - The block the line belongs to.
+ * @param layout - The laid-out block.
+ * @param box - The box the label was laid out at; 0 for none.
+ * @returns The width in reference pixels.
+ * @example
+ * ```ts
+ * alignWidthOf({ ...bodyStyle, wrap: "box" }, { lines: [], width: 200, height: 0 }, 300); // 300
+ * ```
+ */
+function alignWidthOf(style: TextStyle, layout: TextLayout, box: number): number {
+  return style.wrap === "box" && box > 0 ? Math.max(layout.width, box) : layout.width;
+}
+
+/**
+ * Where a line starts inside the width the block aligns in. The first line of an indented block
+ * counts its indent in its width, so it aligns in the room after the indent.
+ *
+ * @param style - The style of the label.
+ * @param width - The width the block aligns in.
  * @param line - The line.
  * @returns The offset in reference pixels.
+ * @example
+ * ```ts
+ * alignOffset({ ...bodyStyle, align: "center" }, 300, { runs: [], width: 200, height: 0, baseline: 0 }); // 50
+ * ```
  */
-function alignOffset(style: TextStyle, layout: TextLayout, line: Line): number {
+function alignOffset(style: TextStyle, width: number, line: Line): number {
   if (style.align === "left") return 0;
 
-  const slack = layout.width - line.width;
+  const slack = width - line.width;
 
   return style.align === "center" ? slack / 2 : slack;
 }
 
 /**
- * The rings of copies one run is drawn over, bottom first: the outline of a stroked style, then the
- * synthetic bold in the fill when the style names no bold font.
+ * The rings of copies one run is drawn over, bottom first: the outline of a stroked look, then the
+ * synthetic bold in the fill when the look names no bold font.
  *
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param run - The run to draw.
  * @param fill - The colour the run is filled with.
  * @returns The rings, none for a plain run.
@@ -282,30 +315,31 @@ function iconTexture(ctx: TextCtx, pixi: PixiModule, run: IconRun): PixiTexture 
 }
 
 /**
- * Sizes the sprite of one inline icon square at the line height and puts it where the icon
+ * Sizes the sprite of one inline icon square at the line of its look and puts it where the icon
  * starts.
  *
  * @param ctx - Domain context of the text plugin.
  * @param sprite - The sprite of the icon.
- * @param style - The style of the label.
- * @param at - Where the icon starts, in the local space of the block.
+ * @param style - The look of the icon.
+ * @param x - Where the icon starts across, in the local space of the block.
+ * @param y - Where it starts down.
  */
-function placeIcon(ctx: TextCtx, sprite: PixiSprite, style: TextStyle, at: Point): void {
+function placeIcon(ctx: TextCtx, sprite: PixiSprite, style: TextStyle, x: number, y: number): void {
   const side = lineHeightOf(style, ctx.state.tables);
 
   sprite.width = side;
   sprite.height = side;
-  sprite.x = at.x;
-  sprite.y = at.y;
+  sprite.x = x;
+  sprite.y = y;
 }
 
 /**
- * Builds the sprite of one inline icon, square at the line height.
+ * Builds the sprite of one inline icon, square at the line of its look.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The icon to draw.
- * @param style - The style of the label.
+ * @param style - The look of the icon.
  * @param at - Where the icon starts, in the local space of the block.
  * @returns The sprite.
  */
@@ -318,7 +352,7 @@ function buildIcon(
 ): PixiContainer {
   const sprite = new pixi.Sprite(iconTexture(ctx, pixi, run));
 
-  placeIcon(ctx, sprite, style, at);
+  placeIcon(ctx, sprite, style, at.x, at.y);
 
   return sprite;
 }
@@ -329,7 +363,7 @@ function buildIcon(
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs to draw.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param fill - The colour of the glyphs.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The display object.
@@ -365,8 +399,8 @@ function buildGlyphs(
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs that cast the shadow.
- * @param style - The style of the label.
- * @param shadow - The shadow of the style.
+ * @param style - The look of the run.
+ * @param shadow - The shadow of the look.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The display object, to be drawn under the run.
  */
@@ -416,7 +450,7 @@ function ringSpots(ring: Ring, at: Point): Point[] {
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs the ring surrounds.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param ring - The width and colour of the ring.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The copies, to be drawn under the run.
@@ -438,35 +472,13 @@ function buildRing(
 }
 
 /**
- * Where every object of one glyph run sits, in the order `buildRun` adds them: its shadow, the
- * copies of its rings, then the run itself.
- *
- * @param style - The style of the label.
- * @param run - The glyph run.
- * @param at - Where the run starts, in the local space of the block.
- * @returns One point per object.
- */
-function glyphSpots(style: TextStyle, run: TextRun, at: Point): Point[] {
-  const shadow = style.shadow;
-  const spots = shadow === undefined ? [] : [{ x: at.x + shadow.dx, y: at.y + shadow.dy }];
-
-  for (const ring of ringsOf(style, run, run.color ?? style.fill)) {
-    spots.push(...ringSpots(ring, at));
-  }
-
-  spots.push(at);
-
-  return spots;
-}
-
-/**
  * Builds the Pixi objects of one run, bottom first: an icon is one sprite, and a glyph run is its
- * shadow when the style has one, its outline and synthetic bold rings, then the glyphs.
+ * shadow when its look has one, its outline and synthetic bold rings, then the glyphs.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The run to draw.
- * @param style - The style of the label.
+ * @param style - The look of the run.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The display objects in drawing order.
  */
@@ -514,15 +526,15 @@ function isOutsideLayout(
 }
 
 /**
- * The style and the laid-out block of one component value, under the generation of this moment.
- * A `"box"` style wraps at the box `ui` wrote; with none it is one line, and a dev warning says
- * so once per style unless a layout measured that style at a width (a label that fits its row).
+ * The style one component value is drawn in. A `"box"` style wraps at the box `ui` wrote; with
+ * none it is one line, and a dev warning says so once per style unless a layout measured that
+ * style at a width (a label that fits its row).
  *
  * @param ctx - Domain context of the text plugin.
  * @param value - The component value.
- * @returns What the container is filled from.
+ * @returns The style.
  */
-function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
+function drawnStyleOf(ctx: TextCtx, value: Readonly<TextValue>): TextStyle {
   const style = styleOf(ctx, value.style);
 
   if (isOutsideLayout(ctx, style, value)) {
@@ -531,47 +543,157 @@ function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
     });
   }
 
+  return style;
+}
+
+/**
+ * The style and the laid-out block of one component value, under the generation of this moment:
+ * what a new container is filled from.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param value - The component value.
+ * @param entity - The entity the label sits on, when the draw knows it.
+ * @returns What the container is filled from.
+ */
+function labelOf(ctx: TextCtx, value: Readonly<TextValue>, entity: Entity | undefined): DrawnLabel {
   return {
-    style,
-    layout: layoutFor(ctx, value.resolved, value.style, value.box),
-    generation: ctx.state.generation
+    style: drawnStyleOf(ctx, value),
+    layout: shownLayoutOf(ctx, entity, value),
+    generation: ctx.state.generation,
+    entity
   };
 }
 
 /**
- * Calls `visit` with every run of a laid-out block and where it starts, anchored by the
- * component, line after line. A run of glyphs starts half the leading lower, so the glyphs sit in
- * the middle of a line taller or shorter than the font's; an icon starts on the line it fills.
+ * The width of one run of a laid-out block: measured on its first draw and kept for the run.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param run - A run of a cached layout.
+ * @param style - The style of the label.
+ * @returns The width in reference pixels.
+ */
+function widthOfRun(ctx: TextCtx, run: Run, style: TextStyle): number {
+  const kept = ctx.state.runWidths.get(run);
+
+  if (kept !== undefined) return kept;
+
+  const width = measureRun(run, style, ctx.state.tables, ctx.layoutOptions);
+
+  ctx.state.runWidths.set(run, width);
+
+  return width;
+}
+
+/**
+ * Calls `visit` with every run of a laid-out block, its look and where it starts, anchored by the
+ * component, line after line. The line of a run's look stands so that the run's baseline is the
+ * line's: a run of glyphs starts half its leading below the top of that line, so the glyphs sit in
+ * the middle of a line taller or shorter than the font's, and an icon starts on the line it fills.
+ * A run in a look of its own stands by the font it is drawn with, one in the paragraph's look by
+ * the paragraph's font (`metricsFontOf`). In a line no run reaches past the paragraph's line every
+ * run of the paragraph's look starts on the top of the line, as before lines had boxes. The first
+ * line starts after the indent.
  *
  * @param ctx - Domain context of the text plugin.
  * @param label - The style and the laid-out block.
- * @param anchor - The anchor of the component.
- * @param visit - Called once per run, in reading order.
+ * @param value - The component value: its anchor, and the box it was laid out at.
+ * @param visit - Called once per run, in reading order: a module function, so no draw builds a
+ *   closure; it reaches the container through `state.cursor`.
  */
 function eachRun(
   ctx: TextCtx,
   label: DrawnLabel,
-  anchor: Point,
-  visit: (run: Run, at: Point) => void
+  value: Readonly<TextValue>,
+  visit: RunVisitor
 ): void {
   const { style, layout } = label;
-  const height = lineHeightOf(style, ctx.state.tables);
-  const leading = (height - fontLineOf(style, ctx.state.tables)) / 2;
-  const options = { warn: warnFor(ctx) };
-  const left = -anchor.x * layout.width;
-  let y = -anchor.y * layout.height;
+  const tables = ctx.state.tables;
+  const options = ctx.layoutOptions;
+  const at = ctx.state.cursor.at;
+  const width = alignWidthOf(style, layout, value.box ?? 0);
+  const left = -value.anchor.x * width;
+  let top = -value.anchor.y * layout.height;
+  let indent = style.textIndent ?? 0;
 
-  // Lines top to bottom, runs left to right; a glyph run sits half the leading lower.
+  // Lines top to bottom, runs left to right; every run stands on the baseline of its line.
   for (const line of layout.lines) {
-    let x = left + alignOffset(style, layout, line);
+    let x = left + alignOffset(style, width, line) + indent;
 
     for (const run of line.runs) {
-      visit(run, { x, y: run.kind === "text" ? y + leading : y });
-      x += measureRun(run, style, ctx.state.tables, options);
+      const look = lookIn(style, run, options);
+      const font = metricsFontOf(style, look, run);
+      const leading = leadingOf(look, tables, font);
+      // How far the top of the run's own line sits below the top of the line: 0 when all stand alike.
+      const lift = line.baseline - (leading + ascentOf(look, tables, font));
+
+      at[0] = x;
+      at[1] = run.kind === "text" ? top + lift + leading : top + lift;
+      visit(ctx, run, look);
+      x += widthOfRun(ctx, run, style);
     }
 
-    y += height;
+    top += line.height;
+    indent = 0;
   }
+}
+
+/**
+ * Points the draw cursor at a container before a fill or a retext walks its runs.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param pixi - The Pixi module the renderer loaded.
+ * @param container - The container of this label.
+ * @returns The cursor, at the first child.
+ */
+function openCursor(ctx: TextCtx, pixi: PixiModule, container: PixiContainer): DrawCursor {
+  const cursor = ctx.state.cursor;
+
+  cursor.container = container;
+  cursor.pixi = pixi;
+  cursor.index = 0;
+
+  return cursor;
+}
+
+/**
+ * Lets the draw cursor go of its container, so the state holds no Pixi object between draws.
+ *
+ * @param cursor - The cursor of the plugin.
+ */
+export function closeCursor(cursor: DrawCursor): void {
+  cursor.container = undefined;
+  cursor.pixi = undefined;
+}
+
+/**
+ * Tells whether the draw cursor points at a container, as it does inside a fill or a retext.
+ *
+ * @param cursor - The cursor of the plugin.
+ * @returns True when a container and the Pixi module are set.
+ */
+function isOpen(
+  cursor: DrawCursor
+): cursor is DrawCursor & { container: PixiContainer; pixi: PixiModule } {
+  return cursor.container !== undefined && cursor.pixi !== undefined;
+}
+
+/**
+ * Builds the objects of one run into the container of the cursor.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param run - The run; where it starts is in `state.cursor.at`.
+ * @param look - The look of the run.
+ */
+function fillRun(ctx: TextCtx, run: Run, look: TextStyle): void {
+  const cursor = ctx.state.cursor;
+
+  if (!isOpen(cursor)) return;
+
+  const { container, pixi, at } = cursor;
+
+  const spot = { x: at[0] ?? 0, y: at[1] ?? 0 };
+
+  for (const object of buildRun(ctx, pixi, run, look, spot)) container.addChild(object);
 }
 
 /**
@@ -592,22 +714,27 @@ function fill(
   value: Readonly<TextValue>,
   label: DrawnLabel
 ): void {
-  eachRun(ctx, label, value.anchor, (run, at) => {
-    for (const object of buildRun(ctx, pixi, run, label.style, at)) container.addChild(object);
-  });
+  const cursor = openCursor(ctx, pixi, container);
+
+  eachRun(ctx, label, value, fillRun);
+  closeCursor(cursor);
   ctx.state.drawn.set(container, label);
 }
 
 /**
  * Tells whether two runs are drawn with the same objects: an icon of the same key, or glyphs with
- * the same bold, italic and colour. Only the text of a glyph run may differ.
+ * the same bold, italic and colour, both in the same span. Only the text of a glyph run may
+ * differ: a run of another span is in another look, with other fonts and copies.
  *
  * @param first - One run.
  * @param second - The other, or nothing.
  * @returns True when the objects of `first` can draw `second`.
  */
 function sameObjects(first: Run, second: Run | undefined): boolean {
-  if (second === undefined || first.kind !== second.kind) return false;
+  if (second === undefined || first.kind !== second.kind || first.span !== second.span) {
+    return false;
+  }
+
   if (first.kind === "icon") return second.kind === "icon" && first.key === second.key;
 
   return (
@@ -619,28 +746,141 @@ function sameObjects(first: Run, second: Run | undefined): boolean {
 }
 
 /**
- * Tells whether two laid-out blocks have the same lines, each with the same runs.
+ * Tells whether two lines hold the same runs, one by one.
+ *
+ * @param drawn - A line the container was filled from.
+ * @param next - The line at its place now, if any.
+ * @returns True when the objects of `drawn` can draw `next`.
+ */
+function sameLine(drawn: Line, next: Line | undefined): boolean {
+  if (next === undefined || drawn.runs.length !== next.runs.length) return false;
+
+  for (let at = 0; at < drawn.runs.length; at += 1) {
+    const run = drawn.runs[at];
+
+    if (run === undefined || !sameObjects(run, next.runs[at])) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Tells whether two laid-out blocks have the same lines, each with the same runs. Index loops: an
+ * update of a ticking label asks this every time and builds nothing.
  *
  * @param drawn - The block the container was filled from.
  * @param next - The block to draw now.
  * @returns True when the objects of `drawn` can draw `next`.
  */
 function sameShape(drawn: TextLayout, next: TextLayout): boolean {
-  return (
-    drawn.lines.length === next.lines.length &&
-    drawn.lines.every((line, index) => {
-      const runs = next.lines[index]?.runs ?? [];
+  if (drawn.lines.length !== next.lines.length) return false;
 
-      return (
-        line.runs.length === runs.length && line.runs.every((run, at) => sameObjects(run, runs[at]))
-      );
-    })
-  );
+  for (let index = 0; index < drawn.lines.length; index += 1) {
+    const line = drawn.lines[index];
+
+    if (line === undefined || !sameLine(line, next.lines[index])) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Writes the text of a glyph run into the next child of the cursor and moves it to a spot.
+ *
+ * @param cursor - The draw cursor, its container set.
+ * @param container - The container of the cursor.
+ * @param text - The glyphs of the run.
+ * @param x - The spot across.
+ * @param y - The spot down.
+ */
+function moveCopy(
+  cursor: DrawCursor,
+  container: PixiContainer,
+  text: string,
+  x: number,
+  y: number
+): void {
+  const glyphs = container.getChildAt<PixiBitmapText>(cursor.index);
+
+  glyphs.text = text;
+  glyphs.x = x;
+  glyphs.y = y;
+  cursor.index += 1;
+}
+
+/**
+ * Moves the copies of one ring around a run, in the order `ringSpots` placed them.
+ *
+ * @param cursor - The draw cursor, its container set.
+ * @param container - The container of the cursor.
+ * @param text - The glyphs of the run.
+ * @param width - The radius of the ring.
+ * @param x - Where the run starts across.
+ * @param y - Where it starts down.
+ */
+function moveRing(
+  cursor: DrawCursor,
+  container: PixiContainer,
+  text: string,
+  width: number,
+  x: number,
+  y: number
+): void {
+  const count = copiesFor(width);
+
+  for (let index = 0; index < count; index += 1) {
+    const angle = (index / count) * Math.PI * 2;
+
+    moveCopy(cursor, container, text, x + Math.cos(angle) * width, y + Math.sin(angle) * width);
+  }
+}
+
+/**
+ * Writes a new block's run into the objects already in the container, in the order `buildRun`
+ * added them: an icon's texture, size and spot; a glyph run's shadow, outline ring, synthetic bold
+ * ring and glyphs, each with the new text at its spot. Walks the spots by index, so it builds
+ * nothing.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param run - The run; where it starts is in `state.cursor.at`.
+ * @param look - The look of the run.
+ */
+function retextRun(ctx: TextCtx, run: Run, look: TextStyle): void {
+  const cursor = ctx.state.cursor;
+
+  if (!isOpen(cursor)) return;
+
+  const { container, pixi } = cursor;
+
+  const x = cursor.at[0] ?? 0;
+  const y = cursor.at[1] ?? 0;
+
+  if (run.kind === "icon") {
+    const sprite = container.getChildAt<PixiSprite>(cursor.index);
+
+    sprite.texture = iconTexture(ctx, pixi, run);
+    placeIcon(ctx, sprite, look, x, y);
+    cursor.index += 1;
+
+    return;
+  }
+
+  // Bottom first, as `buildRun` added them: the shadow, the outline, the synthetic bold, the run.
+  const shadow = look.shadow;
+
+  if (shadow !== undefined) moveCopy(cursor, container, run.text, x + shadow.dx, y + shadow.dy);
+  if (look.strokeWidth > 0) moveRing(cursor, container, run.text, look.strokeWidth, x, y);
+  if (run.bold && look.bold === undefined) {
+    moveRing(cursor, container, run.text, look.size / SYNTHETIC_BOLD, x, y);
+  }
+
+  moveCopy(cursor, container, run.text, x, y);
 }
 
 /**
  * Writes a new block into the objects already in the container, in the order `fill` added them:
- * the text and the spots of every glyph object, the texture, size and spot of every icon.
+ * the text and the spots of every glyph object, the texture, size and spot of every icon. The
+ * label record is the drawn one, its layout already written.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
@@ -655,29 +895,10 @@ function retext(
   value: Readonly<TextValue>,
   label: DrawnLabel
 ): void {
-  let index = 0;
+  const cursor = openCursor(ctx, pixi, container);
 
-  eachRun(ctx, label, value.anchor, (run, at) => {
-    if (run.kind === "icon") {
-      const sprite = container.getChildAt<PixiSprite>(index);
-
-      sprite.texture = iconTexture(ctx, pixi, run);
-      placeIcon(ctx, sprite, label.style, at);
-      index += 1;
-
-      return;
-    }
-
-    for (const spot of glyphSpots(label.style, run, at)) {
-      const glyphs = container.getChildAt<PixiBitmapText>(index);
-
-      glyphs.text = run.text;
-      glyphs.x = spot.x;
-      glyphs.y = spot.y;
-      index += 1;
-    }
-  });
-  ctx.state.drawn.set(container, label);
+  eachRun(ctx, label, value, retextRun);
+  closeCursor(cursor);
 }
 
 /**
@@ -696,7 +917,9 @@ function samePoint(first: Point, second: Point): boolean {
  * was last updated with, drawn with the style object that is current and under the generation
  * that is current, and for a `"box"` style at the same box. A replaced style is a new object under
  * the same name. A font or an icon a dev hot swap replaced moves the generation, because the
- * objects hold textures that are destroyed. The box of any other style changes nothing drawn.
+ * objects hold textures that are destroyed, and so does a styles swap, because a span or a bold
+ * look of the label may have changed under a style that stood. The box of any other style changes
+ * nothing drawn.
  *
  * @param ctx - Domain context of the text plugin.
  * @param container - The container of this label.
@@ -727,9 +950,10 @@ function isCurrent(
 /**
  * Draws a changed value into a container that holds a label already. A ticking counter keeps its
  * objects: with the same style object, the same generation, the same anchor and the same lines
- * and runs, the new text and spots are written into them. Anything else frees the children and
- * fills the container again. A label of an older generation is always filled again: writing the
- * string it shows already into a `BitmapText` rebuilds no glyph.
+ * and runs, the new text and spots are written into them and the new layout into the drawn
+ * record, so the update builds nothing. Anything else frees the children and fills the container
+ * again. A label of an older generation is always filled again: writing the string it shows
+ * already into a `BitmapText` rebuilds no glyph.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
@@ -745,26 +969,30 @@ function redraw(
   next: Readonly<TextValue>
 ): void {
   const drawn = ctx.state.drawn.get(container);
-  const label = labelOf(ctx, next);
+  const style = drawnStyleOf(ctx, next);
+  const layout = shownLayoutOf(ctx, drawn?.entity, next);
+  const generation = ctx.state.generation;
 
   // The objects in the container can take the new block: only the text and the spots differ.
   const canRetext =
-    drawn?.style === label.style &&
-    drawn.generation === label.generation &&
+    drawn?.style === style &&
+    drawn.generation === generation &&
     samePoint(previous.anchor, next.anchor) &&
-    sameShape(drawn.layout, label.layout);
+    sameShape(drawn.layout, layout);
 
   if (canRetext) {
-    retext(ctx, pixi, container, next, label);
+    drawn.layout = layout;
+    retext(ctx, pixi, container, next, drawn);
 
     return;
   }
 
+  // Anything else: the children go, and the container is filled again.
   for (const child of container.removeChildren()) {
     child.destroy({ children: true, texture: false });
   }
 
-  fill(ctx, pixi, container, next, label);
+  fill(ctx, pixi, container, next, { style, layout, generation, entity: drawn?.entity });
 }
 
 /**
@@ -779,7 +1007,7 @@ function redraw(
  */
 export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
   return {
-    create: (value): unknown => {
+    create: (value, entity): unknown => {
       const pixi = ctx.deps.renderer.host.pixi();
 
       if (pixi === undefined) return undefined;
@@ -787,7 +1015,7 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
       const container = new pixi.Container();
 
       container.alpha = value.alpha;
-      fill(ctx, pixi, container, value, labelOf(ctx, value));
+      fill(ctx, pixi, container, value, labelOf(ctx, value, entity));
 
       return container;
     },

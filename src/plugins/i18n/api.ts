@@ -95,6 +95,23 @@ function formatIn(ctx: I18nCtx, message: Message, locale?: string): readonly Par
 }
 
 /**
+ * Joins the text parts of a sentence, elements dropped, and reads every `\<` as the `<` it
+ * escapes, so plain text shows a parameter as the player wrote it.
+ *
+ * @param parts - What `formatIn` answered.
+ * @returns The sentence as text.
+ * @example
+ * ```ts
+ * plainOf([{ kind: "text", text: "Host: \\<b>x" }]); // "Host: <b>x"
+ * ```
+ */
+function plainOf(parts: readonly Part[]): string {
+  const text = parts.map(part => (part.kind === "text" ? part.text : "")).join("");
+
+  return text.replaceAll(String.raw`\<`, "<");
+}
+
+/**
  * Switches the current locale on the queue: load what is lazy (the modules of the held bundles
  * included), set the locale, send the event.
  *
@@ -170,8 +187,10 @@ function waitsForBundle(state: State, messages: CompiledMessages): boolean {
 function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages): void {
   const { state } = ctx;
 
+  // A locale nobody loaded has nothing in memory to swap: it reads the new file when it loads.
   if (!state.loaded.has(locale)) return;
 
+  // The one module in memory the new one replaces: a registry entry or the module of a held bundle.
   const entries = state.registered.get(locale) ?? [];
   const owners = entries.filter(entry => isReady(entry) && sharesKey(entry.messages, messages));
   const held = [...state.bundled.values()].filter(modules =>
@@ -179,9 +198,11 @@ function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages)
   );
   const found = owners.length + held.length;
 
+  // None yet for the strings of a bundle that is not loaded: they are read with the bundle.
   if (found === 0 && waitsForBundle(state, messages)) return;
   if (found !== 1) throw noSingleModule(locale);
 
+  // Swap it, merge the locale again, and let every key warn afresh.
   const [owner] = owners;
   const next = entries.map(entry => (entry === owner ? { from: entry.from, messages } : entry));
 
@@ -190,6 +211,7 @@ function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages)
   state.registered.set(locale, next);
   state.warned.clear();
 
+  // `text` reads the swapped strings when the locale is one a label shows.
   if (locale === state.locale || locale === ctx.config.fallback) {
     ctx.emit("i18n:locale-changed", { locale: state.locale });
   }
@@ -226,10 +248,7 @@ export function createI18nApi(ctx: I18nCtx): I18nApi {
     locale: () => ctx.state.locale,
     setLocale: locale => setLocale(ctx, locale),
     format: (message: Message, locale?: string): readonly Part[] => formatIn(ctx, message, locale),
-    plain: message =>
-      formatIn(ctx, message)
-        .map(part => (part.kind === "text" ? part.text : ""))
-        .join(""),
+    plain: message => plainOf(formatIn(ctx, message)),
     has: key => resolve(ctx.state, key, ctx.state.locale, ctx.config.fallback) !== undefined,
     isKey: value => isKnownKey(ctx.state, ctx.config.fallback, value),
     duration: (ms: number, style: DurationStyle = "short"): string =>

@@ -11,6 +11,7 @@ import {
   Text,
   textFor
 } from "../../components";
+import type { TextStyleInput } from "../../types";
 
 // ---------------------------------------------------------------------------
 // The pure half of the plugin: the component a game writes, the pair `label`
@@ -376,5 +377,120 @@ describe("textFor", () => {
 
     expect(kit.label).toBe(label);
     expect(kit.defineTextStyles).toBe(defineTextStyles);
+  });
+});
+
+describe("defineTextStyles — boldStyle and textIndent (F152)", () => {
+  /** The game's row style: 13 px words with a 16 px alt-bold count. */
+  const row = { font: "ui.fonts.text-medium", size: 13, fill: 0x3b_2a_1a };
+
+  // The bug: the stored boldStyle gains every key with `undefined`, so it no longer equals what the
+  // game wrote; or its shadow keeps no alpha and draws at 0.
+  it("stores the keys of boldStyle the game gave, with the alpha of its shadow filled", () => {
+    const stored = defineTextStyles({
+      "album.row.13": {
+        ...row,
+        boldStyle: { font: "ui.fonts.alt-bold", size: 16, shadow: { color: 0, dx: 0, dy: 2 } }
+      }
+    }).map["album.row.13"];
+
+    expect(stored?.boldStyle).toStrictEqual({
+      font: "ui.fonts.alt-bold",
+      size: 16,
+      shadow: { color: 0, dx: 0, dy: 2, alpha: 1 }
+    });
+  });
+
+  // The bug: a style that names neither field gets `boldStyle: undefined` or `textIndent: 0`, so
+  // every stored style differs from the literal of its docs and of a hot swap.
+  it("leaves both fields out of a style that names neither, and textIndent out at 0", () => {
+    const map = defineTextStyles({ plain: row, flat: { ...row, textIndent: 0 } }).map;
+
+    expect(Object.hasOwn(map.plain ?? {}, "boldStyle")).toBe(false);
+    expect(Object.hasOwn(map.plain ?? {}, "textIndent")).toBe(false);
+    expect(Object.hasOwn(map.flat ?? {}, "textIndent")).toBe(false);
+    expect(
+      defineTextStyles({ indented: { ...row, textIndent: 20 } }).map.indented?.textIndent
+    ).toBe(20);
+  });
+
+  // The bug: a bad bold look is stored, and every `<b>` of the style draws at size 0, NaN apart,
+  // or with a field nobody reads.
+  it("refuses every bad field of boldStyle, naming it", () => {
+    const cases: Array<[unknown, string]> = [
+      [{ wrap: 200 }, '[game] Text style "album.row.13" has boldStyle.wrap.'],
+      [{ size: 0 }, '[game] Text style "album.row.13" has boldStyle.size 0.'],
+      [{ size: -1 }, '[game] Text style "album.row.13" has boldStyle.size -1.'],
+      [{ size: Number.NaN }, '[game] Text style "album.row.13" has boldStyle.size NaN.'],
+      [
+        { size: Number.POSITIVE_INFINITY },
+        '[game] Text style "album.row.13" has boldStyle.size Infinity.'
+      ],
+      [
+        { letterSpacing: Number.NaN },
+        '[game] Text style "album.row.13" has boldStyle.letterSpacing NaN.'
+      ],
+      [
+        { strokeWidth: Number.POSITIVE_INFINITY },
+        '[game] Text style "album.row.13" has boldStyle.strokeWidth Infinity.'
+      ],
+      [{ font: 7 }, '[game] Text style "album.row.13" has boldStyle.font 7.'],
+      [{ shadow: { dy: 4 } }, '[game] Text style "album.row.13" has boldStyle.shadow.'],
+      ["bold", '[game] Text style "album.row.13" has boldStyle "bold".'],
+      [[], '[game] Text style "album.row.13" has boldStyle [].']
+    ];
+
+    // A game's literal is checked by tsc; a tool or a hand-built map is not.
+    for (const [boldStyle, message] of cases) {
+      const input = { ...row, boldStyle } as unknown as TextStyleInput;
+
+      expect(() => defineTextStyles({ "album.row.13": input })).toThrow(message);
+    }
+  });
+
+  it("says how to fix a bad boldStyle", () => {
+    const input = { ...row, boldStyle: { wrap: 200 } } as unknown as TextStyleInput;
+
+    expect(() => defineTextStyles({ "album.row.13": input })).toThrow(
+      '[game] Text style "album.row.13" has boldStyle.wrap.\n' +
+        "  Use only font, size, fill, letterSpacing, stroke, strokeWidth and shadow."
+    );
+    expect(() => readStyle("album.row.13", { ...row, boldStyle: { size: 0 } })).toThrow(
+      '[game] Text style "album.row.13" has boldStyle.size 0.\n  Use a size above 0.'
+    );
+  });
+
+  // The bug: an indent below 0 pulls the first line out of its box, NaN puts it nowhere.
+  it("refuses a textIndent below 0 or not finite", () => {
+    for (const textIndent of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => defineTextStyles({ card: { ...row, textIndent } })).toThrow(
+        `[game] Text style "card" has textIndent ${textIndent}.\n` +
+          "  Use reference px of 0 or more, such as 20."
+      );
+    }
+  });
+
+  // The bug: `buildStyles` and `replaceStyles` read a style back through readStyle and drop both
+  // fields, so a feature's `<b>` draws without its look and its first line without its indent.
+  it("reads a style with boldStyle and textIndent back to an equal literal, again and again", () => {
+    const stored = defineTextStyles({
+      "album.row.13": {
+        ...row,
+        textIndent: 20,
+        boldStyle: {
+          font: "ui.fonts.alt-bold",
+          size: 16,
+          fill: 0xff_00_00,
+          letterSpacing: 0.5,
+          stroke: 0,
+          strokeWidth: 2,
+          shadow: { color: 0, dx: 0, dy: 2, alpha: 0.5 }
+        }
+      }
+    }).map["album.row.13"];
+    const once = readStyle("album.row.13", stored ?? {});
+
+    expect(once).toStrictEqual(stored);
+    expect(readStyle("album.row.13", once ?? {})).toStrictEqual(stored);
   });
 });
