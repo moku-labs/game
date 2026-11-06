@@ -220,3 +220,44 @@ describe("the context of a system", () => {
     expect(seen[0]?.pointer).toBe(seen[1]?.pointer);
   });
 });
+
+describe("the rows of a feature's system while a scene is built aside (F155)", () => {
+  it("pass over the build's entities until it ends; an engine system's rows keep them", () => {
+    // Bug caught: a game's system sees the coming scene arrive over the build frames, before its commit.
+    const world = createMockWorld();
+    const ecs = world.api.ecs;
+    const current = ecs.spawn(test, [Position({ x: 1 })]);
+    const coming = ecs.spawn(test, [Position({ x: 2 })]);
+    const seen: Record<string, Entity[][]> = { feature: [], engine: [] };
+    const watcher = (name: "feature" | "engine") =>
+      system({
+        name,
+        phase: "animate",
+        query: [Position],
+        run: rows => {
+          const run: Entity[] = [];
+
+          for (const [entity] of rows) run.push(entity as Entity);
+          seen[name]?.push(run);
+        }
+      });
+
+    world.features.push({ name: "f", description: { systems: [watcher("feature")] } });
+    ecs.system(watcher("engine"));
+    world.start();
+
+    // The build table as `projection.build` leaves it: only its entity set is read by the walk.
+    world.ctx.state.projection.building = {
+      entities: new Set([coming])
+    } as unknown as NonNullable<typeof world.ctx.state.projection.building>;
+    world.frame();
+    delete world.ctx.state.projection.building;
+    world.frame();
+
+    expect(seen.feature).toEqual([[current], [current, coming]]);
+    expect(seen.engine).toEqual([
+      [current, coming],
+      [current, coming]
+    ]);
+  });
+});

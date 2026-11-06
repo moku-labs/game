@@ -298,7 +298,9 @@ export type FilterInput<Value> = {
   readonly stages: readonly FilterStage[];
   /**
    * The steps of the second texture for this value and resolution. Pure: no state, no randomness; the context object
-   * is the engine's and valid during the call only.
+   * is the engine's and valid during the call only. The engine reads the steps during the call and copies the uniform
+   * values it needs, so a chain may answer the same array on every call, its uniform objects written in place (what
+   * `Bloom` does, so a tween allocates nothing in the chain).
    *
    * @param value - The stored value of the filter component.
    * @param context - The resolution of the texture the view is drawn into.

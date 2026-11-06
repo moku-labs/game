@@ -522,10 +522,11 @@ export type Leaving = {
   outMs: number;
   /**
    * The floor on the swap (F130), for a loader that is on with `holdMs` above 0: the clock moment the swap may happen at,
-   * and the frame counter at the look's start. Absent: no floor. `state.leaving` is always the running switch's look
+   * the game time it may happen at (F156: the stepped frames of a visual test move it where the clock stands), and the
+   * frame counter at the look's start. Absent: no floor. `state.leaving` is always the running switch's look
    * (`dropLeftOver` and `leaveFor` keep it so), which is why the build reads it there.
    */
-  hold?: { until: number; frame: number };
+  hold?: { until: number; elapsedUntil: number; frame: number };
   /**
    * The loader projection the switch feeds its `SceneSwitch` (F107 part 1), from its start to its swap or drop. Absent
    * when it feeds none: a ring, a texture, a loader turned off, or a projection another owner shows.

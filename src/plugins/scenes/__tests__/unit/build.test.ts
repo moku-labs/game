@@ -437,6 +437,27 @@ describe("a floor on the swap", () => {
     expect(mock.time.callbacks.signals).toEqual([]);
   });
 
+  // Bug (F156): on a clock that stands, as the fake clock of a visual test's pixel leg, the floor never passes and the
+  // switch never commits, though the stepped frames run on.
+  it("passes the floor on game time while the clock stands: the old scene at 256 ms of frames, the new at 272", async () => {
+    const mock = await onHome(FLOOR);
+    const { entering, settled } = await enterBoard(mock);
+
+    mock.world.building.done = true;
+
+    // 16 frames of 16 ms from the look's start: 256 ms, under the floor.
+    for (let frame = 0; frame < 16; frame += 1) mock.time.frame();
+    await flush();
+
+    expect(mock.api.current()).toBe("home");
+    expect(settled.done).toBe(false);
+
+    mock.time.frame();
+    await entering;
+
+    expect(mock.api.current()).toBe("board");
+  });
+
   // Bug: the floor is counted from the build start, not from the look's, so a switch slower than the floor waits again
   // after its long load.
   it("adds no frame to a switch slower than the floor: a build done at its first frame commits there", async () => {

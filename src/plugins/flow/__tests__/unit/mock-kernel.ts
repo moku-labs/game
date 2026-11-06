@@ -166,6 +166,7 @@ function createFakeClock(record: Recorder): ClockApi {
     poke: (): void => {
       record.pokes += 1;
     },
+    advance: () => 1000,
     dueAt: () => undefined,
     pending: () => 0,
     listeners: () => 0

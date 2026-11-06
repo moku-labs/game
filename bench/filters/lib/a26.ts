@@ -5,7 +5,7 @@
  */
 
 /**
- * Every arm of the A26 run, in the order of one round. `sweep` is left out: its blur pass hides the colour matrix's, and
+ * Every arm of the A26 run, in the order of one round. `sweep` is left out: its blur pass hides the colour matrix's, so
  * slice 3 of F126 stage 3 splits it into `sweep-blur`, `sweep-blur-q4` and `sweep-grade`.
  */
 export const ARMS = [
@@ -42,7 +42,12 @@ export const ARMS = [
   "set-dissolve",
   "set-shine",
   "set-aura",
-  "set-fold"
+  "set-fold",
+  "set-bloom",
+  "set-bloom-held",
+  "set-bloom-one",
+  "sweep-blur",
+  "sweep-blur-q4"
 ] as const;
 
 /** The apps that may stand in front of a free phone. */

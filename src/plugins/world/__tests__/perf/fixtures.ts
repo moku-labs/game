@@ -144,19 +144,36 @@ function walker(index: number): AnySystem {
  * The twin of the old probe: 300 entities carry `Cell`, `matching` of them `Lit` too, and 40
  * systems of phase `animate` query `[Cell, Lit]`, ten of them with `mut(Lit)`.
  *
+ * With `aside`, the systems are a feature's and every other entity belongs to a scene built aside,
+ * which their rows pass over (F155).
+ *
  * @param matching - How many entities carry both terms.
+ * @param aside - True for feature systems during a build aside.
  * @returns One frame: phase `animate`, then the clear of phase `signals`.
  */
-export function walkFixture(matching: number): () => void {
+export function walkFixture(matching: number, aside = false): () => void {
   const world = createMockWorld();
   const { ecs } = stableModules(world);
   const every = ENTITIES / matching;
+  const building = new Set<Entity>();
 
   for (let index = 0; index < ENTITIES; index += 1) {
-    world.api.ecs.spawn(OWNER, index % every === 0 ? [Cell(), Lit()] : [Cell()]);
+    const entity = world.api.ecs.spawn(OWNER, index % every === 0 ? [Cell(), Lit()] : [Cell()]);
+
+    if (index % 2 === 0) building.add(entity);
   }
 
-  for (let index = 0; index < SYSTEMS; index += 1) world.api.ecs.system(walker(index));
+  for (let index = 0; index < SYSTEMS; index += 1) {
+    if (aside) ecs.featureSystem(walker(index));
+    else world.api.ecs.system(walker(index));
+  }
+
+  // The build table as `projection.build` leaves it: the walk reads only its entity set.
+  if (aside) {
+    world.ctx.state.projection.building = { entities: building } as unknown as NonNullable<
+      typeof world.ctx.state.projection.building
+    >;
+  }
 
   const time = frameTime();
 

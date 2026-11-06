@@ -88,6 +88,8 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
   const api: EcsModule = {
     system: (definition: AnySystem): (() => void) => registerSystem(ctx, definition),
 
+    featureSystem: (definition: AnySystem): (() => void) => registerSystem(ctx, definition, true),
+
     spawn: (owner: Owner, components: readonly AnyComponentValue[]): Entity => {
       const entity = reserveEntity(state, owner);
 

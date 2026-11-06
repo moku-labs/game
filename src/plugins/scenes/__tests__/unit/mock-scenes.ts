@@ -141,6 +141,8 @@ export type FakeTime = {
   fps: number;
   /** The frame counter: what `snapshot().frame` answers, one up with every `frame()`. */
   frames: number;
+  /** The game time: what `snapshot().elapsed` answers, the `elapsed` of every `frame()` added up. */
+  elapsed: number;
   /**
    * Runs one frame: every registered callback, phase by phase, as `time.step` does, with a `Time` of 16 ms at scale 1
    * and the frame counter unless the test gives other fields.
@@ -488,10 +490,19 @@ function createFakeTime(journal: string[]): FakeTime {
     clock: undefined,
     fps: 60,
     frames: 0,
+    elapsed: 0,
     frame: (time: Partial<Time> = {}): void => {
       fake.frames += 1;
+      fake.elapsed += 16;
 
-      const step = { delta: 16, elapsed: 16, scale: 1, frame: fake.frames, idle: false, ...time };
+      const step = {
+        delta: 16,
+        elapsed: fake.elapsed,
+        scale: 1,
+        frame: fake.frames,
+        idle: false,
+        ...time
+      };
 
       for (const callbacks of Object.values(fake.callbacks)) {
         // eslint-disable-next-line unicorn/no-useless-spread -- a callback that removes itself does not skip the next one
@@ -525,7 +536,10 @@ function createFakeTime(journal: string[]): FakeTime {
       return clock === undefined ? undefined : () => clock.now;
     },
     rate: (): { fps: number } => ({ fps: fake.fps }),
-    snapshot: (): { frame: number } => ({ frame: fake.frames })
+    snapshot: (): { frame: number; elapsed: number } => ({
+      frame: fake.frames,
+      elapsed: fake.elapsed
+    })
   } as unknown as TimeApi;
 
   return fake;

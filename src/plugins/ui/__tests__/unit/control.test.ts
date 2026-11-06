@@ -240,4 +240,16 @@ describe("game.scroll", () => {
       data: { command: "game.scroll", key: "nothing" }
     });
   });
+
+  it("refuses { dy } without to before ui.scroll runs (F154)", async () => {
+    // Bug caught: an editor or a visual test sends { dy } and the scroll is set to NaN.
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, scrolled } = strip();
+    const sent: unknown = { key: "strip", dy: 10 };
+
+    await expect(run(app, scrollCommand, sent as { key: string; to: number })).rejects.toThrow(
+      '[game] The command game.scroll got the field "dy", which it does not take.\n  It takes key (string), to (number); a field ending in ? may be left out.'
+    );
+    expect(scrolled).toEqual([]);
+  });
 });

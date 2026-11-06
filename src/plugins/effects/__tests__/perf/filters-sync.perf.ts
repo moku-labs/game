@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Glow } from "../../filters/builtins";
+import type { FilterFields } from "../../filters/types";
+import { Bloom } from "../../set/bloom";
 import { Flash } from "../../set/flash";
 import { BUDGET, NOISE } from "./budgets";
 import {
+  BLOOM_STRENGTH,
   bytesPerCall,
   CROSSING,
   FLASH_AMOUNT,
@@ -55,6 +58,37 @@ describe("effects:filters, heap bytes per frame step", () => {
 
     expect(handed.some(set => set.slots[0]?.quad !== undefined)).toBe(true);
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
+  });
+
+  // Bug it guards: the chain of a member makes its ladder per call: a strength tween runs the chain in every frame.
+  it("the chain of Bloom, called as a tween calls it, both ladders", () => {
+    const chain = Bloom.filter.inputs[0]?.chain;
+    const value: Record<string, number | boolean> = { ...Bloom().value };
+    const context = { resolution: 2 };
+    let frame = 0;
+
+    if (chain === undefined) throw new Error("Bloom reads no input");
+
+    const call = (): void => {
+      frame += 1;
+      // Small integers, so the write of the radius boxes nothing: radius 16 takes the ladder at ¼, 32 the one at ⅛.
+      value.radius = (frame & 1) === 0 ? 16 : 32;
+      chain(value as FilterFields, context);
+    };
+
+    expect(bytesPerCall(call)).toBeLessThanOrEqual(BUDGET.bloomChain + NOISE);
+  });
+
+  // Bug it guards: the engine's walk of a chain's answer (its inputs, steps and places) allocates per frame of a tween.
+  it("one Bloom strength tweened on one of 12 filtered views: the chain runs again, no quad", () => {
+    const fixture = filtersFixture([Bloom.filter], BLOOM_STRENGTH);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
+    const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);
+
+    expect(handed.some(set => set.slots[0]?.inputs?.count === 1)).toBe(true);
+    expect(handed.every(set => set.slots[0]?.quad === undefined)).toBe(true);
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersBloomTween + NOISE);
   });
 
   // Bug it guards: the steady pass-budget count (F117) boxed its frames or made a record per frame over the budget.

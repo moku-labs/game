@@ -5,6 +5,7 @@
  */
 import {
   Aura,
+  Bloom,
   Dissolve,
   defineFilter,
   Flash,
@@ -278,5 +279,6 @@ export const BENCH_FILTERS = [
   Dissolve,
   Shine,
   Aura,
-  Fold
+  Fold,
+  Bloom
 ];

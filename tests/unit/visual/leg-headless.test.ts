@@ -174,6 +174,31 @@ describe("the headless leg", () => {
     });
   });
 
+  it("moves the game clock with a clock step, so a moment armed on it arrives (F157)", async () => {
+    // Bug caught: the step is not in the catalogue, or moves frames and leaves the clock standing.
+    let moved: number | undefined;
+    const clocked: VisualSetup = {
+      app: (): VisualApp => {
+        const app = createTinyGame();
+
+        app.clock.onElapsed(({ now }) => {
+          moved = now;
+        });
+        app.clock.scheduleAt(61_000);
+
+        return app;
+      }
+    };
+    const [result] = await runHeadlessLeg(
+      clocked,
+      [openPopup(7, [{ clock: { advanceMs: 60_000 } }, { checkpoint: "later" }])],
+      runInto()
+    );
+
+    expect(result?.error).toBeUndefined();
+    expect(moved).toBe(61_000);
+  });
+
   it("does not mount a popup that the last node of a walk opens", async () => {
     const test = openPopup(7, [
       { walk: { route: [{ at: "home", intent: "open" }] } },
