@@ -90,6 +90,9 @@ export function unitQuad(pixi: PixiModule): PixiMeshGeometry {
   });
 }
 
+/** The names a quad gives each input in `inputNames`: its texture, then its sampler. */
+export const NAMES_PER_INPUT = 2;
+
 /** What the shader of a quad binds by name: the uniform groups, the textures and their samplers. */
 type QuadResources = Record<
   string,
@@ -120,7 +123,7 @@ export function quadShader(
 
   // Texture then sampler, input by input; once, at the making of a shader.
   for (const [index, name] of inputNames.entries()) {
-    resources[name] = index % 2 === 0 ? source : source.style;
+    resources[name] = index % NAMES_PER_INPUT === 0 ? source : source.style;
   }
 
   return new pixi.Shader({ gpuProgram: program, resources });

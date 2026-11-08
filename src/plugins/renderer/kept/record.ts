@@ -11,6 +11,7 @@
  * never taken (F68). Taking and releasing happen inside the flush, before the stage pass, both halves in the same frame
  * (K3).
  */
+import { NAMES_PER_INPUT } from "../quad";
 import type { FilterSlot, FilterSlotQuad, SyncState, SyncWriters, View } from "../sync/types";
 import type {
   FilterSlotInputs,
@@ -282,7 +283,7 @@ function inputsFit(record: KeptRecord, slot: FilterSlot, quad: FilterSlotQuad): 
   const names = quad.inputNames?.length ?? 0;
 
   if (inputs === undefined) return names === 0;
-  if (record.category === "screen" || names !== 2 * inputs.count) return false;
+  if (record.category === "screen" || names !== NAMES_PER_INPUT * inputs.count) return false;
 
   return record.s2.length === inputs.count && record.heldPlaced && !chainOwed(record, inputs);
 }

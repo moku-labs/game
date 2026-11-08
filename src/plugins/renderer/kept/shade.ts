@@ -8,7 +8,7 @@
  * The filter's uniform group is the instance's own, read by the mesh as it stands. A filter that reads inputs binds the
  * record's held stage 2 results under the names its quad gives (F126 stage 4).
  */
-import { filterGlobals, quadShader, unitQuad, VECTOR } from "../quad";
+import { filterGlobals, NAMES_PER_INPUT, quadShader, unitQuad, VECTOR } from "../quad";
 import type {
   FilterSlot,
   FilterSlotQuad,
@@ -253,9 +253,9 @@ function bindHeld(shade: KeptShade, record: KeptRecord): void {
 
   const { resources } = shade.shader;
 
-  for (let input = 0; 2 * input + 1 < names.length; input += 1) {
-    const texture = names[2 * input];
-    const sampler = names[2 * input + 1];
+  for (let input = 0; NAMES_PER_INPUT * input + 1 < names.length; input += 1) {
+    const texture = names[NAMES_PER_INPUT * input];
+    const sampler = names[NAMES_PER_INPUT * input + 1];
     const source = record.s2[input]?.source ?? shade.source;
 
     if (texture !== undefined && resources[texture] !== source) resources[texture] = source;
