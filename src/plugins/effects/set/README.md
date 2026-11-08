@@ -35,7 +35,7 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
 | `Shine` | `position: -0.5` (-0.5..1.5), `width: 0.2`, `angle: 0.6` (radians), `strength: 0.6` | new: a glint | screen | 1 | ≤ 1.065 | its quad | 22.8 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
 | `Aura` | `color: 0xffffff`, `strength: 1` (0..2), `spread: 8` (CSS px, the padding) | a cheap `Glow` | tile | 1 | ≤ 0.083 | its quad | 24.9 against `rest` 22.7; by round `rest` + 2.05 against its line + 2.0 (perf/a26-2026-11-04-f126-s3-slice2) |
 | `Fold` | `angle: 0` (radians), `axis: 0` (0 about the vertical axis, 1 about the horizontal), `perspective: 0.5` (0..1), `shade: 0.4` (0..1) | OrderFlip, CoverFold | tile | 1 | ≤ 0.083 | its quad | 22.7 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
-| `Bloom` | `strength: 0.6` (0..2), `threshold: 0.7` (0..1), `radius: 16` (CSS px) | new: light around what is bright | tile: for an object, not the screen | 3 at any radius and resolution: its 2 steps at ¼ (at ⅛ for a wide radius, and at 2.625) and its body | ≤ 0.074 (0.116 at 2.625) | its chain kept, stage 3 in every frame it moves, 3 passes for `strength`, 7 for `threshold` or `radius`; never its quad | at rest + 0.4 (12 still), + 2.3 (one moving among 12), 12 moving 89.0 against `rest` 22.5; `perf/a26-2026-11-05-f126-s3-bloom-2` |
+| `Bloom` | `strength: 0.6` (0..2), `threshold: 0.7` (0..1), `radius: 16` (CSS px) | new: light around what is bright | tile: for an object, not the screen | 3 at any radius and resolution: its 2 steps at ¼ (at ⅛ for a wide radius, and at 2.625) and its body | ≤ 0.074 (0.116 at 2.625) | a moving `strength`: its quad over the held chain result on WebGPU (stage 4 slice 1), stage 3 in every frame on WebGL, 3 passes; a moving `threshold` or `radius` reruns the chain and stage 3, 7 passes, on both | on its quad: 12 still + 0.6, one moving among 12 + 0.7, 12 moving 24.2 (+ 0.8) against `rest` 23.4, 1 pass; `perf/a26-2026-11-08-f126-s4-slice1`. Before it, at rest + 0.4 (12 still), + 2.3 (one moving among 12), 12 moving 89.0 against `rest` 22.5; `perf/a26-2026-11-05-f126-s3-bloom-2` |
 
 - **`Flash`** mixes the view towards `color` by `amount`, at the view's own alpha: 0 draws it as it is, 1 draws its
   shape in `color`, the transparent pixels around it stay transparent. `amount` is clamped to 0..1, so a tween that
@@ -90,25 +90,29 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
   the phone's full 2.625 (radius 16 is 10.5 texels at ¼), 0.12 Mpx a tile. The cut is taken per tap, not per texel,
   and the rings of the blur reach to about the radius: a small bright point blooms into a soft disc, a little
   hexagonal. It has no padding: the light stays inside the view's bounds. It is for an object, not the screen: over the
-  A26's screen its passes would fill 1.20 Mpx a frame at 2 and 1.89 at 2.625. A chain member never rides the quad: a
-  still `Bloom` is kept as a picture (its chain drawn once over the picture, stage 2, and the filter once over both,
-  stage 3). A tween of any field marks its chain stale and runs it again in JavaScript in every frame; a change of
-  `strength` alone leaves the stages' uniforms as they were, so stage 2 is not redrawn and the view pays stage 3 alone,
-  3 passes a frame, whatever the length of the chain. A change of `threshold` or `radius` redraws the 2 steps too: 7
-  passes a frame. On the Mac's dev page (WebGPU, resolution 2) `set-bloom`'s 12 moving tiles draw 40 passes a frame,
-  36 of them theirs; written `threshold` instead, 88. The stages are not root exports: a game that wants a chain writes
-  its own.
+  A26's screen its passes would fill 1.20 Mpx a frame at 2 and 1.89 at 2.625. A still `Bloom` is kept as a picture
+  (its chain drawn once over the picture, stage 2, and the filter once over both, stage 3). A tween of any field marks
+  its chain stale and runs it again in JavaScript in every frame; a change of `strength` alone leaves the stages'
+  uniforms as they were, so stage 2 is not redrawn: on WebGPU the view draws its body on its own quad in the canvas
+  pass from its third write, over the held result of `bright` (stage 4 slice 1), no pass of its own; on WebGL it pays
+  stage 3 alone, 3 passes a frame, whatever the length of the chain. A change of `threshold` or `radius` reruns the 2
+  steps: the view leaves its quad in that frame and draws stage 2 and stage 3 on its sprite, 7 passes a frame, and
+  comes back on the quad by the same count once only `strength` moves again. Before stage 4, on the Mac's dev page
+  (WebGPU, resolution 2), `set-bloom`'s 12 moving tiles drew 40 passes a frame, 36 of them theirs; written `threshold`
+  instead, 88. The stages are not root exports: a game that wants a chain writes its own.
 
 ## How a member draws
 
 Every member's body has the plain signature `@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0)
 vec4<f32>`, reads no `@builtin` and nothing of the screen, and has no inputs (`Aura` and `Fold` have a padding, `Bloom`
-one input): its category is `"local"`, and, but for `Bloom`, it carries a `quadSource`. So a still view under it is kept as a picture (a batched sprite, no pass),
+one input, drawn from its view): its category is `"local"`, and it carries a `quadSource`. So a still view under it is kept as a picture (a batched sprite, no pass),
 and on WebGPU a view whose value moves draws the member's body on its own quad in the canvas pass from its third write
 (renderer README, "Kept pictures"): `canvasPasses` stays 1. Two members on one view, or a member beside `Alpha`, draw
 through the filter pass, the way two filters of a game do. On WebGL a tween costs one filter pass a frame; the GLSL
-twin does the same math, line for line. `Bloom` reads a second texture, which no quad binds: a still one is kept as a
-picture, a moving one pays its chain and stage 3, on WebGPU and WebGL alike.
+twin does the same math, line for line. `Bloom` reads a second texture: its quad program declares `bright` at group 3
+after the uniforms (`assembleQuad` with inputs), the slot's quad names it (`inputNames`), and the renderer binds the
+held chain result there. A moving `strength` rides the quad; a change its chain reads, `threshold` or `radius`, reruns
+the chain and stage 3, on WebGPU and WebGL alike.
 
 Before every member's body the engine puts the set head (`head.ts`), which a game's own body does not get:
 
@@ -150,7 +154,7 @@ a tile, 128 × 128. At resolution 2 one pass over the screen is 384 × 693 × 4 
 | `Shine` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 | `Aura` | 1 | 13 | ≤ 1.065 Mpx | ≤ 0.083 Mpx (padded by 8) | quad |
 | `Fold` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.083 Mpx (padded by 8) | quad |
-| `Bloom` | 3, at 2 and at 2.625 | 1 of its own body; its steps 4 (`BloomDown`) and 13 (`BloomBlur`) | 1.20 Mpx; 1.89 at 2.625: for an object, not the screen | ≤ 0.1 Mpx (0.074); ≤ 0.16 at 2.625 (0.116) | chain + stage 3 |
+| `Bloom` | 3, at 2 and at 2.625 | 1 of its own body; its steps 4 (`BloomDown`) and 13 (`BloomBlur`) | 1.20 Mpx; 1.89 at 2.625: for an object, not the screen | ≤ 0.1 Mpx (0.074); ≤ 0.16 at 2.625 (0.116) | quad for `strength`; chain + stage 3 for `threshold` or `radius` |
 
 A padded member draws its frame grown by the padding on every side: a tile under `Aura` (at its default `spread` 8) or
 `Fold` is 144 × 144, 0.083 Mpx at 2. On the screen Pixi cuts the frame to the screen, so it stays 1.0644.
@@ -158,8 +162,9 @@ A padded member draws its frame grown by the padding on every side: a tile under
 A member adds no JavaScript per frame: `filters-sync.perf.ts` measures a `Flash` amount tweened on one of 12 filtered
 views, its quad handed over, at 0 B a frame, beside the `Glow` line of the same shape. `Bloom`'s chain answers one of
 two arrays made once, written in place: called as a tween calls it, over both ladders, 0 B. Its `strength` tweened on
-one of the 12 views costs 32 B a frame (`budgets.ts`, `filtersBloomTween`, Node 24.21; 2 920 B before the engine's
-`evaluate` walked its steps by index): a chain member's uniform write marks its chain stale, the engine checks and
+one of the 12 views, its quad handed over with `bright` named, costs 32 B a frame (`budgets.ts`, `filtersBloomTween`,
+Node 24.21; 2 920 B before the engine's `evaluate` walked its steps by index; the same 32 with the quad, whose names
+are made once with it): a chain member's uniform write marks its chain stale, the engine checks and
 writes the chain's answer again in every frame, and V8 boxes `BloomDown`'s fractional `threshold` at its check and at
 its compare-on-write. A chain whose step uniforms hold whole numbers measures 0: `reach` is written as one (made as a
 division it was a double, and the tween measured 64 B).
@@ -180,7 +185,8 @@ division it was a double, and the tween measured 64 B).
   at threshold 1 and premultiplied above it, its alpha its brightest channel, 4 taps on the diagonals `reach` texels
   out, their cuts averaged; `BloomBlur`'s 13 taps, the centre and rings of 6 at sigma and half of it, 60° apart and off
   the texel grid at sigma 8 and 5.25, weighed `exp(−d² / (2 sigma²))` and normalised; `inputTexel()` one texel of a
-  frame in a pooled texture; the budget rows of `Bloom` at 2 and 2.625.
+  frame in a pooled texture; the budget rows of `Bloom` at 2 and 2.625, its quad on a change of `strength`, and
+  `threshold` and `radius` the only fields its chain's answer moves with.
 - Build: `tests/integration/game-build.test.ts`: a game that lists no member carries no `"effects.flash"`, no
   `"effects.bloom"` nor a stage of its chain, and no `inputPlace`, also against a one-module build of the package as `dist/` ships it; a game listing `Flash` carries it
   and no other member; a release bundle carries no `effects:filter-unlisted`, a dev bundle does.
@@ -192,8 +198,9 @@ division it was a double, and the tween measured 64 B).
   under it stays black; an `Aura` at strength 2 is its colour next to a straight edge; `Fold` at a half turn is the
   colour at 0.6; `Bloom` at threshold 1 is the source, and the middle of a gold square on a dark card gains 0.6 of its
   light over 0.7, green 204 to 219), and WebGL against WebGPU: alpha within 2/255 and colour within 8/255 on 99.5 % of
-  pixels. `Bloom` has no quad: its held rows at radius 16 and 32 and its tween, kept again once the value stops, are
-  held within 1/255 of live on both backends, and its tween row never takes the quad. Both
+  pixels. `Bloom`'s held rows at radius 16 and 32 and its `strength` tween are held within 1/255 of live on both
+  backends, the tween on its quad on WebGPU; a `threshold` tween after it is off the quad in a frame that reran the
+  chain, on WebGPU after it was on it, within 1/255 of live on both. Both
   comparisons are of premultiplied pixels, what the canvas composites: Pixi's WebGL extract writes its read-back as it
   is, premultiplied, while the WebGPU one writes straight alpha, so a half-transparent pixel (a soft edge, a halo) would
   differ by its alpha. On the Mac (2026-11-04) every row of slice 1 was within 1/255 of live and of WebGPU on every
@@ -202,7 +209,9 @@ division it was a double, and the tween measured 64 B).
   a capture back rounds the colour. On the Mac (2026-11-05, the chain of two steps) every `Bloom` row was kept and
   0/255 off live on WebGPU and WebGL at 1 and 2, its tween off the quad; WebGL held to WebGPU on 100 % of the pixels,
   colour and alpha 0/255 off; the gold square's middle read 220 against the 219 by hand (the 8-bit stages round 0.1 of
-  light up to 26/255).
+  light up to 26/255). On the Mac (2026-11-08, stage 4 slice 1) the `strength` tween drew on its quad on WebGPU at 1
+  and 2 and the `threshold` row left it in the frame of its chain, every `Bloom` row 0/255 off live and WebGL 0/255
+  off WebGPU.
 - Phone: the bench arms `set-flash`, `set-grade`, `set-vignette` and, of slice 2, `set-reveal-line`,
   `set-reveal-round`, `set-dissolve`, `set-shine`, `set-aura`, `set-fold` (8 rows 340 × 72 under the member, its first
   number written each frame), `set-grade-full` (one full-screen `Grade` written each frame) and `sweep-grade` (the same screen

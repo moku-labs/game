@@ -90,9 +90,19 @@ export function unitQuad(pixi: PixiModule): PixiMeshGeometry {
   });
 }
 
+/** The names a quad gives each input in `inputNames`: its texture, then its sampler. */
+export const NAMES_PER_INPUT = 2;
+
+/** What the shader of a quad binds by name: the uniform groups, the textures and their samplers. */
+type QuadResources = Record<
+  string,
+  PixiUniformGroup | PixiTextureSource | PixiTextureSource["style"]
+>;
+
 /**
  * The shader of a quad over a texture. `fu` is left out for a filter that binds none: Pixi throws on an undefined
- * resource.
+ * resource. Each input the quad names gets that texture too, its sampler that texture's style, until the kept cache
+ * binds the held result there (`shade.ts`): Pixi builds a group only of what is bound, and a draw over a hole throws.
  *
  * @param pixi - The module that draws.
  * @param quad - The slot's quad.
@@ -106,11 +116,15 @@ export function quadShader(
   gfu: PixiUniformGroup,
   source: PixiTextureSource
 ): PixiShader {
-  const { program, fu } = quad;
-  const texture = { gfu, uTexture: source, uSampler: source.style };
+  const { program, fu, inputNames = [] } = quad;
+  const resources: QuadResources = { gfu, uTexture: source, uSampler: source.style };
 
-  return new pixi.Shader({
-    gpuProgram: program,
-    resources: fu === undefined ? texture : { ...texture, fu }
-  });
+  if (fu !== undefined) resources.fu = fu;
+
+  // Texture then sampler, input by input; once, at the making of a shader.
+  for (const [index, name] of inputNames.entries()) {
+    resources[name] = index % NAMES_PER_INPUT === 0 ? source : source.style;
+  }
+
+  return new pixi.Shader({ gpuProgram: program, resources });
 }

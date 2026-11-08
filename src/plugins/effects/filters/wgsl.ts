@@ -5,7 +5,7 @@
  * its sampler (WGSL only), its scale and clamp uniforms and `sample<Name>(uv)`; for a backdrop, the
  * texture Pixi copies the canvas under the view into (`uBackTexture`, group 0 binding 3), its scale
  * and clamp uniforms and `sampleBack(uv)`. For a kept view whose numbers change, the quad program: the same fragment
- * body on a mesh, in the pass that draws the canvas (F126 stage 2). Pure strings.
+ * body on a mesh, in the pass that draws the canvas (F126 stage 2), its inputs bound at group 3 (stage 4). Pure strings.
  */
 import type { FilterInputDefinition, UniformSpec } from "./types";
 
@@ -68,24 +68,27 @@ export function uniformStruct(uniforms: readonly UniformSpec[], group = 1): stri
 }
 
 /**
- * The engine's half of each input: the texture and the sampler in `@group(1)` after `fu`, and the function that
- * reads the input at the body's uv, its scale and its clamp applied. Nothing without inputs.
+ * The engine's half of each input: the texture and the sampler in the group of `fu`, after it (input `k` at bindings
+ * `1 + 2k` and `2 + 2k`), and the function that reads the input at the body's uv, its scale and its clamp applied.
+ * Nothing without inputs.
  *
  * @param inputs - The inputs in declaration order.
+ * @param group - The bind group of `fu` and the inputs: 1 in a filter's source, 3 in a quad program's.
  * @returns The WGSL lines, or `""`.
  * @example
  * ```ts
- * const soft = { name: "soft", from: "input", texture: "uSoft", sampler: "uSoftSampler", sample: "sampleSoft", scale: { name: "softScale", type: "f32", form: "number", size: 1 }, clamp: { name: "softClamp", type: "vec4<f32>", form: "vector", size: 4 }, stages: [], chain: () => [] } as const;
+ * const soft = { name: "soft", from: "input", texture: "softTexture", sampler: "softSampler", sample: "sampleSoft", scale: { name: "softScale", type: "vec2<f32>", form: "vector", size: 2 }, clamp: { name: "softClamp", type: "vec4<f32>", form: "vector", size: 4 }, stages: [], chain: () => [] } as const;
  *
  * inputBindings([soft]).includes("fn sampleSoft(uv: vec2<f32>) -> vec4<f32>"); // true
+ * inputBindings([soft], 3).startsWith("@group(3) @binding(1) var softTexture: texture_2d<f32>;"); // true
  * ```
  */
-export function inputBindings(inputs: readonly FilterInputDefinition[]): string {
+export function inputBindings(inputs: readonly FilterInputDefinition[], group = 1): string {
   return inputs
     .map(
       (input, index) =>
-        `@group(1) @binding(${1 + 2 * index}) var ${input.texture}: texture_2d<f32>;\n` +
-        `@group(1) @binding(${2 + 2 * index}) var ${input.sampler}: sampler;\n\n` +
+        `@group(${group}) @binding(${1 + 2 * index}) var ${input.texture}: texture_2d<f32>;\n` +
+        `@group(${group}) @binding(${2 + 2 * index}) var ${input.sampler}: sampler;\n\n` +
         `fn ${input.sample}(uv: vec2<f32>) -> vec4<f32> {\n` +
         `  return textureSampleLevel(${input.texture}, ${input.sampler}, clamp(uv * gfu.uInputSize.xy * fu.${input.scale.name}, fu.${input.clamp.name}.xy, fu.${input.clamp.name}.zw), 0.0);\n` +
         "}\n\n"
@@ -272,32 +275,45 @@ function quadBody(wgsl: string): string | undefined {
 }
 
 /**
- * The quad program of a filter: the head of the mesh, the uniform struct at group 3 (the uniforms, then the engine's
- * `keptOrigin` of a body that calls `canvasPixel`, as `assemble` lists them, so the struct matches the instance's group
- * member for member: a shader that asks for more than the group holds fails only as an asynchronous GPU validation
- * error, a blank view with nothing in the logs), the `canvasPixel` helper, the body as `filterBody`, the entry point.
+ * The quad program of a filter: the head of the mesh, the uniform struct at group 3 (the uniforms, then the scale and
+ * the clamp of each input, then the engine's `keptOrigin` of a body that calls `canvasPixel`, as `assemble` lists
+ * them, so the struct matches the instance's group member for member: a shader that asks for more than the group holds
+ * fails only as an asynchronous GPU validation error, a blank view with nothing in the logs), each input's texture and
+ * sampler at group 3 after `fu` with its `sample<Name>` helper (the renderer binds the held chain results there), the
+ * `canvasPixel` helper, the body as `filterBody`, the entry point. Without inputs the text is the one of a filter that
+ * reads none.
  *
  * @param uniforms - The uniforms in declaration order.
  * @param body - The fragment body the game wrote.
  * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
+ * @param inputs - The inputs in declaration order, each starting from the view's own input; none by default.
  * @returns The WGSL source of both stages, or `undefined` for a body the rewrite does not fit.
  * @example
  * ```ts
  * assembleQuad([], "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return vec4<f32>(uv, 0.0, 1.0); }")?.includes("fn filterBody(uv: vec2<f32>) -> vec4<f32>"); // true
  * assembleQuad([], "@fragment fn mainFragment(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> { return at; }"); // undefined
+ * assembleQuad(Bloom.filter.uniforms, BLOOM_WGSL, undefined, Bloom.filter.inputs)?.includes("@group(3) @binding(2) var brightSampler: sampler;"); // true
  * ```
  */
 export function assembleQuad(
   uniforms: readonly UniformSpec[],
   body: string,
-  origin?: UniformSpec
+  origin?: UniformSpec,
+  inputs: readonly FilterInputDefinition[] = []
 ): string | undefined {
   const rewritten = quadBody(body);
 
   if (rewritten === undefined) return undefined;
 
-  const struct = uniformStruct(origin === undefined ? uniforms : [...uniforms, origin], 3);
+  const struct = uniformStruct(
+    [
+      ...uniforms,
+      ...inputs.flatMap(input => [input.scale, input.clamp]),
+      ...(origin === undefined ? [] : [origin])
+    ],
+    3
+  );
   const helper = origin === undefined ? "" : CANVAS_PIXEL;
 
-  return `${QUAD_HEADER}${struct}${helper}${rewritten}${QUAD_TAIL}`;
+  return `${QUAD_HEADER}${struct}${inputBindings(inputs, 3)}${helper}${rewritten}${QUAD_TAIL}`;
 }

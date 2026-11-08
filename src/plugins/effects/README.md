@@ -230,7 +230,13 @@ reads the canvas place, where a filter output would read the picture's target.
 
 For that `defineFilter` assembles a second text beside `source`, `FilterDefinition.quadSource`: Pixi's mesh stage, the
 filter's uniforms at groups 2 and 3, the body renamed `filterBody`, and a `mainFragment` that multiplies it by the
-mesh's colour and alpha. The text of `source` does not change. On WebGPU the shader check compiles a kind's quad right
+mesh's colour and alpha. A filter with inputs that all start from its view (`from: "input"`) gets one too: the struct
+at group 3 lists the uniforms, then each input's scale and clamp, then `keptOrigin`, as the instance's group holds them,
+and each input's texture and sampler follow `fu` at group 3 with the same `sample<Name>` helper. The slot's quad names
+them (`inputNames`, texture then sampler per input), and the renderer binds the held chain results there while the
+chain stands; a change its chain reads leaves the mesh for today's path, and the view comes back by the usual count
+of writes (F126 stage 4 slice 1). The text of `source`
+does not change. On WebGPU the shader check compiles a kind's quad right
 after its body, and the kind answers when both did. The renderer gets the built program over the slot, `quad`, and
 over `sync.filters.warm`, so its pipelines are made while the game loads, one probe per kind; a stage or a fallback
 never runs on a quad and brings none. Every instance of a kind shares one program.
@@ -243,7 +249,7 @@ Some bodies cannot move, and stay on that path too:
 - a signature other than the plain one, `@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32>`.
   Whitespace and newlines may vary, and the `uv` may have any name; a second parameter or `vec2f` does not fit;
 - a body that reads `@builtin(...)`, outside a comment;
-- a filter with inputs, and a backdrop;
+- a backdrop, and so an input drawn from `"back"`;
 - a body that declares `filterBody`, `globalUniforms`, `localUniforms`, `GlobalUniforms` or `LocalUniforms`, the names
   of the quad program.
 
@@ -269,7 +275,7 @@ An `Alpha` at `alpha: 1` and `resolution: 0` would copy its subtree unchanged th
 
 ### The effect set
 
-Ready members a game lists in a feature's `filters`, as its own filters, from the root: `Flash` (a colour wash), `Grade` (contrast, brightness, saturation, tint), `Vignette` (darker, or coloured, outside a disc), `RevealLine` (shown up to a sweeping line), `RevealRound` (shown inside a growing disc), `Dissolve` (eaten by a noise, with a rim), `Shine` (a band of light sweeping across), `Aura` (a soft halo around the shape), `Fold` (turned about an axis, as a card flips) and `Bloom` (light around what is bright). Each is a `defineFilter` of the engine: one pass, `cache: "local"`, one sample of the input (`Aura` 13), no padding (`Aura` its live `spread`, `Fold` 8 px), so a still view is kept as a picture and a moving value draws on the view's own quad from its third write (WebGPU; on WebGL each frame of a tween is one filter pass). `Bloom` is the one with a chain: its input `bright` is drawn by two stages of the set (the light above `threshold` cut and boxed down to ¼, or ⅛ for a wide radius, in one pass, then a 13-tap blur there in one more), 3 passes with its body at any radius and resolution, so it is for an object, not the screen; a still one is kept as a picture, and a tween of it runs its chain in every frame it moves and redraws stage 3, 3 passes a frame for `strength`, 7 for `threshold` or `radius`, never the quad. Nothing of the set is registered by itself, and a game that lists no member carries none of its shaders. The members, their fields, budgets and phone numbers: [set/README.md](set/README.md).
+Ready members a game lists in a feature's `filters`, as its own filters, from the root: `Flash` (a colour wash), `Grade` (contrast, brightness, saturation, tint), `Vignette` (darker, or coloured, outside a disc), `RevealLine` (shown up to a sweeping line), `RevealRound` (shown inside a growing disc), `Dissolve` (eaten by a noise, with a rim), `Shine` (a band of light sweeping across), `Aura` (a soft halo around the shape), `Fold` (turned about an axis, as a card flips) and `Bloom` (light around what is bright). Each is a `defineFilter` of the engine: one pass, `cache: "local"`, one sample of the input (`Aura` 13), no padding (`Aura` its live `spread`, `Fold` 8 px), so a still view is kept as a picture and a moving value draws on the view's own quad from its third write (WebGPU; on WebGL each frame of a tween is one filter pass). `Bloom` is the one with a chain: its input `bright` is drawn by two stages of the set (the light above `threshold` cut and boxed down to ¼, or ⅛ for a wide radius, in one pass, then a 13-tap blur there in one more), 3 passes with its body at any radius and resolution, so it is for an object, not the screen; a still one is kept as a picture; a `strength` tween keeps its chain and draws on the view's quad over the held result on WebGPU (stage 3 again on WebGL, 3 passes a frame), and a `threshold` or `radius` tween reruns its chain and stage 3, 7 passes a frame. Nothing of the set is registered by itself, and a game that lists no member carries none of its shaders. The members, their fields, budgets and phone numbers: [set/README.md](set/README.md).
 
 ### The filter sync
 

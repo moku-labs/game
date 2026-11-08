@@ -4,13 +4,15 @@
  * without a change, at most one first take a frame and none while an alpha is due (F114); a kept view whose subtree
  * changes in three drawn frames in a row goes live until it stood still for eight; a move only moves the quad. A step
  * of the renderer resolution keeps the pictures: one drawn lower is refined a few a flush (F126). A kept view whose filter
- * numbers keep changing goes on its filter's own shader and back to a sprite at rest (F126 stage 2, `shade.ts`); a placed
+ * numbers keep changing goes on its filter's own shader and back to a sprite at rest (F126 stage 2, `shade.ts`), also one
+ * whose filter reads inputs while it holds their results and stage 3 drew over them last (F126 stage 4); a placed
  * view under a filtered ancestor and a view whose body reads the screen (`cache: false`) are kept only on that shader,
  * from their first take on, and stay there. A view with a node under its top that blends otherwise than normally is
  * never taken (F68). Taking and releasing happen inside the flush, before the stage pass, both halves in the same frame
  * (K3).
  */
-import type { FilterSlot, SyncState, SyncWriters, View } from "../sync/types";
+import { NAMES_PER_INPUT } from "../quad";
+import type { FilterSlot, FilterSlotQuad, SyncState, SyncWriters, View } from "../sync/types";
 import type {
   FilterSlotInputs,
   PixiContainer,
@@ -237,10 +239,10 @@ function drawsDirect(stack: Stack): boolean {
 
 /**
  * Tells whether the record being stepped may draw through its filter's own body (F126 stage 2): on WebGPU, one enabled
- * filter with a quad, no inputs, on `"inherit"`, at the canvas resolution, and not drawn direct. An `Alpha` beside it does
- * not fit: stage 3 draws `F(A·x)` in stack order, the mesh would draw `A·F(x)`, and for a body that is not alpha-linear
- * the picture would pop at every entry. A top that blends otherwise never gets here: `pictureWhy` refuses it. A mesh
- * destroyed with a parent around it has nothing left to draw on. Allocates nothing.
+ * filter with a quad, on `"inherit"`, at the canvas resolution, not drawn direct, and inputs its mesh may bind
+ * (`inputsFit`). An `Alpha` beside it does not fit: stage 3 draws `F(A·x)` in stack order, the mesh would draw `A·F(x)`,
+ * and for a body that is not alpha-linear the picture would pop at every entry. A top that blends otherwise never gets
+ * here: `pictureWhy` refuses it. A mesh destroyed with a parent around it has nothing left to draw on. Allocates nothing.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -252,11 +254,38 @@ function shadeFits(kctx: KeptCtx, record: KeptRecord, stack: Stack): boolean {
   if (stack.rs !== NOW.r || drawsDirect(stack)) return false;
 
   const slot = enabledSlot(record.slots);
-  const bodyOnQuad = slot?.quad !== undefined && slot.inputs === undefined;
-  const followsCanvas = slot?.filter.resolution === "inherit";
+  const quad = slot?.quad;
+
+  if (slot === undefined || quad === undefined) return false;
+
+  const followsCanvas = slot.filter.resolution === "inherit";
   const meshStands = !record.shaded || record.shade?.mesh.destroyed !== true;
 
-  return bodyOnQuad && followsCanvas && meshStands;
+  return followsCanvas && meshStands && inputsFit(record, slot, quad);
+}
+
+/**
+ * Tells whether the inputs of a record's one enabled filter let its mesh draw (F126 stage 4). A filter with none fits
+ * while its quad names none: a game's own slot has no inputs, and names on its quad would bind results nobody drew. One
+ * with inputs fits while its quad names two per input, the record holds a result of each, drawn by this seam over the
+ * picture and the chain as they are (`chainOwed`, which refuses another seam too), and stage 3 drew over them last
+ * (`heldPlaced`): the mesh reads the scale and clamp of each input as stage 3 left them. A body that reads the screen
+ * does not fit with inputs: a change of its chain would leave the mesh for stage 3, which reads the picture's target.
+ * Allocates nothing.
+ *
+ * @param record - The record.
+ * @param slot - Its one enabled slot.
+ * @param quad - The slot's quad.
+ * @returns True when they fit.
+ */
+function inputsFit(record: KeptRecord, slot: FilterSlot, quad: FilterSlotQuad): boolean {
+  const { inputs } = slot;
+  const names = quad.inputNames?.length ?? 0;
+
+  if (inputs === undefined) return names === 0;
+  if (record.category === "screen" || names !== NAMES_PER_INPUT * inputs.count) return false;
+
+  return record.s2.length === inputs.count && record.heldPlaced && !chainOwed(record, inputs);
 }
 
 /**
@@ -629,6 +658,7 @@ export function createRecord(
     s2InputsVersion: 0,
     s2PictureVersion: 0,
     s2Of: undefined,
+    heldPlaced: false,
     dirtyS1: true,
     dirtyS2: false,
     dirtyS3: false,
@@ -854,11 +884,11 @@ function neededBytes(
   // A stack drawn direct keeps no filter output.
   if (!drawsDirect(now)) bytes += textureBytes(w1 + 2 * Ps, h1 + 2 * Ps, now.r);
 
-  const first = firstInputs(record.slots);
+  const inputs = firstInputs(record.slots);
 
-  if (first !== undefined) {
-    for (let index = 0; index < first.inputs.count; index += 1) {
-      const scale = first.inputs.scaleOf(index) ?? 0;
+  if (inputs !== undefined) {
+    for (let index = 0; index < inputs.count; index += 1) {
+      const scale = inputs.scaleOf(index) ?? 0;
 
       bytes += textureBytes(w1 + 2 * now.P, h1 + 2 * now.P, now.rs * scale);
     }
@@ -1105,7 +1135,9 @@ function isEmptyBounds(
 /**
  * Renders the stages of a take whose keys are written: the subtree picture, the pre-pass results of the first filter
  * with inputs, the filter output; the budget counts the textures after. A live view whose take failed draws live
- * again: its filters go back on its top.
+ * again: its filters go back on its top. A record on its mesh whose filter reads inputs leaves it after stage 2 and
+ * draws stage 3 over the new results: the mesh would read their scale and clamp before any stage 3 wrote them. The
+ * next frame's refresh puts one that may draw no other way back on the mesh.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -1127,7 +1159,7 @@ function renderStages(
 
   if (live) handFilters(kctx, pixi, record, view);
 
-  const first = firstInputs(record.slots);
+  const inputs = firstInputs(record.slots);
   let ok = renderStage1(kctx, pixi, matrices, record);
 
   // A stack of alphas draws the picture itself (F54): no pre-pass, no filter output.
@@ -1144,15 +1176,14 @@ function renderStages(
 
   meshForTake(kctx, pixi, record, ok);
 
-  if (ok && first !== undefined) {
-    renderStage2(kctx, pixi, matrices, record, {
-      inputs: first.inputs,
-      resolution: now.r,
-      padding: now.P
-    });
+  if (ok && inputs !== undefined) {
+    renderStage2(kctx, pixi, matrices, record, { inputs, resolution: now.r, padding: now.P });
   } else if (record.s2Of !== undefined) {
     releaseInputs(kctx, record);
   }
+
+  // New results are placed by stage 3 alone: the mesh reads each input's scale and clamp as stage 3 last wrote them.
+  if (record.shaded && !shadeFits(kctx, record, now)) leaveShade(record);
 
   // Under the mode a retake costs stage 1 and one copy.
   if (record.shaded) record.shadedAt = kctx.state.frame;
@@ -1232,7 +1263,8 @@ function goDirect(kctx: KeptCtx, record: KeptRecord): void {
 }
 
 /**
- * Ends the loan of stage 2 when the first filter with inputs left the stack: the results are destroyed.
+ * Ends the loan of stage 2 when the first filter with inputs left the stack: the results are destroyed, and nothing is
+ * placed any more.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -1240,6 +1272,7 @@ function goDirect(kctx: KeptCtx, record: KeptRecord): void {
 function releaseInputs(kctx: KeptCtx, record: KeptRecord): void {
   endLoan(record.s2Of);
   record.s2Of = undefined;
+  record.heldPlaced = false;
   for (const target of record.s2.splice(0)) dropTexture(kctx, target);
 }
 
@@ -2064,7 +2097,7 @@ function outputOwed(record: KeptRecord, hold: boolean): boolean {
  * @returns The `OWED`.
  */
 function stagesOwed(record: KeptRecord, hold: boolean): number {
-  const inputs = firstInputs(record.slots)?.inputs;
+  const inputs = firstInputs(record.slots);
 
   if (inputs !== undefined && chainOwed(record, inputs)) return OWED.chain;
 
@@ -2106,7 +2139,9 @@ function refresh(
 
 /**
  * Redoes what a record that does not draw direct owes, on its mesh when it is shaded or goes on it now: a stack that
- * stopped fitting leaves and owes stage 3, one at rest may leave, and what is left is today's tail of stage 2 and 3.
+ * stopped fitting leaves and owes stage 3, one at rest may leave, and what is left is today's tail of stage 2 and 3. A
+ * shaded record whose filter's chain is owed no longer fits: it leaves and draws stages 2 and 3 on its sprite, and comes
+ * back by the count of its outputs.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -2149,7 +2184,7 @@ function refreshOutput(
   }
 
   // A chain that left goes before the mesh or stage 3 draws without it.
-  const inputs = firstInputs(record.slots)?.inputs;
+  const inputs = firstInputs(record.slots);
 
   if (inputs === undefined && record.s2Of !== undefined) releaseInputs(kctx, record);
 

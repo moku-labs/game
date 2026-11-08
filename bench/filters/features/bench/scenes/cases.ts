@@ -947,13 +947,14 @@ function bloomTilesScene(
 
 /**
  * The arms of `Bloom` (F126 stage 3 slice 3, its second shape): every tile moving, every tile kept, and one moving
- * among eleven kept. A chain member has no quad, so a moving tile runs its chain and redraws stage 3, 3 passes, in
- * every frame; a still one is a kept picture, a batched sprite.
+ * among eleven kept. A moving `strength` leaves the chain held, so on WebGPU a moving tile draws its body on its own
+ * quad in the canvas pass over the held chain result (F126 stage 4 slice 1), no pass of its own; a still one is a
+ * kept picture, a batched sprite. A moving `threshold` or `radius` would rerun the chain and stage 3 instead.
  */
 const BLOOM_SCENES: readonly BenchScene[] = [
   bloomTilesScene(
     "set-bloom",
-    "12 tiles of 128 x 128 under Bloom, its strength written each frame: the chain and stage 3, no quad",
+    "12 tiles of 128 x 128 under Bloom, its strength written each frame: its quad over the held chain result",
     BLOOM_STRENGTH,
     (stage, tiles) => elapsedMs => {
       for (const [index, tile] of tiles.entries()) {

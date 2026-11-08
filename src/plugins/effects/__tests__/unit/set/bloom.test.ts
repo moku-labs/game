@@ -60,10 +60,14 @@ describe("Bloom", () => {
     expect(Bloom.filter.inputs[0]?.chain({ ...Bloom().value }, { resolution: 2 }).length).toBe(2);
   });
 
-  // Bug: a chain member that claims the quad (no mesh binds a second texture), reads the screen, or is padded.
-  it('is "local", reads one input `bright` drawn by its two stages, and has no quad and no padding', () => {
+  // Bug: a moving strength falls off the quad (a body the rewrite cannot carry, or `bright` not bound on the mesh): 3
+  // passes a frame again; or the member reads the screen, or is padded.
+  it('is "local", reads one input `bright` drawn by its two stages, rides the quad with it bound, and has no padding', () => {
     expect(headsOf(BLOOM_WGSL)).toBe(1);
-    expect(Bloom.filter.quadSource).toBeUndefined();
+    expect(Bloom.filter.quadSource).toContain("fn filterBody(uv: vec2<f32>) -> vec4<f32>");
+    expect(Bloom.filter.quadSource).toContain(
+      "@group(3) @binding(1) var brightTexture: texture_2d<f32>;"
+    );
     expect(Bloom.filter.cache).toBe("local");
     expect(Bloom.filter.padding).toBe(0);
     expect(Bloom.filter.inputs.map(input => [input.name, input.sample, input.from])).toEqual([

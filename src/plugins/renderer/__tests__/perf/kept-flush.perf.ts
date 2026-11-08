@@ -13,6 +13,7 @@ import {
   keptOwnFadeBoard,
   keptScreenBoard,
   keptShadedBoard,
+  keptShadedChainBoard,
   keptSteppedBoard,
   keptUnderBoard,
   keptWhyBoard,
@@ -119,6 +120,15 @@ describe("the kept flush of a quiet board", () => {
   it("allocates nothing for 40 shaded views whose numbers are written every frame (F126)", async () => {
     expect(bytesPerCall(await keptShadedBoard(40), 20_000)).toBeLessThanOrEqual(
       BUDGET.keptShaded + NOISE
+    );
+  });
+
+  // Bug: a shaded view whose filter reads an input makes an object for its first slot with inputs twice a frame, or binds
+  // its held result again in every frame, which Pixi answers with a new bind group: a Bloom whose strength moves must cost
+  // what a one-pass member's mesh frame costs.
+  it("allocates nothing for 12 shaded views over their held chain whose numbers are written every frame (F126 stage 4)", async () => {
+    expect(bytesPerCall(await keptShadedChainBoard(12), 20_000)).toBeLessThanOrEqual(
+      BUDGET.keptShadedChain + NOISE
     );
   });
 

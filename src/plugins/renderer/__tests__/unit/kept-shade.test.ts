@@ -4,11 +4,12 @@ import type { Entity } from "../../../world/types";
 import { Parent, Shape, Transform } from "../../components";
 import { KEY } from "../../kept/geometry";
 import { CALM_AFTER, QUAD_CALM } from "../../kept/record";
+import { renderShade } from "../../kept/shade";
 import { stopKept } from "../../kept/state";
-import type { KeptRecord, KeptShade } from "../../kept/types";
-import type { FilterSlot, FilterSlotInputs, PixiContainer } from "../../types";
+import type { KeptCtx, KeptRecord, KeptShade } from "../../kept/types";
+import type { FilterSlot, PixiContainer } from "../../types";
 import { type Drawn, OWNER, startDrawn } from "../demand-harness";
-import { quadOfFilter, shadedSlot } from "../quad-harness";
+import { chainQuadOfFilter, chainSeam, chainSlot, quadOfFilter, shadedSlot } from "../quad-harness";
 
 // ---------------------------------------------------------------------------
 // F126 stage 2: a kept view whose filter numbers change draws through the filter's own body on a mesh, in the canvas
@@ -690,15 +691,6 @@ describe("the size of the padded picture", () => {
 });
 
 describe("what fits the mode", () => {
-  const INPUTS: FilterSlotInputs = {
-    stages: [],
-    count: 1,
-    version: () => 1,
-    scaleOf: () => 0.5,
-    draw: () => undefined,
-    hold: () => undefined
-  };
-
   /** Stacks a mesh cannot draw. */
   const REFUSED: ReadonlyArray<[string, () => FilterSlot[]]> = [
     ["two filters", () => [shadedSlot(), shadedSlot()]],
@@ -709,7 +701,12 @@ describe("what fits the mode", () => {
         { filter: new pixi.AlphaFilter({ alpha: 0.5 }), passes: 1, cache: "local" }
       ]
     ],
-    ["inputs", () => [shadedSlot({ inputs: INPUTS })]],
+    // Inputs fit only with a held, placed result of each (F126 stage 4): an empty chain holds none.
+    ["inputs with no held result", () => [chainSlot(chainSeam("empty"))]],
+    // A quad that does not name the inputs leaves nowhere to bind the held results.
+    ["inputs on a quad that names none", () => [shadedSlot({ inputs: chainSeam().inputs })]],
+    // A game's own slot has no inputs: names on its quad would bind results nobody drew.
+    ["names on a quad of a slot without inputs", () => [shadedSlot({ quad: chainQuadOfFilter() })]],
     ["no quad", () => [{ filter: shadedSlot().filter, passes: 1, cache: "local" }]],
     [
       "a fixed resolution at the canvas's",
@@ -733,7 +730,8 @@ describe("what fits the mode", () => {
     ]
   ];
 
-  // Bug: a stack drawn `A·F(x)` where stage 3 draws `F(A·x)`, a body with no input, a program bound on the wrong grid.
+  // Bug: a stack drawn `A·F(x)` where stage 3 draws `F(A·x)`, a body that samples an input nobody held, a program bound on
+  // the wrong grid.
   it.each(REFUSED)("stays on stage 3 for %s", async (_name, slots) => {
     const drawn = await open();
     const card = keptCard(drawn, slots());
@@ -1437,6 +1435,11 @@ describe("a placed view under a filter", () => {
 
         return [slot];
       }
+    ],
+    // A first take there would go on the mesh before stage 3 ever wrote the input's scale and clamp (F126 stage 4).
+    [
+      "a filter with inputs it holds no result of",
+      () => [chainSlot(chainSeam(), { cache: "placed", origin: new Float32Array(2) })]
     ]
   ];
 
@@ -1609,6 +1612,30 @@ describe("a cache: false view on its quad", () => {
     });
   });
 
+  // Bug: a body that reads the screen kept with a chain: its next chain change leaves the mesh for stage 3, which reads the
+  // picture's target, not the canvas (F126 stage 4).
+  it("with inputs it is drawn live, also once its chain is held and placed", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const drawn = await open();
+    const slot = chainSlot();
+    const card = keptCard(drawn, [slot]);
+    const record = recordOf(drawn, card);
+
+    expect(record.heldPlaced).toBe(true);
+
+    drawn.mock.api.sync.filters.set(card, [{ ...slot, cache: "screen" }]);
+    drawn.frame();
+
+    expect(record.category).toBe("screen");
+    expect(record.mode).toBe("live");
+    expect(record.shaded).toBe(false);
+    expect(drawn.mock.api.sync.debug.why()[0]).toMatchObject({
+      mode: "live",
+      reason: "cache-false"
+    });
+  });
+
   // Bug: a game session cannot tell a `cache: false` view on its shader from one drawn live.
   it("why() says quad: true when it fits", async () => {
     vi.stubGlobal("__MOKU_GAME_AGENT__", true);
@@ -1703,5 +1730,174 @@ describe("a cache: false view on its quad", () => {
 
     expect(cards.every(card => recordOf(drawn, card).shaded)).toBe(true);
     expect(drawn.mock.modules.sync.canvasPasses()).toBe(1);
+  });
+});
+
+/**
+ * The renders of a record's stage 2 since a point: its keeper's stand-in.
+ *
+ * @param drawn - The running renderer.
+ * @param record - The record.
+ * @param from - The render count to start from.
+ * @returns How many.
+ */
+function chainsOf(drawn: Drawn, record: KeptRecord, from: number): number {
+  return rendersBy(drawn, record.keeperStandIn, from);
+}
+
+describe("a filter with inputs on its mesh (F126 stage 4)", () => {
+  // Bug: a mesh over numbers stage 3 never wrote: the flag stays up over new results, or is up before stage 3 drew.
+  it("heldPlaced is down while stages 2 and 3 draw, and up once stage 3 drew", async () => {
+    const drawn = await open();
+    const seam = chainSeam();
+    const card = keptCard(drawn, [chainSlot(seam)]);
+    const record = recordOf(drawn, card);
+    const seen: boolean[] = [];
+
+    expect(record.heldPlaced).toBe(true);
+
+    drawn.stage.last().renderer.watchers.push(call => {
+      if (call.container === record.keeperStandIn || call.container === record.standIn) {
+        seen.push(record.heldPlaced);
+      }
+    });
+    seam.bump();
+    write(drawn, card);
+
+    expect(seen).toEqual([false, false]);
+    expect(record.heldPlaced).toBe(true);
+  });
+
+  // Bug: a Bloom whose strength moves pays a stage 3 pass in every frame, or its mesh samples the picture where the held
+  // light should be.
+  it("enters at the third output over its held chain, the mesh binding s2 under the input's names", async () => {
+    const drawn = await open();
+    const card = keptCard(drawn, [chainSlot()]);
+    const record = recordOf(drawn, card);
+    const start = drawn.stage.targets().length;
+
+    write(drawn, card);
+    write(drawn, card);
+
+    expect(record.shaded).toBe(false);
+    expect(rendersBy(drawn, record.standIn, start)).toBe(2);
+
+    write(drawn, card);
+
+    const held = record.s2[0]?.source;
+    const { resources } = shadeOf(record).shader;
+
+    expect(record.shaded).toBe(true);
+    expect(chainsOf(drawn, record, start)).toBe(0);
+    expect(rendersBy(drawn, copyOf(drawn), start)).toBe(1);
+    expect(held).toBeDefined();
+    expect(resources.brightTexture).toBe(held);
+    expect(resources.brightSampler).toBe(held?.style);
+
+    const entered = drawn.stage.targets().length;
+
+    for (let frame = 0; frame < 10; frame += 1) write(drawn, card);
+
+    expect(drawn.stage.targets().length).toBe(entered);
+  });
+
+  // Bug: a mesh over a chain that should have drawn again: a new threshold shows only at the next take; or a Bloom whose
+  // threshold moved once stays on stage 3 for good.
+  it("a new chain version on the mesh leaves it and draws stages 2 and 3 in that frame, and the outputs bring it back", async () => {
+    const drawn = await open();
+    const seam = chainSeam();
+    const card = keptCard(drawn, [chainSlot(seam)]);
+    const record = shaded(drawn, card);
+    const from = drawn.stage.targets().length;
+
+    seam.bump();
+    write(drawn, card);
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(false);
+    expect(chainsOf(drawn, record, from)).toBe(1);
+    expect(rendersBy(drawn, record.standIn, from)).toBe(1);
+    expect(record.quad).toBe(shadeOf(record).sprite);
+    expect(quadBesideTop(record)).toBe(true);
+
+    shaded(drawn, card);
+
+    expect(shadeOf(record).shader.resources.brightTexture).toBe(record.s2[0]?.source);
+  });
+
+  // Bug: a chain view retaken under a filter draws its new results on the mesh with the old scale and clamp.
+  it("on its mesh under a filter, a retake draws through stage 3 and the frame after on the mesh", async () => {
+    const drawn = await open();
+    const panel = drawn.spawn(Transform({ x: 50, y: 50 }), Shape({ w: 200, h: 200 }));
+    const lamp = drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 20, y: 20 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: panel })
+    ]);
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(lamp, [
+      chainSlot(chainSeam(), { cache: "placed", origin: new Float32Array(2) })
+    ]);
+    drawn.frames(6);
+
+    const record = shaded(drawn, lamp);
+
+    drawn.mock.api.sync.filters.set(panel, [LIVE_SLOT()]);
+    drawn.frame();
+
+    expect(record.shaded).toBe(true);
+
+    const from = drawn.stage.targets().length;
+
+    drawn.mock.world.ecs.set(lamp, Shape, { w: 50, h: 50 });
+    drawn.frame();
+
+    expect(record.mode).toBe("kept");
+    expect(record.shaded).toBe(false);
+    expect(takesOf(drawn, record, from)).toBe(1);
+    expect(chainsOf(drawn, record, from)).toBe(1);
+    expect(rendersBy(drawn, record.standIn, from)).toBe(1);
+
+    const retaken = drawn.stage.targets().length;
+
+    drawn.frame();
+
+    expect(record.shaded).toBe(true);
+    expect(rendersBy(drawn, record.standIn, retaken)).toBe(0);
+    expect(rendersBy(drawn, copyOf(drawn), retaken)).toBe(1);
+  });
+
+  // Bug: a mesh drawn while an input holds no result keeps the released one bound: Pixi binds a destroyed texture.
+  it("binds the output's own texture under the names of an input whose result is missing", async () => {
+    const drawn = await open();
+    const record = shaded(drawn, keptCard(drawn, [chainSlot()]));
+    const { key } = record;
+    const kctx = {
+      host: drawn.mock.modules.host,
+      state: drawn.mock.ctx.state.kept
+    } as unknown as KeptCtx;
+    const matrices = {
+      m1: new pixi.Matrix(),
+      m3: new pixi.Matrix(),
+      parent: new pixi.Matrix(),
+      local: new pixi.Matrix()
+    };
+
+    // As a release leaves a record: the results out of its list, then destroyed.
+    for (const target of record.s2.splice(0)) target.destroy(true);
+
+    // The mesh frame the flush would run, at the keys that stand: no copy, no size of its own.
+    renderShade(kctx, pixi, matrices, record, {
+      r: key[KEY.r] ?? 1,
+      P: key[KEY.P] ?? 0,
+      tx: key[KEY.s3Tx] ?? 0,
+      ty: key[KEY.s3Ty] ?? 0
+    });
+
+    const { resources } = shadeOf(record).shader;
+
+    expect(resources.brightTexture).toBe(record.s3?.source);
+    expect(resources.brightSampler).toBe(record.s3?.source.style);
   });
 });

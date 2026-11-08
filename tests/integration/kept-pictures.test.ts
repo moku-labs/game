@@ -320,7 +320,7 @@ describe("kept pictures across the engine", () => {
     expect(rings.every(ring => !kept.isKept(ring))).toBe(true);
   });
 
-  it("a uniform tween over a still subtree redoes only the filter output", async () => {
+  it("a uniform tween over a still subtree redoes only the filter output, then rides the quad over the held chain", async () => {
     const kept = await open();
     const ward = kept.spawn(Transform({ x: 0, y: 0 }), square(380), Soft({ spread: 1 }));
     // A lamp keeps the first frames drawn, so the ward is taken.
@@ -337,7 +337,8 @@ describe("kept pictures across the engine", () => {
     expect(await kept.frames(10)).toBe(10);
     expect(kept.renders(ward, "#1")).toBe(1);
     expect(kept.renders(ward, "#2")).toBe(1);
-    expect(kept.renders(ward, "#3")).toBe(11);
+    // The take, then `QUAD_AFTER` + 1 outputs on the sprite; after that the mesh binds the held chain (F126 s4).
+    expect(kept.renders(ward, "#3")).toBe(4);
   });
 
   it("a photo swapped under a blur is in the next drawn frame", async () => {

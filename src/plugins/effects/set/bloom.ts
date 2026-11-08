@@ -1,8 +1,9 @@
 /**
  * @file effects/set — `Bloom`: light around the bright parts of a view. The one member with a chain: its input `bright`
  * is the view's light above `threshold`, cut and boxed down to ¼ (⅛ for a wide radius) in one pass and blurred there in
- * one more; the body adds it back by `strength`. 3 passes at any radius and resolution. A chain member never rides the
- * quad: a value change runs the chain again and redraws the kept picture's filter (stage 3).
+ * one more; the body adds it back by `strength`. 3 passes at any radius and resolution. A change of `strength` rides
+ * the view's quad over the held chain result on WebGPU; one of `threshold` or `radius` runs the chain again and redraws
+ * the kept picture's filter (stage 3).
  */
 import { defineFilter } from "../filters/define";
 import type { FilterChainContext, FilterComponent, FilterStep } from "../filters/types";
@@ -121,9 +122,10 @@ const BLOOM_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(BLOOM_GLSL);
  * (over the A26's screen its passes fill 1.9 Mpx a frame at 2.625). List it in a feature's `filters`, as a game's own
  * filter. It reads a second texture drawn by a chain of two stages, the light cut and boxed down to ¼ (⅛ when the
  * radius is over 8 texels at ¼: radius 16 at the phone's 2.625, 32 at 2) and blurred there: 3 passes at any radius.
- * A still view is kept as a picture; a tween of any field runs the chain again and redraws the picture's filter, 3
- * passes, in every frame it moves: it never draws on the view's quad. Past a sigma of 8 texels at ⅛ the bloom stops
- * widening.
+ * A still view is kept as a picture. A `strength` tween leaves the chain as it was: on WebGPU the view draws on its own
+ * quad over the held chain result, no pass of its own, and on WebGL it redraws the picture's filter, 3 passes. A
+ * `threshold` or `radius` tween runs the chain again too, in every frame it moves. Past a sigma of 8 texels at ⅛ the
+ * bloom stops widening.
  *
  * @example
  * ```ts

@@ -41,9 +41,8 @@ export const BUDGET = {
   // the two ladders. New. 0: it answers one of two arrays made once, their threshold and sigma written in place.
   bloomChain: 0,
   // The same change: the `strength` of a `Bloom` tweened on one of 12 filtered views, the tween's own write subtracted.
-  // A chain member never rides the quad, and any uniform write marks its chain stale (`writeFilter`), so the sync runs
-  // the engine's `evaluate` again in every frame. Before: 2 920 B on Node 24.21 over a window of 10 000 steps: its
-  // `entries()` walks and their `[index, item]` pairs (the inputs, the checked steps, the placed steps), `Object.keys`
+  // Any uniform write marks its chain stale (`writeFilter`), so the sync runs the engine's `evaluate` again in every
+  // frame. Before: 2 920 B on Node 24.21 over a window of 10 000 steps: its `entries()` walks and their `[index, item]` pairs (the inputs, the checked steps, the placed steps), `Object.keys`
   // of each step's uniforms and the `for…of` iterators over frozen lists in `stepProblem`, and the `{ place, built }`
   // `placeFor` answers per step, each step's `scale` boxed by `Reflect.get`. Now 32, over the usual window: index loops,
   // a `for…in` over the step's own keys, the scale read plainly, the place answered alone (a rebuild seen as a new place
@@ -51,7 +50,9 @@ export const BUDGET = {
   // read by a uniform's name from step objects of more than one shape, comes back boxed (16 B) at both of its reads,
   // the check and the compare-on-write. A chain whose uniforms hold whole numbers measures 0. Measured again on the
   // two-step chain (`BloomDown`, `BloomBlur`): 32. Its `reach` is written as a whole number: made as `1 / (4 × scale)`,
-  // a double, it came back boxed at both reads too, 64.
+  // a double, it came back boxed at both reads too, 64. Measured again with its quad handed over, its input named
+  // (change 2026-11-06-f126-s4-quad-chain): 32. The names are made once with the quad; the renderer holds the chain,
+  // whose answer did not change, but this sync still evaluates it, and the 32 B are that walk's.
   filtersBloomTween: 32,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the

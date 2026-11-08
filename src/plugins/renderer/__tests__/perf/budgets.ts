@@ -124,6 +124,11 @@ export const BUDGET = {
   // numbers as a kept view's; the output's size is compared before a size object or a label is made, the origins and
   // the slot are walked by index, the group's numbers go through one scratch array, and no iterator walks the ranges.
   keptShaded: 0,
+  // F126 stage 4: 12 views on their own shader whose filter reads one input (a `Bloom` whose strength moves), a number of
+  // each written every frame over the chain the cache holds. New. The first slot with inputs is answered as its seam, not
+  // an object a call; whether the chain is held and placed is read off the record; the held result is compared with what
+  // the mesh binds and written only when it differs.
+  keptShadedChain: 0,
   // F126 stage 2, part B: 12 placed views under a live filter, a number of each written every frame. New. Every step walks
   // the view's parents, a flag and a map read per ancestor, and asks whether the view fits its mesh, on one object.
   keptUnder: 0,

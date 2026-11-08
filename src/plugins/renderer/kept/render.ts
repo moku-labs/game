@@ -265,14 +265,13 @@ export function endLoan(inputs: FilterSlotInputs | undefined): void {
 }
 
 /**
- * The first enabled slot of a stack, when it reads inputs: the one stage 2 keeps (OQ23-5).
+ * The inputs of the first enabled slot of a stack, when it reads any: the seam stage 2 keeps (OQ23-5). The seam itself,
+ * no object around it: a shaded frame of a view whose filter reads inputs asks twice.
  *
  * @param slots - The record's slots.
- * @returns The slot and its inputs, or `undefined`.
+ * @returns The seam, or `undefined`.
  */
-export function firstInputs(
-  slots: readonly FilterSlot[]
-): { slot: FilterSlot; inputs: FilterSlotInputs } | undefined {
+export function firstInputs(slots: readonly FilterSlot[]): FilterSlotInputs | undefined {
   // per drawn frame and record: a frozen list, walked by index (`for…of` allocates over a frozen array).
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
   for (let index = 0; index < slots.length; index += 1) {
@@ -280,7 +279,7 @@ export function firstInputs(
 
     if (slot === undefined || !slot.filter.enabled) continue;
 
-    return slot.inputs === undefined ? undefined : { slot, inputs: slot.inputs };
+    return slot.inputs;
   }
 
   return undefined;
@@ -517,7 +516,7 @@ function sizeTargets(
  * Stage 2, the pre-pass result of the first enabled filter with inputs (spec 24 B3.9): the keeper's stand-in is
  * rendered over the picture, its apply draws the chain into engine targets; the version is read after the draw, a
  * scale that changed inside it resizes the targets and draws once more; the filter then holds the results. An empty
- * chain holds nothing.
+ * chain holds nothing. Whatever it draws, no stage 3 drew over it yet (`heldPlaced`).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -537,6 +536,9 @@ export function renderStage2(
 ): void {
   const { inputs, resolution, padding } = context;
   const scales = scalesOf(inputs);
+
+  // The instance's scale and clamp are those of the results before these, until stage 3 draws over them.
+  record.heldPlaced = false;
 
   if (record.s2Of !== inputs) endLoan(record.s2Of);
 
@@ -620,7 +622,8 @@ export function readsPlace(record: Readonly<Pick<KeptRecord, "category">>): bool
 /**
  * Stage 3, the filter output: the stand-in, carrying the record's filters, is rendered at `M3 = translate(Ps, Ps)`
  * into the output texture. A placed filter's origin gets the picture's canvas origin first, `O + Δ`; a local one
- * writes nothing.
+ * writes nothing. A render over held results places them (`heldPlaced`): the filter's apply inside it wrote each
+ * input's scale and clamp for them, which a mesh of the record reads as they stand. A render that failed placed nothing.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -655,7 +658,11 @@ export function renderStage3(
 
   matrices.m3.set(1, 0, 0, 1, Ps, Ps);
 
-  if (!kctx.host.renderTo(standIn, output, matrices.m3, true)) return false;
+  const rendered = kctx.host.renderTo(standIn, output, matrices.m3, true);
+
+  record.heldPlaced = rendered && record.s2Of !== undefined;
+
+  if (!rendered) return false;
 
   key[KEY.r] = now.r;
   key[KEY.P] = now.P;

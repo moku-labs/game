@@ -518,6 +518,8 @@ export type FilterSlot = {
  * const quad: FilterSlotQuad = { program: tintProgram, fu: tintOfRow.group };
  * ctx.require(rendererPlugin).sync.filters.set(row, [{ filter: tintOfRow.filter, passes: 1, cache: "local", quad }]);
  * quad.program.vertex?.entryPoint; // "mainVertex"
+ * // A Bloom on a tile reads one input, `bright`: the mesh binds its held result under two names.
+ * bloomOfTile.quad?.inputNames; // ["brightTexture", "brightSampler"]
  * ```
  */
 export type FilterSlotQuad = {
@@ -525,6 +527,11 @@ export type FilterSlotQuad = {
   readonly program: PixiGpuProgram;
   /** The uniform group of the filter's instance; `undefined` for a filter that binds none. */
   readonly fu: PixiUniformGroup | undefined;
+  /**
+   * The resource names of each input of the filter, its texture then its sampler, in declaration order: the mesh binds
+   * the held chain results there. Empty or left out for a filter with no inputs; a game's own slot leaves it out.
+   */
+  readonly inputNames?: readonly string[];
 };
 
 /**

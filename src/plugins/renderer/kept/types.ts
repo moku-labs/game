@@ -352,6 +352,12 @@ export type KeptRecord = {
   s2PictureVersion: number;
   /** The inputs the held results were drawn by; another first filter with inputs redoes stage 2. */
   s2Of: FilterSlotInputs | undefined;
+  /**
+   * Stage 3 drew over the held results last (F126 stage 4): the filter's apply then wrote each input's scale and clamp for
+   * them into the instance's numbers, which its mesh reads as they stand. False from the record's making, after stage 2
+   * and after its results are released.
+   */
+  heldPlaced: boolean;
   /** Dirty flags set by collect (P10.3) and by the key compare of the flush. */
   dirtyS1: boolean;
   dirtyS2: boolean;
