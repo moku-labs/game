@@ -141,10 +141,14 @@ const FILTERS = [
   "AlphaFilter"
 ];
 
-/** The bodies a kept view can run on its quad: the kinds of a checked plain body, drawn after their filter. */
+/**
+ * The bodies a kept view can run on its quad: the kinds of a checked plain body, and a chain whose inputs start from
+ * the view (F126 s4: its mesh binds the held results), drawn after their filter.
+ */
 const QUADS = [
   "effects.glow.quad",
   "effects.outline.quad",
+  "fixture.frost.quad",
   "fixture.tint.quad",
   "fixture.veil.quad"
 ];
