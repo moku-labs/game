@@ -1221,13 +1221,22 @@ as it stands, with no pass and no take. On the A26, 8 small rows cost 34.4 ms li
 23.0 ms on the mesh (spike, GPU time at 221 MHz, whole frame), their pixels within 1/255 of live. A game does nothing:
 `cache` keeps its meaning, the mode enters and leaves by itself, and WebGL keeps stage 3.
 
-A record fits when it is on WebGPU with exactly one enabled filter, of `effects` (the slot has a `quad`), with no inputs, on
+A record fits when it is on WebGPU with exactly one enabled filter, of `effects` (the slot has a `quad`), on
 `resolution: "inherit"`, and does not draw direct. An `Alpha` beside the filter does not fit: stage 3 draws `F(A·x)` in stack
 order, the mesh would draw `A·F(x)`, and a body that is not alpha-linear would pop at every entry. `s3` then holds the padded
 picture, the subtree picture copied at `translate(Ps, Ps)` with no filter: one pass, only when the picture, the padding or the
 resolution changed, so a retake on the mesh costs stage 1 and that copy. The mesh stands on one unit square of the run,
 scaled by the output's CSS size, and `uOutputFrame.xy` holds the picture's canvas place, so `keptOrigin` is 0 in the mode and
 `canvasPixel` answers what it answers live.
+
+A filter with inputs (a `Bloom`) fits too, while its quad names each input's texture and sampler
+(`FilterSlotQuad.inputNames`), the record holds the current stage 2 result of each and stage 3 drew over them last: the
+filter's apply in that pass wrote each input's scale and clamp for those results into the instance's numbers, which the
+mesh reads as they stand (F126 stage 4). The mesh binds the held results under the input's names, written only when they
+differ. A moving `strength` so rides the mesh. A change of the chain (a new `threshold` or `radius`, a new subtree picture)
+leaves the mesh in its frame and draws stages 2 and 3, and the view comes back by the count below; a retake under a
+filtered ancestor draws its frame through stage 3 and goes back on the mesh the frame after. A quad that names inputs on a
+slot without them does not fit, and neither does a body that reads the screen with inputs.
 
 It enters at the third output owed without a gap of more than `CALM_AFTER` frames (`QUAD_AFTER` = 2): a tween that writes every
 second frame reaches it, a write now and then does not. It goes back to a sprite after `QUAD_CALM` (30) drawn frames without
@@ -1254,8 +1263,8 @@ output of it is ever kept, since stage 3 would read the picture's target, not th
 take and never leaves at rest: a resting one costs a mesh frame, never a step. It moves, scales and steps as a placed view
 does: a move is a refresh with no pass, a new scale takes it again, never drawn scaled. A change under its top retakes it,
 and three in a row draw it live, calm, as any view; the next take puts it on its mesh again. Where it does not fit (WebGL, an
-`Alpha` beside it, a fixed resolution, a second filter) it is drawn live, and `why()` says `"cache-false"`; a slot without a
-quad (a body that reads `@builtin(position)`, a filter with inputs, a broken kind's stand-in) keeps no record at all.
+`Alpha` beside it, a fixed resolution, a second filter, inputs) it is drawn live, and `why()` says `"cache-false"`; a slot
+without a quad (a body that reads `@builtin(position)`, a broken kind's stand-in) keeps no record at all.
 On the A26 (Chrome, 221 MHz, the bench's 8 `rows-live` rows with `cache: false`, 2026-11-04): 22.5 ms of GPU a frame and
 1 canvas pass, against 27.6 ms and 9 passes drawn live.
 
@@ -1308,12 +1317,12 @@ from two append-only lists.
 | `"off"` | The switch `sync.debug.kept` is off, `keptMb` is 0, or the frame draws everything live for a check. |
 | `"backdrop"` | A filter reads what is under it. Also a view without a record. |
 | `"filter-blend"` | A filter blends otherwise than normally. |
-| `"cache-false"` | The cache may not keep a slot (a slot that names no category, a `cache: false` slot without a quad): the view has no record; or a `cache: false` view does not fit its quad in this frame (WebGL, an `Alpha` beside it, a fixed resolution, a second filter). |
+| `"cache-false"` | The cache may not keep a slot (a slot that names no category, a `cache: false` slot without a quad): the view has no record; or a `cache: false` view does not fit its quad in this frame (WebGL, an `Alpha` beside it, a fixed resolution, a second filter, inputs). |
 | `"faded-out"` | The top is at alpha 0 or invisible. |
 | `"top-blend"` | The top or its visual blends otherwise. |
 | `"hidden"` | A cover or a hidden reason of the top holds it. |
 | `"ancestor-hidden"`, `"ancestor-tint"`, `"ancestor-blend"` | An ancestor is not drawn, is tinted, or blends otherwise. |
-| `"placed-under-filter"` | A `"placed"` filter under a filtered ancestor that cannot run on its own shader: no quad, a stack of more than one, a resolution of its own, WebGL. |
+| `"placed-under-filter"` | A `"placed"` filter under a filtered ancestor that cannot run on its own shader: no quad, a stack of more than one, a resolution of its own, WebGL, inputs whose results the record does not hold and place yet. |
 | `"idle"` | A take had nothing to render (empty, off the canvas, too big), or would be cut to the canvas under a zoom. |
 | `"display"` | A `Display` hangs under the top without `onDemand`. |
 | `"budget"` | The budget refused its take, and the refusal holds. |

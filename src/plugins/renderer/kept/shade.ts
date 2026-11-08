@@ -5,7 +5,8 @@
  * Ps)` with no filter, one pass only when the picture, the padding or the resolution changed; a new number is drawn by
  * the mesh with no pass at all. The renderer holds no shader text: `effects` hands a built program over the slot. The
  * policy of the mode, when it is entered and left, lives in `record.ts`; this file holds what is made, bound and freed.
- * The filter's uniform group is the instance's own, read by the mesh as it stands.
+ * The filter's uniform group is the instance's own, read by the mesh as it stands. A filter that reads inputs binds the
+ * record's held stage 2 results under the names its quad gives (F126 stage 4).
  */
 import { filterGlobals, quadShader, unitQuad, VECTOR } from "../quad";
 import type {
@@ -237,6 +238,34 @@ function rebuildShader(
 }
 
 /**
+ * Binds the record's held stage 2 results under the names of each input the quad gives, its texture then its sampler,
+ * written only where they differ: a write Pixi takes as a change of the group, which it builds again. An input with no
+ * result held binds the texture the shader reads (`shade.source`): the mesh never holds a released one, which is
+ * destroyed. Indexed, allocates nothing.
+ *
+ * @param shade - The shade, its shader on the slot's quad and its source the output's.
+ * @param record - The record.
+ */
+function bindHeld(shade: KeptShade, record: KeptRecord): void {
+  const names = shade.quad.inputNames;
+
+  if (names === undefined) return;
+
+  const { resources } = shade.shader;
+
+  for (let input = 0; 2 * input + 1 < names.length; input += 1) {
+    const texture = names[2 * input];
+    const sampler = names[2 * input + 1];
+    const source = record.s2[input]?.source ?? shade.source;
+
+    if (texture !== undefined && resources[texture] !== source) resources[texture] = source;
+    if (sampler !== undefined && resources[sampler] !== source.style) {
+      resources[sampler] = source.style;
+    }
+  }
+}
+
+/**
  * Copies a vector of `WANTED` into the group where it differs. Both sides are 32-bit numbers: a double would differ from
  * its stored value in every frame, and the group would be uploaded in every frame.
  *
@@ -368,10 +397,10 @@ function copyPadded(
 
 /**
  * The frame of a shaded record: stage 3 for the mesh. The output at its size, the shader on the slot's quad and on that
- * texture, the padded picture copied when `s1`, the padding or the resolution changed (one pass, counted), the global
- * uniforms, then `keptOrigin` at 0: in the mode the place is in `uOutputFrame.xy`, so `canvasPixel` and a body that reads
- * the frame answer the same. The keys stage 3 writes. A new number needs none of it: the mesh reads the instance's own
- * uniform group. Allocates nothing while the size stands.
+ * texture, the held results of its inputs bound, the padded picture copied when `s1`, the padding or the resolution
+ * changed (one pass, counted), the global uniforms, then `keptOrigin` at 0: in the mode the place is in `uOutputFrame.xy`,
+ * so `canvasPixel` and a body that reads the frame answer the same. The keys stage 3 writes. A new number needs none of
+ * it: the mesh reads the instance's own uniform group. Allocates nothing while the size stands.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -412,6 +441,9 @@ export function renderShade(
     shade.source = source;
     shade.copied = -1;
   }
+
+  // After a shader built again too: it binds the output in the place of each result.
+  bindHeld(shade, record);
 
   // `outputOf` resizes `s3` in place, which blanks it without moving `s1Version`.
   const resized =

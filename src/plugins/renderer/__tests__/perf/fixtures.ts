@@ -35,7 +35,7 @@ import { FakeFilter, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 import { startOverlayStage } from "../overlay-harness";
 import { type AgentRenderer, startAgent } from "../perf-harness";
-import { shadedSlot } from "../quad-harness";
+import { chainSlot, shadedSlot } from "../quad-harness";
 
 /** The owner of every entity the fixtures spawn. */
 const OWNER = { kind: "plugin", name: "perf" } as const;
@@ -912,6 +912,50 @@ export async function keptShadedBoard(count: number): Promise<() => void> {
 
   if (records.length !== count || records.some(record => !record.shaded)) {
     throw new Error("perf fixture: a view of the shaded board is not shaded");
+  }
+
+  return frame;
+}
+
+/**
+ * A board of `count` views on their filter's own shader whose filter reads one input (F126 stage 4), as `set-bloom` of
+ * the bench draws `Bloom`s whose strength moves: each slot carries the seam of its chain, which the cache holds since the
+ * view's take, and a quad that names the input. Every frame writes every view's number after the mark, then the kept
+ * cache collects and flushes: the chain stands, the mesh binds the held result it holds already and renders nothing.
+ *
+ * @param count - The shaded views.
+ * @returns One frame: the marks, the numbers, the collect and the flush.
+ */
+export async function keptShadedChainBoard(count: number): Promise<() => void> {
+  const stage = await startOverlayStage({ onDemand: false });
+  const { sync } = stage.drawn.mock.modules;
+  const views: Entity[] = [];
+  const numbers: Array<{ amount: number }> = [];
+
+  for (let index = 0; index < count; index += 1) {
+    views.push(stage.view({ order: 1, x: (index % 5) * 200, y: Math.floor(index / 5) * 200 }));
+  }
+
+  stage.frame();
+
+  for (const view of views) {
+    const slot = chainSlot();
+
+    if (slot.quad?.fu !== undefined) numbers.push(slot.quad.fu.uniforms as { amount: number });
+
+    sync.filters.set(view, Object.freeze([slot]));
+  }
+
+  stage.frames(12);
+
+  const frame = numbersFrame(views, numbers, stage.drawn.mock.modules);
+
+  for (let index = 0; index < 4; index += 1) frame();
+
+  const { records } = stage.drawn.mock.ctx.state.kept;
+
+  if (records.length !== count || records.some(record => !record.shaded || !record.heldPlaced)) {
+    throw new Error("perf fixture: a view of the chain board is not shaded over its held result");
   }
 
   return frame;
