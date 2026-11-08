@@ -88,7 +88,8 @@ type Budget = {
   readonly passes: number;
   readonly mpx: number;
   readonly samples: number;
-  readonly onChange: "quad" | "chain + stage 3" | "filter pass";
+  /** What a change of a field its chain does not read costs. */
+  readonly onChange: "quad" | "filter pass";
 };
 
 /**
@@ -193,15 +194,44 @@ function budgetOf(row: Row, frame: Frame, resolution: number): Budget {
 }
 
 /**
- * What a value change of a member costs: its quad, its chain and stage 3, or a filter pass.
+ * What a change of a member's own value costs, one its chain does not read: its quad, or a filter pass. A change its
+ * chain reads redraws the chain and stage 3 (`chainFields`).
  *
  * @param member - The member.
  * @returns The cost, as the README's table words it.
  */
 function onChangeOf(member: FilterComponent<FilterFields>): Budget["onChange"] {
-  if (member.filter.quadSource !== undefined) return "quad";
+  return member.filter.quadSource === undefined ? "filter pass" : "quad";
+}
 
-  return member.filter.inputs.length > 0 ? "chain + stage 3" : "filter pass";
+/**
+ * The number fields of a member whose change moves its chain's answer at a resolution: a change of one of them reruns
+ * the chain and stage 3, the rest stay on the quad. Each field is written to twice its default plus one.
+ *
+ * @param member - The member.
+ * @param resolution - Texels per CSS px.
+ * @returns The fields, in declaration order.
+ */
+function chainFields(member: FilterComponent<FilterFields>, resolution: number): string[] {
+  const defaults = member().value as FilterFields;
+  // The chain answers arrays it writes in place: each answer is read out before the next call.
+  const answer = (value: FilterFields): string =>
+    JSON.stringify(
+      member.filter.inputs.map(input =>
+        input
+          .chain(value, { resolution })
+          .map(step => [step.stage.filter.id, step.scale, step.uniforms])
+      )
+    );
+  const before = answer(defaults);
+
+  return member.filter.uniforms
+    .map(uniform => uniform.name)
+    .filter(name => {
+      const value = defaults[name];
+
+      return typeof value === "number" && answer({ ...defaults, [name]: 2 * value + 1 }) !== before;
+    });
 }
 
 describe("the budgets of the set", () => {
@@ -228,16 +258,24 @@ describe("the budgets of the set", () => {
     expect(budgetOf(row, TILE, RESOLUTION).mpx).toBeLessThanOrEqual(row.tile);
   });
 
-  // Bug: a chain that grew a step at the phone's resolution, a body that gained a sample, or a chain member that
-  // claims the quad: a value change of it runs the chain and stage 3, a pass for each step.
+  // Bug: a chain that grew a step at the phone's resolution, a body that gained a sample, or Bloom off the quad: a
+  // change of its strength pays the chain and stage 3 again, a pass for each step and the body, in every frame.
   it.each(
     BLOOM_ROWS
-  )("Bloom on a tile at $resolution: $passes passes, at most $mpx Mpx, the chain and stage 3 on change", row => {
+  )("Bloom on a tile at $resolution: $passes passes, at most $mpx Mpx, its quad on a change of its own", row => {
     const tile = budgetOf(BLOOM, row.frame, row.resolution);
 
     expect(tile.passes).toBe(row.passes);
     expect(tile.mpx).toBeLessThanOrEqual(row.mpx);
     expect(tile.samples).toBe(BLOOM.samples);
-    expect(tile.onChange).toBe("chain + stage 3");
+    expect(tile.onChange).toBe("quad");
+  });
+
+  // Bug: the chain reads `strength` (written into a step, say): every strength tween reruns the chain and leaves the
+  // quad, while threshold and radius, which the chain does read, are the only changes that may.
+  it.each(
+    BLOOM_ROWS
+  )("Bloom at $resolution: threshold and radius rerun the chain and stage 3, strength does not", row => {
+    expect(chainFields(Bloom, row.resolution)).toEqual(["threshold", "radius"]);
   });
 });

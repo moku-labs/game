@@ -5,9 +5,10 @@
  * runs on the real engine, the real Pixi and the real GPU, with `debug.verifyFrames` on. Each member plays three rows:
  * a held value, kept as a picture and held against its live frame; a tweening value, which on WebGPU runs on the
  * view's own quad and is held against its live frame; and one pixel worked out by hand (`RevealLine` two, its corners
- * at a quarter turn of the diagonal; `Shine` two, its line and a transparent corner). `Bloom`, the member with a chain,
- * has no quad: its held rows at radius 16 and 32 are its kept picture (stage 3) within 1/255 of live, and its tweening
- * row runs without a quad and is kept again within 1/255 of live once the value stops. Every capture stays in the
+ * at a quarter turn of the diagonal; `Shine` two, its line and a transparent corner). `Bloom`, the member with a chain:
+ * its held rows at radius 16 and 32 are its kept picture (stage 3) within 1/255 of live; its `strength` tween runs on
+ * the view's own quad on WebGPU over the held chain result, within 1/255 of live; and a `threshold` tween after it
+ * reruns the chain, which leaves the quad in that frame for stage 2 and 3, within 1/255 of live. Every capture stays in the
  * page, so the leg can hand the WebGPU pictures to the WebGL page (`compareSet`) and hold the GLSL twins against the
  * WGSL bodies. It answers in `globalThis.effectsSet`.
  *
@@ -40,14 +41,19 @@ import manifestJson from "../../fixtures/mini-game/generated/manifest.json";
 export type SetRow = {
   /** `member: kind`. */
   name: string;
-  /** `held`, `tween`, `probe`, or `chain`: the tween of a member with a chain, which no quad runs. */
-  kind: "held" | "tween" | "probe" | "chain";
+  /**
+   * `held`, `tween`, `probe`, or `rerun`: the tween of a field a member's chain reads, after a tween that brought the
+   * view on its quad, captured in a frame whose write reran the chain.
+   */
+  kind: "held" | "tween" | "probe" | "rerun";
   /** Held within 1/255 of its live frame on both backends, not only within the frame oracle's thresholds. */
   strict?: boolean;
   /** Pictures the renderer kept when the row was captured. */
   pictures: number;
   /** Views drawn through their own shader when the row was captured. */
   shaded: number;
+  /** For a `rerun` row: views drawn through their own shader in the frame before the first write the chain reads. */
+  before?: number;
   /** Pixels of the capture that differ from the live capture by more than 24 in a channel: the frame oracle's. */
   differing: number;
   /** Pixels of the capture that differ from the live capture by more than 1 in a channel. */
@@ -90,6 +96,9 @@ const SETTLE_FRAMES = 60;
 
 /** Writes of a number that bring a kept view on its shader, past `QUAD_AFTER`. */
 const WRITES = 5;
+
+/** Writes of a field a chain reads, after the writes that brought the view on its shader: each reruns the chain. */
+const RERUNS = 3;
 
 /** A change of a channel the frame oracle does not count. */
 const CHANNEL = 24;
@@ -259,14 +268,74 @@ async function captured(app: App, name: string): Promise<string> {
   return shot.png;
 }
 
-/** What a row draws: its views, and the writes of one frame of its tween. */
+/**
+ * What a row draws: its views, the writes of one frame of its tween, and, for a `rerun` row, the writes of one frame of
+ * the tween of a field the chain reads, played after it; the row is captured in the frame of the last of those.
+ */
 type Scene = {
   readonly entities: readonly World.Entity[];
   readonly write?: (turn: number) => void;
+  readonly rerun?: (turn: number) => void;
 };
+
+/**
+ * The views drawn through their own shader now.
+ *
+ * @param app - The app.
+ * @returns How many.
+ */
+function shadedNow(app: App): number {
+  return app.renderer.sync.debug.why().filter(entry => entry.quad === true).length;
+}
 
 /** A pixel worked out by hand: where it is, in CSS px of the canvas, and what it must be. */
 type Probe = { readonly x: number; readonly y: number; readonly rgb: readonly number[] };
+
+/**
+ * Brings a row's scene to the state it is captured in: at rest until it is kept, or through its tween, and for a
+ * `rerun` row through the writes its chain reads after it.
+ *
+ * @param app - The app.
+ * @param scene - What the row draws.
+ * @returns For a `rerun` row, the views on their own shader before its first write the chain reads.
+ */
+async function bring(app: App, scene: Scene): Promise<number | undefined> {
+  const { write, rerun } = scene;
+
+  if (write === undefined) {
+    // At rest until it is kept as a picture.
+    for (let frame = 0; frame < SETTLE_FRAMES; frame += 1) {
+      await step(app, 1);
+      if (app.renderer.stats().kept.pictures > 0) break;
+    }
+
+    return undefined;
+  }
+
+  await step(app, 6);
+
+  for (let turn = 0; turn < WRITES; turn += 1) {
+    write(turn);
+    await step(app, 1);
+  }
+
+  if (rerun === undefined) {
+    // The view stays on its shader for `QUAD_CALM` frames after the last write.
+    await step(app, 12);
+
+    return undefined;
+  }
+
+  // Captured in the frame of the last write the chain reads: the chain was drawn again in it.
+  const before = shadedNow(app);
+
+  for (let turn = 0; turn < RERUNS; turn += 1) {
+    rerun(turn);
+    await step(app, 1);
+  }
+
+  return before;
+}
 
 /**
  * Plays one row: brings it to its state, captures it, captures it again drawn live, takes it away.
@@ -285,28 +354,9 @@ async function play(
   row: { name: string; kind: SetRow["kind"]; scene: Scene; probe?: Probe; strict?: true }
 ): Promise<SetRow> {
   const { name, kind, scene, probe, strict } = row;
-  const { write } = scene;
-
-  if (write === undefined) {
-    // At rest until it is kept as a picture.
-    for (let frame = 0; frame < SETTLE_FRAMES; frame += 1) {
-      await step(app, 1);
-      if (app.renderer.stats().kept.pictures > 0) break;
-    }
-  } else {
-    await step(app, 6);
-
-    for (let turn = 0; turn < WRITES; turn += 1) {
-      write(turn);
-      await step(app, 1);
-    }
-
-    // The view stays on its shader for `QUAD_CALM` frames after the last write.
-    await step(app, 12);
-  }
-
+  const before = await bring(app, scene);
   const pictures = app.renderer.stats().kept.pictures;
-  const shaded = app.renderer.sync.debug.why().filter(entry => entry.quad === true).length;
+  const shaded = shadedNow(app);
   const png = await captured(app, name);
 
   app.renderer.sync.debug.kept(false);
@@ -332,6 +382,7 @@ async function play(
     ...(strict === undefined ? {} : { strict }),
     pictures,
     shaded,
+    ...(before === undefined ? {} : { before }),
     ...compare(mode, await composited(live))
   };
 
@@ -433,17 +484,23 @@ async function run(): Promise<SetResult> {
    * @param make - The member's value at the start.
    * @param write - The field's patch at a turn.
    * @param fill - The card's fill.
+   * @param rerun - The patch of a field the chain reads at a turn, played after the tween.
    * @returns The scene.
    */
   const tweened = (
     make: () => World.AnyComponentValue,
     write: (entity: World.Entity, turn: number) => void,
-    fill?: number
+    fill?: number,
+    rerun?: (entity: World.Entity, turn: number) => void
   ): Scene => {
     const entities = card(make(), fill);
     const parent = entities.at(-1) ?? 0;
 
-    return { entities, write: turn => write(parent, turn) };
+    return {
+      entities,
+      write: turn => write(parent, turn),
+      ...(rerun === undefined ? {} : { rerun: (turn: number) => rerun(parent, turn) })
+    };
   };
 
   // The rows play one after another: an array literal evaluates its awaits in order.
@@ -653,7 +710,8 @@ async function run(): Promise<SetResult> {
       scene: { entities: card(Fold({ angle: Math.PI }), 0x33_88_ff, false) },
       probe: { x: 240, y: 240, rgb: [31, 82, 153] }
     }),
-    // Bloom: the gold square on a dark card blooms; a chain member is kept as a picture and never takes the quad.
+    // Bloom: the gold square on a dark card blooms. Still, it is kept as a picture; a moving strength rides its quad over
+    // the held chain result; a moving threshold reruns the chain, off the quad.
     await play(app, {
       name: "Bloom: held, radius 16",
       kind: "held",
@@ -668,12 +726,23 @@ async function run(): Promise<SetResult> {
     }),
     await play(app, {
       name: "Bloom: tween",
-      kind: "chain",
+      kind: "tween",
       strict: true,
       scene: tweened(
         () => Bloom({ strength: 0.2 }),
         (entity, turn) => ecs.set(entity, Bloom, { strength: 0.2 + 0.1 * turn }),
         DARK
+      )
+    }),
+    await play(app, {
+      name: "Bloom: threshold tween after a strength tween, off the quad in a frame that reran the chain",
+      kind: "rerun",
+      strict: true,
+      scene: tweened(
+        () => Bloom({ strength: 0.2 }),
+        (entity, turn) => ecs.set(entity, Bloom, { strength: 0.2 + 0.1 * turn }),
+        DARK,
+        (entity, turn) => ecs.set(entity, Bloom, { threshold: 0.6 - 0.1 * turn })
       )
     }),
     // The blur reaches about 26 CSS px (its outer ring at sigma, the radius 16 px, and a texel at ¼ for each linear

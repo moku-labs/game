@@ -918,9 +918,11 @@ export function defineFilter<
     id,
     source: assemble(uniforms, inputs, spec.wgsl, origin, backdrop),
     glsl: assembleGlsl(uniforms, inputs, spec.glsl, origin, backdrop),
-    // A mesh binds neither a second texture nor the canvas under it.
+    // A mesh binds the held results of inputs drawn from the view, never the canvas under it.
     quadSource:
-      inputs.length === 0 && !backdrop ? assembleQuad(uniforms, spec.wgsl, origin) : undefined,
+      !backdrop && inputs.every(input => input.from === "input")
+        ? assembleQuad(uniforms, spec.wgsl, origin, inputs)
+        : undefined,
     uniforms,
     passes,
     padding,

@@ -2,7 +2,8 @@
  * @file effects/set — what every member's unit test checks, as one set of cases. Not a test file: the unit project
  * only collects `*.test.ts`. A member is one `defineFilter` of the set: the cases read its definition and its own
  * bodies, never `filter.source`, which carries the set head. `bodyCases` is the part of them that holds for any body
- * of the set: a chain member (`Bloom`) and the stages its chain draws, which no quad runs, take those alone.
+ * of the set: a chain member (`Bloom`, which rides the quad with its input bound and so has inputs `memberCases`
+ * refuses) and the stages its chain draws, which no quad runs, take those alone.
  */
 import { expect, it } from "vitest";
 import type { FilterComponent, FilterDefinition, FilterFields } from "../../../filters/types";

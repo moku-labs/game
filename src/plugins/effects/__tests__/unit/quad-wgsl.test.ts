@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defineFilter } from "../../filters/define";
 import type { UniformSpec } from "../../filters/types";
 import { assembleQuad, HEADER } from "../../filters/wgsl";
-import { Frosted, Soft, Under } from "../filter-fixtures";
+import { Frosted, SOFT_BODIES, SOFT_STAGES, Soft, softChain, Under } from "../filter-fixtures";
 
 // ---------------------------------------------------------------------------
 // Unit test: the quad program (F126 stage 2), the WGSL that runs a filter's own
@@ -111,6 +111,39 @@ describe("assembleQuad", () => {
     expect(placed).toContain("keptOrigin: vec2<f32>");
     expect(assembleQuad([AMOUNT], BODY)).not.toContain("canvasPixel");
   });
+
+  // Bug: the inputs parameter moves the quad of a filter without inputs, which drew right before it existed. The
+  // digests were read before the parameter existed.
+  it.each([
+    ["uniforms", [AMOUNT], undefined, "e86797dcae06ecae"],
+    ["uniforms and the origin", [AMOUNT], ORIGIN, "0bbea875d3070b21"],
+    ["no uniforms", [], undefined, "1b5c6ca0f265b108"]
+  ] as const)("does not move with no inputs, for a body with %s", (_name, uniforms, origin, pinned) => {
+    expect(digest(assembleQuad(uniforms, BODY, origin, []) ?? "")).toBe(pinned);
+  });
+});
+
+describe("assembleQuad with inputs", () => {
+  /** `Soft`'s one input, `soft`: what the engine declares for it. */
+  const inputs = Soft.filter.inputs;
+
+  // Bug: a struct that does not match the instance's group member for member: a blank view, and only an asynchronous
+  // GPU validation error.
+  it("lists the uniforms, then each input's scale and clamp, then the origin", () => {
+    const source = assembleQuad([AMOUNT], BODY, ORIGIN, inputs) ?? "";
+
+    expect(source).toContain(
+      "struct FilterUniforms {\n  amount: f32,\n  softScale: vec2<f32>,\n  softClamp: vec4<f32>,\n  keptOrigin: vec2<f32>,\n};"
+    );
+  });
+
+  // Bug: an input bound at group 1, Pixi's mesh group, or over `fu`: the pipeline layout fails, on the phone only.
+  it("binds each input's texture and sampler at group 3 after fu, and its sample helper once", () => {
+    const source = assembleQuad([AMOUNT], BODY, undefined, inputs) ?? "";
+
+    expect(bindings(source).slice(5)).toEqual(["3 0 fu", "3 1 softTexture", "3 2 softSampler"]);
+    expect(source.match(/fn sampleSoft\(uv: vec2<f32>\) -> vec4<f32>/g)).toHaveLength(1);
+  });
 });
 
 describe("the bodies the rewrite takes", () => {
@@ -168,8 +201,9 @@ fn mainFragment(
 });
 
 describe("defineFilter and the quad text", () => {
-  // Bug: a body that reads a second texture, or the canvas under it, is moved to a mesh that binds neither.
-  it("has quad text for a plain body, none with inputs or for a backdrop", () => {
+  // Bug: a plain body loses its quad, or one with inputs that start from its view stays off it: 3 passes a frame for a
+  // value the chain does not read.
+  it("has quad text for a plain body and for one whose inputs start from its view", () => {
     const Tint = defineFilter("fixture.quadTint", {
       wgsl: BODY,
       glsl: GLSL,
@@ -177,7 +211,23 @@ describe("defineFilter and the quad text", () => {
     });
 
     expect(Tint.filter.quadSource).toBe(assembleQuad(Tint.filter.uniforms, BODY));
-    expect(Soft.filter.quadSource).toBeUndefined();
+    expect(Soft.filter.quadSource).toBe(
+      assembleQuad(Soft.filter.uniforms, SOFT_BODIES.wgsl, undefined, Soft.filter.inputs)
+    );
+  });
+
+  // Bug: a mesh over the canvas under the view, which it cannot bind: a backdrop, with or without inputs, and an input
+  // drawn from what was drawn under the view stay off the quad.
+  it("has none for a backdrop, its inputs from its view or from back", () => {
+    const Misted = defineFilter("fixture.quadMisted", {
+      ...SOFT_BODIES,
+      uniforms: { spread: 1, tone: 0 },
+      backdrop: true,
+      inputs: { soft: { stages: SOFT_STAGES, chain: softChain } }
+    });
+
+    expect(Misted.filter.inputs[0]?.from).toBe("input");
+    expect(Misted.filter.quadSource).toBeUndefined();
     expect(Under.filter.quadSource).toBeUndefined();
     expect(Frosted.filter.quadSource).toBeUndefined();
   });

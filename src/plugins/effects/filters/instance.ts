@@ -1626,7 +1626,8 @@ export function createStandIn(
  *
  * @param pixi - The module the renderer loaded.
  * @param definition - A definition whose check answered ok.
- * @param program - The quad program of a kind that hands one over, drawn with the probe's own uniform group.
+ * @param program - The quad program of a kind that hands one over, drawn with the probe's own uniform group and the
+ *   names of its inputs.
  * @returns The probe's filter, its quad and its teardown.
  */
 export function createWarmFilter(
@@ -1635,12 +1636,24 @@ export function createWarmFilter(
   program?: PixiGpuProgram
 ): WarmProbe {
   const body = createOurs(pixi, definition, PROBE_VALUE);
+  // The probe's mesh binds every input the program declares, or Pixi throws on the missing resource.
+  const quad =
+    program === undefined
+      ? undefined
+      : { program, fu: body.group, inputNames: quadInputNames(definition) };
 
-  return {
-    filter: body.filter,
-    quad: program === undefined ? undefined : { program, fu: body.group },
-    destroy: (): void => destroyBody(body)
-  };
+  return { filter: body.filter, quad, destroy: (): void => destroyBody(body) };
+}
+
+/**
+ * The resource names a quad binds the held result of each input under: its texture, then its sampler, in declaration
+ * order. Made once with the quad object it goes on, never per frame.
+ *
+ * @param definition - The definition.
+ * @returns The names; empty for a definition without inputs.
+ */
+export function quadInputNames(definition: FilterDefinition): readonly string[] {
+  return definition.inputs.flatMap(input => [input.texture, input.sampler]);
 }
 
 /**

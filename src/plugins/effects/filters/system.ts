@@ -33,6 +33,7 @@ import {
   createStandIn,
   createWarmFilter,
   destroyFilter,
+  quadInputNames,
   quadProgramOf,
   refreshInputs,
   writeFilter
@@ -384,7 +385,7 @@ function quadProgramFor(
 
 /**
  * What an instance's slot carries for the quad, one object for the instance's life: the renderer builds its shader
- * again for another one.
+ * again for another one. It names each input the mesh binds a held chain result under (none for a filter without).
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -402,7 +403,11 @@ function quadOf(
 
   if (program === undefined) return undefined;
 
-  instance.quad ??= { program, fu: instance.group };
+  instance.quad ??= {
+    program,
+    fu: instance.group,
+    inputNames: quadInputNames(instance.definition)
+  };
 
   return instance.quad;
 }

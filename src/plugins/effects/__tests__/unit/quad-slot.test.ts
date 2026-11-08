@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FeatureFilter } from "../../../flow/types";
 import { Sprite, Transform } from "../../../renderer/components";
-import type { FilterSlot } from "../../../renderer/types";
+import type { FilterSlot, FilterSlotQuad } from "../../../renderer/types";
 import type { AnyComponentValue, Entity } from "../../../world/types";
 import { Alpha, Blur, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { type FakeFxFilter, FakeFxGpuProgram } from "../fake-effects-pixi";
-import { Small, Soft, SoftDim, Veiled } from "../filter-fixtures";
+import { Frosted, Small, Soft, SoftDim, Veiled } from "../filter-fixtures";
 import { createMockEffects, type MockEffects } from "./mock-effects";
 
 // ---------------------------------------------------------------------------
@@ -197,10 +197,44 @@ describe("the quad over the slot", () => {
     expect(lastSlots(mock)[0]?.quad?.fu).toBeUndefined();
   });
 
+  // Bug: a slot quad with no names for its input: the renderer keeps a chain view off its mesh, or binds its held
+  // result under a name the program does not declare and Pixi throws. One without inputs names none.
+  it("names each input's texture and sampler on the quad, none for a filter without inputs", async () => {
+    const mock = await checked([Soft, Tint]);
+
+    view(mock, [Soft()]);
+    view(mock, [Tint()]);
+
+    const [soft, tint] = mock.renderer.sets.map(set => set.slots[0]?.quad);
+
+    expect(soft?.program).toBe(quadPrograms(Soft.filter.quadSource)[0]);
+    expect(soft?.inputNames).toEqual(["softTexture", "softSampler"]);
+    expect(tint?.inputNames).toEqual([]);
+  });
+
+  // Bug: the names made per sync: an array a frame for a chain view on its quad, and a quad the renderer reads as new.
+  it("keeps the same quad and names of a filter with inputs through a write of its value", async () => {
+    const mock = await checked([Soft]);
+    const entity = view(mock, [Soft()]);
+    const before = lastSlots(mock)[0]?.quad;
+
+    mock.world.ecs.set(entity, Soft, { spread: 2 });
+    mock.frame();
+    mock.world.ecs.add(entity, Glow());
+    mock.frame();
+
+    const after = lastSlots(mock).find(slot => slot.quad?.program === before?.program)?.quad;
+
+    expect(before?.inputNames).toHaveLength(2);
+    expect(after).toBe(before);
+    expect(after?.inputNames).toBe(before?.inputNames);
+  });
+
   // Bug: a shader that asks for more than the group holds: a blank view with no error at all.
   it.each([
     ["without canvasPixel", Tint],
-    ["with canvasPixel", Placed]
+    ["with canvasPixel", Placed],
+    ["with an input", Soft]
   ])("declares the members of the instance's group, %s", async (_name, kind) => {
     const mock = await checked([kind]);
     const entity = view(mock, [kind()]);
@@ -210,9 +244,9 @@ describe("the quad over the slot", () => {
     expect(membersOf(kind.filter.quadSource)).toEqual(members);
   });
 
-  // Bug: a body that reads a second texture, or that the wrapper cannot call, is moved to the mesh.
+  // Bug: a body that reads the canvas under its view, or that the wrapper cannot call, is moved to the mesh.
   it.each([
-    ["with inputs", Soft, () => Soft()],
+    ["a backdrop with an input from back", Frosted, () => Frosted()],
     ["a body the rewrite does not fit", Position, () => Position()],
     ["a core kind", undefined, () => Blur({ strength: 4 })],
     ["an Alpha", undefined, () => Alpha({ alpha: 0.5 })]
@@ -456,7 +490,7 @@ describe("the quad in the check", () => {
 });
 
 describe("the quad in the warm-up", () => {
-  // Bug: 40 pipelines at load that nothing uses, or a kind's first quad compiled in play.
+  // Bug: 40 pipelines at load that nothing uses, or a kind's first quad compiled in play: a kind with an input too.
   it("hands a kind's filter with its quad, a stage and a fallback alone", async () => {
     const mock = createMockEffects();
 
@@ -468,9 +502,28 @@ describe("the quad in the warm-up", () => {
     await settle();
 
     expect(handedWith(mock, Tint.filter.id)).toBe("quad");
-    expect(handedWith(mock, Soft.filter.id)).toBe("alone");
+    expect(handedWith(mock, Soft.filter.id)).toBe("quad");
     expect(handedWith(mock, Small.filter.id)).toBe("alone");
     expect(handedWith(mock, SoftDim.filter.id)).toBe("alone");
+  });
+
+  // Bug: the probe's mesh binds no input: Pixi throws on the missing resource and the warm-up logs
+  // `renderer:warm-failed` for every kind with a chain (`effects.bloom` in the spike).
+  it("names the inputs of a probe's quad, none for a kind without inputs", async () => {
+    const mock = createMockEffects();
+
+    mock.renderer.device = mock.gpu.device;
+    mock.renderer.warmAnswer = "later";
+    mock.features.push({ name: "fx", description: { filters: [Tint, Soft] } });
+    mock.start();
+    mock.frame();
+    await settle();
+
+    const quadOf = (source: string | undefined): FilterSlotQuad | undefined =>
+      mock.renderer.warmQuads.find(quad => quad?.program === quadPrograms(source)[0]);
+
+    expect(quadOf(Soft.filter.quadSource)?.inputNames).toEqual(["softTexture", "softSampler"]);
+    expect(quadOf(Tint.filter.quadSource)?.inputNames).toEqual([]);
   });
 
   // Bug: a probe's quad binds the uniform group of nothing: the warm-up's mesh throws.

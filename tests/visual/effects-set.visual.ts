@@ -6,8 +6,10 @@
  * and stays within 1/255 of its live frame; one pixel by hand (Flash at amount 1 is its colour, Grade at saturation 0
  * of red is the luma, Vignette's centre is the source; RevealLine's far corners at π/4 and progress 1, Shine's line and
  * a transparent corner under it, Aura next to an edge, Fold at a half turn, Bloom at threshold 1; `effects-set/page.ts`
- * has the numbers) is within 2/255; `Bloom`, which reads a chain and never takes the quad, is held within 1/255 of live
- * at radius 16 and 32 and after its tween, on both backends, its tween off the quad; and every WebGL capture is held against the WebGPU capture of the same row: alpha within 2/255 and
+ * has the numbers) is within 2/255; `Bloom`, which reads a chain, is held within 1/255 of live at radius 16 and 32 and
+ * in its tween on both backends, its `strength` tween on the quad over the held chain result on WebGPU, and a
+ * `threshold` tween after it off the quad in a frame that reran the chain, within 1/255 of live on both backends (stage
+ * 4 slice 1); and every WebGL capture is held against the WebGPU capture of the same row: alpha within 2/255 and
  * colour within 8/255 on 99.5 % of the pixels. Both comparisons are of premultiplied pixels, what the canvas
  * composites (Pixi's WebGL extract writes premultiplied pixels, its WebGPU one straight alpha). No
  * `renderer:stale-picture`, no shader, pipeline or GPU error, no unlisted member. Not a vitest file:
@@ -40,21 +42,23 @@ const RESOLUTIONS = [1, 2] as const;
 const RENDERERS = ["webgpu", "webgl"] as const;
 
 /**
- * The problems of a row of the member with a chain, in words, on either backend: its tween takes no quad and is kept
- * again once the value stops, and a strict row is within 1/255 of its live frame.
+ * The problems of a row of the member with a chain, in words: a tween of a field its chain reads leaves the quad in
+ * the frame that reran the chain (after a tween that brought it there, on WebGPU), and a strict row is within 1/255 of
+ * its live frame on either backend.
  *
+ * @param renderer - The backend.
  * @param row - What the row answered.
  * @returns The problems.
  */
-function chainProblems(row: SetRow): string[] {
+function chainProblems(renderer: (typeof RENDERERS)[number], row: SetRow): string[] {
   const problems: string[] = [];
 
-  if (row.kind === "chain" && row.shaded > 0) {
-    problems.push(`${row.name}: on a quad, which a chain member never takes`);
+  if (row.kind === "rerun" && row.shaded > 0) {
+    problems.push(`${row.name}: on its quad in a frame that reran its chain`);
   }
 
-  if (row.kind === "chain" && row.pictures < 1) {
-    problems.push(`${row.name}: not kept again once its value stopped`);
+  if (row.kind === "rerun" && renderer === "webgpu" && (row.before ?? 0) < 1) {
+    problems.push(`${row.name}: not on its quad before its chain reran, so it proves nothing`);
   }
 
   if (row.strict === true && row.largest > 1) {
@@ -85,7 +89,7 @@ function rowProblems(renderer: (typeof RENDERERS)[number], row: SetRow): string[
     }
   }
 
-  problems.push(...chainProblems(row));
+  problems.push(...chainProblems(renderer, row));
 
   if (row.kind === "tween" && renderer === "webgpu") {
     if (row.shaded < 1) problems.push(`${row.name}: not on its quad`);
@@ -142,6 +146,16 @@ function crossProblems(lines: readonly CrossRow[], rows: number): string[] {
   if (lines.length !== rows) problems.push(`compared ${lines.length} rows of ${rows}`);
 
   return problems;
+}
+
+/**
+ * The views a `rerun` row had on their quad before its chain reran, as the log line words it.
+ *
+ * @param row - What the row answered.
+ * @returns ` (N before)`, or `""` for another row.
+ */
+function beforeOf(row: SetRow): string {
+  return row.before === undefined ? "" : ` (${row.before} before)`;
 }
 
 const built = await Bun.build({
@@ -228,7 +242,7 @@ try {
               : `, probe ${JSON.stringify(row.probe.got)} wanted ${JSON.stringify(row.probe.wanted)}`;
 
           console.log(
-            `  ${row.name}: kept ${row.pictures}, quad ${row.shaded}, oracle ${row.differing}, over 1/255 ${row.overOne}, at most ${row.largest}, lit ${row.lit} of ${row.total}${probe}`
+            `  ${row.name}: kept ${row.pictures}, quad ${row.shaded}${beforeOf(row)}, oracle ${row.differing}, over 1/255 ${row.overOne}, at most ${row.largest}, lit ${row.lit} of ${row.total}${probe}`
           );
         }
       }

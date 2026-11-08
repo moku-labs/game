@@ -196,7 +196,9 @@ export type FilterDefinition = {
   readonly glsl: string;
   /**
    * The quad program: the same body on a mesh, in the pass that draws the canvas (renderer README, "Kept pictures").
-   * `undefined` for a definition with inputs, a backdrop, or a body the rewrite does not fit.
+   * A definition with inputs has one too: each input starts from the view's own input, and the mesh binds its held
+   * chain result (`Bloom` rides it while its `strength` moves). `undefined` for a backdrop, an input from `"back"`, or
+   * a body the rewrite does not fit.
    */
   readonly quadSource: string | undefined;
   readonly uniforms: readonly UniformSpec[];

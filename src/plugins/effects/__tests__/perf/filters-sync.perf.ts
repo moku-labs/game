@@ -79,15 +79,16 @@ describe("effects:filters, heap bytes per frame step", () => {
     expect(bytesPerCall(call)).toBeLessThanOrEqual(BUDGET.bloomChain + NOISE);
   });
 
-  // Bug it guards: the engine's walk of a chain's answer (its inputs, steps and places) allocates per frame of a tween.
-  it("one Bloom strength tweened on one of 12 filtered views: the chain runs again, no quad", () => {
+  // Bug it guards: the names of the quad's input made per sync, or the engine's walk of a chain's answer (its inputs,
+  // steps and places) allocates per frame of a tween.
+  it("one Bloom strength tweened on one of 12 filtered views, its quad handed over with its input named", () => {
     const fixture = filtersFixture([Bloom.filter], BLOOM_STRENGTH);
     const step = bytesPerCall(tweenStep(fixture));
     const write = bytesPerCall(tweenWrite(fixture));
     const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);
 
     expect(handed.some(set => set.slots[0]?.inputs?.count === 1)).toBe(true);
-    expect(handed.every(set => set.slots[0]?.quad === undefined)).toBe(true);
+    expect(handed.some(set => set.slots[0]?.quad?.inputNames?.length === 2)).toBe(true);
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersBloomTween + NOISE);
   });
 
