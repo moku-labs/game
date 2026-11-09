@@ -41,6 +41,7 @@ export function remeasureCall(): () => void {
   } as unknown as Element;
   const source: TextSource = {
     measure: () => SIZE,
+    content: () => undefined,
     resolved: () => "1500",
     style: () => "digits",
     formatted: () => undefined,

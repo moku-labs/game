@@ -48,13 +48,15 @@ export type ElementLookup = (entity: Entity) => Element | undefined;
 
 /**
  * What a text element is measured through: the advance table of `text`, at the width Yoga offers
- * for a style that wraps at its box (`undefined` when the width is not bounded); the string `text`
- * resolved for an entity and its `Text.style` (`undefined` before the entity carries its `Text`);
- * what a format of the game answers, for a bound text before its first resolve; and the duration
- * words of `i18n`, for a bound `"duration"` before its first resolve.
+ * for a style that wraps at its box (`undefined` when the width is not bounded); the `Text.content`
+ * of an entity, which a system may write outside the projection, the string `text` resolved for it
+ * and its `Text.style` (each `undefined` before the entity carries its `Text`); what a format of
+ * the game answers, for a bound text before its first resolve; and the duration words of `i18n`,
+ * for a bound `"duration"` before its first resolve.
  */
 export type TextSource = {
   measure(content: string | Message, style: string, width?: number): Size;
+  content(entity: Entity): string | Message | undefined;
   resolved(entity: Entity): string | undefined;
   style(entity: Entity): string | undefined;
   formatted(name: string, value: number): FormattedNumber | undefined;

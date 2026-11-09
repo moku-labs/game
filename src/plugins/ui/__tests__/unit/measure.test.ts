@@ -39,6 +39,7 @@ function sourceOf(resolved: Map<Entity, string>): TextSource {
       width: typeof content === "string" ? content.length * 10 : 0,
       height: 20
     }),
+    content: () => undefined,
     resolved: entity => resolved.get(entity),
     style: () => undefined,
     formatted: () => undefined,
@@ -237,6 +238,7 @@ describe("the measure function of a bound text", () => {
         width: typeof content === "string" ? content.length * glyph.width : 0,
         height: 20
       }),
+      content: () => undefined,
       resolved: () => "Play",
       style: () => undefined,
       formatted: () => undefined,
@@ -304,6 +306,7 @@ function lineSource(line: { height: number }): TextSource {
       width: typeof content === "string" ? content.length * 10 : 0,
       height: line.height
     }),
+    content: () => undefined,
     resolved: () => undefined,
     style: () => undefined,
     formatted: () => undefined,
@@ -445,5 +448,31 @@ describe("a text whose bind names a format", () => {
     expect(widthOf(element, source)).toBe(40);
     expect(formatted).not.toHaveBeenCalled();
     expect(style).not.toHaveBeenCalled();
+  });
+});
+
+describe("a text without a bind that a system writes (F162)", () => {
+  it("is measured by the content and the style its Text holds, not by the markup", () => {
+    const written = { content: "Play", style: "big" };
+    const source = pillSource({
+      content: () => written.content,
+      style: () => written.style
+    });
+    const plain = textElement({ content: "Play", style: "big" });
+    const { state, row, node } = centredText(plain, source);
+
+    expect(solved(row, node).w).toBe(40);
+
+    // The system swaps the style: the same four characters at 5 each.
+    written.style = "small";
+
+    expect(remeasureShown(state, plain, source)).toBe(true);
+    expect(solved(row, node).w).toBe(20);
+
+    // And writes a longer string in that style.
+    written.content = "Play again";
+
+    expect(remeasureShown(state, plain, source)).toBe(true);
+    expect(solved(row, node).w).toBe(50);
   });
 });
