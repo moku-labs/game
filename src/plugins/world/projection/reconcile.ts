@@ -21,7 +21,7 @@ import {
   writeRestNow,
   writeRestUnderLoops
 } from "./motions";
-import { seedMutes } from "./mutes";
+import { birthMask, checkDrift, seedMutes } from "./mutes";
 import {
   dequeueRevive,
   despawnView,
@@ -200,6 +200,8 @@ function enterEntry(
 ): void {
   const values = collectView(pctx, spec, entry.item);
   const state = pctx.ctx.state.projection;
+  // Asked before the spawn: a `when` that throws spawns nothing, as a `view` that throws.
+  const mask = birthMask(state, spec, entry.item);
   const building = state.building;
   let entity: Entity;
 
@@ -225,8 +227,9 @@ function enterEntry(
     entry.direct ? "mount" : "change"
   );
 
+  view.mask = mask;
   // The spawn wrote the `initialOnly` fields from `view`; from here on they are another writer's.
-  seedMutes(state, spec, entity);
+  seedMutes(state, spec, view);
 
   mounted.live.set(entry.key, view);
   state.byEntity.set(entity, view);
@@ -265,8 +268,12 @@ function adoptEntry(
 
   showHeld(pctx, mounted, record, entry.direct ? "mount" : "change");
 
-  if (next === undefined) view.item = entry.item;
-  else writeDifference(pctx, view, next, entry.item);
+  if (next === undefined) {
+    view.item = entry.item;
+    checkDrift(pctx, spec, view);
+  } else {
+    writeDifference(pctx, spec, view, next, entry.item);
+  }
 
   playEnter(pctx, spec, view, entry);
 }
@@ -315,6 +322,7 @@ function changeEntry(
 
   if (plays && added.length + changed.length + removed.length === 0) {
     view.item = entry.item;
+    checkDrift(pctx, spec, view);
 
     return false;
   }
@@ -324,6 +332,7 @@ function changeEntry(
 
   view.rest = next;
   view.item = entry.item;
+  checkDrift(pctx, spec, view);
 
   if (entry.direct) {
     // Every rest key, not only the changed ones: a load during a motion has to converge in this
@@ -402,6 +411,7 @@ function reviveEntry(
 
   view.rest = next;
   view.item = entry.item;
+  checkDrift(pctx, spec, view);
 
   if (entry.direct) {
     writeRestNow(pctx, view, [...next.keys()]);

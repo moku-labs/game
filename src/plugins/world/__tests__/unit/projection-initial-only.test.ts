@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { component } from "../../ecs/define";
 import type { ComponentType, Entity } from "../../ecs/types";
 import { projection } from "../../projection/define";
@@ -535,5 +535,604 @@ describe("projection initialOnly — the spec", () => {
     commitTimers(world, timers, "restore");
 
     expect(world.api.ecs.get(label, Label)).toEqual({ x: 7, y: 3, shown: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F159: a pair with `when(item)` covers only the views whose item answered true at their birth.
+// The answer is fixed for the life of the view; views with the same answers share one seed.
+// ---------------------------------------------------------------------------
+
+/** One part of a stopwatch: the hand turns with the clock, a bolt keeps what `view` gave it. */
+type Part = { id: string; hand: boolean; sweep: number; x: number };
+type Watch = { parts: Part[]; warmHand?: boolean };
+
+const WATCH = "board.watch";
+
+/**
+ * Tells a hand: the `when` of most cases.
+ *
+ * @param found - The part.
+ * @returns True for a hand.
+ */
+const isHand = (found: Part): boolean => found.hand;
+
+/**
+ * A `when` that throws for an item at x 5, else tells a hand.
+ *
+ * @param found - The part.
+ * @returns True for a hand.
+ * @throws {Error} For a part at x 5.
+ */
+function throwsAtFive(found: Part): boolean {
+  if (found.x === 5) throw new Error("no hand");
+
+  return found.hand;
+}
+
+/** What a case changes about the stopwatch projection. */
+type WatchOptions = {
+  when?: (found: Part) => boolean;
+  /** Adds `[Transform, ["x"]]` without a `when` before the pair with one. */
+  always?: boolean;
+  motion?: ProjectionMotion<Part>;
+};
+
+/**
+ * Builds the stopwatch projection: `Arc.sweep` is another writer's on the views `when` covers.
+ *
+ * @param options - What the case changes.
+ * @returns The spec.
+ */
+function watch(options: WatchOptions = {}): AnyProjectionSpec {
+  const when = options.when ?? isHand;
+  const base = {
+    name: WATCH,
+    layer: "items",
+    from: (player: Watch) => player.parts,
+    key: (found: Part) => found.id,
+    view: (found: Part) => [Arc({ sweep: found.sweep }), Transform({ x: found.x, y: 0, scale: 1 })],
+    ...(options.motion === undefined ? {} : { motion: options.motion })
+  };
+  const spec =
+    options.always === true
+      ? projection({
+          ...base,
+          initialOnly: [
+            [Transform, ["x"]],
+            [Arc, ["sweep"], when]
+          ]
+        })
+      : projection({ ...base, initialOnly: [[Arc, ["sweep"], when]] });
+
+  return spec as AnyProjectionSpec;
+}
+
+/**
+ * A part at rest: a bolt with a full arc at x 0.
+ *
+ * @param id - The key.
+ * @param patch - Fields that differ.
+ * @returns The item.
+ */
+function part(id: string, patch: Partial<Part> = {}): Part {
+  return { id, hand: false, sweep: 1, x: 0, ...patch };
+}
+
+/**
+ * Sets the player's parts.
+ *
+ * @param world - The mock world.
+ * @param parts - The parts.
+ */
+function setParts(world: MockWorld, parts: Part[]): void {
+  world.model.player = { parts } as unknown as Watch & Record<string, never>;
+}
+
+/**
+ * Registers and mounts the stopwatch over the given parts, as a scene does.
+ *
+ * @param world - The mock world.
+ * @param parts - The parts the player starts with.
+ * @param spec - The projection.
+ */
+function mountWatch(world: MockWorld, parts: Part[], spec: AnyProjectionSpec): void {
+  setParts(world, parts);
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(spec);
+  world.start();
+  world.api.projection.mount([WATCH], MOUNT_OWNER);
+}
+
+/**
+ * Commits the parts and runs the frame that reconciles them.
+ *
+ * @param world - The mock world.
+ * @param parts - The new parts.
+ * @param cause - Why the commit happened.
+ */
+function commitParts(
+  world: MockWorld,
+  parts: Part[],
+  cause: "edge" | "rollback" | "restore" | "load" = "edge"
+): void {
+  setParts(world, parts);
+  world.commit(cause);
+  world.frame(16);
+}
+
+/**
+ * The entity of one part.
+ *
+ * @param world - The mock world.
+ * @param id - The key.
+ * @returns The entity.
+ */
+function partOf(world: MockWorld, id: string): Entity {
+  return world.api.projection.entityOf(WATCH, id) ?? 0;
+}
+
+/**
+ * The stored arc of one part.
+ *
+ * @param world - The mock world.
+ * @param id - The key.
+ * @returns The stored sweep.
+ */
+function sweepOf(world: MockWorld, id: string): number | undefined {
+  return world.api.ecs.get(partOf(world, id), Arc)?.sweep;
+}
+
+/**
+ * Draws the arc of each part, as the system of the hand does.
+ *
+ * @param world - The mock world.
+ * @param ids - The keys.
+ */
+function draw(world: MockWorld, ids: readonly string[]): void {
+  for (const id of ids) world.api.ecs.set(partOf(world, id), Arc, { sweep: DRAWN });
+}
+
+/**
+ * The keys a `world:initial-only-changed` warning named, in order.
+ *
+ * @param world - The mock world.
+ * @returns One key per warning.
+ */
+function drifted(world: MockWorld): string[] {
+  const calls = (world.log.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+
+  return calls
+    .filter(([event]) => event === "world:initial-only-changed")
+    .map(([, data]) => {
+      const address = data as { projection: string; key: string };
+
+      expect(address.projection).toBe(WATCH);
+
+      return address.key;
+    });
+}
+
+describe("projection initialOnly when — the birth", () => {
+  // Bug: `when` is ignored and the pair covers every view, or covers none.
+  it("mutes the field only on the views whose item answered true", () => {
+    const world = createMockWorld();
+    const parts = [part("hand", { hand: true }), part("bolt")];
+
+    mountWatch(world, parts, watch());
+    draw(world, ["hand", "bolt"]);
+    commitParts(world, parts, "restore");
+
+    expect(sweepOf(world, "hand")).toBe(DRAWN);
+    expect(sweepOf(world, "bolt")).toBe(1);
+    expect(world.ctx.state.projection.mutes.has(partOf(world, "bolt"))).toBe(false);
+  });
+
+  // Bug: a seed is built per birth, so a long list pays a table per view.
+  it("gives the views with the same answers one frozen table, a play birth too", () => {
+    const world = createMockWorld();
+    const parts = [part("a", { hand: true }), part("b")];
+
+    mountWatch(world, parts, watch());
+    commitParts(world, [...parts, part("c", { hand: true })]);
+
+    const mutes = world.ctx.state.projection.mutes;
+    const shared = mutes.get(partOf(world, "a"));
+
+    expect(shared).toBeDefined();
+    expect(Object.isFrozen(shared)).toBe(true);
+    expect(mutes.get(partOf(world, "c"))).toBe(shared);
+  });
+
+  // Bug: the seed of a mask holds only the pairs with a `when`, so a view that answers false
+  // loses the pairs that cover every view.
+  it("keeps the pairs without a when on a view whose item answered false", () => {
+    const world = createMockWorld();
+    const parts = [part("hand", { hand: true }), part("bolt")];
+
+    mountWatch(world, parts, watch({ always: true }));
+    draw(world, ["hand", "bolt"]);
+    for (const id of ["hand", "bolt"]) world.api.ecs.set(partOf(world, id), Transform, { x: 7 });
+    commitParts(world, parts, "restore");
+
+    expect(sweepOf(world, "hand")).toBe(DRAWN);
+    expect(sweepOf(world, "bolt")).toBe(1);
+    expect(world.api.ecs.get(partOf(world, "hand"), Transform)?.x).toBe(7);
+    expect(world.api.ecs.get(partOf(world, "bolt"), Transform)?.x).toBe(7);
+  });
+
+  // Bug: a throwing `when` is caught nowhere and breaks the frame, or the view is spawned before
+  // it is asked and stays behind without a record.
+  it("takes a when that throws as a failed birth: world:projection-failed, nothing spawned", () => {
+    const world = createMockWorld();
+    const births: Entity[] = [];
+    const when = (found: Part): boolean => {
+      if (found.id === "boom") throw new Error("no hand");
+
+      return found.hand;
+    };
+
+    world.api.ecs.onAdded(Arc, entity => {
+      births.push(entity);
+    });
+    mountWatch(world, [part("a", { hand: true })], watch({ when }));
+    commitParts(world, [part("a", { hand: true }), part("boom")]);
+
+    expect(world.log.error).toHaveBeenCalledWith(
+      "world:projection-failed",
+      { projection: WATCH },
+      expect.any(Error)
+    );
+    expect(births).toEqual([partOf(world, "a")]);
+    expect(world.api.projection.entityOf(WATCH, "boom")).toBeUndefined();
+  });
+});
+
+describe("projection initialOnly when — next to mute()", () => {
+  // Bug: the release of a mute keeps the fields of the spec, not of the view, so it keeps the field
+  // on a view `when` did not cover, or drops it on one it did.
+  it("keeps the field on a mute's release only on a view the when covers", () => {
+    const world = createMockWorld();
+    const parts = [part("hand", { hand: true }), part("bolt")];
+
+    mountWatch(world, parts, watch());
+    for (const id of ["hand", "bolt"])
+      world.api.projection.mute(partOf(world, id), Arc, ["sweep"])();
+    draw(world, ["hand", "bolt"]);
+    commitParts(world, parts, "restore");
+
+    expect(sweepOf(world, "hand")).toBe(DRAWN);
+    expect(sweepOf(world, "bolt")).toBe(1);
+  });
+});
+
+describe("projection initialOnly when — a changed item", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Bug: a changed item asks `when` again, so a view gains or loses its seed mid-life.
+  it("keeps the answer of the birth and asks no more in a release build", () => {
+    const world = createMockWorld();
+    const when = vi.fn(isHand);
+
+    mountWatch(world, [part("a", { hand: true })], watch({ when }));
+    // Same content but `hand` (the play path that only stores the item), then a real change.
+    commitParts(world, [part("a")]);
+    commitParts(world, [part("a", { x: 5 })]);
+    settleFrames(world);
+    draw(world, ["a"]);
+    commitParts(world, [part("a", { x: 5 })], "restore");
+
+    expect(when).toHaveBeenCalledTimes(1);
+    expect(sweepOf(world, "a")).toBe(DRAWN);
+    expect(drifted(world)).toEqual([]);
+  });
+
+  // Bug: the dev build never warns, warns on every change, or warns for an item whose answer holds.
+  it("warns world:initial-only-changed once per view in a dev build, and changes nothing", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const world = createMockWorld();
+
+    mountWatch(world, [part("a", { hand: true }), part("c", { hand: true })], watch());
+    commitParts(world, [part("a", { hand: true, x: 2 }), part("c", { hand: true })]);
+
+    expect(drifted(world)).toEqual([]);
+
+    // `a` keeps its content (only stored), `c` changes it (written).
+    commitParts(world, [part("a", { x: 2 }), part("c", { x: 4 })]);
+
+    expect(drifted(world)).toEqual(["a", "c"]);
+
+    commitParts(world, [part("a", { x: 9 }), part("c", { x: 5 })]);
+    settleFrames(world);
+    draw(world, ["a", "c"]);
+    commitParts(world, [part("a", { x: 9 }), part("c", { x: 5 })], "restore");
+
+    expect(drifted(world)).toEqual(["a", "c"]);
+    expect(sweepOf(world, "a")).toBe(DRAWN);
+    expect(sweepOf(world, "c")).toBe(DRAWN);
+  });
+
+  // Bug: the dev check lets a `when` that throws on the new item stop the reconcile, so a dev build
+  // drops a change a release build writes.
+  it("warns nothing and writes the change when a when throws on the new item in a dev build", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const world = createMockWorld();
+
+    mountWatch(world, [part("a", { hand: true })], watch({ when: throwsAtFive }));
+    commitParts(world, [part("a", { hand: true, x: 5 })]);
+    settleFrames(world);
+
+    expect(world.api.ecs.get(partOf(world, "a"), Transform)?.x).toBe(5);
+    expect(drifted(world)).toEqual([]);
+    expect(world.log.error).not.toHaveBeenCalled();
+  });
+
+  // Bug: a key that comes back during its exit takes the new item unseen by the drift check.
+  it("warns for a view revived with an item that answers otherwise", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const world = createMockWorld();
+
+    mountWatch(
+      world,
+      [part("a", { hand: true })],
+      watch({
+        motion: { exit: view => view.tween(Transform, { x: 50 }, { ms: 200, ease: "linear" }) }
+      })
+    );
+
+    const entity = partOf(world, "a");
+
+    commitParts(world, []);
+    world.frame(100);
+    commitParts(world, [part("a")]);
+
+    expect(partOf(world, "a")).toBe(entity);
+    expect(drifted(world)).toEqual(["a"]);
+  });
+});
+
+/**
+ * A stopwatch shown while the session is open, its window held warm on a hand (on a bolt once the
+ * player sets `warmHand: false`).
+ *
+ * @param when - The `when` of its pair.
+ * @returns The world, mounted closed and warmed up.
+ */
+function warmWatch(when: (found: Part) => boolean = isHand): MockWorld {
+  const world = createMockWorld();
+  const spec = projection({
+    name: WATCH,
+    layer: "items",
+    from: (_player: Watch, session: { open?: boolean }): Part[] =>
+      session.open === true ? [part("w", { x: 3 })] : [],
+    key: (found: Part) => found.id,
+    view: (found: Part) => [Arc({ sweep: found.sweep }), Transform({ x: found.x })],
+    warm: (player: Watch) => part("w", { hand: player.warmHand !== false }),
+    initialOnly: [[Arc, ["sweep"], when]]
+  }) as AnyProjectionSpec;
+
+  setParts(world, []);
+  world.model.session = {};
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(spec);
+  world.start();
+  world.api.projection.onBuild(() => true);
+  world.api.projection.mount([WATCH], MOUNT_OWNER);
+  world.frame(16);
+  world.frame(16);
+
+  return world;
+}
+
+describe("projection initialOnly when — a warm window", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Bug: the held view is asked on the item it is shown with, or never, so the answer of its birth
+  // is lost; or the drift check misses a warm view shown with another item.
+  it("asks when on the warm item, and a dev build warns when the shown item answers otherwise", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const world = warmWatch();
+    const held = world.ctx.state.projection.warm.get(WATCH)?.view?.entity;
+
+    world.model.session = { open: true };
+    world.commit("edge", ["session"]);
+    world.frame(16);
+
+    // The open itself warns: the held view took the shown item in `adoptEntry`.
+    expect(drifted(world)).toEqual(["w"]);
+
+    draw(world, ["w"]);
+    world.commit("restore", ["session"]);
+    world.frame(16);
+
+    expect(partOf(world, "w")).toBe(held);
+    expect(sweepOf(world, "w")).toBe(DRAWN);
+    expect(world.api.ecs.get(partOf(world, "w"), Transform)?.x).toBe(3);
+    expect(drifted(world)).toEqual(["w"]);
+  });
+
+  // Bug: a held view whose warm item changes takes the new item in `writeDifference` unseen by the
+  // drift check.
+  it("warns in a dev build when the warm item of a held view changes its answer", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const world = warmWatch();
+    const record = world.ctx.state.projection.warm.get(WATCH);
+    const held = record?.view;
+
+    world.model.player = { parts: [], warmHand: false };
+    world.commit("edge", ["player"]);
+    world.frame(16);
+    world.frame(16);
+
+    // The same held view took the new warm item: written into, not built again.
+    expect(record?.view).toBe(held);
+    expect(held?.item).toEqual(part("w"));
+    expect(drifted(world)).toEqual(["w"]);
+  });
+
+  // Bug: a `when` that throws on the warm item escapes the warm step and breaks the frame, or a
+  // view is held without the answer of its birth.
+  it("takes a when that throws on the warm item as a failed build: logged, nothing held", () => {
+    const world = warmWatch(() => {
+      throw new Error("no hand");
+    });
+
+    expect(world.log.error).toHaveBeenCalledWith(
+      "world:projection-failed",
+      { projection: WATCH },
+      expect.any(Error)
+    );
+    expect(world.ctx.state.projection.warm.get(WATCH)?.view).toBeUndefined();
+  });
+});
+
+describe("projection initialOnly when — replace", () => {
+  // Bug: `replace` keeps the answers of the birth, or asks the old spec, so a hot swap of the
+  // `when` never reaches the live views.
+  it("asks the new spec's when on the item each view shows now", () => {
+    const world = createMockWorld();
+
+    mountWatch(world, [part("a", { hand: true }), part("b")], watch());
+    // A release build keeps the answers of the birth: `a` muted, `b` not.
+    commitParts(world, [part("a"), part("b", { hand: true })]);
+    world.api.projection.replace(watch());
+    world.frame(16);
+    draw(world, ["a", "b"]);
+    commitParts(world, [part("a"), part("b", { hand: true })], "restore");
+
+    expect(sweepOf(world, "a")).toBe(1);
+    expect(sweepOf(world, "b")).toBe(DRAWN);
+  });
+
+  // Bug: a view a `mute()` gave its own table keeps the old answer's seed sets, or loses its mute,
+  // or never gets the seed of its new answer.
+  it("moves a view with its own mute table to its new answer and keeps the mute", () => {
+    const world = createMockWorld();
+
+    mountWatch(world, [part("a", { hand: true }), part("b")], watch());
+    for (const id of ["a", "b"]) world.api.projection.mute(partOf(world, id), Transform, ["x"]);
+    // A release build keeps the answers of the birth; `replace` asks them again: `a` no, `b` yes.
+    commitParts(world, [part("a"), part("b", { hand: true })]);
+    world.api.projection.replace(watch());
+    world.frame(16);
+    draw(world, ["a", "b"]);
+    for (const id of ["a", "b"]) world.api.ecs.set(partOf(world, id), Transform, { x: 7 });
+    commitParts(world, [part("a"), part("b", { hand: true })], "restore");
+
+    expect(sweepOf(world, "a")).toBe(1);
+    expect(sweepOf(world, "b")).toBe(DRAWN);
+    expect(world.api.ecs.get(partOf(world, "a"), Transform)?.x).toBe(7);
+    expect(world.api.ecs.get(partOf(world, "b"), Transform)?.x).toBe(7);
+  });
+
+  // Bug: the views move while the masks are asked, so a `when` that throws halfway leaves some
+  // views on the new spec's seed and the spec on the old one.
+  it("throws for a when that throws, with every view's table and the spec as they were", () => {
+    const world = createMockWorld();
+
+    mountWatch(world, [part("a", { hand: true }), part("b")], watch());
+
+    const state = world.ctx.state.projection;
+    const spec = state.specs.get(WATCH);
+    const table = state.mutes.get(partOf(world, "a"));
+    const failing = watch({
+      when: found => {
+        if (found.id === "b") throw new Error("no hand");
+
+        return true;
+      }
+    });
+
+    expect(() => world.api.projection.replace(failing)).toThrow("no hand");
+    expect(state.specs.get(WATCH)).toBe(spec);
+    expect(state.mutes.get(partOf(world, "a"))).toBe(table);
+    expect(state.mutes.has(partOf(world, "b"))).toBe(false);
+  });
+});
+
+describe("projection initialOnly when — the spec", () => {
+  // Bug: a third element that is no function is taken, and the birth throws a TypeError later.
+  it("refuses a when that is no function, and a pair with a when and no field, at register", () => {
+    const world = createMockWorld();
+    const base = {
+      name: WATCH,
+      layer: "items",
+      from: (player: Watch) => player.parts,
+      key: (found: Part) => found.id,
+      view: (found: Part) => [Arc({ sweep: found.sweep })]
+    };
+    const notFunction = {
+      ...base,
+      initialOnly: [[Arc, ["sweep"], true]]
+    } as unknown as AnyProjectionSpec;
+    const noField = projection({ ...base, initialOnly: [[Arc, [], isHand]] }) as AnyProjectionSpec;
+
+    expect(() => world.api.projection.register(notFunction)).toThrow(
+      '[game] Projection "board.watch" lists Arc in initialOnly with a "when" that is no function.\n' +
+        "  Give a function of the item, or drop the third element."
+    );
+    expect(() => world.api.projection.register(noField)).toThrow(
+      '[game] Projection "board.watch" lists Arc in initialOnly with no field.'
+    );
+    expect(world.ctx.state.projection.specs.has(WATCH)).toBe(false);
+  });
+
+  // Bug: a 33rd `when` takes bit 32, which is bit 0 again, so its answer mutes another pair's fields.
+  it("refuses more pairs with a when than a mask holds", () => {
+    const world = createMockWorld();
+    const pairs = Array.from({ length: 33 }, () => [Arc, ["sweep"], isHand] as const);
+    const spec = {
+      name: WATCH,
+      layer: "items",
+      from: (player: Watch) => player.parts,
+      key: (found: Part) => found.id,
+      view: (found: Part) => [Arc({ sweep: found.sweep })],
+      initialOnly: pairs
+    } as unknown as AnyProjectionSpec;
+
+    expect(() => world.api.projection.register(spec)).toThrow(
+      '[game] Projection "board.watch" lists 33 initialOnly pairs with a "when".'
+    );
+  });
+});
+
+describe("projection initialOnly when — the ways home", () => {
+  // Bug: a rest write reads the seed of the spec instead of the view's table, so it puts the
+  // system's value back on a covered view or leaves an uncovered one off its rest.
+  it.each([
+    [
+      "a rollback",
+      (world: MockWorld, parts: Part[]): void => commitParts(world, parts, "rollback")
+    ],
+    ["a restore", (world: MockWorld, parts: Part[]): void => commitParts(world, parts, "restore")],
+    ["a load", (world: MockWorld, parts: Part[]): void => commitParts(world, parts, "load")],
+    [
+      "settle(entity)",
+      (world: MockWorld): void => {
+        for (const id of ["hand", "bolt"]) world.api.projection.settle(partOf(world, id));
+      }
+    ]
+  ])("keeps a covered view's field through %s and brings the others home", (_way, goHome) => {
+    const world = createMockWorld();
+    const parts = [part("hand", { hand: true }), part("bolt")];
+
+    mountWatch(world, parts, watch());
+    draw(world, ["hand", "bolt"]);
+    // The same item objects: only the way home decides what is written.
+    setParts(world, parts);
+    goHome(world, parts);
+    settleFrames(world);
+
+    expect(sweepOf(world, "hand")).toBe(DRAWN);
+    expect(sweepOf(world, "bolt")).toBe(1);
   });
 });

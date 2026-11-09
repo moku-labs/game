@@ -41,10 +41,14 @@ export const BUDGET = {
   mutedOwned: 0,
   /**
    * F91: 50 fades on views whose projection names `initialOnly` fields, asking for their muted fields: the seed every
-   * view shares, joined once with the type's owned field. New: 0 B.
+   * view shares, joined once with the type's owned field. New: 0 B. F159 holds the same budget for 50 fades on views
+   * a `when` covers half of: the `when` is asked at the birth only, each view keeps its seed.
    */
   initialOnlyAsks: 0,
-  /** F91: a still frame over 300 such views after their fade ended off the rest pose. New: 0 B. */
+  /**
+   * F91: a still frame over 300 such views after their fade ended off the rest pose. New: 0 B. F159 holds the same
+   * budget with a `when` that covers half of them.
+   */
   initialOnlyStill: 0,
   /** W6: `ecs.get`. Was 0 B. */
   ecsGet: 0,

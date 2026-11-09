@@ -407,34 +407,60 @@ export type AnyProjectionMotion = {
 
 /**
  * One pair of `ProjectionSpec.initialOnly`: a component and the fields of it that `view` gives a
- * view once, when it is born. The field names are checked against the component's own value.
+ * view once, when it is born. The field names are checked against the component's own value. A
+ * third element, `when`, covers only the views whose item answers true at their birth; `Item` is
+ * the item `from` gives, so `when` reads its fields checked. The answer is fixed for the life of
+ * the view. Without `when` the pair covers every view.
  *
  * @example
  * ```ts
+ * // The arc of every ring is the system's.
  * const arc: InitialOnlyPair<ShapeValue> = [Shape, ["sweep"]];
+ * // Only the hand of the stopwatch turns with the clock; its bolt keeps the rotation `view` gives.
+ * type Part = { id: string; role: "bolt" | "restHand" };
+ * const hand: InitialOnlyPair<TransformValue, Part> = [Transform, ["rotation"], part => part.role === "restHand"];
+ * hand[2]?.({ id: "hand", role: "restHand" }); // true
+ * hand[2]?.({ id: "bolt", role: "bolt" }); // false
  * ```
  */
-export type InitialOnlyPair<Value extends object> = readonly [
-  ComponentHandle<Value>,
-  readonly (keyof Value & string)[]
-];
+export type InitialOnlyPair<Value extends object, Item = unknown> =
+  | readonly [ComponentHandle<Value>, readonly (keyof Value & string)[]]
+  | readonly [
+      ComponentHandle<Value>,
+      readonly (keyof Value & string)[],
+      (item: NoInfer<Item>) => boolean
+    ];
 
 /**
  * The `initialOnly` list of a projection: one pair for each value type of `Values`, each pair
- * checked against its own component. `projection()` infers `Values` from the list, so
- * `[[Shape, ["swep"]]]` is a type error.
+ * checked against its own component, and each `when` typed with the item `Item` of `from`.
+ * `projection()` infers `Values` from the list and `Item` from `from`, so `[[Shape, ["swep"]]]`
+ * and a `when` that reads a field the item lacks are type errors.
  *
  * @example
  * ```ts
- * const fields: InitialOnly<[ShapeValue, TransformValue]> = [
+ * type Part = { id: string; role: "bolt" | "restHand" };
+ * const fields: InitialOnly<[ShapeValue, TransformValue], Part> = [
  *   [Shape, ["sweep", "alpha"]],
- *   [Transform, ["rotation"]]
+ *   [Transform, ["rotation"], part => part.role === "restHand"]
  * ];
  * ```
  */
-export type InitialOnly<Values extends readonly object[]> = {
-  readonly [Index in keyof Values]: InitialOnlyPair<Values[Index]>;
+export type InitialOnly<Values extends readonly object[], Item = unknown> = {
+  readonly [Index in keyof Values]: InitialOnlyPair<Values[Index], Item>;
 };
+
+/**
+ * The `when` of an `initialOnly` pair with the item type erased, as the world stores it. A method
+ * signature, so a `when` typed for a game's item still reaches the erased spec.
+ */
+type AnyWhen = { bivariant(item: unknown): boolean }["bivariant"];
+
+/**
+ * One `initialOnly` pair of an erased spec: the component, its field names no longer tied to it,
+ * and the `when` if any.
+ */
+export type AnyInitialOnlyPair = readonly [ComponentHandle<object>, readonly string[], AnyWhen?];
 
 /**
  * A scene switch, as a plugin hands it to a projection with `projection.feed`: the scene left, the scene entered, and
@@ -521,6 +547,13 @@ export type ProjectionSpec<
    * rules of `mute()`, for every view of the projection and for its whole life. A `mute()` on the
    * view adds to them, and its release keeps them. Left out, the projection writes every field.
    *
+   * A third element, `when(item)`, covers only some views: it is asked once, at the birth of a
+   * view (for a view a warm window builds, on the warm item), and the answer holds for the life of
+   * the view. A `when` that throws is a failed birth, `world:projection-failed`, as a `view` that
+   * throws. A dev build warns `world:initial-only-changed` once per view when a later item would
+   * answer otherwise; nothing changes in the view. `replace` asks the new spec's `when` on the item
+   * each live view shows.
+   *
    * @example
    * ```ts
    * // The timer ring of a chest: born full, then the system `board.rings` draws its arc from `Now`.
@@ -540,8 +573,23 @@ export type ProjectionSpec<
    * });
    * // The fade ends with the 0.42 the system wrote: no full ring, no `world:view-corrected`.
    * ```
+   * @example
+   * ```ts
+   * // The stopwatch: its bolt tweens home with the enter motion, its hand turns with `Now`.
+   * export const stopwatch = projection({
+   *   name: "board.stopwatch",
+   *   layer: "marks",
+   *   from: (player: Player) => player.board.stopwatch.parts,
+   *   key: part => part.id,
+   *   view: part => [Transform({ x: part.x, y: part.y, rotation: part.rotation })],
+   *   motion: { enter: view => view.toRest(Transform, { ms: 300 }) },
+   *   initialOnly: [[Transform, ["rotation"], part => part.role === "restHand"]]
+   * });
+   * // The hand keeps the angle `board.hand` writes through the enter, a lift and the way home;
+   * // the bolt still ends at its rest rotation.
+   * ```
    */
-  readonly initialOnly?: InitialOnly<Values>;
+  readonly initialOnly?: InitialOnly<Values, Item>;
   /**
    * The item a closed window of this projection is kept built for, so it opens in the frame after the tap. While
    * `from` does not show its key (`key(item)`, or the name of the projection without `key`), the engine builds its
@@ -601,8 +649,8 @@ export type AnyProjectionSpec = {
   key?(item: unknown): string;
   view(item: unknown): ViewOutput;
   readonly motion?: AnyProjectionMotion;
-  /** The `initialOnly` pairs, their field names no longer tied to the component. */
-  readonly initialOnly?: readonly (readonly [ComponentHandle<object>, readonly string[]])[];
+  /** The `initialOnly` pairs, their field names no longer tied to the component, each with its `when` if any. */
+  readonly initialOnly?: readonly AnyInitialOnlyPair[];
   /** The item a closed window is kept built for, its type erased as `from`'s. */
   warm?(player: Json, session: Json): unknown;
 };
@@ -649,6 +697,15 @@ export type View = {
   exiting: boolean;
   /** How the view came, then how it leaves. */
   cause: MotionCause;
+  /**
+   * The `initialOnly` seed the view was born with, the table of its answers: what the release of a
+   * `mute()` keeps. `undefined` for a view no pair covers. A `replace` moves it to the new spec's.
+   */
+  seed: MuteTable | undefined;
+  /** The answers of the `when`s at the birth (or the last `replace`): bit i for the i-th pair with a `when`. */
+  mask: number;
+  /** A dev build warned `world:initial-only-changed` for this view: it warns once. */
+  maskWarned: boolean;
 };
 
 /**
@@ -757,6 +814,20 @@ export type Dirty = { causes: Cause[]; roots: Set<Root>; force: boolean };
 export type MuteTable = ReadonlyMap<string, ReadonlySet<string>>;
 
 /**
+ * The `initialOnly` of one spec, checked: its pairs, where the pairs with a `when` are, and the
+ * frozen seed of every answer mask a view was born with so far. Views with the same answers share
+ * one seed. A mask that covers no pair has `undefined`: no seed.
+ */
+export type SeedBook = {
+  /** The spec's `initialOnly` pairs, checked at `register` or `replace`: every one has a field, every `when` is a function. */
+  readonly pairs: readonly AnyInitialOnlyPair[];
+  /** The indices in `pairs` of the pairs with a `when`, in order: the i-th is bit i of a mask. */
+  readonly asks: readonly number[];
+  /** Answer mask to its frozen seed, filled the first time a view is born with that mask; `undefined` covers no pair. */
+  readonly seeds: Map<number, MuteTable | undefined>;
+};
+
+/**
  * A mute's fields joined with a type's owned fields, and the owned set they were joined with.
  */
 export type JoinedFields = {
@@ -796,8 +867,8 @@ export type ProjectionState = {
    * its spawn muted keeps that table, and the seed joins it.
    */
   mutes: Map<Entity, MuteTable>;
-  /** The `initialOnly` seed of each registered spec that has one, frozen, built at `register` and `replace`. */
-  initialOnly: WeakMap<AnyProjectionSpec, MuteTable>;
+  /** The `initialOnly` seed book of each registered spec that has the option, checked at `register` and `replace`. */
+  initialOnly: WeakMap<AnyProjectionSpec, SeedBook>;
   /** The owned fields of each component type as a set, by the type's frozen `owned` list: made once. */
   ownedSets: WeakMap<readonly string[], ReadonlySet<string>>;
   /** The muted and the owned fields joined, by the mute's field set: dropped when `mute()` or its release changes it. */
@@ -1053,11 +1124,14 @@ export type ProjectionApi = {
   /**
    * Swaps the stored spec of a registered projection. A mounted one has its layers checked against
    * the current scene and runs the new `view` for every item on the next frame, directly. An
-   * unmounted one is only stored; its next `mount` uses it. Nothing changes when the call throws.
+   * unmounted one is only stored; its next `mount` uses it. The new spec's `initialOnly` `when`s
+   * are asked on the item each live view shows now, before any view moves to the fields of its new
+   * answers. Nothing changes when the call throws, also when a `when` throws.
    *
    * @param spec - The new projection, under the name it was registered with.
-   * @throws {Error} When no projection of that name is registered, or when a mounted one names a
-   * `layer` or `lift` the scene does not declare.
+   * @throws {Error} When no projection of that name is registered, when a mounted one names a
+   * `layer` or `lift` the scene does not declare, when its `initialOnly` is refused, or what a
+   * `when` throws.
    * @example
    * ```ts
    * // The dev hot swap in `ui`: the saved `view.ts` exports a new `boardItems`.

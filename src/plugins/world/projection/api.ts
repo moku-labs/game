@@ -21,7 +21,7 @@ import {
   writeRestUnderLoops
 } from "./motions";
 import { checkLayers, mountNames, unmountNames } from "./mount";
-import { learnSeed, muteFields, reseedViews } from "./mutes";
+import { learnSeed, muteFields, replaceSeed } from "./mutes";
 import {
   clearMounted,
   dropIfStill,
@@ -246,11 +246,9 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       if (mounted) checkLayers(spec, state.layers);
 
-      const from = state.initialOnly.get(previous);
-      const seed = learnSeed(state, spec);
-
+      // Asks the new `when`s on the item of each view before anything moves: a throw changes nothing.
+      replaceSeed(state, spec);
       state.specs.set(spec.name, spec);
-      reseedViews(state, spec.name, from, seed);
 
       if (!mounted) return;
 

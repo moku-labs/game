@@ -279,6 +279,9 @@ export function createViewRecord(
     dropWhenStill: false,
     loopOwed: false,
     exiting: false,
-    cause
+    cause,
+    seed: undefined,
+    mask: 0,
+    maskWarned: false
   };
 }

@@ -203,9 +203,35 @@ checked against its own component: `[[Shape, ["swep"]]]` does not compile. A pai
 refused at `register` with `[game] Projection "…" lists Shape in initialOnly with no field.`. Left
 out, the projection writes every field, as before.
 
-The cost: the list is built once per spec, into one frozen table every view of the projection
-shares, so a birth makes no set and the frame does no new work. The table joins the type's `owned`
-fields through the same cached set as a mute (0 B a frame, `__tests__/perf/initial-only.perf.ts`).
+A pair takes a third element, `when(item)`, to cover only some views (F159):
+`initialOnly: [[Transform, ["rotation"], part => part.role === "restHand"]]`. Its `item` is the item
+`from` gives, so a field the item lacks does not compile, through `projection` and through a game's
+`kit.projection`. A pair without `when` covers every view, as before.
+
+- **Fixed at birth.** `when` is asked once, when a view is born: a spawn of the reconcile, or the
+  build of a warm window, which asks it on the warm item. The answer holds for the whole life of the
+  view; a changed item never asks it again in a release build.
+- **A `when` that throws** is a failed birth, as a `view` that throws: `world:projection-failed`,
+  nothing spawned for the item, and the reconcile of that projection stops for this commit.
+- **The dev warning.** In a dev build (`__MOKU_GAME_DEV__`), when a view takes another item (a
+  changed item, a revive, a warm view shown with an item other than the warm one) and its `when`s
+  would now answer otherwise, the engine warns `world:initial-only-changed` with
+  `{ projection, key }`, once per view. Nothing changes in the view. A release build calls nothing.
+- **`replace`** asks the new spec's `when`s on the item each live view shows now, and moves the view
+  to the table of its new answers by the rule above. All answers are asked before any view moves:
+  a `when` that throws makes `replace` throw, and nothing changes.
+- **`mute()` next to it.** The release of a mute keeps the fields of the view's own answers, not
+  the spec's: on a view `when` did not cover, the field is released.
+- A third element that is no function is refused at `register`:
+  `[game] Projection "…" lists Transform in initialOnly with a "when" that is no function.`. A pair
+  with a `when` and no field is refused as one without.
+
+The cost: the list is checked once per spec. A spec without `when` builds one frozen table at
+`register`, which every view of the projection shares. With `when`, the views born with the same
+answers share one frozen table, built the first time a view is born with them and kept per spec; a
+view no pair covers gets none. So a birth makes no set and the frame does no new work. The table
+joins the type's `owned` fields through the same cached set as a mute (0 B a frame, with and
+without `when`, `__tests__/perf/initial-only.perf.ts`).
 
 The recipe of F91, a timer ring whose arc runs on the clock: the view draws it full, the system
 draws the arc from `Now`, and the end of the fade-in keeps the arc.
