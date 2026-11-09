@@ -9,7 +9,8 @@ import type { ProjectionSpec } from "./types";
  * Types a projection: keyed items of the model turned into entities. `Item` is inferred from the
  * return of `from` and reaches `key`, `view` and every motion hook; `layer` and `lift` stay
  * literal, so `defineScene` can check them against the layers of the scene. Each pair of
- * `initialOnly` has its field names checked against its own component.
+ * `initialOnly` has its field names checked against its own component, and its `when`, if any,
+ * takes the item.
  *
  * @param spec - Name, layer, optional lift layer, `from`, `key`, `view`, the motion hooks and
  *   the `initialOnly` fields.

@@ -21,7 +21,8 @@ import type {
   MotionHandle,
   SceneSwitch,
   Track,
-  TweenDriver
+  TweenDriver,
+  ViewHandle
 } from "../../projection/types";
 import type { EcsModule, ProjectionModule } from "../../types";
 import { BOARD, type Item, LAYERS, MOUNT_OWNER, mountBoard, settleFrames } from "../unit/board";
@@ -380,25 +381,32 @@ const Dial = component("Dial", { sweep: 1, alpha: 1, shown: 0 }, { owned: ["show
 /** Name of the rings projection. */
 const RINGS = "perf.rings";
 
-/** One ring of the rings projection. */
-type Ring = { id: string };
+/** One ring of the rings projection: every second one is a clock's, whose arc a system draws (F159). */
+type Ring = { id: string; clock: boolean };
 
 /**
  * The rings projection: every ring fades in when a commit brings it, and its `sweep` is another
- * writer's from the birth on.
+ * writer's from the birth on: of every ring, or with `when` (F159) of the clock rings only.
  *
+ * @param when - Whether the pair asks `ring.clock` at the birth.
  * @returns The spec.
  */
-function ringsSpec(): AnyProjectionSpec {
-  return projection({
+function ringsSpec(when = false): AnyProjectionSpec {
+  const base = {
     name: RINGS,
     layer: "items",
     from: (player: { rings: Ring[] }) => player.rings,
     key: (ring: Ring) => ring.id,
     view: () => [Dial()],
-    motion: { enter: view => view.tween(Dial, { alpha: 1 }, { ms: 200, ease: "linear" }) },
-    initialOnly: [[Dial, ["sweep"]]]
-  }) as AnyProjectionSpec;
+    motion: {
+      enter: (view: ViewHandle<Ring>) => view.tween(Dial, { alpha: 1 }, { ms: 200, ease: "linear" })
+    }
+  };
+  const spec = when
+    ? projection({ ...base, initialOnly: [[Dial, ["sweep"], (ring: Ring) => ring.clock]] })
+    : projection({ ...base, initialOnly: [[Dial, ["sweep"]]] });
+
+  return spec as AnyProjectionSpec;
 }
 
 /**
@@ -407,15 +415,18 @@ function ringsSpec(): AnyProjectionSpec {
  *
  * @param world - The mock world.
  * @param count - How many rings.
+ * @param when - Whether the pair asks a `when`: then every second ring is a clock's.
  */
-function mountRings(world: MockWorld, count: number): void {
+function mountRings(world: MockWorld, count: number, when = false): void {
   const rings: Ring[] = [];
 
-  for (let index = 0; index < count; index += 1) rings.push({ id: `r${index}` });
+  for (let index = 0; index < count; index += 1) {
+    rings.push({ id: `r${index}`, clock: index % 2 === 0 });
+  }
 
   world.model.player = { rings: [] };
   world.api.projection.setLayers(LAYERS);
-  world.api.projection.register(ringsSpec());
+  world.api.projection.register(ringsSpec(when));
   world.start();
   world.api.projection.mount([RINGS], MOUNT_OWNER);
   world.model.player = { rings };
@@ -425,11 +436,14 @@ function mountRings(world: MockWorld, count: number): void {
 
 /**
  * Fifty rings fading in, each fade asking for the muted fields of its view as a driver does on
- * every frame: the `initialOnly` seed of the projection joined with the field the type owns.
+ * every frame: the `initialOnly` seed of the projection joined with the field the type owns. With
+ * `when` (F159) half the rings answered true at their birth: they share the seed of that answer,
+ * the others have none and ask the owned field alone.
  *
+ * @param when - Whether the pair asks a `when`.
  * @returns One frame of the fifty asks.
  */
-export function initialOnlyAsksFixture(): () => void {
+export function initialOnlyAsksFixture(when = false): () => void {
   const world = createMockWorld();
   const asks: Array<() => ReadonlySet<string>> = [];
   const driver: TweenDriver = {
@@ -442,7 +456,7 @@ export function initialOnlyAsksFixture(): () => void {
   };
 
   world.api.projection.setDriver(driver);
-  mountRings(world, 50);
+  mountRings(world, 50, when);
 
   const count = asks.length;
 
@@ -456,14 +470,16 @@ export function initialOnlyAsksFixture(): () => void {
 /**
  * The sweep of a still frame over 300 rings whose fade ended while a system had drawn their
  * `sweep` off the rest pose: the check at the end of the fade ran and corrected nothing, and now
- * nothing moves.
+ * nothing moves. With `when` (F159) half the rings are covered; the end of the fade wrote the
+ * others home.
  *
+ * @param when - Whether the pair asks a `when`.
  * @returns One sweep.
  */
-export function initialOnlyStillFixture(): () => void {
+export function initialOnlyStillFixture(when = false): () => void {
   const world = createMockWorld();
 
-  mountRings(world, ENTITIES);
+  mountRings(world, ENTITIES, when);
 
   for (const entity of world.api.projection.entitiesOf(RINGS)) {
     world.api.ecs.set(entity, Dial, { sweep: 0.42 });

@@ -81,6 +81,133 @@ kit.projection({
   initialOnly: [[Shape, ["swep"]]]
 });
 
+// ---------------------------------------------------------------------------
+// F159: a pair's third element, `when`, is a predicate on the item, typed from `from`. The field
+// checks of F91 hold next to it, through the root helper and through a game's kit.
+// ---------------------------------------------------------------------------
+
+type Part = { id: string; role: "bolt" | "restHand"; x: number };
+type Clock = { parts: Part[] };
+
+// Bug: `when` gets `unknown` or `any` for its item, so a game cannot read a field, or reads a wrong one unchecked.
+const hands = projection({
+  name: "board.clock",
+  layer: "marks",
+  from: (player: Clock) => player.parts,
+  key: part => part.id,
+  view: part => [Transform({ x: part.x })],
+  initialOnly: [
+    [Shape, ["sweep"]],
+    [
+      Transform,
+      ["rotation"],
+      part => {
+        expectTypeOf(part).toEqualTypeOf<Part>();
+
+        return part.role === "restHand";
+      }
+    ]
+  ]
+});
+
+// Bug: a spec with a `when` no longer reaches the world's register, which takes the erased form.
+expectTypeOf(hands).toExtend<AnyProjectionSpec>();
+
+projection({
+  name: "board.clock",
+  layer: "marks",
+  from: (player: Clock) => player.parts,
+  key: (part: Part) => part.id,
+  view: () => [Transform()],
+  // @ts-expect-error — Transform has no field "rotatoin", with a `when` as without one
+  initialOnly: [[Transform, ["rotatoin"], part => part.role === "restHand"]]
+});
+
+projection({
+  name: "board.clock",
+  layer: "marks",
+  from: (player: Clock) => player.parts,
+  key: part => part.id,
+  view: () => [Transform()],
+  // @ts-expect-error — a Part has no field "kind": `when` reads the item `from` gives
+  initialOnly: [[Transform, ["rotation"], part => part.kind === "hand"]]
+});
+
+projection({
+  name: "board.clock",
+  layer: "marks",
+  from: (player: Clock) => player.parts,
+  key: (part: Part) => part.id,
+  view: () => [Transform()],
+  initialOnly: [
+    [Transform, ["x"]],
+    // @ts-expect-error — "rotation" is a field of Transform, not of Arc, also in a pair with a `when`
+    [Arc, ["rotation"], part => part.role === "restHand"]
+  ]
+});
+
+// The kit of a game binds the same helper: the item of `when` is the game's, and the pairs are checked.
+const clockKit = defineGame<{
+  player: Clock;
+  session: Record<string, never>;
+  assets: string;
+  strings: Record<string, never>;
+}>();
+
+const kitHands = clockKit.projection({
+  name: "board.clock",
+  layer: "marks",
+  from: player => player.parts,
+  key: part => part.id,
+  view: () => [Transform()],
+  initialOnly: [
+    [
+      Transform,
+      ["rotation"],
+      part => {
+        expectTypeOf(part).toEqualTypeOf<Part>();
+
+        return part.role === "restHand";
+      }
+    ]
+  ]
+});
+
+expectTypeOf(kitHands).toExtend<AnyProjectionSpec>();
+
+clockKit.projection({
+  name: "board.clock",
+  layer: "marks",
+  from: player => player.parts,
+  key: (part: Part) => part.id,
+  view: () => [Transform()],
+  // @ts-expect-error — Transform has no field "rotatoin"
+  initialOnly: [[Transform, ["rotatoin"], part => part.role === "restHand"]]
+});
+
+clockKit.projection({
+  name: "board.clock",
+  layer: "marks",
+  from: player => player.parts,
+  key: part => part.id,
+  view: () => [Transform()],
+  // @ts-expect-error — a Part has no field "kind"
+  initialOnly: [[Transform, ["rotation"], part => part.kind === "hand"]]
+});
+
+clockKit.projection({
+  name: "board.clock",
+  layer: "marks",
+  from: player => player.parts,
+  key: (part: Part) => part.id,
+  view: () => [Transform()],
+  initialOnly: [
+    [Transform, ["x"]],
+    // @ts-expect-error — "rotation" is a field of Transform, not of Arc
+    [Arc, ["rotation"], part => part.role === "restHand"]
+  ]
+});
+
 // An annotated spec that names no value types still takes a list, unchecked, as the erased form.
 export const annotated: ProjectionSpec<Timer, "marks", never, Player, Record<string, never>> = {
   name: "board.marks",

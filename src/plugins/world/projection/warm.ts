@@ -12,7 +12,7 @@ import type { AnyComponentValue, Entity } from "../ecs/types";
 import { deepEquals, diffComponents } from "./diff";
 import { cancelTracks } from "./driver";
 import { finishHandles, writeRestNow } from "./motions";
-import { seedMutes } from "./mutes";
+import { birthMask, checkDrift, seedMutes } from "./mutes";
 import type {
   AnyProjectionSpec,
   MotionCause,
@@ -552,6 +552,28 @@ function viewOfItem(
 }
 
 /**
+ * Asks the `initialOnly` `when`s of a spec on a warm item. A throw is logged as a projection that failed.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param item - The warm item.
+ * @returns The answer mask, or `undefined` when a `when` threw.
+ */
+function maskOfItem(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  item: unknown
+): number | undefined {
+  try {
+    return birthMask(pctx.ctx.state.projection, spec, item);
+  } catch (error) {
+    pctx.ctx.log.error("world:projection-failed", { projection: spec.name }, asError(error));
+
+    return undefined;
+  }
+}
+
+/**
  * Starts the work of a record: it becomes the record in work, `left()` counts the warm budget from the frame rate
  * the loop runs at, and the loop is woken, so the building frames come at the full rate.
  *
@@ -571,7 +593,7 @@ function startWork(pctx: ProjectionCtx, record: WarmRecord): void {
  * Spawns the held view of a warm item, as a scene build spawns a view: bare, flagged held, then its `Layer` and its
  * view components, so an `onAdded` hook already asks `isBuilding` true, and with `"change"` as its cause, so its
  * enter plays when it is shown. The record is in work from before the spawn: what ui marks in its hooks is the
- * record's. Nothing is spawned when `view` throws.
+ * record's. The `initialOnly` `when`s are asked on the warm item. Nothing is spawned when `view` or a `when` throws.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -590,6 +612,10 @@ function spawnWarm(
 
   if (values === undefined) return;
 
+  const mask = maskOfItem(pctx, spec, warm.item);
+
+  if (mask === undefined) return;
+
   const state = pctx.ctx.state.projection;
 
   startWork(pctx, record);
@@ -598,8 +624,9 @@ function spawnWarm(
   const view = createViewRecord(entity, spec.name, warm.key, warm.item, values, "change");
 
   record.entities.add(entity);
+  view.mask = mask;
   // The spawn wrote the `initialOnly` fields from `view`; from here on they are another writer's.
-  seedMutes(state, spec, entity);
+  seedMutes(state, spec, view);
   state.byEntity.set(entity, view);
   record.view = view;
   record.key = warm.key;
@@ -640,6 +667,7 @@ function refreshWarm(
 
     startWork(pctx, record);
     writeDifference(pctx, view, next, warm.item);
+    checkDrift(pctx, spec, view);
     record.item = warm.item;
 
     return true;
