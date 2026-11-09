@@ -101,7 +101,8 @@ export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
 /**
  * Rebuilds the layer containers when `world.projection.layers()` handed out a new list. A name
  * that stayed keeps its container, its hidden mask and every view in it; a name that left is
- * detached, and the views that still name it are reported.
+ * detached, and the views that still name it are reported. A layer the loader of a scene being left holds above the
+ * veil stays there.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when the list was new and the containers were rebuilt.
@@ -139,10 +140,19 @@ export function syncLayers(sctx: SyncCtx): boolean {
   state.layers = next;
   state.hudLayer = hudLayerIn(next);
 
+  // Every declared layer under the root, in list order, but one the loader of a scene being left holds above the veil:
+  // under the root for the rest of the frame it would fall into an overlay's range and draw hidden (F161). The look
+  // puts it at its place at the end.
+  const held = state.leave.objects?.held;
+
   for (const spec of list) {
     const container = next.get(spec.name)?.container;
 
-    if (container !== undefined) root.addChild(container);
+    if (container === undefined) continue;
+
+    const liftedByLoader = held !== undefined && container.parent === held;
+
+    if (!liftedByLoader) root.addChild(container);
   }
 
   return true;

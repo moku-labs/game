@@ -50,6 +50,11 @@ export const BUDGET = {
    * budget with a `when` that covers half of them.
    */
   initialOnlyStill: 0,
+  /**
+   * Nested mutes: 50 such fades, each view with two mutes of one field nested and the inner one released, asking for
+   * their muted fields. New: 0 B. The counts live beside the field set and are read only by `mute()` and its release.
+   */
+  nestedMutes: 0,
   /** W6: `ecs.get`. Was 0 B. */
   ecsGet: 0,
   /**

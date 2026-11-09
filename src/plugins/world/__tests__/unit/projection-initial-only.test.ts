@@ -420,6 +420,24 @@ describe("projection initialOnly — next to mute()", () => {
 
     expect(arcOf(world, "a")).toEqual({ sweep: DRAWN, alpha: 1 });
   });
+
+  // Bug: with mutes counted, the last release of a seed field frees it, and the projection writes it again.
+  it("keeps the field muted when two nested mutes that named it are released", () => {
+    const world = createMockWorld();
+    const timers = [timer("a")];
+
+    mountMarks(world, timers, marks());
+
+    const outer = world.api.projection.mute(ringOf(world, "a"), Arc, ["sweep"]);
+    const inner = world.api.projection.mute(ringOf(world, "a"), Arc, ["sweep", "alpha"]);
+
+    inner();
+    outer();
+    world.api.ecs.set(ringOf(world, "a"), Arc, { sweep: DRAWN, alpha: 0.3 });
+    commitTimers(world, timers, "restore");
+
+    expect(arcOf(world, "a")).toEqual({ sweep: DRAWN, alpha: 1 });
+  });
 });
 
 describe("projection initialOnly — the spec", () => {

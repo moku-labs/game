@@ -103,3 +103,54 @@ describe("the muted fields of a track", () => {
     expect([...muted()]).toEqual(["shown"]);
   });
 });
+
+describe("mutes on one field", () => {
+  // Bug: a drag muted x/y/rotation of the carried hand and its release freed the rotation a system had muted, so the
+  // projection wrote the hand back to 12 o'clock. Mutes on one field nest: it is free once the last one is released.
+  it("nest: the field stays muted until the last mute of it is released", () => {
+    const world = createMockWorld();
+    const { entity, muted } = trackedElement(world, false);
+    const system = world.api.projection.mute(entity, Plain, ["x"]);
+    const drag = world.api.projection.mute(entity, Plain, ["x", "y"]);
+
+    drag();
+
+    expect([...muted()]).toEqual(["x"]);
+
+    system();
+
+    expect([...muted()]).toEqual([]);
+  });
+
+  it("are released in any order", () => {
+    const world = createMockWorld();
+    const { entity, muted } = trackedElement(world, false);
+    const system = world.api.projection.mute(entity, Plain, ["x"]);
+    const drag = world.api.projection.mute(entity, Plain, ["x", "y"]);
+
+    system();
+
+    expect([...muted()].toSorted()).toEqual(["x", "y"]);
+
+    drag();
+
+    expect([...muted()]).toEqual([]);
+  });
+
+  // Bug: a remover called twice would take a second mute's hold on the field with it.
+  it("count each remover once, however often it is called", () => {
+    const world = createMockWorld();
+    const { entity, muted } = trackedElement(world, false);
+    const system = world.api.projection.mute(entity, Plain, ["x"]);
+    const drag = world.api.projection.mute(entity, Plain, ["x"]);
+
+    drag();
+    drag();
+
+    expect([...muted()]).toEqual(["x"]);
+
+    system();
+
+    expect([...muted()]).toEqual([]);
+  });
+});

@@ -867,6 +867,11 @@ export type ProjectionState = {
    * its spawn muted keeps that table, and the seed joins it.
    */
   mutes: Map<Entity, MuteTable>;
+  /**
+   * How many live `mute()` calls hold each field, by the field set a mute wrote: a field leaves its set only when the
+   * last of them is released, so mutes on one field nest.
+   */
+  muteCounts: WeakMap<ReadonlySet<string>, Map<string, number>>;
   /** The `initialOnly` seed book of each registered spec that has the option, checked at `register` and `replace`. */
   initialOnly: WeakMap<AnyProjectionSpec, SeedBook>;
   /** The owned fields of each component type as a set, by the type's frozen `owned` list: made once. */
@@ -1311,9 +1316,9 @@ export type ProjectionApi = {
   settle(entity: Entity): void;
 
   /**
-   * Hands a set of fields to another writer. Tracks never write them, also not on `finish()`. On
-   * a view whose projection names `initialOnly` fields the mute adds to them, and the remover keeps
-   * them.
+   * Hands a set of fields to another writer. Tracks never write them, also not on `finish()`.
+   * Mutes of one field nest: the field is handed back when the last of them is released. On a view
+   * whose projection names `initialOnly` fields the mute adds to them, and the remover keeps them.
    *
    * @param entity - The entity of the view.
    * @param component - The component whose fields are taken over.
@@ -1326,6 +1331,13 @@ export type ProjectionApi = {
    * const release = world.projection.mute(held, Transform, ["x", "y"]);
    *
    * release(); // the finger let go
+   *
+   * // A system turns the hand of a clock; a drag of that clock mutes the rotation too.
+   * const turn = world.projection.mute(hand, Transform, ["rotation"]);
+   * const drag = world.projection.mute(hand, Transform, ["x", "y", "rotation"]);
+   *
+   * drag(); // "rotation" stays muted: `turn` still holds it
+   * turn(); // now tracks write it again
    * ```
    */
   mute(entity: Entity, component: ComponentType<object>, fields: readonly string[]): () => void;
