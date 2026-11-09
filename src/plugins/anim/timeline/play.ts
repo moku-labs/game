@@ -52,7 +52,9 @@ export function resolveTarget(
  * whenever nothing animates the target; an entity nothing projects answers its current
  * `Transform`. Inside `build` no spawn step has run yet, so `at(spawned(id))` answers the identity
  * pose and one warning. A target nothing resolves gives the identity pose and one
- * warning, so a choreography over a screen that is not there plays on instead of throwing.
+ * warning, so a choreography over a screen that is not there plays on instead of throwing. In a dev
+ * build the miss is an error: a flight that starts in the screen's corner is a bug of the game
+ * (F163).
  *
  * @param actx - Domain context of the anim plugin.
  * @param target - The projection key, the entity or the spawned id to read.
@@ -73,10 +75,11 @@ export function restPoseOf(
       : (projection.restOf(entity, Transform) ?? ecs.get(entity, Transform));
 
   if (entity === undefined || own === undefined) {
-    actx.log.warn(
-      "anim:target-missing",
-      typeof target === "number" ? { entity: target } : { ...target }
-    );
+    const isDev = typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
+    const data = typeof target === "number" ? { entity: target } : { ...target };
+
+    if (isDev) actx.log.error("anim:target-missing", data);
+    else actx.log.warn("anim:target-missing", data);
 
     return { x: 0, y: 0, rotation: 0, scale: 1 };
   }
