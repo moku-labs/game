@@ -139,10 +139,16 @@ export function syncLayers(sctx: SyncCtx): boolean {
   state.layers = next;
   state.hudLayer = hudLayerIn(next);
 
+  const held = state.leave.objects?.held;
+
   for (const spec of list) {
     const container = next.get(spec.name)?.container;
 
-    if (container !== undefined) root.addChild(container);
+    // A layer the loader of a scene being left holds above the veil stays there: under the root for the rest of the
+    // frame it would fall into an overlay's range and draw hidden (F161). The look puts it at its place at the end.
+    if (container !== undefined && (held === undefined || container.parent !== held)) {
+      root.addChild(container);
+    }
   }
 
   return true;
