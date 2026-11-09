@@ -393,15 +393,18 @@ export function coolShown(state: ProjectionState, name: string, view: View): voi
 /**
  * Writes the difference between a view's rest pose and a new output of `view` straight onto its entity: added and
  * changed components are written, removed ones taken off, no hook runs and no motion plays. The direct write of a
- * changed item, for a held view and for the one the open shows.
+ * changed item, for a held view and for the one the open shows. The view takes the new item, so a dev build checks
+ * the `initialOnly` answers of its birth against it (`checkDrift`).
  *
  * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
  * @param view - The view.
  * @param next - The new output of `view(item)`, by component name.
  * @param item - The item it was made from.
  */
 export function writeDifference(
   pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
   view: View,
   next: Map<string, AnyComponentValue>,
   item: unknown
@@ -418,6 +421,7 @@ export function writeDifference(
 
   view.rest = next;
   view.item = item;
+  checkDrift(pctx, spec, view);
   finishHandles(view);
   writeRestNow(pctx, view, changed);
 }
@@ -666,8 +670,7 @@ function refreshWarm(
     }
 
     startWork(pctx, record);
-    writeDifference(pctx, view, next, warm.item);
-    checkDrift(pctx, spec, view);
+    writeDifference(pctx, spec, view, next, warm.item);
     record.item = warm.item;
 
     return true;

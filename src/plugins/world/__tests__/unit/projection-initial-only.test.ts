@@ -545,7 +545,7 @@ describe("projection initialOnly — the spec", () => {
 
 /** One part of a stopwatch: the hand turns with the clock, a bolt keeps what `view` gave it. */
 type Part = { id: string; hand: boolean; sweep: number; x: number };
-type Watch = { parts: Part[] };
+type Watch = { parts: Part[]; warmHand?: boolean };
 
 const WATCH = "board.watch";
 
@@ -897,7 +897,8 @@ describe("projection initialOnly when — a changed item", () => {
 });
 
 /**
- * A stopwatch shown while the session is open, its window held warm on a hand.
+ * A stopwatch shown while the session is open, its window held warm on a hand (on a bolt once the
+ * player sets `warmHand: false`).
  *
  * @param when - The `when` of its pair.
  * @returns The world, mounted closed and warmed up.
@@ -911,7 +912,7 @@ function warmWatch(when: (found: Part) => boolean = isHand): MockWorld {
       session.open === true ? [part("w", { x: 3 })] : [],
     key: (found: Part) => found.id,
     view: (found: Part) => [Arc({ sweep: found.sweep }), Transform({ x: found.x })],
-    warm: () => part("w", { hand: true }),
+    warm: (player: Watch) => part("w", { hand: player.warmHand !== false }),
     initialOnly: [[Arc, ["sweep"], when]]
   }) as AnyProjectionSpec;
 
@@ -944,6 +945,10 @@ describe("projection initialOnly when — a warm window", () => {
     world.model.session = { open: true };
     world.commit("edge", ["session"]);
     world.frame(16);
+
+    // The open itself warns: the held view took the shown item in `adoptEntry`.
+    expect(drifted(world)).toEqual(["w"]);
+
     draw(world, ["w"]);
     world.commit("restore", ["session"]);
     world.frame(16);
@@ -951,6 +956,26 @@ describe("projection initialOnly when — a warm window", () => {
     expect(partOf(world, "w")).toBe(held);
     expect(sweepOf(world, "w")).toBe(DRAWN);
     expect(world.api.ecs.get(partOf(world, "w"), Transform)?.x).toBe(3);
+    expect(drifted(world)).toEqual(["w"]);
+  });
+
+  // Bug: a held view whose warm item changes takes the new item in `writeDifference` unseen by the
+  // drift check.
+  it("warns in a dev build when the warm item of a held view changes its answer", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const world = warmWatch();
+    const record = world.ctx.state.projection.warm.get(WATCH);
+    const held = record?.view;
+
+    world.model.player = { parts: [], warmHand: false };
+    world.commit("edge", ["player"]);
+    world.frame(16);
+    world.frame(16);
+
+    // The same held view took the new warm item: written into, not built again.
+    expect(record?.view).toBe(held);
+    expect(held?.item).toEqual(part("w"));
     expect(drifted(world)).toEqual(["w"]);
   });
 
@@ -986,6 +1011,27 @@ describe("projection initialOnly when — replace", () => {
 
     expect(sweepOf(world, "a")).toBe(1);
     expect(sweepOf(world, "b")).toBe(DRAWN);
+  });
+
+  // Bug: a view a `mute()` gave its own table keeps the old answer's seed sets, or loses its mute,
+  // or never gets the seed of its new answer.
+  it("moves a view with its own mute table to its new answer and keeps the mute", () => {
+    const world = createMockWorld();
+
+    mountWatch(world, [part("a", { hand: true }), part("b")], watch());
+    for (const id of ["a", "b"]) world.api.projection.mute(partOf(world, id), Transform, ["x"]);
+    // A release build keeps the answers of the birth; `replace` asks them again: `a` no, `b` yes.
+    commitParts(world, [part("a"), part("b", { hand: true })]);
+    world.api.projection.replace(watch());
+    world.frame(16);
+    draw(world, ["a", "b"]);
+    for (const id of ["a", "b"]) world.api.ecs.set(partOf(world, id), Transform, { x: 7 });
+    commitParts(world, [part("a"), part("b", { hand: true })], "restore");
+
+    expect(sweepOf(world, "a")).toBe(1);
+    expect(sweepOf(world, "b")).toBe(DRAWN);
+    expect(world.api.ecs.get(partOf(world, "a"), Transform)?.x).toBe(7);
+    expect(world.api.ecs.get(partOf(world, "b"), Transform)?.x).toBe(7);
   });
 
   // Bug: the views move while the masks are asked, so a `when` that throws halfway leaves some
@@ -1068,6 +1114,7 @@ describe("projection initialOnly when — the ways home", () => {
       (world: MockWorld, parts: Part[]): void => commitParts(world, parts, "rollback")
     ],
     ["a restore", (world: MockWorld, parts: Part[]): void => commitParts(world, parts, "restore")],
+    ["a load", (world: MockWorld, parts: Part[]): void => commitParts(world, parts, "load")],
     [
       "settle(entity)",
       (world: MockWorld): void => {

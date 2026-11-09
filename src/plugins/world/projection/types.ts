@@ -439,6 +439,7 @@ export type InitialOnlyPair<Value extends object, Item = unknown> =
  *
  * @example
  * ```ts
+ * type Part = { id: string; role: "bolt" | "restHand" };
  * const fields: InitialOnly<[ShapeValue, TransformValue], Part> = [
  *   [Shape, ["sweep", "alpha"]],
  *   [Transform, ["rotation"], part => part.role === "restHand"]
@@ -818,9 +819,11 @@ export type MuteTable = ReadonlyMap<string, ReadonlySet<string>>;
  * one seed. A mask that covers no pair has `undefined`: no seed.
  */
 export type SeedBook = {
+  /** The spec's `initialOnly` pairs, checked at `register` or `replace`: every one has a field, every `when` is a function. */
   readonly pairs: readonly AnyInitialOnlyPair[];
   /** The indices in `pairs` of the pairs with a `when`, in order: the i-th is bit i of a mask. */
   readonly asks: readonly number[];
+  /** Answer mask to its frozen seed, filled the first time a view is born with that mask; `undefined` covers no pair. */
   readonly seeds: Map<number, MuteTable | undefined>;
 };
 
@@ -1121,11 +1124,14 @@ export type ProjectionApi = {
   /**
    * Swaps the stored spec of a registered projection. A mounted one has its layers checked against
    * the current scene and runs the new `view` for every item on the next frame, directly. An
-   * unmounted one is only stored; its next `mount` uses it. Nothing changes when the call throws.
+   * unmounted one is only stored; its next `mount` uses it. The new spec's `initialOnly` `when`s
+   * are asked on the item each live view shows now, before any view moves to the fields of its new
+   * answers. Nothing changes when the call throws, also when a `when` throws.
    *
    * @param spec - The new projection, under the name it was registered with.
-   * @throws {Error} When no projection of that name is registered, or when a mounted one names a
-   * `layer` or `lift` the scene does not declare.
+   * @throws {Error} When no projection of that name is registered, when a mounted one names a
+   * `layer` or `lift` the scene does not declare, when its `initialOnly` is refused, or what a
+   * `when` throws.
    * @example
    * ```ts
    * // The dev hot swap in `ui`: the saved `view.ts` exports a new `boardItems`.

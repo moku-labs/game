@@ -268,10 +268,13 @@ function adoptEntry(
 
   showHeld(pctx, mounted, record, entry.direct ? "mount" : "change");
 
-  if (next === undefined) view.item = entry.item;
-  else writeDifference(pctx, view, next, entry.item);
+  if (next === undefined) {
+    view.item = entry.item;
+    checkDrift(pctx, spec, view);
+  } else {
+    writeDifference(pctx, spec, view, next, entry.item);
+  }
 
-  checkDrift(pctx, spec, view);
   playEnter(pctx, spec, view, entry);
 }
 

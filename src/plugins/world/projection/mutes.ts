@@ -213,13 +213,15 @@ function asksOf(spec: AnyProjectionSpec, pairs: readonly AnyInitialOnlyPair[]): 
  */
 function buildSeed(book: SeedBook, mask: number): MuteTable | undefined {
   const seed = new Map<string, ReadonlySet<string>>();
-  let bit = 0;
+  // The bit of the next pair with a `when`: they count 0, 1, 2… in list order, as `maskOfBook` asks them.
+  let whenBit = 0;
 
   for (const [component, fields, when] of book.pairs) {
+    // A pair with a `when` joins only when its answer is in the mask; a pair without one always does.
     if (when !== undefined) {
-      const covered = (mask & (1 << bit)) !== 0;
+      const covered = (mask & (1 << whenBit)) !== 0;
 
-      bit += 1;
+      whenBit += 1;
 
       if (!covered) continue;
     }
@@ -299,17 +301,20 @@ export function learnSeed(state: ProjectionState, spec: AnyProjectionSpec): void
 /**
  * Asks the `when`s of a book on one item.
  *
- * @param book - The seed book of the spec.
+ * @param book - The seed book of the spec, if it has one.
  * @param item - The item.
- * @returns The answers, bit i set when the i-th `when` answers true.
+ * @returns The answers, bit i set when the i-th `when` answers true; 0 with no book or no `when`.
  * @throws {Error} What a `when` throws.
  */
-function maskOf(book: SeedBook, item: unknown): number {
+function maskOfBook(book: SeedBook | undefined, item: unknown): number {
+  if (book === undefined) return 0;
+
   const { asks, pairs } = book;
   const count = asks.length;
   let mask = 0;
 
-  // Per birth: an index loop, no iterator.
+  // Per birth: an index loop, no iterator. `bit < count`, so `asks[bit]` is always defined, and it
+  // is the index of a pair with a `when`: the `?? 0` and the `?.` only satisfy the compiler.
   for (let bit = 0; bit < count; bit += 1) {
     const when = pairs[asks[bit] ?? 0]?.[2];
 
@@ -332,9 +337,7 @@ function maskOf(book: SeedBook, item: unknown): number {
 export function birthMask(state: ProjectionState, spec: AnyProjectionSpec, item: unknown): number {
   if (spec.initialOnly === undefined) return 0;
 
-  const book = state.initialOnly.get(spec);
-
-  return book === undefined || book.asks.length === 0 ? 0 : maskOf(book, item);
+  return maskOfBook(state.initialOnly.get(spec), item);
 }
 
 /**
@@ -424,7 +427,7 @@ export function checkDrift(pctx: ProjectionCtx, spec: AnyProjectionSpec, view: V
   let mask: number;
 
   try {
-    mask = maskOf(book, view.item);
+    mask = maskOfBook(book, view.item);
   } catch {
     return;
   }
@@ -518,9 +521,7 @@ function viewsOf(state: ProjectionState, name: string): View[] {
 export function replaceSeed(state: ProjectionState, spec: AnyProjectionSpec): void {
   const book = checkBook(spec);
   const views = viewsOf(state, spec.name);
-  const masks = views.map(view =>
-    book === undefined || book.asks.length === 0 ? 0 : maskOf(book, view.item)
-  );
+  const masks = views.map(view => maskOfBook(book, view.item));
 
   if (book !== undefined) state.initialOnly.set(spec, book);
 
