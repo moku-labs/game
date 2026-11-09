@@ -109,9 +109,51 @@ function dropEmptyMute(
 }
 
 /**
+ * Counts one more live mute of each field in a field set a mute wrote.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param owned - The field set the mute wrote.
+ * @param fields - The fields it names.
+ */
+function holdFields(state: ProjectionState, owned: Set<string>, fields: readonly string[]): void {
+  let counts = state.muteCounts.get(owned);
+
+  if (counts === undefined) {
+    counts = new Map();
+    state.muteCounts.set(owned, counts);
+  }
+
+  for (const field of fields) counts.set(field, (counts.get(field) ?? 0) + 1);
+}
+
+/**
+ * Counts one live mute of a field less.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param owned - The field set the mute wrote.
+ * @param field - The field.
+ * @returns True when no live mute holds the field any more.
+ */
+function dropHold(state: ProjectionState, owned: Set<string>, field: string): boolean {
+  const counts = state.muteCounts.get(owned);
+  const left = (counts?.get(field) ?? 1) - 1;
+
+  if (left > 0) {
+    counts?.set(field, left);
+
+    return false;
+  }
+
+  counts?.delete(field);
+
+  return true;
+}
+
+/**
  * Hands fields of one component of one entity to another writer, until the remover runs. A view
- * born with an `initialOnly` seed gets its own copy first. The remover keeps the fields of the
- * view's seed, asked when it runs: a mute made inside the spawn came before the view was known.
+ * born with an `initialOnly` seed gets its own copy first. Mutes of one field nest: each counts,
+ * and the field is handed back when the last of them is released. The remover keeps the fields of
+ * the view's seed, asked when it runs: a mute made inside the spawn came before the view was known.
  *
  * @param state - The projection branch of the plugin state.
  * @param entity - The entity.
@@ -129,6 +171,7 @@ export function muteFields(
   const owned = ownFields(table.get(name));
 
   for (const field of fields) owned.add(field);
+  holdFields(state, owned, fields);
   forgetJoined(state, owned);
   table.set(name, owned);
   state.mutes.set(entity, table);
@@ -140,11 +183,11 @@ export function muteFields(
 
     released = true;
 
-    // The view's own `initialOnly` fields stay muted when this mute is released.
+    // A field another live mute holds stays muted, and so do the view's own `initialOnly` fields.
     const kept = initialFieldsOf(state, entity, name);
 
     for (const field of fields) {
-      if (kept?.has(field) !== true) owned.delete(field);
+      if (dropHold(state, owned, field) && kept?.has(field) !== true) owned.delete(field);
     }
 
     forgetJoined(state, owned);

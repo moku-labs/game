@@ -57,6 +57,7 @@ export function createProjectionState(): ProjectionState {
     keys: emptyMap(),
     keysByEntity: emptyMap(),
     mutes: emptyMap(),
+    muteCounts: emptyWeakMap(),
     initialOnly: emptyWeakMap(),
     ownedSets: emptyWeakMap(),
     joinedMutes: emptyWeakMap(),

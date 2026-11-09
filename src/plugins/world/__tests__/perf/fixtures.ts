@@ -468,6 +468,42 @@ export function initialOnlyAsksFixture(when = false): () => void {
 }
 
 /**
+ * Fifty rings fading in as `initialOnlyAsksFixture` makes them, each with two mutes of `alpha` nested on it and the
+ * inner one released (a system's mute under a drag's): each fade asks for the muted fields as a driver does on every
+ * frame, and finds `alpha` still held by the outer mute.
+ *
+ * @returns One frame of the fifty asks.
+ */
+export function nestedMutesFixture(): () => void {
+  const world = createMockWorld();
+  const asks: Array<() => ReadonlySet<string>> = [];
+  const driver: TweenDriver = {
+    track: (_entity, _component, _to, _options, muted) => {
+      asks.push(muted);
+
+      return RUNNING;
+    },
+    cancelAll: (): void => {}
+  };
+
+  world.api.projection.setDriver(driver);
+  mountRings(world, 50);
+
+  for (const entity of world.api.projection.entitiesOf(RINGS)) {
+    world.api.projection.mute(entity, Dial, ["alpha"]);
+    world.api.projection.mute(entity, Dial, ["alpha", "shown"])();
+  }
+
+  const count = asks.length;
+
+  return (): void => {
+    for (let index = 0; index < count; index += 1) {
+      sink.flag = asks[index]?.().has("alpha") === true;
+    }
+  };
+}
+
+/**
  * The sweep of a still frame over 300 rings whose fade ended while a system had drawn their
  * `sweep` off the rest pose: the check at the end of the fade ran and corrected nothing, and now
  * nothing moves. With `when` (F159) half the rings are covered; the end of the fade wrote the

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { initialOnlyAsksFixture, initialOnlyStillFixture } from "./fixtures";
+import { initialOnlyAsksFixture, initialOnlyStillFixture, nestedMutesFixture } from "./fixtures";
 
 describe("initialOnly: heap per frame", () => {
   it("50 fades asking for the muted fields of their initialOnly views stay within budget", async ({
@@ -39,5 +39,15 @@ describe("initialOnly: heap per frame", () => {
 
     await annotate(`initialOnly when, still frame over 300 views: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.initialOnlyStill + NOISE_BYTES);
+  });
+
+  // Nested mutes: the counts are read by `mute()` and its release only; the frame asks the field set as before.
+  it("50 fades asking on views with two nested mutes of one field, one released, stay within budget", async ({
+    annotate
+  }) => {
+    const bytes = alloc(nestedMutesFixture(), 2000);
+
+    await annotate(`nested mutes, 50 fades asking: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.nestedMutes + NOISE_BYTES);
   });
 });
