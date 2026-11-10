@@ -640,13 +640,6 @@ const CASES: readonly Case[] = [
     resolved: 0,
     applied: false
   },
-  {
-    name: "motion",
-    key: "go",
-    props: { motion: { change: { Box: (): undefined => undefined } } },
-    resolved: 0,
-    applied: false
-  },
   { name: "intent", key: "go", props: { intent: "stop" }, resolved: 0, applied: false },
   { name: "payload", key: "go", props: { payload: { id: 2 } }, resolved: 0, applied: false },
   { name: "local", key: "tab", props: { local: { tab: "video" } }, resolved: 0, applied: false },
@@ -716,6 +709,20 @@ describe("one prop changed alone", () => {
     expect(h.element("go").is.disabled).toBe(true);
   });
 
+  // Bug (F168): a new motion counted as a change, and the rest look was written over a running
+  // tween. A motion writes nothing: the element only keeps its hooks for the next play.
+  it("writes nothing for a new motion alone, and keeps its hooks on the element", () => {
+    const h = harness();
+    const motion = { change: { Box: (): undefined => undefined } };
+
+    h.mount(screen());
+    h.render(screen({ go: { motion } }));
+
+    expect(h.touched()).toEqual([]);
+    expect(h.counters.written).toBe(0);
+    expect(h.element("go").motion).toBe(motion);
+  });
+
   it("restarts the loop of an element whose motion names another loop", () => {
     const h = harness();
 
@@ -740,15 +747,19 @@ describe("a function inside a prop", () => {
     expect(h.counters.written).toBe(0);
   });
 
-  it("is another one when it is built again per render, so the element is written every time", () => {
+  it("is another one when it is built again per render: the element takes it, and writes nothing (F168)", () => {
     const h = harness();
 
     h.mount(screen(inlineHook()));
     h.render(screen(inlineHook()));
+
+    const second = h.element("go").motion;
+
     h.render(screen(inlineHook()));
 
-    expect(h.touched()).toEqual([h.entity("go")]);
-    expect(h.counters.written).toBe(2);
+    expect(h.element("go").motion).not.toBe(second);
+    expect(h.touched()).toEqual([]);
+    expect(h.counters.written).toBe(0);
     expect(h.resolveElement).not.toHaveBeenCalled();
     expect(h.applyStyle).not.toHaveBeenCalled();
   });

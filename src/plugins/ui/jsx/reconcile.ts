@@ -184,9 +184,10 @@ const CONTENT_ROW_STYLE: Style = Object.freeze({ origin: "topLeft", direction: "
 /**
  * The props, besides `style`, `state` and `content`, that a live element is written from: `bind`,
  * `texture`, `name` and `fit` reach its visual, `intent`, `payload`, `point`, `local` and `escape`
- * its input, `components` its extras and `motion` its hooks. Every other prop is read from the node
- * where it is used, at every patch: `hosts`, the props of a windowed scroll, the props of a text
- * field, and the children.
+ * its input, `components` its extras. Every other prop is read from the node where it is used, at
+ * every patch: `hosts`, the props of a windowed scroll, the props of a text field, and the
+ * children. `motion` writes nothing: the patch stores it on the element at every render, and a new
+ * identity of the same look rewrites nothing a running tween holds (F168).
  */
 const WRITTEN: readonly string[] = [
   "bind",
@@ -194,7 +195,6 @@ const WRITTEN: readonly string[] = [
   "name",
   "fit",
   "components",
-  "motion",
   "intent",
   "payload",
   "point",
@@ -1312,7 +1312,8 @@ export function createReconciler(
    * for, no component set, no rest recorded, no rest pose moved. What still runs for it reads a
    * prop the comparison leaves out, or costs nothing: the check of a windowed scroll's props; the
    * node of this render kept on the element, which the hosts, the rows of a windowed scroll, a
-   * text field and the measure of a text read later; its motion and its instance; the host set;
+   * text field and the measure of a text read later; its motion, whose identity alone changes
+   * nothing written (F168), and its instance; the host set;
    * the props of a text field; the loop of a new motion; and the diff of its children.
    *
    * @param root - The root being reconciled.
