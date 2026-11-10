@@ -320,7 +320,9 @@ function stampHold(ctx: ScenesCtx, leaving: Leaving, loader: Readonly<FullLoader
  * decides, and the scene being entered sets the veil's colour and alpha (`enter.cover`). A loader projection is fed
  * the switch from now on, and shown or mounted only once its loader is due. A loader with a floor stamps it here, on the
  * look's clock and frame counter: the swap of `build.ts` waits for it. An abort of the node drops both at once, from its
- * listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over.
+ * listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over. A switch that shows
+ * no look is recorded as declined for that signal and scene (`leaveDeclined`), so the stage after `begin` does not ask
+ * the scene's `leave` function again.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene being switched to.
@@ -339,7 +341,12 @@ export function startLeave(
 
   const leave = leaveOf(ctx.config.leave, sceneLeaveOf(ctx, from, scene.id));
 
-  if (leave === undefined) return undefined;
+  if (leave === undefined) {
+    // The `scene` stage of this node must not ask the scene's `leave` function for this switch again.
+    ctx.state.declined = { signal: run.signal, to: scene.id };
+
+    return undefined;
+  }
 
   // The scene being entered has the last word on the veil's colour and alpha.
   const cover = enteredCover(leave.cover, scene.enter?.cover);
@@ -387,6 +394,21 @@ export function ownLeave(ctx: ScenesCtx, run: RunContext): Leaving | undefined {
 }
 
 /**
+ * Tells whether the `begin` stage of this node already found that the switch to the target shows no look. A target that
+ * changed between the two stages is not declined: its own switch is asked once.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal of the node.
+ * @param target - The scene the switch mounts.
+ * @returns True when `begin` started no look for this node and this scene.
+ */
+export function leaveDeclined(ctx: ScenesCtx, run: RunContext, target: string): boolean {
+  const declined = ctx.state.declined;
+
+  return declined?.signal === run.signal && declined.to === target;
+}
+
+/**
  * The look the `begin` stage of this node started for the scene the `scene` stage switches to. One it started for
  * another scene (the expected scene changed between the two stages) is dropped: its loader was resolved against that
  * scene, so the switch shows its own.
@@ -416,6 +438,9 @@ export function leaveFor(ctx: ScenesCtx, run: RunContext, target: string): Leavi
  */
 export function dropLeftOver(ctx: ScenesCtx, run: RunContext): void {
   const leaving = ctx.state.leaving;
+
+  // What the node before declined is no answer for this one.
+  delete ctx.state.declined;
 
   if (leaving !== undefined && leaving.signal !== run.signal) endLeave(ctx, leaving, "drop");
 }
@@ -457,6 +482,8 @@ export function endLeave(ctx: ScenesCtx, leaving: Leaving | undefined, how: "lan
  * @param state - The plugin state.
  */
 export function forgetLeave(state: State): void {
+  delete state.declined;
+
   const leaving = state.leaving;
 
   if (leaving === undefined) return;

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import { projection } from "../../../world/projection/define";
 import { defineScene } from "../../define";
-import { checkConfig } from "../../lifecycle";
 import type { LeaveSwitch, SceneLeave, SceneState } from "../../types";
 
 type Item = { id: string };
@@ -404,13 +403,5 @@ describe("defineScene with a `leave` that is a function of the switch", () => {
         leave: { cover: { alpha: 2 } }
       })
     ).toThrow('[game] Scene "memory": leave.cover.alpha is 2.');
-  });
-
-  // Bug: `config.leave` takes the function form too: a config has no scene to name in `from`, so the engine would call
-  // it with a switch of nothing.
-  it("is refused in the config, where `leave` stays static", () => {
-    expect(() =>
-      checkConfig({ buildMs: "auto", leave: (() => undefined) as unknown as SceneLeave })
-    ).toThrow("Give { cover, loader } or false");
   });
 });

@@ -210,12 +210,14 @@ export type SceneLeave<Asset extends string = string> =
 
 /**
  * The switch a `leave` function is asked about: the ids of the scene being left and of the scene being switched to. A
- * new frozen object for every call. While a scene stands and holds its loader (F103) `to` is the scene itself.
+ * new frozen object for every call. When a scene stands live (for the loader it holds, F103) `to` is the scene itself.
  *
  * @example
  * ```ts
- * // The memory dissolving into the ward is asked with this value.
- * const sw: LeaveSwitch = { from: "memory", to: "ward" };
+ * // The memory dissolving into the ward is asked with { from: "memory", to: "ward" }; every other exit keeps the config's look.
+ * const leave = (sw: LeaveSwitch): SceneLeave | undefined => (sw.to === "ward" ? { loader: false } : undefined);
+ * leave({ from: "memory", to: "ward" }); // { loader: false }
+ * leave({ from: "memory", to: "board" }); // undefined
  * ```
  */
 export type LeaveSwitch = { readonly from: string; readonly to: string };
@@ -280,7 +282,7 @@ export type SceneSpec<
   /**
    * What a live switch shows over this scene when it is left: merged field by field over `config.leave`. A function is
    * called once per switch that shows a look, when the look starts, with the scene itself as `from`, and once more
-   * when the scene stands and holds its loader, with `to` the scene itself; `undefined` means the scene wrote nothing.
+   * when the scene stands live (for the loader it holds), with `to` the scene itself; `undefined` means the scene wrote nothing.
    * A throw or a result of the wrong shape is logged (`scenes:leave-failed`) and the config's look is shown.
    *
    * @example
@@ -489,6 +491,13 @@ export type State = {
    * one. Absent otherwise: deleted, never written as `undefined`.
    */
   leaving?: Leaving;
+  /**
+   * The switch the `begin` stage of a node saw and found to show no look (a `leave` that resolved to nothing): the
+   * node's signal and the scene it switches to. The `scene` stage of the same node reads it instead of asking the
+   * scene's `leave` function a second time. Replaced by the next such switch, and dropped at the next node and at a
+   * stop. Absent otherwise: deleted, never written as `undefined`.
+   */
+  declined?: { readonly signal: AbortSignal; readonly to: string };
   /**
    * The leave loader projection scenes holds for the next switch of the scene that stands (F103): `world` keeps it
    * built and hidden, and the loader's `due` only shows it. Absent while it holds none: deleted, never written as

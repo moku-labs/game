@@ -18,6 +18,7 @@ import { namedBundles } from "./bundles";
 import {
   dropLeftOver,
   endLeave,
+  leaveDeclined,
   leaveFor,
   loaderProjectionOf,
   ownLeave,
@@ -367,7 +368,9 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
   try {
     const named = namedBundles(scene, committedState(ctx));
 
-    leaving ??= startLeave(ctx, scene, run);
+    if (leaving === undefined && !leaveDeclined(ctx, run, scene.id)) {
+      leaving = startLeave(ctx, scene, run);
+    }
     await loadAndStand(ctx, scene, named, run);
   } catch (error) {
     endLeave(ctx, leaving, "drop");

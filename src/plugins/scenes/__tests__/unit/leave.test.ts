@@ -1018,4 +1018,70 @@ describe("a `leave` that is a function of the switch", () => {
     expect(mock.state.current).toBe("board");
     expect(mock.renderer.leaves.at(-1)).toEqual({ call: "land", current: "board" });
   });
+
+  // Bug: a switch whose look resolves to nothing (`false`) is started again by the `scene` stage of the same node, so
+  // the game's function runs twice for one switch.
+  it("is called once per switch when its result is `false`, though no look was recorded", async () => {
+    const leave = vi.fn<LeaveFn>(() => false);
+    const { mock } = await leavingMemory(leave, "board");
+
+    expect(leave).toHaveBeenCalledExactlyOnceWith({ from: "memory", to: "board" });
+    expect(mock.renderer.leaves).toEqual([]);
+  });
+
+  // Bug: with `config.leave: false` a throw of the function leaves no look, the `scene` stage asks again, and
+  // `scenes:leave-failed` is logged twice for one switch.
+  it("logs a throw once per switch when the config shows nothing", async () => {
+    const { mock } = await leavingMemory(
+      () => {
+        throw new Error("no light");
+      },
+      "board",
+      { buildMs: "auto", leave: false }
+    );
+
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("scenes:leave-failed", {
+      scene: "memory",
+      to: "board",
+      error: expect.any(Error)
+    });
+  });
+
+  // Bug: the "nothing" answer of `begin` is kept by the signal alone, so a scene stage that switches to another scene
+  // than `begin` saw (the expected scene changed between the stages) is never asked about its own switch.
+  it("asks again, once, for the scene the scene stage switches to when begin saw another", async () => {
+    const seen: LeaveSwitch[] = [];
+    const mock = createMockScenes();
+
+    mock.flow.features.push({
+      name: "screens",
+      description: {
+        scenes: [
+          memoryOf(sw => {
+            seen.push(sw);
+
+            return false;
+          }),
+          boardScene,
+          wardScene
+        ]
+      }
+    });
+    mock.start();
+    await mock.enter({ rest: true, scene: "memory" });
+    mock.renderer.host.ready.mockReturnValue(true);
+    mock.world.building.done = true;
+
+    const run = { signal: new AbortController().signal };
+
+    mock.api.expect("board");
+    await mock.stage("begin", { rest: true, over: true }, run);
+    mock.api.expect("ward");
+    await mock.stage("scene", { rest: true, over: true }, run);
+
+    expect(seen).toEqual([
+      { from: "memory", to: "board" },
+      { from: "memory", to: "ward" }
+    ]);
+  });
 });

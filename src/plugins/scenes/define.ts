@@ -236,7 +236,8 @@ function namesOf(
  *   projections: [],
  *   leave: sw => (sw.to === "ward" ? { loader: false } : undefined)
  * });
- * typeof memory.leave; // "function", called with { from: "memory", to: "ward" } at the switch
+ * typeof memory.leave; // "function", called with { from: "memory", to: "ward" } at the switch,
+ * // and with { from: "memory", to: "memory" } when the memory stands live
  * ```
  */
 export function defineScene<

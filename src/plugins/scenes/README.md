@@ -260,9 +260,10 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   frozen `{ from, to }`: the ids of the scene being left and of the scene being switched to. Its result stands where the
   static `leave` of the scene stands, merged over `config.leave`; `undefined` means the scene wrote nothing, so
   `config.leave` shows alone. The engine calls it once per switch that shows a look, when the look starts (`to` is the
-  scene switched to), and once when the scene stands and holds its loader (`to` is the scene itself, see the loader hold
-  below). A fast walk, a world that does not run live, a headless app and the first scene of a run call nothing, and
-  no call is made in a frame. The result is checked like a value written in the scene; a function that throws or a
+  scene switched to), and once when the scene stands live, for the loader it holds (`to` is the scene itself, see the loader hold
+  below). A fast walk, a world that does not run live and a headless app call nothing. The first scene of a run shows
+  no look, but is asked once for its hold when it stands live. No call is made in a frame, and the `scene` stage of a
+  node does not ask again for a switch whose look its `begin` stage found to be nothing. The result is checked like a value written in the scene; a function that throws or a
   result of the wrong shape is logged (`scenes:leave-failed`, with the scene, `to` and the error) and the scene is read
   as having written nothing, so the switch goes on with the config's look. `config.leave` stays a value: a function
   there throws at `createApp`.
