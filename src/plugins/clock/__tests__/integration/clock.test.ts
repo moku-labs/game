@@ -1,18 +1,23 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { coreConfig, createCore } from "../../../../config";
+import { lifecyclePlugin } from "../../../lifecycle";
+import { timePlugin } from "../../../time";
 import { fakeClock } from "../../fake";
 import { clockPlugin } from "../../index";
 import type { Elapsed, FakeClock } from "../../types";
 
 // ---------------------------------------------------------------------------
-// Integration test: clock on a bare framework (the engine defaults are not built yet)
+// Integration test: clock on a bare framework (the engine defaults are not built yet), with the
+// pause stack it hooks (F169) and the time plugin under it
 // ---------------------------------------------------------------------------
+
+const plugins = [timePlugin, lifecyclePlugin, clockPlugin];
 
 const bare = createCore(coreConfig, { plugins: [] });
 
 const createTestApp = (clock: FakeClock = fakeClock(1000)) => {
   const app = bare.createApp({
-    plugins: [clockPlugin],
+    plugins,
     pluginConfigs: { clock: { source: clock } }
   });
 
@@ -111,7 +116,7 @@ describe("clock plugin integration", () => {
   });
 
   it("uses the system source when no source is configured", () => {
-    const app = bare.createApp({ plugins: [clockPlugin] });
+    const app = bare.createApp({ plugins });
 
     expect(Number.isInteger(app.clock.now())).toBe(true);
   });
@@ -129,7 +134,7 @@ describe("clock plugin integration", () => {
 
     it("rejects a source that is not a ClockSource", () => {
       const app = bare.createApp({
-        plugins: [clockPlugin],
+        plugins,
         // @ts-expect-error -- source must implement now/setTimer/clearTimer
         pluginConfigs: { clock: { source: { now: () => 0 } } }
       });

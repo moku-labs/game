@@ -11,8 +11,9 @@ import type { Api as ClockApi } from "./types";
 /**
  * Moves the game clock forward by `advanceMs`: a moment the rules scheduled with `clock.scheduleAt`
  * that is due now arrives as `elapsed`, through the graph. A visual test reaches a clock-armed
- * moment with it while its fake clock stands. Changes what the game sees, so the session is
- * tainted and the command journaled. Answers the clock after the move.
+ * moment with it while its fake clock stands. While `game.pause` holds the clock stands, and this
+ * command and `game.step` are the only things that move it. Changes what the game sees, so the
+ * session is tainted and the command journaled. Answers the clock after the move.
  *
  * @throws {Error} `[game] The command game.clock needs clockPlugin.` when the app has no `clockPlugin`.
  * @throws {RangeError} When `advanceMs` is 0 or negative.

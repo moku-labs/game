@@ -123,6 +123,8 @@ export type State = {
   last: number;
   /** Milliseconds `advance` moved the clock forward, added to every reading of the source. */
   shift: number;
+  /** The source reading taken when the clock stopped for the devtools pause (F169), else `undefined`. */
+  frozenAt: number | undefined;
   dueAt: number | undefined;
   handle: unknown;
   listeners: Array<(input: Elapsed) => void>;

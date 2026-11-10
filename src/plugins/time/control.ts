@@ -3,10 +3,18 @@
  * time scale and force the frame rate. Dev and debug builds: every body starts with the inline agent guard of a cosmetic
  * command, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
  */
+import type { Api as ClockApi } from "../clock/types";
 import { defineCommand, inputSchema } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
+import type { Api as LifecycleApi } from "../lifecycle/types";
 import type { RateChoice } from "./types";
+
+/** What `game.step` needs of an app: the control app, and the clock and the pause stack when installed. */
+type StepApp = ControlApp & {
+  readonly clock?: ClockApi;
+  readonly lifecycle?: LifecycleApi;
+};
 
 /** The length of one frame at 60 fps, the step a frame count takes by default. */
 const FRAME_MS = 1000 / 60;
@@ -26,6 +34,19 @@ function checkFrames(frames: number): void {
 }
 
 /**
+ * Picks the clock `game.step` moves with the frames: the clock stands while the game is paused for
+ * `devtools` (F169), so the step moves it; on a running clock the step leaves it alone.
+ *
+ * @param app - The app the command runs on.
+ * @returns The standing clock, or `undefined`.
+ */
+function standingClock(app: StepApp): ClockApi | undefined {
+  if (app.lifecycle?.reasons().includes("devtools") !== true) return undefined;
+
+  return app.clock;
+}
+
+/**
  * Refuses a time scale that is not a finite number of zero or more. `setScale` clamps silently;
  * the command refuses, so an editor slider cannot pass `NaN`.
  *
@@ -42,13 +63,19 @@ function checkScale(scale: number): void {
 
 /**
  * Runs frames by hand, one `time.step` each, also while the game is paused, and answers the time
- * after them. A frame lasts 1000/60 ms unless `deltaMs` says otherwise.
+ * after them. A frame lasts 1000/60 ms unless `deltaMs` says otherwise. While `game.pause` holds,
+ * the clock stands, and each frame moves it by `deltaMs` before the frame runs, so `clock.now()`
+ * and the frame time go on together and a moment the flow scheduled arrives on the frame that
+ * reaches it. Otherwise the clock follows the device and the step leaves it alone.
  *
  * @example
  * ```ts
  * // The editor paused the game on a merge; step three frames to watch the item land.
- * const ran = await run(app, commands.step, { frames: 3 });
- * ran.value; // { delta: 16.666…, elapsed: 50, scale: 1, frame: 3, idle: false }
+ * await run(app, commands.pause);
+ * app.clock.now(); // 1000000
+ * const ran = await run(app, commands.step, { frames: 3, deltaMs: 20 });
+ * ran.value; // { delta: 20, elapsed: 60, scale: 1, frame: 3, idle: false }
+ * app.clock.now(); // 1000060
  * ```
  */
 export const stepCommand = defineCommand({
@@ -56,7 +83,7 @@ export const stepCommand = defineCommand({
   title: "Step frames",
   input: inputSchema(["frames", "number"], ["deltaMs", "number?"]),
   effect: "cosmetic",
-  run: (app: ControlApp, { frames, deltaMs = FRAME_MS }) => {
+  run: (app: StepApp, { frames, deltaMs = FRAME_MS }) => {
     if (
       (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
       (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
@@ -67,7 +94,12 @@ export const stepCommand = defineCommand({
     app.log.debug("moku:dev", { command: "game.step", frames });
     checkFrames(frames);
 
-    for (let frame = 0; frame < frames; frame += 1) app.time.step(deltaMs);
+    const clock = deltaMs > 0 ? standingClock(app) : undefined;
+
+    for (let frame = 0; frame < frames; frame += 1) {
+      clock?.advance(deltaMs);
+      app.time.step(deltaMs);
+    }
 
     return app.time.snapshot();
   }

@@ -253,7 +253,10 @@ and debug builds. All three are effect `cosmetic`: the session stays clean.
 
 - `game.step` — input `{ frames: "number", deltaMs: "number?" }`. It calls `step(deltaMs)`
   `frames` times, also while paused, with `deltaMs` 1000/60 by default, and answers `snapshot()`.
-  `frames` must be a whole number of 0 or more, or it throws.
+  `frames` must be a whole number of 0 or more, or it throws. While `game.pause` holds the clock
+  stands (F169), and each frame first moves it by `deltaMs` (`clock.advance`), so `clock.now()`
+  and the frame time go on together and a flow-timed moment arrives on the frame that reaches it.
+  Under another pause reason, or a running game, the step leaves the clock alone.
 - `game.timeScale` — input `{ scale: "number" }`. It calls `setScale(scale)` and answers
   `snapshot()`. `scale` must be a finite number of 0 or more, or it throws: `setScale` clamps
   silently, the command refuses, so an editor slider cannot pass `NaN`. At 0 game time stands

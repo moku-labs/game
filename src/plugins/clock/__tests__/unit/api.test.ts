@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
-import { cancelPending, createClockApi } from "../../api";
+import { cancelPending, createClockApi, freezeClock, thawClock } from "../../api";
 import { fakeClock } from "../../fake";
 import type { ClockCtx, ClockSource, Elapsed, FakeClock, State } from "../../types";
 
@@ -10,7 +10,15 @@ import type { ClockCtx, ClockSource, Elapsed, FakeClock, State } from "../../typ
 const createMockCtx = (source: ClockSource): ClockCtx => ({
   global: {},
   config: { source },
-  state: { source, last: 0, shift: 0, dueAt: undefined, handle: undefined, listeners: [] },
+  state: {
+    source,
+    last: 0,
+    shift: 0,
+    frozenAt: undefined,
+    dueAt: undefined,
+    handle: undefined,
+    listeners: []
+  },
   emit: () => {}
 });
 
@@ -505,6 +513,7 @@ describe("createClockApi", () => {
         source: clock,
         last: 0,
         shift: 0,
+        frozenAt: undefined,
         dueAt: undefined,
         handle: undefined,
         listeners: []
@@ -560,7 +569,15 @@ const createStopState = (): { state: State; clock: FakeClock } => {
 
   return {
     clock,
-    state: { source: clock, last: 0, shift: 0, dueAt: undefined, handle: undefined, listeners: [] }
+    state: {
+      source: clock,
+      last: 0,
+      shift: 0,
+      frozenAt: undefined,
+      dueAt: undefined,
+      handle: undefined,
+      listeners: []
+    }
   };
 };
 
@@ -669,5 +686,60 @@ describe("advance, the move of the door game.clock (F157)", () => {
       `[game] clock.advance moves the clock forward, not by ${ms} ms.\n  Pass a finite number of milliseconds above 0.`
     );
     expect(api.now()).toBe(1000);
+  });
+});
+
+describe("freezeClock and thawClock, the devtools pause (F169)", () => {
+  it("arms no timer while the clock stands, and drops the one that was armed", () => {
+    const { ctx, clock } = createFakeCtx();
+    const api = createClockApi(ctx);
+    const setTimer = vi.spyOn(clock, "setTimer");
+    const clearTimer = vi.spyOn(clock, "clearTimer");
+
+    api.scheduleAt(1500);
+    freezeClock(ctx.state);
+    api.scheduleAt(1600);
+
+    expect(clearTimer).toHaveBeenCalledTimes(1);
+    expect(setTimer).toHaveBeenCalledTimes(1);
+    expect(ctx.state.handle).toBeUndefined();
+    expect(api.dueAt()).toBe(1600);
+  });
+
+  it("keeps the first stop when it is stopped twice", () => {
+    const { ctx, clock } = createFakeCtx();
+    const api = createClockApi(ctx);
+
+    freezeClock(ctx.state);
+    clock.advance(700);
+    freezeClock(ctx.state);
+    thawClock(ctx.state);
+
+    expect(api.now()).toBe(1000);
+  });
+
+  it("leaves a running clock alone on thaw", () => {
+    const { ctx, clock } = createFakeCtx();
+    const api = createClockApi(ctx);
+
+    clock.advance(300);
+    thawClock(ctx.state);
+
+    expect(api.now()).toBe(1300);
+    expect(ctx.state.shift).toBe(0);
+  });
+
+  it("delivers a moment already reached on thaw on the next timer of the source", () => {
+    const { ctx, clock } = createFakeCtx();
+    const api = createClockApi(ctx);
+    const received: Elapsed[] = [];
+
+    api.onElapsed(input => received.push(input));
+    freezeClock(ctx.state);
+    api.scheduleAt(900);
+    thawClock(ctx.state);
+    clock.advance(0);
+
+    expect(received).toEqual([{ now: 1000 }]);
   });
 });

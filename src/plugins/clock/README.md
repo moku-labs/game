@@ -33,7 +33,8 @@ clock.scheduleAt(rules.nextDue(player, tables));
 ```
 
 `control.ts` holds `game.clock` (key `clock` in `commands`), input `{ advanceMs: "number" }`,
-effect `cheat`: it calls `advance(advanceMs)` and answers `{ now }`. A visual test writes it as the
+effect `cheat`: it calls `advance(advanceMs)` and answers `{ now }`. While `game.pause` holds, the
+clock stands, and this command and `game.step` are the only things that move it (F169). A visual test writes it as the
 step `{ clock: { advanceMs: 60_000 } }`, and a moment a rest node waits on arrives through the graph.
 
 ```ts
@@ -71,7 +72,20 @@ A `ClockSource` is `now(): number`, `setTimer(fn, delayMs): unknown` and `clearT
 ## Events
 
 None. `elapsed` is an input of the graph, delivered through the listener registry, not a broadcast.
-The plugin declares no `depends` and emits nothing.
+The plugin emits nothing.
+
+## Dependencies and hooks
+
+`depends: [lifecyclePlugin]`, for the hook only: no API is required. On `lifecycle:changed` the
+clock stops while the stack holds `devtools` (the editor's `game.pause`, F169) and goes on when it
+no longer does. While it stands, `now()` reads the moment it stopped at, no timer is armed and only
+`advance` moves it: the doors `game.clock` and `game.step` (each stepped frame moves it by its
+`deltaMs`, before the frame runs). A moment that comes due on an advance is delivered at once. On
+resume it goes on from where it stood: the span it stood is folded into the shift, so it lags the
+source by that span and keeps every advance; the pending moment is armed again. Any other reason,
+such as `background`, leaves the clock on the source, so real-time timers (energy refills) see the
+time that passed. The clock sits before `flow`, so its hook runs first and the resume poke of
+`flow` reads the clock that goes on again.
 
 ## Lifecycle
 
