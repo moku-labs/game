@@ -325,6 +325,24 @@ visual the element is drawn with and not an extra of its `components` prop (`cha
 `image`, which draws a `Sprite`; `change.Alpha` with no `Alpha` among its extras). It is read when
 the element mounts and when its `motion` prop changes, against what it carries then.
 
+### Home after a drag
+
+An element with a `Draggable` among its extras is carried by `input` like any view (a child is
+drawn in its root's layer while it is out of its parent). When the drag lets it go, its `Held` goes,
+and `ui` sends it home to its layout rest the way `world.projection.settle` sends a world view
+(F166): its `motion.settle` hook with `["Transform"]`, else a `toRest` of the `Transform` over
+the world's `settleMs`. This happens also when the drop target refuses it, or when there is no
+target. An element already at rest plays nothing; an element playing its exit keeps its exit.
+
+```tsx
+// The held frame of the strip flies back to its slot in 180 ms when no target takes it.
+<panel
+  key="stripHeld"
+  components={[Draggable({ payload: { frame: "held" } })]}
+  motion={{ settle: view => view.toRest(Transform, { ms: 180, ease: "out" }) }}
+/>
+```
+
 ## Scroll
 
 A `scroll` moves its content on one axis: `axis: "y"`, the default, or `"x"`. The children form

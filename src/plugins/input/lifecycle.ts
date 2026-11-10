@@ -117,6 +117,7 @@ export function stopInput(state: State): void {
   state.hovered = undefined;
   state.pointerOver = undefined;
   state.parent = undefined;
+  state.layered = false;
   state.restScale = undefined;
   state.heldPose = undefined;
   state.wake = undefined;

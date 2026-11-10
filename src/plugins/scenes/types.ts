@@ -192,7 +192,8 @@ export type SceneLoader<Asset extends string = string> = {
  * `leave` is merged field by field over `config.leave`, which is merged over the engine's default (`{ cover: { color:
  * 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }`). `false` turns a part or the whole off;
  * a part written over `false` starts from the engine's default. The scene being entered may set the veil's `color` and
- * `alpha` on top (`enter.cover`). Fast mode, a headless app and the first scene of a run show nothing.
+ * `alpha` on top (`enter.cover`). Fast mode, a headless app and the first scene of a run show nothing. A scene may
+ * also write a function of the switch that gives one (`SceneSpec.leave`).
  *
  * @example
  * ```ts
@@ -206,6 +207,20 @@ export type SceneLoader<Asset extends string = string> = {
 export type SceneLeave<Asset extends string = string> =
   | { cover?: SceneCover | false; loader?: SceneLoader<Asset> | false }
   | false;
+
+/**
+ * The switch a `leave` function is asked about: the ids of the scene being left and of the scene being switched to. A
+ * new frozen object for every call. When a scene stands live (for the loader it holds, F103) `to` is the scene itself.
+ *
+ * @example
+ * ```ts
+ * // The memory dissolving into the ward is asked with { from: "memory", to: "ward" }; every other exit keeps the config's look.
+ * const leave = (sw: LeaveSwitch): SceneLeave | undefined => (sw.to === "ward" ? { loader: false } : undefined);
+ * leave({ from: "memory", to: "ward" }); // { loader: false }
+ * leave({ from: "memory", to: "board" }); // undefined
+ * ```
+ */
+export type LeaveSwitch = { readonly from: string; readonly to: string };
 
 /**
  * What a live switch to this scene shows over the scene being left: the veil takes this scene's `color` and `alpha`,
@@ -264,8 +279,24 @@ export type SceneSpec<
   layers: Layers;
   projections: Projections & NoInfer<CheckedProjections<SceneLayer<Layers>, Projections>>;
   music?: Asset;
-  /** What a live switch shows over this scene when it is left: merged field by field over `config.leave`. */
-  leave?: SceneLeave<Asset>;
+  /**
+   * What a live switch shows over this scene when it is left: merged field by field over `config.leave`. A function is
+   * called once per switch that shows a look, when the look starts, with the scene itself as `from`, and once more
+   * when the scene stands live (for the loader it holds), with `to` the scene itself; `undefined` means the scene wrote nothing.
+   * A throw or a result of the wrong shape is logged (`scenes:leave-failed`) and the config's look is shown.
+   *
+   * @example
+   * ```ts
+   * // The memory dissolves into the ward under the veil alone; every other exit keeps the config's loader.
+   * defineScene("memory", {
+   *   bundle: "memory",
+   *   layers: {},
+   *   projections: [],
+   *   leave: sw => (sw.to === "ward" ? { loader: false } : undefined)
+   * });
+   * ```
+   */
+  leave?: SceneLeave<Asset> | ((sw: LeaveSwitch) => SceneLeave<Asset> | undefined);
   /** What a live switch to this scene shows: the `color` and `alpha` of the veil over the scene being left. */
   enter?: SceneEnter;
 };
@@ -291,7 +322,8 @@ export type DefineScene<
 ) => SceneDefinition;
 
 /**
- * A scene as `defineScene` returns it: plain frozen data, ready for the `scenes` key of a feature.
+ * A scene as `defineScene` returns it: frozen data, ready for the `scenes` key of a feature. It is plain data except
+ * for a `leave` the scene wrote as a function of the switch, which is kept as it is.
  *
  * @example
  * ```ts
@@ -315,8 +347,11 @@ export type SceneDefinition = {
    * @returns The bundle names the scene needs on top of `bundle`.
    */
   bundles?(state: SceneState): readonly string[];
-  /** What `defineScene` was given as `leave`; absent when the scene takes the config's. */
-  readonly leave?: SceneLeave;
+  /**
+   * What `defineScene` was given as `leave`: a value, or the function of the switch as it was written (the scene is
+   * plain data only while this is a value); absent when the scene takes the config's.
+   */
+  readonly leave?: SceneLeave | ((sw: LeaveSwitch) => SceneLeave | undefined);
   /** What `defineScene` was given as `enter`; absent when the scene being left decides the veil alone. */
   readonly enter?: SceneEnter;
 };
@@ -456,6 +491,13 @@ export type State = {
    * one. Absent otherwise: deleted, never written as `undefined`.
    */
   leaving?: Leaving;
+  /**
+   * The switch the `begin` stage of a node saw and found to show no look (a `leave` that resolved to nothing): the
+   * node's signal and the scene it switches to. The `scene` stage of the same node reads it instead of asking the
+   * scene's `leave` function a second time. Replaced by the next such switch, and dropped at the next node and at a
+   * stop. Absent otherwise: deleted, never written as `undefined`.
+   */
+  declined?: { readonly signal: AbortSignal; readonly to: string };
   /**
    * The leave loader projection scenes holds for the next switch of the scene that stands (F103): `world` keeps it
    * built and hidden, and the loader's `due` only shows it. Absent while it holds none: deleted, never written as

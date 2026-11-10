@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import { projection } from "../../../world/projection/define";
 import { defineScene } from "../../define";
-import type { SceneState } from "../../types";
+import type { LeaveSwitch, SceneLeave, SceneState } from "../../types";
 
 type Item = { id: string };
 
@@ -376,5 +376,32 @@ describe("defineScene and enter", () => {
     const scene = defineScene("night", { bundle: "night", layers: {}, projections: [], enter });
 
     expect(scene.enter).toEqual({ cover: { color: 0x0b_10_20, alpha: 0.7 } });
+  });
+});
+
+describe("defineScene with a `leave` that is a function of the switch", () => {
+  // Bug: `defineScene` runs `checkLeave` on the function (refused as "not { cover, loader } or false"), calls it at
+  // definition (a game's function runs with no switch), or wraps it so the engine cannot hand it the switch.
+  it("accepts the function, does not call it and keeps it as it is", () => {
+    const leave = vi.fn((sw: LeaveSwitch): SceneLeave | undefined =>
+      sw.to === "ward" ? { loader: false } : undefined
+    );
+    const scene = defineScene("memory", { bundle: "memory", layers: {}, projections: [], leave });
+
+    expect(leave).not.toHaveBeenCalled();
+    expect(scene.leave).toBe(leave);
+  });
+
+  // Bug: the static check goes (a function is the only thing that skips it), so a static `leave` of the wrong shape is
+  // accepted.
+  it("still refuses a static `leave` of the wrong shape", () => {
+    expect(() =>
+      defineScene("memory", {
+        bundle: "memory",
+        layers: {},
+        projections: [],
+        leave: { cover: { alpha: 2 } }
+      })
+    ).toThrow('[game] Scene "memory": leave.cover.alpha is 2.');
   });
 });

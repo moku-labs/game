@@ -178,15 +178,16 @@ function namesOf(
  * `lift` is not among them does not compile — and throws here for a caller without types.
  * `bundles` names bundles that depend on the committed state: the scene is mounted once those
  * are in too. `leave` is what a live switch shows over the scene when it is left, merged over the
- * config's: `false` shows nothing. `enter` sets the colour and the alpha of the veil of every live switch to the scene.
+ * config's: `false` shows nothing; a function of the switch is called once per switch with `{ from, to }` and kept as it
+ * is. `enter` sets the colour and the alpha of the veil of every live switch to the scene.
  *
  * @param id - Id of the scene. A node names it with `defineNode({ scene: id })`.
  * @param scene - The bundle, the optional bundles of state, the layers, the projections, the
  *   optional music key, the optional `leave` and the optional `enter`.
  * @returns The scene as frozen data, ready for the `scenes` key of a feature.
  * @throws {Error} For an integer-like layer name, for a `layer` or `lift` that is not declared, for two HUD layers,
- *   an `above` other than `"overlays"`, a `ui` declared after the HUD layer, and a `leave` or an `enter` of the wrong
- *   shape.
+ *   an `above` other than `"overlays"`, a `ui` declared after the HUD layer, and a `leave` value or an `enter` of the
+ *   wrong shape (the result of a `leave` function is checked at the switch and logged).
  * @example
  * ```ts
  * // features/board/view/scene.ts of a game.
@@ -227,6 +228,16 @@ function namesOf(
  *   projections: [],
  *   enter: { cover: { color: 0x0b1020, alpha: 0.7 } }
  * }).enter; // { cover: { color: 0x0b1020, alpha: 0.7 } }
+ *
+ * // The memory dissolves into the ward under the veil alone; every other exit keeps the config's loader.
+ * const memory = defineScene("memory", {
+ *   bundle: "memory",
+ *   layers: { room: {} },
+ *   projections: [],
+ *   leave: sw => (sw.to === "ward" ? { loader: false } : undefined)
+ * });
+ * typeof memory.leave; // "function", called with { from: "memory", to: "ward" } at the switch,
+ * // and with { from: "memory", to: "memory" } when the memory stands live
  * ```
  */
 export function defineScene<
@@ -241,7 +252,8 @@ export function defineScene<
   const layers = layersOf(id, scene.layers);
   const projections: readonly AnySceneProjection[] = scene.projections;
 
-  checkLeave(`Scene "${id}": leave`, scene.leave);
+  // A function is checked per switch, on its result (`sceneLeaveOf`).
+  if (typeof scene.leave !== "function") checkLeave(`Scene "${id}": leave`, scene.leave);
   checkEnter(`Scene "${id}": enter`, scene.enter);
 
   return Object.freeze({

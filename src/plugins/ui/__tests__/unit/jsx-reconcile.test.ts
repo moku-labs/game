@@ -363,6 +363,7 @@ function harness() {
     changeExtra: () => false,
     repose,
     lift: vi.fn(),
+    settleHome: vi.fn(),
     exit: vi.fn(),
     playTrack: vi.fn(),
     settled: () => true,
@@ -1378,6 +1379,31 @@ describe("the end of a root built aside before the swap", () => {
 
     expect(h.layout.exit).not.toHaveBeenCalled();
     expect([h.state.jsx.roots.has(ROOT), h.state.jsx.removing.size]).toEqual([false, 0]);
+  });
+});
+
+// ─── an element a drag let go (F166) ───────────────────────────
+
+describe("an element a drag let go", () => {
+  it("is sent home while it lives", () => {
+    const h = harness();
+
+    h.mount(screen());
+    h.frame.dropped(h.entity("go"));
+
+    expect(h.layout.settleHome).toHaveBeenCalledWith(h.element("go"));
+  });
+
+  // Bug: a settle over an exit would cancel the exit's motion, and the element would never leave.
+  it("keeps its exit when it plays one, and an entity ui does not own is left alone", () => {
+    const h = harness();
+
+    h.mount(screen());
+    h.state.jsx.exiting.add(h.entity("go"));
+    h.frame.dropped(h.entity("go"));
+    h.frame.dropped(9999);
+
+    expect(h.layout.settleHome).not.toHaveBeenCalled();
   });
 });
 
