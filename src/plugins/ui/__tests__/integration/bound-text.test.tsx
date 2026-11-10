@@ -176,7 +176,11 @@ describe("a text a system writes outside the projection (F162)", () => {
 
     app.time.step(16);
 
-    const entity = app.ui.find("plain") ?? 0;
+    const found = app.ui.find("plain");
+
+    expect(found).toBeDefined();
+
+    const entity = found ?? 0;
     const nine = rectOf(app, "plain");
 
     expect(nine.w).toBe(20);
