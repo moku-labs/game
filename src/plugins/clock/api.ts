@@ -57,10 +57,11 @@ function deliverElapsed(state: State): void {
 
 /**
  * Arms the single timer for a due moment. The delay is counted from the RAW source reading plus
- * the shift of `advance`, not from trusted time: the source's timer runs on the device clock, so after the device clock was
- * moved back the wait is longer than `moment - now()`. A moment further than the longest timer
- * waits in steps: the timer fires early and `fireDue` arms it again. A clock that stands keeps the
- * moment and arms no timer: only `advance` reaches it, or the timer armed when the clock goes on.
+ * the shift of `advance`, not from trusted time: the source's timer runs on the device clock, so
+ * after the device clock was moved back the wait is longer than `moment - now()`. A moment
+ * further than the longest timer waits in steps: the timer fires early and `fireDue` arms it
+ * again. A clock that stands keeps the moment and arms no timer: only `advance` reaches it, or the
+ * timer armed when the clock goes on.
  *
  * @param state - Clock state.
  * @param moment - Due moment in epoch milliseconds.

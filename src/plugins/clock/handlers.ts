@@ -12,8 +12,9 @@ type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
 /**
  * Creates the hook handlers. On `lifecycle:changed` the clock stops when the stack holds
  * `devtools` and goes on when it no longer does; any other reason leaves it on the source. The
- * clock sits before flow among the plugins, so this hook runs first, at the change itself, and
- * the poke of flow on resume reads the clock that goes on again.
+ * clock sits before flow among the plugins, so this hook runs first, at the change itself. The
+ * order does not matter for the reading: going on again keeps the moment it stood at, so the
+ * resume poke of flow reads the same `now` before or after it.
  *
  * @param ctx - Kernel context of the clock plugin.
  * @param ctx.state - Clock state.
