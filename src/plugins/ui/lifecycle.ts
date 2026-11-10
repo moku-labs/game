@@ -97,7 +97,8 @@ function drawsViews(ctx: UiCtx): boolean {
 /**
  * Opens the four systems of phase `layout`, the system `ui.enter` of phase `sync`, the seven world
  * hooks of `Tree`, `Box`, `Pressed` and `PointerOver`, the two that tell the hosting step a view
- * lost its `Parent` or its `Held` (a view freed so may hang under its host again), the listener
+ * lost its `Parent` or its `Held` (a view freed so may hang under its host again), the one that
+ * sends a ui element home when a drag lets it go (its `Held` went, F166), the listener
  * that asks for every root to be built again after a restore or a load, the two effect handlers,
  * the hint listener that buffers every released hint for the `change` hooks of the next frame
  * step, the three tap listeners (the `LocalWrite` patch, the pointer tap that clears the keyboard
@@ -166,6 +167,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ecs.onRemoved(PointerOver, entity => jsx.markPointer(entity, "hover", false)),
     ecs.onRemoved(Parent, () => hostsMoved(ctx.state.jsx)),
     ecs.onRemoved(Held, () => hostsMoved(ctx.state.jsx)),
+    // A ui element the drag let go goes home: `world.projection.settle` knows only world views (F166).
+    ecs.onRemoved(Held, entity => jsx.dropped(entity)),
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.flow.fx.onHint(hint => {

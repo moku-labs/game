@@ -23,6 +23,7 @@ import {
   playExtraChange,
   poseEnter,
   repose,
+  settleHome,
   startLoop,
   writeRest
 } from "./motion";
@@ -171,6 +172,8 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
       repose(ctx, element, parent, hooked, hint),
 
     lift: (element: Element, units: number): void => liftRest(ctx, element, units),
+
+    settleHome: (element: Element): void => settleHome(ctx, element),
 
     exit: (element: Element, cause: MotionCause, span?: MotionSpan, stands?: boolean): void =>
       beginExit(ctx, state, element, cause, span, stands),

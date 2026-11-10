@@ -2937,12 +2937,27 @@ export function createReconciler(
     if (!moved) modules.layout.repose(element, parentRect(element), false);
   }
 
+  /**
+   * Sends an element home when a drag let it go: its `Held` went. An element that plays its exit,
+   * or has not spawned, keeps its motions (F166).
+   *
+   * @param entity - The entity that lost `Held`.
+   */
+  function dropped(entity: Entity): void {
+    const element = state.elements.get(entity);
+
+    if (element === undefined || !element.live || state.exiting.has(entity)) return;
+
+    modules.layout.settleHome(element);
+  }
+
   return {
     reconcile,
     solve,
     mountRoot,
     unmountRoot,
     markPointer,
+    dropped,
     queueEnter,
     playEntered,
     sweep,
