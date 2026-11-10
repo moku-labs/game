@@ -425,9 +425,23 @@ describe("the drag of a parented view", () => {
   });
 });
 
-// A JSX root in layer "ui" at (0, 0) holds a column, which holds the card: the card has no Layer of its own.
-function jsxChild(mock: MockInput, own?: string): { root: number; column: number; card: number } {
-  const root = mock.spawn([Transform({}), Layer({ name: "ui" })]);
+/**
+ * A JSX root at (0, 0) holds a column, which holds the card, and the finger grabs the card.
+ *
+ * @param mock - The mocked input.
+ * @param own - A layer of the card's own; none when left out, as a JSX child has none.
+ * @param rootLayer - The layer of the root; none with `false`.
+ * @returns The three entities.
+ */
+function jsxChild(
+  mock: MockInput,
+  own?: string,
+  rootLayer: string | false = "ui"
+): { root: number; column: number; card: number } {
+  const root = mock.spawn([
+    Transform({}),
+    ...(rootLayer === false ? [] : [Layer({ name: rootLayer })])
+  ]);
   const column = mock.spawn([Transform({ x: 10, y: 20 }), Parent({ entity: root })]);
   const card = mock.spawn(
     [
@@ -480,6 +494,48 @@ describe("the drag of a child that has no Layer of its own (F165)", () => {
     expect(mock.has(card, Parent)).toBe(false);
     expect(mock.read(card, Layer)).toEqual({ name: "ui" });
     expect(mock.state.layered).toBe(false);
+  });
+
+  it("gives the layer back when the drag is given up for an exit, as on a release", () => {
+    const mock = createMockInput();
+    const { column, card } = jsxChild(mock);
+
+    mock.attachTo(card, Exiting());
+    abortDrag(mock.input);
+
+    expect(mock.has(card, Layer)).toBe(false);
+    expect(mock.read(card, Parent)).toEqual({ entity: column });
+    expect(mock.state.layered).toBe(false);
+  });
+
+  it("adds no layer when the root names none", () => {
+    const mock = createMockInput();
+    const { card } = jsxChild(mock, undefined, false);
+
+    expect(mock.has(card, Layer)).toBe(false);
+    expect(mock.state.layered).toBe(false);
+  });
+
+  // Bug: a stop mid-drag left the flag set, and the next reparent took a view's own Layer off.
+  it("forgets the given layer on stop", () => {
+    const mock = createMockInput();
+
+    jsxChild(mock);
+    stopInput(mock.state);
+
+    expect(mock.state.layered).toBe(false);
+  });
+
+  it("decides the given layer again at every grab, so a stale flag never takes a view's own Layer", () => {
+    const mock = createMockInput();
+
+    mock.state.layered = true;
+
+    const { card } = jsxChild(mock, "lifted");
+
+    release(mock.input);
+
+    expect(mock.read(card, Layer)).toEqual({ name: "lifted" });
   });
 });
 

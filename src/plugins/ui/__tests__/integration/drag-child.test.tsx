@@ -209,4 +209,24 @@ describe("a Draggable child of a JSX projection", () => {
     expect(stripSettled).toEqual([["Transform"]]);
     expect(app.world.ecs.get(hooked, Transform)).toMatchObject({ x: rest?.x, y: rest?.y });
   });
+
+  it("let go right where it rests, plays no settle hook", async () => {
+    const { app, pixi } = await startStrip();
+    // The grab is taken at the first move past the slop: a finger back on that point holds the element at rest.
+    const grabbedAt = { x: 760, y: 1100 };
+
+    pointer(app, pixi, "pointerdown", { x: 700, y: 1100 });
+    step(app);
+    pointer(app, pixi, "pointermove", grabbedAt);
+    step(app);
+    pointer(app, pixi, "pointermove", { x: 900, y: 1000 });
+    step(app);
+    pointer(app, pixi, "pointermove", grabbedAt);
+    step(app);
+    pointer(app, pixi, "pointerup", grabbedAt);
+    step(app);
+    await settle(app, 4);
+
+    expect(stripSettled).toEqual([]);
+  });
 });

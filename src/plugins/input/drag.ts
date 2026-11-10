@@ -79,10 +79,10 @@ function unparent(ctx: InputCtx, entity: Entity): boolean {
   ctx.state.parent = parent;
   ecs.remove(entity, Parent);
   ecs.set(entity, Transform, root);
-  if (layer !== undefined) {
-    ecs.add(entity, Layer({ name: layer }));
-    ctx.state.layered = true;
-  }
+
+  // Out of its parent, a view with no layer of its own is drawn in its root's.
+  ctx.state.layered = layer !== undefined;
+  if (layer !== undefined) ecs.add(entity, Layer({ name: layer }));
 
   return true;
 }

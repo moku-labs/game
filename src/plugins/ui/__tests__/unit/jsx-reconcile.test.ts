@@ -1382,6 +1382,31 @@ describe("the end of a root built aside before the swap", () => {
   });
 });
 
+// ─── an element a drag let go (F166) ───────────────────────────
+
+describe("an element a drag let go", () => {
+  it("is sent home while it lives", () => {
+    const h = harness();
+
+    h.mount(screen());
+    h.frame.dropped(h.entity("go"));
+
+    expect(h.layout.settleHome).toHaveBeenCalledWith(h.element("go"));
+  });
+
+  // Bug: a settle over an exit would cancel the exit's motion, and the element would never leave.
+  it("keeps its exit when it plays one, and an entity ui does not own is left alone", () => {
+    const h = harness();
+
+    h.mount(screen());
+    h.state.jsx.exiting.add(h.entity("go"));
+    h.frame.dropped(h.entity("go"));
+    h.frame.dropped(9999);
+
+    expect(h.layout.settleHome).not.toHaveBeenCalled();
+  });
+});
+
 // ─── the point prop of a button (F139) ─────────────────────────
 
 describe("the point prop of a button", () => {
