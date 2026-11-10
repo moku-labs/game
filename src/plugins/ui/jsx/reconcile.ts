@@ -113,6 +113,12 @@ const NO_LOOK: object = Object.freeze({});
 /** The owned fields of a type that gives none to a plugin: one list, never a new one. */
 const NO_OWNED: readonly string[] = [];
 
+/**
+ * The fields of `Text` a write with no new content in the markup leaves alone: the string `text`
+ * resolved, and the content and the style a game's system may have written since (F167).
+ */
+const TEXT_KEPT: readonly string[] = ["resolved", "content", "style"];
+
 /** The time of a reconcile a test steps by hand: no ms pass, so no scroll moves. */
 const NO_TIME: Readonly<Time> = Object.freeze({
   delta: 0,
@@ -217,6 +223,8 @@ type Change = {
   moved: boolean;
   /** The layout node is written and measured again: a rect, a text or what it is measured in. */
   measures: boolean;
+  /** The markup's `content`, `style` and `bind` say what they said: a write leaves `Text.content` and `Text.style` alone. */
+  keepsText: boolean;
   /** The element says what it said: nothing is styled and nothing is written. */
   unchanged: boolean;
 };
@@ -721,6 +729,8 @@ export function createReconciler(
   let slotsVersion = -1;
   let slotsRoots = -1;
   let placedUnder: ReadonlyArray<LayerSpec> | undefined;
+  // Whether the write pass under way leaves the content and the style of a `Text` alone (F167).
+  let textKept = false;
   // The roots the reconcile of this frame diffed: a render may bring a scroll a new `offset` prop.
   let rendered = 0;
   // Whether an entity belongs to the scene `world` builds aside (spec 31). Asked every time: the
@@ -1078,12 +1088,17 @@ export function createReconciler(
    * rect never resets it. The look is recorded as the rest of the visual before it is written, so
    * the rest the world holds is always the one the element is drawn with (a restore brings it back
    * to exactly that) and a `change` hook of the visual brings it home with `toRest`. The extras of
-   * the `components` prop are diffed last. Every call is one write pass of `UiCounters`.
+   * the `components` prop are diffed last. Every call is one write pass of `UiCounters`. A write
+   * whose markup says the same `content`, `style` and `bind` as the last one (a moved rect, a restyle, a
+   * render that changed another prop) leaves the entity's `Text.content` and `Text.style` alone, so
+   * what a game's system wrote there stays (F167).
    *
    * @param element - The element that changed.
+   * @param keepsText - Whether the markup's `content`, `style` and `bind` say what they said.
    */
-  function writeLive(element: Element): void {
+  function writeLive(element: Element, keepsText: boolean): void {
     state.written += 1;
+    textKept = keepsText;
     writeOrder(element);
 
     // Remove the visuals and inputs the element no longer carries. Per restyle: the two lists are
@@ -1153,7 +1168,7 @@ export function createReconciler(
    * @param type - Its component type.
    */
   function writeOthers(element: Element, value: object, type: AnyComponentType): void {
-    const owned = fieldsLeftAlone(element, type, ecs.typeOf(type.componentName)?.owned ?? NO_OWNED);
+    const owned = leftAlone(element, type, ecs.typeOf(type.componentName)?.owned ?? NO_OWNED);
     const others = otherFields(value, owned);
 
     if (others !== undefined) ecs.set(element.entity, asHandle(type), others);
@@ -1175,6 +1190,23 @@ export function createReconciler(
   }
 
   /**
+   * The fields a write of the current pass leaves alone: those of `fieldsLeftAlone`, and on the
+   * `Text` of a write with no new content in the markup its content and style too.
+   *
+   * @param element - The live element.
+   * @param type - The component type of the value.
+   * @param owned - The fields its type gives to a plugin.
+   * @returns The fields left alone: a list of the module, never a new one, for a kept text.
+   */
+  function leftAlone(
+    element: Element,
+    type: AnyComponentType,
+    owned: readonly string[]
+  ): readonly string[] {
+    return type === Text && textKept ? TEXT_KEPT : fieldsLeftAlone(element, type, owned);
+  }
+
+  /**
    * Writes one visual or input value onto a live element: added when the entity lacks it, else
    * its fields patched, but never a tag or the state of a scroll, and never a field its type gives
    * to a plugin. A `Tappable` that drops `point` is added again: it replaces the stored one whole.
@@ -1192,7 +1224,7 @@ export function createReconciler(
     if (value.value === true || SCROLL_STATE.has(value.type.componentName)) return;
 
     const typeOwned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
-    const owned = fieldsLeftAlone(element, value.type, typeOwned);
+    const owned = leftAlone(element, value.type, typeOwned);
 
     ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
   }
@@ -1238,6 +1270,7 @@ export function createReconciler(
       resolved: !keepsStyle,
       moved: !keepsStyle && modules.layout.affectsRect(element.style, style),
       measures: !stands || !sameStyle || !sameContent,
+      keepsText: sameStyle && sameContent && sameValue(previous.props.bind, node.props.bind),
       unchanged: keepsStyle && sameContent && writesSame(previous, node)
     };
   }
@@ -1264,7 +1297,7 @@ export function createReconciler(
 
     if (!element.live) return;
 
-    writeLive(element);
+    writeLive(element, change.keepsText);
 
     // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
     if (!change.moved) {
@@ -1803,7 +1836,7 @@ export function createReconciler(
 
     if (element.moved) {
       modules.layout.commit(element, parent);
-      writeLive(element);
+      writeLive(element, true);
       if (!quiet) hooked = modules.layout.change(element, element.previous, hint);
     }
 
@@ -2932,7 +2965,7 @@ export function createReconciler(
 
     if (!element.live) return;
 
-    writeLive(element);
+    writeLive(element, true);
 
     if (!moved) modules.layout.repose(element, parentRect(element), false);
   }

@@ -3,7 +3,7 @@ import { Transform } from "../../../renderer/components";
 import { Text } from "../../../text/components";
 import { Exiting } from "../../../world/ecs/define";
 import { Box, UiCounters } from "../../components";
-import { type ExtrasApp, startExtrasApp, Tally } from "../extras-app";
+import { Clock, type ExtrasApp, startExtrasApp, Tally } from "../extras-app";
 
 // ---------------------------------------------------------------------------
 // Integration: a text with `bind` is sized by the string text shows for it
@@ -198,6 +198,32 @@ describe("a text a system writes outside the projection (F162)", () => {
     app.time.step(16);
 
     expect(rectOf(app, "plain")).toEqual(nine);
+
+    await app.stop();
+  });
+});
+
+describe("a text a system writes in its run (F167)", () => {
+  it("keeps the content the system wrote after the frames that follow, laid out at its width", async () => {
+    const app = await startExtrasApp();
+
+    app.world.projection.mount(["clockScreen"], { kind: "plugin", name: "test" });
+    app.time.step(16);
+    app.time.step(16);
+
+    const entity = app.ui.find("clock") ?? 0;
+    const nine = rectOf(app, "clock");
+
+    expect(nine.w).toBe(20);
+
+    // The clock turns: the system writes "10" over the markup's "9" in its next run.
+    app.world.ecs.set(entity, Clock, { left: 10 });
+    app.time.step(16);
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(entity, Text)?.content).toBe("10");
+    expect(rectOf(app, "clock").w).toBe(39);
 
     await app.stop();
   });
