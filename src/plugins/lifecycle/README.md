@@ -49,11 +49,13 @@ hooks: ctx => ({
 `control.ts` holds `game.pause` and `game.resume` (keys `pause` and `resume` in `commands`) of the
 editor's write door, `@moku-labs/game/control`, dev builds only. They push and pop the reason
 `devtools` and answer `isPaused()`, so after `game.resume` another reason, such as a hidden tab,
-keeps its hold. Effect `cosmetic`, no input.
+keeps its hold. Effect `cosmetic`, no input. While `devtools` holds, `clock.now()` stands too
+(F169): only `game.step` and `game.clock` move it, and after `game.resume` it goes on from where it
+stood, behind the device clock by the pause.
 
 ## Dependencies
 
-`time`. It sits below lifecycle, so pausing it is a direct call — `time.pause()` and `time.resume()`, resolved once with `ctx.require(timePlugin)` — never an event (`spec/07-COMMUNICATION.md §5`: a lower plugin cannot hook a higher one's event). `lifecycle:changed` is for the plugins above: `flow`, `audio`.
+`time`. It sits below lifecycle, so pausing it is a direct call — `time.pause()` and `time.resume()`, resolved once with `ctx.require(timePlugin)` — never an event (`spec/07-COMMUNICATION.md §5`: a lower plugin cannot hook a higher one's event). `lifecycle:changed` is for the plugins above: `clock`, `flow`, `audio`.
 
 `time.pause()` is called once, when the stack goes from empty to one reason; `time.resume()` once, when the last reason leaves.
 

@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { coreConfig, createCore } from "../../../../config";
-import { fakeClock } from "../../fake";
 import { lifecyclePlugin } from "../../../lifecycle";
 import { timePlugin } from "../../../time";
+import { fakeClock } from "../../fake";
 import { clockPlugin } from "../../index";
 import type { Elapsed, FakeClock } from "../../types";
 

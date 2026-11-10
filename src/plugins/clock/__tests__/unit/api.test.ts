@@ -10,7 +10,15 @@ import type { ClockCtx, ClockSource, Elapsed, FakeClock, State } from "../../typ
 const createMockCtx = (source: ClockSource): ClockCtx => ({
   global: {},
   config: { source },
-  state: { source, last: 0, shift: 0, frozenAt: undefined, dueAt: undefined, handle: undefined, listeners: [] },
+  state: {
+    source,
+    last: 0,
+    shift: 0,
+    frozenAt: undefined,
+    dueAt: undefined,
+    handle: undefined,
+    listeners: []
+  },
   emit: () => {}
 });
 
@@ -561,7 +569,15 @@ const createStopState = (): { state: State; clock: FakeClock } => {
 
   return {
     clock,
-    state: { source: clock, last: 0, shift: 0, frozenAt: undefined, dueAt: undefined, handle: undefined, listeners: [] }
+    state: {
+      source: clock,
+      last: 0,
+      shift: 0,
+      frozenAt: undefined,
+      dueAt: undefined,
+      handle: undefined,
+      listeners: []
+    }
   };
 };
 

@@ -13,13 +13,16 @@ import type { Api } from "./types";
 type LifecycleApp = ControlApp & { readonly lifecycle: Api };
 
 /**
- * Pauses the game with the pause reason `devtools`. Answers whether the game is paused.
+ * Pauses the game with the pause reason `devtools`. Answers whether the game is paused. The clock
+ * stands too: `clock.now()` moves only on `game.step` and `game.clock`, so a frame-stepped trace is
+ * the same on every run. Another pause reason, such as a hidden tab, keeps the clock on the device.
  *
  * @example
  * ```ts
- * // The editor's pause button: the world stands, and `game.step` moves it frame by frame.
+ * // The editor's pause button: the world and the clock stand, and `game.step` moves both.
  * (await run(app, commands.pause)).value; // true
  * app.lifecycle.reasons(); // ["devtools"]
+ * app.clock.now(); // 1000000, and still 1000000 two seconds later
  * ```
  */
 export const pauseCommand = defineCommand({
@@ -44,7 +47,8 @@ export const pauseCommand = defineCommand({
 
 /**
  * Takes the pause reason `devtools` back. Answers whether the game is still paused: another
- * reason, such as a hidden tab, keeps its hold.
+ * reason, such as a hidden tab, keeps its hold. The clock goes on from where it stood, with the
+ * advances of `game.step` and `game.clock`: behind the device clock by the pause, never a jump.
  *
  * @example
  * ```ts
