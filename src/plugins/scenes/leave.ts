@@ -2,7 +2,8 @@
  * @file scenes plugin — what a live switch shows over the scene being left (spec 33, slices A2 and A3): a veil from the
  * `begin` stage of the node that switches, before the `load` stage downloads its bundles, so a cold first visit reacts in
  * the next frame, and a loader when the switch is not done `afterMs` after its start. The scene being left decides: its
- * `leave` over `config.leave` over the engine's default, field by field. The renderer draws both
+ * `leave` (a value, or a function of the switch asked once per switch and once per hold of its loader) over
+ * `config.leave` over the engine's default, field by field. The renderer draws both
  * (`renderer.sync.leave`); this file resolves the look, with the veil's colour and alpha of the scene being entered on
  * top (`enter.cover`), hands the renderer the `due` of a loader projection (`loader.ts` shows or mounts it), starts
  * feeding that loader the switch (`progress.ts`), stamps a loader's floor on the swap for `build.ts` to read, and lands
@@ -10,12 +11,14 @@
  * abort listener drops the look then too; the next node's `begin` drops one left over all the same.
  */
 import type { LeaveLoader, LeaveLook } from "../renderer/types";
+import { checkLeave } from "./leave-check";
 import { dropLoader, dueLoader, landLoader } from "./loader";
 import { startFeeding } from "./progress";
 import type {
   FullCover,
   FullLeave,
   FullLoader,
+  LeaveSwitch,
   Leaving,
   RunContext,
   SceneCover,
@@ -185,6 +188,38 @@ export function leaveOf(
 }
 
 /**
+ * The `leave` of a scene for one switch: a value as it is; a function called with a new frozen `{ from, to }`, its
+ * result checked like a value the scene wrote. A function that throws, or a result of the wrong shape, is logged and
+ * the scene is read as having written nothing (the config's look shows): a game's function never ends a switch.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param scene - The scene being left.
+ * @param to - The scene being switched to; the scene itself while it stands and holds its loader.
+ * @returns What the scene writes for this switch, or `undefined`.
+ */
+export function sceneLeaveOf(
+  ctx: ScenesCtx,
+  scene: SceneDefinition,
+  to: string
+): SceneLeave | undefined {
+  const leave = scene.leave;
+
+  if (typeof leave !== "function") return leave;
+
+  try {
+    const result = leave(Object.freeze<LeaveSwitch>({ from: scene.id, to }));
+
+    checkLeave(`Scene "${scene.id}": leave`, result);
+
+    return result;
+  } catch (error) {
+    ctx.log.error("scenes:leave-failed", { scene: scene.id, to, error });
+
+    return undefined;
+  }
+}
+
+/**
  * The loader projection a scene leaves with: the one its `leave` over `config.leave` names, when the loader is on.
  *
  * @param config - `config.leave`.
@@ -302,7 +337,7 @@ export function startLeave(
 
   if (from === undefined) return undefined;
 
-  const leave = leaveOf(ctx.config.leave, from.leave);
+  const leave = leaveOf(ctx.config.leave, sceneLeaveOf(ctx, from, scene.id));
 
   if (leave === undefined) return undefined;
 

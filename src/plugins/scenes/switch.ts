@@ -21,6 +21,7 @@ import {
   leaveFor,
   loaderProjectionOf,
   ownLeave,
+  sceneLeaveOf,
   startLeave
 } from "./leave";
 import { holdLoader, releaseListed, settleFade } from "./loader";
@@ -311,7 +312,7 @@ async function loadAndStand(
  */
 function standLoader(ctx: ScenesCtx, scene: SceneDefinition, run: RunContext): void {
   const name = buildsAside(ctx, run)
-    ? loaderProjectionOf(ctx.config.leave, scene.leave)
+    ? loaderProjectionOf(ctx.config.leave, sceneLeaveOf(ctx, scene, scene.id))
     : undefined;
 
   holdLoader(ctx, scene, name);

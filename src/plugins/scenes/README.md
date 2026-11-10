@@ -33,7 +33,7 @@ export const boardFeature = defineFeature("board", {
 | `layers` | `Record<string, { sort? }>` | Layer name to its sort rule. The order of the lines is draw order, bottom first. A layer `ui` is appended |
 | `projections` | `ProjectionSpec[]` | The projections the scene mounts. Their `layer` and `lift` are checked against the keys of `layers` and `ui` |
 | `music` | `AudioKey` | Optional. The audio keys of the game (`G["assets"]`). Carried in `scenes:changed`, so `audio` needs no lookup |
-| `leave` | `SceneLeave` | Optional. What a live switch shows over this scene when it is left: a veil and a loader, merged field by field over `config.leave`; `false` shows nothing. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
+| `leave` | `SceneLeave` or `(sw: LeaveSwitch) => SceneLeave \| undefined` | Optional. What a live switch shows over this scene when it is left: a veil and a loader, merged field by field over `config.leave`; `false` shows nothing. A function is asked per switch with `{ from, to }`; with it the scene is no longer plain data. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
 | `enter` | `SceneEnter` | Optional. What a live switch to this scene shows: `{ cover: { color?, alpha? } }`, the colour and the alpha of the veil over the scene being left. See [A switch to the scene: `enter`](#a-switch-to-the-scene-enter) |
 
 The layer names are inferred from the keys of `layers`, and `NoInfer` keeps `projections` out of that inference: a wrong `layer` or `lift` is an error on the projection that is wrong, with no generic at the call site. The same check runs at run time for a caller without types:
@@ -54,7 +54,7 @@ defineScene("board", { bundle: "board", layers: { cells: {}, items: { sort: "y" 
 
 `sort` left out means `"none"`, except on a layer named `ui`, which sorts by `Order`: the roots of a scene draw there
 in the order of its `projections`, and a popup over them. A scene that writes `ui: { sort: "none" }` keeps insertion
-order. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is plain frozen data, so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey, Player, Session>`.
+order. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is frozen data (plain data, unless `leave` is a function of the switch: that function is kept as it was written), so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey, Player, Session>`.
 
 ## The HUD layer: `{ above: "overlays" }`
 
@@ -231,6 +231,8 @@ pluginConfigs.scenes.leave = { cover: { color: 0x000000, alpha: 0.45, inMs: 50, 
 // Per scene, merged field by field over the config; `false` turns a part or the whole off.
 defineScene("board", { ..., leave: { cover: { color: 0x0b1020, alpha: 0.6 }, loader: { texture: "ui.loader.ring" } } });
 defineScene("ward", { ..., leave: false });
+// Or a function of the switch: the memory dissolves into the ward under the veil alone, and keeps the loader elsewhere.
+defineScene("memory", { ..., leave: sw => (sw.to === "ward" ? { loader: false } : undefined) });
 ```
 
 | Part | Field | Default | Meaning |
@@ -254,6 +256,16 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   part written over `false` starts from the engine's default. `texture` and `projection` are one choice: a level that
   names either replaces both of the level below, and with both named the projection is drawn. The type of `texture` is
   the game's asset key through `defineGame`.
+- **A function of the switch (F160).** `leave` may be `(sw: LeaveSwitch) => SceneLeave | undefined`, with `sw` a new
+  frozen `{ from, to }`: the ids of the scene being left and of the scene being switched to. Its result stands where the
+  static `leave` of the scene stands, merged over `config.leave`; `undefined` means the scene wrote nothing, so
+  `config.leave` shows alone. The engine calls it once per switch that shows a look, when the look starts (`to` is the
+  scene switched to), and once when the scene stands and holds its loader (`to` is the scene itself, see the loader hold
+  below). A fast walk, a world that does not run live, a headless app and the first scene of a run call nothing, and
+  no call is made in a frame. The result is checked like a value written in the scene; a function that throws or a
+  result of the wrong shape is logged (`scenes:leave-failed`, with the scene, `to` and the error) and the scene is read
+  as having written nothing, so the switch goes on with the config's look. `config.leave` stays a value: a function
+  there throws at `createApp`.
 - **When.** Only a real scene change on a live run, while the world runs live, with a drawing renderer
   (`renderer.host.ready()`): the switches that build aside. A fast walk (a restore, a test walk), a node entered live
   while the world walks fast or stands paused (the restore of a repro), a headless app and the first scene of a run
@@ -293,7 +305,8 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
   a switch anyway.
 - **A loader projection** draws in a layer of its own that the scene being left declares (`loading: {}`).
   - **Held while the scene stands (F103).** Once a scene stands (a one-block mount or the commit of a scene built
-    aside), the projection its `leave` loader names (the scene's `leave` over `config.leave`) is held for its next
+    aside), the projection its `leave` loader names (the scene's `leave` over `config.leave`; a `leave` function is asked
+    for it with `to` the scene itself) is held for its next
     switch: `world.projection.hold([name], owner)` under the scenes owner. `world` builds the view of its `from`'s first
     item in idle frames and keeps it hidden, so nothing of it shows over the scene. Only a projection the scene does not
     list, whose spec's `layer` the scene declares (read from the `projections` of the features), and that no other
@@ -330,6 +343,10 @@ With neither `texture` nor `projection` the loader is a white ring the engine dr
     scene leaves with the same loader, it is held again at that moment instead; a loader the new scene leaves with that
     is another one is held at once. A look without a veil, or with `outMs: 0`, takes it down at the land. The next
     switch that starts while it still fades unmounts it (or holds it again) at once, before its own look shows.
+  - **A switch whose look differs from the held loader (F160).** When the `leave` function of the scene being left
+    gives a look without the held loader for this switch (`loader: false`, a ring, a texture or another projection),
+    the held loader is not shown: its `due` is never called. At the swap the new scene holds its own loader, which
+    unmounts the old one or holds it again; another projection is mounted when due, as after a fast walk.
   - **A held loader the next switch does not use** goes at the swap: the new scene does not declare its layer, leaves
     with another loader or with nothing (`leave: false`), or stands in a fast walk or headless. One the scene being
     switched to lists is unmounted before that scene is built or mounted, so the scene mounts it as its own.
@@ -358,7 +375,7 @@ createApp({ pluginConfigs: { scenes: { leave: { loader: { afterMs: 250, projecti
 createApp({ pluginConfigs: { scenes: { leave: { loader: { afterMs: 0, holdMs: 260, projection: "opening" } } } } });
 ```
 
-A `leave` of the wrong shape throws where it was written: in the config at `createApp`, in a scene at `defineScene`:
+A `leave` value of the wrong shape throws where it was written: in the config at `createApp`, in a scene at `defineScene`. The result of a `leave` function is not known there: it is checked at the switch, logged and replaced by the config's look:
 
 ```
 [game] scenes.leave.cover.alpha is 2.
@@ -455,7 +472,7 @@ A `buildMs` that is neither `"auto"` nor a finite number above 0 throws in `onIn
   Give "auto" or the milliseconds a frame may spend on the next scene, a finite number above 0 such as 4.
 ```
 
-A `leave` of the wrong shape throws there too. A scene is data in a feature. A transition the game draws itself (its
+A `leave` of the wrong shape throws there too, and a function is refused there: `config.leave` is a value. A scene is data in a feature. A transition the game draws itself (its
 own view built and warmed ahead) is later work (spec 33, slice C).
 
 ## Events

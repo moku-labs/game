@@ -4,7 +4,7 @@ import type { NodeInfo } from "../../../flow/types";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
 import { FALLBACK_LEAVE, leaveOf } from "../../leave";
-import type { Config, RunContext } from "../../types";
+import type { Config, LeaveSwitch, RunContext, SceneLeave } from "../../types";
 import { createMockScenes, type MockScenes } from "./mock-scenes";
 
 // ---------------------------------------------------------------------------
@@ -821,5 +821,201 @@ describe("the veil of the scene being entered", () => {
       alpha: 0.7
     });
     expect(FALLBACK_LEAVE.cover).toEqual(VEIL);
+  });
+});
+
+/** What a scene writes for `leave` as a function of the switch. */
+type LeaveFn = (sw: LeaveSwitch) => SceneLeave | undefined;
+
+/**
+ * The memory scene: leaves with a function of the switch.
+ *
+ * @param leave - The function.
+ * @returns The scene.
+ */
+function memoryOf(leave: LeaveFn): ReturnType<typeof defineScene> {
+  return defineScene("memory", {
+    bundle: "memory",
+    layers: { room: {}, loading: {} },
+    projections: [],
+    leave
+  });
+}
+
+/**
+ * Starts the plugin with the memory and stands it headless (the renderer draws from then on), then switches live to
+ * another scene up to its bundle wait.
+ *
+ * @param leave - The `leave` function of the memory.
+ * @param to - The scene switched to.
+ * @param config - The config of the plugin.
+ * @returns The started mock and the switch, at its bundle wait.
+ */
+async function leavingMemory(
+  leave: LeaveFn,
+  to: string,
+  config?: Config
+): Promise<{ mock: MockScenes; entering: Promise<void> }> {
+  const mock = createMockScenes(config);
+
+  mock.flow.features.push({
+    name: "screens",
+    description: { scenes: [memoryOf(leave), homeScene, boardScene, wardScene, nightScene] }
+  });
+  mock.start();
+  await mock.enter({ rest: true, scene: "memory" });
+  mock.renderer.host.ready.mockReturnValue(true);
+  mock.assets.control.gated = true;
+
+  return { mock, ...(await enterScene(mock, to)) };
+}
+
+/** The memory dissolving into the ward: the veil alone. */
+const TO_WARD_NO_LOADER: LeaveFn = sw => (sw.to === "ward" ? { loader: false } : undefined);
+
+describe("a `leave` that is a function of the switch", () => {
+  // Bug: the function is read once for the scene (or its result cached by scene), so both exits of the memory get the
+  // same look: the flicker of the loader over the sharp ward comes back, or the board loses its loader.
+  it.each([
+    ["the ward: the veil and no loader", "ward", { cover: VEIL }],
+    [
+      "the board: the config's loader",
+      "board",
+      { cover: VEIL, loader: { afterMs: 400, due: expect.any(Function) } }
+    ]
+  ] as const)("shows a look per exit: %s", async (_case, to, look) => {
+    const { mock } = await leavingMemory(TO_WARD_NO_LOADER, to, LOADING);
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith(look);
+  });
+
+  // Bug: `undefined` from the function is read as "no look" (nothing shown) or as `false`, instead of "the scene wrote
+  // nothing".
+  it("gives the look of a scene with no `leave` for `undefined`", async () => {
+    const config: Config = {
+      buildMs: "auto",
+      leave: { cover: { alpha: 0.3 }, loader: { afterMs: 250, texture: "ui.loader.ring" } }
+    };
+    const { mock: viaFunction } = await leavingMemory(() => undefined, "board", config);
+    const viaNothing = await enterFrom("home", "board", config);
+    const look = {
+      cover: { ...VEIL, alpha: 0.3 },
+      loader: { afterMs: 250, texture: "ui.loader.ring" }
+    };
+
+    expect(viaFunction.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith(look);
+    expect(viaNothing.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith(look);
+  });
+
+  // Bug: the result replaces the config's `leave` whole (shallow): a result that writes one veil field loses the
+  // config's loader and the other veil fields.
+  it("merges its result over the config's field by field", async () => {
+    const { mock } = await leavingMemory(() => ({ cover: { alpha: 0.6 } }), "board", {
+      buildMs: "auto",
+      leave: {
+        cover: { color: 0x0b_10_20, outMs: 200 },
+        loader: { afterMs: 300, texture: "ui.loader.ring" }
+      }
+    });
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: { color: 0x0b_10_20, alpha: 0.6, inMs: 50, outMs: 200 },
+      loader: { afterMs: 300, texture: "ui.loader.ring" }
+    });
+  });
+
+  // Bug: the result of the function skips `enteredCover`, so the scene entered loses its say over the veil.
+  it("keeps the colour and alpha of the scene entered over its result", async () => {
+    const { mock } = await leavingMemory(
+      () => ({ cover: { color: 0xff_00_00, alpha: 0.2, inMs: 80, outMs: 200 } }),
+      "night"
+    );
+
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: { color: 0x22_33_44, alpha: 0.7, inMs: 80, outMs: 200 },
+      loader: { afterMs: 400 }
+    });
+  });
+
+  // Bug: a result of `false` is read as "wrote nothing" (the config's look shows) instead of "show nothing".
+  it("shows nothing for a result of `false`", async () => {
+    const { mock } = await leavingMemory(() => false, "board");
+
+    expect(mock.renderer.leaves).toEqual([]);
+  });
+
+  // Bug: the function runs more than once per switch (at `begin` and again at the `scene` stage), runs while the app
+  // stands headless, gets a mutable or a shared switch, or runs in a frame step (a per-frame cost).
+  it("calls the function once at the start of the look, with a frozen switch, and never in a frame", async () => {
+    const seen: LeaveSwitch[] = [];
+    const { mock, entering } = await leavingMemory(sw => {
+      seen.push(sw);
+
+      return undefined;
+    }, "board");
+
+    expect(seen).toEqual([{ from: "memory", to: "board" }]);
+    expect(Object.isFrozen(seen[0])).toBe(true);
+
+    for (let frame = 0; frame < 5; frame += 1) mock.time.frame();
+    await finish(mock, entering);
+    for (let frame = 0; frame < 5; frame += 1) mock.time.frame();
+
+    expect(seen).toHaveLength(1);
+  });
+
+  // Bug: the function is called for a switch that shows nothing (a fast walk, a headless app, a world that does not run
+  // live): a game's function with a side effect runs for a look nobody sees.
+  it.each([
+    ["a fast walk", { mode: "fast", world: "live", ready: true }],
+    ["a live run over a fast world", { mode: "live", world: "fast", ready: true }],
+    ["a live run over a paused world", { mode: "live", world: "paused", ready: true }],
+    ["a headless app", { mode: "live", world: "live", ready: false }]
+  ] as const)("is not called for %s", async (_case, setup) => {
+    const leave = vi.fn<LeaveFn>(() => undefined);
+    const mock = createMockScenes();
+
+    mock.flow.features.push({
+      name: "screens",
+      description: { scenes: [memoryOf(leave), boardScene] }
+    });
+    mock.start();
+    await mock.enter({ rest: true, scene: "memory" });
+    mock.renderer.host.ready.mockReturnValue(setup.ready);
+    mock.world.mode = setup.world;
+    mock.world.building.done = true;
+    await mock.enter({ rest: true, scene: "board" }, { mode: setup.mode });
+
+    expect(leave).not.toHaveBeenCalled();
+  });
+
+  // Bug: a throw of the game's function aborts the switch (the scene never mounts), or is swallowed unlogged, or a
+  // result of the wrong shape reaches the renderer.
+  it.each([
+    [
+      "throws",
+      (): never => {
+        throw new Error("no light");
+      },
+      "no light"
+    ],
+    ["returns a veil of the wrong shape", () => ({ cover: { alpha: 2 } }), "leave.cover.alpha is 2"]
+  ] as const)("logs once and shows the config's look when it %s, and the switch lands", async (_case, leave, text) => {
+    const { mock, entering } = await leavingMemory(leave, "board");
+
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("scenes:leave-failed", {
+      scene: "memory",
+      to: "board",
+      error: expect.objectContaining({ message: expect.stringContaining(text) })
+    });
+    expect(mock.renderer.sync.leave.show).toHaveBeenCalledExactlyOnceWith({
+      cover: VEIL,
+      loader: { afterMs: 400 }
+    });
+
+    await finish(mock, entering);
+
+    expect(mock.state.current).toBe("board");
+    expect(mock.renderer.leaves.at(-1)).toEqual({ call: "land", current: "board" });
   });
 });
