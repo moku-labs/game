@@ -334,6 +334,55 @@ export const shelfScreen = projection({
   )
 });
 
+/**
+ * A strip, mounted by hand, as A Memory Missing's night strip: a JSX root in layer `ui` whose
+ * child `stripHeld`, 200 × 200 at (100, 1000), is a `Draggable` with no drop target under it.
+ * Its sibling `stripHooked`, at (600, 1000), brings itself home with its own `settle` hook.
+ */
+export const stripScreen = projection({
+  name: "drawn.strip",
+  layer: "ui",
+  from: (): ScreenItem => ({ id: "strip" }),
+  view: () => (
+    <stack key="stripRoot" style={{ width: 1080, height: 1920 }}>
+      <panel
+        key="stripHeld"
+        components={[Draggable({ payload: { frame: "held" } })]}
+        style={{
+          position: "absolute",
+          top: 1000,
+          left: 100,
+          width: 200,
+          height: 200,
+          reason: "held"
+        }}
+      />
+      <panel
+        key="stripHooked"
+        components={[Draggable({ payload: { frame: "hooked" } })]}
+        motion={{
+          settle: (view, components) => {
+            stripSettled.push([...components]);
+
+            return view.toRest(Transform, { ms: 100 });
+          }
+        }}
+        style={{
+          position: "absolute",
+          top: 1000,
+          left: 600,
+          width: 200,
+          height: 200,
+          reason: "hooked"
+        }}
+      />
+    </stack>
+  )
+});
+
+/** The components every `settle` hook of `stripHooked` was handed, in call order. */
+export const stripSettled: string[][] = [];
+
 /** The ward. The hud is listed first: only the layers put the scene root under it. */
 export const wardSceneDef = defineScene("ward", {
   bundle: "ward",
@@ -417,7 +466,8 @@ export const drawnFeature = defineFeature("drawn", {
     boardBadge,
     ordersRow,
     overlapScreen,
-    shelfScreen
+    shelfScreen,
+    stripScreen
   ],
   ui: [Shop, Overlap],
   strings: { en: english }
