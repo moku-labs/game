@@ -11,6 +11,12 @@ import { describe, expect, it } from "vitest";
 /** The root entry, whose exports are the public names. */
 const INDEX = fileURLToPath(new URL("../../src/index.ts", import.meta.url));
 
+/**
+ * Milliseconds the test may take: it type-checks the whole root entry, about 4 s alone on the Mac, and more while
+ * other suites run beside it, which overran vitest's 5 s default.
+ */
+const CHECK_MS = 20_000;
+
 /** The text agents read. */
 const LLMS = readFileSync(new URL("../../llms.txt", import.meta.url), "utf8");
 
@@ -56,7 +62,7 @@ function mentioned(name: string): boolean {
 
 describe("llms.txt", () => {
   // Bug: a public name ships without a word in llms.txt, so an agent writing a game never learns it.
-  it("names every export of the root entry", () => {
+  it("names every export of the root entry", { timeout: CHECK_MS }, () => {
     const names = publicNames();
 
     expect(names.length).toBeGreaterThan(100);
