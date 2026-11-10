@@ -2,7 +2,8 @@
  * @file scenes plugin — what a live switch shows over the scene being left (spec 33, slices A2 and A3): a veil from the
  * `begin` stage of the node that switches, before the `load` stage downloads its bundles, so a cold first visit reacts in
  * the next frame, and a loader when the switch is not done `afterMs` after its start. The scene being left decides: its
- * `leave` over `config.leave` over the engine's default, field by field. The renderer draws both
+ * `leave` (a value, or a function of the switch asked once per switch and once per hold of its loader) over
+ * `config.leave` over the engine's default, field by field. The renderer draws both
  * (`renderer.sync.leave`); this file resolves the look, with the veil's colour and alpha of the scene being entered on
  * top (`enter.cover`), hands the renderer the `due` of a loader projection (`loader.ts` shows or mounts it), starts
  * feeding that loader the switch (`progress.ts`), stamps a loader's floor on the swap for `build.ts` to read, and lands
@@ -10,12 +11,14 @@
  * abort listener drops the look then too; the next node's `begin` drops one left over all the same.
  */
 import type { LeaveLoader, LeaveLook } from "../renderer/types";
+import { checkLeave } from "./leave-check";
 import { dropLoader, dueLoader, landLoader } from "./loader";
 import { startFeeding } from "./progress";
 import type {
   FullCover,
   FullLeave,
   FullLoader,
+  LeaveSwitch,
   Leaving,
   RunContext,
   SceneCover,
@@ -185,6 +188,38 @@ export function leaveOf(
 }
 
 /**
+ * The `leave` of a scene for one switch: a value as it is; a function called with a new frozen `{ from, to }`, its
+ * result checked like a value the scene wrote. A function that throws, or a result of the wrong shape, is logged and
+ * the scene is read as having written nothing (the config's look shows): a game's function never ends a switch.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param scene - The scene being left.
+ * @param to - The scene being switched to; the scene itself while it stands and holds its loader.
+ * @returns What the scene writes for this switch, or `undefined`.
+ */
+export function sceneLeaveOf(
+  ctx: ScenesCtx,
+  scene: SceneDefinition,
+  to: string
+): SceneLeave | undefined {
+  const leave = scene.leave;
+
+  if (typeof leave !== "function") return leave;
+
+  try {
+    const result = leave(Object.freeze<LeaveSwitch>({ from: scene.id, to }));
+
+    checkLeave(`Scene "${scene.id}": leave`, result);
+
+    return result;
+  } catch (error) {
+    ctx.log.error("scenes:leave-failed", { scene: scene.id, to, error });
+
+    return undefined;
+  }
+}
+
+/**
  * The loader projection a scene leaves with: the one its `leave` over `config.leave` names, when the loader is on.
  *
  * @param config - `config.leave`.
@@ -285,7 +320,9 @@ function stampHold(ctx: ScenesCtx, leaving: Leaving, loader: Readonly<FullLoader
  * decides, and the scene being entered sets the veil's colour and alpha (`enter.cover`). A loader projection is fed
  * the switch from now on, and shown or mounted only once its loader is due. A loader with a floor stamps it here, on the
  * look's clock and frame counter: the swap of `build.ts` waits for it. An abort of the node drops both at once, from its
- * listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over.
+ * listener. The look keeps the node's signal, so the `scene` stage of the same node takes it over. A switch that shows
+ * no look is recorded as declined for that signal and scene (`leaveDeclined`), so the stage after `begin` does not ask
+ * the scene's `leave` function again.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene being switched to.
@@ -302,9 +339,14 @@ export function startLeave(
 
   if (from === undefined) return undefined;
 
-  const leave = leaveOf(ctx.config.leave, from.leave);
+  const leave = leaveOf(ctx.config.leave, sceneLeaveOf(ctx, from, scene.id));
 
-  if (leave === undefined) return undefined;
+  if (leave === undefined) {
+    // The `scene` stage of this node must not ask the scene's `leave` function for this switch again.
+    ctx.state.declined = { signal: run.signal, to: scene.id };
+
+    return undefined;
+  }
 
   // The scene being entered has the last word on the veil's colour and alpha.
   const cover = enteredCover(leave.cover, scene.enter?.cover);
@@ -352,6 +394,21 @@ export function ownLeave(ctx: ScenesCtx, run: RunContext): Leaving | undefined {
 }
 
 /**
+ * Tells whether the `begin` stage of this node already found that the switch to the target shows no look. A target that
+ * changed between the two stages is not declined: its own switch is asked once.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal of the node.
+ * @param target - The scene the switch mounts.
+ * @returns True when `begin` started no look for this node and this scene.
+ */
+export function leaveDeclined(ctx: ScenesCtx, run: RunContext, target: string): boolean {
+  const declined = ctx.state.declined;
+
+  return declined?.signal === run.signal && declined.to === target;
+}
+
+/**
  * The look the `begin` stage of this node started for the scene the `scene` stage switches to. One it started for
  * another scene (the expected scene changed between the two stages) is dropped: its loader was resolved against that
  * scene, so the switch shows its own.
@@ -381,6 +438,9 @@ export function leaveFor(ctx: ScenesCtx, run: RunContext, target: string): Leavi
  */
 export function dropLeftOver(ctx: ScenesCtx, run: RunContext): void {
   const leaving = ctx.state.leaving;
+
+  // What the node before declined is no answer for this one.
+  delete ctx.state.declined;
 
   if (leaving !== undefined && leaving.signal !== run.signal) endLeave(ctx, leaving, "drop");
 }
@@ -422,6 +482,8 @@ export function endLeave(ctx: ScenesCtx, leaving: Leaving | undefined, how: "lan
  * @param state - The plugin state.
  */
 export function forgetLeave(state: State): void {
+  delete state.declined;
+
   const leaving = state.leaving;
 
   if (leaving === undefined) return;
