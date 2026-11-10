@@ -28,6 +28,15 @@ const MAX_DEPTH = 32;
 const UI_OWNER_NAME = "ui";
 
 /**
+ * Tells whether this is a dev build, where the warnings of the step are logged.
+ *
+ * @returns True when `__MOKU_GAME_DEV__` is defined and true.
+ */
+function isDev(): boolean {
+  return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
+}
+
+/**
  * Logs one warning once per code and entity, in dev builds.
  *
  * @param sctx - Domain context of the sync module.
@@ -93,16 +102,17 @@ function clampInto(
       : "all";
   const hold = raw.hold === true;
   const hudInert = raw.hudInert === true;
+  // A value stored by an older engine has no field: `undefined` is quiet.
+  const isInertMalformed = hudInert !== raw.hudInert && raw.hudInert !== undefined;
+  // Per frame on a shipped value: checked before any warning is built, so a release build makes nothing.
+  const isInertUnused = isDev() && hudInert && (hud === "none" || hud === "under");
 
   if (dim !== raw.dim) warnOnce(sctx, "renderer:overlay-value", entity, { field: "dim" });
   if (fade !== raw.fade) warnOnce(sctx, "renderer:overlay-value", entity, { field: "fade" });
   if (cover !== raw.cover) warnOnce(sctx, "renderer:overlay-value", entity, { field: "cover" });
   if (hud !== raw.hud) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hud" });
   if (hold !== raw.hold) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hold" });
-  // A value stored by an older engine has no field: `undefined` is quiet.
-  if (hudInert !== raw.hudInert && raw.hudInert !== undefined) {
-    warnOnce(sctx, "renderer:overlay-value", entity, { field: "hudInert" });
-  }
+  if (isInertMalformed) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hudInert" });
 
   into.dim = dim;
   into.dimColor = Number.isFinite(raw.dimColor) ? raw.dimColor : 0;
@@ -112,9 +122,7 @@ function clampInto(
   into.fade = fade;
   into.hold = hold;
 
-  if (hudInert && (hud === "none" || hud === "under")) {
-    warnOnce(sctx, "renderer:hud-inert-unused", entity, { hud });
-  }
+  if (isInertUnused) warnOnce(sctx, "renderer:hud-inert-unused", entity, { hud });
 }
 
 /**

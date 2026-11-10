@@ -266,7 +266,7 @@ export type SpriteOptions = {
 
 /**
  * How an overlay lies over what is drawn before it: the dim it brings, whether it hides what is under it, which parts
- * of the HUD stay shown, and how long its dim and the HUD take to follow it when its root has no motion of its own.
+ * of the HUD stay shown and whether the kept parts still take a tap, and how long its dim and the HUD take to follow it when its root has no motion of its own.
  * The level the overlay is at and whether it has landed are the engine's: `app.renderer.sync.debug.overlays()`
  * reports them.
  *
@@ -442,8 +442,8 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * the overlay is there, and drawn again in the same frame anything in it changes; `cover: "opaque"` draws nothing
  * under it while it is fully shown. The engine draws its dim and fades the HUD parts it does not keep, with the root's
  * own enter and exit motion (`fade` when it has none); `hud: "under"` draws the whole HUD under the dim instead.
- * `hudInert: true` makes the HUD parts it keeps shown take no tap while it stands. `hold: true` holds the endless loops of what lies under it while it stands, so a dimmed sheet over a sharp scene
- * draws no frame at rest.
+ * `hudInert: true` makes the HUD parts it keeps shown take no tap while it stands. `hold: true` holds the endless loops
+ * of what lies under it while it stands, so a dimmed sheet over a sharp scene draws no frame at rest.
  *
  * @example
  * ```tsx

@@ -487,7 +487,11 @@ export function stepParts(sctx: SyncCtx): void {
 
     applyHud(sctx, entity, view, factor);
 
-    if (factor < 1 || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key)) {
+    // Fading, going to fade, or kept by an inert overlay.
+    const takesNoTap =
+      factor < 1 || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key);
+
+    if (takesNoTap) {
       const top = view.wrapper ?? view.object;
 
       if (offList[count] !== top) offList[count] = top;
