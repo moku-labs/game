@@ -169,3 +169,36 @@ describe("a bound text sized by the string it shows", () => {
     await app.stop();
   });
 });
+
+describe("a text a system writes outside the projection (F162)", () => {
+  it("is laid out again at the content the system wrote, both when it grows and when it shrinks", async () => {
+    const app = await mountBound();
+
+    app.time.step(16);
+
+    const found = app.ui.find("plain");
+
+    expect(found).toBeDefined();
+
+    const entity = found ?? 0;
+    const nine = rectOf(app, "plain");
+
+    expect(nine.w).toBe(20);
+
+    // A timer system writes the label once a minute; the markup still says "9".
+    app.world.ecs.set(entity, Text, { content: "10" });
+    app.time.step(16);
+
+    const ten = rectOf(app, "plain");
+
+    expect(ten.w).toBe(39);
+    expect(ten.x + ten.w / 2).toBe(nine.x + nine.w / 2);
+
+    app.world.ecs.set(entity, Text, { content: "9" });
+    app.time.step(16);
+
+    expect(rectOf(app, "plain")).toEqual(nine);
+
+    await app.stop();
+  });
+});

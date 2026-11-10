@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type } from "../../../flow/runner/define";
 import { Parent, Transform } from "../../../renderer/components";
 import type { Entity } from "../../../world/types";
@@ -114,5 +114,31 @@ describe("anim/timeline at() root pose", () => {
       scale: 1
     });
     expect(mock.log.warn).toHaveBeenCalledWith("anim:target-missing", { spawned: "coin1" });
+  });
+});
+
+describe("anim/timeline at() of a target not drawn yet, in a dev build (F163)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("logs an error, not a warning, and still answers the identity pose", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = createMockAnim();
+    const target = { projection: "DailyWindow", key: "dailyCard5Tick" };
+
+    expect(restPoseOf(mock.actx, target)).toEqual({ x: 0, y: 0, rotation: 0, scale: 1 });
+    expect(mock.log.error).toHaveBeenCalledWith("anim:target-missing", target);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("stays a warning outside a dev build", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", false);
+    const mock = createMockAnim();
+
+    restPoseOf(mock.actx, spawned("coin1"));
+
+    expect(mock.log.warn).toHaveBeenCalledWith("anim:target-missing", { spawned: "coin1" });
+    expect(mock.log.error).not.toHaveBeenCalled();
   });
 });

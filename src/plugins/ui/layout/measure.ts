@@ -208,6 +208,28 @@ function namedSize(
 }
 
 /**
+ * The size of a text with no bind: the content and the style its `Text` holds, so a write of a
+ * system outside the projection is measured too (F162). Before the entity carries its `Text`, for
+ * the first solve, the content and the style the markup wrote.
+ *
+ * @param element - The text element.
+ * @param source - What it is measured through.
+ * @param width - The width Yoga offers, or `undefined` when it bounds none.
+ * @returns The size before it is rounded.
+ */
+function contentSize(element: Element, source: TextSource, width: number | undefined): Size {
+  const content = source.content(element.entity);
+
+  if (content === undefined) {
+    const written = contentOf(element);
+
+    return source.measure(written.content, written.style, width);
+  }
+
+  return source.measure(content, source.style(element.entity) ?? styleKeyOf(element), width);
+}
+
+/**
  * The size a text measures to: a bound one by what it shows, any other by its content.
  *
  * @param element - The text element.
@@ -218,11 +240,7 @@ function namedSize(
 function textSize(element: Element, source: TextSource, width: number | undefined): Size {
   const bind = bindOf(element);
 
-  if (bind === undefined) {
-    const { content, style } = contentOf(element);
-
-    return source.measure(content, style, width);
-  }
+  if (bind === undefined) return contentSize(element, source, width);
 
   // Per shown change of a rolling counter: a built-in bind asks nothing here and builds nothing.
   const named = isTextFormat(bind.format) ? undefined : namedSize(element, bind, source, width);
