@@ -18,6 +18,7 @@ import { rendererPlugin } from "../../renderer";
 import { Shape, Transform } from "../../renderer/components";
 import { scenesPlugin } from "../../scenes";
 import { textPlugin } from "../../text";
+import { Text } from "../../text/components";
 import { worldPlugin } from "../../world";
 import { component, Order, tag } from "../../world/ecs/define";
 import type { Motion, MotionHandle, ViewHandle } from "../../world/types";
@@ -89,7 +90,7 @@ const rolledMotion: ElementMotion = { change: { Mark: rollMark } };
 /** The player of the extras fixture: the level the popup button carries. */
 export type ExtrasPlayer = { level: number };
 
-const { defineNode, defineFlow, defineFeature } = defineGame<{
+const { defineNode, defineFlow, defineFeature, system } = defineGame<{
   player: ExtrasPlayer;
   session: { visits: number };
   assets: string;
@@ -308,6 +309,62 @@ export const boundScreen = projection({
   view: () => <Bound key="boundCounter" />
 });
 
+/**
+ * A game's own timer on a text, as a slot's timer is: what it should show (`left`) and what its
+ * system wrote last (`shown`).
+ */
+export const Clock = component("Clock", { left: 9, shown: 9 });
+
+/**
+ * The game's timer system (F167): when a clock shows another number than it should, it writes the
+ * text's `content` and the clock in one run, the way a slot's timer writes its minute.
+ */
+export const clockTick = system({
+  name: "extras.clock",
+  phase: "animate",
+  query: [Clock],
+  run: (rows, { world }) => {
+    for (const [entity, clock] of rows) {
+      if (clock.left === clock.shown) continue;
+
+      world.set(entity, Text, { content: String(clock.left) });
+      world.set(entity, Clock, { shown: clock.left });
+    }
+  }
+});
+
+/**
+ * A timer text that says "9" in its markup and is written by `clockTick` after. Its button renders
+ * the view again with the same content and another prop: the text gets `Flag` too.
+ */
+export const Clocked = defineComponent("Clocked", {
+  local: { flagged: false },
+  view: (_props: object, local) => (
+    <column key="clockRoot" style={{ width: 800, height: 400 }}>
+      <row key="clockRow" style={centredRow}>
+        <text
+          key="clock"
+          style="digits"
+          content="9"
+          components={
+            local.flagged ? [Clock({ left: 9, shown: 9 }), Flag()] : [Clock({ left: 9, shown: 9 })]
+          }
+        />
+      </row>
+      <button key="flagClock" local={{ flagged: true }} style={control} />
+    </column>
+  )
+});
+
+/** A screen with the timer text. */
+export const clockScreen = projection({
+  name: "clockScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "clockScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => <Clocked key="clocked" />
+});
+
 /** The padding of the plaque: wide on the sides, as a title plaque pads its title. */
 export const plaquePadding = { top: 20, right: 80, bottom: 20, left: 80 } as const;
 
@@ -517,9 +574,11 @@ export const extrasFeature = defineFeature("extras", {
     hintScreen,
     hintViews,
     boundScreen,
+    clockScreen,
     plaqueScreen
   ],
-  ui: [Marked, Clash, Leaving, MarkedPopup, Rolled, Bound, Plaque],
+  systems: [clockTick],
+  ui: [Marked, Clash, Leaving, MarkedPopup, Rolled, Bound, Clocked, Plaque],
   strings: { en: english }
 });
 
