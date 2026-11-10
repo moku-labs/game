@@ -33,6 +33,14 @@ describe("the checks of `leave`", () => {
     );
   });
 
+  // Bug F160: `config.leave` takes the function form too: a config has no scene to name in `from`, so the engine would
+  // call it with a switch of nothing.
+  it("refuses a function in the config, where `leave` stays static", () => {
+    expect(() =>
+      checkConfig({ buildMs: "auto", leave: (() => undefined) as unknown as SceneLeave })
+    ).toThrow("Give { cover, loader } or false");
+  });
+
   // Bug: a scene's wrong `leave` throws only at its first switch, far from the line that wrote it.
   it("refuses a scene's `leave` of the wrong shape at `defineScene`, naming the scene", () => {
     expect(() =>

@@ -4,7 +4,14 @@ import { createApp, projection, screen } from "../../../../index";
 import type { Json } from "../../../model/types";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
-import type { DefineScene, Events, KernelSlice, SceneDefinition, SceneState } from "../../types";
+import type {
+  DefineScene,
+  Events,
+  KernelSlice,
+  LeaveSwitch,
+  SceneDefinition,
+  SceneState
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -140,6 +147,47 @@ createApp({
 
 // @ts-expect-error — `leave` is an object or `false`, never `true`.
 createApp({ plugins: [...screen], pluginConfigs: { scenes: { leave: true } } });
+
+// ─── leave as a function of the switch ────────────────────────
+
+// The switch is inferred as `LeaveSwitch`: read-only ids of the scene being left and the scene being switched to.
+defineGameScene("memory", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [],
+  leave: sw => {
+    expectTypeOf(sw).toEqualTypeOf<LeaveSwitch>();
+    expectTypeOf(sw.from).toEqualTypeOf<string>();
+    // @ts-expect-error — the switch is read-only: a function cannot move the target.
+    sw.to = "ward";
+
+    return sw.to === "ward" ? { loader: false } : undefined;
+  }
+});
+
+// A function that gives nothing, and one that gives `false`, are both accepted.
+defineGameScene("memory", { bundle: "board", layers: {}, projections: [], leave: () => undefined });
+defineGameScene("memory", { bundle: "board", layers: {}, projections: [], leave: () => false });
+
+defineGameScene("memory", {
+  bundle: "board",
+  layers: {},
+  projections: [],
+  // @ts-expect-error — "not.a.key" is not an asset key of this game, in the result of the function too.
+  leave: () => ({ loader: { texture: "not.a.key" } })
+});
+
+defineGameScene("memory", {
+  bundle: "board",
+  layers: {},
+  projections: [],
+  // @ts-expect-error — the function gives a `leave` or nothing, never `true`.
+  leave: () => true
+});
+
+// The config's `leave` stays static: a function is no `SceneLeave`.
+// @ts-expect-error — `scenes.leave` takes no function.
+createApp({ plugins: [...screen], pluginConfigs: { scenes: { leave: () => undefined } } });
 
 // ─── enter: the veil's colour and alpha of the scene being entered ──
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import { defineScene } from "../../define";
-import type { SceneDefinition, SceneState } from "../../types";
+import type { Config, LeaveSwitch, SceneDefinition, SceneLeave, SceneState } from "../../types";
 import { createMockScenes, type MockScenes } from "./mock-scenes";
 
 const homeScene = defineScene("home", {
@@ -945,5 +945,213 @@ describe("a projection both scenes list", () => {
       names: ["shared.hud", "shop.shelf"],
       owner: { kind: "plugin", name: "scenes" }
     });
+  });
+});
+
+/**
+ * Starts a switch and lets it reach the bundle wait.
+ *
+ * @param mock - The started mock.
+ * @param scene - The scene to switch to.
+ * @param signal - The abort signal of the node.
+ * @returns The switch, in a wrapper: an async function would wait for it.
+ */
+async function switching(
+  mock: MockScenes,
+  scene: string,
+  signal?: AbortSignal
+): Promise<{ entering: Promise<void> }> {
+  const entering = mock.enter({ rest: true, scene }, signal === undefined ? {} : { signal });
+
+  entering.catch(() => undefined);
+  await flush();
+
+  return { entering };
+}
+
+/**
+ * Calls the `due` of the loader the renderer was handed last, the way the renderer does in the frame it is due.
+ *
+ * @param mock - The mock with a switch at its start.
+ */
+function dueNow(mock: MockScenes): void {
+  mock.renderer.sync.leave.show.mock.calls.at(-1)?.[0].loader?.due?.();
+}
+
+describe("the hold of a loader whose scene leaves with a function of the switch", () => {
+  /** The ordinary stand: a live run over a live world with a drawing renderer. */
+  const LIVE = { mode: "live", world: "live", ready: true } as const;
+
+  /** The projections the feature brings: two loaders in the layer "loading". */
+  const loaders = [
+    { name: "loading", layer: "loading" },
+    { name: "spinner", layer: "loading" }
+  ];
+
+  /** The config whose loader is the projection "loading". */
+  const LOADING: Config = { buildMs: "auto", leave: { loader: { projection: "loading" } } };
+
+  /** The scene that leaves with a function: declares the loader's layer, so it holds a loader. */
+  const memoryOf = (leave: (sw: LeaveSwitch) => SceneLeave | undefined): SceneDefinition =>
+    defineScene("memory", {
+      bundle: "memory",
+      layers: { room: {}, loading: {} },
+      projections: [],
+      leave
+    });
+
+  /** A scene that declares the loader's layer and leaves with the config's look. */
+  const calmScene = defineScene("calm", {
+    bundle: "calm",
+    layers: { loading: {} },
+    projections: []
+  });
+
+  /** A scene that does not declare the loader's layer, so it holds none. */
+  const plainScene = defineScene("plain", {
+    bundle: "plain",
+    layers: { room: {} },
+    projections: []
+  });
+
+  /**
+   * Starts the plugin and stands the memory with a drawing renderer and a build that commits at once; the loads are
+   * held from then on.
+   *
+   * @param leave - The `leave` function of the memory.
+   * @param modes - How the memory stands: the runner's mode, the world's mode and whether the renderer draws.
+   * @param modes.mode - The runner's mode.
+   * @param modes.world - The world's mode.
+   * @param modes.ready - Whether the renderer draws.
+   * @returns The started mock.
+   */
+  async function standingMemory(
+    leave: (sw: LeaveSwitch) => SceneLeave | undefined,
+    modes: { mode: "live" | "fast"; world: "live" | "fast"; ready: boolean } = LIVE
+  ): Promise<MockScenes> {
+    const mock = createMockScenes(LOADING);
+
+    mock.flow.features.push({
+      name: "screens",
+      description: { scenes: [memoryOf(leave), calmScene, plainScene], projections: loaders }
+    });
+    mock.start();
+    mock.renderer.host.ready.mockReturnValue(modes.ready);
+    mock.world.mode = modes.world;
+    mock.world.building.done = true;
+    await mock.enter({ rest: true, scene: "memory" }, { mode: modes.mode });
+    mock.renderer.host.ready.mockReturnValue(true);
+    mock.world.mode = "live";
+    mock.assets.control.gated = true;
+
+    return mock;
+  }
+
+  // Bug: the hold asks `from.leave` as a value (a function is read as "no look") or hands the function the switch's
+  // `to` of nothing: the scene holds the config's loader instead of the one its function names for a stand.
+  it("calls the function with the scene itself as `from` and `to`, and holds the projection its result names", async () => {
+    const seen: LeaveSwitch[] = [];
+    const mock = await standingMemory(sw => {
+      seen.push(sw);
+
+      return { loader: { projection: "spinner" } };
+    });
+
+    expect(seen).toEqual([{ from: "memory", to: "memory" }]);
+    expect(mock.world.holds).toEqual([["spinner"]]);
+    expect(mock.state.held).toEqual({ name: "spinner", layer: "loading" });
+  });
+
+  // Bug: the hold ignores a result that turns the loader off for the stand and holds the config's loader all the same.
+  it("holds nothing when its result for the stand turns the loader off", async () => {
+    const mock = await standingMemory(() => ({ loader: false }));
+
+    expect(mock.world.holds).toEqual([]);
+    expect(mock.state.held).toBeUndefined();
+  });
+
+  // Bug: the hold runs the game's function where no switch shows a look (a fast walk, a world that walks fast, a
+  // headless app).
+  it.each([
+    ["a fast walk", { mode: "fast", world: "live", ready: true }],
+    ["a world that walks fast", { mode: "live", world: "fast", ready: true }],
+    ["a headless app", { mode: "live", world: "live", ready: false }]
+  ] as const)("is not called when the scene stands in %s", async (_case, modes) => {
+    const leave = vi.fn((): SceneLeave | undefined => undefined);
+    const mock = await standingMemory(leave, modes);
+
+    expect(leave).not.toHaveBeenCalled();
+    expect(mock.world.holds).toEqual([]);
+  });
+
+  // Bug: a throw of the function at the stand rejects the switch after its swap, or loses the loader the config names.
+  it("logs a throw of the function once and holds the config's loader", async () => {
+    const mock = await standingMemory(() => {
+      throw new Error("no light");
+    });
+
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("scenes:leave-failed", {
+      scene: "memory",
+      to: "memory",
+      error: expect.objectContaining({ message: "no light" })
+    });
+    expect(mock.state.current).toBe("memory");
+    expect(mock.world.holds).toEqual([["loading"]]);
+  });
+
+  // Bug: the re-hold after a dropped switch reuses the value of the first hold (or skips the function), and the two
+  // calls share one object a game could keep and mutate.
+  it("is called again for the re-hold after a dropped switch, with a new switch each time", async () => {
+    const seen: LeaveSwitch[] = [];
+    const mock = await standingMemory(sw => {
+      seen.push(sw);
+
+      return undefined;
+    });
+    const controller = new AbortController();
+    const { entering } = await switching(mock, "plain", controller.signal);
+
+    dueNow(mock);
+    controller.abort();
+    await entering.catch(() => undefined);
+
+    expect(seen).toEqual([
+      { from: "memory", to: "memory" },
+      { from: "memory", to: "plain" },
+      { from: "memory", to: "memory" }
+    ]);
+    expect(seen.every(sw => Object.isFrozen(sw))).toBe(true);
+    expect(seen[0]).not.toBe(seen[2]);
+    expect(mock.world.holds).toEqual([["loading"], ["loading"]]);
+  });
+
+  // Bug: a held loader is shown on a switch whose function result turns the loader off (the flicker F160 removes), or
+  // stays mounted under a scene that holds none.
+  it("does not show the held loader when its result turns the loader off, and unmounts it at the swap to a scene that holds none", async () => {
+    const mock = await standingMemory(sw => (sw.to === "plain" ? { loader: false } : undefined));
+    const { entering } = await switching(mock, "plain");
+
+    expect(mock.renderer.sync.leave.show.mock.calls.at(-1)?.[0].loader).toBeUndefined();
+    expect(mock.world.shows).toEqual([]);
+
+    mock.assets.release();
+    await entering;
+
+    expect(mock.world.shows).toEqual([]);
+    expect(mock.world.unmounted).toContainEqual(["loading"]);
+    expect(mock.state.held).toBeUndefined();
+  });
+
+  // Bug: the loader held and not shown is dropped at the swap to a scene that holds the same one.
+  it("keeps the held loader for a scene that holds the same loader after a switch that did not show it", async () => {
+    const mock = await standingMemory(sw => (sw.to === "calm" ? { loader: false } : undefined));
+    const { entering } = await switching(mock, "calm");
+
+    mock.assets.release();
+    await entering;
+
+    expect(mock.world.shows).toEqual([]);
+    expect(mock.world.unmounted.flat()).not.toContain("loading");
+    expect(mock.state.held).toEqual({ name: "loading", layer: "loading" });
   });
 });
