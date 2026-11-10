@@ -28,6 +28,15 @@ const MAX_DEPTH = 32;
 const UI_OWNER_NAME = "ui";
 
 /**
+ * Tells whether this is a dev build, where the warnings of the step are logged.
+ *
+ * @returns True when `__MOKU_GAME_DEV__` is defined and true.
+ */
+function isDev(): boolean {
+  return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
+}
+
+/**
  * Logs one warning once per code and entity, in dev builds.
  *
  * @param sctx - Domain context of the sync module.
@@ -68,8 +77,10 @@ function isKeyList(value: unknown): value is readonly string[] {
 
 /**
  * Copies the marker into the record's own value, clamped (O1): `dim` into [0, 1], `fade` to 0 or more, an unknown
- * `cover` as `"none"`, a `hud` that is not `"all"`, `"none"`, `"under"` or a key list as `"all"`, a `hold` that is no
- * boolean as `false`; one dev warning per field.
+ * `cover` as `"none"`, a `hud` that is not `"all"`, `"none"`, `"under"` or a key list as `"all"`, a `hold` or a
+ * `hudInert` that is no boolean as `false` (a `hudInert` a value stored by an older engine lacks is `false` and quiet);
+ * one dev warning per field. A `hudInert` of `true` with `hud` `"none"` or `"under"` has no effect and warns once
+ * (`renderer:hud-inert-unused`); the value is kept.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The marked entity.
@@ -90,19 +101,28 @@ function clampInto(
       ? raw.hud
       : "all";
   const hold = raw.hold === true;
+  const hudInert = raw.hudInert === true;
+  // A value stored by an older engine has no field: `undefined` is quiet.
+  const isInertMalformed = hudInert !== raw.hudInert && raw.hudInert !== undefined;
+  // Per frame on a shipped value: checked before any warning is built, so a release build makes nothing.
+  const isInertUnused = isDev() && hudInert && (hud === "none" || hud === "under");
 
   if (dim !== raw.dim) warnOnce(sctx, "renderer:overlay-value", entity, { field: "dim" });
   if (fade !== raw.fade) warnOnce(sctx, "renderer:overlay-value", entity, { field: "fade" });
   if (cover !== raw.cover) warnOnce(sctx, "renderer:overlay-value", entity, { field: "cover" });
   if (hud !== raw.hud) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hud" });
   if (hold !== raw.hold) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hold" });
+  if (isInertMalformed) warnOnce(sctx, "renderer:overlay-value", entity, { field: "hudInert" });
 
   into.dim = dim;
   into.dimColor = Number.isFinite(raw.dimColor) ? raw.dimColor : 0;
   into.cover = cover;
   into.hud = hud;
+  into.hudInert = hudInert;
   into.fade = fade;
   into.hold = hold;
+
+  if (isInertUnused) warnOnce(sctx, "renderer:hud-inert-unused", entity, { hud });
 }
 
 /**

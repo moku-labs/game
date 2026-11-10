@@ -31,11 +31,16 @@ Overlay({ level: 1 });
 Overlay({ landed: true });
 
 expectTypeOf<keyof OverlayValue>().toEqualTypeOf<
-  "dim" | "dimColor" | "cover" | "hud" | "fade" | "hold"
+  "dim" | "dimColor" | "cover" | "hud" | "hudInert" | "fade" | "hold"
 >();
 
 // @ts-expect-error — hold is a switch, true or false.
 Overlay({ hold: "yes" });
+
+Overlay({ dim: 0.7, hud: ["energy", "gems"], hudInert: true });
+
+// @ts-expect-error — hudInert is a switch, true or false.
+Overlay({ hudInert: "yes" });
 
 HudPart({ key: "anything" });
 
@@ -47,6 +52,11 @@ kit.Overlay({ dim: 0.56, hud: ["energy", "gems"] });
 kit.Overlay({ dim: 0.56, hold: true, hud: ["energy", "gems"] });
 kit.Overlay({ hud: "none" });
 kit.Overlay({ dim: 0.82, dimColor: 0x1e_16_1a, hud: "under" });
+
+kit.Overlay({ dim: 0.7, hud: ["energy"], hudInert: true });
+
+// @ts-expect-error — the kit's hudInert is a switch too.
+kit.Overlay({ hudInert: "yes" });
 
 // @ts-expect-error — "energi" is not a HUD key of the game.
 kit.HudPart({ key: "energi" });

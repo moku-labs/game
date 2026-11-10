@@ -364,4 +364,41 @@ describe('Overlay({ hud: "under" })', () => {
       ["renderer:overlay-value", { entity: wrong, field: "hud" }]
     ]);
   });
+
+  // Bug: no warning for a switch that does nothing, or one every frame, or one in a build that is not dev.
+  it("warns once per overlay for hudInert with hud none or under, and not outside dev", async () => {
+    const { stage } = await hudStage({ dev: true });
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const pyramid = stage.overlay({ dim: 0.82, hud: "under", hudInert: true }, { order: 2 });
+    const quiet = stage.overlay({ dim: 0.5, hud: "none", hudInert: true }, { order: 3 });
+    const kept = stage.overlay({ dim: 0.5, hud: ["energy"], hudInert: true }, { order: 4 });
+
+    stage.level(pyramid, 1, true);
+    stage.level(quiet, 1, true);
+    stage.level(kept, 1, true);
+    stage.frames(3);
+
+    const unused = (): unknown[] =>
+      warn.mock.calls.filter(([code]) => code === "renderer:hud-inert-unused");
+
+    expect(unused()).toEqual([
+      ["renderer:hud-inert-unused", { entity: pyramid, hud: "under" }],
+      ["renderer:hud-inert-unused", { entity: quiet, hud: "none" }]
+    ]);
+    // The value is kept: it has no effect, the clamp does not rewrite it.
+    expect(stage.drawn.mock.ctx.state.sync.overlay.records.get(pyramid)?.value.hudInert).toBe(true);
+  });
+
+  it("logs no hud-inert-unused outside a dev build", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", false);
+
+    const { stage } = await hudStage();
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const quiet = stage.overlay({ dim: 0.5, hud: "none", hudInert: true }, { order: 3 });
+
+    stage.level(quiet, 1, true);
+    stage.frames(3);
+
+    expect(warn.mock.calls.filter(([code]) => code === "renderer:hud-inert-unused")).toEqual([]);
+  });
 });

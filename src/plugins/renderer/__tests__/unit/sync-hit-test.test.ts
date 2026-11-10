@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Exiting, Layer, Order } from "../../../world/ecs/define";
-import { Parent, Shape, Sprite, Transform } from "../../components";
+import { HudPart, Overlay, Parent, Shape, Sprite, Transform } from "../../components";
 import { FakeContainer, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
+import { endStage, type OverlayStage, startOverlayStage } from "../overlay-harness";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -513,5 +514,43 @@ describe("sync hitBoxOf", () => {
     box.x = 1000;
 
     expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(cell);
+  });
+});
+
+describe("sync hit test of an inert HUD part (F164)", () => {
+  const running: OverlayStage[] = [];
+
+  afterEach(() => {
+    for (const stage of running.splice(0)) endStage(stage);
+  });
+
+  // Bug: a skipped top swallows the walk, so a tap on an inert part reaches nothing instead of what lies beneath.
+  it("lands a tap on an inert part on the full-screen view beneath it, and on the part with hudInert false", async () => {
+    const stage = await startOverlayStage();
+
+    running.push(stage);
+
+    const energy = stage.view({
+      layer: "hud",
+      x: 100,
+      y: 100,
+      extra: [HudPart({ key: "energy" })]
+    });
+    const catcher = stage.view({ layer: "ui", w: 1080, h: 1920 });
+    const suitcase = stage.overlay({ dim: 0.7, hud: ["energy"], hudInert: false }, { order: 5 });
+    const { sync } = stage.drawn.mock.api;
+
+    stage.level(suitcase, 1, true);
+    stage.frames(3);
+    expect(sync.hitTest(150, 150, () => true)).toBe(energy);
+
+    stage.drawn.mock.world.ecs.set(suitcase, Overlay, { hudInert: true });
+    stage.frame();
+
+    const ignoreOverlay = (entity: number): boolean => entity !== suitcase;
+
+    expect(sync.hitTest(150, 150, ignoreOverlay)).toBe(catcher);
+    expect(sync.hitAll(150, 150)).not.toContain(energy);
+    expect(sync.hitAll(150, 150)).toContain(catcher);
   });
 });

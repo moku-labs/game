@@ -266,7 +266,7 @@ export type SpriteOptions = {
 
 /**
  * How an overlay lies over what is drawn before it: the dim it brings, whether it hides what is under it, which parts
- * of the HUD stay shown, and how long its dim and the HUD take to follow it when its root has no motion of its own.
+ * of the HUD stay shown and whether the kept parts still take a tap, and how long its dim and the HUD take to follow it when its root has no motion of its own.
  * The level the overlay is at and whether it has landed are the engine's: `app.renderer.sync.debug.overlays()`
  * reports them.
  *
@@ -275,11 +275,15 @@ export type SpriteOptions = {
  * // The shop: the board dims to 56 %, the energy and the gems stay shown above the dim, the dim takes 270 ms, and the
  * // glints of the board under it rest while the shop stands.
  * const shop: OverlayValue = {
- *   dim: 0.56, dimColor: 0x1b1430, cover: "none", hud: ["energy", "gems"], fade: 270, hold: true
+ *   dim: 0.56, dimColor: 0x1b1430, cover: "none", hud: ["energy", "gems"], hudInert: false, fade: 270, hold: true
  * };
  * // The pyramid choice: the board and the whole HUD dim to 82 % together under it.
  * const pyramid: OverlayValue = {
- *   dim: 0.82, dimColor: 0x1e161a, cover: "none", hud: "under", fade: 250, hold: false
+ *   dim: 0.82, dimColor: 0x1e161a, cover: "none", hud: "under", hudInert: false, fade: 250, hold: false
+ * };
+ * // The daily suitcase: the board dims, the energy and the gems stay bright above the dim and only show.
+ * const suitcase: OverlayValue = {
+ *   dim: 0.7, dimColor: 0x1b1430, cover: "none", hud: ["energy", "gems"], hudInert: true, fade: 250, hold: false
  * };
  * ```
  */
@@ -296,6 +300,12 @@ export type OverlayValue = {
    * there; with a dim of 0 it is `"all"`.
    */
   hud: "all" | "none" | "under" | readonly string[];
+  /**
+   * True: the HUD parts this overlay keeps shown above its dim take no tap while it stands, entering and leaving
+   * included: no press, no `Pressed`, no press pose, no intent. They are drawn as they are; a tap on one goes where a
+   * tap beside it goes. No effect with `hud: "none"` or `"under"`.
+   */
+  hudInert: boolean;
   /**
    * Milliseconds the dim and the HUD parts take to come and go when the root plays no enter or exit motion; a root
    * with a motion is followed for its own length. 0 follows at once.
@@ -336,6 +346,7 @@ const overlayDefaults: OverlayValue = {
   dimColor: 0x00_00_00,
   cover: "none",
   hud: "all",
+  hudInert: false,
   fade: 250,
   hold: false
 };
@@ -431,8 +442,8 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * the overlay is there, and drawn again in the same frame anything in it changes; `cover: "opaque"` draws nothing
  * under it while it is fully shown. The engine draws its dim and fades the HUD parts it does not keep, with the root's
  * own enter and exit motion (`fade` when it has none); `hud: "under"` draws the whole HUD under the dim instead.
- * `hold: true` holds the endless loops of what lies under it while it stands, so a dimmed sheet over a sharp scene
- * draws no frame at rest.
+ * `hudInert: true` makes the HUD parts it keeps shown take no tap while it stands. `hold: true` holds the endless loops
+ * of what lies under it while it stands, so a dimmed sheet over a sharp scene draws no frame at rest.
  *
  * @example
  * ```tsx
@@ -442,6 +453,8 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * <stack key="shopDimLayer" components={[Overlay({ dim: 0.56, hold: true, hud: ["energy", "gems"] })]} />
  * // The pyramid choice: the ward and the whole HUD dim to 82 % under it, and the HUD takes no tap until it leaves.
  * <stack key="pyramidChoice" components={[Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })]} />
+ * // The daily suitcase: the energy and the gems stay bright above the dim and only show, a tap on them does nothing.
+ * <stack key="dailySuitcase" components={[Overlay({ dim: 0.7, hud: ["energy", "gems"], hudInert: true })]} />
  * ```
  */
 export const Overlay = /*#__PURE__*/ component("Overlay", overlayDefaults);
@@ -505,6 +518,7 @@ export function sprite(
  * kit.sprite({ texture: "board.cell", at: { x: 90, y: 90 } });
  * kit.Overlay({ dim: 0.56, hud: ["energy"] }).value.hud; // ["energy"]
  * kit.Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" }).value.hud; // "under"
+ * kit.Overlay({ dim: 0.7, hud: ["energy"], hudInert: true }).value.hudInert; // true
  * ```
  */
 export type RendererKit<Asset extends string, HudKey extends string = string> = {

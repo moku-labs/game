@@ -163,4 +163,26 @@ describe("overlay dim", () => {
       ["renderer:overlay-value", { entity: shop, field: "dim" }]
     ]);
   });
+
+  // Bug: a warning on every overlay stored by an older engine (no field), or a non-boolean kept as it is.
+  it("clamps hudInert to a boolean with one dev warning, and stays quiet for a missing field", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const stage = await stageOf();
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const wrong = stage.overlay({ dim: 0.5, hudInert: "yes" as unknown as boolean });
+    const older = stage.overlay({ dim: 0.5, hudInert: undefined as unknown as boolean });
+
+    stage.level(wrong, 1);
+    stage.level(older, 1);
+    stage.frames(3);
+
+    const { records } = stage.drawn.mock.ctx.state.sync.overlay;
+
+    expect(records.get(wrong)?.value.hudInert).toBe(false);
+    expect(records.get(older)?.value.hudInert).toBe(false);
+    expect(warn.mock.calls.filter(([code]) => code === "renderer:overlay-value")).toEqual([
+      ["renderer:overlay-value", { entity: wrong, field: "hudInert" }]
+    ]);
+  });
 });
