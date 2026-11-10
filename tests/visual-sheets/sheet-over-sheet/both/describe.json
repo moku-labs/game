@@ -1072,7 +1072,8 @@
           "dimColor": 0,
           "fade": 250,
           "hold": false,
-          "hud": "none"
+          "hud": "none",
+          "hudInert": false
         },
         "OverlayLevel": {
           "landed": true,
@@ -1322,7 +1323,8 @@
           "hud": [
             "energy",
             "gems"
-          ]
+          ],
+          "hudInert": false
         },
         "OverlayLevel": {
           "landed": true,

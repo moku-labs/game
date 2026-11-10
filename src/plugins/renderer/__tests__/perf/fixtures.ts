@@ -494,6 +494,44 @@ export async function fadedPartBoard(): Promise<() => void> {
   return () => sync.stepOverlays();
 }
 
+/**
+ * A resting suitcase that keeps two HUD parts shown and inert (change 2026-11-10-f164-hud-inert, F164), over the real
+ * Pixi of the overlay stage: 20 views of the ward, the HUD parts `energy`, `gems` and `shop`, and a landed overlay with
+ * `dim: 0.7`, `hud: ["energy", "gems"]` and `hudInert: true`, so the kept parts and `shop` all take no tap while nothing
+ * moves. The frames that build it and land the suitcase have run.
+ *
+ * @returns One overlay step of a frame at rest.
+ */
+export async function inertPartBoard(): Promise<() => void> {
+  const stage = await startOverlayStage();
+  const { sync } = stage.drawn.mock.modules;
+
+  for (let index = 0; index < 20; index += 1) {
+    stage.view({ layer: "scene", x: (index % 5) * 200, y: Math.floor(index / 5) * 200 });
+  }
+
+  const energy = stage.view({ layer: "hud", x: 100, extra: [HudPart({ key: "energy" })] });
+
+  stage.view({ layer: "hud", x: 400, extra: [HudPart({ key: "gems" })] });
+  stage.view({ layer: "hud", x: 700, extra: [HudPart({ key: "shop" })] });
+
+  const suitcase = stage.overlay(
+    { dim: 0.7, hud: ["energy", "gems"], hudInert: true },
+    { order: 2 }
+  );
+
+  stage.level(suitcase, 1, true);
+  stage.frames(3);
+
+  const { overlay } = stage.drawn.mock.ctx.state.sync;
+
+  if (overlay.offTops.size !== 3 || !overlay.offTops.has(stage.topOf(energy))) {
+    throw new Error("perf fixture: the resting suitcase does not make its kept parts inert");
+  }
+
+  return () => sync.stepOverlays();
+}
+
 /** What an endless loop hands `loopsHeld`: what it writes that could show its view again. */
 type Reveals = "alpha" | "place" | "both" | undefined;
 

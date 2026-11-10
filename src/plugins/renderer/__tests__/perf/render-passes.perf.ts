@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
-import { bytesPerCall, fadedPartBoard, filteredStage, hudStage, hudUnderBoard } from "./fixtures";
+import {
+  bytesPerCall,
+  fadedPartBoard,
+  filteredStage,
+  hudStage,
+  hudUnderBoard,
+  inertPartBoard
+} from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: what a still frame reads every frame after the A26 device profile (Q2 of change 2026-10-18-cheap-idle-tick):
@@ -35,6 +42,12 @@ describe("a still frame", () => {
   it("steps a resting shop that fades a HUD part without allocating", async () => {
     expect(bytesPerCall(await fadedPartBoard(), 20_000)).toBeLessThanOrEqual(
       BUDGET.hudPartsFaded + NOISE
+    );
+  });
+
+  it("steps a resting suitcase that makes HUD parts inert without allocating", async () => {
+    expect(bytesPerCall(await inertPartBoard(), 20_000)).toBeLessThanOrEqual(
+      BUDGET.hudPartsInert + NOISE
     );
   });
 });

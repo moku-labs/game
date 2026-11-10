@@ -363,6 +363,25 @@ function targetOf(order: readonly OverlayRecord[], key: string): number {
 }
 
 /**
+ * Whether a part is inert: an overlay in the order, in any phase, keeps it shown and says `hudInert`. `"under"` and
+ * `"none"` keep nothing inert.
+ *
+ * @param order - The overlays, bottom first.
+ * @param key - The part's key.
+ * @returns True when a tap does not reach the part.
+ */
+function inertOf(order: readonly OverlayRecord[], key: string): boolean {
+  for (const record of order) {
+    const { hud, hudInert } = record.value;
+
+    if (!hudInert || hud === "none" || hud === "under") continue;
+    if (hud === "all" || hud.includes(key)) return true;
+  }
+
+  return false;
+}
+
+/**
  * Tells whether a set holds exactly the nodes of a list: as many, and every one of them.
  *
  * @param list - The nodes, each once.
@@ -423,9 +442,10 @@ function warnOutside(sctx: SyncCtx, entity: Entity, key: string): void {
 
 /**
  * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame, and the
- * parts leaving or not fully back take no tap. A part outside the HUD layer is warned once and drawn as it is. A part of
- * a scene built aside is not warned while it builds, nor in the frame its build waits to be attached: the layers it is
- * judged against are still the scene's being left (a splash with no HUD layer), or none on a cold page (F117).
+ * parts leaving or not fully back take no tap, and the parts an inert overlay keeps shown take no tap either. A part
+ * outside the HUD layer is warned once and drawn as it is. A part of a scene built aside is not warned while it builds,
+ * nor in the frame its build waits to be attached: the layers it is judged against are still the scene's being left (a
+ * splash with no HUD layer), or none on a cold page (F117).
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -467,7 +487,7 @@ export function stepParts(sctx: SyncCtx): void {
 
     applyHud(sctx, entity, view, factor);
 
-    if (factor < 1 || targetOf(overlay.order, key) < 1) {
+    if (factor < 1 || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key)) {
       const top = view.wrapper ?? view.object;
 
       if (offList[count] !== top) offList[count] = top;

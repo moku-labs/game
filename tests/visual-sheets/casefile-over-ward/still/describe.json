@@ -590,7 +590,8 @@
           "dimColor": 0,
           "fade": 250,
           "hold": false,
-          "hud": "all"
+          "hud": "all",
+          "hudInert": false
         },
         "OverlayLevel": {
           "landed": true,

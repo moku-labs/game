@@ -178,3 +178,128 @@ describe("HUD parts", () => {
     ]);
   });
 });
+
+/**
+ * Whether a part's top is in the set of tops that take no tap.
+ *
+ * @param stage - The stage.
+ * @param entity - The part.
+ * @returns True when a tap does not reach it.
+ */
+function isOff(stage: OverlayStage, entity: Entity): boolean {
+  return stage.drawn.mock.ctx.state.sync.overlay.offTops.has(stage.topOf(entity));
+}
+
+describe("HUD parts of an inert overlay (F164)", () => {
+  // Bug: the field is read but the kept part stays tappable, or the part is dimmed with it.
+  it("draws a kept part at 1 and takes no tap on it, while a part not listed fades and takes none as before", async () => {
+    const { stage, energy, gems } = await hudStage();
+    const suitcase = stage.overlay({ dim: 0.7, hud: ["energy"], hudInert: true });
+
+    stage.level(suitcase, 1, true);
+    stage.frames(2);
+
+    expect(alphaOf(stage, energy)).toBe(1);
+    expect(isOff(stage, energy)).toBe(true);
+    expect(alphaOf(stage, gems)).toBe(0);
+    expect(isOff(stage, gems)).toBe(true);
+  });
+
+  // Bug: inert applied to every kept part, whatever the field says.
+  it("keeps a kept part tappable with hudInert false", async () => {
+    const { stage, energy, gems } = await hudStage();
+    const shop = stage.overlay({ dim: 0.7, hud: ["energy"], hudInert: false });
+
+    stage.level(shop, 1, true);
+    stage.frames(2);
+
+    expect(isOff(stage, energy)).toBe(false);
+    expect(isOff(stage, gems)).toBe(true);
+  });
+
+  // Bug: `inertOf` reads only the list form of `hud`.
+  it("makes every part inert with hud all", async () => {
+    const { stage, energy, gems } = await hudStage();
+    const suitcase = stage.overlay({ dim: 0.7, hud: "all", hudInert: true });
+
+    stage.level(suitcase, 1, true);
+    stage.frames(2);
+
+    expect([alphaOf(stage, energy), alphaOf(stage, gems)]).toEqual([1, 1]);
+    expect([isOff(stage, energy), isOff(stage, gems)]).toEqual([true, true]);
+  });
+
+  // Bug: a phase check copied from `targetOf`, which skips an exiting record: the part is tappable while it leaves.
+  it("is inert while the overlay enters and while it leaves, and tappable once it is gone", async () => {
+    const { stage, energy } = await hudStage();
+    const suitcase = stage.overlay({ dim: 0.7, hud: ["energy"], hudInert: true });
+
+    stage.level(suitcase, 0.3);
+    stage.frame();
+    expect(isOff(stage, energy)).toBe(true);
+
+    stage.level(suitcase, 1, true);
+    stage.frame();
+    stage.leave(suitcase);
+    stage.level(suitcase, 0.5);
+    stage.frame();
+    expect(isOff(stage, energy)).toBe(true);
+
+    stage.drawn.mock.world.ecs.despawn(suitcase);
+    stage.frame();
+    expect(isOff(stage, energy)).toBe(false);
+  });
+
+  // Bug: the top overlay decides the inert state, as it decides the factor.
+  it("keeps a part inert under a top overlay that is not inert", async () => {
+    const { stage, energy } = await hudStage();
+    const suitcase = stage.overlay({ dim: 0.7, hud: ["energy"], hudInert: true }, { order: 1 });
+    const sheet = stage.overlay({ dim: 0.3, hud: ["energy"], hudInert: false }, { order: 2 });
+
+    stage.level(suitcase, 1, true);
+    stage.level(sheet, 1, true);
+    stage.frames(2);
+
+    expect(isOff(stage, energy)).toBe(true);
+
+    stage.drawn.mock.world.ecs.despawn(suitcase);
+    stage.frames(2);
+    expect(isOff(stage, energy)).toBe(false);
+  });
+
+  // Bug: the set is rebuilt every frame (a new table, an allocation per frame) when its members stand.
+  it("does not rebuild the no-tap set in a frame where its members stand", async () => {
+    const { stage, energy } = await hudStage();
+    const suitcase = stage.overlay({ dim: 0.7, hud: ["energy", "gems"], hudInert: true });
+
+    stage.level(suitcase, 1, true);
+    stage.frames(2);
+
+    const { overlay } = stage.drawn.mock.ctx.state.sync;
+    const before = overlay.offTops;
+
+    expect(before.has(stage.topOf(energy))).toBe(true);
+    stage.frames(2);
+    expect(overlay.offTops).toBe(before);
+    expect(before.has(stage.topOf(energy))).toBe(true);
+  });
+
+  // Bug: `inertOf` is applied before the layer check, so a part outside the HUD layer is swallowed from taps.
+  it("does not make a part outside the HUD layer inert, and warns as before", async () => {
+    const stage = await startOverlayStage({ dev: true });
+
+    running.push(stage);
+
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const stray = stage.view({ layer: "scene", extra: [HudPart({ key: "energy" })] });
+    const suitcase = stage.overlay({ dim: 0.7, hud: "all", hudInert: true }, { order: 2 });
+
+    stage.level(suitcase, 1, true);
+    stage.frames(3);
+
+    expect(isOff(stage, stray)).toBe(false);
+    expect(warn.mock.calls.filter(([code]) => code === "renderer:hud-part-outside")).toEqual([
+      ["renderer:hud-part-outside", { entity: stray, key: "energy" }]
+    ]);
+  });
+});

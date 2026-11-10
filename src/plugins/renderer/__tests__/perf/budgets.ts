@@ -64,6 +64,10 @@ export const BUDGET = {
   // `clear()`). Now 0 B: the faded tops are listed in place and compared with the tap set; it is built again only when
   // they change.
   hudPartsFaded: 0,
+  // F164: new. The overlay step of a resting suitcase with `hudInert: true` that keeps two HUD parts shown: `inertOf`
+  // walks the overlay order and the stored key list with `includes`, no closure, no object, no string; the tap set is
+  // built again only when its members change.
+  hudPartsInert: 0,
   // A26 heap profile: before 22 400 B (a new SDF shader made at every layout of a text and dropped by Pixi: its bind
   // groups, its resource accessors, its uniform group); then 2 831 B with the text's own shader kept. S: the text gets
   // no shader at all; measured 2 767 B, all of it Pixi laying the label out again (its graphics context's
