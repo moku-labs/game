@@ -333,13 +333,25 @@ export const clockTick = system({
   }
 });
 
-/** A timer text that says "9" in its markup and is written by `clockTick` after. */
+/**
+ * A timer text that says "9" in its markup and is written by `clockTick` after. Its button renders
+ * the view again with the same content and another prop: the text gets `Flag` too.
+ */
 export const Clocked = defineComponent("Clocked", {
-  view: () => (
+  local: { flagged: false },
+  view: (_props: object, local) => (
     <column key="clockRoot" style={{ width: 800, height: 400 }}>
       <row key="clockRow" style={centredRow}>
-        <text key="clock" style="digits" content="9" components={[Clock({ left: 9, shown: 9 })]} />
+        <text
+          key="clock"
+          style="digits"
+          content="9"
+          components={
+            local.flagged ? [Clock({ left: 9, shown: 9 }), Flag()] : [Clock({ left: 9, shown: 9 })]
+          }
+        />
       </row>
+      <button key="flagClock" local={{ flagged: true }} style={control} />
     </column>
   )
 });

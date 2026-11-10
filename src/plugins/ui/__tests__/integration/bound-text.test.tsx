@@ -3,7 +3,7 @@ import { Transform } from "../../../renderer/components";
 import { Text } from "../../../text/components";
 import { Exiting } from "../../../world/ecs/define";
 import { Box, UiCounters } from "../../components";
-import { Clock, type ExtrasApp, startExtrasApp, Tally } from "../extras-app";
+import { Clock, type ExtrasApp, Flag, startExtrasApp, Tally } from "../extras-app";
 
 // ---------------------------------------------------------------------------
 // Integration: a text with `bind` is sized by the string text shows for it
@@ -224,6 +224,30 @@ describe("a text a system writes in its run (F167)", () => {
 
     expect(app.world.ecs.get(entity, Text)?.content).toBe("10");
     expect(rectOf(app, "clock").w).toBe(39);
+
+    await app.stop();
+  });
+
+  it("keeps it when the view renders again with the same content and another prop", async () => {
+    const app = await startExtrasApp();
+
+    app.world.projection.mount(["clockScreen"], { kind: "plugin", name: "test" });
+    app.time.step(16);
+    app.time.step(16);
+
+    const entity = app.ui.find("clock") ?? 0;
+
+    app.world.ecs.set(entity, Clock, { left: 10 });
+    app.time.step(16);
+    app.time.step(16);
+
+    // The view renders again: the markup still says "9", and the text gets `Flag`.
+    app.input.tap(app.ui.find("flagClock") ?? 0);
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(app.world.ecs.has(entity, Flag)).toBe(true);
+    expect(app.world.ecs.get(entity, Text)?.content).toBe("10");
 
     await app.stop();
   });

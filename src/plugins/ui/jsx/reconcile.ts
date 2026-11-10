@@ -114,10 +114,11 @@ const NO_LOOK: object = Object.freeze({});
 const NO_OWNED: readonly string[] = [];
 
 /**
- * The fields of `Text` a write with no new content in the markup leaves alone: the string `text`
- * resolved, and the content and the style a game's system may have written since (F167).
+ * The fields of `Text` a write with no new content in the markup leaves alone: those the type gives
+ * to `text` (the string it resolved), and the content and the style a game's system may have
+ * written since (F167).
  */
-const TEXT_KEPT: readonly string[] = ["resolved", "content", "style"];
+const TEXT_KEPT: readonly string[] = Object.freeze([...Text.owned, "content", "style"]);
 
 /** The time of a reconcile a test steps by hand: no ms pass, so no scroll moves. */
 const NO_TIME: Readonly<Time> = Object.freeze({
