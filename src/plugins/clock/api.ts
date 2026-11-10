@@ -6,6 +6,17 @@ import { MAX_TIMER_MS } from "./system";
 import type { Api, ClockCtx, Elapsed, State } from "./types";
 
 /**
+ * Reads the source plus the shift of `advance`, uncut. While the clock stands (F169) the source is
+ * not read: the reading taken when it stopped stands in for it.
+ *
+ * @param state - Clock state.
+ * @returns The raw moment, in epoch milliseconds.
+ */
+function rawNow(state: State): number {
+  return (state.frozenAt ?? state.source.now()) + state.shift;
+}
+
+/**
  * Reads the source and raises the high-water mark. A source that goes back cannot move game time
  * back, and a fractional reading is cut to whole milliseconds. The shift of `advance` is added.
  *
@@ -13,7 +24,7 @@ import type { Api, ClockCtx, Elapsed, State } from "./types";
  * @returns The highest moment ever returned, in epoch milliseconds.
  */
 function readNow(state: State): number {
-  const moment = Math.trunc(state.source.now() + state.shift);
+  const moment = Math.trunc(rawNow(state));
 
   if (moment > state.last) state.last = moment;
   return state.last;
@@ -48,16 +59,20 @@ function deliverElapsed(state: State): void {
  * Arms the single timer for a due moment. The delay is counted from the RAW source reading plus
  * the shift of `advance`, not from trusted time: the source's timer runs on the device clock, so after the device clock was
  * moved back the wait is longer than `moment - now()`. A moment further than the longest timer
- * waits in steps: the timer fires early and `fireDue` arms it again.
+ * waits in steps: the timer fires early and `fireDue` arms it again. A clock that stands keeps the
+ * moment and arms no timer: only `advance` reaches it, or the timer armed when the clock goes on.
  *
  * @param state - Clock state.
  * @param moment - Due moment in epoch milliseconds.
  */
 function arm(state: State, moment: number): void {
-  const raw = Math.trunc(state.source.now() + state.shift);
+  state.dueAt = moment;
+
+  if (state.frozenAt !== undefined) return;
+
+  const raw = Math.trunc(rawNow(state));
   const delayMs = Math.min(MAX_TIMER_MS, Math.max(0, moment - raw));
 
-  state.dueAt = moment;
   state.handle = state.source.setTimer(() => fireDue(state), delayMs);
 }
 
@@ -110,6 +125,40 @@ function advanceBy(state: State, ms: number): number {
   else arm(state, moment);
 
   return now;
+}
+
+/**
+ * Stops the clock (F169): `now()` stands at the moment it reads now, and the timer of the pending
+ * moment is dropped, the moment kept. Only `advance` moves a standing clock. Stopping it twice
+ * changes nothing.
+ *
+ * @param state - Clock state.
+ */
+export function freezeClock(state: State): void {
+  if (state.frozenAt !== undefined) return;
+
+  state.frozenAt = state.source.now();
+
+  if (state.handle !== undefined) state.source.clearTimer(state.handle);
+
+  state.handle = undefined;
+}
+
+/**
+ * Lets a standing clock go on from where it stood: the span it stood is folded into the shift, so
+ * it lags the source by that span and keeps every advance made meanwhile; it does not jump to the
+ * source. The pending moment is armed again for the rest of its wait. A clock that runs is left
+ * alone.
+ *
+ * @param state - Clock state.
+ */
+export function thawClock(state: State): void {
+  if (state.frozenAt === undefined) return;
+
+  state.shift += state.frozenAt - state.source.now();
+  state.frozenAt = undefined;
+
+  if (state.dueAt !== undefined) arm(state, state.dueAt);
 }
 
 /**

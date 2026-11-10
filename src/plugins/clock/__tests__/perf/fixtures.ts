@@ -40,7 +40,7 @@ function clockOver(source: ClockSource): Api {
   const ctx: ClockCtx = {
     global: {},
     config: { source },
-    state: { source, last: 0, shift: 0, dueAt: undefined, handle: undefined, listeners: [] },
+    state: { source, last: 0, shift: 0, frozenAt: undefined, dueAt: undefined, handle: undefined, listeners: [] },
     emit: () => {}
   };
 

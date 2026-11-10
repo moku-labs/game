@@ -5,8 +5,8 @@ import { systemSource } from "./system";
 import type { Config, State } from "./types";
 
 /**
- * Creates the initial clock state: the configured source or the system source, no shift, no due
- * moment, no timer handle, no listeners.
+ * Creates the initial clock state: the configured source or the system source, no shift, a clock
+ * that runs, no due moment, no timer handle, no listeners.
  *
  * @param ctx - Minimal context.
  * @param ctx.config - Resolved plugin config.
@@ -17,6 +17,7 @@ export function createClockState(ctx: { readonly config: Readonly<Config> }): St
     source: ctx.config.source ?? systemSource(),
     last: 0,
     shift: 0,
+    frozenAt: undefined,
     dueAt: undefined,
     handle: undefined,
     listeners: []
