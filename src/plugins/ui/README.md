@@ -61,7 +61,8 @@ component is set, so `changed()` names none of its components.
 | nothing | the comparison |
 | `style`, `state`, a pointer or focus flag, a covered root | its style is resolved again and its components are written. Its layout node is written and its root solves once when a rect may move, and for a new `style` prop |
 | `content` | its layout node is written and measured again, its root solves once, its components are written |
-| `bind`, `texture`, `name`, `fit`, `intent`, `payload`, `local`, `escape`, `components`, `motion` | its components are written. No style pass, no solve |
+| `bind`, `texture`, `name`, `fit`, `intent`, `payload`, `local`, `escape`, `components` | its components are written. No style pass, no solve |
+| `motion` | the element takes the new hooks for its next play. Nothing is written and a running tween goes on (F168); a `loop` that is really another one replaces the running one |
 | `hosts`, the props of a windowed `scroll`, the `snap`, `offset` and `jump` of a `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
 | the viewport (size, orientation, safe area), a dev hot swap | every element is patched in full once: style, layout node, components |
 | the locale, a font that arrives after the mount | no element is patched and no view runs. The texts `text` resolves again are measured in that frame; when the line of the `body` style moved, every `icon` without a size is too, on a screen with no text as well. A root solves once when a size in it changed |
@@ -71,8 +72,9 @@ component is set, so `changed()` names none of its components.
   function, a `Set`, a `Map`, a `Date` and a class instance are the same only when they are the
   same object: a prop that holds a new `Set` at every render is written at every render.
 - **Hooks stay built once.** A `motion` from `defineMotion`, or a hook table at module level, is the
-  same function at every render. An arrow written inline in a view is a new one each time, so its
-  element is written at every render: no style pass and no solve, but one write pass.
+  same function at every render. A `motion` written inline in a view is a new one each time: its
+  element takes the new hooks and writes nothing, so a running tween is not cut (F168). A `loop`
+  built anew still counts as a rebuild (`ui:motion-rebuilt`).
 - **A style is a value.** Write it inline or keep one from `defineStyle`. An object changed in place
   is the same object, so the change is not seen until that element is resolved again.
 - **A patch that throws** is done in full at the next render.
