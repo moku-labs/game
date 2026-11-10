@@ -166,6 +166,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ecs.onRemoved(PointerOver, entity => jsx.markPointer(entity, "hover", false)),
     ecs.onRemoved(Parent, () => hostsMoved(ctx.state.jsx)),
     ecs.onRemoved(Held, () => hostsMoved(ctx.state.jsx)),
+    // A ui element the drag let go goes home: `world.projection.settle` knows only world views (F166).
+    ecs.onRemoved(Held, entity => jsx.dropped(entity)),
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.flow.fx.onHint(hint => {

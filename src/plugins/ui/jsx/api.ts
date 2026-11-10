@@ -209,6 +209,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     markPointer: frame.markPointer,
 
+    dropped: frame.dropped,
+
     queueEnter: frame.queueEnter,
 
     playEntered: frame.playEntered,

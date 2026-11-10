@@ -363,6 +363,7 @@ function harness() {
     changeExtra: () => false,
     repose,
     lift: vi.fn(),
+    settleHome: vi.fn(),
     exit: vi.fn(),
     playTrack: vi.fn(),
     settled: () => true,

@@ -190,6 +190,8 @@ export type LayoutModule = {
   ): boolean;
   repose(element: Element, parent: Rect | undefined, hooked: boolean, hint?: Hint): void;
   lift(element: Element, units: number): void;
+  /** Brings an element a drag let go home: its `settle` hook, else a `toRest` of its `Transform` (F166). */
+  settleHome(element: Element): void;
   /**
    * Starts the exit, telling the hook why the element leaves; `span` notes the longest finite track the exit hook
    * started; `stands` plays no hook: the element goes with the exit over it.

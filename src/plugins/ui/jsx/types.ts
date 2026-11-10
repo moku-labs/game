@@ -82,7 +82,8 @@ export type ElementChange<Value> = (
  * component of the `components` prop (its values before and after). A hook for any other
  * component name is accepted, so every `defineMotion` result fits; `ui` never plays it, and a dev
  * build names it once (`ui:change-never-plays`). Every hook gets the hint routed to the element's
- * key in that frame step.
+ * key in that frame step. `settle` plays when a drag lets a `Draggable` element go, with
+ * `["Transform"]`; without it the element takes its rest `Transform` over the world's `settleMs`.
  *
  * @example
  * ```ts
@@ -849,6 +850,13 @@ export type JsxModule = {
   releaseHosted(): void;
   applyTap(entity: Entity): void;
   markPointer(entity: Entity, flag: PointerFlag, on: boolean): void;
+  /**
+   * Sends an element home when a drag let it go (its `Held` went): its `settle` hook, else a
+   * `toRest` of its `Transform` (F166).
+   *
+   * @param entity - The entity that lost `Held`.
+   */
+  dropped(entity: Entity): void;
   /**
    * Plays the enter hook of an element whose `Box` was just attached, and keeps it for `playEntered`.
    *

@@ -235,6 +235,11 @@ export type State = {
   pointerOver: Entity | undefined;
   /** The `Parent` the held view had at the grab. It is hung back under it on the release. */
   parent: Entity | undefined;
+  /**
+   * Whether the drag gave the held view the `Layer` of its root, because the view had none of its
+   * own (a child element of a JSX tree): it is taken off again when the view hangs back (F165).
+   */
+  layered: boolean;
   /** The rest scale of the held view in root space: the base of `heldScale`, set back on drop. */
   restScale: number | undefined;
   /**

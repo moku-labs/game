@@ -9,7 +9,7 @@
  */
 import { Parent, Transform, type TransformValue } from "../renderer/components";
 import { applyPose, localPoseOf, parentOf, poseUnder, rootPoseOf } from "../renderer/sync/pose";
-import { Exiting } from "../world/ecs/define";
+import { Exiting, Layer } from "../world/ecs/define";
 import type { Entity } from "../world/types";
 import { dropAnswer, submit } from "./answers";
 import { Draggable, DropTarget, Held, Hovered } from "./components";
@@ -41,9 +41,27 @@ function clearHover(ctx: InputCtx): void {
 }
 
 /**
+ * The layer the top of a view's parent chain is drawn in.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - A view that hangs under a parent.
+ * @returns The layer name of its root, or `undefined` when the root names none.
+ */
+function rootLayerOf(ctx: InputCtx, entity: Entity): string | undefined {
+  const { ecs } = ctx.deps.world;
+  let top = entity;
+
+  for (let parent = parentOf(ecs, top); parent !== 0; parent = parentOf(ecs, top)) top = parent;
+
+  return ecs.get(top, Layer)?.name;
+}
+
+/**
  * Takes a parented view out of its parent for the drag. The parent is remembered, the root pose
  * is written into the `Transform` and the `Parent` goes, so the finger moves the view 1:1 and
- * `lift` reaches the lift layer. A view with no parent, or no `Transform` to take the pose, stays.
+ * `lift` reaches the lift layer. A view with no `Layer` of its own, a child element of a JSX
+ * tree, is drawn in its root's layer while it is carried (F165). A view with no parent, or no
+ * `Transform` to take the pose, stays.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view the finger picked up.
@@ -56,32 +74,40 @@ function unparent(ctx: InputCtx, entity: Entity): boolean {
   if (parent === 0 || !ecs.has(entity, Transform)) return false;
 
   const root = rootPoseOf(ecs, entity);
+  const layer = ecs.has(entity, Layer) ? undefined : rootLayerOf(ctx, entity);
 
   ctx.state.parent = parent;
   ecs.remove(entity, Parent);
   ecs.set(entity, Transform, root);
+  if (layer !== undefined) {
+    ecs.add(entity, Layer({ name: layer }));
+    ctx.state.layered = true;
+  }
 
   return true;
 }
 
 /**
  * Hangs a view that left its parent for the drag back under it, at the local pose that keeps it
- * where the finger left it, so the motion home starts under the finger. A parent with no
- * `Transform` left the world meanwhile: the view keeps its root pose. A view that is gone is
- * forgotten.
+ * where the finger left it, so the motion home starts under the finger. The `Layer` the drag
+ * gave it goes with it: under its parent it is drawn where its parent is. A parent with no
+ * `Transform` left the world meanwhile: the view keeps its root pose and that layer. A view that
+ * is gone is forgotten.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view that was carried.
  */
 function reparent(ctx: InputCtx, entity: Entity): void {
-  const { parent } = ctx.state;
+  const { parent, layered } = ctx.state;
   const { ecs } = ctx.deps.world;
 
   ctx.state.parent = undefined;
+  ctx.state.layered = false;
   if (parent === undefined || !ecs.has(entity, Transform) || !ecs.has(parent, Transform)) return;
 
   const local = localPoseOf(ecs, parent, rootPoseOf(ecs, entity));
 
+  if (layered) ecs.remove(entity, Layer);
   ecs.add(entity, Parent({ entity: parent }));
   ecs.set(entity, Transform, local);
 }

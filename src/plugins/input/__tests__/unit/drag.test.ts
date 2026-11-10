@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Parent, Transform, type TransformValue } from "../../../renderer/components";
 import { rootPoseOf } from "../../../renderer/sync/pose";
-import { Exiting } from "../../../world/ecs/define";
+import { Exiting, Layer } from "../../../world/ecs/define";
 import type { Entity } from "../../../world/types";
 import { Draggable, DropTarget, Held, Hovered } from "../../components";
 import { abortDrag, grab, moveHeld, moveHover, release } from "../../drag";
@@ -422,6 +422,64 @@ describe("the drag of a parented view", () => {
     expect(mock.read(item, Parent)).toEqual({ entity: slot });
     expect(mock.read(item, Transform)).toMatchObject({ x: 200, y: 300, scale: 1 });
     expect(mock.has(item, Held)).toBe(false);
+  });
+});
+
+// A JSX root in layer "ui" at (0, 0) holds a column, which holds the card: the card has no Layer of its own.
+function jsxChild(mock: MockInput, own?: string): { root: number; column: number; card: number } {
+  const root = mock.spawn([Transform({}), Layer({ name: "ui" })]);
+  const column = mock.spawn([Transform({ x: 10, y: 20 }), Parent({ entity: root })]);
+  const card = mock.spawn(
+    [
+      Draggable({}),
+      Transform({ x: 5, y: 5 }),
+      Parent({ entity: column }),
+      ...(own === undefined ? [] : [Layer({ name: own })])
+    ],
+    { projection: "strip", key: "stripHeld" }
+  );
+
+  mock.state.entity = card;
+  grab(mock.input, card, { x: 15, y: 25 });
+
+  return { root, column, card };
+}
+
+describe("the drag of a child that has no Layer of its own (F165)", () => {
+  // Bug: out of its parent with no Layer, the renderer drew the card nowhere ("unknown layer").
+  it("is drawn in its root's layer while it is carried, and gives the layer back when it hangs again", () => {
+    const mock = createMockInput();
+    const { column, card } = jsxChild(mock);
+
+    expect(mock.read(card, Layer)).toEqual({ name: "ui" });
+
+    release(mock.input);
+
+    expect(mock.has(card, Layer)).toBe(false);
+    expect(mock.read(card, Parent)).toEqual({ entity: column });
+  });
+
+  it("keeps a Layer of its own and never takes it off", () => {
+    const mock = createMockInput();
+    const { card } = jsxChild(mock, "lifted");
+
+    expect(mock.read(card, Layer)).toEqual({ name: "lifted" });
+
+    release(mock.input);
+
+    expect(mock.read(card, Layer)).toEqual({ name: "lifted" });
+  });
+
+  it("keeps the root's layer when its parent left the world during the drag, so it is still drawn", () => {
+    const mock = createMockInput();
+    const { column, card } = jsxChild(mock);
+
+    mock.kill(column);
+    release(mock.input);
+
+    expect(mock.has(card, Parent)).toBe(false);
+    expect(mock.read(card, Layer)).toEqual({ name: "ui" });
+    expect(mock.state.layered).toBe(false);
   });
 });
 

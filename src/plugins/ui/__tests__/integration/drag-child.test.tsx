@@ -1,8 +1,9 @@
 import * as pixiJs from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Layer, Parent, Transform } from "../../../renderer/components";
 import { type FrameOracle, watchFrames } from "../../../renderer/__tests__/stage-oracle";
 import { stagePixi } from "../../../renderer/__tests__/stage-pixi";
+import { Parent, Transform } from "../../../renderer/components";
+import { Layer } from "../../../world/ecs/define";
 import type { Entity } from "../../../world/types";
 import {
   afterEachFrame,
@@ -21,6 +22,9 @@ import {
 // the renderer's tree went wrong. F166: `projection.settle` knew only world views, so a dropped
 // element that no target took stayed where the finger let go.
 // ---------------------------------------------------------------------------
+
+/** A point in reference units. */
+type At = { x: number; y: number };
 
 /** The apps a test started, with the oracle that watched them. */
 const running: Array<{ stop(): Promise<void>; oracle: FrameOracle }> = [];
@@ -119,12 +123,7 @@ function entityOf(app: DrawnApp, key: string): Entity {
  * @param from - The centre of the element.
  * @returns The frames in which the element was not drawn.
  */
-function carry(
-  app: DrawnApp,
-  pixi: DrawnPixi,
-  entity: Entity,
-  from: { x: number; y: number }
-): number[] {
+function carry(app: DrawnApp, pixi: DrawnPixi, entity: Entity, from: At): number[] {
   const undrawn: number[] = [];
 
   pointer(app, pixi, "pointerdown", from);
@@ -147,12 +146,7 @@ function carry(
  * @param from - The centre the carry started at.
  * @param frames - How many frames to step after the release.
  */
-async function letGo(
-  app: DrawnApp,
-  pixi: DrawnPixi,
-  from: { x: number; y: number },
-  frames: number
-): Promise<void> {
+async function letGo(app: DrawnApp, pixi: DrawnPixi, from: At, frames: number): Promise<void> {
   pointer(app, pixi, "pointerup", { x: from.x + 300, y: from.y - 200 });
   step(app);
   await settle(app, frames);
