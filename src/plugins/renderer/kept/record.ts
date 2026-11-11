@@ -741,7 +741,7 @@ export function goLive(
 /**
  * Undoes the render group the cache made of a top that is drawn live again: drawn with its filters inside a parent's
  * filter pass, a top that stays a render group draws other pixels than the container it was (found by the browser
- * leg, T4). Its subtree's colour is worked out again. The next take makes it one again.
+ * leg, T4). Its subtree's colour and display status are worked out again. The next take makes it one again.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -753,26 +753,32 @@ function ungroup(kctx: KeptCtx, record: KeptRecord): void {
 
   if (!record.top.destroyed) {
     record.top.disableRenderGroup();
-    recolour(record.top);
+    reflag(record.top);
   }
 
   madeGroups.delete(record.top);
 }
 
 /**
- * Makes Pixi work out the colour of a top's subtree again after it stopped being a render group. Pixi's
- * `disableRenderGroup` hands the children to the parent's group with the colour and alpha they had inside the group
- * they left, which leave out the top's own: a top at alpha 0.5 would draw its subtree at 1 from then on (Pixi's
- * `enableRenderGroup` flags them, the way back does not). An alpha written away and back, through Pixi's public
- * setter, flags the top, and Pixi's next update carries the flag down the subtree; nothing is drawn in between.
+ * Makes Pixi work out the colour and the display status of a top's subtree again after it stopped being a render
+ * group. Pixi's `disableRenderGroup` hands the children to the parent's group with what they had inside the group they
+ * left, which leaves out the top's own: a top at alpha 0.5 would draw its subtree at 1 from then on, and a top the cache
+ * hid (`renderable` false) would leave its subtree counted as drawn (Pixi's `enableRenderGroup` flags them, the way
+ * back does not). Pixi pools the group it gave back, and the next take of another view gets it with its batcher: a node
+ * still counted as drawn writes its vertices there at every move of it, and the other picture is taken from them
+ * (F173). An alpha and a `renderable` written away and back, through Pixi's public setters, flag the top, and Pixi's
+ * next update carries both flags down the subtree; nothing is drawn in between.
  *
  * @param top - The top, no render group any more.
  */
-function recolour(top: PixiContainer): void {
+function reflag(top: PixiContainer): void {
   const alpha = top.alpha;
+  const renderable = top.renderable;
 
   top.alpha = alpha === 0 ? 1 : 0;
   top.alpha = alpha;
+  top.renderable = !renderable;
+  top.renderable = renderable;
 }
 
 /**
