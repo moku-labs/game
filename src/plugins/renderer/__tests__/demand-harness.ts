@@ -180,6 +180,7 @@ export type Drawn = {
  * @param options.dev - Stubs `__MOKU_GAME_DEV__` true.
  * @param options.config - Other config of the renderer, as `keptMb`.
  * @param options.kind - The backend the stand-in reports; WebGPU when left out.
+ * @param options.builds - True to run Pixi's own render group system on every render (`stagePixi`).
  * @returns The running renderer.
  */
 export async function startDrawn(
@@ -188,11 +189,15 @@ export async function startDrawn(
     dev?: boolean;
     config?: Partial<Config>;
     kind?: "webgpu" | "webgl";
+    builds?: boolean;
   } = {}
 ): Promise<Drawn> {
   if (options.dev === true) vi.stubGlobal("__MOKU_GAME_DEV__", true);
 
-  const stage = stagePixi(options.kind === undefined ? {} : { kind: options.kind });
+  const stage = stagePixi({
+    ...(options.kind === undefined ? {} : { kind: options.kind }),
+    ...(options.builds === true ? { builds: true } : {})
+  });
   const mock = createMockRenderer({
     config: {
       ...options.config,
