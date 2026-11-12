@@ -215,10 +215,13 @@ export type ScrollWindow = {
  * positive toward `max`. A glide runs from `from` to `to` over `duration` ms, `elapsed` of them
  * gone. `pointer` and `start` are the finger on the axis and the offset where the press began.
  * `seen` is the `offset` prop of the last render, 0 when it is left out; `placed` turns true when
- * the first solve put the scroll at it. `atProp` is true while the scroll follows that prop: it
- * stands at it or glides to it, so a new range puts it at the prop again. The first place and a
- * glide to a new prop set it; a press and `app.ui.scroll` clear it, and a fling or a snap glide
- * only comes after a press. Plain numbers written in place: a frame allocates nothing.
+ * the first solve put the scroll at it. `aim` is the `aim` prop of the last render, a string or a
+ * finite number, `undefined` for any other value; a new one follows the prop again. `glideMs` is
+ * the `glideMs` prop of the last settle, `NaN` when it gives no length: a glide to the prop that a
+ * new range re-aims takes it. `atProp` is true while the scroll follows that prop: it stands at it
+ * or glides to it, so a new range puts it at the prop again. The first place and a glide to a new
+ * prop set it; a press and `app.ui.scroll` clear it, and a fling or a snap glide only comes after a
+ * press. Plain values written in place: a frame allocates nothing.
  */
 export type ScrollMotion = {
   axis: "x" | "y";
@@ -233,6 +236,8 @@ export type ScrollMotion = {
   pointer: number;
   start: number;
   seen: number;
+  aim: string | number | undefined;
+  glideMs: number;
   placed: boolean;
   atProp: boolean;
 };

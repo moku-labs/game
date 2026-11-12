@@ -1,7 +1,8 @@
 /**
  * @file ui/layout — scroll. A scroll container moves its content on its axis: with the finger,
  * then in a fling that slows down, or in a glide to a `snap` stop; it starts at its `offset`
- * prop, glides when the prop changes, and stays inside the range every solve gives it, with hard
+ * prop, glides there again when the prop or its `aim` changes (in `glideMs` when it gives one),
+ * stands there at once with `jump`, and stays inside the range every solve gives it, with hard
  * edges. The content moves by one `Transform` write on the axis: no solve, no motion, the children
  * keep their rects. `Scroll` holds the offset the way the windowed range is cut with (0 and below),
  * `ScrollState` the way a game reads it (0 to `max`), `Scrollable` whether it moves, for `input`.
@@ -137,13 +138,44 @@ function askedOffsetOf(container: Element): number {
 }
 
 /**
- * Whether the scroll's last render asks a new `offset` prop to stand there at once.
+ * Whether the scroll's last render asks it to stand at its `offset` prop at once: a new prop or a
+ * new `aim` stands there instead of gliding, and a glide to the prop that runs ends at its target.
  *
  * @param container - The scroll element.
  * @returns True when its `jump` prop is true.
  */
 function jumpsOf(container: Element): boolean {
   return container.node.props.jump === true;
+}
+
+/**
+ * The `glideMs` prop of the scroll's last render: the length of a glide to the prop, `NaN` when
+ * it is left out or is no finite number of 0 or more.
+ *
+ * @param container - The scroll element.
+ * @returns The length in ms, or `NaN` for the default length.
+ */
+function glideMsOf(container: Element): number {
+  const glideMs = container.node.props.glideMs;
+
+  return typeof glideMs === "number" && Number.isFinite(glideMs) && glideMs >= 0
+    ? glideMs
+    : Number.NaN;
+}
+
+/**
+ * The `aim` prop of the scroll's last render: a string or a finite number is kept, any other
+ * value is none.
+ *
+ * @param container - The scroll element.
+ * @returns The aim, or `undefined`.
+ */
+function aimOf(container: Element): string | number | undefined {
+  const aim = container.node.props.aim;
+
+  if (typeof aim === "string") return aim;
+
+  return typeof aim === "number" && Number.isFinite(aim) ? aim : undefined;
 }
 
 /**
@@ -206,17 +238,20 @@ function stop(motion: ScrollMotion): void {
 }
 
 /**
- * Starts a glide to an offset, kept inside the range, on the curve `1 − (1 − p)³` over
- * `min(620, 260 + distance × 1.1)` ms. A scroll already there stops instead.
+ * Starts a glide to an offset, kept inside the range, on the curve `1 − (1 − p)³` from where the
+ * scroll stands, over `length` ms, or `min(620, 260 + distance × 1.1)` ms when `length` is `NaN`.
+ * A scroll already there stops instead; a length of 0 stands it there at once.
  *
  * @param motion - Its motion.
  * @param target - Where it goes, from the start.
+ * @param length - How long the glide lasts, in ms; `NaN` for the default length.
  */
-function glideTo(motion: ScrollMotion, target: number): void {
+function glideTo(motion: ScrollMotion, target: number, length: number): void {
   const to = within(target, motion.max);
   const distance = Math.abs(to - motion.offset);
 
-  if (distance === 0) {
+  if (distance === 0 || length === 0) {
+    motion.offset = to;
     stop(motion);
 
     return;
@@ -227,7 +262,9 @@ function glideTo(motion: ScrollMotion, target: number): void {
   motion.from = motion.offset;
   motion.to = to;
   motion.elapsed = 0;
-  motion.duration = Math.min(GLIDE_MAX_MS, GLIDE_MS + distance * GLIDE_MS_PER_UNIT);
+  motion.duration = Number.isNaN(length)
+    ? Math.min(GLIDE_MAX_MS, GLIDE_MS + distance * GLIDE_MS_PER_UNIT)
+    : length;
 }
 
 /**
@@ -342,7 +379,8 @@ function letGo(state: LayoutState, container: Element, motion: ScrollMotion, own
   if (snap !== undefined) {
     const projected = motion.offset + velocity * PROJECT_MS;
 
-    glideTo(motion, nearestStop(snap, projected, motion.max, motion.offset));
+    // A snap glide keeps the default length: `glideMs` is the length of a glide to the prop.
+    glideTo(motion, nearestStop(snap, projected, motion.max, motion.offset), Number.NaN);
 
     return;
   }
@@ -591,9 +629,9 @@ export function stepScroll(
 /**
  * Takes a new range: the offset keeps inside it at once, and so does a running glide. A scroll
  * that follows its `offset` prop goes on following it in the new range: standing, it stands at
- * the prop at once; gliding to it, it glides on to it from where it is. So a prop the first range
- * was too short for is reached once the content grows, a text measured again when its font
- * arrives.
+ * the prop at once; gliding to it, it starts the glide again from where it is, over the `glideMs`
+ * of the last settle. So a prop the first range was too short for is reached once the content
+ * grows, a text measured again when its font arrives.
  *
  * @param motion - The motion of the scroll.
  * @param max - The largest offset the solve gives it now.
@@ -608,14 +646,15 @@ function resize(motion: ScrollMotion, max: number): void {
 
   if (!motion.atProp) return;
 
-  if (motion.mode === "glide") glideTo(motion, motion.seen);
+  if (motion.mode === "glide") glideTo(motion, motion.seen, motion.glideMs);
   else motion.offset = within(motion.seen, max);
 }
 
 /**
  * Puts a scroll the solve just spawned at its `offset` prop, inside its range, and lets it follow
- * the prop from there. Its spawn waits in the queue of the phase: these values replace the queued
- * ones at the flush, before the first draw.
+ * the prop from there. Its `aim` and `glideMs` are recorded: the first `aim` moves nothing more.
+ * Its spawn waits in the queue of the phase: these values replace the queued ones at the flush,
+ * before the first draw.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param container - The scroll element, live since this solve.
@@ -630,6 +669,8 @@ function place(ctx: UiCtx, container: Element, content: Element, motion: ScrollM
   motion.atProp = true;
   motion.max = maxOf(container, content, motion.axis);
   motion.seen = askedOffsetOf(container);
+  motion.aim = aimOf(container);
+  motion.glideMs = glideMsOf(container);
   motion.offset = within(motion.seen, motion.max);
 
   const offset = Math.round(motion.offset);
@@ -644,13 +685,14 @@ function place(ctx: UiCtx, container: Element, content: Element, motion: ScrollM
 }
 
 /**
- * Takes a new `offset` prop: with `jump` the scroll stands at it at once and stops, without it
- * glides there; either way it follows the prop from then on. A scroll the finger holds only
- * remembers it.
+ * Follows the `offset` prop again, after a new prop or a new `aim`: with `jump` the scroll stands
+ * at it at once and stops, without it glides there from where it stands, over `glideMs`, even out
+ * of a running glide, fling or snap glide; either way it follows the prop from then on. A scroll
+ * the finger holds only remembers it.
  *
- * @param motion - The motion of the scroll, its range already the one of this solve.
+ * @param motion - The motion of the scroll, its range and `glideMs` already the ones of this solve.
  * @param container - The scroll element.
- * @param asked - The new `offset` prop, from the start.
+ * @param asked - The `offset` prop, from the start.
  */
 function followOffset(motion: ScrollMotion, container: Element, asked: number): void {
   if (motion.mode === "held") return;
@@ -660,17 +702,18 @@ function followOffset(motion: ScrollMotion, container: Element, asked: number): 
     motion.offset = within(asked, motion.max);
     stop(motion);
   } else {
-    glideTo(motion, asked);
+    glideTo(motion, asked, motion.glideMs);
   }
 
   motion.atProp = true;
 }
 
 /**
- * Settles a placed scroll on what the solve and the render of this frame gave it: a new range at
- * once, then a glide to a new `offset` prop, which the scroll follows from then on. With `jump` it
- * stands at the new prop at once instead, in the solve that gave the content its new rects, and a
- * glide the new range re-aimed stops. A scroll the finger holds only remembers the prop.
+ * Settles a placed scroll on what the solve and the render of this frame gave it: its `glideMs`,
+ * a new range at once, then a glide to a new `offset` prop or to the same one under a new `aim`,
+ * which the scroll follows from then on. With `jump` it stands at the prop at once instead, in the
+ * solve that gave the content its new rects; a glide to the prop that runs, the one a new range
+ * re-aimed too, ends at its target. A scroll the finger holds only remembers the prop and the aim.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
@@ -685,13 +728,25 @@ function settle(
   content: Element,
   motion: ScrollMotion
 ): void {
+  motion.glideMs = glideMsOf(container);
   resize(motion, maxOf(container, content, motion.axis));
 
   const asked = askedOffsetOf(container);
+  const aim = aimOf(container);
+  const aimed = !Object.is(aim, motion.aim);
 
-  if (asked !== motion.seen) {
+  // The aim is taken whatever the scroll does: a held one remembers it, as it does the prop.
+  motion.aim = aim;
+
+  if (asked !== motion.seen || aimed) {
     motion.seen = asked;
     followOffset(motion, container, asked);
+  }
+
+  // A jump ends a glide to the prop where it was going; a snap glide after a release goes on.
+  if (jumpsOf(container) && motion.atProp && motion.mode === "glide") {
+    motion.offset = motion.to;
+    stop(motion);
   }
 
   show(ctx, state, container, content, motion);
@@ -720,9 +775,11 @@ function standAtTarget(
 
 /**
  * Settles every scroll on what the solve and the render of this frame gave it. A scroll the solve
- * just spawned takes its place at its `offset` prop. A placed one keeps inside a new range at
- * once, a running glide's target too, and glides to a new `offset` prop; the same value on a
- * re-render does nothing, and a scroll the finger holds only remembers it. A scroll nobody sees
+ * just spawned takes its place at its `offset` prop and records its `aim`. A placed one keeps
+ * inside a new range at once, a running glide's target too, and glides to a new `offset` prop, or
+ * to the same one under a new `aim`, in `glideMs` when it gives one; the same value and aim on a
+ * re-render do nothing, `jump` ends a glide to the prop at its target, and a scroll the finger
+ * holds only remembers the prop and the aim. A scroll nobody sees
  * yet (`stands`: a root built aside or held warm) stands at its target at once instead of gliding,
  * so no glide plays hidden or at its open. A scroll left moving wakes the loop the way
  * `stepScroll` does: not at a time scale of 0, where it stands.
@@ -765,7 +822,9 @@ export function settleScroll(
 
 /**
  * Re-clamps a live windowed scroll to the content height of its new rows before its range is
- * cut, so a list that shrank below the window moves up in the same frame.
+ * cut, so a list that shrank below the window moves up in the same frame. A glide to the prop
+ * that the new range re-aims starts again from where the list stands, over the `glideMs` of the
+ * last settle.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.

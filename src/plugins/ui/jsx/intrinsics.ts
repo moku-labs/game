@@ -82,8 +82,9 @@ export type ScrollSnap = readonly number[] & Brand<"ScrollSnap">;
 /**
  * How far a scroll stands from its start, in reference units, kept inside 0 to `max`; 0 when
  * left out. The first frame draws it there. A later render with another value glides there on
- * the curve and in the time of `snap`; the same value changes nothing, so a scroll the finger
- * moved stays where it was left.
+ * the curve `1 − (1 − p)³`, in `min(620, 260 + distance × 1.1)` ms or in `glideMs`. The same value
+ * with the same `aim` changes nothing, so a scroll the finger moved stays where it was left; a new
+ * `aim` glides it back to the value.
  *
  * @example
  * ```tsx
@@ -97,11 +98,12 @@ export type ScrollSnap = readonly number[] & Brand<"ScrollSnap">;
 export type ScrollOffset = number & Brand<"ScrollOffset">;
 
 /**
- * Whether a new `offset` prop of this render stands there at once instead of gliding: in the same
- * solve as the content's new rects, so content that moved inside the track and an offset that moves
- * by as much keep what the player sees in place. A running fling or glide stops and `ScrollState`
- * says `moving: false`. A scroll the finger holds only remembers the prop; left out or false, a new
- * prop glides. A `snap` release always glides.
+ * Whether a new `offset` prop or a new `aim` of this render stands at the prop at once instead of
+ * gliding: in the same solve as the content's new rects, so content that moved inside the track
+ * and an offset that moves by as much keep what the player sees in place. A running fling or glide
+ * stops and `ScrollState` says `moving: false`. A glide to the prop that runs ends at its target in
+ * the render that turns `jump` on, with the same `offset`. A scroll the finger holds only remembers
+ * the prop; left out or false, a new prop glides. A `snap` release always glides.
  *
  * @example
  * ```tsx
@@ -111,9 +113,55 @@ export type ScrollOffset = number & Brand<"ScrollOffset">;
  *   <row key="track" style={{ width: 778, height: 120 }} />
  * </scroll>;
  * // the frame of that render: ScrollState { offset: 82, max: 472, moving: false }
+ *
+ * // The strip glides 0 to 390 in 620 ms; 150 ms in, the player skips: the same offset with jump.
+ * <scroll key="strip" axis="x" offset={390} jump style={{ width: 306, height: 120 }}>
+ *   <row key="track" style={{ width: 696, height: 120 }} />
+ * </scroll>;
+ * // the frame of that render: ScrollState { offset: 390, max: 390, moving: false }
  * ```
  */
 export type ScrollJump = boolean & Brand<"ScrollJump">;
+
+/**
+ * How long every glide to the `offset` prop lasts, in ms, on the curve `1 − (1 − p)³`: a new
+ * `offset`, a new `aim`, and a glide to the prop that a new range re-aims, which starts again from
+ * where the scroll stands. 0 stands at the prop at once, as `jump`. Left out, not a number, `NaN`,
+ * `Infinity` or below 0: `min(620, 260 + distance × 1.1)`. A `snap` glide after a release keeps
+ * that default. A new value alone leaves a running glide as it is; it applies from the next glide
+ * to the prop.
+ *
+ * @example
+ * ```tsx
+ * // The strip stands on 318; the game moves it to the next order in exactly 150 ms.
+ * <scroll key="strip" axis="x" offset={390} glideMs={150} style={{ width: 306, height: 120 }}>
+ *   <row key="track" style={{ width: 696, height: 120 }} />
+ * </scroll>;
+ * // 75 ms in: ScrollState { offset: 381, max: 390, moving: true }
+ * // 150 ms in: ScrollState { offset: 390, max: 390, moving: false }
+ * ```
+ */
+export type ScrollGlideMs = number & Brand<"ScrollGlideMs">;
+
+/**
+ * What the `offset` prop aims at, a string or a finite number: a new value follows the prop again
+ * from where the scroll stands, even when the offset is the same. A scroll the finger moved glides
+ * back to its offset; a running glide, fling or snap glide starts again toward it, in `glideMs`;
+ * with `jump` it stands there at once. Compared with `Object.is`; any other value (`NaN`,
+ * `Infinity`, an object, a boolean) counts as left out, and leaving it out after a value is a
+ * change too. The same value on a re-render does nothing. A scroll the finger holds only remembers
+ * it: the release glides to a stop or flings, as without it.
+ *
+ * @example
+ * ```tsx
+ * // The player dragged the strip to 390. The game skips to the next order, which is also at 0.
+ * <scroll key="strip" axis="x" offset={0} aim="order-7" style={{ width: 306, height: 120 }}>
+ *   <row key="track" style={{ width: 696, height: 120 }} />
+ * </scroll>;
+ * // the render before said aim="order-6": the strip glides 390 → 0 and stands on 0
+ * ```
+ */
+export type ScrollAim = (string | number) & Brand<"ScrollAim">;
 /** How many rows a windowed scroll has. */
 export type ScrollRows = number & Brand<"ScrollRows">;
 /** The height of every row, in reference units; above 0. */
@@ -282,8 +330,8 @@ type ScrollWindowForm = {
 /**
  * What a scroll container takes: children for a short list, or `rows`, `rowHeight` and `row` for
  * a long one, whose rows exist only in the window; the `axis` it moves on, the `snap` stops a
- * release glides to, the `offset` it stands at, and whether a new `offset` stands there at once
- * (`jump`).
+ * release glides to, the `offset` it stands at, how long a glide to it lasts (`glideMs`), what it
+ * aims at (`aim`), and whether a new `offset` stands there at once (`jump`).
  *
  * @example
  * ```ts
@@ -292,6 +340,10 @@ type ScrollWindowForm = {
  * const strip: ScrollProps = { axis: "x", snap: [0, 318, 390], offset: 318 };
  * // A first tile of 82 u came in at the start of the track: the strip stands on 82 at once.
  * const shifted: ScrollProps = { axis: "x", offset: 82, jump: true };
+ * // From 318, the next order: the strip glides to 390 in exactly 150 ms.
+ * const quick: ScrollProps = { axis: "x", offset: 390, glideMs: 150 };
+ * // The next order is at 0 too: a strip the player dragged to 390 glides back to 0.
+ * const next: ScrollProps = { axis: "x", offset: 0, aim: "order-7" };
  * // 1000 orders of 120 u in a 1600 u list: rows 0 to 18 exist at offset 0.
  * const orders: ScrollProps = {
  *   style: { height: 1600 },
@@ -305,6 +357,8 @@ export type ScrollProps = CommonProperties & {
   axis?: ScrollAxis;
   snap?: ScrollSnap;
   offset?: ScrollOffset;
+  glideMs?: ScrollGlideMs;
+  aim?: ScrollAim;
   jump?: ScrollJump;
 } & (ScrollChildForm | ScrollWindowForm);
 

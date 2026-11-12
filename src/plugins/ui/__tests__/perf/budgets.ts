@@ -61,6 +61,25 @@ export const BUDGET = {
    */
   scrollJump: 0,
   /**
+   * F170 (change 2026-11-12-scroll-glide-control): the settle of a render that gives the strip a
+   * new `offset` prop with `glideMs={150}`, no `jump`: the props read, a glide of 150 ms started in
+   * place on the motion, and the writes through the kept patches. 0 B.
+   */
+  scrollGlideMsSettle: 0,
+  /**
+   * F174: the settle of a render with a new `aim`, a string the render made, and the same `offset`
+   * prop: the aim compared with `Object.is` and kept by reference, a glide to the prop started in
+   * place. 0 B.
+   */
+  scrollAimSettle: 0,
+  /** F171: the settle of a render with `jump` while the strip glides to its prop: it stands at the target. 0 B. */
+  scrollJumpEndsGlide: 0,
+  /**
+   * F170: the settle of a solve with a new range while the strip glides to its prop with
+   * `glideMs={150}`: the glide started again in place from where the strip stands. 0 B.
+   */
+  scrollResizeReaim: 0,
+  /**
    * F42 (change 2026-10-21-exit-restore-fixes): `still` of one leaving element per frame, three motions held, one of
    * them endless (a hot pulse). Was an `every` with an arrow; now an array `for…of` and a set lookup. 0 B.
    */

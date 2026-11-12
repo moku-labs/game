@@ -6,9 +6,13 @@ import type * as ScrollModule from "../../layout/scroll";
 import type { ElementLookup, LayoutState } from "../../layout/types";
 import type { UiCtx } from "../../types";
 import {
+  aimSettle,
   flingFrame,
   glideFrame,
+  glideMsSettle,
   heldFrame,
+  jumpEndsGlideSettle,
+  resizeReaimSettle,
   type ScrollCall,
   type ScrollPerf,
   type Step,
@@ -57,7 +61,7 @@ const scroll = await startScrollPerf(call);
 const running: { frame: Step } = { frame: stillFrame(scroll) };
 
 /**
- * The options of a bench whose `setup` builds its frame, so the strip is held, flinging,
+ * The options of a bench whose `setup` builds its frame or settle, so the strip is held, flinging,
  * gliding or still when that bench starts, whatever the bench before it left.
  *
  * @param build - Sets the strip up and returns the frame.
@@ -77,4 +81,19 @@ describe("scroll step", () => {
   bench("fling frame, one x strip", () => running.frame(), setUp(flingFrame));
   bench("glide frame, one x strip", () => running.frame(), setUp(glideFrame));
   bench("still frame, one x strip", () => running.frame(), setUp(stillFrame));
+});
+
+describe("scroll settle", () => {
+  bench("glideMs glide to a new offset, one x strip", () => running.frame(), setUp(glideMsSettle));
+  bench("new aim, one x strip", () => running.frame(), setUp(aimSettle));
+  bench(
+    "jump ends a glide to the prop, one x strip",
+    () => running.frame(),
+    setUp(jumpEndsGlideSettle)
+  );
+  bench(
+    "new range re-aims a glide to the prop, one x strip",
+    () => running.frame(),
+    setUp(resizeReaimSettle)
+  );
 });

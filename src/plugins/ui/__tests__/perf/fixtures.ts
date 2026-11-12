@@ -490,6 +490,118 @@ export function jumpFrame(scroll: ScrollPerf): Step {
 }
 
 /**
+ * Sets the last render's props of the strip for a settle of change 2026-11-12-scroll-glide-control:
+ * the offset prop 1000, which the motion has seen, the aim "order-6", which it has taken, and
+ * `jump` and `glideMs` as given. The strip stands, no finger on it.
+ *
+ * @param scroll - The started scroll perf app.
+ * @param jump - The `jump` prop.
+ * @param glideMs - The `glideMs` prop.
+ * @returns The props of the strip's node.
+ */
+function settleProps(scroll: ScrollPerf, jump: boolean, glideMs: number): Record<string, unknown> {
+  const props = scroll.element.node.props;
+
+  scroll.ui.app.world.ecs.untag(scroll.strip, Pressed);
+  props.jump = jump;
+  props.glideMs = glideMs;
+  props.offset = 1000;
+  props.aim = "order-6";
+  scroll.motion.seen = 1000;
+  scroll.motion.aim = "order-6";
+  scroll.motion.mode = "still";
+
+  return props;
+}
+
+/**
+ * The settle of a render that gives the strip, put at 900, a new `offset` prop with
+ * `glideMs={150}` and no `jump` (F170): 1082, then 1000, so every call starts a glide of 150 ms
+ * from 900. The render itself is left out.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One settle.
+ */
+export function glideMsSettle(scroll: ScrollPerf): Step {
+  const props = settleProps(scroll, false, 150);
+
+  return (): void => {
+    props.offset = props.offset === 1000 ? 1082 : 1000;
+    scroll.motion.offset = 900;
+    scroll.motion.mode = "still";
+    scroll.settle();
+  };
+}
+
+/**
+ * The settle of a render that gives the strip, put at 900, a new `aim` with the same `offset` prop
+ * 1000 (F174): "order-7", then "order-6", strings the render made, so every call follows the prop
+ * again and starts a glide of 150 ms to 1000.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One settle.
+ */
+export function aimSettle(scroll: ScrollPerf): Step {
+  const props = settleProps(scroll, false, 150);
+
+  return (): void => {
+    props.aim = props.aim === "order-6" ? "order-7" : "order-6";
+    scroll.motion.offset = 900;
+    scroll.motion.mode = "still";
+    scroll.settle();
+  };
+}
+
+/**
+ * Sets the strip gliding to its `offset` prop 1000 from 900, 100 of 400 ms in, at 950.
+ *
+ * @param motion - The strip's motion.
+ */
+function glideToProp(motion: ScrollMotion): void {
+  motion.mode = "glide";
+  motion.atProp = true;
+  motion.from = 900;
+  motion.to = 1000;
+  motion.offset = 950;
+  motion.elapsed = 100;
+  motion.duration = 400;
+}
+
+/**
+ * The settle of a render with `jump` and the same `offset` prop while the strip glides to it
+ * (F171): every call stands the glide at its target, 1000.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One settle.
+ */
+export function jumpEndsGlideSettle(scroll: ScrollPerf): Step {
+  settleProps(scroll, true, 150);
+
+  return (): void => {
+    glideToProp(scroll.motion);
+    scroll.settle();
+  };
+}
+
+/**
+ * The settle of a solve that gives the strip a new range while it glides to its `offset` prop
+ * with `glideMs={150}` (F170): the motion is told an old `max` of 5000 before every call, so the
+ * settle takes the strip's own range again and starts the glide to 1000 again over 150 ms.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One settle.
+ */
+export function resizeReaimSettle(scroll: ScrollPerf): Step {
+  settleProps(scroll, false, 150);
+
+  return (): void => {
+    glideToProp(scroll.motion);
+    scroll.motion.max = 5000;
+    scroll.settle();
+  };
+}
+
+/**
  * A frame of a strip that stands: no finger, no fling, no glide.
  *
  * @param scroll - The started scroll perf app.
