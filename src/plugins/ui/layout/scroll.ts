@@ -823,8 +823,8 @@ export function settleScroll(
 /**
  * Re-clamps a live windowed scroll to the content height of its new rows before its range is
  * cut, so a list that shrank below the window moves up in the same frame. A glide to the prop
- * that the new range re-aims starts again from where the list stands, over the `glideMs` of the
- * last settle.
+ * that the new range re-aims starts again from where the list stands, over the `glideMs` of this
+ * render.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
@@ -846,6 +846,8 @@ export function clampScroll(
   // A live scroll was placed by the solve that spawned it; before that it stands at 0.
   if (motion === undefined || !motion.placed || content === undefined) return 0;
 
+  // The glideMs of this render, which settle reads only after this: a glide re-aimed here takes it.
+  motion.glideMs = glideMsOf(container);
   resize(motion, extent(contentHeight, container.rect.h));
   show(ctx, state, container, content, motion);
 

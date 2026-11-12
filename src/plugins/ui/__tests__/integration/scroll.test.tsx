@@ -960,6 +960,53 @@ describe("glideMs", () => {
     expect(stateOf(app, "glideRows")).toEqual({ offset: 1200, max: 1200, moving: false });
   });
 
+  it("G4: re-aims a glide of a windowed list with the glideMs of the render that also changes its rows", async () => {
+    // Bug caught: the re-clamp before the range is cut re-aims the glide with the glideMs of the
+    // last render, so a render that gives 150 and fewer rows together glides for the old length.
+    running = await startScrollApp();
+    mount(running, "glideRows");
+
+    const app = running;
+
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS, false));
+    app.time.step(32);
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS - 5, 150));
+
+    expect(stateOf(app, "glideRows")).toMatchObject({ max: 1200, moving: true });
+
+    app.time.step(149);
+
+    expect(stateOf(app, "glideRows")?.moving).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glideRows")).toEqual({ offset: 1200, max: 1200, moving: false });
+  });
+
+  it("G4: re-aims a glide of a scroll with children with the glideMs of the render that also changes its range", async () => {
+    // Bug caught: settle reads glideMs after it resizes, so a render that gives 150 and a longer
+    // track together re-aims the glide with the glideMs of the last render.
+    const app = await start("glide");
+
+    tell(app, { at: 600 });
+    app.time.step(32);
+    tell(app, { at: 600, glideMs: 150, track: LONG_TRACK });
+
+    expect(stateOf(app, "glider")).toMatchObject({ max: LONG_TRACK - PINNED, moving: true });
+
+    app.time.step(149);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({
+      offset: 600,
+      max: LONG_TRACK - PINNED,
+      moving: false
+    });
+  });
+
   it("G5: keeps the default length for a snap glide after a release when glideMs is set", async () => {
     // Bug caught: glideMs shortens the snap glide too, so the strip snaps in 150 ms.
     const app = await start("glide");

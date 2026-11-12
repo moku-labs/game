@@ -243,13 +243,18 @@ export const GLIDE_ROWS = 40;
 
 /**
  * The windowed glide list: `rows` rows of 80 u in a 1600 u list, at `offset` `at`, every glide to
- * the prop 150 ms long.
+ * the prop `glideMs` long: 150 by default, `false` leaves it out.
  *
  * @param at - The offset prop.
  * @param rows - How many rows.
+ * @param glideMs - The `glideMs` of the list, or `false` for none.
  * @returns The root node of the screen.
  */
-export function glideRowsNode(at: number, rows: number): DescriptionNode {
+export function glideRowsNode(
+  at: number,
+  rows: number,
+  glideMs: number | false = 150
+): DescriptionNode {
   return (
     <column key="glideRowsRoot" style={rootStyle}>
       <scroll
@@ -258,7 +263,7 @@ export function glideRowsNode(at: number, rows: number): DescriptionNode {
         rows={rows}
         rowHeight={ROW}
         offset={at}
-        glideMs={150}
+        {...(glideMs === false ? {} : { glideMs })}
         aim="orders"
         row={index => <row key={`g${index}`} style={{ width: 1080, height: ROW }} />}
       />
