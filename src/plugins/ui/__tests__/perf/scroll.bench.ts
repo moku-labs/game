@@ -12,6 +12,7 @@ import {
   glideMsSettle,
   heldFrame,
   jumpEndsGlideSettle,
+  numberAimSettle,
   resizeReaimSettle,
   type ScrollCall,
   type ScrollPerf,
@@ -86,6 +87,7 @@ describe("scroll step", () => {
 describe("scroll settle", () => {
   bench("glideMs glide to a new offset, one x strip", () => running.frame(), setUp(glideMsSettle));
   bench("new aim, one x strip", () => running.frame(), setUp(aimSettle));
+  bench("new number aim, one x strip", () => running.frame(), setUp(numberAimSettle));
   bench(
     "jump ends a glide to the prop, one x strip",
     () => running.frame(),

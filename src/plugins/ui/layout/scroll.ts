@@ -304,7 +304,9 @@ function hold(
 
   // A new press starts here: the finger where it is, the offset where the scroll stands, an empty
   // ring. The player moves the scroll now, so it no longer follows its `offset` prop.
-  if (motion.mode !== "held" || state.scrolling !== container.entity) {
+  const startsNewPress = motion.mode !== "held" || state.scrolling !== container.entity;
+
+  if (startsNewPress) {
     motion.mode = "held";
     motion.velocity = 0;
     motion.pointer = at;
@@ -736,7 +738,7 @@ function settle(
   const aimed = !Object.is(aim, motion.aim);
 
   // The aim is taken whatever the scroll does: a held one remembers it, as it does the prop.
-  motion.aim = aim;
+  if (aimed) motion.aim = aim;
 
   if (asked !== motion.seen || aimed) {
     motion.seen = asked;
@@ -744,7 +746,9 @@ function settle(
   }
 
   // A jump ends a glide to the prop where it was going; a snap glide after a release goes on.
-  if (jumpsOf(container) && motion.atProp && motion.mode === "glide") {
+  const endsGlideAtTarget = jumpsOf(container) && motion.atProp && motion.mode === "glide";
+
+  if (endsGlideAtTarget) {
     motion.offset = motion.to;
     stop(motion);
   }
@@ -779,10 +783,10 @@ function standAtTarget(
  * inside a new range at once, a running glide's target too, and glides to a new `offset` prop, or
  * to the same one under a new `aim`, in `glideMs` when it gives one; the same value and aim on a
  * re-render do nothing, `jump` ends a glide to the prop at its target, and a scroll the finger
- * holds only remembers the prop and the aim. A scroll nobody sees
- * yet (`stands`: a root built aside or held warm) stands at its target at once instead of gliding,
- * so no glide plays hidden or at its open. A scroll left moving wakes the loop the way
- * `stepScroll` does: not at a time scale of 0, where it stands.
+ * holds only remembers the prop and the aim. A scroll nobody sees yet (`stands`: a root built
+ * aside or held warm) stands at its target at once instead of gliding, so no glide plays hidden or
+ * at its open. A scroll left moving wakes the loop the way `stepScroll` does: not at a time scale
+ * of 0, where it stands.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.

@@ -1207,9 +1207,9 @@ describe("aim", () => {
     expect(moving(app)).toBe(true);
   });
 
-  it("A9: compares the aim after keeping only a string or a finite number: NaN, Infinity, an object or a boolean is none", async () => {
-    // Bug caught: an object aim, new on every render, or NaN compared with !==, makes every render
-    // glide the strip back; or a number aim is dropped.
+  it("A9: keeps a number aim, and follows it once when it changes", async () => {
+    // Bug caught: a number aim is dropped, so changing it does nothing; or the same number follows
+    // again on every render.
     const app = await start("aimed");
 
     dragToEnd(app);
@@ -1219,19 +1219,47 @@ describe("aim", () => {
 
     frames(app, 50);
     dragToEnd(app);
-    // 7 again, then NaN for none: a change, followed once.
     tell(app, { at: 0, aim: 7 }, "aimed");
 
-    expect(moving(app)).toBe(false);
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
 
+  it("A9: takes NaN for no aim, a change from a number and none twice", async () => {
+    // Bug caught: NaN compared with !== is never equal to itself, so every render with it glides the
+    // strip back.
+    const app = await start("aimed");
+
+    dragToEnd(app);
+    tell(app, { at: 0, aim: 7 }, "aimed");
+    frames(app, 50);
+    dragToEnd(app);
+    // 7 to none is a change, followed once.
     tell(app, { at: 0, aim: Number.NaN }, "aimed");
+
+    expect(moving(app)).toBe(true);
+
     frames(app, 50);
 
     expect(stateOf(app, "glider")?.offset).toBe(0);
 
     dragToEnd(app);
+    tell(app, { at: 0, aim: Number.NaN }, "aimed");
 
-    for (const aim of [Number.NaN, Number.POSITIVE_INFINITY, { order: 7 }, { order: 7 }, true]) {
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("A9: takes Infinity, an object and a boolean for no aim", async () => {
+    // Bug caught: an object aim, new on every render, or a boolean or Infinity kept as an aim makes
+    // every render glide the strip back.
+    const app = await start("aimed");
+
+    // The strip starts with the aim "order-6": none is a change, followed once.
+    dragToEnd(app);
+    tell(app, { at: 0 }, "aimed");
+    frames(app, 50);
+    dragToEnd(app);
+
+    for (const aim of [Number.POSITIVE_INFINITY, { order: 7 }, { order: 7 }, true]) {
       tell(app, { at: 0, aim }, "aimed");
 
       expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
@@ -1280,6 +1308,42 @@ describe("aim", () => {
   });
 });
 
+/**
+ * Flings the glide strip off a drag, tells it its offset prop 318 again, with `jump` or without,
+ * and follows it for three frames, in an app of its own.
+ *
+ * @param jump - Whether the render that tells the offset again has `jump` on.
+ * @returns The offsets at that render and the frames after it, and whether the strip still moves.
+ */
+async function flingAfterTell(jump: boolean): Promise<{ offsets: number[]; moving: boolean }> {
+  const app = await start("glide");
+
+  press(app, "glider", 500, 900);
+  moveTo(app, 600, 900);
+  rest(app);
+  release(app, "glider");
+  tell(app, { at: 318, jump: true });
+  press(app, "glider", 500, 900);
+  moveTo(app, 520, 900);
+  moveTo(app, 540, 900);
+  release(app, "glider");
+  tell(app, { at: 318, jump });
+
+  const offsets = [stateOf(app, "glider")?.offset ?? Number.NaN];
+
+  for (let frame = 0; frame < 3; frame += 1) {
+    frames(app, 1);
+    offsets.push(stateOf(app, "glider")?.offset ?? Number.NaN);
+  }
+
+  const result = { offsets, moving: moving(app) === true };
+
+  await app.stop();
+  running = undefined;
+
+  return result;
+}
+
 describe("jump ends a glide to the prop (F171)", () => {
   it("J5: stands at the glide's target in the render that turns jump on, the offset prop the same", async () => {
     // Bug caught: jump acts on a new offset only, so the strip glides on for half a second after
@@ -1299,6 +1363,24 @@ describe("jump ends a glide to the prop (F171)", () => {
     frames(app, 5);
 
     expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("J5: stands a windowed list at its glide's target in the render that turns jump on", async () => {
+    // Bug caught: the windowed path of the list ends no glide on jump, so a list the game asked to
+    // stand keeps gliding for 150 ms.
+    running = await startScrollApp();
+    mount(running, "glideRows");
+
+    const app = running;
+
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS));
+    app.time.step(60);
+
+    expect(stateOf(app, "glideRows")?.moving).toBe(true);
+
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS, 150, true));
+
+    expect(stateOf(app, "glideRows")).toEqual({ offset: 1500, max: 1600, moving: false });
   });
 
   it("J6: lets a snap glide after a release glide on under jump", async () => {
@@ -1321,8 +1403,8 @@ describe("jump ends a glide to the prop (F171)", () => {
     expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
   });
 
-  it("J7: changes nothing on a still or flinging strip with the same offset and aim", async () => {
-    // Bug caught: jump puts the strip at its offset prop on every render, or stops a fling.
+  it("J7: changes nothing on a still strip with the same offset and aim", async () => {
+    // Bug caught: jump puts the strip at its offset prop on every render.
     const app = await start("glide");
 
     press(app, "glider", 500, 900);
@@ -1332,17 +1414,14 @@ describe("jump ends a glide to the prop (F171)", () => {
     tell(app, { at: 318, jump: true });
 
     expect(stateOf(app, "glider")).toEqual({ offset: 218, max: 390, moving: false });
+  });
 
-    press(app, "glider", 500, 900);
-    moveTo(app, 520, 900);
-    moveTo(app, 540, 900);
-    release(app, "glider");
+  it("J7: leaves a fling exactly as it goes without jump, the offset and aim the same", async () => {
+    // Bug caught: jump stops a fling, or stands it at the offset prop, 318.
+    const [withJump, withoutJump] = [await flingAfterTell(true), await flingAfterTell(false)];
 
-    expect(moving(app)).toBe(true);
-
-    tell(app, { at: 318, jump: true });
-
-    expect(moving(app)).toBe(true);
-    expect(stateOf(app, "glider")?.offset).not.toBe(318);
+    expect(withJump).toEqual(withoutJump);
+    expect(withJump.moving).toBe(true);
+    expect(withJump.offsets[0]).not.toBe(318);
   });
 });

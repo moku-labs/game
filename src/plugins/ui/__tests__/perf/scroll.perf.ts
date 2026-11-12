@@ -14,6 +14,7 @@ import {
   heldFrame,
   jumpEndsGlideSettle,
   jumpFrame,
+  numberAimSettle,
   resizeReaimSettle,
   type ScrollCall,
   startScrollPerf,
@@ -124,6 +125,15 @@ describe("scroll step: heap per frame of one x strip", () => {
 
     await annotate(`settleScroll, aim: ${aim} B a render`);
     expect(aim).toBeLessThanOrEqual(BUDGET.scrollAimSettle + NOISE_BYTES);
+    // The window measured the follow: a glide from 900 to the same prop, 1000.
+    expect(scroll.motion).toMatchObject({ mode: "glide", from: 900, to: 1000, duration: 150 });
+  });
+
+  it("a settle with a new number aim stays within budget", async ({ annotate }) => {
+    const aim = bytesPerCall(numberAimSettle(scroll));
+
+    await annotate(`settleScroll, number aim: ${aim} B a render`);
+    expect(aim).toBeLessThanOrEqual(BUDGET.scrollNumberAimSettle + NOISE_BYTES);
     // The window measured the follow: a glide from 900 to the same prop, 1000.
     expect(scroll.motion).toMatchObject({ mode: "glide", from: 900, to: 1000, duration: 150 });
   });

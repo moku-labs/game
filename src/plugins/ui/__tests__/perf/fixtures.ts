@@ -553,6 +553,28 @@ export function aimSettle(scroll: ScrollPerf): Step {
 }
 
 /**
+ * The settle of a render that gives the strip, put at 900, the number `aim` 1.5, which is not an
+ * integer (F174), with the same `offset` prop 1000, while the motion has taken 2.5: every call
+ * takes the new aim and starts a glide of 150 ms to 1000 again. The step resets the motion's aim,
+ * not the props': a fraction written into the props record boxes in the fixture, not in the settle.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One settle.
+ */
+export function numberAimSettle(scroll: ScrollPerf): Step {
+  const props = settleProps(scroll, false, 150);
+
+  props.aim = 1.5;
+
+  return (): void => {
+    scroll.motion.aim = 2.5;
+    scroll.motion.offset = 900;
+    scroll.motion.mode = "still";
+    scroll.settle();
+  };
+}
+
+/**
  * Sets the strip gliding to its `offset` prop 1000 from 900, 100 of 400 ms in, at 950.
  *
  * @param motion - The strip's motion.

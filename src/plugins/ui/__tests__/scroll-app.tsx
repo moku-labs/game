@@ -248,12 +248,14 @@ export const GLIDE_ROWS = 40;
  * @param at - The offset prop.
  * @param rows - How many rows.
  * @param glideMs - The `glideMs` of the list, or `false` for none.
+ * @param jump - Whether the list stands at its `offset` prop at once instead of gliding.
  * @returns The root node of the screen.
  */
 export function glideRowsNode(
   at: number,
   rows: number,
-  glideMs: number | false = 150
+  glideMs: number | false = 150,
+  jump = false
 ): DescriptionNode {
   return (
     <column key="glideRowsRoot" style={rootStyle}>
@@ -265,6 +267,7 @@ export function glideRowsNode(
         offset={at}
         {...(glideMs === false ? {} : { glideMs })}
         aim="orders"
+        jump={jump}
         row={index => <row key={`g${index}`} style={{ width: 1080, height: ROW }} />}
       />
     </column>

@@ -72,6 +72,11 @@ export const BUDGET = {
    * place. 0 B.
    */
   scrollAimSettle: 0,
+  /**
+   * F174: the settle of a render with a new `aim` that is a number, not an integer (1.5 over 2.5):
+   * the aim compared with `Object.is` and kept in the motion without a box. 0 B.
+   */
+  scrollNumberAimSettle: 0,
   /** F171: the settle of a render with `jump` while the strip glides to its prop: it stands at the target. 0 B. */
   scrollJumpEndsGlide: 0,
   /**
