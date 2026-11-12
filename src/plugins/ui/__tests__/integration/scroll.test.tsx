@@ -14,6 +14,10 @@ import {
   FREE_TRACK,
   find,
   frames,
+  GLIDE_ROWS,
+  type GlideTold,
+  glideNode,
+  glideRowsNode,
   LONG_TRACK,
   logged,
   mount,
@@ -24,6 +28,7 @@ import {
   press,
   ROW,
   release,
+  renderRoot,
   type ScrollApp,
   startScrollApp,
   stateOf,
@@ -811,5 +816,612 @@ describe("F141: jump on scroll", () => {
     frames(app, 40);
 
     expect(stateOf(app, "jumping")).toMatchObject({ offset: EARLY_TILE, moving: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Change 2026-11-12-scroll-glide-control (F170, F171, F174): `glideMs`, the
+// length of every glide to the `offset` prop; `aim`, which follows the prop
+// again from where the scroll stands; and `jump`, which ends a glide to the
+// prop. "Moving" is read off `ScrollState.moving`: the offset there is rounded.
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the glide strip of a screen again with what a render tells it, and steps that frame.
+ *
+ * @param app - The running app.
+ * @param told - What the render tells the strip.
+ * @param screen - The screen of the strip: `glide` opens on 318, `aimed` on 0 with aim "order-6".
+ */
+function tell(app: ScrollApp, told: GlideTold, screen = "glide"): void {
+  renderRoot(app, screen, glideNode(told));
+}
+
+/**
+ * Drags the strip of the aimed screen from 0 to its end, 390, and lets go still.
+ *
+ * @param app - The running app.
+ */
+function dragToEnd(app: ScrollApp): void {
+  press(app, "glider", 500, 900);
+  moveTo(app, -500, 900);
+  rest(app);
+  release(app, "glider");
+}
+
+/**
+ * Whether the glide strip moves, as a game reads it.
+ *
+ * @param app - The running app.
+ * @returns `ScrollState.moving`.
+ */
+function moving(app: ScrollApp): boolean | undefined {
+  return stateOf(app, "glider")?.moving;
+}
+
+describe("glideMs", () => {
+  it("G1: glides to a new offset prop in exactly glideMs ms, on the curve", async () => {
+    // Bug caught: glideMs is ignored and the glide keeps the default 339 ms, or it ends a ms early
+    // or late, or runs on another curve.
+    const app = await start("glide");
+
+    tell(app, { at: 390, glideMs: 150 });
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 318, max: 390, moving: true });
+
+    app.time.step(75);
+
+    expect(stateOf(app, "glider")?.offset).toBe(381);
+
+    app.time.step(74);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it.each([
+    ["left out", undefined],
+    ["a string", "150"],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["negative", -150]
+  ])("G2: keeps the default length when glideMs is %s", async (_name, glideMs) => {
+    // Bug caught: a glideMs that is no length (a string, NaN, Infinity, below 0) is taken as one,
+    // so the glide never ends, ends at once, or runs for the string's number.
+    const app = await start("glide");
+
+    tell(app, { at: 390, glideMs });
+    app.time.step(339);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("G3: stands at a new offset prop at once with glideMs 0", async () => {
+    // Bug caught: a glide of 0 ms divides by 0 or says it moves for a frame.
+    const app = await start("glide");
+
+    tell(app, { at: 390, glideMs: 0 });
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+    expect(poseOf(app, "glider")?.x).toBe(-390);
+  });
+
+  it("G4: restarts a glide to the prop that a new range re-aims, with glideMs, from where it stands", async () => {
+    // Bug caught: the re-aimed glide takes the default length, so a game that asked for 150 ms
+    // waits half a second when the track grows under the glide.
+    const app = await start("glide");
+
+    tell(app, { at: 600, glideMs: 150 });
+    app.time.step(32);
+    tell(app, { at: 600, glideMs: 150, track: LONG_TRACK });
+
+    expect(stateOf(app, "glider")).toMatchObject({ max: LONG_TRACK - PINNED, moving: true });
+
+    app.time.step(149);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({
+      offset: 600,
+      max: LONG_TRACK - PINNED,
+      moving: false
+    });
+  });
+
+  it("G4: restarts a glide to the prop of a windowed list that fewer rows re-aim, with glideMs", async () => {
+    // Bug caught: the re-clamp of a windowed list before its range is cut re-aims the glide with
+    // the default length, not the glideMs of the list.
+    running = await startScrollApp();
+    mount(running, "glideRows");
+
+    const app = running;
+
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS));
+    app.time.step(32);
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS - 5));
+
+    expect(stateOf(app, "glideRows")).toMatchObject({ max: 1200, moving: true });
+
+    app.time.step(149);
+
+    expect(stateOf(app, "glideRows")?.moving).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glideRows")).toEqual({ offset: 1200, max: 1200, moving: false });
+  });
+
+  it("G4: re-aims a glide of a windowed list with the glideMs of the render that also changes its rows", async () => {
+    // Bug caught: the re-clamp before the range is cut re-aims the glide with the glideMs of the
+    // last render, so a render that gives 150 and fewer rows together glides for the old length.
+    running = await startScrollApp();
+    mount(running, "glideRows");
+
+    const app = running;
+
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS, false));
+    app.time.step(32);
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS - 5, 150));
+
+    expect(stateOf(app, "glideRows")).toMatchObject({ max: 1200, moving: true });
+
+    app.time.step(149);
+
+    expect(stateOf(app, "glideRows")?.moving).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glideRows")).toEqual({ offset: 1200, max: 1200, moving: false });
+  });
+
+  it("G4: re-aims a glide of a scroll with children with the glideMs of the render that also changes its range", async () => {
+    // Bug caught: settle reads glideMs after it resizes, so a render that gives 150 and a longer
+    // track together re-aims the glide with the glideMs of the last render.
+    const app = await start("glide");
+
+    tell(app, { at: 600 });
+    app.time.step(32);
+    tell(app, { at: 600, glideMs: 150, track: LONG_TRACK });
+
+    expect(stateOf(app, "glider")).toMatchObject({ max: LONG_TRACK - PINNED, moving: true });
+
+    app.time.step(149);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({
+      offset: 600,
+      max: LONG_TRACK - PINNED,
+      moving: false
+    });
+  });
+
+  it("G5: keeps the default length for a snap glide after a release when glideMs is set", async () => {
+    // Bug caught: glideMs shortens the snap glide too, so the strip snaps in 150 ms.
+    const app = await start("glide");
+    const snap = [0, 318, 390];
+
+    tell(app, { at: 318, glideMs: 150, snap });
+    press(app, "glider", 500, 900);
+    moveTo(app, 440, 900);
+    rest(app);
+    // The release frame glides its first 16 ms of 260 + 12 × 1.1 = 273.2.
+    release(app, "glider");
+    app.time.step(150);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(107);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("G6: starts no glide of distance 0: a new aim at the prop it stands on stops it", async () => {
+    // Bug caught: a glide of 0 u runs its glideMs and says it moves the whole time.
+    const app = await start("glide");
+
+    tell(app, { at: 318, aim: "order-7", glideMs: 150 });
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 318, max: 390, moving: false });
+  });
+
+  it("G7: leaves a running glide as it is when a render brings a new glideMs alone", async () => {
+    // Bug caught: a new glideMs restarts or shortens the glide that runs.
+    const app = await start("glide");
+
+    tell(app, { at: 390 });
+    app.time.step(100);
+    tell(app, { at: 390, glideMs: 150 });
+    app.time.step(150);
+
+    expect(stateOf(app, "glider")).toEqual({
+      offset: glidedTo(318, 390, 266),
+      max: 390,
+      moving: true
+    });
+
+    app.time.step(73);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+});
+
+describe("aim", () => {
+  it("A1: records the aim of the first render: the same aim later leaves a strip the finger moved", async () => {
+    // Bug caught: the first solve does not record the aim, so the first re-render takes it as new
+    // and pulls the strip the player dragged back to its offset.
+    const app = await start("aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 0, max: 390, moving: false });
+
+    dragToEnd(app);
+    tell(app, { at: 0, aim: "order-6" }, "aimed");
+    frames(app, 20);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("A2: glides from where the finger left it to the same offset prop when the aim changes", async () => {
+    // Bug caught: the same offset with a new aim changes nothing, so the game cannot bring the
+    // dragged strip back to the next order.
+    const app = await start("aimed");
+
+    dragToEnd(app);
+    tell(app, { at: 0, aim: "order-7" }, "aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: true });
+
+    frames(app, 1);
+
+    expect(stateOf(app, "glider")?.offset).toBe(glidedTo(390, 0, 16));
+
+    frames(app, 40);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 0, max: 390, moving: false });
+  });
+
+  it("A3: stands at the offset prop at once on a new aim with jump", async () => {
+    // Bug caught: jump acts on a new offset only, so a new aim glides.
+    const app = await start("aimed");
+
+    dragToEnd(app);
+    tell(app, { at: 0, aim: "order-7", jump: true }, "aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 0, max: 390, moving: false });
+    expect(poseOf(app, "glider")?.x).toBe(0);
+  });
+
+  it("A4: leaves a running glide its target, length and elapsed on a render with the same aim", async () => {
+    // Bug caught: every render with an aim restarts the glide, so a screen that renders often
+    // never lets its strip arrive.
+    const app = await start("glide");
+
+    tell(app, { at: 390, aim: "order-6" });
+    app.time.step(100);
+    tell(app, { at: 390, aim: "order-6" });
+    app.time.step(150);
+
+    expect(stateOf(app, "glider")).toEqual({
+      offset: glidedTo(318, 390, 266),
+      max: 390,
+      moving: true
+    });
+
+    app.time.step(73);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("A5: runs one glide for a new offset and a new aim in one render, and takes the aim", async () => {
+    // Bug caught: the offset branch leaves the new aim unrecorded, so the next render with the
+    // same props restarts the glide.
+    const app = await start("aimed");
+
+    dragToEnd(app);
+    tell(app, { at: 100, aim: "order-7" }, "aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: true });
+
+    frames(app, 1);
+
+    expect(stateOf(app, "glider")?.offset).toBe(glidedTo(390, 100, 16));
+
+    tell(app, { at: 100, aim: "order-7" }, "aimed");
+
+    expect(stateOf(app, "glider")?.offset).toBe(glidedTo(390, 100, 32));
+
+    // 260 + 290 × 1.1 = 579 ms in all.
+    app.time.step(546);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(2);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 100, max: 390, moving: false });
+  });
+
+  it("A6: only remembers a new aim while the finger holds the strip, and lets go as before", async () => {
+    // Bug caught: a new aim pulls the strip out from under the finger, glides it to the prop at the
+    // release, or is lost so the next render takes it as new.
+    const app = await start("aimed");
+
+    press(app, "glider", 500, 900);
+    moveTo(app, 450, 900);
+    tell(app, { at: 0, aim: "order-7" }, "aimed");
+
+    expect(stateOf(app, "glider")).toMatchObject({ offset: 50, moving: true });
+
+    moveTo(app, 430, 900);
+    rest(app);
+    release(app, "glider");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 70, max: 390, moving: false });
+
+    tell(app, { at: 0, aim: "order-7" }, "aimed");
+    frames(app, 10);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 70, max: 390, moving: false });
+  });
+
+  it("A8: follows once when the aim is removed and once when it comes back, never for undefined twice", async () => {
+    // Bug caught: removing the aim is not a change, or a render without an aim counts as one each
+    // time.
+    const app = await start("aimed");
+
+    dragToEnd(app);
+    tell(app, { at: 0 }, "aimed");
+    frames(app, 50);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 0, max: 390, moving: false });
+
+    dragToEnd(app);
+    tell(app, { at: 0 }, "aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+
+    tell(app, { at: 0, aim: "order-6" }, "aimed");
+
+    expect(moving(app)).toBe(true);
+  });
+
+  it("A9: keeps a number aim, and follows it once when it changes", async () => {
+    // Bug caught: a number aim is dropped, so changing it does nothing; or the same number follows
+    // again on every render.
+    const app = await start("aimed");
+
+    dragToEnd(app);
+    tell(app, { at: 0, aim: 7 }, "aimed");
+
+    expect(moving(app)).toBe(true);
+
+    frames(app, 50);
+    dragToEnd(app);
+    tell(app, { at: 0, aim: 7 }, "aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("A9: takes NaN for no aim, a change from a number and none twice", async () => {
+    // Bug caught: NaN compared with !== is never equal to itself, so every render with it glides the
+    // strip back.
+    const app = await start("aimed");
+
+    dragToEnd(app);
+    tell(app, { at: 0, aim: 7 }, "aimed");
+    frames(app, 50);
+    dragToEnd(app);
+    // 7 to none is a change, followed once.
+    tell(app, { at: 0, aim: Number.NaN }, "aimed");
+
+    expect(moving(app)).toBe(true);
+
+    frames(app, 50);
+
+    expect(stateOf(app, "glider")?.offset).toBe(0);
+
+    dragToEnd(app);
+    tell(app, { at: 0, aim: Number.NaN }, "aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("A9: takes Infinity, an object and a boolean for no aim", async () => {
+    // Bug caught: an object aim, new on every render, or a boolean or Infinity kept as an aim makes
+    // every render glide the strip back.
+    const app = await start("aimed");
+
+    // The strip starts with the aim "order-6": none is a change, followed once.
+    dragToEnd(app);
+    tell(app, { at: 0 }, "aimed");
+    frames(app, 50);
+    dragToEnd(app);
+
+    for (const aim of [Number.POSITIVE_INFINITY, { order: 7 }, { order: 7 }, true]) {
+      tell(app, { at: 0, aim }, "aimed");
+
+      expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+    }
+  });
+
+  it.each([
+    ["a glide to the prop", "prop"],
+    ["a fling", "fling"],
+    ["a snap glide", "snap"]
+  ])("A10: restarts %s on a new aim, to the offset prop with glideMs", async (_name, motion) => {
+    // Bug caught: a new aim is ignored while the strip moves, so the game's skip waits for the
+    // fling or the glide to end; or the restart keeps the old glide's length.
+    const app = await start("aimed");
+    const snap = [0, 318, 390];
+
+    if (motion === "prop") {
+      tell(app, { at: 390, aim: "order-6" }, "aimed");
+      app.time.step(100);
+    } else if (motion === "fling") {
+      press(app, "glider", 500, 900);
+      moveTo(app, 460, 900);
+      moveTo(app, 420, 900);
+      moveTo(app, 380, 900);
+      release(app, "glider");
+    } else {
+      tell(app, { at: 0, aim: "order-6", snap }, "aimed");
+      press(app, "glider", 500, 900);
+      moveTo(app, 122, 900);
+      rest(app);
+      release(app, "glider");
+    }
+
+    expect(moving(app)).toBe(true);
+
+    const at = motion === "prop" ? 390 : 0;
+
+    tell(app, { at, aim: "order-7", glideMs: 150, snap }, "aimed");
+    app.time.step(149);
+
+    expect(moving(app)).toBe(true);
+
+    app.time.step(1);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: at, max: 390, moving: false });
+  });
+});
+
+/**
+ * Flings the glide strip off a drag, tells it its offset prop 318 again, with `jump` or without,
+ * and follows it for three frames, in an app of its own.
+ *
+ * @param jump - Whether the render that tells the offset again has `jump` on.
+ * @returns The offsets at that render and the frames after it, and whether the strip still moves.
+ */
+async function flingAfterTell(jump: boolean): Promise<{ offsets: number[]; moving: boolean }> {
+  const app = await start("glide");
+
+  press(app, "glider", 500, 900);
+  moveTo(app, 600, 900);
+  rest(app);
+  release(app, "glider");
+  tell(app, { at: 318, jump: true });
+  press(app, "glider", 500, 900);
+  moveTo(app, 520, 900);
+  moveTo(app, 540, 900);
+  release(app, "glider");
+  tell(app, { at: 318, jump });
+
+  const offsets = [stateOf(app, "glider")?.offset ?? Number.NaN];
+
+  for (let frame = 0; frame < 3; frame += 1) {
+    frames(app, 1);
+    offsets.push(stateOf(app, "glider")?.offset ?? Number.NaN);
+  }
+
+  const result = { offsets, moving: moving(app) === true };
+
+  await app.stop();
+  running = undefined;
+
+  return result;
+}
+
+describe("jump ends a glide to the prop (F171)", () => {
+  it("J5: stands at the glide's target in the render that turns jump on, the offset prop the same", async () => {
+    // Bug caught: jump acts on a new offset only, so the strip glides on for half a second after
+    // the game asked it to stand.
+    const app = await start("aimed");
+
+    tell(app, { at: 390, aim: "order-6" }, "aimed");
+    app.time.step(150);
+
+    expect(moving(app)).toBe(true);
+
+    tell(app, { at: 390, aim: "order-6", jump: true }, "aimed");
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+    expect(poseOf(app, "glider")?.x).toBe(-390);
+
+    frames(app, 5);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("J5: stands a windowed list at its glide's target in the render that turns jump on", async () => {
+    // Bug caught: the windowed path of the list ends no glide on jump, so a list the game asked to
+    // stand keeps gliding for 150 ms.
+    running = await startScrollApp();
+    mount(running, "glideRows");
+
+    const app = running;
+
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS));
+    app.time.step(60);
+
+    expect(stateOf(app, "glideRows")?.moving).toBe(true);
+
+    renderRoot(app, "glideRows", glideRowsNode(1500, GLIDE_ROWS, 150, true));
+
+    expect(stateOf(app, "glideRows")).toEqual({ offset: 1500, max: 1600, moving: false });
+  });
+
+  it("J6: lets a snap glide after a release glide on under jump", async () => {
+    // Bug caught: jump ends every glide, so a snap release with jump on stands where the finger
+    // let go, between two stops.
+    const app = await start("glide");
+    const snap = [0, 318, 390];
+
+    tell(app, { at: 318, snap, jump: true });
+    press(app, "glider", 500, 900);
+    moveTo(app, 440, 900);
+    rest(app);
+    release(app, "glider");
+    tell(app, { at: 318, snap, jump: true });
+
+    expect(moving(app)).toBe(true);
+
+    frames(app, 30);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 390, max: 390, moving: false });
+  });
+
+  it("J7: changes nothing on a still strip with the same offset and aim", async () => {
+    // Bug caught: jump puts the strip at its offset prop on every render.
+    const app = await start("glide");
+
+    press(app, "glider", 500, 900);
+    moveTo(app, 600, 900);
+    rest(app);
+    release(app, "glider");
+    tell(app, { at: 318, jump: true });
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 218, max: 390, moving: false });
+  });
+
+  it("J7: leaves a fling exactly as it goes without jump, the offset and aim the same", async () => {
+    // Bug caught: jump stops a fling, or stands it at the offset prop, 318.
+    const [withJump, withoutJump] = [await flingAfterTell(true), await flingAfterTell(false)];
+
+    expect(withJump).toEqual(withoutJump);
+    expect(withJump.moving).toBe(true);
+    expect(withJump.offsets[0]).not.toBe(318);
   });
 });

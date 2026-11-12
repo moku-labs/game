@@ -4,7 +4,9 @@
  * opened on 318, and the pinned column that closes to a 390 u window with stops 0 and 306), a
  * free strip with no stops, a vertical list, a windowed list, an x strip inside a y list, a
  * windowed list on the x axis, a scroll whose axis changes, a strip opened on 318 whose track
- * starts too short for it and grows, and a strip whose track and offset shift in one render. The finger lands the way `input` lands it: `Pressed` on the
+ * starts too short for it and grows, a strip whose track and offset shift in one render, and the
+ * glide strip and windowed glide list a test renders again with any `offset`, `glideMs`, `aim`
+ * and `jump` (change 2026-11-12-scroll-glide-control). The finger lands the way `input` lands it: `Pressed` on the
  * scroll and the `Pointer` resource. Real flow runner, plain Bun, inert
  * renderer, real Yoga.
  */
@@ -20,6 +22,7 @@ import { Parent, Transform } from "../../renderer/components";
 import { scenesPlugin } from "../../scenes";
 import { textPlugin } from "../../text";
 import { worldPlugin } from "../../world";
+import { Tree } from "../../world/ecs/define";
 import { ScrollState, type ScrollStateValue } from "../components";
 import { uiPlugin } from "../index";
 import { defineComponent } from "../jsx/component";
@@ -184,6 +187,110 @@ export const GrowScreen = defineComponent("GrowScreen", {
 });
 
 /**
+ * What a render tells the glide strip (change 2026-11-12-scroll-glide-control): its `offset`, and
+ * any value of `glideMs`, `aim`, `jump` and `snap`, the way a game may hand them; the track may
+ * grow.
+ */
+export type GlideTold = {
+  at: number;
+  glideMs?: unknown;
+  aim?: unknown;
+  jump?: boolean;
+  snap?: readonly number[];
+  track?: number;
+};
+
+/**
+ * The glide strip as a render describes it: a 306 u window over the board's track, `max` 390.
+ * Plain nodes, so a test can hand it a `glideMs` or an `aim` the types refuse.
+ *
+ * @param told - What the render tells the strip.
+ * @returns The root node of the screen.
+ */
+export function glideNode(told: GlideTold): DescriptionNode {
+  return {
+    type: "column",
+    key: "glideRoot",
+    props: { style: rootStyle },
+    children: [
+      {
+        type: "scroll",
+        key: "glider",
+        props: {
+          axis: "x",
+          offset: told.at,
+          glideMs: told.glideMs,
+          aim: told.aim,
+          jump: told.jump,
+          snap: told.snap,
+          style: { width: PINNED, height: 120 }
+        },
+        children: [
+          {
+            type: "row",
+            key: "glideTrack",
+            props: { style: { width: told.track ?? TRACK, height: 120 } },
+            children: []
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/** The first rows of the windowed glide list: 40 of 80 u in a 1600 u list scroll 1600 u. */
+export const GLIDE_ROWS = 40;
+
+/**
+ * The windowed glide list: `rows` rows of 80 u in a 1600 u list, at `offset` `at`, every glide to
+ * the prop `glideMs` long: 150 by default, `false` leaves it out.
+ *
+ * @param at - The offset prop.
+ * @param rows - How many rows.
+ * @param glideMs - The `glideMs` of the list, or `false` for none.
+ * @param jump - Whether the list stands at its `offset` prop at once instead of gliding.
+ * @returns The root node of the screen.
+ */
+export function glideRowsNode(
+  at: number,
+  rows: number,
+  glideMs: number | false = 150,
+  jump = false
+): DescriptionNode {
+  return (
+    <column key="glideRowsRoot" style={rootStyle}>
+      <scroll
+        key="glideRows"
+        style={{ width: 1080, height: WINDOW }}
+        rows={rows}
+        rowHeight={ROW}
+        offset={at}
+        {...(glideMs === false ? {} : { glideMs })}
+        aim="orders"
+        jump={jump}
+        row={index => <row key={`g${index}`} style={{ width: 1080, height: ROW }} />}
+      />
+    </column>
+  );
+}
+
+/**
+ * Renders a screen of the fixture again with a new root node, the way its view would.
+ *
+ * @param app - The running app.
+ * @param screen - The projection whose root renders.
+ * @param node - The new root node.
+ */
+export function renderRoot(app: ScrollApp, screen: string, node: DescriptionNode): void {
+  const root = app.world.projection.entityOf(screen, `${screen}Item`);
+
+  if (root === undefined) throw new Error(`the screen "${screen}" is not mounted`);
+
+  app.world.ecs.set(root, Tree, { node });
+  app.time.step(16);
+}
+
+/**
  * The rows of a list: `count` rows of `ROW`.
  *
  * @param prefix - The start of every row key.
@@ -222,6 +329,9 @@ export const scrollScreens = [
   screenOf("turn", () => <TurnScreen key="turnScreen" />),
   screenOf("grow", () => <GrowScreen key="growScreen" />),
   screenOf("jump", () => <JumpScreen key="jumpScreen" />),
+  screenOf("glide", () => glideNode({ at: 318 })),
+  screenOf("aimed", () => glideNode({ at: 0, aim: "order-6" })),
+  screenOf("glideRows", () => glideRowsNode(0, GLIDE_ROWS)),
   screenOf("free", () => (
     <column key="freeRoot" style={rootStyle}>
       <scroll key="free" axis="x" style={{ width: PINNED, height: 120 }}>

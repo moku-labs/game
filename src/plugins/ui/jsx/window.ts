@@ -200,6 +200,8 @@ export function scrollMotionOf(node: DescriptionNode): ScrollMotion {
     pointer: 0,
     start: 0,
     seen: 0,
+    aim: undefined,
+    glideMs: Number.NaN,
     placed: false,
     atProp: false
   };
