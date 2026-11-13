@@ -544,9 +544,33 @@ function pictureWhy(top: PixiContainer, view: View): number {
 }
 
 /**
- * Tells whether a node under a top blends otherwise than normally, at any depth (F68): drawn into a picture, it would
- * blend with the picture's empty texture, not with what is drawn under the view, and a glow would cover the board under
- * it instead of lighting it. Recursive, by index over `children`: allocates nothing.
+ * Tells whether a node holds an enabled filter whose output lays with a blend other than normal (F178): `sync` writes
+ * a slot's `blend` on the last enabled filter of a view.
+ *
+ * @param node - The node.
+ * @returns True when one of its filters blends otherwise.
+ */
+function filterBlends(node: PixiContainer): boolean {
+  const filters: readonly PixiFilter[] | null | undefined = node.filters;
+
+  if (filters === null || filters === undefined) return false;
+
+  // per take attempt and filtered node: a frozen list, walked by index.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < filters.length; index += 1) {
+    const filter = filters[index];
+
+    if (filter?.enabled === true && !plainBlend(filter.blendMode)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tells whether a node under a top blends otherwise than normally, at any depth (F68), by its own blend or by a filter
+ * it holds (F178): drawn into a picture, it would blend with the picture's empty texture, not with what is drawn under
+ * the view, so a glow would cover the board under it instead of lighting it, and the ink of a stamp would turn black.
+ * Recursive, by index over `children`: allocates nothing.
  *
  * @param node - The top, or a node under it; its own blend is not read (`eligible` reads the top's and the visual's).
  * @returns True when a node under it blends otherwise.
@@ -559,7 +583,8 @@ function blendsBelow(node: PixiContainer): boolean {
   for (let index = 0; index < children.length; index += 1) {
     const child = children[index];
 
-    if (child !== undefined && (!plainBlend(child.blendMode) || blendsBelow(child))) return true;
+    if (child === undefined) continue;
+    if (!plainBlend(child.blendMode) || filterBlends(child) || blendsBelow(child)) return true;
   }
 
   return false;
@@ -727,7 +752,7 @@ export function goLive(
 
   // Onto the view's top now: a view that got a wrapper while kept takes its filters on the new top.
   if (view !== undefined && putBack) {
-    kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark);
+    kctx.sync.applyFilters(kctx.ctx, view, filtersOf(kctx.ctx.state.sync, record.entity), noMark);
   }
 
   if (view !== undefined) kctx.sync.swapHidden(kctx.hidden, view, "kept", false);
@@ -916,7 +941,13 @@ function handFilters(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord, view: 
   const standIn = standInOf(pixi, record);
 
   kctx.sync.clearFilters(record.top);
-  kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark, standIn);
+  kctx.sync.applyFilters(
+    kctx.ctx,
+    view,
+    filtersOf(kctx.ctx.state.sync, record.entity),
+    noMark,
+    standIn
+  );
 }
 
 /**
@@ -1245,7 +1276,13 @@ function meshForTake(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord, ok: bo
 function putFiltersBack(kctx: KeptCtx, record: KeptRecord, view: View): void {
   // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
   if (record.standIn !== undefined) record.standIn.filters = null;
-  kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark, record.top);
+  kctx.sync.applyFilters(
+    kctx.ctx,
+    view,
+    filtersOf(kctx.ctx.state.sync, record.entity),
+    noMark,
+    record.top
+  );
 }
 
 /**
@@ -2683,7 +2720,7 @@ export function bypassRecord(kctx: KeptCtx, record: KeptRecord, view: View, live
     // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
     if (record.standIn !== undefined) record.standIn.filters = null;
     setOrigins(record.slots, 0, 0);
-    kctx.sync.applyFilters(view, filters, noMark, record.top);
+    kctx.sync.applyFilters(kctx.ctx, view, filters, noMark, record.top);
     kctx.sync.swapHidden(kctx.hidden, view, "kept", false);
     if (record.quad !== undefined) record.quad.visible = false;
     // Drawn live, the top must not stay the render group its picture made of it.
@@ -2693,7 +2730,9 @@ export function bypassRecord(kctx: KeptCtx, record: KeptRecord, view: View, live
   }
 
   kctx.sync.clearFilters(record.top);
-  if (record.standIn !== undefined) kctx.sync.applyFilters(view, filters, noMark, record.standIn);
+  if (record.standIn !== undefined) {
+    kctx.sync.applyFilters(kctx.ctx, view, filters, noMark, record.standIn);
+  }
   kctx.sync.swapHidden(kctx.hidden, view, "kept", true);
   if (record.quad !== undefined) {
     record.quad.visible =

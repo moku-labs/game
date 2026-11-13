@@ -2,7 +2,7 @@
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
-import type { OverlayValue, ShapeValue, TransformValue } from "../components";
+import type { OverlayValue, ShapeValue, SpriteBlend, TransformValue } from "../components";
 import type { DemandReason, Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { FilterCache, KeptState, RetakeWhy, WhyLive } from "../kept/types";
@@ -505,6 +505,21 @@ export type FilterSlot = {
   blurs?: boolean;
   /** The filter's own body as a program for its quad, for a kept view whose numbers change; filled by effects. */
   quad?: FilterSlotQuad;
+  /**
+   * How the filter's output lays over what is drawn under its view (F178): the whole filtered group at once, as
+   * `Sprite.blend` lays one quad. Left out, the renderer never writes the filter's blend mode: a game's own filter keeps
+   * the one it set. Only the last enabled filter of
+   * a view lays its blend: an earlier one draws into a cleared texture, where `"multiply"` gives black, so it draws
+   * `"normal"` and is warned once per kind (`renderer:filter-blend-not-last`). A view under a kept top that holds a
+   * filter with a blend keeps that top live (`"blend-below"`).
+   *
+   * @example
+   * ```ts
+   * // `effects` hands the stamp of episode 5: a rough edge, then the ink, which multiplies the page under the stamp.
+   * ctx.require(rendererPlugin).sync.filters.set(stamp, [{ filter: inkOfStamp, passes: 1, kind: "effects.StampInk", blend: "multiply" }]);
+   * ```
+   */
+  blend?: SpriteBlend;
 };
 
 /**
@@ -1473,13 +1488,14 @@ export type AreaEntry = {
 
 /**
  * What one probe draw of the warm-up draws: a content subject of the renderer (the batch pipeline of sprites, with the
- * normal, the add and the screen blend, the graphics pipe's own, particles with either blend, distance-field text), a
+ * normal, the add, the screen and the multiply blend, the graphics pipe's own, particles with either blend, distance-field text), a
  * filter handed to `filters.warm`, or its body on its quad.
  */
 export type WarmSubject =
   | "sprite"
   | "sprite-add"
   | "sprite-screen"
+  | "sprite-multiply"
   | "graphics"
   | "particles-normal"
   | "particles-add"
@@ -1535,6 +1551,8 @@ export type WarmObjects = {
   spriteAdd: PixiSprite;
   /** The 4 × 4 white sprite of `sprite`, blending `"screen"`: the batch pipeline of a screened glow. */
   spriteScreen: PixiSprite;
+  /** The 4 × 4 white sprite of `sprite`, blending `"multiply"`: the batch pipeline of the ink of a stamp. */
+  spriteMultiply: PixiSprite;
   graphics: PixiGraphics;
   particlesNormal: PixiContainer;
   particlesAdd: PixiContainer;
@@ -1931,6 +1949,8 @@ export type SyncState = {
   warned: Set<string>;
   /** The `blend` values of a `Sprite` or a `NineSlice` already refused (`renderer:blend-unknown`), so each warns once. */
   blendWarned: Set<string>;
+  /** The kinds of the blended filters already warned as not last (`renderer:filter-blend-not-last`), each once. */
+  filterBlendWarned: Set<string>;
   added: Set<Entity>;
   removed: Set<Entity>;
   /** Entities whose `Parent` was removed: `world` marks no change then, only `onRemoved` fires. */
@@ -2086,8 +2106,9 @@ export type SyncWriters = {
     reason: HiddenReason,
     draw: () => Result
   ) => Result;
-  /** Hangs the filters on a view's top, or on a target. */
+  /** Hangs the filters on a view's top, or on a target, each with the blend it draws with. */
   readonly applyFilters: (
+    ctx: RendererCtx,
     view: View,
     slots: readonly FilterSlot[],
     before: () => void,

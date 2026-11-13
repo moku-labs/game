@@ -175,6 +175,30 @@ describe("a filtered view with a blended node inside", () => {
     expect(blendWarnings(drawn)).toEqual([]);
   });
 
+  // Bug: a child's own filter that multiplies its output (the ink of a stamp) is baked against the picture's empty
+  // texture, black, instead of multiplying what is drawn under the view.
+  it("is drawn live when a node under the top holds an enabled filter with a blend, warned once", async () => {
+    const drawn = await open();
+    const card = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 200, h: 200 }));
+    const stamp = childOf(drawn, card, Shape({ w: 80, h: 80, fill: 0xc2_41_2f }));
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(stamp, [slot(), { ...slot(), blend: "multiply" }]);
+    drawn.mock.api.sync.filters.set(card, [slot()]);
+    drawn.frames(6);
+
+    const view = drawn.objectOf(card)?.label;
+
+    expect(stageOneOf(drawn, card)).toHaveLength(0);
+    expect(topOf(drawn, card).renderable).toBe(true);
+    expect(drawn.mock.api.sync.debug.why().find(entry => entry.view === view)).toMatchObject({
+      mode: "live",
+      reason: "blend-below"
+    });
+    expect(blendWarnings(drawn)).toEqual([{ picture: topOf(drawn, card).label }]);
+  });
+
   // Bug: the retake of a kept view whose child turned to a glow bakes the glow against the picture's empty texture.
   it("goes live in the frame a child of a kept view turns to screen, warned once", async () => {
     const drawn = await open();

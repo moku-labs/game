@@ -51,7 +51,7 @@ describe("a sprite's alpha tween", () => {
     const { mock, entities } = await startSprites(20);
     const entity = entities[10] ?? 0;
 
-    mock.world.ecs.set(entity, Sprite, { alpha: 0.5, blend: "multiply" as SpriteBlend });
+    mock.world.ecs.set(entity, Sprite, { alpha: 0.5, blend: "overlay" as SpriteBlend });
 
     const sprite = storedSprite(mock, entity);
 

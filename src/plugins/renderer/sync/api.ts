@@ -937,7 +937,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     filters: {
       set: (entity: Entity, slots: readonly FilterSlot[]): void =>
-        setFilters(state, entity, slots, deps.demand.mark, deps.kept),
+        setFilters(ctx, entity, slots, deps.demand.mark, deps.kept),
 
       area: (entity: Entity, area: readonly [number, number, number, number] | undefined): void =>
         setArea(sctx, entity, area),
@@ -968,7 +968,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     stepLeave: (): void => stepLeave(sctx),
 
-    stepFilters: (): void => applySwitched(state, deps.kept),
+    stepFilters: (): void => applySwitched(ctx, deps.kept),
 
     drainOverlayEvents: (monitor: OverlayEventSink): void => drainOverlayEvents(sctx, monitor),
 

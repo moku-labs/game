@@ -158,6 +158,7 @@ const CONTENT = [
   "sprite",
   "sprite-add",
   "sprite-screen",
+  "sprite-multiply",
   "graphics",
   "particles-normal",
   "particles-add"

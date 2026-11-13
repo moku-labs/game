@@ -6,8 +6,9 @@
  */
 import type { EcsApi } from "../../world/ecs/types";
 import type { Entity } from "../../world/types";
+import type { SpriteBlend } from "../components";
 import type { KeptState } from "../kept/types";
-import type { KeptModule, PixiContainer, PixiFilter, PixiRectangle } from "../types";
+import type { KeptModule, PixiContainer, PixiFilter, PixiRectangle, RendererCtx } from "../types";
 import type { AreaEntry, FilterSlot, PassCount, SyncCtx, SyncState, View } from "./types";
 
 /** What a display object without filters holds: one shared list, plain, so a still frame's compare makes none. */
@@ -27,14 +28,45 @@ function heldFilters(target: PixiContainer): readonly PixiFilter[] {
 }
 
 /**
+ * The index of the last enabled filter of slots: the one Pixi draws onto what is under the view.
+ *
+ * @param slots - The slots.
+ * @returns The index, -1 when none is enabled.
+ */
+function lastEnabled(slots: readonly FilterSlot[]): number {
+  for (let index = slots.length - 1; index >= 0; index -= 1) {
+    if (slots[index]?.filter.enabled === true) return index;
+  }
+
+  return -1;
+}
+
+/**
+ * The Pixi blend a slot's filter draws with (F178): the slot's `blend` on the last enabled filter, `"normal"` on every
+ * other, whose output goes into the next pass's cleared texture. Pure.
+ *
+ * @param blend - The slot's `blend`, `undefined` when it has none.
+ * @param last - True for the last enabled filter of its view.
+ * @returns The blend mode.
+ * @example
+ * ```ts
+ * blendOfSlot("multiply", false); // "normal"
+ * ```
+ */
+function blendOfSlot(blend: SpriteBlend | undefined, last: boolean): SpriteBlend {
+  return last ? (blend ?? "normal") : "normal";
+}
+
+/**
  * Tells whether a display object holds exactly the enabled filters of these slots, in their order (E3): Pixi is handed
- * no disabled filter, which draws nothing but costs a filter push and pop, two batch breaks, every frame.
+ * no disabled filter, which draws nothing but costs a filter push and pop, two batch breaks, every frame. A list Pixi
+ * holds already is not handed again, which would copy it.
  *
  * @param target - The display object.
  * @param slots - The slots to compare with.
- * @returns True when nothing has to be written.
+ * @returns True when the list stands.
  */
-function holds(target: PixiContainer, slots: readonly FilterSlot[]): boolean {
+function holdsList(target: PixiContainer, slots: readonly FilterSlot[]): boolean {
   const held = heldFilters(target);
   let at = 0;
 
@@ -50,6 +82,40 @@ function holds(target: PixiContainer, slots: readonly FilterSlot[]): boolean {
   }
 
   return at === held.length;
+}
+
+/**
+ * Tells whether every enabled filter of slots holds the blend it draws with (F178).
+ *
+ * @param slots - The slots.
+ * @returns True when no blend has to be written.
+ */
+function blendsStand(slots: readonly FilterSlot[]): boolean {
+  const last = lastEnabled(slots);
+
+  // per frame and filtered view: a frozen list, walked by index.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+
+    // A slot without `blend` (a game's own filter) keeps the blend mode Pixi holds.
+    if (slot?.blend === undefined || !slot.filter.enabled) continue;
+    if (slot.filter.blendMode !== blendOfSlot(slot.blend, index === last)) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Tells whether a display object holds exactly the enabled filters of these slots, in their order, each with the blend
+ * it draws with: nothing to write.
+ *
+ * @param target - The display object.
+ * @param slots - The slots to compare with.
+ * @returns True when nothing has to be written.
+ */
+function holds(target: PixiContainer, slots: readonly FilterSlot[]): boolean {
+  return holdsList(target, slots) && blendsStand(slots);
 }
 
 /**
@@ -72,14 +138,80 @@ function enabledFilters(slots: readonly FilterSlot[]): PixiFilter[] | undefined 
 }
 
 /**
- * Writes the enabled filters of slots onto a display object, or clears them when none is enabled.
+ * Warns once per kind that a blended filter is not the last enabled one of its view, so it draws normally
+ * (`renderer:filter-blend-not-last`, in every build, as `renderer:blend-unknown`).
  *
+ * @param ctx - Domain context of the renderer plugin: the log, and the kinds warned in the sync state.
+ * @param slot - The slot.
+ */
+function warnNotLast(ctx: RendererCtx, slot: FilterSlot): void {
+  const filter = slot.kind ?? "other";
+  const warned = ctx.state.sync.filterBlendWarned;
+
+  // per write of a misplaced blend: a set lookup, no detail object after the first.
+  if (warned.has(filter)) return;
+
+  warned.add(filter);
+  ctx.log.warn("renderer:filter-blend-not-last", { filter });
+}
+
+/**
+ * Warns every enabled filter of slots that has a blend but is not the last enabled one: it draws normally.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param slots - The slots.
+ */
+function warnMisplaced(ctx: RendererCtx, slots: readonly FilterSlot[]): void {
+  const last = lastEnabled(slots);
+
+  // eslint-disable-next-line unicorn/no-for-loop -- a frozen list, walked by index: allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+
+    if (slot === undefined || !slot.filter.enabled || index === last) continue;
+    if ((slot.blend ?? "normal") !== "normal") warnNotLast(ctx, slot);
+  }
+}
+
+/**
+ * Writes the blend every enabled filter of slots that declares one draws with, each only when it differs from what Pixi
+ * holds (F178): the slot's own on the last, `"normal"` on the others, whose blend is warned. A disabled filter, and a
+ * slot without `blend` (a game's own filter, whose blend mode the game owns), are not written.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param slots - The slots.
+ */
+function writeBlends(ctx: RendererCtx, slots: readonly FilterSlot[]): void {
+  const last = lastEnabled(slots);
+
+  // eslint-disable-next-line unicorn/no-for-loop -- a frozen list, walked by index: allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+
+    // A slot without `blend` (a game's own filter) keeps the blend mode Pixi holds.
+    if (slot?.blend === undefined || !slot.filter.enabled) continue;
+
+    const mode = blendOfSlot(slot.blend, index === last);
+
+    if (slot.filter.blendMode !== mode) slot.filter.blendMode = mode;
+  }
+
+  warnMisplaced(ctx, slots);
+}
+
+/**
+ * Writes the enabled filters of slots onto a display object, or clears them when none is enabled, then the blend each
+ * draws with. The one writer of a view's filters: a list Pixi holds already is not handed again.
+ *
+ * @param ctx - Domain context of the renderer plugin.
  * @param target - The display object.
  * @param slots - The slots.
  */
-function writeFilters(target: PixiContainer, slots: readonly FilterSlot[]): void {
+function writeFilters(ctx: RendererCtx, target: PixiContainer, slots: readonly FilterSlot[]): void {
   // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
-  target.filters = enabledFilters(slots) ?? null;
+  if (!holdsList(target, slots)) target.filters = enabledFilters(slots) ?? null;
+
+  writeBlends(ctx, slots);
 }
 
 /**
@@ -99,14 +231,17 @@ export function clearFilters(target: PixiContainer): void {
  * (`kept.filterTarget`, spec 23 P9.1). Only the enabled ones: a disabled filter draws nothing, and Pixi would push and
  * pop it around the view every frame (E3); a view whose filters are all disabled holds none. Written only when they
  * differ from what the target holds, and `before` runs once just before that write: the caller marks the entity there.
+ * Each enabled filter draws with its blend: the slot's own on the last enabled one, `"normal"` on the others (F178).
  * A filter switched on or off later is written by `applySwitched` in the frame it was switched.
  *
+ * @param ctx - Domain context of the renderer plugin: the log a misplaced blend warns through.
  * @param view - The view.
  * @param slots - The filters in draw order; empty clears them.
  * @param before - Called once, before the write, when there is one.
  * @param target - Where the filters hang: the view's top unless the kept cache says otherwise.
  */
 export function applyFilters(
+  ctx: RendererCtx,
   view: View,
   slots: readonly FilterSlot[],
   before: () => void,
@@ -115,7 +250,7 @@ export function applyFilters(
   if (holds(target, slots)) return;
 
   before();
-  writeFilters(target, slots);
+  writeFilters(ctx, target, slots);
 }
 
 /**
@@ -181,25 +316,30 @@ function isFilterObject(value: unknown): value is object {
 /**
  * Keeps the filters of an entity and writes them onto its view when it has one, then tells the
  * kept cache (spec 23 P9.1). An empty list forgets the entity. A new list on the view is
- * structural: `mark` runs before it is written.
+ * structural: `mark` runs before it is written. A slot with a blend that is not the last enabled one is warned once
+ * per kind (`renderer:filter-blend-not-last`, F178), written or not.
  *
- * @param state - The sync branch of the plugin state.
+ * @param ctx - Domain context of the renderer plugin.
  * @param entity - The entity.
  * @param slots - The filters in draw order.
  * @param mark - Marks the entity before its view is written.
  * @param kept - The kept cache: where the filters hang, and the record it keeps.
  */
 export function setFilters(
-  state: SyncState,
+  ctx: RendererCtx,
   entity: Entity,
   slots: readonly FilterSlot[],
   mark: (entity: Entity) => void,
   kept: KeptModule
 ): void {
+  const state = ctx.state.sync;
+
   if (slots.length === 0) state.filters.delete(entity);
   else state.filters.set(entity, [...slots]);
 
   state.passesVersion += 1;
+  // A list Pixi holds already, blends and all, is not written: its misplaced blend is warned here.
+  warnMisplaced(ctx, slots);
 
   // Inline and positive: Bun folds the agent guard under a production `define`.
   if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
@@ -208,9 +348,12 @@ export function setFilters(
 
   const view = state.views.get(entity);
 
-  if (view !== undefined) applyFilters(view, slots, () => mark(entity), kept.filterTarget(view));
-  // Kept for an entity without a view: the pass looks for its despawn.
-  else if (slots.length > 0) state.viewlessEntries = true;
+  if (view !== undefined) {
+    applyFilters(ctx, view, slots, () => mark(entity), kept.filterTarget(view));
+  } else if (slots.length > 0) {
+    // Kept for an entity without a view: the pass looks for its despawn.
+    state.viewlessEntries = true;
+  }
 
   kept.slots(entity, slots);
 }
@@ -220,34 +363,32 @@ export function setFilters(
  * while its picture is kept: the filters hang on the stand-in, and the wrapper is a new top, so
  * the next flush draws it live and moves them (spec 23 P9.1).
  *
- * @param state - The sync branch of the plugin state.
+ * @param ctx - Domain context of the renderer plugin: the sync and the kept state.
  * @param entity - The entity.
  * @param view - Its view, wrapper set.
  * @param before - Called before a write of the object's or the wrapper's filters.
- * @param kept - The kept state.
  */
 export function moveFilters(
-  state: SyncState,
+  ctx: RendererCtx,
   entity: Entity,
   view: View,
-  before: () => void,
-  kept: KeptState
+  before: () => void
 ): void {
-  const slots = state.filters.get(entity);
+  const slots = ctx.state.sync.filters.get(entity);
 
-  if (slots === undefined || kept.byEntity.get(entity)?.mode === "kept") return;
+  if (slots === undefined || ctx.state.kept.byEntity.get(entity)?.mode === "kept") return;
 
   if (heldFilters(view.object).length > 0) before();
   clearFilters(view.object);
-  applyFilters(view, slots, before);
+  applyFilters(ctx, view, slots, before);
 }
 
 /** What the walk of the switched filters reads, set before the walk: one at a time, no closure per frame. */
 const switched: {
-  sync: SyncState | undefined;
+  ctx: RendererCtx | undefined;
   kept: Pick<KeptModule, "filterTarget"> | undefined;
   wrote: boolean;
-} = { sync: undefined, kept: undefined, wrote: false };
+} = { ctx: undefined, kept: undefined, wrote: false };
 
 /**
  * Writes the enabled filters of one view again when one of them was switched on or off since they were handed to Pixi.
@@ -256,38 +397,41 @@ const switched: {
  * @param entity - The entity.
  */
 function applySwitchedOne(slots: readonly FilterSlot[], entity: Entity): void {
-  const { sync, kept } = switched;
-  const view = sync?.views.get(entity);
+  const { ctx, kept } = switched;
+  const view = ctx?.state.sync.views.get(entity);
 
-  if (view === undefined || kept === undefined) return;
+  if (ctx === undefined || view === undefined || kept === undefined) return;
 
   const target = kept.filterTarget(view);
 
   if (holds(target, slots)) return;
 
-  writeFilters(target, slots);
+  writeFilters(ctx, target, slots);
   switched.wrote = true;
 }
 
 /**
  * Hands Pixi the filters of every view whose filters were switched on or off since they were written (E3), before the
  * frame is drawn, so a switch is drawn in the frame it was made. No mark: the writer of a switch tells the renderer
- * with `invalidate` first. A write moves `passesVersion` on: the paddings the walks of `shown` read changed (E4).
+ * with `invalidate` first. A write moves `passesVersion` on: the paddings the walks of `shown` read changed (E4). The
+ * blends follow the switch: the filter that became the last enabled one draws with its own slot's (F178).
  *
- * @param state - The sync branch of the plugin state.
+ * @param ctx - Domain context of the renderer plugin.
  * @param kept - The kept module: where each view's filters hang.
  */
-export function applySwitched(state: SyncState, kept: Pick<KeptModule, "filterTarget">): void {
+export function applySwitched(ctx: RendererCtx, kept: Pick<KeptModule, "filterTarget">): void {
+  const state = ctx.state.sync;
+
   if (state.filters.size === 0) return;
 
-  switched.sync = state;
+  switched.ctx = ctx;
   switched.kept = kept;
   switched.wrote = false;
   // per frame: a Map walked with `forEach` and a callback made once, no iterator, no entry array.
   // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no entry arrays.
   state.filters.forEach(applySwitchedOne);
   if (switched.wrote) state.passesVersion += 1;
-  switched.sync = undefined;
+  switched.ctx = undefined;
   switched.kept = undefined;
 }
 

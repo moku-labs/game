@@ -21,11 +21,12 @@ const FONT = [
   "char id=48 x=0 y=0 width=16 height=16 xoffset=0 yoffset=0 xadvance=16 page=0 chnl=15"
 ].join("\n");
 
-/** The six content subjects in the order the renderer queues them. */
+/** The seven content subjects in the order the renderer queues them. */
 const CONTENT = [
   "sprite",
   "sprite-add",
   "sprite-screen",
+  "sprite-multiply",
   "graphics",
   "particles-normal",
   "particles-add"
@@ -270,17 +271,17 @@ describe("the warm-up of the content pipelines", () => {
   it("a WebGPU warm-up draws each content subject in four variants, one draw a frame, before the stage pass", async () => {
     const warmed = await startWarm();
 
-    expect(warmed.frames(24)).toBe(24);
+    expect(warmed.frames(28)).toBe(28);
     expect(warmed.calls).toEqual(
       CONTENT.flatMap(subject => inFour(subject)).flatMap(probe => [probe, "stage"])
     );
     // Every one of those frames created pipelines: none is a sample of the adaptive rate.
-    expect(warmed.mock.time.frameProbed).toHaveBeenCalledTimes(24);
-    expect(warmed.mock.drawnCount()).toBe(24);
+    expect(warmed.mock.time.frameProbed).toHaveBeenCalledTimes(28);
+    expect(warmed.mock.drawnCount()).toBe(28);
 
     // The queue is empty: a still screen drawing on demand draws nothing more.
     expect(warmed.frames(5)).toBe(0);
-    expect(warmed.probes()).toHaveLength(24);
+    expect(warmed.probes()).toHaveLength(28);
   });
 
   it("warm: 3 draws three probes a frame", async () => {
@@ -291,9 +292,9 @@ describe("the warm-up of the content pipelines", () => {
     expect(warmed.calls).toEqual([...inFour("sprite").slice(0, 3), "stage"]);
   });
 
-  // Bug: the glow probes draw with the normal blend, so the add and screen pipelines of the sprite batch are still
-  // created in the frame a glow first shows.
-  it("draws the glow probes as white sprites with the add and the screen blend", async () => {
+  // Bug: the glow probes draw with the normal blend, so the add, screen and multiply pipelines of the sprite batch are
+  // still created in the frame a glow or the ink of a stamp first shows.
+  it("draws the glow probes as white sprites with the add, the screen and the multiply blend", async () => {
     const warmed = await startWarm({ config: { warm: 4 } });
     const sprites: string[] = [];
 
@@ -306,12 +307,13 @@ describe("the warm-up of the content pipelines", () => {
         `${subject.label} ${subject.blendMode} ${subject.texture === pixi.Texture.WHITE}`
       );
     });
-    warmed.frames(3);
+    warmed.frames(4);
 
     expect([...new Set(sprites)]).toEqual([
       "renderer.warm.sprite inherit true",
       "renderer.warm.sprite-add add true",
-      "renderer.warm.sprite-screen screen true"
+      "renderer.warm.sprite-screen screen true",
+      "renderer.warm.sprite-multiply multiply true"
     ]);
   });
 
@@ -349,7 +351,7 @@ describe("the warm-up of the content pipelines", () => {
   it("WebGL draws one variant", async () => {
     const warmed = await startWarm({ kind: "webgl" });
 
-    expect(warmed.frames(8)).toBe(6);
+    expect(warmed.frames(9)).toBe(7);
     expect(warmed.probes()).toEqual(CONTENT.map(subject => `${subject} canvas`));
   });
 
@@ -360,7 +362,7 @@ describe("the warm-up of the content pipelines", () => {
     warmed.stage.last().renderer.background.clearBeforeRender = false;
     warmed.mock.modules.sync.forget();
     warmed.mock.modules.sync.rebuildAll();
-    warmed.frames(14);
+    warmed.frames(16);
 
     expect(warmed.probes()).toEqual(
       CONTENT.flatMap(subject => [`${subject} texture`, `${subject} texture+clip`])
@@ -379,7 +381,7 @@ describe("the warm-up of a filter", () => {
     const warmed = await startWarm();
     const filter = new pixi.AlphaFilter({ alpha: 0.5 });
 
-    warmed.frames(24);
+    warmed.frames(28);
     warmed.name(filter, "probe");
 
     const answer = watchAnswer(warmed.mock.api.sync.filters.warm(filter));
@@ -393,10 +395,10 @@ describe("the warm-up of a filter", () => {
     await settle();
 
     expect(answer.answer).toBe(true);
-    expect(warmed.probes().slice(24)).toEqual(inFour("probe"));
+    expect(warmed.probes().slice(28)).toEqual(inFour("probe"));
     // Handed over again on the same device: done already.
     expect(await warmed.mock.api.sync.filters.warm(filter)).toBe(true);
-    expect(warmed.probes()).toHaveLength(28);
+    expect(warmed.probes()).toHaveLength(32);
   });
 
   it("the text probe is queued when the first font is installed, ahead of waiting filters", async () => {
@@ -406,7 +408,7 @@ describe("the warm-up of a filter", () => {
     warmed.name(filter, "probe");
     warmed.mock.api.sync.filters.warm(filter);
     installFont(warmed);
-    warmed.frames(32);
+    warmed.frames(36);
 
     expect(warmed.probes()).toEqual([
       ...CONTENT.flatMap(subject => inFour(subject)),
@@ -423,7 +425,7 @@ describe("the warm-up of a filter", () => {
     warmed.name(filter, "probe");
     warmed.mock.api.sync.filters.warm(filter);
     installFont(warmed);
-    warmed.frames(32);
+    warmed.frames(36);
 
     const first = warmed.probes();
 
@@ -433,10 +435,10 @@ describe("the warm-up of a filter", () => {
 
     const again = watchAnswer(warmed.mock.api.sync.filters.warm(filter));
 
-    warmed.frames(32);
+    warmed.frames(36);
     await settle();
 
-    expect(warmed.probes().slice(32)).toEqual(first);
+    expect(warmed.probes().slice(36)).toEqual(first);
     expect(again.answer).toBe(true);
   });
 
@@ -460,7 +462,7 @@ describe("the warm-up of a filter", () => {
         depth: filterDepth(call.container)
       });
     });
-    warmed.frames(24);
+    warmed.frames(28);
     warmed.mock.api.sync.filters.warm(filter);
     warmed.frames(4);
 
@@ -499,11 +501,11 @@ describe("the warm-up of a filter", () => {
       watchAnswer(warmed.mock.api.sync.filters.warm(after))
     ];
 
-    // 24 content draws, three a frame: the eighth frame draws the last content probe, the ninth the broken one.
-    expect(warmed.frames(9)).toBe(9);
+    // 28 content draws, three a frame: the tenth frame draws the last content probe, then the broken one.
+    expect(warmed.frames(10)).toBe(10);
     await settle();
 
-    expect(warmed.probes().slice(23)).toEqual(["particles-add texture+clip", "broken canvas"]);
+    expect(warmed.probes().slice(27)).toEqual(["particles-add texture+clip", "broken canvas"]);
     expect(warmed.calls.at(-1)).toBe("stage");
     expect(answers.map(answer => answer.answer)).toEqual([false, false]);
     expect(heard).toEqual([]);
@@ -524,15 +526,15 @@ describe("the warm-up of a filter", () => {
 
     expect(late.answer).toBe(false);
     expect(warmed.frames(3)).toBe(0);
-    expect(warmed.probes()).toHaveLength(25);
+    expect(warmed.probes()).toHaveLength(29);
 
     // A new application has a new filter stack: its warm-up runs again, without the filters whose callers were told
     // false (they may have destroyed them).
     warmed.mock.modules.sync.forget();
     warmed.mock.modules.sync.rebuildAll();
-    warmed.frames(10);
+    warmed.frames(11);
 
-    expect(warmed.probes().slice(25)).toEqual([
+    expect(warmed.probes().slice(29)).toEqual([
       ...CONTENT.flatMap(subject => inFour(subject)),
       ...inFour("text")
     ]);
@@ -818,12 +820,12 @@ describe("the end of a warm-up run", () => {
 
     vi.stubGlobal("__MOKU_GAME_AGENT__", true);
     warmed.mock.modules.sync.onWarm(draws => heard.push(draws));
-    warmed.frames(23);
+    warmed.frames(27);
 
     expect(heard).toEqual([]);
 
     warmed.frames(3);
 
-    expect(heard).toEqual([24]);
+    expect(heard).toEqual([28]);
   });
 });

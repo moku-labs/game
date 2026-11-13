@@ -340,6 +340,10 @@ export class FakeFilter {
   public enabled = true;
   public padding: number;
   public destroyed = false;
+  /** How often `blendMode` was written. */
+  public blendWrites = 0;
+  /** Pixi's blend of the filter's output, `"normal"` as a new Pixi filter holds. */
+  private mode = "normal";
 
   public constructor(options: Record<string, unknown> = {}) {
     this.options = options;
@@ -355,6 +359,25 @@ export class FakeFilter {
    */
   public static from(options: Record<string, unknown>): FakeFilter {
     return new FakeFilter(options);
+  }
+
+  /**
+   * How the filter's output lays over what is under its view, as Pixi's `Filter.blendMode`.
+   *
+   * @returns The blend mode.
+   */
+  public get blendMode(): string {
+    return this.mode;
+  }
+
+  /**
+   * Writes the blend, counted.
+   *
+   * @param value - The blend mode.
+   */
+  public set blendMode(value: string) {
+    this.mode = value;
+    this.blendWrites += 1;
   }
 
   /** Frees the filter. */

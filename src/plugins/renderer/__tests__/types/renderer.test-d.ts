@@ -5,6 +5,7 @@ import type { Entity } from "../../../world/types";
 import type {
   NineSliceValue,
   ShapeValue,
+  SpriteBlend,
   SpriteFit,
   SpriteValue,
   TransformValue
@@ -113,16 +114,18 @@ NineSlice({ texture: "ui.field", width: 480, height: 96, clip: true });
 // @ts-expect-error — clip is on or off
 NineSlice({ clip: "yes" });
 
-// ─── blend: a glow lays its pixels over what is under it (F68) ────────
+// ─── blend: a glow lays its pixels over what is under it (F68), the ink of a stamp multiplies (F178) ────────
 
 Sprite({ texture: "board.bg-forest-meadow", blend: "screen" });
 kit.NineSlice({ blend: "add" });
 NineSlice({ blend: "normal" });
+Sprite({ texture: "ui.stamp.ring", blend: "multiply" });
+NineSlice({ blend: "multiply" });
 
-// @ts-expect-error — Pixi's other modes are not offered: normal, add or screen
-Sprite({ blend: "multiply" });
+// @ts-expect-error — Pixi's other modes are not offered: normal, add, screen or multiply
+Sprite({ blend: "overlay" });
 
-// @ts-expect-error — the nine-slice takes the same three
+// @ts-expect-error — the nine-slice takes the same four
 kit.NineSlice({ blend: "overlay" });
 
 // ─── Shape: the fill has its own alpha ────────────────────────
@@ -294,6 +297,7 @@ expectTypeOf<FilterSlot>().toEqualTypeOf<{
   origin?: Float32Array;
   blurs?: boolean;
   quad?: FilterSlotQuad;
+  blend?: SpriteBlend;
 }>();
 expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void

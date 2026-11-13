@@ -7,7 +7,7 @@ import { type FakeSprite, FakeTexture } from "../fake-pixi";
 import { createMockRenderer } from "../mock-renderer";
 
 // ---------------------------------------------------------------------------
-// Unit test of `blend` on `Sprite` and `NineSlice` (F68): `"add"` and `"screen"` go on the view's own Pixi object,
+// Unit test of `blend` on `Sprite` and `NineSlice` (F68, F178): `"add"`, `"screen"` and `"multiply"` go on the view's own Pixi object,
 // `"normal"` and a value without the field go back to `"inherit"`, each written only when it differs and marked
 // before; any other value is never handed to Pixi and warned once; a pooled object waits with no blend. The whole
 // renderer runs over the real Pixi of `stagePixi`, drawn on demand, the tree oracle checking every frame.
@@ -182,6 +182,32 @@ describe("sync blend: a Sprite", () => {
   });
 });
 
+describe("sync blend: multiply", () => {
+  // Bug: multiply falls into blend-unknown and draws normal, so the ink of a stamp never darkens the page under it.
+  it("draws a Sprite and a NineSlice with Pixi's multiply, and normal turns it back to inherit", async () => {
+    const drawn = await open();
+    const ink = settled(
+      drawn,
+      Transform({ x: 100, y: 100 }),
+      Sprite({ texture: "fx.glow", blend: "multiply" })
+    );
+    const panel = settled(
+      drawn,
+      Transform({ x: 300, y: 100 }),
+      NineSlice({ texture: "glass.frost", width: 100, height: 100, blend: "multiply" })
+    );
+
+    expect([blendOf(drawn, ink), blendOf(drawn, panel)]).toEqual(["multiply", "multiply"]);
+    expect(warnings(drawn, "renderer:blend-unknown")).toEqual([]);
+
+    drawn.mock.world.ecs.set(ink, Sprite, { blend: "normal" });
+    drawn.mock.world.ecs.set(panel, NineSlice, { blend: "normal" });
+
+    expect(drawn.frame()).toBe(true);
+    expect([blendOf(drawn, ink), blendOf(drawn, panel)]).toEqual(["inherit", "inherit"]);
+  });
+});
+
 describe("sync blend: a NineSlice", () => {
   // Bug: only a Sprite reads the field; or the object a hollow flip swaps in keeps the pool's normal blend.
   it("carries the blend on a filled and a hollow panel, across a hollow flip both ways", async () => {
@@ -218,18 +244,18 @@ describe("sync blend: a NineSlice", () => {
 describe("sync blend: a value Pixi is never handed", () => {
   // Bug: an advanced mode or a typo reaches Pixi, which draws it through a filter pass of its own, or the log repeats
   // the warning at every sync.
-  it("draws multiply and a typo normally, warned once per value", async () => {
+  it("draws overlay and a typo normally, warned once per value", async () => {
     const drawn = await open();
-    const multiply = "multiply" as SpriteBlend;
+    const overlay = "overlay" as SpriteBlend;
     const first = settled(
       drawn,
       Transform({ x: 100, y: 100 }),
-      Sprite({ texture: "fx.glow", blend: multiply })
+      Sprite({ texture: "fx.glow", blend: overlay })
     );
     const second = settled(
       drawn,
       Transform({ x: 300, y: 100 }),
-      NineSlice({ texture: "glass.frost", width: 100, height: 100, blend: multiply })
+      NineSlice({ texture: "glass.frost", width: 100, height: 100, blend: overlay })
     );
 
     drawn.mock.world.ecs.set(first, Sprite, { alpha: 0.5 });
@@ -247,7 +273,7 @@ describe("sync blend: a value Pixi is never handed", () => {
       "inherit"
     ]);
     expect(warnings(drawn, "renderer:blend-unknown")).toEqual([
-      { blend: "multiply" },
+      { blend: "overlay" },
       { blend: "screeen" }
     ]);
   });

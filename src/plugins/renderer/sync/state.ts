@@ -164,6 +164,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     invalidated: emptySet(),
     warned: emptySet(),
     blendWarned: emptySet(),
+    filterBlendWarned: emptySet(),
     added: emptySet(),
     removed: emptySet(),
     reparented: emptySet(),

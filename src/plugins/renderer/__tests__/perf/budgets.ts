@@ -35,7 +35,7 @@ export const BUDGET = {
   // F68: the same tween of a sprite blending `"add"`. New, measured 0 B: the blend is read as the string Pixi holds and
   // compared, never written while it stands.
   spriteBlendTween: 0,
-  // F68: the same tween of a sprite whose blend is refused (`"multiply"`). New, measured 0 B: warned at the first sync,
+  // F68: the same tween of a sprite whose blend is refused (`"overlay"`; `"multiply"` until F178). New, measured 0 B: warned at the first sync,
   // then one set lookup a sync.
   spriteBlendRefused: 0,
   // Audit row 20: before 2 720 B (six mark sets grown again every frame and given a new table at every `clear()`).

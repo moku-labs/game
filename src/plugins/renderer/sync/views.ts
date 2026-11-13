@@ -300,18 +300,22 @@ function retargetKey(state: SyncState, entity: Entity, view: View, key: string):
 }
 
 /**
- * The Pixi blend mode a `blend` of a `Sprite` or a `NineSlice` draws with: `"add"` and `"screen"` as they are, Pixi's
- * own blends of the sprite batch; `"inherit"`, what a fresh object holds, for `"normal"` and a value without the field.
- * Any other string (Pixi's advanced modes, `"multiply"`, a typo) is never handed to Pixi, which would draw an advanced
- * mode through a filter pass of its own: it draws normally, and each such value is warned once per run.
+ * The Pixi blend mode a `blend` of a `Sprite` or a `NineSlice` draws with: `"add"`, `"screen"` and `"multiply"` as
+ * they are, Pixi's own blends of the sprite batch on WebGPU and WebGL; `"inherit"`, what a fresh object holds, for
+ * `"normal"` and a value without the field. Any other string (Pixi's advanced modes such as `"overlay"`, a typo) is
+ * never handed to Pixi, which would draw an advanced mode through a filter pass of its own: it draws normally, and each
+ * such value is warned once per run.
  *
  * @param sctx - Domain context of the sync module.
  * @param blend - The component's `blend`, as a game wrote it.
  * @returns The Pixi blend mode.
  */
-function blendModeOf(sctx: SyncCtx, blend: string | undefined): "inherit" | "add" | "screen" {
+function blendModeOf(
+  sctx: SyncCtx,
+  blend: string | undefined
+): "inherit" | "add" | "screen" | "multiply" {
   if (blend === undefined || blend === "normal") return "inherit";
-  if (blend === "add" || blend === "screen") return blend;
+  if (blend === "add" || blend === "screen" || blend === "multiply") return blend;
 
   const warned = sctx.ctx.state.sync.blendWarned;
 
@@ -1243,13 +1247,7 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   writeRenderable(view);
   applyTransform(sctx, parentEntity, view);
   // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.
-  moveFilters(
-    sctx.ctx.state.sync,
-    parentEntity,
-    view,
-    () => markView(sctx, parentEntity),
-    sctx.ctx.state.kept
-  );
+  moveFilters(sctx.ctx, parentEntity, view, () => markView(sctx, parentEntity));
   // The filter area hangs where the filters do (B4).
   if (sctx.ctx.state.sync.areas.has(parentEntity)) moveArea(sctx, parentEntity, view);
   if (ownsAlpha(view))
@@ -1509,7 +1507,7 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
   attach(sctx, entity, view);
   const slots = filtersOf(state, entity);
 
-  applyFilters(view, slots, () => markView(sctx, entity));
+  applyFilters(sctx.ctx, view, slots, () => markView(sctx, entity));
   // The filter area kept for it lands with the filters (B4).
   if (state.areas.has(entity)) applyArea(sctx, entity, view);
   // A view built with filters kept for it gets its record of the kept cache (spec 23 P9.1).
@@ -1685,6 +1683,7 @@ export function stopSync(state: SyncState): void {
   state.invalidated.clear();
   state.warned.clear();
   state.blendWarned.clear();
+  state.filterBlendWarned.clear();
   state.added.clear();
   state.removed.clear();
   state.reparented.clear();

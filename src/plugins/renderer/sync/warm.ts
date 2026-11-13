@@ -18,6 +18,7 @@
  * imports the monitor (LEAD-FIXES-3 O24).
  */
 
+import type { SpriteBlend } from "../components";
 import { filterGlobals, quadShader, unitQuad } from "../quad";
 import { destroyWhole } from "../sources";
 import type { FilterSlotQuad, PixiContainer, PixiFilter, PixiModule, PixiSprite } from "../types";
@@ -39,6 +40,7 @@ type FixedNode =
   | "sprite"
   | "spriteAdd"
   | "spriteScreen"
+  | "spriteMultiply"
   | "graphics"
   | "particlesNormal"
   | "particlesAdd";
@@ -51,6 +53,7 @@ const CONTENT: readonly WarmSubject[] = Object.freeze([
   "sprite",
   "sprite-add",
   "sprite-screen",
+  "sprite-multiply",
   "graphics",
   "particles-normal",
   "particles-add"
@@ -63,6 +66,7 @@ const FIXED_NODES: Readonly<
   sprite: "sprite",
   "sprite-add": "spriteAdd",
   "sprite-screen": "spriteScreen",
+  "sprite-multiply": "spriteMultiply",
   graphics: "graphics",
   "particles-normal": "particlesNormal",
   "particles-add": "particlesAdd"
@@ -99,13 +103,13 @@ function particleProperties(): Record<string, boolean> {
 
 /**
  * A 4 × 4 sprite of Pixi's white texture: the batch pipeline of sprites, nine-slices, plain bitmap text and batched
- * graphics, with the blend of a `Sprite` or a `NineSlice` glow (part of a WebGPU pipeline's key).
+ * graphics, with the blend of a `Sprite` or a `NineSlice` glow or ink (part of a WebGPU pipeline's key).
  *
  * @param pixi - The module that draws.
- * @param blend - `"normal"` (Pixi's own mode left as it is), `"add"` or `"screen"`.
- * @returns The sprite, labelled `renderer.warm.sprite`, or `renderer.warm.sprite-<blend>` for a glow.
+ * @param blend - `"normal"` (Pixi's own mode left as it is), `"add"`, `"screen"` or `"multiply"`.
+ * @returns The sprite, labelled `renderer.warm.sprite`, or `renderer.warm.sprite-<blend>` for a blended one.
  */
-function whiteSprite(pixi: PixiModule, blend: "normal" | "add" | "screen" = "normal"): PixiSprite {
+function whiteSprite(pixi: PixiModule, blend: SpriteBlend = "normal"): PixiSprite {
   const sprite = new pixi.Sprite(pixi.Texture.WHITE);
 
   sprite.label = blend === "normal" ? "renderer.warm.sprite" : `renderer.warm.sprite-${blend}`;
@@ -192,6 +196,7 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     sprite: whiteSprite(pixi),
     spriteAdd: whiteSprite(pixi, "add"),
     spriteScreen: whiteSprite(pixi, "screen"),
+    spriteMultiply: whiteSprite(pixi, "multiply"),
     graphics,
     particlesNormal: particlesOf(pixi, "normal"),
     particlesAdd: particlesOf(pixi, "add"),
@@ -253,6 +258,7 @@ function dropObjects(warm: WarmState): void {
     objects.sprite,
     objects.spriteAdd,
     objects.spriteScreen,
+    objects.spriteMultiply,
     objects.graphics,
     objects.particlesNormal,
     objects.particlesAdd,

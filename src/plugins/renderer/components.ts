@@ -42,23 +42,26 @@ export type SpriteFit = "fill" | "contain" | "cover";
 /**
  * How a sprite or a nine-slice lays its own pixels over what is drawn under it. `"normal"` covers it by alpha, as a
  * view without the field does. `"screen"` lightens it: on a dark background it matches CSS `mix-blend-mode: screen`.
- * `"add"` adds the colours, brighter than `"screen"`. Both draw in the sprite batch, with no extra pass; each switch
- * between blends in draw order costs one more draw call.
+ * `"add"` adds the colours, brighter than `"screen"`. `"multiply"` darkens it as ink on paper: over an opaque backdrop
+ * it matches CSS `mix-blend-mode: multiply`; over a transparent canvas pixel it gives black. All three draw in the
+ * sprite batch, with no extra pass; each switch between blends in draw order costs one more draw call.
  *
  * @example
  * ```ts
  * // The glow of the memory card: lightens the ward under it as the design's screen does.
  * const glow: SpriteBlend = "screen";
  * world.ecs.spawn(owner, [Layer({ name: "fx" }), Transform({ x: 540, y: 960 }), Sprite({ texture: "fx.glow", blend: glow })]);
+ * // The red ring of a stamp: the page's paper shows through its ink.
+ * world.ecs.spawn(owner, [Layer({ name: "fx" }), Transform({ x: 540, y: 960 }), Sprite({ texture: "ui.stamp.ring", tint: 0xc2412f, blend: "multiply" })]);
  * ```
  */
-export type SpriteBlend = "normal" | "add" | "screen";
+export type SpriteBlend = "normal" | "add" | "screen" | "multiply";
 
 /**
  * One textured quad. `texture` is an asset key; `defineGame` narrows it to the game's keys.
  * `width` and `height` are the box in reference units; 0 on an axis keeps the texture's own size
  * there. `anchor` is the point of the box that sits on the `Transform`. `alpha` fades the quad
- * and the entity's children. `blend` lays the quad over what is under it with `"add"` or `"screen"`.
+ * and the entity's children. `blend` lays the quad over what is under it with `"add"`, `"screen"` or `"multiply"`.
  *
  * @example
  * ```ts
@@ -80,11 +83,12 @@ export type SpriteValue = {
   fit: SpriteFit;
   /**
    * How the quad lays its pixels over what is drawn under it: `"add"` adds them, `"screen"` lightens with them (CSS
-   * `mix-blend-mode: screen` on a dark background), `"normal"` covers by alpha. It blends the quad alone, never the
+   * `mix-blend-mode: screen` on a dark background), `"multiply"` darkens with them (CSS `mix-blend-mode: multiply` over
+   * an opaque backdrop, black over a transparent pixel), `"normal"` covers by alpha. It blends the quad alone, never the
    * entity's children. Absent by default, read as `"normal"`, so a sprite that never sets it keeps the values it had
-   * before the field existed; `"normal"` is there so a patch can turn a glow off. Any other string draws normally and is
-   * warned once (`renderer:blend-unknown`). A filtered view with a blended node inside is drawn live, never kept as a
-   * picture (`renderer:kept-blend`, once).
+   * before the field existed; `"normal"` is there so a patch can turn a glow off. Any other string (Pixi's advanced
+   * modes such as `"overlay"`, a typo) draws normally and is warned once (`renderer:blend-unknown`). A filtered view
+   * with a blended node inside is drawn live, never kept as a picture (`renderer:kept-blend`, once).
    *
    * @example
    * ```ts
@@ -103,7 +107,7 @@ export type SpriteValue = {
  * the same rule as `Shape.clip`: the mask is a filled rectangle and is never drawn, and the panel
  * itself is never masked. `alpha` fades the panel and the entity's children. `hollow` draws the
  * rim alone: the eight border pieces, never the centre. `blend` lays the panel over what is under it
- * with `"add"` or `"screen"`.
+ * with `"add"`, `"screen"` or `"multiply"`.
  *
  * @example
  * ```ts
@@ -149,7 +153,7 @@ export type NineSliceValue = {
   hollow?: boolean;
   /**
    * How the panel lays its pixels over what is drawn under it, as `Sprite.blend`: `"add"` adds them, `"screen"`
-   * lightens with them, `"normal"` covers by alpha. It blends the panel alone, filled or hollow, never the entity's
+   * lightens with them, `"multiply"` darkens with them, `"normal"` covers by alpha. It blends the panel alone, filled or hollow, never the entity's
    * children. Absent by default, read as `"normal"`, so a panel that never sets it keeps the values it had before the
    * field existed.
    *

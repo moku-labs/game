@@ -8,8 +8,8 @@ import { stubCanvasDocument } from "../sdf-text-stage";
 // ---------------------------------------------------------------------------
 // Unit test against the real pixi.js module, no GPU: what a blend costs (F68). The sprites `sync` wrote, blends and
 // all, are built into an instruction list by Pixi's own render group system over Pixi's own `BatcherPipe`,
-// `SpritePipe` and `BlendModePipe`, as a rebuild of a render group builds them. `"add"` and `"screen"` are native
-// blends: no filter pass, one batch per run of equal blends in draw order.
+// `SpritePipe` and `BlendModePipe`, as a rebuild of a render group builds them. `"add"`, `"screen"` and `"multiply"`
+// (F178) are native blends: no filter pass, one batch per run of equal blends in draw order.
 // ---------------------------------------------------------------------------
 
 const running: Drawn[] = [];
@@ -150,12 +150,23 @@ describe("the draw calls of blended sprites on Pixi's own pipes", () => {
     expect(draws.batches).toEqual(["normal", "add", "normal", "screen", "normal"]);
   });
 
-  // Bug: a mode the renderer refuses still reaches Pixi, which breaks the batch for it (or adds a filter pass).
-  it("draws a refused multiply in the batch of the sprites around it", async () => {
+  // Bug: multiply is not one of Pixi's native batch blends, so the ink of a stamp costs a filter pass, or every
+  // multiplied sprite breaks the batch on its own.
+  it("batches a run of multiply sprites as add: no pass, one batch per switch in draw order", async () => {
     const drawn = await startDrawn();
 
     running.push(drawn);
-    spritesOf(drawn, [undefined, "multiply" as SpriteBlend, undefined]);
+    spritesOf(drawn, [undefined, "multiply", "multiply", undefined]);
+
+    expect(drawsOf(drawn)).toEqual({ batches: ["normal", "multiply", "normal"], filters: 0 });
+  });
+
+  // Bug: a mode the renderer refuses still reaches Pixi, which breaks the batch for it (or adds a filter pass).
+  it("draws a refused overlay in the batch of the sprites around it", async () => {
+    const drawn = await startDrawn();
+
+    running.push(drawn);
+    spritesOf(drawn, [undefined, "overlay" as SpriteBlend, undefined]);
 
     expect(drawsOf(drawn)).toEqual({ batches: ["normal"], filters: 0 });
   });

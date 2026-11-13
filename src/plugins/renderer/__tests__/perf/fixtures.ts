@@ -371,7 +371,10 @@ export async function filteredStage(enabled = true): Promise<MockRenderer> {
 
     const filter = fake as unknown as PixiFilter;
 
-    mock.api.sync.filters.set(entity, [{ filter, passes: 1, kind: "fog" }]);
+    // Every other view lays its filter's output with multiply (F178): the still step compares the blend too.
+    const blend = index % 2 === 0 ? "multiply" : "normal";
+
+    mock.api.sync.filters.set(entity, [{ filter, passes: 1, kind: "fog", blend }]);
   }
 
   mock.modules.sync.pass();
