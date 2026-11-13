@@ -86,15 +86,19 @@ export type PointerValue = {
 };
 
 /**
- * How a scroll container moves, as input reads it: the axis it moves on, and whether it moves
- * now — held, flinging or gliding.
+ * How a scroll container moves, as input reads it: the axis it moves on, whether it moves now —
+ * held, flinging or gliding — and whether its `locked` prop keeps the finger from moving it (F177).
+ * `locked` is left out until a scroll is locked, so it reads as `false`: a scroll that was never
+ * locked keeps the value it always had.
  *
  * @example
  * ```ts
  * const value: ScrollableValue = { axis: "x", moving: true };
+ * // The order strip, locked during a delivery: a finger neither moves nor stops it.
+ * const locked: ScrollableValue = { axis: "x", moving: false, locked: true };
  * ```
  */
-export type ScrollableValue = { axis: "x" | "y"; moving: boolean };
+export type ScrollableValue = { axis: "x" | "y"; moving: boolean; locked?: boolean };
 
 const scrollableDefaults: ScrollableValue = { axis: "y", moving: false };
 
@@ -224,7 +228,9 @@ export const PointerOver = /*#__PURE__*/ tag("PointerOver");
  * On every ui scroll container, internal: ui writes it, input reads it, a game never sees it. A
  * press that leaves the tap slop along `axis` goes from the pressed view to the innermost scroll
  * of that axis the view hangs in by its `Parent` chain; a finger that lands on a view inside a
- * scroll that is `moving` stops it and answers nothing.
+ * scroll that is `moving` stops it and answers nothing. A `locked` scroll takes neither: the
+ * hand-off ends there with the press caught and given to no one, the view under a finger keeps
+ * the press while the scroll moves, and a press held on it is dropped.
  */
 export const Scrollable = /*#__PURE__*/ component("Scrollable", scrollableDefaults);
 

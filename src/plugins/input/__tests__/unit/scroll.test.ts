@@ -12,6 +12,7 @@ import {
   Tappable,
   Touchable
 } from "../../components";
+import { resolveEarly } from "../../gestures";
 import { record } from "../../pointer";
 import type { RawSample } from "../../types";
 import { createMockInput, type MockInput } from "./mock-input";
@@ -397,5 +398,122 @@ describe("a scroll that plays its exit", () => {
 
     expect(still.has(panned.button, Pressed)).toBe(true);
     expect(still.has(panned.scroll, Pressed)).toBe(false);
+  });
+});
+
+describe("a locked scroll (F177)", () => {
+  it("refuses the hand-off: the button loses its press, the scroll is never pressed, the release answers nothing", () => {
+    // Bug caught: a locked strip still takes the press past the slop (it pans, or wears the press
+    // for a step), or the button keeps the press and buys the item when the finger comes back.
+    const mock = createMockInput();
+    const { scroll, button } = buttonInScroll(mock, { locked: true });
+
+    record(mock.state, down(60, 50));
+    mock.frame();
+
+    expect(mock.has(button, Pressed)).toBe(true);
+
+    record(mock.state, moved(80, 50));
+    mock.frame();
+
+    expect(mock.has(button, Pressed)).toBe(false);
+    expect(mock.trail).not.toContain(`tag:Pressed:${String(scroll)}`);
+    expect(mock.state.caught).toBe(true);
+
+    record(mock.state, up(62, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("passes over a moving locked scroll: the button under the finger keeps its press and its tap", () => {
+    // Bug caught: a finger stops the locked strip's glide and the button under it answers nothing.
+    const mock = createMockInput();
+    const { scroll, button } = buttonInScroll(mock, { moving: true, locked: true });
+
+    record(mock.state, down(60, 50));
+    mock.frame();
+
+    expect(mock.has(button, Pressed)).toBe(true);
+    expect(mock.has(scroll, Pressed)).toBe(false);
+
+    record(mock.state, up(60, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "buy", payload: { id: "s1" } }]);
+  });
+
+  it("goes on up the chain past a moving locked scroll to a moving one it sits in", () => {
+    // Bug caught: the walk stops at the locked strip, so the finger no longer stops the page.
+    const mock = createMockInput();
+    const page = scrollOf(
+      mock,
+      { axis: "y", moving: true },
+      { x: 0, y: 0, width: 400, height: 400 }
+    );
+    const strip = scrollOf(
+      mock,
+      { axis: "x", moving: true, locked: true },
+      { x: 0, y: 100, width: 400, height: 100 },
+      [Parent({ entity: page })]
+    );
+
+    mock.start();
+    record(mock.state, down(60, 150));
+    mock.frame();
+
+    expect(mock.has(page, Pressed)).toBe(true);
+    expect(mock.has(strip, Pressed)).toBe(false);
+  });
+
+  it("drops a press on a locked scroll's own background at its event", () => {
+    // Bug caught: the locked strip holds the press, so a later move pans it or hands it to a page.
+    const mock = createMockInput();
+    const strip = scrollOf(
+      mock,
+      { axis: "x", locked: true },
+      { x: 0, y: 0, width: 400, height: 100 }
+    );
+
+    mock.start();
+    record(mock.state, down(200, 50));
+    resolveEarly(mock.input);
+
+    expect(mock.has(strip, Pressed)).toBe(false);
+    expect(mock.state.entity).toBeUndefined();
+    expect(mock.state.caught).toBe(true);
+    expect(mock.state.phase).toBe("pressed");
+  });
+
+  it("drops a press held on a scroll the lock reaches at the next step, until the lift, also after an unlock", () => {
+    // Bug caught: a held strip goes on following the finger once it is locked, or takes the
+    // finger back when the lock ends before the lift.
+    const mock = createMockInput();
+    const strip = scrollOf(mock, { axis: "x" }, { x: 0, y: 0, width: 400, height: 100 });
+
+    mock.start();
+    record(mock.state, down(200, 50));
+    record(mock.state, moved(240, 50));
+    mock.frame();
+
+    expect(mock.has(strip, Pressed)).toBe(true);
+
+    mock.attachTo(strip, Scrollable({ axis: "x", locked: true }));
+    mock.frame();
+
+    expect(mock.has(strip, Pressed)).toBe(false);
+    expect(mock.state.entity).toBeUndefined();
+
+    mock.attachTo(strip, Scrollable({ axis: "x", locked: false }));
+    record(mock.state, moved(280, 50));
+    mock.frame();
+
+    expect(mock.has(strip, Pressed)).toBe(false);
+
+    record(mock.state, up(280, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([]);
+    expect(mock.state.phase).toBe("idle");
   });
 });

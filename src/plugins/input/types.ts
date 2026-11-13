@@ -216,7 +216,8 @@ export type State = {
   moved: boolean;
   /**
    * The press belongs to a scroll: it landed on a moving one and stopped it, or it was handed to
-   * one past the tap slop. Its release answers nothing and runs no `onTap` listener.
+   * one past the tap slop, or a locked one dropped it (F177), which leaves no pressed entity. Its
+   * release answers nothing and runs no `onTap` listener.
    */
   caught: boolean;
   /** The pressed or held entity. */

@@ -38,6 +38,7 @@ function scrollPatches(): ScrollPatches {
     scroll: { offset: 0, min: 0 },
     state: { offset: 0, max: 0, moving: false },
     scrollable: { moving: false },
+    scrollLock: { moving: false, locked: false },
     x: { x: 0 },
     y: { y: 0 }
   };

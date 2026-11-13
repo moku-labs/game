@@ -3,8 +3,9 @@
  * which answers `undefined` without a DOM, and every accept function refuses a view that is
  * already playing its exit. A trace takes a cell only inside a circle smaller than its box. The
  * scroll a press belongs to is found up the pressed view's own `Parent` chain, never under the
- * point: a view drawn over a scroll from another root keeps its press. While the lock of a guide
- * stands, a point outside its window finds no view at all.
+ * point: a view drawn over a scroll from another root keeps its press; a scroll its `locked` prop
+ * holds takes none. While the lock of a guide stands, a point outside its window finds no view at
+ * all.
  */
 import { localPoseOf, parentOf } from "../renderer/sync/pose";
 import { Exiting } from "../world/ecs/define";
@@ -152,11 +153,24 @@ export function findPressed(ctx: InputCtx, x: number, y: number): Entity | undef
 }
 
 /**
+ * Tells whether a view is a scroll its `locked` prop holds (F177): the finger neither moves nor
+ * stops it. Reads only, allocates nothing.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The view.
+ * @returns True when it carries a `Scrollable` with `locked` true.
+ */
+export function isLockedScroll(ctx: InputCtx, entity: Entity): boolean {
+  return ctx.deps.world.ecs.get(entity, Scrollable)?.locked === true;
+}
+
+/**
  * The innermost scroll a view sits in that moves now: the view itself or the nearest ancestor of
- * its `Parent` chain that carries a `Scrollable` with `moving` true and is not on its way out. A
- * finger that lands on the view stops that scroll. A view of another root drawn over the scroll,
- * a HUD button or a popup, hangs in no chain of it, so it keeps its press. Reads only, allocates
- * nothing.
+ * its `Parent` chain that carries a `Scrollable` with `moving` true, is not locked and is not on
+ * its way out. A finger that lands on the view stops that scroll. A locked scroll is passed over:
+ * the walk goes on up the chain, and with no other scroll moving the view under the finger takes
+ * the press as on a still scroll. A view of another root drawn over the scroll, a HUD button or a
+ * popup, hangs in no chain of it, so it keeps its press. Reads only, allocates nothing.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view the hit test found under the finger.
@@ -167,7 +181,11 @@ export function movingScrollOf(ctx: InputCtx, entity: Entity): Entity | undefine
   let current = entity;
 
   for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
-    if (ecs.get(current, Scrollable)?.moving === true && !ecs.has(current, Exiting)) return current;
+    const scrollable = ecs.get(current, Scrollable);
+
+    if (scrollable?.moving === true && scrollable.locked !== true && !ecs.has(current, Exiting)) {
+      return current;
+    }
 
     current = parentOf(ecs, current);
   }
