@@ -24,7 +24,7 @@ import {
   Traceable
 } from "./components";
 import { abortDrag, grab, letGoOfLeavers, moveHeld, moveHover, release } from "./drag";
-import { findPressed, lockedOut, movingScrollOf, scrollOnAxisOf } from "./hit";
+import { findPressed, isLockedScroll, lockedOut, movingScrollOf, scrollOnAxisOf } from "./hit";
 import { clearPointerOver, endsHover, isHover, movePointerOver, syncCursor } from "./hover";
 import { type LostPress, lostPress } from "./lost";
 import { attach, detach, record } from "./pointer";
@@ -197,28 +197,78 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
 }
 
 /**
+ * Lets the press go with no answer while the finger stays followed: the pressed view loses
+ * `Pressed`, and the press is caught and belongs to no view, so a later move hands nothing on and
+ * the release answers nothing and runs no listener.
+ *
+ * @param ctx - Domain context of the input plugin.
+ */
+function dropPress(ctx: InputCtx): void {
+  const { entity } = ctx.state;
+
+  if (entity !== undefined) ctx.deps.world.ecs.untag(entity, Pressed);
+  ctx.state.caught = true;
+  ctx.state.entity = undefined;
+  ctx.state.key = undefined;
+}
+
+/**
+ * Drops a press held on a scroll its `locked` prop holds (F177), after the samples are drained: a
+ * press that landed on its own background, or one it held when the lock came. The finger stays
+ * followed until it lifts, so an unlock before the lift gives the scroll nothing. A press on a view
+ * inside the scroll is that view's and stays.
+ *
+ * @param ctx - Domain context of the input plugin.
+ */
+export function dropLockedPress(ctx: InputCtx): void {
+  const { entity, phase } = ctx.state;
+
+  if (phase !== "pressed" || entity === undefined || !isLockedScroll(ctx, entity)) return;
+
+  dropPress(ctx);
+}
+
+/**
  * The press just left the tap slop: it goes to the scroll it pans, the innermost `Scrollable` of
  * the pressed view's own `Parent` chain (the view itself included) that moves on the dominant axis
  * of the move. The view loses `Pressed`, and the press is marked caught: it is a scroll gesture
- * now, so its release answers nothing, also when the finger came back inside the slop. A
- * draggable or swipeable view keeps its gesture, a caught press keeps its scroll, and a view that
- * sits in no scroll of that axis keeps its press, also a popup button drawn over a list.
+ * now, so its release answers nothing, also when the finger came back inside the slop. A locked
+ * scroll does nothing with it: the press is dropped and no scroll is pressed, also not one of the
+ * same axis around it. A press that sits on a locked scroll's own background is dropped the same
+ * way, whatever axis the move has. A draggable or swipeable view keeps its gesture, a caught press keeps its
+ * scroll, and a view that sits in no scroll of that axis keeps its press, also a popup button
+ * drawn over a list.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - Where the finger is, in reference units.
  */
-function handOff(ctx: InputCtx, point: Point): void {
+export function handOff(ctx: InputCtx, point: Point): void {
   const { caught, entity, start } = ctx.state;
   const { ecs } = ctx.deps.world;
 
   if (entity === undefined || caught) return;
   if (ecs.has(entity, Draggable) || ecs.has(entity, Swipeable)) return;
 
+  // A press on a locked scroll's own background keeps the finger: no scroll around it gets it.
+  if (isLockedScroll(ctx, entity)) {
+    dropPress(ctx);
+
+    return;
+  }
+
   const scroll = scrollOnAxisOf(ctx, entity, axisOf(start, point));
 
   if (scroll === undefined || scroll === entity) return;
 
   lostPress(ctx, "scroll");
+
+  // A locked scroll ends the search: it keeps the finger and does nothing with it.
+  if (isLockedScroll(ctx, scroll)) {
+    dropPress(ctx);
+
+    return;
+  }
+
   ecs.untag(entity, Pressed);
   ctx.state.caught = true;
   press(ctx, scroll);
@@ -631,7 +681,8 @@ function clearJust(pointer: PointerValue): void {
  * (F61): the pressed view is tagged and a release answers the gate now, so the press look starts
  * in the next frame and a node that awaits nothing commits before it. The first resolve after a
  * frame clears that frame's flags; the next frame step keeps the ones it wrote. Only a live world
- * resolves early: fast and paused leave the samples to the frame step, as before.
+ * resolves early: fast and paused leave the samples to the frame step, as before. A press that
+ * landed on a locked scroll is dropped here, before any system sees it.
  *
  * @param ctx - Domain context of the input plugin.
  */
@@ -648,6 +699,7 @@ export function resolveEarly(ctx: InputCtx): void {
 
   ctx.state.samples = [];
   drainSamples(ctx, pointer, queue);
+  dropLockedPress(ctx);
   syncCursor(ctx);
   pointer.id = ctx.state.pointerId ?? -1;
 }
@@ -656,6 +708,7 @@ export function resolveEarly(ctx: InputCtx): void {
  * The one frame step of the plugin, registered with `time.onFrame("input")` in `onInit`, so it
  * runs before the `world` callback of the same phase: `Pointer`, `Held`, `Hovered` and `Pressed`
  * are fresh when game systems of phase `input` read them.
+ * A press held on a locked scroll is dropped once the samples are drained.
  * The canvas cursor is set right after the hover. `Pointer.id` is written last, once per step: the
  * followed `pointerId`, `-1` when no pointer is followed.
  *
@@ -696,6 +749,7 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
 
   ctx.state.samples = [];
   drainSamples(ctx, pointer, queue);
+  dropLockedPress(ctx);
   syncCursor(ctx);
 
   advanceTime(ctx, pointer, time.delta);

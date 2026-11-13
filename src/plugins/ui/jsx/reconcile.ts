@@ -404,7 +404,8 @@ function answerOf(node: DescriptionNode): AnyComponentValue[] {
  * The input components of an element: a button answers the gate, writes local state, or only
  * swallows the tap; a panel swallows the tap too, so nothing under it answers; a text field takes
  * the tap that starts its editing; a scroll container takes the press that moves its content and
- * carries where it stands, on the axis it spawned with. A button of a covered popup answers
+ * carries where it stands, on the axis it spawned with, locked from the start when its first render
+ * says `locked`. A button of a covered popup answers
  * nothing, so only the top popup answers the gate. A button with the `escape` prop that answers
  * also carries `Escapable`, the control the Escape key taps.
  *
@@ -416,8 +417,13 @@ function inputOf(element: Element): AnyComponentValue[] {
 
   if (type === "scroll") {
     const axis = element.scroll?.axis ?? "y";
+    // A scroll mounted locked is locked from its first frame; one that is not keeps no `locked`.
+    const scrollable =
+      node.props.locked === true
+        ? Scrollable({ axis, moving: false, locked: true })
+        : Scrollable({ axis, moving: false });
 
-    return [Touchable(), Scroll({ axis }), Scrollable({ axis, moving: false }), ScrollState()];
+    return [Touchable(), Scroll({ axis }), scrollable, ScrollState()];
   }
   if (type === "panel" || type === "input") return [Touchable()];
   if (type !== "button") return [];

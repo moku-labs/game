@@ -14,6 +14,9 @@ import {
   heldFrame,
   jumpEndsGlideSettle,
   jumpFrame,
+  lockDropSettle,
+  lockedHeldFrame,
+  lockedStillFrame,
   numberAimSettle,
   resizeReaimSettle,
   type ScrollCall,
@@ -156,5 +159,36 @@ describe("scroll step: heap per frame of one x strip", () => {
     // The window measured the re-aim: the range of the strip, a glide of 150 ms from 950.
     expect(scroll.motion).toMatchObject({ mode: "glide", from: 950, duration: 150 });
     expect(scroll.motion.max).not.toBe(5000);
+  });
+
+  // The lock tests run last: they leave the strip locked.
+  it("a frame of a locked strip with Pressed on it stays within budget", async ({ annotate }) => {
+    const held = bytesPerCall(lockedHeldFrame(scroll));
+    const offset = scroll.motion.offset;
+
+    await annotate(`stepScroll, locked with Pressed: ${held} B a frame`);
+    expect(held).toBeLessThanOrEqual(BUDGET.scrollLockedHeld + NOISE_BYTES);
+    // The window measured a press that counts as none: the strip stands where it stood.
+    expect(scroll.motion.mode).toBe("still");
+    expect(scroll.motion.offset).toBe(offset);
+  });
+
+  it("a frame of a still locked strip stays within budget", async ({ annotate }) => {
+    const still = bytesPerCall(lockedStillFrame(scroll));
+
+    await annotate(`stepScroll, locked and still: ${still} B a frame`);
+    expect(still).toBeLessThanOrEqual(BUDGET.scrollLockedStill + NOISE_BYTES);
+  });
+
+  it("a settle that drops the finger of a locked strip stays within budget", async ({
+    annotate
+  }) => {
+    const drop = bytesPerCall(lockDropSettle(scroll));
+
+    await annotate(`settleScroll, lock drops the finger: ${drop} B a render`);
+    expect(drop).toBeLessThanOrEqual(BUDGET.scrollLockDrop + NOISE_BYTES);
+    // The window measured the drop: the strip no longer follows the finger.
+    expect(scroll.motion.mode).not.toBe("held");
+    expect(scroll.motion.locked).toBe(true);
   });
 });

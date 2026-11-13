@@ -188,8 +188,8 @@ export const GrowScreen = defineComponent("GrowScreen", {
 
 /**
  * What a render tells the glide strip (change 2026-11-12-scroll-glide-control): its `offset`, and
- * any value of `glideMs`, `aim`, `jump` and `snap`, the way a game may hand them; the track may
- * grow.
+ * any value of `glideMs`, `aim`, `jump`, `snap` and `locked` (F177), the way a game may hand
+ * them; the track may grow.
  */
 export type GlideTold = {
   at: number;
@@ -198,6 +198,7 @@ export type GlideTold = {
   jump?: boolean;
   snap?: readonly number[];
   track?: number;
+  locked?: unknown;
 };
 
 /**
@@ -223,6 +224,7 @@ export function glideNode(told: GlideTold): DescriptionNode {
           aim: told.aim,
           jump: told.jump,
           snap: told.snap,
+          locked: told.locked,
           style: { width: PINNED, height: 120 }
         },
         children: [

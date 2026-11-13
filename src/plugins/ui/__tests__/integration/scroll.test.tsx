@@ -1425,3 +1425,26 @@ describe("jump ends a glide to the prop (F171)", () => {
     expect(withJump.offsets[0]).not.toBe(318);
   });
 });
+
+describe("locked (F177)", () => {
+  it("leaves a locked strip where it stands while Pressed is on it, and writes the lock for input", async () => {
+    // Bug caught: the scroll step follows a finger on a locked strip that `input` has not dropped
+    // yet, or the lock never reaches the strip's `Scrollable`.
+    const app = await start("glide");
+
+    renderRoot(app, "glide", glideNode({ at: 318, locked: true }));
+
+    expect(app.world.ecs.get(find(app, "glider"), Scrollable)?.locked).toBe(true);
+
+    press(app, "glider", 500, 900);
+    moveTo(app, 400, 900);
+    moveTo(app, 300, 900);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 318, max: 390, moving: false });
+
+    release(app, "glider");
+    frames(app, 30);
+
+    expect(stateOf(app, "glider")).toEqual({ offset: 318, max: 390, moving: false });
+  });
+});
