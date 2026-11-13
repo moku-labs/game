@@ -318,7 +318,9 @@ function createOurs(
  * Lays a body's definition blend on its Pixi filter (F178): the filter that draws onto the canvas under the view
  * (the main body, a release stand-in, the warm probe, a dev mark) carries it. A normal blend writes nothing, so a
  * filter Pixi builds keeps the mode it starts with. Never called for a place of a chain or the body a dev stand-in draws
- * into its pooled texture: they draw into a cleared texture, where multiply gives black.
+ * into its pooled texture: they draw into a cleared texture, where multiply gives black. This write at creation serves
+ * the warm probe and the kept check before the first list write; afterwards the renderer writes the blend of every
+ * filter whose slot names one (last enabled only).
  *
  * @param body - The body whose filter draws onto the canvas.
  * @param blend - The blend to lay.

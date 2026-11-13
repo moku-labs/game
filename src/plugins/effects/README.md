@@ -196,7 +196,7 @@ StampInk.filter.blend; // "multiply"
 |---|---|
 | `backdrop: true` with a blend other than normal throws at definition | a backdrop reads the canvas under itself and lays its output over it already |
 | a stage (listed in an input's `stages`) with a blend other than normal throws | a stage draws into a cleared pooled texture, where multiply gives black |
-| a `fallback` of a filter must declare the same blend, else `defineFilter` throws | the ink keeps its look when the main body breaks. The dev stand-in draws the fallback normally into its pooled texture and lays the blend with its striped mark pass |
+| a `fallback` of a filter must declare the same blend, else `defineFilter` throws | the ink keeps its look when the main body breaks. The dev stand-in draws the fallback normally into its pooled texture and lays the blend with its striped mark pass. Its slot names no blend, so in a dev build with a broken blended kind the renderer's last-only rule, its warning and the kept check do not see that mark: keep a blended filter last on its view |
 | `blend` other than the four strings throws | `"overlay"` or a typo would draw normally and say nothing |
 
 Limits: over a transparent canvas pixel, or inside a filtered ancestor where nothing was drawn beneath, `"multiply"` gives black (the result is the product with nothing). A filter with a blend is never kept as a picture: its view is drawn live, one pass, and a view under a kept top that holds one keeps that top live (renderer README, "Kept pictures").

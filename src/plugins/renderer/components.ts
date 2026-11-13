@@ -397,7 +397,8 @@ export const Transform = /*#__PURE__*/ component("Transform", transformDefaults)
 
 /**
  * One textured quad. `texture` is an asset key, resolved through the texture providers; a size
- * and a `fit` draw it into a box. `blend: "add"` or `"screen"` lays it over what is under it.
+ * and a `fit` draw it into a box. `blend: "add"`, `"screen"` or `"multiply"` lays it over what is
+ * under it.
  */
 export const Sprite = /*#__PURE__*/ component("Sprite", spriteDefaults);
 
@@ -418,8 +419,8 @@ const nineSliceDefaults: NineSliceValue = {
 /**
  * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
  * the slice outline over it. `clip: true` masks the children of the entity to the panel box.
- * `hollow: true` draws its rim alone, never the centre cell. `blend: "add"` or `"screen"` lays it over what is under
- * it.
+ * `hollow: true` draws its rim alone, never the centre cell. `blend: "add"`, `"screen"` or `"multiply"`
+ * lays it over what is under it.
  */
 export const NineSlice = /*#__PURE__*/ component("NineSlice", nineSliceDefaults);
 

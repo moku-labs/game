@@ -236,7 +236,10 @@ export type FilterDefinition = {
   readonly resolution: number;
   /** True for a filter that reads what was drawn under its view: Pixi's `blendRequired`, and `sampleBack` in its body. */
   readonly backdrop: boolean;
-  /** How the filter's output lays over what is under the view: Pixi's `Filter.blendMode` of the main instance; `"normal"` when left out. */
+  /**
+   * How the filter's output lays over what is under the view: Pixi's `Filter.blendMode` of the main instance;
+   * `"normal"` when left out.
+   */
   readonly blend: SpriteBlend;
 };
 

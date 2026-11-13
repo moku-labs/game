@@ -1,7 +1,8 @@
 /**
  * @file renderer/sync — the filters `effects` hangs on entities' views, the rectangle they draw inside, and the render
- * passes they cost. The renderer never creates, writes or destroys a filter: it keeps the slot list per entity, assigns
- * the instances to the view, and takes them off when it lets the object go. The area (B4) is kept per entity the same
+ * passes they cost. The renderer never creates or destroys a filter, and of its fields writes only `blendMode`, from the
+ * slot's `blend` (F178): it keeps the slot list per entity, assigns the instances to the view, and takes them off when it
+ * lets the object go. The area (B4) is kept per entity the same
  * way and written into one Pixi `Rectangle` on the view's top, in its own units.
  */
 import type { EcsApi } from "../../world/ecs/types";
@@ -45,7 +46,7 @@ function lastEnabled(slots: readonly FilterSlot[]): number {
  * The Pixi blend a slot's filter draws with (F178): the slot's `blend` on the last enabled filter, `"normal"` on every
  * other, whose output goes into the next pass's cleared texture. Pure.
  *
- * @param blend - The slot's `blend`, `undefined` when it has none.
+ * @param blend - The slot's `blend`; a slot without one is never written.
  * @param last - True for the last enabled filter of its view.
  * @returns The blend mode.
  * @example
@@ -53,8 +54,8 @@ function lastEnabled(slots: readonly FilterSlot[]): number {
  * blendOfSlot("multiply", false); // "normal"
  * ```
  */
-function blendOfSlot(blend: SpriteBlend | undefined, last: boolean): SpriteBlend {
-  return last ? (blend ?? "normal") : "normal";
+function blendOfSlot(blend: SpriteBlend, last: boolean): SpriteBlend {
+  return last ? blend : "normal";
 }
 
 /**
