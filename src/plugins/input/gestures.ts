@@ -234,7 +234,8 @@ export function dropLockedPress(ctx: InputCtx): void {
  * of the move. The view loses `Pressed`, and the press is marked caught: it is a scroll gesture
  * now, so its release answers nothing, also when the finger came back inside the slop. A locked
  * scroll does nothing with it: the press is dropped and no scroll is pressed, also not one of the
- * same axis around it. A draggable or swipeable view keeps its gesture, a caught press keeps its
+ * same axis around it. A press that sits on a locked scroll's own background is dropped the same
+ * way, whatever axis the move has. A draggable or swipeable view keeps its gesture, a caught press keeps its
  * scroll, and a view that sits in no scroll of that axis keeps its press, also a popup button
  * drawn over a list.
  *
@@ -247,6 +248,13 @@ export function handOff(ctx: InputCtx, point: Point): void {
 
   if (entity === undefined || caught) return;
   if (ecs.has(entity, Draggable) || ecs.has(entity, Swipeable)) return;
+
+  // A press on a locked scroll's own background keeps the finger: no scroll around it gets it.
+  if (isLockedScroll(ctx, entity)) {
+    dropPress(ctx);
+
+    return;
+  }
 
   const scroll = scrollOnAxisOf(ctx, entity, axisOf(start, point));
 

@@ -165,6 +165,16 @@ export function isLockedScroll(ctx: InputCtx, entity: Entity): boolean {
 }
 
 /**
+ * Tells whether a `Scrollable` value glides now and its `locked` prop does not hold it.
+ *
+ * @param scrollable - The view's `Scrollable` value, or `undefined` for a view that has none.
+ * @returns True for a moving scroll that is not locked.
+ */
+function isMovingUnlocked(scrollable: ScrollableValue | undefined): boolean {
+  return scrollable?.moving === true && scrollable.locked !== true;
+}
+
+/**
  * The innermost scroll a view sits in that moves now: the view itself or the nearest ancestor of
  * its `Parent` chain that carries a `Scrollable` with `moving` true, is not locked and is not on
  * its way out. A finger that lands on the view stops that scroll. A locked scroll is passed over:
@@ -183,9 +193,7 @@ export function movingScrollOf(ctx: InputCtx, entity: Entity): Entity | undefine
   for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
     const scrollable = ecs.get(current, Scrollable);
 
-    if (scrollable?.moving === true && scrollable.locked !== true && !ecs.has(current, Exiting)) {
-      return current;
-    }
+    if (isMovingUnlocked(scrollable) && !ecs.has(current, Exiting)) return current;
 
     current = parentOf(ecs, current);
   }

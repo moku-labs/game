@@ -697,8 +697,8 @@ function resize(motion: ScrollMotion, max: number): void {
 /**
  * Puts a scroll the solve just spawned at its `offset` prop, inside its range, and lets it follow
  * the prop from there. Its `aim`, `glideMs` and `locked` are recorded: the first `aim` moves
- * nothing more, and the first `Scrollable` already carries the lock. Its spawn waits in the queue of the phase: these values replace the queued ones at the flush,
- * before the first draw.
+ * nothing more, and the first `Scrollable` already carries the lock. Its spawn waits in the queue
+ * of the phase: these values replace the queued ones at the flush, before the first draw.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param container - The scroll element, live since this solve.
@@ -837,10 +837,9 @@ function standAtTarget(
  * to the same one under a new `aim`, in `glideMs` when it gives one; the same value and aim on a
  * re-render do nothing, `jump` ends a glide to the prop at its target, and a scroll the finger
  * holds only remembers the prop and the aim; a render that locks it lets the finger go first. A
- * scroll nobody sees yet (`stands`: a root built
- * aside or held warm) stands at its target at once instead of gliding, so no glide plays hidden or
- * at its open. A scroll left moving wakes the loop the way `stepScroll` does: not at a time scale
- * of 0, where it stands.
+ * scroll nobody sees yet (`stands`: a root built aside or held warm) stands at its target at once
+ * instead of gliding, so no glide plays hidden or at its open. A scroll left moving wakes the loop
+ * the way `stepScroll` does: not at a time scale of 0, where it stands.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.

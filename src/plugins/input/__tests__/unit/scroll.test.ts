@@ -517,3 +517,35 @@ describe("a locked scroll (F177)", () => {
     expect(mock.state.phase).toBe("idle");
   });
 });
+
+describe("a locked scroll in a scroll of the other axis (F177)", () => {
+  it("keeps the finger when the down and the cross-axis move drain in one step: the outer scroll is never pressed", () => {
+    // Bug caught: the hand-off ignores that the pressed view is itself a locked scroll, so a
+    // down on a locked strip's background plus a vertical move in one batch hands the press to the
+    // page around it.
+    const mock = createMockInput();
+    const page = scrollOf(mock, { axis: "y" }, { x: 0, y: 0, width: 400, height: 400 });
+    const strip = scrollOf(
+      mock,
+      { axis: "x", locked: true },
+      { x: 0, y: 100, width: 400, height: 100 },
+      [Parent({ entity: page })]
+    );
+
+    mock.start();
+    record(mock.state, down(200, 150));
+    record(mock.state, moved(200, 200));
+    mock.frame();
+
+    expect(mock.has(page, Pressed)).toBe(false);
+    expect(mock.trail).not.toContain(`tag:Pressed:${String(page)}`);
+    expect(mock.has(strip, Pressed)).toBe(false);
+    expect(mock.state.caught).toBe(true);
+
+    record(mock.state, up(200, 200));
+    mock.frame();
+
+    expect(mock.answers).toEqual([]);
+    expect(mock.state.phase).toBe("idle");
+  });
+});
