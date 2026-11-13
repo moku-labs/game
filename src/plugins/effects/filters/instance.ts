@@ -15,6 +15,7 @@
  * places `sampleBack` on that copy (`activeBackTexture`) and starts the chains `from: "back"` there.
  */
 
+import type { SpriteBlend } from "../../renderer/components";
 import { CALM_AFTER } from "../../renderer/kept/record";
 import type {
   PixiFilter,
@@ -311,6 +312,19 @@ function createOurs(
     areaStale: false,
     quad: undefined
   };
+}
+
+/**
+ * Lays a body's definition blend on its Pixi filter (F178): the filter that draws onto the canvas under the view
+ * (the main body, a release stand-in, the warm probe, a dev mark) carries it. A normal blend writes nothing, so a
+ * filter Pixi builds keeps the mode it starts with. Never called for a place of a chain or the body a dev stand-in draws
+ * into its pooled texture: they draw into a cleared texture, where multiply gives black.
+ *
+ * @param body - The body whose filter draws onto the canvas.
+ * @param blend - The blend to lay.
+ */
+function layBlend(body: OursBody, blend: SpriteBlend): void {
+  if (blend !== "normal") body.filter.blendMode = blend;
 }
 
 /**
@@ -623,6 +637,9 @@ export function createFilter(
       : createCore(ectx, pixi, kind.core, value, probeMap);
 
   if (body === undefined) return undefined;
+
+  // The main body is the filter that draws onto the canvas: it lays the definition's blend (its places do not).
+  if (body.kind === "wgsl") layBlend(body, body.definition.blend);
 
   // Built at rest an `Alpha` that draws its view unchanged is off at once: nothing was switched yet.
   body.filter.enabled = value.enabled && !(body.kind === "alpha" && drawsUnchanged(value));
@@ -1518,7 +1535,8 @@ export function refreshInputs(
  * The body a stand-in of a dev build draws: the fallback with the striped mark over it, or the
  * mark alone. The pair draws the fallback into one pooled texture of the input's frame and
  * resolution, then the mark from it into the output, and gives the texture back in a `finally`. A
- * backdrop fallback has its `sampleBack` placed first.
+ * backdrop fallback has its `sampleBack` placed first. The fallback draws normally into the pooled texture; the mark
+ * pass draws onto the target, so it lays the fallback's blend (F178).
  *
  * @param pixi - The module the renderer loaded.
  * @param fallback - The checked fallback, or `undefined`.
@@ -1533,6 +1551,8 @@ function markedBody(
   const mark = createOurs(pixi, brokenMark().filter, value);
 
   if (fallback === undefined) return mark;
+
+  layBlend(mark, fallback.blend);
 
   const body: OursBody = { ...createOurs(pixi, fallback, value), mark, passes: 2 };
   const request = { width: 0, height: 0, resolution: 1 };
@@ -1595,6 +1615,7 @@ export function createStandIn(
     body = markedBody(pixi, usable, value);
   } else if (usable !== undefined) {
     body = createOurs(pixi, usable, value);
+    layBlend(body, usable.blend);
     if (usable.backdrop) wireBack(pixi, body);
   }
 
@@ -1636,6 +1657,10 @@ export function createWarmFilter(
   program?: PixiGpuProgram
 ): WarmProbe {
   const body = createOurs(pixi, definition, PROBE_VALUE);
+
+  // The probe draws with the definition's blend: the pipeline of filter + multiply exists before the first stamp.
+  layBlend(body, definition.blend);
+
   // The probe's mesh binds every input the program declares, or Pixi throws on the missing resource.
   const quad =
     program === undefined

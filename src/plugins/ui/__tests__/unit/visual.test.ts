@@ -147,6 +147,31 @@ describe("visualOf", () => {
     expect(halo?.value).toMatchObject({ texture: "glass.frost", blend: "add" });
   });
 
+  // Bug: `multiply` is missing from the blends the visual spreads, so the ink of a stamp reaches
+  // Pixi as a plain quad (or as undefined), and a variant that drops it leaves the ink pressed.
+  it("writes multiply into the Sprite and the NineSlice, and normal once the style drops it", () => {
+    const inkImage = elementOf({
+      type: "image",
+      style: { blend: "multiply" },
+      node: { type: "image", props: { texture: "art.ink" }, children: [] }
+    });
+    const inkPanel = elementOf({
+      type: "stack",
+      style: { nineSlice: "art.stamp", blend: "multiply" }
+    });
+    const [ink] = visualOf(inkImage);
+    const [stamp] = visualOf(inkPanel);
+
+    expect(ink?.value).toMatchObject({ texture: "art.ink", blend: "multiply" });
+    expect(stamp?.value).toMatchObject({ texture: "art.stamp", blend: "multiply" });
+
+    inkImage.style = {};
+    inkPanel.style = { nineSlice: "art.stamp" };
+
+    expect(visualOf(inkImage)[0]?.value).toMatchObject({ blend: "normal" });
+    expect(visualOf(inkPanel)[0]?.value).toMatchObject({ blend: "normal" });
+  });
+
   // Bug: an image hidden by a size of 0 the layout did not give it (its style states none, a
   // game's system sizes its sprite), or shown at its texture's size when its edges squeeze it to 0.
   it("puts an image at alpha 0 only on an axis its style sizes and the layout makes 0", () => {

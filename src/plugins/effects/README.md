@@ -91,7 +91,7 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 
 ## Filters
 
-`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding?, inputs?, fallback?, cache?, area?, resolution?, backdrop? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
+`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding?, inputs?, fallback?, cache?, area?, resolution?, backdrop?, blend? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
 
 - `wgsl` is the WGSL fragment body only: `fn mainFragment` and its helpers. The engine prepends the vertex stage, the input bindings `gfu`, `uTexture`, `uSampler`, and a `FilterUniforms` struct in declaration order bound as `fu`. The body reads `fu.amount`.
 - `glsl` is the same math in GLSL ES 3.0: `void main()`, which sets `finalColor`, and its helpers. The engine prepends `#version 300 es`, `precision highp float;`, `in vec2 vTextureCoord;`, `out vec4 finalColor;`, `uniform sampler2D uTexture;`, Pixi's global filter uniforms `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture` as `vec4`, and one `uniform` per declared uniform under its bare name. The body reads `amount`. The vertex stage is Pixi's `defaultFilterVert`.
@@ -152,7 +152,7 @@ const Frost = defineFilter("Frost", {
 Frost.filter.inputs.map(input => input.sample); // ["sampleBlur"]
 ```
 
-`fallback` is another filter made by `defineFilter`, drawing alone, over a subset of the filter's uniforms with the same types: it draws with the kind's value when the filter is broken.
+`fallback` is another filter made by `defineFilter`, drawing alone, over a subset of the filter's uniforms with the same types: it draws with the kind's value when the filter is broken. It declares the same `blend` as the filter ("Blend").
 
 ### Backdrop: a filter that reads what was drawn under its view
 
@@ -180,6 +180,26 @@ export const Frost = defineFilter("Frost", {
 - Its slot says it blurs (`blurs`) only for an input from the view's own input: a chain from back blurs the scene under the view, not the view, so an overlay over it holds no loops for it.
 - WebGL copies from Pixi's back buffer: the renderer asks for it when a feature brings a backdrop (renderer README, `preference`); WebGPU copies from the canvas.
 - Inside the box, everything already drawn under the view is in the copy: the scene and an overlay's dim alike.
+
+### Blend: a filter that lays itself over what is under it
+
+`blend: "normal" | "add" | "screen" | "multiply"` (change 2026-11-13-f178-multiply, default `"normal"`) lays the whole output of a filter over what is drawn under its view, as `Sprite.blend` lays one quad. `Def.filter.blend` reads it. It is Pixi's `Filter.blendMode` of the filter that draws onto the canvas: the main instance, a stand-in, the warm probe (so the pipeline of filter + multiply exists before the first stamp). The renderer writes it on the last enabled filter of a view (renderer README, "Filters"); an earlier filter of the view draws normally and is warned once per kind (`renderer:filter-blend-not-last`).
+
+```ts
+// A stamp's ink: a rough edge laid over the page with multiply. Replaces a backdrop filter that reads the canvas under
+// the stamp, so WebGL keeps no back buffer for it.
+export const StampInk = defineFilter("StampInk", { wgsl: INK_WGSL, glsl: INK_GLSL, uniforms: { span: 125.6 }, blend: "multiply" });
+StampInk.filter.blend; // "multiply"
+```
+
+| Rule | Why |
+|---|---|
+| `backdrop: true` with a blend other than normal throws at definition | a backdrop reads the canvas under itself and lays its output over it already |
+| a stage (listed in an input's `stages`) with a blend other than normal throws | a stage draws into a cleared pooled texture, where multiply gives black |
+| a `fallback` of a filter must declare the same blend, else `defineFilter` throws | the ink keeps its look when the main body breaks. The dev stand-in draws the fallback normally into its pooled texture and lays the blend with its striped mark pass |
+| `blend` other than the four strings throws | `"overlay"` or a typo would draw normally and say nothing |
+
+Limits: over a transparent canvas pixel, or inside a filtered ancestor where nothing was drawn beneath, `"multiply"` gives black (the result is the product with nothing). A filter with a blend is never kept as a picture: its view is drawn live, one pass, and a view under a kept top that holds one keeps that top live (renderer README, "Kept pictures").
 
 ### Filters that are kept
 

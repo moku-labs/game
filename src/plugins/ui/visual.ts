@@ -142,7 +142,8 @@ const NORMAL_BLEND: BlendField = Object.freeze({ blend: "normal" });
 /** What an element spreads while its style blends, one frozen object per mode. */
 const BLENDS: Readonly<Record<NonNullable<ResolvedStyle["blend"]>, BlendField>> = Object.freeze({
   add: Object.freeze({ blend: "add" }),
-  screen: Object.freeze({ blend: "screen" })
+  screen: Object.freeze({ blend: "screen" }),
+  multiply: Object.freeze({ blend: "multiply" })
 });
 
 /**

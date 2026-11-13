@@ -182,11 +182,13 @@ the element. Without `nineSlice` it does nothing, and `lint()` reports it as
 <stack key="memFrost" style={{ nineSlice: "glass.frost", hollow: true, width: 960, height: 1400 }} />
 ```
 
-`style.blend: "add"` or `"screen"` lays an `image`, an `icon` or the nine-slice of the style over
-what is drawn under it, written into `Sprite.blend` or `NineSlice.blend` (see "Blend" in the
-renderer README). `"add"` adds its colour, for a spark or a flare; `"screen"` lightens with it, for
-a soft glow (on a dark background it matches CSS `mix-blend-mode: screen`). Without it the element
-covers by alpha. An element that never blended carries no `blend` field, so a game's describe and
+`style.blend: "add"`, `"screen"` or `"multiply"` lays an `image`, an `icon` or the nine-slice of the
+style over what is drawn under it, written into `Sprite.blend` or `NineSlice.blend` (see "Blend" in
+the renderer README). `"add"` adds its colour, for a spark or a flare; `"screen"` lightens with it,
+for a soft glow (on a dark background it matches CSS `mix-blend-mode: screen`); `"multiply"` darkens
+with it, for ink pressed into paper (it matches CSS `mix-blend-mode: multiply` over an opaque
+backdrop; over a transparent pixel it gives black). A whole group multiplies through the `blend` of a
+filter, not through this style. Without it the element covers by alpha. An element that never blended carries no `blend` field, so a game's describe and
 saved values stay as they were; once it blended, a render or a variant that drops the blend writes
 `"normal"`, and the glow turns off. The rest the element records carries the same value, so a
 restore draws the look the element has. It blends the element's own quad alone, never its children,
@@ -200,6 +202,7 @@ and does nothing on a rectangle, a shape or a text; no `lint()` rule reports tha
 
 ```tsx
 <image key="glow" texture="art.glow" style={{ blend: "screen", alpha: 0.8 }} />
+<image key="ink" texture="art.ink" style={{ blend: "multiply" }} />
 <button key="claim" intent="claim" style={{ nineSlice: "ui.button", is: { hover: { blend: "add" } } }} />
 ```
 

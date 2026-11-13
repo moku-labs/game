@@ -5,6 +5,7 @@
  * (`fallback`). Pure: no ctx, no device; every shader a kind can draw is checked on the running
  * backend when the renderer first draws, in every build, by the filter sync.
  */
+import type { SpriteBlend } from "../../renderer/components";
 import type { FilterCache } from "../../renderer/types";
 import { component } from "../../world/ecs/define";
 import { assembleGlsl } from "./glsl";
@@ -304,16 +305,53 @@ function readBackdrop(id: string, backdrop: unknown): boolean {
   );
 }
 
+/** The blends a filter may lay its output with: the ones the renderer maps to Pixi. */
+const BLENDS: readonly SpriteBlend[] = ["normal", "add", "screen", "multiply"];
+
+/**
+ * Reads the declared blend: one of the four, or left out for `"normal"`. A JavaScript caller may pass anything.
+ *
+ * @param id - The filter id.
+ * @param blend - What the game declared.
+ * @returns The blend.
+ * @throws {Error} When it is given and is none of the four.
+ */
+function readBlend(id: string, blend: unknown): SpriteBlend {
+  if (blend === undefined) return "normal";
+
+  const found = BLENDS.find(candidate => candidate === blend);
+
+  if (found !== undefined) return found;
+
+  throw new Error(
+    `[game] Filter "${id}": blend must be "normal", "add", "screen" or "multiply".\n  Got ${JSON.stringify(blend)}.`
+  );
+}
+
 /**
  * Refuses what a backdrop cannot have: a padding (Pixi copies the canvas under the padded box, and a copy past the
- * canvas edge fails on the GPU) and a cache that keeps it (what is under it changes without it).
+ * canvas edge fails on the GPU), a cache that keeps it (what is under it changes without it) and a blend (it lays its
+ * output over the canvas under it already).
  *
  * @param id - The filter id.
  * @param padding - The padding as declared, `0` when left out.
  * @param cache - The cache as declared.
- * @throws {Error} When the padding is not 0 or the cache keeps it.
+ * @param blend - The read blend.
+ * @throws {Error} When the padding is not 0, the cache keeps it or the blend is not normal.
  */
-function checkBackdrop(id: string, padding: number | string, cache: unknown): void {
+function checkBackdrop(
+  id: string,
+  padding: number | string,
+  cache: unknown,
+  blend: SpriteBlend
+): void {
+  if (blend !== "normal") {
+    throw new Error(
+      `[game] Filter "${id}" is a backdrop: it blends with what is under it by itself, so its blend must be normal.\n` +
+        `  Got ${JSON.stringify(blend)}: leave blend out, or drop backdrop and let the blend lay the output.`
+    );
+  }
+
   if (padding !== 0) {
     throw new Error(
       `[game] Filter "${id}" is a backdrop: its padding must be 0.\n` +
@@ -654,6 +692,13 @@ function readStages(id: string, name: string, stages: unknown): readonly FilterS
       );
     }
 
+    if (stage.filter.blend !== "normal") {
+      throw new Error(
+        `[game] Filter "${id}": stage "${stage.filter.id}" of input "${name}" has blend ${JSON.stringify(stage.filter.blend)}.\n` +
+          "  A stage draws into a cleared texture, where multiply gives black: give it no blend."
+      );
+    }
+
     if (!read.includes(stage)) read.push(stage);
   }
 
@@ -734,15 +779,17 @@ function readInputs<Value>(
  * @param fallback - What the game declared under `fallback`.
  * @param uniforms - The read uniforms.
  * @param backdrop - Whether the filter is a backdrop.
+ * @param blend - The filter's blend: the fallback draws with the same one, so the look survives a broken body.
  * @returns The fallback's definition, or `undefined` without one.
  * @throws {Error} When it is no filter of ours, has the same id, has inputs or a fallback, a uniform of it is not
- *   one of this filter's with the same type, or it is a backdrop and the filter is not.
+ *   one of this filter's with the same type, it is a backdrop and the filter is not, or it blends otherwise.
  */
 function readFallback(
   id: string,
   fallback: unknown,
   uniforms: readonly UniformSpec[],
-  backdrop: boolean
+  backdrop: boolean,
+  blend: SpriteBlend
 ): FilterDefinition | undefined {
   if (fallback === undefined) return undefined;
 
@@ -771,6 +818,13 @@ function readFallback(
     throw new Error(
       `[game] Filter "${id}": its fallback "${definition.id}" is a backdrop, and "${id}" is not.\n` +
         `  A fallback draws in its place on the same view: give it no backdrop, or make "${id}" a backdrop too.`
+    );
+  }
+
+  if (definition.blend !== blend) {
+    throw new Error(
+      `[game] Filter "${id}": its fallback "${definition.id}" draws with blend ${JSON.stringify(definition.blend)}, and "${id}" with ${JSON.stringify(blend)}.\n` +
+        `  A fallback draws in its place and keeps the look: give both the same blend.`
     );
   }
 
@@ -859,19 +913,22 @@ function cacheWithInputs(
  * filter draws nothing: Pixi then renders and fills only that box, not the view's bounds. A
  * `resolution` draws the view and its filters at that many texels per CSS px instead of the
  * canvas's. A `backdrop` reads what was drawn under its view inside that box: the body calls
- * `sampleBack(uv)`, and an input may start `from: "back"`; it is drawn live in every frame.
- * Register it through the `filters` key of a feature. The README shows a filter with a blur input,
+ * `sampleBack(uv)`, and an input may start `from: "back"`; it is drawn live in every frame. A `blend` lays the
+ * filter's output over what is under the view (`"multiply"` for a stamp's ink); the last enabled filter of a view
+ * lays it, and its view is drawn live. Register it through the `filters` key of a feature. The README shows a filter with a blur input,
  * one with an `area` and a backdrop.
  *
  * @param id - The filter id, also the component name; unique, and not one of the built-ins.
  * @param spec - Both bodies, the uniforms, the passes one apply costs, the padding, the inputs, the fallback, the
- *   cache category, the area, the resolution and the backdrop switch.
+ *   cache category, the area, the resolution, the backdrop switch and the blend.
  * @returns The component type, with the frozen `filter` definition attached.
  * @throws {Error} When the id is empty, the WGSL has no `mainFragment`, the GLSL no `void main(`,
  *   a uniform is reserved, badly named or of no known form, the passes or the padding break
  *   their rules, an input or the fallback breaks one of its rules, `passes` is given with inputs,
  *   `area` is not a function, `resolution` is not a number from 0 to 4, `backdrop` is not a
- *   boolean, or a backdrop has a padding or a cache that keeps it.
+ *   boolean, a backdrop has a padding or a cache that keeps it, `blend` is none of `"normal"`, `"add"`, `"screen"`
+ *   and `"multiply"`, a backdrop or a stage has a blend other than normal, or a fallback blends otherwise than the
+ *   filter.
  * @example
  * ```ts
  * // features/board/effects.ts: a gold tint a motion hook tweens on a merge, on WebGPU and WebGL.
@@ -879,6 +936,10 @@ function cacheWithInputs(
  * Tint({ amount: 1 }).value; // { amount: 1, color: 0xffd700, enabled: true, order: 0 }
  * Tint.filter.glsl.includes("uniform vec3 color;"); // true
  * Tint.filter.cache; // "local"
+ * // A stamp's ink: a rough edge laid over the page with multiply, in place of a backdrop filter.
+ * const StampInk = defineFilter("StampInk", { wgsl: inkWgsl, glsl: inkGlsl, uniforms: { span: 125.6 }, blend: "multiply" });
+ * StampInk.filter.blend; // "multiply"
+ * Tint.filter.blend; // "normal"
  * ```
  */
 export function defineFilter<
@@ -892,6 +953,7 @@ export function defineFilter<
   );
   const uniforms = Object.freeze(read.map(entry => entry.spec));
   const backdrop = readBackdrop(id, spec.backdrop);
+  const blend = readBlend(id, spec.blend);
   const inputs = readInputs(id, spec.inputs, uniforms, backdrop);
 
   if (spec.inputs !== undefined && spec.passes !== undefined) {
@@ -900,13 +962,13 @@ export function defineFilter<
     );
   }
 
-  const fallback = readFallback(id, spec.fallback, uniforms, backdrop);
+  const fallback = readFallback(id, spec.fallback, uniforms, backdrop, blend);
   const passes = spec.passes ?? 1;
   const padding = spec.padding ?? 0;
 
   checkCost(id, passes, padding, uniforms);
   checkCache(id, spec.cache);
-  if (backdrop) checkBackdrop(id, padding, spec.cache);
+  if (backdrop) checkBackdrop(id, padding, spec.cache, blend);
 
   const area = readArea(id, spec.area);
   const resolution = readResolution(id, spec.resolution);
@@ -932,6 +994,7 @@ export function defineFilter<
     origin,
     resolution,
     backdrop,
+    blend,
     // The key is there only when the spec gave an area (`exactOptionalPropertyTypes`).
     ...(area === undefined ? {} : { area })
   });

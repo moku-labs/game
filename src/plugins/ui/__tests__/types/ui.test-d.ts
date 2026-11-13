@@ -174,12 +174,13 @@ describe("defineStyle", () => {
     defineStyle({ fit: "cover" });
   });
 
-  // Bug: the blend of a style widens to any string, so `"multiply"` compiles and is drawn plain,
+  // Bug: the blend of a style widens to any string, so `"overlay"` compiles and is drawn plain,
   // with a warning only at run time.
-  it("takes add and screen as the blend of a style and refuses any other mode", () => {
+  it("takes add, screen and multiply as the blend of a style and refuses any other mode", () => {
     expectTypeOf(defineStyle({ blend: "screen" }).blend).toEqualTypeOf<"screen">();
-    // @ts-expect-error — a style blends "add" or "screen"; another mode is drawn plain.
-    defineStyle({ blend: "multiply" });
+    expectTypeOf(defineStyle({ blend: "multiply" }).blend).toEqualTypeOf<"multiply">();
+    // @ts-expect-error — a style blends "add", "screen" or "multiply"; another mode is drawn plain.
+    defineStyle({ blend: "overlay" });
   });
 
   it("refuses a field outside the vocabulary", () => {

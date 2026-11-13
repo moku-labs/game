@@ -2,6 +2,8 @@
  * @file effects/filters — type definitions: what `defineFilter` takes and returns, the values of
  * the built-in filter components, and what the filter sync keeps per kind and per view.
  */
+
+import type { SpriteBlend } from "../../renderer/components";
 import type {
   FilterCache,
   FilterSlot,
@@ -157,6 +159,16 @@ export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
    * every frame into Pixi's back buffer. Default `false`.
    */
   readonly backdrop?: boolean;
+  /**
+   * How the filter's output lays over what is drawn under the view, as `Sprite.blend`: `"normal"` (the default)
+   * covers by alpha, `"add"` and `"screen"` lighten, `"multiply"` darkens with it (a stamp's ink over the page, like
+   * CSS `mix-blend-mode: multiply`). A multiply filter replaces a `backdrop` one for such a look, so WebGL keeps no
+   * back buffer. Only the last enabled filter of a view lays its blend; an earlier one draws normally and is warned.
+   * Over a transparent canvas pixel, or inside a filtered ancestor where nothing was drawn beneath, multiply gives
+   * black. The view is drawn live, never kept as a picture. Refused for a `backdrop`, for a stage (a stage draws into a
+   * cleared texture, where multiply gives black), and for a fallback whose blend is another than the filter's.
+   */
+  readonly blend?: SpriteBlend;
 };
 
 /**
@@ -186,6 +198,9 @@ export type UniformSpec = {
  * Tint.filter.uniforms.map(uniform => uniform.name); // ["amount", "color"]
  * Tint.filter.inputs.length; // 0: it reads no second texture
  * Tint.filter.cache; // "local": a still view under it is drawn from a picture
+ * Tint.filter.blend; // "normal": it covers what is under the view by alpha
+ * const StampInk = defineFilter("StampInk", { wgsl: inkWgsl, glsl: inkGlsl, uniforms: { span: 125.6 }, blend: "multiply" });
+ * StampInk.filter.blend; // "multiply"
  * ```
  */
 export type FilterDefinition = {
@@ -221,6 +236,8 @@ export type FilterDefinition = {
   readonly resolution: number;
   /** True for a filter that reads what was drawn under its view: Pixi's `blendRequired`, and `sampleBack` in its body. */
   readonly backdrop: boolean;
+  /** How the filter's output lays over what is under the view: Pixi's `Filter.blendMode` of the main instance; `"normal"` when left out. */
+  readonly blend: SpriteBlend;
 };
 
 /**

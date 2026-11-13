@@ -15,7 +15,7 @@
  * switch and a filter that broke or re-ran its chains inside a render mark them all. A frame where nothing of that
  * happened syncs no view and allocates nothing.
  */
-import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
+import { NineSlice, Shape, Sprite, type SpriteBlend, Transform } from "../../renderer/components";
 import type {
   FilterCache,
   FilterSlot,
@@ -632,8 +632,22 @@ function syncKind(
 }
 
 /**
+ * The blend an instance's slot names (F178): its definition's, when that is not normal. The renderer writes it on the
+ * slot's filter, so a slot of a filter that draws into a pooled texture first (a dev stand-in with its mark) names none:
+ * there the mark pass carries the blend, and the outer filter stays normal.
+ *
+ * @param instance - The instance.
+ * @returns The blend, or `undefined` for a slot that leaves the key out.
+ */
+function slotBlendOf(instance: FilterInstance): SpriteBlend | undefined {
+  if (instance.kind !== "wgsl" || instance.mark !== undefined) return undefined;
+
+  return instance.definition.blend === "normal" ? undefined : instance.definition.blend;
+}
+
+/**
  * The slot of one instance: its filter, its passes, its kind id for the performance log, the
- * seam of its inputs when it has some, and what the kept-picture cache may do with it (its
+ * seam of its inputs when it has some, its blend when it has one, and what the kept-picture cache may do with it (its
  * category, a placed filter's origin, whether it shows a blurred copy, the quad its body runs on).
  *
  * @param ectx - Domain context of the effects plugin.
@@ -644,12 +658,15 @@ function syncKind(
 function slotOf(ectx: EffectsCtx, pixi: PixiModule, instance: FilterInstance): FilterSlot {
   const cache = cacheOfInstance(instance);
   const quad = quadOf(ectx, pixi, instance);
+  const blend = slotBlendOf(instance);
   const slot: FilterSlot = {
     filter: instance.filter,
     passes: instance.passes,
     kind: instance.kindId,
     cache
   };
+
+  if (blend !== undefined) slot.blend = blend;
 
   if (instance.kind === "wgsl" && instance.inputs !== undefined) slot.inputs = instance.inputs.slot;
   if (blursOf(instance)) slot.blurs = true;
