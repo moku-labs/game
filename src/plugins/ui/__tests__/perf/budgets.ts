@@ -85,6 +85,18 @@ export const BUDGET = {
    */
   scrollResizeReaim: 0,
   /**
+   * F177 (change 2026-11-13-f177-scroll-lock): a frame of the locked strip with `Pressed` on it,
+   * the finger moving: the press counts as none and the step returns at its idle check. 0 B.
+   */
+  scrollLockedHeld: 0,
+  /** F177: a frame of the locked strip that stands, no finger: the idle check alone. 0 B. */
+  scrollLockedStill: 0,
+  /**
+   * F177: the settle of a render that locks the strip the finger holds: the finger let go with no
+   * velocity, `Scrollable` and `ScrollState` written from the patches. 0 B.
+   */
+  scrollLockDrop: 0,
+  /**
    * F42 (change 2026-10-21-exit-restore-fixes): `still` of one leaving element per frame, three motions held, one of
    * them endless (a hot pulse). Was an `every` with an arrow; now an array `for…of` and a set lookup. 0 B.
    */

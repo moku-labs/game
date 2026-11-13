@@ -12,7 +12,8 @@
  * keyed by the cell of the item, and the JSX projection `orders.row` over it. The popup `Shop`
  * opens from the ward and over the board. `order.overlap`, mounted by hand, holds two overlapping
  * buttons, the first one shown by a local flag; `drawn.shelf`, mounted by hand, an x scroll with a
- * shop button inside a y scroll.
+ * shop button inside a y scroll; `drawn.lock`, mounted by hand, the lock strip of F177, an x scroll
+ * of cards a test renders again with any `locked`.
  *
  * The app draws on the fake Pixi, or on the real one with a stand-in GPU (`startDrawnApp({ stage })`),
  * where the tree oracle of the renderer's tests can read every frame the helpers step.
@@ -34,9 +35,11 @@ import type { CompiledMessages } from "../../i18n/types";
 import { type FakeDom, type FakeElement, installFakeDom } from "../../renderer/__tests__/fake-dom";
 import { createFakePixi, type FakePixi, FakeTexture } from "../../renderer/__tests__/fake-pixi";
 import type { StagePixi } from "../../renderer/__tests__/stage-pixi";
+import { Tree } from "../../world/ecs/define";
 import type { Entity } from "../../world/types";
 import { popup } from "../components";
 import { defineComponent } from "../jsx/component";
+import type { DescriptionNode } from "../jsx/types";
 
 /** The player of the drawn fixture: the cells of the board and the items on them. */
 export type DrawnPlayer = {
@@ -383,6 +386,134 @@ export const stripScreen = projection({
 /** The components every `settle` hook of `stripHooked` was handed, in call order. */
 export const stripSettled: string[][] = [];
 
+/**
+ * What a render tells the lock strip (F177, change 2026-11-13-f177-scroll-lock): any value of
+ * `locked`, the way a game may hand it, its `offset`, `glideMs`, `aim`, `jump` and `snap`, and the
+ * scroll it sits in, if any.
+ */
+export type LockTold = {
+  locked?: unknown;
+  offset?: number;
+  glideMs?: number;
+  aim?: string;
+  jump?: boolean;
+  /** The stops; `[0, 318, 390]` when left out, none for `"none"`. */
+  snap?: readonly number[] | "none" | undefined;
+  /** The axis of an unlocked scroll the strip sits in; none when left out. */
+  outer?: "x" | "y";
+};
+
+/** The stops of the lock strip, as the order strip of A Memory Missing's board has them. */
+const LOCK_STOPS = [0, 318, 390];
+
+/** What the lock screen renders when it is mounted; a test sets it before the mount. */
+export const lockStart: { told: LockTold } = { told: {} };
+
+/**
+ * The lock strip as a render describes it: an x scroll of 306 × 200 at (0, 100), over a 696 u
+ * track of six cards, buttons of 116 × 120 that answer `shop`, at x 116 × n of the track. Below the
+ * cards, y 220 to 300, the finger lands on the strip's own background. With `outer`, the strip is
+ * the first child of an unlocked scroll of that axis at (0, 100): `lockOuter`, 600 × 600 over a
+ * 1200 u row (x), or 1080 × 600 over a 1200 u column (y). Plain nodes, so a test can hand it a
+ * `locked` the types refuse.
+ *
+ * @param told - What the render tells the strip.
+ * @returns The root node of the screen.
+ */
+export function lockNode(told: LockTold): DescriptionNode {
+  const cards: DescriptionNode[] = [0, 1, 2, 3, 4, 5].map(index => ({
+    type: "button",
+    key: `lockCard${index}`,
+    props: { intent: "shop", style: { width: 116, height: 120 } },
+    children: []
+  }));
+  const at = told.outer === undefined ? { position: "absolute", top: 100, left: 0 } : {};
+  const strip: DescriptionNode = {
+    type: "scroll",
+    key: "lockStrip",
+    props: {
+      axis: "x",
+      snap: told.snap === "none" ? undefined : (told.snap ?? LOCK_STOPS),
+      offset: told.offset,
+      glideMs: told.glideMs,
+      aim: told.aim,
+      jump: told.jump,
+      locked: told.locked,
+      style: { ...at, width: 306, height: 200 }
+    },
+    children: [
+      {
+        type: "row",
+        key: "lockTrack",
+        props: { style: { width: 696, height: 200, alignItems: "flex-start" } },
+        children: cards
+      }
+    ]
+  };
+  const body =
+    told.outer === undefined
+      ? strip
+      : {
+          type: "scroll",
+          key: "lockOuter",
+          props: {
+            axis: told.outer,
+            style: {
+              position: "absolute",
+              top: 100,
+              left: 0,
+              width: told.outer === "x" ? 600 : 1080,
+              height: 600
+            }
+          },
+          children: [
+            {
+              type: told.outer === "x" ? "row" : "column",
+              key: "lockOuterBody",
+              props: {
+                style:
+                  told.outer === "x"
+                    ? { width: 1200, height: 600, alignItems: "flex-start" }
+                    : { width: 1080, height: 1200, alignItems: "flex-start" }
+              },
+              children: [strip]
+            }
+          ]
+        };
+
+  return {
+    type: "stack",
+    key: "lockRoot",
+    props: { style: { width: 1080, height: 1920 } },
+    children: [body]
+  };
+}
+
+/** The lock strip, mounted by hand, rendered from `lockStart` and again by `renderLock`. */
+export const lockScreen = projection({
+  name: "drawn.lock",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "lockItem" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => lockNode(lockStart.told)
+});
+
+/**
+ * Renders the lock screen again with what a new render tells the strip, the way its view would,
+ * and keeps it as the start, so a view that runs again says the same.
+ *
+ * @param app - The running app.
+ * @param told - What the render tells the strip.
+ */
+export function renderLock(app: DrawnApp, told: LockTold): void {
+  const root = app.world.projection.entityOf("drawn.lock", "lockItem");
+
+  if (root === undefined) throw new Error("the lock screen is not mounted");
+
+  lockStart.told = told;
+  app.world.ecs.set(root, Tree, { node: lockNode(told) });
+}
+
 /** The ward. The hud is listed first: only the layers put the scene root under it. */
 export const wardSceneDef = defineScene("ward", {
   bundle: "ward",
@@ -467,7 +598,8 @@ export const drawnFeature = defineFeature("drawn", {
     ordersRow,
     overlapScreen,
     shelfScreen,
-    stripScreen
+    stripScreen,
+    lockScreen
   ],
   ui: [Shop, Overlap],
   strings: { en: english }

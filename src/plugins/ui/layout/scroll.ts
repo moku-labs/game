@@ -3,9 +3,12 @@
  * then in a fling that slows down, or in a glide to a `snap` stop; it starts at its `offset`
  * prop, glides there again when the prop or its `aim` changes (in `glideMs` when it gives one),
  * stands there at once with `jump`, and stays inside the range every solve gives it, with hard
- * edges. The content moves by one `Transform` write on the axis: no solve, no motion, the children
- * keep their rects. `Scroll` holds the offset the way the windowed range is cut with (0 and below),
- * `ScrollState` the way a game reads it (0 to `max`), `Scrollable` whether it moves, for `input`.
+ * edges. While its `locked` prop is true (F177) the finger neither moves nor stops it: a finger on
+ * it counts as none, a finger that holds it when the lock comes is let go with no velocity, and the
+ * props still move it. The content moves by one `Transform` write on the axis: no solve, no motion,
+ * the children keep their rects. `Scroll` holds the offset the way the windowed range is cut with
+ * (0 and below), `ScrollState` the way a game reads it (0 to `max`), `Scrollable` whether it moves
+ * and whether it is locked, for `input`.
  * The exact numbers live on the element's `scroll` record and the samples of the press in the
  * layout state, written in place; the components get whole reference units. A frame allocates
  * nothing.
@@ -176,6 +179,16 @@ function aimOf(container: Element): string | number | undefined {
   if (typeof aim === "string") return aim;
 
   return typeof aim === "number" && Number.isFinite(aim) ? aim : undefined;
+}
+
+/**
+ * Whether the scroll's last render keeps the finger from moving it: only the value `true` locks.
+ *
+ * @param container - The scroll element.
+ * @returns True when its `locked` prop is true.
+ */
+function lockedOf(container: Element): boolean {
+  return container.node.props.locked === true;
 }
 
 /**
@@ -367,7 +380,7 @@ function releaseVelocity(state: LayoutState): number {
 /**
  * Lets go of a scroll the finger held. With `snap` it glides to the stop nearest to where its
  * velocity carries in 260 ms; without, it flings, or stands when it was let go too slowly. A
- * press whose samples a later press took lets go with no velocity.
+ * press whose samples a later press took, and a press a lock let go, let go with no velocity.
  *
  * @param state - The layout state, which keeps the samples of the press.
  * @param container - The scroll that was held.
@@ -483,9 +496,42 @@ function moveContent(
 }
 
 /**
+ * Writes `Scrollable` when `moving` or `locked` changed, in one write: with `locked` once the lock
+ * differs from the world's, with `moving` alone otherwise, so a scroll never locked keeps a
+ * `Scrollable` without the field. Nothing when both are the same.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param state - The layout state, which keeps the patches.
+ * @param container - The scroll element.
+ * @param moving - Whether it moves now.
+ * @param locked - Whether its `locked` prop holds.
+ */
+function writeScrollable(
+  ctx: UiCtx,
+  state: LayoutState,
+  container: Element,
+  moving: boolean,
+  locked: boolean
+): void {
+  const ecs = ctx.deps.world.ecs;
+  const scrollable = ecs.get(container.entity, Scrollable);
+
+  if (scrollable === undefined) return;
+
+  if ((scrollable.locked === true) !== locked) {
+    state.scrollPatches.scrollLock.moving = moving;
+    state.scrollPatches.scrollLock.locked = locked;
+    ecs.set(container.entity, Scrollable, state.scrollPatches.scrollLock);
+  } else if (scrollable.moving !== moving) {
+    state.scrollPatches.scrollable.moving = moving;
+    ecs.set(container.entity, Scrollable, state.scrollPatches.scrollable);
+  }
+}
+
+/**
  * Writes what changed of a scroll, in whole units: `Scroll` when its offset or range moved,
- * `ScrollState` when the offset, `max` or `moving` changed, `Scrollable` when `moving` did, and
- * the content's pose. A frame where nothing changed writes nothing.
+ * `ScrollState` when the offset, `max` or `moving` changed, `Scrollable` when `moving` or `locked`
+ * did, and the content's pose. A frame where nothing changed writes nothing.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
@@ -506,7 +552,6 @@ function show(
   const moving = motion.mode !== "still";
   const scroll = ecs.get(container.entity, Scroll);
   const shown = ecs.get(container.entity, ScrollState);
-  const scrollable = ecs.get(container.entity, Scrollable);
   const rangeMoved =
     scroll !== undefined && (scroll.offset !== 0 - offset || scroll.min !== 0 - motion.max);
   const stateMoved =
@@ -528,11 +573,8 @@ function show(
     ecs.set(container.entity, ScrollState, patches.state);
   }
 
-  // `input` reads `moving` to let a finger catch the scroll: written when it starts or stops.
-  if (scrollable !== undefined && scrollable.moving !== moving) {
-    patches.scrollable.moving = moving;
-    ecs.set(container.entity, Scrollable, patches.scrollable);
-  }
+  // `input` reads `moving` to let a finger catch the scroll, `locked` to keep the finger off it.
+  writeScrollable(ctx, state, container, moving, motion.locked);
 
   moveContent(ctx, state, container, content, motion);
 }
@@ -551,8 +593,9 @@ function isIdle(motion: ScrollMotion, pressed: boolean): boolean {
 
 /**
  * Moves one scroll by the frame: the finger while it is pressed, the release when it lets go,
- * then a fling or a glide, and writes what changed. A still scroll no finger is on costs a tag
- * check.
+ * then a fling or a glide, and writes what changed. `Pressed` on a locked scroll counts as no
+ * finger: `input` drops that press at its next step, and the settle of the lock already let a held
+ * scroll go. A still scroll no finger is on costs a tag check, a locked one a flag check more.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state.
@@ -571,13 +614,12 @@ function stepOne(
   time: Readonly<Time>
 ): boolean {
   const ecs = ctx.deps.world.ecs;
-  const pressed = ecs.has(container.entity, Pressed);
+  const motion = container.scroll;
+  const pressed = ecs.has(container.entity, Pressed) && motion?.locked !== true;
   // The press the samples belong to ends whatever the container holds now.
   const released = !pressed && state.scrolling === container.entity;
 
   if (released) state.scrolling = undefined;
-
-  const motion = container.scroll;
 
   if (motion === undefined || isIdle(motion, pressed)) return false;
 
@@ -654,9 +696,9 @@ function resize(motion: ScrollMotion, max: number): void {
 
 /**
  * Puts a scroll the solve just spawned at its `offset` prop, inside its range, and lets it follow
- * the prop from there. Its `aim` and `glideMs` are recorded: the first `aim` moves nothing more.
- * Its spawn waits in the queue of the phase: these values replace the queued ones at the flush,
- * before the first draw.
+ * the prop from there. Its `aim`, `glideMs` and `locked` are recorded: the first `aim` moves
+ * nothing more, and the first `Scrollable` already carries the lock. Its spawn waits in the queue
+ * of the phase: these values replace the queued ones at the flush, before the first draw.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param container - The scroll element, live since this solve.
@@ -673,6 +715,7 @@ function place(ctx: UiCtx, container: Element, content: Element, motion: ScrollM
   motion.seen = askedOffsetOf(container);
   motion.aim = aimOf(container);
   motion.glideMs = glideMsOf(container);
+  motion.locked = lockedOf(container);
   motion.offset = within(motion.seen, motion.max);
 
   const offset = Math.round(motion.offset);
@@ -715,7 +758,9 @@ function followOffset(motion: ScrollMotion, container: Element, asked: number): 
  * a new range at once, then a glide to a new `offset` prop or to the same one under a new `aim`,
  * which the scroll follows from then on. With `jump` it stands at the prop at once instead, in the
  * solve that gave the content its new rects; a glide to the prop that runs, the one a new range
- * re-aimed too, ends at its target. A scroll the finger holds only remembers the prop and the aim.
+ * re-aimed too, ends at its target. A scroll the finger holds only remembers the prop and the aim,
+ * unless this render locks it: the finger is let go first, with no velocity, so a new prop or aim
+ * of the same render is followed, and a prop only remembered before is not.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.
@@ -731,7 +776,15 @@ function settle(
   motion: ScrollMotion
 ): void {
   motion.glideMs = glideMsOf(container);
+  motion.locked = lockedOf(container);
   resize(motion, maxOf(container, content, motion.axis));
+
+  // A lock lets go of the finger before the prop is followed: the press's samples are no longer
+  // the scroll's, so it stands, or glides to the stop nearest to where it stands.
+  if (motion.locked && motion.mode === "held") {
+    if (state.scrolling === container.entity) state.scrolling = undefined;
+    letGo(state, container, motion, false);
+  }
 
   const asked = askedOffsetOf(container);
   const aim = aimOf(container);
@@ -783,10 +836,10 @@ function standAtTarget(
  * inside a new range at once, a running glide's target too, and glides to a new `offset` prop, or
  * to the same one under a new `aim`, in `glideMs` when it gives one; the same value and aim on a
  * re-render do nothing, `jump` ends a glide to the prop at its target, and a scroll the finger
- * holds only remembers the prop and the aim. A scroll nobody sees yet (`stands`: a root built
- * aside or held warm) stands at its target at once instead of gliding, so no glide plays hidden or
- * at its open. A scroll left moving wakes the loop the way `stepScroll` does: not at a time scale
- * of 0, where it stands.
+ * holds only remembers the prop and the aim; a render that locks it lets the finger go first. A
+ * scroll nobody sees yet (`stands`: a root built aside or held warm) stands at its target at once
+ * instead of gliding, so no glide plays hidden or at its open. A scroll left moving wakes the loop
+ * the way `stepScroll` does: not at a time scale of 0, where it stands.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state, which keeps the patches.

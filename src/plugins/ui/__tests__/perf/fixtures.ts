@@ -6,7 +6,7 @@
  */
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
-import { Pointer, Pressed } from "../../../input/components";
+import { Pointer, Pressed, Scrollable } from "../../../input/components";
 import type { Time } from "../../../time/types";
 import { Tree } from "../../../world/ecs/define";
 import type { AnySystem, Entity, SystemContext } from "../../../world/types";
@@ -634,4 +634,74 @@ export function stillFrame(scroll: ScrollPerf): Step {
   scroll.motion.mode = "still";
 
   return scroll.frame;
+}
+
+/**
+ * Locks the strip the way a render with `locked={true}` and a settle leave it (F177): the prop,
+ * the motion's flag, and the world's `Scrollable`, written once here, outside any window.
+ *
+ * @param scroll - The started scroll perf app.
+ */
+function lockStrip(scroll: ScrollPerf): void {
+  scroll.element.node.props.locked = true;
+  scroll.motion.locked = true;
+  scroll.ui.app.world.ecs.set(scroll.strip, Scrollable, { locked: true });
+}
+
+/**
+ * A frame of the locked strip with `Pressed` on it, which `input` has not dropped yet (F177): the
+ * finger moves 3.7 u one way, then back, and the strip stands, so the step returns at its idle
+ * check and writes nothing.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One frame.
+ */
+export function lockedHeldFrame(scroll: ScrollPerf): Step {
+  const pointer = scroll.ui.app.world.ecs.resource(Pointer);
+  const shift = new Float64Array(1);
+
+  lockStrip(scroll);
+  scroll.motion.mode = "still";
+  scroll.ui.app.world.ecs.tag(scroll.strip, Pressed);
+  pointer.x = 500;
+
+  return (): void => {
+    shift[0] = shift[0] === 0 ? 3.7 : 0;
+    pointer.x = 500 + (shift[0] ?? 0);
+    scroll.frame();
+  };
+}
+
+/**
+ * A frame of the locked strip that stands, no finger on it (F177): the idle check and nothing
+ * more.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One frame.
+ */
+export function lockedStillFrame(scroll: ScrollPerf): Step {
+  lockStrip(scroll);
+  scroll.ui.app.world.ecs.untag(scroll.strip, Pressed);
+  scroll.motion.mode = "still";
+
+  return scroll.frame;
+}
+
+/**
+ * The settle of a render that locks the strip while the finger holds it at 900 (F177): the finger
+ * is let go with no velocity, `Scrollable` and `ScrollState` written. The hold is set again before
+ * every call.
+ *
+ * @param scroll - The started scroll perf app.
+ * @returns One settle.
+ */
+export function lockDropSettle(scroll: ScrollPerf): Step {
+  settleProps(scroll, false, 150);
+  lockStrip(scroll);
+
+  return (): void => {
+    scroll.motion.mode = "held";
+    scroll.motion.offset = 900;
+    scroll.settle();
+  };
 }

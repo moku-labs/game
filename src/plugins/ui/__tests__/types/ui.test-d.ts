@@ -480,6 +480,14 @@ describe("the scroll on both axes", () => {
     expectTypeOf([strip, named, worded, diagonal]).not.toBeUndefined();
   });
 
+  it("takes `locked` as a boolean and refuses any other value", () => {
+    const held: UiIntrinsicElements["scroll"] = { axis: "x", locked: true, children: [] };
+    // @ts-expect-error — `locked` is a boolean, not a word.
+    const worded: UiIntrinsicElements["scroll"] = { axis: "x", locked: "yes" };
+
+    expectTypeOf([held, worded]).not.toBeUndefined();
+  });
+
   it("steers a scroll by key and offset, from the API and from a visual step", () => {
     const api = {} as UiApi;
     const steps: VisualStep[] = [

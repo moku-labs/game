@@ -221,7 +221,9 @@ export type ScrollWindow = {
  * new range re-aims takes it. `atProp` is true while the scroll follows that prop: it stands at it
  * or glides to it, so a new range puts it at the prop again. The first place and a glide to a new
  * prop set it; a press and `app.ui.scroll` clear it, and a fling or a snap glide only comes after a
- * press. Plain values written in place: a frame allocates nothing.
+ * press. `locked` is the `locked` prop of the last place or settle, true only for the value `true`
+ * (F177): the finger neither moves nor stops the scroll, the program still does. Plain values
+ * written in place: a frame allocates nothing.
  */
 export type ScrollMotion = {
   axis: "x" | "y";
@@ -238,6 +240,7 @@ export type ScrollMotion = {
   seen: number;
   aim: string | number | undefined;
   glideMs: number;
+  locked: boolean;
   placed: boolean;
   atProp: boolean;
 };

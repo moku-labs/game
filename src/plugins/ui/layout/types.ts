@@ -65,12 +65,15 @@ export type TextSource = {
 
 /**
  * The patches the scroll step writes with, one object each, filled in place: a frame builds none.
- * Every number in them is a whole reference unit.
+ * Every number in them is a whole reference unit. `Scrollable` has two: `scrollable` when only
+ * `moving` changed, `scrollLock` when `locked` did, so a scroll never locked keeps a `Scrollable`
+ * with no `locked` field.
  */
 export type ScrollPatches = {
   scroll: { offset: number; min: number };
   state: { offset: number; max: number; moving: boolean };
   scrollable: { moving: boolean };
+  scrollLock: { moving: boolean; locked: boolean };
   x: { x: number };
   y: { y: number };
 };

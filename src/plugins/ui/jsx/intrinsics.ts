@@ -162,6 +162,36 @@ export type ScrollGlideMs = number & Brand<"ScrollGlideMs">;
  * ```
  */
 export type ScrollAim = (string | number) & Brand<"ScrollAim">;
+
+/**
+ * Keeps the finger from moving the scroll while it is `true` (F177); any other value leaves it
+ * unlocked. A drag on it or on a view inside it moves nothing, its release neither flings nor
+ * snaps, and a finger that lands while it glides or flings does not stop it. The views inside keep
+ * their taps: a press that drifts past the tap slop answers none. A finger that holds the scroll
+ * when the lock comes is let go with no velocity: with `snap` it glides to the stop nearest to
+ * where it stands, and the finger takes it again only after a new press. `offset`, `aim`, `jump`
+ * and `glideMs` move it as before. A scroll of the same axis around it does not take the pan.
+ *
+ * @example
+ * ```tsx
+ * // A delivery plays on the order strip, which stands on 318: the game moves it to the delivered
+ * // order in 150 ms, and the player can tap the cards but not scroll them.
+ * <scroll
+ *   key="strip"
+ *   axis="x"
+ *   snap={[0, 318, 390]}
+ *   offset={390}
+ *   glideMs={150}
+ *   locked
+ *   style={{ width: 306, height: 120 }}
+ * >
+ *   <row key="track" style={{ width: 696, height: 120 }} />
+ * </scroll>;
+ * // 150 ms in: ScrollState { offset: 390, max: 390, moving: false }
+ * // a drag on the strip after that: the same ScrollState in every frame, and no tap
+ * ```
+ */
+export type ScrollLocked = boolean & Brand<"ScrollLocked">;
 /** How many rows a windowed scroll has. */
 export type ScrollRows = number & Brand<"ScrollRows">;
 /** The height of every row, in reference units; above 0. */
@@ -331,7 +361,8 @@ type ScrollWindowForm = {
  * What a scroll container takes: children for a short list, or `rows`, `rowHeight` and `row` for
  * a long one, whose rows exist only in the window; the `axis` it moves on, the `snap` stops a
  * release glides to, the `offset` it stands at, how long a glide to it lasts (`glideMs`), what it
- * aims at (`aim`), and whether a new `offset` stands there at once (`jump`).
+ * aims at (`aim`), whether a new `offset` stands there at once (`jump`), and whether the finger
+ * is kept from moving it (`locked`).
  *
  * @example
  * ```ts
@@ -344,6 +375,8 @@ type ScrollWindowForm = {
  * const quick: ScrollProps = { axis: "x", offset: 390, glideMs: 150 };
  * // The next order is at 0 too: a strip the player dragged to 390 glides back to 0.
  * const next: ScrollProps = { axis: "x", offset: 0, aim: "order-7" };
+ * // A delivery plays: the strip stands on 390 and no finger moves it.
+ * const delivering: ScrollProps = { axis: "x", offset: 390, locked: true };
  * // 1000 orders of 120 u in a 1600 u list: rows 0 to 18 exist at offset 0.
  * const orders: ScrollProps = {
  *   style: { height: 1600 },
@@ -360,6 +393,7 @@ export type ScrollProps = CommonProperties & {
   glideMs?: ScrollGlideMs;
   aim?: ScrollAim;
   jump?: ScrollJump;
+  locked?: ScrollLocked;
 } & (ScrollChildForm | ScrollWindowForm);
 
 /**

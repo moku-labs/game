@@ -63,7 +63,7 @@ component is set, so `changed()` names none of its components.
 | `content` | its layout node is written and measured again, its root solves once, its components are written |
 | `bind`, `texture`, `name`, `fit`, `intent`, `payload`, `local`, `escape`, `components` | its components are written. No style pass, no solve |
 | `motion` | the element takes the new hooks for its next play. Nothing is written and a running tween goes on (F168); a `loop` that is really another one replaces the running one |
-| `hosts`, the props of a windowed `scroll`, the `snap`, `offset`, `glideMs`, `aim` and `jump` of a `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
+| `hosts`, the props of a windowed `scroll`, the `snap`, `offset`, `glideMs`, `aim`, `jump` and `locked` of a `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
 | the viewport (size, orientation, safe area), a dev hot swap | every element is patched in full once: style, layout node, components |
 | the locale, a font that arrives after the mount | no element is patched and no view runs. The texts `text` resolves again are measured in that frame; when the line of the `body` style moved, every `icon` without a size is too, on a screen with no text as well. A root solves once when a size in it changed |
 
@@ -376,6 +376,7 @@ they are drawn, and no solve runs.
 | `glideMs` | how long every glide to the `offset` prop lasts, in ms: a new value, a new `aim`, and a glide to the prop that a new `max` re-aims, which starts again from where the scroll stands. `glideMs={150}` from 318 to 390: 381 at 75 ms, standing on 390 at 150 ms. `0` stands at the prop at once, as `jump`. Left out, not a number, `NaN`, `Infinity` or below 0: `min(620, 260 + distance × 1.1)`. A `snap` glide after a release keeps that default. A new `glideMs` alone leaves a running glide as it is |
 | `aim` | a string or a finite number the `offset` prop aims at. A new value follows the prop again from where the scroll stands, even with the same `offset`: a strip the player dragged to 390 with `offset={0}` glides back to 0 when `aim` goes from `"order-6"` to `"order-7"`; a running glide, fling or snap glide starts again toward the prop, in `glideMs`; with `jump` it stands there at once. Compared with `Object.is`; any other value (`NaN`, `Infinity`, an object, a boolean) counts as left out, and a value left out after one is a change too. The same value on a re-render does nothing. A scroll the finger holds only remembers it: the release snaps or flings as without it. A scroll not on the screen yet stands at the prop |
 | `jump` | `true`: a new `offset` value or a new `aim` of this render stands at the prop at once instead of gliding, in the same solve as the content's new rects. A first tile of 82 u that comes in at the start of the track with `offset` 82 more keeps the cards where they were drawn. A running fling or glide stops, a glide a new `max` re-aimed too, and `ScrollState` says `moving: false`; the scroll follows the prop from then on. A glide to the prop that runs ends at its target in the render that turns `jump` on, with the same `offset`: 150 ms into a 620 ms glide 0 → 390, the strip stands on 390 in that frame. A scroll the finger holds only remembers the prop. Left out or `false`: a new value glides. A `snap` release always glides, also under `jump`, and a still or flinging scroll with the same `offset` and `aim` is left as it is |
+| `locked` | `true`: the finger never moves the scroll. A drag on it or on a view inside it moves nothing and its release neither flings nor snaps; a finger that lands while it glides or flings does not stop it, and the view under the finger takes the press as on a still scroll. The views inside keep their taps; a press that drifts past the tap slop answers none. A finger that holds the scroll when `locked` turns true is let go with no velocity: with `snap` it glides to the stop nearest to where it stands, without it stands; the finger takes it again only after a new press, also when the lock ends first. A new `offset` or `aim` in the render that locks a held scroll is followed. `offset`, `aim`, `jump` and `glideMs` move it as before. A scroll of the same axis around it does not take the pan. Only the value `true` locks; left out, `false` or any other value: unlocked |
 
 All numbers are reference units and milliseconds of `time` (`time.delta`): a time scale and a pause
 apply.
@@ -405,9 +406,10 @@ apply.
   frames coming; at a time scale of 0 it asks for none, and a fling or a glide goes on where it
   stands once time runs again.
 - The internal `Scroll` keeps the offset the way the windowed range is cut with: `Scroll.offset =
-  −ScrollState.offset`, `Scroll.min = −max`. The internal `Scrollable` `{ axis, moving }` is what
-  `input` reads for the hand-off and the catch. A game reads neither.
-- **No allocation.** A held, flinging, gliding or still frame, and the settle of a `jump` render, of a glide to a new `offset` in `glideMs`, of a new `aim`, of a `jump` that ends a glide to the prop and of a new range that re-aims one, allocate nothing: the exact numbers
+  −ScrollState.offset`, `Scroll.min = −max`. The internal `Scrollable` `{ axis, moving, locked? }` is what
+  `input` reads for the hand-off, the catch and the drop of a press on a locked scroll; `locked` is
+  written the first time a scroll is locked. A game reads neither.
+- **No allocation.** A held, flinging, gliding or still frame, and the settle of a `jump` render, of a glide to a new `offset` in `glideMs`, of a new `aim`, of a `jump` that ends a glide to the prop, of a new range that re-aims one and of a lock that drops the finger, and a frame of a locked scroll with or without `Pressed`, allocate nothing: the exact numbers
   live on the element's motion record and in the layout state, written in place, and the components
   get whole units through patches kept in the layout state (`__tests__/perf/scroll.perf.ts`).
 

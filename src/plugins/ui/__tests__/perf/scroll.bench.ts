@@ -12,6 +12,9 @@ import {
   glideMsSettle,
   heldFrame,
   jumpEndsGlideSettle,
+  lockDropSettle,
+  lockedHeldFrame,
+  lockedStillFrame,
   numberAimSettle,
   resizeReaimSettle,
   type ScrollCall,
@@ -98,4 +101,11 @@ describe("scroll settle", () => {
     () => running.frame(),
     setUp(resizeReaimSettle)
   );
+});
+
+// The lock benches run last: they leave the strip locked.
+describe("scroll lock", () => {
+  bench("locked frame with Pressed, one x strip", () => running.frame(), setUp(lockedHeldFrame));
+  bench("locked still frame, one x strip", () => running.frame(), setUp(lockedStillFrame));
+  bench("lock drops the finger, one x strip", () => running.frame(), setUp(lockDropSettle));
 });
