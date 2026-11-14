@@ -57,7 +57,7 @@ export function splitFields(value: Readonly<Record<string, unknown>>): {
 /**
  * The rest value of a component with the neutral value of every optional field the stored value carries and the rest
  * leaves out (`Transform`'s `scaleX`: a stored `0` is brought home to 1). The rest itself comes back when there is
- * nothing to add, so a view that never set such a field pays no allocation.
+ * nothing to add, so a view that never set such a field copies nothing (the walk over the stored keys is its only cost).
  *
  * @param type - The component type, which may declare neutral values.
  * @param rest - The rest value.

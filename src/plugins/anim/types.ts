@@ -27,7 +27,8 @@ export type Target = { projection: string; key: string } | Entity | { spawned: s
 
 /**
  * The pose `at(target)` answers with: where the target rests in root (reference) space, its rest
- * `Transform` composed through the `Parent` chain, or the identity pose when nothing is there.
+ * `Transform` composed through the `Parent` chain, or the identity pose when nothing is there. The per-axis factors
+ * of the target (`scaleX`, `scaleY`) are not carried: `at()` answers the uniform `scale` only.
  *
  * @example
  * ```ts

@@ -85,3 +85,18 @@ describe("the neutral value on an instant settle", () => {
     expect(world.api.ecs.get(entity, Pose)).toEqual({ x: 0, scaleX: 1 });
   });
 });
+
+describe("the neutral value on a direct convergence", () => {
+  // Bug: `writeRestNow` (the write of a restore's converge step, no hook and no settle) writes the rest as it is, so a
+  // squeezed field the rest lacks stays squeezed after a load.
+  it("writes a field the rest lacks home to its neutral when a restore converges", () => {
+    const world = createMockWorld();
+    const entity = mountPose(world);
+
+    world.api.ecs.set(entity, Pose, { scaleX: 0 });
+    world.commit("restore", ["player"]);
+    world.frame(16);
+
+    expect(world.api.ecs.get(entity, Pose)).toEqual({ x: 0, scaleX: 1 });
+  });
+});

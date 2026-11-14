@@ -833,11 +833,11 @@ function boxCovers(
 ): boolean {
   const transform = ectx.deps.world.ecs.get(entity, Transform);
   const scale = transform?.scale ?? 1;
+  // `"scaleX" in` before the read: a plain `?? 1` boxes a number at a site that sees both shapes of `Transform`.
+  const factorX = transform !== undefined && "scaleX" in transform ? (transform.scaleX ?? 1) : 1;
+  const factorY = transform !== undefined && "scaleY" in transform ? (transform.scaleY ?? 1) : 1;
 
-  return (
-    width * scale * (transform?.scaleX ?? 1) >= size.width &&
-    height * scale * (transform?.scaleY ?? 1) >= size.height
-  );
+  return width * scale * factorX >= size.width && height * scale * factorY >= size.height;
 }
 
 /**

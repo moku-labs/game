@@ -200,6 +200,7 @@ function movePlaced(
     ecs.set(entity, Transform, { pivot: { x: pose.pivot.x, y: pose.pivot.y } });
   }
 
+  // A local-space stream follows the host's uniform scale only, not its per-axis factors (`scaleX`, `scaleY`).
   const still =
     placed.x === pose.x &&
     placed.y === pose.y &&

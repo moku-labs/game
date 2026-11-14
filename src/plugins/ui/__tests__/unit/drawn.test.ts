@@ -308,6 +308,27 @@ describe("drawnInto", () => {
     expect(drawn(underCollapsed, 2)).toBeUndefined();
   });
 
+  it("answers nothing for an element squeezed to 0 on one axis, its own or a parent's, and shows one at 0.01", () => {
+    // Bug caught: only `scale <= 0` counts as collapsed, so an element popping in on scaleX 0 is found as a line and a
+    // guide on it ends its grace, where the anchor resolver (mapInto) already treats the same pose as collapsed.
+    const flatX = panelWorld();
+    const flatY = panelWorld();
+    const underFlat = panelWorld();
+    const thin = panelWorld();
+
+    put(flatX, 2, { Transform: pose({ x: 70, y: 50, scaleX: 0, pivot: { x: 50, y: 20 } }) });
+    put(flatY, 2, { Transform: pose({ x: 70, y: 50, scaleY: 0, pivot: { x: 50, y: 20 } }) });
+    put(underFlat, 1, {
+      Transform: pose({ x: 300, y: 350, scaleX: 0, pivot: { x: 200, y: 150 } })
+    });
+    put(thin, 2, { Transform: pose({ x: 70, y: 50, scaleX: 0.01, pivot: { x: 50, y: 20 } }) });
+
+    expect(drawn(flatX, 2)).toBeUndefined();
+    expect(drawn(flatY, 2)).toBeUndefined();
+    expect(drawn(underFlat, 2)).toBeUndefined();
+    expect(drawn(thin, 2)).toBeDefined();
+  });
+
   it("answers nothing for a world sprite of no width or no height: it draws at its texture's size", () => {
     // Bug caught: a sprite whose component says 0 on one axis is taken as a point or a line, while
     // the renderer draws it at the texture's size there, so the anchor sits off what is drawn.

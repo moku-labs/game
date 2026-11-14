@@ -291,8 +291,8 @@ function localBoxInto(
  * Writes where an entity is drawn, in screen reference units, when it is shown. A box of no area is
  * shown at its point: a width or a height of 0. Not shown: the entity belongs to a scene built
  * aside, it or something it is drawn under is leaving, the alphas on its way up multiply to 0.01 or
- * less, its root pose is at scale 0 or less (it pops in from scale 0, or hangs under a collapsed
- * parent), it draws no box, or the box is turned inside out (a size below 0).
+ * less, its root pose is at scale 0 or less or has a per-axis factor (`scaleX`, `scaleY`) of exactly 0
+ * (it pops in from scale 0, or hangs under a collapsed parent), it draws no box, or the box is turned inside out (a size below 0).
  *
  * @param reader - What the resolver reads.
  * @param entity - The entity of the target.
@@ -302,8 +302,10 @@ function localBoxInto(
  */
 export function drawnInto(reader: DrawnReader, entity: Entity, out: Rect, pose: AxisPose): boolean {
   if (building(reader, entity) || !visible(reader, entity)) return false;
-  // A collapsed pose draws nothing: an element entering from scale 0 is not a point yet.
-  if (!drawnPoseInto(reader, entity, pose) || pose.scale <= 0) return false;
+  if (!drawnPoseInto(reader, entity, pose)) return false;
+  // A collapsed pose draws nothing: an element entering from scale 0 is not a point yet. A per-axis factor of 0 squeezes
+  // one axis flat, the same; a negative one is a mirror and stays drawn.
+  if (pose.scale <= 0 || pose.scaleX === 0 || pose.scaleY === 0) return false;
   if (!localBoxInto(reader, entity, pose, out)) return false;
 
   return out.w >= 0 && out.h >= 0;
