@@ -550,7 +550,7 @@ The style object of a `text` may name the text style key it draws and measures w
 - Layout fields sit next to it as on any style: `{ text: "rule.12.5", width: "100%" }`.
 - Only `when` takes it: an `is` variant names no key, so a press never moves the layout. `uiFor`
   narrows `text` to the game's text style keys, `defineStyle` takes such a style, and the type is
-  `TextStyle` from `@moku-labs/game`.
+  `TextTagStyle` from `@moku-labs/game`.
 
 ## Keyboard focus
 

@@ -322,20 +322,16 @@ export type Style<Asset extends string = string> = BaseStyle<Asset> & {
  * ```tsx
  * // The shop title: 19 on a 16:9 phone, 20.5 on a 20:9 one, one text node on both.
  * <text key="title" content="Vitrine" style={{ text: "title.19", when: { tall: { text: "title.20.5" } } }} />;
- * app.world.ecs.get(app.ui.find("title") ?? 0, Text)?.style; // "title.19" on 1080 x 1920, "title.20.5" on 1080 x 2400
+ * const title = app.ui.find("title");
+ * if (title !== undefined) app.world.ecs.get(title, Text)?.style; // "title.19" on 1080 x 1920, "title.20.5" on 1080 x 2400
  * ```
  */
-export type TextStyle<Asset extends string = string, Key extends string = string> = Omit<
+export type TextTagStyle<Asset extends string = string, Key extends string = string> = Omit<
   Style<Asset>,
   "when"
 > & {
   text?: Key;
-  when?: {
-    portrait?: BaseStyle<Asset> & { text?: Key };
-    landscape?: BaseStyle<Asset> & { text?: Key };
-    tall?: BaseStyle<Asset> & { text?: Key };
-    wide?: BaseStyle<Asset> & { text?: Key };
-  };
+  when?: { [Name in keyof WhenVariants<Asset>]?: BaseStyle<Asset> & { text?: Key } };
 };
 
 /**
@@ -421,7 +417,7 @@ export type StylesState = { flags: WhenFlags; viewport: Readonly<ViewportSize> |
  */
 export type StylesModule = {
   flagsOf(viewport: Readonly<ViewportSize>): WhenFlags;
-  resolveElement(style: Style | undefined, is: IsFlags): ResolvedStyle;
+  resolveElement(style: Style | TextTagStyle | undefined, is: IsFlags): ResolvedStyle;
   viewport(): Readonly<ViewportSize> | undefined;
   useViewport(viewport: Readonly<ViewportSize>): boolean;
 };

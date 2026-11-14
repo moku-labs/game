@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   component,
   createApp,
@@ -871,6 +871,10 @@ const SHORT_PHONE: ViewportSize = {
 const TALL_PHONE: ViewportSize = { ...SHORT_PHONE, height: 2400 };
 
 describe("ui — a restore draws a text with the key of the frame it lands on (F182)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   // Catches: a restored text drawn or measured with the key of the frame it was saved on.
   it("saved on a tall frame, restored on a short one, draws and measures with the short key", async () => {
     const app = await startSplash();

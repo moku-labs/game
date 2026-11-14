@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { Text } from "../../../text/components";
 import { Box } from "../../components";
@@ -56,6 +56,10 @@ function drawn(app: TextWhenApp, key: string) {
 function heightOf(app: TextWhenApp, content: string, style: string): number {
   return Math.ceil(app.text.measure(content, style).height - 0.0001);
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /**
  * Moves the app onto another viewport and runs one frame.

@@ -1,7 +1,7 @@
 /**
  * @file ui/styles — `defineStyle`: the type check of the vocabulary and a frozen object. Pure.
  */
-import type { Style, TextStyle } from "./types";
+import type { Style, TextTagStyle } from "./types";
 
 /**
  * Declares one style. The work is the type: a field outside the vocabulary, or a value outside
@@ -16,6 +16,8 @@ import type { Style, TextStyle } from "./types";
  * defineStyle({ text: "title.19", when: { tall: { text: "title.20.5" } } }).when.tall.text; // "title.20.5"
  * ```
  */
-export function defineStyle<const Given extends Style | TextStyle>(style: Given): Readonly<Given> {
+export function defineStyle<const Given extends Style | TextTagStyle>(
+  style: Given
+): Readonly<Given> {
   return Object.freeze(style);
 }

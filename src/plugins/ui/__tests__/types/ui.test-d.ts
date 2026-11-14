@@ -23,7 +23,7 @@ import type {
 } from "../../jsx/intrinsics";
 import type { DescriptionNode, Finding, UiNode } from "../../jsx/types";
 import { defineStyle } from "../../styles/define";
-import type { Style, TextStyle } from "../../styles/types";
+import type { Style, TextTagStyle } from "../../styles/types";
 import type { Config, ElementChange, ElementMotion, UiApi } from "../../types";
 
 const Reward = defineComponent("Reward", {
@@ -323,7 +323,7 @@ describe("uiFor", () => {
     expectTypeOf(kit.intrinsics.panel.nineSlice).toBeString();
     // F182: the style object of a text names the game's text style keys, in its base and in `when`.
     expectTypeOf(kit.intrinsics.text.style).toEqualTypeOf<
-      "digits" | TextStyle<"ui.coin" | "ui.panel", "digits"> | undefined
+      "digits" | TextTagStyle<"ui.coin" | "ui.panel", "digits"> | undefined
     >();
   });
 

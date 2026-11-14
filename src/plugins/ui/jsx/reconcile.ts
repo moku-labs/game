@@ -1238,7 +1238,9 @@ export function createReconciler(
   ): readonly string[] {
     if (type !== Text || !textKept) return fieldsLeftAlone(element, type, owned);
 
-    return keyKept || namesFormat(element) ? TEXT_KEPT : TEXT_CONTENT_KEPT;
+    const styleKept = keyKept || namesFormat(element);
+
+    return styleKept ? TEXT_KEPT : TEXT_CONTENT_KEPT;
   }
 
   /**
@@ -1298,6 +1300,10 @@ export function createReconciler(
     const style = keepsStyle ? element.style : styleFor(parent, node, is);
     const sameContent = sameValue(previous.props.content, node.props.content);
 
+    // Two property reads: a new viewport may resolve the same markup to another key (F182).
+    const keepsKey =
+      namedKeyOf(element.style, previous.props.style) === namedKeyOf(style, node.props.style);
+
     return {
       is,
       style,
@@ -1306,9 +1312,7 @@ export function createReconciler(
       moved: !keepsStyle && modules.layout.affectsRect(element.style, style),
       measures: !stands || !sameStyle || !sameContent,
       keepsText: sameStyle && sameContent && sameValue(previous.props.bind, node.props.bind),
-      // Two property reads: a new viewport may resolve the same markup to another key (F182).
-      keepsKey:
-        namedKeyOf(element.style, previous.props.style) === namedKeyOf(style, node.props.style),
+      keepsKey,
       unchanged: keepsStyle && sameContent && writesSame(previous, node)
     };
   }

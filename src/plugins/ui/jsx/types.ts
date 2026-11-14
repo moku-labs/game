@@ -718,14 +718,23 @@ export type UiNode = {
    */
   content?: string;
   /**
-   * The text style key a `text` was given: its `style` prop while that is a key. Absent when the
-   * style is a `Style` object, when there is none, and on any other tag.
+   * The text style key a `text` draws with: the key its style object took for this frame (the base
+   * `text` or one a `when` variant set), else its `style` prop while that is a key; for a text bound
+   * to a named format, the style that format answered. Absent on any other tag and on a text whose
+   * style names none.
    *
    * @example
    * ```ts
    * // Home: `<text key="homePlayLabel" style="ui.button" content="Play" />` under the root row.
    * const label = app.ui.tree().children.find(node => node.key === "homePlayLabel");
    * label?.textStyle; // "ui.button"
+   * ```
+   * @example
+   * ```ts
+   * // `<text key="title" style={{ text: "title.19", when: { tall: { text: "title.20.5" } } }} />`
+   * // on a tall viewport (1080 x 2400), under the root row.
+   * const title = app.ui.tree().children.find(node => node.key === "title");
+   * title?.textStyle; // "title.20.5"
    * ```
    */
   textStyle?: string;

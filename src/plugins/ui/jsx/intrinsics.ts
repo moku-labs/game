@@ -8,7 +8,7 @@ import type { Json } from "../../model/types";
 import type { TextBind } from "../../text/types";
 import type { AnchorTarget } from "../../world/projection/types";
 import type { AnyComponentValue } from "../../world/types";
-import type { Style, TextStyle } from "../styles/types";
+import type { Style, TextTagStyle } from "../styles/types";
 import type {
   CommonProps as CommonProperties,
   DescriptionNode,
@@ -44,7 +44,7 @@ export type TextContent = (string | Message) & Brand<"TextContent">;
  * The text style key, or a layout style that may name the key in its base and its `when`
  * variants; one that names none draws in the built-in `body`.
  */
-export type TextStyleProp = (string | TextStyle) & Brand<"TextStyleProp">;
+export type TextStyleProp = (string | TextTagStyle) & Brand<"TextStyleProp">;
 /** The asset key of an image. */
 export type ImageTexture = string & Brand<"ImageTexture">;
 /** The asset key of an icon. */
@@ -524,7 +524,7 @@ export type IntrinsicElementsFor<
   text: Omit<CommonProperties, "style"> & {
     content?: string | Message<StringKey>;
     bind?: TextBind;
-    style?: TextStyleKey | TextStyle<Asset, TextStyleKey>;
+    style?: TextStyleKey | TextTagStyle<Asset, TextStyleKey>;
   };
 };
 
