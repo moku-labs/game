@@ -168,6 +168,23 @@ export async function startBoxPerf(): Promise<PerfUi> {
 }
 
 /**
+ * Starts the perf app and mounts the ten texts whose style names their key in `when` (F182), then
+ * runs frames until they rest: the spawn, the frame that writes their `Text` once more, and one
+ * more. The viewport stands from here on.
+ *
+ * @returns The app and its `ui` steps, the texts at rest.
+ */
+export async function startTextWhenPerf(): Promise<PerfUi> {
+  const ui = await startPerfUi();
+
+  ui.app.world.projection.mount(["whenTexts"], { kind: "plugin", name: "perf" });
+
+  for (let frame = 0; frame < 3; frame += 1) ui.app.time.step(16);
+
+  return ui;
+}
+
+/**
  * Starts the perf app and builds the names of the box files aside, as a live switch builds the
  * next scene (spec 31): every mounted projection is kept, and the names are reconciled and solved
  * while their enters wait in the queue for the swap.

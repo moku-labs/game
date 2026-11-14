@@ -43,7 +43,15 @@ import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
-import { ANCHOR, CONTENT, fieldsLeftAlone, livePatch, visualOf } from "../visual";
+import {
+  ANCHOR,
+  CONTENT,
+  fieldsLeftAlone,
+  livePatch,
+  namedKeyOf,
+  namesFormat,
+  visualOf
+} from "../visual";
 import { cancelExtra, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
@@ -119,6 +127,13 @@ const NO_OWNED: readonly string[] = [];
  * written since (F167).
  */
 const TEXT_KEPT: readonly string[] = Object.freeze([...Text.owned, "content", "style"]);
+
+/**
+ * The fields of `Text` a write leaves alone when the markup says what it said but its style names
+ * another text style key for this frame (F182): the style is written, the content a game's system
+ * may have written stays (F167).
+ */
+const TEXT_CONTENT_KEPT: readonly string[] = Object.freeze([...Text.owned, "content"]);
 
 /** The time of a reconcile a test steps by hand: no ms pass, so no scroll moves. */
 const NO_TIME: Readonly<Time> = Object.freeze({
@@ -226,6 +241,11 @@ type Change = {
   measures: boolean;
   /** The markup's `content`, `style` and `bind` say what they said: a write leaves `Text.content` and `Text.style` alone. */
   keepsText: boolean;
+  /**
+   * The text style key the style names for this frame is the one it named before (F182). While the
+   * markup says the same but the key changed, a write sets `Text.style` and leaves the content alone.
+   */
+  keepsKey: boolean;
   /** The element says what it said: nothing is styled and nothing is written. */
   unchanged: boolean;
 };
@@ -738,6 +758,8 @@ export function createReconciler(
   let placedUnder: ReadonlyArray<LayerSpec> | undefined;
   // Whether the write pass under way leaves the content and the style of a `Text` alone (F167).
   let textKept = false;
+  // Whether that pass also finds the text style key of the frame unchanged, so `Text.style` stays (F182).
+  let keyKept = true;
   // The roots the reconcile of this frame diffed: a render may bring a scroll a new `offset` prop.
   let rendered = 0;
   // Whether an entity belongs to the scene `world` builds aside (spec 31). Asked every time: the
@@ -1102,10 +1124,13 @@ export function createReconciler(
    *
    * @param element - The element that changed.
    * @param keepsText - Whether the markup's `content`, `style` and `bind` say what they said.
+   * @param keepsKey - Whether the text style key of this frame is the one before; a new one is
+   *   written into `Text.style` even when the markup says the same (F182).
    */
-  function writeLive(element: Element, keepsText: boolean): void {
+  function writeLive(element: Element, keepsText: boolean, keepsKey = true): void {
     state.written += 1;
     textKept = keepsText;
+    keyKept = keepsKey;
     writeOrder(element);
 
     // Remove the visuals and inputs the element no longer carries. Per restyle: the two lists are
@@ -1198,7 +1223,8 @@ export function createReconciler(
 
   /**
    * The fields a write of the current pass leaves alone: those of `fieldsLeftAlone`, and on the
-   * `Text` of a write with no new content in the markup its content and style too.
+   * `Text` of a write with no new content in the markup its content, and its style too unless the
+   * frame names another key for it (a style a named format answers always stays).
    *
    * @param element - The live element.
    * @param type - The component type of the value.
@@ -1210,7 +1236,11 @@ export function createReconciler(
     type: AnyComponentType,
     owned: readonly string[]
   ): readonly string[] {
-    return type === Text && textKept ? TEXT_KEPT : fieldsLeftAlone(element, type, owned);
+    if (type !== Text || !textKept) return fieldsLeftAlone(element, type, owned);
+
+    const styleKept = keyKept || namesFormat(element);
+
+    return styleKept ? TEXT_KEPT : TEXT_CONTENT_KEPT;
   }
 
   /**
@@ -1270,6 +1300,10 @@ export function createReconciler(
     const style = keepsStyle ? element.style : styleFor(parent, node, is);
     const sameContent = sameValue(previous.props.content, node.props.content);
 
+    // Two property reads: a new viewport may resolve the same markup to another key (F182).
+    const keepsKey =
+      namedKeyOf(element.style, previous.props.style) === namedKeyOf(style, node.props.style);
+
     return {
       is,
       style,
@@ -1278,6 +1312,7 @@ export function createReconciler(
       moved: !keepsStyle && modules.layout.affectsRect(element.style, style),
       measures: !stands || !sameStyle || !sameContent,
       keepsText: sameStyle && sameContent && sameValue(previous.props.bind, node.props.bind),
+      keepsKey,
       unchanged: keepsStyle && sameContent && writesSame(previous, node)
     };
   }
@@ -1304,7 +1339,7 @@ export function createReconciler(
 
     if (!element.live) return;
 
-    writeLive(element, change.keepsText);
+    writeLive(element, change.keepsText, change.keepsKey);
 
     // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
     if (!change.moved) {

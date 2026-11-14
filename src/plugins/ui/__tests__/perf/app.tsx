@@ -4,8 +4,9 @@
  * a JSX projection laid out in a slot of the board; and eight small HUD roots. Three host elements
  * of the board name two world projections each, forty sprite views per projection. The scroll
  * files mount one more root, an order strip; the box files one more, a list of names that wrap at
- * their box; the warm files two closed sheets the world holds warm. Real flow, world, text and
- * Yoga; inert renderer, headless.
+ * their box; the warm files two closed sheets the world holds warm; the text-when files a column of
+ * ten texts whose style object names their key in `when` (F182). Real flow, world, text and Yoga;
+ * inert renderer, headless.
  */
 import {
   createApp,
@@ -236,6 +237,30 @@ const boxesScreen = projection({
   )
 });
 
+/** The texts of the text-when screen. */
+export const WHEN_TEXTS = 10;
+
+/**
+ * The texts of the text-when files (F182), mounted by them only: ten titles whose style names the
+ * short key in its base and the tall one in `when.portrait`, which the headless phone holds.
+ */
+const whenTextsScreen = projection({
+  name: "whenTexts",
+  layer: "ui",
+  from: (): Item => ({ id: "whenTexts" }),
+  view: () => (
+    <column key="whenRoot" style={{ width: 600, height: 1200, align: "start" }}>
+      {Array.from({ length: WHEN_TEXTS }, (_unused, index) => (
+        <text
+          key={`whenTitle${index}`}
+          content={`Vitrine ${index}`}
+          style={{ text: "perf.when.short", when: { portrait: { text: "perf.when.tall" } } }}
+        />
+      ))}
+    </column>
+  )
+});
+
 /** The rows of the shop's windowed list. */
 const SHOP_ROWS = 200;
 
@@ -324,12 +349,15 @@ const perfFeature = defineFeature("perf", {
     hudScreen,
     stripScreen,
     boxesScreen,
+    whenTextsScreen,
     shopSheet,
     settingsSheet
   ],
   ui: [Board],
   textStyles: defineTextStyles({
-    "perf.name": { font: "ui.font-body", size: 32, fill: 0xff_ff_ff, wrap: "box" }
+    "perf.name": { font: "ui.font-body", size: 32, fill: 0xff_ff_ff, wrap: "box" },
+    "perf.when.short": { font: "ui.font-body", size: 19, fill: 0xff_ff_ff },
+    "perf.when.tall": { font: "ui.font-body", size: 41, fill: 0xff_ff_ff }
   }),
   strings: { en: english }
 });

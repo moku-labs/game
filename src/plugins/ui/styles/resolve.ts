@@ -3,7 +3,16 @@
  * merged, with the four safe-area tokens replaced by the numbers of the viewport. Pure.
  */
 import type { ViewportSize } from "../../renderer/viewport/types";
-import type { BaseStyle, Edges, IsFlags, Length, ResolvedStyle, Style, WhenFlags } from "./types";
+import type {
+  BaseStyle,
+  Edges,
+  IsFlags,
+  Length,
+  ResolvedStyle,
+  Style,
+  TextTagStyle,
+  WhenFlags
+} from "./types";
 
 /**
  * The flags one element is resolved against: the viewport flags of the frame plus its own state.
@@ -96,12 +105,19 @@ function edgesOf(
  *
  * @param into - The style built so far.
  * @param variant - The variant to lay over it.
+ * @param keepsText - Whether a `text` field of the variant is merged in. An `is` variant never
+ *   moves the text style key: a press must not change the letters, so a plain object that carries
+ *   one there is ignored.
  */
-function merge(into: Record<string, unknown>, variant: BaseStyle | undefined): void {
+function merge(
+  into: Record<string, unknown>,
+  variant: BaseStyle | undefined,
+  keepsText = true
+): void {
   if (variant === undefined) return;
 
   for (const [field, value] of Object.entries(variant)) {
-    if (value !== undefined) into[field] = value;
+    if (value !== undefined && (keepsText || field !== "text")) into[field] = value;
   }
 }
 
@@ -153,7 +169,7 @@ function withSafeArea(merged: Record<string, unknown>, viewport: ViewportSize): 
  * ```
  */
 export function resolve(
-  style: Style | undefined,
+  style: Style | TextTagStyle | undefined,
   flags: StyleFlags,
   viewport: ViewportSize
 ): ResolvedStyle {
@@ -171,7 +187,7 @@ export function resolve(
 
       if (!flags[name] || (flags.disabled && pointer)) continue;
 
-      merge(merged, is?.[name]);
+      merge(merged, is?.[name], false);
     }
   }
 

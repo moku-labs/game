@@ -312,12 +312,37 @@ export type Style<Asset extends string = string> = BaseStyle<Asset> & {
 };
 
 /**
+ * The style object of a `text` tag: a layout style whose base and `when` variants may name the
+ * text style key it draws and measures with, so one text takes the letters of the frame. The `is`
+ * variants carry no key: a press must not move the layout. A named format of a bound text still
+ * picks its own style; a style without `text` draws in `body`. `Key` is the game's text style key
+ * union: `uiFor` narrows `text` to it.
+ *
+ * @example
+ * ```tsx
+ * // The shop title: 19 on a 16:9 phone, 20.5 on a 20:9 one, one text node on both.
+ * <text key="title" content="Vitrine" style={{ text: "title.19", when: { tall: { text: "title.20.5" } } }} />;
+ * const title = app.ui.find("title");
+ * if (title !== undefined) app.world.ecs.get(title, Text)?.style; // "title.19" on 1080 x 1920, "title.20.5" on 1080 x 2400
+ * ```
+ */
+export type TextTagStyle<Asset extends string = string, Key extends string = string> = Omit<
+  Style<Asset>,
+  "when"
+> & {
+  text?: Key;
+  when?: { [Name in keyof WhenVariants<Asset>]?: BaseStyle<Asset> & { text?: Key } };
+};
+
+/**
  * What `resolve` answers with: the base vocabulary with every safe-area token replaced by a
- * number and every variant already merged in. Frozen.
+ * number and every variant already merged in, and the text style key a text's style named.
+ * Frozen.
  *
  * @example
  * ```ts
  * const resolved: ResolvedStyle = { direction: "row", gap: 12, padding: 24 };
+ * const title: ResolvedStyle = { text: "title.20.5", width: 600 };
  * ```
  */
 export type ResolvedStyle = Omit<
@@ -330,6 +355,8 @@ export type ResolvedStyle = Omit<
   top?: number;
   right?: number;
   bottom?: number;
+  /** The text style key of a text, when its style object names one. */
+  text?: string;
 };
 
 /**
@@ -390,7 +417,7 @@ export type StylesState = { flags: WhenFlags; viewport: Readonly<ViewportSize> |
  */
 export type StylesModule = {
   flagsOf(viewport: Readonly<ViewportSize>): WhenFlags;
-  resolveElement(style: Style | undefined, is: IsFlags): ResolvedStyle;
+  resolveElement(style: Style | TextTagStyle | undefined, is: IsFlags): ResolvedStyle;
   viewport(): Readonly<ViewportSize> | undefined;
   useViewport(viewport: Readonly<ViewportSize>): boolean;
 };

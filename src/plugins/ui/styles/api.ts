@@ -6,7 +6,7 @@ import type { ViewportSize } from "../../renderer/viewport/types";
 import type { UiCtx } from "../types";
 import { flagsOf, sameViewport } from "./flags";
 import { resolve, type StyleFlags } from "./resolve";
-import type { IsFlags, ResolvedStyle, Style, StylesModule } from "./types";
+import type { IsFlags, ResolvedStyle, Style, StylesModule, TextTagStyle } from "./types";
 
 /** What an element is resolved against before the first frame read the real viewport. */
 const FALLBACK_VIEWPORT: Readonly<ViewportSize> = {
@@ -59,7 +59,7 @@ export function createStylesApi(ctx: UiCtx): StylesModule {
       return changed;
     },
 
-    resolveElement: (style: Style | undefined, is: IsFlags): ResolvedStyle => {
+    resolveElement: (style: Style | TextTagStyle | undefined, is: IsFlags): ResolvedStyle => {
       const when = state.flags;
 
       flags.portrait = when.portrait;

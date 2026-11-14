@@ -6,6 +6,7 @@ import { flagsOf, noFlags, sameViewport } from "../../styles/flags";
 import { resolve, type StyleFlags } from "../../styles/resolve";
 import { createStylesState } from "../../styles/state";
 import { defineTokens } from "../../styles/tokens";
+import type { TextTagStyle } from "../../styles/types";
 import type { UiCtx } from "../../types";
 
 /**
@@ -156,6 +157,17 @@ describe("resolve", () => {
 
   it("answers an empty style for an element that wrote none", () => {
     expect(resolve(undefined, flags(), viewportOf())).toEqual({});
+  });
+
+  it("keeps the text style key of the base while a plain object carries one in an is variant", () => {
+    // `is` has no `text` in its type, but a style object that is not a literal may still carry it:
+    // a press must not change the letters.
+    const pressedWithText = { gap: 4, text: "title.99" };
+    const style: TextTagStyle = { text: "title.19", is: { pressed: pressedWithText } };
+    const resolved = resolve(style, flags({ pressed: true }), viewportOf());
+
+    expect(resolved.gap).toBe(4);
+    expect(resolved.text).toBe("title.19");
   });
 });
 

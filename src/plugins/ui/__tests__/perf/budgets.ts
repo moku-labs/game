@@ -211,5 +211,16 @@ export const BUDGET = {
    * rolling counter asks at every change of its shown string. A format of a game costs it one more
    * compare: it reads no `Text.style` and asks no format, and nothing is built. 0 B.
    */
-  remeasureBound: 0
+  remeasureBound: 0,
+  /**
+   * F182 (change 2026-11-14-f182-text-when): `ui.reconcile` and `ui.solve` of an idle frame over the
+   * ten roots and ten texts whose style names its key in `when`, the viewport standing. Nothing is
+   * resolved, written, measured or solved again. 0 B.
+   */
+  textWhenIdle: 0,
+  /**
+   * F182: the remeasure of one such text before the entity carries a style of its own: the key is
+   * one property read of the resolved style, and nothing is built. 0 B.
+   */
+  textWhenRemeasure: 0
 } as const;

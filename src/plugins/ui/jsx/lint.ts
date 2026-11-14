@@ -6,7 +6,7 @@ import type { Message, Part } from "../../i18n/types";
 import { Tappable } from "../../input/components";
 import { DebugTrigger, LocalWrite } from "../components";
 import type { UiCtx } from "../types";
-import { fitScaleOf } from "../visual";
+import { fitScaleOf, writtenKeyOf } from "../visual";
 import type { Element, Finding } from "./types";
 
 /**
@@ -72,8 +72,9 @@ function formatIfLoaded(ctx: UiCtx, message: Message, locale: string): readonly 
 }
 
 /**
- * Measures a text in every loaded locale and reports the widest one that does not fit. A lazy
- * locale the player has not picked yet cannot be measured, so it is skipped.
+ * Measures a text in every loaded locale, in the key its markup names for this frame, and reports
+ * the widest one that does not fit. A lazy locale the player has not picked yet cannot be
+ * measured, so it is skipped.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The text element.
@@ -83,7 +84,7 @@ function textOverflow(ctx: UiCtx, element: Element): Finding | undefined {
   if (element.type !== "text") return undefined;
 
   const content = element.node.props.content;
-  const style = typeof element.node.props.style === "string" ? element.node.props.style : "body";
+  const style = writtenKeyOf(element);
 
   if (typeof content !== "object" || content === null) return undefined;
 

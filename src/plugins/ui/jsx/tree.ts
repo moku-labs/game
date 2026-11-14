@@ -7,7 +7,7 @@ import { parseTags } from "../../text/tags";
 import type { Warn } from "../../text/types";
 import type { Entity } from "../../world/types";
 import type { Rect } from "../layout/types";
-import { drawnRect, namesFormat } from "../visual";
+import { drawnRect, namedKeyOf, namesFormat } from "../visual";
 import { fieldValue } from "./fields";
 import type { AsideOf, Element, JsxState, Root, UiNode } from "./types";
 import { isOwnKey } from "./window";
@@ -84,12 +84,12 @@ function contentOf(element: Element, resolvedOf: ResolvedOf | undefined): string
 
 /**
  * The text style key of a text element: the style a format of the game answered, for a text whose
- * bind names one; else the `style` prop while that is a key.
+ * bind names one; else the key its style object took for this frame (F182); else the `style` prop
+ * while that is a key.
  *
  * @param element - The element to read.
  * @param shownStyleOf - Reads `Text.style` of an entity; none for a tree read without a world.
- * @returns The key, or `undefined` for any other element and for a text with a `Style` object or
- * no style.
+ * @returns The key, or `undefined` for any other element and for a text whose style names none.
  */
 function textStyleOf(element: Element, shownStyleOf: ShownStyleOf | undefined): string | undefined {
   if (element.type !== "text") return undefined;
@@ -98,9 +98,7 @@ function textStyleOf(element: Element, shownStyleOf: ShownStyleOf | undefined): 
 
   if (shown !== undefined) return shown;
 
-  const style = element.node.props.style;
-
-  return typeof style === "string" ? style : undefined;
+  return namedKeyOf(element.style, element.node.props.style);
 }
 
 /**

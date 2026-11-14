@@ -12,7 +12,7 @@ import type { IntrinsicElementsFor } from "./jsx/intrinsics";
 import type { PopupComponent } from "./jsx/types";
 import { defineStyle } from "./styles/define";
 import { defineTokens } from "./styles/tokens";
-import type { Style } from "./styles/types";
+import type { Style, TextTagStyle } from "./styles/types";
 
 /**
  * The rect of a ui element in root coordinates, in reference units. Its `x` and `y` are the rest
@@ -267,7 +267,9 @@ export function popup<
  */
 export type UiKit<Asset extends string, TextStyleKey extends string, StringKey extends string> = {
   defineComponent: typeof defineComponent;
-  defineStyle: <const Given extends Style<Asset>>(style: Given) => Readonly<Given>;
+  defineStyle: <const Given extends Style<Asset> | TextTagStyle<Asset, TextStyleKey>>(
+    style: Given
+  ) => Readonly<Given>;
   defineTokens: typeof defineTokens;
   popup: <
     Properties extends object,
