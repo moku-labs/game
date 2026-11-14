@@ -6,6 +6,7 @@ import {
   Transform,
   type TransformValue
 } from "../../../renderer/components";
+import type { AxisPose } from "../../../renderer/sync/types";
 import { Exiting } from "../../../world/ecs/define";
 import type { AnchorTarget } from "../../../world/projection/types";
 import type { AnyComponentType, Entity } from "../../../world/types";
@@ -31,8 +32,8 @@ type World = {
  * @param patch - What differs from the identity.
  * @returns The pose.
  */
-function pose(patch: Partial<TransformValue>): TransformValue {
-  return { ...Transform.defaults, pivot: { x: 0, y: 0 }, ...patch };
+function pose(patch: Partial<TransformValue>): AxisPose {
+  return { ...Transform.defaults, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 }, ...patch };
 }
 
 /**
@@ -356,5 +357,28 @@ describe("targetsInto", () => {
     expect(spans(world, [play, dot])).toEqual({ x: 120, y: 230, w: 490, h: 680 });
     expect(spans(world, [gone, dot])).toEqual({ x: 600, y: 900, w: 10, h: 10 });
     expect(spans(world, [gone])).toBeUndefined();
+  });
+});
+
+describe("a target stretched on one axis (F179)", () => {
+  // Bug: the resolver scales the box by the uniform scale alone, so an anchor glued to the ribbon misses its edge.
+  it("is drawn at its stretched width, about its pivot, under a stretched parent", () => {
+    const world = emptyWorld();
+
+    put(world, 3, { Transform: pose({ x: 100, y: 50, scaleY: 0.5 }) });
+    put(world, 4, {
+      Transform: pose({ x: 100, y: 100, scaleX: 2, pivot: { x: 25, y: 0 } }),
+      Shape: { w: 50, h: 20, alpha: 1 },
+      Parent: { entity: 3 }
+    });
+    world.keys.set("hud/ribbon", 4);
+
+    // The ribbon's 50 x 20 box, stretched to 100 about x 25, under a parent that halves Y.
+    expect(spans(world, { projection: "hud", key: "ribbon" })).toEqual({
+      x: 150,
+      y: 100,
+      w: 100,
+      h: 10
+    });
   });
 });
