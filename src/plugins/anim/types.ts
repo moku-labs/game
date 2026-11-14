@@ -27,7 +27,8 @@ export type Target = { projection: string; key: string } | Entity | { spawned: s
 
 /**
  * The pose `at(target)` answers with: where the target rests in root (reference) space, its rest
- * `Transform` composed through the `Parent` chain, or the identity pose when nothing is there.
+ * `Transform` composed through the `Parent` chain, or the identity pose when nothing is there. The per-axis factors
+ * of the target (`scaleX`, `scaleY`) are not carried: `at()` answers the uniform `scale` only.
  *
  * @example
  * ```ts
@@ -188,20 +189,23 @@ export type Events = {
 /**
  * One key of a keyframe track in `defineMotion`: where on the track it sits (`at`, 0..1 of
  * `transition.ms`), the curve of the segment that ends on it (default `"inOut"`) and the pose.
- * `dx` and `dy` are offsets from the rest pose in reference units; `rotation` (radians), `scale`
- * and `alpha` are absolute. A field the key leaves out holds the previous key's value.
+ * `dx` and `dy` are offsets from the rest pose in reference units; `rotation` (radians), `scale`,
+ * `scaleX`, `scaleY` and `alpha` are absolute. `scaleX` and `scaleY` stretch one axis on top of `scale`; a view
+ * that sets neither rests at 1. A field the key leaves out holds the previous key's value.
  *
  * An enter walk starts on the first key and ends on the rest pose at `at: 1`; an exit walk starts
  * where the view is and ends on the last key, the pose the element leaves in.
  *
- * In a loop (`loop: { track }`) every Transform field is an offset added to the rest pose: `dx`, `dy`, `rotation`
- * and `scale` (`scale: 0.05` grows a scale-1 view to 1.05). `alpha` stays absolute. The loop
- * stands on its first key until that key's `at`, and its last key repeats its first one.
+ * In a loop (`loop: { track }`) every Transform field is an offset added to the rest pose: `dx`, `dy`, `rotation`,
+ * `scale`, `scaleX` and `scaleY` (`scale: 0.05` grows a scale-1 view to 1.05, `scaleX: 0.05` widens it alone). `alpha`
+ * stays absolute. The loop stands on its first key until that key's `at`, and its last key repeats its first one.
  *
  * @example
  * ```ts
  * // A popup board at 42 % of its swing: 14 u below its rest, tilted 5°, slightly larger.
  * const key: MotionKeyframe = { at: 0.42, ease: "out", Transform: { dy: 14, rotation: 0.087, scale: 1.04 } };
+ * // A ribbon at 65 % of its unfurl: 8 % wider than its rest, as tall as it rests.
+ * const unfurl: MotionKeyframe = { at: 0.65, Transform: { scaleX: 1.08 } };
  * ```
  */
 export type MotionKeyframe = {
@@ -212,6 +216,8 @@ export type MotionKeyframe = {
     readonly dy?: number;
     readonly rotation?: number;
     readonly scale?: number;
+    readonly scaleX?: number;
+    readonly scaleY?: number;
   };
   readonly Shape?: { readonly alpha?: number };
   readonly Sprite?: { readonly alpha?: number };

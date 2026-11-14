@@ -168,7 +168,7 @@ export function checkLoop(name: string, keys: readonly MotionKeyframe[]): void {
 
 /**
  * The pose one key gives the Transform: `dx` and `dy` as positions from the rest pose, rotation
- * and scale as written.
+ * and scale, scaleX and scaleY as written.
  *
  * @param key - The key.
  * @param rest - The rest position of the view.
@@ -185,6 +185,8 @@ function transformPose(
   if (fields?.dy !== undefined) pose.y = rest.y + fields.dy;
   if (fields?.rotation !== undefined) pose.rotation = fields.rotation;
   if (fields?.scale !== undefined) pose.scale = fields.scale;
+  if (fields?.scaleX !== undefined) pose.scaleX = fields.scaleX;
+  if (fields?.scaleY !== undefined) pose.scaleY = fields.scaleY;
 
   return pose;
 }
@@ -232,7 +234,8 @@ function lanesOf(view: ViewHandle<unknown>): Lane[] {
 
     lanes.push({
       component: asComponent(Transform),
-      rest: { x, y, rotation, scale },
+      // A view without a per-axis factor rests at the neutral 1.
+      rest: { x, y, rotation, scale, scaleX: transform.scaleX ?? 1, scaleY: transform.scaleY ?? 1 },
       pose: key => transformPose(key, { x, y })
     });
   }
@@ -358,7 +361,7 @@ function exitLane(
  * @returns The offsets the key names.
  * @example
  * ```ts
- * loopTransformPose({ at: 0.5, Transform: { dx: 4, scale: 0.05 } }); // { x: 4, scale: 0.05 }
+ * loopTransformPose({ at: 0.5, Transform: { dx: 4, scaleX: 0.05 } }); // { x: 4, scaleX: 0.05 }
  * ```
  */
 function loopTransformPose(key: MotionKeyframe): KeyPose {
@@ -369,6 +372,8 @@ function loopTransformPose(key: MotionKeyframe): KeyPose {
   if (fields?.dy !== undefined) pose.y = fields.dy;
   if (fields?.rotation !== undefined) pose.rotation = fields.rotation;
   if (fields?.scale !== undefined) pose.scale = fields.scale;
+  if (fields?.scaleX !== undefined) pose.scaleX = fields.scaleX;
+  if (fields?.scaleY !== undefined) pose.scaleY = fields.scaleY;
 
   return pose;
 }

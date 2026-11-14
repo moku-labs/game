@@ -588,7 +588,7 @@ A headless test presses keys through `app.input.pressKey("Tab", { shift: true })
 
 ## Visual transform styles
 
-`offsetX`, `offsetY` (reference units), `scale` (uniform), `rotation` (radians) and `origin` (`"center"` default,
+`offsetX`, `offsetY` (reference units), `scale` (uniform), `scaleX` and `scaleY` (one axis on top of `scale`; left out they write no key, and `fit` folds into `scale` alone), `rotation` (radians) and `origin` (`"center"` default,
 `"top"`, `"topLeft"`, or `{ x, y }` in fractions of the box, any fraction: `{ x: 0.5, y: -0.5 }`
 hangs the pivot half the height above the top edge, where a popup's ropes meet) never change a
 rect. They are written

@@ -15,7 +15,7 @@ import { Exiting } from "../../world/ecs/define";
 import type { EcsApi, Entity } from "../../world/types";
 import { Parent, Transform, type TransformValue } from "../components";
 import type { Point } from "../types";
-import type { PoseReader } from "./types";
+import type { AxisPose, PoseReader } from "./types";
 
 /** How deep a parent chain is followed; deeper is treated as a loop. */
 const MAX_DEPTH = 32;
@@ -54,23 +54,57 @@ export function isLeaving(ecs: Pick<EcsApi, "get" | "has">, entity: Entity): boo
 }
 
 /**
+ * Gives a fresh pose the per-axis factors a pose that may reach the ECS carries: a key only when the factor is not 1 or
+ * the stored value already has it, so a merge never leaves a stale factor and a plain view gains no key.
+ *
+ * @param pose - The fresh pose, written in place.
+ * @param factorX - The composed X factor.
+ * @param factorY - The composed Y factor.
+ * @param keepX - Whether the stored value already has `scaleX`.
+ * @param keepY - Whether the stored value already has `scaleY`.
+ * @returns The same pose.
+ * @example
+ * ```ts
+ * withFactors({ x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }, 2, 1, false, false).scaleX; // 2
+ * ```
+ */
+function withFactors(
+  pose: TransformValue,
+  factorX: number,
+  factorY: number,
+  keepX: boolean,
+  keepY: boolean
+): TransformValue {
+  if (factorX !== 1 || keepX) pose.scaleX = factorX;
+  if (factorY !== 1 || keepY) pose.scaleY = factorY;
+
+  return pose;
+}
+
+/**
  * A fresh copy of a pose, so a caller may change what it got without touching the world.
  *
  * @param pose - The pose to copy.
- * @returns The same numbers in new objects.
+ * @returns The same numbers in new objects; a factor only where the pose has one.
  * @example
  * ```ts
  * copyPose({ x: 1, y: 2, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }).pivot.x; // 0
  * ```
  */
 function copyPose(pose: Readonly<TransformValue>): TransformValue {
-  return {
-    x: pose.x,
-    y: pose.y,
-    rotation: pose.rotation,
-    scale: pose.scale,
-    pivot: { x: pose.pivot.x, y: pose.pivot.y }
-  };
+  return withFactors(
+    {
+      x: pose.x,
+      y: pose.y,
+      rotation: pose.rotation,
+      scale: pose.scale,
+      pivot: { x: pose.pivot.x, y: pose.pivot.y }
+    },
+    pose.scaleX ?? 1,
+    pose.scaleY ?? 1,
+    pose.scaleX !== undefined,
+    pose.scaleY !== undefined
+  );
 }
 
 /**
@@ -83,13 +117,16 @@ function copyPose(pose: Readonly<TransformValue>): TransformValue {
  * ```ts
  * applyPose({ x: 10, y: 0, rotation: 0, scale: 2, pivot: { x: 5, y: 0 } }, { x: 5, y: 1 });
  * // { x: 10, y: 2 }
+ * // The same pose stretched 3 times on X: a point 4 right of the pivot lands 24 right of the position.
+ * applyPose({ x: 10, y: 0, rotation: 0, scale: 2, scaleX: 3, pivot: { x: 5, y: 0 } }, { x: 9, y: 0 });
+ * // { x: 34, y: 0 }
  * ```
  */
 export function applyPose(pose: Readonly<TransformValue>, point: Point): Point {
   const cos = Math.cos(pose.rotation);
   const sin = Math.sin(pose.rotation);
-  const dx = point.x - pose.pivot.x;
-  const dy = point.y - pose.pivot.y;
+  const dx = (point.x - pose.pivot.x) * (pose.scaleX ?? 1);
+  const dy = (point.y - pose.pivot.y) * (pose.scaleY ?? 1);
 
   return {
     x: pose.x + pose.scale * (dx * cos - dy * sin),
@@ -104,7 +141,8 @@ export function applyPose(pose: Readonly<TransformValue>, point: Point): Point {
  *
  * @param above - The parent pose.
  * @param local - The pose under it.
- * @returns The composed pose; it keeps the local pivot.
+ * @returns The composed pose; it keeps the local pivot. The factors multiply per axis; a key is there only when the
+ *   product is not 1 or `local` has it.
  * @example
  * ```ts
  * poseUnder(
@@ -119,19 +157,26 @@ export function poseUnder(
 ): TransformValue {
   const landed = applyPose(above, local);
 
-  return {
-    x: landed.x,
-    y: landed.y,
-    rotation: local.rotation + above.rotation,
-    scale: local.scale * above.scale,
-    pivot: { x: local.pivot.x, y: local.pivot.y }
-  };
+  return withFactors(
+    {
+      x: landed.x,
+      y: landed.y,
+      rotation: local.rotation + above.rotation,
+      scale: local.scale * above.scale,
+      pivot: { x: local.pivot.x, y: local.pivot.y }
+    },
+    (local.scaleX ?? 1) * (above.scaleX ?? 1),
+    (local.scaleY ?? 1) * (above.scaleY ?? 1),
+    local.scaleX !== undefined,
+    local.scaleY !== undefined
+  );
 }
 
 /**
  * Where an entity really is, written into the caller's pose: its `Transform` composed through the `Parent` chain,
  * every pivot on the way applied, the numbers of `rootPoseOf` (the same steps in the same order). The answer keeps the
- * entity's own pivot. Allocates nothing: a reader that asks every frame passes the same object.
+ * entity's own pivot. Allocates nothing: a reader that asks every frame passes the same object. Both per-axis factors
+ * are written on every call, 1 for an entity without them, so a reused pose never keeps the factor of the entity before.
  *
  * @param ecs - The world read, `world.ecs`.
  * @param entity - The entity to place.
@@ -141,23 +186,28 @@ export function poseUnder(
  * @example
  * ```ts
  * // `effects` follows a host every frame: the slot sits at (40, 60) scaled 0.5, the host at (100, 200) inside it.
- * const pose = { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } };
+ * const pose = { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } };
  * rootPoseInto(ctx.require(worldPlugin).ecs, host, pose);
- * // pose is { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { x: 0, y: 0 } }
+ * // pose is { x: 90, y: 160, rotation: 0, scale: 0.5, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } }
  * ```
  */
 export function rootPoseInto(
   ecs: PoseReader,
   entity: Entity,
-  out: TransformValue,
+  out: AxisPose,
   own?: Readonly<TransformValue>
-): TransformValue {
+): AxisPose {
   const start = own ?? ecs.get(entity, Transform) ?? Transform.defaults;
 
   out.x = start.x;
   out.y = start.y;
   out.rotation = start.rotation;
   out.scale = start.scale;
+  // `in`, not `?? 1` on the load: a plain and a stretched Transform are two shapes, and a double loaded from one or
+  // `undefined` from the other meets in a tagged value, which boxes (one allocation per read). Inside the branch the load
+  // sees one shape and stays a raw double.
+  out.scaleX = "scaleX" in start ? (start.scaleX ?? 1) : 1;
+  out.scaleY = "scaleY" in start ? (start.scaleY ?? 1) : 1;
   out.pivot.x = start.pivot.x;
   out.pivot.y = start.pivot.y;
 
@@ -172,18 +222,33 @@ export function rootPoseInto(
     const above = ecs.get(parent, Transform) ?? Transform.defaults;
     const cos = Math.cos(above.rotation);
     const sin = Math.sin(above.rotation);
-    const dx = out.x - above.pivot.x;
-    const dy = out.y - above.pivot.y;
+    const factorX = "scaleX" in above ? (above.scaleX ?? 1) : 1;
+    const factorY = "scaleY" in above ? (above.scaleY ?? 1) : 1;
+    const dx = (out.x - above.pivot.x) * factorX;
+    const dy = (out.y - above.pivot.y) * factorY;
 
     out.x = above.x + above.scale * (dx * cos - dy * sin);
     out.y = above.y + above.scale * (dx * sin + dy * cos);
     out.rotation = out.rotation + above.rotation;
     out.scale = out.scale * above.scale;
+    out.scaleX = out.scaleX * factorX;
+    out.scaleY = out.scaleY * factorY;
     current = parent;
   }
 
   return out;
 }
+
+/** The scratch of `rootPoseOf`: one walk at a time, nothing of it leaves, so the call needs no pose of its own. */
+const walked: AxisPose = {
+  x: 0,
+  y: 0,
+  rotation: 0,
+  scale: 1,
+  scaleX: 1,
+  scaleY: 1,
+  pivot: { x: 0, y: 0 }
+};
 
 /**
  * Where an entity really is: its `Transform` composed through the `Parent` chain, every pivot on
@@ -193,7 +258,9 @@ export function rootPoseInto(
  * @param ecs - The world read, `world.ecs`.
  * @param entity - The entity to place.
  * @param own - A pose to use in place of the entity's own `Transform`, such as its rest pose.
- * @returns The pose in root space, a fresh object. An entity without a `Transform` sits at the identity pose.
+ * @returns The pose in root space, a fresh object. An entity without a `Transform` sits at the identity pose. It has
+ *   `scaleX` / `scaleY` only where the composed factor is not 1 or the entity's own pose has the key, so a plain view
+ *   gains no key when this is written back.
  * @example
  * ```ts
  * // `input` lifts a board cell out of its slot: the slot sits at (40, 60) scaled 0.5,
@@ -207,11 +274,21 @@ export function rootPoseOf(
   entity: Entity,
   own?: Readonly<TransformValue>
 ): TransformValue {
-  return rootPoseInto(
-    ecs,
-    entity,
-    { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
-    own
+  const start = own ?? ecs.get(entity, Transform);
+  const pose = rootPoseInto(ecs, entity, walked, own);
+
+  return withFactors(
+    {
+      x: pose.x,
+      y: pose.y,
+      rotation: pose.rotation,
+      scale: pose.scale,
+      pivot: { x: pose.pivot.x, y: pose.pivot.y }
+    },
+    pose.scaleX,
+    pose.scaleY,
+    start?.scaleX !== undefined,
+    start?.scaleY !== undefined
   );
 }
 
@@ -222,8 +299,8 @@ export function rootPoseOf(
  * @param ecs - The world read, `world.ecs`.
  * @param parent - The entity to hang under; `0` for none, which answers the root pose itself.
  * @param root - The pose in root space.
- * @returns The local pose. A parent collapsed to scale 0 counts as scale 1, so the answer stays
- *   finite.
+ * @returns The local pose. A parent collapsed to scale 0, or a factor of 0, counts as 1, so the answer stays finite. The
+ *   per-axis factors divide per axis; a key is there only where the result is not 1 or `root` has it.
  * @example
  * ```ts
  * // `input` drops the cell back into the slot at (40, 60) scaled 0.5, where the finger left it.
@@ -242,18 +319,26 @@ export function localPoseOf(
 
   const above = rootPoseOf(ecs, parent);
   const scale = above.scale === 0 ? 1 : above.scale;
+  const factorX = above.scaleX === undefined || above.scaleX === 0 ? 1 : above.scaleX;
+  const factorY = above.scaleY === undefined || above.scaleY === 0 ? 1 : above.scaleY;
   const cos = Math.cos(-above.rotation);
   const sin = Math.sin(-above.rotation);
   const dx = root.x - above.x;
   const dy = root.y - above.y;
 
-  return {
-    x: above.pivot.x + (dx * cos - dy * sin) / scale,
-    y: above.pivot.y + (dx * sin + dy * cos) / scale,
-    rotation: root.rotation - above.rotation,
-    scale: root.scale / scale,
-    pivot: { x: root.pivot.x, y: root.pivot.y }
-  };
+  return withFactors(
+    {
+      x: above.pivot.x + (dx * cos - dy * sin) / (scale * factorX),
+      y: above.pivot.y + (dx * sin + dy * cos) / (scale * factorY),
+      rotation: root.rotation - above.rotation,
+      scale: root.scale / scale,
+      pivot: { x: root.pivot.x, y: root.pivot.y }
+    },
+    (root.scaleX ?? 1) / factorX,
+    (root.scaleY ?? 1) / factorY,
+    root.scaleX !== undefined,
+    root.scaleY !== undefined
+  );
 }
 
 /**

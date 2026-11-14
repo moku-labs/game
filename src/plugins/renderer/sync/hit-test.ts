@@ -30,7 +30,7 @@ function takeWalk(sctx: SyncCtx): Walk {
     sctx.ctx.state.sync.hitWalks.pop() ?? {
       orders: [],
       alphas: new Float64Array(MAX_DEPTH + 1),
-      pose: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
+      pose: { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } },
       local: { x: 0, y: 0 },
       x: 0,
       y: 0,
@@ -74,16 +74,18 @@ function localPoint(sctx: SyncCtx, walk: Walk, entity: Entity): Point {
     return local;
   }
 
-  // Undo the entity's root pose: translate, unrotate, unscale, then add the pivot back.
+  // Undo the entity's root pose: translate, unrotate, unscale per axis, then add the pivot back.
   const above = rootPoseInto(sctx.ctx.deps.world.ecs, entity, walk.pose);
   const scale = above.scale === 0 ? 1 : above.scale;
+  const scaleX = above.scaleX === 0 ? scale : scale * above.scaleX;
+  const scaleY = above.scaleY === 0 ? scale : scale * above.scaleY;
   const cos = Math.cos(-above.rotation);
   const sin = Math.sin(-above.rotation);
   const dx = walk.x - above.x;
   const dy = walk.y - above.y;
 
-  local.x = above.pivot.x + (dx * cos - dy * sin) / scale;
-  local.y = above.pivot.y + (dx * sin + dy * cos) / scale;
+  local.x = above.pivot.x + (dx * cos - dy * sin) / scaleX;
+  local.y = above.pivot.y + (dx * sin + dy * cos) / scaleY;
 
   return local;
 }

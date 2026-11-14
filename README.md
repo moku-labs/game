@@ -242,6 +242,16 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 
 `log` and `env` come from [`@moku-labs/common`](https://github.com/moku-labs/common). The dependency graph and every root export are in [docs/plugins.md](./docs/plugins.md).
 
+### Scale on one axis
+
+`Transform` takes `scaleX` and `scaleY` on top of `scale`: a view is drawn `scale × scaleX` wide and `scale × scaleY` tall, and a view that sets neither is drawn as it always was. A style, a tween, a segment and a motion loop take them like `scale`. A missing factor counts as 1, so a tween of `scaleX` starts from 1.
+
+```tsx
+// A ribbon that unfurls from its left edge: it starts almost flat and a tween brings `scaleX` to 1.
+<stack key="ribbon" style={{ origin: "topLeft", scaleX: 0.01 }} />;
+view.tween(Transform, { scaleX: 1 }, { ms: 260, segments: [{ at: 0.65, to: { scaleX: 1.08 } }, { at: 1, to: { scaleX: 1 } }] });
+```
+
 ### Entry points
 
 | Import | Runs in | For |

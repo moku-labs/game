@@ -541,7 +541,7 @@ export function visualRectOf(element: Element, lookup: ElementLookup): Rect {
 }
 
 /**
- * Tells whether two transforms put a view in the same place.
+ * Tells whether two transforms put a view in the same place. A missing `scaleX` or `scaleY` counts as 1.
  *
  * @param first - One pose.
  * @param second - The other.
@@ -550,27 +550,41 @@ export function visualRectOf(element: Element, lookup: ElementLookup): Rect {
  * ```ts
  * samePose(
  *   { x: 1, y: 2, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
- *   { x: 1, y: 2, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
+ *   { x: 1, y: 2, rotation: 0, scale: 1, scaleX: 1, pivot: { x: 0, y: 0 } }
  * ); // true
+ * samePose(
+ *   { x: 1, y: 2, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
+ *   { x: 1, y: 2, rotation: 0, scale: 1, scaleX: 0.5, pivot: { x: 0, y: 0 } }
+ * ); // false
  * ```
  */
 export function samePose(
   first: Readonly<TransformValue>,
   second: Readonly<TransformValue>
 ): boolean {
+  // `in`, not `?? 1` on the load: plain and stretched poses meet here, and a double read from one shape or `undefined`
+  // from the other is boxed.
+  const firstX = "scaleX" in first ? (first.scaleX ?? 1) : 1;
+  const secondX = "scaleX" in second ? (second.scaleX ?? 1) : 1;
+  const firstY = "scaleY" in first ? (first.scaleY ?? 1) : 1;
+  const secondY = "scaleY" in second ? (second.scaleY ?? 1) : 1;
+
   return (
     first.x === second.x &&
     first.y === second.y &&
     first.rotation === second.rotation &&
     first.scale === second.scale &&
+    firstX === secondX &&
+    firstY === secondY &&
     first.pivot.x === second.pivot.x &&
     first.pivot.y === second.pivot.y
   );
 }
 
 /**
- * Where a local box of a view lands in root space: moved by the pose, scaled around its pivot.
- * A guide hole is axis-aligned, so the rotation is left out.
+ * Where a local box of a view lands in root space: moved by the pose, scaled around its pivot, per axis
+ * (`scale × scaleX` wide, `scale × scaleY` tall). A guide hole is axis-aligned, so the rotation is left out. A size is
+ * a magnitude: a view flipped by a negative factor keeps its width and starts at its left edge.
  *
  * @param pose - The root pose of the view, `rootPoseOf` of `renderer`.
  * @param local - The box in the view's local units.
@@ -579,13 +593,18 @@ export function samePose(
  * ```ts
  * drawnRect({ x: 200, y: 200, rotation: 0, scale: 0.8, pivot: { x: 250, y: 250 } },
  *   { x: 50, y: 50, w: 100, h: 100 }); // { x: 40, y: 40, w: 80, h: 80 }
+ * // A ribbon of 200 x 40 squeezed to half its width about its left edge.
+ * drawnRect({ x: 0, y: 0, rotation: 0, scale: 1, scaleX: 0.5, pivot: { x: 0, y: 0 } },
+ *   { x: 0, y: 0, w: 200, h: 40 }); // { x: 0, y: 0, w: 100, h: 40 }
  * ```
  */
 export function drawnRect(pose: Readonly<TransformValue>, local: Rect): Rect {
-  return {
-    x: pose.x + pose.scale * (local.x - pose.pivot.x),
-    y: pose.y + pose.scale * (local.y - pose.pivot.y),
-    w: local.w * pose.scale,
-    h: local.h * pose.scale
-  };
+  const factorX = pose.scale * (pose.scaleX ?? 1);
+  const factorY = pose.scale * (pose.scaleY ?? 1);
+  const w = local.w * Math.abs(factorX);
+  const h = local.h * Math.abs(factorY);
+  const left = pose.x + factorX * (local.x - pose.pivot.x);
+  const top = pose.y + factorY * (local.y - pose.pivot.y);
+
+  return { x: factorX < 0 ? left - w : left, y: factorY < 0 ? top - h : top, w, h };
 }

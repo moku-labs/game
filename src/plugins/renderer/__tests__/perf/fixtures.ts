@@ -1627,9 +1627,11 @@ export type HoverBoard = {
  * values not in insertion order, and a clipping panel of 60 rows; the layer `hud` holds 10 buttons. The frames that
  * build it have run.
  *
+ * @param stretched - True stretches every item and shadow per axis (`scaleX` 1.1, `scaleY` 0.9, F179).
  * @returns The board, its drop target and the point over it.
  */
-export async function hoverBoard(): Promise<HoverBoard> {
+export async function hoverBoard(stretched = false): Promise<HoverBoard> {
+  const factors = stretched ? { scaleX: 1.1, scaleY: 0.9 } : {};
   const mock = createMockRenderer();
   const { ecs } = mock.world;
   const owner = { kind: "plugin", name: "perf" } as const;
@@ -1651,13 +1653,13 @@ export async function hoverBoard(): Promise<HoverBoard> {
       Sprite({ texture: "slot" })
     ]);
     const item = ecs.spawn(owner, [
-      Transform(),
+      Transform(factors),
       Sprite({ texture: "item" }),
       Parent({ entity: slot })
     ]);
 
     ecs.spawn(owner, [
-      Transform({ y: 8 }),
+      Transform({ y: 8, ...factors }),
       Sprite({ texture: "shadow" }),
       Parent({ entity: item })
     ]);

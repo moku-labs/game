@@ -23,6 +23,14 @@ describe("sync hitTest", () => {
     ).toBeLessThanOrEqual(BUDGET.hitTestMiss + NOISE);
   });
 
+  it("allocates nothing for a miss over a board whose items are stretched per axis (F179)", async () => {
+    const board = await hoverBoard(true);
+
+    expect(
+      bytesPerCall(() => board.mock.api.sync.hitTest(500, 20, none), CALLS)
+    ).toBeLessThanOrEqual(BUDGET.hitTestMiss + NOISE);
+  });
+
   it("allocates nothing for a drop lookup that finds the slot under an item", async () => {
     const board = await hoverBoard();
     const isTarget = (entity: Entity): boolean => entity === board.target;

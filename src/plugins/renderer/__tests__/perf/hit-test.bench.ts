@@ -4,12 +4,19 @@ import type { Entity } from "../../../world/types";
 import { hoverBoard } from "./fixtures";
 
 const board = await hoverBoard();
+const stretched = await hoverBoard(true);
 const { hitTest } = board.mock.api.sync;
+const { hitTest: stretchedHitTest } = stretched.mock.api.sync;
 const none = (): boolean => false;
 const isTarget = (entity: Entity): boolean => entity === board.target;
 
 describe("the hover hit test over a board of 540 views", () => {
   bench("a miss: every view walked", () => void hitTest(500, 20, none), BENCH_OPTIONS);
+  bench(
+    "a miss over items stretched per axis",
+    () => void stretchedHitTest(500, 20, none),
+    BENCH_OPTIONS
+  );
   bench(
     "a drop lookup: the bottom slot under its item",
     () => void hitTest(board.drop.x, board.drop.y, isTarget),

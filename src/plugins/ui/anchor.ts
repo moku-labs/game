@@ -439,12 +439,14 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
   /**
    * Maps the union of the targets into the root coordinates of the anchor: through the root pose of
    * the entity it is drawn under (its parent, or the slot of its root), then by its parent's rect,
-   * then padded outward. A size an inward pad turns below 0 stops at 0, about the centre of the
-   * targets: the anchor stands on that point.
+   * then padded outward, each axis by its own factor (`scale × scaleX`, `scale × scaleY`). A size an
+   * inward pad turns below 0 stops at 0, about the centre of the targets: the anchor stands on that
+   * point.
    *
    * @param element - The anchor.
    * @param anchor - Its record: `screen` is read, `next` written.
-   * @returns False when the space it is drawn in is collapsed: nothing of it could be seen.
+   * @returns False when the space it is drawn in is collapsed on an axis, or flipped: nothing of it
+   *   could be seen, or no rect maps back.
    */
   function mapInto(element: Element, anchor: Anchor): boolean {
     const above = element.parent ?? state.roots.get(element.root)?.slot ?? 0;
@@ -454,13 +456,16 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
       pose.x = 0;
       pose.y = 0;
       pose.scale = 1;
+      pose.scaleX = 1;
+      pose.scaleY = 1;
       pose.pivot.x = 0;
       pose.pivot.y = 0;
     }
 
-    const scale = pose.scale;
+    const scaleX = pose.scale * pose.scaleX;
+    const scaleY = pose.scale * pose.scaleY;
 
-    if (scale <= 0) return false;
+    if (scaleX <= 0 || scaleY <= 0) return false;
 
     const parent = element.parent === undefined ? undefined : lookup(element.parent);
     // The `pad` prop, read here: a fractional number a call returns is boxed.
@@ -468,10 +473,10 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     const pad = typeof given === "number" && Number.isFinite(given) ? given : 0;
     const { screen, next } = anchor;
 
-    next.x = pose.pivot.x + (screen.x - pose.x) / scale + (parent?.rect.x ?? 0) - pad;
-    next.y = pose.pivot.y + (screen.y - pose.y) / scale + (parent?.rect.y ?? 0) - pad;
-    next.w = screen.w / scale + 2 * pad;
-    next.h = screen.h / scale + 2 * pad;
+    next.x = pose.pivot.x + (screen.x - pose.x) / scaleX + (parent?.rect.x ?? 0) - pad;
+    next.y = pose.pivot.y + (screen.y - pose.y) / scaleY + (parent?.rect.y ?? 0) - pad;
+    next.w = screen.w / scaleX + 2 * pad;
+    next.h = screen.h / scaleY + 2 * pad;
 
     // An inward pad past half the targets: the size stops at 0 and keeps the centre.
     if (next.w < 0) {
@@ -835,6 +840,14 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
     pose.y = rest.y;
     pose.rotation = rest.rotation;
     pose.scale = rest.scale;
+
+    // A factor is copied when either side has the key, so a rest without one clears a stale stretch to 1. `in`, not
+    // `?? 1` on the load: the two shapes meet here and a double read from one or `undefined` from the other is boxed.
+    if ("scaleX" in rest || "scaleX" in pose)
+      pose.scaleX = "scaleX" in rest ? (rest.scaleX ?? 1) : 1;
+    if ("scaleY" in rest || "scaleY" in pose)
+      pose.scaleY = "scaleY" in rest ? (rest.scaleY ?? 1) : 1;
+
     ecs.set(element.entity, Transform, NO_PATCH);
   }
 

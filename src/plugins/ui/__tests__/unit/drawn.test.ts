@@ -6,6 +6,7 @@ import {
   Transform,
   type TransformValue
 } from "../../../renderer/components";
+import type { AxisPose } from "../../../renderer/sync/types";
 import { Exiting } from "../../../world/ecs/define";
 import type { AnchorTarget } from "../../../world/projection/types";
 import type { AnyComponentType, Entity } from "../../../world/types";
@@ -31,8 +32,8 @@ type World = {
  * @param patch - What differs from the identity.
  * @returns The pose.
  */
-function pose(patch: Partial<TransformValue>): TransformValue {
-  return { ...Transform.defaults, pivot: { x: 0, y: 0 }, ...patch };
+function pose(patch: Partial<TransformValue>): AxisPose {
+  return { ...Transform.defaults, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 }, ...patch };
 }
 
 /**
@@ -307,6 +308,27 @@ describe("drawnInto", () => {
     expect(drawn(underCollapsed, 2)).toBeUndefined();
   });
 
+  it("answers nothing for an element squeezed to 0 on one axis, its own or a parent's, and shows one at 0.01", () => {
+    // Bug caught: only `scale <= 0` counts as collapsed, so an element popping in on scaleX 0 is found as a line and a
+    // guide on it ends its grace, where the anchor resolver (mapInto) already treats the same pose as collapsed.
+    const flatX = panelWorld();
+    const flatY = panelWorld();
+    const underFlat = panelWorld();
+    const thin = panelWorld();
+
+    put(flatX, 2, { Transform: pose({ x: 70, y: 50, scaleX: 0, pivot: { x: 50, y: 20 } }) });
+    put(flatY, 2, { Transform: pose({ x: 70, y: 50, scaleY: 0, pivot: { x: 50, y: 20 } }) });
+    put(underFlat, 1, {
+      Transform: pose({ x: 300, y: 350, scaleX: 0, pivot: { x: 200, y: 150 } })
+    });
+    put(thin, 2, { Transform: pose({ x: 70, y: 50, scaleX: 0.01, pivot: { x: 50, y: 20 } }) });
+
+    expect(drawn(flatX, 2)).toBeUndefined();
+    expect(drawn(flatY, 2)).toBeUndefined();
+    expect(drawn(underFlat, 2)).toBeUndefined();
+    expect(drawn(thin, 2)).toBeDefined();
+  });
+
   it("answers nothing for a world sprite of no width or no height: it draws at its texture's size", () => {
     // Bug caught: a sprite whose component says 0 on one axis is taken as a point or a line, while
     // the renderer draws it at the texture's size there, so the anchor sits off what is drawn.
@@ -356,5 +378,50 @@ describe("targetsInto", () => {
     expect(spans(world, [play, dot])).toEqual({ x: 120, y: 230, w: 490, h: 680 });
     expect(spans(world, [gone, dot])).toEqual({ x: 600, y: 900, w: 10, h: 10 });
     expect(spans(world, [gone])).toBeUndefined();
+  });
+});
+
+describe("a target stretched on one axis (F179)", () => {
+  // Bug: the resolver scales the box by the uniform scale alone, so an anchor glued to the ribbon misses its edge.
+  it("is drawn at its stretched width, about its pivot, under a stretched parent", () => {
+    const world = emptyWorld();
+
+    put(world, 3, { Transform: pose({ x: 100, y: 50, scaleY: 0.5 }) });
+    put(world, 4, {
+      Transform: pose({ x: 100, y: 100, scaleX: 2, pivot: { x: 25, y: 0 } }),
+      Shape: { w: 50, h: 20, alpha: 1 },
+      Parent: { entity: 3 }
+    });
+    world.keys.set("hud/ribbon", 4);
+
+    // The ribbon's 50 x 20 box, stretched to 100 about x 25, under a parent that halves Y.
+    expect(spans(world, { projection: "hud", key: "ribbon" })).toEqual({
+      x: 150,
+      y: 100,
+      w: 100,
+      h: 10
+    });
+  });
+});
+
+describe("a target flipped by a negative factor (F179)", () => {
+  // Bug: the width of a mirrored view comes out negative, so the "turned inside out" check hides a view that is on
+  // the screen, and an anchor or a guide on it vanishes.
+  it("is still shown, as wide as unflipped and starting at its left edge", () => {
+    const world = emptyWorld();
+
+    // A 50 x 20 box at (100, 40) about its own origin, mirrored on X: it covers x 50..100, not 100..150.
+    put(world, 4, {
+      Transform: pose({ x: 100, y: 40, scaleX: -1 }),
+      Shape: { w: 50, h: 20, alpha: 1 }
+    });
+    world.keys.set("hud/flag", 4);
+
+    expect(spans(world, { projection: "hud", key: "flag" })).toEqual({
+      x: 50,
+      y: 40,
+      w: 50,
+      h: 20
+    });
   });
 });

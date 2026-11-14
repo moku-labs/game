@@ -465,7 +465,7 @@ function createGuide(payload: Json | undefined, veil: Veil): Guide {
     screen: emptyRect(),
     scratch: {
       part: emptyRect(),
-      pose: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
+      pose: { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } }
     },
     locked: "none",
     found: false,

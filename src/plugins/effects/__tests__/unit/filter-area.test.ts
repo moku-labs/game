@@ -280,4 +280,38 @@ describe("the full-screen budget of a view with an area (F43)", () => {
 
     expect(mock.log.warn).toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
   });
+
+  // Bug (F179): the box is scaled by the uniform scale alone, so a screen-sized sprite squeezed to half its width still
+  // counts as a full-screen filter.
+  it("a full-screen sprite of scaleX 0.5 does not cover the viewport", () => {
+    const mock = started([]);
+
+    mock.spawn([...screenSprite(), Blur()]);
+    mock.spawn([
+      Sprite({ texture: "splash.ward", width: 1080, height: 1920 }),
+      Transform({ scaleX: 0.5 }),
+      Blur()
+    ]);
+    mock.frame();
+    mock.frame();
+
+    expect(mock.log.warn).not.toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
+  });
+
+  // Bug (F179): the height is scaled by the uniform scale alone, so a screen-sized sprite squeezed to half its height
+  // still counts as a full-screen filter.
+  it("a full-screen sprite of scaleY 0.5 does not cover the viewport", () => {
+    const mock = started([]);
+
+    mock.spawn([...screenSprite(), Blur()]);
+    mock.spawn([
+      Sprite({ texture: "splash.ward", width: 1080, height: 1920 }),
+      Transform({ scaleY: 0.5 }),
+      Blur()
+    ]);
+    mock.frame();
+    mock.frame();
+
+    expect(mock.log.warn).not.toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
+  });
 });

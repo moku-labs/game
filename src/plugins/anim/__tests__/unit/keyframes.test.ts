@@ -367,3 +367,50 @@ describe("anim defineMotion — definition-time errors", () => {
     );
   });
 });
+
+describe("anim defineMotion — keys of scaleX and scaleY", () => {
+  /** A ribbon that unfurls on enter and folds on exit, on X alone. */
+  const unfurl = defineMotion({
+    keyframes: {
+      open: [
+        { at: 0, Transform: { scaleX: 0.01 } },
+        { at: 0.5, ease: "linear", Transform: { scaleX: 1.08 } }
+      ],
+      fold: [{ at: 1, ease: "linear", Transform: { scaleY: 0.2 } }]
+    },
+    transition: { ms: 1000 },
+    on: { enter: "open", exit: "fold" }
+  });
+
+  // Bug: the key's scaleX is dropped, so the view starts at rest and nothing unfurls; or the rest of the lane has no
+  // scaleX and the walk cannot end at 1.
+  it("walks scaleX from the first key through 1.08 to the neutral 1, leaving scale and scaleY alone", () => {
+    const probe = setup();
+
+    unfurl.enter?.(probe.view, {});
+
+    expect(probe.mock.world.ecs.get(probe.entity, Transform)?.scaleX).toBe(0.01);
+
+    step(probe, 500);
+
+    expect(probe.mock.world.ecs.get(probe.entity, Transform)?.scaleX).toBeCloseTo(1.08);
+
+    step(probe, 500);
+
+    const end = probe.mock.world.ecs.get(probe.entity, Transform);
+
+    expect(end?.scaleX).toBe(1);
+    expect(end?.scale).toBe(1);
+    expect(Object.keys(end ?? {})).not.toContain("scaleY");
+  });
+
+  // Bug: an exit key of scaleY is lost on the way to the tween.
+  it("walks scaleY to the last key on exit", () => {
+    const probe = setup();
+
+    unfurl.exit?.(probe.view, {});
+    step(probe, 1000);
+
+    expect(probe.mock.world.ecs.get(probe.entity, Transform)?.scaleY).toBeCloseTo(0.2);
+  });
+});

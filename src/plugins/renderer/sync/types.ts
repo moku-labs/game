@@ -203,6 +203,20 @@ export type CoverFrame = { base: PixiTexture; texture: PixiTexture; users: Set<E
 export type PoseReader = Pick<EcsApi, "get">;
 
 /**
+ * The scratch pose of a hot loop: a `TransformValue` whose per-axis factors are always there. `rootPoseInto` writes both
+ * on every call (1 when the entity has none), so a reused object never carries the factor of the entity before. A pose
+ * that may reach the ECS stays a `TransformValue`, which carries a factor only when it is not 1.
+ *
+ * @example
+ * ```ts
+ * // A reader that asks every frame keeps one pose and passes it in again.
+ * const pose: AxisPose = { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } };
+ * rootPoseInto(ctx.require(worldPlugin).ecs, host, pose); // pose.scaleX is 1 for a host without the field
+ * ```
+ */
+export type AxisPose = TransformValue & { scaleX: number; scaleY: number };
+
+/**
  * One layer of the scene: its container, the sort rule its children follow, the reasons that hide the container
  * (`hidden.ts`), and whether it is the scene's HUD layer (`above: "overlays"`).
  */
@@ -1881,7 +1895,7 @@ export type HitWalk = {
    */
   alphas: Float64Array;
   /** The root pose of the entity whose box is tested, written in place. */
-  pose: TransformValue;
+  pose: AxisPose;
   /** The reference point brought into an entity's own space, written in place. */
   local: Point;
   /** The reference x. */

@@ -16,6 +16,9 @@ import type {
   TagValue
 } from "./types";
 
+// The neutral value of an optional numeric field lives beside the modules: `projection` reads it too.
+export { neutralOf, withNeutral } from "../neutral";
+
 /**
  * Declares a component type. The defaults give the TypeScript type, the JSON shape and the
  * inspector schema; the name is the storage key and the key of `motion.change`.

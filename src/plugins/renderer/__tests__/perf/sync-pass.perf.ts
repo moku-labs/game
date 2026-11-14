@@ -17,11 +17,11 @@ afterEach(() => {
  *
  * @returns The step.
  */
-async function moveStep(): Promise<() => void> {
+async function moveStep(stretched = false): Promise<() => void> {
   const { mock, entities } = await startSprites(300);
   const entity = entities[150] ?? 0;
 
-  mock.world.ecs.set(entity, Transform, { x: 1 });
+  mock.world.ecs.set(entity, Transform, stretched ? { x: 1, scaleX: 0.5, scaleY: 2 } : { x: 1 });
 
   const moved = storedTransform(mock, entity);
 
@@ -52,6 +52,10 @@ describe("the sync pass", () => {
 
   it("allocates nothing on a pass that moves one view of 300", async () => {
     expect(bytesPerCall(await moveStep())).toBeLessThanOrEqual(BUDGET.syncPassMove + NOISE);
+  });
+
+  it("allocates nothing on a pass that moves one view stretched per axis (F179)", async () => {
+    expect(bytesPerCall(await moveStep(true))).toBeLessThanOrEqual(BUDGET.syncPassMove + NOISE);
   });
 
   it("allocates nothing on a pass of an agent build that moves one view: the tree check reads no move", async () => {

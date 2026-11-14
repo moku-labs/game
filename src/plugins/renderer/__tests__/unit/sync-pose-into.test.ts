@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Parent, Transform, type TransformValue } from "../../components";
 import { rootPoseInto, rootPoseOf } from "../../sync/pose";
+import type { AxisPose } from "../../sync/types";
 import { createMockRenderer } from "../mock-renderer";
 
 // ---------------------------------------------------------------------------
@@ -15,8 +16,8 @@ const owner = { kind: "plugin", name: "test" } as const;
  *
  * @returns The pose.
  */
-function blankPose(): TransformValue {
-  return { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } };
+function blankPose(): AxisPose {
+  return { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } };
 }
 
 describe("rootPoseInto", () => {
@@ -35,7 +36,8 @@ describe("rootPoseInto", () => {
     const pivot = out.pivot;
 
     expect(rootPoseInto(ecs, c, out)).toBe(out);
-    expect(out).toEqual(rootPoseOf(ecs, c));
+    // The scratch carries both factors, written every call; the pose of `rootPoseOf` only those that are not 1.
+    expect(out).toEqual({ ...rootPoseOf(ecs, c), scaleX: 1, scaleY: 1 });
     expect(out.pivot).toBe(pivot);
   });
 
@@ -51,6 +53,8 @@ describe("rootPoseInto", () => {
       y: 60,
       rotation: 0,
       scale: 0.5,
+      scaleX: 1,
+      scaleY: 1,
       pivot: { x: 0, y: 0 }
     });
   });

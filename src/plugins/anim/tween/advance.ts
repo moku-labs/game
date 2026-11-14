@@ -4,6 +4,7 @@
  * motion and the two ways out. Deterministic: the only clock is the `delta` a caller hands in.
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
+import { neutralOf } from "../../world/ecs/define";
 import type { AnyComponent } from "../../world/ecs/types";
 import type { Entity, TrackOptions, TrackSegment } from "../../world/types";
 import { Animation, countPlaying } from "../components";
@@ -146,7 +147,11 @@ function beginTrack(actx: AnimCtx, track: Track, stored: Readonly<Record<string,
 
     const base = actx.state.bases.get(key);
     const current = stored[field];
-    const read = typeof current === "number" ? current : (track.targets[slot] ?? 0);
+    // A field the value lacks starts from its neutral (`scaleX` is 1), else from the target: no jump.
+    const read =
+      typeof current === "number"
+        ? current
+        : (neutralOf(track.component, field) ?? track.targets[slot] ?? 0);
 
     // Only an offset stands between the field and its base; without one the field is read.
     if (base !== undefined && actx.state.offsets.has(key)) {
