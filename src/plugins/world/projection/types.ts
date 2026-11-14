@@ -109,15 +109,20 @@ export type MotionCause = "mount" | "change" | "discard";
 export type ReducedMotion = "cut" | "keep";
 
 /**
- * Only the numeric fields of a component value: what a tween can interpolate.
+ * Only the numeric fields of a component value: what a tween can interpolate. An optional number counts too, and its
+ * entry is a plain required `number`, so a tween names it with a number and never with `undefined`.
  *
  * @example
  * ```ts
  * type Numbers = NumericFields<{ x: number; texture: string }>; // { x: number }
+ * type Stretch = NumericFields<{ x: number; scaleX?: number }>; // { x: number; scaleX: number }
  * ```
  */
 export type NumericFields<Value extends object> = {
-  [Key in keyof Value as Value[Key] extends number ? Key : never]: Value[Key];
+  [Key in keyof Value as Exclude<Value[Key], undefined> extends number ? Key : never]-?: Exclude<
+    Value[Key],
+    undefined
+  >;
 };
 
 /**

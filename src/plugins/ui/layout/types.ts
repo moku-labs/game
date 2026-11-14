@@ -6,7 +6,7 @@ import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import type { Message } from "../../i18n/types";
-import type { TransformValue } from "../../renderer/components";
+import type { AxisPose } from "../../renderer/sync/types";
 import type { FormattedNumber, Size } from "../../text/types";
 import type { Time } from "../../time/types";
 import type { AnchorTarget, Motion, ViewHandle } from "../../world/projection/types";
@@ -96,7 +96,7 @@ export type Guide = {
   /** The viewport, read every frame. */
   screen: Rect;
   /** What the resolver writes on its way: one target's rect and its pose. */
-  scratch: { part: Rect; pose: TransformValue };
+  scratch: { part: Rect; pose: AxisPose };
   /** What `input` locks now: the window, every press, or nothing yet. */
   locked: "window" | "all" | "none";
   /** Whether a target was shown at the last placement. */

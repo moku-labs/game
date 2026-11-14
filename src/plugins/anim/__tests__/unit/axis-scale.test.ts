@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { Parent, Transform, type TransformValue } from "../../../renderer/components";
 import type { ViewHandle } from "../../../world/projection/types";
-import type { Entity } from "../../../world/types";
+import type { Entity, TrackOptions } from "../../../world/types";
 import { asComponent } from "../../components";
 import { playLoop } from "../../keyframes";
 import { localTargetOf } from "../../timeline/space";
 import { advanceTracks, beginFrame } from "../../tween/advance";
 import { createDriver } from "../../tween/driver";
-import type { TrackOptions } from "../../tween/types";
 import { createMockAnim, type MockAnim, spawnTestEntity } from "./mock-anim";
 
 // ---------------------------------------------------------------------------
@@ -61,7 +60,12 @@ function handleOver(mock: MockAnim, entity: Entity): ViewHandle<unknown> {
         to as Record<string, number>,
         { ease: "out", delayMs: 0, additive: false, ...options } as TrackOptions,
         NONE
-      )
+      ),
+    all: (handles: readonly { cancel(): void }[]) => ({
+      cancel: () => {
+        for (const handle of handles) handle.cancel();
+      }
+    })
   } as unknown as ViewHandle<unknown>;
 }
 
@@ -163,11 +167,11 @@ describe("a root-space target of scaleX", () => {
     const parent = spawnTestEntity(mock, [Transform({ scaleX: 2, scale: 3 })]);
     const child = spawnTestEntity(mock, [Transform(), Parent({ entity: parent })]);
 
-    expect(
-      localTargetOf(mock.world.ecs, child, asComponent(Transform), { scaleX: 1 })
-    ).toEqual({ scaleX: 0.5 });
-    expect(
-      localTargetOf(mock.world.ecs, child, asComponent(Transform), { scale: 1.5 })
-    ).toEqual({ scale: 0.5 });
+    expect(localTargetOf(mock.world.ecs, child, asComponent(Transform), { scaleX: 1 })).toEqual({
+      scaleX: 0.5
+    });
+    expect(localTargetOf(mock.world.ecs, child, asComponent(Transform), { scale: 1.5 })).toEqual({
+      scale: 0.5
+    });
   });
 });

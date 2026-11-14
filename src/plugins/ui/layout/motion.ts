@@ -52,7 +52,7 @@ function pivotOf(origin: Origin | undefined, width: number, height: number): Poi
  *
  * @param rect - The rect of the element in root coordinates.
  * @param parent - The rect of its parent, or nothing for a root element.
- * @param style - The resolved style, for `origin`, `offsetX`, `offsetY`, `scale` and `rotation`.
+ * @param style - The resolved style, for `origin`, `offsetX`, `offsetY`, `scale`, `scaleX`, `scaleY` and `rotation`.
  * @param fit - The element's own fit scale, 1 without `fit: "contain"`.
  * @returns The rest transform.
  * @example
@@ -61,6 +61,8 @@ function pivotOf(origin: Origin | undefined, width: number, height: number): Poi
  * // { x: 45, y: 85, rotation: 0, scale: 1, pivot: { x: 5, y: 5 } }
  * restTransform({ x: 0, y: 0, w: 200, h: 80 }, undefined, { rotation: -0.026, origin: "top" });
  * // { x: 100, y: 0, rotation: -0.026, scale: 1, pivot: { x: 100, y: 0 } }
+ * restTransform({ x: 0, y: 0, w: 200, h: 80 }, undefined, { scaleX: 0.5, origin: "topLeft" });
+ * // { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 0.5, pivot: { x: 0, y: 0 } }
  * ```
  */
 export function restTransform(
@@ -73,13 +75,20 @@ export function restTransform(
   const centre = { x: rect.w / 2, y: rect.h / 2 };
   const local = { x: rect.x - (parent?.x ?? 0), y: rect.y - (parent?.y ?? 0) };
 
-  return {
+  const rest: TransformValue = {
     x: local.x + centre.x + fit * (pivot.x + (style.offsetX ?? 0) - centre.x),
     y: local.y + centre.y + fit * (pivot.y + (style.offsetY ?? 0) - centre.y),
     rotation: style.rotation ?? 0,
     scale: fit * (style.scale ?? 1),
     pivot
   };
+
+  // A per-axis factor is the style's alone (`fit` is folded into `scale`); a style without one writes no key, and a
+  // plain element's pose keeps the shape it always had.
+  if (style.scaleX !== undefined) rest.scaleX = style.scaleX;
+  if (style.scaleY !== undefined) rest.scaleY = style.scaleY;
+
+  return rest;
 }
 
 /**

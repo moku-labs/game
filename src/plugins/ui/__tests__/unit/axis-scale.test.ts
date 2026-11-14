@@ -67,3 +67,15 @@ describe("drawnRect, per axis", () => {
     ).toEqual({ x: -100, y: 0, w: 400, h: 40 });
   });
 });
+
+describe("drawnRect, flipped", () => {
+  // Bug: a mirrored view gets a negative width, so a guide hole or a locate rect is turned inside out.
+  it("keeps the size positive and starts at the left edge of a view mirrored on X", () => {
+    expect(drawnRect(pose({ x: 200, scaleX: -0.5 }), RECT)).toEqual({
+      x: 100,
+      y: 0,
+      w: 100,
+      h: 40
+    });
+  });
+});

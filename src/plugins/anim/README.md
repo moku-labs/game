@@ -133,10 +133,11 @@ const swing = defineMotion({
 });
 ```
 
-- A key (`Anim.MotionKeyframe`): `at` 0..1, `ease?`, `Transform?: { dx, dy, rotation, scale }`,
+- A key (`Anim.MotionKeyframe`): `at` 0..1, `ease?`, `Transform?: { dx, dy, rotation, scale, scaleX, scaleY }`,
   `Shape | Sprite | NineSlice?: { alpha }`. `dx`/`dy` are offsets from the rest pose in reference
-  units; rotation (radians), scale and alpha are absolute. A field a key leaves out holds the
-  previous key's value.
+  units; rotation (radians), scale, `scaleX`, `scaleY` and alpha are absolute. A field a key leaves out holds the
+  previous key's value. A view that has no `scaleX` or `scaleY` rests at 1, so a tween of one starts
+  from 1; in a loop `scaleX: 0.05` is an offset like `scale` and peaks a plain view at 1.05.
 - `transition.ms` is the whole track. Each segment eases by the key it ends on, default `"inOut"`;
   `transition.ease` does not apply to a track.
 - Enter: the view is set to the first key (held until its `at`) and walks the keys to the rest pose
@@ -369,7 +370,7 @@ app.anim.play(deliverFly, {
 ```
 
 - `space: "local"` is the default: the fields are written into the `Transform` as they are.
-- `space: "root"`: the `x`, `y`, `rotation` and `scale` of a `Transform` are a root pose. When the
+- `space: "root"`: the `x`, `y`, `rotation`, `scale`, `scaleX` and `scaleY` of a `Transform` are a root pose (`scale` is divided by the parents' uniform scale, `scaleX` and `scaleY` by their per-axis factors). When the
   track starts, or when a finished timeline writes a step that never started, they are turned into
   the space of the target's `Parent` with `localPoseOf` of `renderer`. The target of every keyframe
   segment is turned the same way.

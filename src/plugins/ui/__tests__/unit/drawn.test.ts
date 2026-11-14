@@ -382,3 +382,25 @@ describe("a target stretched on one axis (F179)", () => {
     });
   });
 });
+
+describe("a target flipped by a negative factor (F179)", () => {
+  // Bug: the width of a mirrored view comes out negative, so the "turned inside out" check hides a view that is on
+  // the screen, and an anchor or a guide on it vanishes.
+  it("is still shown, as wide as unflipped and starting at its left edge", () => {
+    const world = emptyWorld();
+
+    // A 50 x 20 box at (100, 40) about its own origin, mirrored on X: it covers x 50..100, not 100..150.
+    put(world, 4, {
+      Transform: pose({ x: 100, y: 40, scaleX: -1 }),
+      Shape: { w: 50, h: 20, alpha: 1 }
+    });
+    world.keys.set("hud/flag", 4);
+
+    expect(spans(world, { projection: "hud", key: "flag" })).toEqual({
+      x: 50,
+      y: 40,
+      w: 50,
+      h: 20
+    });
+  });
+});

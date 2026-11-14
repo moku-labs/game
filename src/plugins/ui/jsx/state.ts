@@ -136,7 +136,7 @@ export function createAnchor(): Anchor {
     screen: ownRect(0, 0, 0, 0),
     part: ownRect(0, 0, 0, 0),
     next: ownRect(0, 0, 0, 0),
-    pose: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
+    pose: { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } },
     placed: false,
     hidden: false,
     missing: 0,

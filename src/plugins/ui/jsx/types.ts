@@ -9,6 +9,7 @@ import type { Message } from "../../i18n/types";
 import type { KeyInput, RawSample } from "../../input/types";
 import type { Json } from "../../model/types";
 import type { TransformValue } from "../../renderer/components";
+import type { AxisPose } from "../../renderer/sync/types";
 import type { Time } from "../../time/types";
 import type {
   AnchorTarget,
@@ -663,7 +664,7 @@ export type Anchor = {
   screen: { x: number; y: number; w: number; h: number };
   part: { x: number; y: number; w: number; h: number };
   next: { x: number; y: number; w: number; h: number };
-  pose: TransformValue;
+  pose: AxisPose;
   placed: boolean;
   hidden: boolean;
   missing: number;

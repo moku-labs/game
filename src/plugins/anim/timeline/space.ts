@@ -11,12 +11,13 @@ import type { Entity } from "../../world/types";
 import { asComponent } from "../components";
 
 /** The fields of a `Transform` a root-space target is converted in. */
-const POSE_FIELDS = ["x", "y", "rotation", "scale"] as const;
+const POSE_FIELDS = ["x", "y", "rotation", "scale", "scaleX", "scaleY"] as const;
 
 /**
  * Turns the root-space target of a tween into the local target under the entity's parent. A field
  * the step does not name is read from where the entity stands now and is not written, so a step
- * that names only `scale` leaves `x` and `y` alone. A component other than `Transform`, and an
+ * that names only `scale` leaves `x` and `y` alone. `scale` is divided by the parents' uniform scale, `scaleX` and
+ * `scaleY` by the parents' per-axis factors. A component other than `Transform`, and an
  * entity without a parent, keep the target as it is.
  *
  * @param ecs - The world read, `world.ecs`.
@@ -37,17 +38,22 @@ export function localTargetOf(
   if (component !== asComponent(Transform) || parent === 0) return local;
 
   const now = rootPoseOf(ecs, entity);
+  const scaleX = to.scaleX ?? now.scaleX;
+  const scaleY = to.scaleY ?? now.scaleY;
+  // A factor is part of the pose only when the target or the entity has one, as the pose keys are everywhere.
   const root: TransformValue = {
     x: to.x ?? now.x,
     y: to.y ?? now.y,
     rotation: to.rotation ?? now.rotation,
     scale: to.scale ?? now.scale,
+    ...(scaleX === undefined ? {} : { scaleX }),
+    ...(scaleY === undefined ? {} : { scaleY }),
     pivot: now.pivot
   };
   const landed = localPoseOf(ecs, parent, root);
 
   for (const field of POSE_FIELDS) {
-    if (to[field] !== undefined) local[field] = landed[field];
+    if (to[field] !== undefined) local[field] = landed[field] ?? 1;
   }
 
   return local;

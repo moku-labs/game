@@ -70,3 +70,18 @@ describe("the neutral value of an optional field", () => {
     expect(viewOf(world, "a")?.handles.some(handle => handle.active())).toBe(false);
   });
 });
+
+describe("the neutral value on an instant settle", () => {
+  // Bug: `settle(entity)` in a world that is not live writes the rest values as they are, so a squeezed field the rest
+  // lacks stays squeezed.
+  it("writes a field the rest lacks home to its neutral at once", () => {
+    const world = createMockWorld();
+    const entity = mountPose(world);
+
+    world.api.ecs.setMode("paused");
+    world.api.ecs.set(entity, Pose, { scaleX: 0 });
+    world.api.projection.settle(entity);
+
+    expect(world.api.ecs.get(entity, Pose)).toEqual({ x: 0, scaleX: 1 });
+  });
+});

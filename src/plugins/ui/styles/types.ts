@@ -225,6 +225,8 @@ export type Origin = "center" | "top" | "topLeft" | { x: number; y: number };
  * const lift: TransformStyle = { offsetY: -6, scale: 1.05, origin: "center" };
  * // The title plaque of a popup, tilted by 1.5 degrees around the middle of its top edge.
  * const plaque: TransformStyle = { rotation: -0.026, origin: "top" };
+ * // A ribbon that unfurls from its left edge: it starts almost flat on X and a tween brings `scaleX` to 1.
+ * const ribbon: TransformStyle = { scaleX: 0.01, origin: "topLeft" };
  * ```
  */
 export type TransformStyle = {
@@ -234,6 +236,13 @@ export type TransformStyle = {
   offsetY?: number;
   /** Uniform scale around the origin. */
   scale?: number;
+  /**
+   * Width factor on top of `scale`, around the origin: the element is drawn `scale × scaleX` wide. Left out it is 1 and
+   * no key reaches the `Transform`. A `fit: "contain"` scale goes into `scale`, never into this.
+   */
+  scaleX?: number;
+  /** Height factor on top of `scale`, around the origin, the same way as `scaleX`. */
+  scaleY?: number;
   /** Turns the drawn element around the origin, in radians, clockwise; 0 by default. */
   rotation?: number;
   /** The point the element scales and turns around; the centre by default. */

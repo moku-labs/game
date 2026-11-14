@@ -9,6 +9,7 @@
  */
 import { NineSlice, Shape, Sprite, Transform, type TransformValue } from "../renderer/components";
 import { parentOf } from "../renderer/sync/pose";
+import type { AxisPose } from "../renderer/sync/types";
 import { Text } from "../text/components";
 import { Exiting } from "../world/ecs/define";
 import type { AnchorTarget } from "../world/projection/types";
@@ -83,14 +84,15 @@ function poseOf(reader: DrawnReader, entity: Entity): Readonly<TransformValue> |
  * Writes where an entity really is: its pose composed through every entity it is drawn under,
  * the arithmetic of `rootPoseInto`, over `upOf`. The answer keeps the entity's own pivot. Kept in
  * step with `rootPoseInto` of `renderer/sync/pose.ts`: the same composition, step by step, over the
- * parents of `ui` elements and the rest pose of an element whose `Transform` has not landed.
+ * parents of `ui` elements and the rest pose of an element whose `Transform` has not landed. Both
+ * per-axis factors are written on every call, 1 for an entity without them.
  *
  * @param reader - What the resolver reads.
  * @param entity - The entity.
  * @param out - The pose to write, its `pivot` included.
  * @returns False for a view with no `Transform`: `out` is not written.
  */
-export function drawnPoseInto(reader: DrawnReader, entity: Entity, out: TransformValue): boolean {
+export function drawnPoseInto(reader: DrawnReader, entity: Entity, out: AxisPose): boolean {
   const own = poseOf(reader, entity);
 
   if (own === undefined) return false;
@@ -99,6 +101,10 @@ export function drawnPoseInto(reader: DrawnReader, entity: Entity, out: Transfor
   out.y = own.y;
   out.rotation = own.rotation;
   out.scale = own.scale;
+  // `in`, not `?? 1` on the load: a plain and a stretched Transform meet here, and a double read from one or `undefined`
+  // from the other is boxed (one allocation per read).
+  out.scaleX = "scaleX" in own ? (own.scaleX ?? 1) : 1;
+  out.scaleY = "scaleY" in own ? (own.scaleY ?? 1) : 1;
   out.pivot.x = own.pivot.x;
   out.pivot.y = own.pivot.y;
 
@@ -113,13 +119,17 @@ export function drawnPoseInto(reader: DrawnReader, entity: Entity, out: Transfor
     const above = poseOf(reader, parent) ?? Transform.defaults;
     const cos = Math.cos(above.rotation);
     const sin = Math.sin(above.rotation);
-    const dx = out.x - above.pivot.x;
-    const dy = out.y - above.pivot.y;
+    const factorX = "scaleX" in above ? (above.scaleX ?? 1) : 1;
+    const factorY = "scaleY" in above ? (above.scaleY ?? 1) : 1;
+    const dx = (out.x - above.pivot.x) * factorX;
+    const dy = (out.y - above.pivot.y) * factorY;
 
     out.x = above.x + above.scale * (dx * cos - dy * sin);
     out.y = above.y + above.scale * (dx * sin + dy * cos);
     out.rotation += above.rotation;
     out.scale *= above.scale;
+    out.scaleX *= factorX;
+    out.scaleY *= factorY;
     current = parent;
   }
 
@@ -176,17 +186,25 @@ function visible(reader: DrawnReader, entity: Entity): boolean {
 
 /**
  * Moves a local box of an entity into root space, in place: moved by the pose, scaled around its
- * pivot, the rotation left out. The numbers stay in the rect: a fractional number handed to a call
- * is boxed.
+ * pivot per axis, the rotation left out. The numbers stay in the rect: a fractional number handed to
+ * a call is boxed. A size is a magnitude: a view flipped by a negative factor covers the same
+ * ground mirrored, so its rect is as wide as the unflipped one and starts at its left edge.
  *
  * @param pose - The root pose of the entity.
  * @param out - The box in the entity's own units, written in root space.
  */
-function toRoot(pose: Readonly<TransformValue>, out: Rect): void {
-  out.x = pose.x + pose.scale * (out.x - pose.pivot.x);
-  out.y = pose.y + pose.scale * (out.y - pose.pivot.y);
-  out.w *= pose.scale;
-  out.h *= pose.scale;
+function toRoot(pose: Readonly<AxisPose>, out: Rect): void {
+  const factorX = pose.scale * pose.scaleX;
+  const factorY = pose.scale * pose.scaleY;
+  const width = out.w * Math.abs(factorX);
+  const height = out.h * Math.abs(factorY);
+  const left = pose.x + factorX * (out.x - pose.pivot.x);
+  const top = pose.y + factorY * (out.y - pose.pivot.y);
+
+  out.x = factorX < 0 ? left - width : left;
+  out.y = factorY < 0 ? top - height : top;
+  out.w = width;
+  out.h = height;
 }
 
 /**
@@ -256,7 +274,7 @@ function ownBoxInto(reader: DrawnReader, entity: Entity, out: Rect): boolean {
 function localBoxInto(
   reader: DrawnReader,
   entity: Entity,
-  pose: Readonly<TransformValue>,
+  pose: Readonly<AxisPose>,
   out: Rect
 ): boolean {
   out.x = 0;
@@ -282,12 +300,7 @@ function localBoxInto(
  * @param pose - A pose the resolver writes on its way, kept by the caller.
  * @returns True when the target is shown and `out` holds its rect.
  */
-export function drawnInto(
-  reader: DrawnReader,
-  entity: Entity,
-  out: Rect,
-  pose: TransformValue
-): boolean {
+export function drawnInto(reader: DrawnReader, entity: Entity, out: Rect, pose: AxisPose): boolean {
   if (building(reader, entity) || !visible(reader, entity)) return false;
   // A collapsed pose draws nothing: an element entering from scale 0 is not a point yet.
   if (!drawnPoseInto(reader, entity, pose) || pose.scale <= 0) return false;
@@ -343,7 +356,7 @@ export function targetsInto(
   reader: DrawnReader,
   to: AnchorTarget | readonly AnchorTarget[],
   out: Rect,
-  scratch: { part: Rect; pose: TransformValue }
+  scratch: { part: Rect; pose: AxisPose }
 ): boolean {
   const list: readonly AnchorTarget[] = isTargetList(to) ? to : [to];
   let shown = false;
@@ -383,7 +396,7 @@ export function rectOfTargets(
   const out: Rect = { x: 0, y: 0, w: 0, h: 0 };
   const scratch = {
     part: { x: 0, y: 0, w: 0, h: 0 },
-    pose: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
+    pose: { x: 0, y: 0, rotation: 0, scale: 1, scaleX: 1, scaleY: 1, pivot: { x: 0, y: 0 } }
   };
 
   return targetsInto(readerOf(ctx), to, out, scratch) ? out : undefined;

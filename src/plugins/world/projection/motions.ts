@@ -3,6 +3,7 @@
  * of spike P5, the settle of the loose components and the convergence check.
  */
 import type { AnyComponentValue, ComponentType, Entity } from "../ecs/types";
+import { neutralOf } from "../neutral";
 import { deepEquals } from "./diff";
 import { drivenComponents, inertHandle, loopOffsets, mutedFields, startTrack } from "./driver";
 import type {
@@ -51,6 +52,64 @@ export function splitFields(value: Readonly<Record<string, unknown>>): {
   }
 
   return { numeric, other };
+}
+
+/**
+ * The rest value of a component with the neutral value of every optional field the stored value carries and the rest
+ * leaves out (`Transform`'s `scaleX`: a stored `0` is brought home to 1). The rest itself comes back when there is
+ * nothing to add, so a view that never set such a field pays no allocation.
+ *
+ * @param type - The component type, which may declare neutral values.
+ * @param rest - The rest value.
+ * @param stored - The value the entity carries now.
+ * @returns The rest value, completed with neutrals where the stored value has a field the rest lacks.
+ * @example
+ * ```ts
+ * restWithNeutrals(Transform, { x: 0 }, { x: 0, scaleX: 0 }); // { x: 0, scaleX: 1 }
+ * restWithNeutrals(Transform, { x: 0 }, { x: 5 }); // the same object as the rest
+ * ```
+ */
+function restWithNeutrals(
+  type: object,
+  rest: Readonly<Record<string, unknown>>,
+  stored: Readonly<Record<string, unknown>> | undefined
+): Readonly<Record<string, unknown>> {
+  if (stored === undefined) return rest;
+
+  let completed: Record<string, unknown> | undefined;
+
+  for (const field of Object.keys(stored)) {
+    if (field in rest) continue;
+
+    const neutral = neutralOf(type, field);
+
+    if (neutral === undefined) continue;
+
+    completed ??= { ...rest };
+    completed[field] = neutral;
+  }
+
+  return completed ?? rest;
+}
+
+/**
+ * The values that bring a rest component home: its rest value, with the neutral of an optional field the entity carries.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view to bring home.
+ * @param value - The rest value of the component, which names its type.
+ * @returns The fields to write.
+ */
+function restHome(
+  pctx: ProjectionCtx,
+  view: View,
+  value: AnyComponentValue
+): Readonly<Record<string, unknown>> {
+  return restWithNeutrals(
+    value.type,
+    value.value as Record<string, unknown>,
+    storedValue(pctx, view.entity, value.type)
+  );
 }
 
 /**
@@ -145,7 +204,13 @@ export function createViewHandle(
 
       if (target === undefined || target.value === true) return inertHandle();
 
-      const { numeric, other } = splitFields(target.value as Record<string, unknown>);
+      const { numeric, other } = splitFields(
+        restWithNeutrals(
+          target.type,
+          target.value as Record<string, unknown>,
+          storedValue(pctx, view.entity, target.type)
+        )
+      );
 
       if (Object.keys(other).length > 0) writeUnmuted(pctx, view.entity, target, other);
 
@@ -319,7 +384,15 @@ export function looseComponents(pctx: ProjectionCtx, view: View): string[] {
 
     const under = valueUnderLoop(pctx, view, value);
 
-    if (under !== undefined && !deepEquals(under, value.value)) loose.push(name);
+    if (
+      under !== undefined &&
+      !deepEquals(
+        under,
+        restWithNeutrals(value.type, value.value as Record<string, unknown>, under)
+      )
+    ) {
+      loose.push(name);
+    }
   }
 
   return loose;
@@ -439,7 +512,7 @@ export function writeRestUnderLoops(
 
     if (value === undefined || value.value === true) continue;
 
-    writeUnderLoop(pctx, view, value, value.value as Record<string, unknown>);
+    writeUnderLoop(pctx, view, value, restHome(pctx, view, value));
   }
 }
 
@@ -458,7 +531,7 @@ export function writeRestNow(pctx: ProjectionCtx, view: View, components: readon
 
     if (value === undefined || value.value === true) continue;
 
-    writeUnmuted(pctx, view.entity, value, value.value as Record<string, unknown>);
+    writeUnmuted(pctx, view.entity, value, restHome(pctx, view, value));
   }
 }
 
@@ -551,7 +624,9 @@ function offRestFields(
 
   const muted = mutedFields(pctx, view.entity, name);
 
-  for (const [field, entry] of Object.entries(value.value as Record<string, unknown>)) {
+  const rest = restWithNeutrals(value.type, value.value as Record<string, unknown>, under);
+
+  for (const [field, entry] of Object.entries(rest)) {
     if (!muted.has(field) && !atRest(under[field], entry)) patch[field] = entry;
   }
 
