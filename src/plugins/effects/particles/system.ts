@@ -11,6 +11,7 @@
 import { isDev } from "../../flow/doors/dev";
 import { Transform, type TransformValue } from "../../renderer/components";
 import { rootPoseInto } from "../../renderer/sync/pose";
+import type { AxisPose } from "../../renderer/sync/types";
 import type { PixiModule, PixiTexture, Point } from "../../renderer/types";
 import { system } from "../../world/ecs/define";
 import type { AnySystem, EcsApi, Entity } from "../../world/types";
@@ -25,7 +26,15 @@ import type { BakedEmitter, EmitterInstance, EmitterValue, StepTime } from "./ty
 const STILL: Readonly<Point> = Object.freeze({ x: 0, y: 0 });
 
 /** The host's root pose of the emitter being run: one object for the module, written in place every frame. */
-const POSE: TransformValue = { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } };
+const POSE: AxisPose = {
+  x: 0,
+  y: 0,
+  rotation: 0,
+  scale: 1,
+  scaleX: 1,
+  scaleY: 1,
+  pivot: { x: 0, y: 0 }
+};
 
 /** Where a world-space stream emits from this frame, written in place; the step reads it at once and keeps nothing. */
 const OFFSET: Point = { x: 0, y: 0 };

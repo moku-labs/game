@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { component, Exiting, Layer, mut, Order, resource, system, tag } from "../../ecs/define";
+import {
+  component,
+  Exiting,
+  Layer,
+  mut,
+  neutralOf,
+  Order,
+  resource,
+  system,
+  tag,
+  withNeutral
+} from "../../ecs/define";
 import { createMockWorld } from "./mock-world";
 
 const Item = component("Item", { kind: "", level: 1 });
@@ -67,5 +78,18 @@ describe("ecs/define", () => {
     expect(() => world.api.ecs.spawn(owner, [other()])).toThrow(
       '[game] Component "Item" is defined twice.\n  Use one component() call and import it.'
     );
+  });
+
+  // Bug: the neutral of one field answers for every field, or leaks into the stored value and the snapshot.
+  it("declares the neutral value of one optional field and leaves the type's own keys alone", () => {
+    const Pose = withNeutral(component<{ x: number; scaleX?: number }>("NeutralPose", { x: 0 }), {
+      scaleX: 1
+    });
+
+    expect(neutralOf(Pose, "scaleX")).toBe(1);
+    expect(neutralOf(Pose, "x")).toBeUndefined();
+    expect(neutralOf(Item, "level")).toBeUndefined();
+    expect(Object.keys(Pose)).toEqual(Object.keys(Item));
+    expect(Pose().value).toEqual({ x: 0 });
   });
 });

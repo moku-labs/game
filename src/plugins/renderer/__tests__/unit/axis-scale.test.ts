@@ -36,7 +36,9 @@ async function started(): Promise<MockRenderer> {
  * Spawns a sprite view, syncs it and answers the scale Pixi holds for it.
  *
  * @param transform - Its Transform.
- * @param sprite - Its sprite size; 0 keeps the texture's 64.
+ * @param sprite - Its sprite size; left out keeps the texture's 64.
+ * @param sprite.width - The width.
+ * @param sprite.height - The height.
  * @returns The Pixi scale.
  */
 async function pixiScaleOf(
@@ -93,10 +95,7 @@ describe("pose math, per axis", () => {
   it("places a child at (10, 10) under a parent of scaleX 2 at (20, 10)", () => {
     const { world } = createMockRenderer({ dom: false });
     const parent = world.ecs.spawn(owner, [Transform({ scaleX: 2 })]);
-    const child = world.ecs.spawn(owner, [
-      Transform({ x: 10, y: 10 }),
-      Parent({ entity: parent })
-    ]);
+    const child = world.ecs.spawn(owner, [Transform({ x: 10, y: 10 }), Parent({ entity: parent })]);
     const pose = rootPoseOf(world.ecs, child);
 
     expect(pose.x).toBeCloseTo(20);
@@ -111,10 +110,7 @@ describe("pose math, per axis", () => {
     const parent = world.ecs.spawn(owner, [
       Transform({ x: 100, y: 100, rotation: Math.PI / 2, scaleX: 2 })
     ]);
-    const child = world.ecs.spawn(owner, [
-      Transform({ x: 10, y: 10 }),
-      Parent({ entity: parent })
-    ]);
+    const child = world.ecs.spawn(owner, [Transform({ x: 10, y: 10 }), Parent({ entity: parent })]);
     const pose = rootPoseOf(world.ecs, child);
 
     // Local (10, 10) scaled to (20, 10), turned by π/2 to (-10, 20), placed at (100, 100).
@@ -126,7 +122,15 @@ describe("pose math, per axis", () => {
   it("round-trips a root pose through localPoseOf under a stretched, turned and pivoted parent", () => {
     const { world } = createMockRenderer({ dom: false });
     const parent = world.ecs.spawn(owner, [
-      Transform({ x: 40, y: 60, rotation: 0.4, scale: 0.5, scaleX: 2, scaleY: 0.8, pivot: { x: 5, y: 7 } })
+      Transform({
+        x: 40,
+        y: 60,
+        rotation: 0.4,
+        scale: 0.5,
+        scaleX: 2,
+        scaleY: 0.8,
+        pivot: { x: 5, y: 7 }
+      })
     ]);
     const child = world.ecs.spawn(owner, [
       Transform({ x: 30, y: -20, scaleX: 0.5, pivot: { x: 2, y: 3 } }),
@@ -191,10 +195,7 @@ describe("pose shape", () => {
   it("leaves the keys out of rootPoseOf and localPoseOf of a plain view", () => {
     const { world } = createMockRenderer({ dom: false });
     const slot = world.ecs.spawn(owner, [Transform({ x: 40, y: 60, scale: 0.5 })]);
-    const cell = world.ecs.spawn(owner, [
-      Transform({ x: 100, y: 200 }),
-      Parent({ entity: slot })
-    ]);
+    const cell = world.ecs.spawn(owner, [Transform({ x: 100, y: 200 }), Parent({ entity: slot })]);
     const root = rootPoseOf(world.ecs, cell);
     const local = localPoseOf(world.ecs, slot, root);
 
@@ -219,25 +220,25 @@ describe("pose shape", () => {
   });
 });
 
+/**
+ * A 100 x 20 box stretched by 2 on X about its centre at (500, 300).
+ *
+ * @returns The renderer and the box.
+ */
+async function stretchedBox(): Promise<{ mock: MockRenderer; box: Entity }> {
+  const mock = await started();
+  const box = mock.world.ecs.spawn(owner, [
+    Layer({ name: "items" }),
+    Transform({ x: 500, y: 300, scaleX: 2, pivot: { x: 50, y: 10 } }),
+    Shape({ w: 100, h: 20 })
+  ]);
+
+  mock.modules.sync.pass();
+
+  return { mock, box };
+}
+
 describe("hit test, per axis", () => {
-  /**
-   * A 100 x 20 box stretched by 2 on X about its centre at (500, 300).
-   *
-   * @returns The renderer and the box.
-   */
-  async function stretchedBox(): Promise<{ mock: MockRenderer; box: Entity }> {
-    const mock = await started();
-    const box = mock.world.ecs.spawn(owner, [
-      Layer({ name: "items" }),
-      Transform({ x: 500, y: 300, scaleX: 2, pivot: { x: 50, y: 10 } }),
-      Shape({ w: 100, h: 20 })
-    ]);
-
-    mock.modules.sync.pass();
-
-    return { mock, box };
-  }
-
   // Bug: the inverse ignores scaleX: a point the stretched box covers is a miss.
   it("finds a point 90 units left of the centre and misses one 110 units left", async () => {
     const { mock, box } = await stretchedBox();

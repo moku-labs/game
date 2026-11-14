@@ -31,7 +31,7 @@ function dragHosted(
   mock.state.phase = "dragging";
   grab(mock.input, item, { x: 90, y: 160 });
 
-  const grabbed = { ...mock.read(item, Transform) };
+  const grabbed = { ...(mock.read(item, Transform) as object) };
 
   moveHeld(mock.input, { x: 120, y: 160 });
   release(mock.input, { x: 120, y: 160 });

@@ -1130,7 +1130,8 @@ export function writeVisual(sctx: SyncCtx, entity: Entity, view: View): void {
 }
 
 /**
- * Writes the `Transform` component: `position` is where the `pivot` lands. The stretch of the
+ * Writes the `Transform` component: `position` is where the `pivot` lands, and the drawn scale is `scale` times the
+ * per-axis factor (`scaleX`, `scaleY`, 1 when absent) on each axis. The stretch of the
  * visual (a sized sprite, the 64 x 64 placeholder) is folded into the object's scale, so the
  * pivot is written in the object's own units. A wrapper carries the pose instead, and the visual
  * inside it keeps only its stretch.
@@ -1143,20 +1144,20 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
   const value = sctx.ctx.deps.world.ecs.get(entity, Transform) ?? Transform.defaults;
   const target = view.wrapper ?? view.object;
   const stretch: Point = view.drawScale;
+  // The factor is a number on both branches, so `value.scale * factor` is one multiplication whatever the shape: a
+  // factor missing on a plain Transform is `undefined` from a load of that shape, and a `?? 1` on it, or a branch that
+  // leaves the multiplication out, boxes a fractional product (one allocation per view per pass).
+  const factorX = "scaleX" in value ? (value.scaleX ?? 1) : 1;
+  const factorY = "scaleY" in value ? (value.scaleY ?? 1) : 1;
+  const scaleX = value.scale * factorX;
+  const scaleY = value.scale * factorY;
 
   // The top's own pose moves the view: a kept picture follows it (P9.4). Writes inside a wrapper change the picture.
   writePoint(sctx, entity, target.position, value.x, value.y, markMoved);
   writeRotation(sctx, entity, target, value.rotation, markMoved);
 
   if (view.wrapper === undefined) {
-    writePoint(
-      sctx,
-      entity,
-      target.scale,
-      value.scale * stretch.x,
-      value.scale * stretch.y,
-      markMoved
-    );
+    writePoint(sctx, entity, target.scale, scaleX * stretch.x, scaleY * stretch.y, markMoved);
     writePoint(
       sctx,
       entity,
@@ -1169,7 +1170,7 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
     return;
   }
 
-  writePoint(sctx, entity, target.scale, value.scale, value.scale, markMoved);
+  writePoint(sctx, entity, target.scale, scaleX, scaleY, markMoved);
   writePoint(sctx, entity, target.pivot, value.pivot.x, value.pivot.y, markMoved);
   writePoint(sctx, entity, view.object.position, 0, 0);
   writeRotation(sctx, entity, view.object, 0);

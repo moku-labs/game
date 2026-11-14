@@ -3,7 +3,7 @@
  * part), the engine's own overlay level, and the `sprite()` bundle helper. Pure: no ctx, no state, no Pixi. Made with the `component()` helper of `world`, so nothing has
  * to be registered.
  */
-import { component } from "../world/ecs/define";
+import { component, withNeutral } from "../world/ecs/define";
 import type { ComponentValue, Entity, Narrowed } from "../world/types";
 import type { Point } from "./types";
 
@@ -18,6 +18,8 @@ import type { Point } from "./types";
  * const value: TransformValue = {
  *   x: 640, y: 340, rotation: 0, scale: 1.1, pivot: { x: 100, y: 40 }
  * };
+ * // A ribbon title that unfurls: 1 % of its width, full height, around its centre.
+ * const ribbon: TransformValue = { ...value, scale: 1, scaleX: 0.01, pivot: { x: 100, y: 40 } };
  * ```
  */
 export type TransformValue = {
@@ -25,6 +27,31 @@ export type TransformValue = {
   y: number;
   rotation: number;
   scale: number;
+  /**
+   * A factor on `scale` along X alone: the view draws `scale × scaleX` wide. Absent by default and read as 1, so a view
+   * that never sets it is stored, snapshotted and described exactly as before. A tween, a motion or `toRest` of it starts
+   * from 1 while it is absent. A child under a parent that turns and stretches on one axis is not sheared: the factors
+   * compose per axis, and the rotation adds.
+   *
+   * @example
+   * ```ts
+   * // The ribbon unfurls to its full width, 260 ms after the screen opened.
+   * world.ecs.spawn(owner, [Layer({ name: "ui" }), Transform({ x: 540, y: 300, scaleX: 0.01, pivot: { x: 200, y: 40 } })]);
+   * view.tween(Transform, { scaleX: 1 }, { ms: 260 }); // drawn 400 wide at the end, 80 high throughout
+   * ```
+   */
+  scaleX?: number;
+  /**
+   * A factor on `scale` along Y alone: the view draws `scale × scaleY` high. Absent by default and read as 1, like
+   * `scaleX`.
+   *
+   * @example
+   * ```ts
+   * // A squash on landing: wider and shorter for a beat.
+   * world.ecs.set(blob, Transform, { scaleX: 1.2, scaleY: 0.8 });
+   * ```
+   */
+  scaleY?: number;
   pivot: Point;
 };
 
@@ -386,10 +413,13 @@ const spriteDefaults: SpriteValue = {
 };
 
 /**
- * Where a view sits: reference units, radians, uniform scale, and the local point it turns
- * around.
+ * Where a view sits: reference units, radians, uniform scale (with an optional factor per axis), and the local point it
+ * turns around.
  */
-export const Transform = /*#__PURE__*/ component("Transform", transformDefaults);
+export const Transform = /*#__PURE__*/ withNeutral(component("Transform", transformDefaults), {
+  scaleX: 1,
+  scaleY: 1
+});
 
 /**
  * One textured quad. `texture` is an asset key, resolved through the texture providers; a size
