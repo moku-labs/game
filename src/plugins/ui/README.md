@@ -531,6 +531,27 @@ root); a `Tree` spawned by hand without a `Layer` draws in `ui`.
 A variant may swap anything, the nine-slice included (`is: { disabled: { nineSlice: "ui.button-off" } }`);
 swapping between a rectangle and a nine-slice trades the one component for the other.
 
+## A text's size by the frame
+
+The style object of a `text` may name the text style key it draws and measures with, `text`, and a
+`when` variant may name another one. One text node then takes the letters of the frame:
+
+```tsx
+<text key="title" content="Vitrine" style={{ text: "title.19", when: { tall: { text: "title.20.5" } } }} />
+// 1080 x 1920: Text.style is "title.19"; 1080 x 2400: "title.20.5", the same entity
+```
+
+- The key a text draws with: the style a named format of its bind answers; else `text` of its style
+  for this frame; else the string `style`; else `body`. The measure still prefers a `Text.style` a
+  game's system wrote (F162), and the snapshot tree's `textStyle` and `lint()` read the same key.
+- A new viewport writes the new key into `Text.style` and lays the text out with it in the same
+  frame; the content is left alone. While the key of the frame stays the same, a style a system
+  wrote stays too (F167).
+- Layout fields sit next to it as on any style: `{ text: "rule.12.5", width: "100%" }`.
+- Only `when` takes it: an `is` variant names no key, so a press never moves the layout. `uiFor`
+  narrows `text` to the game's text style keys, `defineStyle` takes such a style, and the type is
+  `TextStyle` from `@moku-labs/game`.
+
 ## Keyboard focus
 
 For desktop development and keyboard players. `input` delivers the keys (`onKey`); `ui` owns the

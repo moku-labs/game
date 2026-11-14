@@ -14,11 +14,11 @@ import { formatBound, isTextFormat } from "../../text/format";
 import type { Size, TextBind } from "../../text/types";
 import type { AnyComponentValue } from "../../world/types";
 import type { Element } from "../jsx/types";
-import { bindOf } from "../visual";
+import { bindOf, writtenKeyOf } from "../visual";
 import type { LayoutState, TextSource } from "./types";
 
-/** What a text is drawn in when its `style` prop is a layout style instead of a style key. */
-const DEFAULT_TEXT_STYLE = "body";
+/** The text style an icon without a size is squared on. */
+const ICON_LINE_STYLE = "body";
 
 /** The glyph an icon is sized from: one line of the text style it sits in. */
 const LINE_SAMPLE = "M";
@@ -33,7 +33,7 @@ const WHOLE_EPSILON = 0.0001;
  * @returns The height of that line, as `text` measures it now.
  */
 function lineOf(source: TextSource): number {
-  return source.measure(LINE_SAMPLE, DEFAULT_TEXT_STYLE).height;
+  return source.measure(LINE_SAMPLE, ICON_LINE_STYLE).height;
 }
 
 /**
@@ -87,19 +87,8 @@ export function needsMeasure(element: Element): boolean {
 }
 
 /**
- * Reads the style key of a text or an icon out of its props.
- *
- * @param element - The element.
- * @returns The key `text.measure` takes.
- */
-function styleKeyOf(element: Element): string {
-  const { style } = element.node.props;
-
-  return typeof style === "string" ? style : DEFAULT_TEXT_STYLE;
-}
-
-/**
- * Reads what a text draws out of its props.
+ * Reads what a text draws out of its markup: the content of its props, and the key its style of
+ * this frame names (`writtenKeyOf`).
  *
  * @param element - The text element.
  * @returns The content and the style key `text.measure` takes.
@@ -109,7 +98,7 @@ export function contentOf(element: Element): {
   style: string;
 } {
   const { content } = element.node.props;
-  const styleKey = styleKeyOf(element);
+  const styleKey = writtenKeyOf(element);
 
   if (typeof content === "string") return { content, style: styleKey };
   if (typeof content === "object" && content !== null && "key" in content) {
@@ -198,7 +187,7 @@ function namedSize(
   const resolved = source.resolved(element.entity);
 
   if (resolved !== undefined) {
-    return source.measure(resolved, source.style(element.entity) ?? styleKeyOf(element), width);
+    return source.measure(resolved, source.style(element.entity) ?? writtenKeyOf(element), width);
   }
 
   const value = listedValueOf(element, bind);
@@ -226,7 +215,7 @@ function contentSize(element: Element, source: TextSource, width: number | undef
     return source.measure(written.content, written.style, width);
   }
 
-  return source.measure(content, source.style(element.entity) ?? styleKeyOf(element), width);
+  return source.measure(content, source.style(element.entity) ?? writtenKeyOf(element), width);
 }
 
 /**
@@ -245,7 +234,7 @@ function textSize(element: Element, source: TextSource, width: number | undefine
   // Per shown change of a rolling counter: a built-in bind asks nothing here and builds nothing.
   const named = isTextFormat(bind.format) ? undefined : namedSize(element, bind, source, width);
 
-  return named ?? source.measure(boundShown(element, bind, source), styleKeyOf(element), width);
+  return named ?? source.measure(boundShown(element, bind, source), writtenKeyOf(element), width);
 }
 
 /**
@@ -264,7 +253,7 @@ function naturalSize(element: Element, source: TextSource, width?: number): Size
   // An icon is one line of its style squared; a text is the string it shows.
   const size =
     element.type === "icon"
-      ? squareOf(source.measure(LINE_SAMPLE, styleKeyOf(element)))
+      ? squareOf(source.measure(LINE_SAMPLE, writtenKeyOf(element)))
       : textSize(element, source, width);
 
   // Whole units, so Yoga sizes the parent from the same length it draws the text at.

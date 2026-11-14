@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   component,
   createApp,
@@ -6,11 +6,13 @@ import {
   defineComponent,
   defineGame,
   defineMotion,
+  defineTextStyles,
   parallel,
   play,
   projection,
   Shape,
   screen,
+  Text,
   Transform,
   tween,
   type
@@ -19,7 +21,8 @@ import type { Target } from "../../../anim/types";
 import { Pointer, PointerOver, Pressed } from "../../../input/components";
 import type { Json } from "../../../model/types";
 import { Parent } from "../../../renderer/components";
-import { Scroll } from "../../components";
+import type { ViewportSize } from "../../../renderer/viewport/types";
+import { Box, Scroll } from "../../components";
 import type { ElementMotion } from "../../jsx/types";
 import { tick as stackTick, startStackApp } from "../stack-app";
 
@@ -183,6 +186,11 @@ const splashScreen = projection({
       <scroll key="credits" axis="y" style={{ width: 400, height: 200 }}>
         <column key="lines" style={{ width: 400, height: 800 }} />
       </scroll>
+      <text
+        key="splashTitle"
+        content="Vitrine"
+        style={{ text: "splash.short", when: { tall: { text: "splash.tall" } } }}
+      />
     </column>
   )
 });
@@ -275,7 +283,12 @@ const splashFeature = defineFeature("splash", {
   components: [Parallax],
   projections: [splashScreen],
   animations: [leaveSplash, revealSplash],
-  ui: [Lamp]
+  ui: [Lamp],
+  // The two sizes of the title, one per frame (F182).
+  textStyles: defineTextStyles({
+    "splash.short": { font: "ui.font-body", size: 19, fill: 0 },
+    "splash.tall": { font: "ui.font-body", size: 41, fill: 0 }
+  })
 });
 
 /** Yields the microtask queue to the flow loop, the way a test waits without a timer. */
@@ -840,6 +853,53 @@ describe("ui — the rest the world holds for an element is the one it is drawn 
 
     expect(app.ui.find("splashHint")).not.toBe(hint);
     expect(creditsOf(app).offset).toBe(0);
+
+    await app.stop();
+  });
+});
+
+/** A phone of 16:9: the title takes its base key. */
+const SHORT_PHONE: ViewportSize = {
+  width: 1080,
+  height: 1920,
+  scale: 0.36,
+  orientation: "portrait",
+  safeArea: { top: 0, right: 0, bottom: 0, left: 0 }
+};
+
+/** A phone of 20:9: the title takes the key of `when.tall`. */
+const TALL_PHONE: ViewportSize = { ...SHORT_PHONE, height: 2400 };
+
+describe("ui — a restore draws a text with the key of the frame it lands on (F182)", () => {
+  // Catches: a restored text drawn or measured with the key of the frame it was saved on.
+  it("saved on a tall frame, restored on a short one, draws and measures with the short key", async () => {
+    const app = await startSplash();
+
+    vi.spyOn(app.renderer.viewport, "size").mockReturnValue(TALL_PHONE);
+    stepFrames(app, 2);
+
+    const titleOf = () => {
+      const entity = app.ui.find("splashTitle") ?? 0;
+
+      return {
+        style: app.world.ecs.get(entity, Text)?.style,
+        h: app.world.ecs.get(entity, Box)?.h
+      };
+    };
+    const heightOf = (style: string): number =>
+      Math.ceil(app.text.measure("Vitrine", style).height - 0.0001);
+
+    expect(titleOf()).toEqual({ style: "splash.tall", h: heightOf("splash.tall") });
+
+    const bookmark = app.flow.bookmark();
+
+    await playExit(app);
+    vi.spyOn(app.renderer.viewport, "size").mockReturnValue(SHORT_PHONE);
+    await app.flow.restore(bookmark);
+    stepFrames(app, 3);
+
+    expect(app.flow.state().path).toBe("splash");
+    expect(titleOf()).toEqual({ style: "splash.short", h: heightOf("splash.short") });
 
     await app.stop();
   });

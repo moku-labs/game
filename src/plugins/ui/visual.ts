@@ -30,6 +30,40 @@ export const ANCHOR = "anchor";
 /** The three ways a sized sprite fills its box, as the `fit` prop of `image` and `icon` names them. */
 const FITS: readonly SpriteFit[] = ["contain", "cover", "fill"];
 
+/** What a text is drawn in when its markup names no text style key. */
+const DEFAULT_TEXT_STYLE = "body";
+
+/**
+ * The text style key the markup of a text names (F182): the key its resolved style took from its
+ * base or from a `when` variant of this frame, else its `style` prop while that is a key. A
+ * property read and a type check: nothing is built.
+ *
+ * @param style - The resolved style of the text.
+ * @param property - Its `style` prop.
+ * @returns The key, or `undefined` when the markup names none.
+ * @example
+ * ```ts
+ * namedKeyOf({ text: "title.20.5" }, "title.19"); // "title.20.5"
+ * ```
+ */
+export function namedKeyOf(style: ResolvedStyle, property: unknown): string | undefined {
+  if (typeof style.text === "string") return style.text;
+
+  return typeof property === "string" ? property : undefined;
+}
+
+/**
+ * The text style key a text's markup writes into `Text.style` and is measured with until the
+ * entity carries its `Text`: the key it names, else `body`. One reader for the measure, the
+ * `Text` write and `lint()`; a format of a game still answers its own style where it does.
+ *
+ * @param element - The text, its style of this frame resolved.
+ * @returns The key.
+ */
+export function writtenKeyOf(element: Element): string {
+  return namedKeyOf(element.style, element.node.props.style) ?? DEFAULT_TEXT_STYLE;
+}
+
 /**
  * Tells whether a tag draws nothing of its own, so its `Shape` is invisible unless its style fills.
  *
@@ -322,7 +356,7 @@ export function fieldsLeftAlone(
 /**
  * The visual component of an element: a sprite for an image or an icon (at alpha 0 while its style
  * states a size the layout makes 0: the renderer draws a sprite of width 0 at its texture's size,
- * so the size alone cannot say "nothing"), the text for a text (with
+ * so the size alone cannot say "nothing"), the text for a text (in the key of `writtenKeyOf`, with
  * its laid-out width as the box a `"box"` style wraps at), the nine-slice of its style (outlined
  * when the style sets `debug`, its rim alone when it sets `hollow`; the sprite and the nine-slice
  * blended by the style's `blend`), or a rounded rectangle, a triangle with `shape: "triangle"`, its
@@ -363,12 +397,10 @@ export function visualOf(element: Element): AnyComponentValue[] {
   }
 
   if (type === "text") {
-    const styleKey = typeof node.props.style === "string" ? node.props.style : "body";
-
     return [
       Text({
         content: contentOf(node.props),
-        style: styleKey,
+        style: writtenKeyOf(element),
         bind: node.props.bind as undefined,
         anchor: { x: 0, y: 0 },
         // The laid-out width, only on a text of a style with `wrap: "box"` that wrapped at its box:

@@ -432,6 +432,7 @@ export type {
 export { Box, DebugTrigger, LocalWrite, popup, ScrollState } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";
 export { defineStyle } from "./plugins/ui/styles/define";
+export type { TextStyle } from "./plugins/ui/styles/types";
 export { resolve } from "./plugins/ui/styles/resolve";
 export { defineTokens } from "./plugins/ui/styles/tokens";
 // audio: the music descriptor (sfx is anim's)

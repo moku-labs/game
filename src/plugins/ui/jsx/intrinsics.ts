@@ -8,7 +8,7 @@ import type { Json } from "../../model/types";
 import type { TextBind } from "../../text/types";
 import type { AnchorTarget } from "../../world/projection/types";
 import type { AnyComponentValue } from "../../world/types";
-import type { Style } from "../styles/types";
+import type { Style, TextStyle } from "../styles/types";
 import type {
   CommonProps as CommonProperties,
   DescriptionNode,
@@ -40,8 +40,11 @@ export type ButtonEscape = boolean & Brand<"ButtonEscape">;
 export type ButtonPoint = boolean & Brand<"ButtonPoint">;
 /** What a text draws: a plain string, or a message of the game's string table. */
 export type TextContent = (string | Message) & Brand<"TextContent">;
-/** The text style key, or a layout style when the built-in `body` is meant. */
-export type TextStyleProp = (string | Style) & Brand<"TextStyleProp">;
+/**
+ * The text style key, or a layout style that may name the key in its base and its `when`
+ * variants; one that names none draws in the built-in `body`.
+ */
+export type TextStyleProp = (string | TextStyle) & Brand<"TextStyleProp">;
 /** The asset key of an image. */
 export type ImageTexture = string & Brand<"ImageTexture">;
 /** The asset key of an icon. */
@@ -299,6 +302,8 @@ export type ButtonTagProps = CommonProperties & { escape?: ButtonEscape } & (
  * @example
  * ```ts
  * const props: TextTagProps = { content: "120", style: "digits" };
+ * // The shop title: "title.19" on a short phone, "title.20.5" on a tall one.
+ * const title: TextTagProps = { content: "Vitrine", style: { text: "title.19", when: { tall: { text: "title.20.5" } } } };
  * // The coin counter: Counter is an extra component, the text shows Math.round of its value.
  * const coins: TextTagProps = { bind: bind(Counter, "value"), components: [Counter({ value: 25 })] };
  * ```
@@ -492,8 +497,8 @@ export type Restyled<Properties, Asset extends string> = Properties extends unkn
 /**
  * The same tags with the asset keys, text style keys and message keys of one game. `uiFor`
  * carries it, so a game can name the type of its own intrinsics. The asset keys narrow `texture`,
- * `name` and the `nineSlice` of every style; the text style keys narrow the `style` of a text
- * and the `textStyle` of a field; the message keys narrow `content` and `placeholder`.
+ * `name` and the `nineSlice` of every style; the text style keys narrow the `style` of a text,
+ * the `text` of its style object and of each `when` variant, and the `textStyle` of a field; the message keys narrow `content` and `placeholder`.
  *
  * @example
  * ```ts
@@ -519,7 +524,7 @@ export type IntrinsicElementsFor<
   text: Omit<CommonProperties, "style"> & {
     content?: string | Message<StringKey>;
     bind?: TextBind;
-    style?: TextStyleKey | Style<Asset>;
+    style?: TextStyleKey | TextStyle<Asset, TextStyleKey>;
   };
 };
 

@@ -18,10 +18,12 @@ import type {
   ScrollRowHeight,
   ScrollRows,
   TextBind,
+  TextTagProps,
   UiIntrinsicElements
 } from "../../jsx/intrinsics";
 import type { DescriptionNode, Finding, UiNode } from "../../jsx/types";
 import { defineStyle } from "../../styles/define";
+import type { Style, TextStyle } from "../../styles/types";
 import type { Config, ElementChange, ElementMotion, UiApi } from "../../types";
 
 const Reward = defineComponent("Reward", {
@@ -245,6 +247,70 @@ describe("the delta 6 vocabulary", () => {
   });
 });
 
+describe("the text key of a style object (F182)", () => {
+  it("takes `text` in the base and in a `when` variant of a text's style, never in `is`", () => {
+    const title: TextTagProps = {
+      content: "Vitrine",
+      style: { text: "title.19", when: { tall: { text: "title.20.5" } } }
+    };
+    const pressed: TextTagProps = {
+      content: "Vitrine",
+      // @ts-expect-error — a press must not move the layout: `is` variants carry no key.
+      style: { is: { pressed: { text: "title.20.5" } } }
+    };
+    const kit = uiFor<"ui.coin", "title.19" | "title.20.5", "hud.coins">();
+    // @ts-expect-error — nor through uiFor.
+    const typedPressed: typeof kit.intrinsics.text.style = { is: { hover: { text: "title.19" } } };
+
+    expectTypeOf(title).not.toBeUndefined();
+    expectTypeOf(pressed).not.toBeUndefined();
+    expectTypeOf(typedPressed).not.toBeUndefined();
+  });
+
+  it("narrows the key to the game's text styles through uiFor, in the base and in each `when` variant", () => {
+    const kit = uiFor<"ui.coin", "title.19" | "title.20.5", "hud.coins">();
+    const known: typeof kit.intrinsics.text.style = {
+      text: "title.19",
+      width: "100%",
+      when: { tall: { text: "title.20.5" } }
+    };
+    // @ts-expect-error — "title.21" is not a text style key of this game.
+    const unknownTall: typeof kit.intrinsics.text.style = { when: { tall: { text: "title.21" } } };
+    // @ts-expect-error — nor in the base.
+    const unknownBase: typeof kit.intrinsics.text.style = { text: "title.21" };
+
+    expectTypeOf(known).not.toBeUndefined();
+    expectTypeOf(unknownTall).not.toBeUndefined();
+    expectTypeOf(unknownBase).not.toBeUndefined();
+  });
+
+  it("is refused on any tag but `text`", () => {
+    const kit = uiFor<"ui.coin", "title.19", "hud.coins">();
+    // @ts-expect-error — a row draws no letters.
+    const typedRow: typeof kit.intrinsics.row.style = { text: "title.19" };
+    // @ts-expect-error — nor an untyped one.
+    const row: UiIntrinsicElements["row"]["style"] = { text: "title.19" };
+    // @ts-expect-error — nor a `when` variant of a plain style.
+    const column: Style = { when: { tall: { text: "title.19" } } };
+
+    expectTypeOf(typedRow).not.toBeUndefined();
+    expectTypeOf(row).not.toBeUndefined();
+    expectTypeOf(column).not.toBeUndefined();
+  });
+
+  it("is taken by defineStyle, frozen with its literal keys, and narrowed by the kit's", () => {
+    const title = defineStyle({ text: "title.19", when: { tall: { text: "title.20.5" } } });
+
+    expectTypeOf(title.when.tall.text).toEqualTypeOf<"title.20.5">();
+
+    const kit = uiFor<"ui.coin", "title.19" | "title.20.5", "hud.coins">();
+
+    expectTypeOf(kit.defineStyle({ text: "title.19" }).text).toEqualTypeOf<"title.19">();
+    // @ts-expect-error — "title.21" is not a text style key of this game.
+    kit.defineStyle({ when: { tall: { text: "title.21" } } });
+  });
+});
+
 describe("uiFor", () => {
   it("narrows the asset and text style props of the intrinsic tags", () => {
     const kit = uiFor<"ui.coin" | "ui.panel", "digits", "hud.coins">();
@@ -255,8 +321,9 @@ describe("uiFor", () => {
     >();
     // @ts-expect-error — the nine-slice moved into the style (delta 4): a panel has no such prop.
     expectTypeOf(kit.intrinsics.panel.nineSlice).toBeString();
+    // F182: the style object of a text names the game's text style keys, in its base and in `when`.
     expectTypeOf(kit.intrinsics.text.style).toEqualTypeOf<
-      "digits" | import("../../styles/types").Style<"ui.coin" | "ui.panel"> | undefined
+      "digits" | TextStyle<"ui.coin" | "ui.panel", "digits"> | undefined
     >();
   });
 
