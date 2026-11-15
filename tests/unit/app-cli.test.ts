@@ -1963,7 +1963,12 @@ describe("--debug and --editor", () => {
       })
     };
 
-    for (const editor of ["lan:0", "lan:x", "lan:70000", "lan:"]) {
+    const top = await run(["native", "build", "android", "--debug", "--editor", "lan:65535"], root);
+
+    expect(top.seen.errors).toEqual([]);
+    expect(top.seen.natives[0]?.options.editor).toBe("192.168.1.5:65535");
+
+    for (const editor of ["lan:0", "lan:x", "lan:65536", "lan:70000", "lan:"]) {
       const { code, seen } = await run(["build", "--debug", "--editor", editor], root);
 
       expect(code, editor).toBe(1);

@@ -657,7 +657,8 @@ function appOf(
  * @param native - The native section.
  * @param where - The game folder and the home folder.
  * @param target - The target of the verb.
- * @param extras - The debug profile and the build number of this run.
+ * @param extras - The debug profile and the build number of this run; it also reads `simulator`
+ *   and `unsigned`.
  * @returns The block, empty when there is nothing to pass.
  */
 function signingOf(

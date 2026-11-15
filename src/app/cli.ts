@@ -614,7 +614,9 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
   };
 
   // `nativeDebugOf` lets a named target through on Android and iOS only.
-  if (debug.debug !== undefined && target !== undefined) {
+  const isNamedDebugApp = debug.debug !== undefined && target !== undefined;
+
+  if (isNamedDebugApp) {
     deps.ui.warn(
       "native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store."
     );
@@ -632,7 +634,9 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
   if (!(await deps.native(verb, settings, where, options))) return 1;
 
   // A failed build never reaches the install lines or the upload.
-  if (verb === "build" && target === "ios" && debug.debug !== undefined) {
+  const isIosDebugBuild = verb === "build" && target === "ios" && debug.debug !== undefined;
+
+  if (isIosDebugBuild) {
     printInstallLines(parsed, deps);
   }
 

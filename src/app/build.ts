@@ -755,7 +755,7 @@ function debugPageOf(
     level,
     build: buildIdOf(deps.now()),
     engine: engine.id,
-    editor: isTestApp ? (run.editor ?? EDITOR_OFF) : (run.editor ?? DEFAULT_EDITOR),
+    editor: run.editor ?? (isTestApp ? EDITOR_OFF : DEFAULT_EDITOR),
     app: appIdOf(settings.native, profile)
   };
 
