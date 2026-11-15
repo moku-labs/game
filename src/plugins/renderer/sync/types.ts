@@ -302,7 +302,8 @@ export type TexturesApi = {
 
   /**
    * Makes a Pixi texture from a decoded image, so `assets` never imports Pixi. Once uploaded it stays on the GPU until
-   * `destroy`: Pixi's collector leaves it alone.
+   * `destroy`: Pixi's collector leaves it alone. The renderer owns an `ImageBitmap` from here on: it closes it once
+   * Pixi has the texture on the GPU (F189), so the caller never uses it again; `destroy` closes one not uploaded yet.
    *
    * @param image - The decoded image.
    * @param options - `nine` is left, top, right and bottom in pixels; it becomes the texture's
@@ -1444,6 +1445,20 @@ export type SyncInternal = {
   uploadStep(): boolean;
 
   /**
+   * Frees the decoded images Pixi has on the GPU now (F189), after the stage pass of a drawn frame: each bitmap is
+   * closed and its source gets the 1x1 stand-in. One compare and no allocation while nothing waits.
+   */
+  releaseStep(): void;
+
+  /**
+   * How many textures hold the stand-in instead of their decoded image: after a lost device they can only come back
+   * with a page reload (F189).
+   *
+   * @returns The count of freed textures still alive.
+   */
+  freedCount(): number;
+
+  /**
    * Subscribes to the end of a warm-up run: the queue became empty (the monitor of an agent build writes the `warm`
    * event line). Emptied by `stopSync`.
    *
@@ -1646,6 +1661,21 @@ export type UploadState = {
   done: WeakSet<PixiTextureSource>;
   /** The one listener on `unload` of every source in `done`. */
   forget(source: PixiTextureSource): void;
+};
+
+/**
+ * The decoded images of `textures.create` (F189): a source made from an `ImageBitmap` waits in `pending` until Pixi
+ * has it on the GPU of the drawing renderer; then its bitmap is closed and a 1x1 stand-in takes its place, so no
+ * upload ever reads a closed bitmap (WebGPU throws on one). A freed source cannot be uploaded again: after a lost
+ * device the page reloads. Not public.
+ */
+export type ReleaseState = {
+  /** The sources whose bitmap is still open, in the order they were made. */
+  pending: PixiTextureSource[];
+  /** The sources that hold the stand-in, until they are destroyed. */
+  freed: Set<PixiTextureSource>;
+  /** The transparent 1x1 image every freed source holds; made at the first release. */
+  standIn: OffscreenCanvas | undefined;
 };
 
 /**
@@ -1997,6 +2027,8 @@ export type SyncState = {
   warm: WarmState;
   /** The texture upload queue (F60). */
   upload: UploadState;
+  /** The decoded images waiting to be freed, and how each freed texture is filled again (F189). */
+  release: ReleaseState;
   /** The class of the rim-only nine-slice (F59), made at the first hollow view over the loaded Pixi module. */
   hollowClass: HollowClass | undefined;
   /**

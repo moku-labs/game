@@ -19,6 +19,18 @@ async function tick(times = 20): Promise<void> {
 
 const owner = { kind: "plugin", name: "test" } as const;
 
+/** A 1x1 canvas, as the browser makes it. */
+class FakeCanvas {
+  /**
+   * Answers a context, as a canvas does.
+   *
+   * @returns A stand-in context.
+   */
+  public getContext(): object {
+    return {};
+  }
+}
+
 async function drawing(): Promise<MockRenderer> {
   const mock = createMockRenderer();
 
@@ -278,6 +290,74 @@ describe("host device loss", () => {
 
     expect(mock.api.host.ready()).toBe(true);
     expect(mock.pauses.at(-1)).toEqual({ action: "pop", reason: "device-lost" });
+  });
+
+  // Bug (F189): textures whose decoded image was freed are restored onto a new device as transparent pictures.
+  it.each([
+    "webgpu",
+    "webgl"
+  ] as const)("restores nothing on %s when a loss callback answers that the page leaves", async kind => {
+    const mock = createMockRenderer({ kind });
+    const heard: unknown[] = [];
+
+    await mock.start();
+    mock.modules.host.decideLoss(info => {
+      heard.push(info);
+
+      return true;
+    });
+
+    if (kind === "webgpu") {
+      mock.pixi.last().lose("unknown");
+    } else {
+      mock.pixi.last().canvas.dispatch("webglcontextlost", { preventDefault: () => undefined });
+      mock.pixi.last().canvas.dispatch("webglcontextrestored");
+    }
+
+    await tick();
+
+    expect(heard).toEqual([expect.objectContaining({ kind, textureBytes: expect.any(Number) })]);
+    expect(mock.pixi.applications).toHaveLength(1);
+    expect(mock.api.host.ready()).toBe(false);
+    expect(mock.pauses.filter(entry => entry.action === "pop")).toHaveLength(0);
+  });
+
+  // Bug (F189): the plugin root never asks, and a loss with freed textures restores blank pictures instead of a
+  // reload.
+  it("reloads the page on a loss once a texture had its decoded image freed", async () => {
+    const reload = vi.fn();
+
+    vi.stubGlobal("location", { reload });
+
+    const mock = createMockRenderer();
+
+    await mock.start();
+    mock.ctx.state.sync.release.freed.add({} as never);
+    mock.pixi.last().lose("unknown");
+    await tick();
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(mock.pixi.applications).toHaveLength(1);
+  });
+
+  // Bug (F189): the frame never calls the release step, and every decoded bitmap stays open next to its GPU copy.
+  it("frees a decoded bitmap Pixi has on the GPU after a drawn frame", async () => {
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+
+    const mock = createMockRenderer();
+
+    await mock.start();
+
+    const close = vi.fn();
+    const uid = String((mock.pixi.last().renderer as { uid?: unknown }).uid);
+    const source = { destroyed: false, resource: { close }, _gpuData: { [uid]: {} } };
+
+    mock.ctx.state.sync.release.pending.push(source as never);
+    mock.modules.demand.request();
+    mock.drawFrame();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(source.resource).toBeInstanceOf(FakeCanvas);
   });
 
   it("ignores a device that goes away while the plugin stops", async () => {

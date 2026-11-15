@@ -11,6 +11,7 @@ import { createModules } from "./api";
 import { stopDemand } from "./demand/state";
 import { stopHost } from "./host/init";
 import { stopKept } from "./kept/state";
+import { leaveAfterLoss, reportLosses } from "./loss";
 import { stopMonitor } from "./monitor/api";
 import { stopShots } from "./shots/state";
 import { stopSync } from "./sync/views";
@@ -51,7 +52,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * drawn and clears them; a drawn frame draws the probes of the warm-up onto the canvas first (F4: the
  * stage pass clears them, in the same task, so they never show), then uploads the queued texture sources (F60), then
  * the kept pictures (`kept.flush`, so the canvas stays one pass, E7), then the stage, then a shot of the frame just drawn
- * while the canvas texture holds it (`shots.after`, never of the heat map), then the pixel leg of the kept oracle;
+ * while the canvas texture holds it (`shots.after`, never of the heat map), then, when Pixi drew it, the decoded images
+ * now on the GPU are freed (`sync.releaseStep`, F189), then the pixel leg of the kept oracle;
  * `demand` settles the
  * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
  * waiting capture; last, `host` trims Pixi's texture pool when a rest or a scene change is due. The display objects
@@ -123,6 +125,8 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
       ctx.deps.time.frameDrawn();
       // A frame of probes, uploads or building work is load work, no sample of the adaptive rate.
       if (probed || uploaded || built) ctx.deps.time.frameProbed();
+      // F189: Pixi submitted the frame; the decoded images now on the GPU are freed.
+      modules.sync.releaseStep();
     }
 
     modules.kept.after();
@@ -152,6 +156,9 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
   const rendererCtx = withDeps(ctx);
   const modules = createModules(rendererCtx);
 
+  // F189: the losses a reload took away are logged once, at the next start.
+  reportLosses(rendererCtx);
+
   // A resolution applied by a frame or a restore empties the canvas: the frame is drawn.
   modules.host.onResolution(() => modules.demand.whole("resize"));
 
@@ -171,6 +178,9 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     modules.sync.forget();
     modules.shots.forget();
   });
+
+  // F189: a loss is recorded; with freed textures the page reloads instead of restoring.
+  modules.host.decideLoss(info => leaveAfterLoss(rendererCtx, info, modules.sync.freedCount()));
 
   modules.host.onRestore(rebuilt => {
     // The canvas and every kept picture came back empty: the next frame is drawn whole and takes them again.

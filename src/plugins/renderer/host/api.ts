@@ -29,6 +29,7 @@ import {
 import type {
   CanvasPassListener,
   HostDeps,
+  LossInfo,
   ResolutionListener,
   TextureUsage,
   TrimListener,
@@ -89,6 +90,10 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       state.onReady.push(fn);
     },
 
+    decideLoss: (fn: (info: LossInfo) => boolean): void => {
+      state.lossDeciders.push(fn);
+    },
+
     onRestore: (fn: (rebuilt: boolean) => void): void => {
       state.onRestore.push(fn);
     },
@@ -134,6 +139,17 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       else app.renderer.render({ container, target, clear: true });
 
       return true;
+    },
+
+    onGpu: (source: PixiTextureSource): boolean => {
+      const app = state.app;
+
+      if (!state.ready || app === undefined) return false;
+
+      // Pixi files the GPU copy of a source under the uid of the renderer that made it (8.22).
+      const slot: unknown = source._gpuData[app.renderer.uid];
+
+      return slot !== undefined && slot !== null;
     },
 
     initSource: (source: PixiTextureSource): void => {

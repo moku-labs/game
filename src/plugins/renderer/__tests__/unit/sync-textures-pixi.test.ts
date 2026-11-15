@@ -168,7 +168,10 @@ class StubBitmap {
  * @returns The context.
  */
 function readyHost(): SyncCtx {
-  return { deps: { host: { pixi: () => pixi, ready: () => true } } } as unknown as SyncCtx;
+  return {
+    ctx: { state: { sync: createSyncState({ nineSlice: false }) } },
+    deps: { host: { pixi: () => pixi, ready: () => true } }
+  } as unknown as SyncCtx;
 }
 
 describe("creating a texture with the real Pixi", () => {

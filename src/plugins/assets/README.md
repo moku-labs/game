@@ -327,6 +327,13 @@ scene (`sceneBundles`), a leaving scene or the scene being built (`sceneComing`)
 naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
 `page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
 
+**What a megabyte of the budget is (F189).** A texture costs `width × height × 4` bytes, its mip chain included
+(`mb` of the manifest): once in the decoded image until its first upload, once on the GPU after it, since `renderer`
+closes the decoded `ImageBitmap` as soon as the texture is on the GPU. The budget therefore counts a texture once,
+also on WebKit, which charges a page for both copies: before F189 every loaded texture cost twice its `mb` there
+(an open `ImageBitmap` is graphics memory of the page in WebKit, 4 bytes a pixel, measured). A lost device now reloads the page (see
+the renderer's "Decoded images"). Decoded sounds are not in the budget: see the `audio` plugin.
+
 **A drawn bundle is never evicted (F184).** Before a bundle becomes the victim the budget asks
 `renderer.sync.textures.used(keys)` with the bundle's keys: a bundle with a key a sprite or a
 nine-slice view draws now (the magenta placeholder of an unanswered key included) stays. The pass

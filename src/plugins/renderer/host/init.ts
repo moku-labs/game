@@ -321,6 +321,7 @@ export function stopHost(state: HostState): void {
   state.unsupported = undefined;
   state.onReady.length = 0;
   state.onRestore.length = 0;
+  state.lossDeciders.length = 0;
   state.onLoss.length = 0;
   state.onResolutionChange.length = 0;
   state.onTrim.length = 0;

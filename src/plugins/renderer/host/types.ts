@@ -101,6 +101,10 @@ export type HostState = {
    * replaced the old one (WebGPU), false when a WebGL context came back on the same one.
    */
   onRestore: Array<(rebuilt: boolean) => void>;
+  /** Asked at every loss whether the page leaves (F189): one that answers true stops the restore. */
+  lossDeciders: Array<(info: LossInfo) => boolean>;
+  /** True once a loss decided that the page reloads: nothing is restored any more. */
+  leaving: boolean;
   /** Run before the lost application is destroyed, while its display objects are still alive. */
   onLoss: Array<() => void>;
   cleanups: Array<() => void>;
@@ -304,6 +308,12 @@ export type HostDeps = {
 };
 
 /**
+ * What a `decideLoss` callback hears of a loss: the backend, what the browser said, and the bytes of every texture
+ * source the lost application held (art, targets and kept pictures), measured before it went. Not public.
+ */
+export type LossInfo = { kind: "webgpu" | "webgl"; reason: string; textureBytes: number };
+
+/**
  * host methods injected into `viewport`, `sync` and `monitor`, and driven by the plugin root. Not
  * public.
  */
@@ -325,6 +335,23 @@ export type HostInternal = {
    * @param fn - Called after every successful restore, told whether the application is new.
    */
   onRestore(fn: (rebuilt: boolean) => void): void;
+
+  /**
+   * Subscribes to every loss of the device, after `renderer:device-lost` went out: the callback answers whether the
+   * page leaves (it reloads), and then nothing is restored (F189).
+   *
+   * @param fn - Told what was lost and the texture bytes the lost application held; answers true when the page leaves.
+   */
+  decideLoss(fn: (info: LossInfo) => boolean): void;
+
+  /**
+   * Tells whether Pixi has a GPU texture for a source on the application that draws now: it uploaded the source, at a
+   * draw or through `initSource`. Reads Pixi's per-renderer slot of the source; allocates nothing.
+   *
+   * @param source - The source.
+   * @returns True when the source is on the GPU of the drawing renderer; false while nothing draws.
+   */
+  onGpu(source: PixiTextureSource): boolean;
 
   /**
    * Subscribes to the moment just before a lost application is destroyed. This is the last point

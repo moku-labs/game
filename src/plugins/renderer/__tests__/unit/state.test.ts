@@ -37,6 +37,8 @@ describe("renderer state", () => {
       restoring: false,
       onReady: [],
       onRestore: [],
+      lossDeciders: [],
+      leaving: false,
       onLoss: [],
       cleanups: [],
       unsupported: undefined,

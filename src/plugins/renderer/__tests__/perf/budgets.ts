@@ -172,6 +172,11 @@ export const BUDGET = {
   // Change 2026-10-22-ready-warm-hollow, F60: the upload step of a drawn frame with nothing queued. New, measured 0 B:
   // two numbers compared.
   uploadIdle: 0,
+  // F189: the release step after a drawn frame with no decoded image waiting. New: one length compared.
+  releaseIdle: 0,
+  // F189: the release step with 40 decoded images Pixi has not uploaded yet (a preloaded bundle). New: 40 slot reads,
+  // the list rewritten in place.
+  releaseWaiting: 0,
   // F59: a pass that syncs a hollow frame whose value stood (its NineSlice in the change set, nothing of it changed).
   // New, measured 0 B: the borders, the outline's shape and the clip's box of the write are written in place (before,
   // a nine-slice write made a texture answer, a borders object, a hit box, an outline shape and a clip value).
