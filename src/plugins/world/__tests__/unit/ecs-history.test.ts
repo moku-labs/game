@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createModules } from "../../api";
 import { component, mut, system, tag } from "../../ecs/define";
-import { HISTORY_FRAMES } from "../../ecs/history";
+import { HISTORY_FRAMES, SPARE_RECORDS } from "../../ecs/history";
 import type { Entity, HistoryChange, Owner } from "../../ecs/types";
 import { clearWorld, withDeps } from "../../lifecycle";
 import { BOARD, commitItems, Level, mountBoard } from "./board";
@@ -333,6 +333,45 @@ describe("the frame history", () => {
     expect(history?.slots.every(slot => slot !== undefined)).toBe(true);
     expect(history?.slots[2]?.frame).toBe(HISTORY_FRAMES + 2);
     expect(changesAt(world, HISTORY_FRAMES + 2)).toEqual([]);
+  });
+
+  // Bug (F194): every slot keeps the records of the largest frame it ever held: a window open writes thousands, and
+  // over a session the ring held up to 77 MB of spares.
+  it("lets go of a big frame's records once it left the window, down to the spare floor", () => {
+    const world = recording();
+    const moved = spawnAt(world, 0);
+
+    world.frame();
+    for (let x = 0; x < 1000; x += 1) spawnAt(world, x);
+    world.frame();
+    for (let frame = 0; frame < 2 * HISTORY_FRAMES; frame += 1) {
+      world.api.ecs.set(moved, Position, { x: frame });
+      world.frame();
+    }
+
+    const sizes = world.ctx.state.ecs.history?.slots.map(slot => slot?.changes.length ?? 0) ?? [];
+
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(SPARE_RECORDS);
+  });
+
+  // Bug: the cut throws away spares a frame of the same size, still in the window, says the board needs again.
+  it("keeps the spares of a slot the busiest frame of the window could fill", () => {
+    const world = recording();
+
+    world.frame();
+    for (let x = 0; x < 1000; x += 1) spawnAt(world, x);
+    world.frame();
+
+    const big = world.ctx.state.ecs.history?.newest ?? -1;
+
+    frames(world, HISTORY_FRAMES / 2 - 1);
+    for (let x = 0; x < 1000; x += 1) spawnAt(world, x);
+    frames(world, HISTORY_FRAMES / 2 + 1);
+
+    const reused = world.ctx.state.ecs.history?.slots[big % HISTORY_FRAMES];
+
+    expect(reused?.frame).toBe(big + HISTORY_FRAMES);
+    expect(reused?.changes.length).toBe(1000);
   });
 
   it("records nothing in a production build, and diff says it needs a dev build", () => {

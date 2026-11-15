@@ -29,6 +29,8 @@ export const BUDGET = {
   changesMarkClear: 0,
   /** F70: one recorded frame of a dev build, 20 of 100 Spots moved. Was 18 110 B: a `structuredClone` per change, `isJson` arrays and closures, a fresh slot. */
   historyFrame: 0,
+  /** F194: the same over 200 of 400 Spots, over the spare floor: the busiest-frame scan and the spare cut. New. */
+  historyBusyFrame: 0,
   /** W2: `changed()` with nothing marked, walked. Was 32 B: a new empty array per call. */
   changedIdle: 0,
   /** W4: a sweep over 300 resting views. Was 2 848 B: copies of the queue and the live views, a filtered track table, map iterators. */
