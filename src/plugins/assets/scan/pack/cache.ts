@@ -10,7 +10,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { NineSlice } from "../../types";
 import { WEBP_ALPHA_QUALITY, WEBP_QUALITY } from "./encode";
-import { BORDER, EXTRUDE, type LayoutFrame, PADDING, PAGE_SIZE } from "./layout";
+import { BORDER, EXTRUDE, type LayoutFrame, PACKER_SIZE, PADDING, PAGE_SIZE } from "./layout";
 
 /** The cache folder under the working directory. */
 export const CACHE_FOLDER = path.join("node_modules", ".cache", "moku-game-pack");
@@ -101,6 +101,7 @@ export function cacheKey(input: CacheKeyInput): string {
       sharp: input.sharp,
       packer: packerVersion(),
       page: PAGE_SIZE,
+      packerSize: PACKER_SIZE,
       border: BORDER,
       padding: PADDING,
       extrude: EXTRUDE,

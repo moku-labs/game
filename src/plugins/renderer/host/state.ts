@@ -19,7 +19,7 @@ function emptyWeakSet(): WeakSet<object> {
  * @returns The pool branch of the host state.
  */
 export function createPoolState(): PoolState {
-  return { lastDrawnAt: undefined, sceneAt: undefined, restDone: false, baseline: 0 };
+  return { lastDrawnAt: undefined, sceneAt: undefined, restDone: false, baseline: 0, held: [] };
 }
 
 /**

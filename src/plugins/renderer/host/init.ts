@@ -293,7 +293,8 @@ export function destroyApplication(state: HostState): void {
  * Undoes everything `init` created. Works on the state alone, because `onStop` has no context.
  * `ready` drops first, so a device that goes away during the teardown is ignored. The draw
  * counter, the batched text, the render-group pipe and the lazy canvas pass swap Pixi's own classes back, so the next
- * application on the page starts from them. The pool trim starts over and its listeners go; Pixi's pool itself is left.
+ * application on the page starts from them. The pool trim starts over and its listeners go, and the targets a trim
+ * still held are destroyed (a filter that still binds one warns once, at teardown); Pixi's pool itself is left.
  *
  * @param state - The host branch of the plugin state.
  */
@@ -325,7 +326,9 @@ export function stopHost(state: HostState): void {
   state.onResolutionChange.length = 0;
   state.onTrim.length = 0;
   state.onCanvasPass = undefined;
-  // The pool is module-global and another app on the page may draw: it is not cleared here.
+  // The pool is module-global and another app on the page may draw: it is not cleared here. The targets a trim held
+  // are out of the pool already (F187); nothing else destroys them.
+  for (const texture of state.pool.held) texture.destroy(true);
   state.pool = createPoolState();
   state.resolution.pending = undefined;
   state.kind = "none";

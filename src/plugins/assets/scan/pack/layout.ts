@@ -23,6 +23,16 @@ export const BORDER = 2;
  */
 export const EXTRUDE = 1;
 
+/**
+ * The size `maxrects-packer` is given (F188). It lets a bin grow to its size plus the padding, so a
+ * packer of `PAGE_SIZE` wrote 2050 px pages; one of `PAGE_SIZE - PADDING` never passes
+ * `PAGE_SIZE`, and holds a frame of up to `PAGE_SIZE - PADDING - 2 × BORDER` per side.
+ */
+export const PACKER_SIZE = PAGE_SIZE - PADDING;
+
+/** The largest side of a frame a page holds: 2042 px. */
+const ROOM = PACKER_SIZE - BORDER * 2;
+
 /** Where one texture lies on its page, in page pixels. */
 export type LayoutFrame = { key: string; x: number; y: number; width: number; height: number };
 
@@ -62,9 +72,7 @@ function packingOrder(left: Sized, right: Sized): number {
  * ```
  */
 function fitsPage(member: Sized): boolean {
-  const room = PAGE_SIZE - BORDER * 2;
-
-  return member.width <= room && member.height <= room;
+  return member.width <= ROOM && member.height <= ROOM;
 }
 
 /**
@@ -92,7 +100,7 @@ function framesOf(rects: readonly KeyedRect[]): LayoutFrame[] {
  * @returns One problem per texture that is too large.
  * @example
  * ```ts
- * unfitProblems([{ key: "ui.sky", width: 4096, height: 64 }]); // ['the texture "ui.sky" (4096×64) fits no 2048×2048 page with a 2 px border.']
+ * unfitProblems([{ key: "ui.sky", width: 4096, height: 64 }]); // ['the texture "ui.sky" (4096×64) fits no 2048×2048 page with its 2 px border and 2 px padding.']
  * ```
  */
 function unfitProblems(members: readonly Sized[]): string[] {
@@ -102,7 +110,7 @@ function unfitProblems(members: readonly Sized[]): string[] {
     .map(
       member =>
         `the texture "${member.key}" (${member.width}×${member.height}) fits no ` +
-        `${PAGE_SIZE}×${PAGE_SIZE} page with a ${BORDER} px border.`
+        `${PAGE_SIZE}×${PAGE_SIZE} page with its ${BORDER} px border and ${PADDING} px padding.`
     );
 }
 
@@ -127,7 +135,7 @@ export function layoutGroup(bundle: string, group: Group, members: readonly Size
   const problems = unfitProblems(members);
 
   // The rest goes to the packer in a fixed order, so the same members give the same layout.
-  const packer = new MaxRectsPacker<KeyedRect>(PAGE_SIZE, PAGE_SIZE, PADDING, {
+  const packer = new MaxRectsPacker<KeyedRect>(PACKER_SIZE, PACKER_SIZE, PADDING, {
     smart: true,
     pot: false,
     square: false,
