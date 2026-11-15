@@ -1,6 +1,8 @@
 import * as pixi from "pixi.js";
 import { describe, expect, it, vi } from "vitest";
 import { createHostApi } from "../../host/api";
+import { stopHost } from "../../host/init";
+import { trimOnPause } from "../../host/pool";
 import { createHostState } from "../../host/state";
 import type { HostModule, PixiModule, RendererCtx } from "../../types";
 
@@ -30,9 +32,9 @@ function uninstallNothing(): void {
 /**
  * A ready host over the real Pixi module, whose application lists the texture sources the test hands it.
  *
- * @returns The host module and the list Pixi's texture system would keep.
+ * @returns The host module, the list Pixi's texture system would keep, and the context.
  */
-function realHost(): { host: HostModule; managed: unknown[] } {
+function realHost(): { host: HostModule; managed: unknown[]; ctx: RendererCtx } {
   const state = createHostState();
   const managed: unknown[] = [];
 
@@ -49,7 +51,8 @@ function realHost(): { host: HostModule; managed: unknown[] } {
 
   return {
     host: createHostApi(ctx, { installCounting: undefined, installPasses: installNothing }),
-    managed
+    managed,
+    ctx
   };
 }
 
@@ -148,6 +151,48 @@ describe("a pooled target a shader still binds and the trim (F187)", () => {
     group.destroy();
     host.afterFrame(false);
     expect(boundSource.destroyed).toBe(true);
+  });
+});
+
+describe("the held targets, the baseline and the stop (F187)", () => {
+  it("lowers the baseline by a released target, so a pause after it trims growth smaller than that target", () => {
+    const { host, managed, ctx } = realHost();
+    const bound = take();
+    const boundSource = bound.source;
+    const group = new pixi.BindGroup({ 0: boundSource });
+
+    managed.push(boundSource);
+    pixi.TexturePool.returnTexture(bound);
+    host.trimPool("scene");
+    group.destroy();
+    host.afterFrame(true);
+    managed.length = 0;
+
+    // A smaller target than the released one grows idle in the pool: the pause gives it back.
+    const grown = pixi.TexturePool.getOptimalTexture({ width: 16, height: 16, resolution: 1 });
+    const grownSource = grown.source;
+
+    managed.push(grownSource);
+    pixi.TexturePool.returnTexture(grown);
+
+    expect(trimOnPause(ctx)).toBe(16 * 16 * 4);
+    expect(grownSource.destroyed).toBe(true);
+  });
+
+  it("destroys the targets a trim still holds when the host stops", () => {
+    const { host, ctx } = realHost();
+    const bound = take();
+    const boundSource = bound.source;
+    const group = new pixi.BindGroup({ 0: boundSource });
+
+    pixi.TexturePool.returnTexture(bound);
+    host.trimPool("scene");
+    ctx.state.host.app = undefined;
+    stopHost(ctx.state.host);
+
+    expect(boundSource.destroyed).toBe(true);
+    expect(ctx.state.host.pool.held).toEqual([]);
+    group.destroy();
   });
 });
 

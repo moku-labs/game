@@ -1,12 +1,12 @@
 /**
  * @file renderer/host — the pool trim (C14): gives back the idle render targets Pixi's global `TexturePool` keeps,
- * strictly between frames; a target a shader still binds waits for the frame that lets it go (F187). A trim runs at rest, `restMs` after a scene
- * change, and on a pause. The trim reaches the monitor of an agent build through the listeners it registers with
- * `onTrim`, so this file never imports the monitor (LEAD-FIXES-3 O24).
+ * strictly between frames. A target a shader still binds waits for the frame that lets it go (F187). A trim runs at
+ * rest, `restMs` after a scene change, and on a pause. The trim reaches the monitor of an agent build through the
+ * listeners it registers with `onTrim`, so this file never imports the monitor (LEAD-FIXES-3 O24).
  */
 import { BYTES_PER_MB, roundTo } from "../monitor/units";
 import type { PixiApplication, PixiModule, PixiTexture, PoolTrim, RendererCtx } from "../types";
-import { textureUsage } from "./readback";
+import { sourceBytes, textureUsage } from "./readback";
 import type { PoolState, TrimReason } from "./types";
 
 /**
@@ -37,20 +37,19 @@ function dueReason(
   now: number,
   drawn: boolean
 ): TrimReason | undefined {
-  if (
+  const rested =
     !drawn &&
     !pool.restDone &&
     pool.lastDrawnAt !== undefined &&
-    now - pool.lastDrawnAt >= config.restMs
-  ) {
-    return "rest";
-  }
+    now - pool.lastDrawnAt >= config.restMs;
+
+  if (rested) return "rest";
 
   return pool.sceneAt !== undefined && now - pool.sceneAt >= config.restMs ? "scene" : undefined;
 }
 
 /** The idle textures of Pixi's pool by bucket: a private field Pixi 8 keeps, read only here (F187). */
-type PoolBuckets = { _buckets?: unknown };
+type PoolBuckets = { _buckets?: Map<number, PixiTexture[]> };
 
 /**
  * Tells whether a bind group of a shader still holds a texture's source: a bind group listens to its resources'
@@ -81,7 +80,8 @@ function clearPool(pixi: PixiModule, held: PixiTexture[]): void {
     return;
   }
 
-  for (const textures of (buckets as Map<number, PixiTexture[]>).values()) {
+  // A bound texture waits in `held`; every other idle one is destroyed now.
+  for (const textures of buckets.values()) {
     for (const texture of textures) {
       if (isBound(texture)) held.push(texture);
       else texture.destroy(true);
@@ -92,12 +92,14 @@ function clearPool(pixi: PixiModule, held: PixiTexture[]): void {
 }
 
 /**
- * Destroys every held target no bind group holds any more, after the frame that let it go; the others wait. Removes
- * by swapping with the last, so the list keeps its store.
+ * Destroys every held target no bind group holds any more, after the frame that let it go; the others wait. The
+ * baseline drops by what each one held, so the growth the next trim measures is new growth only. Removes by swapping
+ * with the last, so the list keeps its store.
  *
- * @param held - The targets a trim took out of the pool while bound.
+ * @param pool - The pool branch of the host state: its held targets and its baseline.
  */
-function releaseHeld(held: PixiTexture[]): void {
+function releaseHeld(pool: PoolState): void {
+  const { held } = pool;
   let index = 0;
 
   while (index < held.length) {
@@ -108,7 +110,10 @@ function releaseHeld(held: PixiTexture[]): void {
       continue;
     }
 
-    texture?.destroy(true);
+    if (texture !== undefined) {
+      pool.baseline = Math.max(0, pool.baseline - sourceBytes(texture.source));
+      texture.destroy(true);
+    }
 
     const last = held.pop();
 
@@ -168,7 +173,9 @@ export function afterFrame(ctx: RendererCtx, drawn: boolean): void {
 
   const pool = state.pool;
 
-  if (pool.held.length > 0) releaseHeld(pool.held);
+  // The targets the last frame let go are freed first, then the frame is stamped.
+  if (pool.held.length > 0) releaseHeld(pool);
+
   const now = ctx.deps.clock.now();
 
   if (drawn) {

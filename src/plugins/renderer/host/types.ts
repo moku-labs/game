@@ -63,7 +63,10 @@ export type PoolState = {
   sceneAt: number | undefined;
   /** A trim ran (or was judged not worth it) since the last drawn frame: one per rest. */
   restDone: boolean;
-  /** Render-target bytes right after the last trim; 0 at start. Growth is measured from here. */
+  /**
+   * Render-target bytes right after the last trim, less the held targets released since; 0 at start. Growth is
+   * measured from here.
+   */
   baseline: number;
   /**
    * Idle targets a trim took out of Pixi's pool while a bind group still held them (F187): destroyed after the first
