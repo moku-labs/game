@@ -214,7 +214,7 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
  * @param scope - What `onStop` receives: the frozen config and the plugin state.
  */
 export function stopRenderer(scope: TeardownScope): void {
-  // First, while the application still lists its textures: the trail is written "closed".
+  // First: the trail is closed from its own state, before any module lets go.
   stopTrail(scope.state.trail);
   stopMonitor(scope.state.monitor);
   // After the monitor, so a captured or verified frame never outlives the app.

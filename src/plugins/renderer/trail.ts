@@ -47,11 +47,13 @@ export type TrailRecord = {
   at: number;
   /** Seconds since the page started, at the last write. */
   uptimeS: number;
+  /** Where the page stood at the last write. */
   state: TrailPageState;
   /** The flow path at the last write. */
   path: string;
   /** The last rest paths, oldest first. */
   paths: TrailPath[];
+  /** The backend that draws, `"none"` before the application is up. */
   kind: RendererKind;
   /** Megabytes of the textures Pixi manages. */
   textureMb: number;
@@ -291,6 +293,32 @@ function notePath(record: TrailRecord, path: string, now: number): boolean {
 }
 
 /**
+ * The record of a run that starts now, over the one just reported.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param document - The page's document.
+ * @returns The record, not written yet.
+ */
+function createRecord(ctx: RendererCtx, document: Document): TrailRecord {
+  const now = ctx.deps.clock.now();
+
+  return {
+    startedAt: now,
+    at: now,
+    uptimeS: uptimeOf(now),
+    state: pageStateOf(document),
+    path: pathOf(ctx),
+    paths: [],
+    kind: ctx.state.host.kind,
+    textureMb: 0,
+    heapMb: undefined,
+    fps: 0,
+    uploadFrames: 0,
+    writes: 0
+  };
+}
+
+/**
  * Starts the trail of a page: reports the run before when it was cut short, starts a new record, writes it, writes it
  * again once the application is up, then every 2 s and at each change of the page (`visibilitychange`, `pagehide`,
  * a `pageshow` from the back/forward cache). Without a document or a mount (an inert renderer) or a `localStorage` to
@@ -307,22 +335,7 @@ export function startTrail(ctx: RendererCtx): void {
 
   reportLastRun(ctx);
 
-  // The record of this run, over the one just reported.
-  const now = ctx.deps.clock.now();
-  const record: TrailRecord = {
-    startedAt: now,
-    at: now,
-    uptimeS: uptimeOf(now),
-    state: pageStateOf(document),
-    path: pathOf(ctx),
-    paths: [],
-    kind: ctx.state.host.kind,
-    textureMb: 0,
-    heapMb: undefined,
-    fps: 0,
-    uploadFrames: 0,
-    writes: 0
-  };
+  const record = createRecord(ctx, document);
   const write = (): void => writeTrail(ctx, trail, record);
 
   // The page changes state: the record says so at once.

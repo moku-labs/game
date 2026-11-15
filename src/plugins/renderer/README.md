@@ -1848,7 +1848,8 @@ keeps one record of the run under `moku-game:last-run` (`trail.ts`):
 
 It is written at start, once the application is up, every 2 s by the page's own timer, in the page task right after a
 new rest path (`flow:rest`, never inside the emit), on `visibilitychange`, on `pagehide` (`"closed"`), on a `pageshow`
-from the back/forward cache, and when the renderer stops (`"closed"`, from the record's own state only). The frames per
+from the back/forward cache, and when the renderer stops (`"closed"`, from the record's own state only: its numbers are
+those of the last write, at most 2 s old). The frames per
 second are measured on the page clock. An inert renderer (no document, no mount) and a page without `localStorage`
 start no trail. A frame only adds to two counters: nothing is read, written or made in it
 (`__tests__/perf/trail.perf.ts`). A storage that refuses a write keeps nothing; the run goes on.
