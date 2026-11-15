@@ -8,6 +8,7 @@ import { createKeptState } from "./kept/state";
 import { createMonitorState } from "./monitor/state";
 import { createShotsState } from "./shots/state";
 import { createSyncState } from "./sync/state";
+import { createTrailState } from "./trail";
 import type { Config, State } from "./types";
 import { createViewportState } from "./viewport/state";
 
@@ -245,6 +246,7 @@ export function createRendererState(ctx: { readonly config: Readonly<Config> }):
     monitor: createMonitorState(ctx.config.monitor),
     demand: createDemandState(ctx.config.debug.verifyFrames === true),
     kept: createKeptState(ctx.config),
-    shots: createShotsState()
+    shots: createShotsState(),
+    trail: createTrailState()
   };
 }
