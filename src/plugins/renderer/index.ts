@@ -5,8 +5,9 @@
  * picture of the drawn frame under an asset key, `monitor` counts and, in an agent build, measures
  * every frame. Emits
  * `renderer:device-lost`. Hooks `lifecycle:changed` (a pause serves the waiting captures, trims
- * Pixi's texture pool and, in an agent build, flushes the performance log), and in an agent build
- * `flow:edge`, `flow:rest` (the flow path of the frames) and `time:thermal` (the thermal line).
+ * Pixi's texture pool and, in an agent build, flushes the performance log), `flow:rest` in every build (the run's
+ * trail, F175; in an agent build also the flow path of the frames), `time:rate` (the render scale), and in an agent
+ * build `flow:edge` and `time:thermal` (the thermal line).
  *
  * @see README.md
  */
