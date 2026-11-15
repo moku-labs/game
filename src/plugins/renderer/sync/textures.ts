@@ -150,6 +150,7 @@ function defaultBordersOf(nine: NineBorders): {
 
 /**
  * Makes a Pixi texture out of a decoded image, on behalf of `assets`, which decides when it leaves the GPU.
+ * An ImageBitmap is held until its source is on the GPU, then closed and replaced by a 1x1 stand-in (sync/release.ts).
  *
  * @param sctx - Domain context of the sync module.
  * @param image - The decoded image.
@@ -172,6 +173,7 @@ export function createTexture(
   // `ImageSource` writes true after its options, so only this reaches it. Its owner frees it with `destroyTexture`:
   // Pixi's collector would take a warmed picture off the GPU a minute later, with no event, under the budget (F129).
   base.source.autoGarbageCollect = false;
+
   // F189: the decoded bitmap is freed once the source is on the GPU.
   holdImage(sctx.ctx.state.sync, base.source);
 
@@ -378,7 +380,7 @@ export function clearFrames(state: SyncState): void {
  * Frees a texture, its source and the crops cut from it. A slice keeps the source: it belongs to
  * the page, which frees it. A source that goes lets go of its `change` listeners first, the ones
  * of its style too, so no bind group Pixi still keeps is told. A texture destroyed twice is a
- * no-op.
+ * no-op. A bitmap not yet uploaded is closed at once, and a freed source leaves the freed list.
  *
  * @param state - The sync branch of the plugin state.
  * @param texture - The texture to free.

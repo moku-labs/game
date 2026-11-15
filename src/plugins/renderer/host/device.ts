@@ -65,17 +65,18 @@ function beginLoss(ctx: RendererCtx, kind: "webgpu" | "webgl", reason: string): 
   ctx.emit("renderer:device-lost", { kind, reason });
 
   // A callback that answers true takes the page away (a reload): nothing is restored.
-  for (const decide of state.lossDeciders) if (decide(info)) state.leaving = true;
+  for (const decide of state.lossDeciders) {
+    if (decide(info)) state.leaving = true;
+  }
 
   return true;
 }
 
 /**
- * Ends a restore: the renderer draws again and the pause reason goes. A page that leaves after the loss (F189)
- * restores nothing. The `onRestore` callbacks
- * run first: after a WebGPU restore the whole display tree is new and they rebuild it; after a
- * WebGL restore the tree stands, but the canvas and every render texture came back empty, so they
- * ask for a whole frame and the pictures again.
+ * Ends a restore: the renderer draws again and the pause reason goes. The `onRestore` callbacks run first: after a
+ * WebGPU restore the whole display tree is new and they rebuild it; after a WebGL restore the tree stands, but the
+ * canvas and every render texture came back empty, so they ask for a whole frame and the pictures again. A page that
+ * leaves after the loss (F189) restores nothing: the call returns at once and the pause reason stays.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param rebuild - True when a new application replaced the old one.
