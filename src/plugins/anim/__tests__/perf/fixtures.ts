@@ -310,6 +310,8 @@ export function timelineEdgesFixture(): () => void {
     for (let index = 0; index < EDGES; index++) {
       startTimeline(listening, rt, pause, { it: 0 }).finish();
     }
+    // endTimeline leaves the ended entries in the list; advancing drops them so it does not grow per pass.
+    advanceTimelines(listening, rt, 0);
   };
 }
 

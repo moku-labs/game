@@ -143,7 +143,7 @@ export type ModelCommitted = ModelEvents["model:committed"];
  *   skipped: ["Display"],
  *   motions: ["Transform"]
  * };
- * // The same item, when its enter motion was defined with the id "board.item.enter":
+ * // The same item, when its enter motion was defined with the id "board.item" (its enter track is labelled "board.item.enter"):
  * const entering: Explained = { ...sliding, motionIds: ["board.item.enter"] };
  * ```
  */
