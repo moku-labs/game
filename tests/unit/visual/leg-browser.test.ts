@@ -54,7 +54,9 @@ const FLAGS = [
   "--enable-unsafe-webgpu",
   "--use-angle=metal",
   "--enable-gpu",
-  "--ignore-gpu-blocklist"
+  "--ignore-gpu-blocklist",
+  "--use-mock-keychain",
+  "--password-store=basic"
 ];
 
 const tolerance = { ratio: 0.001, threshold: 24 };
@@ -242,7 +244,7 @@ describe("loadChromium", () => {
 describe("launchChrome", () => {
   const missing = "browserType.launch: Executable doesn't exist at /cache/chromium\nLooks like...";
 
-  it("launches Playwright's own Chromium with the four WebGPU flags by default", async () => {
+  it("launches Playwright's own Chromium with the WebGPU flags and no keychain by default (F186)", async () => {
     const { chromium, log } = fakeChromium();
 
     await launchChrome(chromium, undefined);
