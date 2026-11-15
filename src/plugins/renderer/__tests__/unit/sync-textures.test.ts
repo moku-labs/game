@@ -469,3 +469,57 @@ describe("sync textures: a slice out of an atlas page", () => {
     );
   });
 });
+
+describe("sync textures used (F184)", () => {
+  it("is true for a key a sprite view draws and false for one nobody draws", async () => {
+    const mock = await started();
+
+    mock.api.sync.textures.provide(() => new FakeTexture({}) as never);
+    spawnSprite(mock, "board.cell");
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.textures.used(["board.cell"])).toBe(true);
+    expect(mock.api.sync.textures.used(["splash.logo"])).toBe(false);
+  });
+
+  it("is true when any one key of the list is drawn", async () => {
+    const mock = await started();
+
+    mock.api.sync.textures.provide(() => new FakeTexture({}) as never);
+    spawnSprite(mock, "board.bg");
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.textures.used(["splash.logo", "board.cell", "board.bg"])).toBe(true);
+  });
+
+  // Bug: a read that skips the placeholder views would let the budget evict a bundle a view still waits to draw.
+  it("is true for a key whose view draws the magenta placeholder", async () => {
+    const mock = await started();
+    const entity = spawnSprite(mock, "board.cell");
+
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(entity)?.placeholder).toBe(true);
+    expect(mock.api.sync.textures.used(["board.cell"])).toBe(true);
+  });
+
+  it("is false once the view of the key is removed", async () => {
+    const mock = await started();
+    const entity = spawnSprite(mock, "board.cell");
+
+    mock.modules.sync.pass();
+    mock.world.ecs.despawn(entity);
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.textures.used(["board.cell"])).toBe(false);
+  });
+
+  it("is false for an empty list", async () => {
+    const mock = await started();
+
+    spawnSprite(mock, "board.cell");
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.textures.used([])).toBe(false);
+  });
+});

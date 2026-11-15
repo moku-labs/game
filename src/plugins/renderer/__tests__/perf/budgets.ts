@@ -212,5 +212,9 @@ export const BUDGET = {
   // the walk's list, two generators and two pose objects per view tested.
   hitTestMiss: 0,
   // F118: the drop lookup of a drag over the same board, found under an item and its shadow.
-  hitTestDrop: 0
+  hitTestDrop: 0,
+  // F184: new. `textures.used` over 40 keys, the drawn one last: a map read per key by index, nothing made.
+  texturesUsedHit: 0,
+  // F184: new. The same over 40 keys none of which a view draws.
+  texturesUsedMiss: 0
 } as const;

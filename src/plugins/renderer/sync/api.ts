@@ -861,6 +861,19 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         dropPooled(state, keys);
       },
 
+      used: (keys: readonly string[]): boolean => {
+        if (state.root === undefined) return false;
+
+        // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+        for (let index = 0; index < keys.length; index += 1) {
+          const key = keys[index];
+
+          if (key !== undefined && state.byKey.has(key)) return true;
+        }
+
+        return false;
+      },
+
       upload: (textures: readonly PixiTexture[]): Promise<boolean> => uploadTextures(sctx, textures)
     },
 

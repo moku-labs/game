@@ -375,6 +375,24 @@ export type TexturesApi = {
   invalidate(keys: readonly string[]): void;
 
   /**
+   * Tells whether a view draws one of these asset keys now: a sprite or nine-slice view, shown or hidden, the magenta
+   * placeholder of a key no provider answers included. `assets` asks before it unloads a bundle, so the budget never
+   * frees a texture a view still holds. Reads the table of keys the views keep; allocates nothing. Particles, filter
+   * inputs, inline images in text and the leave loader take textures without a view of this table: they do not count.
+   *
+   * @param keys - The asset keys of a bundle.
+   * @returns `true` when at least one key has a view; `false` for no keys and while inert (no root, headless).
+   * @example
+   * ```ts
+   * // `assets` before the budget unloads "board": a view still shows its cells.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.textures.used(["board.cell", "board.bg"]); // true: the board still shows its cells
+   * renderer.sync.textures.used(["splash.logo"]); // false: no view draws it
+   * ```
+   */
+  used(keys: readonly string[]): boolean;
+
+  /**
    * Puts textures on the GPU before a screen shows them: each texture's source is queued once and uploaded with Pixi's
    * `renderer.texture.initSource` before the stage pass of a drawn frame, `renderer.uploads` a frame (one by default),
    * and the renderer asks for the next frame while sources wait. The slices of one atlas page share its source, so the
