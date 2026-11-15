@@ -350,7 +350,7 @@ describe("AnimPlayer: a system plays animations", () => {
     const probe = defineAnimation("look.probe", {
       slots: { thing: type<Target>() },
       build: ({ thing }, tools) => {
-        seen.push(tools.reduced);
+        seen.push(tools.reducedMotion);
 
         return tween(thing, Transform, { scale: 1 }, { ms: 100 });
       }

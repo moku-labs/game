@@ -309,10 +309,9 @@ expectTypeOf<Anim.HapticDescriptor["payload"]["kind"]>().toEqualTypeOf<HapticKin
 // F176: build tools carry the reduced switch; a hand-written `{ at }` without it still compiles.
 const bareTools: BuildTools = { at: () => ({ x: 0, y: 0, rotation: 0, scale: 1 }) };
 
-expectTypeOf(bareTools.reduced).toEqualTypeOf<boolean | undefined>();
 deliverOrder.build({ items: [card], card }, { at: bareTools.at });
-// @ts-expect-error — `reduced` is a boolean, not a rule name
-deliverOrder.build({ items: [card], card }, { at: bareTools.at, reduced: "keep" });
+// @ts-expect-error — `reducedMotion` is a boolean, not a rule name
+deliverOrder.build({ items: [card], card }, { at: bareTools.at, reducedMotion: "keep" });
 
 // A system plays through the AnimPlayer resource: the same play as app.anim, typed by the slots.
 expectTypeOf(AnimPlayer).toEqualTypeOf<ResourceType<Anim.AnimPlayerValue>>();

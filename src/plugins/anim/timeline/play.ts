@@ -190,7 +190,7 @@ export function startTimeline<Tags extends SlotTags>(
   const spawned = emptySpawnTable();
   const step = definition.build(slots, {
     at: (target: Target): Pose => restPoseOf(actx, target, spawned),
-    reduced: actx.state.reducedMotion
+    reducedMotion: actx.state.reducedMotion
   });
 
   assertUniqueSpawns(definition.id, step);

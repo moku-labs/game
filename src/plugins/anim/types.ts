@@ -86,10 +86,10 @@ export type SlotRecord = SlotValues<SlotTags>;
  * choreography can fly one element to where another one rests, even inside a scaled slot. A view
  * that has a `Parent` itself is aimed at that pose with a `tween` in `space: "root"`.
  *
- * `reduced` is the live reduced-motion switch (`setReducedMotion`) read once, when the play
+ * `reducedMotion` is the live reduced-motion switch (`setReducedMotion`) read once, when the play
  * starts, so `build` can choose a designed variant: fades in place, waits, marks, every track
  * `reduced: "keep"`. The engine never guesses: a tween of that variant that is not marked `keep`
- * is still cut. A switch while the timeline runs does not rebuild it. An absent `reduced` reads as
+ * is still cut. A switch while the timeline runs does not rebuild it. An absent `reducedMotion` reads as
  * `false`, so a hand-written `{ at }` passes; a nested `use` sees it only when the outer tools are
  * passed on.
  *
@@ -97,19 +97,19 @@ export type SlotRecord = SlotValues<SlotTags>;
  * ```ts
  * const giftFade = defineAnimation("puzzles.giftFade", {
  *   slots: { hero: type<Target>() },
- *   build: ({ hero }, { reduced }) =>
- *     reduced
+ *   build: ({ hero }, { reducedMotion }) =>
+ *     reducedMotion
  *       ? tween(hero, Shape, { alpha: 0 }, { ms: 200, reduced: "keep" })
  *       : tween(hero, Transform, { y: -300 }, { ms: 600 })
  * });
  * app.anim.setReducedMotion(true);
- * app.anim.play(giftFade, { hero }); // build got reduced: true: the hero fades in place over 200 ms
+ * app.anim.play(giftFade, { hero }); // build got reducedMotion: true: the hero fades in place over 200 ms
  * ```
  */
 export type BuildTools = {
   at(target: Target): Pose;
   /** Whether reduced motion was on when this play started. Absent reads as `false`. */
-  readonly reduced?: boolean;
+  readonly reducedMotion?: boolean;
 };
 
 /**
