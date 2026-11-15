@@ -45,12 +45,18 @@ import type {
   VisualTolerance
 } from "./types";
 
-/** The Chrome flags of `.planning/e2e/run.mjs`: WebGPU on Metal, on any GPU. */
-const WEBGPU_FLAGS = [
+/**
+ * The Chrome flags of every launch: WebGPU on Metal, on any GPU, and no macOS keychain (F186): a
+ * Chrome without the two last flags asks the keychain for "Chrome Safe Storage" and opens a
+ * dialog over the screen on every pixel run.
+ */
+const CHROME_FLAGS = [
   "--enable-unsafe-webgpu",
   "--use-angle=metal",
   "--enable-gpu",
-  "--ignore-gpu-blocklist"
+  "--ignore-gpu-blocklist",
+  "--use-mock-keychain",
+  "--password-store=basic"
 ] as const;
 
 /** The page width in CSS px when the setup names none: a phone. */
@@ -179,7 +185,7 @@ async function attempt(chromium: Chromium, options: LaunchOptions): Promise<Atte
 }
 
 /**
- * Launches Chrome with the four WebGPU flags: the Chrome of `page.browser` when the setup names
+ * Launches Chrome with the WebGPU flags and without the macOS keychain: the Chrome of `page.browser` when the setup names
  * one, else Playwright's own Chromium, else the system Chrome. Playwright's Chromium comes first
  * because its version is pinned by `playwright-core`, so the baselines do not move with a Chrome
  * update.
@@ -193,7 +199,7 @@ export async function launchChrome(
   chromium: Chromium,
   browser: VisualPage["browser"]
 ): Promise<ChromeBrowser> {
-  const args = [...WEBGPU_FLAGS];
+  const args = [...CHROME_FLAGS];
 
   if (browser !== undefined) {
     const given = await attempt(chromium, { ...browser, args });

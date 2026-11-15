@@ -188,6 +188,33 @@ afterEach(async () => {
 });
 
 describe("packAssets", () => {
+  it("writes no page file past 2048 × 2048, border, padding and edge copy counted (F188)", async () => {
+    // Sixteen 510 px squares: four in a row would make a 2050 px page.
+    const files: Record<string, Uint8Array> = {};
+    const square = await png(510, 510, BLUE);
+
+    for (let index = 0; index < 16; index += 1) {
+      files[`features/ui/assets/sq-${String(index).padStart(2, "0")}.png`] = square;
+    }
+
+    const root = await makeTree(files);
+
+    folders.push(root);
+
+    const out = await temp();
+    const { manifest } = await pack(root, out, false);
+    const pages = bundleOf(manifest, "ui").pages ?? [];
+
+    expect(pages.length).toBeGreaterThan(0);
+
+    for (const page of pages) {
+      const written = await sharp(path.join(out, page.path)).metadata();
+
+      expect(written.width).toBeLessThanOrEqual(2048);
+      expect(written.height).toBeLessThanOrEqual(2048);
+    }
+  });
+
   it("lands every key of the scan once, as a frame of a page of its bundle or as a loose file", async () => {
     const root = await gameTree();
     const out = await temp();
@@ -464,8 +491,8 @@ describe("packAssets", () => {
 
     await expect(pack(root, out, false)).rejects.toThrow(
       "[game] assets: the pack found 2 problems.\n" +
-        '  the texture "ui.fx-huge" (2050×4) fits no 2048×2048 page with a 2 px border.\n' +
-        '  the texture "ui.fx-wide" (4×2047) fits no 2048×2048 page with a 2 px border.\n' +
+        '  the texture "ui.fx-huge" (2050×4) fits no 2048×2048 page with its 2 px border and 2 px padding.\n' +
+        '  the texture "ui.fx-wide" (4×2047) fits no 2048×2048 page with its 2 px border and 2 px padding.\n' +
         '  Fix them and run "bun run assets:pack" again.'
     );
     await expect(stat(out)).rejects.toThrow();

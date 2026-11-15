@@ -46,7 +46,7 @@ describe("renderer state", () => {
       ownGpu: undefined,
       kept: new WeakSet(),
       pixelsFailed: false,
-      pool: { lastDrawnAt: undefined, sceneAt: undefined, restDone: false, baseline: 0 },
+      pool: { lastDrawnAt: undefined, sceneAt: undefined, restDone: false, baseline: 0, held: [] },
       onTrim: []
     });
     expect(state.viewport.scale).toBe(1);

@@ -1019,9 +1019,13 @@ between frames, until the page closes: Pixi's own garbage collector never frees 
 a power-of-two bucket lives forever. After a walk through every screen of a game that is tens of MiB
 (about 90 MB of the 202 MB of GPU textures of A Memory Missing on a Galaxy A26).
 
-The renderer gives them back with Pixi's public `TexturePool.clear(true)`, strictly between frames
-(after `host.render()` returned, or from a hook outside the render phase), never inside a frame and
-never while the host is not ready or restores a lost device:
+The renderer gives them back strictly between frames (after `host.render()` returned, or from a hook
+outside the render phase), never inside a frame and never while the host is not ready or restores a
+lost device. An idle target no shader binds is destroyed at once. One a bind group still holds (the
+last input of Pixi's filter pass, an effect's input) is taken out of the pool and destroyed after the
+first frame that ends with nothing bound to it (F187): Pixi warns, and empties the binding, when a
+bound texture is destroyed. Pixi then forgets every idle target with `TexturePool.clear(false)`. A
+Pixi without the pool's buckets is trimmed with `TexturePool.clear(true)`, as before.
 
 | Trim | When | Floor |
 |---|---|---|

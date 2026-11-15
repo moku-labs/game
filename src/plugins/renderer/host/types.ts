@@ -8,6 +8,7 @@ import type {
   PixiMatrix,
   PixiModule,
   PixiRenderTexture,
+  PixiTexture,
   PixiTextureSource,
   RendererKind
 } from "../types";
@@ -62,8 +63,16 @@ export type PoolState = {
   sceneAt: number | undefined;
   /** A trim ran (or was judged not worth it) since the last drawn frame: one per rest. */
   restDone: boolean;
-  /** Render-target bytes right after the last trim; 0 at start. Growth is measured from here. */
+  /**
+   * Render-target bytes right after the last trim, less the held targets released since; 0 at start. Growth is
+   * measured from here.
+   */
   baseline: number;
+  /**
+   * Idle targets a trim took out of Pixi's pool while a bind group still held them (F187): destroyed after the first
+   * frame that ends with nothing bound to them, so Pixi never sees a bound texture destroyed.
+   */
+  held: PixiTexture[];
 };
 
 /**
@@ -527,8 +536,9 @@ export type HostInternal = {
   sceneChanged(): void;
 
   /**
-   * Gives back every idle render target of Pixi's pool now, with Pixi's public `TexturePool.clear(true)`: a texture
-   * handed out and not returned survives and is destroyed when it comes back; a kept picture is never in the pool.
+   * Gives back every idle render target of Pixi's pool now: one no shader binds is destroyed, one a bind group still
+   * holds is destroyed after the first frame that lets it go (F187); a texture handed out and not returned survives
+   * and is destroyed when it comes back; a kept picture is never in the pool.
    * The new baseline is what the targets hold after it. Never call it inside a Pixi render call.
    *
    * @param reason - Why: a rest, a scene change, a pause.
