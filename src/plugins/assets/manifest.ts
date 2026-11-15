@@ -368,6 +368,27 @@ export function indexKeys(manifest: Manifest): Map<string, string> {
 }
 
 /**
+ * Builds the key list of every bundle, each list frozen: what the budget asks `renderer` about and what an unload
+ * invalidates, read once here instead of a `files.map` per call.
+ *
+ * @param manifest - The parsed manifest.
+ * @returns Bundle name to its asset keys, in manifest order.
+ * @example
+ * ```ts
+ * keysOfBundles(parseManifest(json)).get("ui"); // ["ui.button.primary", "ui.panel"]
+ * ```
+ */
+export function keysOfBundles(manifest: Manifest): Map<string, readonly string[]> {
+  const keys = emptyMap<string, readonly string[]>();
+
+  for (const [name, bundle] of Object.entries(manifest.bundles)) {
+    keys.set(name, Object.freeze(bundle.files.map(file => file.key)));
+  }
+
+  return keys;
+}
+
+/**
  * Works out the prefix of every file URL: the configured one, the folder of the manifest URL, or
  * the site root for an inline manifest.
  *

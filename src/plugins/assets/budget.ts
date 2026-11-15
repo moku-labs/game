@@ -14,6 +14,9 @@ const HEAVIEST = 5;
 /** No feature holds a bundle: the stack as a leaving scene's non-`feature` bundle sees it. */
 const NO_FEATURES: ReadonlySet<string> = Object.freeze(new Set<string>());
 
+/** The key list of a bundle the manifest walk did not list: nothing drawn, nothing to invalidate. */
+const NO_KEYS: readonly string[] = Object.freeze([]);
+
 /** One row of the over-budget warning: a loose file by its key, or a page as `page "<id>"`. */
 type Heavy = { key: string; mb: number };
 
@@ -39,14 +42,58 @@ export function usedMb(state: State): number {
 }
 
 /**
- * Picks the bundle that leaves next: the loaded one with the smallest use counter that is not
- * pinned, not named by the mounted, a leaving or the coming scene, not permanent and not in the preload queue. Its
- * `release` is not read: a `"leave"` bundle is a candidate like any other.
+ * Reads the asset keys of a bundle from the list the manifest walk froze; a bundle it did not list
+ * has none. Nothing is built per call.
  *
  * @param state - The plugin state.
+ * @param bundle - Name of the bundle.
+ * @returns Its keys, frozen.
+ */
+export function bundleKeys(state: State, bundle: string): readonly string[] {
+  return state.keysOf.get(bundle) ?? NO_KEYS;
+}
+
+/**
+ * Tells whether the budget must leave a loaded bundle alone by the state alone: pinned, permanent, named by the
+ * mounted, a leaving or the coming scene, in the preload queue, held after a reload, or the `except` of the pass.
+ *
+ * @param state - The plugin state.
+ * @param name - Name of the bundle.
+ * @param entry - Its manifest entry.
+ * @param except - The bundle whose load started the pass, if any.
+ * @returns True when it may not go.
+ */
+function keptByState(
+  state: State,
+  name: string,
+  entry: ManifestBundle,
+  except: string | undefined
+): boolean {
+  return (
+    name === except ||
+    state.pinned.has(name) ||
+    isPermanent(entry.tier) ||
+    state.reloadHeld.has(name) ||
+    state.sceneNamed.includes(name) ||
+    state.sceneLeaving.includes(name) ||
+    state.sceneComing.includes(name) ||
+    state.queue?.bundles.includes(name) === true
+  );
+}
+
+/**
+ * Picks the bundle that leaves next: the loaded one with the smallest use counter that is not
+ * pinned, not named by the mounted, a leaving or the coming scene, not permanent, not in the preload queue, not held
+ * after a reload, not `except` and drawn by no view (`renderer.sync.textures.used`, asked last: it walks the keys).
+ * Its `release` is not read: a `"leave"` bundle is a candidate like any other.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param except - The bundle that may not go: the one whose load started this pass.
  * @returns The bundle name, or `undefined` when nothing may go.
  */
-export function pickVictim(state: State): string | undefined {
+export function pickVictim(ctx: AssetsCtx, except?: string): string | undefined {
+  const state = ctx.state;
+  const textures = ctx.deps.renderer.sync.textures;
   let victim: string | undefined;
   let smallest = Number.POSITIVE_INFINITY;
 
@@ -54,11 +101,10 @@ export function pickVictim(state: State): string | undefined {
     const entry = state.manifest.bundles[name];
 
     if (record.status !== "loaded" || entry === undefined) continue;
-    if (state.pinned.has(name) || isPermanent(entry.tier)) continue;
-    if (state.sceneNamed.includes(name) || state.sceneLeaving.includes(name)) continue;
-    if (state.sceneComing.includes(name)) continue;
-    if (state.queue?.bundles.includes(name) === true) continue;
+    if (keptByState(state, name, entry, except)) continue;
     if (record.lastUsed >= smallest) continue;
+    // A drawn bundle never goes: its views would ask again at once and the reload evict the next one (F184).
+    if (textures.used(bundleKeys(state, name))) continue;
 
     smallest = record.lastUsed;
     victim = name;
@@ -103,9 +149,28 @@ export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): v
 }
 
 /**
+ * Notes why a bundle went, for the loop guard: a budget unload is remembered until the next rest, so a view that asks
+ * again for it right away starts its hold; any other reason ends both the mark and the hold (F184).
+ *
+ * @param state - The plugin state.
+ * @param bundle - Name of the bundle.
+ * @param reason - Why it was unloaded.
+ */
+function noteUnload(state: State, bundle: string, reason: UnloadReason): void {
+  if (reason === "budget") {
+    state.budgetUnloaded.add(bundle);
+
+    return;
+  }
+
+  state.budgetUnloaded.delete(bundle);
+  state.reloadHeld.delete(bundle);
+}
+
+/**
  * Frees one loaded bundle: the textures are destroyed, its warm is forgotten, every companion drops
- * what travels with it, `renderer` is told that its keys are gone and the event goes out. A bundle
- * that is not loaded is left alone.
+ * what travels with it, the loop guard notes the reason, `renderer` is told that its keys are gone and the event goes
+ * out. A bundle that is not loaded is left alone.
  *
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
@@ -126,8 +191,9 @@ export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: UnloadReaso
   state.warmed.delete(bundle);
 
   unloadCompanions(ctx, state.companions, bundle);
+  noteUnload(state, bundle, reason);
 
-  const keys = entry.files.map(file => file.key);
+  const keys = bundleKeys(state, bundle);
 
   ctx.deps.renderer.sync.textures.invalidate(keys);
 
@@ -195,14 +261,15 @@ function warnOverBudget(ctx: AssetsCtx): void {
  * Headless there is no texture memory, so it does nothing.
  *
  * @param ctx - Domain context of the plugin.
+ * @param except - The bundle a load just published: never undone by its own pass. A rest passes none.
  */
-export function enforceBudget(ctx: AssetsCtx): void {
+export function enforceBudget(ctx: AssetsCtx, except?: string): void {
   const state = ctx.state;
 
   if (state.io === undefined) return;
 
   while (usedMb(state) > ctx.config.textureBudgetMb) {
-    const victim = pickVictim(state);
+    const victim = pickVictim(ctx, except);
 
     if (victim === undefined) {
       warnOverBudget(ctx);

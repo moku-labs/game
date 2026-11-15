@@ -52,7 +52,8 @@ describe("renderer api", () => {
       "invalidate",
       "provide",
       "slice",
-      "upload"
+      "upload",
+      "used"
     ]);
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
     expect(Object.keys(mock.api.sync.filters).toSorted()).toEqual(["area", "set", "warm"]);
@@ -140,5 +141,14 @@ describe("renderer api", () => {
     mock.api.sync.textures.invalidate(["board.cell"]);
 
     expect(mock.ctx.state.sync.invalidated.size).toBe(0);
+  });
+
+  // Bug: `used` reads a table a headless renderer never fills, or throws on its missing root.
+  it("answers false to `used` while inert, a key a table holds included", () => {
+    const mock = createMockRenderer({ dom: false });
+
+    mock.ctx.state.sync.byKey.set("board.cell", new Set([1]));
+
+    expect(mock.api.sync.textures.used(["board.cell"])).toBe(false);
   });
 });

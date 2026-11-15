@@ -64,10 +64,35 @@ export function lookupTexture(ctx: AssetsCtx, key: string): Texture | undefined 
   // The request itself is not latched. A load that failed left the record idle, so the next miss
   // asks again; while one is running every caller joins it instead of starting a second.
   if (record?.status !== "loading") {
+    holdAskedAgain(ctx, bundle);
     loadBundle(ctx, bundle, undefined, "request").catch(ignoreFailure);
   }
 
   return undefined;
+}
+
+/**
+ * The loop guard of a texture miss: a bundle the budget unloaded since the last rest that a view asks for again is
+ * drawn by something `renderer` does not track, so it is held from now on and never a budget victim again, and the
+ * first time per bundle one warning names it (F184).
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param bundle - The bundle whose key missed.
+ */
+function holdAskedAgain(ctx: AssetsCtx, bundle: string): void {
+  const state = ctx.state;
+
+  if (!state.budgetUnloaded.has(bundle) || state.reloadHeld.has(bundle)) return;
+
+  state.reloadHeld.add(bundle);
+
+  if (state.thrashWarned.has(bundle)) return;
+
+  state.thrashWarned.add(bundle);
+  ctx.log.warn("assets: a view asked again for a bundle the budget unloaded", {
+    bundle,
+    budgetMb: ctx.config.textureBudgetMb
+  });
 }
 
 /**

@@ -44,7 +44,7 @@ describe("pickVictim", () => {
   it("takes the loaded bundle with the smallest use counter", async () => {
     const mock = await loadAll();
 
-    expect(pickVictim(mock.ctx.state)).toBe("alpha");
+    expect(pickVictim(mock.assetsCtx)).toBe("alpha");
   });
 
   it("never takes a permanent tier", async () => {
@@ -54,7 +54,7 @@ describe("pickVictim", () => {
     unloadBundle(mock.assetsCtx, "beta", "request");
     unloadBundle(mock.assetsCtx, "gamma", "request");
 
-    expect(pickVictim(mock.ctx.state)).toBeUndefined();
+    expect(pickVictim(mock.assetsCtx)).toBeUndefined();
   });
 
   it("never takes a pinned bundle", async () => {
@@ -62,7 +62,7 @@ describe("pickVictim", () => {
 
     mock.ctx.state.pinned = new Set(["alpha"]);
 
-    expect(pickVictim(mock.ctx.state)).toBe("beta");
+    expect(pickVictim(mock.assetsCtx)).toBe("beta");
   });
 
   it("never takes a bundle of the preload queue", async () => {
@@ -70,7 +70,7 @@ describe("pickVictim", () => {
 
     mock.ctx.state.queue = { bundles: ["alpha", "beta"], controller: new AbortController() };
 
-    expect(pickVictim(mock.ctx.state)).toBe("gamma");
+    expect(pickVictim(mock.assetsCtx)).toBe("gamma");
   });
 });
 
@@ -193,7 +193,7 @@ describe("budget edge cases", () => {
     mock.ctx.state.manifest = { version: 1, bundles: {} };
 
     expect(usedMb(mock.ctx.state)).toBe(0);
-    expect(pickVictim(mock.ctx.state)).toBeUndefined();
+    expect(pickVictim(mock.assetsCtx)).toBeUndefined();
   });
 
   it("skips a bundle that is still loading", async () => {
@@ -206,7 +206,7 @@ describe("budget edge cases", () => {
     const record = mock.ctx.state.records.get("alpha");
 
     expect(record?.status).toBe("loading");
-    expect(pickVictim(mock.ctx.state)).toBe("beta");
+    expect(pickVictim(mock.assetsCtx)).toBe("beta");
 
     mock.io.releaseAll();
     await running;
@@ -308,7 +308,7 @@ describe("pickVictim and the scene list", () => {
 
     mock.ctx.state.sceneNamed = ["alpha"];
 
-    expect(pickVictim(mock.ctx.state)).toBe("beta");
+    expect(pickVictim(mock.assetsCtx)).toBe("beta");
   });
 
   it('takes a "leave" bundle like any other when nothing holds it', async () => {
@@ -320,7 +320,7 @@ describe("pickVictim and the scene list", () => {
       await loadBundle(mock.assetsCtx, name, undefined, "request");
     }
 
-    expect(pickVictim(mock.ctx.state)).toBe("alpha");
+    expect(pickVictim(mock.assetsCtx)).toBe("alpha");
   });
 });
 

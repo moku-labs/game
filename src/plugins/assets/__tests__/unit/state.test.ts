@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { releaseAll } from "../../lifecycle";
 import { createAssetsState } from "../../state";
 
 describe("createAssetsState", () => {
@@ -30,6 +31,27 @@ describe("createAssetsState", () => {
     expect(state.pinned.size).toBe(0);
     expect(state.warned.size).toBe(0);
     expect(state.removers).toEqual([]);
+  });
+
+  // Bug: a loop-guard mark of the last session survives into the next one, or the key lists of a manifest stay.
+  it("starts the budget's key lists and loop guard empty, and releaseAll empties them", () => {
+    const state = createAssetsState();
+
+    expect(state.keysOf.size).toBe(0);
+    expect(state.budgetUnloaded.size).toBe(0);
+    expect(state.reloadHeld.size).toBe(0);
+    expect(state.thrashWarned.size).toBe(0);
+
+    state.keysOf.set("board", ["board.cell"]);
+    state.budgetUnloaded.add("board");
+    state.reloadHeld.add("board");
+    state.thrashWarned.add("board");
+    releaseAll(state);
+
+    expect(state.keysOf.size).toBe(0);
+    expect(state.budgetUnloaded.size).toBe(0);
+    expect(state.reloadHeld.size).toBe(0);
+    expect(state.thrashWarned.size).toBe(0);
   });
 
   it("gives every call its own collections", () => {
