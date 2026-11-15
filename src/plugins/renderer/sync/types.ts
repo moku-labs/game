@@ -279,7 +279,7 @@ export type SliceFrame = { x: number; y: number; width: number; height: number }
  * // `assets` decoded a file of a bundle: it uploads it, then the views of the key draw it.
  * const renderer = ctx.require(rendererPlugin);
  * const bitmap = await createImageBitmap(await (await fetch("/assets/board/cell.png")).blob());
- * const texture = renderer.sync.textures.create(bitmap); // texture.width === bitmap.width
+ * const texture = renderer.sync.textures.create(bitmap); // the renderer owns the bitmap now: never read it again
  * renderer.sync.textures.invalidate(["board.cell"]); // the next pass resolves "board.cell" again
  * ```
  */
@@ -2027,7 +2027,7 @@ export type SyncState = {
   warm: WarmState;
   /** The texture upload queue (F60). */
   upload: UploadState;
-  /** The decoded images waiting to be freed, and how each freed texture is filled again (F189). */
+  /** The decoded images waiting to be freed, and the stand-in the freed ones hold (F189). */
   release: ReleaseState;
   /** The class of the rim-only nine-slice (F59), made at the first hollow view over the loaded Pixi module. */
   hollowClass: HollowClass | undefined;

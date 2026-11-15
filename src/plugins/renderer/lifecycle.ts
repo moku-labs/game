@@ -54,8 +54,7 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * the kept pictures (`kept.flush`, so the canvas stays one pass, E7), then the stage, then a shot of the frame just drawn
  * while the canvas texture holds it (`shots.after`, never of the heat map), then, when Pixi drew it, the decoded images
  * now on the GPU are freed (`sync.releaseStep`, F189), then the pixel leg of the kept oracle;
- * `demand` settles the
- * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
+ * `demand` settles the frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
  * waiting capture; last, `host` trims Pixi's texture pool when a rest or a scene change is due. The display objects
  * are written by the `sync` system. While the overdraw heat map of a dev or debug build is on, every frame asks to be
  * drawn and its stage pass is drawn as the map (`sync.drawOverdraw`).

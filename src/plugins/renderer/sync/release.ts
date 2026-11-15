@@ -2,11 +2,11 @@
  * @file renderer/sync — the decoded images of `textures.create` (F189). An `ImageBitmap` is kept open only until Pixi
  * has its source on the GPU of the drawing renderer, at a draw or through the upload queue: the step after the stage
  * pass closes it and gives the source a transparent 1x1 stand-in. Before that, a WebKit page held every texture twice:
- * an open bitmap is graphics memory of the page, `width × height × 4` bytes (208 MB for 30 images of the game, measured
- * in WebKit 26.4), next to the GPU copy; on an iPhone 16 Pro Max the page reached iOS's 2048 MB limit. The stand-in, never the closed bitmap, is what a later upload reads: WebGPU throws on
- * a closed bitmap, WebGL takes the 1x1 into a texture of the right size. A freed source cannot be uploaded again, so a
- * lost device with freed sources reloads the page (`loss.ts`). An `<img>` element, or a runtime without
- * `OffscreenCanvas`, keeps its image.
+ * an open bitmap is graphics memory of the page, `width × height × 4` bytes (208 MB for 30 images of the game,
+ * measured in WebKit 26.4), next to the GPU copy; on an iPhone 16 Pro Max the page reached iOS's 2048 MB limit. The
+ * stand-in, never the closed bitmap, is what a later upload reads: WebGPU throws on a closed bitmap, WebGL takes the
+ * 1x1 into a texture of the right size. A freed source cannot be uploaded again, so a lost device with freed sources
+ * reloads the page (`loss.ts`). An `<img>` element, or a runtime without `OffscreenCanvas`, keeps its image.
  */
 import type { PixiTextureSource } from "../types";
 import type { ReleaseState, SyncCtx, SyncState } from "./types";

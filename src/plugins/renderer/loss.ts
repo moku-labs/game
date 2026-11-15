@@ -22,6 +22,20 @@ const BYTES_PER_MB = 1_048_576;
 const MS_PER_S = 1000;
 
 /**
+ * Rounds to one decimal.
+ *
+ * @param value - A number.
+ * @returns The number to one decimal.
+ * @example
+ * ```ts
+ * tenth(12.345); // 12.3
+ * ```
+ */
+function tenth(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/**
  * Seconds since the page started: the wall clock against the page's time origin.
  *
  * @param now - The wall clock in milliseconds.
@@ -52,19 +66,8 @@ export type LossRecord = {
   reported: boolean;
 };
 
-/**
- * Rounds to one decimal.
- *
- * @param value - A number.
- * @returns The number to one decimal.
- * @example
- * ```ts
- * tenth(12.345); // 12.3
- * ```
- */
-function tenth(value: number): number {
-  return Math.round(value * 10) / 10;
-}
+/** `performance` where the browser adds `memory` (Chromium). */
+type PerformanceWithMemory = Performance & { memory?: { usedJSHeapSize?: unknown } };
 
 /**
  * The JS heap in use, in megabytes, where the browser tells it: `performance.memory` of Chromium. WebKit has none.
@@ -72,8 +75,8 @@ function tenth(value: number): number {
  * @returns The megabytes, or `undefined`: the record is kept without it.
  */
 function heapMb(): number | undefined {
-  const memory = (globalThis.performance as { memory?: { usedJSHeapSize?: unknown } } | undefined)
-    ?.memory;
+  const performanceWithMemory: PerformanceWithMemory | undefined = globalThis.performance;
+  const memory = performanceWithMemory?.memory;
   const used = memory?.usedJSHeapSize;
 
   return typeof used === "number" ? tenth(used / BYTES_PER_MB) : undefined;
@@ -94,6 +97,27 @@ function pathOf(ctx: RendererCtx): string {
 }
 
 /**
+ * Tells whether a parsed value has the fields of a kept record.
+ *
+ * @param value - A parsed element.
+ * @returns True for an object with the fields the log reads.
+ */
+function isLossRecord(value: unknown): value is LossRecord {
+  if (typeof value !== "object" || value === null) return false;
+
+  const record = value as Record<string, unknown>;
+
+  return (
+    typeof record.at === "number" &&
+    typeof record.kind === "string" &&
+    typeof record.reason === "string" &&
+    typeof record.path === "string" &&
+    typeof record.freed === "number" &&
+    typeof record.reloaded === "boolean"
+  );
+}
+
+/**
  * Reads the kept records. Anything that is not a list, and a storage that throws, reads as none.
  *
  * @returns The records, oldest first.
@@ -103,7 +127,9 @@ export function readLosses(): LossRecord[] {
     const text = globalThis.localStorage?.getItem(LOSS_KEY);
     const parsed: unknown = text === null || text === undefined ? [] : JSON.parse(text);
 
-    return Array.isArray(parsed) ? (parsed as LossRecord[]) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is LossRecord => isLossRecord(value))
+      : [];
   } catch {
     return [];
   }
