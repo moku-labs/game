@@ -123,6 +123,8 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
       ctx.deps.time.frameDrawn();
       // A frame of probes, uploads or building work is load work, no sample of the adaptive rate.
       if (probed || uploaded || built) ctx.deps.time.frameProbed();
+      // F189: Pixi submitted the frame; the decoded images now on the GPU are freed.
+      modules.sync.releaseStep();
     }
 
     modules.kept.after();
@@ -171,6 +173,9 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     modules.sync.forget();
     modules.shots.forget();
   });
+
+  // F189: the textures whose decoded image was freed are read from their files again before anything draws.
+  modules.host.beforeRestore(() => modules.sync.refill());
 
   modules.host.onRestore(rebuilt => {
     // The canvas and every kept picture came back empty: the next frame is drawn whole and takes them again.

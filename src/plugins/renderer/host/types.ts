@@ -92,6 +92,8 @@ export type HostState = {
    * replaced the old one (WebGPU), false when a WebGL context came back on the same one.
    */
   onRestore: Array<(rebuilt: boolean) => void>;
+  /** Awaited before a restore ends, while nothing draws yet: `sync` fills its freed textures again (F189). */
+  beforeRestore: Array<() => Promise<void> | undefined>;
   /** Run before the lost application is destroyed, while its display objects are still alive. */
   onLoss: Array<() => void>;
   cleanups: Array<() => void>;
@@ -316,6 +318,23 @@ export type HostInternal = {
    * @param fn - Called after every successful restore, told whether the application is new.
    */
   onRestore(fn: (rebuilt: boolean) => void): void;
+
+  /**
+   * Subscribes to the end of a restore, before it ends: the restore waits for the promise, and the renderer draws
+   * nothing meanwhile. A promise that rejects is logged and the restore ends all the same.
+   *
+   * @param fn - Called after every successful restore of the device, before the `onRestore` callbacks.
+   */
+  beforeRestore(fn: () => Promise<void> | undefined): void;
+
+  /**
+   * Tells whether Pixi has a GPU texture for a source on the application that draws now: it uploaded the source, at a
+   * draw or through `initSource`. Reads Pixi's per-renderer slot of the source; allocates nothing.
+   *
+   * @param source - The source.
+   * @returns True when the source is on the GPU of the drawing renderer; false while nothing draws.
+   */
+  onGpu(source: PixiTextureSource): boolean;
 
   /**
    * Subscribes to the moment just before a lost application is destroyed. This is the last point

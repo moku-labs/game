@@ -6,6 +6,7 @@
 import type { Entity } from "../../world/types";
 import { destroyWhole } from "../sources";
 import type { PixiModule, PixiTexture } from "../types";
+import { dropImage, holdImage } from "./release";
 import type {
   CreateTextureOptions,
   HitBox,
@@ -171,6 +172,10 @@ export function createTexture(
   // `ImageSource` writes true after its options, so only this reaches it. Its owner frees it with `destroyTexture`:
   // Pixi's collector would take a warmed picture off the GPU a minute later, with no event, under the budget (F129).
   base.source.autoGarbageCollect = false;
+  // F189: the decoded bitmap is freed once the source is on the GPU, when a reload can bring it back.
+  const reload = options?.reload;
+
+  if (reload !== undefined) holdImage(sctx.ctx.state.sync, base.source, reload);
 
   if (nine === undefined) return base;
 
@@ -391,5 +396,7 @@ export function destroyTexture(state: SyncState, texture: PixiTexture): void {
     return;
   }
 
+  // A bitmap not freed yet goes now, not at the next collection.
+  dropImage(state, texture.source);
   destroyWhole(texture);
 }

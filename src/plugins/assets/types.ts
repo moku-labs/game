@@ -58,14 +58,24 @@ export type NineBorders = readonly [number, number, number, number];
 
 /**
  * Options of `io.createTexture`. Same shape as `renderer.sync.textures.create`: `nine` gives the
- * default nine-slice borders, `mips` asks for the full mip chain.
+ * default nine-slice borders, `mips` asks for the full mip chain, `reload` decodes the file again. The plugin passes
+ * `reload` with every file it loads: the renderer frees the decoded image once it is on the GPU and reads the file
+ * again after a lost device (F189). A custom io that drops it keeps every decoded image open, as before.
  *
  * @example
  * ```ts
- * const options: CreateTextureOptions = { nine: [48, 48, 48, 48], mips: true };
+ * const options: CreateTextureOptions = {
+ *   nine: [48, 48, 48, 48],
+ *   mips: true,
+ *   reload: async () => createImageBitmap(await (await fetch("/assets/ui/panel.png")).blob())
+ * };
  * ```
  */
-export type CreateTextureOptions = { nine?: NineBorders; mips?: true };
+export type CreateTextureOptions = {
+  nine?: NineBorders;
+  mips?: true;
+  reload?: () => Promise<DecodedImage>;
+};
 
 /**
  * The part of a fetch response the plugin reads: the manifest is `json`, a texture is a `blob`,

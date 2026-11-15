@@ -19,6 +19,11 @@ async function tick(times = 20): Promise<void> {
 
 const owner = { kind: "plugin", name: "test" } as const;
 
+/** Does nothing: the release of a gate before its promise exists. */
+function noop(): void {
+  // Replaced by the resolve of the promise.
+}
+
 async function drawing(): Promise<MockRenderer> {
   const mock = createMockRenderer();
 
@@ -274,6 +279,41 @@ describe("host device loss", () => {
     expect(mock.pixi.applications).toHaveLength(1);
 
     mock.pixi.last().canvas.dispatch("webglcontextrestored");
+    await tick();
+
+    expect(mock.api.host.ready()).toBe(true);
+    expect(mock.pauses.at(-1)).toEqual({ action: "pop", reason: "device-lost" });
+  });
+
+  // Bug (F189): the restored renderer draws before the freed textures are read again: transparent pictures, and kept
+  // pictures taken of them.
+  it.each([
+    "webgpu",
+    "webgl"
+  ] as const)("draws nothing on a restored %s device until the work before the restore settled", async kind => {
+    const mock = createMockRenderer({ kind });
+    const gate = { finish: noop };
+
+    await mock.start();
+    mock.modules.host.beforeRestore(
+      () =>
+        new Promise<void>(resolve => {
+          gate.finish = resolve;
+        })
+    );
+
+    if (kind === "webgpu") {
+      mock.pixi.last().lose("unknown");
+    } else {
+      mock.pixi.last().canvas.dispatch("webglcontextlost", { preventDefault: () => undefined });
+      mock.pixi.last().canvas.dispatch("webglcontextrestored");
+    }
+
+    await tick();
+
+    expect(mock.api.host.ready()).toBe(false);
+
+    gate.finish();
     await tick();
 
     expect(mock.api.host.ready()).toBe(true);

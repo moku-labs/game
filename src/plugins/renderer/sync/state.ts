@@ -6,6 +6,7 @@ import type {
   AsideQueue,
   DebugSwitches,
   OverlayState,
+  ReleaseState,
   SyncState,
   UploadState,
   WarmState
@@ -122,6 +123,16 @@ function createUploadState(): UploadState {
 }
 
 /**
+ * Creates the empty release branch: no bitmap waits, no reload is kept, no stand-in made yet. Its own non-exported
+ * function, as `emptyMap`.
+ *
+ * @returns The release branch of the sync state.
+ */
+function createReleaseState(): ReleaseState {
+  return { pending: [], reloads: emptyMap(), standIn: undefined };
+}
+
+/**
  * Creates the empty aside queue of a scene build: nothing waits for a view. Its own non-exported function, as
  * `emptyMap`.
  *
@@ -177,6 +188,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     viewlessEntries: false,
     warm: createWarmState(),
     upload: createUploadState(),
+    release: createReleaseState(),
     hollowClass: undefined,
     filterKinds: emptyWeakMap(),
     filterOwners: emptyWeakMap(),

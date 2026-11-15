@@ -27,6 +27,7 @@ import type {
   BundleMap,
   BundleRecord,
   CreateTextureOptions,
+  DecodedImage,
   Events,
   FetchResponse,
   Inflight,
@@ -306,8 +307,30 @@ export async function loadImage(
   options?: CreateTextureOptions
 ): Promise<Texture> {
   const response = await fetchFile(run, path);
+  const image = await run.io.decode(await response.blob());
 
-  return run.io.createTexture(await run.io.decode(await response.blob()), options);
+  return run.io.createTexture(image, { ...options, reload: reloadOf(run, path) });
+}
+
+/**
+ * Decodes one image of a bundle again, for the renderer after a lost device (F189). The load that read it first may
+ * be long over, so the fetch has its own signal.
+ *
+ * @param run - The load that read the image first: its io, bundle and base.
+ * @param path - Path of the image.
+ * @returns What the renderer calls to read the file again.
+ */
+function reloadOf(run: Loading, path: string): () => Promise<DecodedImage> {
+  // Only what a fetch needs is kept: the texture outlives the load and its maps.
+  const { io, bundle, base } = run;
+
+  return async (): Promise<DecodedImage> => {
+    const signal = new AbortController().signal;
+    const again: Loading = { io, bundle, base, signal, assets: emptyAssets() };
+    const response = await fetchFile(again, path);
+
+    return io.decode(await response.blob());
+  };
 }
 
 /**

@@ -179,6 +179,24 @@ describe("loadBundle", () => {
     });
   });
 
+  // Bug (F189): the renderer cannot free a decoded image, or after a lost device it reads the wrong file or a cancelled
+  // fetch, and the picture stays transparent.
+  it("hands each texture a reload that reads its own file again, after the load is over", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "board", undefined, "request");
+
+    const [first] = mock.io.created;
+    const reload = first === undefined ? undefined : mock.io.reloads.get(first.id);
+    const before = mock.io.fetched.length;
+    const image = (await reload?.()) as unknown as { url: string } | undefined;
+
+    expect(mock.io.reloads.size).toBe(2);
+    expect(mock.io.fetched.slice(before)).toEqual([first?.from]);
+    expect(image?.url).toBe(first?.from);
+  });
+
   it("rejects an unknown bundle and names the fix", async () => {
     const mock = createMockAssets({ manifest: boardManifest });
 

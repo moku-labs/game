@@ -81,6 +81,37 @@ export function finishRestore(ctx: RendererCtx, rebuild: boolean): void {
 }
 
 /**
+ * Ends a restore once the `beforeRestore` callbacks settled, while nothing draws: `sync` fills its freed textures
+ * again (F189). One that rejects is logged and the restore goes on. With no work to wait for, the restore ends at once,
+ * in this task.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param rebuild - True when a new application replaced the old one.
+ * @returns Resolves when the restore ended.
+ */
+async function endRestore(ctx: RendererCtx, rebuild: boolean): Promise<void> {
+  const work: Array<Promise<void>> = [];
+
+  for (const fn of ctx.state.host.beforeRestore) {
+    const pending = fn();
+
+    if (pending !== undefined) work.push(pending);
+  }
+
+  if (work.length > 0) {
+    const results = await Promise.allSettled(work);
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        ctx.log.error("renderer: restore step failed", { error: result.reason });
+      }
+    }
+  }
+
+  finishRestore(ctx, rebuild);
+}
+
+/**
  * Watches the device of the current application. Called again after every restore, because a
  * new application carries a new device and a new canvas.
  *
@@ -97,7 +128,7 @@ export function watchDevice(ctx: RendererCtx, restart: () => Promise<boolean>): 
     const onLost = async (info: { reason: string }): Promise<void> => {
       if (ctx.state.host.app !== app) return;
       if (!beginLoss(ctx, "webgpu", info.reason)) return;
-      if (await restart()) finishRestore(ctx, true);
+      if (await restart()) await endRestore(ctx, true);
     };
 
     app.renderer.gpu.device.lost
@@ -115,7 +146,11 @@ export function watchDevice(ctx: RendererCtx, restart: () => Promise<boolean>): 
     event.preventDefault();
     beginLoss(ctx, "webgl", "webglcontextlost");
   };
-  const onContextRestored = (): void => finishRestore(ctx, false);
+  const onContextRestored = (): void => {
+    endRestore(ctx, false).catch((error: unknown) =>
+      ctx.log.error("renderer: restore failed", { error })
+    );
+  };
 
   canvas.addEventListener("webglcontextlost", onContextLost);
   canvas.addEventListener("webglcontextrestored", onContextRestored);

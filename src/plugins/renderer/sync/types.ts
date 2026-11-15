@@ -248,16 +248,30 @@ export type TextureProvider = (key: string) => PixiTexture | undefined;
 export type NineBorders = readonly [number, number, number, number];
 
 /**
- * Options of `textures.create`. `nine` gives the default nine-slice borders in pixels; `mips`
- * uploads the texture with its full mip chain, which Pixi builds on the GPU (`slice` ignores it:
- * a slice shares the source of its page).
+ * Decodes the image of a texture again from its file: what a texture of `textures.create` is filled from after a lost
+ * device, once its first decoded image was freed (F189).
  *
  * @example
  * ```ts
- * const options: CreateTextureOptions = { nine: [12, 12, 12, 12], mips: true };
+ * // `assets` reads the file of the texture once more.
+ * const reload: TextureReload = async () => createImageBitmap(await (await fetch(url)).blob());
  * ```
  */
-export type CreateTextureOptions = { nine?: NineBorders; mips?: true };
+export type TextureReload = () => Promise<ImageBitmap | HTMLImageElement>;
+
+/**
+ * Options of `textures.create`. `nine` gives the default nine-slice borders in pixels; `mips`
+ * uploads the texture with its full mip chain, which Pixi builds on the GPU (`slice` ignores it:
+ * a slice shares the source of its page). `reload` lets the renderer free a decoded `ImageBitmap` once it is on the
+ * GPU (`close()`), and decode it again from the file after a lost device; without it the bitmap stays open for the
+ * life of the texture.
+ *
+ * @example
+ * ```ts
+ * const options: CreateTextureOptions = { nine: [12, 12, 12, 12], mips: true, reload };
+ * ```
+ */
+export type CreateTextureOptions = { nine?: NineBorders; mips?: true; reload?: TextureReload };
 
 /**
  * Where `textures.slice` cuts a texture out of an atlas page, in page pixels. The manifest `atlas`
@@ -1444,6 +1458,20 @@ export type SyncInternal = {
   uploadStep(): boolean;
 
   /**
+   * Frees the decoded images Pixi has on the GPU now (F189), after the stage pass of a drawn frame: each bitmap is
+   * closed and its source gets the 1x1 stand-in. One compare and no allocation while nothing waits.
+   */
+  releaseStep(): void;
+
+  /**
+   * Fills every freed texture again from its file, after a lost device and before the restored renderer draws.
+   * A file that fails is logged and its texture stays transparent.
+   *
+   * @returns Resolves when every reload settled; `undefined` when no texture was freed.
+   */
+  refill(): Promise<void> | undefined;
+
+  /**
    * Subscribes to the end of a warm-up run: the queue became empty (the monitor of an agent build writes the `warm`
    * event line). Emptied by `stopSync`.
    *
@@ -1646,6 +1674,21 @@ export type UploadState = {
   done: WeakSet<PixiTextureSource>;
   /** The one listener on `unload` of every source in `done`. */
   forget(source: PixiTextureSource): void;
+};
+
+/**
+ * The decoded images of `textures.create` (F189): a source made from an `ImageBitmap` with a `reload` waits in
+ * `pending` until Pixi has it on the GPU of the drawing renderer; then its bitmap is closed and a 1x1 stand-in takes
+ * its place, so no upload ever reads a closed bitmap (WebGPU throws on one). After a lost device every source in
+ * `reloads` is filled again from its file. Not public.
+ */
+export type ReleaseState = {
+  /** The sources whose bitmap is still open, in the order they were made. */
+  pending: PixiTextureSource[];
+  /** The reload of every source that has one, until it is destroyed. */
+  reloads: Map<PixiTextureSource, TextureReload>;
+  /** The transparent 1x1 image every freed source holds; made at the first release. */
+  standIn: OffscreenCanvas | undefined;
 };
 
 /**
@@ -1997,6 +2040,8 @@ export type SyncState = {
   warm: WarmState;
   /** The texture upload queue (F60). */
   upload: UploadState;
+  /** The decoded images waiting to be freed, and how each freed texture is filled again (F189). */
+  release: ReleaseState;
   /** The class of the rim-only nine-slice (F59), made at the first hollow view over the loaded Pixi module. */
   hollowClass: HollowClass | undefined;
   /**

@@ -68,6 +68,8 @@ export type Held = { url: string; resolve: () => void; reject: (error: unknown) 
 export type FakeIo = AssetsIo & {
   created: FakeTexture[];
   sliced: FakeSlice[];
+  /** The `reload` each texture was made with, by its id (F189). */
+  reloads: Map<string, () => Promise<DecodedImage>>;
   /** Textures and slices, in the order they were destroyed. */
   destroyed: Array<FakeTexture | FakeSlice>;
   fetched: string[];
@@ -110,6 +112,7 @@ function abortError(): Error {
 export function createFakeIo(manifest?: unknown): FakeIo {
   const created: FakeTexture[] = [];
   const sliced: FakeSlice[] = [];
+  const reloads = new Map<string, () => Promise<DecodedImage>>();
   const destroyed: Array<FakeTexture | FakeSlice> = [];
   const fetched: string[] = [];
   const status = new Map<string, number>();
@@ -125,6 +128,7 @@ export function createFakeIo(manifest?: unknown): FakeIo {
   const io: FakeIo = {
     created,
     sliced,
+    reloads,
     destroyed,
     fetched,
     status,
@@ -193,6 +197,7 @@ export function createFakeIo(manifest?: unknown): FakeIo {
       };
 
       created.push(texture);
+      if (options?.reload !== undefined) reloads.set(texture.id, options.reload);
 
       return texture as unknown as Texture;
     },
