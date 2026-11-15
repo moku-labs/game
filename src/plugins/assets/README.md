@@ -589,7 +589,7 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 
 | Rule | Value |
 |---|---|
-| Page | 2048 × 2048 at most, as small as its content (not a power of two, not square). |
+| Page | 2048 × 2048 at most with its 2 px border, padding and edge copy counted, as small as its content (not a power of two, not square). A frame is at most 2042 px per side. |
 | Padding | 2 px between frames and a 2 px border. Each frame's edge pixels are copied 1 px out into it (extrude), so a picture drawn at a fractional place samples its own edge, never transparent black (F105); the rest stays transparent. |
 | Trim, rotation | Never: a rotated or trimmed nine-slice would lose its borders. |
 | Loose by size | A texture with a side above 512 px stays a file of its own. |

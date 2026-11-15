@@ -86,6 +86,45 @@ describe("layoutGroup", () => {
     expect(page?.width).toBeLessThan(256);
   });
 
+  it("never makes a page past 2048 × 2048, border and padding counted (F188)", () => {
+    // Four 510 px frames in a row need 4 × 510 + 3 × 2 + 2 × 2 = 2050 px: they must not share a row.
+    const squares = Array.from({ length: 16 }, (_, index) =>
+      member(`ui.sq-${String(index).padStart(2, "0")}`, 510, 510)
+    );
+    const { pages, problems } = layoutGroup("ui", "main", squares);
+
+    expect(problems).toEqual([]);
+    expect(pages.flatMap(page => page.frames)).toHaveLength(16);
+
+    for (const page of pages) {
+      expect(page.width).toBeLessThanOrEqual(PAGE_SIZE);
+      expect(page.height).toBeLessThanOrEqual(PAGE_SIZE);
+
+      for (const frame of page.frames) {
+        expect(frame.x + frame.width + BORDER).toBeLessThanOrEqual(page.width);
+        expect(frame.y + frame.height + BORDER).toBeLessThanOrEqual(page.height);
+      }
+    }
+  });
+
+  it("packs the largest texture a page holds, and names one a pixel larger (F188)", () => {
+    const largest = PAGE_SIZE - BORDER * 2 - PADDING;
+    const fits = layoutGroup("ui", "fx", [member("ui.fx-full", largest, largest)]);
+    const over = layoutGroup("ui", "fx", [member("ui.fx-over", largest + 1, 8)]);
+
+    expect(fits.problems).toEqual([]);
+    expect(fits.pages).toEqual([
+      {
+        width: largest + BORDER * 2,
+        height: largest + BORDER * 2,
+        frames: [{ key: "ui.fx-full", x: BORDER, y: BORDER, width: largest, height: largest }]
+      }
+    ]);
+    expect(over.problems).toEqual([
+      `the texture "ui.fx-over" (2043×8) fits no 2048×2048 page with its 2 px border and 2 px padding.`
+    ]);
+  });
+
   it("gives the same layout for the same members in any order", () => {
     expect(layoutGroup("ui", "main", mixed)).toEqual(layoutGroup("ui", "main", mixed.toReversed()));
   });
@@ -99,8 +138,8 @@ describe("layoutGroup", () => {
     ]);
 
     expect(problems).toEqual([
-      `the texture "ui.fx-huge" (2048×64) fits no 2048×2048 page with a 2 px border.`,
-      `the texture "ui.fx-wide" (2058×10) fits no 2048×2048 page with a 2 px border.`
+      `the texture "ui.fx-huge" (2048×64) fits no 2048×2048 page with its 2 px border and 2 px padding.`,
+      `the texture "ui.fx-wide" (2058×10) fits no 2048×2048 page with its 2 px border and 2 px padding.`
     ]);
     expect(pages.flatMap(page => page.frames).map(frame => frame.key)).toEqual([
       "ui.fx-a",
