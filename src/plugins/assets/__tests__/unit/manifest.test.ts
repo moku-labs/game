@@ -3,6 +3,7 @@ import {
   emptyManifest,
   fileUrl,
   indexKeys,
+  keysOfBundles,
   kindOf,
   nineOf,
   parseManifest,
@@ -186,6 +187,16 @@ describe("indexKeys", () => {
     expect(index.get("ui.panel")).toBe("ui");
     expect(index.get("ui.button.primary")).toBe("ui");
     expect(index.get("board.cell")).toBeUndefined();
+  });
+});
+
+describe("keysOfBundles", () => {
+  // Bug: a list built per call or left writable; the budget and an unload read it on every pass (F184).
+  it("lists the keys of every bundle in manifest order, frozen", () => {
+    const keys = keysOfBundles(parseManifest(raw)).get("ui");
+
+    expect(keys).toEqual(["ui.button.primary", "ui.panel"]);
+    expect(Object.isFrozen(keys)).toBe(true);
   });
 });
 

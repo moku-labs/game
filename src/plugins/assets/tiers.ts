@@ -4,11 +4,12 @@
  * files, and the bundle counts as loaded only after them. The loaders of one image, one font and
  * one sound are exported: the dev hot swap of `swap.ts` reads a changed file through them.
  */
-import { enforceBudget, releaseAssets } from "./budget";
+import { bundleKeys, enforceBudget, releaseAssets } from "./budget";
 import { loadCompanions, unloadCompanions } from "./companions";
 import {
   fileUrl,
   indexKeys,
+  keysOfBundles,
   kindOf,
   nineOf,
   parseManifest,
@@ -549,7 +550,7 @@ function finish(
   // A failure `ready` counted as there is over: the next `ready` waits for this bundle's warm (F52).
   ctx.state.readyFailed.delete(bundle);
 
-  ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
+  ctx.deps.renderer.sync.textures.invalidate(bundleKeys(ctx.state, bundle));
 
   ctx.emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
 
@@ -567,7 +568,8 @@ function finish(
 
   // The picture changes now: the sprites that waited for these keys resolve on the next frame.
   ctx.deps.time.wake();
-  enforceBudget(ctx);
+  // The bundle just loaded is never its own pass's victim: a load is not undone by itself (F184).
+  enforceBudget(ctx, bundle);
 }
 
 /**
@@ -931,7 +933,7 @@ async function fetchManifest(ctx: AssetsCtx, url: string): Promise<unknown> {
 }
 
 /**
- * Reads the manifest into the state and builds the key index.
+ * Reads the manifest into the state and builds the key index and the key list of every bundle.
  *
  * @param ctx - Domain context of the plugin.
  * @throws {Error} In a browser, when the manifest cannot be read.
@@ -946,6 +948,7 @@ async function readManifest(ctx: AssetsCtx): Promise<void> {
 
     ctx.state.manifest = parseManifest(raw);
     ctx.state.bundleOfKey = indexKeys(ctx.state.manifest);
+    ctx.state.keysOf = keysOfBundles(ctx.state.manifest);
   } catch (error) {
     if (ctx.state.io !== undefined) throw error;
 

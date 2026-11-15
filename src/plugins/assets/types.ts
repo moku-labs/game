@@ -585,6 +585,17 @@ export type State = {
   manifest: Manifest;
   /** Asset key to the bundle that carries it. */
   bundleOfKey: Map<string, string>;
+  /** Bundle name to its asset keys, frozen, built with `bundleOfKey`: the budget and an unload read it, never `files.map`. */
+  keysOf: Map<string, readonly string[]>;
+  /** Bundles the budget unloaded since the last rest: a view that asks again for one of them starts the hold (F184). */
+  budgetUnloaded: Set<string>;
+  /**
+   * Bundles a view asked again for right after the budget unloaded them: never a budget victim again, until they leave
+   * another way (`"request"`, `"leave"`), so an untracked consumer costs one evict/reload at most (F184).
+   */
+  reloadHeld: Set<string>;
+  /** Bundles the "asked again" warning named already: one line per bundle per session (F184). */
+  thrashWarned: Set<string>;
   /** Scene id to its declaration, read from the `scenes` key of `flow.features`. */
   scenes: Map<string, SceneDefinition>;
   /** Flow id to the feature that owns it, read from the `flows` key of `flow.features`. */

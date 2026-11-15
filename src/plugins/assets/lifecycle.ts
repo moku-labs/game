@@ -300,6 +300,10 @@ export function releaseAll(state: State): void {
 
   state.records.clear();
   state.bundleOfKey.clear();
+  state.keysOf.clear();
+  state.budgetUnloaded.clear();
+  state.reloadHeld.clear();
+  state.thrashWarned.clear();
   state.scenes.clear();
   state.featureOfFlow.clear();
   state.pinned.clear();
