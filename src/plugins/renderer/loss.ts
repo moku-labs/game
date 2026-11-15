@@ -16,10 +16,10 @@ export const LOSS_KEY = "moku-game:gpu-losses";
 const KEPT = 10;
 
 /** Bytes in a megabyte. */
-const BYTES_PER_MB = 1_048_576;
+export const BYTES_PER_MB = 1_048_576;
 
 /** Milliseconds in a second. */
-const MS_PER_S = 1000;
+export const MS_PER_S = 1000;
 
 /**
  * Rounds to one decimal.

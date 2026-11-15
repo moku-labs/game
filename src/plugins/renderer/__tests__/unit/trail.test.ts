@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CUT_KEY, readCutRuns, TRAIL_EVERY_MS, TRAIL_KEY, type TrailRecord } from "../../trail";
+import { withDeps } from "../../lifecycle";
+import {
+  CUT_KEY,
+  readCutRuns,
+  startTrail,
+  TRAIL_EVERY_MS,
+  TRAIL_KEY,
+  type TrailRecord
+} from "../../trail";
 import type { PixiTexture } from "../../types";
 import { FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
@@ -56,6 +64,9 @@ function lastRun(state: TrailRecord["state"], path = "ward/idle"): TrailRecord {
 
 let storage: ReturnType<typeof memoryStorage>;
 
+/** What the page clock (`performance.now()`) answers, ms. */
+let pageMs = 0;
+
 /** The trail the storage holds now. */
 function trail(): TrailRecord {
   const text = storage.items.get(TRAIL_KEY);
@@ -79,9 +90,12 @@ beforeEach(() => {
   vi.useFakeTimers();
   storage = memoryStorage();
   vi.stubGlobal("localStorage", storage);
+  pageMs = 0;
+  vi.spyOn(globalThis.performance, "now").mockImplementation(() => pageMs);
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -116,19 +130,22 @@ describe("the report of the run before (F175)", () => {
     mock.stop();
   });
 
-  // Bug: every start after a clean exit claims a cut run.
-  it("reports nothing after a run that closed, after none, and after a broken record", async () => {
-    for (const kept of [JSON.stringify(lastRun("closed")), undefined, "{not json", '{"at":1}']) {
-      storage.items.clear();
-      if (kept !== undefined) storage.items.set(TRAIL_KEY, kept);
+  // Bug: every start after a clean exit claims a cut run; a broken record throws or is reported.
+  it.each([
+    ["a run that closed", JSON.stringify(lastRun("closed"))],
+    ["no record", undefined],
+    ["text that is not JSON", "{not json"],
+    ["a record without its fields", '{"at":1}'],
+    ["a record with an unknown state", JSON.stringify({ ...lastRun("visible"), state: "gone" })]
+  ])("reports nothing after %s", async (_name, kept) => {
+    if (kept !== undefined) storage.items.set(TRAIL_KEY, kept);
 
-      const mock = await started();
+    const mock = await started();
 
-      mock.stop();
-      expect(mock.log.warn).not.toHaveBeenCalledWith("renderer:run-cut-short", expect.anything());
-      expect(mock.log.info).not.toHaveBeenCalledWith("renderer:run-cut-short", expect.anything());
-      expect(storage.items.has(CUT_KEY)).toBe(false);
-    }
+    mock.stop();
+    expect(mock.log.warn).not.toHaveBeenCalledWith("renderer:run-cut-short", expect.anything());
+    expect(mock.log.info).not.toHaveBeenCalledWith("renderer:run-cut-short", expect.anything());
+    expect(storage.items.has(CUT_KEY)).toBe(false);
   });
 
   // Bug: the list of cut runs grows without end in the page's storage.
@@ -186,12 +203,14 @@ describe("the trail of this run (F175)", () => {
     for (let frame = 0; frame < 120; frame += 1) mock.drawFrame();
 
     mock.setNow(1_000_000 + TRAIL_EVERY_MS);
+    pageMs = TRAIL_EVERY_MS;
     vi.advanceTimersByTime(TRAIL_EVERY_MS);
 
     expect(mock.drawnCount()).toBe(120);
     expect(trail()).toMatchObject({ at: 1_002_000, fps: 60, uploadFrames: 0, writes: 3 });
 
     mock.setNow(1_000_000 + 2 * TRAIL_EVERY_MS);
+    pageMs = 2 * TRAIL_EVERY_MS;
     vi.advanceTimersByTime(TRAIL_EVERY_MS);
 
     expect(trail()).toMatchObject({ at: 1_004_000, fps: 0, writes: 4 });
@@ -208,6 +227,7 @@ describe("the trail of this run (F175)", () => {
     const uploading = mock.api.sync.textures.upload(textures);
     for (let frame = 0; frame < 6; frame += 1) mock.drawFrame();
     mock.setNow(1_000_000 + 3 * TRAIL_EVERY_MS);
+    pageMs = 3 * TRAIL_EVERY_MS;
     vi.advanceTimersByTime(TRAIL_EVERY_MS);
 
     expect(trail()).toMatchObject({ fps: 3, uploadFrames: 3 });
@@ -215,21 +235,40 @@ describe("the trail of this run (F175)", () => {
     mock.stop();
   });
 
-  // Bug: a kill right after a scene change shows the scene before it.
-  it("writes at once when the flow comes to rest on a new path, and keeps the last eight", async () => {
+  // Bug: a frozen or moved game clock (dev control) reads as 0 fps: the span is taken from the page clock.
+  it("takes the frames per second from the page clock, whatever the game clock does", async () => {
+    const mock = await started(1_000_000);
+
+    for (let frame = 0; frame < 60; frame += 1) mock.drawFrame();
+
+    pageMs = TRAIL_EVERY_MS;
+    vi.advanceTimersByTime(TRAIL_EVERY_MS);
+
+    expect(trail().fps).toBe(30);
+    mock.stop();
+  });
+
+  // Bug: a kill right after a scene change shows the scene before it; or the write runs inside the emit.
+  it("writes a new rest path in the next page task, once, and keeps the last eight", async () => {
     const mock = await started();
 
     mock.setPath("board/awaitIntent");
     mock.hooks["flow:rest"]({ path: "board/awaitIntent", checkpoint: false });
 
+    expect(trail().writes).toBe(2);
+    vi.advanceTimersByTime(1);
     expect(trail()).toMatchObject({ path: "board/awaitIntent", writes: 3 });
 
     mock.hooks["flow:rest"]({ path: "board/awaitIntent", checkpoint: false });
+    vi.advanceTimersByTime(1);
     expect(trail().writes).toBe(3);
 
     for (let index = 0; index < 10; index += 1) {
       mock.hooks["flow:rest"]({ path: `ward/step-${index}`, checkpoint: false });
     }
+
+    vi.advanceTimersByTime(1);
+    expect(trail().writes).toBe(4);
 
     const paths = trail().paths.map(entry => entry.path);
 
@@ -275,10 +314,49 @@ describe("the trail of this run (F175)", () => {
     expect(trail().state).toBe("closed");
 
     vi.advanceTimersByTime(10 * TRAIL_EVERY_MS);
+    mock.dom?.document.dispatch("visibilitychange");
     mock.dom?.window.dispatch("pagehide", { persisted: false });
+    mock.dom?.window.dispatch("pageshow", { persisted: true });
     mock.hooks["flow:rest"]({ path: "elsewhere", checkpoint: false });
+    vi.advanceTimersByTime(1);
 
-    expect(trail().writes).toBe(writes);
+    expect(trail()).toMatchObject({ state: "closed", writes });
+  });
+
+  // Bug: a rest path written after the stop calls the stopped plugins and turns the closed record visible.
+  it("drops a rest write still waiting for its task when the renderer stops", async () => {
+    const mock = await started();
+
+    mock.hooks["flow:rest"]({ path: "ward/idle", checkpoint: false });
+    mock.stop();
+
+    const writes = trail().writes;
+
+    vi.advanceTimersByTime(1);
+    expect(trail()).toMatchObject({ state: "closed", writes });
+  });
+
+  // Bug: a second start doubles the timer and the listeners, or reports the run it just began as cut short.
+  it("starts once", async () => {
+    const mock = await started();
+    const timers = vi.getTimerCount();
+
+    startTrail(withDeps(mock.ctx));
+
+    expect(vi.getTimerCount()).toBe(timers);
+    expect(mock.log.warn).not.toHaveBeenCalledWith("renderer:run-cut-short", expect.anything());
+    mock.stop();
+  });
+
+  // Bug: an inert renderer (no mount) keeps a timer and writes empty records.
+  it("starts nothing on a renderer with no mount", async () => {
+    const mock = createMockRenderer({ config: { mount: undefined } });
+
+    await mock.start();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(storage.items.has(TRAIL_KEY)).toBe(false);
+    mock.stop();
   });
 
   // Bug: a page without storage keeps a timer for nothing; a refusing storage breaks the start or the frame.

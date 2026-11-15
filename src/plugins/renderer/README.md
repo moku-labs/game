@@ -1833,8 +1833,8 @@ image: it goes with the device, and `has` answers false.
 ## The trail of the run
 
 iOS may end the page's WebContent process in the middle of play (its memory limit, F175), and the game starts
-again at the splash with nothing that says why. On a page with a document and a `localStorage`, the renderer keeps
-one record of the run under `moku-game:last-run` (`trail.ts`):
+again at the splash with nothing that says why. On a page with a document, a mount and a `localStorage`, the renderer
+keeps one record of the run under `moku-game:last-run` (`trail.ts`):
 
 | Field | What it holds |
 |---|---|
@@ -1846,9 +1846,11 @@ one record of the run under `moku-game:last-run` (`trail.ts`):
 | `fps`, `uploadFrames` | drawn frames per second, and frames that uploaded textures, since the write before |
 | `writes` | how many writes the run made |
 
-It is written at start, once the application is up, every 2 s by the page's own timer, at once on a new rest path
-(`flow:rest`), on `visibilitychange`, on `pagehide` (`"closed"`), on a `pageshow` from the back/forward cache, and
-when the renderer stops (`"closed"`). A frame only adds to two counters: nothing is read, written or made in it
+It is written at start, once the application is up, every 2 s by the page's own timer, in the page task right after a
+new rest path (`flow:rest`, never inside the emit), on `visibilitychange`, on `pagehide` (`"closed"`), on a `pageshow`
+from the back/forward cache, and when the renderer stops (`"closed"`, from the record's own state only). The frames per
+second are measured on the page clock. An inert renderer (no document, no mount) and a page without `localStorage`
+start no trail. A frame only adds to two counters: nothing is read, written or made in it
 (`__tests__/perf/trail.perf.ts`). A storage that refuses a write keeps nothing; the run goes on.
 
 At the next start a record that is not `"closed"` is a run cut short: `"visible"` is logged as
