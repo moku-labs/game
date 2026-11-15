@@ -46,17 +46,19 @@ import type {
 } from "./types";
 
 /**
- * The Chrome flags of every launch: WebGPU on Metal, on any GPU, and no macOS keychain (F186): a
- * Chrome without the two last flags asks the keychain for "Chrome Safe Storage" and opens a
- * dialog over the screen on every pixel run.
+ * The two flags that keep Chrome off the macOS keychain (F186): a Chrome without them asks the
+ * keychain for "Chrome Safe Storage" and opens a dialog over the screen. Every Chrome the engine,
+ * its tests or its scripts launch carries them.
  */
+export const NO_KEYCHAIN_FLAGS = ["--use-mock-keychain", "--password-store=basic"] as const;
+
+/** The Chrome flags of every launch of the leg: WebGPU on Metal, on any GPU, and no macOS keychain. */
 const CHROME_FLAGS = [
   "--enable-unsafe-webgpu",
   "--use-angle=metal",
   "--enable-gpu",
   "--ignore-gpu-blocklist",
-  "--use-mock-keychain",
-  "--password-store=basic"
+  ...NO_KEYCHAIN_FLAGS
 ] as const;
 
 /** The page width in CSS px when the setup names none: a phone. */
