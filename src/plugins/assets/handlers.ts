@@ -56,6 +56,8 @@ export function createHandlers(
         assets.state.restPending = true;
         assets.state.restedLive = true;
       }
+      // "Asked again right after a budget unload" means before this rest; a held bundle stays held (F184).
+      assets.state.budgetUnloaded.clear();
       enforceBudget(assets);
 
       if (!live) return;

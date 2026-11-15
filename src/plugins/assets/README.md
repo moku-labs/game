@@ -327,6 +327,22 @@ scene (`sceneBundles`), a leaving scene or the scene being built (`sceneComing`)
 naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
 `page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
 
+**A drawn bundle is never evicted (F184).** Before a bundle becomes the victim the budget asks
+`renderer.sync.textures.used(keys)` with the bundle's keys: a bundle with a key a sprite or a
+nine-slice view draws now (the magenta placeholder of an unanswered key included) stays. The pass
+after a load never takes the bundle that load just published either. Everything left in use means
+the warning above and no eviction: the budget never destroys a texture still bound to a view, and
+two drawn bundles that do not fit together load once each instead of evicting each other forever.
+
+**The reload hold.** Four consumers take textures that `renderer` does not track by view:
+particles, filter inputs, inline images in text and the leave loader. For their bundles a texture
+miss guards the loop: when a key misses for a bundle the budget unloaded since the last rest, the
+bundle is held from then on and is never a budget victim again, and the first time per bundle (per
+session) one warning goes out: `assets: a view asked again for a bundle the budget unloaded`
+`{ bundle, budgetMb }`. So such a bundle costs one evict/reload at most. A rest ends the "since"
+window, not the hold: a held bundle stays held until it leaves another way (`app.assets.unload`, or
+`release: "leave"`). A bundle asked again only after a rest that followed its eviction is not held.
+
 The pinned bundles of a node are what its scene names — its `bundle`, then what its
 `bundles(state)` returns for the committed `player` and `session` of `model.store.snapshot()` —
 and the `feature`-tier bundles of its flow's feature. A node without a scene keeps the scene of the
@@ -485,13 +501,13 @@ preload, no event and no budget work.
 | `lifecycle.ts` | `connectAssets` (onInit), `startAssets` (onStart), `releaseAll` (onStop), the enter callback, the `load` effect and the registration of the `ready` effect. |
 | `bundles.ts` | `defineBundles`, the `load` and `ready` descriptors and `bundlesFor`. |
 | `ready.ts` | `warmBundle` (the body of `warm`: load, then `renderer.sync.textures.upload`, one warm per bundle in `state.warmed`) and `answerReady` (the handler of the `ready` effect, `state.readyFailed`, the inbox event `ready`). |
-| `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, and the megabyte arithmetic `textureMb` and `sumMb`. |
+| `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `keysOfBundles`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, and the megabyte arithmetic `textureMb` and `sumMb`. |
 | `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`, and the loaders of one file: `loadImage`, `loadFont`, `loadSound`. |
 | `stamp.ts` | The stamp of the keys watch: the type guard `isAssetStamps`, `stampsOf` (the stamp out of a `ui:hot-swap`) and `changedPaths`. |
 | `paths.ts` | The paths of the manifest for the hot swap: `indexPaths`, `refusalOf` (why the page reloads instead) and `batchesOf` (the changed files by bundle). |
 | `swap.ts` | The replace itself: `createSwap` (the handler behind `ui:hot-swap`), one bundle after another. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
-| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle` (it forgets the bundle's warm), `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `nameComingBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
+| `budget.ts` | `usedMb`, `bundleKeys` (the frozen key list of a bundle), `pickVictim` (skips a drawn or reload-held bundle), `enforceBudget`, `unloadBundle` (it forgets the bundle's warm), `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `nameComingBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |

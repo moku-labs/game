@@ -223,6 +223,11 @@ export type FakeRenderer = {
   providers: TextureProvider[];
   /** `sync.textures.upload`: answers `true` at once unless a test scripts another answer. */
   upload: Mock<(textures: readonly Texture[]) => Promise<boolean>>;
+  /**
+   * The keys a view draws now, as the renderer's `byKey` table holds them: `sync.textures.used` answers from it.
+   * Empty by default, so a test that draws nothing keeps the plain LRU.
+   */
+  drawn: Set<string>;
   api: RendererApi;
 };
 
@@ -370,7 +375,8 @@ function createMockLog(): Log.LogApi {
 }
 
 /**
- * Creates the fake `renderer`: no Pixi, only the six texture members and `host.ready()`.
+ * Creates the fake `renderer`: no Pixi, only the seven texture members and `host.ready()`. `used` reads the
+ * test's `drawn` set.
  *
  * @param io - The fake io whose texture factory the renderer hands out.
  * @returns The fake renderer and its recordings.
@@ -381,6 +387,7 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
     invalidated: [],
     providers: [],
     upload: vi.fn(async () => true),
+    drawn: new Set(),
     api: undefined as unknown as RendererApi
   };
 
@@ -405,7 +412,14 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
         invalidate: (keys: readonly string[]): void => {
           fake.invalidated.push([...keys]);
         },
-        upload: (textures: readonly Texture[]): Promise<boolean> => fake.upload(textures)
+        upload: (textures: readonly Texture[]): Promise<boolean> => fake.upload(textures),
+        used: (keys: readonly string[]): boolean => {
+          for (const key of keys) {
+            if (fake.drawn.has(key)) return true;
+          }
+
+          return false;
+        }
       }
     },
     monitor: { event: vi.fn() }
