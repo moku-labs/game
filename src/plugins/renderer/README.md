@@ -211,7 +211,7 @@ internal markup: select them by nothing, set the properties instead.
 | `boundsOf(entity)` | The axis-aligned bounds, in reference units, of the four corners of the view's hit box brought through its `Transform` and `Parent` chain, rotation included. `undefined` without a view, for a view in no tree, hidden or at an effective alpha of 0.01 or less, and for bounds without area (a scale of 0 too), so a located element is one the player sees. A fresh object. Inert: `undefined`. The `game.locate` source of `ui` and the legend of `capture()` read it. |
 | `hitBoxOf(entity)` | The very box `hitTest` tests for the view, in the entity's own units, before the `Transform` and the `Parent` chain: `{ x: -32, y: -32, width: 64, height: 64 }` for a 64 x 64 `Sprite` with the default anchor, `{ x: 0, y: 0, width: w, height: h }` for a `Shape`. A fresh object; `undefined` without a view. `input` fits the circle of a trace in it. |
 | `textures.provide(fn)` | Adds a provider to the chain; the newest is asked first. Returns the remover. Works while inert. |
-| `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Once uploaded it stays on the GPU until `textures.destroy`: Pixi's collector leaves it alone (F129). Throws while the renderer does not draw. |
+| `textures.create(image, { nine?, mips?, reload? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Once uploaded it stays on the GPU until `textures.destroy`: Pixi's collector leaves it alone (F129). With `reload`, an `ImageBitmap` is freed once it is on the GPU, and read again after a lost device (see "Decoded images"). Throws while the renderer does not draw. |
 | `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
 | `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. Before a source goes, the `change` listeners of the source and of its style are removed: Pixi 8.22 keeps batch bind groups forever, and each would warn `[BindGroup] ... destroyed while still bound to a shader`. |
 | `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once (sprites, nine-slices, hollow nine-slices). No-op while inert. |
@@ -377,6 +377,28 @@ const renderer = ctx.require(rendererPlugin);
 await renderer.sync.textures.upload(record.textures); // true 6 drawn frames later (uploads: 1)
 await renderer.sync.textures.upload(record.textures); // true at once: they are on this device
 ```
+
+#### Decoded images
+
+A WebKit page holds a decoded `ImageBitmap` next to its GPU copy, and counts both against the page (F189: on an
+iPhone 16 Pro Max the bitmaps were ~440 MB of a 1671 MB WebContent footprint; iOS ends the page at 2048 MB). A texture
+of `textures.create` made from an `ImageBitmap` with a `reload` keeps its bitmap only until Pixi has the source on the
+GPU of the drawing renderer, at its first draw or through `textures.upload`. The step after the stage pass of a drawn
+frame then calls `close()` and gives the source a transparent 1x1 `OffscreenCanvas`: a later upload reads that, never
+the closed bitmap (WebGPU throws on a closed bitmap; WebGL draws the 1x1 into a texture of the full size). A texture
+destroyed before its upload closes its bitmap at once. The step reads Pixi's per-renderer slot of each waiting source
+and allocates nothing (0 B with nothing waiting and with 40 waiting).
+
+A lost device comes back with the freed textures read again: before the restore ends, while nothing draws, every
+`reload` runs and its image goes into the same source (`source.update()`), so slices, fonts and views keep their
+texture objects; each is freed again after its next upload. A reload that fails logs `renderer:reload-failed` and
+leaves that texture transparent; the restore ends all the same. Without `reload`, an `<img>` element, or a runtime
+without `OffscreenCanvas`, the image stays open for the life of the texture, as before. `assets` passes a reload
+with every file it loads.
+
+Measured headless in Chromium on the A Memory Missing DEV build from a cold boot: decoded bitmaps still open after 30 s
+159 MB (WebGL) and 166 MB (WebGPU) before, 22 MB and 21 MB after; after 90 s on WebGPU 235 MB (83 bitmaps) before,
+66 MB (21) after: the images of bundles loaded ahead and not drawn yet. The JS heap is flat and the same, ~42 MB.
 
 ### `shots` — `app.renderer.shots`
 

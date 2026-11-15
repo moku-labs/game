@@ -161,6 +161,9 @@ createApp({
 carries the four readers this plugin uses: `json()` for the manifest, `blob()` for an image,
 `text()` for a `.fnt` file and `arrayBuffer()` for a sound, plus `headers.get(name)` for the
 `content-type`. A real `Response` fits it as it is. A fake answers `headers: { get: () => null }`.
+The `options` of `createTexture` carry `reload` for every image the plugin loads: it fetches the file again through
+the same `io` with a signal of its own, and decodes it. Pass it on to `renderer.sync.textures.create`, or the decoded
+image stays open for the life of the texture (F189).
 
 ### A missing file on `tauri://`
 
@@ -326,6 +329,14 @@ scene (`sceneBundles`), a leaving scene or the scene being built (`sceneComing`)
 `"budget"`. It does not read `release`. When nothing may go it writes one warning
 naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
 `page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
+
+**What a megabyte of the budget is (F189).** A texture costs `width × height × 4` bytes, its mip chain included
+(`mb` of the manifest): once in the decoded image until its first upload, once on the GPU after it. Every file this
+plugin loads hands `renderer` a `reload`, so the decoded `ImageBitmap` is closed as soon as the texture is on the GPU
+and read from its file again only after a lost device. The budget therefore counts a texture once, also on WebKit,
+which charges a page for both copies: before F189 every loaded texture cost twice its `mb` there (~440 MB of decoded
+bitmaps next to a 250 MB budget on an iPhone 16 Pro Max). A custom `io` whose `createTexture` drops `reload` keeps
+every decoded image open and costs twice again. Decoded sounds are not in the budget: see the `audio` plugin.
 
 **A drawn bundle is never evicted (F184).** Before a bundle becomes the victim the budget asks
 `renderer.sync.textures.used(keys)` with the bundle's keys: a bundle with a key a sprite or a
