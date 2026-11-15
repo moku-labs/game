@@ -41,6 +41,7 @@ describe("anim/timeline play", () => {
 
     const entity = spawnTestEntity(mock, [Transform()]);
     const handle = mock.api.play(flight, { it: entity });
+    const timeline = mock.api.timelines().running[0]?.timeline;
 
     mock.frame(50);
 
@@ -53,7 +54,7 @@ describe("anim/timeline play", () => {
     expect(handle.active()).toBe(false);
     expect(mock.emitted).toContainEqual({
       name: "anim:finished",
-      payload: { animation: "hud.coinsFly" }
+      payload: { animation: "hud.coinsFly", timeline, reason: "ended" }
     });
   });
 
@@ -64,6 +65,7 @@ describe("anim/timeline play", () => {
 
     const entity = spawnTestEntity(mock, [Transform()]);
     const handle = mock.api.play(flight, { it: entity });
+    const timeline = mock.api.timelines().running[0]?.timeline;
 
     handle.finish();
     await handle.done;
@@ -72,7 +74,7 @@ describe("anim/timeline play", () => {
     expect(handle.marks()).toEqual(["landed"]);
     expect(mock.emitted).toContainEqual({
       name: "anim:finished",
-      payload: { animation: "hud.coinsFly" }
+      payload: { animation: "hud.coinsFly", timeline, reason: "finished" }
     });
   });
 

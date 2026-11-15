@@ -17,7 +17,7 @@ is anchored to the bottom or the right edge sits less than one unit past it (F11
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key (`Text.style` when its bind names a format of the game), `value` on a text field, `window` on a windowed scroll, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key (`Text.style` when its bind names a format of the game), `value` on a text field, `window` on a windowed scroll, `motion` on an element whose `motion` prop carries an `id` (`defineMotion({ id })`), `scroll` on a scroll (see [Scroll](#scroll)), children |
 | `app.ui.find(key)` | the entity of a keyed element, live only, never one of a scene built aside or of a window held warm |
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
@@ -402,6 +402,17 @@ apply.
   while the finger holds it, it flings or it glides. While a scroll moves, `time.wake()` keeps the
   frames coming; at a time scale of 0 it asks for none, and a fling or a glide goes on where it
   stands once time runs again.
+- **`UiNode.scroll`** (F193): `app.ui.tree()` and `game.ui` show a scroll's `{ axis, offset, max,
+  moving, snap? }`: the values `ScrollState` carries (`offset` in whole units, `moving` while it is
+  held, flings or glides; all 0 and `false` until the first solve placed it) and the stops of its
+  `snap` prop as a release uses them: finite numbers only, each kept inside `0..max`, in prop order.
+  `snap` is absent when the scroll names no stop (no prop, `[]`, or only values that are no finite
+  number). Any other tag has no `scroll`.
+
+  ```ts
+  app.ui.tree().children[0]?.scroll; // { axis: "x", offset: 318, max: 390, moving: false, snap: [0, 318, 390] }
+  ```
+
 - The internal `Scroll` keeps the offset the way the windowed range is cut with: `Scroll.offset =
   −ScrollState.offset`, `Scroll.min = −max`. The internal `Scrollable` `{ axis, moving, locked? }` is what
   `input` reads for the hand-off, the catch and the drop of a press on a locked scroll; `locked` is
@@ -633,6 +644,11 @@ new one starts; a motion without a loop, or no motion, stops it. A `defineMotion
 the same loop (the same keys, cycle and reduced-motion rule) is the same loop: it runs on. Still,
 declare a motion at module level: a dev build names an element whose loop was rebuilt by three
 renders in a row (`ui:motion-rebuilt`), and a hand-written loop of a new reference restarts.
+
+`app.ui.tree()` shows the `id` of an element's motion as `UiNode.motion` (F192), read off the
+`motion` prop, so a reader sees which motion the element was last given; no key without an `id`.
+Loop-label quirk: an equal loop re-rendered under another motion id is the same loop and runs on,
+so its tracks keep the old `<id>.loop` label while `UiNode.motion` already shows the new id.
 
 An element's `enter` hook plays at the element's `Box`, at the flush of phase `layout`, before any
 `sync` system of the game sees the entity: a system of `sync` (a gate that reads the element's

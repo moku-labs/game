@@ -12,7 +12,7 @@ const flight = defineAnimation("hud.coinsFly", {
 });
 
 describe("anim api", () => {
-  it("exposes play, finishAll, active, onMark, reducedMotion, setReducedMotion and replace", () => {
+  it("exposes play, finishAll, active, timelines, onMark, reducedMotion, setReducedMotion and replace", () => {
     const mock = createMockAnim();
 
     expect(Object.keys(mock.api).toSorted()).toEqual([
@@ -22,7 +22,8 @@ describe("anim api", () => {
       "play",
       "reducedMotion",
       "replace",
-      "setReducedMotion"
+      "setReducedMotion",
+      "timelines"
     ]);
   });
 

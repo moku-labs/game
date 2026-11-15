@@ -29,6 +29,7 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 | `play(animation, slots)` | Builds the step tree now and starts it. Returns a `PlayHandle`: the `MotionHandle` contract over the whole tree plus `done` and `marks()`. |
 | `finishAll()` | Every timeline ends at its own end, every track writes its exact target and every spawned entity is despawned. Called by the frame step in world mode `"fast"`. |
 | `active()` | Tracks in the table, the delayed ones and the running loops included. `0` when nothing moves; a screen at rest with loops counts one track per loop lane. A `Frames` component counts nothing. |
+| `timelines()` | What plays now and what ended last, as new plain objects: `{ running, ended }`. `running` lists every running timeline in start order with its `timeline` number, `animation`, `startFrame`, `slots` (the targets as `play` got them), `entities` and `marks` (copies). `ended` is the ring of the last 16 ends, oldest first, each with `timeline`, `animation`, `startFrame`, `endFrame` and `reason`. See "Timelines and their events". |
 | `onMark(fn)` | Direct subscription next to the event. Returns the remover. |
 | `reducedMotion()` | Whether reduced motion is on. |
 | `setReducedMotion(on)` | Switches reduced motion on or off for every track started afterwards. |
@@ -39,7 +40,38 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 | Event | Payload | When |
 |---|---|---|
 | `anim:mark` | `{ animation, mark }` | A `mark` step was reached, or jumped by `finish()`. |
-| `anim:finished` | `{ animation }` | A timeline ended or was finished. Never on `cancel()`. |
+| `anim:started` | `{ animation, timeline }` | A timeline started: it is in `timelines()` and `play` has not returned yet. Not emitted when `build` throws or the tree spawns one id twice. |
+| `anim:cancelled` | `{ animation, timeline }` | A timeline was cancelled with `handle.cancel()`. |
+| `anim:finished` | `{ animation, timeline, reason }` | A timeline ended or was finished. Never on `cancel()`. `reason` is `"ended"` when the cursor ran through the tree, `"finished"` for `handle.finish()`, `finishAll()` (also the fast frames of the world) and the abort of the node that played it. |
+
+`timeline` is the number of the timeline. Ids are shared with tracks, so the numbers of two plays are
+not consecutive; read the number of a play from `timelines().running`.
+
+### Timelines and their events
+
+Every end goes through one function that runs, in this order: the timeline leaves the table,
+`Animation` is counted down, the entities it spawned are despawned, the end is written into the ring
+that `timelines().ended` reads, the event is emitted (`anim:finished`, or `anim:cancelled` for a
+cancel) and `done` resolves. A listener of the event therefore already finds the end in
+`timelines().ended`.
+
+The ring holds the last 16 ends. Its 16 records are made with the state and overwritten in place, so an
+end allocates no record: the 17th end evicts the oldest. A `timelines()` call builds new objects (a
+reader pays, the frame step does not), and the lists it hands out are copies, so changing them changes
+nothing in the engine. Stopping the plugin empties the ring (the records stay allocated).
+
+`game.timelines` is the same answer as a source of the `/inspect` door (`sources.timelines`, changes
+every frame, production-safe): `read(app, sources.timelines)` gives `app.anim.timelines()`. It throws
+`[game] The source game.timelines needs animPlugin.` in an app without the plugin. The value is plain
+JSON.
+
+```ts
+app.anim.play(deliverOrder, { card: { projection: "board.items", key: "a" } });
+app.time.step(50);
+app.anim.timelines().running[0]?.animation; // "orders.deliver"
+app.time.step(50);
+app.anim.timelines().ended[0]?.reason;      // "ended"
+```
 
 ## Helpers (pure, exported from the package root)
 
@@ -60,7 +92,7 @@ HAPTIC_KINDS                            // the kinds haptic takes: light, medium
 use(animation, slots, tools?)           // nests one animation; pass the outer tools when it reads `at`
 play(animation, slots)                  // the fx descriptor a node awaits
 external(player, clip)                  // reserved for Spine: always throws
-defineMotion({ states?, keyframes?, transition?, loop?, on, when? })
+defineMotion({ id?, states?, keyframes?, transition?, loop?, on, when? })
 cubicBezier(x1, y1, x2, y2)             // the CSS timing function as an `ease`: solved once into a
                                         // table, 0 B per eased time, within 1e-4 of the exact curve
 ```
@@ -235,6 +267,22 @@ const orderCard = defineMotion({
   Two motions built from equal data carry the same one, so `ui` keeps a loop running when a render
   builds its motion again. `printOf(hook)` (module `anim/motion`, for engine plugins) reads it; a
   hand-written hook and a loop whose keys hold a function ease carry none.
+
+### Motion ids and track labels
+
+`defineMotion({ id: "hud.card", … })` names the motion for inspection and changes nothing a player
+sees. The motion it returns carries `id`, and every track a hook starts is labelled `<id>.enter`,
+`<id>.exit`, `<id>.loop` or `<id>.change`: `world.projection.motionIdsOf(entity)` lists the labels of
+the running tracks of an entity, `game.explain` shows them as `motionIds` and `game.ui` shows the id on
+the element's `motion` field. The four strings are built once in `defineMotion`; a hook only passes
+one on. A motion without `id` adds no `label` key to any options object it passes. An `id` that is not
+a non-empty string throws `[game] defineMotion: id must be a non-empty string.`
+
+The label is not part of the loop fingerprint, on purpose: it is not motion data. So an equal loop
+built again under **another** `id` (a view body that builds its `defineMotion` at every render with an
+id from its state) keeps the running loop track, and the track keeps its old `<id>.loop` label, while
+the element's `motion` field in `game.ui` already shows the new id. A loop that really changes (other
+keys, `loop.ms` or `loop.reduced`) starts a new track under the new label.
 
 ### Loops of views nobody sees
 
@@ -577,6 +625,10 @@ additive track leaves, the field is written once more without offsets.
   stops after `anim`.
 
 ## Doors
+
+`inspect.ts` holds `game.timelines` (key `timelines` in `sources`) of the editor's read door,
+`@moku-labs/game/inspect`: `anim.timelines()` every frame, production-safe, `[game] The source
+game.timelines needs animPlugin.` without the plugin.
 
 `control.ts` holds `game.reducedMotion` (key `reducedMotion` in `commands`) of the editor's write
 door, `@moku-labs/game/control`, dev builds only. Input `{ on: "boolean" }`: it calls

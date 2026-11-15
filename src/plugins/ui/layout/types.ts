@@ -218,6 +218,8 @@ export type LayoutModule = {
   clampScroll(container: Element, contentHeight: number, lookup: ElementLookup): number;
   /** Puts a live scroll at an offset at once; false when it has not been placed yet. */
   scrollTo(container: Element, to: number, lookup: ElementLookup): boolean;
+  /** The stops a `snap` prop names as a release uses them: finite numbers inside 0 to `max`, in prop order; none when no stop remains. */
+  stopsOf(snap: unknown, max: number): number[] | undefined;
   windowOf(
     offset: number,
     viewportHeight: number,

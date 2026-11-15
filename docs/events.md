@@ -19,7 +19,9 @@ One event is global: `ui:hot-swap`, so `effects` and `assets` can hook it with n
 | `assets:replaced` | `assets` | `{ bundle: string; keys: readonly string[] }` | Dev only: a hot swap replaced files of one loaded bundle. One event per bundle per swap. `keys` are the asset keys with new bytes: each answers a new texture, font or sound, and the old textures are destroyed. See [Hot swap](./hot-swap.md) |
 | `scenes:changed` | `scenes` | `{ from, to, music }` | The scene switched on entering a node |
 | `anim:mark` | `anim` | `{ animation, mark }` | A `mark` step was reached, or jumped by `finish()` |
-| `anim:finished` | `anim` | `{ animation }` | A timeline ended or was finished. Never on `cancel()` |
+| `anim:started` | `anim` | `{ animation, timeline }` | A timeline started: it is in `anim.timelines()` and `play` has not returned |
+| `anim:cancelled` | `anim` | `{ animation, timeline }` | A timeline was cancelled with `handle.cancel()` |
+| `anim:finished` | `anim` | `{ animation, timeline, reason }` | A timeline ended or was finished. `reason` is `"ended"` (the tree ran through) or `"finished"` (`finish()`, `finishAll()`, the abort of its node). Never on `cancel()` |
 | `i18n:locale-changed` | `i18n` | `{ locale }` | The module of the new locale is loaded, `replace` swapped messages of the current locale or the fallback, or the strings of a bundle arrived for a key shown missing; `text` re-resolves. Never at start |
 | `ui:hot-swap` | `ui`, global | `{ file: string; module: Readonly<Record<string, unknown>> }` | Dev only: a saved view module was swapped, `module` is its new exports. `effects` replaces its emitters. For `.moku/assets-stamp.ts` it is only forwarded, with no repaint: `module.default` is the `AssetStamps`, and `assets` replaces the changed files. See [Hot swap](./hot-swap.md) |
 

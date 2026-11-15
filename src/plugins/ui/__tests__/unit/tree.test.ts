@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createJsxState } from "../../jsx/state";
 import { readTree } from "../../jsx/tree";
-import type { Element, JsxState } from "../../jsx/types";
+import type { Element, JsxState, ScrollMotion, UiNode } from "../../jsx/types";
+import { stopsOf } from "../../layout/scroll";
 
 // ---------------------------------------------------------------------------
 // `readTree` over a hand-built state: the `content` of a text node comes from
@@ -189,5 +190,166 @@ describe("readTree textStyle", () => {
     expect(Object.hasOwn(readTree(stateWith(sized), ["ui"]), "textStyle")).toBe(false);
     expect(Object.hasOwn(readTree(stateWith(bare), ["ui"]), "textStyle")).toBe(false);
     expect(Object.hasOwn(readTree(stateWith(row), ["ui"]), "textStyle")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `readTree` over a hand-built state: the `motion` id and the `scroll` record
+// (F192, F193) are read off the element, with no world.
+// ---------------------------------------------------------------------------
+
+/**
+ * A scroll motion as the solve leaves it.
+ *
+ * @param patch - What to change about it.
+ * @returns The motion.
+ */
+function motionOf(patch: Partial<ScrollMotion>): ScrollMotion {
+  return {
+    axis: "x",
+    mode: "still",
+    offset: 0,
+    max: 390,
+    velocity: 0,
+    from: 0,
+    to: 0,
+    duration: 0,
+    elapsed: 0,
+    pointer: 0,
+    start: 0,
+    seen: 0,
+    aim: undefined,
+    glideMs: Number.NaN,
+    locked: false,
+    placed: true,
+    atProp: true,
+    ...patch
+  };
+}
+
+/**
+ * The scroll element of a strip.
+ *
+ * @param scroll - Its motion record.
+ * @param props - Its props.
+ * @returns The element.
+ */
+function stripOf(scroll: ScrollMotion | undefined, props: Record<string, unknown>): Element {
+  return elementOf({
+    type: "scroll",
+    key: "strip",
+    node: { type: "scroll", props, children: [] },
+    ...(scroll === undefined ? {} : { scroll })
+  });
+}
+
+/**
+ * Reads the tree the way the module does, with the stops of the layout module.
+ *
+ * @param state - The state to read.
+ * @returns The root node.
+ */
+function withStops(state: JsxState): UiNode {
+  return readTree(state, ["ui"], undefined, undefined, undefined, undefined, stopsOf);
+}
+
+describe("readTree scroll", () => {
+  it("gives a scroll its axis, rounded offset, max and moving flag, and the stops it snaps to", () => {
+    // Bug caught: the offset is read unrounded, or `moving` ignores a glide, or the stops are dropped.
+    const gliding = motionOf({ offset: 317.6, mode: "glide" });
+    const tree = withStops(stateWith(stripOf(gliding, { snap: [0, 318, 390] })));
+
+    expect(tree.scroll).toEqual({
+      axis: "x",
+      offset: 318,
+      max: 390,
+      moving: true,
+      snap: [0, 318, 390]
+    });
+  });
+
+  it("says a standing scroll does not move", () => {
+    // Bug caught: `moving` is true for every mode, so a still strip reads as animating.
+    const tree = withStops(stateWith(stripOf(motionOf({ mode: "still" }), {})));
+
+    expect(tree.scroll?.moving).toBe(false);
+  });
+
+  it("is all zeros and not moving before the first solve placed it", () => {
+    // Bug caught: the tree shows the unplaced record's leftover numbers, not what ScrollState says.
+    const unplaced = motionOf({ placed: false, offset: 12, max: 77, mode: "glide", axis: "y" });
+    const tree = withStops(stateWith(stripOf(unplaced, {})));
+
+    expect(tree.scroll).toEqual({ axis: "y", offset: 0, max: 0, moving: false });
+  });
+
+  it("clamps the stops into 0 to max and drops what is no finite number, in prop order", () => {
+    // Bug caught: a stop outside the range, a NaN (null in JSON) or a word reaches the reader.
+    const clamped = withStops(stateWith(stripOf(motionOf({}), { snap: [-10, 500] })));
+    const mixed = withStops(
+      stateWith(
+        stripOf(motionOf({}), { snap: [300, "end", Number.NaN, Number.POSITIVE_INFINITY, 100] })
+      )
+    );
+
+    expect(clamped.scroll?.snap).toEqual([0, 390]);
+    expect(mixed.scroll?.snap).toEqual([300, 100]);
+  });
+
+  it("has no snap key without the prop, with an empty one or with no finite stop", () => {
+    // Bug caught: `snap: []` or `snap: undefined` shows up for a scroll that names no stops.
+    for (const snap of [undefined, [], ["a"], [Number.NaN], "0,318", 5]) {
+      const tree = withStops(stateWith(stripOf(motionOf({}), { snap })));
+
+      expect(tree.scroll).toBeDefined();
+      expect(Object.hasOwn(tree.scroll ?? {}, "snap")).toBe(false);
+    }
+  });
+
+  it("has no scroll key on an element without a scroll record", () => {
+    // Bug caught: every node, a text or a row, would carry a scroll record.
+    const row = elementOf({
+      type: "row",
+      key: "bar",
+      node: { type: "row", props: {}, children: [] }
+    });
+
+    expect(Object.hasOwn(withStops(stateWith(row)), "scroll")).toBe(false);
+    expect(Object.hasOwn(withStops(stateWith(stripOf(undefined, {}))), "scroll")).toBe(false);
+  });
+});
+
+describe("readTree motion", () => {
+  it("gives an element the id of its motion prop", () => {
+    // Bug caught: the id is read from the wrong place and a labelled motion shows nothing.
+    const card = elementOf({
+      type: "column",
+      key: "card",
+      node: {
+        type: "column",
+        props: { motion: { id: "hud.card", enter: () => undefined } },
+        children: []
+      }
+    });
+
+    expect(readTree(stateWith(card)).motion).toBe("hud.card");
+  });
+
+  it("has no motion key without a motion, with a motion that has no id, or an id that is no string", () => {
+    // Bug caught: `motion: undefined` or a number id is shown for an element the id does not name.
+    for (const props of [{}, { motion: {} }, { motion: { id: 7 } }, { motion: "hud.card" }]) {
+      const card = elementOf({ type: "column", node: { type: "column", props, children: [] } });
+
+      expect(Object.hasOwn(readTree(stateWith(card)), "motion")).toBe(false);
+    }
+  });
+});
+
+describe("stopsOf", () => {
+  it("keeps the finite numbers inside 0 to max, in order, and answers nothing for the rest", () => {
+    // Bug caught: the reader's stops differ from the ones a release snaps to.
+    expect(stopsOf([-10, 318, 500], 390)).toEqual([0, 318, 390]);
+    expect(stopsOf([], 390)).toBeUndefined();
+    expect(stopsOf(undefined, 390)).toBeUndefined();
   });
 });

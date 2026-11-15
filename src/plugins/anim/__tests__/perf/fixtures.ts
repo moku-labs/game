@@ -7,7 +7,7 @@ import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { AnimPlayer } from "../../components";
 import { createRuntime } from "../../lifecycle";
-import { advanceTimelines } from "../../timeline/play";
+import { advanceTimelines, startTimeline } from "../../timeline/play";
 import {
   defineAnimation,
   frames,
@@ -63,6 +63,12 @@ const TRACKS = 50;
 
 /** How many timelines the timeline fixtures run. */
 const TIMELINES = 10;
+
+/** How many timelines the crowded timeline fixtures run (F191: the ring and the snapshot fields must cost nothing per frame). */
+const CROWD = 50;
+
+/** How many timelines one pass of the edge fixture starts and ends. */
+const EDGES = 1000;
 
 /** The fields nobody mutes, one set for every track, so the fixture's own `muted` allocates nothing. */
 const NONE: ReadonlySet<string> = Object.freeze(new Set<string>());
@@ -217,16 +223,18 @@ const pause = defineAnimation("perf.pause", {
 });
 
 /**
- * Plays one animation ten times, each over the entity a projection key names, as a game aims them.
+ * Plays one animation several times, each over the entity a projection key names, as a game aims
+ * them.
  *
  * @param animation - The animation to play.
+ * @param count - How many timelines to start.
  * @returns One frame step of the timelines.
  */
-function playTen(animation: typeof fly): () => void {
+function playMany(animation: typeof fly, count: number): () => void {
   const mock = createMockAnim();
   const rt = createRuntime(mock.actx);
 
-  for (let index = 0; index < TIMELINES; index++) {
+  for (let index = 0; index < count; index++) {
     const entity = spawnTestEntity(mock, [
       Transform({ x: index, y: index }),
       Sprite({ texture: "perf.f0" })
@@ -250,7 +258,25 @@ function playTen(animation: typeof fly): () => void {
  * @returns One frame step of the timelines.
  */
 export function timelinesFixture(): () => void {
-  return playTen(fly);
+  return playMany(fly, TIMELINES);
+}
+
+/**
+ * Fifty timelines running, as many as `timelinesFixture` per timeline: every frame moves 100 fields.
+ *
+ * @returns One frame step of the timelines.
+ */
+export function crowdedTimelinesFixture(): () => void {
+  return playMany(fly, CROWD);
+}
+
+/**
+ * Fifty timelines that only wait: every frame walks every tree and writes nothing.
+ *
+ * @returns One frame step of the timelines.
+ */
+export function crowdedWaitingTimelinesFixture(): () => void {
+  return playMany(pause, CROWD);
 }
 
 /**
@@ -259,7 +285,32 @@ export function timelinesFixture(): () => void {
  * @returns One frame step of the timelines.
  */
 export function waitingTimelinesFixture(): () => void {
-  return playTen(pause);
+  return playMany(pause, TIMELINES);
+}
+
+/**
+ * One pass of the edges of timelines: a thousand timelines started and finished, each announced to
+ * a listener on `anim:started` and `anim:finished` the way the kernel hands them to a hook. It is
+ * the cost of the ring write and the two events, not of a frame.
+ *
+ * @returns One pass of 1000 starts and 1000 ends.
+ */
+export function timelineEdgesFixture(): () => void {
+  const mock = createMockAnim();
+  const rt = createRuntime(mock.actx);
+  const heard = { count: 0 };
+  const listening = {
+    ...mock.actx,
+    emit: (): void => {
+      heard.count += 1;
+    }
+  };
+
+  return (): void => {
+    for (let index = 0; index < EDGES; index++) {
+      startTimeline(listening, rt, pause, { it: 0 }).finish();
+    }
+  };
 }
 
 /** A bounce that moves every frame: up 7.5 and back with a breath of the scale, as offsets. */

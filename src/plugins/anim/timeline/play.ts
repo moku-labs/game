@@ -16,10 +16,12 @@ import type {
   Pose,
   SlotTags,
   SlotValues,
-  Target
+  Target,
+  TimelineEndReason
 } from "../types";
 import { loopBlocksSequence } from "./checks";
 import { advanceCursor, cancelCursor, createCursor, finishCursor, resolveTargets } from "./cursor";
+import { recordEnd } from "./ring";
 import { assertUniqueSpawns } from "./spawn";
 import type { CursorCtx, RunningTimeline, Step, TimelineRuntime } from "./types";
 
@@ -127,14 +129,14 @@ function cursorCtxOf(rt: TimelineRuntime, running: RunningTimeline): CursorCtx {
 
 /**
  * Ends one timeline exactly once: it leaves the table, `Animation` is counted down on every
- * entity it named, every entity it spawned is despawned, `anim:finished` is emitted unless it was
- * cancelled, and `done` resolves.
+ * entity it named, every entity it spawned is despawned, the end is written into the ring of
+ * `timelines()`, `anim:finished` is emitted (`anim:cancelled` for a cancel), and `done` resolves.
  *
  * @param actx - Domain context of the anim plugin.
  * @param running - The running timeline.
- * @param finished - False when the timeline was cancelled: a cancel announces nothing.
+ * @param reason - How it ends: its tree ran through, `finish()` ended it, or `cancel()` did.
  */
-function endTimeline(actx: AnimCtx, running: RunningTimeline, finished: boolean): void {
+function endTimeline(actx: AnimCtx, running: RunningTimeline, reason: TimelineEndReason): void {
   if (running.ended) return;
 
   running.ended = true;
@@ -147,7 +149,14 @@ function endTimeline(actx: AnimCtx, running: RunningTimeline, finished: boolean)
 
   running.spawned.clear();
 
-  if (finished) actx.emit("anim:finished", { animation: running.animation });
+  // The ring is written before anyone hears the end, so a listener of the event already reads it.
+  recordEnd(actx.state, running, reason);
+
+  if (reason === "cancelled") {
+    actx.emit("anim:cancelled", { animation: running.animation, timeline: running.id });
+  } else {
+    actx.emit("anim:finished", { animation: running.animation, timeline: running.id, reason });
+  }
 
   running.resolve();
 }
@@ -212,6 +221,8 @@ export function startTimeline<Tags extends SlotTags>(
   const running: RunningTimeline = {
     id,
     animation: definition.id,
+    slots,
+    startFrame: actx.state.frame,
     cursor,
     marks,
     entities,
@@ -225,19 +236,20 @@ export function startTimeline<Tags extends SlotTags>(
   actx.state.timelines.set(id, running);
   actx.state.timelineList.push(running);
   rt.wake();
+  actx.emit("anim:started", { animation: definition.id, timeline: id });
 
   return {
     finish: (): void => {
       if (running.ended) return;
 
       finishCursor(cursorCtxOf(rt, running), cursor);
-      endTimeline(actx, running, true);
+      endTimeline(actx, running, "finished");
     },
     cancel: (): void => {
       if (running.ended) return;
 
       cancelCursor(cursorCtxOf(rt, running), cursor);
-      endTimeline(actx, running, false);
+      endTimeline(actx, running, "cancelled");
     },
     active: (): boolean => !running.ended,
     done,
@@ -264,7 +276,7 @@ export function advanceTimelines(actx: AnimCtx, rt: TimelineRuntime, deltaMs: nu
     if (running === undefined || running.ended) continue;
 
     advanceCursor(cursorCtxOf(rt, running), running.cursor, deltaMs);
-    if (running.cursor.ended) endTimeline(actx, running, true);
+    if (running.cursor.ended) endTimeline(actx, running, "ended");
   }
 
   dropEnded(list);
@@ -288,7 +300,7 @@ export function finishAllTimelines(actx: AnimCtx, rt: TimelineRuntime): void {
     if (running === undefined || running.ended) continue;
 
     finishCursor(cursorCtxOf(rt, running), running.cursor);
-    endTimeline(actx, running, true);
+    endTimeline(actx, running, "finished");
   }
 
   dropEnded(list);

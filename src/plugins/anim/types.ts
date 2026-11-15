@@ -9,7 +9,7 @@ import type { Api as FlowApi, TypeTag } from "../flow/types";
 import type { SyncApi } from "../renderer/sync/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Ease, Entity, MotionHandle, Api as WorldApi } from "../world/types";
-import type { RunningTimeline, Step } from "./timeline/types";
+import type { EndedRecord, RunningTimeline, Step } from "./timeline/types";
 import type { Track } from "./tween/types";
 
 /**
@@ -182,8 +182,94 @@ export type MarkListener = (animation: string, mark: string) => void;
 export type Events = {
   /** A `mark` step was reached, or jumped by `finish()`. */
   "anim:mark": { animation: string; mark: string };
-  /** A timeline ended or was finished. Not emitted on `cancel()`. */
-  "anim:finished": { animation: string };
+  /** A timeline started: it is in `timelines()` and `play` has not returned yet. */
+  "anim:started": { animation: string; timeline: number };
+  /** A timeline was cancelled with `handle.cancel()`. `anim:finished` does not follow. */
+  "anim:cancelled": { animation: string; timeline: number };
+  /**
+   * A timeline ended or was finished, with `reason: "ended"` when its tree ran through and
+   * `"finished"` for `finish()`, `finishAll()` and the abort of the node that played it. Not
+   * emitted on `cancel()`.
+   */
+  "anim:finished": { animation: string; timeline: number; reason: "ended" | "finished" };
+};
+
+/**
+ * Why a timeline ended: it ran through its tree, it was finished early, or it was cancelled.
+ *
+ * @example
+ * ```ts
+ * // A timeline that played to its last step, then one a node's abort finished early.
+ * const ran: TimelineEndReason = "ended";
+ * const aborted: TimelineEndReason = "finished";
+ * ```
+ */
+export type TimelineEndReason = "ended" | "finished" | "cancelled";
+
+/**
+ * One running timeline as `timelines()` reports it.
+ *
+ * @example
+ * ```ts
+ * // The delivery of order card "a", one frame in, with nothing reached yet.
+ * const info: RunningTimelineInfo = {
+ *   timeline: 4, animation: "orders.deliver", startFrame: 0,
+ *   slots: { card: { projection: "board.items", key: "a" } }, entities: [1_048_576], marks: []
+ * };
+ * ```
+ */
+export type RunningTimelineInfo = {
+  /** The timeline number: the one `anim:started` and `anim:finished` carry. Ids are shared with tracks. */
+  readonly timeline: number;
+  /** The animation id. */
+  readonly animation: string;
+  /** The anim frame count when it started. */
+  readonly startFrame: number;
+  /** The targets as `play` received them. */
+  readonly slots: SlotRecord;
+  /** The entities its targets resolved to at the start, each counted in `Animation`. A copy. */
+  readonly entities: readonly Entity[];
+  /** The marks reached so far. A copy. */
+  readonly marks: readonly string[];
+};
+
+/**
+ * One ended timeline of the ring `timelines()` keeps.
+ *
+ * @example
+ * ```ts
+ * const info: EndedTimelineInfo = {
+ *   timeline: 4, animation: "orders.deliver", startFrame: 0, endFrame: 2, reason: "ended"
+ * };
+ * ```
+ */
+export type EndedTimelineInfo = {
+  /** The timeline number it ran under. */
+  readonly timeline: number;
+  /** The animation id. */
+  readonly animation: string;
+  /** The anim frame count when it started. */
+  readonly startFrame: number;
+  /** The anim frame count when it ended. */
+  readonly endFrame: number;
+  /** How it ended. */
+  readonly reason: TimelineEndReason;
+};
+
+/**
+ * What `timelines()` and the `game.timelines` source answer: the timelines that run now, in start
+ * order, and the last sixteen that ended, oldest first.
+ *
+ * @example
+ * ```ts
+ * const idle: TimelinesSnapshot = { running: [], ended: [] };
+ * ```
+ */
+export type TimelinesSnapshot = {
+  /** The running timelines, in start order. */
+  readonly running: readonly RunningTimelineInfo[];
+  /** The last ended timelines, oldest first, at most 16. */
+  readonly ended: readonly EndedTimelineInfo[];
 };
 
 /**
@@ -311,6 +397,15 @@ export type State = {
    * stays in it until the next frame step drops it.
    */
   timelineList: RunningTimeline[];
+  /**
+   * The ring of the last 16 ended timelines. Its 16 records are made with the state and written
+   * in place at every end, never replaced.
+   */
+  ended: EndedRecord[];
+  /** The ring slot the next end writes, 0..15. */
+  endedNext: number;
+  /** How many slots of the ring hold a real record, 0..16. */
+  endedCount: number;
   /** The `animations` of every feature, read in `onStart`. */
   registry: Map<string, AnyAnimationDefinition>;
   /** `onMark` subscribers, in subscription order. */
@@ -426,6 +521,28 @@ export type AnimApi = {
    * ```
    */
   active(): number;
+
+  /**
+   * What plays now and what ended last: every running timeline with the targets it was played
+   * with, and the last 16 that ended with the reason of each end. Every call builds new plain
+   * objects and copies the lists, so a caller cannot change engine state; a reader pays for it,
+   * the frame step does not. Stopping the app empties the ring.
+   *
+   * @returns The running timelines in start order and the ended ones, oldest first.
+   * @example
+   * ```ts
+   * // A test asks what the delivery did, one frame in and at its end.
+   * const deliverOrder = defineAnimation("orders.deliver", { slots: { card: type<Target>() },
+   *   build: ({ card }) => sequence(tween(card, Transform, { x: 100 }, { ms: 100 }), mark("done")) });
+   * app.anim.play(deliverOrder, { card: { projection: "board.items", key: "a" } });
+   * app.time.step(50);
+   * app.anim.timelines().running[0]?.animation; // "orders.deliver"
+   * app.time.step(50);
+   * app.anim.timelines().running; // []
+   * app.anim.timelines().ended[0]?.reason; // "ended"
+   * ```
+   */
+  timelines(): TimelinesSnapshot;
 
   /**
    * Whether reduced motion is on. It starts at `Config.reducedMotion` and `setReducedMotion`
