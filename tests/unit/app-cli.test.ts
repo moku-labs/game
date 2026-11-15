@@ -656,6 +656,24 @@ describe("moku-game dev, the parent", () => {
     expect(seen.removed.toSorted()).toEqual(["SIGHUP", "SIGINT", "SIGTERM"]);
   });
 
+  // Bug: the parent listened only after the spawn. A parent that lost the CPU right after it let the child print the
+  // URL first, and a Ctrl+C then killed the parent by the signal (no exit code) while the child served on.
+  it("dev listens to the stop signals before it starts the child", async () => {
+    const root = makeGame();
+    const atSpawn: string[] = [];
+    const { deps, seen } = fakeDeps(root);
+    const spawn = deps.spawn;
+
+    deps.spawn = (command, options) => {
+      atSpawn.push(...seen.handlers.keys());
+
+      return spawn(command, options);
+    };
+
+    expect(await runCommand(["dev"], deps)).toBe(0);
+    expect(atSpawn.toSorted()).toEqual(["SIGHUP", "SIGINT", "SIGTERM"]);
+  });
+
   it("dev warns when .moku is not ignored, and no more without generated/manifest.json", async () => {
     const root = makeGame({ ".gitignore": "node_modules\n" }, ["generated/manifest.json"]);
     const { code, seen } = await run(["dev"], root);
