@@ -224,5 +224,9 @@ export const BUDGET = {
   texturesUsedMiss: 0,
   // F187: new. `afterFrame` of a drawn frame while a trim holds a target a bind group still binds: one listener count
   // a held target, nothing made.
-  poolHeldFrame: 0
+  poolHeldFrame: 0,
+  // F175: new. The trail's count of a drawn frame that uploaded: two small-integer adds.
+  trailFrame: 0,
+  // F175: new. What a started trail adds to a drawn frame of 20 sprites: the count only; it writes on its timer.
+  trailDrawnFrame: 0
 } as const;
