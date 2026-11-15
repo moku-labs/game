@@ -344,6 +344,28 @@ describe("AnimPlayer: a system plays animations", () => {
     await app.stop();
   });
 
+  it("hands the build of a system's play the reduced switch, as app.anim.play does", async () => {
+    // Catches: the resource door taking a path that builds without the flag (F176).
+    const seen: Array<boolean | undefined> = [];
+    const probe = defineAnimation("look.probe", {
+      slots: { thing: type<Target>() },
+      build: ({ thing }, tools) => {
+        seen.push(tools.reduced);
+
+        return tween(thing, Transform, { scale: 1 }, { ms: 100 });
+      }
+    });
+    const { app, a } = await startBoard();
+
+    app.world.ecs.resource(AnimPlayer).play(probe, { thing: a });
+    app.anim.setReducedMotion(true);
+    app.world.ecs.resource(AnimPlayer).play(probe, { thing: a });
+
+    expect(seen).toEqual([false, true]);
+
+    await app.stop();
+  });
+
   it("logs the sentence as world:system-failed when the app has no anim", async () => {
     const print = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const app = createApp({ plugins: [worldPlugin, boardFeature], pluginConfigs });
