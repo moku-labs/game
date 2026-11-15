@@ -1830,6 +1830,31 @@ A hidden tab is `lifecycle.push("background")`, a visible one `pop`. Textures ar
 the renderer: a texture source keeps its CPU image and Pixi uploads it again. A shot of `renderer.shots` has no CPU
 image: it goes with the device, and `has` answers false.
 
+## The trail of the run
+
+iOS may end the page's WebContent process in the middle of play (its memory limit, F175), and the game starts
+again at the splash with nothing that says why. On a page with a document and a `localStorage`, the renderer keeps
+one record of the run under `moku-game:last-run` (`trail.ts`):
+
+| Field | What it holds |
+|---|---|
+| `startedAt`, `at`, `uptimeS` | the wall clock of the start and of the last write, the seconds since the page started |
+| `state` | `"visible"`, `"hidden"` (the page in the background) or `"closed"` (`pagehide`, or the renderer stopped) |
+| `path`, `paths` | the flow path at the last write, and the last 8 rest paths with their `atS` |
+| `kind`, `textureMb` | the backend, and the megabytes of the textures Pixi manages |
+| `heapMb` | the JS heap where the browser tells it (Chromium); left out on WebKit |
+| `fps`, `uploadFrames` | drawn frames per second, and frames that uploaded textures, since the write before |
+| `writes` | how many writes the run made |
+
+It is written at start, once the application is up, every 2 s by the page's own timer, at once on a new rest path
+(`flow:rest`), on `visibilitychange`, on `pagehide` (`"closed"`), on a `pageshow` from the back/forward cache, and
+when the renderer stops (`"closed"`). A frame only adds to two counters: nothing is read, written or made in it
+(`__tests__/perf/trail.perf.ts`). A storage that refuses a write keeps nothing; the run goes on.
+
+At the next start a record that is not `"closed"` is a run cut short: `"visible"` is logged as
+`ctx.log.warn("renderer:run-cut-short", record)` (killed in play), `"hidden"` as `ctx.log.info` with the same name
+(reclaimed in the background, or swiped away), and the record is kept in `moku-game:cut-runs`, the newest ten.
+
 ## Events
 
 | Event | Payload | When |
