@@ -3,8 +3,9 @@
  * `parseArgs`, then one of `dev`, `build`, `native <verb>`, `keys`, `pack`, `visual` or `help`.
  * Every seam of the process (the console, the environment, spawning, signals, the watcher, the
  * keys watch, the asset scanner, native, Bun's resolver, the visual test runner, the home folder,
- * the file check, the folder listing, the network interfaces, the game's version) comes in as `deps`, so a test runs a
- * command with stubs. It returns the exit code and never exits itself. A plain function, on no API.
+ * the file check, the folder listing, the network interfaces, the game's version) comes in as
+ * `deps`, so a test runs a command with stubs. It returns the exit code and never exits itself. A
+ * plain function, on no API.
  */
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -940,6 +941,14 @@ function nativeStoreOf(
 
   if (target !== "ios" && target !== "android") {
     throw new Error(`[game] native: --store builds ios or android, got ${target ?? "no target"}.`);
+  }
+
+  // Native keeps cleartext off outside the debug profile: a release-built Android test app cannot
+  // open ws://, so the link would fail silently.
+  if (parsed.values.editor !== undefined && target === "android") {
+    throw new Error(
+      "[game] native: --store --dev --editor builds ios only for now.\n  On Android use native build android --debug --editor host:port|lan."
+    );
   }
 
   // The number, then the upload, which goes to App Store Connect only.

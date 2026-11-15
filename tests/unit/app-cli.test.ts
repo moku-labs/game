@@ -1452,6 +1452,21 @@ describe("native --store", () => {
         ["native", "build", "ios", "--store", "--dev", "--build-number", "1", "--simulator"],
         "[game] native: --store does not go with --simulator."
       ],
+      // Bug: a linked Android dev build that never connects (release profile, cleartext off).
+      [
+        [
+          "native",
+          "build",
+          "android",
+          "--store",
+          "--dev",
+          "--build-number",
+          "1",
+          "--editor",
+          "lan"
+        ],
+        "[game] native: --store --dev --editor builds ios only for now.\n  On Android use native build android --debug --editor host:port|lan."
+      ],
       [
         ["native", "build", "macos", "--store", "--build-number", "1"],
         "[game] native: --store builds ios or android, got macos."
