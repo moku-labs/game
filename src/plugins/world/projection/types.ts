@@ -147,12 +147,13 @@ export type TrackSegment = { at: number; ease?: Ease; to: Record<string, number>
  * keyframe walk: the segments run one after another over `ms` on one clock, and `to` is where the
  * last one ends. `repeat` runs the walk again from its first segment when it ends: a number
  * counts the extra runs, `"forever"` never ends. `reduced: "keep"` plays the track as written under
- * reduced motion. The world passes it to the driver unchanged; without a driver the target is
- * written once.
+ * reduced motion. `label` names the track for inspection. The world passes it to the driver
+ * unchanged; without a driver the target is written once.
  *
  * @example
  * ```ts
  * const options: TweenOptions = { ms: 350, ease: "out", delayMs: 40 };
+ * const named: TweenOptions = { ms: 350, label: "hud.card.enter" };
  * const fade: TweenOptions = { ms: 250, reduced: "keep" }; // still fades under reduced motion
  * const walk: TweenOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
  * const sway: TweenOptions = { ms: 2400, additive: true, repeat: "forever", segments: [{ at: 0.5, to: { rotation: 0.05 } }, { at: 1, to: { rotation: 0 } }] };
@@ -166,20 +167,30 @@ export type TweenOptions = {
   segments?: readonly TrackSegment[];
   repeat?: number | "forever";
   reduced?: ReducedMotion;
+  /** A name for the track, shown by inspection (`motionIdsOf`, `game.explain`). `defineMotion` sets it from its `id`. */
+  label?: string;
 };
 
 /**
  * Options of `ViewHandle.toRest`. Defaults: the plugin's `settleMs` and ease `"out"`. `delayMs`
  * lets a hook wait, for example for a flight to land, before the view comes home. `reduced: "keep"`
- * lets the way home run its length under reduced motion.
+ * lets the way home run its length under reduced motion. `label` names the track for inspection.
  *
  * @example
  * ```ts
  * const options: RestOptions = { ms: 200, delayMs: 120 };
  * const fadeIn: RestOptions = { ms: 200, reduced: "keep" };
+ * const named: RestOptions = { ms: 200, label: "hud.card.exit" };
  * ```
  */
-export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number; reduced?: ReducedMotion };
+export type RestOptions = {
+  ms?: number;
+  ease?: Ease;
+  delayMs?: number;
+  reduced?: ReducedMotion;
+  /** A name for the track, shown by inspection (`motionIdsOf`, `game.explain`). `defineMotion` sets it from its `id`. */
+  label?: string;
+};
 
 /**
  * What the driver is told about one track: how long it runs, how it eases, how long it waits,
@@ -188,7 +199,8 @@ export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number; reduced?
  * `to` is the last segment's target. A track with `repeat` starts its walk again when it ends
  * (a number counts the extra runs, `"forever"` never ends); the instant driver ignores it and
  * writes the end pose once. `reduced: "keep"` tells the driver the author kept the track under
- * reduced motion; the instant driver ignores that too.
+ * reduced motion; the instant driver ignores that too. `label` names the track for inspection:
+ * the world keeps it with the track and `motionIdsOf` answers it while the track runs.
  *
  * @example
  * ```ts
@@ -196,6 +208,7 @@ export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number; reduced?
  * const kept: TrackOptions = { ms: 250, ease: "out", reduced: "keep" };
  * const walk: TrackOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
  * const twice: TrackOptions = { ms: 400, ease: "inOut", delayMs: 0, additive: true, repeat: 1 };
+ * const named: TrackOptions = { ms: 250, label: "hud.card.enter" };
  * ```
  */
 export type TrackOptions = {
@@ -206,6 +219,8 @@ export type TrackOptions = {
   segments?: readonly TrackSegment[];
   repeat?: number | "forever";
   reduced?: ReducedMotion;
+  /** A name for the track, shown by inspection (`motionIdsOf`, `game.explain`). `defineMotion` sets it from its `id`. */
+  label?: string;
 };
 
 /**
@@ -387,6 +402,8 @@ export type ChangeHooks<Item> = { readonly [component: string]: ChangeHook<Item>
  * ```
  */
 export type ProjectionMotion<Item> = {
+  /** The id `defineMotion` was given; `anim` also labels the tracks of the motion with it. */
+  readonly id?: string;
   enter?(view: ViewHandle<Item>, item: Item, hint?: Hint, cause?: MotionCause): Motion;
   loop?(view: ViewHandle<Item>): Motion;
   exit?(view: ViewHandle<Item>, item: Item, hint?: Hint, cause?: MotionCause): Motion;
@@ -769,6 +786,8 @@ export type Track = {
    * end, as for a loop.
    */
   forever: boolean;
+  /** The name `TrackOptions.label` gave the track, for inspection (`motionIdsOf`); `undefined` for an unlabelled one. */
+  label: string | undefined;
 };
 
 /**
@@ -1432,6 +1451,23 @@ export type ProjectionApi = {
    * ```
    */
   motionsOf(entity: Entity): readonly string[];
+
+  /**
+   * The labels of the running tracks on an entity, as inspection shows them: the `label` of every
+   * track that still runs, in start order, each once. A track without a label adds none. An
+   * entity no labelled motion drives answers `[]`. Every call hands out a new array.
+   *
+   * @param entity - The entity to ask about.
+   * @returns The labels, or `[]`.
+   * @example
+   * ```ts
+   * // A coin whose enter motion was defined with the id "hud.coin.enter" is mid-flight.
+   * app.world.projection.motionIdsOf(coin); // ["hud.coin.enter"]
+   * app.time.step(400);
+   * app.world.projection.motionIdsOf(coin); // []
+   * ```
+   */
+  motionIdsOf(entity: Entity): readonly string[];
 
   /**
    * The rest value of one component of an entity: what a view holds when nothing animates it, or

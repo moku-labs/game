@@ -247,7 +247,8 @@ export function startTrack(
       component: component.componentName,
       handle,
       additive: options.additive === true,
-      forever: options.repeat === "forever"
+      forever: options.repeat === "forever",
+      label: options.label
     });
   }
 
@@ -357,4 +358,26 @@ export function runningComponents(tracks: readonly Track[], entity: Entity): str
   }
 
   return names;
+}
+
+/**
+ * The labels of the running tracks on one entity, in track order, each once. A track without a
+ * label adds none. It only reads: an ended track is skipped, not forgotten.
+ *
+ * @param tracks - The tracks the projection started.
+ * @param entity - The entity to ask about.
+ * @returns A new array of labels.
+ */
+export function runningLabels(tracks: readonly Track[], entity: Entity): string[] {
+  const labels: string[] = [];
+
+  for (const track of tracks) {
+    if (track.entity !== entity || track.label === undefined || labels.includes(track.label)) {
+      continue;
+    }
+
+    if (track.handle.active()) labels.push(track.label);
+  }
+
+  return labels;
 }

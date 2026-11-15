@@ -155,9 +155,10 @@ type Slot = { id: string; x: number };
  * A board of two items drawn with the engine's Transform; a change of x slides the item over
  * 100 ms, linear.
  *
+ * @param label - The label of the slide's track, when the motion was defined with an id.
  * @returns The mock world, the app that reads it and the entity of item i7.
  */
-function slidingBoard(): {
+function slidingBoard(label?: string): {
   world: MockWorld;
   app: ReturnType<typeof createApp> & { world: MockWorld["api"] };
   i7: number;
@@ -178,7 +179,14 @@ function slidingBoard(): {
       key: (item: Slot) => item.id,
       view: (item: Slot) => [Transform({ x: item.x })],
       motion: {
-        change: { Transform: view => view.toRest(Transform, { ms: 100, ease: "linear" }) }
+        change: {
+          Transform: view =>
+            view.toRest(Transform, {
+              ms: 100,
+              ease: "linear",
+              ...(label === undefined ? {} : { label })
+            })
+        }
       }
     }) as AnyProjectionSpec
   );
@@ -225,6 +233,30 @@ describe("game.explain", () => {
       motions: ["Transform"]
     });
     expect(read(app, explainSource, { entity: 42 })).toBeUndefined();
+    expect(read(app, explainSource, { entity: 1_048_577 })).not.toHaveProperty("motionIds");
+  });
+
+  it("adds motionIds while a labelled motion runs and drops them after it", () => {
+    const { world, app, i7 } = slidingBoard("board.item.enter");
+
+    world.model.player = {
+      items: [
+        { id: "i5", x: 0 },
+        { id: "i7", x: 128 }
+      ]
+    } as unknown as Record<string, never>;
+    world.commit();
+    world.frame(16);
+    world.frame(34);
+
+    expect(read(app, explainSource, { entity: i7 })).toMatchObject({
+      motions: ["Transform"],
+      motionIds: ["board.item.enter"]
+    });
+
+    world.frame(100);
+
+    expect(read(app, explainSource, { entity: i7 })).not.toHaveProperty("motionIds");
   });
 
   it("explains an entity with no key and no motion, and names what is not JSON", () => {
