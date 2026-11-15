@@ -225,7 +225,7 @@ export type RunningTimelineInfo = {
   readonly animation: string;
   /** The anim frame count when it started. */
   readonly startFrame: number;
-  /** The targets as `play` received them. */
+  /** The targets as `play` received them: the very object, not a copy. Do not mutate it. */
   readonly slots: SlotRecord;
   /** The entities its targets resolved to at the start, each counted in `Animation`. A copy. */
   readonly entities: readonly Entity[];
@@ -525,8 +525,9 @@ export type AnimApi = {
   /**
    * What plays now and what ended last: every running timeline with the targets it was played
    * with, and the last 16 that ended with the reason of each end. Every call builds new plain
-   * objects and copies the lists, so a caller cannot change engine state; a reader pays for it,
-   * the frame step does not. Stopping the app empties the ring.
+   * objects and copies `entities` and `marks`; `slots` is the very object `play` received, so do
+   * not mutate it. A reader pays for the copies, the frame step does not. Stopping the app empties
+   * the ring.
    *
    * @returns The running timelines in start order and the ended ones, oldest first.
    * @example

@@ -242,15 +242,15 @@ function nearestStop(
 
 /**
  * The stops a scroll's `snap` prop names, as a release uses them: numbers only, each kept inside 0
- * to `max`, in prop order. A stop that is no finite number is left out, so `NaN` and `Infinity`
- * never reach a reader's JSON as `null`.
+ * to `max`, in prop order. A `NaN` and a stop that is no number are left out; `Infinity` is kept
+ * clamped to `max`, so every stop is finite and no `null` reaches a reader's JSON.
  *
  * @param snap - The `snap` prop of the scroll, any value.
  * @param max - The largest offset.
- * @returns The stops, or `undefined` when the prop is no array or no finite stop remains.
+ * @returns The stops, or `undefined` when the prop is no array or no numeric stop remains.
  * @example
  * ```ts
- * stopsOf([-10, 318, Number.NaN, "end", 500], 390); // [0, 318, 390]
+ * stopsOf([-10, 318, Number.NaN, "end", 500, Infinity], 390); // [0, 318, 390, 390]
  * ```
  */
 export function stopsOf(snap: unknown, max: number): number[] | undefined {
@@ -259,7 +259,7 @@ export function stopsOf(snap: unknown, max: number): number[] | undefined {
   const stops: number[] = [];
 
   for (const candidate of snap) {
-    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    if (typeof candidate === "number" && !Number.isNaN(candidate)) {
       stops.push(within(candidate, max));
     }
   }

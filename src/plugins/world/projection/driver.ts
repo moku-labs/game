@@ -372,9 +372,8 @@ export function runningLabels(tracks: readonly Track[], entity: Entity): string[
   const labels: string[] = [];
 
   for (const track of tracks) {
-    if (track.entity !== entity || track.label === undefined || labels.includes(track.label)) {
-      continue;
-    }
+    if (track.entity !== entity) continue;
+    if (track.label === undefined || labels.includes(track.label)) continue;
 
     if (track.handle.active()) labels.push(track.label);
   }

@@ -98,7 +98,8 @@ export const projectionsSource = defineSource({
  * read(app, sources.explain, { entity: 1048577 });
  * // { id: 1048577, owner: { kind: "projection", name: "board.items" },
  * //   key: { projection: "board.items", key: "i7" },
- * //   components: { Layer: { name: "items" } }, skipped: ["Display"],
+ * //   components: { Transform: { x: 32, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
+ * //     Layer: { name: "items" } }, skipped: ["Display"],
  * //   motions: ["Transform"], motionIds: ["board.item.enter"] }
  * ```
  */

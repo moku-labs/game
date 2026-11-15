@@ -192,7 +192,7 @@ function nodeOf(
 
   // The optional fields, each only when it applies: the words of a text, the style key of a keyed
   // text, the fit scale of a fitted element, the value of a text field, the window of a windowed
-  // scroll, the local of a component root.
+  // scroll, the local of a component root, the motion id of a motion, the scroll record of a scroll.
   const content = contentOf(element, resolvedOf);
   const worded = content === undefined ? node : { ...node, content };
   const textStyle = textStyleOf(element, shownStyleOf);
@@ -209,6 +209,8 @@ function nodeOf(
     element.instance === undefined ? undefined : state.instances.get(element.instance)?.local;
 
   const located = local === undefined ? windowed : { ...windowed, local: { ...local } };
+
+  // The motion id and the scroll record come last, each only when the element has one.
   const motion = motionIdOf(element);
   const motioned = motion === undefined ? located : { ...located, motion };
   const scroll = scrollOf(element, stopsOf);

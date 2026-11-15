@@ -767,7 +767,7 @@ export type UiNode = {
   /**
    * Where a scroll stands and how it rests: its axis, offset and max (as `ScrollState` has them),
    * whether it moves, and its snap stops as a release uses them: numbers only, each kept inside
-   * 0 to `max`, in prop order. `snap` is absent when the scroll names no stops. Absent on any
+   * 0 to `max` (`Infinity` reads as `max`), in prop order, `NaN` and non-numbers left out. `snap` is absent when the scroll names no stops. Absent on any
    * other tag; offset, max and `moving` are 0 and false until the first solve placed the scroll.
    *
    * @example

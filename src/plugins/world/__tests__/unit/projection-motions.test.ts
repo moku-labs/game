@@ -472,7 +472,7 @@ describe("projection.motionIdsOf", () => {
     expect(world.api.projection.motionIdsOf(b)).toEqual(["only.b"]);
   });
 
-  it("hands out a new array on every call and forgets no track", () => {
+  it("motionIdsOf hands out a new array on every call and forgets no track", () => {
     const world = createMockWorld();
 
     mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {

@@ -1464,7 +1464,7 @@ export type ProjectionApi = {
    * // A coin whose enter motion was defined with `defineMotion({ id: "hud.coin", transition: { ms: 400 }, ... })`
    * // is mid-flight, and its enter track is labelled "hud.coin.enter".
    * app.world.projection.motionIdsOf(coin); // ["hud.coin.enter"]
-   * app.time.step(400);
+   * app.time.step(500);
    * app.world.projection.motionIdsOf(coin); // []
    * ```
    */

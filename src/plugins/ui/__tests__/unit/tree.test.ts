@@ -283,7 +283,7 @@ describe("readTree scroll", () => {
     expect(tree.scroll).toEqual({ axis: "y", offset: 0, max: 0, moving: false });
   });
 
-  it("clamps the stops into 0 to max and drops what is no finite number, in prop order", () => {
+  it("clamps the stops into 0 to max, keeps Infinity as max and drops NaN and non-numbers, in prop order", () => {
     // Bug caught: a stop outside the range, a NaN (null in JSON) or a word reaches the reader.
     const clamped = withStops(stateWith(stripOf(motionOf({}), { snap: [-10, 500] })));
     const mixed = withStops(
@@ -293,10 +293,10 @@ describe("readTree scroll", () => {
     );
 
     expect(clamped.scroll?.snap).toEqual([0, 390]);
-    expect(mixed.scroll?.snap).toEqual([300, 100]);
+    expect(mixed.scroll?.snap).toEqual([300, 390, 100]);
   });
 
-  it("has no snap key without the prop, with an empty one or with no finite stop", () => {
+  it("has no snap key without the prop, with an empty one or with only NaN or non-number stops", () => {
     // Bug caught: `snap: []` or `snap: undefined` shows up for a scroll that names no stops.
     for (const snap of [undefined, [], ["a"], [Number.NaN], "0,318", 5]) {
       const tree = withStops(stateWith(stripOf(motionOf({}), { snap })));

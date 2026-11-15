@@ -196,6 +196,7 @@ export function startTimeline<Tags extends SlotTags>(
   definition: AnimationDefinition<Tags>,
   slots: SlotValues<Tags>
 ): PlayHandle {
+  // Build the step tree and check it: a bad tree throws before anything starts.
   const spawned = emptySpawnTable();
   const step = definition.build(slots, {
     at: (target: Target): Pose => restPoseOf(actx, target, spawned)
@@ -204,15 +205,18 @@ export function startTimeline<Tags extends SlotTags>(
   assertUniqueSpawns(definition.id, step);
   warnLoopBlocks(actx, definition.id, step);
 
+  // Take the next timeline number.
   const id = actx.state.nextId;
 
   actx.state.nextId += 1;
 
+  // Resolve the targets once and count each entity in Animation.
   const cursor = createCursor(step);
   const { targets, entities } = resolveTargets(rt, step);
 
   for (const entity of entities) countPlaying(actx.deps.world.ecs, entity, 1);
 
+  // Build the running record.
   let settle = noResolver;
   const done = new Promise<void>(resolve => {
     settle = resolve;
@@ -233,11 +237,13 @@ export function startTimeline<Tags extends SlotTags>(
     cctx: { rt, animation: definition.id, marks, spawned, targets }
   };
 
+  // Register it and announce the start.
   actx.state.timelines.set(id, running);
   actx.state.timelineList.push(running);
   rt.wake();
   actx.emit("anim:started", { animation: definition.id, timeline: id });
 
+  // Hand out the handle.
   return {
     finish: (): void => {
       if (running.ended) return;

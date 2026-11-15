@@ -29,7 +29,7 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 | `play(animation, slots)` | Builds the step tree now and starts it. Returns a `PlayHandle`: the `MotionHandle` contract over the whole tree plus `done` and `marks()`. |
 | `finishAll()` | Every timeline ends at its own end, every track writes its exact target and every spawned entity is despawned. Called by the frame step in world mode `"fast"`. |
 | `active()` | Tracks in the table, the delayed ones and the running loops included. `0` when nothing moves; a screen at rest with loops counts one track per loop lane. A `Frames` component counts nothing. |
-| `timelines()` | What plays now and what ended last, as new plain objects: `{ running, ended }`. `running` lists every running timeline in start order with its `timeline` number, `animation`, `startFrame`, `slots` (the targets as `play` got them), `entities` and `marks` (copies). `ended` is the ring of the last 16 ends, oldest first, each with `timeline`, `animation`, `startFrame`, `endFrame` and `reason`. See "Timelines and their events". |
+| `timelines()` | What plays now and what ended last, as new plain objects: `{ running, ended }`. `running` lists every running timeline in start order with its `timeline` number, `animation`, `startFrame`, `slots` (the very object `play` got, not a copy: do not mutate it), `entities` and `marks` (copies). `ended` is the ring of the last 16 ends, oldest first, each with `timeline`, `animation`, `startFrame`, `endFrame` and `reason`. See "Timelines and their events". |
 | `onMark(fn)` | Direct subscription next to the event. Returns the remover. |
 | `reducedMotion()` | Whether reduced motion is on. |
 | `setReducedMotion(on)` | Switches reduced motion on or off for every track started afterwards. |
@@ -56,9 +56,9 @@ cancel) and `done` resolves. A listener of the event therefore already finds the
 `timelines().ended`.
 
 The ring holds the last 16 ends. Its 16 records are made with the state and overwritten in place, so an
-end allocates no record: the 17th end evicts the oldest. A `timelines()` call builds new objects (a
-reader pays, the frame step does not), and the lists it hands out are copies, so changing them changes
-nothing in the engine. Stopping the plugin empties the ring (the records stay allocated).
+end allocates no record: the 17th end evicts the oldest. A `timelines()` call builds new plain objects (a
+reader pays, the frame step does not) and copies `entities` and `marks`, so changing those changes
+nothing in the engine. `slots` is the very object `play` received: do not mutate it. Stopping the plugin empties the ring (the records stay allocated).
 
 `game.timelines` is the same answer as a source of the `/inspect` door (`sources.timelines`, changes
 every frame, production-safe): `read(app, sources.timelines)` gives `app.anim.timelines()`. It throws
