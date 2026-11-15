@@ -107,6 +107,7 @@ async function build(
     home: "/home/tester",
     exists: unused,
     listFiles: unused,
+    interfaces: unused,
     readPackageVersion: unused,
     ...change(seen)
   };
@@ -515,6 +516,69 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build --debug, the bundle
     expect(bundled).toMatch(/__MOKU_GAME_EDITOR__\s*=\s*"off"/);
     expect(bundled).toMatch(/__MOKU_GAME_CONTROL__\s*=\s*(?:true|!0)/);
     expect(bundled).toContain('"com.mini.game.dev"');
+  });
+
+  it("under the dev profile --editor bakes that address and the warning names the link (bug: the link silently dropped on DEV)", async () => {
+    const root = game();
+
+    fakeEditor(root);
+    put(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "mini-game" }, native: { name: "Mini", identifier: "com.mini.game", dev: { identifier: "com.mini.game.dev" } } };\n'
+    );
+
+    const { code, seen } = await build(
+      ["--debug", "--editor", "192.168.1.20:47600"],
+      root,
+      MANIFEST_ONLY,
+      0,
+      recorded => ({ ...debugSeams(recorded), env: { MOKU_NATIVE_PROFILE: "dev" } })
+    );
+    const out = path.join(root, "dist", "web");
+    const html = readFileSync(path.join(out, "index.html"), "utf8");
+    const script = /<script type="module" crossorigin src="([^"]+)"/.exec(html)?.[1] ?? "";
+    const bundled = readFileSync(path.join(out, script), "utf8");
+
+    expect(seen.errors).toEqual([]);
+    expect(code).toBe(0);
+    expect(seen.warnings).toEqual([
+      `build: a DEBUG page with the editor agent, control: every command, the state-changing ones too. Build debug-20261014T153012Z, engine ${VERSION}+src, editor 192.168.1.20:47600. This is a DEV page for the store test track, with an editor link to 192.168.1.20:47600.`
+    ]);
+    expect(bundled).toMatch(/__MOKU_GAME_EDITOR__\s*=\s*"192\.168\.1\.20:47600"/);
+    expect(bundled).toContain('"com.mini.game.dev"');
+  });
+
+  it("--debug --editor lan bakes the LAN address of en0 with port 47600, and the page is one never to ship (bug: lan baked as a host)", async () => {
+    const root = game();
+
+    fakeEditor(root);
+
+    const { code, seen } = await build(
+      ["--debug", "--editor", "lan"],
+      root,
+      MANIFEST_ONLY,
+      0,
+      recorded => ({
+        ...debugSeams(recorded),
+        interfaces: () => ({
+          // eslint-disable-next-line sonarjs/no-hardcoded-ip -- a VPN address the pick skips.
+          utun3: [{ address: "10.8.0.2", family: "IPv4", internal: false }],
+          // eslint-disable-next-line sonarjs/no-hardcoded-ip -- the LAN address the pick bakes.
+          en0: [{ address: "192.168.1.20", family: "IPv4", internal: false }]
+        })
+      })
+    );
+    const out = path.join(root, "dist", "web");
+    const html = readFileSync(path.join(out, "index.html"), "utf8");
+    const script = /<script type="module" crossorigin src="([^"]+)"/.exec(html)?.[1] ?? "";
+    const bundled = readFileSync(path.join(out, script), "utf8");
+
+    expect(seen.errors).toEqual([]);
+    expect(code).toBe(0);
+    expect(seen.warnings).toEqual([
+      `build: a DEBUG page with the editor agent, control: every command, the state-changing ones too. Build debug-20261014T153012Z, engine ${VERSION}+src, editor 192.168.1.20:47600. Never ship it to a store.`
+    ]);
+    expect(bundled).toMatch(/__MOKU_GAME_EDITOR__\s*=\s*"192\.168\.1\.20:47600"/);
   });
 
   // Bug: a page for an editor that does not read "off" dials for ever on a tester's phone.

@@ -60,6 +60,10 @@ const SELF = "/game/node_modules/@moku-labs/game/bin/moku-game.mjs";
 /** The home folder the stubs answer. */
 const HOME = "/home/tester";
 
+/** The interface table the stubs answer: Wi-Fi on `en0`, the address `--editor lan` picks. */
+// eslint-disable-next-line sonarjs/no-hardcoded-ip -- the LAN address `--editor lan` reads to.
+const LAN_TABLE = { en0: [{ address: "192.168.1.5", family: "IPv4", internal: false }] };
+
 /** The temp folders of a test, removed after it. */
 const made: string[] = [];
 
@@ -187,6 +191,7 @@ function fakeDeps(
     home: HOME,
     exists: () => false,
     listFiles: () => [],
+    interfaces: () => LAN_TABLE,
     readPackageVersion: () => undefined,
     ...change
   };
@@ -1092,10 +1097,10 @@ describe("the command line", () => {
       "moku-game <command> [options]",
       "",
       "  dev [--port 3000] [--packed]          serve the game with hot reload",
-      "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
-      "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
+      "  build [--out dist/web] [--debug [--editor host:port|lan]]  pack the assets and build the page; --debug adds the editor agent and control",
+      "  native build <target> [--simulator] [--debug [--editor host:port|lan]]  build the native app (ios, macos, android)",
       "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
-      "  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev",
+      "  native build <target> --store --dev --build-number <n> [--editor host:port|lan]  a store-signed test app from native.dev",
       "  native build ios --store --build-number <n> --upload  a store build, then the upload to App Store Connect",
       "  native dev <target>                   run the native shell on the dev server",
       "  native doctor | native clean          check or remove the native project",
@@ -1409,7 +1414,26 @@ describe("native --store", () => {
       ],
       [
         ["native", "build", "android", "--store", "--build-number", "1", "--editor", "h:1"],
-        "[game] native: --store does not go with --editor."
+        "[game] native: --editor goes with --debug or --store --dev."
+      ],
+      [
+        ["native", "build", "ios", "--store", "--build-number", "1", "--editor", "lan"],
+        "[game] native: --editor goes with --debug or --store --dev."
+      ],
+      [
+        [
+          "native",
+          "build",
+          "ios",
+          "--store",
+          "--dev",
+          "--build-number",
+          "1",
+          "--editor",
+          "lan",
+          "--debug"
+        ],
+        "[game] native: --store does not go with --debug."
       ],
       [
         ["native", "build", "ios", "--store", "--build-number", "1", "--simulator"],
@@ -1427,6 +1451,21 @@ describe("native --store", () => {
       [
         ["native", "build", "ios", "--store", "--dev", "--build-number", "1", "--simulator"],
         "[game] native: --store does not go with --simulator."
+      ],
+      // Bug: a linked Android dev build that never connects (release profile, cleartext off).
+      [
+        [
+          "native",
+          "build",
+          "android",
+          "--store",
+          "--dev",
+          "--build-number",
+          "1",
+          "--editor",
+          "lan"
+        ],
+        "[game] native: --store --dev --editor builds ios only for now.\n  On Android use native build android --debug --editor host:port|lan."
       ],
       [
         ["native", "build", "macos", "--store", "--build-number", "1"],
@@ -1540,6 +1579,23 @@ describe("native --store", () => {
       "[game] native --dev: config.ts has no native.dev.\n  Add native.dev: { identifier } with an id ending in .dev."
     ]);
     expect(seen.natives).toEqual([]);
+  });
+
+  it("--store --dev takes --editor, lan read to the LAN address, and hands it to native beside the store block with no debug profile (bug: the F133 ban not lifted, or the link dropped on its way to the test app)", async () => {
+    const config =
+      'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t", dev: { identifier: "com.t.dev" } } };\n';
+    const root = makeGame({ "config.ts": config });
+    const argv = ["native", "build", "ios", "--store", "--dev", "--build-number", "19"];
+    const lan = await run([...argv, "--editor", "lan"], root, { exists: everyFileThere });
+    const given = await run([...argv, "--editor", "192.168.1.20:47600"], root, {
+      exists: everyFileThere
+    });
+
+    expect([lan.code, given.code]).toEqual([0, 0]);
+    expect(lan.seen.natives[0]?.options.editor).toBe("192.168.1.5:47600");
+    expect(lan.seen.natives[0]?.options.store?.dev).toBe(true);
+    expect(lan.seen.natives[0]?.options).not.toHaveProperty("debug");
+    expect(given.seen.natives[0]?.options.editor).toBe("192.168.1.20:47600");
   });
 
   // Bug: altool uploads an old build, the key of the wrong place, or the test app's .ipa from the players' folder.
@@ -1874,6 +1930,69 @@ describe("--debug and --editor", () => {
     ]);
   });
 
+  it("--editor lan reads the computer's LAN IPv4 with port 47600, lan:47601 keeps its port, and a host:port reads no interface table (bug: lan baked as a host, or the port dropped)", async () => {
+    const root = makeGame({ "config.ts": native });
+    const android = await run(["native", "build", "android", "--debug", "--editor", "lan"], root);
+    const ios = await run(
+      ["native", "build", "ios", "--debug", "--simulator", "--editor", "lan:47601"],
+      root
+    );
+    const given = await run(
+      ["native", "build", "android", "--debug", "--editor", "192.168.1.20:47600"],
+      root,
+      {
+        interfaces: () => {
+          throw new Error("no interface table here");
+        }
+      }
+    );
+
+    expect(android.seen.natives[0]?.options.editor).toBe("192.168.1.5:47600");
+    expect(ios.seen.natives[0]?.options.editor).toBe("192.168.1.5:47601");
+    expect(given.seen.errors).toEqual([]);
+    expect(given.seen.natives[0]?.options.editor).toBe("192.168.1.20:47600");
+  });
+
+  it("--editor lan:0, lan:x, lan:70000 and lan: are refused as host:port; with no LAN IPv4 lan is refused on build and native (bug: a port nobody listens on, or lan baked as a host)", async () => {
+    const root = makeGame({ "config.ts": native });
+    const noLan = {
+      interfaces: () => ({
+        lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+        // eslint-disable-next-line sonarjs/no-hardcoded-ip -- an IPv6 address the pick skips.
+        en0: [{ address: "fe80::1c2a", family: "IPv6", internal: false }]
+      })
+    };
+
+    const top = await run(["native", "build", "android", "--debug", "--editor", "lan:65535"], root);
+
+    expect(top.seen.errors).toEqual([]);
+    expect(top.seen.natives[0]?.options.editor).toBe("192.168.1.5:65535");
+
+    for (const editor of ["lan:0", "lan:x", "lan:65536", "lan:70000", "lan:"]) {
+      const { code, seen } = await run(["build", "--debug", "--editor", editor], root);
+
+      expect(code, editor).toBe(1);
+      expect(seen.errors).toEqual([`[game] build: --editor takes host:port, got "${editor}".`]);
+      expect(seen.scans).toEqual([]);
+    }
+
+    const build = await run(["build", "--debug", "--editor", "lan"], root, noLan);
+    const nativeRun = await run(
+      ["native", "build", "ios", "--debug", "--editor", "lan"],
+      root,
+      noLan
+    );
+
+    expect(build.seen.errors).toEqual([
+      "[game] build: --editor lan found no LAN address on this computer.\n  Connect to a Wi-Fi or give --editor host:port."
+    ]);
+    expect(build.seen.scans).toEqual([]);
+    expect(nativeRun.seen.errors).toEqual([
+      "[game] native: --editor lan found no LAN address on this computer.\n  Connect to a Wi-Fi or give --editor host:port."
+    ]);
+    expect(nativeRun.seen.natives).toEqual([]);
+  });
+
   it("with MOKU_NATIVE_PROFILE=store build --debug is refused before anything is built; with debug and no --debug a release page is built", async () => {
     const root = makeGame();
     const store = await run(["build", "--debug"], root, { env: { MOKU_NATIVE_PROFILE: "store" } });
@@ -1893,6 +2012,78 @@ describe("--debug and --editor", () => {
   });
 });
 
+describe("native build ios --debug, the install lines", () => {
+  /** A config with a native section, for the native verbs. */
+  const native =
+    'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t" } };\n';
+
+  /** The first two lines after a device build. */
+  const lines = ["native: install it on an iPhone by cable:", "  xcrun devicectl list devices"];
+
+  // Bug: a debug .ipa with no word on how it reaches the phone, or an older one named.
+  it("after a green device build they name the newest .ipa of dist-native/ios-debug", async () => {
+    const root = makeGame({ "config.ts": native });
+    const folders: string[] = [];
+    const { code, seen } = await run(["native", "build", "ios", "--debug"], root, {
+      listFiles: folder => {
+        folders.push(folder);
+
+        return [
+          { name: "Old.ipa", mtimeMs: 1 },
+          { name: "T (debug).ipa", mtimeMs: 3 },
+          { name: "build.log", mtimeMs: 9 }
+        ];
+      }
+    });
+    const folder = path.join(root, "dist-native", "ios-debug");
+
+    expect(code).toBe(0);
+    expect(folders).toEqual([folder]);
+    expect(seen.out).toEqual([
+      ...lines,
+      `  xcrun devicectl device install app --device <name or id> "${path.join(folder, "T (debug).ipa")}"`
+    ]);
+  });
+
+  // Bug: a device build that left no .ipa ends with no way to install it.
+  it("with no .ipa in the folder they point at Xcode", async () => {
+    const root = makeGame({ "config.ts": native });
+    const { code, seen } = await run(["native", "build", "ios", "--debug"], root, {
+      listFiles: () => [{ name: "T.app", mtimeMs: 1 }]
+    });
+    const folder = path.join(root, "dist-native", "ios-debug");
+
+    expect(code).toBe(0);
+    expect(seen.out).toEqual([
+      `native: no .ipa in ${folder}; open it in Xcode → Window → Devices and Simulators to install.`
+    ]);
+  });
+
+  // Bug: a stale .ipa named after a simulator build, an Android or a plain build, or a failed one.
+  it("nothing is printed for --debug --simulator, android --debug, a plain ios build, or a failed build", async () => {
+    const root = makeGame({ "config.ts": native });
+    const listed: string[] = [];
+    const listFiles: CliDeps["listFiles"] = folder => {
+      listed.push(folder);
+
+      return [{ name: "T.ipa", mtimeMs: 1 }];
+    };
+    const simulator = await run(["native", "build", "ios", "--debug", "--simulator"], root, {
+      listFiles
+    });
+    const android = await run(["native", "build", "android", "--debug"], root, { listFiles });
+    const plain = await run(["native", "build", "ios"], root, { listFiles });
+    const failed = await run(["native", "build", "ios", "--debug"], root, {
+      listFiles,
+      native: async () => false
+    });
+
+    expect([simulator, android, plain, failed].map(ran => ran.code)).toEqual([0, 0, 0, 1]);
+    expect([simulator, android, plain, failed].map(ran => ran.seen.out)).toEqual([[], [], [], []]);
+    expect(listed).toEqual([]);
+  });
+});
+
 describe("MOKU_NATIVE_PROFILE=dev", () => {
   /** The profile of native's web build for a test app. */
   const dev = { env: { MOKU_NATIVE_PROFILE: "dev" } };
@@ -1908,14 +2099,15 @@ describe("MOKU_NATIVE_PROFILE=dev", () => {
     expect(seen.scans).toEqual([]);
   });
 
-  // Bug: a tester's phone dials a Mac that is not there, or the overlay's toggles are greyed out.
-  it("--editor and --debug=read are refused, the read-only page and the address have no place on it", async () => {
+  // Bug: the overlay's toggles are greyed out, or the link a person asked for is refused on DEV.
+  it("--debug=read is refused, the read-only page has no place on it; --editor goes on to the editor check (bug: the F133 ban on a DEV link not lifted)", async () => {
     const root = makeGame();
     const editor = await run(["build", "--debug", "--editor", "127.0.0.1:47600"], root, dev);
     const read = await run(["build", "--debug=read"], root, dev);
 
+    // The stub resolver answers a path with no package.json above it: the next check refuses it.
     expect(editor.seen.errors).toEqual([
-      "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page has no editor link.\n  Build it without --editor."
+      "[game] build: a dev page needs @moku-labs/editor 0.10.19 or newer, found no readable version.\n  An older one dials the editor for ever. Run: bun add -d @moku-labs/editor@latest."
     ]);
     expect(read.seen.errors).toEqual([
       "[game] build: MOKU_NATIVE_PROFILE is dev: a dev page runs every command.\n  Build it with --debug."

@@ -3,8 +3,9 @@
  * `parseArgs`, then one of `dev`, `build`, `native <verb>`, `keys`, `pack`, `visual` or `help`.
  * Every seam of the process (the console, the environment, spawning, signals, the watcher, the
  * keys watch, the asset scanner, native, Bun's resolver, the visual test runner, the home folder,
- * the file check, the folder listing, the game's version) comes in as `deps`, so a test runs a
- * command with stubs. It returns the exit code and never exits itself. A plain function, on no API.
+ * the file check, the folder listing, the network interfaces, the game's version) comes in as
+ * `deps`, so a test runs a command with stubs. It returns the exit code and never exits itself. A
+ * plain function, on no API.
  */
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -12,7 +13,9 @@ import type { BrandConsole } from "@moku-labs/common/cli";
 import type { parseVisualArgv, runVisualTests } from "../visual";
 import { type BuildRun, type DebugLevel, keysArguments, packArguments, runBuild } from "./build";
 import type { KeysWatcher } from "./keys";
+import { type Interfaces, lanAddressOf } from "./lan";
 import {
+  debugFolderOf,
   missingPasswords,
   type NativeStore,
   type NativeVerb,
@@ -123,8 +126,13 @@ export type CliDeps = {
   home: string;
   /** Tells whether a file is there; the keystore check of `--store`. */
   exists: (path: string) => boolean;
-  /** The files of a folder, none for a missing folder; `--upload` finds the newest `.ipa` with it. */
+  /**
+   * The files of a folder, none for a missing folder; `--upload` and the install lines of an iOS
+   * debug build find the newest `.ipa` with it.
+   */
   listFiles: (folder: string) => readonly ListedFile[];
+  /** The network interfaces of this computer, `os.networkInterfaces()`; only `--editor lan` reads them. */
+  interfaces: () => Interfaces;
   /** The `version` of `<root>/package.json`, `undefined` for a missing file or field. */
   readPackageVersion: (root: string) => string | undefined;
 };
@@ -216,6 +224,12 @@ const MAX_BUILD_NUMBER = 2_100_000_000;
 /** A host of `--editor`: a name or an IPv4 address, or an IPv6 address in brackets. */
 const EDITOR_HOST = /^(?:[\w.-]+|\[[\da-f:.]+\])$/i;
 
+/** The host of `--editor` that stands for the LAN address of this computer: `lan` or `lan:<port>`. */
+const LAN_HOST = "lan";
+
+/** The port of `--editor lan` without one: the editor's LAN listener. */
+const EDITOR_PORT = "47600";
+
 /** The value a bare `--debug` reads as: the full profile, with no alias note. */
 const BARE_DEBUG = "";
 
@@ -227,10 +241,10 @@ const USAGE = [
   "moku-game <command> [options]",
   "",
   "  dev [--port 3000] [--packed]          serve the game with hot reload",
-  "  build [--out dist/web] [--debug [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent and control",
-  "  native build <target> [--simulator] [--debug [--editor host:port]]  build the native app (ios, macos, android)",
+  "  build [--out dist/web] [--debug [--editor host:port|lan]]  pack the assets and build the page; --debug adds the editor agent and control",
+  "  native build <target> [--simulator] [--debug [--editor host:port|lan]]  build the native app (ios, macos, android)",
   "  native build <target> --store --build-number <n>  a store build: an .aab on android, an .ipa on ios",
-  "  native build <target> --store --dev --build-number <n>  a store-signed test app from native.dev",
+  "  native build <target> --store --dev --build-number <n> [--editor host:port|lan]  a store-signed test app from native.dev",
   "  native build ios --store --build-number <n> --upload  a store build, then the upload to App Store Connect",
   "  native dev <target>                   run the native shell on the dev server",
   "  native doctor | native clean          check or remove the native project",
@@ -437,21 +451,26 @@ function noteFullAlias(parsed: Parsed, ui: CliUi): void {
 }
 
 /**
- * Reads `--editor`: the `host:port` the page agent of a debug page dials.
+ * Reads `--editor`: the `host:port` the page agent of a debug page dials. `lan` stands for the LAN
+ * address of this computer at port 47600, `lan:<port>` at that port; only then are the interfaces
+ * read.
  *
  * @param value - The value of the flag.
  * @param command - The command word, for the message.
+ * @param interfaces - The network interfaces of this computer.
  * @returns The address.
- * @throws {Error} When the value is not a host and a whole port from 1 to 65535.
+ * @throws {Error} When the value is not a host and a whole port from 1 to 65535, or `lan` finds no
+ *   LAN address.
  * @example
  * ```ts
- * editorOf("192.168.1.20:47600"); // "192.168.1.20:47600"
+ * editorOf("lan:47601", "build", () => ({ en0: [{ address: "192.168.1.5", family: "IPv4", internal: false }] })); // "192.168.1.5:47601"
  * ```
  */
-function editorOf(value: string, command: Command = "build"): string {
-  const colon = value.lastIndexOf(":");
-  const host = value.slice(0, Math.max(colon, 0));
-  const port = value.slice(colon + 1);
+function editorOf(value: string, command: Command, interfaces: () => Interfaces): string {
+  const given = value === LAN_HOST ? `${LAN_HOST}:${EDITOR_PORT}` : value;
+  const colon = given.lastIndexOf(":");
+  const host = given.slice(0, Math.max(colon, 0));
+  const port = given.slice(colon + 1);
   const isAddress =
     colon > 0 &&
     EDITOR_HOST.test(host) &&
@@ -460,8 +479,17 @@ function editorOf(value: string, command: Command = "build"): string {
     Number(port) <= MAX_PORT;
 
   if (!isAddress) throw new Error(`[game] ${command}: --editor takes host:port, got "${value}".`);
+  if (host !== LAN_HOST) return given;
 
-  return value;
+  const lan = lanAddressOf(interfaces());
+
+  if (lan === undefined) {
+    throw new Error(
+      `[game] ${command}: --editor lan found no LAN address on this computer.\n  Connect to a Wi-Fi or give --editor host:port.`
+    );
+  }
+
+  return `${lan}:${port}`;
 }
 
 /**
@@ -566,7 +594,7 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
 
   // `--store` reads first: its refusal of `--debug` names the store on every target.
   const store = nativeStoreOf(parsed, verb, target);
-  const debug = nativeDebugOf(parsed, verb, target);
+  const debug = nativeDebugOf(parsed, verb, target, deps.interfaces);
 
   noteFullAlias(parsed, deps.ui);
 
@@ -586,7 +614,9 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
   };
 
   // `nativeDebugOf` lets a named target through on Android and iOS only.
-  if (debug.debug !== undefined && target !== undefined) {
+  const isNamedDebugApp = debug.debug !== undefined && target !== undefined;
+
+  if (isNamedDebugApp) {
     deps.ui.warn(
       "native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store."
     );
@@ -603,8 +633,41 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
 
   if (!(await deps.native(verb, settings, where, options))) return 1;
 
-  // A failed build never reaches the upload.
+  // A failed build never reaches the install lines or the upload.
+  const isIosDebugBuild = verb === "build" && target === "ios" && debug.debug !== undefined;
+
+  if (isIosDebugBuild) {
+    printInstallLines(parsed, deps);
+  }
+
   return options.store?.upload === true ? uploadIpa(settings, where, options.store, deps) : 0;
+}
+
+/**
+ * Prints how the `.ipa` of a green iOS debug device build reaches an iPhone by cable: the two
+ * `xcrun devicectl` lines with the newest `.ipa` of the debug folder, or the way through Xcode when
+ * the folder has none. A simulator build has no `.ipa`, so it prints nothing.
+ *
+ * @param parsed - The command line.
+ * @param deps - The seams of the process.
+ */
+function printInstallLines(parsed: Parsed, deps: CliDeps): void {
+  if (parsed.values.simulator === true) return;
+
+  const folder = debugFolderOf(parsed.root);
+  const ipa = newestIpaOf(folder, deps);
+
+  if (ipa === undefined) {
+    deps.ui.info(
+      `native: no .ipa in ${folder}; open it in Xcode → Window → Devices and Simulators to install.`
+    );
+
+    return;
+  }
+
+  deps.ui.info("native: install it on an iPhone by cable:");
+  deps.ui.line("  xcrun devicectl list devices");
+  deps.ui.line(`  xcrun devicectl device install app --device <name or id> "${ipa}"`);
 }
 
 /**
@@ -769,32 +832,39 @@ function warnIosStore(settings: ResolvedGameConfig, target: string | undefined, 
 
 /**
  * Reads `--debug` and `--editor` of `moku-game native`: they go with `native build android` and
- * `native build ios` only for now.
+ * `native build ios` only for now. A dev store build (`--store --dev`) takes `--editor` alone,
+ * which `nativeStoreOf` has let through.
  *
  * @param parsed - The command line.
  * @param verb - The native verb.
  * @param target - The target the command line names, unchecked.
- * @returns The profile and the editor address as given, each only when given.
- * @throws {Error} When either goes with another verb, `--editor` comes without `--debug`, a value
- *   is refused, or the target is neither `android` nor `ios`.
+ * @param interfaces - The network interfaces of this computer, for `--editor lan`.
+ * @returns The profile and the editor address, `lan` read to the LAN address, each only when given.
+ * @throws {Error} When either goes with another verb, `--editor` comes without `--debug` outside a
+ *   dev store build, a value is refused, or the target is neither `android` nor `ios`.
  */
 function nativeDebugOf(
   parsed: Parsed,
   verb: NativeVerb,
-  target: string | undefined
+  target: string | undefined,
+  interfaces: () => Interfaces
 ): Pick<NativeVerbOptions, "debug" | "editor"> {
   const debug = debugLevelOf(parsed.values.debug, "native");
   const editor = parsed.values.editor;
+  const isTestApp = parsed.values.store === true && parsed.values.dev === true;
 
   if (debug === undefined && editor === undefined) return {};
   if (verb !== "build") throw new Error("[game] native: --debug goes with native build only.");
+  if (isTestApp && editor !== undefined) return { editor: editorOf(editor, "native", interfaces) };
   if (debug === undefined) throw new Error("[game] native: --editor goes with --debug.");
 
   if (target !== undefined && target !== "android" && target !== "ios") {
     throw new Error(`[game] native: --debug builds Android and iOS only for now (got ${target}).`);
   }
 
-  return editor === undefined ? { debug } : { debug, editor: editorOf(editor, "native") };
+  return editor === undefined
+    ? { debug }
+    : { debug, editor: editorOf(editor, "native", interfaces) };
 }
 
 /**
@@ -836,8 +906,8 @@ function refuseWithoutStore(parsed: Parsed): void {
 /**
  * Reads `--store`, `--build-number`, `--dev` and `--upload` of `moku-game native`, before any
  * config is read: they go with `native build ios` and `native build android` only, one number for
- * both stores, `--dev` turns the store build into the test app, and `--upload` sends an iOS one to
- * App Store Connect.
+ * both stores, `--dev` turns the store build into the test app, which may take `--editor`, and
+ * `--upload` sends an iOS one to App Store Connect.
  *
  * @param parsed - The command line.
  * @param verb - The native verb.
@@ -845,7 +915,8 @@ function refuseWithoutStore(parsed: Parsed): void {
  * @returns The store flag, the number, `dev` and `upload`, or nothing without them.
  * @throws {Error} When the first two go without each other or with another verb or target, when
  *   `--dev` or `--upload` goes without `--store`, when `--upload` goes with another target than
- *   ios, when `--debug`, `--editor` or `--simulator` comes along, or when the number is refused.
+ *   ios, when `--debug` or `--simulator` comes along, when `--editor` comes without `--dev`, or when
+ *   the number is refused.
  */
 function nativeStoreOf(
   parsed: Parsed,
@@ -860,17 +931,28 @@ function nativeStoreOf(
     return {};
   }
 
-  // A store build goes with `build` only, with no debug flag, on ios or android.
+  // A store build goes with `build` only, with no debug flag, on ios or android; only the test
+  // app takes an editor link.
   if (verb !== "build") throw new Error("[game] native: --store goes with native build only.");
 
-  const clash = (["debug", "editor", "simulator"] as const).find(
-    flag => parsed.values[flag] !== undefined
-  );
+  const clash = (["debug", "simulator"] as const).find(flag => parsed.values[flag] !== undefined);
 
   if (clash !== undefined) throw new Error(`[game] native: --store does not go with --${clash}.`);
 
+  if (parsed.values.editor !== undefined && dev !== true) {
+    throw new Error("[game] native: --editor goes with --debug or --store --dev.");
+  }
+
   if (target !== "ios" && target !== "android") {
     throw new Error(`[game] native: --store builds ios or android, got ${target ?? "no target"}.`);
+  }
+
+  // Native keeps cleartext off outside the debug profile: a release-built Android test app cannot
+  // open ws://, so the link would fail silently.
+  if (parsed.values.editor !== undefined && target === "android") {
+    throw new Error(
+      "[game] native: --store --dev --editor builds ios only for now.\n  On Android use native build android --debug --editor host:port|lan."
+    );
   }
 
   // The number, then the upload, which goes to App Store Connect only.
@@ -974,7 +1056,7 @@ function hop(argv: readonly string[], parsed: Parsed, deps: CliDeps): Promise<nu
 
 /**
  * Runs `moku-game build`: a release page, or with `--debug` a debug page whose agent dials
- * `--editor` (`--debug=read` for the rare read-only page).
+ * `--editor`, `lan` read to the LAN address (`--debug=read` for the rare read-only page).
  *
  * @param parsed - The command line.
  * @param deps - The process seams.
@@ -999,7 +1081,7 @@ function runBuildCommand(parsed: Parsed, deps: CliDeps): Promise<number> {
     out: path.resolve(deps.cwd, out),
     servePlugins: parsed.servePlugins,
     ...(debug === undefined ? {} : { debug }),
-    ...(editor === undefined ? {} : { editor: editorOf(editor) })
+    ...(editor === undefined ? {} : { editor: editorOf(editor, "build", deps.interfaces) })
   };
 
   return runBuild(run, deps);

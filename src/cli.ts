@@ -7,7 +7,7 @@
  * lives in `app/`; this file wires the real process into it.
  */
 import { existsSync, readdirSync, statSync, watch } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import path from "node:path";
 import { createBrandConsole } from "@moku-labs/common/cli";
 import { type CliDeps, type ListedFile, runCommand, type Watcher } from "./app/cli";
@@ -174,7 +174,8 @@ function keysSeams(ui: KeysUi): KeysSeams {
  * started with, Bun's spawn and resolver, the signals, `fs.watch`, the keys watch, the asset
  * scanner with the string tools, native, the visual test runner, loaded only by
  * `moku-game visual`, and what a native build reads: the home folder, the file check, the folder
- * listing of `--upload` and the version of the game's `package.json`.
+ * listing of `--upload` and of the install lines, the network interfaces of `--editor lan` and the
+ * version of the game's `package.json`.
  *
  * @returns The seams of this process.
  */
@@ -213,6 +214,7 @@ function processDeps(): CliDeps {
     home: homedir(),
     exists: existsSync,
     listFiles,
+    interfaces: () => networkInterfaces(),
     readPackageVersion: packageVersionOf
   };
 }

@@ -181,6 +181,9 @@ function keyEnvNow(): KeyEnv {
   };
 }
 
+/** The line a linked dev iOS build adds to `Info.plist` for the local network prompt. */
+const LOCAL_NETWORK = "The debug link to the moku editor on your computer, over the local network.";
+
 /** A shippable native section with the test app, named and drawn by the game. */
 const withTestApp: NonNullable<GameConfig["native"]> = {
   ...shippable,
@@ -476,9 +479,24 @@ describe("nativeConfigOf", () => {
     expect(nativeConfigOf(settings, where, "android").app).not.toHaveProperty("buildNumber");
   });
 
-  // Bug: a device build asks for an App Store export and fails without Distribution rights.
-  it("exportMethod comes only with a store build on iOS", () => {
+  // Bug: a device build asks for an App Store export and fails without Distribution rights, or an
+  // iOS debug app exports nothing a registered iPhone installs by cable.
+  it("exportMethod is app-store-connect on an iOS store build, debugging on an iOS debug device build, and none on the simulator, a plain build or android (bug: an IPA that cannot be installed by cable)", () => {
     const settings = settingsOf({ native: shippable });
+    const debug = { level: "full" } as const;
+
+    expect(appleOf(nativeConfigOf(settings, where, "ios", { debug }))).toEqual({
+      teamId: "ABCDE12345",
+      iosMinimumSystemVersion: "26.0",
+      exportMethod: "debugging"
+    });
+    expect(appleOf(nativeConfigOf(settings, where, "ios", { debug, simulator: true }))).toEqual({
+      teamId: "ABCDE12345",
+      iosMinimumSystemVersion: "26.0"
+    });
+    expect(appleOf(nativeConfigOf(settings, where, "android", { debug }))).toEqual({
+      teamId: "ABCDE12345"
+    });
 
     expect(appleOf(nativeConfigOf(settings, where, "ios", { buildNumber: 12 }))).toEqual({
       teamId: "ABCDE12345",
@@ -553,6 +571,64 @@ describe("nativeConfigOf", () => {
     });
     expect(nativeConfigOf(plist, where, "ios").ios).toEqual({ infoPlist });
     expect(nativeConfigOf(minimum, where, "ios")).not.toHaveProperty("ios");
+  });
+
+  // Bug: the iPhone cannot reach the Mac, or a tester's build asks for the local network for nothing.
+  it("a dev iOS build with an editor link adds the local network line and NSAllowsLocalNetworking; without a link, on android or on a debug build it adds nothing", () => {
+    const settings = settingsOf({ native: withTestApp });
+    const editor = "192.168.1.20:47600";
+
+    expect(
+      nativeConfigOf(settings, where, "ios", { dev: true, buildNumber: 19, editor }).ios
+    ).toEqual({
+      infoPlist: {
+        NSLocalNetworkUsageDescription: LOCAL_NETWORK,
+        NSAppTransportSecurity: { NSAllowsLocalNetworking: true }
+      }
+    });
+    expect(
+      nativeConfigOf(settings, where, "ios", { dev: true, buildNumber: 19 })
+    ).not.toHaveProperty("ios");
+    expect(
+      nativeConfigOf(settings, where, "android", { dev: true, buildNumber: 19, editor })
+    ).not.toHaveProperty("ios");
+    // Native adds both keys itself under the debug profile.
+    expect(
+      nativeConfigOf(settings, where, "ios", { debug: { level: "full", editor } })
+    ).not.toHaveProperty("ios");
+  });
+
+  // Bug: the game's own usage line or ATS keys are lost, or a plist value that is no dict is rewritten.
+  it("on a linked dev iOS build a game's own usage line wins, its ATS dict keeps its keys and gains NSAllowsLocalNetworking, and an ATS value that is no dict stays untouched", () => {
+    const linked = { dev: true, buildNumber: 19, editor: "192.168.1.20:47600" } as const;
+    const own = settingsOf({
+      native: {
+        ...withTestApp,
+        ios: {
+          infoPlist: {
+            NSLocalNetworkUsageDescription: "Our own words.",
+            NSAppTransportSecurity: { NSAllowsArbitraryLoadsInWebContent: true },
+            ITSAppUsesNonExemptEncryption: false
+          }
+        }
+      }
+    });
+    const odd = settingsOf({
+      native: { ...withTestApp, ios: { infoPlist: { NSAppTransportSecurity: ["kept"] } } }
+    });
+
+    expect(nativeConfigOf(own, where, "ios", linked).ios?.infoPlist).toEqual({
+      NSLocalNetworkUsageDescription: "Our own words.",
+      NSAppTransportSecurity: {
+        NSAllowsArbitraryLoadsInWebContent: true,
+        NSAllowsLocalNetworking: true
+      },
+      ITSAppUsesNonExemptEncryption: false
+    });
+    expect(nativeConfigOf(odd, where, "ios", linked).ios?.infoPlist).toEqual({
+      NSLocalNetworkUsageDescription: LOCAL_NETWORK,
+      NSAppTransportSecurity: ["kept"]
+    });
   });
 });
 
@@ -820,6 +896,37 @@ describe("runNative", () => {
     expect(recorder.configs.map(config => config.projectDir)).toEqual([
       "/g/.moku/tauri-dev",
       "/g/.moku/tauri-dev"
+    ]);
+  });
+
+  // Bug: extrasOf drops the editor of a dev build, and the test app's page never dials the Mac.
+  it("a dev store build with an editor builds its page with the link and the plist keys, and without one with --debug alone", async () => {
+    const settings = settingsOf({ native: withTestApp });
+    const options = { target: "ios", version: "1.2.3", store: storeOf({ dev: true }) };
+
+    await runNative("build", settings, where, { ...options, editor: "192.168.1.20:47600" });
+    await runNative("build", settings, where, options);
+
+    expect(recorder.configs[0]?.web.build).toContain("build --debug --editor 192.168.1.20:47600");
+    expect(recorder.configs[0]?.ios?.infoPlist).toHaveProperty("NSAppTransportSecurity", {
+      NSAllowsLocalNetworking: true
+    });
+    expect(recorder.configs[1]?.web.build).toMatch(/ build --debug$/);
+    expect(recorder.configs[1]).not.toHaveProperty("ios");
+  });
+
+  // Bug: extrasOf drops the simulator flag, and a simulator build asks for a device export.
+  it("an iOS debug build exports for debugging on a device and not on the simulator", async () => {
+    await runNative("build", settingsOf(), where, { target: "ios", debug: "full" });
+    await runNative("build", settingsOf(), where, {
+      target: "ios",
+      debug: "full",
+      simulator: true
+    });
+
+    expect(recorder.configs.map(config => config.signing?.apple?.exportMethod)).toEqual([
+      "debugging",
+      undefined
     ]);
   });
 
