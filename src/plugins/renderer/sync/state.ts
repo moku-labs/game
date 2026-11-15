@@ -123,13 +123,13 @@ function createUploadState(): UploadState {
 }
 
 /**
- * Creates the empty release branch: no bitmap waits, no reload is kept, no stand-in made yet. Its own non-exported
+ * Creates the empty release branch: no bitmap waits, none was freed, no stand-in made yet. Its own non-exported
  * function, as `emptyMap`.
  *
  * @returns The release branch of the sync state.
  */
 function createReleaseState(): ReleaseState {
-  return { pending: [], reloads: emptyMap(), standIn: undefined };
+  return { pending: [], freed: emptySet(), standIn: undefined };
 }
 
 /**

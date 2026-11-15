@@ -29,6 +29,7 @@ import {
 import type {
   CanvasPassListener,
   HostDeps,
+  LossInfo,
   ResolutionListener,
   TextureUsage,
   TrimListener,
@@ -89,8 +90,8 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       state.onReady.push(fn);
     },
 
-    beforeRestore: (fn: () => Promise<void> | undefined): void => {
-      state.beforeRestore.push(fn);
+    decideLoss: (fn: (info: LossInfo) => boolean): void => {
+      state.lossDeciders.push(fn);
     },
 
     onRestore: (fn: (rebuilt: boolean) => void): void => {

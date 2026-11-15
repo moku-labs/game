@@ -45,7 +45,7 @@ import {
 import { forgetOverlays } from "./overlay-state";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { parentOf } from "./pose";
-import { refillImages, releaseStep } from "./release";
+import { releaseStep } from "./release";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
 import { checkTree } from "./tree-check";
@@ -994,7 +994,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     releaseStep: (): void => releaseStep(sctx),
 
-    refill: (): Promise<void> | undefined => refillImages(sctx),
+    freedCount: (): number => state.release.freed.size,
 
     onWarm: (fn: WarmListener): void => {
       state.warm.listeners.push(fn);

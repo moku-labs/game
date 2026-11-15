@@ -3,7 +3,8 @@
  * needs a new application; WebGL raises two canvas events and Pixi restores itself.
  */
 import type { RendererCtx } from "../types";
-import type { HostState } from "./types";
+import { textureUsage } from "./readback";
+import type { HostState, LossInfo } from "./types";
 
 /**
  * The GPU device of the application that draws now. Only a WebGPU application has one; a lost
@@ -36,8 +37,9 @@ export function liveGl(state: HostState): WebGL2RenderingContext | undefined {
 }
 
 /**
- * Starts a loss: the renderer stops drawing, the game pauses and the event goes out. A loss
- * while the plugin is already down, or while a restore runs, is ignored.
+ * Starts a loss: the renderer stops drawing, the game pauses and the event goes out; then the `decideLoss` callbacks
+ * hear it, and one that answers true marks the page as leaving (F189). A loss while the plugin is already down, or
+ * while a restore runs, is ignored.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param kind - Which backend lost its device.
@@ -49,17 +51,28 @@ function beginLoss(ctx: RendererCtx, kind: "webgpu" | "webgl", reason: string): 
 
   if (!state.ready || state.restoring) return false;
 
+  // Measured while the lost application still lists its textures, for the record of the loss (F189).
+  const info: LossInfo = {
+    kind,
+    reason,
+    textureBytes: state.app === undefined ? 0 : textureUsage(state.app, state.kept).bytes
+  };
+
   state.ready = false;
   state.restoring = true;
   ctx.deps.lifecycle.push("device-lost");
 
   ctx.emit("renderer:device-lost", { kind, reason });
 
+  // A callback that answers true takes the page away (a reload): nothing is restored.
+  for (const decide of state.lossDeciders) if (decide(info)) state.leaving = true;
+
   return true;
 }
 
 /**
- * Ends a restore: the renderer draws again and the pause reason goes. The `onRestore` callbacks
+ * Ends a restore: the renderer draws again and the pause reason goes. A page that leaves after the loss (F189)
+ * restores nothing. The `onRestore` callbacks
  * run first: after a WebGPU restore the whole display tree is new and they rebuild it; after a
  * WebGL restore the tree stands, but the canvas and every render texture came back empty, so they
  * ask for a whole frame and the pictures again.
@@ -70,7 +83,7 @@ function beginLoss(ctx: RendererCtx, kind: "webgpu" | "webgl", reason: string): 
 export function finishRestore(ctx: RendererCtx, rebuild: boolean): void {
   const state = ctx.state.host;
 
-  if (!state.restoring) return;
+  if (!state.restoring || state.leaving) return;
 
   state.ready = true;
   state.restoring = false;
@@ -78,37 +91,6 @@ export function finishRestore(ctx: RendererCtx, rebuild: boolean): void {
   for (const fn of state.onRestore) fn(rebuild);
 
   ctx.deps.lifecycle.pop("device-lost");
-}
-
-/**
- * Ends a restore once the `beforeRestore` callbacks settled, while nothing draws: `sync` fills its freed textures
- * again (F189). One that rejects is logged and the restore goes on. With no work to wait for, the restore ends at once,
- * in this task.
- *
- * @param ctx - Domain context of the renderer plugin.
- * @param rebuild - True when a new application replaced the old one.
- * @returns Resolves when the restore ended.
- */
-async function endRestore(ctx: RendererCtx, rebuild: boolean): Promise<void> {
-  const work: Array<Promise<void>> = [];
-
-  for (const fn of ctx.state.host.beforeRestore) {
-    const pending = fn();
-
-    if (pending !== undefined) work.push(pending);
-  }
-
-  if (work.length > 0) {
-    const results = await Promise.allSettled(work);
-
-    for (const result of results) {
-      if (result.status === "rejected") {
-        ctx.log.error("renderer: restore step failed", { error: result.reason });
-      }
-    }
-  }
-
-  finishRestore(ctx, rebuild);
 }
 
 /**
@@ -128,7 +110,9 @@ export function watchDevice(ctx: RendererCtx, restart: () => Promise<boolean>): 
     const onLost = async (info: { reason: string }): Promise<void> => {
       if (ctx.state.host.app !== app) return;
       if (!beginLoss(ctx, "webgpu", info.reason)) return;
-      if (await restart()) await endRestore(ctx, true);
+      // The page reloads: no new application is made.
+      if (ctx.state.host.leaving) return;
+      if (await restart()) finishRestore(ctx, true);
     };
 
     app.renderer.gpu.device.lost
@@ -146,11 +130,7 @@ export function watchDevice(ctx: RendererCtx, restart: () => Promise<boolean>): 
     event.preventDefault();
     beginLoss(ctx, "webgl", "webglcontextlost");
   };
-  const onContextRestored = (): void => {
-    endRestore(ctx, false).catch((error: unknown) =>
-      ctx.log.error("renderer: restore failed", { error })
-    );
-  };
+  const onContextRestored = (): void => finishRestore(ctx, false);
 
   canvas.addEventListener("webglcontextlost", onContextLost);
   canvas.addEventListener("webglcontextrestored", onContextRestored);

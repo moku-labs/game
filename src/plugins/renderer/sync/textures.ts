@@ -172,10 +172,8 @@ export function createTexture(
   // `ImageSource` writes true after its options, so only this reaches it. Its owner frees it with `destroyTexture`:
   // Pixi's collector would take a warmed picture off the GPU a minute later, with no event, under the budget (F129).
   base.source.autoGarbageCollect = false;
-  // F189: the decoded bitmap is freed once the source is on the GPU, when a reload can bring it back.
-  const reload = options?.reload;
-
-  if (reload !== undefined) holdImage(sctx.ctx.state.sync, base.source, reload);
+  // F189: the decoded bitmap is freed once the source is on the GPU.
+  holdImage(sctx.ctx.state.sync, base.source);
 
   if (nine === undefined) return base;
 

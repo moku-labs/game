@@ -248,30 +248,16 @@ export type TextureProvider = (key: string) => PixiTexture | undefined;
 export type NineBorders = readonly [number, number, number, number];
 
 /**
- * Decodes the image of a texture again from its file: what a texture of `textures.create` is filled from after a lost
- * device, once its first decoded image was freed (F189).
- *
- * @example
- * ```ts
- * // `assets` reads the file of the texture once more.
- * const reload: TextureReload = async () => createImageBitmap(await (await fetch(url)).blob());
- * ```
- */
-export type TextureReload = () => Promise<ImageBitmap | HTMLImageElement>;
-
-/**
  * Options of `textures.create`. `nine` gives the default nine-slice borders in pixels; `mips`
  * uploads the texture with its full mip chain, which Pixi builds on the GPU (`slice` ignores it:
- * a slice shares the source of its page). `reload` lets the renderer free a decoded `ImageBitmap` once it is on the
- * GPU (`close()`), and decode it again from the file after a lost device; without it the bitmap stays open for the
- * life of the texture.
+ * a slice shares the source of its page).
  *
  * @example
  * ```ts
- * const options: CreateTextureOptions = { nine: [12, 12, 12, 12], mips: true, reload };
+ * const options: CreateTextureOptions = { nine: [12, 12, 12, 12], mips: true };
  * ```
  */
-export type CreateTextureOptions = { nine?: NineBorders; mips?: true; reload?: TextureReload };
+export type CreateTextureOptions = { nine?: NineBorders; mips?: true };
 
 /**
  * Where `textures.slice` cuts a texture out of an atlas page, in page pixels. The manifest `atlas`
@@ -316,7 +302,8 @@ export type TexturesApi = {
 
   /**
    * Makes a Pixi texture from a decoded image, so `assets` never imports Pixi. Once uploaded it stays on the GPU until
-   * `destroy`: Pixi's collector leaves it alone.
+   * `destroy`: Pixi's collector leaves it alone. The renderer owns an `ImageBitmap` from here on: it closes it once
+   * Pixi has the texture on the GPU (F189), so the caller never uses it again; `destroy` closes one not uploaded yet.
    *
    * @param image - The decoded image.
    * @param options - `nine` is left, top, right and bottom in pixels; it becomes the texture's
@@ -1464,12 +1451,12 @@ export type SyncInternal = {
   releaseStep(): void;
 
   /**
-   * Fills every freed texture again from its file, after a lost device and before the restored renderer draws.
-   * A file that fails is logged and its texture stays transparent.
+   * How many textures hold the stand-in instead of their decoded image: after a lost device they can only come back
+   * with a page reload (F189).
    *
-   * @returns Resolves when every reload settled; `undefined` when no texture was freed.
+   * @returns The count of freed textures still alive.
    */
-  refill(): Promise<void> | undefined;
+  freedCount(): number;
 
   /**
    * Subscribes to the end of a warm-up run: the queue became empty (the monitor of an agent build writes the `warm`
@@ -1677,16 +1664,16 @@ export type UploadState = {
 };
 
 /**
- * The decoded images of `textures.create` (F189): a source made from an `ImageBitmap` with a `reload` waits in
- * `pending` until Pixi has it on the GPU of the drawing renderer; then its bitmap is closed and a 1x1 stand-in takes
- * its place, so no upload ever reads a closed bitmap (WebGPU throws on one). After a lost device every source in
- * `reloads` is filled again from its file. Not public.
+ * The decoded images of `textures.create` (F189): a source made from an `ImageBitmap` waits in `pending` until Pixi
+ * has it on the GPU of the drawing renderer; then its bitmap is closed and a 1x1 stand-in takes its place, so no
+ * upload ever reads a closed bitmap (WebGPU throws on one). A freed source cannot be uploaded again: after a lost
+ * device the page reloads. Not public.
  */
 export type ReleaseState = {
   /** The sources whose bitmap is still open, in the order they were made. */
   pending: PixiTextureSource[];
-  /** The reload of every source that has one, until it is destroyed. */
-  reloads: Map<PixiTextureSource, TextureReload>;
+  /** The sources that hold the stand-in, until they are destroyed. */
+  freed: Set<PixiTextureSource>;
   /** The transparent 1x1 image every freed source holds; made at the first release. */
   standIn: OffscreenCanvas | undefined;
 };
