@@ -8,7 +8,7 @@ import path from "node:path";
 import type { Cli, Config, createApp, Target } from "@moku-labs/native";
 import type { DebugLevel } from "./build";
 import { TEST_APP_SUFFIX } from "./config";
-import type { ResolvedGameConfig } from "./types";
+import type { PlistValue, ResolvedGameConfig } from "./types";
 
 /** The port of the dev server Tauri's shell starts and loads. */
 const DEV_PORT = 5173;
@@ -82,7 +82,7 @@ export type NativeVerbOptions = {
   simulator?: boolean;
   /** Build a debug app: the web page with the editor agent and its control profile; `native build` on Android and iOS only. */
   debug?: DebugLevel;
-  /** The `host:port` the page agent of the debug app dials, when `--editor` gave one. */
+  /** The `host:port` the page agent of the debug app, or of the test app of `--store --dev`, dials, when `--editor` gave one. */
   editor?: string;
   /** The `version` of the game's `package.json`, unchecked. */
   version?: string;
@@ -113,13 +113,18 @@ export type StoreInput = {
 /** The debug profile of a native build: the web build's `--debug` level and its `--editor`. */
 type NativeDebug = { level: DebugLevel; editor?: string | undefined };
 
-/** What one run adds to `config.ts`: a build number means a store build. */
+/**
+ * What one run adds to `config.ts`: a build number means a store build, `editor` is the link of a
+ * test app (a debug app keeps its own in `debug`), `simulator` the iOS simulator slice.
+ */
 type NativeExtras = {
   debug?: NativeDebug;
   buildNumber?: number;
   version?: string;
   unsigned?: true;
   dev?: true;
+  editor?: string;
+  simulator?: boolean;
 };
 
 /** The native section of a resolved config. */
@@ -131,6 +136,10 @@ type AppleKeyVariables = {
   APPLE_API_ISSUER: string;
   APPLE_API_KEY_PATH: string;
 };
+
+/** The `Info.plist` line of a linked test app on iOS: why it asks for the local network. */
+const LOCAL_NETWORK_USAGE =
+  "The debug link to the moku editor on your computer, over the local network.";
 
 /** The line of an `--upload` that finds no App Store Connect key, in `config.ts` or the env. */
 const NO_UPLOAD_KEY =
@@ -329,6 +338,20 @@ export function uploadArgvOf(ipa: string, key: AppleKey): string[] {
  */
 export function uploadFolderOf(cwd: string, store: Pick<NativeStore, "dev">): string {
   return path.join(cwd, store.dev === true ? DEV_OUT : STORE_OUT, "ios");
+}
+
+/**
+ * The folder native leaves the `.ipa` of an iOS debug device build in, under `dist-native`.
+ *
+ * @param cwd - The game folder.
+ * @returns The folder, absolute.
+ * @example
+ * ```ts
+ * debugFolderOf("/g"); // "/g/dist-native/ios-debug"
+ * ```
+ */
+export function debugFolderOf(cwd: string): string {
+  return path.join(cwd, STORE_OUT, "ios-debug");
 }
 
 /**
@@ -628,7 +651,8 @@ function appOf(
 /**
  * The signing block of the native config. A debug build keeps native's SDK key, so it takes no
  * upload key, and neither does a plain build without its passwords, which Gradle would refuse only
- * after the compile; a store build on iOS exports for App Store Connect, and only that one does.
+ * after the compile; a store build on iOS exports for App Store Connect, and an iOS debug build for
+ * a device exports for debugging, so a registered iPhone installs it by cable.
  *
  * @param native - The native section.
  * @param where - The game folder and the home folder.
@@ -645,16 +669,18 @@ function signingOf(
   const android = native.signing?.android;
   const teamId = native.signing?.apple?.teamId;
   const isStoreIos = target === "ios" && extras.buildNumber !== undefined;
+  const isDebugDevice = target === "ios" && extras.debug !== undefined && extras.simulator !== true;
   const keyStaysOut =
     android === undefined || extras.debug !== undefined || extras.unsigned === true;
 
-  // The Apple block: the team, the iOS minimum, the export of a store build.
+  // The Apple block: the team, the iOS minimum, the export of a store or a debug device build.
   const apple: Config["signing"]["apple"] = {
     ...(teamId === undefined ? {} : { teamId }),
     ...(target === "ios"
       ? { iosMinimumSystemVersion: native.ios?.minimumVersion ?? IOS_MINIMUM }
       : {}),
-    ...(isStoreIos ? { exportMethod: "app-store-connect" as const } : {})
+    ...(isStoreIos ? { exportMethod: "app-store-connect" as const } : {}),
+    ...(isDebugDevice ? { exportMethod: "debugging" as const } : {})
   };
 
   return {
@@ -671,14 +697,51 @@ function signingOf(
 }
 
 /**
- * The iOS block of the native config. Native takes the manifest as an absolute path only.
+ * The `Info.plist` keys of a test app with an editor link on iOS, over the game's own: the local
+ * network line, unless the game wrote its own, and `NSAllowsLocalNetworking` added to the game's
+ * App Transport Security dict, or the dict made. An ATS value that is no dict stays as it is.
+ *
+ * @param infoPlist - The game's `native.ios.infoPlist`.
+ * @returns The keys.
+ * @example
+ * ```ts
+ * linkedPlistOf({ NSAppTransportSecurity: { NSAllowsArbitraryLoadsInWebContent: true } }); // { NSLocalNetworkUsageDescription: "The debug link to the moku editor on your computer, over the local network.", NSAppTransportSecurity: { NSAllowsArbitraryLoadsInWebContent: true, NSAllowsLocalNetworking: true } }
+ * ```
+ */
+function linkedPlistOf(
+  infoPlist: Readonly<Record<string, PlistValue>> = {}
+): Record<string, PlistValue> {
+  const security = infoPlist.NSAppTransportSecurity;
+  const isDict = typeof security === "object" && !Array.isArray(security);
+
+  return {
+    NSLocalNetworkUsageDescription: LOCAL_NETWORK_USAGE,
+    ...infoPlist,
+    NSAppTransportSecurity: isDict
+      ? { ...security, NSAllowsLocalNetworking: true }
+      : (security ?? { NSAllowsLocalNetworking: true })
+  };
+}
+
+/**
+ * The iOS block of the native config. Native takes the manifest as an absolute path only. A test
+ * app with an editor link on iOS adds the local network keys; native adds them itself to a debug
+ * app.
  *
  * @param native - The native section.
  * @param cwd - The game folder.
+ * @param target - The target of the verb.
+ * @param extras - The dev flag and the editor link of this run.
  * @returns The block, empty when the game adds nothing to the bundle.
  */
-function iosBundleOf(native: NativeSection, cwd: string): NonNullable<Config["ios"]> {
-  const infoPlist = native.ios?.infoPlist;
+function iosBundleOf(
+  native: NativeSection,
+  cwd: string,
+  target: Target | undefined,
+  extras: NativeExtras
+): NonNullable<Config["ios"]> {
+  const isLinkedTestApp = target === "ios" && extras.dev === true && extras.editor !== undefined;
+  const infoPlist = isLinkedTestApp ? linkedPlistOf(native.ios?.infoPlist) : native.ios?.infoPlist;
   const manifest = native.ios?.privacyManifest;
 
   return {
@@ -727,7 +790,8 @@ export function testProjectsOf(cwd: string): readonly string[] {
  * builds its web page with the same profile and `--editor`; on Android its name and identifier stay
  * the game's and native renames it, on iOS the engine does, in a project of its own. A dev build is
  * a store build of the test app of `native.dev`, in its own project and output folders, with the
- * full debug page. A build number means a store build.
+ * full debug page, linked to the editor when `extras.editor` is set. A build number means a store
+ * build.
  *
  * @param settings - The resolved `config.ts` of the game.
  * @param where - The game folder, the command that runs `moku-game` and the home folder.
@@ -754,8 +818,8 @@ export function nativeConfigOf(
     app: appOf(settings, appIdentityOf(native, target, extras), extras),
     web: {
       cwd: where.cwd,
-      // A dev page is `--debug` as it is: the profile in native's env does the rest.
-      build: webBuildOf(where, isTestApp ? { level: "full" } : extras.debug),
+      // A dev page is `--debug` as it is, with its link: the profile in native's env does the rest.
+      build: webBuildOf(where, isTestApp ? { level: "full", editor: extras.editor } : extras.debug),
       devCommand: `${where.command} dev --port ${DEV_PORT}`,
       devUrl: `http://127.0.0.1:${DEV_PORT}`,
       dist: path.join(where.cwd, "dist/web")
@@ -770,7 +834,7 @@ export function nativeConfigOf(
   };
   const targets = native.targets ?? (target === undefined ? undefined : [target]);
   const signing = signingOf(native, where, target, extras);
-  const ios = iosBundleOf(native, where.cwd);
+  const ios = iosBundleOf(native, where.cwd, target, extras);
 
   if (targets !== undefined) {
     config.targets = targets;
@@ -866,18 +930,22 @@ async function runVerb(
 
 /**
  * What this run adds to the native config. A version that is not `x.y.z` stays out, and native
- * falls back to its own; `--store` has refused one before this reads it.
+ * falls back to its own; `--store` has refused one before this reads it. The editor of a test app
+ * goes on its own, a debug app's in its profile.
  *
  * @param options - The verb options.
  * @returns The extras of `nativeConfigOf`.
  */
 function extrasOf(options: NativeVerbOptions): NativeExtras {
-  const { debug, editor, store, unsigned, version } = options;
+  const { debug, editor, store, unsigned, version, simulator } = options;
+  const isLinkedTestApp = debug === undefined && store?.dev === true && editor !== undefined;
 
   return {
     ...(debug === undefined ? {} : { debug: { level: debug, editor } }),
     ...(store === undefined ? {} : { buildNumber: store.buildNumber }),
     ...(store?.dev === true ? { dev: true } : {}),
+    ...(isLinkedTestApp ? { editor } : {}),
+    ...(simulator === undefined ? {} : { simulator }),
     ...(unsigned === undefined ? {} : { unsigned }),
     ...(version !== undefined && STORE_VERSION.test(version) ? { version } : {})
   };

@@ -171,6 +171,7 @@ function fakeDeps(
     home: "/home/tester",
     exists: unused,
     listFiles: unused,
+    interfaces: unused,
     readPackageVersion: unused,
     visual: async () => ({
       parseVisualArgv,
