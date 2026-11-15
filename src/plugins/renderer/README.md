@@ -380,8 +380,9 @@ await renderer.sync.textures.upload(record.textures); // true at once: they are 
 
 #### Decoded images
 
-A WebKit page holds a decoded `ImageBitmap` next to its GPU copy, and counts both against the page (F189: on an
-iPhone 16 Pro Max the bitmaps were ~440 MB of a 1671 MB WebContent footprint; iOS ends the page at 2048 MB). A texture
+A WebKit page holds every open `ImageBitmap` as graphics memory of its own, `width × height × 4` bytes, next to the
+GPU copy (F189: in WebKit 26.4, 30 images of A Memory Missing held open added 208 MB of "owned physical footprint
+(graphics)" and `close()` gave it back at once; on an iPhone 16 Pro Max the page reached iOS's 2048 MB limit). A texture
 of `textures.create` made from an `ImageBitmap` keeps its bitmap only until Pixi has the source on the GPU of the
 drawing renderer, at its first draw or through `textures.upload`. The step after the stage pass of a drawn frame then
 calls `close()` and gives the source a transparent 1x1 `OffscreenCanvas`: a later upload reads that, never the closed
@@ -403,6 +404,7 @@ record)`), so a loss a reload took away still reaches the log the editor shows.
 Measured headless in Chromium on the A Memory Missing DEV build from a cold boot: decoded bitmaps still open after 30 s
 159 MB (WebGL) and 166 MB (WebGPU) before, 22 MB and 21 MB after; after 90 s on WebGPU 235 MB (83 bitmaps) before,
 66 MB (21) after: the images of bundles loaded ahead and not drawn yet. The JS heap is flat and the same, ~42 MB.
+WebGPU textures of the same run: 138 MB of art, 30 MB of render targets.
 
 ### `shots` — `app.renderer.shots`
 

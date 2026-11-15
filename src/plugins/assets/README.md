@@ -331,7 +331,7 @@ naming the five heaviest loaded entries, loose files and atlas pages together (a
 (`mb` of the manifest): once in the decoded image until its first upload, once on the GPU after it, since `renderer`
 closes the decoded `ImageBitmap` as soon as the texture is on the GPU. The budget therefore counts a texture once,
 also on WebKit, which charges a page for both copies: before F189 every loaded texture cost twice its `mb` there
-(~440 MB of decoded bitmaps next to a 250 MB budget on an iPhone 16 Pro Max). A lost device now reloads the page (see
+(an open `ImageBitmap` is graphics memory of the page in WebKit, 4 bytes a pixel, measured). A lost device now reloads the page (see
 the renderer's "Decoded images"). Decoded sounds are not in the budget: see the `audio` plugin.
 
 **A drawn bundle is never evicted (F184).** Before a bundle becomes the victim the budget asks
