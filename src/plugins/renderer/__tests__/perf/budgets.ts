@@ -216,5 +216,8 @@ export const BUDGET = {
   // F184: new. `textures.used` over 40 keys, the drawn one last: a map read per key by index, nothing made.
   texturesUsedHit: 0,
   // F184: new. The same over 40 keys none of which a view draws.
-  texturesUsedMiss: 0
+  texturesUsedMiss: 0,
+  // F187: new. `afterFrame` of a drawn frame while a trim holds a target a bind group still binds: one listener count
+  // a held target, nothing made.
+  poolHeldFrame: 0
 } as const;
