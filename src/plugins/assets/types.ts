@@ -5,7 +5,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Events as GlobalEvents, Require } from "../../config";
-import type { Descriptor, Api as FlowApi, NodeInfo } from "../flow/types";
+import type { Descriptor, Api as FlowApi, FlowGraph, FlowState, NodeInfo } from "../flow/types";
 import type { Api as ModelApi } from "../model/types";
 import type { PixiTexture, Api as RendererApi, SliceFrame } from "../renderer/types";
 import type { NamedMemo, SceneDefinition } from "../scenes/types";
@@ -646,7 +646,7 @@ export type State = {
   /** One cell for the megabytes the budget filter of the look-ahead adds up: a typed cell boxes no number (F196). */
   runningMb: Float64Array;
   /** The flow stack and the graph `stackFeatures` was filled for. */
-  stackFeaturesOf: { readonly stack: unknown; readonly graph: unknown } | undefined;
+  stackFeaturesOf: { readonly stack: FlowState["stack"]; readonly graph: FlowGraph } | undefined;
   records: Map<string, BundleRecord>;
   /** Bundles of the node entered last. They are never unloaded. */
   pinned: Set<string>;

@@ -17,7 +17,7 @@ const NODES = 12;
 const tag: AnyTypeTag = { kind: "type" };
 
 /**
- * Builds one node with one outcome, `next`.
+ * Builds one node with two outcomes, `next` and `close`.
  *
  * @param rest - Whether the node rests.
  * @returns The node.

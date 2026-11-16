@@ -13,6 +13,9 @@ import type { AssetsCtx, LookAhead, Manifest, PreloadQueue, State } from "./type
 /** The answer of a flow or scene that names no bundle: one frozen list, so asking allocates nothing. */
 const NO_NAMES: readonly string[] = Object.freeze([]);
 
+/** The entries one frame takes in a walk's flattened frames: its flow, then its node. */
+const FRAME_WIDTH = 2;
+
 /** One frame of the flow stack. */
 type FlowFrame = FlowState["stack"][number];
 
@@ -308,11 +311,6 @@ function follow(
  * @param ctx - Domain context of the plugin.
  * @param depth - How many edges to look ahead.
  * @returns The bundle names in load order.
- * @example
- * ```ts
- * // Resting on "board/awaitIntent" with a depth of two edges.
- * neighbourhood(ctx, 2); // ["board", "board.chains", "shop", "home", "reward"]
- * ```
  */
 export function neighbourhood(ctx: AssetsCtx, depth: number): readonly string[] {
   const current = ctx.state.current;
@@ -342,6 +340,7 @@ function isSameWalk(ctx: AssetsCtx, walk: LookAhead, current: NodeInfo, depth: n
     walk.player === player &&
     walk.session === session &&
     walk.manifest === state.manifest &&
+    // `scenes` and `featureOfFlow` are filled in place once, in `onStart`, before the first rest; a new map moves it.
     walk.scenes === state.scenes &&
     walk.graph === ctx.deps.flow.describe();
 
@@ -356,15 +355,29 @@ function isSameWalk(ctx: AssetsCtx, walk: LookAhead, current: NodeInfo, depth: n
  * @returns True for the same flows and nodes in the same order.
  */
 function isSameFrames(kept: readonly string[], stack: readonly FlowFrame[]): boolean {
-  if (kept.length !== (stack.length - 1) * 2) return false;
+  if (kept.length !== (stack.length - 1) * FRAME_WIDTH) return false;
 
   for (let at = 0; at < stack.length - 1; at += 1) {
-    const frame = stack[at];
-
-    if (frame?.flow !== kept[at * 2] || frame?.node !== kept[at * 2 + 1]) return false;
+    if (!isKeptFrame(stack[at], kept, at * FRAME_WIDTH)) return false;
   }
 
   return true;
+}
+
+/**
+ * Tells whether one frame of the stack is the flow and node a walk kept at an offset of its flat list.
+ *
+ * @param frame - The frame of the stack now.
+ * @param kept - The flattened frames the walk kept.
+ * @param offset - Where the frame's flow sits in `kept`; its node follows.
+ * @returns True for the same flow and node.
+ */
+function isKeptFrame(
+  frame: FlowFrame | undefined,
+  kept: readonly string[],
+  offset: number
+): boolean {
+  return frame?.flow === kept[offset] && frame?.node === kept[offset + 1];
 }
 
 /**
@@ -582,11 +595,6 @@ function isSameQueue(state: State, queue: PreloadQueue, bundles: readonly string
  * headless app do nothing.
  *
  * @param ctx - Domain context of the plugin.
- * @example
- * ```ts
- * // What the `flow:rest` hook does after it enforced the budget.
- * startPreload(ctx); // state.queue.bundles is the neighbourhood, loading in the background
- * ```
  */
 export function startPreload(ctx: AssetsCtx): void {
   const state = ctx.state;

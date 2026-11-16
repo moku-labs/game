@@ -1300,7 +1300,8 @@ export type RunnerApi = {
 
   /**
    * Renders the whole graph as JSON, without running the game. It reads the flows as data, so
-   * it works before `run()`.
+   * it works before `run()`. After `run()` the graph cannot change: every call answers the same
+   * deeply frozen graph, so a caller that wants to edit it copies it first.
    *
    * @returns Nodes, flags, outcomes, edges, slots and who contributed.
    * @example
