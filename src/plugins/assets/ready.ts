@@ -83,6 +83,18 @@ export async function warmBundle(ctx: AssetsCtx, bundle: string): Promise<void> 
 function isThere(state: State, bundle: string): boolean {
   if (state.readyFailed.has(bundle)) return true;
 
+  return isWarm(state, bundle);
+}
+
+/**
+ * Tells whether a bundle is loaded and its textures went to the GPU: the `ready` answer `true` without a failed load.
+ * The `load` effect answers at once for such bundles (F203).
+ *
+ * @param state - State of the assets plugin.
+ * @param bundle - Name of a bundle of the manifest.
+ * @returns True when the bundle is loaded and warmed.
+ */
+export function isWarm(state: State, bundle: string): boolean {
   return state.records.get(bundle)?.status === "loaded" && state.warmed.get(bundle)?.done === true;
 }
 
