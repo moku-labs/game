@@ -121,7 +121,7 @@ function sharesOf(ctx: ScenesCtx, scene: SceneDefinition): BundleShare[] {
   let named: readonly string[];
 
   try {
-    named = namedBundles(scene, committedState(ctx));
+    named = namedBundles(scene, committedState(ctx), ctx.state.namedMemo);
   } catch {
     return [];
   }

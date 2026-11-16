@@ -366,7 +366,7 @@ async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promis
   let leaving: Leaving | undefined = leaveFor(ctx, run, scene.id);
 
   try {
-    const named = namedBundles(scene, committedState(ctx));
+    const named = namedBundles(scene, committedState(ctx), ctx.state.namedMemo);
 
     if (leaving === undefined && !leaveDeclined(ctx, run, scene.id)) {
       leaving = startLeave(ctx, scene, run);
@@ -403,7 +403,7 @@ async function reread(ctx: ScenesCtx, run: RunContext): Promise<void> {
 
   if (scene?.bundles === undefined) return;
 
-  const named = namedBundles(scene, committedState(ctx));
+  const named = namedBundles(scene, committedState(ctx), ctx.state.namedMemo);
 
   if (sameNames(named, state.named)) return;
 

@@ -3,7 +3,7 @@
  * returns, and the check that an entry of a feature's `scenes` list is a scene. Pure; read by the
  * switch and by `assets`, so both read a scene one way.
  */
-import type { SceneDefinition, SceneState } from "./types";
+import type { NamedMemo, SceneDefinition, SceneState } from "./types";
 
 /**
  * Tells whether what a scene's `bundles` returned is a list of bundle names.
@@ -22,11 +22,14 @@ function isNameList(value: unknown): value is readonly string[] {
 /**
  * Lists the bundles a scene names for a committed state: its `bundle` first, then what its
  * `bundles(state)` returns, in order, each name once. An error the game's `bundles` throws
- * propagates unchanged.
+ * propagates unchanged. With a memo, a scene is asked once per committed state: while `player`
+ * and `session` are the trees it last answered for, the same frozen list comes back and `bundles`
+ * is not called (F194: the look-ahead asked every scene of the neighbourhood at every rest).
  *
  * @param scene - The scene declaration.
  * @param state - The committed player and session, frozen.
- * @returns The bundle names, the scene bundle first.
+ * @param memo - The last answer of each scene, kept by the plugin that asks; none to ask every time.
+ * @returns The bundle names, the scene bundle first; frozen when they come from the memo.
  * @throws {Error} When `bundles` returns something that is not a list of names.
  * @example
  * ```ts
@@ -35,7 +38,33 @@ function isNameList(value: unknown): value is readonly string[] {
  * namedBundles(wardScene, { player, session }); // ["location", "ep01"] while session.episode is "ep01"
  * ```
  */
-export function namedBundles(scene: SceneDefinition, state: SceneState): readonly string[] {
+export function namedBundles(
+  scene: SceneDefinition,
+  state: SceneState,
+  memo?: WeakMap<SceneDefinition, NamedMemo>
+): readonly string[] {
+  const known = memo?.get(scene);
+
+  if (known !== undefined && known.player === state.player && known.session === state.session) {
+    return known.names;
+  }
+
+  const names = Object.freeze(readNames(scene, state));
+
+  memo?.set(scene, { player: state.player, session: state.session, names });
+
+  return names;
+}
+
+/**
+ * Asks a scene for its bundles: its `bundle`, then what `bundles(state)` returns, each name once.
+ *
+ * @param scene - The scene declaration.
+ * @param state - The committed player and session, frozen.
+ * @returns A new list of names, the scene bundle first.
+ * @throws {Error} When `bundles` returns something that is not a list of names.
+ */
+function readNames(scene: SceneDefinition, state: SceneState): string[] {
   const names = [scene.bundle];
 
   if (scene.bundles === undefined) return names;

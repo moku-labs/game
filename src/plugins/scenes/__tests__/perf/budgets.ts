@@ -16,5 +16,7 @@ export const BUDGET = {
   loaderFading: 0,
   // The `assets:bundle-progress` hook of a switch that feeds its loader, below the step (F107 part 1): a lookup in the
   // table of the switch, a mean, a compare.
-  progressBelowStep: 0
+  progressBelowStep: 0,
+  // F194: what a scene names, asked again with the same committed trees: one memo read, two compares. New.
+  namedHit: 0
 } as const;

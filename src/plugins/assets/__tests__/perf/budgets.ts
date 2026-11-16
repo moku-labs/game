@@ -13,5 +13,9 @@ export const BUDGET = {
   // A scene leaves and an element still plays its exit: one count read.
   stillExiting: 0,
   // A view asks for a key of a loaded bundle (F184, change 2026-11-15-f184-budget-drawn): a touch and two map reads.
-  lookupHit: 0
+  lookupHit: 0,
+  // F194: the look-ahead of one rest, a hub with six windows and the same committed state. Before 95 312 B: every
+  // scene asked for its bundles again, the manifest scanned per node. Now 17.0 to 18.1 KB over runs, the walk itself: its visits, frames,
+  // ids, the distance map and the answer. Follow-up: keep the walk of a rest for the next one at the same place.
+  restLookAhead: 19_000
 } as const;

@@ -8,7 +8,7 @@ import type { Events as GlobalEvents, Require } from "../../config";
 import type { Descriptor, Api as FlowApi, NodeInfo } from "../flow/types";
 import type { Api as ModelApi } from "../model/types";
 import type { PixiTexture, Api as RendererApi, SliceFrame } from "../renderer/types";
-import type { SceneDefinition } from "../scenes/types";
+import type { NamedMemo, SceneDefinition } from "../scenes/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Api as WorldApi } from "../world/types";
 
@@ -607,6 +607,15 @@ export type State = {
   scenes: Map<string, SceneDefinition>;
   /** Flow id to the feature that owns it, read from the `flows` key of `flow.features`. */
   featureOfFlow: Map<string, string>;
+  /**
+   * The `feature`-tier bundles of each feature, indexed from the manifest it was built from: built again only when a
+   * new manifest replaced it (a dev hot swap). The look-ahead reads it for every node it visits (F194).
+   */
+  featureIndex:
+    | { readonly manifest: Manifest; readonly byFeature: ReadonlyMap<string, readonly string[]> }
+    | undefined;
+  /** The last answer of each scene to `bundles`, by declaration: the look-ahead asks a scene once per committed state. */
+  namedMemo: WeakMap<SceneDefinition, NamedMemo>;
   records: Map<string, BundleRecord>;
   /** Bundles of the node entered last. They are never unloaded. */
   pinned: Set<string>;

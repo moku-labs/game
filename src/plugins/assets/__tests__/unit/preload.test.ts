@@ -127,6 +127,21 @@ describe("bundlesOfNode", () => {
     ]);
   });
 
+  // Bug (F194): the feature index outlives a dev hot swap's new manifest, and a feature bundle it adds never loads.
+  it("reads the feature-tier bundles of the manifest of now, after a new one replaced it", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" });
+    const node = mock.ctx.state.current as NodeInfo;
+
+    bundlesOfNode(mock.assetsCtx, node);
+    mock.ctx.state.manifest = manifestOf({
+      board: { feature: "board", tier: "scene", keys: ["board.cell"] },
+      "board.chains": { feature: "board", tier: "feature", keys: ["board.chain"] },
+      "board.extra": { feature: "board", tier: "feature", keys: ["board.more"] }
+    });
+
+    expect(bundlesOfNode(mock.assetsCtx, node)).toEqual(["board", "board.chains", "board.extra"]);
+  });
+
   it("keeps the previous scene bundle for a node without a scene", async () => {
     const mock = await standingAt({ flow: "board", node: "merge" });
 
@@ -557,6 +572,31 @@ describe('neighbourhood and "leave" bundles', () => {
     const mock = await lookingAhead("ep03");
 
     expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "ep03", "location"]);
+  });
+
+  // Bug (F194): every rest asked every scene of the neighbourhood again with the same committed state; the ward's
+  // `bundles` of A Memory Missing built hundreds of MB of rows a minute while windows opened and closed.
+  it("asks a scene once over rests with the same committed state, and again after a commit", async () => {
+    const mock = await lookingAhead("ep01");
+    const asked = { count: 0 };
+
+    mock.ctx.state.scenes.set(
+      "ward",
+      sceneOf("ward", "location", ({ session }) => {
+        asked.count += 1;
+
+        return [(session as { episode: string }).episode];
+      })
+    );
+    neighbourhood(mock.assetsCtx, 1);
+    neighbourhood(mock.assetsCtx, 1);
+
+    expect(asked.count).toBe(1);
+
+    mock.model.session = { episode: "ep03" };
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "ep03", "location"]);
+    expect(asked.count).toBe(2);
   });
 
   it("keeps only the scene bundle of a scene whose bundles throws", async () => {

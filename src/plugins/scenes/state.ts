@@ -1,7 +1,7 @@
 /**
  * @file scenes plugin — state factory.
  */
-import type { SceneDefinition, SceneOwner, State } from "./types";
+import type { NamedMemo, SceneDefinition, SceneOwner, State } from "./types";
 
 /**
  * Creates the registry of declared scenes. Its own function because lint rule L5 refuses a
@@ -11,6 +11,15 @@ import type { SceneDefinition, SceneOwner, State } from "./types";
  */
 function emptyRegistry(): Map<string, SceneDefinition> {
   return new Map();
+}
+
+/**
+ * Creates the memo of what each scene named, for the same L5 reason.
+ *
+ * @returns An empty memo, keyed by scene declaration.
+ */
+function emptyMemo(): WeakMap<SceneDefinition, NamedMemo> {
+  return new WeakMap();
 }
 
 /**
@@ -35,6 +44,7 @@ export function createScenesState(): State {
     current: undefined,
     pending: undefined,
     named: [],
+    namedMemo: emptyMemo(),
     owner: sceneOwner(),
     teardown: undefined
   };
