@@ -354,7 +354,7 @@ describe("a warm window opened on another item", () => {
     expect(seen.changes).toBe(0);
   });
 
-  // Bug a fix could bring: the same item opened while the record builds is written twice, or its
+  // Bug a fix could bring: the same item opened while the record builds plays a `change` motion, or its
   // still application is lost and the elements applied before the open keep stale poses.
   it("opened with the warm item while its record is building, stands where a cold open stands", async () => {
     const warmCold = await start({ drawing: false });
@@ -372,15 +372,18 @@ describe("a warm window opened on another item", () => {
     untilWarm(warm, 1);
     await openAndClose(warm);
     untilApplying(warm);
+    seen.changes = 0;
     await warm.answer("openPacks");
 
     for (let index = 0; index < 3; index += 1) warm.frame();
 
     expect(posesOf(warm)).toEqual(cold);
+    expect(seen.changes).toBe(0);
   });
 
   // Bug a fix could bring: a ready record opened on another item no longer moves the elements the
-  // item moves.
+  // item moves. Known, older than F200: a ready record still plays the moved elements' `change` motion
+  // (one here), where a cold open plays none; a follow-up of its own.
   it("opened when its record is ready, stands where a cold open stands", async () => {
     const cold = await coldMarket();
     const warm = await start();
