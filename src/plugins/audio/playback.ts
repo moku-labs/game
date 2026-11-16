@@ -525,7 +525,8 @@ function refused(ctx: AudioCtx, key: string): void {
  * is only remembered; the unlock starts it. A key that is still on its way counts as the
  * same key, and every other request replaces it: the replaced switch starts nothing when its
  * buffer or its element is ready, so one tap that unlocks the context and enters a scene with the
- * same track starts it once. `config.music` picks the decode or the stream path.
+ * same track starts it once. `config.music` picks the decode or the stream path; on the decode path
+ * the track that leaves, by a switch, by `null` or replaced while it decoded, leaves the cache too.
  *
  * @param ctx - Domain context of the plugin.
  * @param request - The key to play and the length of the cross-fade.
