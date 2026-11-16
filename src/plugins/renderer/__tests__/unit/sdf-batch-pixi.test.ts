@@ -107,6 +107,48 @@ describe("a distance-field label on the renderer's pipes", () => {
   });
 });
 
+/**
+ * Counts the glyph layouts the text pipe makes: Pixi's `_updateContext`, which `initGpuText` and `addRenderable` call.
+ *
+ * @param stage - The batch stage.
+ * @returns The spy.
+ */
+function layouts(stage: SdfBatchStage) {
+  return vi.spyOn(stage.textPipe as unknown as { _updateContext: () => void }, "_updateContext");
+}
+
+describe("the layout of a label's glyphs", () => {
+  // Bug (F195): Pixi laid every new label out twice in its first build, in `initGpuText` and again in `addRenderable`,
+  // which found the flag of the label's construction still set: half the glyph work of every window's first draw.
+  it("lays a new label out once in its first build, with all its glyphs", () => {
+    const current = stageAt();
+    const counted = layouts(current);
+    const text = current.label("12345");
+
+    current.build([text]);
+
+    expect(counted).toHaveBeenCalledTimes(1);
+    expect(current.elements(text).length).toBeGreaterThan(0);
+  });
+
+  // Bug: a cleared flag hides a change, so the label keeps drawing its old glyphs.
+  it("lays a label out again when its text changed after the first build", () => {
+    const current = stageAt();
+    const text = current.label("12");
+
+    current.build([text]);
+    // As Pixi's `collectRenderablesSimple` after the add: the view counts as drawn, so a later change flags it.
+    text.didViewUpdate = false;
+
+    const counted = layouts(current);
+
+    text.text = "345678";
+    current.build([text]);
+
+    expect(counted).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("the routing batch pipe", () => {
   // Bug: Pixi pools its batchable elements: one that carried a label's glyphs comes back for a plain graphics, which the
   // SDF batcher would draw through the distance-field step.

@@ -84,6 +84,10 @@ export const BUDGET = {
   sdfAddToBatchPooled: 0,
   // S: new. The draw of an SDF batch whose resolution did not move: two compares before Pixi's own.
   sdfDrawStill: 0,
+  // F195: a new 12-glyph label made, built once and destroyed (window of 2000). Before 30 800 B: Pixi laid it out twice;
+  // now one layout, 24 000 B. The label, its proxy graphics and context, its glyph instructions.
+  // 27 000 leaves room for small Pixi changes and still fails the double layout.
+  sdfFirstBuild: 27_000,
   // E4: before 2 352 B (the held answers cleared at every pass, `for…of` over Pixi's frozen filter lists, Pixi's `alpha`
   // boxed at every node of every walk). Now an answer stands while `passesVersion` does.
   unseenStill: 0,
