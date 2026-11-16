@@ -119,6 +119,19 @@ function hasStorage(): boolean {
 }
 
 /**
+ * Tells whether the window can take and drop listeners. A headless test that stubs only `document`, or a worker,
+ * cannot. The document's own listeners are not checked here: the host's visibility watch needs them before the trail.
+ *
+ * @returns True when `addEventListener` and `removeEventListener` are on `globalThis`.
+ */
+function hasWindowListeners(): boolean {
+  return (
+    typeof globalThis.addEventListener === "function" &&
+    typeof globalThis.removeEventListener === "function"
+  );
+}
+
+/**
  * Reads a `localStorage` key as JSON. A storage that throws, and text that does not parse, read as `undefined`.
  *
  * @param key - The key.
@@ -321,8 +334,8 @@ function createRecord(ctx: RendererCtx, document: Document): TrailRecord {
 /**
  * Starts the trail of a page: reports the run before when it was cut short, starts a new record, writes it, writes it
  * again once the application is up, then every 2 s and at each change of the page (`visibilitychange`, `pagehide`,
- * a `pageshow` from the back/forward cache). Without a document or a mount (an inert renderer) or a `localStorage` to
- * keep it in, nothing starts.
+ * a `pageshow` from the back/forward cache). Without a document or a mount (an inert renderer), a `localStorage` to
+ * keep it in, or listeners on the window (a headless test, a worker), nothing starts.
  *
  * @param ctx - Domain context of the renderer plugin.
  */
@@ -331,6 +344,7 @@ export function startTrail(ctx: RendererCtx): void {
   const trail = ctx.state.trail;
 
   if (document === undefined || ctx.config.mount === undefined || !hasStorage()) return;
+  if (!hasWindowListeners()) return;
   if (trail.stop !== undefined) return;
 
   reportLastRun(ctx);
@@ -378,9 +392,12 @@ export function startTrail(ctx: RendererCtx): void {
   };
   trail.stop = (): void => {
     globalThis.clearInterval(timer);
+    // The host may have lost its listeners since the start (a test unstubs its globals first).
     document.removeEventListener("visibilitychange", onVisibility);
-    globalThis.removeEventListener("pagehide", onPageHide);
-    globalThis.removeEventListener("pageshow", onPageShow);
+    if (hasWindowListeners()) {
+      globalThis.removeEventListener("pagehide", onPageHide);
+      globalThis.removeEventListener("pageshow", onPageShow);
+    }
     record.state = "closed";
     record.writes += 1;
     writeJson(TRAIL_KEY, record);

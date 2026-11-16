@@ -380,4 +380,18 @@ describe("the trail of this run (F175)", () => {
     expect(storage.items.has(TRAIL_KEY)).toBe(false);
     mock.stop();
   });
+
+  // Bug (0.15.135): a headless game test stubs `document` and `localStorage` but gives the window no listeners, and
+  // the start threw "globalThis.addEventListener is not a function".
+  it("starts nothing, and throws nothing, on a host with no window listeners", async () => {
+    const mock = createMockRenderer();
+
+    vi.stubGlobal("addEventListener", undefined);
+    vi.stubGlobal("removeEventListener", undefined);
+    await mock.start();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(storage.items.has(TRAIL_KEY)).toBe(false);
+    expect(() => mock.stop()).not.toThrow();
+  });
 });
