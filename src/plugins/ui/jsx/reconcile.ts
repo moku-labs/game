@@ -773,6 +773,9 @@ export function createReconciler(
   let released = false;
   // True while the anchor pass applies an element of an `<anchor>`: the solve leaves them alone.
   let anchoring = false;
+  // True while a root shown before its parts were done is applied still: a live element whose rest
+  // pose moved takes it at once, with no hook and no track, as a held one does (F200).
+  let applyingStill = false;
   // The membership version of the world's projections the last walk for a released root read, and the
   // one the last pass of the held enters read with the length of the queue it left: a frame with
   // windows held warm and at rest compares numbers and walks nothing (spec 33 B+D).
@@ -1928,7 +1931,9 @@ export function createReconciler(
    * Applies a solved rect to an element that is already live. A moved one gets its `Box`, its
    * visual size and its `change.Box` motion; its rest pose then plays `change.Transform` unless
    * the `change` hook already moves it. A quiet one plays neither: its root changed its place (a
-   * slot came or went), so its rects changed units, not places.
+   * slot came or went), so its rects changed units, not places. One of a root applied still plays
+   * neither and takes its new rest pose at once: the window opened on another item than the one it
+   * was built for, and stands where a cold open would (F200).
    *
    * @param element - The live element to apply.
    * @param parent - The rect of its parent, or nothing for a root.
@@ -1945,8 +1950,28 @@ export function createReconciler(
       if (!quiet) hooked = modules.layout.change(element, element.previous, hint);
     }
 
+    const rest = element.rest;
+
     // Move the rest pose, which plays `change.Transform` only when no hook took it.
     modules.layout.repose(element, parent, hooked, hint);
+
+    // Per moved element of a still application only: a new rest pose is a new object.
+    if (applyingStill && element.rest !== rest) writeStillPose(element);
+  }
+
+  /**
+   * Writes the rest pose of a live element of a root applied still, as `applyFirst` and a held
+   * element take it: at once, with no hook and no track. The content of a scroll keeps its
+   * `Transform`: the scroll step owns it.
+   *
+   * @param element - A live element whose rest pose moved in this application.
+   */
+  function writeStillPose(element: Element): void {
+    if (element.type === CONTENT) return;
+
+    const pose = element.rest;
+
+    ecs.set(element.entity, Transform, { ...pose, pivot: { ...pose.pivot } });
   }
 
   /**
@@ -2261,13 +2286,32 @@ export function createReconciler(
     // new viewport, a text measured again) applies in one block, so the build always reaches its end.
     if (root.aside !== undefined && isAside(root.entity) && !element.live) {
       parts.applyInParts(root, element, quiet);
-    } else {
-      // A root shown before its parts were done takes its rects with no motion: its enters play next.
-      applyRects(element, quiet || root.still === true);
+    } else if (root.still === true) {
+      applyStill(element);
       delete root.still;
+    } else {
+      applyRects(element, quiet);
     }
 
     return true;
+  }
+
+  /**
+   * Applies a root shown before its parts were done (a warm window opened while it was built): its
+   * elements take their rects and rest poses with no motion, a live one whose rest pose moved at
+   * once, so the window stands where a cold open stands, also on another item than the warm one
+   * (F200). Its enters play next.
+   *
+   * @param element - The root element.
+   */
+  function applyStill(element: Element): void {
+    applyingStill = true;
+
+    try {
+      applyRects(element, true);
+    } finally {
+      applyingStill = false;
+    }
   }
 
   /**

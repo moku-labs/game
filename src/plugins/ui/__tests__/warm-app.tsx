@@ -12,12 +12,13 @@ import { assetsPlugin } from "../../assets";
 import { i18nPlugin } from "../../i18n";
 import { inputPlugin } from "../../input";
 import { rendererPlugin } from "../../renderer";
-import { Overlay } from "../../renderer/components";
+import { Overlay, Transform } from "../../renderer/components";
 import { scenesPlugin } from "../../scenes";
 import { textPlugin } from "../../text";
 import { worldPlugin } from "../../world";
 import { Tree } from "../../world/ecs/define";
 import type { Entity, LayerSpec } from "../../world/types";
+import { Box } from "../components";
 import { uiPlugin } from "../index";
 import type { ElementMotion } from "../jsx/types";
 import { settle, steppingClock } from "./parts-app";
@@ -334,9 +335,79 @@ const dimScreen = projection({
   warm: (): Item => ({ id: "dim" })
 });
 
+/**
+ * The motion of the track of the tabs sheet: a moved rest pose is counted, and taken at once, as a
+ * game's `landOnBox` does.
+ */
+const TRACK_MOTION: ElementMotion = {
+  change: {
+    Transform: (view, _previous, next) => {
+      seen.changes += 1;
+      view.set(Transform, { x: next.x, y: next.y, pivot: next.pivot });
+
+      return undefined;
+    }
+  }
+};
+
+/** The tabs of the sheet with a track: the warm one, and the one the other tab opens. */
+type Tab = "packs" | "market";
+
+/** The item of the sheet with a track: the tab it opens on. */
+type TabsItem = { id: string; tab: Tab };
+
+/** The panes of the track, side by side, each 400 u wide. */
+const PANES: readonly Tab[] = ["packs", "market"];
+
+/** The rows of one pane of the track: with the root, the clip, the track and the panes, 165 elements. */
+const PANE_ROWS = 16;
+
+/**
+ * The sheet of A Memory Missing's shop, cut down (F200): a clip one pane wide over a track of two
+ * panes, the track standing one pane to the left on the market. The warm item is the packs tab;
+ * the market opens with the same key and another item, so the open moves the track. 165
+ * elements: on a clock that never moves they are applied 100 a frame, the track in the first part.
+ */
+const tabsScreen = projection({
+  name: "warm.tabs",
+  layer: "ui",
+  from: (_player: WarmPlayer, session: WarmSession): TabsItem[] =>
+    session.open === "packs" || session.open === "market"
+      ? [{ id: "tabs", tab: session.open }]
+      : [],
+  key: (item: TabsItem) => item.id,
+  view: (item: TabsItem) => (
+    <column key="tabsRoot" style={{ width: 1080, height: 1920 }}>
+      <row key="tabsClip" style={{ width: 400, height: 800 }}>
+        <row
+          key="tabsTrack"
+          style={{ width: 800, height: 800, left: item.tab === "packs" ? 0 : -400 }}
+          motion={TRACK_MOTION}
+          components={[Marked({ name: "tabsTrack" })]}
+        >
+          {PANES.map(pane => (
+            <column key={`pane_${pane}`} style={{ width: 400, height: 800 }}>
+              {Array.from({ length: PANE_ROWS }, (_unused, row) => (
+                <row key={`${pane}${row}`} style={{ width: 400, height: 40 }}>
+                  {CELLS.map(cell => (
+                    <stack key={`${pane}${row}_${cell}`} style={{ width: 60, height: 30 }} />
+                  ))}
+                </row>
+              ))}
+            </column>
+          ))}
+        </row>
+      </row>
+    </column>
+  ),
+  warm: (): TabsItem => ({ id: "tabs", tab: "packs" })
+});
+
 const home = defineNode({
   rest: true,
   outcomes: {
+    openPacks: type(),
+    openMarket: type(),
     openSheet: type(),
     openList: type(),
     openDim: type(),
@@ -399,6 +470,8 @@ const scroll = defineNode({
 const main = defineFlow("main", {
   nodes: {
     home,
+    openPacks: opens("packs"),
+    openMarket: opens("market"),
     openSheet: opens("sheet"),
     openList: opens("list"),
     openDim: opens("dim"),
@@ -413,6 +486,8 @@ const main = defineFlow("main", {
   outcomes: {},
   edges: {
     home: {
+      openPacks: "openPacks",
+      openMarket: "openMarket",
       openSheet: "openSheet",
       openList: "openList",
       openDim: "openDim",
@@ -423,6 +498,8 @@ const main = defineFlow("main", {
       scroll: "scroll",
       coin: "coin"
     },
+    openPacks: { done: "home" },
+    openMarket: { done: "home" },
     openSheet: { done: "home" },
     openList: { done: "home" },
     openDim: { done: "home" },
@@ -444,7 +521,8 @@ const warmFeature = defineFeature("warm", {
     rowsScreen,
     dimScreen,
     clashScreen,
-    wideScreen
+    wideScreen,
+    tabsScreen
   ],
   components: [Marked]
 });
@@ -601,4 +679,29 @@ export function markedIn(warm: Warm, name: string): Entity | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Steps frames until the held tabs sheet is in its application: its track is applied, and ui's part
+ * of the build is not done, so the world's record of it is still building.
+ *
+ * @param warm - The started fixture, the tabs sheet mounted and closed.
+ * @param most - The most frames to step.
+ */
+export function untilApplying(warm: Warm, most = 200): void {
+  const built = warm.checks.find(check => check.name === "asideBuilt");
+  const { ecs, projection } = warm.app.world;
+
+  for (let frames = 1; frames <= most; frames += 1) {
+    warm.frame();
+
+    // The held track, not the one of a window that just closed and still leaves.
+    for (const [entity, mark] of ecs.query(Marked)) {
+      const held = mark.name === "tabsTrack" && projection.isBuilding(entity);
+
+      if (held && ecs.get(entity, Box) !== undefined && built?.() === false) return;
+    }
+  }
+
+  throw new Error(`the tabs sheet was not in its application in ${most} frames`);
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OverlayLevel } from "../../../renderer/components";
+import { OverlayLevel, Transform } from "../../../renderer/components";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import type { Time } from "../../../time/types";
 import { Tree } from "../../../world/ecs/define";
@@ -15,6 +15,7 @@ import {
   markedIn,
   seen,
   startWarm,
+  untilApplying,
   untilWarm,
   type Warm,
   type WarmOptions,
@@ -408,6 +409,140 @@ describe("a window opened before it was built whole", () => {
       warm.app.ui.find("d19_3b")
     );
     expect(seen.enters).toEqual(["sheetRoot", "buy"]);
+  });
+});
+
+/** The pose of one element as the game's systems read it: its `Transform` and its `Box`, rounded. */
+type Pose = { key: string; x: number; y: number; box: string };
+
+/**
+ * The pose of every keyed element of the screen, in the order of the snapshot.
+ *
+ * @param warm - The started fixture.
+ * @returns The poses.
+ */
+function posesOf(warm: Warm): Pose[] {
+  return keysOf(warm.app.ui.tree())
+    .filter(key => key !== "")
+    .map(key => {
+      // eslint-disable-next-line unicorn/no-array-callback-reference -- `ui.find` takes a key, not a callback.
+      const entity = warm.app.ui.find(key) ?? 0;
+      const transform = warm.app.world.ecs.get(entity, Transform);
+      const box = warm.app.world.ecs.get(entity, Box);
+
+      return {
+        key,
+        x: Math.round(transform?.x ?? Number.NaN),
+        y: Math.round(transform?.y ?? Number.NaN),
+        box:
+          box === undefined
+            ? "none"
+            : [box.x, box.y, box.w, box.h].map(value => Math.round(value)).join(",")
+      };
+    });
+}
+
+/**
+ * The tabs sheet opened on the market in a headless app, where nothing is warm: the poses three
+ * frames after the open.
+ *
+ * @returns The poses of a cold open.
+ */
+async function coldMarket(): Promise<Pose[]> {
+  const warm = await start({ drawing: false });
+
+  warm.mount(["warm.tabs"]);
+  warm.frame();
+  await warm.answer("openMarket");
+
+  for (let index = 0; index < 3; index += 1) warm.frame();
+
+  return posesOf(warm);
+}
+
+/**
+ * Opens the tabs sheet on the packs and closes it again, so the record is warmed anew after the
+ * close, as the shop is in the game.
+ *
+ * @param warm - The started fixture, the tabs sheet mounted and held.
+ */
+async function openAndClose(warm: Warm): Promise<void> {
+  await warm.answer("openPacks");
+
+  for (let index = 0; index < 3; index += 1) warm.frame();
+
+  await warm.answer("close");
+}
+
+describe("a warm window opened on another item", () => {
+  // Bug (F200): a window opened with another item while its held root was still being applied
+  // keeps the warm item's pose on the elements the item moves: the still application of the root
+  // gave them their new rest pose and `Box`, but wrote no `Transform`, so the track of the shop's
+  // two panes drew the packs pane in the market's place for good. Or the pose comes through the
+  // track's `change.Transform` motion, which a cold open never plays.
+  it("opened while its record is building, stands where a cold open stands", async () => {
+    const cold = await coldMarket();
+    const warm = await start();
+
+    warm.mount(["warm.tabs"]);
+    untilWarm(warm, 1);
+    await openAndClose(warm);
+    untilApplying(warm);
+
+    expect(warm.app.world.projection.left()).toBeLessThan(Number.POSITIVE_INFINITY);
+
+    seen.changes = 0;
+    await warm.answer("openMarket");
+
+    for (let index = 0; index < 3; index += 1) warm.frame();
+
+    expect(posesOf(warm)).toEqual(cold);
+    expect(seen.changes).toBe(0);
+  });
+
+  // Bug a fix could bring: the same item opened while the record builds plays a `change` motion, or its
+  // still application is lost and the elements applied before the open keep stale poses.
+  it("opened with the warm item while its record is building, stands where a cold open stands", async () => {
+    const warmCold = await start({ drawing: false });
+
+    warmCold.mount(["warm.tabs"]);
+    warmCold.frame();
+    await warmCold.answer("openPacks");
+
+    for (let index = 0; index < 3; index += 1) warmCold.frame();
+
+    const cold = posesOf(warmCold);
+    const warm = await start();
+
+    warm.mount(["warm.tabs"]);
+    untilWarm(warm, 1);
+    await openAndClose(warm);
+    untilApplying(warm);
+    seen.changes = 0;
+    await warm.answer("openPacks");
+
+    for (let index = 0; index < 3; index += 1) warm.frame();
+
+    expect(posesOf(warm)).toEqual(cold);
+    expect(seen.changes).toBe(0);
+  });
+
+  // Bug a fix could bring: a ready record opened on another item no longer moves the elements the
+  // item moves. Known, older than F200: a ready record still plays the moved elements' `change` motion
+  // (one here), where a cold open plays none; a follow-up of its own.
+  it("opened when its record is ready, stands where a cold open stands", async () => {
+    const cold = await coldMarket();
+    const warm = await start();
+
+    warm.mount(["warm.tabs"]);
+    untilWarm(warm, 1);
+    await openAndClose(warm);
+    untilWarm(warm, 1);
+    await warm.answer("openMarket");
+
+    for (let index = 0; index < 3; index += 1) warm.frame();
+
+    expect(posesOf(warm)).toEqual(cold);
   });
 });
 

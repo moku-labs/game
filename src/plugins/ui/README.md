@@ -1113,6 +1113,8 @@ JSX is a root of `ui`, held:
   held enters play in that frame, posed at the end of its solve. A root opened before its build was
   done gets the rest in one block in that frame: its parked children are diffed whatever the
   budget, and it is laid out and applied whole with no motion, so no half-built frame is drawn.
+  An element applied before the open whose rest pose the open moved (another tab than the warm
+  one) takes the new pose at once, its `Transform` included, as a cold open places it (F200).
 - **The close** plays the exits as for any root; the world builds the window again in idle frames.
 - **At rest** the held roots cost a few numbers a frame: the walk for a released root runs only
   when the membership of the world's projections moved, the queue of held
