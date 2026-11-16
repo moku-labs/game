@@ -1,8 +1,9 @@
 /**
  * @file assets packer, build time — the content-hash cache. One entry per atlas group and per
  * encoded loose texture, keyed by everything that decides its bytes: the format of the entry, the
- * versions of `sharp` and `maxrects-packer`, the packing constants and the members (key, SHA-256
- * of the source, nine). A hit replays the frames and the encoded bytes: no decode, no encode.
+ * versions of `sharp` and `maxrects-packer`, the packing constants (the page size, the loose
+ * side, the trim margin) and the members (key, SHA-256 of the source, nine). A hit
+ * replays the frames, with their trim, and the encoded bytes: no decode, no encode.
  * Entries are content-addressed, so the cache is never pruned.
  */
 import { createHash } from "node:crypto";
@@ -10,13 +11,18 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { NineSlice } from "../../types";
 import { WEBP_ALPHA_QUALITY, WEBP_QUALITY } from "./encode";
+import { LOOSE_SIDE } from "./groups";
 import { BORDER, EXTRUDE, type LayoutFrame, PACKER_SIZE, PADDING, PAGE_SIZE } from "./layout";
+import { TRIM_MARGIN } from "./trim";
 
 /** The cache folder under the working directory. */
 export const CACHE_FOLDER = path.join("node_modules", ".cache", "moku-game-pack");
 
 /** Changes when the shape of an entry changes, so an old entry is never read as a new one. */
-const FORMAT = "pack-1";
+const FORMAT = "pack-2";
+
+/** The optional fields of a frame that say where a trimmed texture lay in its original. */
+const TRIM_FIELDS = ["offsetX", "offsetY", "origWidth", "origHeight"] as const;
 
 /** One member of a cache entry: a texture by its key, the hash of its source and its borders. */
 export type CacheMember = { key: string; source: string; nine: NineSlice | undefined };
@@ -100,8 +106,10 @@ export function cacheKey(input: CacheKeyInput): string {
       kind: input.kind,
       sharp: input.sharp,
       packer: packerVersion(),
-      page: PAGE_SIZE,
+      pageSize: PAGE_SIZE,
       packerSize: PACKER_SIZE,
+      looseSide: LOOSE_SIDE,
+      trimMargin: TRIM_MARGIN,
       border: BORDER,
       padding: PADDING,
       extrude: EXTRUDE,
@@ -113,7 +121,8 @@ export function cacheKey(input: CacheKeyInput): string {
 }
 
 /**
- * Tells whether a value read from an entry file is one frame.
+ * Tells whether a value read from an entry file is one frame: a key and four numbers, and the four
+ * trim numbers of a trimmed texture when they are there.
  *
  * @param value - Anything the JSON carried.
  * @returns True for a frame.
@@ -125,7 +134,8 @@ function isFrame(value: unknown): value is LayoutFrame {
 
   return (
     typeof frame.key === "string" &&
-    ["x", "y", "width", "height"].every(field => typeof frame[field] === "number")
+    ["x", "y", "width", "height"].every(field => typeof frame[field] === "number") &&
+    TRIM_FIELDS.every(field => frame[field] === undefined || typeof frame[field] === "number")
   );
 }
 

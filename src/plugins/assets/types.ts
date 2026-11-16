@@ -144,7 +144,9 @@ export type AssetsIo = {
    * `atlas` frame is passed as it is.
    *
    * @param page - The page texture, made by `createTexture`.
-   * @param frame - Where the file lies on the page, in page pixels.
+   * @param frame - Where the file lies on the page, in page pixels. A trimmed file's frame also
+   *   carries `offsetX`, `offsetY`, `origWidth` and `origHeight`: the slice then answers the size of
+   *   the original and draws the cut at its offset.
    * @param options - `nine` becomes the default nine-slice borders of the slice.
    * @returns The new texture over the page's source.
    */
@@ -172,15 +174,46 @@ export type NineSlice = { left: number; top: number; right: number; bottom: numb
 
 /**
  * Where a packed file lies: `page` is the id of a page of the same bundle, never a file name, and
- * the frame is in page pixels. `width` and `height` equal the file's own, so its `nine` stays
- * valid as it is. The packer writes it; the loader cuts the file out of the page.
+ * the frame is in page pixels. Without the trim fields `width` and `height` equal the file's own,
+ * so its `nine` stays valid as it is. With them the file was trimmed to its visible pixels: the
+ * frame is the cut, `offsetX` and `offsetY` say where the cut's first column and row lay in the
+ * original image, and `origWidth` and `origHeight` are the size of that original (the file's own
+ * `width` and `height`). All four are there together or none is; a texture with `nine` is never
+ * trimmed. The packer writes it; the loader cuts the file out of the page.
  *
  * @example
  * ```ts
  * const frame: AtlasFrame = { page: "ui/main-0", x: 583, y: 595, width: 256, height: 128 };
+ *
+ * // A 300×200 icon trimmed to its visible 256×128, which started at (20, 36) of the original.
+ * const trimmed: AtlasFrame = {
+ *   page: "ui/main-0",
+ *   x: 583,
+ *   y: 595,
+ *   width: 256,
+ *   height: 128,
+ *   offsetX: 20,
+ *   offsetY: 36,
+ *   origWidth: 300,
+ *   origHeight: 200
+ * };
  * ```
  */
-export type AtlasFrame = { page: string; x: number; y: number; width: number; height: number };
+export type AtlasFrame = {
+  page: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** x of the frame's first column inside the original image. */
+  offsetX?: number;
+  /** y of the frame's first row inside the original image. */
+  offsetY?: number;
+  /** Width of the original image (the file's own `width`). */
+  origWidth?: number;
+  /** Height of the original image (the file's own `height`). */
+  origHeight?: number;
+};
 
 /**
  * One atlas page of a packed bundle. `id` is `<bundle>/<group>-<index>`, the name an `atlas`

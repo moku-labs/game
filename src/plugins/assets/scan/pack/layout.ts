@@ -24,26 +24,62 @@ export const BORDER = 2;
 export const EXTRUDE = 1;
 
 /**
- * The size `maxrects-packer` is given (F188). It lets a bin grow to its size plus the padding, so a
- * packer of `PAGE_SIZE` wrote 2050 px pages; one of `PAGE_SIZE - PADDING` never passes
- * `PAGE_SIZE`, and holds a frame of up to `PAGE_SIZE - PADDING - 2 × BORDER` per side.
+ * Where a frame lies inside its original image, when the original was trimmed (F198). All four
+ * fields go together; a frame without them is the whole image.
  */
-export const PACKER_SIZE = PAGE_SIZE - PADDING;
+export type Trim = { offsetX: number; offsetY: number; origWidth: number; origHeight: number };
 
-/** The largest side of a frame a page holds: 2042 px. */
-const ROOM = PACKER_SIZE - BORDER * 2;
-
-/** Where one texture lies on its page, in page pixels. */
-export type LayoutFrame = { key: string; x: number; y: number; width: number; height: number };
+/** Where one texture lies on its page, in page pixels, and where it lay in its original if trimmed. */
+export type LayoutFrame = {
+  key: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  offsetX?: number;
+  offsetY?: number;
+  origWidth?: number;
+  origHeight?: number;
+};
 
 /** One page of an atlas group: its size and its frames, sorted by key. */
 export type LayoutPage = { width: number; height: number; frames: readonly LayoutFrame[] };
 
-/** The pages of one group, and one sentence per texture or rule the packing broke. */
+/**
+ * A member of a layout: its key and the size of what goes on the page (the cut, when it was
+ * trimmed). `trim` says where the cut lay in its original.
+ */
+export type Boxed = Sized & { trim?: Trim };
+
+/** The pages of one group and one sentence per texture or rule the packing broke. */
 export type Layout = { pages: readonly LayoutPage[]; problems: readonly string[] };
 
-/** A rectangle of the packer that carries the key of its texture. */
-type KeyedRect = Rectangle & { data: { key: string } };
+/** A rectangle of the packer that carries the key of its texture and its trim. */
+type KeyedRect = Rectangle & { data: { key: string; trim: Trim | undefined } };
+
+/**
+ * The size `maxrects-packer` is given (F188). It lets a bin grow to its size plus the padding, so a
+ * packer of `PAGE_SIZE` wrote 2050 px pages; one of `PAGE_SIZE - PADDING` never passes `PAGE_SIZE`.
+ */
+export const PACKER_SIZE = PAGE_SIZE - PADDING;
+
+/** The largest side of a frame a page holds, inside its border: 2042 px. */
+const ROOM = PACKER_SIZE - BORDER * 2;
+
+/**
+ * Tells whether a member fits a page: both sides at most `ROOM`.
+ *
+ * @param member - The member.
+ * @returns True when a page holds it with its border.
+ * @example
+ * ```ts
+ * fitsPage({ key: "ui.dot", width: 8, height: 8 }); // true
+ * fitsPage({ key: "ui.sky", width: 4096, height: 64 }); // false
+ * ```
+ */
+function fitsPage(member: Sized): boolean {
+  return member.width <= ROOM && member.height <= ROOM;
+}
 
 /**
  * Compares two members the way the packer likes them: the longest side first, a larger area
@@ -62,17 +98,14 @@ function packingOrder(left: Sized, right: Sized): number {
 }
 
 /**
- * Tells whether a texture fits a page at all, inside the border.
+ * Compares two members by key.
  *
- * @param member - The texture.
- * @returns True when both sides fit.
- * @example
- * ```ts
- * fitsPage({ key: "ui.fx-rays", width: 504, height: 512 }); // true
- * ```
+ * @param left - One member.
+ * @param right - Another member.
+ * @returns The sort order.
  */
-function fitsPage(member: Sized): boolean {
-  return member.width <= ROOM && member.height <= ROOM;
+function byKey(left: Sized, right: Sized): number {
+  return left.key.localeCompare(right.key);
 }
 
 /**
@@ -88,7 +121,8 @@ function framesOf(rects: readonly KeyedRect[]): LayoutFrame[] {
       x: rect.x,
       y: rect.y,
       width: rect.width,
-      height: rect.height
+      height: rect.height,
+      ...rect.data.trim
     }))
     .toSorted((left, right) => left.key.localeCompare(right.key));
 }
@@ -96,7 +130,7 @@ function framesOf(rects: readonly KeyedRect[]): LayoutFrame[] {
 /**
  * Names every texture that fits no page, one sentence each, sorted by key.
  *
- * @param members - The textures of a group.
+ * @param members - The textures that do not fit.
  * @returns One problem per texture that is too large.
  * @example
  * ```ts
@@ -105,8 +139,7 @@ function framesOf(rects: readonly KeyedRect[]): LayoutFrame[] {
  */
 function unfitProblems(members: readonly Sized[]): string[] {
   return members
-    .filter(member => !fitsPage(member))
-    .toSorted((left, right) => left.key.localeCompare(right.key))
+    .toSorted(byKey)
     .map(
       member =>
         `the texture "${member.key}" (${member.width}×${member.height}) fits no ` +
@@ -115,24 +148,25 @@ function unfitProblems(members: readonly Sized[]): string[] {
 }
 
 /**
- * Lays the members of one atlas group out on pages of at most 2048 × 2048 pixels: 2 px of
- * padding between frames and a 2 px border, never trimmed and never rotated, so every frame keeps
- * the size of its source and a nine-slice keeps its borders. A texture that fits no page is a
- * problem naming its key, never a silent drop; an `fx` group that needs more than one page is a
- * problem naming the bundle and the count, because a particle emitter binds one page.
+ * Lays the members of one atlas group out on pages of at most `PAGE_SIZE` pixels per side:
+ * `PADDING` pixels between frames and a `BORDER` at the page edge, never rotated, so every frame
+ * keeps the size of its cut and a nine-slice (never trimmed) keeps its borders. A member that fits
+ * no page is a problem naming its key, in any group, never a silent drop: the groups keep a
+ * texture that large out of a `main` group (`LOOSE_SIDE`), and an `fx` texture loose would sample
+ * the wrong page in silence. An `fx` group that needs more than one page is a problem naming the
+ * bundle and the count, because a particle emitter binds one page.
  *
  * @param bundle - Name of the bundle, for the messages.
  * @param group - The atlas group.
- * @param members - Its textures, with their sizes.
+ * @param members - Its textures, with the sizes that go on the page.
  * @returns The pages and the problems.
  * @example
  * ```ts
- * layoutGroup("ui", "main", [{ key: "ui.dot", width: 8, height: 8 }]).pages; // [{ width: 12, height: 12, frames: [{ key: "ui.dot", x: 2, y: 2, width: 8, height: 8 }] }]
+ * layoutGroup("ui", "fx", [{ key: "ui.fx-a", width: 32, height: 32 }, { key: "ui.fx-sky", width: 4096, height: 64 }]).problems; // ['the texture "ui.fx-sky" (4096×64) fits no 2048×2048 page with its 2 px border and 2 px padding.']
  * ```
  */
-export function layoutGroup(bundle: string, group: Group, members: readonly Sized[]): Layout {
-  // A texture larger than a page is reported by key and left out of the packing.
-  const problems = unfitProblems(members);
+export function layoutGroup(bundle: string, group: Group, members: readonly Boxed[]): Layout {
+  const problems = unfitProblems(members.filter(entry => !fitsPage(entry)));
 
   // The rest goes to the packer in a fixed order, so the same members give the same layout.
   const packer = new MaxRectsPacker<KeyedRect>(PACKER_SIZE, PACKER_SIZE, PADDING, {
@@ -144,7 +178,7 @@ export function layoutGroup(bundle: string, group: Group, members: readonly Size
   });
 
   for (const member of members.filter(entry => fitsPage(entry)).toSorted(packingOrder)) {
-    packer.add(member.width, member.height, { key: member.key });
+    packer.add(member.width, member.height, { key: member.key, trim: member.trim });
   }
 
   // Every bin that holds a frame becomes a page.

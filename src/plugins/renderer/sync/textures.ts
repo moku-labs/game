@@ -5,7 +5,7 @@
  */
 import type { Entity } from "../../world/types";
 import { destroyWhole } from "../sources";
-import type { PixiModule, PixiTexture } from "../types";
+import type { PixiModule, PixiRectangle, PixiTexture } from "../types";
 import { dropImage, holdImage } from "./release";
 import type {
   CreateTextureOptions,
@@ -191,41 +191,90 @@ export function createTexture(
 }
 
 /**
- * Tells whether a frame lies inside a page of the given size. A negative number, or one that is
- * not a number, lies outside.
+ * Tells whether a frame carries the four trim fields. An incomplete set counts as none.
+ *
+ * @param frame - The frame.
+ * @returns True when the offset and the original size are all numbers.
+ * @example
+ * ```ts
+ * isTrimmed({ x: 0, y: 0, width: 8, height: 8, offsetX: 0, offsetY: 0, origWidth: 10 }); // false
+ * ```
+ */
+function isTrimmed(frame: SliceFrame): frame is Required<SliceFrame> {
+  return (
+    typeof frame.offsetX === "number" &&
+    typeof frame.offsetY === "number" &&
+    typeof frame.origWidth === "number" &&
+    typeof frame.origHeight === "number"
+  );
+}
+
+/**
+ * Tells whether a frame lies inside a page of the given size, and a trimmed frame inside its
+ * original too. A negative number, or one that is not a number, lies outside.
  *
  * @param frame - The frame in page pixels.
  * @param page - The size of the page.
  * @param page.width - Width of the page in pixels.
  * @param page.height - Height of the page in pixels.
- * @returns True when the whole frame is on the page.
+ * @returns True when the whole frame is on the page and, when trimmed, in its original.
  * @example
  * ```ts
  * frameFits({ x: 256, y: 384, width: 256, height: 128 }, { width: 512, height: 512 }); // true
  * ```
  */
 function frameFits(frame: SliceFrame, page: { width: number; height: number }): boolean {
-  return (
+  const onPage =
     frame.x >= 0 &&
     frame.y >= 0 &&
     frame.width >= 0 &&
     frame.height >= 0 &&
     frame.x + frame.width <= page.width &&
-    frame.y + frame.height <= page.height
+    frame.y + frame.height <= page.height;
+
+  if (!onPage || !isTrimmed(frame)) return onPage;
+
+  return (
+    frame.offsetX >= 0 &&
+    frame.offsetY >= 0 &&
+    frame.offsetX + frame.width <= frame.origWidth &&
+    frame.offsetY + frame.height <= frame.origHeight
   );
+}
+
+/**
+ * The `orig` and `trim` Pixi gives a slice of a trimmed frame: the original's size, and where the
+ * frame's pixels lie in it. A frame without the four fields gets neither.
+ *
+ * @param pixi - The Pixi module.
+ * @param frame - The frame.
+ * @returns The two rectangles, or nothing for an untrimmed frame.
+ */
+function trimOf(
+  pixi: PixiModule,
+  frame: SliceFrame
+): { orig?: PixiRectangle; trim?: PixiRectangle } {
+  if (!isTrimmed(frame)) return {};
+
+  return {
+    orig: new pixi.Rectangle(0, 0, frame.origWidth, frame.origHeight),
+    trim: new pixi.Rectangle(frame.offsetX, frame.offsetY, frame.width, frame.height)
+  };
 }
 
 /**
  * Cuts a texture out of an atlas page, on behalf of `assets`. The slice shares the page's source,
  * its frame is offset by the page's own frame, and it is marked as a slice so `destroyTexture`
- * frees only the wrapper.
+ * frees only the wrapper. A trimmed frame also gets `orig` and `trim`, so the slice answers the
+ * size of its original (F198).
  *
  * @param sctx - Domain context of the sync module.
  * @param page - The page texture.
- * @param frame - The frame in page pixels.
+ * @param frame - The frame in page pixels, with the four trim fields when it was trimmed.
  * @param options - Nine-slice borders, in pixels.
  * @returns The slice.
- * @throws {Error} When the renderer does not draw, and when the frame does not fit in the page.
+ * @throws {Error} When the renderer does not draw, and when the frame does not fit in the page or
+ *   a trimmed frame not in its original.
  */
 export function sliceTexture(
   sctx: SyncCtx,
@@ -252,6 +301,7 @@ export function sliceTexture(
       frame.width,
       frame.height
     ),
+    ...trimOf(pixi, frame),
     ...(nine === undefined ? {} : { defaultBorders: defaultBordersOf(nine) })
   });
 
@@ -277,6 +327,62 @@ function frameKeyOf(key: string, width: number, height: number): string {
 }
 
 /**
+ * The crop of an untrimmed base: the part of its frame inside `crop`.
+ *
+ * @param pixi - The Pixi module.
+ * @param base - The untrimmed texture.
+ * @param crop - The part of the base to show, in its pixels.
+ * @returns The crop, sharing the base's source.
+ */
+function plainCrop(pixi: PixiModule, base: PixiTexture, crop: HitBox): PixiTexture {
+  return new pixi.Texture({
+    source: base.source,
+    frame: new pixi.Rectangle(base.frame.x + crop.x, base.frame.y + crop.y, crop.width, crop.height)
+  });
+}
+
+/**
+ * The crop of a trimmed base (F198). The crop is in original pixels, the base's pixels lie at its
+ * trim: the crop draws their common part `I`, not rounded, where it lies in the crop, and keeps the
+ * crop's size. A crop that misses the trim draws nothing, over one pixel of the base's own frame,
+ * so it never shows a neighbour on the page.
+ *
+ * @param pixi - The Pixi module.
+ * @param base - The trimmed texture.
+ * @param trim - Where the base's pixels lie in its original.
+ * @param crop - The part of the original to show.
+ * @returns The crop, sharing the base's source.
+ */
+function trimmedCrop(pixi: PixiModule, base: PixiTexture, trim: HitBox, crop: HitBox): PixiTexture {
+  const left = Math.max(crop.x, trim.x);
+  const top = Math.max(crop.y, trim.y);
+  const width = Math.min(crop.x + crop.width, trim.x + trim.width) - left;
+  const height = Math.min(crop.y + crop.height, trim.y + trim.height) - top;
+  const orig = new pixi.Rectangle(0, 0, crop.width, crop.height);
+
+  if (width <= 0 || height <= 0) {
+    return new pixi.Texture({
+      source: base.source,
+      frame: new pixi.Rectangle(base.frame.x, base.frame.y, 1, 1),
+      orig,
+      trim: new pixi.Rectangle(0, 0, 0, 0)
+    });
+  }
+
+  return new pixi.Texture({
+    source: base.source,
+    frame: new pixi.Rectangle(
+      base.frame.x + left - trim.x,
+      base.frame.y + top - trim.y,
+      width,
+      height
+    ),
+    orig,
+    trim: new pixi.Rectangle(left - crop.x, top - crop.y, width, height)
+  });
+}
+
+/**
  * The texture a `"cover"` sprite draws: the part of `base` inside `crop`, sharing its source. One
  * crop per asset key and box, shared by every entity that shows it; the entity is added to its
  * users. A key that answers a new base has been invalidated, so every view of it resolves again
@@ -289,7 +395,8 @@ function frameKeyOf(key: string, width: number, height: number): string {
  * @param box - The box the sprite covers, which names the crop.
  * @param box.width - Width of the box.
  * @param box.height - Height of the box.
- * @param crop - The part of the base to show, in texture pixels.
+ * @param crop - The part of the base to show, in texture pixels: those of the original for a
+ *   trimmed base, whose `width` and `height` are the original's.
  * @returns The crop and its `frames` key, or the base and `""` while inert.
  */
 export function coverTexture(
@@ -304,6 +411,7 @@ export function coverTexture(
   const frameKey = frameKeyOf(key, box.width, box.height);
   const cached = frames.get(frameKey);
 
+  // Cache hit: the crop for this key and box is built from this base, so share it.
   if (cached?.base === base) {
     cached.users.add(entity);
 
@@ -317,12 +425,13 @@ export function coverTexture(
   // The crop shares the base's source: freeing it must never free the image.
   if (cached !== undefined) cached.texture.destroy(false);
 
-  const texture = new pixi.Texture({
-    source: base.source,
-    frame: new pixi.Rectangle(base.frame.x + crop.x, base.frame.y + crop.y, crop.width, crop.height)
-  });
+  // Build the crop: a trimmed base needs its trim honoured, a plain one is a straight cut.
+  const trim: HitBox | undefined = base.trim;
+  const texture =
+    trim === undefined ? plainCrop(pixi, base, crop) : trimmedCrop(pixi, base, trim, crop);
   const users = emptySet<Entity>();
 
+  // Register the crop so every entity that shows this key and box shares it.
   users.add(entity);
   frames.set(frameKey, { base, texture, users });
 

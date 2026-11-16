@@ -332,6 +332,84 @@ describe("manifest v2", () => {
   });
 });
 
+/** The atlas of a packed file as the manifest carries it, with the given extra fields. */
+function atlasWith(extra: Record<string, unknown>): unknown {
+  return {
+    version: 2,
+    bundles: {
+      ui: {
+        feature: "ui",
+        tier: "core",
+        mb: 0,
+        pages: [],
+        files: [
+          {
+            key: "ui.a",
+            width: 40,
+            height: 30,
+            mb: 0,
+            atlas: { page: "ui/main-0", x: 2, y: 2, width: 22, height: 12, ...extra }
+          }
+        ]
+      }
+    }
+  };
+}
+
+describe("manifest atlas trim fields (F198)", () => {
+  it("reads the four trim fields of a trimmed frame as they are", () => {
+    // Bug caught: a parser that drops the fields gives the loader a cut with no place to draw it.
+    const manifest = parseManifest(
+      atlasWith({ offsetX: 9, offsetY: 7, origWidth: 40, origHeight: 30 })
+    );
+
+    expect(manifest.bundles.ui?.files[0]?.atlas).toEqual({
+      page: "ui/main-0",
+      x: 2,
+      y: 2,
+      width: 22,
+      height: 12,
+      offsetX: 9,
+      offsetY: 7,
+      origWidth: 40,
+      origHeight: 30
+    });
+  });
+
+  it("drops all four when one is missing or not a number of 0 or more", () => {
+    // Bug caught: a half set read as zeros draws the cut at the corner of an original of size 0.
+    const three = { offsetX: 9, offsetY: 7, origWidth: 40 };
+    const negative = { offsetX: -1, offsetY: 7, origWidth: 40, origHeight: 30 };
+    const text = { offsetX: "9", offsetY: 7, origWidth: 40, origHeight: 30 };
+    const infinite = {
+      offsetX: 9,
+      offsetY: 7,
+      origWidth: 40,
+      origHeight: Number.POSITIVE_INFINITY
+    };
+
+    for (const extra of [three, negative, text, infinite]) {
+      expect(parseManifest(atlasWith(extra)).bundles.ui?.files[0]?.atlas).toEqual({
+        page: "ui/main-0",
+        x: 2,
+        y: 2,
+        width: 22,
+        height: 12
+      });
+    }
+  });
+
+  it("keeps an offset of 0", () => {
+    // Bug caught: reading the fields with numberAt, or a truthy test, drops a cut that starts at
+    // the corner of its original.
+    const manifest = parseManifest(
+      atlasWith({ offsetX: 0, offsetY: 0, origWidth: 40, origHeight: 30 })
+    );
+
+    expect(manifest.bundles.ui?.files[0]?.atlas).toMatchObject({ offsetX: 0, offsetY: 0 });
+  });
+});
+
 describe("parseManifest tolerates broken entries", () => {
   it("refuses a bundle that is not an object", () => {
     expect(() => parseManifest({ version: 1, bundles: { ui: "nope" } })).toThrow(
