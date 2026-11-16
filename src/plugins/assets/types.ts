@@ -594,6 +594,13 @@ export type State = {
    * another way (`"request"`, `"leave"`), so an untracked consumer costs one evict/reload at most (F184).
    */
   reloadHeld: Set<string>;
+  /**
+   * Bundles a node rests on through the `ready` effect, to the live rests seen since: a `ready` answered `false` for
+   * them, and none answered `true` since. Held from the budget and from the `"leave"` release, so the rest the node
+   * waits on cannot take them before the node asks again (F190). A bundle no `ready` asked for again by its second
+   * rest is let go: the node it was asked for was left another way (Back).
+   */
+  readyWaiting: Map<string, number>;
   /** Bundles the "asked again" warning named already: one line per bundle per session (F184). */
   thrashWarned: Set<string>;
   /** Scene id to its declaration, read from the `scenes` key of `flow.features`. */

@@ -55,7 +55,8 @@ export function bundleKeys(state: State, bundle: string): readonly string[] {
 
 /**
  * Tells whether the budget must leave a loaded bundle alone by the state alone: pinned, permanent, named by the
- * mounted, a leaving or the coming scene, in the preload queue, held after a reload, or the `except` of the pass.
+ * mounted, a leaving or the coming scene, in the preload queue, held after a reload, rested on through `ready`, or the
+ * `except` of the pass.
  *
  * @param state - The plugin state.
  * @param name - Name of the bundle.
@@ -74,6 +75,7 @@ function keptByState(
     state.pinned.has(name) ||
     isPermanent(entry.tier) ||
     state.reloadHeld.has(name) ||
+    state.readyWaiting.has(name) ||
     state.sceneNamed.includes(name) ||
     state.sceneLeaving.includes(name) ||
     state.sceneComing.includes(name) ||
@@ -84,7 +86,7 @@ function keptByState(
 /**
  * Picks the bundle that leaves next: the loaded one with the smallest use counter that is not
  * pinned, not named by the mounted, a leaving or the coming scene, not permanent, not in the preload queue, not held
- * after a reload, not `except` and drawn by no view (`renderer.sync.textures.used`, asked last: it walks the keys).
+ * after a reload, not rested on through `ready`, not `except` and drawn by no view (`renderer.sync.textures.used`, asked last: it walks the keys).
  * Its `release` is not read: a `"leave"` bundle is a candidate like any other.
  *
  * @param ctx - Domain context of the plugin.
@@ -316,7 +318,8 @@ export function featuresOnStack(ctx: AssetsCtx): ReadonlySet<string> {
  * Tells whether a bundle must stay where the game stands now: it is pinned (a bundle of the node
  * entered last), the mounted scene names it (the last list `sceneBundles` received), the scene
  * being built names it (the last list `sceneComing` received), a leaving scene named it and its
- * elements still play their exit, its feature is in `onStack`, or its tier is permanent.
+ * elements still play their exit, a node rests on it through `ready` (F190), its feature is in
+ * `onStack`, or its tier is permanent.
  *
  * @param ctx - Domain context of the plugin.
  * @param name - Name of the bundle.
@@ -337,6 +340,7 @@ export function isHeld(
     state.sceneNamed.includes(name) ||
     state.sceneLeaving.includes(name) ||
     state.sceneComing.includes(name) ||
+    state.readyWaiting.has(name) ||
     onStack.has(entry.feature) ||
     isPermanent(entry.tier)
   );

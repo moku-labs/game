@@ -164,3 +164,28 @@ describe("the release mark of a rest", () => {
     expect(mock.api.isLoaded("beta")).toBe(true);
   });
 });
+
+describe("the hold of a bundle a node rests on through ready (F190)", () => {
+  // Bug: after Back from the wait the hold never ended, so the bundle stayed out of the budget and the leave release.
+  it("keeps the bundle from the budget through the first live rest and lets it go at the second", async () => {
+    const mock = createMockAssets({ manifest, preloadDepth: 0 });
+    const rest = createHandlers(mock.ctx)["flow:rest"];
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "alpha", undefined, "request");
+    // Alpha alone is over the budget: only the hold keeps it.
+    mock.config.textureBudgetMb = 0.03;
+    mock.ctx.state.current = alphaNode;
+    // A ready answered false for alpha: a node rests on it.
+    mock.ctx.state.readyWaiting.set("alpha", 0);
+
+    rest({ path: "main/wait", checkpoint: false });
+
+    expect(mock.api.isLoaded("alpha")).toBe(true);
+
+    rest({ path: "main/alpha", checkpoint: false });
+
+    expect(mock.ctx.state.readyWaiting.has("alpha")).toBe(false);
+    expect(mock.api.isLoaded("alpha")).toBe(false);
+  });
+});
