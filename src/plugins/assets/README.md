@@ -104,8 +104,16 @@ and posts `ready` after its upload. A warm that rejects (not an abort) puts the 
 `state.readyFailed` and logs `ctx.log.warn("assets:ready-failed", { bundle, error })`; the next
 `ready` counts it as there, so a broken file never hangs a node, and a later successful load of the
 bundle takes it out again. An abort (an unload, a stop) marks nothing: the next `ready` starts the
-bundle again. The posting does not wait on the node's signal: the warm is shared work, and the inbox
-keeps only the latest `ready`, so a stale event costs at most one more question of the transit node.
+bundle again. The posting does not wait on the node's signal: the warm is shared work.
+
+**A `ready` goes only to the rest its ask leads to (F204).** That rest is the rest whose body asked,
+or else the first rest entered after the ask (`passReadyNode`, from the `load` stage of every node).
+The event is posted while that rest is the active node and has the outcome `ready` (every `inbox`
+type is an outcome); settled before the rest is entered, it waits and is posted on entry. A newer
+`false` ask takes the event over; a rest without `ready`, or any node entered after the rest, drops
+it. So `fx.start(ready(...))`, an ask left by Back, or the second of two asks of one warm posts
+nothing, and the next window's wait does not end at once on a stale event (on the A26 it cost every
+cold window two frames and the dim of its first wait).
 
 **The rest on a `ready` holds its bundles (F190).** A bundle `ready` answered `false` for is rested
 on (`state.readyWaiting`): neither the budget nor the `release: "leave"` release takes it until a
