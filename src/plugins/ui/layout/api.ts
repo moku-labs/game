@@ -29,7 +29,7 @@ import {
 } from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
-import { clampScroll, scrollTo, settleScroll, stepScroll } from "./scroll";
+import { clampScroll, scrollTo, settleScroll, stepScroll, stopsOf } from "./scroll";
 import { contentRectOf, solveRoot } from "./solve";
 import type {
   ElementLookup,
@@ -201,6 +201,8 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
       scrollTo(ctx, state, container, to, lookup),
 
     windowOf,
+
+    stopsOf,
 
     popupHandler: (jsx: JsxModule): FxHandler => createPopupHandler(ctx, state, jsx),
 

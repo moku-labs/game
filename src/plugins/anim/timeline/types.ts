@@ -6,7 +6,7 @@ import type { Json } from "../../model/types";
 import type { AnyComponent, AnyComponentValue, ComponentType } from "../../world/ecs/types";
 import type { Ease, Entity, ReducedMotion, TrackOptions, TrackSegment } from "../../world/types";
 import type { StepMotion } from "../tween/types";
-import type { Target } from "../types";
+import type { SlotRecord, Target, TimelineEndReason } from "../types";
 import type { HAPTIC_KINDS } from "./steps";
 
 /**
@@ -362,6 +362,10 @@ export type CursorCtx = {
 export type RunningTimeline = {
   readonly id: number;
   readonly animation: string;
+  /** The slot values exactly as `play` received them, by reference: `timelines()` shows them. */
+  readonly slots: SlotRecord;
+  /** The frame count of anim (`State.frame`) when the timeline started. */
+  readonly startFrame: number;
   readonly cursor: Cursor;
   readonly marks: string[];
   readonly entities: readonly Entity[];
@@ -373,4 +377,17 @@ export type RunningTimeline = {
   ended: boolean;
   /** The one cursor context of the timeline, made at its start and reused by every frame. */
   readonly cctx: CursorCtx;
+};
+
+/**
+ * One slot of the ring of ended timelines. The sixteen records are made once with the state and
+ * written in place at every end, so an end allocates no record. Private: the API answers
+ * `EndedTimelineInfo` copies.
+ */
+export type EndedRecord = {
+  timeline: number;
+  animation: string;
+  startFrame: number;
+  endFrame: number;
+  reason: TimelineEndReason;
 };

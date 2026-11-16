@@ -53,6 +53,7 @@ const PROJECTION_MEMBERS = [
   "left",
   "lift",
   "membershipVersion",
+  "motionIdsOf",
   "motionsOf",
   "mount",
   "mute",

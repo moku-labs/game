@@ -29,6 +29,9 @@ import type {
 /** How many frames the history keeps: 2 s at 60 fps, so a glitch seen by eye is still in it. */
 export const HISTORY_FRAMES = 120;
 
+/** Spare records a slot always may keep: a steady frame of a busy board reuses them. */
+export const SPARE_RECORDS = 64;
+
 /** Rows a frame a component must be marked, on average over a window, to be judged wasteful. */
 const MARKED_ROWS = 32;
 
@@ -260,8 +263,43 @@ function writeChange(
 }
 
 /**
+ * The most records any other slot of the ring holds for its frame: the busiest frame still in the
+ * window. It runs once a frame, optimized, and allocates nothing.
+ *
+ * @param history - The frame history.
+ * @param slot - The slot being reused, left out.
+ * @returns The largest record count of the other slots.
+ */
+function busiestOther(history: History, slot: HistorySlot): number {
+  let busiest = 0;
+
+  for (const other of history.slots) {
+    if (other !== undefined && other !== slot && other.count > busiest) busiest = other.count;
+  }
+
+  return busiest;
+}
+
+/**
+ * Cuts the spare records of a reused slot down to the busiest frame still in the window, never
+ * below `SPARE_RECORDS`. A steady load keeps the spares it reuses; a big frame's records (a window
+ * opening, thousands of them) go once that frame left the window, instead of staying in every slot
+ * it ever met (F194: up to 77 MB).
+ *
+ * @param history - The frame history.
+ * @param slot - The slot being reused, its old frame's records now spares.
+ */
+function trimSpares(history: History, slot: HistorySlot): void {
+  if (slot.changes.length <= SPARE_RECORDS) return;
+
+  const keep = Math.max(SPARE_RECORDS, busiestOther(history, slot));
+
+  if (slot.changes.length > keep) slot.changes.length = keep;
+}
+
+/**
  * The slot of one frame, emptied for it when the ring still holds an older frame at its index:
- * its record objects stay, as spares.
+ * its record objects stay, as spares, as many as the busiest frame of the window needs.
  *
  * @param history - The frame history.
  * @param frame - The frame number.
@@ -275,6 +313,7 @@ function slotFor(history: History, frame: number): HistorySlot {
 
   if (known !== undefined) {
     known.frame = frame;
+    trimSpares(history, known);
     known.count = 0;
     if (known.spawned.length > 0) known.spawned.length = 0;
     if (known.despawned.length > 0) known.despawned.length = 0;

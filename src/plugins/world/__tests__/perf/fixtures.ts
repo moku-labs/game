@@ -315,7 +315,8 @@ export function sweepFixture(ending: number): () => void {
       component: "Transform",
       handle: ENDED,
       additive: false,
-      forever: false
+      forever: false,
+      label: undefined
     });
   }
 
@@ -328,6 +329,39 @@ export function sweepFixture(ending: number): () => void {
       if (track !== undefined) state.tracks.push(track);
     }
 
+    projection.sweep();
+  };
+}
+
+/**
+ * The sweep of phase `animate` over a mounted projection of 300 resting views while 50 tracks keep
+ * running on the track table. With `labelled`, every track carries a label (F192), as a track of
+ * a `defineMotion({ id })` motion does: the label is read by `motionIdsOf` only, so the frame
+ * must cost what it costs without one.
+ *
+ * @param labelled - Whether the running tracks carry a label.
+ * @returns One sweep.
+ */
+export function sweepRunningFixture(labelled: boolean): () => void {
+  const world = createMockWorld();
+
+  mountBoard(world, boardItems(ENTITIES));
+  world.frame(16);
+
+  const { projection } = stableModules(world);
+
+  for (let index = 0; index < 50; index += 1) {
+    world.ctx.state.projection.tracks.push({
+      entity: index,
+      component: "Transform",
+      handle: RUNNING,
+      additive: false,
+      forever: false,
+      label: labelled ? "board.item.enter" : undefined
+    });
+  }
+
+  return (): void => {
     projection.sweep();
   };
 }
@@ -807,14 +841,18 @@ export function settled(fn: () => void): () => void {
  * glide or an idle tween writes them, then the recorder of phase `signals` reads the marks and the change sets are
  * cleared. The recording started before the measure.
  *
+ * @param count - The entities with a `Spot`.
+ * @param moved - How many of them move, every `count / moved`-th one.
  * @returns One frame of writes, its record and the clear.
  */
-export function recordedFrameFixture(): () => void {
+export function recordedFrameFixture(count = 100, moved = 20): () => void {
   const world = createMockWorld();
   const state = world.ctx.state.ecs;
   const entities: Entity[] = [];
 
-  for (let index = 0; index < 100; index += 1) {
+  const step = Math.floor(count / moved);
+
+  for (let index = 0; index < count; index += 1) {
     entities.push(world.api.ecs.spawn(OWNER, [Spot()]));
   }
 
@@ -828,8 +866,8 @@ export function recordedFrameFixture(): () => void {
   return (): void => {
     frame += 1;
 
-    for (let index = 0; index < 20; index += 1) {
-      const entity = entities[index * 5] ?? 0;
+    for (let index = 0; index < moved; index += 1) {
+      const entity = entities[index * step] ?? 0;
       const spot = store?.get(entity) as { x: number } | undefined;
 
       if (spot !== undefined) spot.x = frame % 1000;

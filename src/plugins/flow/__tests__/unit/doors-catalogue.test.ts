@@ -39,7 +39,8 @@ describe("the base catalogue", () => {
       "explain",
       "diff",
       "schema",
-      "at"
+      "at",
+      "timelines"
     ]);
     expect(Object.keys(commands)).toEqual([
       "answer",

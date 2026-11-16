@@ -2,6 +2,7 @@
  * @file anim plugin — state factory. The plugin starts empty: `onInit` registers the frame step,
  * `onStart` fills the registry and installs the driver.
  */
+import type { EndedRecord } from "./timeline/types";
 import type { Config, State } from "./types";
 
 /**
@@ -23,10 +24,28 @@ function emptySet<Value>(): Set<Value> {
   return new Set();
 }
 
+/** How many ended timelines the ring of `timelines()` keeps. */
+export const ENDED_CAPACITY = 16;
+
+/**
+ * Makes the 16 records of the ring of ended timelines, once, so an end only overwrites them.
+ *
+ * @returns Sixteen blank records.
+ */
+function blankRing(): EndedRecord[] {
+  const ring: EndedRecord[] = [];
+
+  for (let index = 0; index < ENDED_CAPACITY; index++) {
+    ring.push({ timeline: 0, animation: "", startFrame: 0, endFrame: 0, reason: "ended" });
+  }
+
+  return ring;
+}
+
 /**
  * Creates the initial anim state: an empty track table, the empty field bookkeeping of the
- * retarget policy and the offsets accumulator, no timeline, no animation and no frame loop, and
- * reduced motion at its configured start value.
+ * retarget policy and the offsets accumulator, no timeline (and a ring of 16 blank records for the
+ * ended ones), no animation and no frame loop, and reduced motion at its configured start value.
  *
  * @param ctx - Minimal context.
  * @param ctx.config - Resolved plugin config.
@@ -43,6 +62,9 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     additive: emptyMap(),
     timelines: emptyMap(),
     timelineList: [],
+    ended: blankRing(),
+    endedNext: 0,
+    endedCount: 0,
     registry: emptyMap(),
     markListeners: emptySet(),
     frame: 0,

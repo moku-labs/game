@@ -83,6 +83,7 @@ From `@moku-labs/game/inspect`. `Changes` is when `watch` reads the source again
 | `diff` | `game.diff` | `{ from: "number", to: "number" }` | frame | `world.ecs.diff(from, to)`: `{ from, to, entities }`, what changed between the end of frame `from` and the end of frame `to`. Dev builds only, see "Frame history" |
 | `schema` | `game.schema` | none | frame | `world.ecs.schema()`: every component and tag the world met, sorted by name, with the JSON kind of each field |
 | `at` | `game.at` | `{ x: "number", y: "number" }` | frame | What lies under a page point in CSS px, topmost first: `[{ entity, owner, key, layer }]`. `[]` while the renderer is inert |
+| `timelines` | `game.timelines` | none | frame | `anim.timelines()`: `{ running, ended }`, the running timelines (`timeline`, `animation`, `startFrame`, `slots`, `entities`, `marks`) and the last 16 ended ones (`startFrame`, `endFrame`, `reason`), oldest first. Only in a game that composes `animPlugin` |
 
 ## Base commands
 
