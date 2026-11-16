@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer, Order } from "../../../world/ecs/define";
+import type { Entity } from "../../../world/types";
 import { Display, NineSlice, Parent, Sprite, Transform } from "../../components";
 import { FakeContainer, FakeParticleContainer, type FakeSprite, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
@@ -183,6 +184,105 @@ describe("sync views", () => {
       "renderer: parent left before its children",
       expect.objectContaining({ parent })
     );
+  });
+
+  // Bug (F195): the children are read from the host itself, not from a scan of every view; a wrong lookup detaches
+  // another parent's view, or an object of the host that tops no view (a dim, a mask, a picture's quad).
+  it("detaches only the leaving parent's own children, and leaves the host's other objects alone", async () => {
+    const mock = await started();
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    const other = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+
+    mock.modules.sync.pass();
+
+    const children = [0, 1, 2].map(() =>
+      mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: parent })])
+    );
+    const cousin = mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: other })]);
+    // A child that is a parent itself hangs by its wrapper, which keeps its own child.
+    const grandchild = mock.world.ecs.spawn(owner, [
+      Transform(),
+      Sprite(),
+      Parent({ entity: children[0] ?? parent })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const views = mock.ctx.state.sync.views;
+    const nested = views.get(children[0] ?? parent);
+    const host = views.get(parent)?.wrapper;
+    const extra = new FakeContainer();
+
+    host?.addChild(extra as never);
+    mock.world.ecs.despawn(parent);
+    mock.modules.sync.pass();
+
+    for (const child of children) {
+      const view = views.get(child);
+
+      expect((view?.wrapper ?? view?.object)?.parent).toBeNull();
+    }
+    expect(views.get(grandchild)?.object.parent).toBe(nested?.wrapper);
+    expect(views.get(cousin)?.object.parent).toBe(views.get(other)?.wrapper);
+    expect(extra.parent).toBe(host);
+    expect(mock.log.warn).toHaveBeenCalledWith("renderer: parent left before its children", {
+      parent,
+      orphans: children
+    });
+  });
+
+  // Bug (F195): every parent that left scanned every view on stage for its children, so a window's close was
+  // quadratic in its views (12–15 ms of the album's close frame on the A26).
+  it("closes a window of parents without walking the view table", async () => {
+    const mock = await started();
+    const ecs = mock.world.ecs;
+    const root = ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    const leaving: Entity[] = [root];
+
+    for (let panel = 0; panel < 4; panel += 1) {
+      const entity = ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: root })]);
+
+      leaving.push(entity, ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity })]));
+    }
+    mock.modules.sync.pass();
+
+    const views = mock.ctx.state.sync.views;
+    const walks = { count: 0 };
+    const entries = views.entries.bind(views);
+    const values = views.values.bind(views);
+    const keys = views.keys.bind(views);
+    const each = views.forEach.bind(views);
+
+    // Every way to walk the table counts: `for…of`, `entries`, `values`, `keys`, `forEach`.
+    views[Symbol.iterator] = (): ReturnType<typeof entries> => {
+      walks.count += 1;
+
+      return entries();
+    };
+    views.entries = (): ReturnType<typeof entries> => {
+      walks.count += 1;
+
+      return entries();
+    };
+    views.values = (): ReturnType<typeof values> => {
+      walks.count += 1;
+
+      return values();
+    };
+    views.keys = (): ReturnType<typeof keys> => {
+      walks.count += 1;
+
+      return keys();
+    };
+    views.forEach = (...args: Parameters<typeof each>): void => {
+      walks.count += 1;
+      each(...args);
+    };
+    for (const entity of leaving) ecs.despawn(entity);
+    mock.modules.sync.pass();
+
+    expect(walks.count).toBe(0);
+    expect(views.size).toBe(0);
   });
 
   // Bug (F44): a restore hangs a hosted view under the rebuilt host in the frame the old host goes; the view was
