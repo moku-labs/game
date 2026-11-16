@@ -185,6 +185,70 @@ describe("sync views", () => {
     );
   });
 
+  // Bug (F195): the children are read from the host itself, not from a scan of every view; a wrong lookup detaches
+  // another parent's view, or an object of the host that tops no view (a dim, a mask, a picture's quad).
+  it("detaches only the leaving parent's own children, and leaves the host's other objects alone", async () => {
+    const mock = await started();
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    const other = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+
+    mock.modules.sync.pass();
+
+    const children = [0, 1, 2].map(() =>
+      mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: parent })])
+    );
+    const cousin = mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: other })]);
+
+    mock.modules.sync.pass();
+
+    const views = mock.ctx.state.sync.views;
+    const host = views.get(parent)?.wrapper;
+    const extra = new FakeContainer();
+
+    host?.addChild(extra as never);
+    mock.world.ecs.despawn(parent);
+    mock.modules.sync.pass();
+
+    for (const child of children) expect(views.get(child)?.object.parent).toBeNull();
+    expect(views.get(cousin)?.object.parent).toBe(views.get(other)?.wrapper);
+    expect(extra.parent).toBe(host);
+    expect(mock.log.warn).toHaveBeenCalledWith("renderer: parent left before its children", {
+      parent,
+      orphans: children
+    });
+  });
+
+  // Bug (F195): every parent that left scanned every view on stage for its children, so a window's close was
+  // quadratic in its views (12–15 ms of the album's close frame on the A26).
+  it("closes a window of parents without walking the view table", async () => {
+    const mock = await started();
+    const ecs = mock.world.ecs;
+    const root = ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    const window: number[] = [root];
+
+    for (let panel = 0; panel < 4; panel += 1) {
+      const entity = ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: root })]);
+
+      window.push(entity, ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity })]));
+    }
+    mock.modules.sync.pass();
+
+    const views = mock.ctx.state.sync.views;
+    const walks = { count: 0 };
+    const entries = views.entries.bind(views);
+
+    views[Symbol.iterator] = (): ReturnType<typeof entries> => {
+      walks.count += 1;
+
+      return entries();
+    };
+    for (const entity of window) ecs.despawn(entity);
+    mock.modules.sync.pass();
+
+    expect(walks.count).toBe(0);
+    expect(views.size).toBe(0);
+  });
+
   // Bug (F44): a restore hangs a hosted view under the rebuilt host in the frame the old host goes; the view was
   // named an orphan of the old host, and drawn nowhere until the next pass.
   it("hangs a child that moved to another parent in the frame its old parent left, and names nothing", async () => {

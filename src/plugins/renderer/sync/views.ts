@@ -1543,20 +1543,31 @@ function displayObjectOf(sctx: SyncCtx, entity: Entity): PixiContainer | undefin
  * child whose `Parent` names another entity, or none, by now: it moved in the same frame (a hosted view a restore
  * hung under the rebuilt host, F44), and the later steps of this pass hang it where it belongs.
  *
+ * The children are read from the host itself, front first: a detach takes the child at the read position out, so the
+ * next one moves into it, and Pixi's `removeChild` finds it near the front. A scan of every view per parent that left
+ * made the close of a window quadratic in its views (F195: 12–15 ms of the album's close frame on the A26). An object
+ * of the host that tops no view (a dim, a mask, a picture's quad) is not a child, and is passed over.
+ *
  * @param sctx - Domain context of the sync module.
  * @param entity - The parent entity.
  * @param host - The container its children hang in.
  */
 function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): void {
   const state = sctx.ctx.state.sync;
-  const orphans: Entity[] = [];
+  const children = host.children;
+  let orphans: Entity[] | undefined;
 
-  for (const [child, childView] of state.views) {
-    if (child === entity) continue;
+  let at = 0;
 
-    const object = childView.wrapper ?? childView.object;
+  while (at < children.length) {
+    const object = children[at];
+    const childView = object === undefined ? undefined : state.viewOfTop.get(object);
+    const child = childView === undefined ? undefined : state.entityOf.get(childView.object);
 
-    if (object.parent !== host) continue;
+    if (object === undefined || child === undefined || child === entity) {
+      at += 1;
+      continue;
+    }
 
     markView(sctx, child);
     detach(object);
@@ -1564,10 +1575,13 @@ function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): voi
     state.orphans.add(child);
 
     // Named only when it neither leaves nor moved to another parent in the same frame (F44).
-    if (isLostOrphan(sctx, child, entity)) orphans.push(child);
+    if (isLostOrphan(sctx, child, entity)) {
+      orphans ??= [];
+      orphans.push(child);
+    }
   }
 
-  if (orphans.length > 0) {
+  if (orphans !== undefined) {
     sctx.ctx.log.warn("renderer: parent left before its children", { parent: entity, orphans });
   }
 }
