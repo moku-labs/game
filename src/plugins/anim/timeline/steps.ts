@@ -560,11 +560,12 @@ export function external(_player: ExternalPlayer, _clip: string): never {
 /**
  * Nests one animation inside another. The nested tree is built here, so its marks are reported
  * under the nested id and no function survives in the data. Pass the outer `tools` when the
- * nested `build` reads `at`.
+ * nested `build` reads `at` or `reducedMotion`.
  *
  * @param animation - The animation to nest.
  * @param slots - One target, or a list of targets, per slot of the nested animation.
- * @param tools - The build tools of the outer animation; without them `at` is the identity pose.
+ * @param tools - The build tools of the outer animation, which carry `at` and `reducedMotion`; without
+ *   them `at` is the identity pose and `reducedMotion` is absent (false).
  * @returns The use step.
  * @example
  * ```ts

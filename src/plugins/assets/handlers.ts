@@ -6,6 +6,7 @@
 import { enforceBudget } from "./budget";
 import { withDeps } from "./lifecycle";
 import { startPreload } from "./preload";
+import { ageReadyWaiting } from "./ready";
 import { createSwap } from "./swap";
 import type { AssetsCtx, FlowRest, HotSwap, KernelSlice } from "./types";
 
@@ -55,6 +56,8 @@ export function createHandlers(
       if (live) {
         assets.state.restPending = true;
         assets.state.restedLive = true;
+        // A node rests here on its `ready`: what it asked for stays through this rest, not past the next (F190).
+        ageReadyWaiting(assets.state);
       }
       // "Asked again right after a budget unload" means before this rest; a held bundle stays held (F184).
       assets.state.budgetUnloaded.clear();

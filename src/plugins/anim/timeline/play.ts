@@ -199,7 +199,8 @@ export function startTimeline<Tags extends SlotTags>(
   // Build the step tree and check it: a bad tree throws before anything starts.
   const spawned = emptySpawnTable();
   const step = definition.build(slots, {
-    at: (target: Target): Pose => restPoseOf(actx, target, spawned)
+    at: (target: Target): Pose => restPoseOf(actx, target, spawned),
+    reducedMotion: actx.state.reducedMotion
   });
 
   assertUniqueSpawns(definition.id, step);

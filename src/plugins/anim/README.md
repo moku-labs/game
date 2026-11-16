@@ -117,7 +117,8 @@ from the kit does not compile. The objects are the same as the root exports.
 and `Sprite`, and the kit's `Sprite` and `NineSlice` that `defineGame` narrows to the game's asset
 keys. The kit component passes as it is: `tween(target, Sprite, { alpha: 0 }, { ms: 100 })`.
 
-`build(slots, { at })` runs once per play, so the same animation may play twice at once. `at(target)`
+`build(slots, { at, reducedMotion })` runs once per play, so the same animation may play twice at once.
+`reducedMotion` tells whether reduced motion was on when the play started (see "Reduced motion"). `at(target)`
 resolves the target through `world.projection.entityOf` and answers its **root pose**: the rest
 `Transform` composed through the `Parent` chain (`rootPoseOf` of `renderer`, every pivot applied), so
 a flight lands on a cell inside a scaled board slot. An entity without a parent answers its rest
@@ -385,6 +386,24 @@ const sheetFade = defineAnimation("sheet.fade", {
       tween(sheet, Transform, { y: 0 }, { ms: 250 }),
       tween(sheet, Shape, { alpha: 1 }, { ms: 250, reduced: "keep" })
     )
+});
+```
+
+`build` can choose a designed variant of its own: its tools carry `reducedMotion`, the live switch read
+once when the play starts. A switch while the timeline runs does not rebuild it. The engine still
+guesses nothing: a tween of the variant that is not marked `reduced: "keep"` is cut, and `wait`,
+`mark` and `sfx` play as always. The nested `use(animation, slots, tools)` passes `reducedMotion` on with
+the outer tools; without them the nested build sees none (false). An absent `reducedMotion` reads as
+`false`, so `build(slots, { at })` called by hand in a test still compiles.
+
+```ts
+// Under reduced motion the sheet fades in place; otherwise it slides in.
+const sheetIn = defineAnimation("sheet.in", {
+  slots: { sheet: type<Anim.Target>() },
+  build: ({ sheet }, { reducedMotion }) =>
+    reducedMotion
+      ? tween(sheet, Shape, { alpha: 1 }, { ms: 200, reduced: "keep" })
+      : tween(sheet, Transform, { y: 0 }, { ms: 250 })
 });
 ```
 
