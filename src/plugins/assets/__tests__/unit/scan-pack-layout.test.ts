@@ -52,11 +52,10 @@ describe("page size", () => {
 
 describe("layoutGroup", () => {
   it("packs every member once, at its own size, never rotated", () => {
-    const { pages, problems, loose } = layoutGroup("ui", "main", mixed);
+    const { pages, problems } = layoutGroup("ui", "main", mixed);
     const frames = pages.flatMap(page => page.frames);
 
     expect(problems).toEqual([]);
-    expect(loose).toEqual([]);
     expect(pages).toHaveLength(1);
     expect(frames.map(frame => frame.key).toSorted()).toEqual(mixed.map(entry => entry.key));
 
@@ -145,7 +144,7 @@ describe("layoutGroup", () => {
 
   it("reports an fx member that fits no page by its key, and packs the rest", () => {
     // Bug caught: an fx texture left loose would sample the wrong page in silence.
-    const { pages, loose, problems } = layoutGroup("ui", "fx", [
+    const { pages, problems } = layoutGroup("ui", "fx", [
       member("ui.fx-huge", PAGE_SIZE, 64),
       member("ui.fx-wide", PAGE_SIZE + 10, 10),
       member("ui.fx-a", 32, 32),
@@ -156,45 +155,26 @@ describe("layoutGroup", () => {
       `the texture "ui.fx-huge" (2048×64) fits no 2048×2048 page with its 2 px border and 2 px padding.`,
       `the texture "ui.fx-wide" (2058×10) fits no 2048×2048 page with its 2 px border and 2 px padding.`
     ]);
-    expect(loose).toEqual([]);
     expect(pages.flatMap(page => page.frames).map(frame => frame.key)).toEqual([
       "ui.fx-a",
       "ui.fx-b"
     ]);
   });
 
-  it("hands a main member that fits no page back as loose, with no problem, sorted by key", () => {
-    // Bug caught: the old unfit rule failed the whole pack on a main texture a file can hold.
-    const { pages, loose, problems } = layoutGroup("ui", "main", [
+  it("reports a main member above a page the same way: the groups keep it from here", () => {
+    // Bug caught: a main member too large for a page vanishing, or failing with no key.
+    const { pages, problems } = layoutGroup("ui", "main", [
       member("ui.wide", ROOM + 1, 8),
       member("ui.tall", 8, ROOM + 1),
       member("ui.a", 32, 32),
       member("ui.b", 32, 32)
     ]);
 
-    expect(problems).toEqual([]);
-    expect(loose.map(entry => entry.key)).toEqual(["ui.tall", "ui.wide"]);
-    expect(pages.flatMap(page => page.frames).map(frame => frame.key)).toEqual(["ui.a", "ui.b"]);
-  });
-
-  it("leaves a lone main member loose: a page of one gains nothing", () => {
-    // Bug caught: a page of one texture costs its padding and a request, and saves nothing.
-    const { pages, loose, problems } = layoutGroup("ui", "main", [member("ui.a", 50, 50)]);
-
-    expect(pages).toEqual([]);
-    expect(loose.map(entry => entry.key)).toEqual(["ui.a"]);
-    expect(problems).toEqual([]);
-  });
-
-  it("leaves every main member loose when only one of them fits a page", () => {
-    // Bug caught: counting the members given instead of the members that fit packs a page of one.
-    const { pages, loose } = layoutGroup("ui", "main", [
-      member("ui.a", 50, 50),
-      member("ui.big", ROOM + 1, 8)
+    expect(problems).toEqual([
+      `the texture "ui.tall" (8×2043) fits no 2048×2048 page with its 2 px border and 2 px padding.`,
+      `the texture "ui.wide" (2043×8) fits no 2048×2048 page with its 2 px border and 2 px padding.`
     ]);
-
-    expect(pages).toEqual([]);
-    expect(loose.map(entry => entry.key)).toEqual(["ui.a", "ui.big"]);
+    expect(pages.flatMap(page => page.frames).map(frame => frame.key)).toEqual(["ui.a", "ui.b"]);
   });
 
   it("reports an fx group that needs more than one page, with the bundle and the count", () => {

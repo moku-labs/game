@@ -47,19 +47,12 @@ export type LayoutPage = { width: number; height: number; frames: readonly Layou
 
 /**
  * A member of a layout: its key and the size of what goes on the page (the cut, when it was
- * trimmed). `trim` says where the cut lay in the original, whose size a loose file keeps.
+ * trimmed). `trim` says where the cut lay in its original.
  */
 export type Boxed = Sized & { trim?: Trim };
 
-/**
- * The pages of one group, the members that stay loose and one sentence per texture or rule the
- * packing broke.
- */
-export type Layout = {
-  pages: readonly LayoutPage[];
-  loose: readonly Boxed[];
-  problems: readonly string[];
-};
+/** The pages of one group and one sentence per texture or rule the packing broke. */
+export type Layout = { pages: readonly LayoutPage[]; problems: readonly string[] };
 
 /** A rectangle of the packer that carries the key of its texture and its trim. */
 type KeyedRect = Rectangle & { data: { key: string; trim: Trim | undefined } };
@@ -72,6 +65,21 @@ export const PACKER_SIZE = PAGE_SIZE - PADDING;
 
 /** The largest side of a frame a page holds, inside its border: 2042 px. */
 const ROOM = PACKER_SIZE - BORDER * 2;
+
+/**
+ * Tells whether a member fits a page: both sides at most `ROOM`.
+ *
+ * @param member - The member.
+ * @returns True when a page holds it with its border.
+ * @example
+ * ```ts
+ * fitsPage({ key: "ui.dot", width: 8, height: 8 }); // true
+ * fitsPage({ key: "ui.sky", width: 4096, height: 64 }); // false
+ * ```
+ */
+function fitsPage(member: Sized): boolean {
+  return member.width <= ROOM && member.height <= ROOM;
+}
 
 /**
  * Compares two members the way the packer likes them: the longest side first, a larger area
@@ -140,28 +148,25 @@ function unfitProblems(members: readonly Sized[]): string[] {
 }
 
 /**
- * Lays the members of one atlas group out on pages of at most 2048 × 2048 pixels: 2 px of
- * padding between frames and a 2 px border, never rotated, so every frame keeps the size of its cut
- * and a nine-slice (never trimmed) keeps its borders. A member that fits no page goes back in
- * `loose` when the group is `main`; in `fx` it is a problem naming its key, never a silent drop or
- * a loose file, because production does not filter to one source and a loose `fx` texture would
- * sample the wrong page in silence. A `main` layout that packs fewer than two members leaves them
- * all loose: a page of one costs its padding and gains nothing. An `fx` group that needs more than
- * one page is a problem naming the bundle and the count, because a particle emitter binds one page.
+ * Lays the members of one atlas group out on pages of at most `PAGE_SIZE` pixels per side:
+ * `PADDING` pixels between frames and a `BORDER` at the page edge, never rotated, so every frame
+ * keeps the size of its cut and a nine-slice (never trimmed) keeps its borders. A member that fits
+ * no page is a problem naming its key, in any group, never a silent drop: the groups keep a
+ * texture that large out of a `main` group (`LOOSE_SIDE`), and an `fx` texture loose would sample
+ * the wrong page in silence. An `fx` group that needs more than one page is a problem naming the
+ * bundle and the count, because a particle emitter binds one page.
  *
  * @param bundle - Name of the bundle, for the messages.
  * @param group - The atlas group.
  * @param members - Its textures, with the sizes that go on the page.
- * @returns The pages, the members left loose and the problems.
+ * @returns The pages and the problems.
  * @example
  * ```ts
- * layoutGroup("ui", "main", [{ key: "ui.dot", width: 8, height: 8 }, { key: "ui.sky", width: 4096, height: 64 }]).loose; // [{ key: "ui.dot", width: 8, height: 8 }, { key: "ui.sky", width: 4096, height: 64 }]
+ * layoutGroup("ui", "fx", [{ key: "ui.fx-a", width: 32, height: 32 }, { key: "ui.fx-sky", width: 4096, height: 64 }]).problems; // ['the texture "ui.fx-sky" (4096×64) fits no 2048×2048 page with its 2 px border and 2 px padding.']
  * ```
  */
 export function layoutGroup(bundle: string, group: Group, members: readonly Boxed[]): Layout {
-  const fits = members.filter(entry => entry.width <= ROOM && entry.height <= ROOM);
-  const unfit = members.filter(entry => entry.width > ROOM || entry.height > ROOM);
-  const problems = group === "fx" ? unfitProblems(unfit) : [];
+  const problems = unfitProblems(members.filter(entry => !fitsPage(entry)));
 
   // The rest goes to the packer in a fixed order, so the same members give the same layout.
   const packer = new MaxRectsPacker<KeyedRect>(PACKER_SIZE, PACKER_SIZE, PADDING, {
@@ -172,7 +177,7 @@ export function layoutGroup(bundle: string, group: Group, members: readonly Boxe
     border: BORDER
   });
 
-  for (const member of fits.toSorted(packingOrder)) {
+  for (const member of members.filter(entry => fitsPage(entry)).toSorted(packingOrder)) {
     packer.add(member.width, member.height, { key: member.key, trim: member.trim });
   }
 
@@ -189,10 +194,5 @@ export function layoutGroup(bundle: string, group: Group, members: readonly Boxe
     );
   }
 
-  // A page of one member costs its padding and gains nothing: a main group of one stays loose.
-  if (group === "main" && fits.length < 2) {
-    return { pages: [], loose: members.toSorted(byKey), problems };
-  }
-
-  return { pages, loose: group === "main" ? unfit.toSorted(byKey) : [], problems };
+  return { pages, problems };
 }

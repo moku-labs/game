@@ -327,6 +327,21 @@ function frameKeyOf(key: string, width: number, height: number): string {
 }
 
 /**
+ * The crop of an untrimmed base: the part of its frame inside `crop`.
+ *
+ * @param pixi - The Pixi module.
+ * @param base - The untrimmed texture.
+ * @param crop - The part of the base to show, in its pixels.
+ * @returns The crop, sharing the base's source.
+ */
+function plainCrop(pixi: PixiModule, base: PixiTexture, crop: HitBox): PixiTexture {
+  return new pixi.Texture({
+    source: base.source,
+    frame: new pixi.Rectangle(base.frame.x + crop.x, base.frame.y + crop.y, crop.width, crop.height)
+  });
+}
+
+/**
  * The crop of a trimmed base (F198). The crop is in original pixels, the base's pixels lie at its
  * trim: the crop draws their common part `I`, not rounded, where it lies in the crop, and keeps the
  * crop's size. A crop that misses the trim draws nothing, over one pixel of the base's own frame,
@@ -396,6 +411,7 @@ export function coverTexture(
   const frameKey = frameKeyOf(key, box.width, box.height);
   const cached = frames.get(frameKey);
 
+  // Cache hit: the crop for this key and box is built from this base, so share it.
   if (cached?.base === base) {
     cached.users.add(entity);
 
@@ -409,21 +425,13 @@ export function coverTexture(
   // The crop shares the base's source: freeing it must never free the image.
   if (cached !== undefined) cached.texture.destroy(false);
 
+  // Build the crop: a trimmed base needs its trim honoured, a plain one is a straight cut.
   const trim: HitBox | undefined = base.trim;
   const texture =
-    trim === undefined
-      ? new pixi.Texture({
-          source: base.source,
-          frame: new pixi.Rectangle(
-            base.frame.x + crop.x,
-            base.frame.y + crop.y,
-            crop.width,
-            crop.height
-          )
-        })
-      : trimmedCrop(pixi, base, trim, crop);
+    trim === undefined ? plainCrop(pixi, base, crop) : trimmedCrop(pixi, base, trim, crop);
   const users = emptySet<Entity>();
 
+  // Register the crop so every entity that shows this key and box shares it.
   users.add(entity);
   frames.set(frameKey, { base, texture, users });
 

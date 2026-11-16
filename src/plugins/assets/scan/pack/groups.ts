@@ -76,7 +76,9 @@ export function groupOf(texture: Sized): Group | undefined {
 
   if (name.startsWith(FX_PREFIX) || folders.includes(FX_FOLDER)) return "fx";
 
-  return texture.width <= LOOSE_SIDE && texture.height <= LOOSE_SIDE ? "main" : undefined;
+  const fitsLooseSide = texture.width <= LOOSE_SIDE && texture.height <= LOOSE_SIDE;
+
+  return fitsLooseSide ? "main" : undefined;
 }
 
 /**

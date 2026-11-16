@@ -628,12 +628,12 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 | Padding | 2 px between frames and a 2 px border. Each frame's edge pixels are copied 1 px out into it (extrude), so a picture drawn at a fractional place samples its own edge, never transparent black (F105); the rest stays transparent. |
 | Trim | A texture that is not a nine-slice is cut to its visible pixels (alpha above 0), grown by 1 px on each side where the image has room: the margin keeps one transparent row or column at a cut edge, so bilinear sampling at the edge of the sprite reads transparent as before. A fully transparent image keeps a 1×1 frame at 0, 0. The manifest's `atlas` records `offsetX`, `offsetY`, `origWidth`, `origHeight`, only when the cut is smaller than the image. A texture with `nine` is never trimmed, and a loose file is not trimmed. |
 | Rotation | Never. |
-| Loose by size | A `main` texture with a header side above `LOOSE_SIDE` (1018 px) stays a file of its own and is not laid out, and a `main` group the layout puts fewer than two textures on pages leaves them loose too, without a problem. The header size decides the group, so a cache hit decodes nothing. |
+| Loose by size | A `main` texture with a header side above `LOOSE_SIDE` (1018 px) stays a file of its own and is not laid out; the cap is far below a page (2042 px), so a `main` texture always fits one. The header size decides the group, so a cache hit decodes nothing. |
 | Loose by mipmaps | A texture with `mips` stays a file of its own, whatever its key or size: Pixi builds the full chain, and from the second level on the neighbours on a page would bleed into it. The pack check refuses a mipmapped frame. The packed bundle keeps `parent`, `dir` and `release`; a loose mipmapped file keeps `mips` and its chain `mb`. |
 | Groups | Per bundle: `fx` holds the textures whose key's last segment starts with `fx-` (`ui.fx-spark`) or that lie in an `fx` folder (`ui.fx.leaf` from `assets/fx/leaf.webp`), whatever their size (a particle emitter binds one page); `main` holds the other textures. The frames of an animation in `fx/` (`ui.fx.coin-spin.0`) go to `fx` too. A stem named `fx` with no folder (`ui.fx`) is not an fx folder. |
 | Group of one | Stays loose: an atlas of one file is one request either way. |
 | `fx` pages | Exactly one; more is a problem naming the bundle and the count. |
-| Oversized | A `main` texture that fits no page stays loose (see "Loose by size"). An `fx` texture that fits no page is a problem naming the key and `2048×2048`, never loose: an emitter binds one page, and a loose `fx` texture would sample the wrong page in silence. Never a silent drop. |
+| Oversized | A texture that fits no page is a problem naming the key and `2048×2048`, never loose and never a silent drop. A `main` texture above `LOOSE_SIDE` is out of the group before the layout (see "Loose by size"); an `fx` texture is never loose, since an emitter binds one page and a loose `fx` texture would sample the wrong page in silence. |
 | Pages | WebP, `quality: 80, alphaQuality: 80`, composed from the sources decoded to RGBA. |
 | Loose textures | A `.webp` source is copied byte for byte; a `.png` source is encoded to WebP q80. |
 | Fonts | The pages are copied byte for byte and stay PNG (MSDF needs lossless); the `.fnt` is rewritten to name the hashed pages, then hashed. |
@@ -667,8 +667,7 @@ The cache lives in `node_modules/.cache/moku-game-pack/` under the working direc
 per atlas group and per encoded loose PNG, keyed by the versions of `sharp` and `maxrects-packer`,
 the packing constants (the page size, the loose side, the trim margin, padding,
 border, extrude, WebP quality) and the members (key, SHA-256 of the source, nine). A hit replays the
-frames, with their trim fields, and the bytes with no decode and no encode, and the textures the
-layout left loose are the members that have no frame; a changed source repacks only its group. A miss
+frames, with their trim fields, and the bytes with no decode and no encode; a changed source repacks only its group. A miss
 decodes every member of the group once. Copies are not
 cached. The cache is content-addressed and never pruned.
 

@@ -119,7 +119,6 @@ function parseNine(value: unknown): NineSlice | undefined {
  * @example
  * ```ts
  * sizeAt(0); // 0
- * sizeAt(undefined); // undefined
  * ```
  */
 function sizeAt(value: unknown): number | undefined {

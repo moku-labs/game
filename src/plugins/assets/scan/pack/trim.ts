@@ -11,6 +11,9 @@ export const TRIM_MARGIN = 1;
 /** Bytes per pixel of the decoded images: RGBA. */
 const CHANNELS = 4;
 
+/** Which byte of a pixel is its alpha. */
+const ALPHA_OFFSET = 3;
+
 /** A rectangle of an image, in its pixels. */
 export type Box = { x: number; y: number; width: number; height: number };
 
@@ -32,7 +35,7 @@ function visibleExtent(pixels: Pixels): Extent | undefined {
 
   for (let row = 0; row < height; row += 1) {
     for (let column = 0; column < width; column += 1) {
-      if ((data[(row * width + column) * CHANNELS + 3] ?? 0) === 0) continue;
+      if ((data[(row * width + column) * CHANNELS + ALPHA_OFFSET] ?? 0) === 0) continue;
 
       left = Math.min(left, column);
       right = Math.max(right, column);
