@@ -29,8 +29,14 @@ export type GroupPlan<Texture extends Sized> = {
   loose: readonly Texture[];
 };
 
-/** A texture with a side above this stays loose: packing it would cost more memory than it saves. */
-const LOOSE_SIDE = 512;
+/**
+ * A `main` texture packs when both its header sides are at most this; above it stays loose: it is
+ * not laid out at all.
+ *
+ * F198: the A26 measured the hybrid per-group page size (1024, 2048, 4096) no better than fixed 2048
+ * pages (ward after one board visit: GL 378.5 vs 371.2 MB, draw calls 35 both), so pages stay 2048.
+ */
+export const LOOSE_SIDE = 1018;
 
 /** The last segment of a key that names a particle texture starts with this. */
 const FX_PREFIX = "fx-";
@@ -46,7 +52,8 @@ const GROUP_ORDER: readonly Group[] = ["fx", "main"];
  * builds its full chain, and from the second level on the neighbours on a page would bleed into
  * it. A key whose last segment starts with `fx-`, or with a folder segment `fx` between the bundle
  * name and the stem, goes to `fx` whatever its size: the frames of an animation in `fx/` too. Any
- * other texture goes to `main` when no side is above 512 px.
+ * other texture goes to `main` when no header side is above `LOOSE_SIDE` (1018 px). The header
+ * size decides: nothing is decoded before the groups are made, so a cache hit decodes nothing.
  *
  * @param texture - The key, the size and the mipmaps of the texture.
  * @returns The group, or `undefined` when the texture stays loose.
@@ -55,6 +62,7 @@ const GROUP_ORDER: readonly Group[] = ["fx", "main"];
  * groupOf({ key: "ui.fx-rays", width: 504, height: 512 }); // "fx"
  * groupOf({ key: "ui.fx.leaf", width: 64, height: 64 }); // "fx", from assets/fx/leaf.webp of ui
  * groupOf({ key: "ui.fx", width: 64, height: 64 }); // "main": a stem, no folder
+ * groupOf({ key: "ui.panel", width: 600, height: 600 }); // "main"
  * groupOf({ key: "ep01.items.cup", width: 336, height: 288, mips: true }); // undefined: loose
  * ```
  */
@@ -68,7 +76,9 @@ export function groupOf(texture: Sized): Group | undefined {
 
   if (name.startsWith(FX_PREFIX) || folders.includes(FX_FOLDER)) return "fx";
 
-  return texture.width <= LOOSE_SIDE && texture.height <= LOOSE_SIDE ? "main" : undefined;
+  const fitsLooseSide = texture.width <= LOOSE_SIDE && texture.height <= LOOSE_SIDE;
+
+  return fitsLooseSide ? "main" : undefined;
 }
 
 /**
