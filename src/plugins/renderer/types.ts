@@ -16,6 +16,7 @@ import type { MonitorSections } from "./monitor/log-types";
 import type { MonitorApi, MonitorInternal, MonitorState, PerfMonitorApi } from "./monitor/types";
 import type { ShotsApi, ShotsConfig, ShotsInternal, ShotsState } from "./shots/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
+import type { TrailState } from "./trail";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
 /**
@@ -469,6 +470,8 @@ export type State = {
   demand: DemandState;
   kept: KeptState;
   shots: ShotsState;
+  /** The trail of the run in `localStorage` (F175). */
+  trail: TrailState;
 };
 
 /**

@@ -14,6 +14,7 @@ import { trimOnPause } from "./host/pool";
 import { followScale } from "./host/resolution";
 import { withDeps } from "./lifecycle";
 import { servePaused } from "./monitor/capture";
+import { trailRest } from "./trail";
 import type { KernelSlice, MonitorModule } from "./types";
 
 /** Payload of the `lifecycle:changed` hook. */
@@ -88,11 +89,13 @@ export function createHandlers(ctx: KernelSlice): {
     },
 
     /**
-     * Notes the rest path; a new one writes an auto mark. Agent builds only.
+     * Notes the rest path in the run's trail, every build (F175); in an agent build a new one also writes an auto mark.
      *
      * @param payload - Where the flow came to rest.
      */
     "flow:rest": (payload: FlowRest): void => {
+      trailRest(ctx.state.trail, payload.path);
+
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
         monitorOf().path(payload.path, true);
       }

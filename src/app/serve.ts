@@ -599,7 +599,9 @@ export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number>
 /**
  * Runs the bin again as a marked child, `MOKU_GAME_CHILD=1`, in its own process group: Ctrl+C
  * reaches the parent, which hands it and the other stop signals on. `dev` and `visual` run their
- * page server this way, under the page's bunfig.
+ * page server this way, under the page's bunfig. The parent listens before it spawns: a parent
+ * that lost the CPU right after the spawn could see the child print its URL before it listened,
+ * and a Ctrl+C then ended the parent with no exit code while the child served on.
  *
  * @param command - The words of the command: the Bun, its flags, the bin and its arguments.
  * @param deps - The spawn, the signals and the environment.
@@ -608,17 +610,23 @@ export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number>
  * @throws {Error} When the child does not start.
  */
 export async function runChild(command: string[], deps: CliDeps, child: ChildRun): Promise<number> {
-  const started = deps.spawn(command, {
-    cwd: child.cwd,
-    env: { ...deps.env, MOKU_GAME_CHILD: "1" },
-    stdio: ["inherit", "inherit", "inherit"],
-    detached: true
-  });
-  const removers = FORWARDED.map(signal => deps.onSignal(signal, () => started.kill(signal)));
+  const running: { child?: Child } = {};
+  // The stop signals are the parent's before the child exists, so none can end the parent itself.
+  const removers = FORWARDED.map(signal =>
+    deps.onSignal(signal, () => running.child?.kill(signal))
+  );
   let watcher: Watcher | undefined;
 
   // What lives as long as the child opens once it runs and closes when it exits.
   try {
+    const started = deps.spawn(command, {
+      cwd: child.cwd,
+      env: { ...deps.env, MOKU_GAME_CHILD: "1" },
+      stdio: ["inherit", "inherit", "inherit"],
+      detached: true
+    });
+
+    running.child = started;
     watcher = child.whileRunning?.(started);
 
     return await started.exited;

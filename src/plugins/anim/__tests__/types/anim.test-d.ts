@@ -21,6 +21,7 @@ import type { FxStep } from "../../timeline/types";
 import type {
   AnimApi,
   AnyAnimationDefinition,
+  BuildTools,
   Config,
   KernelSlice,
   MotionKeyframe,
@@ -304,6 +305,13 @@ expectTypeOf<HapticKind>().toEqualTypeOf<
   "light" | "medium" | "heavy" | "selection" | "success" | "warning" | "error"
 >();
 expectTypeOf<Anim.HapticDescriptor["payload"]["kind"]>().toEqualTypeOf<HapticKind>();
+
+// F176: build tools carry the reduced switch; a hand-written `{ at }` without it still compiles.
+const bareTools: BuildTools = { at: () => ({ x: 0, y: 0, rotation: 0, scale: 1 }) };
+
+deliverOrder.build({ items: [card], card }, { at: bareTools.at });
+// @ts-expect-error — `reducedMotion` is a boolean, not a rule name
+deliverOrder.build({ items: [card], card }, { at: bareTools.at, reducedMotion: "keep" });
 
 // A system plays through the AnimPlayer resource: the same play as app.anim, typed by the slots.
 expectTypeOf(AnimPlayer).toEqualTypeOf<ResourceType<Anim.AnimPlayerValue>>();
