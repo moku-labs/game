@@ -841,14 +841,18 @@ export function settled(fn: () => void): () => void {
  * glide or an idle tween writes them, then the recorder of phase `signals` reads the marks and the change sets are
  * cleared. The recording started before the measure.
  *
+ * @param count - The entities with a `Spot`.
+ * @param moved - How many of them move, every `count / moved`-th one.
  * @returns One frame of writes, its record and the clear.
  */
-export function recordedFrameFixture(): () => void {
+export function recordedFrameFixture(count = 100, moved = 20): () => void {
   const world = createMockWorld();
   const state = world.ctx.state.ecs;
   const entities: Entity[] = [];
 
-  for (let index = 0; index < 100; index += 1) {
+  const step = Math.floor(count / moved);
+
+  for (let index = 0; index < count; index += 1) {
     entities.push(world.api.ecs.spawn(OWNER, [Spot()]));
   }
 
@@ -862,8 +866,8 @@ export function recordedFrameFixture(): () => void {
   return (): void => {
     frame += 1;
 
-    for (let index = 0; index < 20; index += 1) {
-      const entity = entities[index * 5] ?? 0;
+    for (let index = 0; index < moved; index += 1) {
+      const entity = entities[index * step] ?? 0;
       const spot = store?.get(entity) as { x: number } | undefined;
 
       if (spot !== undefined) spot.x = frame % 1000;
