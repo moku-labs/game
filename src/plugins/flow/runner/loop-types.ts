@@ -3,6 +3,7 @@
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { Json, Transaction } from "../../model/types";
+import type { Descriptor } from "../fx/types";
 import type { WorldEvent } from "../inbox/types";
 import type { AnyFlow, AnyNode, FlowEntry, Frame, Result, Stage } from "./types";
 
@@ -118,6 +119,17 @@ export type Safe = { inside: boolean; recover: boolean };
 export function noop(): void {
   // Nothing to undo yet.
 }
+
+/**
+ * One awaited effect of a node run that has not settled: the promise the body got, its
+ * descriptor, the controller of the signal its handler got, and how to resolve the promise early.
+ */
+export type OpenEffect = {
+  effect: Promise<unknown>;
+  descriptor: Descriptor;
+  controller: AbortController;
+  end: () => void;
+};
 
 /** The event delivered by the inbox to the node that is running. */
 export type Delivery = { event: WorldEvent | undefined };

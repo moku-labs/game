@@ -77,11 +77,12 @@ export type FakeFx = {
  * Builds the `fx` of a node context for a unit test that calls `node.run(context)` itself, with no
  * app and no runner. It records every call and plays no effect: `await fx(descriptor)` goes to
  * `awaited` and resolves with `options.answer(descriptor)`, `fx.start(descriptor)` goes to
- * `started`, `fx.emit(hint)` goes to `emitted`. `fx.start` refuses a descriptor with `answers`
- * and a `guide` with the error the game throws. An `answer` that fails rejects the awaited
- * effect, and resolves `undefined` for a `cosmetic` descriptor, as in the game. There is no
- * handler, no log, no fast mode and no abort signal here: for those, walk the graph with
- * `createHeadless`.
+ * `started`, `fx.emit(hint)` goes to `emitted`. `fx.cancel(promise)` resolves an awaited effect
+ * that has not settled `undefined` and returns `true`, and returns `false` for any other promise.
+ * `fx.start` refuses a descriptor with `answers` and a `guide` with the error the game throws. An
+ * `answer` that fails rejects the awaited effect, and resolves `undefined` for a `cosmetic`
+ * descriptor, as in the game. There is no handler, no log, no fast mode and no abort signal here:
+ * for those, walk the graph with `createHeadless`.
  *
  * @param options - The answer of an awaited effect, and the node path for the refusal message.
  * @returns The `fx` and the lists `awaited`, `started` and `emitted`.
@@ -113,22 +114,70 @@ export function fakeFx(options: FakeFxOptions = {}): FakeFx {
   const started: Descriptor[] = [];
   const emitted: Hint[] = [];
 
+  // The effects not settled yet, each with what ends it early: `cancel` takes it from here.
+  const open = new Map<Promise<unknown>, () => void>();
+
   /**
-   * Records one awaited effect and answers it. Both happen at the call. An `answer` that throws
-   * or rejects is a handler that fails: the effect rejects, never the call. A `cosmetic`
-   * descriptor swallows that failure and resolves `undefined`, as the gateway of the game does.
+   * Asks `options.answer` for one awaited effect. An `answer` that throws or rejects is a handler
+   * that fails: the effect rejects, never the call. A `cosmetic` descriptor swallows that failure
+   * and resolves `undefined`, as the gateway of the game does.
    *
    * @param descriptor - The descriptor the body awaits.
    * @returns A promise of what `options.answer` gives for it.
    */
-  const run = async (descriptor: Descriptor): Promise<unknown> => {
-    awaited.push(descriptor);
-
+  const answerOf = async (descriptor: Descriptor): Promise<unknown> => {
     try {
       return await options.answer?.(descriptor);
     } catch (error) {
       if (descriptor.cosmetic !== true) throw error;
     }
+  };
+
+  /**
+   * Records one awaited effect and answers it. Both happen at the call. The effect stays open
+   * until it settles, or until `cancel` resolves it `undefined`.
+   *
+   * @param descriptor - The descriptor the body awaits.
+   * @returns A promise of what `options.answer` gives for it.
+   */
+  const run = (descriptor: Descriptor): Promise<unknown> => {
+    awaited.push(descriptor);
+
+    const answered = answerOf(descriptor);
+    const early = { end: (): void => undefined };
+    const effect = new Promise<unknown>((resolve, reject) => {
+      early.end = () => {
+        // eslint-disable-next-line unicorn/no-useless-undefined -- `Promise<unknown>` wants the value said.
+        resolve(undefined);
+      };
+      answered.then(resolve, reject);
+    });
+
+    open.set(effect, early.end);
+    // `finally` would hand the rejection on to a promise nobody holds: both branches settle quietly.
+    answered.then(
+      () => open.delete(effect),
+      () => open.delete(effect)
+    );
+
+    return effect;
+  };
+
+  /**
+   * Ends one open effect the fake returned: it resolves `undefined`.
+   *
+   * @param effect - A promise `run` returned.
+   * @returns True when the effect was open and is ended now.
+   */
+  const cancel = (effect: Promise<unknown>): boolean => {
+    const end = open.get(effect);
+
+    if (end === undefined) return false;
+
+    open.delete(effect);
+    end();
+
+    return true;
   };
 
   // The gateway is not generic: the result type is the descriptor's promise, kept by
@@ -152,7 +201,8 @@ export function fakeFx(options: FakeFxOptions = {}): FakeFx {
     start: (descriptor: Descriptor): void => {
       refuseStart(descriptor, path);
       started.push(descriptor);
-    }
+    },
+    cancel
   }) as NodeFx;
 
   return Object.freeze({ fx, awaited, started, emitted });

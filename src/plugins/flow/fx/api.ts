@@ -3,6 +3,7 @@
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { Answered, GateInternal } from "../gate/types";
+import { childOf } from "../signal";
 import type { FlowCtx } from "../types";
 import type {
   Descriptor,
@@ -204,35 +205,6 @@ function enqueue(state: FxState, work: Promise<unknown>): Promise<unknown> {
       }
     );
   });
-}
-
-/**
- * Derives the signal one handler gets: a child of the node's signal that the gateway can end on
- * its own. The node's abort reaches the child with its reason; what the child does never reaches
- * the node. The forwarding listener is dropped with the child, so a node that shows many popups
- * leaves nothing behind on its signal.
- *
- * @param signal - The node's abort signal.
- * @returns The controller of the child signal.
- */
-function childOf(signal: AbortSignal): AbortController {
-  const child = new AbortController();
-
-  if (signal.aborted) {
-    child.abort(signal.reason);
-
-    return child;
-  }
-
-  signal.addEventListener(
-    "abort",
-    () => {
-      child.abort(signal.reason);
-    },
-    { once: true, signal: child.signal }
-  );
-
-  return child;
 }
 
 /**
