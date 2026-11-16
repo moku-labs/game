@@ -83,13 +83,18 @@ export function createSdfTextPipe(pixi: PixiModule): BitmapTextPipeClass {
     public static override readonly extension = pixi.BitmapTextPipe.extension;
 
     /**
-     * Makes a text's proxy graphics as Pixi does, batchable at any length, with the edge of its glyphs.
+     * Makes a text's proxy graphics as Pixi does, batchable at any length, with the edge of its glyphs. Pixi lays the
+     * glyphs out here and again in the first `addRenderable`, which finds the text's update flag still set from its
+     * construction: the layout made here is the text as it stands, so the flag is cleared, and a text changed later
+     * sets it again (F195: the second layout was half the glyph work of every window's first draw).
      *
      * @param text - The text.
      * @returns The proxy.
      */
     public override initGpuText(text: BitmapText): TextProxy {
       const proxy = super.initGpuText(text) as TextProxy;
+
+      text._didTextUpdate = false;
       // One shape for every proxy: the record's fields are all there from the start, the number a double.
       const glyphs: SdfGlyphs = { perScale: Number.NaN, family: undefined, size: Number.NaN };
 

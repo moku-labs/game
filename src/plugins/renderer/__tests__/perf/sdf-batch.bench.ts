@@ -1,3 +1,4 @@
+import * as pixi from "pixi.js";
 import { afterAll, bench, describe } from "vitest";
 import { BENCH_OPTIONS } from "../../../../../tests/perf/alloc";
 import { sdfBatchStage } from "../sdf-text-stage";
@@ -40,6 +41,21 @@ describe("the SDF batch", () => {
     "the draw of an SDF batch at a still resolution",
     () => {
       if (batch !== undefined) stage.batchPipe.execute(batch);
+    },
+    BENCH_OPTIONS
+  );
+});
+
+describe("the first draw of a label (F195)", () => {
+  const into = new pixi.InstructionSet();
+
+  bench(
+    "a new 12-glyph label, made and built once: one glyph layout",
+    () => {
+      const text = stage.label("123456789012");
+
+      stage.build([text], into);
+      text.destroy();
     },
     BENCH_OPTIONS
   );

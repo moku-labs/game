@@ -1,5 +1,6 @@
 import * as pixi from "pixi.js";
 import { afterAll, describe, expect, it } from "vitest";
+import { alloc } from "../../../../../tests/perf/alloc";
 import { SDF_BATCHER } from "../../host/sdf-batcher";
 import { type StageElement, sdfBatchStage } from "../sdf-text-stage";
 import { BUDGET, NOISE } from "./budgets";
@@ -102,5 +103,23 @@ describe("the SDF batch", () => {
     expect(bytesPerCall(() => stage.batchPipe.execute(batch))).toBeLessThanOrEqual(
       BUDGET.sdfDrawStill + NOISE
     );
+  });
+});
+
+describe("the first draw of a label (F195)", () => {
+  // Bug: Pixi laid a new label out twice in its first build (`initGpuText`, then `addRenderable` with the flag of its
+  // construction still set): twice the glyph instructions and contexts of every window's first draw.
+  it("makes and builds a new 12-glyph label with one glyph layout's garbage", () => {
+    const into = new pixi.InstructionSet();
+
+    // A window of 2000: each call makes a label, so a window of 100 000 would collect inside it.
+    const bytes = alloc(() => {
+      const text = stage.label("123456789012");
+
+      stage.build([text], into);
+      text.destroy();
+    }, 2000);
+
+    expect(bytes).toBeLessThanOrEqual(BUDGET.sdfFirstBuild + NOISE);
   });
 });
