@@ -619,6 +619,15 @@ export type State = {
    * rest is let go: the node it was asked for was left another way (Back).
    */
   readyWaiting: Map<string, number>;
+  /** How many `ready` asks answered `false` so far: only the latest one posts its inbox event (F204). */
+  readyAsk: number;
+  /**
+   * Where the rest of the latest `false` ask stands: `"before"` it is entered (a transit node asked), `"at"` it (it is
+   * the active node and lists `ready`), or `"gone"` (posted, left, or a rest that does not list `ready`) (F204).
+   */
+  readyPlace: "before" | "at" | "gone";
+  /** The bundles of that ask settled before its rest was entered: the rest gets the event on entry (F204). */
+  readyHeld: boolean;
   /** Bundles the "asked again" warning named already: one line per bundle per session (F184). */
   thrashWarned: Set<string>;
   /** Scene id to its declaration, read from the `scenes` key of `flow.features`. */
