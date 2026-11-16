@@ -55,6 +55,17 @@ export const BUDGET = {
    */
   timelines: 20 * MOVED_FIELD,
   /**
+   * 50 timelines that only wait, as many as `timelinesWaiting` per timeline (F191): the ring of
+   * ended timelines and the fields `timelines()` reads add nothing to a frame. 0.
+   */
+  timelinesCrowdedWaiting: 0,
+  /**
+   * 50 timelines running, 100 fields moved per frame: the same 16 B a field as `timelines` (F191),
+   * all of it the numbers handed to world (`MOVED_FIELD`). The slots, the start frame and the ring
+   * add nothing.
+   */
+  timelinesCrowded: 100 * MOVED_FIELD,
+  /**
    * 10 endless bounces a system played through `AnimPlayer`, 20 fields moved per frame (F75, change
    * 2026-10-25-f75-f76-timeline-loops). New: 20 × 16 = 320 B, all of it the numbers handed to world
    * (`MOVED_FIELD`); the timeline and its endless tracks add nothing.

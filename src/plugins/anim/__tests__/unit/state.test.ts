@@ -19,6 +19,24 @@ describe("createAnimState", () => {
     expect(state.overMaxTracks).toBe(false);
   });
 
+  it("starts the ring of ended timelines with 16 blank records that no other app shares", () => {
+    const first = createAnimState(ctx);
+    const second = createAnimState(ctx);
+
+    expect(first.endedNext).toBe(0);
+    expect(first.endedCount).toBe(0);
+    expect(first.ended).toHaveLength(16);
+    expect(first.ended[0]).toEqual({
+      timeline: 0,
+      animation: "",
+      startFrame: 0,
+      endFrame: 0,
+      reason: "ended"
+    });
+    expect(new Set(first.ended).size).toBe(16);
+    expect(second.ended[0]).not.toBe(first.ended[0]);
+  });
+
   it("holds no remover before onInit and onStart ran", () => {
     const state = createAnimState(ctx);
 

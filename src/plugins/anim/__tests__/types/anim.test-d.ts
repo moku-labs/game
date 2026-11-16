@@ -155,10 +155,21 @@ expectTypeOf<Anim.MotionKeyframe>().toEqualTypeOf<MotionKeyframe>();
 // The own events reach the plugin context: `emit` is the kernel's, typed with anim's event map.
 declare const animCtx: KernelSlice;
 
-expectTypeOf(animCtx.emit).parameter(0).toEqualTypeOf<"anim:mark" | "anim:finished">();
+expectTypeOf(animCtx.emit)
+  .parameter(0)
+  .toEqualTypeOf<"anim:mark" | "anim:started" | "anim:cancelled" | "anim:finished">();
 
 animCtx.emit("anim:mark", { animation: "orders.deliver", mark: "done" });
+animCtx.emit("anim:started", { animation: "orders.deliver", timeline: 4 });
+animCtx.emit("anim:cancelled", { animation: "orders.deliver", timeline: 4 });
+animCtx.emit("anim:finished", { animation: "orders.deliver", timeline: 4, reason: "ended" });
+animCtx.emit("anim:finished", { animation: "orders.deliver", timeline: 4, reason: "finished" });
+// @ts-expect-error — the finished payload carries the timeline number and the reason
 animCtx.emit("anim:finished", { animation: "orders.deliver" });
+// @ts-expect-error — a cancel is announced by anim:cancelled, never as a finished reason
+animCtx.emit("anim:finished", { animation: "orders.deliver", timeline: 4, reason: "cancelled" });
+// @ts-expect-error — the started payload needs the timeline number
+animCtx.emit("anim:started", { animation: "orders.deliver" });
 // @ts-expect-error — the mark payload needs both fields
 animCtx.emit("anim:mark", {});
 // @ts-expect-error — the plugin owns no other event
@@ -170,6 +181,27 @@ declare const api: AnimApi;
 expectTypeOf(api.play(deliverOrder, { items: [card], card })).toEqualTypeOf<PlayHandle>();
 expectTypeOf(api.active()).toEqualTypeOf<number>();
 expectTypeOf(api.onMark(() => undefined)).toEqualTypeOf<() => void>();
+
+// What the API reads about timelines: running ones with their targets, the last ended ones with a reason.
+expectTypeOf(api.timelines()).toEqualTypeOf<Anim.TimelinesSnapshot>();
+expectTypeOf<Anim.TimelineEndReason>().toEqualTypeOf<"ended" | "finished" | "cancelled">();
+expectTypeOf<Anim.TimelinesSnapshot>().toEqualTypeOf<{
+  readonly running: readonly Anim.RunningTimelineInfo[];
+  readonly ended: readonly Anim.EndedTimelineInfo[];
+}>();
+expectTypeOf<Anim.RunningTimelineInfo["slots"]>().toEqualTypeOf<Anim.SlotRecord>();
+expectTypeOf<Anim.RunningTimelineInfo["marks"]>().toEqualTypeOf<readonly string[]>();
+expectTypeOf<Anim.EndedTimelineInfo["reason"]>().toEqualTypeOf<Anim.TimelineEndReason>();
+// @ts-expect-error — the snapshot is read, never written
+api.timelines().running.push({} as Anim.RunningTimelineInfo);
+// @ts-expect-error — timelines takes no argument
+api.timelines(1);
+
+// A motion may carry an id for inspection; it is optional and a string.
+defineMotion({ id: "hud.card", states: { small: {} }, on: { enter: "small" } });
+expectTypeOf<Parameters<typeof defineMotion>[0]["id"]>().toEqualTypeOf<string | undefined>();
+// @ts-expect-error — the id is a string
+defineMotion({ id: 3, states: { small: {} }, on: { enter: "small" } });
 
 // Delta 6: a loop names one keyframe track; reduced motion is a config start value and a switch.
 defineMotion({

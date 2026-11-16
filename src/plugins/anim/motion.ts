@@ -27,7 +27,14 @@ import type {
   ViewHandle
 } from "../world/types";
 import { asComponent } from "./components";
-import { checkLoop, checkTrack, playKeyframes, playLoop, reducedOption } from "./keyframes";
+import {
+  checkLoop,
+  checkTrack,
+  labelOption,
+  playKeyframes,
+  playLoop,
+  reducedOption
+} from "./keyframes";
 import type { MotionKeyframe } from "./types";
 
 /** What a motion transition runs for when the author named nothing else. */
@@ -98,6 +105,10 @@ export type MotionTransition = {
  * (`"change"`). `transition.reduced` and `loop.reduced` say what reduced motion does to their
  * tracks: `"cut"` (the default) or `"keep"`.
  *
+ * `id` names the motion for inspection: every track a hook starts is labelled `<id>.enter`,
+ * `<id>.exit`, `<id>.loop` or `<id>.change`, and `world.projection.motionIdsOf`, `game.explain`
+ * and the `game.ui` tree show the label or the id. It changes nothing a player sees.
+ *
  * @example
  * ```ts
  * const spec: MotionSpec = {
@@ -122,9 +133,13 @@ export type MotionTransition = {
  *   on: { enter: "faded" },
  *   when: "change"
  * };
+ * // A named motion: while its card enters, motionIdsOf answers ["hud.card.enter"].
+ * const hudCard: MotionSpec = { id: "hud.card", states: { small: { Transform: { scale: 0.8 } } }, on: { enter: "small" } };
  * ```
  */
 export type MotionSpec = {
+  /** The name of the motion, for inspection: it labels every track the motion starts. Not empty. */
+  readonly id?: string;
   readonly states?: Readonly<Record<string, MotionState>>;
   readonly keyframes?: Readonly<Record<string, readonly MotionKeyframe[]>>;
   readonly transition?: {
@@ -285,6 +300,24 @@ function checkChoices(spec: MotionSpec): void {
 }
 
 /**
+ * Checks the `id` of a motion: absent, or a string with a character in it. A plain JavaScript
+ * caller can pass any value.
+ *
+ * @param spec - What `defineMotion` was given.
+ * @throws {Error} When `id` is given and is not a non-empty string.
+ */
+function checkId(spec: MotionSpec): void {
+  const id: unknown = spec.id;
+
+  if (id === undefined || (typeof id === "string" && id !== "")) return;
+
+  throw new Error(
+    "[game] defineMotion: id must be a non-empty string.\n" +
+      '  Give the motion an id such as "hud.card", or leave it out.'
+  );
+}
+
+/**
  * Checks a motion at definition time: every keyframe track, no name that is both a state and a
  * track, an `on.enter` / `on.exit` that names one of them, and the words of `when` and `reduced`.
  *
@@ -292,6 +325,7 @@ function checkChoices(spec: MotionSpec): void {
  * @throws {Error} With the name or the value at fault, in the house format.
  */
 function checkMotion(spec: MotionSpec): void {
+  checkId(spec);
   checkChoices(spec);
 
   for (const [name, keys] of Object.entries(spec.keyframes ?? {})) {
@@ -318,17 +352,47 @@ function checkMotion(spec: MotionSpec): void {
 }
 
 /**
+ * The four labels of a motion with an id, one per hook. Built once in `defineMotion`, so a hook
+ * never builds a string when it starts a track.
+ */
+type MotionLabels = {
+  readonly enter: string;
+  readonly exit: string;
+  readonly loop: string;
+  readonly change: string;
+};
+
+/**
+ * Builds the labels of a motion from its id.
+ *
+ * @param id - The id of the motion, if it has one.
+ * @returns The four labels, or `undefined` for a motion without an id.
+ * @example
+ * ```ts
+ * labelsOf("hud.card")?.enter; // "hud.card.enter"
+ * labelsOf(undefined); // undefined
+ * ```
+ */
+function labelsOf(id: string | undefined): MotionLabels | undefined {
+  if (id === undefined) return undefined;
+
+  return { enter: `${id}.enter`, exit: `${id}.exit`, loop: `${id}.loop`, change: `${id}.change` };
+}
+
+/**
  * What plays the name `on` gave a hook: a state is reached with tweens, a keyframe track is walked.
  *
  * @param spec - What `defineMotion` was given, already checked.
  * @param hook - Which hook to build.
  * @param transition - The resolved transition.
+ * @param label - The label of the hook's tracks, when the motion has an id.
  * @returns The player, or `undefined` when `on` names nothing for it.
  */
 function playerOf(
   spec: MotionSpec,
   hook: "enter" | "exit",
-  transition: MotionTransition
+  transition: MotionTransition,
+  label: string | undefined
 ): ((view: ViewHandle<unknown>) => Motion) | undefined {
   const name = spec.on[hook];
 
@@ -338,15 +402,15 @@ function playerOf(
 
   if (state !== undefined) {
     return hook === "enter"
-      ? view => playEnter(view, state, transition)
-      : view => playExit(view, state, transition);
+      ? view => playEnter(view, state, transition, label)
+      : view => playExit(view, state, transition, label);
   }
 
   const keys = ownEntry(spec.keyframes, name);
 
   return keys === undefined
     ? undefined
-    : view => playKeyframes(view, keys, transition.ms, hook, transition.reduced);
+    : view => playKeyframes(view, keys, transition.ms, hook, transition.reduced, label);
 }
 
 /**
@@ -358,15 +422,17 @@ function playerOf(
  * @param hook - Which hook to build.
  * @param transition - The resolved transition.
  * @param when - When the hook plays.
+ * @param label - The label of the hook's tracks, when the motion has an id.
  * @returns The hook, or `undefined` when `on` names nothing for it.
  */
 function hookOf(
   spec: MotionSpec,
   hook: "enter" | "exit",
   transition: MotionTransition,
-  when: "always" | "change"
+  when: "always" | "change",
+  label: string | undefined
 ): MotionHook | undefined {
-  const play = playerOf(spec, hook, transition);
+  const play = playerOf(spec, hook, transition, label);
 
   if (play === undefined) return undefined;
 
@@ -448,15 +514,18 @@ function recordJson(record: object): string | undefined {
  * `printOf` reads it; a loop whose keys hold a function ease carries none.
  *
  * @param loop - The resolved loop, if any.
+ * @param label - The label of the loop's tracks, when the motion has an id. It is not part of the
+ *   fingerprint: two loops of equal data are equal under any id.
  * @returns The hook, or `undefined` when the motion names no loop.
  */
 function loopHook(
-  loop: MotionLoop | undefined
+  loop: MotionLoop | undefined,
+  label: string | undefined
 ): ((view: ViewHandle<unknown>) => Motion) | undefined {
   if (loop === undefined) return undefined;
 
   const hook = (view: ViewHandle<unknown>): Motion =>
-    playLoop(view, loop.keys, loop.ms, loop.reduced);
+    playLoop(view, loop.keys, loop.ms, loop.reduced, label);
   const print = stableJson({ keys: loop.keys, ms: loop.ms, reduced: loop.reduced });
 
   if (print !== undefined) Object.defineProperty(hook, PRINT, { value: print });
@@ -493,18 +562,22 @@ export function printOf(hook: unknown): string | undefined {
  * @param view - The view handle the hook was given.
  * @param state - The named pose.
  * @param transition - How long the way home takes.
+ * @param label - The label of the tracks, when the motion has an id.
  * @returns One motion over every component the pose names.
  */
 function playEnter(
   view: ViewHandle<unknown>,
   state: MotionState,
-  transition: MotionTransition
+  transition: MotionTransition,
+  label: string | undefined
 ): Motion {
   const poses = posesOf(state);
 
   for (const [component, fields] of poses) view.set(component, fields);
 
-  return view.all(poses.map(([component]) => view.toRest(component, trackOptionsOf(transition))));
+  return view.all(
+    poses.map(([component]) => view.toRest(component, trackOptionsOf(transition, label)))
+  );
 }
 
 /**
@@ -514,37 +587,52 @@ function playEnter(
  * @param view - The view handle the hook was given.
  * @param state - The named pose.
  * @param transition - How long the way out takes.
+ * @param label - The label of the tracks, when the motion has an id.
  * @returns One motion over every component the pose names.
  */
 function playExit(
   view: ViewHandle<unknown>,
   state: MotionState,
-  transition: MotionTransition
+  transition: MotionTransition,
+  label: string | undefined
 ): Motion {
   const poses = posesOf(state);
 
   return view.all(
-    poses.map(([component, fields]) => view.tween(component, fields, trackOptionsOf(transition)))
+    poses.map(([component, fields]) =>
+      view.tween(component, fields, trackOptionsOf(transition, label))
+    )
   );
 }
 
 /**
  * The options a transition starts a track with: its length and curve, and `reduced` only for a
- * kept track, so a cut track starts with the options it always had.
+ * kept track, so a cut track starts with the options it always had, and `label` only for a motion
+ * with an id.
  *
  * @param transition - The resolved transition.
+ * @param label - The label of the track, when the motion has an id.
  * @returns The track options.
  * @example
  * ```ts
- * trackOptionsOf({ ms: 150, ease: "out", reduced: "cut" }); // { ms: 150, ease: "out" }
+ * trackOptionsOf({ ms: 150, ease: "out", reduced: "cut" }, "hud.card.enter"); // { ms: 150, ease: "out", label: "hud.card.enter" }
  * ```
  */
-function trackOptionsOf(transition: MotionTransition): {
+function trackOptionsOf(
+  transition: MotionTransition,
+  label: string | undefined
+): {
   ms: number;
   ease: Ease;
   reduced?: ReducedMotion;
+  label?: string;
 } {
-  return { ms: transition.ms, ease: transition.ease, ...reducedOption(transition.reduced) };
+  return {
+    ms: transition.ms,
+    ease: transition.ease,
+    ...reducedOption(transition.reduced),
+    ...labelOption(label)
+  };
 }
 
 /**
@@ -552,9 +640,14 @@ function trackOptionsOf(transition: MotionTransition): {
  *
  * @param names - The component names `on.change` listed.
  * @param transition - How long the way home takes.
+ * @param label - The label of the tracks, when the motion has an id.
  * @returns The change table, keyed by component name.
  */
-function changeHooks(names: readonly string[], transition: MotionTransition): ChangeHooks<unknown> {
+function changeHooks(
+  names: readonly string[],
+  transition: MotionTransition,
+  label: string | undefined
+): ChangeHooks<unknown> {
   const hooks: Record<string, ChangeHook<unknown>> = {};
 
   for (const name of names) {
@@ -563,7 +656,7 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
     if (component === undefined) continue;
 
     hooks[name] = (view: ViewHandle<unknown>): Motion =>
-      view.toRest(component, trackOptionsOf(transition));
+      view.toRest(component, trackOptionsOf(transition, label));
   }
 
   return hooks;
@@ -585,7 +678,8 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
  *   `world` applies.
  * @throws {Error} When a track is invalid, a name is both a state and a track, `on` names
  *   neither, `loop.track` names no track, `loop.ms` is not a finite number above 0, the loop
- *   ends somewhere else than it starts, or `when` or a `reduced` is not one of its words.
+ *   ends somewhere else than it starts, `id` is given and is not a non-empty string, or `when` or a
+ *   `reduced` is not one of its words.
  * @example
  * ```ts
  * const buttonMotion = defineMotion({
@@ -602,6 +696,14 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
  *   when: "change"
  * });
  * // a scene mount shows it at rest; a commit that adds it grows it in over 220 ms
+ *
+ * const hudCard = defineMotion({
+ *   id: "hud.card",
+ *   states: { small: { Transform: { scale: 0.8 } } },
+ *   on: { enter: "small", change: ["Transform"] }
+ * });
+ * hudCard.id; // "hud.card"
+ * // its enter track is labelled "hud.card.enter", its change track "hud.card.change"
  * ```
  */
 export function defineMotion(spec: MotionSpec): ProjectionMotion<unknown> {
@@ -613,15 +715,18 @@ export function defineMotion(spec: MotionSpec): ProjectionMotion<unknown> {
     reduced: spec.transition?.reduced ?? "cut"
   };
   const when = spec.when ?? "always";
-  const enter = hookOf(spec, "enter", transition, when);
-  const loop = loopHook(loopOf(spec, transition.ms));
-  const exit = hookOf(spec, "exit", transition, when);
+  // The four labels are built here, once; a hook only passes them on.
+  const labels = labelsOf(spec.id);
+  const enter = hookOf(spec, "enter", transition, when, labels?.enter);
+  const loop = loopHook(loopOf(spec, transition.ms), labels?.loop);
+  const exit = hookOf(spec, "exit", transition, when, labels?.exit);
   const changed = spec.on.change ?? [];
 
   return {
+    ...(spec.id === undefined ? {} : { id: spec.id }),
     ...(enter === undefined ? {} : { enter }),
     ...(loop === undefined ? {} : { loop }),
     ...(exit === undefined ? {} : { exit }),
-    ...(changed.length === 0 ? {} : { change: changeHooks(changed, transition) })
+    ...(changed.length === 0 ? {} : { change: changeHooks(changed, transition, labels?.change) })
   };
 }
