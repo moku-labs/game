@@ -14,7 +14,7 @@ import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
 import { releaseAssets, releaseLeftBundles, releaseSceneLeft } from "./budget";
 import { bundlesOfNode } from "./preload";
-import { answerReady } from "./ready";
+import { answerReady, passReadyNode } from "./ready";
 import { bootTiers, loadBundle } from "./tiers";
 import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "./types";
 
@@ -117,7 +117,8 @@ function releaseMarkedRest(ctx: AssetsCtx, run: RunContext): void {
  * The `load` stage of entering a node: the bundles of the node become the pinned set, the release
  * a rest marked runs, and in live mode the node waits for its bundles. A bundle the preload did not
  * reach is a dev warning, except a `"leave"` bundle, which the preload skips on purpose, and the
- * bundles of a node entered before any live rest, which no preload could reach (F117).
+ * bundles of a node entered before any live rest, which no preload could reach (F117). The latest
+ * `ready` ask that answered `false` moves past the node (F204).
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
@@ -133,6 +134,7 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
   if (node.scene !== undefined && state.scenes.has(node.scene)) state.sceneId = node.scene;
 
   releaseMarkedRest(ctx, run);
+  passReadyNode(ctx, node);
 
   if (state.io === undefined || run.mode === "fast") return;
 

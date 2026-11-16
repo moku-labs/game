@@ -5,6 +5,8 @@
  * stay answerable (F52). Nothing here is on the frame path: one promise per bundle, and the inbox
  * event is posted from a promise.
  */
+
+import type { NodeInfo } from "../flow/types";
 import { emptyAssets, isAbortError, loadBundle, unknownBundle } from "./tiers";
 import type { AssetsCtx, State, WarmEntry } from "./types";
 
@@ -124,8 +126,9 @@ export function ageReadyWaiting(state: State): void {
  * The handler of the `ready` effect (F52). Headless it answers `true` before any name check, as the
  * `load` effect does. Every bundle there: `true`, and nothing is posted. Otherwise it starts the
  * warm of each bundle that is not there, answers `false`, and posts `{ type: "ready" }` into
- * `flow.inbox` once all of them settled. The posting does not wait on the node's signal: the warm
- * is shared work, and the inbox keeps only the latest `ready`. A bundle it answers `false` for is
+ * `flow.inbox` once all of them settled, for the rest this ask leads to only (F204, `settleAsk`):
+ * a `ready` nobody rests on would end the next wait at once. The posting does not wait on the
+ * node's signal: the warm is shared work. A bundle it answers `false` for is
  * rested on (`readyWaiting`) until a `ready` finds it there: neither the budget nor the `"leave"`
  * release of the rest in between takes it, else the node that asks again finds it gone and the two
  * nodes cycle forever (F190). `ageReadyWaiting` ends the hold of one nobody asks for again.
@@ -154,9 +157,103 @@ export function answerReady(ctx: AssetsCtx, bundles: readonly string[]): boolean
 
   if (missing.length === 0) return true;
 
-  Promise.all(missing.map(name => warmForReady(ctx, name))).then(() =>
-    ctx.deps.flow.inbox.post({ type: "ready" })
-  );
+  const ask = beginAsk(ctx);
+
+  Promise.all(missing.map(name => warmForReady(ctx, name))).then(() => settleAsk(ctx, ask));
 
   return false;
+}
+
+/**
+ * Tells whether a rest node takes the inbox event `ready`. The graph's validation makes every `inbox` type an
+ * outcome, so a rest without the outcome `ready` never takes it.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param node - The node entered.
+ * @returns True when the node is a rest with the outcome `ready`.
+ */
+function takesReady(ctx: AssetsCtx, node: NodeInfo): boolean {
+  if (!node.rest) return false;
+
+  return (
+    ctx.deps.flow.describe().flows[node.flow]?.nodes[node.node]?.outcomes.includes("ready") === true
+  );
+}
+
+/**
+ * Records a `ready` ask answered `false` as the latest one (F204). Its event belongs to one rest: the rest whose body
+ * asked, or else the first rest entered after the ask.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns The number of this ask.
+ */
+function beginAsk(ctx: AssetsCtx): number {
+  const state = ctx.state;
+  const current = state.current;
+
+  state.readyAsk += 1;
+  state.readyHeld = false;
+  if (current?.rest === true) state.readyPlace = takesReady(ctx, current) ? "at" : "gone";
+  else state.readyPlace = "before";
+
+  return state.readyAsk;
+}
+
+/**
+ * Posts `{ type: "ready" }` for an ask whose bundles settled, when its rest takes it now (F204). A newer ask owns the
+ * event; an ask whose rest is not entered yet holds it for that rest; an ask whose rest was left, or does not list
+ * `ready`, posts nothing, so no later rest ends at once on it.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param ask - The number `beginAsk` gave the ask.
+ */
+function settleAsk(ctx: AssetsCtx, ask: number): void {
+  const state = ctx.state;
+
+  if (ask !== state.readyAsk) return;
+
+  if (state.readyPlace === "before") {
+    state.readyHeld = true;
+    return;
+  }
+
+  if (state.readyPlace !== "at") return;
+
+  state.readyPlace = "gone";
+  ctx.deps.flow.inbox.post({ type: "ready" });
+}
+
+/**
+ * Moves the latest `false` ask past one entered node (F204), from the `load` stage of every node. The first rest
+ * entered after a transit node's ask is its rest: one that lists `ready` gets the held event now and waits for it
+ * otherwise; one that does not ends the ask. Any node entered after that rest ends it too. Allocates nothing: it runs
+ * on every node the graph enters.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param node - The node entered.
+ */
+export function passReadyNode(ctx: AssetsCtx, node: NodeInfo): void {
+  const state = ctx.state;
+
+  if (state.readyPlace === "gone") return;
+
+  // The ask's rest was left.
+  if (state.readyPlace === "at") {
+    state.readyPlace = "gone";
+    return;
+  }
+
+  if (!node.rest) return;
+
+  if (!takesReady(ctx, node)) {
+    state.readyPlace = "gone";
+    return;
+  }
+
+  state.readyPlace = "at";
+  if (!state.readyHeld) return;
+
+  state.readyHeld = false;
+  state.readyPlace = "gone";
+  ctx.deps.flow.inbox.post({ type: "ready" });
 }

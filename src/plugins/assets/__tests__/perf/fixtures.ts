@@ -9,6 +9,7 @@ import type { NodeInfo } from "../../../flow/types";
 import { lookupTexture } from "../../api";
 import { pickVictim, releaseSceneLeft } from "../../budget";
 import { neighbourhood } from "../../preload";
+import { passReadyNode } from "../../ready";
 import { loadBundle } from "../../tiers";
 import { createMockAssets, graphOf, manifestOf, sceneOf } from "../unit/mock-assets";
 
@@ -160,4 +161,46 @@ export async function restLookAhead(): Promise<() => void> {
   } as NodeInfo;
 
   return () => void neighbourhood(mock.assetsCtx, 2);
+}
+
+/**
+ * Builds the info of a node of the flow "main".
+ *
+ * @param node - The node's name.
+ * @param rest - Whether the graph rests there.
+ * @returns The info.
+ */
+function infoOf(node: string, rest: boolean): NodeInfo {
+  return { path: node, flow: "main", node, rest, over: false, checkpoint: false, barrier: false };
+}
+
+/**
+ * A node entered while no `ready` ask waits for its rest: the common case of every node (F204).
+ *
+ * @returns The call the `load` stage makes.
+ */
+export function readyNodeNoAsk(): () => void {
+  const mock = createMockAssets();
+  const board = infoOf("board", true);
+
+  return () => passReadyNode(mock.assetsCtx, board);
+}
+
+/**
+ * The first rest entered after a transit node's `ready` ask, a rest that does not list `ready`: the graph is read and
+ * the ask ends. The ask is set again before each call (F204).
+ *
+ * @returns The call the `load` stage makes.
+ */
+export function readyNodeRestWithoutReady(): () => void {
+  const mock = createMockAssets();
+  const board = infoOf("board", true);
+  const state = mock.assetsCtx.state;
+
+  mock.flow.graph = graphOf({ main: { show: {}, board: { rest: true } } });
+
+  return () => {
+    state.readyPlace = "before";
+    passReadyNode(mock.assetsCtx, board);
+  };
 }
