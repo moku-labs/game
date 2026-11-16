@@ -147,10 +147,12 @@ Why it is set at all: WebKit moves a page to the playback category the moment an
 
 `assets.audio(key)` gives the undecoded bytes and their MIME type; this plugin decodes once per key with `decodeAudioData` and caches the promise, so two plays in flight decode a single time. `assets:bundle-unloaded` names its keys, and exactly those are evicted. `assets:replaced` (dev hot swap) evicts its keys the same way, so the next play of a swapped sound decodes the new bytes; a sound or a track that is playing is not stopped and keeps the old ones. A missing or undecodable key is one `ctx.log.warn` per key and the effect resolves: a broken sound never stops the graph. Sounds always decode; `music` picks how a music track plays.
 
+At `music: "decode"` only the track that plays stays decoded. A switch to another track, `null`, or a switch that a later request replaced while it decoded, drops the left key's buffer from the cache. The source that fades out keeps its own buffer until it stops. A switch back decodes the track again while the current one plays on, so the switch waits for that decode before the cross-fade starts. On an A26 a 60 s stereo track is about 22 MB decoded, and a game that switches between three such tracks keeps about 22 MB instead of about 57 (F198).
+
 | | `music: "decode"` (default) | `music: "stream"` |
 |---|---|---|
 | What plays | one `AudioBufferSourceNode`, `loop = true` | one `<audio>` element on a `blob:` URL of the bytes, through `createMediaElementSource` into the track gain |
-| Memory per 150 s track at 48 kHz | about 58 MB decoded, plus about 60 MB once for the first | about 12 MB |
+| Memory per 150 s track at 48 kHz | about 58 MB decoded for the track that plays, plus about 60 MB once for the first | about 12 MB |
 | Cross-fade | two decoded buffers | two elements, about +6 MB |
 | Loop | gapless | a gap at every loop: 5 to 49 ms in Chromium, about 0.4 s in WebKit |
 | iOS silent switch under `session: "auto"` | respects it | ignores it; the default `"ambient"` makes it respect it |
