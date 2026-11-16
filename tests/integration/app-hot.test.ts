@@ -7,13 +7,21 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { NO_KEYCHAIN_FLAGS } from "../../src/visual/leg-browser";
 import { copyMiniGame, removeCopies, startBin, urlOf } from "./app-helpers";
 
 /** The copies of this file, removed after it. */
 const copies: string[] = [];
 
-/** The flags of a Chromium that draws WebGL without a GPU, as the spike ran it. */
-const SOFTWARE_GL = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
+/**
+ * The flags of a Chromium that draws WebGL without a GPU, as the spike ran it, and never asks the
+ * macOS keychain (a dialog over the screen on every run otherwise).
+ */
+const SOFTWARE_GL = [
+  "--use-angle=swiftshader",
+  "--enable-unsafe-swiftshader",
+  ...NO_KEYCHAIN_FLAGS
+];
 
 /** What the page reads of the running game. */
 type Readout = { path: string | undefined; counter: string | undefined };

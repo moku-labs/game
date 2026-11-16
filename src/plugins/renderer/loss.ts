@@ -16,10 +16,10 @@ export const LOSS_KEY = "moku-game:gpu-losses";
 const KEPT = 10;
 
 /** Bytes in a megabyte. */
-const BYTES_PER_MB = 1_048_576;
+export const BYTES_PER_MB = 1_048_576;
 
 /** Milliseconds in a second. */
-const MS_PER_S = 1000;
+export const MS_PER_S = 1000;
 
 /**
  * Rounds to one decimal.
@@ -31,7 +31,7 @@ const MS_PER_S = 1000;
  * tenth(12.345); // 12.3
  * ```
  */
-function tenth(value: number): number {
+export function tenth(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
@@ -41,7 +41,7 @@ function tenth(value: number): number {
  * @param now - The wall clock in milliseconds.
  * @returns The seconds, to one decimal; 0 where the page has no time origin.
  */
-function uptimeOf(now: number): number {
+export function uptimeOf(now: number): number {
   const origin = globalThis.performance?.timeOrigin;
 
   return origin === undefined ? 0 : tenth((now - origin) / MS_PER_S);
@@ -74,7 +74,7 @@ type PerformanceWithMemory = Performance & { memory?: { usedJSHeapSize?: unknown
  *
  * @returns The megabytes, or `undefined`: the record is kept without it.
  */
-function heapMb(): number | undefined {
+export function heapMb(): number | undefined {
   const performanceWithMemory: PerformanceWithMemory | undefined = globalThis.performance;
   const memory = performanceWithMemory?.memory;
   const used = memory?.usedJSHeapSize;
@@ -88,7 +88,7 @@ function heapMb(): number | undefined {
  * @param ctx - Domain context of the renderer plugin.
  * @returns The path.
  */
-function pathOf(ctx: RendererCtx): string {
+export function pathOf(ctx: RendererCtx): string {
   try {
     return ctx.deps.flow.state().path;
   } catch {

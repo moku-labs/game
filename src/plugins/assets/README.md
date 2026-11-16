@@ -106,6 +106,16 @@ and posts `ready` after its upload. A warm that rejects (not an abort) puts the 
 bundle takes it out again. An abort (an unload, a stop) marks nothing: the next `ready` starts the
 bundle again. The posting does not wait on the node's signal: the warm is shared work, and the inbox
 keeps only the latest `ready`, so a stale event costs at most one more question of the transit node.
+
+**The rest on a `ready` holds its bundles (F190).** A bundle `ready` answered `false` for is rested
+on (`state.readyWaiting`): neither the budget nor the `release: "leave"` release takes it until a
+`ready` finds it there. Without the hold the rest node the transit node goes to released it on its
+own arrival (its `flow:rest` marks the release, its `load` stage runs it), the bundle a scene of the
+next node names but no mounted scene names yet; the transit node asked again, found it gone, and the
+two nodes cycled forever: a fetch-and-free loop in a browser, a microtask loop that hung headless
+runs (A Memory Missing's `ui.memory`). Each live rest ages the hold: it lasts through the rest the
+node waits on and ends at the second rest with no new `ready` for the bundle (Back left the wait), so
+a left wait holds nothing.
 An app without `assets`, such as the headless app of `game.headless()`, has no handler: the effect
 resolves `undefined`, which the recipe reads as "there", hence `=== false`.
 
@@ -322,7 +332,8 @@ fast walk skips the preload.
 
 `enforceBudget` runs after every load and at every rest node: while `usedMb > textureBudgetMb` it
 unloads the bundle with the smallest use counter that is not pinned, not named by the mounted
-scene (`sceneBundles`), a leaving scene or the scene being built (`sceneComing`), not `boot` or `core`, not loading and not in the queue, with reason
+scene (`sceneBundles`), a leaving scene or the scene being built (`sceneComing`), not rested on
+through `ready` (F190), not `boot` or `core`, not loading and not in the queue, with reason
 `"budget"`. It does not read `release`. When nothing may go it writes one warning
 naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
 `page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
@@ -358,8 +369,8 @@ node before it. A `bundles` that throws fails the `load` stage, and flow rolls t
 **`release: "leave"`.** A loaded `"leave"` bundle is unloaded with reason `"leave"` once nothing
 holds it. Held: pinned, named by the mounted scene (the last `sceneBundles` list), named by the
 scene being built aside (the last `sceneComing` list, from the build start to the swap), named by a
-scene that left while anything still carries `Exiting` (its elements play their exit), its feature on
-the stack (a frame — the outer frames of a sub-flow too — whose node's owner in
+scene that left while anything still carries `Exiting` (its elements play their exit), rested on
+through `ready` (F190, above), its feature on the stack (a frame — the outer frames of a sub-flow too — whose node's owner in
 `flow.describe()` is that feature; a node of the parent does not hold the child's bundle), or a
 permanent tier. `flow:rest` fires before the arriving node's stages, while its bundles are not
 pinned yet, so a live rest only marks the release; the arriving node's `load` stage runs it right

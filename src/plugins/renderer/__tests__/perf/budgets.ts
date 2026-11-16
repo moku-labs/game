@@ -229,5 +229,9 @@ export const BUDGET = {
   releaseBindLive: 0,
   // F194: new. The release of a group's last texture: its slots swapped, its listeners compacted out of EMPTY's lists
   // in place (eventemitter3's `off` would copy each list).
-  releaseBindDead: 0
+  releaseBindDead: 0,
+  // F175: new. The trail's count of a drawn frame that uploaded: two small-integer adds.
+  trailFrame: 0,
+  // F175: new. What a started trail adds to a drawn frame of 20 sprites: the count only; it writes on its timer.
+  trailDrawnFrame: 0
 } as const;

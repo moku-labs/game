@@ -42,6 +42,7 @@ export function createAssetsState(): State {
     keysOf: emptyMap(),
     budgetUnloaded: emptySet(),
     reloadHeld: emptySet(),
+    readyWaiting: emptyMap(),
     thrashWarned: emptySet(),
     scenes: emptyMap(),
     featureOfFlow: emptyMap(),
