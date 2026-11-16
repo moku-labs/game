@@ -1052,9 +1052,11 @@ the budget lasts.
   Once it is spent, a new element is still made (its parent's child list is complete), but its
   children wait in the root's queue. The next frames diff the queue first, in the order it was
   parked; children that park again go to its end. A row a windowed scroll moves in never parks.
-  A long child list stops too: after the budget is spent at most 8 more elements are made, so a
-  short list ends, then the rest of every list in work waits in the queue for the next frame, from
-  the child it stopped at.
+  The child list of a new element stops too: after the budget is spent at most 8 more elements are
+  made, so a short list ends, then the rest of every such list in work waits in the queue for the
+  next frame, from the child it stopped at, and only its new children are put into the layout. A
+  held root diffed again (the world patches its view with a new item) still makes the new children
+  of a list that was there before in one frame.
 - **No diff twice.** While parts wait, the root is not diffed again and its windowed scrolls do not
   move their range, so no element is made twice. A state change during the build costs one more
   diff, once the queue is empty.

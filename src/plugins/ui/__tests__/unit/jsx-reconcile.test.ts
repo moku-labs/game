@@ -353,6 +353,7 @@ function harness() {
     markMeasured: vi.fn(),
     affectsRect: layoutChanged,
     place: vi.fn(),
+    append: vi.fn(),
     free: vi.fn(),
     solve,
     contentRect: element => ({ x: 0, y: 0, w: element.rect.w, h: element.rect.h }),

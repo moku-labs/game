@@ -292,7 +292,7 @@ function madeIn(frames: readonly MadeFrame[]): number {
 describe("a wide window held warm", () => {
   // Bug (F201): the frame that spawns a held view makes the whole rest of a long child list once its budget is spent
   // (a shop's track of cards: 7.4 ms against the 5.55 ms of 120 Hz); or the parts end in another screen than one block.
-  it("makes at most a budget read's worth of elements past the budget in a frame, the spawn's too", async () => {
+  it("makes at most two budget reads' worth of elements past the budget in a frame, the spawn's too", async () => {
     const block = rounded(await oneBlock("warm.wide", "openWide"));
     const warm = await start();
     const { frames, step } = recordCosted(warm);
@@ -308,6 +308,7 @@ describe("a wide window held warm", () => {
     // The spawn ran the budget out: the frame it was in is the one this guards.
     expect(spawn?.late).toBeGreaterThan(0);
     expect(spawn?.made).toBeLessThan(WIDE_ELEMENTS);
+    // Up to 7 elements before the next read sees the budget spent, then the 8 a short list may end with.
     expect(Math.max(...frames.map(frame => frame.late))).toBeLessThan(2 * CLOCK_EVERY);
     expect(madeIn(frames)).toBe(WIDE_ELEMENTS);
 
@@ -318,8 +319,8 @@ describe("a wide window held warm", () => {
     expect(rounded(warm.app.ui.tree())).toEqual(block);
   });
 
-  // Bug (F201): a window opened while the rest of a list waits shows the list cut short, or its rest comes in later
-  // frames, half a shop drawn.
+  // Bug (F201, the continuation): a window opened while the rest of a list waits shows the list cut short, or its rest
+  // comes in later frames, half a shop drawn.
   it("is drawn whole in the frame it opens while the rest of its list waits", async () => {
     const block = rounded(await oneBlock("warm.wide", "openWide"));
     const warm = await start();
@@ -342,8 +343,8 @@ describe("a wide window held warm", () => {
     );
   });
 
-  // Bug (F201): the rest of a list diffed after a commit takes rows of the newer tree for new ones, or gives them
-  // identities a later diff takes for others: rows made twice, dropped, or out of order at the open.
+  // Bug (F201, the continuation): the rest of a list made after a commit takes rows of the newer tree for new ones, or
+  // gives them identities a later diff takes for others: rows made twice, dropped, or out of order at the open.
   it("makes every row once and opens on the newest state when a commit lands while the rest waits", async () => {
     const headless = await start({ drawing: false });
 

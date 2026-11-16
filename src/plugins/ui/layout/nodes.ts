@@ -99,3 +99,33 @@ export function placeChildren(
     index += 1;
   }
 }
+
+/**
+ * Puts new children after the ones a parent's node holds, in order, and touches none of those: the
+ * rest of a list made in parts costs one insert a child, where `placeChildren` takes out and puts
+ * back every child placed before (F201). An `<anchor>` is left out, as `placeChildren` leaves it.
+ *
+ * @param state - The layout state.
+ * @param parent - The element whose child list grew at its end.
+ * @param children - The new children only, in child order.
+ */
+export function appendChildren(
+  state: LayoutState,
+  parent: Element,
+  children: readonly Element[]
+): void {
+  const node = state.byEntity.get(parent.entity);
+
+  if (node === undefined) return;
+
+  let index = node.getChildCount();
+
+  for (const child of children) {
+    const childNode = state.byEntity.get(child.entity);
+
+    if (childNode === undefined || child.type === ANCHOR) continue;
+
+    node.insertChild(childNode, index);
+    index += 1;
+  }
+}

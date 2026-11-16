@@ -3,9 +3,9 @@
  * and by part under the frame's budget, laid out once, and applied in parts. The budget is
  * `world.projection.left()`, finite only while a build runs. The first building unit of a frame (a
  * root, a parked part, a part of an application) always runs, so a build always moves. Past the
- * budget the rest of a long child list waits too (F201). A root held
- * warm (slice B+D) is built the same way, and one shown before its parts were done finishes in one
- * block. The reconcile owns the diff and the application of one element and lends them in.
+ * budget the rest of a long child list of a new element waits too (F201). A root held warm (slice
+ * B+D) is built the same way, and one shown before its parts were done finishes in one block. The
+ * reconcile owns the diff and the application of one element and lends them in.
  */
 import type { Entity } from "../../world/types";
 import { asError } from "../errors";
@@ -34,7 +34,7 @@ const NO_NODES: readonly DescriptionNode[] = [];
  */
 export type PartsReconcile = {
   /** Makes the children of a new element from the node at `from` on, after the ones made before. */
-  diffChildren(
+  enterChildren(
     root: Root,
     parent: Element,
     nodes: readonly DescriptionNode[],
@@ -91,9 +91,9 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
 
   // Since the start of the reconcile: the elements entered for roots built aside, whether the budget
-  // was read spent and at which of them, and whether a building unit ran. Since the start of the solve: the elements
-  // applied in parts, and whether an application ended. The parked parts and the cursors are pooled:
-  // a build allocates them once.
+  // was read spent and at which of them, and whether a building unit ran. Since the start of the
+  // solve: the elements applied in parts, and whether an application ended. The parked parts and
+  // the cursors are pooled: a build allocates them once.
   let entered = 0;
   let spent = false;
   let spentFrom = 0;
@@ -266,7 +266,7 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
     state.building = part.cause;
 
     try {
-      reconcile.diffChildren(root, element, part.nodes, part.instance, part.from);
+      reconcile.enterChildren(root, element, part.nodes, part.instance, part.from);
     } catch (error) {
       ctx.log.error("ui:root-failed", { root: root.name }, asError(error));
     } finally {
