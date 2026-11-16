@@ -5,8 +5,10 @@
  * control guard for a route or raw write), so a bundler `define` of `false` drops it, and logs
  * the `moku:dev` marker.
  */
+import type { Api as AssetsApi } from "../assets/types";
 import type { Json, Snapshot, StoreApi } from "../model/types";
-import type { ScenesApi } from "../scenes/types";
+import { isSceneDefinition, namedBundles } from "../scenes/bundles";
+import type { SceneDefinition, SceneState, ScenesApi } from "../scenes/types";
 import { defineCommand, inputSchema } from "./doors/define";
 import { controlRefused } from "./doors/dev";
 import type { ControlApp } from "./doors/types";
@@ -18,8 +20,14 @@ import type { Bookmark, FlowState } from "./types";
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
 const noPayload: Json = null;
 
-/** An app that may carry the screen plugins: the doors read and set its scene when it has one. */
-type SceneApp = { readonly scenes?: ScenesApi };
+/**
+ * An app that may carry the screen plugins: the doors read and set its scene, and load what it
+ * names, when it has them.
+ */
+type SceneApp = {
+  readonly scenes?: ScenesApi;
+  readonly assets?: Pick<AssetsApi, "load" | "sceneComing">;
+};
 
 /** What the save commands need of an app: the control app, its scenes when it has them, the store. */
 type SaveApp = ControlApp &
@@ -34,6 +42,81 @@ type SaveApp = ControlApp &
 type SaveTrees = { player: Json; session: Json; rng: Json; version?: number };
 
 /**
+ * Asks a scene what it names for a state. A scene whose `bundles` throws for that state names only
+ * its own bundle here: the `scene` stage of the restored node meets the throw itself.
+ *
+ * @param scene - The scene declaration.
+ * @param state - The player and session of the bookmark, frozen.
+ * @returns The bundle names, the scene bundle first.
+ */
+function namedOrOwn(scene: SceneDefinition, state: SceneState): readonly string[] {
+  try {
+    return namedBundles(scene, state);
+  } catch {
+    // The stage of the restored node throws it again, where flow rolls the node back.
+    return [scene.bundle];
+  }
+}
+
+/**
+ * Lists the bundles the mounted scene and the bookmark's scene name for the bookmark's state.
+ *
+ * @param app - The app with the screen plugins.
+ * @param bookmark - The bookmark about to be entered.
+ * @returns The bundle names, each once.
+ */
+function bundlesFor(app: HeadlessApp & SceneApp, bookmark: Bookmark): string[] {
+  const wanted = new Set([app.scenes?.current(), bookmark.scene]);
+  const state = Object.freeze({ player: bookmark.player, session: bookmark.session });
+  const names = new Set<string>();
+
+  for (const feature of app.flow.features.all()) {
+    const list: unknown = feature.description.scenes;
+    const scenes = Array.isArray(list) ? list.filter(entry => isSceneDefinition(entry)) : [];
+
+    for (const scene of scenes) {
+      if (wanted.has(scene.id)) for (const name of namedOrOwn(scene, state)) names.add(name);
+    }
+  }
+
+  return [...names];
+}
+
+/**
+ * Loads what the mounted scene and the bookmark's scene name for the bookmark's state, before the
+ * state lands (F199). The mounted scene stays on screen through a restore, and its views read the
+ * committed state at once: a state that landed first would be drawn from bundles nobody loaded.
+ * The names are held as a coming scene's while they load, so no release at the next rest lets
+ * them go before the restored node's `scene` stage names them; the next list of a mounted scene
+ * ends that hold.
+ *
+ * @param app - The app; without `assets` or a mounted scene, nothing is loaded.
+ * @param bookmark - The bookmark about to be entered.
+ * @returns A promise that resolves once every named bundle is in.
+ * @throws {Error} What a load rejected with: the restore is refused before the state changes.
+ */
+async function loadBundlesFor(app: HeadlessApp & SceneApp, bookmark: Bookmark): Promise<void> {
+  const assets = app.assets;
+
+  if (assets === undefined || app.scenes === undefined) return;
+
+  const names = bundlesFor(app, bookmark);
+
+  if (names.length === 0) return;
+
+  assets.sceneComing(names);
+
+  try {
+    for (const name of names) await assets.load(name);
+  } catch (error) {
+    // Nothing lands: the hold ends with the refused restore.
+    assets.sceneComing([]);
+
+    throw error;
+  }
+}
+
+/**
  * Restores a bookmark with its `scene` expected first, so the node the restore enters mounts it.
  * A refused restore puts the record back to the mounted scene, when one is mounted: no later
  * node switches to the scene of a bookmark that was never entered. With nothing mounted the
@@ -45,6 +128,8 @@ type SaveTrees = { player: Json; session: Json; rng: Json; version?: number };
  */
 async function restoreWithScene(app: HeadlessApp & SceneApp, bookmark: Bookmark): Promise<void> {
   const mounted = app.scenes?.current();
+
+  await loadBundlesFor(app, bookmark);
 
   if (bookmark.scene !== undefined) app.scenes?.expect(bookmark.scene);
 
