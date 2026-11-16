@@ -348,7 +348,7 @@ function fadeOut(state: State, seconds: number): void {
  * @param state - The plugin state.
  * @param key - The key of the track that left, or `undefined` when none played.
  */
-function forgetTrack(state: State, key: string | undefined): void {
+export function forgetTrack(state: State, key: string | undefined): void {
   if (key === undefined || state.music?.key === key) return;
 
   state.decoded.delete(key);

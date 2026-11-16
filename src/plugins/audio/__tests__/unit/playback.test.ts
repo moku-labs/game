@@ -282,6 +282,26 @@ describe("playMusic", () => {
     expect([...mock.state.decoded.keys()]).toEqual(["board.theme"]);
   });
 
+  // F198: no gap while a track that left decodes again; the playing one fades only once the new buffer is there.
+  it("keeps the playing track at full level while a track that left decodes again", async () => {
+    const mock = unlocked();
+
+    await playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+    await playMusic(mock.audio, { key: "home.theme", fadeMs: 600 });
+
+    const homeGain = mock.context?.gains[4];
+    const rampsBefore = homeGain?.gain.ramps.length;
+    const back = playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+
+    expect(mock.context?.sources[1]?.stoppedAt).toBeUndefined();
+    expect(homeGain?.gain.ramps.length).toBe(rampsBefore);
+
+    await back;
+
+    expect(homeGain?.gain.ramps.at(-1)?.[0]).toBe(0);
+    expect(keyOf(mock.context?.sources[2]?.buffer)).toBe("board.theme");
+  });
+
   it("forgets the decoded buffer of the track a null key stopped", async () => {
     const mock = unlocked();
 
