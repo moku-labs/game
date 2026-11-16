@@ -17,7 +17,8 @@ import {
   startWarm,
   untilWarm,
   type Warm,
-  type WarmOptions
+  type WarmOptions,
+  WIDE_ROWS
 } from "../warm-app";
 
 // ---------------------------------------------------------------------------
@@ -225,6 +226,151 @@ describe("a window held warm", () => {
     expect(warm.app.ui.tree().key).toBe("wardRoot");
 
     await warm.answer("openSheet");
+
+    for (let index = 0; index < 3; index += 1) warm.frame();
+
+    expect(rounded(warm.app.ui.tree())).toEqual(block);
+  });
+});
+
+/** What one element of a held root costs on the fake clock: a frame's budget makes a few dozen. */
+const ELEMENT_MS = 0.25;
+
+/** The elements the reconcile makes between two reads of the budget (`CLOCK_EVERY` of `jsx/parts.ts`). */
+const CLOCK_EVERY = 8;
+
+/** The elements `ui` makes for the wide sheet: its root, its button, the track, and a row and a dot per row. */
+const WIDE_ELEMENTS = 3 + 2 * WIDE_ROWS;
+
+/** What one frame of a held root's build made: every element, and those made once the budget was spent. */
+type MadeFrame = { made: number; late: number };
+
+/**
+ * Makes every element of a held root cost `ELEMENT_MS` on the clock, as real work does, and counts
+ * per frame the elements made, and those made after `left()` reached 0.
+ *
+ * @param warm - The started fixture, on a clock that stands between frames.
+ * @returns The frames counted so far, and a frame step that counts the next one.
+ */
+function recordCosted(warm: Warm) {
+  const frames: MadeFrame[] = [];
+  const adopt = warm.app.world.projection.adopt;
+
+  vi.spyOn(warm.app.world.projection, "adopt").mockImplementation(entity => {
+    const frame = frames.at(-1);
+
+    warm.clock.advance(ELEMENT_MS);
+
+    if (frame !== undefined) {
+      frame.made += 1;
+      if (warm.app.world.projection.left() <= 0) frame.late += 1;
+    }
+
+    adopt(entity);
+  });
+
+  return {
+    frames,
+    step: (): void => {
+      frames.push({ made: 0, late: 0 });
+      warm.frame();
+    }
+  };
+}
+
+/**
+ * How many elements the counted frames made in all.
+ *
+ * @param frames - The counted frames.
+ * @returns The sum.
+ */
+function madeIn(frames: readonly MadeFrame[]): number {
+  return frames.reduce((sum, frame) => sum + frame.made, 0);
+}
+
+describe("a wide window held warm", () => {
+  // Bug (F201): the frame that spawns a held view makes the whole rest of a long child list once its budget is spent
+  // (a shop's track of cards: 7.4 ms against the 5.55 ms of 120 Hz); or the parts end in another screen than one block.
+  it("makes at most a budget read's worth of elements past the budget in a frame, the spawn's too", async () => {
+    const block = rounded(await oneBlock("warm.wide", "openWide"));
+    const warm = await start();
+    const { frames, step } = recordCosted(warm);
+    const rests = (): boolean => warm.app.world.projection.left() === Number.POSITIVE_INFINITY;
+
+    warm.mount(["warm.wide"]);
+
+    do step();
+    while ((heldTrees(warm).length === 0 || !rests()) && frames.length < 200);
+
+    const spawn = frames.find(frame => frame.made > 0);
+
+    // The spawn ran the budget out: the frame it was in is the one this guards.
+    expect(spawn?.late).toBeGreaterThan(0);
+    expect(spawn?.made).toBeLessThan(WIDE_ELEMENTS);
+    expect(Math.max(...frames.map(frame => frame.late))).toBeLessThan(2 * CLOCK_EVERY);
+    expect(madeIn(frames)).toBe(WIDE_ELEMENTS);
+
+    await warm.answer("openWide");
+
+    for (let index = 0; index < 3; index += 1) warm.frame();
+
+    expect(rounded(warm.app.ui.tree())).toEqual(block);
+  });
+
+  // Bug (F201): a window opened while the rest of a list waits shows the list cut short, or its rest comes in later
+  // frames, half a shop drawn.
+  it("is drawn whole in the frame it opens while the rest of its list waits", async () => {
+    const block = rounded(await oneBlock("warm.wide", "openWide"));
+    const warm = await start();
+    const { frames, step } = recordCosted(warm);
+
+    warm.mount(["warm.wide"]);
+
+    while (heldTrees(warm).length === 0) step();
+
+    // Held, and most of the track not made yet.
+    expect(madeIn(frames)).toBeLessThan(WIDE_ELEMENTS / 2);
+
+    await warm.answer("openWide");
+    step();
+
+    expect(rounded(warm.app.ui.tree())).toEqual(block);
+    expect(unboxed(warm)).toEqual([]);
+    expect(warm.app.world.projection.entityOf("warm.wide", "t119dot")).toBe(
+      warm.app.ui.find("t119dot")
+    );
+  });
+
+  // Bug (F201): the rest of a list diffed after a commit takes rows of the newer tree for new ones, or gives them
+  // identities a later diff takes for others: rows made twice, dropped, or out of order at the open.
+  it("makes every row once and opens on the newest state when a commit lands while the rest waits", async () => {
+    const headless = await start({ drawing: false });
+
+    headless.mount(["warm.wide"]);
+    headless.frame();
+    await headless.answer("coin");
+    headless.frame();
+    await headless.answer("openWide");
+
+    for (let index = 0; index < 3; index += 1) headless.frame();
+
+    const block = rounded(headless.app.ui.tree());
+    const warm = await start();
+    const { frames, step } = recordCosted(warm);
+    const built = warm.checks.find(check => check.name === "asideBuilt");
+
+    warm.mount(["warm.wide"]);
+
+    while (heldTrees(warm).length === 0) step();
+
+    expect(built?.()).toBe(false);
+
+    await warm.answer("coin");
+    untilWarm(warm, 1);
+
+    expect(madeIn(frames)).toBe(WIDE_ELEMENTS);
+
+    await warm.answer("openWide");
 
     for (let index = 0; index < 3; index += 1) warm.frame();
 

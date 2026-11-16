@@ -380,14 +380,16 @@ export type AsideOf = (entity: Entity) => boolean;
 
 /**
  * One part of a root built aside that waits for a later frame (spec 33 A2): an element that exists
- * and whose children were not diffed yet, the nodes it would have diffed, the nearest component
- * instance and the cause its children enter with. Back in the pool it holds no element.
+ * and whose children were not all made yet, the nodes it would have diffed, the first of them that
+ * waits (0, or the rest of a long list past the budget, F201), the nearest component instance and
+ * the cause its children enter with. Back in the pool it holds no element.
  */
 export type Parked = {
   element: Element | undefined;
   nodes: readonly DescriptionNode[];
   instance: string | undefined;
   cause: MotionCause | undefined;
+  from: number;
 };
 
 /**

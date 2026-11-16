@@ -125,8 +125,8 @@ describe("a parked part whose element left before it ran", () => {
 
     jsx.elements.set(gone.entity, gone);
     jsx.elements.set(kept.entity, kept);
-    parts.park(root, gone, NODES, undefined);
-    parts.park(root, kept, NODES, undefined);
+    parts.park(root, gone, NODES, undefined, 0);
+    parts.park(root, kept, NODES, undefined, 0);
 
     // Its parent rendered again without it: `dropElement` forgot it.
     jsx.elements.delete(gone.entity);

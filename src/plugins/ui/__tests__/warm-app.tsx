@@ -274,6 +274,47 @@ const clashScreen = projection({
   warm: (): Item => ({ id: "clash" })
 });
 
+/** The rows of the wide sheet's track: one list, far longer than a frame's budget makes. */
+export const WIDE_ROWS = 120;
+
+/** The item of the wide sheet: the coins widen its rows. */
+type WideItem = { id: string; coins: number };
+
+/**
+ * The item of the wide sheet.
+ *
+ * @param player - The player root.
+ * @returns The item.
+ */
+function wideItem(player: WarmPlayer): WideItem {
+  return { id: "wide", coins: player.coins };
+}
+
+/**
+ * A sheet of one wide list, as a shop's track of cards: its root, a button, the track and 120
+ * rows of one dot each, 243 elements, the 120 rows in one child list.
+ */
+const wideScreen = projection({
+  name: "warm.wide",
+  layer: "ui",
+  from: (player: WarmPlayer, session: WarmSession): WideItem[] =>
+    session.open === "wide" ? [wideItem(player)] : [],
+  key: (item: WideItem) => item.id,
+  view: (item: WideItem) => (
+    <column key="wideRoot" style={{ width: 1080, height: 1920 }}>
+      <button key="wideClose" intent="close" style={{ width: 200, height: 80 }} />
+      <column key="track" style={{ width: 1000, gap: 2 }}>
+        {Array.from({ length: WIDE_ROWS }, (_unused, index) => (
+          <row key={`t${index}`} style={{ width: 400 + item.coins, height: 12 }}>
+            <stack key={`t${index}dot`} style={{ width: 10, height: 10, fill: 0x22_33_44 }} />
+          </row>
+        ))}
+      </column>
+    </column>
+  ),
+  warm: (player: WarmPlayer) => wideItem(player)
+});
+
 /** A sheet that dims what lies under it while it is open. */
 const dimScreen = projection({
   name: "warm.dim",
@@ -301,6 +342,7 @@ const home = defineNode({
     openDim: type(),
     openRows: type(),
     openClash: type(),
+    openWide: type(),
     close: type(),
     scroll: type(),
     coin: type()
@@ -362,6 +404,7 @@ const main = defineFlow("main", {
     openDim: opens("dim"),
     openRows: opens("rows"),
     openClash: opens("clash"),
+    openWide: opens("wide"),
     close,
     scroll,
     coin
@@ -375,6 +418,7 @@ const main = defineFlow("main", {
       openDim: "openDim",
       openRows: "openRows",
       openClash: "openClash",
+      openWide: "openWide",
       close: "close",
       scroll: "scroll",
       coin: "coin"
@@ -384,6 +428,7 @@ const main = defineFlow("main", {
     openDim: { done: "home" },
     openRows: { done: "home" },
     openClash: { done: "home" },
+    openWide: { done: "home" },
     close: { done: "home" },
     scroll: { done: "home" },
     coin: { done: "home" }
@@ -392,7 +437,15 @@ const main = defineFlow("main", {
 
 const warmFeature = defineFeature("warm", {
   flows: [main],
-  projections: [wardScreen, sheetScreen, listScreen, rowsScreen, dimScreen, clashScreen],
+  projections: [
+    wardScreen,
+    sheetScreen,
+    listScreen,
+    rowsScreen,
+    dimScreen,
+    clashScreen,
+    wideScreen
+  ],
   components: [Marked]
 });
 
@@ -470,6 +523,8 @@ export async function startWarm(options: WarmOptions = {}) {
 
   return {
     app,
+    /** The fake clock under the stepping one: a test moves it on by hand, as work that costs time. */
+    clock: clock.base,
     /** The checks registered with `onBuild`: `ui`'s is the reconciler's `asideBuilt`. */
     checks,
     frame,
