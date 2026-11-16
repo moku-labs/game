@@ -102,7 +102,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
         resolvedOf,
         slot => rootPoseOf(ctx.deps.world.ecs, slot),
         isAside,
-        shownStyleOf
+        shownStyleOf,
+        modules.layout.stopsOf
       ),
 
     find,

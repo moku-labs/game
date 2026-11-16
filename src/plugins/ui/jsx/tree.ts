@@ -18,6 +18,9 @@ type ResolvedOf = (entity: Entity) => string | undefined;
 /** Reads the style an entity is drawn in: `Text.style`, nothing before it carries its `Text`. */
 type ShownStyleOf = (entity: Entity) => string | undefined;
 
+/** Reads the stops a `snap` prop names inside 0 to `max`: `stopsOf` of the layout module. */
+type StopsOf = (snap: unknown, max: number) => number[] | undefined;
+
 /**
  * The warning a tree read drops: `text` already reported a bad tag when it resolved the label.
  */
@@ -102,9 +105,51 @@ function textStyleOf(element: Element, shownStyleOf: ShownStyleOf | undefined): 
 }
 
 /**
+ * The id of the motion an element was given: the `id` of its `motion` prop when that is an object
+ * with a string `id`, which `defineMotion({ id })` sets.
+ *
+ * @param element - The element to read.
+ * @returns The id, or `undefined` for an element without a motion and for a motion without an id.
+ */
+function motionIdOf(element: Element): string | undefined {
+  const motion: unknown = element.node.props.motion;
+
+  if (typeof motion !== "object" || motion === null) return undefined;
+
+  return "id" in motion && typeof motion.id === "string" ? motion.id : undefined;
+}
+
+/**
+ * Where a scroll stands and how it rests: the values `ScrollState` carries (the offset in whole
+ * units, `max`, whether it moves), all 0 and false until the first solve placed it, with its axis
+ * and the stops of its `snap` prop a release would use.
+ *
+ * @param element - The element to read.
+ * @param stopsOf - Reads the stops of a `snap` prop; none in a read without a layout, which leaves `snap` out.
+ * @returns The scroll record, or `undefined` for an element that is no scroll.
+ */
+function scrollOf(element: Element, stopsOf: StopsOf | undefined): UiNode["scroll"] {
+  const motion = element.scroll;
+
+  if (motion === undefined) return undefined;
+
+  const max = motion.placed ? motion.max : 0;
+  const shown = {
+    axis: motion.axis,
+    offset: motion.placed ? Math.round(motion.offset) : 0,
+    max,
+    moving: motion.placed && motion.mode !== "still"
+  };
+  const snap = stopsOf?.(element.node.props.snap, max);
+
+  return snap === undefined ? shown : { ...shown, snap };
+}
+
+/**
  * Turns one element and its subtree into snapshot nodes. The rect is natural; a fitted element
  * adds the scale it is drawn at; a text adds the words it draws and the style key of a keyed
- * text; a text field adds its value; a windowed scroll adds its window. The spacers of a windowed
+ * text; a text field adds its value; a windowed scroll adds its window; an element with a
+ * motion id adds it, a scroll adds where it stands and its snap stops. The spacers of a windowed
  * scroll are left out: its content lists the live rows. The rects of a root laid out in a slot are
  * in the slot's units: `place` maps them into root coordinates.
  *
@@ -112,6 +157,7 @@ function textStyleOf(element: Element, shownStyleOf: ShownStyleOf | undefined): 
  * @param element - The element to read.
  * @param resolvedOf - Reads the resolved string of a text entity; none in a read without a world.
  * @param shownStyleOf - Reads `Text.style` of a text entity; none in a read without a world.
+ * @param stopsOf - Reads the stops of a `snap` prop; none in a read without a layout.
  * @param place - Maps a rect of a slotted root into root coordinates; none for a root on the viewport.
  * @returns The node, with its children in child order.
  */
@@ -120,6 +166,7 @@ function nodeOf(
   element: Element,
   resolvedOf: ResolvedOf | undefined,
   shownStyleOf: ShownStyleOf | undefined,
+  stopsOf: StopsOf | undefined,
   place?: (rect: Rect) => Rect
 ): UiNode {
   // The children, in child order; the spacers of a windowed scroll are skipped.
@@ -129,7 +176,7 @@ function nodeOf(
     const childElement = state.elements.get(child);
 
     if (childElement !== undefined && !isOwnKey(childElement.key)) {
-      children.push(nodeOf(state, childElement, resolvedOf, shownStyleOf, place));
+      children.push(nodeOf(state, childElement, resolvedOf, shownStyleOf, stopsOf, place));
     }
   }
 
@@ -145,7 +192,7 @@ function nodeOf(
 
   // The optional fields, each only when it applies: the words of a text, the style key of a keyed
   // text, the fit scale of a fitted element, the value of a text field, the window of a windowed
-  // scroll, the local of a component root.
+  // scroll, the local of a component root, the motion id of a motion, the scroll record of a scroll.
   const content = contentOf(element, resolvedOf);
   const worded = content === undefined ? node : { ...node, content };
   const textStyle = textStyleOf(element, shownStyleOf);
@@ -161,7 +208,14 @@ function nodeOf(
   const local =
     element.instance === undefined ? undefined : state.instances.get(element.instance)?.local;
 
-  return local === undefined ? windowed : { ...windowed, local: { ...local } };
+  const located = local === undefined ? windowed : { ...windowed, local: { ...local } };
+
+  // The motion id and the scroll record come last, each only when the element has one.
+  const motion = motionIdOf(element);
+  const motioned = motion === undefined ? located : { ...located, motion };
+  const scroll = scrollOf(element, stopsOf);
+
+  return scroll === undefined ? motioned : { ...motioned, scroll };
 }
 
 /**
@@ -228,6 +282,7 @@ function placeOf(
  * @param slotPose - The root pose of a slot, `rootPoseOf` of `renderer`; none in a read without a world.
  * @param isAside - Whether an entity belongs to the scene `world` builds aside: such a root is not read.
  * @param shownStyleOf - Reads `Text.style` of an entity; none in a read without a world.
+ * @param stopsOf - `stopsOf` of the layout module, which clamps the `snap` stops of a scroll; none in a read without a layout.
  * @returns One root node, or every root under a `screen` node.
  * @example
  * ```ts
@@ -240,7 +295,8 @@ export function readTree(
   resolvedOf?: ResolvedOf,
   slotPose?: (slot: Entity) => TransformValue,
   isAside?: AsideOf,
-  shownStyleOf?: ShownStyleOf
+  shownStyleOf?: ShownStyleOf,
+  stopsOf?: StopsOf
 ): UiNode {
   const nodes: UiNode[] = [];
 
@@ -248,7 +304,9 @@ export function readTree(
     const element = root.element === undefined ? undefined : state.elements.get(root.element);
 
     if (element !== undefined)
-      nodes.push(nodeOf(state, element, resolvedOf, shownStyleOf, placeOf(root, slotPose)));
+      nodes.push(
+        nodeOf(state, element, resolvedOf, shownStyleOf, stopsOf, placeOf(root, slotPose))
+      );
   }
 
   const single = nodes.length === 1 ? nodes[0] : undefined;

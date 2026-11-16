@@ -35,6 +35,8 @@ export const BUDGET = {
   sweepIdle: 0,
   /** W4: the same sweep with 10 tracks ending. Was 2 788 B. */
   sweepTracksEnding: 0,
+  /** F192: the same sweep with 50 labelled tracks running: the label is read by `motionIdsOf` only. New: 0 B. */
+  sweepRunningLabelled: 0,
   /** W3: 50 unmuted tracks asking for their muted fields. Was 7 605 B: a new `Set` per ask. */
   mutedUnmuted: 0,
   /** W3: 50 muted tracks of a type with an owned field. Was 29 212 B: a joined `Set` per ask. */

@@ -27,6 +27,7 @@ import {
   resolveTarget,
   startTimeline
 } from "./timeline/play";
+import { resetRing } from "./timeline/ring";
 import { localTargetOf } from "./timeline/space";
 import type { ErasedFields, FxStep, TimelineRuntime } from "./timeline/types";
 import { advanceTracks, beginFrame, finishAllTracks } from "./tween/advance";
@@ -418,6 +419,8 @@ export function stopAnim(state: State): void {
   state.additive.clear();
   state.timelines.clear();
   state.timelineList.length = 0;
+  // The 16 records of the ring stay allocated; the next start reuses them.
+  resetRing(state);
   state.registry.clear();
   state.markListeners.clear();
   state.overMaxTracks = false;
