@@ -5,10 +5,12 @@
  * of a budget pass (F184).
  */
 import { alloc } from "../../../../../tests/perf/alloc";
+import type { NodeInfo } from "../../../flow/types";
 import { lookupTexture } from "../../api";
 import { pickVictim, releaseSceneLeft } from "../../budget";
+import { neighbourhood } from "../../preload";
 import { loadBundle } from "../../tiers";
-import { createMockAssets, manifestOf } from "../unit/mock-assets";
+import { createMockAssets, graphOf, manifestOf, sceneOf } from "../unit/mock-assets";
 
 /** Calls before a window: the check reaches its optimized tier first. */
 const WARM_CALLS = 30_000;
@@ -98,4 +100,64 @@ export async function pickHalfDrawn(): Promise<() => void> {
   );
 
   return () => void pickVictim(mock.assetsCtx);
+}
+
+/**
+ * The look-ahead of one rest on a hub with six windows, as A Memory Missing's ward rests between them (F194): each
+ * window has a scene whose `bundles` reads the session, the manifest holds 48 bundles of 8 features, and the committed
+ * state stays the same from one rest to the next.
+ *
+ * @returns The call the `flow:rest` hook makes through `startPreload`.
+ */
+export async function restLookAhead(): Promise<() => void> {
+  const features = ["ward", "shop", "goals", "mail", "album", "daily", "quests", "storage"];
+  const bundles: Record<string, { feature: string; tier: "feature" | "scene"; keys: string[] }> =
+    {};
+
+  for (const feature of features) {
+    for (let index = 0; index < 6; index += 1) {
+      bundles[`${feature}.${index}`] = {
+        feature,
+        tier: index === 0 ? "scene" : "feature",
+        keys: [`${feature}.k${index}`]
+      };
+    }
+  }
+
+  const mock = createMockAssets({ manifest: manifestOf(bundles), preloadDepth: 2 });
+  const windows = features.slice(1, 7);
+
+  await mock.start();
+  mock.flow.graph = graphOf(
+    {
+      main: {
+        hub: { owner: "ward", scene: "ward", rest: true },
+        ...Object.fromEntries(windows.map(name => [name, { owner: name, scene: name }]))
+      }
+    },
+    { main: { hub: Object.fromEntries(windows.map(name => [`open.${name}`, name])) } }
+  );
+  mock.flow.stack = [{ flow: "main", node: "hub", input: 0 }];
+  mock.model.session = { episode: "ep01" };
+  mock.ctx.state.scenes = new Map(
+    features.map(name => [
+      name,
+      sceneOf(name, `${name}.0`, ({ session }) => [
+        `${(session as { episode: string }).episode}.${name}`
+      ])
+    ])
+  );
+  mock.ctx.state.featureOfFlow = new Map([["main", "ward"]]);
+  mock.ctx.state.current = {
+    path: "hub",
+    flow: "main",
+    node: "hub",
+    rest: true,
+    over: false,
+    checkpoint: false,
+    barrier: false,
+    scene: "ward"
+  } as NodeInfo;
+
+  return () => void neighbourhood(mock.assetsCtx, 2);
 }

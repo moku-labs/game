@@ -270,7 +270,8 @@ export type SceneSpec<
   bundle: Bundle;
   /**
    * Bundles the scene needs on top of `bundle`, read from the committed state each time a node
-   * enters the scene. Pure and cheap: it gets frozen trees, and throwing rolls the node back.
+   * enters the scene. Pure and cheap: it gets frozen trees, and throwing rolls the node back. The engine asks once per
+   * committed state and reuses the answer until a commit replaces `player` or `session`, so it reads nothing else.
    *
    * @param state - The committed `player` and `session`, frozen.
    * @returns Bundle keys of the game, in the order they are loaded.
@@ -458,6 +459,16 @@ export type SceneBuild = {
 };
 
 /**
+ * The last answer of one scene to `bundles`: the committed trees it was read with, and the names it gave, frozen. A
+ * scene is asked again only when a commit replaced `player` or `session`.
+ */
+export type NamedMemo = {
+  readonly player: unknown;
+  readonly session: unknown;
+  readonly names: readonly string[];
+};
+
+/**
  * scenes plugin state.
  */
 export type State = {
@@ -478,6 +489,8 @@ export type State = {
    * is mounted.
    */
   named: readonly string[];
+  /** The last answer of each scene to `bundles`, by declaration: the switch, a re-read and the progress table share it. */
+  namedMemo: WeakMap<SceneDefinition, NamedMemo>;
   owner: SceneOwner;
   /** The remover of the two `onEnter` callbacks, `begin` and `scene`: set in `onStart`, run in `onStop`. */
   teardown: (() => void) | undefined;

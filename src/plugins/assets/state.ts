@@ -15,6 +15,15 @@ function emptyMap<Key, Value>(): Map<Key, Value> {
 }
 
 /**
+ * Creates an empty weak map, for the same reason as `emptyMap`.
+ *
+ * @returns An empty weak map.
+ */
+function emptyWeakMap<Key extends object, Value>(): WeakMap<Key, Value> {
+  return new WeakMap();
+}
+
+/**
  * Creates an empty set, for the same reason as `emptyMap`.
  *
  * @returns An empty set.
@@ -46,6 +55,8 @@ export function createAssetsState(): State {
     thrashWarned: emptySet(),
     scenes: emptyMap(),
     featureOfFlow: emptyMap(),
+    featureIndex: undefined,
+    namedMemo: emptyWeakMap(),
     records: emptyMap(),
     pinned: emptySet(),
     sceneId: undefined,

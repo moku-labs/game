@@ -8,7 +8,10 @@ import { namedBundles } from "../scenes/bundles";
 import type { SceneState } from "../scenes/types";
 import { featuresOnStack, isHeld, usedMb } from "./budget";
 import { ignoreFailure, isAbortError, loadBundle } from "./tiers";
-import type { AssetsCtx, PreloadQueue, State } from "./types";
+import type { AssetsCtx, Manifest, PreloadQueue, State } from "./types";
+
+/** The answer of a flow or scene that names no bundle: one frozen list, so asking allocates nothing. */
+const NO_NAMES: readonly string[] = Object.freeze([]);
 
 /** One node the walk reached: where it is, how it got there and how far away it is. */
 type Visit = {
@@ -19,20 +22,47 @@ type Visit = {
 };
 
 /**
- * Lists the `feature`-tier bundles of the feature that owns a flow.
+ * Indexes the `feature`-tier bundles of the manifest by feature, in the manifest's order.
+ *
+ * @param manifest - The manifest.
+ * @returns Feature name to its bundle names, each list frozen.
+ */
+function indexFeatures(manifest: Manifest): Map<string, readonly string[]> {
+  const byFeature = new Map<string, string[]>();
+
+  for (const [name, entry] of Object.entries(manifest.bundles)) {
+    if (entry.tier !== "feature") continue;
+
+    const names = byFeature.get(entry.feature);
+
+    if (names === undefined) byFeature.set(entry.feature, [name]);
+    else names.push(name);
+  }
+
+  for (const names of byFeature.values()) Object.freeze(names);
+
+  return byFeature;
+}
+
+/**
+ * Lists the `feature`-tier bundles of the feature that owns a flow, from the index of the manifest: built once per
+ * manifest, not once per call (F194: the look-ahead scanned every bundle of the manifest for each node it visited).
  *
  * @param ctx - Domain context of the plugin.
  * @param flow - Id of the flow.
- * @returns The bundle names.
+ * @returns The bundle names, frozen.
  */
-function featureBundles(ctx: AssetsCtx, flow: string): string[] {
-  const feature = ctx.state.featureOfFlow.get(flow);
+function featureBundles(ctx: AssetsCtx, flow: string): readonly string[] {
+  const state = ctx.state;
+  const feature = state.featureOfFlow.get(flow);
 
-  if (feature === undefined) return [];
+  if (feature === undefined) return NO_NAMES;
 
-  return Object.entries(ctx.state.manifest.bundles)
-    .filter(([, entry]) => entry.feature === feature && entry.tier === "feature")
-    .map(([name]) => name);
+  if (state.featureIndex?.manifest !== state.manifest) {
+    state.featureIndex = { manifest: state.manifest, byFeature: indexFeatures(state.manifest) };
+  }
+
+  return state.featureIndex.byFeature.get(feature) ?? NO_NAMES;
 }
 
 /**
@@ -73,7 +103,7 @@ function committedState(ctx: AssetsCtx): SceneState {
 function sceneNames(ctx: AssetsCtx, id: string, state: SceneState): readonly string[] {
   const scene = ctx.state.scenes.get(id);
 
-  return scene === undefined ? [] : namedBundles(scene, state);
+  return scene === undefined ? NO_NAMES : namedBundles(scene, state, ctx.state.namedMemo);
 }
 
 /**

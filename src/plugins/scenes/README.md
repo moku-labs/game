@@ -90,7 +90,7 @@ export const wardScene = defineScene("ward", {
 });
 ```
 
-`bundles` is pure and cheap: it runs at every node of the scene. A throw rejects the node, so `flow` rolls it back with the world untouched. A result that is not a list of names throws:
+`bundles` is pure and cheap, and reads nothing but the state it gets: the engine asks each scene once per committed state and reuses the answer until a commit replaces `player` or `session` (the switch, the re-read and the progress table share one memo; the look-ahead of `assets` keeps its own). A throw is never kept: the next node asks again. A throw rejects the node, so `flow` rolls it back with the world untouched. A result that is not a list of names throws:
 
 ```
 [game] Scene "ward": bundles() must return a list of bundle names.

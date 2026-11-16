@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isSceneDefinition, namedBundles } from "../../bundles";
-import type { SceneDefinition, SceneState } from "../../types";
+import type { NamedMemo, SceneDefinition, SceneState } from "../../types";
 
 /**
  * Builds a scene declaration the way `defineScene` returns it, with an optional `bundles`.
@@ -70,6 +70,70 @@ describe("namedBundles", () => {
 
     expect(() => namedBundles(notAList, ep01)).toThrow(message);
     expect(() => namedBundles(notNames, ep01)).toThrow(message);
+  });
+});
+
+/**
+ * A scene that counts how often it was asked.
+ *
+ * @returns The scene and the count.
+ */
+function counted(): { scene: SceneDefinition; asked: { count: number } } {
+  const asked = { count: 0 };
+  const scene = sceneOf(state => {
+    asked.count += 1;
+
+    return [episodeOf(state)];
+  });
+
+  return { scene, asked };
+}
+
+describe("namedBundles with a memo (F194)", () => {
+  // Bug: every rest asks every scene of the look-ahead again, with the same committed state (F194: the ward's
+  // `bundles` built hundreds of MB of rows a minute while windows opened and closed).
+  it("asks a scene once while the committed trees stay the same", () => {
+    const { scene, asked } = counted();
+    const memo = new WeakMap<SceneDefinition, NamedMemo>();
+    const first = namedBundles(scene, { ...ep01 }, memo);
+
+    expect(namedBundles(scene, { ...ep01 }, memo)).toBe(first);
+    expect(first).toEqual(["location", "ep01"]);
+    expect(asked.count).toBe(1);
+  });
+
+  // Bug: the memo answers the old list after a commit replaced the session.
+  it("asks again once a commit replaced the session or the player", () => {
+    const { scene, asked } = counted();
+    const memo = new WeakMap<SceneDefinition, NamedMemo>();
+    const player = {};
+
+    namedBundles(scene, { player, session: { episode: "ep01" } }, memo);
+
+    expect(namedBundles(scene, { player, session: { episode: "ep02" } }, memo)).toEqual([
+      "location",
+      "ep02"
+    ]);
+    namedBundles(scene, { player: {}, session: { episode: "ep02" } }, memo);
+    expect(asked.count).toBe(3);
+  });
+
+  // Bug: a hot swap's new declaration of the same scene id reads the old declaration's answer.
+  it("keeps the answer of each declaration apart", () => {
+    const memo = new WeakMap<SceneDefinition, NamedMemo>();
+    const old = sceneOf(() => ["ep01"]);
+    const swapped = sceneOf(() => ["ep02"]);
+
+    namedBundles(old, ep01, memo);
+
+    expect(namedBundles(swapped, ep01, memo)).toEqual(["location", "ep02"]);
+  });
+
+  // Bug: a cached list is handed out writable, and one caller's edit changes what the next one reads.
+  it("hands out a frozen list", () => {
+    const { scene } = counted();
+
+    expect(Object.isFrozen(namedBundles(scene, ep01, new WeakMap()))).toBe(true);
   });
 });
 
