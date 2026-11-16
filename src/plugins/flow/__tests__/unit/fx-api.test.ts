@@ -921,7 +921,7 @@ describe("completion order", () => {
     const { api } = setup({ running: true });
     const done = vi.fn();
 
-    api.handle("play", () => "value");
+    api.handle("play", () => Promise.resolve("value"));
     api.run({ kind: "play" }, signal()).then(done);
     await tick();
 
@@ -944,6 +944,73 @@ describe("completion order", () => {
     await tick();
 
     expect(done).toHaveBeenCalledOnce();
+  });
+
+  // Bug (F203): `ready` answered `true` at once, but the node went on in the next `signals` phase: a window that asks
+  // before its commit was drawn a frame late.
+  it("resolves a synchronous answer at once while the frame loop runs, with no signals phase", async () => {
+    const { api } = setup({ running: true });
+    const done = vi.fn();
+
+    api.handle("ready", () => true);
+    api.run({ kind: "ready" }, signal()).then(done);
+    await tick();
+
+    expect(done).toHaveBeenCalledWith(true);
+  });
+
+  it("resolves a missing handler at once while the frame loop runs", async () => {
+    const { api } = setup({ running: true });
+    const done = vi.fn();
+
+    api.run({ kind: "nobody" }, signal()).then(done);
+    await tick();
+
+    expect(done).toHaveBeenCalledWith(undefined);
+  });
+
+  it("rejects a synchronous throw at once while the frame loop runs", async () => {
+    const { api } = setup({ running: true });
+
+    api.handle("ready", () => {
+      throw new Error("no manifest");
+    });
+
+    await expect(api.run({ kind: "ready" }, signal())).rejects.toThrow("no manifest");
+  });
+
+  it("resolves a cosmetic synchronous throw at once with undefined", async () => {
+    const { api } = setup({ running: true });
+
+    api.handle("sfx", () => {
+      throw new Error("no audio");
+    });
+
+    await expect(api.run({ kind: "sfx", cosmetic: true }, signal())).resolves.toBeUndefined();
+  });
+
+  // Guard of the start order: a synchronous answer behind a queued effect waits for the same `signals` phase.
+  it("queues a synchronous answer behind an effect started earlier", async () => {
+    const { api } = setup({ running: true });
+    const order: string[] = [];
+    const { promise, resolve } = Promise.withResolvers<string>();
+
+    api.handle("slow", () => promise);
+    api.handle("quick", () => "quick");
+
+    const first = api.run({ kind: "slow" }, signal()).then(() => order.push("slow"));
+    const second = api.run({ kind: "quick" }, signal()).then(() => order.push("quick"));
+
+    await tick();
+
+    expect(order).toEqual([]);
+
+    resolve("slow");
+    await tick();
+    api.flushSettled();
+    await Promise.all([first, second]);
+
+    expect(order).toEqual(["slow", "quick"]);
   });
 
   it("resolves two completions of one frame in start order", async () => {
