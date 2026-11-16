@@ -742,7 +742,7 @@ export function createReconciler(
     forgetSubtree,
     despawnTree
   });
-  const parts = createParts(ctx, { diffChildren, applyElement, isMoving: range.isMoving });
+  const parts = createParts(ctx, { enterChildren, applyElement, isMoving: range.isMoving });
   // The reconciler's per-frame scratch, kept so an idle frame allocates nothing: the roots to
   // reconcile, the scroll containers, the roots whose slot changed in this solve, the roots still
   // waiting in it, the viewport box, what the slots were last assigned for, and the layer list
@@ -937,7 +937,8 @@ export function createReconciler(
 
     // Past the frame's budget a root built aside makes the element and leaves its children for a
     // later frame (spec 33 A2).
-    if (aside && parts.parks() && nodes.length > 0) parts.park(root, element, nodes, instance);
+    if (aside && parts.parks() && nodes.length > 0) parts.park(root, element, nodes, instance, 0);
+    else if (aside) enterChildren(root, element, nodes, instance, 0);
     else diffChildren(root, element, nodes, instance);
 
     root.needsSolve = true;
@@ -989,10 +990,13 @@ export function createReconciler(
    *
    * @param parent - The element whose children were diffed.
    * @param next - Its children of this render, in markup order.
+   * @param start - The first child whose place may have changed: 0, or the first one the rest of a
+   *   list made in parts added.
    */
-  function placeChildren(parent: Element, next: readonly Entity[]): void {
-    for (const [index, entity] of next.entries()) {
-      const element = state.elements.get(entity);
+  function placeChildren(parent: Element, next: readonly Entity[], start = 0): void {
+    for (let index = start; index < next.length; index += 1) {
+      const entity = next[index];
+      const element = entity === undefined ? undefined : state.elements.get(entity);
 
       if (element === undefined || element.index === index) continue;
 
@@ -1608,6 +1612,70 @@ export function createReconciler(
     modules.layout.place(
       parent,
       next.map(entity => state.elements.get(entity)).filter(element => isElement(element))
+    );
+    root.needsSolve = true;
+  }
+
+  /**
+   * Makes the children of a new element of a root built aside from the node at `from` on, after the
+   * ones made before, and places only those it made: the ones before keep their places and their
+   * Yoga nodes. While the root is built aside the rest of the list waits in its queue once the
+   * frame's budget is spent (F201: a shop's track of 120 cards was made in one frame past its
+   * budget); the first child of a call is always made, so a list always moves. A root shown
+   * meanwhile makes the rest at once. A new element has no old children to leave, so nothing leaves
+   * here.
+   *
+   * @param root - The root built aside, or shown while its parts waited.
+   * @param parent - The new element whose children are made.
+   * @param nodes - Its children of the render it entered with.
+   * @param instance - The identity of the nearest component instance.
+   * @param from - The first node not made yet.
+   */
+  function enterChildren(
+    root: Root,
+    parent: Element,
+    nodes: readonly DescriptionNode[],
+    instance: string | undefined,
+    from: number
+  ): void {
+    if (from >= nodes.length) return;
+
+    const aside = isAside(root.entity);
+    const start = parent.children.length;
+    const next = [...parent.children];
+
+    for (let index = from; index < nodes.length; index += 1) {
+      const node = nodes[index];
+
+      if (node === undefined) continue;
+
+      if (index > from && aside && parts.stops()) {
+        parts.park(root, parent, nodes, instance, index);
+        break;
+      }
+
+      const entity = diffNode(
+        root,
+        parent,
+        node,
+        index,
+        identityOf(parent.identity, node, index),
+        instance
+      );
+
+      if (entity !== undefined) next.push(entity);
+    }
+
+    if (next.length === start) return;
+
+    parent.children = next;
+    placeChildren(parent, next, start);
+    modules.layout.append(
+      parent,
+      next
+        .slice(start)
+        .map(entity => state.elements.get(entity))
+        .filter(element => isElement(element))
     );
     root.needsSolve = true;
   }

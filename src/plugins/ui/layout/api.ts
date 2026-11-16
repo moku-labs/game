@@ -27,7 +27,7 @@ import {
   startLoop,
   writeRest
 } from "./motion";
-import { createNode, freeNode, placeChildren } from "./nodes";
+import { appendChildren, createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
 import { clampScroll, scrollTo, settleScroll, stepScroll, stopsOf } from "./scroll";
 import { contentRectOf, solveRoot } from "./solve";
@@ -120,6 +120,9 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     place: (parent: Element, children: readonly Element[]): void =>
       placeChildren(state, parent, children),
+
+    append: (parent: Element, children: readonly Element[]): void =>
+      appendChildren(state, parent, children),
 
     free: (element: Element): void => freeNode(state, element),
 

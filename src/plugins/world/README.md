@@ -372,7 +372,12 @@ export const settingsSheet = projection({
   `left()` is `Infinity` through the pause and no frame is asked for it; it is built again once the
   world is live. The budget
   is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`; work
-  that starts wakes the loop. At rest the step reads two fields and returns: 0 B a frame
+  that starts wakes the loop. The spawn of a view is the game's `view` call plus one entity and
+  cannot be split; what `ui` makes of it is split by its budget (the ui README, "By part"), so after
+  the budget is spent at most 8 more elements, then the rest of the child list of a new element
+  waits for the next frame. A patch of a held view with a new item still makes the new rows of a
+  list that was there before in one frame.
+  At rest the step reads two fields and returns: 0 B a frame
   (`__tests__/perf/warm.perf.ts`).
 - **The open.** When `from` shows the key, the reconcile shows the held view instead of a spawn: the
   same entity, out of the held set, into the live views. An item with the content of the warm one

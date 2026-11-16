@@ -105,28 +105,28 @@ function harness() {
     log: { error },
     deps: { world: { projection: { left: () => 0, isBuilding: () => true } } }
   } as unknown as UiCtx;
-  const diffChildren = vi.fn<PartsReconcile["diffChildren"]>();
-  const parts = createParts(ctx, { diffChildren, applyElement: vi.fn(), isMoving: () => false });
+  const enterChildren = vi.fn<PartsReconcile["enterChildren"]>();
+  const parts = createParts(ctx, { enterChildren, applyElement: vi.fn(), isMoving: () => false });
   const root = rootOf();
 
   jsx.roots.set(ROOT, root);
   jsx.asideRoots = 1;
 
-  return { parts, jsx, root, diffChildren, error };
+  return { parts, jsx, root, enterChildren, error };
 }
 
 describe("a parked part whose element left before it ran", () => {
   // Bug: the part of an element its parent's newer render dropped is diffed all the same: its
   // children are made under a despawned parent, and the frame's first unit goes to nothing.
   it("is dropped without a diff, and the next part takes the frame's first unit", () => {
-    const { parts, jsx, root, diffChildren, error } = harness();
+    const { parts, jsx, root, enterChildren, error } = harness();
     const gone = elementOf(2);
     const kept = elementOf(3);
 
     jsx.elements.set(gone.entity, gone);
     jsx.elements.set(kept.entity, kept);
-    parts.park(root, gone, NODES, undefined);
-    parts.park(root, kept, NODES, undefined);
+    parts.park(root, gone, NODES, undefined, 0);
+    parts.park(root, kept, NODES, undefined, 0);
 
     // Its parent rendered again without it: `dropElement` forgot it.
     jsx.elements.delete(gone.entity);
@@ -134,7 +134,7 @@ describe("a parked part whose element left before it ran", () => {
     parts.beginReconcile();
     expect(() => parts.drainParked()).not.toThrow();
 
-    expect(diffChildren.mock.calls.map(call => call[1])).toEqual([kept]);
+    expect(enterChildren.mock.calls.map(call => call[1])).toEqual([kept]);
     expect(error).not.toHaveBeenCalled();
     expect(root.parked).toEqual([]);
     expect(parts.waits(root)).toBe(false);

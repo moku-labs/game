@@ -341,7 +341,8 @@ describe("a scene built in parts", () => {
     const solves = counters.solves;
     const frames: Array<{ made: number; solves: number }> = [];
 
-    parts.build(["parts.big"], 3);
+    // A budget of 0: every part spends it, the last one too, however the parts fall (F201 split long lists).
+    parts.build(["parts.big"], 0);
 
     while (!parts.built() && frames.length < 200) {
       parts.frame();
@@ -454,15 +455,17 @@ describe("a scene built in parts", () => {
     const renders = counters.windowRenders;
     const waited: Array<{ tall: boolean; made: number; renders: number }> = [];
 
-    // A budget of 0: the solve waits for the next frame (F61), then the first application stops after 8 elements, the
-    // list live among them.
+    // A budget of 0: the rest of the root's leaves waits a frame (F201), the solve waits for the next frame (F61), then
+    // the first application stops after 8 elements, the list live among them.
     parts.build(["parts.listed"], 0);
-    clock.frame = 1;
-    parts.frame();
-    clock.frame = 2;
-    parts.frame();
+
+    while (marked(parts, "tall") === undefined && clock.frame < 10) {
+      clock.frame += 1;
+      parts.frame();
+    }
 
     expect(marked(parts, "tall")).toBeDefined();
+    expect(parts.built()).toBe(false);
     expect(parts.app.flow.gate.answer({ intent: "more" })).toBe(true);
     await settle();
 

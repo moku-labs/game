@@ -2,9 +2,10 @@
  * @file ui/jsx — a scene build in parts (spec 33, slice A): a root built aside is diffed by root
  * and by part under the frame's budget, laid out once, and applied in parts. The budget is
  * `world.projection.left()`, finite only while a build runs. The first building unit of a frame (a
- * root, a parked part, a part of an application) always runs, so a build always moves. A root held
- * warm (slice B+D) is built the same way, and one shown before its parts were done finishes in one
- * block. The reconcile owns the diff and the application of one element and lends them in.
+ * root, a parked part, a part of an application) always runs, so a build always moves. Past the
+ * budget the rest of a long child list of a new element waits too (F201). A root held warm (slice
+ * B+D) is built the same way, and one shown before its parts were done finishes in one block. The
+ * reconcile owns the diff and the application of one element and lends them in.
  */
 import type { Entity } from "../../world/types";
 import { asError } from "../errors";
@@ -28,16 +29,17 @@ const APPLY_CAP = 100;
 const NO_NODES: readonly DescriptionNode[] = [];
 
 /**
- * What a build in parts borrows from the reconcile it belongs to: the diff of the children of one
- * element, the application of one element, and whether the range of a windowed scroll is moving.
+ * What a build in parts borrows from the reconcile it belongs to: the making of the children of a
+ * new element, the application of one element, and whether the range of a windowed scroll is moving.
  */
 export type PartsReconcile = {
-  /** Diffs the children of one element against the nodes of this render. */
-  diffChildren(
+  /** Makes the children of a new element from the node at `from` on, after the ones made before. */
+  enterChildren(
     root: Root,
     parent: Element,
     nodes: readonly DescriptionNode[],
-    instance: string | undefined
+    instance: string | undefined,
+    from: number
   ): void;
   /** Applies the solved rect of one element: a live one moves, a new one spawns its components. */
   applyElement(element: Element, quiet: boolean): void;
@@ -89,11 +91,12 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
 
   // Since the start of the reconcile: the elements entered for roots built aside, whether the budget
-  // was read spent, and whether a building unit ran. Since the start of the solve: the elements
-  // applied in parts, and whether an application ended. The parked parts and the cursors are pooled:
-  // a build allocates them once.
+  // was read spent and at which of them, and whether a building unit ran. Since the start of the
+  // solve: the elements applied in parts, and whether an application ended. The parked parts and
+  // the cursors are pooled: a build allocates them once.
   let entered = 0;
   let spent = false;
+  let spentFrom = 0;
   let unitRan = false;
   let applied = 0;
   let landed = false;
@@ -171,34 +174,54 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
     if (reconcile.isMoving()) return false;
 
     entered += 1;
-    if (!spent) spent = spentAt(entered);
+
+    if (!spent) {
+      spent = spentAt(entered);
+      spentFrom = entered;
+    }
 
     return spent;
   }
 
   /**
-   * Leaves the children of a new element of a root built aside for a later frame: the element
-   * itself exists, so the child list of its parent is complete. The part is queued behind the
-   * root's other parts, with the cause of the diff running now.
+   * Tells whether the rest of a child list of a root built aside waits for a later frame: once the
+   * budget was read spent, `CLOCK_EVERY` more elements are made, so a short list ends, and then the
+   * rest of every list in work waits (F201: the 120 cards of a shop's track were made in one frame
+   * past its budget). A row a range change scrolls in never waits: the range step runs before any
+   * root of the frame is diffed, and `parks` reads no budget while it moves.
+   *
+   * @returns True when the next child of the list waits.
+   */
+  function stops(): boolean {
+    return spent && entered - spentFrom >= CLOCK_EVERY;
+  }
+
+  /**
+   * Leaves the children of a new element of a root built aside for a later frame, from the node at
+   * `from` on: all of them, or the rest of a list past the budget. The children made before stay.
+   * The part is queued behind the root's other parts, with the cause of the diff running now.
    *
    * @param root - The root built aside.
    * @param element - The element that entered.
    * @param nodes - The children it would have diffed.
    * @param instance - The identity of the nearest component instance.
+   * @param from - The first node that waits.
    */
   function park(
     root: Root,
     element: Element,
     nodes: readonly DescriptionNode[],
-    instance: string | undefined
+    instance: string | undefined,
+    from: number
   ): void {
     const cause = state.building;
-    const part = parkedPool.pop() ?? { element, nodes, instance, cause };
+    const part = parkedPool.pop() ?? { element, nodes, instance, cause, from };
 
     part.element = element;
     part.nodes = nodes;
     part.instance = instance;
     part.cause = cause;
+    part.from = from;
     root.parked ??= [];
     root.parked.push(part);
     track(root);
@@ -243,7 +266,7 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
     state.building = part.cause;
 
     try {
-      reconcile.diffChildren(root, element, part.nodes, part.instance);
+      reconcile.enterChildren(root, element, part.nodes, part.instance, part.from);
     } catch (error) {
       ctx.log.error("ui:root-failed", { root: root.name }, asError(error));
     } finally {
@@ -475,6 +498,7 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
     beginSolve,
     hasLanded,
     parks,
+    stops,
     park,
     waits,
     working,

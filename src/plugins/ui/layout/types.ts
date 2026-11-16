@@ -160,6 +160,8 @@ export type LayoutModule = {
   markMeasured(element: Element): void;
   affectsRect(first: ResolvedStyle, second: ResolvedStyle): boolean;
   place(parent: Element, children: readonly Element[]): void;
+  /** Puts new children after the ones the parent's node holds, without touching those. */
+  append(parent: Element, children: readonly Element[]): void;
   free(element: Element): void;
   solve(rootElement: Element, size: Rect, lookup: ElementLookup): boolean;
   /**
