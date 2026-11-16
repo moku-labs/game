@@ -5,8 +5,10 @@
  * control guard for a route or raw write), so a bundler `define` of `false` drops it, and logs
  * the `moku:dev` marker.
  */
+import type { Api as AssetsApi } from "../assets/types";
 import type { Json, Snapshot, StoreApi } from "../model/types";
-import type { ScenesApi } from "../scenes/types";
+import { isSceneDefinition, namedBundles } from "../scenes/bundles";
+import type { SceneDefinition, SceneState, ScenesApi } from "../scenes/types";
 import { defineCommand, inputSchema } from "./doors/define";
 import { controlRefused } from "./doors/dev";
 import type { ControlApp } from "./doors/types";
@@ -18,15 +20,101 @@ import type { Bookmark, FlowState } from "./types";
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
 const noPayload: Json = null;
 
-/** An app that may carry the screen plugins: the doors read and set its scene when it has one. */
-type SceneApp = { readonly scenes?: ScenesApi };
+/**
+ * An app that may carry the screen plugins: the doors read and set its scene, and load what it
+ * names, when it has them.
+ */
+type SceneApp = {
+  readonly scenes?: ScenesApi;
+  readonly assets?: Pick<AssetsApi, "load" | "sceneComing">;
+};
 
 /** What the save commands need of an app: the control app, its scenes when it has them, the store. */
 type SaveApp = ControlApp &
-  SceneApp & { readonly model: { readonly store: Pick<StoreApi, "snapshot" | "flush"> } };
+  SceneApp & {
+    readonly model: { readonly store: Pick<StoreApi, "snapshot" | "flush" | "schemaVersion"> };
+  };
 
-/** The three trees of a save, as `game.saveExport` answers them and `game.saveImport` takes them. */
-type SaveTrees = { player: Json; session: Json; rng: Json };
+/**
+ * The three trees of a save, as `game.saveExport` answers them and `game.saveImport` takes them,
+ * and the schema version they were written at; an export of an older engine has none.
+ */
+type SaveTrees = { player: Json; session: Json; rng: Json; version?: number };
+
+/**
+ * Asks a scene what it names for a state. A scene whose `bundles` throws for that state names only
+ * its own bundle here: the `scene` stage of the restored node meets the throw itself.
+ *
+ * @param scene - The scene declaration.
+ * @param state - The player and session of the bookmark, frozen.
+ * @returns The bundle names, the scene bundle first.
+ */
+function namedOrOwn(scene: SceneDefinition, state: SceneState): readonly string[] {
+  try {
+    return namedBundles(scene, state);
+  } catch {
+    // The stage of the restored node throws it again, where flow rolls the node back.
+    return [scene.bundle];
+  }
+}
+
+/**
+ * Lists the bundles the mounted scene and the bookmark's scene name for the bookmark's state.
+ *
+ * @param app - The app with the screen plugins.
+ * @param bookmark - The bookmark about to be entered.
+ * @returns The bundle names, each once.
+ */
+function bundlesFor(app: HeadlessApp & SceneApp, bookmark: Bookmark): string[] {
+  const wanted = new Set([app.scenes?.current(), bookmark.scene]);
+  const state = Object.freeze({ player: bookmark.player, session: bookmark.session });
+  const names = new Set<string>();
+
+  for (const feature of app.flow.features.all()) {
+    const list: unknown = feature.description.scenes;
+    const scenes = Array.isArray(list) ? list.filter(entry => isSceneDefinition(entry)) : [];
+
+    for (const scene of scenes) {
+      if (wanted.has(scene.id)) for (const name of namedOrOwn(scene, state)) names.add(name);
+    }
+  }
+
+  return [...names];
+}
+
+/**
+ * Loads what the mounted scene and the bookmark's scene name for the bookmark's state, before the
+ * state lands (F199). The mounted scene stays on screen through a restore, and its views read the
+ * committed state at once: a state that landed first would be drawn from bundles nobody loaded.
+ * The names are held as a coming scene's while they load, so no release at the next rest lets
+ * them go before the restored node's `scene` stage names them; the next list of a mounted scene
+ * ends that hold.
+ *
+ * @param app - The app; without `assets` or a mounted scene, nothing is loaded.
+ * @param bookmark - The bookmark about to be entered.
+ * @returns A promise that resolves once every named bundle is in.
+ * @throws {Error} What a load rejected with: the restore is refused before the state changes.
+ */
+async function loadBundlesFor(app: HeadlessApp & SceneApp, bookmark: Bookmark): Promise<void> {
+  const assets = app.assets;
+
+  if (assets === undefined || app.scenes === undefined) return;
+
+  const names = bundlesFor(app, bookmark);
+
+  if (names.length === 0) return;
+
+  assets.sceneComing(names);
+
+  try {
+    for (const name of names) await assets.load(name);
+  } catch (error) {
+    // Nothing lands: the hold ends with the refused restore.
+    assets.sceneComing([]);
+
+    throw error;
+  }
+}
 
 /**
  * Restores a bookmark with its `scene` expected first, so the node the restore enters mounts it.
@@ -40,6 +128,8 @@ type SaveTrees = { player: Json; session: Json; rng: Json };
  */
 async function restoreWithScene(app: HeadlessApp & SceneApp, bookmark: Bookmark): Promise<void> {
   const mounted = app.scenes?.current();
+
+  await loadBundlesFor(app, bookmark);
 
   if (bookmark.scene !== undefined) app.scenes?.expect(bookmark.scene);
 
@@ -97,22 +187,31 @@ async function restoreFrom(
 }
 
 /**
- * Reads the save `game.saveImport` got: an object with the three trees of `game.saveExport`.
+ * Reads the save `game.saveImport` got: an object with the three trees of `game.saveExport`, and
+ * its schema version when it has one.
  *
  * @param save - The JSON the editor sent.
- * @returns The player, the session and the rng.
- * @throws {Error} When it is not an object with `player`, `session` and `rng`.
+ * @returns The player, the session, the rng and the version.
+ * @throws {Error} When it is not an object with `player`, `session` and `rng`, or when its
+ *   `version` is not a whole number.
  * @example
  * ```ts
- * readSave({ player: { coins: 40 }, session: {}, rng: { seed: 42, streams: {} } }).player; // { coins: 40 }
+ * readSave({ player: { coins: 40 }, session: {}, rng: { seed: 42, streams: {} }, version: 2 }).version; // 2
  * ```
  */
 function readSave(save: Json): SaveTrees {
   if (typeof save === "object" && save !== null && !Array.isArray(save)) {
-    const { player, session, rng } = save;
+    const { player, session, rng, version } = save;
+    const hasTrees = player !== undefined && session !== undefined && rng !== undefined;
 
-    if (player !== undefined && session !== undefined && rng !== undefined) {
-      return { player, session, rng };
+    if (hasTrees && version === undefined) return { player, session, rng };
+    if (hasTrees && Number.isInteger(version)) {
+      return { player, session, rng, version: version as number };
+    }
+    if (hasTrees) {
+      throw new Error(
+        "[game] game.saveImport takes a whole-number version of game.saveExport.\n  Export the save again, or leave version out."
+      );
     }
   }
 
@@ -281,12 +380,13 @@ export const restoreCommand = defineCommand({
 
 /**
  * Answers the committed state as the save holds it: the player, the session and the rng, plain
- * JSON. A read: it runs on a `--debug=read` page too, so a tester's progress can leave the store app.
+ * JSON, and the schema `version` this build writes, so an import into a later build migrates it.
+ * A read: it runs on a `--debug=read` page too, so a tester's progress can leave the store app.
  *
  * @example
  * ```ts
- * // The editor takes the tester's progress from the store app on the phone.
- * (await run(app, commands.saveExport, {})).value; // { player: { coins: 40, … }, session: { … }, rng: { seed: 42, streams: {} } }
+ * // The editor takes the tester's progress from the store app on the phone, a build on schema 37.
+ * (await run(app, commands.saveExport, {})).value; // { player: { coins: 40, … }, session: { … }, rng: { seed: 42, streams: {} }, version: 37 }
  * ```
  */
 export const saveExportCommand = defineCommand({
@@ -294,7 +394,7 @@ export const saveExportCommand = defineCommand({
   title: "Export the save",
   input: {},
   effect: "read",
-  run: (app: SaveApp): Snapshot => {
+  run: (app: SaveApp): Snapshot & { version: number } => {
     if (
       (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
       (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
@@ -306,20 +406,24 @@ export const saveExportCommand = defineCommand({
 
     const { player, session, rng } = app.model.store.snapshot();
 
-    return { player, session, rng };
+    return { player, session, rng, version: app.model.store.schemaVersion() };
   }
 });
 
 /**
  * Puts a save of `game.saveExport` in place and writes it, so the next start of the app reads it:
  * the trees are restored at the main flow's start, and the game lands where a fresh start with
- * them lands. A start that is a rest node is entered; a transit node runs again on the imported
- * trees, rng included, up to the first gate it opens, at a rest node or a popup. Then the store
- * flushes. Replaces the state outside the graph, so the session is tainted and the
+ * them lands. A save of an older schema `version` runs through the game's migrations first; one
+ * without a version is taken as this build's. A start that is a rest node is entered; a transit
+ * node runs again on the imported trees, rng included, up to the first gate it opens, at a rest
+ * node or a popup. Then the store flushes. Replaces the state outside the graph, so the session is tainted and the
  * command journaled. A `--debug=read` page refuses it; a `--debug` page and the dev page run it.
  *
  * @throws {Error} `[game] game.saveImport needs { player, session, rng } of game.saveExport.` for
- *   a value without the three trees.
+ *   a value without the three trees, and `[game] game.saveImport takes a whole-number version …`
+ *   for a version that is not one.
+ * @throws {SaveUnreadableError} For a save of a newer schema, or one no migration step leads away
+ *   from: nothing is restored, and the game stays where it stood.
  * @example
  * ```ts
  * // The debug app beside the store app gets the save exported from the store app. Its main
@@ -327,6 +431,9 @@ export const saveExportCommand = defineCommand({
  * const ran = await run(app, commands.saveImport, { save: exported });
  * ran.value; // { restored: true }
  * ran.state.path; // "home"
+ *
+ * // The export came from a build on schema 39, this one writes 38: refused, nothing moves.
+ * await run(app, commands.saveImport, { save: { ...exported, version: 39 } }); // throws SaveUnreadableError
  * ```
  */
 export const saveImportCommand = defineCommand({

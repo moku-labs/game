@@ -1039,6 +1039,12 @@ export type LoopSeam = {
    * that ends first never takes it, so the restore that waits drops its own.
    */
   restoring: Bookmark | undefined;
+  /**
+   * Rejects the restore that waits for `restoring`, when the loop cannot take it: the store
+   * refused its trees (a save of a newer schema, or a missing migration step). The loop stays at
+   * the node it stood on, with the state it had.
+   */
+  refuse?: ((error: unknown) => void) | undefined;
 };
 
 /**

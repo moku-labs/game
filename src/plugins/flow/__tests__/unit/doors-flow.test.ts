@@ -475,6 +475,7 @@ const withStore = (fake: DoorsFake) => {
   };
   const store = {
     snapshot: fake.app.model.store.snapshot,
+    schemaVersion: (): number => 1,
     flush: async (): Promise<void> => {
       calls.push("flush");
     }
@@ -504,7 +505,8 @@ describe("the save transfer", () => {
     expect(ran.value).toEqual({
       player: { coins: 40 },
       session: {},
-      rng: { seed: 1, streams: {} }
+      rng: { seed: 1, streams: {} },
+      version: 1
     });
     expect(ran.state.tainted).toBe(false);
   });
