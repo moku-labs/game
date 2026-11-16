@@ -117,6 +117,7 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     membershipVersion: projection.membershipVersion,
     causeOf: projection.causeOf,
     motionsOf: projection.motionsOf,
+    motionIdsOf: projection.motionIdsOf,
     entityOf: projection.entityOf,
     entitiesOf: projection.entitiesOf,
     setDriver: projection.setDriver,

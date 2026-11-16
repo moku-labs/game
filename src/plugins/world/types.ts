@@ -143,6 +143,8 @@ export type ModelCommitted = ModelEvents["model:committed"];
  *   skipped: ["Display"],
  *   motions: ["Transform"]
  * };
+ * // The same item, when its enter motion was defined with the id "board.item" (its enter track is labelled "board.item.enter"):
+ * const entering: Explained = { ...sliding, motionIds: ["board.item.enter"] };
  * ```
  */
 export type Explained = {
@@ -156,6 +158,11 @@ export type Explained = {
   skipped: string[];
   /** `projection.motionsOf`: the components a running track drives, in start order. */
   motions: readonly string[];
+  /**
+   * `projection.motionIdsOf`: the labels of the running tracks, in start order. Absent when none
+   * runs or no track carries a label, so a game without `defineMotion` ids answers as before.
+   */
+  motionIds?: readonly string[];
 };
 
 /**

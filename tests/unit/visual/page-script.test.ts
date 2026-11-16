@@ -36,6 +36,8 @@ afterEach(async () => {
   for (const stop of stops) await stop();
   stops = [];
   vi.unstubAllGlobals();
+  // A page loads fresh for every run: the check's read mark never outlives its page.
+  Reflect.deleteProperty(globalThis, "__mokuVisualTrace");
 });
 
 /**
@@ -457,6 +459,26 @@ describe("the check of skipped frames", () => {
     expect(await pageVerify({ test: "open-popup", where: "the start" })).toEqual({
       ok: false,
       reason: 'effects:broken {"filter":"effects.glow","reason":"apply"}'
+    });
+  });
+
+  // Bug: the log keeps only its newest lines (@moku-labs/common, F194): a cursor that counts lines stops growing once
+  // the oldest are dropped, and every line after it is never read.
+  it("fails the step on a missed frame logged after the oldest lines were dropped", async () => {
+    const { app } = await pageGame();
+    const trace = app.log.trace.bind(app.log);
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    for (let line = 0; line < 30; line += 1) app.log.info("game:early", { line });
+    await pageVerify({ test: "open-popup", where: "the start" });
+    for (let line = 0; line < 50; line += 1) app.log.info("game:line", { line });
+    app.log.warn("renderer:missed-frame", { frame: 4, pixels: 9, marked: [] });
+    // The trace keeps its newest 20 lines, as a full trace keeps its newest 1000.
+    vi.spyOn(app.log, "trace").mockImplementation(() => trace().slice(-20));
+
+    expect(await pageStep(restore)).toEqual({
+      ok: false,
+      reason: 'renderer:missed-frame {"frame":4,"pixels":9,"marked":[]}'
     });
   });
 

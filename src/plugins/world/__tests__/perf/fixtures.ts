@@ -315,7 +315,8 @@ export function sweepFixture(ending: number): () => void {
       component: "Transform",
       handle: ENDED,
       additive: false,
-      forever: false
+      forever: false,
+      label: undefined
     });
   }
 
@@ -328,6 +329,39 @@ export function sweepFixture(ending: number): () => void {
       if (track !== undefined) state.tracks.push(track);
     }
 
+    projection.sweep();
+  };
+}
+
+/**
+ * The sweep of phase `animate` over a mounted projection of 300 resting views while 50 tracks keep
+ * running on the track table. With `labelled`, every track carries a label (F192), as a track of
+ * a `defineMotion({ id })` motion does: the label is read by `motionIdsOf` only, so the frame
+ * must cost what it costs without one.
+ *
+ * @param labelled - Whether the running tracks carry a label.
+ * @returns One sweep.
+ */
+export function sweepRunningFixture(labelled: boolean): () => void {
+  const world = createMockWorld();
+
+  mountBoard(world, boardItems(ENTITIES));
+  world.frame(16);
+
+  const { projection } = stableModules(world);
+
+  for (let index = 0; index < 50; index += 1) {
+    world.ctx.state.projection.tracks.push({
+      entity: index,
+      component: "Transform",
+      handle: RUNNING,
+      additive: false,
+      forever: false,
+      label: labelled ? "board.item.enter" : undefined
+    });
+  }
+
+  return (): void => {
     projection.sweep();
   };
 }

@@ -400,7 +400,7 @@ function pageOracle(event: string | undefined): boolean {
 
 /**
  * Turns on the pixel check of the frames the renderer skips, through the door `game.debug`, and
- * starts reading the log of the page from its end: from here on, `pageMissed` fails a step on the
+ * starts reading the log of the page after its last line: from here on, `pageMissed` fails a step on the
  * first line of the frame oracles or of `pageBroke`. A `pageBroke` line the page logged while it
  * loaded, before the check, fails the start.
  *
@@ -415,7 +415,7 @@ export async function pageVerify(_argument: Place): Promise<PageAnswer<undefined
 
     const entries = game.log.trace();
 
-    Reflect.set(globalThis, "__mokuVisualTrace", entries.length);
+    Reflect.set(globalThis, "__mokuVisualTrace", { last: entries.at(-1) });
 
     for (const entry of entries) {
       if (pageBroke(entry.event)) {
@@ -437,13 +437,17 @@ export async function pageVerify(_argument: Place): Promise<PageAnswer<undefined
  * @returns The line, as its event and its data, or `undefined` when none was logged.
  */
 function pageMissed(handles: PageHandles): string | undefined {
-  const from: unknown = Reflect.get(globalThis, "__mokuVisualTrace");
+  const mark: unknown = Reflect.get(globalThis, "__mokuVisualTrace");
 
-  if (typeof from !== "number") return undefined;
+  if (typeof mark !== "object" || mark === null) return undefined;
 
+  const read = mark as { last: unknown };
   const entries = handles.game.log.trace();
+  // The last line read, found from the end: the log keeps only its newest lines (@moku-labs/common, F194), so a
+  // count would stop growing. A line dropped since is older than every line kept: then all of them are new.
+  const from = entries.lastIndexOf(read.last as (typeof entries)[number]) + 1;
 
-  Reflect.set(globalThis, "__mokuVisualTrace", entries.length);
+  read.last = entries.at(-1);
 
   for (let at = from; at < entries.length; at += 1) {
     const entry = entries[at];

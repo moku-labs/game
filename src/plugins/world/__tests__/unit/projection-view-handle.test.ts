@@ -215,6 +215,37 @@ describe("ViewHandle", () => {
     expect(world.driver.started.map(track => "reduced" in track.options)).toEqual([false, false]);
   });
 
+  it("hands the label of tween and toRest to the driver", () => {
+    const world = createMockWorld();
+    const probe = mountProbe(world);
+
+    probe.onChange(view => view.toRest(Transform, { ms: 100, label: "probe.rest" }));
+    probe.commit(40);
+    world.frame(16);
+    probe.onChange(view => view.tween(Transform, { y: 9 }, { ms: 100, label: "probe.tween" }));
+    probe.commit(80);
+    world.frame(16);
+
+    expect(world.driver.started.map(track => track.options.label)).toEqual([
+      "probe.rest",
+      "probe.tween"
+    ]);
+  });
+
+  it("leaves the label out of the driver options when the hook did", () => {
+    const world = createMockWorld();
+    const probe = mountProbe(world);
+
+    probe.onChange(view => view.toRest(Transform, { ms: 100 }));
+    probe.commit(40);
+    world.frame(16);
+    probe.onChange(view => view.tween(Transform, { y: 9 }, { ms: 100 }));
+    probe.commit(80);
+    world.frame(16);
+
+    expect(world.driver.started.map(track => "label" in track.options)).toEqual([false, false]);
+  });
+
   it("tween with no easing and no delay eases out from now", () => {
     const world = createMockWorld();
     const probe = mountProbe(world);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { sweepFixture } from "./fixtures";
+import { sweepFixture, sweepRunningFixture } from "./fixtures";
 
 describe("projection sweep: heap per frame", () => {
   it("a sweep over 300 resting views stays within budget", async ({ annotate }) => {
@@ -16,5 +16,16 @@ describe("projection sweep: heap per frame", () => {
 
     await annotate(`sweep, 10 tracks ending: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.sweepTracksEnding + NOISE_BYTES);
+  });
+
+  it("a sweep with 50 labelled tracks running allocates no more than with 50 unlabelled", async ({
+    annotate
+  }) => {
+    const unlabelled = alloc(sweepRunningFixture(false), 2000);
+    const labelled = alloc(sweepRunningFixture(true), 2000);
+
+    await annotate(`sweep, 50 running tracks: ${unlabelled} B unlabelled, ${labelled} B labelled`);
+    expect(labelled).toBeLessThanOrEqual(unlabelled + NOISE_BYTES);
+    expect(labelled).toBeLessThanOrEqual(BUDGET.sweepRunningLabelled + NOISE_BYTES);
   });
 });

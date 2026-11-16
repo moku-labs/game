@@ -131,7 +131,7 @@ describe("anim/timeline cursor", () => {
     ]);
   });
 
-  it("emits nothing when a timeline is cancelled", () => {
+  it("emits no mark and no finish when a timeline is cancelled, only its start and its cancel", () => {
     const mock = createMockAnim();
 
     mock.start();
@@ -143,7 +143,7 @@ describe("anim/timeline cursor", () => {
 
     handle.cancel();
 
-    expect(mock.emitted).toEqual([]);
+    expect(mock.emitted.map(entry => entry.name)).toEqual(["anim:started", "anim:cancelled"]);
     expect(handle.marks()).toEqual([]);
     expect(mock.api.active()).toBe(0);
   });

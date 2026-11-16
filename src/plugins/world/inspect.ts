@@ -80,8 +80,9 @@ export const projectionsSource = defineSource({
 
 /**
  * One entity in full: its owner, its projection key, every JSON component, the names of the
- * skipped ones and the components a motion still drives. `undefined` for a stale id. The source
- * reads the whole snapshot once per read and picks the row.
+ * skipped ones, the components a motion still drives and, when a running track carries a label,
+ * `motionIds`. `undefined` for a stale id. The source reads the whole snapshot once per read and
+ * picks the row.
  *
  * @example
  * ```ts
@@ -92,6 +93,14 @@ export const projectionsSource = defineSource({
  * //   components: { Transform: { x: 64, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
  * //     Layer: { name: "items" } }, skipped: [], motions: ["Transform"] }
  * read(app, sources.explain, { entity: 42 }); // undefined: a stale id
+ *
+ * // The same item mid-enter of a motion defined with the id "board.item":
+ * read(app, sources.explain, { entity: 1048577 });
+ * // { id: 1048577, owner: { kind: "projection", name: "board.items" },
+ * //   key: { projection: "board.items", key: "i7" },
+ * //   components: { Transform: { x: 32, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
+ * //     Layer: { name: "items" } }, skipped: ["Display"],
+ * //   motions: ["Transform"], motionIds: ["board.item.enter"] }
  * ```
  */
 export const explainSource = defineSource({
@@ -104,13 +113,16 @@ export const explainSource = defineSource({
 
     if (row === undefined) return undefined;
 
+    const motionIds = app.world.projection.motionIdsOf(row.id);
+
     return {
       id: row.id,
       owner: row.owner,
       key: app.world.projection.keyOf(row.id),
       components: row.components,
       skipped: row.skipped,
-      motions: app.world.projection.motionsOf(row.id)
+      motions: app.world.projection.motionsOf(row.id),
+      ...(motionIds.length === 0 ? {} : { motionIds })
     };
   }
 });

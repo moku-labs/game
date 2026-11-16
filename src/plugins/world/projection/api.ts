@@ -7,7 +7,7 @@ import type { Root } from "../../model/types";
 import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
 import { buildNames, commitBuild, discardBuild } from "./build";
-import { cancelTracks, forgetEndedTracks, runningComponents } from "./driver";
+import { cancelTracks, forgetEndedTracks, runningComponents, runningLabels } from "./driver";
 import { feedName, holdNames, reconcileShown, showName } from "./hold";
 import {
   cancelHandles,
@@ -366,6 +366,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.byEntity.get(entity)?.cause ?? state.leaving.get(entity),
 
     motionsOf: (entity: Entity): readonly string[] => runningComponents(state.tracks, entity),
+
+    motionIdsOf: (entity: Entity): readonly string[] => runningLabels(state.tracks, entity),
 
     entityOf: (projection: string, key: string): Entity | undefined => {
       const entity =
