@@ -1556,18 +1556,20 @@ function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): voi
   const state = sctx.ctx.state.sync;
   const children = host.children;
   let orphans: Entity[] | undefined;
-
   let at = 0;
 
   while (at < children.length) {
-    const object = children[at];
-    const childView = object === undefined ? undefined : state.viewOfTop.get(object);
-    const child = childView === undefined ? undefined : state.entityOf.get(childView.object);
+    const child = childOf(state, children[at]);
 
-    if (object === undefined || child === undefined || child === entity) {
+    // Not a child: an object that tops no view, or the parent's own visual. It stays where it hangs.
+    if (child === undefined || child === entity) {
       at += 1;
       continue;
     }
+
+    const object = children[at];
+
+    if (object === undefined) break;
 
     markView(sctx, child);
     detach(object);
@@ -1584,6 +1586,19 @@ function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): voi
   if (orphans !== undefined) {
     sctx.ctx.log.warn("renderer: parent left before its children", { parent: entity, orphans });
   }
+}
+
+/**
+ * The entity whose view an object of a host tops, through the top-to-view and the object-to-entity tables.
+ *
+ * @param state - The sync branch of the plugin state.
+ * @param object - An object hanging in a host.
+ * @returns The entity, or `undefined` for an object that tops no view.
+ */
+function childOf(state: SyncState, object: PixiContainer | undefined): Entity | undefined {
+  const view = object === undefined ? undefined : state.viewOfTop.get(object);
+
+  return view === undefined ? undefined : state.entityOf.get(view.object);
 }
 
 /**
