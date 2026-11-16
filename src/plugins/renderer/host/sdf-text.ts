@@ -94,7 +94,9 @@ export function createSdfTextPipe(pixi: PixiModule): BitmapTextPipeClass {
     public override initGpuText(text: BitmapText): TextProxy {
       const proxy = super.initGpuText(text) as TextProxy;
 
+      // The layout made above is the text as it stands: Pixi's first `addRenderable` must not lay it out again.
       text._didTextUpdate = false;
+
       // One shape for every proxy: the record's fields are all there from the start, the number a double.
       const glyphs: SdfGlyphs = { perScale: Number.NaN, family: undefined, size: Number.NaN };
 
