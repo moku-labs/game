@@ -341,6 +341,20 @@ function fadeOut(state: State, seconds: number): void {
 }
 
 /**
+ * Forgets the decoded buffer of a music key that no longer plays, so only the playing track stays
+ * decoded: a 60 s stereo track is about 22 MB. A source that still fades out keeps its own buffer;
+ * a later switch back decodes the key again while the current track keeps playing.
+ *
+ * @param state - The plugin state.
+ * @param key - The key of the track that left, or `undefined` when none played.
+ */
+function forgetTrack(state: State, key: string | undefined): void {
+  if (key === undefined || state.music?.key === key) return;
+
+  state.decoded.delete(key);
+}
+
+/**
  * Tells whether a track really plays, not one only remembered for the unlock.
  *
  * @param state - The plugin state.
@@ -381,6 +395,8 @@ function startTrack(
 
   if (bus === undefined) return;
 
+  const left = state.music?.key;
+
   fadeOut(state, track.seconds);
 
   const gain = context.createGain();
@@ -395,6 +411,7 @@ function startTrack(
   source.start();
 
   state.music = { key: track.key, gain, source, stream: undefined };
+  forgetTrack(state, left);
   recordSound(ctx, { key: track.key, bus: "music", kind: "music" });
 }
 
@@ -413,8 +430,12 @@ async function playDecoded(
   const state = ctx.state;
   const buffer = await bufferOf(ctx, start.key);
 
-  // A later request replaced this switch: it neither starts nor fades anything.
-  if (state.musicPending !== start.pending) return;
+  // A later request replaced this switch: it neither starts nor fades anything, nor keeps its buffer.
+  if (state.musicPending !== start.pending) {
+    forgetTrack(state, start.key);
+
+    return;
+  }
 
   state.musicPending = undefined;
 
@@ -519,8 +540,11 @@ export async function playMusic(ctx: AudioCtx, request: MusicRequest): Promise<v
   state.musicPending = undefined;
 
   if (key === null) {
+    const left = state.music?.key;
+
     fadeOut(state, seconds);
     state.music = undefined;
+    forgetTrack(state, left);
 
     return;
   }

@@ -266,6 +266,43 @@ describe("playMusic", () => {
     expect(mock.state.music).toBeUndefined();
   });
 
+  // F198: two 60 s tracks are 22 MB each decoded; only the playing one stays.
+  it("forgets the decoded buffer of the track a switch replaced, and decodes it again on the way back", async () => {
+    const mock = unlocked();
+
+    await playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+    await playMusic(mock.audio, { key: "home.theme", fadeMs: 600 });
+
+    expect([...mock.state.decoded.keys()]).toEqual(["home.theme"]);
+    expect(keyOf(mock.context?.sources[0]?.buffer)).toBe("board.theme");
+
+    await playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+
+    expect(mock.context?.decodes).toEqual(["board.theme", "home.theme", "board.theme"]);
+    expect([...mock.state.decoded.keys()]).toEqual(["board.theme"]);
+  });
+
+  it("forgets the decoded buffer of the track a null key stopped", async () => {
+    const mock = unlocked();
+
+    await playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+    // eslint-disable-next-line unicorn/no-null -- `null` is the seam: it stops the music.
+    await playMusic(mock.audio, { key: null, fadeMs: 600 });
+
+    expect(mock.state.decoded.size).toBe(0);
+  });
+
+  it("forgets the decoded buffer of a switch that was replaced while it decoded", async () => {
+    const mock = unlocked();
+
+    await Promise.all([
+      playMusic(mock.audio, { key: "board.theme", fadeMs: 600 }),
+      playMusic(mock.audio, { key: "home.theme", fadeMs: 600 })
+    ]);
+
+    expect([...mock.state.decoded.keys()]).toEqual(["home.theme"]);
+  });
+
   it("remembers the key headless and starts nothing", async () => {
     const mock = createMockAudio();
 
