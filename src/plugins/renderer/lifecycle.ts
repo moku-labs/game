@@ -15,6 +15,7 @@ import { leaveAfterLoss, reportLosses } from "./loss";
 import { stopMonitor } from "./monitor/api";
 import { stopShots } from "./shots/state";
 import { stopSync } from "./sync/views";
+import { startTrail, stopTrail, trailFrame } from "./trail";
 import type { Deps, KernelSlice, Modules, RendererCtx, TeardownScope } from "./types";
 import { stopViewport } from "./viewport/resize";
 
@@ -122,6 +123,8 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
 
     if (rendered) {
       ctx.deps.time.frameDrawn();
+      // F175: two counters of the run's trail, written by its timer.
+      trailFrame(ctx.state.trail, uploaded);
       // A frame of probes, uploads or building work is load work, no sample of the adaptive rate.
       if (probed || uploaded || built) ctx.deps.time.frameProbed();
       // F189: Pixi submitted the frame; the decoded images now on the GPU are freed.
@@ -157,6 +160,8 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
 
   // F189: the losses a reload took away are logged once, at the next start.
   reportLosses(rendererCtx);
+  // F175: the run before is reported when it was cut short; this run keeps its own trail.
+  startTrail(rendererCtx);
 
   // A resolution applied by a frame or a restore empties the canvas: the frame is drawn.
   modules.host.onResolution(() => modules.demand.whole("resize"));
@@ -209,6 +214,8 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
  * @param scope - What `onStop` receives: the frozen config and the plugin state.
  */
 export function stopRenderer(scope: TeardownScope): void {
+  // First: the trail is closed from its own state, before any module lets go.
+  stopTrail(scope.state.trail);
   stopMonitor(scope.state.monitor);
   // After the monitor, so a captured or verified frame never outlives the app.
   stopDemand(scope.state.demand);

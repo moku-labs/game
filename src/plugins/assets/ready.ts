@@ -105,11 +105,30 @@ async function warmForReady(ctx: AssetsCtx, bundle: string): Promise<void> {
 }
 
 /**
+ * Ages the bundles nodes rest on through `ready` by one live rest (F190). The rest a node waits on
+ * is the first: the bundle stays held through it, so the node that asks again finds it. A bundle
+ * no `ready` asked for again by its second rest is let go, because the node it was asked for was
+ * left another way (Back): from then on the budget and the `"leave"` release may take it again.
+ * Called by the `flow:rest` hook of a live rest, before its budget pass.
+ *
+ * @param state - The plugin state.
+ */
+export function ageReadyWaiting(state: State): void {
+  for (const [name, rests] of state.readyWaiting) {
+    if (rests >= 1) state.readyWaiting.delete(name);
+    else state.readyWaiting.set(name, rests + 1);
+  }
+}
+
+/**
  * The handler of the `ready` effect (F52). Headless it answers `true` before any name check, as the
  * `load` effect does. Every bundle there: `true`, and nothing is posted. Otherwise it starts the
  * warm of each bundle that is not there, answers `false`, and posts `{ type: "ready" }` into
  * `flow.inbox` once all of them settled. The posting does not wait on the node's signal: the warm
- * is shared work, and the inbox keeps only the latest `ready`.
+ * is shared work, and the inbox keeps only the latest `ready`. A bundle it answers `false` for is
+ * rested on (`readyWaiting`) until a `ready` finds it there: neither the budget nor the `"leave"`
+ * release of the rest in between takes it, else the node that asks again finds it gone and the two
+ * nodes cycle forever (F190). `ageReadyWaiting` ends the hold of one nobody asks for again.
  *
  * @param ctx - Domain context of the plugin.
  * @param bundles - The bundle names of the descriptor.
@@ -126,6 +145,12 @@ export function answerReady(ctx: AssetsCtx, bundles: readonly string[]): boolean
   }
 
   const missing = bundles.filter(name => !isThere(state, name));
+
+  // What is there is no longer rested on; what is missing is, from now, until a ready finds it there.
+  for (const name of bundles) {
+    if (missing.includes(name)) state.readyWaiting.set(name, 0);
+    else state.readyWaiting.delete(name);
+  }
 
   if (missing.length === 0) return true;
 
