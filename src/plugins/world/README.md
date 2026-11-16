@@ -379,7 +379,10 @@ export const settingsSheet = projection({
   (equal as JSON) runs no `view` and writes nothing; another one has the difference written directly,
   with no `change` hook. The `enter` and `loop` hooks play as for a new view; a direct reconcile (fast
   mode) plays none and the view owes its loop. A record still in work is shown as it stands, and ui
-  builds the rest of its root in one block.
+  builds the rest of its root in one block. Such a record opened on another item than the warm one
+  (another tab) stands where a cold open stands in that frame: ui gives the elements the difference
+  moved their new pose at once, with no `change` motion (F200). A ready record opened on another item
+  stands there too, but its moved elements still play their `change` motion (known, a follow-up).
 - **The close** plays the exit as before. The record goes cold and is built again in idle frames,
   after the exit motion ended.
 - **A commit while the window rests.** The step reads `warm` again: the same content changes nothing;
