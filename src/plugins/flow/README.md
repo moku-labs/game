@@ -38,7 +38,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `gate.pointer(active): void` | While true, entering an `over` node waits: a popup never appears mid-drag. |
 | `gate.state()` | `{ open, allowed, narrowed, blocked? }`. `blocked` is there while a `guide` names the answer of a press outside its window: `input` answers it. |
 | `inbox.post(event): void` | Queues a world event. It is delivered only to a rest node whose `inbox` lists the type. |
-| `fx.handle(kind, fn, options?)` | Registers the single handler of one effect kind. `{ runInFast: true }` makes it run in fast mode too. The handler's `signal` is the node's, with two exceptions: a descriptor with `answers` (a popup) and a `guide` get a signal of their own, so the handler knows when to take down what it showed. |
+| `fx.handle(kind, fn, options?)` | Registers the single handler of one effect kind. `{ runInFast: true }` makes it run in fast mode too. The handler's `signal` ends with the node, or earlier on `fx.cancel` and, for a popup, at the body's return. A descriptor with `answers` (a popup) and a `guide` get a signal of their own, so the handler knows when to take down what it showed. See [The signal of an effect handler](#the-signal-of-an-effect-handler). |
 | `fx.dispatch(descriptor): void` | Fire-and-forget delivery, `runInFast` handlers only in fast mode. Handler errors are logged, never thrown. |
 | `fx.onHint(listener): () => void` | Hears every released hint after the commit of its edge, in release order, next to any `handle` owner of the kind. Silent in fast mode. `world` routes hints to projection motions with it. |
 | `features.register(name, description)` | Called from a feature plugin's `onInit`. After `run()` it throws. |
@@ -341,13 +341,14 @@ popup.
 ## Effects in a node
 
 A node reaches everything that is not logic through the `fx` of its context. There are three
-calls. `recover` gets the same `fx`.
+calls, and `fx.cancel` ends an awaited one early. `recover` gets the same `fx`.
 
 | Call | The handler runs | The body | Use it for |
 |---|---|---|---|
-| `await fx(descriptor)` | Now | Waits for the handler. With `answers` it waits for the player's answer. While the frame loop runs, the body goes on in the `signals` phase after the handler ended, so effects that end in one frame resume in the order they started; `schedule` goes on at once, since its handler only writes a moment (a transit node that arms the clock costs no frame). | A popup, a `guide`, `schedule`, an animation the next line depends on |
+| `await fx(descriptor)` | Now | Waits for the handler. With `answers` it waits for the player's answer. While the frame loop runs, the body goes on in the `signals` phase after the handler ended, so effects that end in one frame resume in the order they started; `schedule` goes on at once, since its handler only writes a moment (a transit node that arms the clock costs no frame). A popup the body did not wait for is closed when the body returns: see [Ending a popup](#ending-a-popup). | A popup, a `guide`, `schedule`, an animation the next line depends on |
 | `fx.start(descriptor)` | Now | Goes on at once. The call returns nothing. | A tap sound, a haptic tick, an animation nothing waits for |
 | `fx.emit(hint)` | After the commit of the edge | Goes on at once. | What shows a change that must be real first: a sparkle on the merged cell |
+| `fx.cancel(promise)` | Its signal is aborted now | Goes on at once. Returns `true` when the promise was an open effect of this node; it then resolves `undefined`. | A popup that has to go while the node goes on |
 
 ```ts
 const place = defineNode({
@@ -384,6 +385,44 @@ app.log.trace().filter(entry => entry.event === "flow:fx-start-failed");
 
 A hint is not a started effect. `fx.emit` waits for the commit and a failed node drops its hints.
 `fx.start` runs at once and a failed node does not take it back.
+
+### Ending a popup
+
+A body may show a popup and not wait for its answer: it races the popup against a load, or it
+leaves on another outcome. When the body returns, with an outcome or a failure, every popup it left
+open is closed in the order it was shown: the handler's signal is aborted, so the popup unmounts,
+and the gate shuts, so the next rest node opens its own. The same holds for `recover`. Other
+awaited effects (an `fx(play(...))` nobody waited for) are left running. A body that the inbox, a
+restore or a stop already left closes nothing when it returns late: the abort took its popups down,
+and the gate belongs to the node entered after it.
+
+`fx.cancel(promise)` ends one awaited effect early, and the node stays. It takes the promise
+`fx(...)` returned, not one built from it with `.then`.
+
+```ts
+run: async ({ fx, out }) => {
+  const shown = fx(popup(Loading, {}));
+  const there = await Promise.race([shown.then(() => "back" as const), fx(load("board"))]);
+
+  if (there === "back") return out.back();
+
+  fx.cancel(shown); // true: Loading unmounts, its gate shuts, `shown` resolves undefined
+  await fx(popup(Tip, {})); // the next popup opens the gate for its own answers
+
+  return out.ready();
+}
+```
+
+| `fx.cancel(promise)` with | Result |
+|---|---|
+| An open effect of this node with `answers` | `true`. The signal aborts, the gate shuts, the promise resolves `undefined`. |
+| An open effect of this node without `answers` (`deal`, `play`) | `true`. The signal aborts, the promise resolves `undefined`; the gate is not touched. |
+| An effect that settled, or was cancelled already | `false`. Nothing happens, so a cancel and then a return close once. |
+| A `guide`, an effect of another node, any other promise | `false`. A guide ends where the runner lifts its narrow. |
+| Any promise after the node's abort | `false`. |
+
+A cancelled promise resolves `undefined` although the descriptor's type may promise an answer: a
+body that cancels an effect does not read its value.
 
 **A cosmetic effect that fails.** A descriptor with `cosmetic: true` (`sfx`, `play`, `haptic`,
 `music`) never fails its node: `await fx(...)` resolves `undefined` and the body goes on. The
@@ -440,8 +479,9 @@ handler for the same kind throws.
 
 A popup's answer names an outcome of its component, so comparing it with an intent the component
 does not declare is a compile error. `NodeFx` is generic: a hand-written fake of it is typed with
-`NodeFx` (`Object.assign(run, { emit, start }) as NodeFx`), or replaced by `fakeFx` of
-`@moku-labs/game/testing`.
+`NodeFx` (`Object.assign(run, { emit, start, cancel }) as NodeFx`), or replaced by `fakeFx` of
+`@moku-labs/game/testing`, whose `cancel` resolves an effect it returned that has not settled
+`undefined` and returns `true`, and returns `false` for any other promise.
 
 ## The signal of an effect handler
 
@@ -450,9 +490,10 @@ It learns from its `signal` when that something has to go.
 
 | Descriptor | Signal | Aborted when |
 |---|---|---|
-| With `answers` (`popup`) | A child of the node's | The answer arrives, or the node is aborted |
+| With `answers` (`popup`) | A child of the node's | The answer arrives, `fx.cancel`, the body's return while it is open, or the node is aborted |
 | `guide` | A child of the node's | The runner lifts the narrow on node exit, or the node is aborted |
-| Everything else (`play`, `load`, `sfx`) | The node's own | The node is aborted |
+| Everything else, awaited (`play`, `load`) | A child of the node's | `fx.cancel`, or the node is aborted |
+| Started with `fx.start` (`sfx`) | The node's own | The node is aborted |
 
 A child signal never reaches back: a popup that ends leaves the node running, and the node walks
 on to its edge. The node's abort reason (`"stop"`, `"restore"`, `"inbox"`) is forwarded to the

@@ -4,10 +4,19 @@
 import type { Json } from "../../model/types";
 import type { Descriptor, Hint, NodeFx } from "../fx/types";
 import type { Allow } from "../gate/types";
+import { childOf } from "../signal";
 import type { FlowCtx } from "../types";
 import { createOut } from "./define";
 import { asError } from "./edge";
-import type { Aborted, AbortReason, Delivery, Location, NodeOutcome, Step } from "./loop-types";
+import type {
+  Aborted,
+  AbortReason,
+  Delivery,
+  Location,
+  NodeOutcome,
+  OpenEffect,
+  Step
+} from "./loop-types";
 import { noop, stages } from "./loop-types";
 import { answerResult, eventResult } from "./position";
 import type { AnyNode, AnyNodeContext, Modules, NodeInfo, RunnerState } from "./types";
@@ -101,21 +110,113 @@ export function refuseStart(descriptor: Descriptor, path: string): void {
 }
 
 /**
+ * Takes one effect off the open list of its run.
+ *
+ * @param open - The open effects of the run.
+ * @param entry - The effect that settled or was closed.
+ */
+function forget(open: OpenEffect[], entry: OpenEffect): void {
+  const index = open.indexOf(entry);
+
+  if (index !== -1) open.splice(index, 1);
+}
+
+/**
+ * Ends one open effect of a node run and takes it off the list: its handler's signal is aborted (a
+ * popup unmounts), the gate closes for a descriptor with `answers`, and the promise the body got
+ * resolves `undefined`. Only an effect found on the list is handed here, so nothing is closed twice.
+ *
+ * @param modules - Injected sibling APIs.
+ * @param open - The open effects of the run.
+ * @param entry - The effect to end, on the list.
+ */
+function closeOne(modules: Modules, open: OpenEffect[], entry: OpenEffect): void {
+  forget(open, entry);
+  entry.controller.abort();
+  if (entry.descriptor.answers !== undefined) modules.gate.close();
+  entry.end();
+}
+
+/**
+ * Closes the popups a body or a `recover` left open, in the order they were started, when it
+ * settled with a result or a failure. Other awaited effects run on. Nothing is closed after the
+ * abort of the node: the abort already reached every effect, the runner shut the gate, and a body
+ * that settles late must not close the gate of the node the loop entered after it.
+ *
+ * @param modules - Injected sibling APIs.
+ * @param signal - The abort signal of the run.
+ * @param open - The open effects of the run.
+ */
+export function closePopups(modules: Modules, signal: AbortSignal, open: OpenEffect[]): void {
+  if (signal.aborted) return;
+
+  // A copy: `closeOne` takes each popup off the list it walks.
+  const popups = open.filter(entry => entry.descriptor.answers !== undefined);
+
+  for (const entry of popups) closeOne(modules, open, entry);
+}
+
+/**
+ * Runs one awaited effect with a signal of its own, a child of the run's, and keeps it on the open
+ * list until it settles, so `fx.cancel` and the body's return can end it early.
+ *
+ * @param modules - Injected sibling APIs.
+ * @param step - The run in progress: its abort signal.
+ * @param open - The open effects of the run.
+ * @param descriptor - The descriptor the body awaits.
+ * @returns The promise the body gets: the effect's value, or `undefined` once it was ended early.
+ */
+function track(
+  modules: Modules,
+  step: Pick<Step, "signal">,
+  open: OpenEffect[],
+  descriptor: Descriptor
+): Promise<unknown> {
+  const controller = childOf(step.signal);
+  const value = modules.fx.run(descriptor, controller.signal);
+  const entry: OpenEffect = { effect: value, descriptor, controller, end: noop };
+
+  entry.effect = new Promise<unknown>((resolve, reject) => {
+    entry.end = () => {
+      // eslint-disable-next-line unicorn/no-useless-undefined -- `Promise<unknown>` wants the value said.
+      resolve(undefined);
+    };
+    value.then(
+      result => {
+        forget(open, entry);
+        resolve(result);
+      },
+      (error: unknown) => {
+        forget(open, entry);
+        reject(error);
+      }
+    );
+  });
+  open.push(entry);
+
+  return entry.effect;
+}
+
+/**
  * Builds the `fx` of a node context: awaited effects by call, effects the body does not wait for
- * by `start`, cosmetic hints by `emit`. A `guide` narrows the gate while it runs; the runner lifts
- * the narrow when the node is left. A body that was aborted keeps running, since the loop only
- * stops waiting for it, so its `fx` starts nothing any more: the gate and the narrow belong to the
- * node the loop entered after it. The `recover` of a rest node gets the same `fx`, bound to the
- * signal of its recovery.
+ * by `start`, cosmetic hints by `emit`, an awaited effect ended early by `cancel`. Each awaited
+ * effect but a `guide` gets a child of the run's signal and stays on `open` until it settles; the
+ * caller closes the popups left there with `closePopups` when the body settles. A `guide` narrows
+ * the gate while it runs; the runner lifts the narrow when the node is left. A body that was
+ * aborted keeps running, since the loop only stops waiting for it, so its `fx` starts and ends
+ * nothing any more: the gate and the narrow belong to the node the loop entered after it. The
+ * `recover` of a rest node gets the same `fx`, bound to the signal of its recovery.
  *
  * @param modules - Injected sibling APIs.
  * @param step - The run in progress: its abort signal, how it tells a walk that a gate opened, and
  *   the path and the log a failed `start` is reported with.
+ * @param open - The open effects of the run, filled and emptied by this `fx`.
  * @returns The effects gateway of one node run.
  */
 export function nodeFx(
   modules: Modules,
-  step: Pick<Step, "signal" | "gateOpened" | "path" | "log">
+  step: Pick<Step, "signal" | "gateOpened" | "path" | "log">,
+  open: OpenEffect[] = []
 ): NodeFx {
   /**
    * Awaits one effect. After the abort of the node it rejects with the abort reason instead.
@@ -133,11 +234,33 @@ export function nodeFx(
         modules.gate.narrow(allow, guideAnswer(descriptor.payload, "blocked"));
     }
 
-    const value = modules.fx.run(descriptor, step.signal);
+    // A guide ends where the runner lifts its narrow, never by `cancel`: it is not tracked.
+    const value =
+      descriptor.kind === "guide"
+        ? modules.fx.run(descriptor, step.signal)
+        : track(modules, step, open, descriptor);
 
     if (descriptor.answers !== undefined) step.gateOpened();
 
     return value;
+  };
+
+  /**
+   * Ends one open effect of this run early. After the abort of the node nothing is ended.
+   *
+   * @param effect - A promise `run` returned.
+   * @returns True when the effect was open and is ended now.
+   */
+  const cancel = (effect: Promise<unknown>): boolean => {
+    if (step.signal.aborted) return false;
+
+    const entry = open.find(item => item.effect === effect);
+
+    if (entry === undefined) return false;
+
+    closeOne(modules, open, entry);
+
+    return true;
   };
 
   /**
@@ -180,7 +303,8 @@ export function nodeFx(
     emit: (item: Hint): void => {
       modules.fx.buffer(item);
     },
-    start
+    start,
+    cancel
   }) as NodeFx;
 }
 
@@ -189,15 +313,16 @@ export function nodeFx(
  *
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
+ * @param open - The open effects of the run, for its `fx`.
  * @returns The node context.
  */
-function nodeContext(modules: Modules, step: Step): AnyNodeContext {
+function nodeContext(modules: Modules, step: Step, open: OpenEffect[]): AnyNodeContext {
   return {
     input: step.input,
     player: step.transaction.player,
     session: step.transaction.session,
     rng: step.transaction.rng,
-    fx: nodeFx(modules, step),
+    fx: nodeFx(modules, step, open),
     out: createOut(step.node.outcomes),
     signal: step.signal,
     now: step.now
@@ -346,14 +471,17 @@ export function abortOutcome(signal: AbortSignal): Promise<Aborted> {
 
 /**
  * Calls the body of a node and turns what it does into an outcome. Nothing is thrown out of here.
+ * A body that settles closes the popups it left open before the loop moves on.
  *
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @returns The result, the abort or the failure.
  */
 async function callBody(modules: Modules, step: Step): Promise<NodeOutcome> {
+  const open: OpenEffect[] = [];
+
   try {
-    const result = await step.node.run?.(nodeContext(modules, step));
+    const result = await step.node.run?.(nodeContext(modules, step, open));
 
     if (step.signal.aborted) return { kind: "aborted", reason: abortReason(step.signal) };
 
@@ -371,6 +499,8 @@ async function callBody(modules: Modules, step: Step): Promise<NodeOutcome> {
     if (step.signal.aborted) return { kind: "aborted", reason: abortReason(step.signal) };
 
     return { kind: "failed", error };
+  } finally {
+    closePopups(modules, step.signal, open);
   }
 }
 

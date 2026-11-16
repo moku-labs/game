@@ -5,9 +5,9 @@
  */
 import type { FlowCtx } from "../types";
 import { arrive, commitEdge, handleAbort, handleFailure } from "./edge";
-import type { RecoveryOutcome, Safe, Step, StepOutcome } from "./loop-types";
+import type { OpenEffect, RecoveryOutcome, Safe, Step, StepOutcome } from "./loop-types";
 import { noPayload } from "./loop-types";
-import { abortOutcome, abortReason, nodeFx, stopped } from "./node";
+import { abortOutcome, abortReason, closePopups, nodeFx, stopped } from "./node";
 import { notifyGateOpen } from "./seam";
 import type { AnyNode, AnyRecoverContext, Modules } from "./types";
 
@@ -38,14 +38,19 @@ export function takeRecovery(safe: Safe, node: AnyNode): boolean {
  *
  * @param modules - Injected sibling APIs.
  * @param recovery - The recovery in progress.
+ * @param open - The open effects of the recovery, for its `fx`.
  * @returns The recovery context.
  */
-function recoverContext(modules: Modules, recovery: Recovery): AnyRecoverContext {
+function recoverContext(
+  modules: Modules,
+  recovery: Recovery,
+  open: OpenEffect[]
+): AnyRecoverContext {
   return {
     player: recovery.transaction.player,
     session: recovery.transaction.session,
     rng: recovery.transaction.rng,
-    fx: nodeFx(modules, recovery),
+    fx: nodeFx(modules, recovery, open),
     signal: recovery.signal,
     now: recovery.now
   };
@@ -53,15 +58,17 @@ function recoverContext(modules: Modules, recovery: Recovery): AnyRecoverContext
 
 /**
  * Calls the `recover` of a node and turns what it does into an outcome. Nothing is thrown out of
- * here.
+ * here. A `recover` that settles closes the popups it left open, so the gate of its node opens.
  *
  * @param modules - Injected sibling APIs.
  * @param recovery - The recovery in progress.
  * @returns That it returned, the abort or the failure.
  */
 async function callRecover(modules: Modules, recovery: Recovery): Promise<RecoveryOutcome> {
+  const open: OpenEffect[] = [];
+
   try {
-    await recovery.node.recover?.(recoverContext(modules, recovery));
+    await recovery.node.recover?.(recoverContext(modules, recovery, open));
 
     if (recovery.signal.aborted) return { kind: "aborted", reason: abortReason(recovery.signal) };
 
@@ -70,6 +77,8 @@ async function callRecover(modules: Modules, recovery: Recovery): Promise<Recove
     if (recovery.signal.aborted) return { kind: "aborted", reason: abortReason(recovery.signal) };
 
     return { kind: "failed", error };
+  } finally {
+    closePopups(modules, recovery.signal, open);
   }
 }
 

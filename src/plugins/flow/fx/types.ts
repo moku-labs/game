@@ -148,9 +148,10 @@ export type GuideOptions = {
 };
 
 /**
- * Handler of one effect kind, registered by a plugin above `flow`. `signal` is the node's abort
- * signal, except for a descriptor with `answers` and for `guide`: those get a signal of their own,
- * aborted when the answer arrives or the narrow is lifted, so the handler unmounts what it showed.
+ * Handler of one effect kind, registered by a plugin above `flow`. `signal` is a signal that ends
+ * with the node, or earlier on `fx.cancel` and, for a popup, at the body's return. A descriptor
+ * with `answers` and a `guide` get a signal of their own, aborted as well when the answer arrives
+ * or the narrow is lifted, so the handler unmounts what it showed.
  *
  * @example
  * ```ts
@@ -275,11 +276,12 @@ export type FxInternal = {
    * Runs one awaited effect. With `answers` the gate decides; without it the handler does, and
    * while the frame loop runs the completion waits for the next `signals` phase, except
    * `schedule`, which resolves at once (its handler only writes a moment). A descriptor with
-   * `answers`, and a `guide`, reach their handler with a child of the node's signal, so what they
-   * showed can be taken down before the node ends.
+   * `answers`, and a `guide`, reach their handler with a child of the signal they got, so what
+   * they showed can be taken down before the node ends.
    *
    * @param descriptor - The descriptor the node awaits.
-   * @param signal - The node's abort signal.
+   * @param signal - A signal that ends with the node, or earlier on `fx.cancel` and, for a popup,
+   *   at the body's return.
    * @returns The answer, the handler's value, or `undefined`.
    */
   run(descriptor: Descriptor, signal: AbortSignal): Promise<unknown>;
@@ -327,7 +329,9 @@ export type FxInternal = {
 /**
  * The `fx` of a node context, and of the context of `recover`. Three ways to reach what is not
  * logic: `await fx(descriptor)` runs an effect and waits for it, `fx.start(descriptor)` starts one
- * now and does not wait, `fx.emit(hint)` keeps a cosmetic hint until the edge has committed. The
+ * now and does not wait, `fx.emit(hint)` keeps a cosmetic hint until the edge has committed.
+ * `fx.cancel(promise)` ends an awaited effect early, and the body's return closes the popups it
+ * left open. The
  * awaited value is typed by the descriptor: what its helper or its `defineEffect` declared,
  * `unknown` for a descriptor written by hand.
  *
@@ -380,6 +384,36 @@ export type NodeFx = (<Result>(descriptor: Descriptor<Result>) => Promise<Result
    * ```
    */
   start(descriptor: Descriptor): void;
+
+  /**
+   * Ends one awaited effect of this node early, without leaving the node. Its handler's signal is
+   * aborted, so a popup unmounts; for a descriptor with `answers` the gate closes as well. The
+   * promise then resolves `undefined`, also where the descriptor's result type has no `undefined`
+   * in it: a body that cancels an effect does not read its value. The body's return closes the
+   * popups it left open anyway; `cancel` is for an effect that has to go while the node goes on.
+   *
+   * @param effect - A promise this node's `fx(...)` returned.
+   * @returns `true` when the effect was open and is ended now. `false` for an effect that settled
+   *   or was cancelled already, one of another node, a `guide`, any other promise, and for every
+   *   call after the node's abort: then nothing happens.
+   * @example
+   * ```ts
+   * // The "wait" node: the popup Loading (outcome "back") stands while the board bundle loads.
+   * run: async ({ fx, out }) => {
+   *   const shown = fx(popup(Loading, {}));
+   *   const back = shown.then(() => "back" as const);
+   *   const there = await Promise.race([back, fx(load("board")).then(() => "loaded" as const)]);
+   *
+   *   if (there === "back") return out.back();
+   *
+   *   fx.cancel(shown); // true: Loading unmounts, its gate closes, `shown` resolves undefined
+   *   await fx(popup(Tip, {})); // the next popup opens the gate for its own answers
+   *
+   *   return out.ready();
+   * }
+   * ```
+   */
+  cancel(effect: Promise<unknown>): boolean;
 };
 
 /**
@@ -396,7 +430,8 @@ export type EffectOptions = { fast?: "run" | "skip"; cosmetic?: boolean };
 
 /**
  * The handler of one declared effect: the typed payload in, the result out. The context is the
- * gateway's: the node's abort signal and the mode of the walk.
+ * gateway's: a signal that ends with the node, or earlier on `fx.cancel` and, for a popup, at the
+ * body's return, and the mode of the walk.
  *
  * @example
  * ```ts
