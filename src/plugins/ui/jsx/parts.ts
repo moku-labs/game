@@ -187,12 +187,13 @@ export function createParts(ctx: UiCtx, reconcile: PartsReconcile) {
    * Tells whether the rest of a child list of a root built aside waits for a later frame: once the
    * budget was read spent, `CLOCK_EVERY` more elements are made, so a short list ends, and then the
    * rest of every list in work waits (F201: the 120 cards of a shop's track were made in one frame
-   * past its budget). A row a range change scrolls in never waits.
+   * past its budget). A row a range change scrolls in never waits: the range step runs before any
+   * root of the frame is diffed, and `parks` reads no budget while it moves.
    *
    * @returns True when the next child of the list waits.
    */
   function stops(): boolean {
-    return spent && entered - spentFrom >= CLOCK_EVERY && !reconcile.isMoving();
+    return spent && entered - spentFrom >= CLOCK_EVERY;
   }
 
   /**
