@@ -7,7 +7,7 @@ import { runCli, type ScanUi } from "../../scan/cli";
 import { textureMb } from "../../scan/image-size";
 import { composePage, type PagePart } from "../../scan/pack/encode";
 import { LOOSE_SIDE } from "../../scan/pack/groups";
-import { PAGE_SIZES, roomOf } from "../../scan/pack/layout";
+import { PAGE_SIZE } from "../../scan/pack/layout";
 import { type PackResult, packAssets } from "../../scan/pack/pack";
 import { scanAssets } from "../../scan/scan";
 import type { Manifest, ManifestBundle, ManifestFile } from "../../types";
@@ -248,8 +248,8 @@ afterEach(async () => {
 });
 
 describe("packAssets", () => {
-  it("writes no page file past the largest page size, border, padding and edge copy counted (F188)", async () => {
-    // Sixteen 510 px squares: four in a row would make a 2050 px page on a 2048 px page size.
+  it("writes no page file past 2048 × 2048, border, padding and edge copy counted (F188)", async () => {
+    // Sixteen 510 px squares: four in a row would make a 2050 px page.
     const files: Record<string, Uint8Array> = {};
     const square = await png(510, 510, BLUE);
 
@@ -265,15 +265,13 @@ describe("packAssets", () => {
     const { manifest } = await pack(root, out, false);
     const pages = bundleOf(manifest, "ui").pages ?? [];
 
-    const largest = Math.max(...PAGE_SIZES);
-
     expect(pages.length).toBeGreaterThan(0);
 
     for (const page of pages) {
       const written = await sharp(path.join(out, page.path)).metadata();
 
-      expect(written.width).toBeLessThanOrEqual(largest);
-      expect(written.height).toBeLessThanOrEqual(largest);
+      expect(written.width).toBeLessThanOrEqual(PAGE_SIZE);
+      expect(written.height).toBeLessThanOrEqual(PAGE_SIZE);
     }
   });
 
@@ -548,17 +546,13 @@ describe("packAssets", () => {
     const root = await gameTree();
     const out = path.join(await temp(), "assets");
 
-    // An fx texture one pixel above the room of the largest page fits no page; it is never loose.
-    const largest = Math.max(...PAGE_SIZES);
-    const over = roomOf(largest) + 1;
-
-    await writeFile(path.join(root, "features/ui/assets/fx-huge.png"), await png(over, 4, RED));
-    await writeFile(path.join(root, "features/ui/assets/fx-wide.png"), await png(4, over, RED));
+    await writeFile(path.join(root, "features/ui/assets/fx-huge.png"), await png(2050, 4, RED));
+    await writeFile(path.join(root, "features/ui/assets/fx-wide.png"), await png(4, 2047, RED));
 
     await expect(pack(root, out, false)).rejects.toThrow(
       "[game] assets: the pack found 2 problems.\n" +
-        `  the texture "ui.fx-huge" (${over}×4) fits no ${largest}×${largest} page with its 2 px border and 2 px padding.\n` +
-        `  the texture "ui.fx-wide" (4×${over}) fits no ${largest}×${largest} page with its 2 px border and 2 px padding.\n` +
+        '  the texture "ui.fx-huge" (2050×4) fits no 2048×2048 page with its 2 px border and 2 px padding.\n' +
+        '  the texture "ui.fx-wide" (4×2047) fits no 2048×2048 page with its 2 px border and 2 px padding.\n' +
         '  Fix them and run "bun run assets:pack" again.'
     );
     await expect(stat(out)).rejects.toThrow();
@@ -709,10 +703,7 @@ describe("runCli --pack", () => {
     const root = await gameTree();
     const ui = recorder();
 
-    await writeFile(
-      path.join(root, "features/ui/assets/fx-huge.png"),
-      await png(roomOf(Math.max(...PAGE_SIZES)) + 1, 4, RED)
-    );
+    await writeFile(path.join(root, "features/ui/assets/fx-huge.png"), await png(2050, 4, RED));
     await rm(path.join(root, "features/ui/assets/fx-star.png"));
 
     expect(
@@ -893,10 +884,10 @@ describe("packAssets trim (F198)", () => {
   });
 });
 
-describe("packAssets loose by layout (F198)", () => {
-  it("writes a main texture the chosen layout leaves loose as a file of its own, on a miss and on a hit", async () => {
-    // Bug caught: a texture the layout left out of the pages and out of the loose list vanishes
-    // from the pack, and the check names its key as missing.
+describe("packAssets loose by size (F198)", () => {
+  it("writes a main texture above LOOSE_SIDE as a file of its own, on a miss and on a hit", async () => {
+    // Bug caught: a texture left out of the pages and out of the loose list vanishes from the
+    // pack, and the check names its key as missing; a hit must not put it on a page either.
     const root = await makeTree({
       "features/ui/assets/big.png": await png(2000, 1000, GREY),
       "features/ui/assets/a.png": await png(50, 50, RED),

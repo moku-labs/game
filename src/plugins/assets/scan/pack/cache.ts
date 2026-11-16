@@ -1,8 +1,8 @@
 /**
  * @file assets packer, build time — the content-hash cache. One entry per atlas group and per
  * encoded loose texture, keyed by everything that decides its bytes: the format of the entry, the
- * versions of `sharp` and `maxrects-packer`, the packing constants (the page sizes, the loose
- * side, the trim margin, the price table) and the members (key, SHA-256 of the source, nine). A hit
+ * versions of `sharp` and `maxrects-packer`, the packing constants (the page size, the loose
+ * side, the trim margin) and the members (key, SHA-256 of the source, nine). A hit
  * replays the frames, with their trim, and the encoded bytes: no decode, no encode.
  * Entries are content-addressed, so the cache is never pruned.
  */
@@ -12,8 +12,7 @@ import path from "node:path";
 import type { NineSlice } from "../../types";
 import { WEBP_ALPHA_QUALITY, WEBP_QUALITY } from "./encode";
 import { LOOSE_SIDE } from "./groups";
-import { BORDER, EXTRUDE, type LayoutFrame, PADDING, PAGE_SIZES } from "./layout";
-import { PRICE_POINTS } from "./price";
+import { BORDER, EXTRUDE, type LayoutFrame, PACKER_SIZE, PADDING, PAGE_SIZE } from "./layout";
 import { TRIM_MARGIN } from "./trim";
 
 /** The cache folder under the working directory. */
@@ -107,10 +106,10 @@ export function cacheKey(input: CacheKeyInput): string {
       kind: input.kind,
       sharp: input.sharp,
       packer: packerVersion(),
-      pageSizes: PAGE_SIZES,
+      pageSize: PAGE_SIZE,
+      packerSize: PACKER_SIZE,
       looseSide: LOOSE_SIDE,
       trimMargin: TRIM_MARGIN,
-      price: PRICE_POINTS,
       border: BORDER,
       padding: PADDING,
       extrude: EXTRUDE,

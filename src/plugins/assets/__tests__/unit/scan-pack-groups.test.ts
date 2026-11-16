@@ -38,7 +38,7 @@ describe("groupOf", () => {
 
   it("packs a 600 px texture: the old 512 px rule kept it loose", () => {
     // Bug caught: the old LOOSE_SIDE of 512 sent every texture above it to a file of its own, so
-    // the pack never saw the large textures the hybrid page sizes exist for.
+    // the pack never saw the textures between 512 and 1018 px.
     expect(groupOf(texture("ui.panel", 600, 600))).toBe("main");
     expect(groupOf(texture("ui.banner", 513, 40))).toBe("main");
   });

@@ -14,7 +14,7 @@ import { type CachedImage, cacheKey, readCache, sha256, writeCache } from "./cac
 import { type Copied, copyAudio, copyFont, copyLoose, extensionOf, readSource } from "./copy";
 import { type Encoder, loadEncoder, type PagePart, type Pixels } from "./encode";
 import { type Group, planGroups } from "./groups";
-import { type Boxed, chooseLayout, type LayoutFrame, type Trim } from "./layout";
+import { type Boxed, type LayoutFrame, layoutGroup, type Trim } from "./layout";
 import { contentHash, looseName, pageId, pageName } from "./names";
 import { cropPixels, trimBox } from "./trim";
 
@@ -341,7 +341,7 @@ async function packGroup(
     height: cut.pixels.height,
     ...(cut.trim === undefined ? {} : { trim: cut.trim })
   }));
-  const layout = chooseLayout(bundle, group, boxed);
+  const layout = layoutGroup(bundle, group, boxed);
   const byKey = new Map(cuts.map(cut => [cut.source.key, cut]));
   const images: CachedImage[] = [];
 
@@ -927,12 +927,11 @@ function countLoose(bundles: readonly ManifestBundle[]): number {
 
 /**
  * Packs the art of a game for production: per bundle, the textures of the `fx` group and of the
- * `main` group go onto WebP atlas pages (each group at the page size, 1024, 2048 or 4096 px, that
- * costs the phone least GL memory; 2 px padding and border with each frame's edge extruded 1 px
+ * `main` group go onto WebP atlas pages (2048 px at most; 2 px padding and border with each frame's edge extruded 1 px
  * into it, never rotated), a texture that is not a nine-slice is cropped to its visible pixels and
  * the manifest keeps where the crop lay in the original (F198). A `main` texture too large for the
  * page, a mipmapped one and a group of one stay loose files; a texture of `fx` too large for the
- * largest page is a problem. Fonts and sounds are copied, every file name carries the hash of its
+ * page is a problem. Fonts and sounds are copied, every file name carries the hash of its
  * bytes, and the packed manifest (version 2) names it all. Nothing is written while a problem is
  * open; afterwards the pack folder holds exactly what the manifest references, plus
  * `manifest.json`. Two runs on the same tree and the same `sharp` write the same bytes.

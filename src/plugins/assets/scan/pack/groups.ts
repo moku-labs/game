@@ -30,14 +30,13 @@ export type GroupPlan<Texture extends Sized> = {
 };
 
 /**
- * A `main` texture with a header side above this stays loose: it is not laid out at all.
+ * A `main` texture packs when both its header sides are at most this; above it stays loose: it is
+ * not laid out at all.
  *
- * Build H (hybrid): 4090, the room of the largest page of `PAGE_SIZES` in `layout.ts`, so every
- * `main` texture is laid out and `chooseLayout` decides what goes loose. Build F (fixed): 1018 with
- * `PAGE_SIZES = [2048]`. The two constants change together; a one-line change in each file makes
- * the other build for the phone A/B (F198).
+ * F198: the A26 measured the hybrid per-group page size (1024, 2048, 4096) no better than fixed 2048
+ * pages (ward after one board visit: GL 378.5 vs 371.2 MB, draw calls 35 both), so pages stay 2048.
  */
-export const LOOSE_SIDE = 4090;
+export const LOOSE_SIDE = 1018;
 
 /** The last segment of a key that names a particle texture starts with this. */
 const FX_PREFIX = "fx-";
@@ -53,7 +52,7 @@ const GROUP_ORDER: readonly Group[] = ["fx", "main"];
  * builds its full chain, and from the second level on the neighbours on a page would bleed into
  * it. A key whose last segment starts with `fx-`, or with a folder segment `fx` between the bundle
  * name and the stem, goes to `fx` whatever its size: the frames of an animation in `fx/` too. Any
- * other texture goes to `main` when no header side is above `LOOSE_SIDE` (4090 px). The header
+ * other texture goes to `main` when no header side is above `LOOSE_SIDE` (1018 px). The header
  * size decides: nothing is decoded before the groups are made, so a cache hit decodes nothing.
  *
  * @param texture - The key, the size and the mipmaps of the texture.

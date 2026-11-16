@@ -546,7 +546,7 @@ preload, no event and no budget work.
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
-| `scan/pack/` | Build time only: the production packer behind `--pack` (`pack`, `groups`, `layout`, `price`, `trim`, `encode`, `names`, `cache`, `copy`). The only place that imports `sharp` and `maxrects-packer` (lint rule L11). |
+| `scan/pack/` | Build time only: the production packer behind `--pack` (`pack`, `groups`, `layout`, `trim`, `encode`, `names`, `cache`, `copy`). The only place that imports `sharp` and `maxrects-packer` (lint rule L11). |
 
 ## What the scanner reads
 
@@ -624,17 +624,16 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 
 | Rule | Value |
 |---|---|
-| Page size | Per group, one of `PAGE_SIZES` = 1024, 2048 or 4096 px (F198). The group is laid out once per size, and the layout the phone pays least GL memory for is kept: the price is the sum of `glMb` of every page and of every texture the layout leaves loose (read at its own size: a loose file is not trimmed). `glMb` is a table measured on a Mali-G68 / Dawn phone (A26): Dawn sub-allocates textures under 4 MiB in power-of-two heaps, so a page just over one costs far more than one just under it. A layout within 0.5 MiB of the cheapest with fewer textures (pages and loose files together) wins, then the lower price, then the smaller page. For an `fx` group only a layout with no problem counts. |
-| Page | At most `P × P` for its page size `P`, with its 2 px border, padding and edge copy counted (the packer is given `P - 2`), as small as its content (not a power of two, not square). A frame is at most `P - 6` px per side: 1018, 2042 or 4090. |
+| Page | 2048 × 2048 at most with its 2 px border, padding and edge copy counted (the packer is given 2046), as small as its content (not a power of two, not square). A frame is at most 2042 px per side. Every group uses the same page size (F198: the A26 measured a page size chosen per group, 1024, 2048 or 4096, no better than fixed 2048 pages). |
 | Padding | 2 px between frames and a 2 px border. Each frame's edge pixels are copied 1 px out into it (extrude), so a picture drawn at a fractional place samples its own edge, never transparent black (F105); the rest stays transparent. |
 | Trim | A texture that is not a nine-slice is cut to its visible pixels (alpha above 0), grown by 1 px on each side where the image has room: the margin keeps one transparent row or column at a cut edge, so bilinear sampling at the edge of the sprite reads transparent as before. A fully transparent image keeps a 1×1 frame at 0, 0. The manifest's `atlas` records `offsetX`, `offsetY`, `origWidth`, `origHeight`, only when the cut is smaller than the image. A texture with `nine` is never trimmed, and a loose file is not trimmed. |
 | Rotation | Never. |
-| Loose by size | A `main` texture with a header side above `LOOSE_SIDE` (4090 px, the room of the largest page) stays a file of its own and is not laid out. A `main` texture that fits no page of the layout that was kept (too large for its size, or the layout puts fewer than two textures on pages) is written as a loose file too, without a problem. The header size decides the group, so a cache hit decodes nothing. |
+| Loose by size | A `main` texture with a header side above `LOOSE_SIDE` (1018 px) stays a file of its own and is not laid out, and a `main` group the layout puts fewer than two textures on pages leaves them loose too, without a problem. The header size decides the group, so a cache hit decodes nothing. |
 | Loose by mipmaps | A texture with `mips` stays a file of its own, whatever its key or size: Pixi builds the full chain, and from the second level on the neighbours on a page would bleed into it. The pack check refuses a mipmapped frame. The packed bundle keeps `parent`, `dir` and `release`; a loose mipmapped file keeps `mips` and its chain `mb`. |
 | Groups | Per bundle: `fx` holds the textures whose key's last segment starts with `fx-` (`ui.fx-spark`) or that lie in an `fx` folder (`ui.fx.leaf` from `assets/fx/leaf.webp`), whatever their size (a particle emitter binds one page); `main` holds the other textures. The frames of an animation in `fx/` (`ui.fx.coin-spin.0`) go to `fx` too. A stem named `fx` with no folder (`ui.fx`) is not an fx folder. |
 | Group of one | Stays loose: an atlas of one file is one request either way. |
 | `fx` pages | Exactly one; more is a problem naming the bundle and the count. |
-| Oversized | A `main` texture that fits no page stays loose (see "Loose by size"). An `fx` texture that fits no page of the largest size is a problem naming the key and `4096×4096`, never loose: an emitter binds one page, and a loose `fx` texture would sample the wrong page in silence. Never a silent drop. |
+| Oversized | A `main` texture that fits no page stays loose (see "Loose by size"). An `fx` texture that fits no page is a problem naming the key and `2048×2048`, never loose: an emitter binds one page, and a loose `fx` texture would sample the wrong page in silence. Never a silent drop. |
 | Pages | WebP, `quality: 80, alphaQuality: 80`, composed from the sources decoded to RGBA. |
 | Loose textures | A `.webp` source is copied byte for byte; a `.png` source is encoded to WebP q80. |
 | Fonts | The pages are copied byte for byte and stay PNG (MSDF needs lossless); the `.fnt` is rewritten to name the hashed pages, then hashed. |
@@ -666,7 +665,7 @@ dist/assets/
 
 The cache lives in `node_modules/.cache/moku-game-pack/` under the working directory: one entry
 per atlas group and per encoded loose PNG, keyed by the versions of `sharp` and `maxrects-packer`,
-the packing constants (the page sizes, the loose side, the trim margin, the price table, padding,
+the packing constants (the page size, the loose side, the trim margin, padding,
 border, extrude, WebP quality) and the members (key, SHA-256 of the source, nine). A hit replays the
 frames, with their trim fields, and the bytes with no decode and no encode, and the textures the
 layout left loose are the members that have no frame; a changed source repacks only its group. A miss
