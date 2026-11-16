@@ -150,7 +150,7 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
         name: "ui.enter",
         phase: "sync",
         query: [],
-        run: () => jsx.playEntered()
+        run: (_rows, frame) => jsx.playEntered(frame.time)
       })
     ),
     ecs.onAdded(Tree, entity => {

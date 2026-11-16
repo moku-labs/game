@@ -233,6 +233,59 @@ describe("ui — the level and the landing of overlays", () => {
     expect(levelOf(app, "still")).toMatchObject({ level: 1, landed: true });
   });
 
+  // Bug (F205): the level track started after the mount frame's animate step, so the dim was drawn at 0 in that frame.
+  it("a fading overlay is drawn in its mount frame at the level its first frame of fade gives, and lands after fade", async () => {
+    const app = await start();
+    const button = keyed(app, "showStill");
+
+    if (button === undefined) throw new Error("no showStill");
+
+    app.input.tap(button);
+
+    // Frames of 10 ms until the overlay's frame: the level it has after that frame is what that frame drew.
+    let frames = 0;
+
+    while (levelOf(app, "still").entity === undefined && frames < 5) {
+      app.time.step(10);
+      frames += 1;
+    }
+
+    // The "out" curve over 120 ms: 10 ms in, 1 - (1 - 10/120)^2.
+    expect(levelOf(app, "still").level).toBeCloseTo(1 - (1 - 10 / 120) ** 2, 3);
+
+    app.time.step(10);
+
+    // One frame later the level is where the whole fade's curve is at 20 ms, within a hundredth.
+    expect(levelOf(app, "still").level).toBeCloseTo(1 - (1 - 20 / 120) ** 2, 2);
+
+    run(app, 90);
+
+    expect(levelOf(app, "still").level).toBeLessThan(1);
+
+    app.time.step(10);
+
+    expect(levelOf(app, "still")).toMatchObject({ level: 1 });
+  });
+
+  // Guard of F205: a mount frame as long as the fade draws the overlay at its full level in that frame.
+  it("a fading overlay mounted in a frame longer than its fade is drawn at its full level in that frame", async () => {
+    const app = await start();
+    const button = keyed(app, "showStill");
+
+    if (button === undefined) throw new Error("no showStill");
+
+    app.input.tap(button);
+
+    let frames = 0;
+
+    while (levelOf(app, "still").entity === undefined && frames < 5) {
+      app.time.step(200);
+      frames += 1;
+    }
+
+    expect(levelOf(app, "still").level).toBe(1);
+  });
+
   it("fade 0 sets the level at once and lands at the next solve", async () => {
     const app = await start();
 

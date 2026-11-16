@@ -1465,7 +1465,10 @@ a glass tint under a panel draws it above the dim now, on the panel.
 
 **Level and landing.** `level` goes from 0 to 1 with the overlay's root's own enter motion (its
 longest timed track), and back to 0 with its exit motion; `fade` (default 250 ms) times it only when
-the root plays none. `landed` turns true when the enter motion is over; leaving is the `Exiting` of
+the root plays none. A `fade` starts in the frame the overlay mounts, that frame's time into it: the
+mount frame draws the dim at the level the fade has after one frame (`fade: 120`, a 10 ms frame:
+0.16), and the level lands `fade` after the mount; a mount frame as long as `fade` draws it at 1
+(F205). `landed` turns true when the enter motion is over; leaving is the `Exiting` of
 the root. Neither is a field of the marker: they are the engine's state (`OverlayLevel`, written by
 `ui`), read through `app.renderer.sync.debug.overlays()`.
 
