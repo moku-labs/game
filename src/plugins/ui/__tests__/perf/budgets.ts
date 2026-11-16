@@ -222,5 +222,11 @@ export const BUDGET = {
    * F182: the remeasure of one such text before the entity carries a style of its own: the key is
    * one property read of the resolved style, and nothing is built. 0 B.
    */
-  textWhenRemeasure: 0
+  textWhenRemeasure: 0,
+  /**
+   * F205 (change 2026-11-16-f205-overlay-fade): the level of a fading overlay caught up in its mount frame, once per
+   * overlay mount, never per frame: 64 B, the level patch and the options of the rest of the track. The track
+   * that mount starts allocates its own record in anim too; nothing of this runs again in later frames.
+   */
+  fadeMount: 64
 } as const;

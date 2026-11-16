@@ -4,6 +4,7 @@
  * follows the root's own enter and exit motion (its longest timed track); `fade` times it only when the root plays
  * none (LEAD-FIXES-4 item 5a). The layout module plays the tracks: it is injected, never imported.
  */
+import { applyEase } from "../../anim/tween/easing";
 import { Overlay, OverlayLevel, type OverlayValue } from "../../renderer/components";
 import { Exiting } from "../../world/ecs/define";
 import type { TweenOptions } from "../../world/projection/types";
@@ -107,29 +108,65 @@ function levelTo(
 }
 
 /**
+ * The fade of an entering overlay from its mount frame on (F205). Its track starts in phase `sync`, after that frame's
+ * `animate` step, so it first moves in the next frame and the mount frame would draw the dim at 0. So the level is
+ * written now where the fade is after the frame's time, and the track runs the rest of the fade: it lands `fade` after
+ * the mount, on the same curve within a hundredth. A frame as long as the fade sets the level at once.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The entering overlay.
+ * @param fade - The track of its `fade`.
+ * @param deltaMs - The game time of the mount frame.
+ * @returns The rest of the track, or `undefined` for a level written at once.
+ */
+export function fadeFromMount(
+  ctx: UiCtx,
+  element: Element,
+  fade: TweenOptions,
+  deltaMs: number
+): TweenOptions | undefined {
+  if (deltaMs <= 0) return fade;
+  if (deltaMs >= fade.ms) return undefined;
+
+  const level = applyEase(fade.ease ?? "out", deltaMs / fade.ms);
+
+  ctx.deps.world.ecs.set(element.entity, OverlayLevel, { level });
+
+  return { ...fade, ms: fade.ms - deltaMs };
+}
+
+/**
  * Starts the level of an entering overlay with its enter motion: 0 to 1 over the root's own motion, or over `fade`
- * when it played none; `fade` 0 sets it at once, and the next solve lands it.
+ * when it played none, already the mount frame's time into it (F205); `fade` 0 sets it at once, and the next solve
+ * lands it.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The jsx state.
  * @param layout - The layout module.
- * @param entering - The entering element and the longest timed track its enter hook started.
+ * @param entering - The entering element, the longest timed track its enter hook started, and the frame's time.
  * @param entering.element - The entering element.
  * @param entering.span - The span its enter hook played.
+ * @param entering.deltaMs - The game time of the frame it enters in.
  */
 export function enterOverlay(
   ctx: UiCtx,
   state: JsxState,
   layout: OverlayLayout,
-  entering: { element: Element; span: MotionSpan }
+  entering: { element: Element; span: MotionSpan; deltaMs: number }
 ): void {
-  const { element, span } = entering;
+  const { element, span, deltaMs } = entering;
   const value = overlayOf(element);
 
   if (value === undefined) return;
 
   state.overlays.add(element.entity);
-  levelTo(ctx, layout, element, { level: 1, track: levelTrack(span, value.fade, "out") });
+
+  const track = levelTrack(span, value.fade, "out");
+  // The root's own motion starts in the next frame too: the level keeps its pace.
+  const fromMount =
+    track === undefined || span.end > 0 ? track : fadeFromMount(ctx, element, track, deltaMs);
+
+  levelTo(ctx, layout, element, { level: 1, track: fromMount });
 }
 
 /**
