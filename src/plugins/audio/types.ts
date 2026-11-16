@@ -290,7 +290,7 @@ export type State = {
   pendingSfx: Map<string, SfxRequest>;
   /** The sound that plays, or decodes, under each id; an entry leaves when its sound ends or stops. */
   named: Map<string, NamedSound>;
-  /** Per key, evicted per key on `assets:bundle-unloaded` and `assets:replaced`. */
+  /** Per key, evicted per key on `assets:bundle-unloaded` and `assets:replaced`, and when a music track stops being the one that plays. */
   decoded: Map<string, Promise<AudioBuffer>>;
   /** Asset keys that already got their one warning. */
   warned: Set<string>;
