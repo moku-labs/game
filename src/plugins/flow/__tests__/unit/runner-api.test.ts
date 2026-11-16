@@ -364,6 +364,21 @@ describe("createRunnerApi", () => {
     expect(graph.slots.afterWin).toEqual([]);
   });
 
+  // Bug (F196): every rest rendered the whole graph again, twice; a graph kept before run() would miss a feature
+  // registered later.
+  it("renders the graph anew before run(), and once, frozen, after run() sealed the features", () => {
+    const harness = setup(restingGraph());
+
+    expect(harness.api.describe()).not.toBe(harness.api.describe());
+
+    harness.ctx.state.features.sealed = true;
+
+    const graph = harness.api.describe();
+
+    expect(harness.api.describe()).toBe(graph);
+    expect(Object.isFrozen(graph.flows.main?.nodes)).toBe(true);
+  });
+
   it("reports the state before the graph runs", () => {
     const harness = setup(restingGraph());
 

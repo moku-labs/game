@@ -1049,6 +1049,8 @@ export type RunnerState = {
   flushing: Promise<void> | undefined;
   /** Every flow of the graph by id, collected at `run()`. */
   flows: Map<string, AnyFlow>;
+  /** The frozen `describe()` of the graph, rendered once after `run()` sealed the features (F196). */
+  described?: FlowGraph;
   enterCallbacks: Record<Stage, EnterCallback[]>;
   /** The position: one frame per nesting level. */
   stack: Frame[];

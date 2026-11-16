@@ -54,14 +54,40 @@ export function collectGraph(ctx: FlowCtx, features: FeaturesApi): Map<string, A
 }
 
 /**
- * Renders the whole graph as JSON. It reads the flows as data, so it works before `run()`.
+ * Freezes a described graph and everything in it: the flows, their nodes, edges and slots.
+ *
+ * @param value - A part of the graph.
+ */
+function freezeDeep(value: unknown): void {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return;
+
+  Object.freeze(value);
+
+  for (const child of Object.values(value)) freezeDeep(child);
+}
+
+/**
+ * Renders the whole graph as JSON. It reads the flows as data, so it works before `run()`. Once
+ * `run()` sealed the features the graph cannot change: it is rendered once, frozen, and the same
+ * object answers every later call (F196: the look-ahead of every rest rendered it again, twice).
  *
  * @param ctx - Domain context of the flow plugin.
  * @param features - Features API: owners and slot contributions.
  * @returns The graph.
  */
 export function graphOf(ctx: FlowCtx, features: FeaturesApi): FlowGraph {
-  return describeGraph(collectGraph(ctx, features), features);
+  const runner = ctx.state.runner;
+
+  if (runner.described !== undefined) return runner.described;
+
+  const graph = describeGraph(collectGraph(ctx, features), features);
+
+  if (!ctx.state.features.sealed) return graph;
+
+  freezeDeep(graph);
+  runner.described = graph;
+
+  return graph;
 }
 
 /**

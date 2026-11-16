@@ -290,10 +290,22 @@ function createFakeTime(): FakeTime {
 function createFakeModel(): FakeModel {
   const fake: FakeModel = { player: {}, session: {}, api: undefined as unknown as ModelApi };
 
+  // As the real store: the same snapshot while the two trees are the same.
+  let last: { player: unknown; session: unknown; rng: unknown } | undefined;
+
   fake.api = {
     store: {
-      snapshot: () =>
-        Object.freeze({ player: fake.player, session: fake.session, rng: { seed: 1, streams: {} } })
+      snapshot: () => {
+        if (last?.player === fake.player && last.session === fake.session) return last;
+
+        last = Object.freeze({
+          player: fake.player,
+          session: fake.session,
+          rng: { seed: 1, streams: {} }
+        });
+
+        return last;
+      }
     }
   } as unknown as ModelApi;
 
@@ -446,15 +458,19 @@ function createFakeFlow(): FakeFlow {
     api: undefined as unknown as FlowApi
   };
 
+  // As the real runner: the same state while the position and the mode are the same.
+  let view: FlowState | undefined;
+
   fake.api = {
     describe: () => fake.graph,
-    state: (): FlowState => ({
-      running: true,
-      path: fake.path,
-      stack: fake.stack,
-      pending: {},
-      mode: fake.mode
-    }),
+    state: (): FlowState => {
+      if (view?.path === fake.path && view.stack === fake.stack && view.mode === fake.mode)
+        return view;
+
+      view = { running: true, path: fake.path, stack: fake.stack, pending: {}, mode: fake.mode };
+
+      return view;
+    },
     onEnter: (stage: Stage, callback: EnterCallback): (() => void) => {
       const registration = { stage, callback };
 
