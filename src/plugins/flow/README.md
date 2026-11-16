@@ -320,8 +320,8 @@ Flow commands:
 | `game.walk` | `{ route: "json" }` | route | `flow.walk` with the route read from JSON |
 | `game.bookmark` | — | read | `flow.bookmark()`, plus `scene: scenes.current()` when the app has `scenes` and a scene is mounted |
 | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `scenes.expect(bookmark.scene)` when the bookmark has a scene, then `flow.restore(bookmark)`; or `flow.restore(reproBookmark(app, repro))` then `flow.walk(repro.route)` |
-| `game.saveExport` | — | read | `model.store.snapshot()`: `{ player, session, rng }`, the save a tester's progress moves with |
-| `game.saveImport` | `{ save: "json" }` | raw | the save of `game.saveExport` restored at the main flow's start, where a fresh start with it lands: a rest start is entered, a transit start runs again on the imported trees (its rng included) up to the first gate it opens; then `model.store.flush()`; a value without `player`, `session` and `rng` throws |
+| `game.saveExport` | — | read | `model.store.snapshot()` and `model.store.schemaVersion()`: `{ player, session, rng, version }`, the save a tester's progress moves with |
+| `game.saveImport` | `{ save: "json" }` | raw | the save of `game.saveExport` restored at the main flow's start, migrated from its `version` first (none: taken as this build's; newer or no migration step: refused, the game stays where it stood), where a fresh start with it lands: a rest start is entered, a transit start runs again on the imported trees (its rng included) up to the first gate it opens; then `model.store.flush()`; a value without `player`, `session` and `rng` throws |
 
 The `scene` of a bookmark is what makes a restore at a popup work in a fresh page. A node without
 a scene of its own keeps the mounted scene: a rest node (`settings/open`, the Settings popup over
