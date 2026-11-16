@@ -5,10 +5,39 @@ import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli, type ScanUi } from "../../scan/cli";
 import { textureMb } from "../../scan/image-size";
+import { composePage, type PagePart } from "../../scan/pack/encode";
+import { LOOSE_SIDE } from "../../scan/pack/groups";
+import { PAGE_SIZE } from "../../scan/pack/layout";
 import { type PackResult, packAssets } from "../../scan/pack/pack";
 import { scanAssets } from "../../scan/scan";
 import type { Manifest, ManifestBundle, ManifestFile } from "../../types";
 import { audioBytes, bmfontText, makeTree, removeTree, stringsTools } from "./scan-fixtures";
+
+/** A page the packer composed: its size and the cut pixels it was given. */
+type Composed = { width: number; height: number; parts: readonly PagePart[] };
+
+/** Every page `encoder.page` was asked to compose, in order: what the trim tests read. */
+const spy = vi.hoisted(() => ({ composed: [] as Composed[] }));
+
+vi.mock("../../scan/pack/encode", async importOriginal => {
+  const original = await importOriginal<typeof import("../../scan/pack/encode")>();
+
+  return {
+    ...original,
+    loadEncoder: async () => {
+      const encoder = await original.loadEncoder();
+
+      return {
+        ...encoder,
+        page: (width: number, height: number, parts: readonly PagePart[]) => {
+          spy.composed.push({ width, height, parts });
+
+          return encoder.page(width, height, parts);
+        }
+      };
+    }
+  };
+});
 
 const folders: string[] = [];
 
@@ -49,6 +78,9 @@ async function temp(): Promise<string> {
   return folder;
 }
 
+/** The width of the textures that stay loose by size: one pixel above the side `groupOf` packs. */
+const WIDE = LOOSE_SIDE + 1;
+
 /**
  * The game tree of these tests: `ui` has two fx textures, three small textures (one nine-slice),
  * a loose WebP and a loose PNG by size, a font with one page and a sound; `board` has a single
@@ -61,8 +93,8 @@ async function gameTree(): Promise<string> {
     "features/ui/assets/icon-a.png": await png(20, 20, BLUE),
     "features/ui/assets/icon-b.png": await png(24, 10, YELLOW),
     "features/ui/assets/panel{nine=4}.png": await png(32, 16, MAGENTA),
-    "features/ui/assets/bg.webp": await webp(600, 20, GREY),
-    "features/ui/assets/big.png": await png(520, 8, GREY),
+    "features/ui/assets/bg.webp": await webp(WIDE, 20, GREY),
+    "features/ui/assets/big.png": await png(WIDE, 8, GREY),
     "features/ui/assets/body.fnt": bmfontText("body_0.png"),
     "features/ui/assets/body_0.png": await png(16, 16, GREY),
     "features/ui/assets/click.mp3": audioBytes(2048),
@@ -97,12 +129,40 @@ async function layeredTree(): Promise<string> {
     "features/board/assets/cell.png": await png(40, 40, GREEN),
     "shared/assets/icon-a.png": await png(20, 20, BLUE),
     "shared/assets/icon-b.png": await png(24, 10, YELLOW),
-    "shared/assets/bg.webp": await webp(600, 20, GREY)
+    "shared/assets/bg.webp": await webp(WIDE, 20, GREY)
   });
 
   folders.push(root);
 
   return root;
+}
+
+/**
+ * The RGBA pixels of a `width × height` image that is transparent except for an inset rectangle,
+ * drawn in colours that differ pixel by pixel, so a wrong offset or a wrong row shows.
+ */
+function marginPixels(width: number, height: number, margin: number): Uint8Array {
+  const data = new Uint8Array(width * height * 4);
+
+  for (let row = margin; row < height - margin; row += 1) {
+    for (let column = margin; column < width - margin; column += 1) {
+      data.set(
+        [(column * 7) % 256, (row * 13) % 256, (column + row * 3) % 256, 255],
+        (row * width + column) * 4
+      );
+    }
+  }
+
+  return data;
+}
+
+/** Encodes raw RGBA pixels as a PNG. */
+async function pngOfPixels(width: number, height: number, data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(
+    await sharp(data, { raw: { width, height, channels: 4 } })
+      .png()
+      .toBuffer()
+  );
 }
 
 /** Packs a tree into a folder, with a cache folder or none. */
@@ -210,8 +270,8 @@ describe("packAssets", () => {
     for (const page of pages) {
       const written = await sharp(path.join(out, page.path)).metadata();
 
-      expect(written.width).toBeLessThanOrEqual(2048);
-      expect(written.height).toBeLessThanOrEqual(2048);
+      expect(written.width).toBeLessThanOrEqual(PAGE_SIZE);
+      expect(written.height).toBeLessThanOrEqual(PAGE_SIZE);
     }
   });
 
@@ -301,7 +361,7 @@ describe("packAssets", () => {
     const bigBytes = await readFile(path.join(out, big.path ?? ""));
 
     expect(bigBytes.subarray(8, 12).toString("ascii")).toBe("WEBP");
-    expect(big).toMatchObject({ width: 520, height: 8, mb: 0.016 });
+    expect(big).toMatchObject({ width: WIDE, height: 8, mb: textureMb(WIDE, 8) });
   });
 
   it("rewrites the .fnt to name its hashed page, and copies the page byte for byte", async () => {
@@ -687,5 +747,172 @@ describe("packAssets of a sub-feature", () => {
     expect(cup.atlas).toBeUndefined();
     expect(cup).toMatchObject({ mips: true, mb: textureMb(32, 32, true) });
     expect(ep01.mb).toBeCloseTo((ep01.pages?.[0]?.mb ?? 0) + cup.mb, 3);
+  });
+});
+
+/** The tree of the trim tests: a texture with a 10 px transparent margin, an opaque one and an empty one. */
+async function trimTree(): Promise<string> {
+  const root = await makeTree({
+    "features/ui/assets/icon.png": await pngOfPixels(40, 30, marginPixels(40, 30, 10)),
+    "features/ui/assets/other.png": await png(20, 20, BLUE),
+    "features/ui/assets/ghost.png": await pngOfPixels(30, 30, new Uint8Array(30 * 30 * 4))
+  });
+
+  folders.push(root);
+
+  return root;
+}
+
+describe("packAssets trim (F198)", () => {
+  it("packs a texture with a 10 px transparent margin as its visible pixels and the margin pixel, and records where it lay", async () => {
+    // Bug caught: a frame without its offset and original size is drawn at the size of the cut, so
+    // the sprite shrinks and shifts; the margin of 1 px keeps the edge reading transparent.
+    const root = await trimTree();
+    const { manifest } = await pack(root, await temp(), false);
+    const ui = bundleOf(manifest, "ui");
+    const icon = fileOf(ui, "ui.icon");
+
+    expect(icon).toMatchObject({ key: "ui.icon", width: 40, height: 30, mb: 0 });
+    expect(icon.atlas).toMatchObject({
+      width: 40 - 18,
+      height: 30 - 18,
+      offsetX: 9,
+      offsetY: 9,
+      origWidth: 40,
+      origHeight: 30
+    });
+    expect(Object.keys(icon.atlas ?? {})).toEqual([
+      "page",
+      "x",
+      "y",
+      "width",
+      "height",
+      "offsetX",
+      "offsetY",
+      "origWidth",
+      "origHeight"
+    ]);
+  });
+
+  it("composes the page with the source pixels of the frame, taken from the offset", async () => {
+    // Bug caught: a crop from the wrong offset or row stride puts the wrong pixels in the page; it
+    // is read on the composed RGBA, which the lossy WebP would blur.
+    const root = await trimTree();
+
+    spy.composed.length = 0;
+
+    const { manifest } = await pack(root, await temp(), false);
+    const ui = bundleOf(manifest, "ui");
+    const atlas = fileOf(ui, "ui.icon").atlas;
+    const page = ui.pages?.find(entry => entry.id === atlas?.page);
+    const call = spy.composed.find(
+      entry => entry.width === page?.width && entry.height === page?.height
+    );
+    const source = marginPixels(40, 30, 10);
+
+    expect(atlas).toBeDefined();
+    expect(call).toBeDefined();
+
+    const rgba = composePage(call?.width ?? 0, call?.height ?? 0, call?.parts ?? []);
+
+    for (let row = 0; row < (atlas?.height ?? 0); row += 1) {
+      const onPage = ((atlas?.y ?? 0) + row) * (page?.width ?? 0) + (atlas?.x ?? 0);
+      const inSource = ((atlas?.offsetY ?? 0) + row) * 40 + (atlas?.offsetX ?? 0);
+
+      expect(rgba.subarray(onPage * 4, (onPage + (atlas?.width ?? 0)) * 4)).toEqual(
+        source.subarray(inSource * 4, (inSource + (atlas?.width ?? 0)) * 4)
+      );
+    }
+  });
+
+  it("keeps a 1×1 frame for a fully transparent texture and the whole frame for an opaque one", async () => {
+    // Bug caught: an empty frame of 0 px cannot be cut out of a page, and trimming an opaque
+    // texture shifts it for nothing.
+    const root = await trimTree();
+    const { manifest } = await pack(root, await temp(), false);
+    const ui = bundleOf(manifest, "ui");
+
+    expect(fileOf(ui, "ui.ghost").atlas).toMatchObject({
+      width: 1,
+      height: 1,
+      offsetX: 0,
+      offsetY: 0,
+      origWidth: 30,
+      origHeight: 30
+    });
+    expect(Object.keys(fileOf(ui, "ui.other").atlas ?? {})).toEqual([
+      "page",
+      "x",
+      "y",
+      "width",
+      "height"
+    ]);
+    expect(fileOf(ui, "ui.other").atlas).toMatchObject({ width: 20, height: 20 });
+  });
+
+  it("never trims a nine-slice: the same margin leaves its full size and no offset fields", async () => {
+    // Bug caught: a trimmed nine-slice loses its borders, which sit in the margin the cut removed.
+    const root = await makeTree({
+      "features/ui/assets/panel{nine=4}.png": await pngOfPixels(40, 30, marginPixels(40, 30, 10)),
+      "features/ui/assets/other.png": await png(20, 20, BLUE)
+    });
+
+    folders.push(root);
+
+    const { manifest } = await pack(root, await temp(), false);
+    const panel = fileOf(bundleOf(manifest, "ui"), "ui.panel");
+
+    expect(panel.nine).toEqual({ left: 4, top: 4, right: 4, bottom: 4 });
+    expect(panel.atlas).toMatchObject({ width: 40, height: 30 });
+    expect(Object.keys(panel.atlas ?? {})).toEqual(["page", "x", "y", "width", "height"]);
+  });
+
+  it("replays the trim of a frame from the cache with the same manifest and bytes", async () => {
+    // Bug caught: a cache entry that drops the trim fields (or is read as another shape) gives a
+    // second run whose frames are the cut at the original's size.
+    const root = await trimTree();
+    const out = await temp();
+    const cache = await temp();
+    const first = await pack(root, out, cache);
+    const before = await snapshot(out);
+    const second = await pack(root, out, cache);
+
+    expect(second.cacheHits).toBe(second.pages);
+    expect(second.cacheHits).toBeGreaterThan(0);
+    expect(second.manifest).toEqual(first.manifest);
+    expect(await snapshot(out)).toEqual(before);
+  });
+});
+
+describe("packAssets loose by size (F198)", () => {
+  it("writes a main texture above LOOSE_SIDE as a file of its own, on a miss and on a hit", async () => {
+    // Bug caught: a texture left out of the pages and out of the loose list vanishes from the
+    // pack, and the check names its key as missing; a hit must not put it on a page either.
+    const root = await makeTree({
+      "features/ui/assets/big.png": await png(2000, 1000, GREY),
+      "features/ui/assets/a.png": await png(50, 50, RED),
+      "features/ui/assets/b.png": await png(50, 50, GREEN)
+    });
+
+    folders.push(root);
+
+    const out = await temp();
+    const cache = await temp();
+    const first = await pack(root, out, cache);
+    const before = await snapshot(out);
+    const second = await pack(root, out, cache);
+
+    for (const result of [first, second]) {
+      const ui = bundleOf(result.manifest, "ui");
+
+      expect(fileOf(ui, "ui.big").atlas).toBeUndefined();
+      expect(fileOf(ui, "ui.big").path).toMatch(/^ui\/ui\.big-[0-9a-f]{10}\.webp$/);
+      expect(fileOf(ui, "ui.a").atlas?.page).toBe("ui/main-0");
+      expect(result.pages).toBe(1);
+      expect(result.loose).toBe(1);
+    }
+
+    expect(second.cacheHits).toBe(1);
+    expect(await snapshot(out)).toEqual(before);
   });
 });

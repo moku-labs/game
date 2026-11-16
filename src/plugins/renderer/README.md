@@ -212,7 +212,7 @@ internal markup: select them by nothing, set the properties instead.
 | `hitBoxOf(entity)` | The very box `hitTest` tests for the view, in the entity's own units, before the `Transform` and the `Parent` chain: `{ x: -32, y: -32, width: 64, height: 64 }` for a 64 x 64 `Sprite` with the default anchor, `{ x: 0, y: 0, width: w, height: h }` for a `Shape`. A fresh object; `undefined` without a view. `input` fits the circle of a trace in it. |
 | `textures.provide(fn)` | Adds a provider to the chain; the newest is asked first. Returns the remover. Works while inert. |
 | `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Once uploaded it stays on the GPU until `textures.destroy`: Pixi's collector leaves it alone (F129). An `ImageBitmap` is closed once Pixi has it on the GPU (see "Decoded images"): the caller must not use it after the first drawn frame. Throws while the renderer does not draw. |
-| `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
+| `textures.slice(page, { x, y, width, height, offsetX?, offsetY?, origWidth?, origHeight? }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. A trimmed frame (all four of `offsetX`, `offsetY`, `origWidth`, `origHeight`; an incomplete set counts as none) gets `orig = (0, 0, origWidth, origHeight)` and `trim = (offsetX, offsetY, width, height)`: `width`/`height` answer the original size (F198). Throws while the renderer does not draw, when the frame does not fit in the page, and when a trimmed frame does not fit in its original. See "Slices of an atlas page". |
 | `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. Before a source goes, the `change` listeners of the source and of its style are removed: Pixi 8.22 keeps batch bind groups forever, and each would warn `[BindGroup] ... destroyed while still bound to a shader`. |
 | `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once (sprites, nine-slices, hollow nine-slices). No-op while inert. |
 | `textures.used(keys)` | `true` when a view draws at least one of these asset keys (F184): the table `invalidate` reads, every sprite and nine-slice view with a texture key, shown or hidden, the magenta placeholder of an unanswered key included. `assets` asks before the budget unloads a bundle. `false` for `[]` and while inert. Reads by index, allocates nothing. Particles, filter inputs, inline images in text and the leave loader take textures without a view of this table: they do not count. |
@@ -1660,10 +1660,32 @@ still keeps the page's source. A frame outside the page, or with a negative numb
 `[game] renderer.sync.textures.slice: frame 583,595 256x128 is outside page 512x512.` with the hint
 `Run "bun run assets:pack".`: the packer checks it, so this catches a stale manifest.
 
+**Trimmed frames (F198).** The packer crops a texture that is not a nine-slice to its visible pixels
+and records where the crop lies in the original: `offsetX`, `offsetY`, `origWidth`, `origHeight`.
+With all four, the slice gets Pixi's `orig = (0, 0, origWidth, origHeight)` and
+`trim = (offsetX, offsetY, width, height)`; its frame stays the page pixels. `width` and `height`
+then answer the original size, and Pixi sizes a sprite by `orig` and draws its quad over `trim`, so
+every sprite keeps its size and place. An incomplete set counts as none (every older manifest has
+none). A trimmed frame must also lie inside its original (`offsetX + width ≤ origWidth`, the same
+for y, no negative offset), else the same error as above.
+
+```ts
+// A 300 x 200 leaf packed without its transparent margin: 256 x 128 of it lie on the page.
+const leaf = renderer.sync.textures.slice(page, {
+  x: 0, y: 0, width: 256, height: 128, offsetX: 9, offsetY: 9, origWidth: 300, origHeight: 200
+});
+leaf.width; // 300
+leaf.trim; // Rectangle { x: 9, y: 9, width: 256, height: 128 }
+```
+
 To `sync` a slice is one texture like any other: providers answer it by key, `invalidate`, pools
 and `byKey` work by key. A `NineSlice` drawn from it copies the slice's borders on every write, and
 Pixi cuts them against the slice's frame. A `"cover"` sprite crops relative to the texture's frame,
-so its crop stays inside the slice and is freed with it.
+so its crop stays inside the slice and is freed with it. On a trimmed texture the crop `C` is in
+original pixels: the crop draws `I = C ∩ trim` (not rounded) at its place in `C`, with
+`orig = (0, 0, C.width, C.height)`, so it keeps the box's size; a crop that misses the trim draws
+nothing (`trim = (0, 0, 0, 0)` over one pixel of the base's frame) and never shows a neighbour on
+the page.
 
 ### Nine-slice borders and the debug outline
 

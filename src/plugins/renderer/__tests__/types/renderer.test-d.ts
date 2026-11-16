@@ -322,7 +322,16 @@ renderer.sync.filters.set(1_048_578, [{ filter: "glow", passes: 1 }]);
 declare const page: PixiTexture;
 declare const packed: { page: string; x: number; y: number; width: number; height: number };
 
-expectTypeOf<SliceFrame>().toEqualTypeOf<{ x: number; y: number; width: number; height: number }>();
+expectTypeOf<SliceFrame>().toEqualTypeOf<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  offsetX?: number;
+  offsetY?: number;
+  origWidth?: number;
+  origHeight?: number;
+}>();
 expectTypeOf(renderer.sync.textures.slice).toEqualTypeOf<
   (page: PixiTexture, frame: SliceFrame, options?: CreateTextureOptions) => PixiTexture
 >();

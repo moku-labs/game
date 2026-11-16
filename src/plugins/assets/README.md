@@ -219,7 +219,7 @@ The dev manifest of `bun run assets:keys` is version 1: loose files, straight fr
 | `parent`, `dir` | A sub-feature's bundle only: its parent feature and its owner folder relative to the scan root (`"features/episodes/ep01"`). A top-level feature's and a layer's bundle carry neither, so a flat game's manifest keeps its bytes. |
 | `release` | `"leave"` only; absent means `"budget"`, and any other value reads as absent (the scanner refuses a wrong one). |
 | `nine` | Optional, always four numbers, whichever of the three tag forms wrote them. Passed to `createTexture` as the tuple `[left, top, right, bottom]`. |
-| `atlas` | `{ page, x, y, width, height }`: the file is cut out of the page of its bundle with that id. Written by the packer. |
+| `atlas` | `{ page, x, y, width, height }`, and for a trimmed file `offsetX`, `offsetY`, `origWidth`, `origHeight` after them (see "Manifest v2"): the file is cut out of the page of its bundle with that id. Written by the packer. |
 | Order | Bundles sorted by name, files sorted by key. A bundle writes `feature`, `parent`, `dir`, `tier`, `release`, `mb`, `pages`, `files`; a texture `key`, `path`, `width`, `height`, `mb`, `mips`, `nine`, `atlas`; a field it does not carry is left out. Unknown fields are ignored. |
 
 ## Manifest v2
@@ -247,7 +247,10 @@ it is.
           "atlas": { "page": "ui/fx-0", "x": 2, "y": 2, "width": 85, "height": 96 } },
         { "key": "ui.panel", "width": 256, "height": 128, "mb": 0,
           "nine": { "left": 48, "top": 48, "right": 48, "bottom": 48 },
-          "atlas": { "page": "ui/main-0", "x": 583, "y": 595, "width": 256, "height": 128 } }
+          "atlas": { "page": "ui/main-0", "x": 583, "y": 595, "width": 256, "height": 128 } },
+        { "key": "ui.star", "width": 300, "height": 200, "mb": 0,
+          "atlas": { "page": "ui/main-0", "x": 2, "y": 2, "width": 256, "height": 128,
+                     "offsetX": 20, "offsetY": 36, "origWidth": 300, "origHeight": 200 } }
       ]
     }
   }
@@ -258,7 +261,9 @@ it is.
 |---|---|
 | `bundle.pages` | Optional, sorted by `id`: `{ id, path, width, height, mb }`. `id` is `<bundle>/<group>-<index>`; `path` follows the `path` rule of a file; `mb` is `width × height × 4 / 1 048 576`. |
 | `file.path` | Present on a loose texture, a font and a sound; absent on a packed texture. |
-| `file.atlas` | `{ page, x, y, width, height }`. `page` is a page id of the same bundle, never a file name. `width` and `height` equal the file's own, so `nine` stays valid as it is. |
+| `file.atlas` | `{ page, x, y, width, height }`, in that order. `page` is a page id of the same bundle, never a file name; `x`, `y`, `width`, `height` are the pixels on the page. Without the four fields below, `width` and `height` equal the file's own, so `nine` stays valid as it is. |
+| `atlas.offsetX`, `atlas.offsetY` | Optional: x and y of the frame's first column and row inside the original image. Written only for a texture the packer trimmed. |
+| `atlas.origWidth`, `atlas.origHeight` | Optional: the size of the original image (the file's own `width` and `height`). All four trim fields are there together or none is; none means the frame is the whole image, as in every manifest written before trim. The loader reads each as a finite number of 0 or more and keeps them only when all four pass: `offsetX: 0` is kept, three of four are all dropped. A `nine` texture never carries them. `renderer.sync.textures.slice` takes the frame as it is and answers the original size (`orig`) with the cut at its offset (`trim`), so a trimmed sprite keeps its size and its place. |
 | `file.mb` | `0` for a packed texture: its page carries the cost. |
 | `bundle.mb` | Pages + loose textures + font pages + audio bytes. `usage()` reports it unchanged. |
 | Order | Bundles by name, pages by id, files by key. Field order of a file: `key`, `path`, `kind`, `width`, `height`, `mb`, `pages`, `nine`, `atlas`. |
@@ -297,7 +302,8 @@ font reads its `.fnt` as text and uploads every page it lists; an audio file is 
 `"audio/mpeg"`) and is never decoded here. A packed sound keeps its extension, so it keeps its type.
 
 A packed bundle starts one load per atlas page first (fetched and uploaded with no borders). A
-packed file waits for its page and becomes `io.sliceTexture(page, atlas, { nine })`: nothing is
+packed file waits for its page and becomes `io.sliceTexture(page, atlas, { nine })` (the manifest's
+`atlas` is passed as it is, trim fields included): nothing is
 fetched twice in one load. A page id the bundle does not list fails the file with
 `[game] assets: file "ui.icon-coin" of bundle "ui" names page "ui/main-9", which the bundle does
 not list.\n  Run "bun run assets:pack".`; a page that fails rejects every file on it with the
@@ -540,7 +546,7 @@ preload, no event and no budget work.
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
-| `scan/pack/` | Build time only: the production packer behind `--pack` (`pack`, `groups`, `layout`, `encode`, `names`, `cache`, `copy`). The only place that imports `sharp` and `maxrects-packer` (lint rule L11). |
+| `scan/pack/` | Build time only: the production packer behind `--pack` (`pack`, `groups`, `layout`, `trim`, `encode`, `names`, `cache`, `copy`). The only place that imports `sharp` and `maxrects-packer` (lint rule L11). |
 
 ## What the scanner reads
 
@@ -618,15 +624,16 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 
 | Rule | Value |
 |---|---|
-| Page | 2048 × 2048 at most with its 2 px border, padding and edge copy counted, as small as its content (not a power of two, not square). A frame is at most 2042 px per side. |
+| Page | 2048 × 2048 at most with its 2 px border, padding and edge copy counted (the packer is given 2046), as small as its content (not a power of two, not square). A frame is at most 2042 px per side. Every group uses the same page size (F198: the A26 measured a page size chosen per group, 1024, 2048 or 4096, no better than fixed 2048 pages). |
 | Padding | 2 px between frames and a 2 px border. Each frame's edge pixels are copied 1 px out into it (extrude), so a picture drawn at a fractional place samples its own edge, never transparent black (F105); the rest stays transparent. |
-| Trim, rotation | Never: a rotated or trimmed nine-slice would lose its borders. |
-| Loose by size | A texture with a side above 512 px stays a file of its own. |
+| Trim | A texture that is not a nine-slice is cut to its visible pixels (alpha above 0), grown by 1 px on each side where the image has room: the margin keeps one transparent row or column at a cut edge, so bilinear sampling at the edge of the sprite reads transparent as before. A fully transparent image keeps a 1×1 frame at 0, 0. The manifest's `atlas` records `offsetX`, `offsetY`, `origWidth`, `origHeight`, only when the cut is smaller than the image. A texture with `nine` is never trimmed, and a loose file is not trimmed. |
+| Rotation | Never. |
+| Loose by size | A `main` texture with a header side above `LOOSE_SIDE` (1018 px) stays a file of its own and is not laid out; the cap is far below a page (2042 px), so a `main` texture always fits one. The header size decides the group, so a cache hit decodes nothing. |
 | Loose by mipmaps | A texture with `mips` stays a file of its own, whatever its key or size: Pixi builds the full chain, and from the second level on the neighbours on a page would bleed into it. The pack check refuses a mipmapped frame. The packed bundle keeps `parent`, `dir` and `release`; a loose mipmapped file keeps `mips` and its chain `mb`. |
 | Groups | Per bundle: `fx` holds the textures whose key's last segment starts with `fx-` (`ui.fx-spark`) or that lie in an `fx` folder (`ui.fx.leaf` from `assets/fx/leaf.webp`), whatever their size (a particle emitter binds one page); `main` holds the other textures. The frames of an animation in `fx/` (`ui.fx.coin-spin.0`) go to `fx` too. A stem named `fx` with no folder (`ui.fx`) is not an fx folder. |
 | Group of one | Stays loose: an atlas of one file is one request either way. |
 | `fx` pages | Exactly one; more is a problem naming the bundle and the count. |
-| Oversized | A texture that fits no page is a problem naming the key, never a silent drop. |
+| Oversized | A texture that fits no page is a problem naming the key and `2048×2048`, never loose and never a silent drop. A `main` texture above `LOOSE_SIDE` is out of the group before the layout (see "Loose by size"); an `fx` texture is never loose, since an emitter binds one page and a loose `fx` texture would sample the wrong page in silence. |
 | Pages | WebP, `quality: 80, alphaQuality: 80`, composed from the sources decoded to RGBA. |
 | Loose textures | A `.webp` source is copied byte for byte; a `.png` source is encoded to WebP q80. |
 | Fonts | The pages are copied byte for byte and stay PNG (MSDF needs lossless); the `.fnt` is rewritten to name the hashed pages, then hashed. |
@@ -637,8 +644,11 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 
 Before anything is written, the pack checks that every key of the scan landed exactly once (a page
 frame or a loose file), that every `atlas.page` names a page of its own bundle, that every frame
-lies inside its page and has the size of its source (so `nine` stays valid). Every problem goes
-into one error, then `Fix them and run "bun run assets:pack" again.`, exit 1.
+lies inside its page and that its original (`origWidth × origHeight`, else the frame's own size)
+has the size of its source (so `nine` stays valid). A trimmed frame must lie inside its original
+(`offsetX + width ≤ origWidth`, same for y), and a file with `nine` whose frame carries the trim
+fields is a problem: `the texture "ui.panel" has nine-slice borders, so it must not be trimmed.`
+Every problem goes into one error, then `Fix them and run "bun run assets:pack" again.`, exit 1.
 
 The output folder:
 
@@ -655,8 +665,10 @@ dist/assets/
 
 The cache lives in `node_modules/.cache/moku-game-pack/` under the working directory: one entry
 per atlas group and per encoded loose PNG, keyed by the versions of `sharp` and `maxrects-packer`,
-the packing constants and the members (key, SHA-256 of the source, nine). A hit replays the frames
-and the bytes with no decode and no encode; a changed source repacks only its group. Copies are not
+the packing constants (the page size, the loose side, the trim margin, padding,
+border, extrude, WebP quality) and the members (key, SHA-256 of the source, nine). A hit replays the
+frames, with their trim fields, and the bytes with no decode and no encode; a changed source repacks only its group. A miss
+decodes every member of the group once. Copies are not
 cached. The cache is content-addressed and never pruned.
 
 The command prints one line per bundle and a closing line through the branded console:
