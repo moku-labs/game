@@ -199,6 +199,43 @@ describe("the load effect", () => {
     expect(result).toEqual({ loaded: ["board", "board.chains"], mb: 0.126 });
   });
 
+  // Bug (F203): a window whose bundles were loaded and on the GPU still got a promise from `load`, so its node went on
+  // in the next `signals` phase and the window was drawn a frame late.
+  it("answers synchronously when every bundle is loaded and warmed, as ready decides", async () => {
+    const mock = createMockAssets({ manifest });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.warm("board");
+    await mock.api.warm("board.chains");
+
+    const handler = mock.flow.handlers.get("load");
+    const result = handler?.run(load(["board", "board.chains"]), {
+      signal: new AbortController().signal,
+      mode: "live"
+    });
+
+    expect(result).toEqual({ loaded: ["board", "board.chains"], mb: 0.126 });
+  });
+
+  it("still answers with a promise while a bundle is loaded but not warmed", async () => {
+    const mock = createMockAssets({ manifest });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.warm("board");
+    await loadBundle(mock.assetsCtx, "board.chains", undefined, "request");
+
+    const handler = mock.flow.handlers.get("load");
+    const result = handler?.run(load(["board", "board.chains"]), {
+      signal: new AbortController().signal,
+      mode: "live"
+    });
+
+    expect(result).toBeInstanceOf(Promise);
+    await expect(result).resolves.toEqual({ loaded: ["board", "board.chains"], mb: 0.126 });
+  });
+
   it("resolves empty while headless", async () => {
     const mock = createMockAssets({ manifest, io: undefined });
 
@@ -304,13 +341,12 @@ describe("the load effect on a broken descriptor", () => {
     const handler = mock.flow.handlers.get("load");
     const run = { signal: new AbortController().signal, mode: "live" as const };
 
-    await expect(handler?.run({ kind: "load", payload: 7 }, run)).resolves.toEqual({
+    // A payload with no bundles answers at once: nothing to wait for.
+    expect(handler?.run({ kind: "load", payload: 7 }, run)).toEqual({ loaded: [], mb: 0 });
+    expect(handler?.run({ kind: "load", payload: { bundles: "board" } }, run)).toEqual({
       loaded: [],
       mb: 0
     });
-    await expect(
-      handler?.run({ kind: "load", payload: { bundles: "board" } }, run)
-    ).resolves.toEqual({ loaded: [], mb: 0 });
     await expect(
       handler?.run({ kind: "load", payload: { bundles: [7, "board"] } }, run)
     ).resolves.toEqual({ loaded: ["board"], mb: 0.063 });
