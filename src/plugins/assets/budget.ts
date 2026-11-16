@@ -284,28 +284,29 @@ export function enforceBudget(ctx: AssetsCtx, except?: string): void {
 }
 
 /**
- * Creates an empty set of names. It lives in its own non-exported function because lint rule L5
- * refuses a collection built inside an exported declaration.
- *
- * @returns An empty set.
- */
-function emptyNames(): Set<string> {
-  return new Set();
-}
-
-/**
  * Lists the features with a node on the flow stack: for every frame, the outer frames of a
  * sub-flow included, the owner `flow.describe()` gives the node the frame addresses. A node with
- * no owner adds nothing. Read once per release or preload pass.
+ * no owner adds nothing. Read once per release or preload pass, into the one set of the plugin state, filled again
+ * only when the stack or the graph is another (F196): the answer holds until the next call.
  *
  * @param ctx - Domain context of the plugin.
  * @returns The feature names.
  */
 export function featuresOnStack(ctx: AssetsCtx): ReadonlySet<string> {
+  const state = ctx.state;
+  const stack = ctx.deps.flow.state().stack;
   const graph = ctx.deps.flow.describe();
-  const features = emptyNames();
+  const features = state.stackFeatures;
 
-  for (const frame of ctx.deps.flow.state().stack) {
+  // The same stack and graph: the set holds. A `clear` frees the table and the next `add` builds it again.
+  if (state.stackFeaturesOf?.stack === stack && state.stackFeaturesOf.graph === graph) {
+    return features;
+  }
+
+  features.clear();
+  state.stackFeaturesOf = { stack, graph };
+
+  for (const frame of stack) {
     const owner = graph.flows[frame.flow]?.nodes[frame.node]?.owner;
 
     if (owner !== undefined) features.add(owner);

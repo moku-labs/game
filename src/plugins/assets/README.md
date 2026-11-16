@@ -324,7 +324,10 @@ flow at the same distance, a node with `slot` adds the start nodes of `graph.slo
 ordered by distance, then by name; the `lazy` tier, a `"leave"` bundle nobody holds, what is
 loaded and what is loading outside the running queue are skipped. A scene of the walk names its
 bundles for the committed state of now (`model.store.snapshot()`); a `bundles` that throws there
-costs only that scene's extra names. The queue stops at the first bundle that would break the budget —
+costs only that scene's extra names. A rest at the place of the last walk (the node and the
+frames below it), with the same committed trees, graph, manifest, scenes and depth, walks nothing:
+it takes the last order and only filters it again, since what is loaded and the budget move; at
+such a rest the look-ahead allocates nothing (F196, `__tests__/perf/look-ahead.perf.ts`). The queue stops at the first bundle that would break the budget —
 preload never evicts. A rest node with the same neighbourhood keeps the running queue, so a node
 the graph comes back to often (a splash that commits its progress through a transit node) does
 not restart its loads. A different neighbourhood replaces the queue and aborts the old one. A

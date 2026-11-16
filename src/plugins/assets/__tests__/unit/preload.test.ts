@@ -610,3 +610,114 @@ describe('neighbourhood and "leave" bundles', () => {
     expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "location"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F196: a rest at the place of the last walk, with the same committed state, takes the walk's
+// order again and walks nothing. What the order does not hold is read again every rest.
+// ---------------------------------------------------------------------------
+
+describe("the look-ahead kept from the last rest", () => {
+  // Bug: the kept walk answers for another node, so the preload brings the old neighbourhood.
+  it("walks again from another node", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+
+    neighbourhood(mock.assetsCtx, 1);
+    mock.flow.stack = [{ flow: "main", node: "home", input: 0 }];
+    mock.ctx.state.current = { ...mock.ctx.state.current, flow: "main", node: "home" } as NodeInfo;
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["home", "board", "board.chains"]);
+  });
+
+  // Bug: the kept walk ignores the frames below the node, so an exit follows a parent that is gone.
+  it("walks again when the frames below the node changed", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toContain("shop");
+
+    mock.flow.stack = [{ flow: "board", node: "await", input: 0 }];
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["board", "board.chains"]);
+  });
+
+  // Bug: the kept answer is the filtered one, so a bundle loaded since is offered again.
+  it("filters the kept order again: a bundle loaded since the last rest is not offered", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+
+    neighbourhood(mock.assetsCtx, 1);
+    await loadBundle(mock.assetsCtx, "board", undefined, "request");
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["board.chains", "shop"]);
+  });
+
+  // Bug: the queue holds the scratch list, so the next rest rewrites the bundles of the running queue.
+  it("gives a new queue its own list, which a later look-ahead does not touch", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+
+    startPreload(mock.assetsCtx);
+
+    const queued = [...(mock.ctx.state.queue?.bundles ?? [])];
+
+    mock.flow.stack = [{ flow: "main", node: "home", input: 0 }];
+    mock.ctx.state.current = { ...mock.ctx.state.current, flow: "main", node: "home" } as NodeInfo;
+    neighbourhood(mock.assetsCtx, 2);
+
+    expect(mock.ctx.state.queue?.bundles).toEqual(queued);
+  });
+
+  // Bug: the features on the stack are kept from an older stack, so a feature left long ago still holds its bundle.
+  it("reads the features on the stack again once the stack changed", async () => {
+    const mock = await lookingAhead("ep01", [{ flow: "ep01.play", node: "hub" }]);
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toContain("ep01");
+
+    mock.flow.stack = [{ flow: "home.main", node: "idle", input: 0 }];
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "location"]);
+  });
+});
+
+describe("the look-ahead kept from the last rest, one input at a time", () => {
+  // Bug: the kept walk compares the frames below the node but not the node itself.
+  it("walks again from another node over the same frames", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+
+    neighbourhood(mock.assetsCtx, 1);
+    mock.flow.stack = [
+      { flow: "main", node: "board", input: 0 },
+      { flow: "board", node: "merge", input: 0 }
+    ];
+    mock.ctx.state.current = { ...mock.ctx.state.current, node: "merge" } as NodeInfo;
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["board.chains", "reward"]);
+  });
+
+  // Bug: the kept walk compares the committed session but not the player.
+  it("walks again after a commit of the player alone", async () => {
+    const mock = await lookingAhead("ep01");
+
+    mock.model.player = { episode: "ep01" };
+    mock.ctx.state.scenes.set(
+      "ward",
+      sceneOf("ward", "location", ({ player }) => [(player as { episode: string }).episode])
+    );
+    neighbourhood(mock.assetsCtx, 1);
+    mock.model.player = { episode: "ep03" };
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "ep03", "location"]);
+  });
+});

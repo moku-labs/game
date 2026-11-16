@@ -3,15 +3,21 @@
  * neighbourhood needs, and the background queue that fetches them one after another.
  */
 
-import type { FlowGraph, GraphNode, NodeInfo } from "../flow/types";
+import type { FlowGraph, FlowState, GraphNode, NodeInfo } from "../flow/types";
 import { namedBundles } from "../scenes/bundles";
 import type { SceneState } from "../scenes/types";
 import { featuresOnStack, isHeld, usedMb } from "./budget";
 import { ignoreFailure, isAbortError, loadBundle } from "./tiers";
-import type { AssetsCtx, Manifest, PreloadQueue, State } from "./types";
+import type { AssetsCtx, LookAhead, Manifest, PreloadQueue, State } from "./types";
 
 /** The answer of a flow or scene that names no bundle: one frozen list, so asking allocates nothing. */
 const NO_NAMES: readonly string[] = Object.freeze([]);
+
+/** The entries one frame takes in a walk's flattened frames: its flow, then its node. */
+const FRAME_WIDTH = 2;
+
+/** One frame of the flow stack. */
+type FlowFrame = FlowState["stack"][number];
 
 /** One node the walk reached: where it is, how it got there and how far away it is. */
 type Visit = {
@@ -297,35 +303,150 @@ function follow(
 /**
  * Walks the graph breadth-first from the node the game stands on and lists the bundles worth
  * preloading: ordered by distance and then by name, without the `lazy` tier, without what is
- * already there or loading outside the running queue, and cut where the budget would break.
+ * already there or loading outside the running queue, and cut where the budget would break. A rest
+ * at the place of the last walk, with the same committed state, graph, manifest, scenes and depth,
+ * walks nothing: it filters the last order again, since the statuses and the budget move (F196).
+ * The answer is the plugin's scratch list, valid until the next call.
  *
  * @param ctx - Domain context of the plugin.
  * @param depth - How many edges to look ahead.
  * @returns The bundle names in load order.
- * @example
- * ```ts
- * // Resting on "board/awaitIntent" with a depth of two edges.
- * neighbourhood(ctx, 2); // ["board", "board.chains", "shop", "home", "reward"]
- * ```
  */
-export function neighbourhood(ctx: AssetsCtx, depth: number): string[] {
+export function neighbourhood(ctx: AssetsCtx, depth: number): readonly string[] {
   const current = ctx.state.current;
 
-  if (current === undefined) return [];
+  if (current === undefined) return NO_NAMES;
+
+  return affordable(ctx, walkOrder(ctx, current, depth));
+}
+
+/**
+ * Tells whether the last walk was made at this place, for this committed state, graph, manifest,
+ * scenes and depth. Field reads and a loop over the frames, no allocation.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param walk - The last walk.
+ * @param current - The node the game stands on.
+ * @param depth - How many edges the walk looks ahead.
+ * @returns True when its order holds now.
+ */
+function isSameWalk(ctx: AssetsCtx, walk: LookAhead, current: NodeInfo, depth: number): boolean {
+  const { player, session } = ctx.deps.model.store.snapshot();
+  const state = ctx.state;
+  const same =
+    walk.flow === current.flow &&
+    walk.node === current.node &&
+    walk.depth === depth &&
+    walk.player === player &&
+    walk.session === session &&
+    walk.manifest === state.manifest &&
+    // `scenes` and `featureOfFlow` are filled in place once, in `onStart`, before the first rest; a new map moves it.
+    walk.scenes === state.scenes &&
+    walk.graph === ctx.deps.flow.describe();
+
+  return same && isSameFrames(walk.frames, ctx.deps.flow.state().stack);
+}
+
+/**
+ * Tells whether the frames below the top of the flow stack are the ones a walk kept, flattened.
+ *
+ * @param kept - Flow and node of each frame below the top, one after the other.
+ * @param stack - The flow stack now, the top last.
+ * @returns True for the same flows and nodes in the same order.
+ */
+function isSameFrames(kept: readonly string[], stack: readonly FlowFrame[]): boolean {
+  if (kept.length !== (stack.length - 1) * FRAME_WIDTH) return false;
+
+  for (let at = 0; at < stack.length - 1; at += 1) {
+    if (!isKeptFrame(stack[at], kept, at * FRAME_WIDTH)) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Tells whether one frame of the stack is the flow and node a walk kept at an offset of its flat list.
+ *
+ * @param frame - The frame of the stack now.
+ * @param kept - The flattened frames the walk kept.
+ * @param offset - Where the frame's flow sits in `kept`; its node follows.
+ * @returns True for the same flow and node.
+ */
+function isKeptFrame(
+  frame: FlowFrame | undefined,
+  kept: readonly string[],
+  offset: number
+): boolean {
+  return frame?.flow === kept[offset] && frame?.node === kept[offset + 1];
+}
+
+/**
+ * The order the walk from the node the game stands on gives: the last walk's when it holds (see
+ * `isSameWalk`), else a new walk, kept for the next rest.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param current - The node the game stands on.
+ * @param depth - How many edges to look ahead.
+ * @returns The bundle names by distance and then by name, never written after the walk.
+ */
+function walkOrder(ctx: AssetsCtx, current: NodeInfo, depth: number): readonly string[] {
+  const last = ctx.state.lookAhead;
+
+  if (last !== undefined && isSameWalk(ctx, last, current, depth)) return last.ordered;
 
   const graph = ctx.deps.flow.describe();
   const stack = ctx.deps.flow.state().stack;
+  const state = committedState(ctx);
+  const below = stack.slice(0, -1);
+  // Not frozen: a `for…of` over a frozen array allocates an iterator result per element in V8 (F196, 848 B a rest).
+  const ordered = walk(ctx, graph, current, below, depth, state);
+
+  ctx.state.lookAhead = {
+    flow: current.flow,
+    node: current.node,
+    frames: below.flatMap(frame => [frame.flow, frame.node]),
+    player: state.player,
+    session: state.session,
+    graph,
+    manifest: ctx.state.manifest,
+    scenes: ctx.state.scenes,
+    depth,
+    ordered
+  };
+
+  return ordered;
+}
+
+/**
+ * Walks the graph breadth-first from a node and orders the bundles it reaches: by the distance
+ * each was first seen at, then by name.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param graph - The graph description.
+ * @param current - The node the walk starts at.
+ * @param below - The frames of the flow stack below it.
+ * @param depth - How many edges to look ahead.
+ * @param state - The committed player and session of now.
+ * @returns The bundle names in order.
+ */
+function walk(
+  ctx: AssetsCtx,
+  graph: FlowGraph,
+  current: NodeInfo,
+  below: readonly FlowFrame[],
+  depth: number,
+  state: SceneState
+): string[] {
   const queue: Visit[] = [
     {
       flow: current.flow,
       node: current.node,
-      frames: stack.slice(0, -1).map(frame => ({ flow: frame.flow, node: frame.node })),
+      frames: below.map(frame => ({ flow: frame.flow, node: frame.node })),
       distance: 0
     }
   ];
   const visited = seenIds(`${current.flow}/${current.node}`);
   const distances = emptyDistances();
-  const state = committedState(ctx);
 
   for (const visit of queue) {
     const node = graph.flows[visit.flow]?.nodes[visit.node];
@@ -345,7 +466,9 @@ export function neighbourhood(ctx: AssetsCtx, depth: number): string[] {
     }
   }
 
-  return affordable(ctx, distances);
+  return [...distances.entries()]
+    .toSorted((left, right) => left[1] - right[1] || left[0].localeCompare(right[0]))
+    .map(([name]) => name);
 }
 
 /**
@@ -371,17 +494,24 @@ function isStillWanted(state: State, name: string): boolean {
  * everything behind the first bundle that would break the budget are dropped. Preload never
  * evicts.
  *
+ * It writes into the scratch list of the plugin state, so a rest allocates no answer.
+ *
  * @param ctx - Domain context of the plugin.
- * @param distances - Bundle name to the distance it was first seen at.
- * @returns The bundle names in load order.
+ * @param ordered - The bundle names by distance and then by name.
+ * @returns The bundle names in load order: the scratch list, valid until the next call.
  */
-function affordable(ctx: AssetsCtx, distances: Map<string, number>): string[] {
-  const ordered = [...distances.entries()]
-    .toSorted((left, right) => left[1] - right[1] || left[0].localeCompare(right[0]))
-    .map(([name]) => name);
-  const wanted: string[] = [];
+function affordable(ctx: AssetsCtx, ordered: readonly string[]): readonly string[] {
+  const wanted = ctx.state.wantedScratch;
+
+  // Emptied by `pop`: a cut by `length` would free its store.
+  while (wanted.length > 0) wanted.pop();
+
   const onStack = featuresOnStack(ctx);
-  let running = usedMb(ctx.state);
+  // In a typed cell, not a local: a fractional sum carried over a call V8 does not inline is boxed once per bundle
+  // (F196, 192 B a rest for 12 bundles).
+  const running = ctx.state.runningMb;
+
+  running[0] = usedMb(ctx.state);
 
   for (const name of ordered) {
     const entry = ctx.state.manifest.bundles[name];
@@ -389,9 +519,9 @@ function affordable(ctx: AssetsCtx, distances: Map<string, number>): string[] {
     if (entry === undefined || entry.tier === "lazy") continue;
     if (entry.release === "leave" && !isHeld(ctx, name, entry, onStack)) continue;
     if (!isStillWanted(ctx.state, name)) continue;
-    if (running + entry.mb > ctx.config.textureBudgetMb) break;
+    if ((running[0] ?? 0) + entry.mb > ctx.config.textureBudgetMb) break;
 
-    running += entry.mb;
+    running[0] = (running[0] ?? 0) + entry.mb;
     wanted.push(name);
   }
 
@@ -446,9 +576,16 @@ export function stopPreload(state: State): void {
  * @returns True when the running queue already brings exactly these bundles.
  */
 function isSameQueue(state: State, queue: PreloadQueue, bundles: readonly string[]): boolean {
-  const remaining = queue.bundles.filter(name => state.records.get(name)?.status !== "loaded");
+  let at = 0;
 
-  return remaining.length === bundles.length && remaining.every((name, at) => bundles[at] === name);
+  for (const name of queue.bundles) {
+    if (state.records.get(name)?.status === "loaded") continue;
+    if (bundles[at] !== name) return false;
+
+    at += 1;
+  }
+
+  return at === bundles.length;
 }
 
 /**
@@ -458,11 +595,6 @@ function isSameQueue(state: State, queue: PreloadQueue, bundles: readonly string
  * headless app do nothing.
  *
  * @param ctx - Domain context of the plugin.
- * @example
- * ```ts
- * // What the `flow:rest` hook does after it enforced the budget.
- * startPreload(ctx); // state.queue.bundles is the neighbourhood, loading in the background
- * ```
  */
 export function startPreload(ctx: AssetsCtx): void {
   const state = ctx.state;
@@ -479,7 +611,8 @@ export function startPreload(ctx: AssetsCtx): void {
 
   if (bundles.length === 0) return;
 
-  const queue: PreloadQueue = { bundles, controller: new AbortController() };
+  // The answer is the scratch list the next rest fills again: the queue keeps its own copy.
+  const queue: PreloadQueue = { bundles: [...bundles], controller: new AbortController() };
 
   state.queue = queue;
   runQueue(ctx, queue).catch(ignoreFailure);

@@ -5,7 +5,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Events as GlobalEvents, Require } from "../../config";
-import type { Descriptor, Api as FlowApi, NodeInfo } from "../flow/types";
+import type { Descriptor, Api as FlowApi, FlowGraph, FlowState, NodeInfo } from "../flow/types";
 import type { Api as ModelApi } from "../model/types";
 import type { PixiTexture, Api as RendererApi, SliceFrame } from "../renderer/types";
 import type { NamedMemo, SceneDefinition } from "../scenes/types";
@@ -576,6 +576,24 @@ export type Config = {
 };
 
 /**
+ * One walk of the look-ahead, kept with what it read: the place (the node and the frames below it, flattened to
+ * flow and node pairs), the committed trees, the graph, the manifest, the scenes and the depth.
+ */
+export type LookAhead = {
+  flow: string;
+  node: string;
+  frames: string[];
+  player: unknown;
+  session: unknown;
+  graph: unknown;
+  manifest: Manifest;
+  scenes: Map<string, SceneDefinition>;
+  depth: number;
+  /** The bundle names the walk reached, by distance and then by name, before the budget filter. */
+  ordered: readonly string[];
+};
+
+/**
  * assets plugin state.
  */
 export type State = {
@@ -616,6 +634,19 @@ export type State = {
     | undefined;
   /** The last answer of each scene to `bundles`, by declaration: the look-ahead asks a scene once per committed state. */
   namedMemo: WeakMap<SceneDefinition, NamedMemo>;
+  /**
+   * The last walk of the look-ahead and what it was walked for: the next rest at the same place, with the same
+   * committed state, graph, manifest, scenes and depth, takes its order and walks nothing (F196).
+   */
+  lookAhead: LookAhead | undefined;
+  /** The list the budget filter of the look-ahead writes into, reused by every rest: a new queue copies it (F196). */
+  wantedScratch: string[];
+  /** The features on the flow stack, as `featuresOnStack` answers them (F196). */
+  stackFeatures: Set<string>;
+  /** One cell for the megabytes the budget filter of the look-ahead adds up: a typed cell boxes no number (F196). */
+  runningMb: Float64Array;
+  /** The flow stack and the graph `stackFeatures` was filled for. */
+  stackFeaturesOf: { readonly stack: FlowState["stack"]; readonly graph: FlowGraph } | undefined;
   records: Map<string, BundleRecord>;
   /** Bundles of the node entered last. They are never unloaded. */
   pinned: Set<string>;
