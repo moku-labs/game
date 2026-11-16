@@ -16,6 +16,7 @@ import { componentsOf, createReconciler } from "../../jsx/reconcile";
 import { createJsxState } from "../../jsx/state";
 import type { DescriptionNode, Element, ElementMotion, Root } from "../../jsx/types";
 import { layoutChanged } from "../../layout/apply";
+import { stopsOf } from "../../layout/scroll";
 import { createLayoutState } from "../../layout/state";
 import type { ElementLookup, LayoutModule } from "../../layout/types";
 import { windowOf } from "../../layout/window";
@@ -372,6 +373,7 @@ function harness() {
     clampScroll: () => 0,
     scrollTo: () => false,
     windowOf,
+    stopsOf,
     popupHandler: () => nothing,
     guideHandler: () => nothing,
     counters: () => ({ nodes: 0, measured: 0, solves: 0 })

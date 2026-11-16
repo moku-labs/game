@@ -193,7 +193,8 @@ export function createViewHandle(
         additive: options.additive ?? false,
         ...(options.segments === undefined ? {} : { segments: options.segments }),
         ...(options.repeat === undefined ? {} : { repeat: options.repeat }),
-        ...(options.reduced === undefined ? {} : { reduced: options.reduced })
+        ...(options.reduced === undefined ? {} : { reduced: options.reduced }),
+        ...(options.label === undefined ? {} : { label: options.label })
       }),
 
     toRest: <Value extends object>(
@@ -219,7 +220,8 @@ export function createViewHandle(
         ease: options?.ease ?? "out",
         delayMs: options?.delayMs ?? 0,
         additive: false,
-        ...(options?.reduced === undefined ? {} : { reduced: options.reduced })
+        ...(options?.reduced === undefined ? {} : { reduced: options.reduced }),
+        ...(options?.label === undefined ? {} : { label: options.label })
       });
     },
 

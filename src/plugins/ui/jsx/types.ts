@@ -685,7 +685,8 @@ export type Anchor = {
  * the scale it is drawn at. A `text` adds `content`: the words it draws. A `text` given a text
  * style key adds `textStyle`. An `input` adds `value`: the text being typed while it is edited,
  * else the local field it writes. A windowed `scroll` adds `window`: the rows that exist, which
- * are the children of its content, and how many the list has.
+ * are the children of its content, and how many the list has. An element whose `motion` carries an
+ * id adds `motion`; a `scroll` adds `scroll`.
  *
  * @example
  * ```ts
@@ -750,6 +751,40 @@ export type UiNode = {
    * ```
    */
   window?: { first: number; last: number; rows: number };
+  /**
+   * The id of the element's `motion` prop, when it was built by `defineMotion({ id })`. Absent on
+   * an element without a motion and on a motion without an id. A loop that an equal re-render
+   * kept under another id still runs under its old `<id>.loop` label: this shows the new id.
+   *
+   * @example
+   * ```ts
+   * // Home: `<column key="card" motion={cardMotion} />`, `cardMotion = defineMotion({ id: "hud.card", ... })`.
+   * const card = app.ui.tree().children.find(node => node.key === "card");
+   * card?.motion; // "hud.card"
+   * ```
+   */
+  motion?: string;
+  /**
+   * Where a scroll stands and how it rests: its axis, offset and max (as `ScrollState` has them),
+   * whether it moves, and its snap stops as a release uses them: numbers only, each kept inside
+   * 0 to `max` (`Infinity` reads as `max`), in prop order, `NaN` and non-numbers left out. `snap` is absent when the scroll names no stops. Absent on any
+   * other tag; offset, max and `moving` are 0 and false until the first solve placed the scroll.
+   *
+   * @example
+   * ```ts
+   * // The board's order strip: `<scroll key="strip" axis="x" snap={[0, 318, 390]} offset={318} />`,
+   * // a 306 u window over a 696 u track.
+   * const strip = app.ui.tree().children.find(node => node.key === "strip");
+   * strip?.scroll; // { axis: "x", offset: 318, max: 390, moving: false, snap: [0, 318, 390] }
+   * ```
+   */
+  scroll?: {
+    axis: "x" | "y";
+    offset: number;
+    max: number;
+    moving: boolean;
+    snap?: number[];
+  };
   children: UiNode[];
 };
 

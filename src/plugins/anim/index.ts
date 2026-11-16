@@ -1,7 +1,7 @@
 /**
  * Complex tier — the one tween core of the engine and the choreographies over it. Installs the
  * `TweenDriver` of `world`, so a projection hook, a timeline step and a UI `motion` prop all make
- * tracks in the same table. Emits `anim:mark`, `anim:finished`.
+ * tracks in the same table. Emits `anim:mark`, `anim:started`, `anim:cancelled`, `anim:finished`.
  *
  * @see README.md
  */
@@ -48,7 +48,9 @@ export const animPlugin = /*#__PURE__*/ createPlugin("anim", {
   events: (register: RegisterFunction) =>
     register.map<Events>({
       "anim:mark": "A mark of a timeline was reached",
-      "anim:finished": "A timeline ended"
+      "anim:started": "A timeline started",
+      "anim:cancelled": "A timeline was cancelled",
+      "anim:finished": "A timeline ended by itself or was finished early"
     }),
   createState: createAnimState,
   api: createAnimApi,

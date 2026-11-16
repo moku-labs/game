@@ -364,6 +364,135 @@ describe("projection motions — the spike cases", () => {
   });
 });
 
+describe("projection.motionIdsOf", () => {
+  it("answers the label while the motion runs and [] after it ended", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "coin", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view =>
+          view.toRest(Transform, { ms: 400, ease: "linear", label: "hud.coin.enter" })
+      }
+    });
+
+    const coin = world.api.projection.entityOf(BOARD, "coin") ?? 0;
+
+    commitItems(world, [{ id: "coin", level: 1, x: 40, y: 300 }]);
+    world.frame(0);
+
+    expect(world.api.projection.motionIdsOf(coin)).toEqual(["hud.coin.enter"]);
+
+    world.frame(400);
+
+    expect(world.api.projection.motionIdsOf(coin)).toEqual([]);
+  });
+
+  it("skips a track that ended before the next sweep forgot it", () => {
+    const world = createMockWorld();
+    const handles: MotionHandle[] = [];
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view => {
+          const handle = view.toRest(Transform, { ms: 300, ease: "linear", label: "gone" });
+
+          handles.push(handle);
+
+          return handle;
+        }
+      }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 1, x: 80, y: 0 }]);
+    world.frame(16);
+
+    expect(world.api.projection.motionIdsOf(entity)).toEqual(["gone"]);
+
+    handles[0]?.finish();
+
+    expect(world.api.projection.motionIdsOf(entity)).toEqual([]);
+  });
+
+  it("names a label two tracks share once, in start order", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Level: view => view.toRest(Level, { ms: 200, ease: "linear", label: "first" }),
+        Transform: view =>
+          view.all([
+            view.tween(Transform, { x: 50 }, { ms: 100, ease: "linear", label: "second" }),
+            view.tween(Transform, { scale: 2 }, { ms: 300, ease: "linear", label: "second" })
+          ])
+      }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 2, x: 50, y: 0 }]);
+    world.frame(16);
+
+    expect(world.api.projection.motionIdsOf(entity)).toEqual(["first", "second"]);
+  });
+
+  it("answers [] for an unlabelled track and for another entity's label", () => {
+    const world = createMockWorld();
+
+    mountBoard(
+      world,
+      [
+        { id: "a", level: 1, x: 0, y: 0 },
+        { id: "b", level: 1, x: 0, y: 0 }
+      ],
+      {
+        change: {
+          Transform: view =>
+            view.toRest(Transform, {
+              ms: 300,
+              ease: "linear",
+              ...(view.key === "b" ? { label: "only.b" } : {})
+            })
+        }
+      }
+    );
+
+    const a = world.api.projection.entityOf(BOARD, "a") ?? 0;
+    const b = world.api.projection.entityOf(BOARD, "b") ?? 0;
+
+    commitItems(world, [
+      { id: "a", level: 1, x: 80, y: 0 },
+      { id: "b", level: 1, x: 80, y: 0 }
+    ]);
+    world.frame(16);
+
+    expect(world.api.projection.motionsOf(a)).toEqual(["Transform"]);
+    expect(world.api.projection.motionIdsOf(a)).toEqual([]);
+    expect(world.api.projection.motionIdsOf(b)).toEqual(["only.b"]);
+  });
+
+  it("motionIdsOf hands out a new array on every call and forgets no track", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: { Transform: view => view.toRest(Transform, { ms: 300, label: "x" }) }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 1, x: 80, y: 0 }]);
+    world.frame(16);
+
+    const tracks = world.ctx.state.projection.tracks;
+
+    expect(world.api.projection.motionIdsOf(entity)).not.toBe(
+      world.api.projection.motionIdsOf(entity)
+    );
+    expect(world.ctx.state.projection.tracks).toBe(tracks);
+  });
+});
+
 describe("projection.motionsOf", () => {
   it("names a component two tracks drive once, in start order", () => {
     const world = createMockWorld();

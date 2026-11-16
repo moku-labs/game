@@ -4,6 +4,7 @@
  * by the door `src/inspect.ts` only, so no plugin reaches it, no import cycle forms and an
  * `/inspect` bundle carries no command.
  */
+import { timelinesSource } from "../../anim/inspect";
 import { assetsSource } from "../../assets/inspect";
 import { audioMutedSource, soundsSource } from "../../audio/inspect";
 import { effectsSource, filtersSource } from "../../effects/inspect";
@@ -58,5 +59,6 @@ export const sources = Object.freeze({
   explain: explainSource,
   diff: diffSource,
   schema: schemaSource,
-  at: atSource
+  at: atSource,
+  timelines: timelinesSource
 });

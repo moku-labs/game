@@ -5,6 +5,7 @@
  */
 import { createRuntime, finishAllAnim, withDeps } from "./lifecycle";
 import { startTimeline } from "./timeline/play";
+import { snapshotOf } from "./timeline/ring";
 import type {
   AnimApi,
   AnimationDefinition,
@@ -13,11 +14,12 @@ import type {
   MarkListener,
   PlayHandle,
   SlotTags,
-  SlotValues
+  SlotValues,
+  TimelinesSnapshot
 } from "./types";
 
 /**
- * Creates the anim API: `app.anim.play`, `finishAll`, `active`, `onMark`, `reducedMotion`,
+ * Creates the anim API: `app.anim.play`, `finishAll`, `active`, `timelines`, `onMark`, `reducedMotion`,
  * `setReducedMotion` and `replace`.
  *
  * @param ctx - Kernel context of the anim plugin.
@@ -36,6 +38,8 @@ export function createAnimApi(ctx: KernelSlice): AnimApi {
     finishAll: (): void => finishAllAnim(actx, rt),
 
     active: (): number => actx.state.tracks.size,
+
+    timelines: (): TimelinesSnapshot => snapshotOf(actx.state),
 
     onMark: (fn: MarkListener): (() => void) => {
       actx.state.markListeners.add(fn);

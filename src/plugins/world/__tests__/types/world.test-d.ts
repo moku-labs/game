@@ -18,6 +18,8 @@ import type {
   DescriptionNode,
   Ease,
   ProjectionApi,
+  ProjectionMotion,
+  RestOptions,
   TrackOptions,
   TweenOptions
 } from "../../projection/types";
@@ -194,6 +196,21 @@ expectTypeOf(looping).toEqualTypeOf<TweenOptions>();
 expectTypeOf(ecs.diff).toEqualTypeOf<(from: number, to: number) => FrameDiff>();
 expectTypeOf(ecs.schema).toEqualTypeOf<() => readonly ComponentSchema[]>();
 expectTypeOf(projectionApi.motionsOf).toEqualTypeOf<(entity: Entity) => readonly string[]>();
+expectTypeOf(projectionApi.motionIdsOf).toEqualTypeOf<(entity: Entity) => readonly string[]>();
+// The track label of inspection is optional on every option type a hook or a driver gets.
+expectTypeOf<TrackOptions["label"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<TweenOptions["label"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<RestOptions["label"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<ProjectionMotion<Item>["id"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<Explained["motionIds"]>().toEqualTypeOf<readonly string[] | undefined>();
+// A motion and a tween without a label stay valid.
+expectTypeOf<{ ms: 100 }>().toExtend<TweenOptions>();
+expectTypeOf<{ ms: 100 }>().toExtend<TrackOptions>();
+expectTypeOf<{ ms: 100 }>().toExtend<RestOptions>();
+// @ts-expect-error — a label is a string, not a number.
+const badLabel: TweenOptions = { ms: 100, label: 7 };
+
+expectTypeOf(badLabel).toEqualTypeOf<TweenOptions>();
 // The seam the owner of elements listens on after a restore: a listener in, its remover out.
 expectTypeOf(projectionApi.onConverged).toEqualTypeOf<(listener: () => void) => () => void>();
 expectTypeOf<EntityDiff["change"]>().toEqualTypeOf<"spawned" | "despawned" | "changed">();

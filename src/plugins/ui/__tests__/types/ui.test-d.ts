@@ -528,6 +528,19 @@ describe("the snapshot of a windowed scroll", () => {
   });
 });
 
+describe("the snapshot of a motion and a scroll", () => {
+  it("has `motion` and `scroll` optional, and `scroll.snap` optional inside it", () => {
+    expectTypeOf<UiNode["motion"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<NonNullable<UiNode["scroll"]>["axis"]>().toEqualTypeOf<"x" | "y">();
+    expectTypeOf<NonNullable<UiNode["scroll"]>["snap"]>().toEqualTypeOf<number[] | undefined>();
+    expectTypeOf<NonNullable<UiNode["scroll"]>["offset"]>().toEqualTypeOf<number>();
+    expectTypeOf<NonNullable<UiNode["scroll"]>["moving"]>().toEqualTypeOf<boolean>();
+    // Both keys are optional: an empty pick of them is assignable.
+    expectTypeOf<object>().toExtend<Pick<UiNode, "motion" | "scroll">>();
+    expectTypeOf<object>().toExtend<Pick<NonNullable<UiNode["scroll"]>, "snap">>();
+  });
+});
+
 describe("the scroll on both axes", () => {
   it("takes axis, snap and offset in the child form, and refuses stops or an offset that are no numbers", () => {
     const strip: UiIntrinsicElements["scroll"] = {
