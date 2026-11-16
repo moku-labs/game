@@ -7,15 +7,16 @@
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AtlasPage, Manifest, ManifestBundle, ManifestFile } from "../../types";
+import type { AtlasFrame, AtlasPage, Manifest, ManifestBundle, ManifestFile } from "../../types";
 import { emitManifest } from "../emit";
 import { textureMb } from "../image-size";
 import { type CachedImage, cacheKey, readCache, sha256, writeCache } from "./cache";
 import { type Copied, copyAudio, copyFont, copyLoose, extensionOf, readSource } from "./copy";
-import { type Encoder, loadEncoder, type PagePart } from "./encode";
+import { type Encoder, loadEncoder, type PagePart, type Pixels } from "./encode";
 import { type Group, planGroups } from "./groups";
-import { type LayoutFrame, layoutGroup } from "./layout";
+import { type Boxed, chooseLayout, type LayoutFrame, type Trim } from "./layout";
 import { contentHash, looseName, pageId, pageName } from "./names";
+import { cropPixels, trimBox } from "./trim";
 
 /**
  * What one pack is told: where the sources are, what the scan found and where everything goes.
@@ -195,40 +196,87 @@ async function readTextures(run: PackRun, bundle: ManifestBundle): Promise<Sourc
 }
 
 /**
- * Decodes the textures of one layout page and composes the page.
+ * A decoded member of a group: the pixels that go on the page (the cut, when its transparent margin
+ * was trimmed) and, when it was cut, where the cut lay in the original.
+ */
+type Cut = { source: Source; pixels: Pixels; trim?: Trim };
+
+/** What one atlas group became: its encoded pages and the members left as files of their own. */
+type PackedGroup = { images: CachedImage[]; loose: Source[] };
+
+/**
+ * Cuts the transparent margin off a decoded texture, except the margin of a nine-slice: a trimmed
+ * nine-slice would lose its borders, so it keeps its full image.
+ *
+ * @param source - The texture.
+ * @param pixels - Its decoded pixels, at the size of its header.
+ * @returns What goes on the page, with the trim when the image got smaller.
+ */
+function cutOf(source: Source, pixels: Pixels): Cut {
+  if (source.file.nine !== undefined) return { source, pixels };
+
+  const box = trimBox(pixels);
+
+  if (box.width === pixels.width && box.height === pixels.height) return { source, pixels };
+
+  return {
+    source,
+    pixels: cropPixels(pixels, box),
+    trim: { offsetX: box.x, offsetY: box.y, origWidth: pixels.width, origHeight: pixels.height }
+  };
+}
+
+/**
+ * Decodes every member of a group once and cuts its margin. A texture whose pixels disagree with the
+ * size of its header is a problem, and is left out.
+ *
+ * @param run - The pack run, which collects the problems.
+ * @param members - The textures of the group.
+ * @returns The cuts of the members that decoded to their header size, in member order.
+ */
+async function decodeGroup(run: PackRun, members: readonly Source[]): Promise<Cut[]> {
+  const cuts: Cut[] = [];
+
+  for (const member of members) {
+    const pixels = await run.encoder.decode(member.bytes);
+
+    // The layout is made on sizes; the pixels must agree with the header the group was planned by.
+    if (pixels.width !== member.width || pixels.height !== member.height) {
+      run.problems.push(
+        `the texture "${member.key}" decodes to ${pixels.width}×${pixels.height}, ` +
+          `not the ${member.width}×${member.height} its header says.`
+      );
+      continue;
+    }
+
+    cuts.push(cutOf(member, pixels));
+  }
+
+  return cuts;
+}
+
+/**
+ * Composes one layout page from the cut pixels of its frames and encodes it.
  *
  * @param run - The pack run.
  * @param page - The size and the frames of the page.
  * @param page.width - Width of the page.
  * @param page.height - Height of the page.
  * @param page.frames - Where each texture lies.
- * @param sources - The members of the group, by key.
+ * @param cuts - The cut of every member of the group, by key.
  * @returns The page, encoded.
  */
 async function encodePage(
   run: PackRun,
   page: { width: number; height: number; frames: readonly LayoutFrame[] },
-  sources: ReadonlyMap<string, Source>
+  cuts: ReadonlyMap<string, Cut>
 ): Promise<CachedImage> {
   const parts: PagePart[] = [];
 
   for (const frame of page.frames) {
-    const source = sources.get(frame.key);
+    const cut = cuts.get(frame.key);
 
-    if (source === undefined) continue;
-
-    const pixels = await run.encoder.decode(source.bytes);
-
-    // The frame was laid out by the size of the header; the pixels must agree with it.
-    if (pixels.width !== frame.width || pixels.height !== frame.height) {
-      run.problems.push(
-        `the texture "${frame.key}" decodes to ${pixels.width}×${pixels.height}, ` +
-          `not the ${frame.width}×${frame.height} its header says.`
-      );
-      continue;
-    }
-
-    parts.push({ pixels, x: frame.x, y: frame.y });
+    if (cut !== undefined) parts.push({ pixels: cut.pixels, x: frame.x, y: frame.y });
   }
 
   const bytes = await run.encoder.page(page.width, page.height, parts);
@@ -237,21 +285,37 @@ async function encodePage(
 }
 
 /**
- * Packs one atlas group into pages: from the cache when every member is unchanged, otherwise laid
- * out, composed and encoded, and stored in the cache when nothing went wrong.
+ * Lists the members of a group that no page of the images holds.
+ *
+ * @param images - The pages of the group.
+ * @param members - Its textures.
+ * @returns The textures without a frame: they stay files of their own.
+ */
+function unframed(images: readonly CachedImage[], members: readonly Source[]): Source[] {
+  const framed = new Set(images.flatMap(image => image.frames.map(frame => frame.key)));
+
+  return members.filter(member => !framed.has(member.key));
+}
+
+/**
+ * Packs one atlas group into pages: from the cache when every member is unchanged, otherwise every
+ * member is decoded once and its transparent margin cut, the layout is chosen on the sizes of the
+ * cuts, the pages are composed from them and encoded, and the entry is stored in the cache when
+ * nothing went wrong. A member the layout leaves out of the pages comes back as loose, on a hit and
+ * on a miss alike.
  *
  * @param run - The pack run.
  * @param bundle - Name of the bundle.
  * @param group - The atlas group.
  * @param members - Its textures, sorted by key.
- * @returns The encoded pages with their frames.
+ * @returns The encoded pages with their frames, and the members that stay loose.
  */
 async function packGroup(
   run: PackRun,
   bundle: string,
   group: Group,
   members: readonly Source[]
-): Promise<CachedImage[]> {
+): Promise<PackedGroup> {
   const key = cacheKey({
     kind: "atlas",
     sharp: run.encoder.version,
@@ -266,25 +330,57 @@ async function packGroup(
   if (cached !== undefined) {
     run.cacheHits += cached.length;
 
-    return cached;
+    return { images: cached, loose: unframed(cached, members) };
   }
 
   const open = run.problems.length;
-  const layout = layoutGroup(bundle, group, members);
-  const sources = new Map(members.map(member => [member.key, member]));
+  const cuts = await decodeGroup(run, members);
+  const boxed: Boxed[] = cuts.map(cut => ({
+    key: cut.source.key,
+    width: cut.pixels.width,
+    height: cut.pixels.height,
+    ...(cut.trim === undefined ? {} : { trim: cut.trim })
+  }));
+  const layout = chooseLayout(bundle, group, boxed);
+  const byKey = new Map(cuts.map(cut => [cut.source.key, cut]));
   const images: CachedImage[] = [];
 
   run.problems.push(...layout.problems);
 
-  for (const page of layout.pages) images.push(await encodePage(run, page, sources));
+  for (const page of layout.pages) images.push(await encodePage(run, page, byKey));
 
   if (run.problems.length === open) await writeCache(run.cache, key, images);
 
-  return images;
+  const left = new Set(layout.loose.map(entry => entry.key));
+
+  return { images, loose: members.filter(member => left.has(member.key)) };
 }
 
 /**
- * Writes the entry of a texture cut out of a page: no `path`, no cost of its own, the frame.
+ * Reads the trim of a frame: where its texture lay in the original, when the texture was cut.
+ *
+ * @param frame - The frame of a page or of the manifest.
+ * @returns The four trim fields, or `undefined` for a texture that is the whole image.
+ */
+function trimOf(frame: Partial<Trim>): Trim | undefined {
+  const { offsetX, offsetY, origWidth, origHeight } = frame;
+
+  if (
+    offsetX === undefined ||
+    offsetY === undefined ||
+    origWidth === undefined ||
+    origHeight === undefined
+  ) {
+    return undefined;
+  }
+
+  return { offsetX, offsetY, origWidth, origHeight };
+}
+
+/**
+ * Writes the entry of a texture cut out of a page: no `path`, no cost of its own, the frame. The
+ * frame carries `offsetX`, `offsetY`, `origWidth` and `origHeight` after `height`, only when the
+ * texture was trimmed.
  *
  * @param file - The texture of the scan.
  * @param page - The id of its page.
@@ -298,7 +394,14 @@ function packedFile(file: ManifestFile, page: string, frame: LayoutFrame): Manif
     height: file.height,
     mb: 0,
     ...(file.nine === undefined ? {} : { nine: file.nine }),
-    atlas: { page, x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+    atlas: {
+      page,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+      ...trimOf(frame)
+    }
   };
 }
 
@@ -371,8 +474,11 @@ async function copyOthers(
   return copies;
 }
 
-/** What the atlas groups of one bundle became: the pages and the textures cut out of them. */
-type PackedGroups = { pages: AtlasPage[]; files: ManifestFile[] };
+/**
+ * What the atlas groups of one bundle became: the pages, the textures cut out of them and the
+ * textures the layout left as files of their own.
+ */
+type PackedGroups = { pages: AtlasPage[]; files: ManifestFile[]; loose: Source[] };
 
 /**
  * Hands one encoded page to the pack folder under its hashed name.
@@ -421,18 +527,20 @@ function framedFiles(
  * @param run - The pack run, which collects the files to write.
  * @param bundle - Name of the bundle.
  * @param groups - The atlas groups of the bundle with their textures.
- * @returns The pages and the packed textures.
+ * @returns The pages, the packed textures and the textures the groups left loose.
  */
 async function packGroups(
   run: PackRun,
   bundle: string,
   groups: ReadonlyMap<Group, readonly Source[]>
 ): Promise<PackedGroups> {
-  const packed: PackedGroups = { pages: [], files: [] };
+  const packed: PackedGroups = { pages: [], files: [], loose: [] };
 
   for (const [group, members] of groups) {
-    const images = await packGroup(run, bundle, group, members);
+    const { images, loose } = await packGroup(run, bundle, group, members);
     const byKey = new Map(members.map(member => [member.key, member.file]));
+
+    packed.loose.push(...loose);
 
     // Each page is named by its content; its textures point at its id.
     for (const [index, image] of images.entries()) {
@@ -490,9 +598,11 @@ async function packBundle(
 ): Promise<ManifestBundle> {
   const plan = planGroups(await readTextures(run, bundle));
 
-  // The atlas groups first, then what stays a file of its own.
+  // The atlas groups first, then what stays a file of its own: what the plan kept out of a group
+  // and what a group's layout left out of its pages.
   const packed = await packGroups(run, name, plan.groups);
-  const files = [...packed.files, ...(await packLoose(run, name, plan.loose, bundle.files))];
+  const loose = [...plan.loose, ...packed.loose];
+  const files = [...packed.files, ...(await packLoose(run, name, loose, bundle.files))];
 
   // A texture on a page costs nothing of its own: the bundle pays for its pages instead.
   const mb = sumMb([...packed.pages, ...files.filter(file => file.atlas === undefined)]);
@@ -561,11 +671,50 @@ function checkTexture(
     );
   }
 
-  if (atlas.width !== source?.width || atlas.height !== source.height) {
+  problems.push(...checkOriginal(file, atlas, source));
+
+  return problems;
+}
+
+/**
+ * Checks the original image of a packed texture (F198): its size is the size of its source, a
+ * trimmed frame lies inside it, and a nine-slice is not trimmed.
+ *
+ * @param file - One packed texture.
+ * @param atlas - Its frame.
+ * @param source - The same texture in the scan.
+ * @returns The problems, empty when the original is right.
+ */
+function checkOriginal(
+  file: ManifestFile,
+  atlas: AtlasFrame,
+  source: ManifestFile | undefined
+): string[] {
+  const problems: string[] = [];
+  const trim = trimOf(atlas);
+  const width = trim?.origWidth ?? atlas.width;
+  const height = trim?.origHeight ?? atlas.height;
+
+  if (width !== source?.width || height !== source.height) {
     problems.push(
-      `the frame of "${file.key}" is ${atlas.width}×${atlas.height}, its source ` +
+      `the frame of "${file.key}" is ${width}×${height}, its source ` +
         `${source?.width ?? 0}×${source?.height ?? 0}.`
     );
+  }
+
+  if (trim === undefined) return problems;
+
+  if (
+    trim.offsetX + atlas.width > trim.origWidth ||
+    trim.offsetY + atlas.height > trim.origHeight
+  ) {
+    problems.push(
+      `the frame of "${file.key}" lies outside its original (${trim.origWidth}×${trim.origHeight}).`
+    );
+  }
+
+  if (file.nine !== undefined) {
+    problems.push(`the texture "${file.key}" has nine-slice borders, so it must not be trimmed.`);
   }
 
   return problems;
@@ -573,8 +722,10 @@ function checkTexture(
 
 /**
  * Checks a packed manifest against the scan it came from: every key landed exactly once, as a
- * page frame or a file; every frame names a page of its own bundle, lies inside it and has the
- * size of its source, so `nine` stays valid as it is; a mipmapped texture is never a frame.
+ * page frame or a file; every frame names a page of its own bundle, lies inside it and belongs to an
+ * original of the size of its source (`origWidth ?? width`), so `nine` stays valid as it is; a
+ * trimmed frame lies inside its original, and a texture with `nine` is never trimmed; a mipmapped
+ * texture is never a frame.
  *
  * @param source - The manifest of the scan.
  * @param packed - The packed manifest.
@@ -776,12 +927,15 @@ function countLoose(bundles: readonly ManifestBundle[]): number {
 
 /**
  * Packs the art of a game for production: per bundle, the textures of the `fx` group and of the
- * `main` group go onto WebP atlas pages (2048 px at most, 2 px padding and border with each frame's
- * edge extruded 1 px into it, never trimmed or rotated), a texture with a side above 512 px and a group of one stay loose files, fonts and
- * sounds are copied, every file name carries the hash of its bytes, and the packed manifest
- * (version 2) names it all. Nothing is written while a problem is open; afterwards the pack folder
- * holds exactly what the manifest references, plus `manifest.json`. Two runs on the same tree and
- * the same `sharp` write the same bytes.
+ * `main` group go onto WebP atlas pages (each group at the page size, 1024, 2048 or 4096 px, that
+ * costs the phone least GL memory; 2 px padding and border with each frame's edge extruded 1 px
+ * into it, never rotated), a texture that is not a nine-slice is cropped to its visible pixels and
+ * the manifest keeps where the crop lay in the original (F198). A `main` texture too large for the
+ * page, a mipmapped one and a group of one stay loose files; a texture of `fx` too large for the
+ * largest page is a problem. Fonts and sounds are copied, every file name carries the hash of its
+ * bytes, and the packed manifest (version 2) names it all. Nothing is written while a problem is
+ * open; afterwards the pack folder holds exactly what the manifest references, plus
+ * `manifest.json`. Two runs on the same tree and the same `sharp` write the same bytes.
  *
  * @param options - The sources, the scanned manifest, the pack folder, the manifest file, the cache.
  * @returns The packed manifest and what was written.

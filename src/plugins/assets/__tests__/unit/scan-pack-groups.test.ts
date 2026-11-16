@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupOf, planGroups } from "../../scan/pack/groups";
+import { groupOf, LOOSE_SIDE, planGroups } from "../../scan/pack/groups";
 
 /** A texture of the plan, by key and size. */
 function texture(key: string, width = 64, height = 64) {
@@ -36,10 +36,24 @@ describe("groupOf", () => {
     expect(groupOf(texture("ui.star-fx-1"))).toBe("main");
   });
 
-  it("keeps a 512 px side in main and sends a 513 px side loose", () => {
-    expect(groupOf(texture("ui.panel", 512, 512))).toBe("main");
-    expect(groupOf(texture("ui.banner", 513, 40))).toBeUndefined();
-    expect(groupOf(texture("ui.rope", 16, 513))).toBeUndefined();
+  it("packs a 600 px texture: the old 512 px rule kept it loose", () => {
+    // Bug caught: the old LOOSE_SIDE of 512 sent every texture above it to a file of its own, so
+    // the pack never saw the large textures the hybrid page sizes exist for.
+    expect(groupOf(texture("ui.panel", 600, 600))).toBe("main");
+    expect(groupOf(texture("ui.banner", 513, 40))).toBe("main");
+  });
+
+  it("packs a texture at LOOSE_SIDE and leaves one a pixel above it loose, by either side", () => {
+    // Bug caught: an off-by-one at the boundary packs a texture the layout cannot hold, or leaves
+    // loose one it could.
+    expect(groupOf(texture("ui.panel", LOOSE_SIDE, LOOSE_SIDE))).toBe("main");
+    expect(groupOf(texture("ui.banner", LOOSE_SIDE + 1, 40))).toBeUndefined();
+    expect(groupOf(texture("ui.rope", 16, LOOSE_SIDE + 1))).toBeUndefined();
+  });
+
+  it("sends an fx texture to fx whatever its size, even above LOOSE_SIDE", () => {
+    // Bug caught: sending a large fx texture loose makes its emitter sample the wrong page.
+    expect(groupOf(texture("ui.fx-sky", LOOSE_SIDE + 1000, 64))).toBe("fx");
   });
 });
 
@@ -48,7 +62,7 @@ describe("planGroups", () => {
     const plan = planGroups([
       texture("ui.icon-b"),
       texture("ui.fx-star"),
-      texture("ui.bg", 1024, 1536),
+      texture("ui.bg", LOOSE_SIDE + 1, 1536),
       texture("ui.icon-a"),
       texture("ui.fx-spark")
     ]);
@@ -60,7 +74,7 @@ describe("planGroups", () => {
   });
 
   it("sends a group of one loose: an atlas of one file is one request either way", () => {
-    const plan = planGroups([texture("orders.card"), texture("orders.bg", 600, 900)]);
+    const plan = planGroups([texture("orders.card"), texture("orders.bg", LOOSE_SIDE + 1, 900)]);
 
     expect(plan.groups.size).toBe(0);
     expect(plan.loose.map(member => member.key)).toEqual(["orders.bg", "orders.card"]);

@@ -112,10 +112,54 @@ function parseNine(value: unknown): NineSlice | undefined {
 }
 
 /**
+ * Reads a value that must be a finite number of 0 or more.
+ *
+ * @param value - Anything that came out of JSON.
+ * @returns The number, or `undefined` for anything else, a missing field included.
+ * @example
+ * ```ts
+ * sizeAt(0); // 0
+ * sizeAt(undefined); // undefined
+ * ```
+ */
+function sizeAt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Reads the trim fields of an atlas frame (F198): `offsetX`, `offsetY`, `origWidth` and `origHeight`.
+ * Each must be a finite number of 0 or more; `numberAt` is not used, because it turns a missing field
+ * into 0 and 0 is a legal offset. The four are kept together or not at all: a frame that lost one is
+ * the whole image, as every older manifest says.
+ *
+ * @param value - The `atlas` object.
+ * @returns The four fields, or `undefined` when any of them is missing or not such a number.
+ */
+function parseTrim(
+  value: Record<string, unknown>
+): Pick<AtlasFrame, "offsetX" | "offsetY" | "origWidth" | "origHeight"> | undefined {
+  const offsetX = sizeAt(value.offsetX);
+  const offsetY = sizeAt(value.offsetY);
+  const origWidth = sizeAt(value.origWidth);
+  const origHeight = sizeAt(value.origHeight);
+
+  if (
+    offsetX === undefined ||
+    offsetY === undefined ||
+    origWidth === undefined ||
+    origHeight === undefined
+  ) {
+    return undefined;
+  }
+
+  return { offsetX, offsetY, origWidth, origHeight };
+}
+
+/**
  * Reads the atlas placement of a packed file.
  *
  * @param value - What the `atlas` field carried.
- * @returns The frame, or `undefined`.
+ * @returns The frame, with its trim fields when it has all four, or `undefined`.
  */
 function parseAtlas(value: unknown): AtlasFrame | undefined {
   if (!isRecord(value)) return undefined;
@@ -125,7 +169,8 @@ function parseAtlas(value: unknown): AtlasFrame | undefined {
     x: numberAt(value, "x"),
     y: numberAt(value, "y"),
     width: numberAt(value, "width"),
-    height: numberAt(value, "height")
+    height: numberAt(value, "height"),
+    ...parseTrim(value)
   };
 }
 

@@ -263,12 +263,38 @@ export type CreateTextureOptions = { nine?: NineBorders; mips?: true };
  * Where `textures.slice` cuts a texture out of an atlas page, in page pixels. The manifest `atlas`
  * field of `assets` carries it with the page id next to it, and passes as it is.
  *
+ * A frame cropped to its visible pixels at pack time also says where the crop lies in the original
+ * image: `offsetX` and `offsetY` are the crop's first column and row inside the original,
+ * `origWidth` and `origHeight` the original's size. All four together or none; an incomplete set
+ * counts as none, and none means the frame is the whole image.
+ *
  * @example
  * ```ts
  * const frame: SliceFrame = { x: 583, y: 595, width: 256, height: 128 };
+ * // A 300 x 200 image packed without its transparent margin: 256 x 128 of it, from column 9 and row 9.
+ * const trimmed: SliceFrame = {
+ *   x: 583, y: 595, width: 256, height: 128, offsetX: 9, offsetY: 9, origWidth: 300, origHeight: 200
+ * };
  * ```
  */
-export type SliceFrame = { x: number; y: number; width: number; height: number };
+export type SliceFrame = {
+  /** Column of the frame's first pixel on the page. */
+  x: number;
+  /** Row of the frame's first pixel on the page. */
+  y: number;
+  /** Width of the frame on the page, in pixels. */
+  width: number;
+  /** Height of the frame on the page, in pixels. */
+  height: number;
+  /** Column of the frame's first pixel inside the original image, for a trimmed frame. */
+  offsetX?: number;
+  /** Row of the frame's first pixel inside the original image, for a trimmed frame. */
+  offsetY?: number;
+  /** Width of the original image, for a trimmed frame. */
+  origWidth?: number;
+  /** Height of the original image, for a trimmed frame. */
+  origHeight?: number;
+};
 
 /**
  * The texture registry `assets` drives, `app.renderer.sync.textures`. The renderer makes and
@@ -324,15 +350,19 @@ export type TexturesApi = {
   /**
    * Cuts a texture out of an atlas page, so `assets` never imports Pixi. The slice shares the
    * page's source: no pixel is copied, and the page keeps the GPU memory. A frame is measured
-   * from the page's own frame, so a slice of a slice lands where it should.
+   * from the page's own frame, so a slice of a slice lands where it should. A trimmed frame (one
+   * with `offsetX`, `offsetY`, `origWidth` and `origHeight`) keeps its original size: the slice
+   * answers `width` and `height` of the original, and Pixi draws the cropped pixels at the offset,
+   * so a sprite keeps its size and place.
    *
    * @param page - The page texture `create` made.
-   * @param frame - The frame in page pixels.
+   * @param frame - The frame in page pixels; with the four trim fields, also where it lies in its
+   *   original image.
    * @param options - `nine` is left, top, right and bottom in pixels; it becomes the slice's
    *   default nine-slice borders.
    * @returns The slice. `destroy` frees only this wrapper, never the page's source.
    * @throws {Error} When the renderer does not draw, and when the frame does not fit in the page
-   *   (a manifest packed for other pages).
+   *   (a manifest packed for other pages) or a trimmed frame does not fit in its original.
    * @example
    * ```ts
    * // `assets`: the page "ui/main-0" landed; the packed button texture is cut out of it with its borders.
@@ -341,6 +371,13 @@ export type TexturesApi = {
    * button.width; // 256
    * button.defaultBorders; // { left: 24, top: 24, right: 24, bottom: 24 }
    * renderer.sync.textures.destroy(button); // the wrapper goes, the page's source stays
+   *
+   * // A 300 x 200 leaf packed without its transparent margin: 256 x 128 of it lie on the page.
+   * const leaf = renderer.sync.textures.slice(page, {
+   *   x: 0, y: 0, width: 256, height: 128, offsetX: 9, offsetY: 9, origWidth: 300, origHeight: 200
+   * });
+   * leaf.width; // 300
+   * leaf.trim; // Rectangle { x: 9, y: 9, width: 256, height: 128 }
    * ```
    */
   slice(page: PixiTexture, frame: SliceFrame, options?: CreateTextureOptions): PixiTexture;
