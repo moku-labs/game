@@ -1,8 +1,8 @@
 /**
  * @file assets plugin — the fixtures of the perf tests and benches. Not a test file. Each fixture builds the mock
  * plugin outside any measured window and hands back the call it measures: what the world calls when an element lost
- * `Exiting` (whether the bundles a leaving scene named may go, F51), a view's ask for a loaded key, and the victim pick
- * of a budget pass (F184).
+ * `Exiting` (whether the bundles a leaving scene named may go, F51), a view's ask for a loaded key, the victim pick
+ * of a budget pass (F184) and the frame of the system `assets.leave` with `releaseUndrawnS` set (F198).
  */
 import { alloc } from "../../../../../tests/perf/alloc";
 import type { NodeInfo } from "../../../flow/types";
@@ -202,5 +202,61 @@ export function readyNodeRestWithoutReady(): () => void {
   return () => {
     state.readyPlace = "before";
     passReadyNode(mock.assetsCtx, board);
+  };
+}
+
+/**
+ * The system `assets.leave` as the world calls it every frame of phase `sync`, with `releaseUndrawnS` set and 20
+ * loaded bundles, half of them drawn, the rest kept by the look-ahead: the pass has nothing to release. The clock is a
+ * fractional number of milliseconds on an object the call reads, as `ctx.time.elapsed` is.
+ *
+ * @param step - Milliseconds the clock moves before each call: `0` keeps every call a frame between two checks, `1000.5`
+ *   makes every call a pass.
+ * @returns The call the world makes.
+ */
+export async function undrawnFrame(step: number): Promise<() => void> {
+  const names = Array.from({ length: 20 }, (_, index) => `b${index}`);
+  const bundles = Object.fromEntries(
+    names.map(name => [name, { feature: name, tier: "lazy", keys: [`${name}.one`, `${name}.two`] }])
+  );
+  const mock = createMockAssets({
+    manifest: manifestOf(bundles),
+    preloadDepth: 0,
+    releaseUndrawnS: 1_000_000_000
+  });
+
+  await mock.start();
+  mock.connect();
+
+  for (const name of names) await loadBundle(mock.assetsCtx, name, undefined, "request");
+
+  mock.renderer.drawn = new Set(
+    names.filter((_, index) => index % 2 === 0).map(name => `${name}.two`)
+  );
+  mock.ctx.state.lookAhead = {
+    flow: "main",
+    node: "hub",
+    frames: [],
+    player: {},
+    session: {},
+    graph: {},
+    manifest: mock.ctx.state.manifest,
+    scenes: new Map(),
+    depth: 2,
+    ordered: names.filter((_, index) => index % 2 === 1)
+  };
+
+  const leave = mock.world.systems.find(system => system.name === "assets.leave");
+  const rows: unknown[] = [];
+  const frame = { time: { elapsed: 0.5 } };
+
+  if (leave === undefined) throw new Error("the system assets.leave is not registered");
+
+  // The first call is a pass, so a step of 0 stays between two checks from here on.
+  leave.run(rows, frame);
+
+  return () => {
+    frame.time.elapsed += step;
+    leave.run(rows, frame);
   };
 }

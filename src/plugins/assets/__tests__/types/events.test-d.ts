@@ -53,7 +53,7 @@ expectTypeOf<Events["assets:bundle-progress"]>().toEqualTypeOf<{
 assetsCtx.emit("assets:bundle-evicted", { bundle: "board" });
 
 expectTypeOf<Events["assets:bundle-unloaded"]["reason"]>().toEqualTypeOf<
-  "budget" | "request" | "leave"
+  "budget" | "request" | "leave" | "undrawn"
 >();
 
 // The release of a bundle whose feature left: the reason a hook reads is "leave".

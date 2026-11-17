@@ -12,7 +12,7 @@ import { worldPlugin } from "../world";
 import { Exiting, system } from "../world/ecs/define";
 import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
-import { releaseAssets, releaseLeftBundles, releaseSceneLeft } from "./budget";
+import { releaseAssets, releaseLeftBundles, releaseSceneLeft, releaseUndrawn } from "./budget";
 import { bundlesOfNode } from "./preload";
 import { answerReady, passReadyNode } from "./ready";
 import { bootTiers, loadBundle } from "./tiers";
@@ -152,15 +152,34 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
 }
 
 /**
+ * Refuses a `releaseUndrawnS` that is no number of seconds: not finite, or below 0. `undefined` is the off switch.
+ *
+ * @param value - The configured value.
+ * @throws {Error} For NaN, an infinity and a negative number, with the way out.
+ */
+function checkReleaseUndrawn(value: number | undefined): void {
+  if (value === undefined || (Number.isFinite(value) && value >= 0)) return;
+
+  throw new Error(
+    `[game] assets.releaseUndrawnS must be a finite number of seconds ≥ 0, got ${String(value)}.\n` +
+      "  Leave it out to keep bundles until the budget needs room."
+  );
+}
+
+/**
  * Connects the plugin in `onInit`: the `load` stage of `onEnter`, the handlers of the `load` and
  * the `ready` effects (F52), both run in fast mode too, the texture provider of `renderer`, the
  * start and the end of an exit in `world`, counted, and the system `assets.leave` of phase `sync`,
- * which lets a leaving scene's bundles go once its elements played their exit (F51). The seven
- * removers go to the state, because `onStop` has nothing but the state.
+ * which lets a leaving scene's bundles go once its elements played their exit (F51) and runs the check
+ * of `releaseUndrawnS` (F198). The seven removers go to the state, because `onStop` has nothing but the
+ * state. A `releaseUndrawnS` that is no number of seconds ≥ 0 fails here.
  *
  * @param ctx - Kernel context of the assets plugin.
+ * @throws {Error} When `releaseUndrawnS` is not finite or is below 0.
  */
 export function connectAssets(ctx: KernelSlice): void {
+  checkReleaseUndrawn(ctx.config.releaseUndrawnS);
+
   const assets = withDeps(ctx);
 
   assets.state.removers.push(
@@ -190,7 +209,10 @@ export function connectAssets(ctx: KernelSlice): void {
         name: "assets.leave",
         phase: "sync",
         query: [],
-        run: () => releaseSceneLeft(assets)
+        run: (_rows, { time }) => {
+          releaseSceneLeft(assets);
+          releaseUndrawn(assets, time.elapsed);
+        }
       })
     )
   );
@@ -304,6 +326,9 @@ export function releaseAll(state: State): void {
   state.bundleOfKey.clear();
   state.keysOf.clear();
   state.budgetUnloaded.clear();
+  state.undrawnUnloaded.clear();
+  state.undrawnCheckAt = 0;
+  state.undrawnPass.visit = undefined;
   state.reloadHeld.clear();
   state.readyWaiting.clear();
   state.thrashWarned.clear();

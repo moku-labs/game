@@ -65,7 +65,8 @@ describe("createAssetsState", () => {
       audio: new Map(),
       pages: new Map(),
       inflight: undefined,
-      lastUsed: 0
+      lastUsed: 0,
+      undrawnSince: -1
     });
 
     expect(second.records.size).toBe(0);

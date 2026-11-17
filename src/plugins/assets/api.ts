@@ -72,9 +72,10 @@ export function lookupTexture(ctx: AssetsCtx, key: string): Texture | undefined 
 }
 
 /**
- * The loop guard of a texture miss: a bundle the budget unloaded since the last rest that a view asks for again is
- * drawn by something `renderer` does not track, so it is held from now on and never a budget victim again, and the
- * first time per bundle one warning names it (F184).
+ * The loop guard of a texture miss: a bundle the budget unloaded since the last rest, or `releaseUndrawnS` unloaded
+ * at any time, that a view asks for again is drawn by something `renderer` does not track, so it is held from now on,
+ * never a budget victim and never released as undrawn again, and the first time per bundle one warning names it
+ * (F184, F198).
  *
  * @param ctx - Domain context of the plugin.
  * @param bundle - The bundle whose key missed.
@@ -82,7 +83,8 @@ export function lookupTexture(ctx: AssetsCtx, key: string): Texture | undefined 
 function holdAskedAgain(ctx: AssetsCtx, bundle: string): void {
   const state = ctx.state;
 
-  if (!state.budgetUnloaded.has(bundle) || state.reloadHeld.has(bundle)) return;
+  if (!state.budgetUnloaded.has(bundle) && !state.undrawnUnloaded.has(bundle)) return;
+  if (state.reloadHeld.has(bundle)) return;
 
   state.reloadHeld.add(bundle);
 

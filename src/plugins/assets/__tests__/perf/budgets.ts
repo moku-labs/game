@@ -21,5 +21,9 @@ export const BUDGET = {
   // A node entered while no `ready` ask waits (F204): one field read.
   readyNoAsk: 0,
   // The rest after a transit node's `ready` ask: the cached graph read and one `includes` (F204).
-  readyRestWithoutReady: 0
+  readyRestWithoutReady: 0,
+  // The system `assets.leave` with `releaseUndrawnS` set (F198): a frame between two checks is field reads, and a
+  // pass over 20 bundles with nothing to release walks the records with a callback made once.
+  undrawnBetweenChecks: 0,
+  undrawnPassNothingToRelease: 0
 } as const;

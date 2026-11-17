@@ -16,8 +16,8 @@ only uses the texture *type*.
 
 | Method | Behaviour |
 |---|---|
-| `load(bundle): Promise<void>` | Loads every file of the bundle and waits for its companions. Already loaded: resolves at once. Loading: joins the running load. Unknown bundle: rejects with `[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".` Headless: resolves at once, state untouched. |
-| `warm(bundle): Promise<void>` | Puts the bundle's textures on the GPU before a scene shows them (F60). Loads it first when it is not loaded (`loadBundle(…, "request")`), then hands every texture and atlas page of its record to `renderer.sync.textures.upload`, which uploads `renderer.uploads` of them a drawn frame (one by default), and resolves after the upload answered. An upload answer `false` (no device, `uploads: 0`, a stop) still resolves: the first draw uploads, as before. A second call joins the running or finished warm (`state.warmed`); the unload of the bundle forgets it, so a reload warms again; a failed warm is forgotten too, so the next call tries again. Unknown bundle: rejects as `load` does. A failed load rejects. Headless: resolves at once, whatever the name, as `load` does. |
+| `load(bundle): Promise<void>` | Loads every file of the bundle and waits for its companions. Already loaded: resolves at once. Loading: joins the running load. Unknown bundle: rejects with `[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".` Headless: resolves at once, state untouched. With `releaseUndrawnS` set, a bundle loaded this way that nothing draws, pins or names leaves again after that many game seconds (Preload and budget). |
+| `warm(bundle): Promise<void>` | Puts the bundle's textures on the GPU before a scene shows them (F60). Loads it first when it is not loaded (`loadBundle(…, "request")`), then hands every texture and atlas page of its record to `renderer.sync.textures.upload`, which uploads `renderer.uploads` of them a drawn frame (one by default), and resolves after the upload answered. An upload answer `false` (no device, `uploads: 0`, a stop) still resolves: the first draw uploads, as before. A second call joins the running or finished warm (`state.warmed`); the unload of the bundle forgets it, so a reload warms again; a failed warm is forgotten too, so the next call tries again. Unknown bundle: rejects as `load` does. A failed load rejects. Headless: resolves at once, whatever the name, as `load` does. With `releaseUndrawnS` set, a warmed bundle nothing draws, pins or names leaves after that many game seconds unless a `ready` the node waits on holds it. |
 | `unload(bundle): void` | Destroys the textures through `io.destroyTexture`, calls every companion's `unload`, calls `renderer.sync.textures.invalidate` with the keys of the bundle, emits `assets:bundle-unloaded` with reason `"request"`. A pinned bundle and the tiers `boot` and `core` are refused with a `ctx.log.warn`. A running load is aborted. |
 | `isLoaded(bundle): boolean` | `status === "loaded"`. Headless: `true` for every bundle of the manifest. |
 | `texture(key): Texture \| undefined` | The texture of a loaded key; touches the use counter of its bundle. A key of a bundle that is not loaded: `undefined`, one dev warning naming key and bundle, and a background `load` of that bundle. Headless: `undefined`. |
@@ -165,11 +165,18 @@ const resume = defineNode({
 | `preloadDepth` | `number` | `2` | How many edges from a rest node the background preload looks ahead. `0` turns preload off. |
 | `baseUrl` | `string \| undefined` | `undefined` | Prefix of every file URL — the CDN seam. `undefined`: the folder of the manifest URL, or `"/"` for an inline manifest. |
 | `io` | `AssetsIo \| undefined` | `undefined` | The I/O seam. `undefined`: `browser.ts` plus `renderer.sync.textures` when `renderer.host.ready()`, otherwise headless. Tests pass a fake. |
+| `releaseUndrawnS` | `number \| undefined` | `undefined` | Game seconds a loaded bundle may go with nothing drawing it and nothing keeping it before it is unloaded with reason `"undrawn"` (F198). `undefined`: off, bundles leave only by the budget, `release: "leave"` and `unload`. `0`: at the second check in a row that finds it undrawn. Not finite or below 0 throws at init. With it set, `textureBudgetMb` only caps the peaks. See Preload and budget. |
 
 ```ts
 createApp({
   plugins: [...screen, boardFeature],
   pluginConfigs: { assets: { manifest: "/assets/manifest.json", textureBudgetMb: 192 } }
+});
+
+// A hub game that shows one window at a time: a window's art goes 20 game seconds after it stopped drawing.
+createApp({
+  plugins: [...screen, boardFeature],
+  pluginConfigs: { assets: { textureBudgetMb: 250, preloadDepth: 3, releaseUndrawnS: 20 } }
 });
 ```
 
@@ -400,6 +407,27 @@ The preload fetches a `"leave"` bundle only while it is held, so entering its fe
 waits for its load. `"leave"` adds a way out, never a protection: the budget may still evict the
 bundle, and `app.assets.unload` works as for any other.
 
+**Unloading what nothing draws: `releaseUndrawnS` (F198).** The budget only acts when memory runs out, so a game that
+leaves a scene keeps its art loaded until the next load needs the room: on the A26, after the board, 236 MB of
+textures were loaded and 85 MB drawn. With `releaseUndrawnS: N` the system `assets.leave` (phase `sync`) makes one
+check a second, on `time.elapsed`: a loaded bundle that nothing draws and nothing keeps for `N` seconds in a row is
+unloaded with reason `"undrawn"`, so it goes between `N` and `N + 1` seconds after it stopped being drawn. The seconds are
+game seconds, the scaled clock: they slow under `setScale` and stand still under pause. Kept, and the count starts again:
+pinned, `boot` or `core`, named by the mounted, a leaving or the coming scene, in the preload queue, in the last
+look-ahead walk (the next rest would load it again), held after a reload, rested on through `ready` (F190), or drawn now
+(`renderer.sync.textures.used`, as the budget asks it). A bundle with a sound or a font is never taken by it: nothing
+asks `used` for those, and a miss on `audio()` or `font()` is silent, so such a bundle leaves as before. `0` still needs
+two checks in a row, so the first step of a `load` effect is not freed before the next step can draw it. An explicit
+bundle (`app.assets.load`, `warm`, the `load` effect) is not kept either: unless it is drawn, pinned, named by a scene or in
+the look-ahead, it leaves after `N` seconds; a game that needs it longer rests on it with `ready`, names it in a scene, or
+leaves the field out. A fast walk and a headless run release nothing. The risk: a scene the game comes back to after
+more than `N` seconds loads its bundle again, and its `load` stage waits for it (it is never drawn missing); a
+look-ahead bundle costs nothing, a bundle outside it costs a load on return. A consumer `renderer` does not track
+(particles, filter inputs, inline text images) is guarded as after a budget unload, with one difference: the mark of an
+`"undrawn"` unload (`state.undrawnUnloaded`) survives a rest and ends when the bundle loads again, so such a consumer
+costs one reload at most, however many rests later it asks. The pass walks the records without an iterator or a closure and
+the frames between two checks read a few fields: both allocate nothing (`__tests__/perf/release-undrawn.perf.ts`).
+
 ## Companions
 
 A `BundleCompanion` is a `load(bundle): Promise<void>` and `unload(bundle): void` pair that loads
@@ -468,7 +496,7 @@ a built game and headless.
 |---|---|
 | `assets:bundle-progress` | `{ bundle, loaded, total }` |
 | `assets:bundle-loaded` | `{ bundle, tier, mb, reason: "boot" \| "enter" \| "request" \| "preload" }` |
-| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request" \| "leave", keys }`; `"leave"`: its feature left, or a scene that named it finished its exit (`release: "leave"`) |
+| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request" \| "leave" \| "undrawn", keys }`; `"leave"`: its feature left, or a scene that named it finished its exit (`release: "leave"`); `"undrawn"`: it went `releaseUndrawnS` game seconds with nothing drawing it and nothing keeping it |
 | `assets:replaced` | `{ bundle, keys }`, dev builds only |
 
 No plugin event belongs to `ready`: it posts the world event `{ type: "ready" }` into `flow.inbox`,

@@ -93,7 +93,7 @@ The shell writes some plugin configs from the seams. Those keys are not in the t
 | `flow` | `mainFlow`, `safeNode` | `retries`, `settleTimeoutMs`, `journalLimit`, `holdMs` |
 | `platform` | `provider`, `keepAwake` | nothing |
 | `renderer` | `mount`; a seam's `loadPixi` and `preference` win | the rest |
-| `assets` | `manifest`, `io` | `textureBudgetMb`, `preloadDepth`, `baseUrl` |
+| `assets` | `manifest`, `io` | `textureBudgetMb`, `preloadDepth`, `baseUrl`, `releaseUndrawnS` |
 | `audio` | `context`; a seam's `journal` wins | the rest |
 
 The graph is run by the page or by the test, never by the game. A game's exit plugin calls `ctx.require(platformPlugin).exit()` itself.

@@ -23,7 +23,8 @@ const config: Config = {
   textureBudgetMb: 192,
   preloadDepth: 2,
   baseUrl: undefined,
-  io: undefined
+  io: undefined,
+  releaseUndrawnS: undefined
 };
 
 /**

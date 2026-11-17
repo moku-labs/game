@@ -507,12 +507,25 @@ export type LoadedAssets = {
 
 /**
  * What the plugin knows about one bundle. `lastUsed` is the value of `useCounter` at the last
- * touch: a counter, never a clock.
+ * touch: a counter, never a clock. `undrawnSince` is the one clock: the frame time in milliseconds at which a check of
+ * `releaseUndrawnS` first found the bundle neither drawn nor kept, `-1` while it is not counting (F198).
  */
 export type BundleRecord = LoadedAssets & {
   status: "idle" | "loading" | "loaded";
   inflight: Inflight | undefined;
   lastUsed: number;
+  undrawnSince: number;
+};
+
+/**
+ * The scratch of one pass of `releaseUndrawnS`: the clock and the limit it reads, in one typed cell (index 0 the frame
+ * time in milliseconds, index 1 the milliseconds a bundle must go undrawn: a number stored in a plain field is boxed
+ * when it came in as an argument), and the step it applies to each record. Fields of the state, so the step is a
+ * function made once, not a closure made per pass (F198).
+ */
+export type UndrawnPass = {
+  clock: Float64Array;
+  visit: ((record: BundleRecord, name: string) => void) | undefined;
 };
 
 /**
@@ -573,6 +586,18 @@ export type Config = {
   baseUrl: string | undefined;
   /** I/O seam. `undefined`: the browser pair plus `renderer.sync.textures`, or headless. */
   io: AssetsIo | undefined;
+  /**
+   * Game seconds a loaded bundle may go with nothing drawing it and nothing keeping it before it is unloaded, with the
+   * reason `"undrawn"`. Nothing keeps a bundle that is pinned, named by the mounted, a leaving or the coming scene, in
+   * the preload queue or the last look-ahead, held after a reload, rested on through `ready`, or of the tier `boot` or
+   * `core`; a bundle with a sound or a font is never taken by it. The seconds are `time.elapsed`, the scaled game
+   * clock: they slow under `setScale` and stand still under pause. A check runs once a second, so a bundle goes
+   * between `releaseUndrawnS` and one second more after it stopped being drawn, and `0` still needs two checks in a
+   * row. A bundle loaded with `load` or `warm` and drawn by nobody leaves the same way. `undefined` (the default): off,
+   * bundles leave only by the budget, `release: "leave"` and `unload`. With it set, `textureBudgetMb` only caps the
+   * peaks. The cost: returning to a released scene loads its bundle again, and the node waits for it.
+   */
+  releaseUndrawnS: number | undefined;
 };
 
 /**
@@ -607,6 +632,20 @@ export type State = {
   keysOf: Map<string, readonly string[]>;
   /** Bundles the budget unloaded since the last rest: a view that asks again for one of them starts the hold (F184). */
   budgetUnloaded: Set<string>;
+  /**
+   * Bundles `releaseUndrawnS` unloaded and nothing loaded since. A rest does not clear it: a consumer `renderer` does
+   * not track (a particle, a filter input, an inline text image) asks again however many rests later, and its ask starts
+   * the same hold as a budget unload does, so it costs one reload at most (F198).
+   */
+  undrawnUnloaded: Set<string>;
+  /** The frame time in milliseconds of the next check of `releaseUndrawnS`; `0` until the first (F198). */
+  undrawnCheckAt: number;
+  /**
+   * What the once-a-second pass of `releaseUndrawnS` hands its per-bundle step: the frame time of the pass and the
+   * milliseconds a bundle must go undrawn. The step is made on the first pass and walks `records` through
+   * `forEach`, so a pass allocates nothing (F198).
+   */
+  undrawnPass: UndrawnPass;
   /**
    * Bundles a view asked again for right after the budget unloaded them: never a budget victim again, until they leave
    * another way (`"request"`, `"leave"`), so an untracked consumer costs one evict/reload at most (F184).
@@ -757,6 +796,7 @@ export type Usage = { textureMb: number; budgetMb: number; bundles: readonly Bun
  * }); // a save of features/ui/assets/click.mp3 sends { bundle: "ui", keys: ["ui.click"] }
  *
  * // The episode was left: { bundle: "ep01", tier: "lazy", mb: 0.492, reason: "leave", keys: ["ep01.items.cup"] }
+ * // With `releaseUndrawnS: 20`, 20 s after the ward stopped drawing it: { bundle: "ward", tier: "scene", mb: 3.5, reason: "undrawn", keys: ["ward.bg"] }
  * ```
  */
 export type Events = {
@@ -772,13 +812,14 @@ export type Events = {
   "assets:bundle-progress": { bundle: string; loaded: number; total: number };
   /**
    * The textures of a bundle were destroyed. `keys` names every asset that went with it. `reason`
-   * "leave": its feature left, or a scene that named it finished its exit (release "leave").
+   * "leave": its feature left, or a scene that named it finished its exit (release "leave"). `reason`
+   * "undrawn": it went `releaseUndrawnS` game seconds with nothing drawing it and nothing keeping it.
    */
   "assets:bundle-unloaded": {
     bundle: string;
     tier: Tier;
     mb: number;
-    reason: "budget" | "request" | "leave";
+    reason: "budget" | "request" | "leave" | "undrawn";
     keys: readonly string[];
   };
   /**
@@ -804,7 +845,8 @@ export type Api = {
   /**
    * Loads every file of a bundle and waits for its companions. An already loaded bundle resolves
    * at once, a loading one joins the running load. Headless it resolves at once and touches
-   * nothing.
+   * nothing. With `releaseUndrawnS` set, a bundle loaded this way that nothing draws, pins or names
+   * leaves again after that many game seconds.
    *
    * @param bundle - Name of a bundle of the manifest.
    * @returns A promise that resolves when every texture of the bundle exists and every companion
@@ -826,7 +868,9 @@ export type Api = {
    * second call joins the running or finished warm of the same bundle; an unload forgets it, so a
    * reload warms again. It resolves also when the renderer could not upload (no device,
    * `uploads: 0`, a stop): the first draw uploads then, as before. Headless it resolves at once,
-   * as `load` does. The `ready` effect waits for it.
+   * as `load` does. The `ready` effect waits for it, and holds the bundle until the node asks again:
+   * with `releaseUndrawnS` set, a warmed bundle nothing draws, pins or names leaves after that many
+   * game seconds.
    *
    * @param bundle - Name of a bundle of the manifest.
    * @returns A promise that resolves once the bundle is loaded and its textures went to the GPU.

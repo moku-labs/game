@@ -318,6 +318,13 @@ export type FakeWorld = {
   startExit(entity: Entity): void;
   /** Takes the tag off one entity and calls the `onRemoved(Exiting)` listeners. */
   endExit(entity: Entity): void;
+  /** The frame clock the systems get as `ctx.time`: scaled game milliseconds, the test moves `elapsed`. */
+  time: { elapsed: number };
+  /** The systems registered on the fake, to call one by itself with a context of the test's own. */
+  systems: ReadonlyArray<{
+    name: string;
+    run: (rows: unknown[], ctx: { time: { elapsed: number } }) => void;
+  }>;
   /** Runs the systems registered on the fake, as one phase `sync` does. */
   sync(): void;
   api: WorldApi;
@@ -332,7 +339,11 @@ export type FakeWorld = {
 function createFakeWorld(): FakeWorld {
   const added: Array<(entity: Entity) => void> = [];
   const removed: Array<(entity: Entity) => void> = [];
-  const systems: Array<{ run: () => void }> = [];
+  const systems: Array<{
+    name: string;
+    run: (rows: unknown[], ctx: { time: { elapsed: number } }) => void;
+  }> = [];
+  const time = { elapsed: 0 };
   const keep = (list: Array<(entity: Entity) => void>, listener: (entity: Entity) => void) => {
     list.push(listener);
 
@@ -348,14 +359,16 @@ function createFakeWorld(): FakeWorld {
     endExit: entity => {
       for (const listener of removed) listener(entity);
     },
+    time,
+    systems,
     sync: () => {
-      for (const entry of systems) entry.run();
+      for (const entry of systems) entry.run([], { time });
     },
     api: {
       ecs: {
         onAdded: (_tag: unknown, listener: (entity: Entity) => void) => keep(added, listener),
         onRemoved: (_tag: unknown, listener: (entity: Entity) => void) => keep(removed, listener),
-        system: (definition: { run: () => void }) => {
+        system: (definition: (typeof systems)[number]) => {
           systems.push(definition);
 
           return () => {
@@ -425,9 +438,13 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
           fake.invalidated.push([...keys]);
         },
         upload: (textures: readonly Texture[]): Promise<boolean> => fake.upload(textures),
+        // Indexed, as the real one: a `for…of` over a frozen key list makes an iterator result per key.
         used: (keys: readonly string[]): boolean => {
-          for (const key of keys) {
-            if (fake.drawn.has(key)) return true;
+          // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+          for (let index = 0; index < keys.length; index += 1) {
+            const key = keys[index];
+
+            if (key !== undefined && fake.drawn.has(key)) return true;
           }
 
           return false;
@@ -520,6 +537,7 @@ export function createMockAssets(
     preloadDepth: 2,
     baseUrl: undefined,
     io,
+    releaseUndrawnS: undefined,
     ...options
   };
   const state = createAssetsState();

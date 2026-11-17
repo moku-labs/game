@@ -242,7 +242,8 @@ function recordOf(state: State, bundle: string): BundleRecord {
     status: "idle",
     ...emptyAssets(),
     inflight: undefined,
-    lastUsed: 0
+    lastUsed: 0,
+    undrawnSince: -1
   };
 
   state.records.set(bundle, created);
@@ -549,6 +550,8 @@ function finish(
   touch(ctx.state, record);
   // A failure `ready` counted as there is over: the next `ready` waits for this bundle's warm (F52).
   ctx.state.readyFailed.delete(bundle);
+  // It is back: a later miss is no longer "asked again" for an undrawn unload (F198).
+  ctx.state.undrawnUnloaded.delete(bundle);
 
   ctx.deps.renderer.sync.textures.invalidate(bundleKeys(ctx.state, bundle));
 

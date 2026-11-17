@@ -1,12 +1,20 @@
 /**
  * @file assets plugin — texture memory: what is used, who leaves next and the eviction itself,
- * and the release of a `"leave"` bundle whose feature left. The LRU compares the use counter,
- * never a clock.
+ * the release of a `"leave"` bundle whose feature left, and the release of a bundle nothing drew for
+ * `releaseUndrawnS`. The LRU compares the use counter, never a clock.
  */
 
 import { unloadCompanions } from "./companions";
 import { isPermanent } from "./tiers";
-import type { AssetsCtx, AssetsIo, Events, LoadedAssets, ManifestBundle, State } from "./types";
+import type {
+  AssetsCtx,
+  AssetsIo,
+  BundleRecord,
+  Events,
+  LoadedAssets,
+  ManifestBundle,
+  State
+} from "./types";
 
 /** How many of the heaviest entries the over-budget warning names. */
 const HEAVIEST = 5;
@@ -17,10 +25,25 @@ const NO_FEATURES: ReadonlySet<string> = Object.freeze(new Set<string>());
 /** The key list of a bundle the manifest walk did not list: nothing drawn, nothing to invalidate. */
 const NO_KEYS: readonly string[] = Object.freeze([]);
 
+/** Where the pass keeps the frame time in `state.undrawnPass.clock`. */
+const PASS_NOW = 0;
+
+/** Where the pass keeps the milliseconds a bundle must go undrawn in `state.undrawnPass.clock`. */
+const PASS_LIMIT = 1;
+
+/** The time between two checks of `releaseUndrawnS`, in milliseconds of the frame clock. */
+const CHECK_EVERY_MS = 1000;
+
+/**
+ * The least a bundle goes undrawn before the pass takes it: a check, then one a second later. So `releaseUndrawnS: 0`
+ * never frees what the first step of a `load` effect just brought before the next step can draw it.
+ */
+const MIN_UNDRAWN_MS = 1000;
+
 /** One row of the over-budget warning: a loose file by its key, or a page as `page "<id>"`. */
 type Heavy = { key: string; mb: number };
 
-/** Why a bundle was unloaded: the budget, a caller, or its feature left. */
+/** Why a bundle was unloaded: the budget, a caller, its feature left, or nothing drew it for `releaseUndrawnS`. */
 type UnloadReason = Events["assets:bundle-unloaded"]["reason"];
 
 /**
@@ -64,12 +87,7 @@ export function bundleKeys(state: State, bundle: string): readonly string[] {
  * @param except - The bundle whose load started the pass, if any.
  * @returns True when it may not go.
  */
-function keptByState(
-  state: State,
-  name: string,
-  entry: ManifestBundle,
-  except: string | undefined
-): boolean {
+function keptByState(state: State, name: string, entry: ManifestBundle, except?: string): boolean {
   return (
     name === except ||
     state.pinned.has(name) ||
@@ -151,8 +169,9 @@ export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): v
 }
 
 /**
- * Notes why a bundle went, for the loop guard: a budget unload is remembered until the next rest, so a view that asks
- * again for it right away starts its hold; any other reason ends both the mark and the hold (F184).
+ * Notes why a bundle went, for the loop guard: a budget unload is remembered until the next rest, an undrawn unload until
+ * the bundle loads again, so a view that asks again for it starts its hold; any other reason ends both marks and the
+ * hold (F184, F198).
  *
  * @param state - The plugin state.
  * @param bundle - Name of the bundle.
@@ -167,6 +186,9 @@ function noteUnload(state: State, bundle: string, reason: UnloadReason): void {
 
   state.budgetUnloaded.delete(bundle);
   state.reloadHeld.delete(bundle);
+
+  if (reason === "undrawn") state.undrawnUnloaded.add(bundle);
+  else state.undrawnUnloaded.delete(bundle);
 }
 
 /**
@@ -176,7 +198,8 @@ function noteUnload(state: State, bundle: string, reason: UnloadReason): void {
  *
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
- * @param reason - Whether the budget, a caller or the release of a left feature asked for it.
+ * @param reason - Whether the budget, a caller, the release of a left feature or the release of an undrawn bundle asked
+ *   for it.
  */
 export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: UnloadReason): void {
   const state = ctx.state;
@@ -189,6 +212,7 @@ export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: UnloadReaso
 
   record.status = "idle";
   record.lastUsed = 0;
+  record.undrawnSince = -1;
   // Its textures are gone from the GPU: a reload warms again (F60).
   state.warmed.delete(bundle);
 
@@ -450,4 +474,91 @@ function unloadIfLeft(ctx: AssetsCtx, name: string, onStack: ReadonlySet<string>
   if (isHeld(ctx, name, entry, onStack)) return;
 
   unloadBundle(ctx, name, "leave");
+}
+
+/**
+ * Tells whether the pass of `releaseUndrawnS` must leave a loaded bundle alone by the state alone: what the budget keeps
+ * (`keptByState`), or a bundle the last look-ahead walk reached, which the next rest would load again.
+ *
+ * @param state - The plugin state.
+ * @param name - Name of the bundle.
+ * @param entry - Its manifest entry.
+ * @returns True when it may not go.
+ */
+function keptFromUndrawn(state: State, name: string, entry: ManifestBundle): boolean {
+  return keptByState(state, name, entry) || state.lookAhead?.ordered.includes(name) === true;
+}
+
+/**
+ * The step of the pass of `releaseUndrawnS` for one record: a bundle with a sound or a font is skipped, a kept or a
+ * drawn one stops its count, any other starts it, and one that went the limit undrawn is unloaded with the reason
+ * `"undrawn"`. The pass hands the clock and the limit through `state.undrawnPass`.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param record - The record of the bundle.
+ * @param name - Name of the bundle.
+ */
+function visitUndrawn(ctx: AssetsCtx, record: BundleRecord, name: string): void {
+  const state = ctx.state;
+  const entry = state.manifest.bundles[name];
+
+  if (record.status !== "loaded" || entry === undefined) return;
+  // `textures.used` never sees these, and a miss on `audio()` or `font()` is silent: no hold, no reload. They leave by
+  // the budget, `release: "leave"` and `unload`.
+  if (record.audio.size > 0 || record.fonts.size > 0) return;
+
+  if (
+    keptFromUndrawn(state, name, entry) ||
+    ctx.deps.renderer.sync.textures.used(bundleKeys(state, name))
+  ) {
+    record.undrawnSince = -1;
+
+    return;
+  }
+
+  const clock = state.undrawnPass.clock;
+  const now = clock[PASS_NOW] ?? 0;
+
+  if (record.undrawnSince === -1) record.undrawnSince = now;
+  if (now - record.undrawnSince >= (clock[PASS_LIMIT] ?? 0)) unloadBundle(ctx, name, "undrawn");
+}
+
+/**
+ * Makes the step of the pass once for a state: a function over `ctx`, so `forEach` takes it and a pass makes no closure.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns The step `visitUndrawn` takes for each record.
+ */
+function undrawnStep(ctx: AssetsCtx): (record: BundleRecord, name: string) => void {
+  return (record, name) => visitUndrawn(ctx, record, name);
+}
+
+/**
+ * Unloads the loaded bundles nothing has drawn or kept for `releaseUndrawnS` game seconds, with the reason `"undrawn"`
+ * (F198). The system `assets.leave` calls it every frame; it returns at once while the field is off, while headless,
+ * while the flow walks fast and until the next check, which comes a second of the frame clock after the last. Only a
+ * pass walks the records, and it allocates nothing. A bundle goes between `releaseUndrawnS` and one second more after
+ * it stopped being drawn.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param now - The frame clock in milliseconds: `ctx.time.elapsed` of the system, scaled game time.
+ */
+export function releaseUndrawn(ctx: AssetsCtx, now: number): void {
+  const state = ctx.state;
+  const seconds = ctx.config.releaseUndrawnS;
+
+  if (seconds === undefined || state.io === undefined || now < state.undrawnCheckAt) return;
+  // A fast walk shows nothing to anybody: nothing is freed there.
+  if (ctx.deps.flow.state().mode === "fast") return;
+
+  // The pass reads its clock and limit from a typed cell: a double stored in a plain field of the state is boxed.
+  const pass = state.undrawnPass;
+
+  state.undrawnCheckAt = now + CHECK_EVERY_MS;
+  pass.clock[PASS_NOW] = now;
+  pass.clock[PASS_LIMIT] = Math.max(seconds * 1000, MIN_UNDRAWN_MS);
+  // `forEach` with a step made once, not `for…of`: no iterator object and no closure per pass.
+  pass.visit ??= undrawnStep(ctx);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a step made once
+  state.records.forEach(pass.visit);
 }

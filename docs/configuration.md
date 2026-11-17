@@ -60,6 +60,7 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `assets` | `manifest` | `string \| Manifest \| undefined` | `undefined` | Manifest URL, or the parsed file in a test |
 | `assets` | `textureBudgetMb` | `number` | `192` | Texture memory budget for the LRU unload |
 | `assets` | `preloadDepth` | `number` | `2` | Graph edges walked for the preload at a rest node |
+| `assets` | `releaseUndrawnS` | `number \| undefined` | `undefined` | Game seconds a loaded bundle may go with nothing drawing or keeping it before it is unloaded (`reason: "undrawn"`); checked once a second. `undefined`: off. With it set `textureBudgetMb` only caps the peaks |
 | `assets` | `baseUrl`, `io` | | `undefined` | The CDN seam and the fetch/decode/texture seam a test replaces. A bundle's own options are not config: its feature's `assets.ts` sets them, `defineBundles({ ep01: { tier: "feature", release: "leave", mipmaps: ["items/**"] } })` |
 | `anim` | `maxTracks` | `number` | `2000` | Dev guard: one warning each time the running track count rises past it. Durations live in the steps, never here |
 | `i18n` | `locale` | `string` | `"en"` | The locale at start |
