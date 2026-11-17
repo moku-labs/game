@@ -356,6 +356,28 @@ describe("fakeFx: a started effect", () => {
   });
 });
 
+describe("fakeFx: cancel", () => {
+  it("resolves an unsettled effect it returned with undefined and returns true", async () => {
+    const fx = fakeFx({ answer: () => new Promise<never>(() => undefined) });
+    const shown = fx.fx(popup);
+
+    expect(fx.fx.cancel(shown)).toBe(true);
+    await expect(shown).resolves.toBeUndefined();
+    // Cancelled once: a second cancel finds nothing open.
+    expect(fx.fx.cancel(shown)).toBe(false);
+  });
+
+  it("returns false for a settled effect and for a promise it did not return", async () => {
+    const fx = fakeFx({ answer: () => ({ intent: "again" }) });
+    const answered = fx.fx(popup);
+
+    await expect(answered).resolves.toEqual({ intent: "again" });
+    expect(fx.fx.cancel(answered)).toBe(false);
+    expect(fx.fx.cancel(Promise.resolve())).toBe(false);
+    expect(fx.fx.cancel(fakeFx().fx(popup))).toBe(false);
+  });
+});
+
 describe("fakeFx: the lists", () => {
   it("records every call in order, each kind in its own list", async () => {
     const fx = fakeFx();

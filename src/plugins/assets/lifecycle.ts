@@ -14,8 +14,8 @@ import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
 import { releaseAssets, releaseLeftBundles, releaseSceneLeft } from "./budget";
 import { bundlesOfNode } from "./preload";
-import { answerReady, stepReady } from "./ready";
-import { bootTiers, loadBundle } from "./tiers";
+import { answerReady, isWarm, passReadyNode, stepReady } from "./ready";
+import { bootTiers, loadBundle, touch } from "./tiers";
 import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "./types";
 
 /** What `onEnter` and an effect handler both hand over. */
@@ -72,25 +72,56 @@ function bundlesOfDescriptor(descriptor: Descriptor | Hint): string[] {
 /**
  * The handler of the `load` effect. It loads the bundles of the payload one after another with
  * the node's signal and reports what arrived, so a loading node can write its own progress.
- * It writes no game state.
+ * It writes no game state. When every bundle is loaded and on the GPU, as `ready` decides, it answers synchronously, so
+ * the node goes on in the frame it asked in (F203); otherwise it answers with a promise.
  *
  * @param ctx - Domain context of the plugin.
  * @param descriptor - The descriptor the node awaited.
  * @param run - The node's mode and signal.
- * @returns What was loaded and what it cost.
+ * @returns What was loaded and what it cost, at once or as a promise.
  */
-async function runLoadEffect(
+function runLoadEffect(
   ctx: AssetsCtx,
   descriptor: Descriptor | Hint,
   run: RunContext
+): LoadResult | Promise<LoadResult> {
+  const state = ctx.state;
+  const names = bundlesOfDescriptor(descriptor);
+
+  if (state.io === undefined) return { loaded: [], mb: 0 };
+  if (!names.every(name => isWarm(state, name))) return loadInOrder(ctx, names, run.signal);
+
+  let mb = 0;
+
+  for (const name of names) {
+    const record = state.records.get(name);
+
+    // A loaded bundle is touched as `loadBundle` touches it, so the budget sees it used.
+    if (record !== undefined) touch(state, record);
+    mb += state.manifest.bundles[name]?.mb ?? 0;
+  }
+
+  return { loaded: names, mb: Number(mb.toFixed(3)) };
+}
+
+/**
+ * Loads the bundles of a `load` effect one after another with the node's signal.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param names - The bundle names of the descriptor.
+ * @param signal - The node's signal.
+ * @returns What was loaded and what it cost.
+ */
+async function loadInOrder(
+  ctx: AssetsCtx,
+  names: readonly string[],
+  signal: AbortSignal
 ): Promise<LoadResult> {
   const loaded: string[] = [];
   let mb = 0;
 
-  if (ctx.state.io === undefined) return { loaded, mb };
-
-  for (const name of bundlesOfDescriptor(descriptor)) {
-    await loadBundle(ctx, name, run.signal, "request");
+  for (const name of names) {
+    await loadBundle(ctx, name, signal, "request");
     loaded.push(name);
     mb += ctx.state.manifest.bundles[name]?.mb ?? 0;
   }
@@ -117,7 +148,8 @@ function releaseMarkedRest(ctx: AssetsCtx, run: RunContext): void {
  * The `load` stage of entering a node: the bundles of the node become the pinned set, the release
  * a rest marked runs, and in live mode the node waits for its bundles. A bundle the preload did not
  * reach is a dev warning, except a `"leave"` bundle, which the preload skips on purpose, and the
- * bundles of a node entered before any live rest, which no preload could reach (F117).
+ * bundles of a node entered before any live rest, which no preload could reach (F117). The latest
+ * `ready` ask that answered `false` moves past the node (F204).
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
@@ -133,6 +165,7 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
   if (node.scene !== undefined && state.scenes.has(node.scene)) state.sceneId = node.scene;
 
   releaseMarkedRest(ctx, run);
+  passReadyNode(ctx, node);
 
   if (state.io === undefined || run.mode === "fast") return;
 

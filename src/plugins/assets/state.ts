@@ -52,6 +52,9 @@ export function createAssetsState(): State {
     budgetUnloaded: emptySet(),
     reloadHeld: emptySet(),
     readyWaiting: emptyMap(),
+    readyAsk: 0,
+    readyPlace: "gone",
+    readyHeld: false,
     thrashWarned: emptySet(),
     scenes: emptyMap(),
     featureOfFlow: emptyMap(),
@@ -82,6 +85,7 @@ export function createAssetsState(): State {
     readyFailed: emptySet(),
     warmed: emptyMap(),
     readyWait: "none",
-    readySince: -1
+    readySince: -1,
+    readyWarmAsk: 0
   };
 }

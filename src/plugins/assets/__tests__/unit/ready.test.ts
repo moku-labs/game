@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { NodeInfo } from "../../../flow/types";
 import { ready } from "../../bundles";
-import { createMockAssets, type MockAssets, manifestOf, packedManifest } from "./mock-assets";
+import {
+  createMockAssets,
+  graphOf,
+  type MockAssets,
+  manifestOf,
+  packedManifest
+} from "./mock-assets";
 
 const manifest = manifestOf({
   board: { feature: "board", tier: "scene", keys: ["board.cell", "board.item"] },
@@ -25,14 +32,79 @@ async function started(options: Parameters<typeof createMockAssets>[0] = {}): Pr
   return mock;
 }
 
+/** The rest a window waits on: it lists `ready`. */
+const WAIT: NodeInfo = { ...nodeInfo("wait"), rest: true };
+/** A rest that does not list `ready`: the board. */
+const BOARD: NodeInfo = { ...nodeInfo("board"), rest: true };
+/** A transit node: it asks and goes on. */
+const SHOW: NodeInfo = nodeInfo("show");
+
 /**
- * Runs the `ready` handler the plugin registered, as a live node's `fx(ready(bundles))` does.
+ * Builds the info of a node of the flow "main".
+ *
+ * @param node - The node's name.
+ * @returns The info, of a transit node.
+ */
+function nodeInfo(node: string): NodeInfo {
+  return {
+    path: node,
+    flow: "main",
+    node,
+    rest: false,
+    over: false,
+    checkpoint: false,
+    barrier: false
+  };
+}
+
+/**
+ * Gives the fake graph the three nodes, `wait` with the outcome `ready`.
+ *
+ * @param mock - The started mock.
+ */
+function withWindowGraph(mock: MockAssets): void {
+  const graph = graphOf({ main: { show: {}, wait: { rest: true }, board: { rest: true } } });
+  const wait = graph.flows.main?.nodes.wait;
+
+  if (wait !== undefined) wait.outcomes.push("ready", "back");
+  mock.flow.graph = graph;
+}
+
+/**
+ * Enters one node, as the runner's `load` stage does.
+ *
+ * @param mock - The started mock.
+ * @param node - The node entered.
+ */
+async function enter(mock: MockAssets, node: NodeInfo): Promise<void> {
+  for (const { callback } of mock.flow.enter) {
+    await callback(node, { mode: "live", signal: new AbortController().signal });
+  }
+}
+
+/**
+ * Runs the `ready` handler the plugin registered, as `fx(ready(bundles))` in the body of the rest
+ * `wait` does: the event of a `false` answer goes to that rest.
  *
  * @param mock - The started mock.
  * @param bundles - The bundles the node names.
  * @returns What the handler answered.
  */
 function askReady(mock: MockAssets, bundles: string | readonly string[]): unknown {
+  withWindowGraph(mock);
+  mock.assetsCtx.state.current = WAIT;
+
+  return askFrom(mock, bundles);
+}
+
+/**
+ * Runs the `ready` handler from the node entered last.
+ *
+ * @param mock - The started mock.
+ * @param bundles - The bundles the node names.
+ * @returns What the handler answered.
+ */
+function askFrom(mock: MockAssets, bundles: string | readonly string[]): unknown {
   return mock.flow.handlers
     .get("ready")
     ?.run(ready(bundles), { signal: new AbortController().signal, mode: "live" });
@@ -187,6 +259,102 @@ describe("the ready effect (F52)", () => {
 
     expect(() => askReady(mock, ["board", "bord"])).toThrow('no bundle "bord" in the manifest');
     expect(mock.renderer.upload).not.toHaveBeenCalled();
+  });
+});
+
+describe("the ready effect: whose event it is (F204)", () => {
+  // Bug: a transit node's ask settled before its rest was entered posted at once, and a rest without `ready` kept it.
+  it("holds the event of a transit ask that settled early and posts it when its rest, listing ready, is entered", async () => {
+    const mock = await started();
+
+    withWindowGraph(mock);
+    await enter(mock, SHOW);
+    mock.io.control.gated = true;
+
+    expect(askFrom(mock, "ui")).toBe(false);
+
+    mock.io.releaseAll();
+    await tick();
+
+    expect(mock.api.isLoaded("ui")).toBe(true);
+    expect(mock.flow.posted).toEqual([]);
+
+    await enter(mock, WAIT);
+
+    expect(mock.flow.posted).toEqual([{ type: "ready" }]);
+  });
+
+  // Bug: `fx.start(ready(...))` before the board posted `ready` the next window's wait took at once.
+  it("drops the event when the first rest after the ask does not list ready, before or after it settles", async () => {
+    const mock = await started();
+
+    withWindowGraph(mock);
+    await enter(mock, SHOW);
+    mock.io.control.gated = true;
+
+    expect(askFrom(mock, "ui")).toBe(false);
+
+    await enter(mock, BOARD);
+    mock.io.releaseAll();
+    await tick();
+    await enter(mock, WAIT);
+
+    expect(mock.flow.posted).toEqual([]);
+  });
+
+  // Bug: Back from the wait left its ask behind, and its event ended the next wait at once.
+  it("drops the event of an ask whose rest was left before it settled", async () => {
+    const mock = await started();
+
+    mock.io.control.gated = true;
+
+    expect(askReady(mock, "ui")).toBe(false);
+
+    await enter(mock, BOARD);
+    mock.io.releaseAll();
+    await tick();
+
+    expect(mock.flow.posted).toEqual([]);
+  });
+
+  // Bug: an older ask settling while a newer one waits for its rest handed that rest the event too early.
+  it("gives a newer ask's rest nothing when only an older ask settled", async () => {
+    const mock = await started();
+
+    mock.io.control.gated = true;
+
+    expect(askReady(mock, "ui")).toBe(false);
+
+    await enter(mock, BOARD);
+    await enter(mock, SHOW);
+
+    expect(askFrom(mock, "board")).toBe(false);
+
+    mock.io.release(url => url.includes("/ui/"));
+    await tick();
+    await enter(mock, WAIT);
+
+    expect(mock.flow.posted).toEqual([]);
+
+    mock.io.releaseAll();
+    await tick();
+
+    expect(mock.flow.posted).toEqual([{ type: "ready" }]);
+  });
+
+  // Bug: two asks of one bundle shared one warm and posted twice; the second event outlived its rest.
+  it("posts once for two asks of one warm: the latest ask owns the event", async () => {
+    const mock = await started();
+
+    mock.io.control.gated = true;
+
+    expect(askReady(mock, "ui")).toBe(false);
+    expect(askReady(mock, "ui")).toBe(false);
+
+    mock.io.releaseAll();
+    await tick();
+
+    expect(mock.flow.posted).toEqual([{ type: "ready" }]);
   });
 });
 

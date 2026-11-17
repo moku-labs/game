@@ -295,12 +295,26 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark, safe:
   state.guide = undefined;
 
   // Replace the state, and mark the rest point: the provider gets the whole restored document.
-  ctx.deps.model.store.restore({
-    player: bookmark.player,
-    session: bookmark.session,
-    rng: bookmark.rng,
-    ...(bookmark.version === undefined ? {} : { version: bookmark.version })
-  });
+  // Trees the store cannot read (a newer schema, a missing migration step) refuse the restore
+  // that waits instead, and the loop runs the node it stood on again, on the state it had.
+  try {
+    ctx.deps.model.store.restore({
+      player: bookmark.player,
+      session: bookmark.session,
+      rng: bookmark.rng,
+      ...(bookmark.version === undefined ? {} : { version: bookmark.version })
+    });
+  } catch (error) {
+    const refuse = loopSeam(state).refuse;
+
+    if (refuse === undefined) throw error;
+
+    refuse(error);
+
+    return;
+  }
+
+  loopSeam(state).refuse = undefined;
   ctx.deps.model.store.markRest();
 
   // Move the position to the node. Its frames are also what a failure retries from.
@@ -436,7 +450,7 @@ export function restorePosition(
   }
 
   const seam = loopSeam(state);
-  const entered = new Promise<void>(resolve => {
+  const entered = new Promise<void>((resolve, reject) => {
     /**
      * Takes the listener off the rest seam.
      *
@@ -469,12 +483,20 @@ export function restorePosition(
       if (!dropListener()) return;
 
       // Only this bookmark is dropped. A later restore may have put its own in the seam.
-      if (seam.restoring === bookmark) seam.restoring = undefined;
+      if (seam.restoring === bookmark) {
+        seam.restoring = undefined;
+        seam.refuse = undefined;
+      }
 
       resolve();
     };
 
     seam.rest.push(listener);
+    seam.refuse = (error: unknown): void => {
+      dropListener();
+      seam.refuse = undefined;
+      reject(error);
+    };
     running.then(finish, finish);
   });
 

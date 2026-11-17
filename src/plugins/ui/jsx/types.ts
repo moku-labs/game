@@ -921,8 +921,10 @@ export type JsxModule = {
   /**
    * Settles the enter hooks of the elements queued since the last call, in the order they came. The
    * `ui.enter` system calls it in phase `sync`, after the game's systems and before the frame is drawn.
+   *
+   * @param time - The frame's time: the level of a fading overlay starts that far into its fade (F205).
    */
-  playEntered(): void;
+  playEntered(time?: Readonly<Time>): void;
   /**
    * Asks for every root to be built again by the next reconcile, after the world brought the
    * elements to their rest pose and ended every track on them: a restore or a load.

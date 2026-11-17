@@ -2455,8 +2455,10 @@ export function createReconciler(
    * loop and the level of an overlay start in the frame the root is first drawn. While nothing was
    * queued since the last call and no root was released, the queue holds only held enters and is
    * not walked.
+   *
+   * @param time - The frame's time: the level of a fading overlay starts that far into its fade (F205).
    */
-  function playEntered(): void {
+  function playEntered(time: Readonly<Time> = NO_TIME): void {
     const entering = state.entering;
     const version = ctx.deps.world.projection.membershipVersion();
 
@@ -2479,7 +2481,7 @@ export function createReconciler(
         entering.list[held] = entity;
         held += 1;
       } else {
-        playEnter(element);
+        playEnter(element, time.delta);
       }
     }
 
@@ -2492,8 +2494,9 @@ export function createReconciler(
    * scrolled in is not new: it plays no `enter` hook, only its loop starts.
    *
    * @param element - The element the `Box` was attached to.
+   * @param deltaMs - The game time of the frame it enters in.
    */
-  function playEnter(element: Element): void {
+  function playEnter(element: Element, deltaMs: number): void {
     if (element.entered) return;
 
     element.entered = true;
@@ -2507,7 +2510,7 @@ export function createReconciler(
       const span = createSpan();
 
       modules.layout.enter(element, span);
-      enterOverlay(ctx, state, modules.layout, { element, span });
+      enterOverlay(ctx, state, modules.layout, { element, span, deltaMs });
     }
   }
 

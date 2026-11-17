@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkPacked } from "../../scan/pack/pack";
-import type { Manifest, ManifestFile } from "../../types";
+import type { AtlasFrame, Manifest, ManifestFile } from "../../types";
 
 /** A loose texture of the scan. */
 function scanned(key: string, width = 32, height = 16): ManifestFile {
@@ -114,6 +114,61 @@ describe("checkPacked", () => {
     ]);
     expect(checkPacked(source, packOf([packed("ui.a", 2), resized, click]))).toEqual([
       'the frame of "ui.b" is 30×16, its source 32×16.'
+    ]);
+  });
+});
+
+/** A trimmed texture on the page: a 20×10 cut of a 32×16 original that started at (6, 3). */
+function trimmed(key: string, x: number, trim: Partial<AtlasFrame> = {}): ManifestFile {
+  const atlas: AtlasFrame = {
+    page: "ui/main-0",
+    x,
+    y: 2,
+    width: 20,
+    height: 10,
+    offsetX: 6,
+    offsetY: 3,
+    origWidth: 32,
+    origHeight: 16,
+    ...trim
+  };
+
+  return { key, width: 32, height: 16, mb: 0, atlas };
+}
+
+describe("checkPacked of a trimmed frame", () => {
+  it("accepts a trimmed frame whose original is the size of its source and holds the cut", () => {
+    expect(checkPacked(source, packOf([trimmed("ui.a", 2), packed("ui.b", 36), click]))).toEqual(
+      []
+    );
+  });
+
+  it("names a trimmed frame whose original size differs from its source", () => {
+    // Bug caught: comparing the cut's size to the source passes a trimmed frame as a resized one,
+    // and comparing nothing passes a texture repacked from another image.
+    const wrong = trimmed("ui.a", 2, { origWidth: 30 });
+
+    expect(checkPacked(source, packOf([wrong, packed("ui.b", 36), click]))).toEqual([
+      'the frame of "ui.a" is 30×16, its source 32×16.'
+    ]);
+  });
+
+  it("names a trimmed frame that does not lie inside its original", () => {
+    // Bug caught: a cut that leaves its original draws outside the sprite's size.
+    const outside = trimmed("ui.a", 2, { offsetX: 14 });
+
+    expect(checkPacked(source, packOf([outside, packed("ui.b", 36), click]))).toEqual([
+      'the frame of "ui.a" lies outside its original (32×16).'
+    ]);
+  });
+
+  it("names a nine-slice texture that carries trim fields", () => {
+    // Bug caught: a trimmed nine-slice loses the borders that sit in the cut-off margin.
+    const nine = { left: 4, top: 4, right: 4, bottom: 4 };
+    const slice: ManifestFile = { ...trimmed("ui.a", 2), nine };
+
+    expect(checkPacked(source, packOf([slice, packed("ui.b", 36), click]))).toEqual([
+      'the texture "ui.a" has nine-slice borders, so it must not be trimmed.'
     ]);
   });
 });

@@ -1,7 +1,7 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { createSyncState } from "../../sync/state";
-import { createTexture, destroyTexture } from "../../sync/textures";
+import { coverTexture, createTexture, destroyTexture, sliceTexture } from "../../sync/textures";
 import type { CreateTextureOptions, SyncCtx } from "../../sync/types";
 import { uploadStep, uploadTextures } from "../../sync/upload";
 
@@ -189,6 +189,166 @@ describe("creating a texture with the real Pixi", () => {
 
     mipped.destroy(true);
     plain.destroy(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A frame packed without its transparent margin (F198): the slice gives Pixi `orig` and `trim`, so
+// the texture keeps the size of its original and draws its pixels where they were in it.
+// ---------------------------------------------------------------------------
+
+/**
+ * A 1024 x 1024 atlas page whose own frame starts at 100, 50 of its source, so a slice that forgets
+ * the page's frame lands elsewhere.
+ *
+ * @returns The page.
+ */
+function offsetPage(): pixi.Texture {
+  return new pixi.Texture({
+    source: new pixi.TextureSource({ width: 1200, height: 1200 }),
+    frame: new pixi.Rectangle(100, 50, 1024, 1024)
+  });
+}
+
+/** A 300 x 200 leaf whose visible 256 x 128 pixels start at column 9 and row 9 of it. */
+const LEAF = {
+  x: 0,
+  y: 0,
+  width: 256,
+  height: 128,
+  offsetX: 9,
+  offsetY: 9,
+  origWidth: 300,
+  origHeight: 200
+};
+
+describe("a trimmed slice (F198)", () => {
+  // Bug: the sprite shrinks to its visible pixels and shifts by the margin it lost.
+  it("answers the original size and draws the page pixels at the offset", () => {
+    const slice = sliceTexture(readyHost(), offsetPage(), { ...LEAF, x: 400, y: 300 });
+
+    expect(slice.width).toBe(300);
+    expect(slice.height).toBe(200);
+    expect(slice.orig).toMatchObject({ x: 0, y: 0, width: 300, height: 200 });
+    expect(slice.trim).toMatchObject({ x: 9, y: 9, width: 256, height: 128 });
+    expect(slice.frame).toMatchObject({ x: 500, y: 350, width: 256, height: 128 });
+
+    // The CI pin: Pixi sizes a sprite by `orig` and draws its quad over `trim`.
+    const sprite = new pixi.Sprite(slice);
+
+    expect(sprite.width).toBe(300);
+    expect(sprite.visualBounds).toMatchObject({ minX: 9, maxX: 265, minY: 9, maxY: 137 });
+  });
+
+  // Bug: an old manifest, or a frame with a lost field, gets a trim of garbage and draws off its place.
+  it("leaves a frame without all four fields untrimmed", () => {
+    const sctx = readyHost();
+    const plain = sliceTexture(sctx, offsetPage(), { x: 0, y: 0, width: 256, height: 128 });
+    const incomplete = sliceTexture(sctx, offsetPage(), {
+      x: 0,
+      y: 0,
+      width: 256,
+      height: 128,
+      offsetX: 9,
+      offsetY: 9,
+      origWidth: 300
+    });
+
+    expect(plain.trim).toBeUndefined();
+    expect(plain.width).toBe(256);
+    expect(incomplete.trim).toBeUndefined();
+    expect(incomplete.width).toBe(256);
+    expect(incomplete.height).toBe(128);
+  });
+
+  // Bug: a stale manifest's trim reaches past its original, and the sprite draws outside its box.
+  it("refuses a trim that leaves its original", () => {
+    const sctx = readyHost();
+    const outside = 'frame 0,0 256x128 is outside page 1024x1024.\n  Run "bun run assets:pack".';
+
+    expect(() => sliceTexture(sctx, offsetPage(), { ...LEAF, offsetX: 45 })).toThrow(outside);
+    expect(() => sliceTexture(sctx, offsetPage(), { ...LEAF, offsetY: 73 })).toThrow(outside);
+    expect(() => sliceTexture(sctx, offsetPage(), { ...LEAF, offsetX: -1 })).toThrow(outside);
+    expect(() => sliceTexture(sctx, offsetPage(), { ...LEAF, offsetY: -1 })).toThrow(outside);
+    expect(() =>
+      sliceTexture(sctx, offsetPage(), { ...LEAF, offsetX: 44, offsetY: 72 })
+    ).not.toThrow();
+  });
+});
+
+/**
+ * The base of the spec's worked example: a 100 x 100 original whose visible 80 x 60 start at 10, 20,
+ * packed at 500, 300 of a page.
+ *
+ * @param sctx - The sync context.
+ * @returns The base texture.
+ */
+function trimmedBase(sctx: SyncCtx): pixi.Texture {
+  const page = new pixi.Texture({ source: new pixi.TextureSource({ width: 1024, height: 1024 }) });
+
+  return sliceTexture(sctx, page, {
+    x: 500,
+    y: 300,
+    width: 80,
+    height: 60,
+    offsetX: 10,
+    offsetY: 20,
+    origWidth: 100,
+    origHeight: 100
+  });
+}
+
+describe("the cover crop of a trimmed texture (F198)", () => {
+  // Bug: the crop is read as page pixels from the trimmed frame, so it shows the wrong part and shifts.
+  it("cuts the crop out of the trim and keeps the crop's size (the worked example)", () => {
+    const sctx = readyHost();
+    const base = trimmedBase(sctx);
+    const { texture } = coverTexture(
+      sctx,
+      1,
+      "board.bg",
+      base,
+      { width: 100, height: 40 },
+      { x: 0, y: 30, width: 100, height: 40 }
+    );
+
+    expect(texture.source).toBe(base.source);
+    expect(texture.frame).toMatchObject({ x: 500, y: 310, width: 80, height: 40 });
+    expect(texture.orig).toMatchObject({ x: 0, y: 0, width: 100, height: 40 });
+    expect(texture.trim).toMatchObject({ x: 10, y: 0, width: 80, height: 40 });
+    expect(texture.width).toBe(100);
+    expect(texture.height).toBe(40);
+  });
+
+  // Bug: the crop shows a neighbour on the page.
+  it("draws nothing for a crop that misses the trim", () => {
+    const sctx = readyHost();
+    const base = trimmedBase(sctx);
+    const { texture } = coverTexture(
+      sctx,
+      1,
+      "board.bg",
+      base,
+      { width: 100, height: 15 },
+      { x: 0, y: 0, width: 100, height: 15 }
+    );
+
+    expect(texture.frame).toMatchObject({ x: 500, y: 300, width: 1, height: 1 });
+    expect(texture.orig).toMatchObject({ x: 0, y: 0, width: 100, height: 15 });
+    expect(texture.trim).toMatchObject({ x: 0, y: 0, width: 0, height: 0 });
+
+    // A crop left of the trim misses it across, with rows in common.
+    const left = coverTexture(
+      sctx,
+      2,
+      "board.bg",
+      base,
+      { width: 5, height: 100 },
+      { x: 0, y: 0, width: 5, height: 100 }
+    ).texture;
+
+    expect(left.frame).toMatchObject({ x: 500, y: 300, width: 1, height: 1 });
+    expect(left.trim).toMatchObject({ x: 0, y: 0, width: 0, height: 0 });
   });
 });
 

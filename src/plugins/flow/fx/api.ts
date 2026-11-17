@@ -3,6 +3,7 @@
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { Answered, GateInternal } from "../gate/types";
+import { childOf } from "../signal";
 import type { FlowCtx } from "../types";
 import type {
   Descriptor,
@@ -142,15 +143,96 @@ async function effectValue(
   try {
     return await entry.run(descriptor, { signal, mode: state.mode });
   } catch (error) {
-    if (descriptor.cosmetic !== true) throw error;
-    if (signal.aborted) return;
+    return failedValue(log, descriptor, signal, error);
+  }
+}
 
-    // `log.warn` takes no error, so the text of what was thrown goes in as data.
+/**
+ * What an awaited effect whose handler failed resolves with: a `cosmetic` descriptor swallows the failure after one
+ * warn entry `flow:fx-cosmetic-failed`, or silently after the abort of its signal; any other failure is thrown on.
+ *
+ * @param log - The engine log.
+ * @param descriptor - The awaited descriptor.
+ * @param signal - The signal the handler was called with.
+ * @param error - What the handler threw or rejected with.
+ * @returns `undefined` for a cosmetic descriptor.
+ * @throws {unknown} The failure itself, for a descriptor that is not cosmetic.
+ */
+function failedValue(
+  log: Log.LogApi,
+  descriptor: Descriptor,
+  signal: AbortSignal,
+  error: unknown
+): undefined {
+  if (descriptor.cosmetic !== true) throw error;
+
+  // `log.warn` takes no error, so the text of what was thrown goes in as data.
+  if (!signal.aborted) {
     log.warn("flow:fx-cosmetic-failed", {
       kind: descriptor.kind,
       message: asError(error).message
     });
   }
+
+  return undefined;
+}
+
+/**
+ * Tells whether a handler answered with a promise or another thenable, that is, not synchronously.
+ *
+ * @param result - What the handler returned.
+ * @returns True for a thenable.
+ * @example
+ * ```ts
+ * isThenable(Promise.resolve(1)); // true
+ * isThenable(true); // false
+ * ```
+ */
+function isThenable(result: unknown): boolean {
+  if (typeof result !== "object" && typeof result !== "function") return false;
+  if (result === null) return false;
+
+  return typeof (result as { then?: unknown }).then === "function";
+}
+
+/**
+ * Runs the handler of an awaited effect while the frame loop runs. A handler that answers synchronously (a value, a
+ * throw, or no handler at all) goes on at once, in the frame it was asked in, so "ask `ready`, then commit" is drawn
+ * in the next frame (F203). A promise goes on in the `signals` phase after it settled. So does a synchronous answer
+ * while an effect started earlier is still queued: effects that end in one frame always resume in start order.
+ *
+ * @param state - fx module state.
+ * @param log - The engine log.
+ * @param descriptor - The awaited descriptor.
+ * @param signal - The signal the handler is called with.
+ * @returns What the handler answered, at once or in the `signals` phase.
+ */
+function runLive(
+  state: FxState,
+  log: Log.LogApi,
+  descriptor: Descriptor,
+  signal: AbortSignal
+): Promise<unknown> {
+  const entry = handlerFor(state, descriptor.kind);
+  let result: unknown;
+  let sync = true;
+
+  if (entry !== undefined) {
+    try {
+      result = entry.run(descriptor, { signal, mode: state.mode });
+      sync = !isThenable(result);
+    } catch (error) {
+      result = Promise.reject(error);
+    }
+  }
+
+  const work = Promise.resolve(result).catch((error: unknown) =>
+    failedValue(log, descriptor, signal, error)
+  );
+
+  if (sync && state.settled.length === 0) return work;
+
+  return enqueue(state, work);
 }
 
 /**
@@ -204,35 +286,6 @@ function enqueue(state: FxState, work: Promise<unknown>): Promise<unknown> {
       }
     );
   });
-}
-
-/**
- * Derives the signal one handler gets: a child of the node's signal that the gateway can end on
- * its own. The node's abort reaches the child with its reason; what the child does never reaches
- * the node. The forwarding listener is dropped with the child, so a node that shows many popups
- * leaves nothing behind on its signal.
- *
- * @param signal - The node's abort signal.
- * @returns The controller of the child signal.
- */
-function childOf(signal: AbortSignal): AbortController {
-  const child = new AbortController();
-
-  if (signal.aborted) {
-    child.abort(signal.reason);
-
-    return child;
-  }
-
-  signal.addEventListener(
-    "abort",
-    () => {
-      child.abort(signal.reason);
-    },
-    { once: true, signal: child.signal }
-  );
-
-  return child;
 }
 
 /**
@@ -360,12 +413,10 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       // A guide outlives its own `await`: it keeps the narrow and its visual until the node ends,
       // so its handler gets a signal of its own instead of the node's.
       const shown = descriptor.kind === "guide" ? beginGuide(state, signal) : signal;
-      const work = effectValue(state, ctx.log, descriptor, shown);
-
       if (state.mode === "fast" || !ctx.deps.time.isRunning() || resolvesAtOnce(descriptor))
-        return work;
+        return effectValue(state, ctx.log, descriptor, shown);
 
-      return enqueue(state, work);
+      return runLive(state, ctx.log, descriptor, shown);
     },
 
     buffer: (item: Hint): void => {

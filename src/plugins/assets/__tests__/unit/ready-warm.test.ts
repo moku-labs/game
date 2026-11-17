@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { NodeInfo } from "../../../flow/types";
 import { ready } from "../../bundles";
 import { READY_WARM_CAP_MS } from "../../ready";
-import { createMockAssets, type MockAssets, manifestOf } from "./mock-assets";
+import { createMockAssets, graphOf, type MockAssets, manifestOf } from "./mock-assets";
 
 // ---------------------------------------------------------------------------
 // Unit (spec 33, slice F, F202, W5): the `ready` effect waits for the warm view the world builds aside. While
@@ -30,14 +31,31 @@ async function started(): Promise<MockAssets> {
   return mock;
 }
 
+/** The rest a gated window waits on: it lists `ready`, so the event of its ask goes to it (F204). */
+const WAIT: NodeInfo = {
+  path: "wait",
+  flow: "main",
+  node: "wait",
+  rest: true,
+  over: false,
+  checkpoint: false,
+  barrier: false
+};
+
 /**
- * Runs the `ready` handler the plugin registered, as a node's `fx(ready(bundles))` does.
+ * Runs the `ready` handler the plugin registered, as `fx(ready(bundles))` in the body of the rest `wait` does.
  *
  * @param mock - The started mock.
  * @param mode - The node's mode.
  * @returns What the handler answered.
  */
 function askReady(mock: MockAssets, mode: "live" | "fast" = "live"): unknown {
+  const graph = graphOf({ main: { wait: { rest: true } } });
+
+  graph.flows.main?.nodes.wait?.outcomes.push("ready");
+  mock.flow.graph = graph;
+  mock.assetsCtx.state.current = WAIT;
+
   return mock.flow.handlers
     .get("ready")
     ?.run(ready("board"), { signal: new AbortController().signal, mode });

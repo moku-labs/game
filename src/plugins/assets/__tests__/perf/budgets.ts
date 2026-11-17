@@ -18,6 +18,10 @@ export const BUDGET = {
   // scene asked for its bundles again, the manifest scanned per node; after F194 17 to 18 KB, the walk itself. F196
   // keeps the walk for the next rest at the same place and filters into a scratch list: nothing.
   restLookAhead: 0,
+  // A node entered while no `ready` ask waits (F204): one field read.
+  readyNoAsk: 0,
+  // The rest after a transit node's `ready` ask: the cached graph read and one `includes` (F204).
+  readyRestWithoutReady: 0,
   // F202: the system `assets.ready` with no `ready` waiting for a warm view: one field read. New.
   readyRest: 0,
   // F202: the same while a `ready` waits for a build under its cap: `left()`, a clock read and a subtraction. New.
