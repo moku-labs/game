@@ -64,6 +64,7 @@
  * | assets | manifest | undefined, a URL or an inline manifest |
  * | assets | textureBudgetMb | 192 |
  * | assets | preloadDepth | 2 |
+ * | assets | releaseUndrawnS | undefined (off); game seconds a loaded bundle may go undrawn and unkept before it is unloaded with reason "undrawn" |
  * | assets | baseUrl | undefined |
  * | assets | io | undefined, the browser fetch and the renderer textures |
  * | scenes | buildMs | "auto", two thirds of a frame ((1000 / time.rate().fps) * 2 / 3, 11.1 ms at 60 Hz), read at each build start; a number fixes it |

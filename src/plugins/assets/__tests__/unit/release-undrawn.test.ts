@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { lookupTexture } from "../../api";
 import { createHandlers } from "../../handlers";
-import type { Config, LookAhead, Manifest } from "../../types";
+import type { Config, Events, LookAhead, Manifest } from "../../types";
 import type { MockAssets } from "./mock-assets";
 import { createMockAssets, manifestOf } from "./mock-assets";
 
@@ -79,9 +79,9 @@ function undrawnUnloads(mock: MockAssets): string[] {
     .filter(
       entry =>
         entry.name === "assets:bundle-unloaded" &&
-        (entry.payload as { reason: string }).reason === "undrawn"
+        (entry.payload as Events["assets:bundle-unloaded"]).reason === "undrawn"
     )
-    .map(entry => (entry.payload as { bundle: string }).bundle);
+    .map(entry => (entry.payload as Events["assets:bundle-unloaded"]).bundle);
 }
 
 /**

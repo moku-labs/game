@@ -158,7 +158,9 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
  * @throws {Error} For NaN, an infinity and a negative number, with the way out.
  */
 function checkReleaseUndrawn(value: number | undefined): void {
-  if (value === undefined || (Number.isFinite(value) && value >= 0)) return;
+  const isValid = value === undefined || (Number.isFinite(value) && value >= 0);
+
+  if (isValid) return;
 
   throw new Error(
     `[game] assets.releaseUndrawnS must be a finite number of seconds ≥ 0, got ${String(value)}.\n` +

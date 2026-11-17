@@ -34,6 +34,9 @@ const PASS_LIMIT = 1;
 /** The time between two checks of `releaseUndrawnS`, in milliseconds of the frame clock. */
 const CHECK_EVERY_MS = 1000;
 
+/** Milliseconds in a second: `releaseUndrawnS` is in seconds, the frame clock in milliseconds. */
+const MS_PER_SECOND = 1000;
+
 /**
  * The least a bundle goes undrawn before the pass takes it: a check, then one a second later. So `releaseUndrawnS: 0`
  * never frees what the first step of a `load` effect just brought before the next step can draw it.
@@ -507,10 +510,11 @@ function visitUndrawn(ctx: AssetsCtx, record: BundleRecord, name: string): void 
   // the budget, `release: "leave"` and `unload`.
   if (record.audio.size > 0 || record.fonts.size > 0) return;
 
-  if (
+  const isKeptOrDrawn =
     keptFromUndrawn(state, name, entry) ||
-    ctx.deps.renderer.sync.textures.used(bundleKeys(state, name))
-  ) {
+    ctx.deps.renderer.sync.textures.used(bundleKeys(state, name));
+
+  if (isKeptOrDrawn) {
     record.undrawnSince = -1;
 
     return;
@@ -556,7 +560,7 @@ export function releaseUndrawn(ctx: AssetsCtx, now: number): void {
 
   state.undrawnCheckAt = now + CHECK_EVERY_MS;
   pass.clock[PASS_NOW] = now;
-  pass.clock[PASS_LIMIT] = Math.max(seconds * 1000, MIN_UNDRAWN_MS);
+  pass.clock[PASS_LIMIT] = Math.max(seconds * MS_PER_SECOND, MIN_UNDRAWN_MS);
   // `forEach` with a step made once, not `for…of`: no iterator object and no closure per pass.
   pass.visit ??= undrawnStep(ctx);
   // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a step made once
