@@ -312,27 +312,35 @@ function createFakeModel(): FakeModel {
   return fake;
 }
 
+/** What a system of the fake world gets: the rows (none) and the frame's `Time`. */
+type FakeSystemRun = (rows: readonly unknown[], frame: { time: { elapsed: number } }) => void;
+
 /** The fake `world`: the start and the end of an exit, as the world tells its `Exiting` listeners. */
 export type FakeWorld = {
   /** Tags one entity `Exiting` and calls the `onAdded(Exiting)` listeners. */
   startExit(entity: Entity): void;
   /** Takes the tag off one entity and calls the `onRemoved(Exiting)` listeners. */
   endExit(entity: Entity): void;
-  /** Runs the systems registered on the fake, as one phase `sync` does. */
-  sync(): void;
+  /** Runs the systems registered on the fake, as one phase `sync` does, at a game clock (`Time.elapsed`, 0 unless given). */
+  sync(elapsed?: number): void;
+  /**
+   * What `projection.left()` answers: `Infinity` while nothing is built, a finite number while a test holds a warm view
+   * in work.
+   */
+  left: number;
   api: WorldApi;
 };
 
 /**
- * Creates the fake `world`: `ecs.onAdded`, `ecs.onRemoved` and `ecs.system` keep what they get, and the fake's calls run
- * them.
+ * Creates the fake `world`: `ecs.onAdded`, `ecs.onRemoved` and `ecs.system` keep what they get, the fake's calls run
+ * them, and `projection.left()` reads the fake's `left`.
  *
  * @returns The fake world.
  */
 function createFakeWorld(): FakeWorld {
   const added: Array<(entity: Entity) => void> = [];
   const removed: Array<(entity: Entity) => void> = [];
-  const systems: Array<{ run: () => void }> = [];
+  const systems: Array<{ run: FakeSystemRun }> = [];
   const keep = (list: Array<(entity: Entity) => void>, listener: (entity: Entity) => void) => {
     list.push(listener);
 
@@ -340,31 +348,34 @@ function createFakeWorld(): FakeWorld {
       list.splice(list.indexOf(listener), 1);
     };
   };
-
-  return {
+  const fake: FakeWorld = {
     startExit: entity => {
       for (const listener of added) listener(entity);
     },
     endExit: entity => {
       for (const listener of removed) listener(entity);
     },
-    sync: () => {
-      for (const entry of systems) entry.run();
+    sync: (elapsed = 0) => {
+      for (const entry of systems) entry.run([], { time: { elapsed } });
     },
+    left: Number.POSITIVE_INFINITY,
     api: {
       ecs: {
         onAdded: (_tag: unknown, listener: (entity: Entity) => void) => keep(added, listener),
         onRemoved: (_tag: unknown, listener: (entity: Entity) => void) => keep(removed, listener),
-        system: (definition: { run: () => void }) => {
+        system: (definition: { run: FakeSystemRun }) => {
           systems.push(definition);
 
           return () => {
             systems.splice(systems.indexOf(definition), 1);
           };
         }
-      }
+      },
+      projection: { left: () => fake.left }
     } as unknown as WorldApi
   };
+
+  return fake;
 }
 
 /**

@@ -614,17 +614,22 @@ export type ProjectionSpec<
   readonly initialOnly?: InitialOnly<Values, Item>;
   /**
    * The item a closed window of this projection is kept built for, so it opens in the frame after the tap. While
-   * `from` does not show its key (`key(item)`, or the name of the projection without `key`), the engine builds its
-   * view aside in the idle time of frames, one step a frame, and holds it hidden: never drawn, never hit, `entityOf`
-   * does not answer for it. After a commit it reads `warm` again: the same content changes nothing, the same key
-   * writes the difference into the held view, another key builds it again. When `from` shows that key the held view
-   * is shown at once: the same entity, only what differs from the warm item is written (no `change` hook), and the
-   * `enter` and `loop` hooks play as for a new view. A close plays the exit as before; the view is then built again
-   * in idle frames. Only on a drawing renderer and a live world (a pause or a fast walk drops the view in work, to be
-   * built again after it), and not in the frames of a motion that owns its fields (a loop and a motion that repeats
-   * forever do not count); a `warm` or a `view` that throws is logged as `world:projection-failed` and nothing is held
-   * until the next commit. The cost is the memory of the held view.
-   * Left out, nothing is warmed.
+   * `from` does not show its key (`key(item)`, or the name of the projection without `key`), or shows it with another
+   * content, the engine builds its view aside in the idle time of frames, one step a frame, and holds it hidden: never
+   * drawn, never hit, `entityOf` does not answer for it. After a commit it reads `warm` again: the same content
+   * changes nothing, the same key writes the difference into the held view, another key builds it again. When `from`
+   * shows that key the held view is shown at once: the same entity, only what differs from the warm item is written
+   * (no `change` hook), and the `enter` and `loop` hooks play as for a new view. A close plays the exit as before; the
+   * view is then built again in idle frames. Only on a drawing renderer and a live world (a pause or a fast walk drops
+   * the view in work, to be built again after it), and not in the frames of a motion that owns its fields (a loop and
+   * a motion that repeats forever do not count); a `warm` or a `view` that throws is logged as
+   * `world:projection-failed` and nothing is held until the next commit. The cost is the memory of the held view.
+   *
+   * A gated window (F202) keeps one key from its dim into its open: `from` shows the dim item first, then the open
+   * one. A `warm` that answers the open item while the dim shows has it built under the dim, also through the press
+   * motion of the tapped button; the commit of the open item swaps the views in one frame (the dim view leaves with
+   * the cause `"discard"` and no exit, the held one is shown as above), and a `ready` of the open waits for the build.
+   * A commit of the dim's content as a new object swaps nothing. Left out, nothing is warmed.
    *
    * @param player - The `player` root of the committed state.
    * @param session - The `session` root of the committed state.
@@ -946,6 +951,17 @@ export type ProjectionState = {
   /** The record whose held view is being built now; absent when none is, never written as `undefined`. */
   warmActive?: WarmRecord;
   /**
+   * The keys an element of a held view registered while a live element of its projection holds the same key, by
+   * projection, then key (F202: the open view of a gated window built under its dim). The live element keeps the key
+   * in `keys` until the show of the record, which moves these over; a drop of the record forgets them.
+   */
+  heldKeys: Map<string, Map<string, Entity>>;
+  /**
+   * The entity `adopt` was last handed while no build and no warm record was in work: an element ui made for a root
+   * held warm, read by the `registerKey` that follows its spawn. `-1` for none.
+   */
+  warmLoose: Entity;
+  /**
    * The warm step may find work: a record went cold, or a commit came since the step last found none. A frame at rest
    * reads it and `warmActive` and returns.
    */
@@ -1006,7 +1022,22 @@ export type WarmRecord = {
    * Kept when `warm`, `from` or `view` threw, so a throw is logged once per commit and not every frame.
    */
   seen?: Snapshot;
+  /**
+   * The record holds the next view of a key `from` shows live with another content (F202: the open view of a gated
+   * window, built under its dim): it is stepped and polled also while a motion that owns its fields runs.
+   */
+  next: boolean;
+  /**
+   * The step read the record under a motion that owns its fields and passed it over: it is stepped from `pending`,
+   * without a second read, in the first step with no such motion.
+   */
+  waiting: boolean;
+  /** The read a waiting record is stepped from; absent for a read that gave no item. */
+  pending?: WarmRead;
 };
+
+/** What the warm step read for a record: the item and its key. */
+export type WarmRead = { item: unknown; key: string };
 
 /**
  * The build of the next scene aside (spec 31): its projections mounted into a table of their own, so a name never has
@@ -1590,10 +1621,13 @@ export type ProjectionApi = {
    * Gives an entity a projection and key of its own, so `entityOf` and `keyOf` answer for it next
    * to the live views. That is how an element becomes a target for `anim`, `input` and `guide`.
    * A key whose entity is gone is dropped in the next live frame, also when the remover was never
-   * called. An element registered while the projection's warm window is held and the projection
-   * shows no live view belongs to the held root (a row its list ranged in after it was built): it
-   * is held with the window, `isBuilding` answers true and `entityOf` nothing until the open. A
-   * projection that shows other keys live while it warms one is not covered: its elements answer.
+   * called. An element registered while the projection's warm window holds a view not shown belongs
+   * to the held root (a row its list ranged in after it was built) when the projection shows no
+   * live view, or when `adopt` was handed it since its spawn (ui adopts every element of a held
+   * root): it is held with the window, `isBuilding` answers true and `entityOf` nothing until the
+   * open. An element of a live view of the projection answers. While a live element holds the same
+   * key, the held element waits: `entityOf` answers the live one until the held view is shown in
+   * its place, then the held one (F202, the open view of a gated window built under its dim).
    *
    * @param projection - Name the element is addressed under.
    * @param key - Key the element is addressed under.
@@ -1612,6 +1646,11 @@ export type ProjectionApi = {
    * // A row the shop's list ranges in while the shop is closed and held warm.
    * world.projection.registerKey("shop.sheet", "w15", row);
    * world.projection.entityOf("shop.sheet", "w15"); // undefined until the shop opens
+   *
+   * // The vitrine dims; its open view, built under the dim, has a scrim keyed as the dim's.
+   * world.projection.adopt(openScrim);
+   * world.projection.registerKey("vitrine", "scrim", openScrim);
+   * world.projection.entityOf("vitrine", "scrim"); // dimScrim, until the open swaps the views
    * ```
    */
   registerKey(projection: string, key: string, entity: Entity): () => void;
@@ -1774,7 +1813,7 @@ export type ProjectionApi = {
   /**
    * Whether an entity is built aside or held warm: a view the running build spawned, the view a warm window holds
    * hidden (`warm` of a projection), an entity `adopt` marked for either, or an element registered with `registerKey`
-   * for a closed warm window. Such an entity is not drawn, not hit and not found until it is shown. A view is flagged before the `onAdded` hooks of its components, so a hook can ask.
+   * for the root a warm window holds. Such an entity is not drawn, not hit and not found until it is shown. A view is flagged before the `onAdded` hooks of its components, so a hook can ask.
    * Two set lookups; false after the commit of the build and once `from` shows the warm view. Allocates nothing.
    *
    * @param entity - The entity to ask about.
@@ -1815,8 +1854,9 @@ export type ProjectionApi = {
   /**
    * Marks an entity another plugin spawned for a root built aside or held warm, so `isBuilding` answers for the whole
    * tree and a discard despawns it with the rest. It joins the running scene build, else the warm window being built
-   * now; does nothing when neither runs. The commit of the build, and the open of the window, clear the mark with
-   * every other.
+   * now. When neither runs it marks nothing, but a `registerKey` of the same entity that follows holds it with the
+   * window its projection holds (a row of a held root's list, ranged in after the window was built). The commit of
+   * the build, and the open of the window, clear the mark with every other.
    *
    * @param entity - The entity to mark.
    * @example

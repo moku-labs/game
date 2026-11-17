@@ -5,20 +5,22 @@
  * `flow` answer with one kept object, so the mock's own fresh snapshot and flow state never land
  * in a window.
  */
-import type { Api as FlowApi } from "../../../flow/types";
+import type { Api as FlowApi, Hint } from "../../../flow/types";
 import type { Api as ModelApi, Snapshot } from "../../../model/types";
 import type { Time } from "../../../time/types";
-import { createModules } from "../../api";
+import { createModules, WORLD_COMPONENTS } from "../../api";
 import { clearAllChanges, markChanged } from "../../ecs/changes";
 import { component, Exiting, mut, Now, system, Tree } from "../../ecs/define";
 import { recordFrame } from "../../ecs/history";
 import type { AnySystem, Entity, Owner, WorldPhase } from "../../ecs/types";
 import { withDeps } from "../../lifecycle";
 import { projection } from "../../projection/define";
+import { applyEntry, swapFor } from "../../projection/reconcile";
 import type {
   AnyProjectionSpec,
   DescriptionNode,
   MotionHandle,
+  ProjectionCtx,
   SceneSwitch,
   Track,
   TweenDriver,
@@ -1139,6 +1141,280 @@ export function warmOpenFixture(): () => void {
   if (record?.phase !== "ready" || record.view?.entity === before) {
     throw new Error("warmOpenFixture: the sheet was not shown and held again");
   }
+
+  return cycle;
+}
+
+/** Name of the gated window of the F202 fixtures. */
+const GATE = "perf.vitrine";
+
+/** One item of the gated window: dimmed, then open, under one key. */
+type Gate = { key: string; phase: string };
+
+/** The session the gated window reads: dimmed, open, or closed. */
+type GateSession = { gate?: string };
+
+/** The state with the gated window dimmed: one kept object. */
+const DIM: Snapshot = Object.freeze({
+  player: {},
+  session: Object.freeze({ gate: "dim" }),
+  rng: { seed: 1, streams: {} }
+});
+
+/** The state with the gated window open: one kept object. */
+const GATE_OPEN: Snapshot = Object.freeze({
+  player: {},
+  session: Object.freeze({ gate: "open" }),
+  rng: { seed: 1, streams: {} }
+});
+
+/**
+ * The gated window: shown dimmed or open while `session.gate` is set, under one key; its `warm` is the open item
+ * while the dim shows. Its view is a screen of 20 rows, as the vitrine of A Memory Missing draws.
+ *
+ * @returns The spec.
+ */
+function gateSpec(): AnyProjectionSpec {
+  const spec = projection({
+    name: GATE,
+    layer: "items",
+    from: (_player: unknown, session: GateSession): Gate[] =>
+      session.gate === undefined ? [] : [{ key: "vitrine", phase: session.gate }],
+    key: (gate: Gate) => gate.key,
+    view: (gate: Gate): DescriptionNode => ({
+      type: "window",
+      props: { phase: gate.phase },
+      children: Array.from({ length: 20 }, (_, row) => ({
+        type: "row",
+        props: { row },
+        children: []
+      }))
+    })
+  });
+
+  // The stored spec: `ProjectionSpec.warm` is typed to give an item; the world reads `undefined` as nothing held.
+  return { ...spec, warm: gateWarm } as AnyProjectionSpec;
+}
+
+/**
+ * The warm item of the gated window: the open item while the dim shows, else nothing.
+ *
+ * @param _player - The player root.
+ * @param session - The session root.
+ * @returns The open item, or `undefined`.
+ */
+function gateWarm(_player: unknown, session: GateSession): Gate | undefined {
+  return session.gate === "dim" ? { key: "vitrine", phase: "open" } : undefined;
+}
+
+/** A track of a motion that owns its fields and runs, as the press tween of a tapped button. */
+const PRESS: Track = {
+  entity: 0,
+  component: "Transform",
+  handle: RUNNING,
+  additive: false,
+  forever: false,
+  label: undefined
+};
+
+/**
+ * The projection modules and their context over a mock world, with a `model` that answers `current.snapshot` and a
+ * live `flow`, both one kept object.
+ *
+ * @param world - The mock world.
+ * @param current - The state the model answers, moved by the fixture.
+ * @param current.snapshot - The state.
+ * @returns The projection module and its domain context.
+ */
+function keptModules(
+  world: MockWorld,
+  current: { snapshot: Snapshot }
+): { projection: ProjectionModule; pctx: ProjectionCtx } {
+  const deps = withDeps(world.ctx).deps;
+  const model = { store: { snapshot: () => current.snapshot } } as unknown as ModelApi;
+  const flow = { state: () => LIVE } as unknown as FlowApi;
+  const ctx = { ...world.ctx, deps: { ...deps, model, flow } };
+  const { ecs, projection } = createModules(ctx);
+
+  return { projection, pctx: { ctx, deps: { ecs, components: WORLD_COMPONENTS } } };
+}
+
+/**
+ * The warm step while the gated window builds its open view under the dim (F202), a motion that owns its fields
+ * running, as the tapped button's press tween does: every step polls the two `onBuild` checks, which answer false.
+ *
+ * @returns One warm step.
+ */
+export function warmNextFixture(): () => void {
+  const world = createMockWorld();
+
+  world.model.session = DIM.session;
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(gateSpec());
+  world.start();
+  world.api.projection.onBuild(() => sink.ms > Number.POSITIVE_INFINITY);
+  world.api.projection.onBuild(() => sink.flag && sink.ms > Number.POSITIVE_INFINITY);
+  world.api.projection.mount([GATE], MOUNT_OWNER);
+
+  const { projection } = keptModules(world, { snapshot: DIM });
+  const state = world.ctx.state.projection;
+
+  projection.stepWarm();
+  state.tracks.push(PRESS);
+  projection.stepWarm();
+
+  // The call must measure the path it names: the next view of the dim's key in work, under the motion.
+  if (state.warmActive?.next !== true || state.mounted.get(GATE)?.live.size !== 1) {
+    throw new Error("warmNextFixture: the open view is not built under the dim");
+  }
+
+  return (): void => {
+    projection.stepWarm();
+  };
+}
+
+/**
+ * The warm step while a motion that owns its fields runs and the closed sheet waits to be built: every step walks the
+ * records and passes the waiting one over.
+ *
+ * @returns One warm step.
+ */
+export function warmWaitingFixture(): () => void {
+  const world = createMockWorld();
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(sheetSpec());
+  world.start();
+  world.api.projection.onBuild(() => true);
+  world.api.projection.mount([SHEET], MOUNT_OWNER);
+
+  const { projection } = keptModules(world, { snapshot: CLOSED });
+  const state = world.ctx.state.projection;
+
+  state.tracks.push(PRESS);
+  projection.stepWarm();
+
+  // The call must measure the path it names: the sheet read and waiting, the walk still owed.
+  if (state.warm.get(SHEET)?.waiting !== true || !state.warmStale) {
+    throw new Error("warmWaitingFixture: the sheet does not wait under the motion");
+  }
+
+  return (): void => {
+    projection.stepWarm();
+  };
+}
+
+/** The reconcile entry calls of a live key: its fast path and the swap check. */
+export type EntryCalls = {
+  /** `applyEntry` of a live key whose item is the same object: nothing to project. */
+  same(): void;
+  /** The swap check of a live key whose item is another object, nothing warm. */
+  swapCheck(): void;
+};
+
+/**
+ * The reconcile of one live board item with nothing warm: `applyEntry` with the same item, and the swap check
+ * (F202) that a new item of a live key asks first.
+ *
+ * @returns One call of each.
+ */
+export function entryFixture(): EntryCalls {
+  const world = createMockWorld();
+  const items = boardItems(1);
+
+  mountBoard(world, items);
+  world.frame(16);
+
+  const { pctx } = keptModules(world, { snapshot: SNAPSHOT });
+  const state = world.ctx.state.projection;
+  const spec = state.specs.get(BOARD);
+  const mounted = state.mounted.get(BOARD);
+  const live = mounted?.live.get("i0");
+
+  if (spec === undefined || mounted === undefined || live === undefined) {
+    throw new Error("entryFixture: the board item is not live");
+  }
+
+  const entry = {
+    key: "i0",
+    item: live.item,
+    peers: { next: mounted.items, previous: mounted.items },
+    direct: false,
+    force: false,
+    settle: false,
+    used: new Set<Hint>(),
+    unchanged: [],
+    rewritten: []
+  };
+  const counts = {
+    projections: 0,
+    entered: 0,
+    changed: 0,
+    exited: 0,
+    revived: 0,
+    queued: 0,
+    hintsRouted: 0,
+    hintsDropped: 0
+  };
+  const other = { ...(live.item as Item) };
+
+  return {
+    same: (): void => {
+      applyEntry(pctx, spec, mounted, entry, counts);
+    },
+    swapCheck: (): void => {
+      sink.value = swapFor(pctx, spec, live, other);
+    }
+  };
+}
+
+/**
+ * One dim, build aside, swap and close of the gated window (F202): the commit that dims it, the warm steps that build
+ * its open view and find it ready, the commit that opens it and swaps the views, the close, and the sweep. No renderer
+ * and no ui: the world's part of a tap on a gated window.
+ *
+ * @returns One cycle.
+ */
+export function warmSwapFixture(): () => void {
+  const world = createMockWorld();
+  const current = { snapshot: CLOSED };
+
+  world.api.projection.setLayers(LAYERS);
+  world.api.projection.register(gateSpec());
+  world.start();
+  world.api.projection.onBuild(() => true);
+  world.api.projection.mount([GATE], MOUNT_OWNER);
+
+  const { projection } = keptModules(world, current);
+  const state = world.ctx.state.projection;
+  const commitTo = (snapshot: Snapshot): void => {
+    current.snapshot = snapshot;
+    projection.markDirty(["session"], "edge");
+    projection.reconcileIfDirty();
+    projection.stepWarm();
+  };
+  const cycle = (): void => {
+    commitTo(DIM);
+    projection.stepWarm();
+    commitTo(GATE_OPEN);
+    commitTo(CLOSED);
+    projection.sweep();
+  };
+
+  commitTo(DIM);
+  projection.stepWarm();
+
+  const held = state.warm.get(GATE)?.view?.entity;
+
+  commitTo(GATE_OPEN);
+
+  // The bench must measure a swap: the view built under the dim is the one the open shows.
+  if (held === undefined || state.mounted.get(GATE)?.live.get("vitrine")?.entity !== held) {
+    throw new Error("warmSwapFixture: the gated window did not swap its views");
+  }
+
+  commitTo(CLOSED);
+  projection.sweep();
 
   return cycle;
 }

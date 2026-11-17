@@ -54,12 +54,15 @@ import {
   clearWarm,
   discardHeld,
   discardWarm,
+  dropHeldKey,
   ensureWarm,
   forgetDeadHeld,
   forgetWarm,
   frameBudget,
   holdRegistered,
-  stepWarm
+  stepWarm,
+  waitHeldKey,
+  yieldHeldKey
 } from "./warm";
 
 /**
@@ -431,17 +434,20 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       }
 
       const byKey = state.keys.get(projection) ?? emptyKeys();
+      // An element of a held root (a closed window's, or the next view a gated window builds under its dim) is held
+      // with it; while a live element holds the same key, the held one waits for the show, whichever came first (F202).
+      const held = holdRegistered(state, projection, entity);
 
-      byKey.set(key, entity);
+      if (!held) yieldHeldKey(state, projection, key);
+      if (!held || !waitHeldKey(state, projection, key, entity)) byKey.set(key, entity);
       state.keys.set(projection, byKey);
       state.keysByEntity.set(entity, { projection, key });
       // The next sweep looks for dead elements, also when no entity was despawned since the last.
       state.sweptDespawns = -1;
-      // An element of a closed window's root, made after its view was ready, is held with it.
-      holdRegistered(state, projection, entity);
 
       return (): void => {
         if (byKey.get(key) === entity) byKey.delete(key);
+        if (state.heldKeys.size > 0) dropHeldKey(state, projection, key, entity);
         if (state.keysByEntity.get(entity)?.key === key) state.keysByEntity.delete(entity);
         state.rests.delete(entity);
       };

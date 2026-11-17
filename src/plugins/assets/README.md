@@ -96,8 +96,22 @@ game would), answers in this order:
 |---|---|
 | Headless (no io) | `true`, before any name check, as the `load` effect does. |
 | A name the manifest lacks | Throws `[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".` |
-| Every bundle there | `true` at once; nothing is posted. A bundle is there when it is loaded **and** warmed (`warm` resolved for it), or when its last warm for `ready` failed. |
-| Otherwise | `false`. It starts `warm` for each bundle that is not there (loading it first), and posts `{ type: "ready" }` into `flow.inbox` once every one of them settled. |
+| Every bundle there, no warm view in work | `true` at once; nothing is posted. A bundle is there when it is loaded **and** warmed (`warm` resolved for it), or when its last warm for `ready` failed. |
+| Every bundle there, a warm view in work (live mode) | `false`; `{ type: "ready" }` is posted once the build ended (see below). |
+| Otherwise | `false`. It starts `warm` for each bundle that is not there (loading it first), and posts `{ type: "ready" }` into `flow.inbox` once every one of them settled and, in live mode, no warm view is in work. |
+
+**A `ready` waits for the warm view in work (F202).** The open view of a gated window is built aside
+under its dim (world README, "A gated window"), so its open motion starts with a built view: while
+`world.projection.left()` is finite, `ready` answers `false`, and the post waits until it turns
+infinite again, whatever ended the build (it is ready, discarded, paused, dropped by a scene build or
+a restore). The system `assets.ready` of phase `sync` posts it; at rest it reads one field a frame,
+0 B (`__tests__/perf/ready.perf.ts`). The wait is capped: `READY_WARM_CAP_MS` (400 ms of game clock)
+after the bundles settled it posts anyway, and the next `ready` counts the warm part as done (the
+bundles are still checked) until the build ends, so the node's re-ask goes on and nothing posts every
+frame. `left()` is finite also during a scene build and while an unrelated warm window builds (a
+settings sheet after a commit); a `ready` asked then waits for that too, at most the cap. A fast walk
+and a headless app wait for no build. With nothing in work the post comes from the promise, as before,
+with no extra frame.
 
 A bundle the preload or a node entry brought but nobody warmed is not there: it answers `false` once
 and posts `ready` after its upload. A warm that rejects (not an abort) puts the bundle in
@@ -521,7 +535,7 @@ preload, no event and no budget work.
 | `handlers.ts` | The `flow:rest` hook and the dev `ui:hot-swap` hook. |
 | `lifecycle.ts` | `connectAssets` (onInit), `startAssets` (onStart), `releaseAll` (onStop), the enter callback, the `load` effect and the registration of the `ready` effect. |
 | `bundles.ts` | `defineBundles`, the `load` and `ready` descriptors and `bundlesFor`. |
-| `ready.ts` | `warmBundle` (the body of `warm`: load, then `renderer.sync.textures.upload`, one warm per bundle in `state.warmed`) and `answerReady` (the handler of the `ready` effect, `state.readyFailed`, the inbox event `ready`). |
+| `ready.ts` | `warmBundle` (the body of `warm`: load, then `renderer.sync.textures.upload`, one warm per bundle in `state.warmed`) and `answerReady` (the handler of the `ready` effect, `state.readyFailed`, the inbox event `ready`), `stepReady` (the body of the system `assets.ready`: the wait for a warm view in work, `READY_WARM_CAP_MS`). |
 | `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `keysOfBundles`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, and the megabyte arithmetic `textureMb` and `sumMb`. |
 | `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`, and the loaders of one file: `loadImage`, `loadFont`, `loadSound`. |
 | `stamp.ts` | The stamp of the keys watch: the type guard `isAssetStamps`, `stampsOf` (the stamp out of a `ui:hot-swap`) and `changedPaths`. |
@@ -713,7 +727,8 @@ again every frame (`changes: "frame"`), because a bundle loads without a model c
   reads for the node being entered and for the preload.
 - `worldPlugin` — `ecs.onAdded(Exiting)` and `ecs.onRemoved(Exiting)` count what leaves;
   `ecs.system` registers `assets.leave` (phase `sync`), where the bundles a leaving scene named go
-  once its elements played their exit.
+  once its elements played their exit, and `assets.ready` (phase `sync`), where a `ready` that waits
+  for a warm view posts once `projection.left()` turns infinite, or at the cap (F202).
 - Module import, not a plugin dependency: `namedBundles` and `isSceneDefinition` of
   `scenes/bundles.ts`. `scenes` calls `sceneBundles` and `sceneComing`; `i18n` calls `companions.add`, `has` and
   `isLoaded`, only when `assets` is composed.

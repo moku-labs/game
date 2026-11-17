@@ -1,11 +1,13 @@
 /**
  * @file world/projection — warm windows (spec 33, slice B+D). A mounted projection that declares `warm` keeps the
- * view of that item built aside and held hidden while `from` does not show its key: `isBuilding` answers for it, so ui
- * and the renderer build it in parts and keep it off stage. One step a frame, in the idle time of a live world, builds,
- * patches or drops a held view; the reconcile shows the held view when `from` brings its key, and a close leaves the
- * record cold, to be built again. A world that stops being live drops the view in work. An element registered for a
- * closed window is held with it, and the sweep forgets the held entities that are gone. A projection `hold` mounted
- * has a record too: it holds `from`'s first item instead of the `warm` one until `show` (`hold.ts`).
+ * view of that item built aside and held hidden while `from` does not show its key, or shows it with another content
+ * (slice F, F202: the open view of a gated window, built under its dim): `isBuilding` answers for it, so ui and the
+ * renderer build it in parts and keep it off stage. One step a frame, in the idle time of a live world, builds,
+ * patches or drops a held view; the reconcile shows the held view when `from` brings its key, or swaps it in for the
+ * live view of that key, and a close leaves the record cold, to be built again. A world that stops being live drops
+ * the view in work. An element registered for a held root is held with it (its key waits while a live element holds
+ * the same one), and the sweep forgets the held entities that are gone. A projection `hold` mounted has a record too:
+ * it holds `from`'s first item instead of the `warm` one until `show` (`hold.ts`).
  */
 import type { Snapshot } from "../../model/types";
 import type { AnyComponentValue, Entity } from "../ecs/types";
@@ -22,6 +24,7 @@ import type {
   SceneSwitch,
   Track,
   View,
+  WarmRead,
   WarmRecord
 } from "./types";
 import { asError, collectView, createViewRecord, spawnFlagged, writeValue } from "./views";
@@ -101,7 +104,13 @@ export function ensureWarm(state: ProjectionState, spec: AnyProjectionSpec): voi
   if (state.warm.has(spec.name)) return;
   if (spec.warm === undefined && !state.held.has(spec.name)) return;
 
-  const record: WarmRecord = { name: spec.name, entities: new Set<Entity>(), phase: "cold" };
+  const record: WarmRecord = {
+    name: spec.name,
+    entities: new Set<Entity>(),
+    phase: "cold",
+    next: false,
+    waiting: false
+  };
 
   state.warm.set(spec.name, record);
   state.warmList.push(record);
@@ -132,8 +141,9 @@ export function heldFor(state: ProjectionState, name: string, key: string): Held
 
 /**
  * Despawns what a record holds: its view, with the cause `"discard"` and no motion, then every entity `adopt` marked
- * for it that is still there. The removal hooks still see them held. A shown view belongs to `mounted` and is left
- * alone. The record keeps its phase; the caller sets it.
+ * for it that is still there. The removal hooks still see them held. The keys its elements wait with are forgotten:
+ * the live elements keep theirs. A shown view belongs to `mounted` and is left alone. The record keeps its phase; the
+ * caller sets it.
  *
  * @param pctx - Domain context of the projection module.
  * @param record - The record.
@@ -142,6 +152,8 @@ function dropHeld(pctx: ProjectionCtx, record: WarmRecord): void {
   const state = pctx.ctx.state.projection;
   const ecs = pctx.deps.ecs;
   const view = record.view;
+
+  if (state.heldKeys.size > 0) state.heldKeys.delete(record.name);
 
   if (view !== undefined && record.phase !== "shown") {
     cancelTracks(pctx, view.entity);
@@ -163,13 +175,17 @@ function dropHeld(pctx: ProjectionCtx, record: WarmRecord): void {
 }
 
 /**
- * Leaves a record cold: nothing held, no longer in work, and the warm step looks at it again.
+ * Leaves a record cold: nothing held, no longer in work, no next view, no read waiting, and the warm step looks at it
+ * again.
  *
  * @param state - The projection branch of the plugin state.
  * @param record - The record.
  */
 function coolRecord(state: ProjectionState, record: WarmRecord): void {
   record.phase = "cold";
+  record.next = false;
+  record.waiting = false;
+  delete record.pending;
   delete record.key;
   delete record.item;
   delete record.view;
@@ -243,6 +259,8 @@ export function clearWarm(pctx: ProjectionCtx): void {
   state.warm.clear();
   state.warmList.length = 0;
   state.warmHeld.clear();
+  state.heldKeys.clear();
+  state.warmLoose = -1;
   state.held.clear();
   state.showing.length = 0;
   state.fed.clear();
@@ -253,7 +271,8 @@ export function clearWarm(pctx: ProjectionCtx): void {
 
 /**
  * Marks an entity another plugin spawned for the record in work, so `isBuilding` answers for it and a discard
- * despawns it with the view. Does nothing while no record is in work.
+ * despawns it with the view. While no record is in work it only remembers the entity: ui adopts an element of a root
+ * held warm right after its spawn, then registers its key, and `holdRegistered` reads it there.
  *
  * @param state - The projection branch of the plugin state.
  * @param entity - The entity.
@@ -261,33 +280,156 @@ export function clearWarm(pctx: ProjectionCtx): void {
 export function adoptWarm(state: ProjectionState, entity: Entity): void {
   const active = state.warmActive;
 
-  if (active === undefined) return;
+  if (active === undefined) {
+    state.warmLoose = entity;
+
+    return;
+  }
 
   active.entities.add(entity);
   state.warmHeld.add(entity);
 }
 
 /**
- * Holds an element whose key a plugin registers under a projection whose warm window is closed: the record holds a
- * view, not shown, and the projection shows no live view, so the element can only be one of the held root's, made
- * after the record was ready (a row a windowed list ranges in after the solve). It joins the record as an adopted one:
- * `isBuilding` answers true, `entityOf` nothing, until the open; a discard despawns it with the view. A projection
- * that shows other keys live while it warms one is not covered: an element registered for it is taken as live.
+ * Tells whether an element whose key a plugin registers under a projection belongs to a held root, and holds it with
+ * the record when it does. An element `adopt` marked for the record in work is held already. One made after the record
+ * was ready (a row a windowed list ranges in after the solve) is held when the projection's record holds a view not
+ * shown and either `adopt` was handed the element since its spawn (ui adopts every element of a root held warm), or
+ * the projection shows no live view, so it can only be one of the held root's. It joins the record as an adopted one:
+ * `isBuilding` answers true, `entityOf` nothing, until the open; a discard despawns it with the view. An element of a
+ * live view of the projection (the dim of a gated window) is live.
  *
  * @param state - The projection branch of the plugin state.
  * @param projection - The projection the key is registered under.
  * @param entity - The element.
+ * @returns True when the element is held.
  */
-export function holdRegistered(state: ProjectionState, projection: string, entity: Entity): void {
-  if (state.warm.size === 0) return;
+export function holdRegistered(
+  state: ProjectionState,
+  projection: string,
+  entity: Entity
+): boolean {
+  const loose = state.warmLoose === entity;
+
+  if (loose) state.warmLoose = -1;
+  if (state.warm.size === 0) return false;
+  if (state.warmHeld.has(entity)) return true;
 
   const record = state.warm.get(projection);
 
-  if (record?.view === undefined || record.phase === "shown") return;
-  if (state.mounted.get(projection)?.live.size !== 0) return;
+  if (record?.view === undefined || record.phase === "shown") return false;
+  if (!loose && state.mounted.get(projection)?.live.size !== 0) return false;
 
   record.entities.add(entity);
   state.warmHeld.add(entity);
+
+  return true;
+}
+
+/**
+ * Creates the table of waiting keys of one projection with its first key. Its own function, because lint rule L5
+ * refuses a collection built inside an exported declaration.
+ *
+ * @param key - The first key.
+ * @param entity - The element that waits with it.
+ * @returns The table.
+ */
+function keyTable(key: string, entity: Entity): Map<string, Entity> {
+  return new Map([[key, entity]]);
+}
+
+/**
+ * Lets the key of a held element wait while a live element of its projection holds the same key: the live one keeps
+ * it in `keys`, so `entityOf` answers the element on the screen until the show of the record.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param projection - The projection the key is registered under.
+ * @param key - The key.
+ * @param entity - The held element.
+ * @returns True when the key waits; false when the key is free, and the element takes it as before.
+ */
+export function waitHeldKey(
+  state: ProjectionState,
+  projection: string,
+  key: string,
+  entity: Entity
+): boolean {
+  const holder = state.keys.get(projection)?.get(key);
+
+  if (holder === undefined || holder === entity || state.warmHeld.has(holder)) return false;
+
+  const waiting = state.heldKeys.get(projection);
+
+  if (waiting === undefined) state.heldKeys.set(projection, keyTable(key, entity));
+  else waiting.set(key, entity);
+
+  return true;
+}
+
+/**
+ * Lets a held element that holds a key wait with it when a live element of its projection registers the same key
+ * (the dim's elements registered after the open view's): the live one takes the key, the held one gets it back at
+ * the show. With nothing held it reads one size.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param projection - The projection the key is registered under.
+ * @param key - The key the live element registers.
+ */
+export function yieldHeldKey(state: ProjectionState, projection: string, key: string): void {
+  if (state.warmHeld.size === 0) return;
+
+  const holder = state.keys.get(projection)?.get(key);
+
+  if (holder === undefined || !state.warmHeld.has(holder)) return;
+
+  const waiting = state.heldKeys.get(projection);
+
+  if (waiting === undefined) state.heldKeys.set(projection, keyTable(key, holder));
+  else waiting.set(key, holder);
+}
+
+/**
+ * Forgets the waiting key of a held element: its remover was called.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param projection - The projection the key was registered under.
+ * @param key - The key.
+ * @param entity - The element.
+ */
+export function dropHeldKey(
+  state: ProjectionState,
+  projection: string,
+  key: string,
+  entity: Entity
+): void {
+  const waiting = state.heldKeys.get(projection);
+
+  if (waiting?.get(key) === entity) waiting.delete(key);
+}
+
+/**
+ * Gives the waiting keys of a projection's held view their place at its show: each replaces the entry of the live
+ * element that held it, which leaves with the live view it belonged to.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param name - The projection.
+ */
+function releaseHeldKeys(state: ProjectionState, name: string): void {
+  const waiting = state.heldKeys.get(name);
+
+  if (waiting === undefined) return;
+
+  state.heldKeys.delete(name);
+
+  const byKey = state.keys.get(name);
+
+  if (byKey === undefined) {
+    state.keys.set(name, waiting);
+
+    return;
+  }
+
+  for (const [key, entity] of waiting) byKey.set(key, entity);
 }
 
 /** What the prune's callback reads: set before the walk, so the callback is module-level and a walk makes no closure. */
@@ -346,8 +488,8 @@ export function frameBudget(state: ProjectionState): number | undefined {
 
 /**
  * Shows the held view of a record: it and every entity marked for it stop being held, the view joins the live views
- * of its projection with the cause of the reconcile, and the record is shown. A record still in work leaves the work:
- * ui builds the rest of its root in one block.
+ * of its projection with the cause of the reconcile, the keys its elements waited with take their place, and the
+ * record is shown. A record still in work leaves the work: ui builds the rest of its root in one block.
  *
  * @param pctx - Domain context of the projection module.
  * @param mounted - The mounted projection.
@@ -366,8 +508,10 @@ export function showHeld(
   for (const entity of record.entities) state.warmHeld.delete(entity);
   record.entities.clear();
   if (state.warmActive === record) delete state.warmActive;
+  if (state.heldKeys.size > 0) releaseHeldKeys(state, record.name);
 
   record.phase = "shown";
+  record.next = false;
   view.cause = cause;
   mounted.live.set(view.key, view);
   state.membershipVersion += 1;
@@ -515,7 +659,7 @@ function readWarm(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   snapshot: Snapshot
-): { item: unknown; key: string } | undefined {
+): WarmRead | undefined {
   const state = pctx.ctx.state.projection;
 
   try {
@@ -610,7 +754,7 @@ function spawnWarm(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   record: WarmRecord,
-  warm: { item: unknown; key: string }
+  warm: WarmRead
 ): void {
   const values = viewOfItem(pctx, spec, warm.item);
 
@@ -653,7 +797,7 @@ function refreshWarm(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   record: WarmRecord,
-  warm: { item: unknown; key: string }
+  warm: WarmRead
 ): boolean {
   const view = record.view;
 
@@ -684,18 +828,90 @@ function refreshWarm(
 }
 
 /**
+ * How the key of a warm item stands in its projection: `from` does not show it (`"closed"`), shows it with the same
+ * content (`"open"`: the window is open, it is not built twice), or shows it with another content (`"next"`: the dim
+ * of a gated window, whose open view is built aside, F202). A map lookup and, for a shown key, one `sameItem`.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param name - The projection.
+ * @param warm - The warm item and its key.
+ * @returns How the key stands.
+ */
+function standing(
+  state: ProjectionState,
+  name: string,
+  warm: WarmRead
+): "closed" | "open" | "next" {
+  const mounted = state.mounted.get(name);
+
+  if (mounted?.items.has(warm.key) !== true) return "closed";
+
+  const live = mounted.live.get(warm.key);
+
+  return live === undefined || sameItem(live.item, warm.item) ? "open" : "next";
+}
+
+/** The turn of one warm step: the state now and whether a motion that owns its fields runs. */
+type Turn = { snapshot: Snapshot; moving: boolean };
+
+/** The turn of a warm step, filled in place by `stepNext`, so a frame under a motion makes no object. */
+const stepTurn: Turn = {
+  snapshot: Object.freeze({ player: {}, session: {}, rng: { seed: 0, streams: {} } }),
+  moving: false
+};
+
+/** What `readTurn` answers for a record that has no turn: read against this state, and not waiting to be stepped. */
+const NO_TURN: WarmRead = Object.freeze({ item: undefined, key: "" });
+
+/**
+ * The read a record's turn works from: the one it waited with, when the state did not change since and no owned
+ * motion runs any more; `NO_TURN` while it still waits or was stepped against this state; else a new read of its item,
+ * once per state (a throw is logged once per commit, not on every frame).
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param record - The record.
+ * @param turn - The state now and whether an owned motion runs.
+ * @returns The read, `undefined` for no item, or `NO_TURN`.
+ */
+function readTurn(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  record: WarmRecord,
+  turn: Turn
+): WarmRead | undefined {
+  if (isSeen(record.seen, turn.snapshot)) {
+    if (!record.waiting || turn.moving) return NO_TURN;
+
+    const pending = record.pending;
+
+    record.waiting = false;
+    delete record.pending;
+
+    return pending;
+  }
+
+  record.waiting = false;
+  delete record.pending;
+  record.seen = turn.snapshot;
+
+  return readWarm(pctx, spec, turn.snapshot);
+}
+
+/**
  * One record's turn in the warm step: a record shown, in work, or read against this state is passed over. Otherwise
- * its item is read (`warm`, or `from`'s first while held): with no item, or with a key `from` shows, what is held is
- * dropped; a cold record spawns its held view, a ready one is brought up to date.
+ * its item is read (`warm`, or `from`'s first while held): with no item, or with a key `from` shows with that content,
+ * what is held is dropped; a cold record spawns its held view, a ready one is brought up to date. While a motion that
+ * owns its fields runs, only a record whose key `from` shows with another content (the dim of a gated window, F202)
+ * does its work; any other one with work waits with its read, and does it once no such motion runs.
  *
  * @param pctx - Domain context of the projection module.
  * @param record - The record.
- * @param snapshot - The state now.
+ * @param turn - The state now and whether an owned motion runs.
  * @returns True when the step did work, so the frame takes no more.
  */
-function stepRecord(pctx: ProjectionCtx, record: WarmRecord, snapshot: Snapshot): boolean {
+function stepRecord(pctx: ProjectionCtx, record: WarmRecord, turn: Turn): boolean {
   if (record.phase === "shown" || record.phase === "building") return false;
-  if (isSeen(record.seen, snapshot)) return false;
 
   const state = pctx.ctx.state.projection;
   // A record lives while its projection is mounted, and a mounted projection is registered.
@@ -703,52 +919,83 @@ function stepRecord(pctx: ProjectionCtx, record: WarmRecord, snapshot: Snapshot)
 
   if (spec === undefined) return false;
 
-  // Read once per state: a throw is logged once per commit, not on every frame.
-  record.seen = snapshot;
+  const read = readTurn(pctx, spec, record, turn);
 
-  const warm = readWarm(pctx, spec, snapshot);
+  if (read === NO_TURN) return false;
 
-  if (warm === undefined || state.mounted.get(record.name)?.items.has(warm.key) === true) {
-    if (record.view === undefined) return false;
+  const stands = read === undefined ? "open" : standing(state, record.name, read);
 
+  // Nothing held and nothing to hold: no work, so no wait either.
+  if (stands === "open" && record.view === undefined) return false;
+
+  if (turn.moving && stands !== "next") {
+    record.waiting = true;
+    record.next = false;
+    if (read !== undefined) record.pending = read;
+
+    return false;
+  }
+
+  if (read === undefined || stands === "open") {
     dropHeld(pctx, record);
     coolRecord(state, record);
 
     return true;
   }
 
-  if (record.phase === "ready") return refreshWarm(pctx, spec, record, warm);
+  let worked: boolean;
 
-  spawnWarm(pctx, spec, record, warm);
+  if (record.phase === "ready") {
+    worked = refreshWarm(pctx, spec, record, read);
+  } else {
+    spawnWarm(pctx, spec, record, read);
+    worked = record.view !== undefined;
+  }
 
-  return record.view !== undefined;
+  // After the work: a drop on the way leaves the record cold, and a cold record holds no next view.
+  record.next = stands === "next" && record.view !== undefined;
+
+  return worked;
 }
 
 /**
  * Takes the next record that has work, in mounted order, and does its one step. A walk that finds none leaves the
- * world at rest until a commit or a close.
+ * world at rest until a commit or a close; one that passed a record over under an owned motion stays stale, so the
+ * record is stepped once the motion ends. Index loop: under a motion this walk runs every frame.
  *
  * @param pctx - Domain context of the projection module.
+ * @param moving - Whether a motion that owns its fields runs.
  */
-function stepNext(pctx: ProjectionCtx): void {
+function stepNext(pctx: ProjectionCtx, moving: boolean): void {
   const state = pctx.ctx.state.projection;
-  const snapshot = pctx.ctx.deps.model.store.snapshot();
+  const list = state.warmList;
+  const count = list.length;
+  const turn = stepTurn;
+  let waits = false;
 
-  // Only when there is work, after a commit or a close: the iterator is no cost of a frame at rest.
-  for (const record of state.warmList) {
-    if (stepRecord(pctx, record, snapshot)) return;
+  turn.snapshot = pctx.ctx.deps.model.store.snapshot();
+  turn.moving = moving;
+
+  for (let index = 0; index < count; index += 1) {
+    const record = list[index];
+
+    if (record === undefined) continue;
+    if (stepRecord(pctx, record, turn)) return;
+    if (record.waiting) waits = true;
   }
 
-  state.warmStale = false;
+  state.warmStale = waits;
 }
 
 /**
  * One step of the warm windows, run in world's `input` callback after the reconcile. At rest it reads two fields and
- * returns. It runs only in a live world with no scene build, a drawing plugin, and no motion that owns its fields and
- * ends: the frames of an animation get no warm step. Where it may not run, the record in work is dropped: a paused or
- * fast world builds no part of it, and `left()` would stay finite for good; it is built again once the step runs.
- * While a record is in work its checks are polled; otherwise the next record with work spawns, patches or drops its
- * held view. One step a frame.
+ * returns. It runs only in a live world with no scene build and a drawing plugin. Where it may not run, the record in
+ * work is dropped: a paused or fast world builds no part of it, and `left()` would stay finite for good; it is built
+ * again once the step runs. While a record is in work its checks are polled; otherwise the next record with work
+ * spawns, patches or drops its held view. One step a frame. The frames of a motion that owns its fields and ends get
+ * no work of an ordinary record (no spawn, no patch, no poll), but a record that holds the next view of a key `from`
+ * shows live is stepped and polled through it: the tapped button's press tween runs through the whole dim of a gated
+ * window (F202, the album).
  *
  * @param pctx - Domain context of the projection module.
  */
@@ -764,8 +1011,8 @@ export function stepWarm(pctx: ProjectionCtx): void {
     return;
   }
 
-  if (ownedMotionRuns(state.tracks)) return;
+  const moving = ownedMotionRuns(state.tracks);
 
-  if (active === undefined) stepNext(pctx);
-  else pollActive(state, active);
+  if (active === undefined) stepNext(pctx, moving);
+  else if (!moving || active.next) pollActive(state, active);
 }

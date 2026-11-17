@@ -659,7 +659,7 @@ export type State = {
   warned: Set<string>;
   /**
    * `onEnter`, the `load` and `ready` handlers, the texture provider, the start and the end of an exit in `world`,
-   * and the system `assets.leave` of phase `sync`.
+   * and the systems `assets.leave` and `assets.ready` of phase `sync`.
    */
   removers: Array<() => void>;
   /** The `files` map of the stamp the dev hot swap applied last. `undefined` until the first swap. */
@@ -696,6 +696,15 @@ export type State = {
   readyFailed: Set<string>;
   /** One running or finished warm per bundle, joined by a second `warm`; dropped when the bundle unloads (F60). */
   warmed: Map<string, WarmEntry>;
+  /**
+   * Where a `ready` stands on a warm view in work (F202, the open view of a gated window built under its dim):
+   * `"none"`, `"warm"` while a `ready` answered `false` waits for the build to post, or `"waived"` after the cap
+   * posted with the build still in work, so a re-ask goes on, until the build ends. The system `assets.ready` reads it
+   * each frame.
+   */
+  readyWait: "none" | "warm" | "waived";
+  /** The game clock (`Time.elapsed`) of the first frame the `"warm"` wait was seen, the start of its cap; -1 before. */
+  readySince: number;
 };
 
 /**

@@ -126,6 +126,14 @@ export const BUDGET = {
   warmIsBuilding: 0,
   /** F61 B+D: the sweep of a frame with a despawn, a warm window of 600 elements held: the prune of the dead. New: 0 B. */
   warmPruneSweep: 0,
+  /** F202: the warm step while the open view of a gated window builds under its dim and an owned motion: the poll. New: 0 B. */
+  warmNextPoll: 0,
+  /** F202: the warm step under an owned motion with a closed sheet waiting: the walk that passes it over. New: 0 B. */
+  warmWaitingWalk: 0,
+  /** F202: `applyEntry` of a live key whose item is the same object, nothing warm. New: 0 B. */
+  entrySame: 0,
+  /** F202: the swap check of a live key with a new item, nothing warm: one size read. New: 0 B. */
+  entrySwapCheck: 0,
   /** F103: world's `input` step at rest with a loader held ready: frame start, no reconcile, no owed show, warm step. New: 0 B. */
   heldInputRest: 0,
   /** F107: the same step with the loader fed: the switch of the standing scene, then one only stored. New: 0 B. */

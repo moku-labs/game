@@ -403,9 +403,76 @@ const tabsScreen = projection({
   warm: (): TabsItem => ({ id: "tabs", tab: "packs" })
 });
 
+/** The item of the gated window: dimmed while its pictures load, then open, under one key (F202). */
+type GateItem = { id: string; phase: "dim" | "open" };
+
+/**
+ * One windowed list of the gated window: 60 rows of 40 u, 400 u high, standing at 400 u, so the rows from the 10th on
+ * come once it stands at its offset, after its root was made.
+ *
+ * @param prefix - The key prefix of its rows.
+ * @returns The list.
+ */
+function gateList(prefix: string) {
+  return (
+    <scroll
+      key={`${prefix}Win`}
+      rows={60}
+      rowHeight={40}
+      overscan={0}
+      offset={400}
+      row={(index: number) => (
+        <row
+          key={`${prefix}${index}`}
+          style={{ width: 300 }}
+          components={[Marked({ name: `${prefix}${index}` })]}
+        />
+      )}
+      style={{ width: 400, height: 400 }}
+    />
+  );
+}
+
+/**
+ * A gated window, as A Memory Missing's vitrine: its dim and its open view share the key `gate` and the keys of the
+ * root and the scrim; each has a windowed list of its own. Its `warm` is the open item while the dim shows, so the
+ * open view is built under the dim.
+ */
+const gateBase = projection({
+  name: "warm.gate",
+  layer: "ui",
+  from: (_player: WarmPlayer, session: WarmSession): GateItem[] =>
+    session.open === "gateDim" || session.open === "gate"
+      ? [{ id: "gate", phase: session.open === "gate" ? "open" : "dim" }]
+      : [],
+  key: (item: GateItem) => item.id,
+  view: (item: GateItem) => (
+    <column key="gateRoot" style={{ width: 1080, height: 1920 }}>
+      <stack
+        key="gateScrim"
+        style={{ width: 1080, height: 400 }}
+        components={[Marked({ name: `${item.phase}Scrim` })]}
+      />
+      {gateList(item.phase === "dim" ? "dw" : "gw")}
+    </column>
+  )
+});
+
+/**
+ * The gated window with its `warm`: the open item while the dim shows, else nothing. `ProjectionSpec.warm` is typed to
+ * give an item; the world reads `undefined` as nothing held, so the spec is widened here.
+ */
+const gateScreen = {
+  ...gateBase,
+  warm: (_player: WarmPlayer, session: WarmSession): GateItem | undefined =>
+    session.open === "gateDim" ? { id: "gate", phase: "open" } : undefined
+} as typeof gateBase;
+
 const home = defineNode({
   rest: true,
   outcomes: {
+    openGateDim: type(),
+    openGate: type(),
     openPacks: type(),
     openMarket: type(),
     openSheet: type(),
@@ -470,6 +537,8 @@ const scroll = defineNode({
 const main = defineFlow("main", {
   nodes: {
     home,
+    openGateDim: opens("gateDim"),
+    openGate: opens("gate"),
     openPacks: opens("packs"),
     openMarket: opens("market"),
     openSheet: opens("sheet"),
@@ -486,6 +555,8 @@ const main = defineFlow("main", {
   outcomes: {},
   edges: {
     home: {
+      openGateDim: "openGateDim",
+      openGate: "openGate",
       openPacks: "openPacks",
       openMarket: "openMarket",
       openSheet: "openSheet",
@@ -498,6 +569,8 @@ const main = defineFlow("main", {
       scroll: "scroll",
       coin: "coin"
     },
+    openGateDim: { done: "home" },
+    openGate: { done: "home" },
     openPacks: { done: "home" },
     openMarket: { done: "home" },
     openSheet: { done: "home" },
@@ -522,7 +595,8 @@ const warmFeature = defineFeature("warm", {
     dimScreen,
     clashScreen,
     wideScreen,
-    tabsScreen
+    tabsScreen,
+    gateScreen
   ],
   components: [Marked]
 });

@@ -168,7 +168,7 @@ app.world.ecs.snapshot().entities[0];
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. A driver may report what its additive tracks add right now with the optional `offsetsOf(entity, component)`: the world then compares the value under a loop with the rest pose. |
 | `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
 | `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home, and where a restore and a load put it. The owner records the pose it draws the element with, every time that changes. The pose of an entity that is gone is dropped in the next live frame. |
-| `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. A key whose entity is gone is dropped in the next live frame, also when the remover was never called. An element registered while the projection's warm window is held and the projection shows no live view is held with the window (a row its list ranged in after it was built): `isBuilding` true, no `entityOf`, until the open. |
+| `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. A key whose entity is gone is dropped in the next live frame, also when the remover was never called. An element registered while the projection's warm window holds a view not shown is held with the window when the projection shows no live view or `adopt` was handed it since its spawn (a row its list ranged in after it was built): `isBuilding` true, no `entityOf`, until the open. While a live element holds the same key, the held one waits and takes it at the open (F202). |
 | `onConverged(listener)` | Calls the listener after a reconcile a restore or a load caused, when every view and every element stands on its rest pose and every track on them is ended. `ui` builds its roots again after it, so each element stands as freshly mounted. The remover is safe to call twice. |
 | `rerunAll()` | Marks every mounted projection dirty and forces `view` for every item. |
 | `build(names, owner, layers, budgetMs): boolean` | Starts building the next scene aside (`scenes`, on a live switch with a drawing renderer). See [Building the next scene aside](#building-the-next-scene-aside). |
@@ -178,7 +178,7 @@ app.world.ecs.snapshot().entities[0];
 | `left(): number` | Milliseconds of building budget left in this frame, for a scene build or a warm window in work; `Infinity` while nothing is built and in a world that is not live (a pause or a fast walk drops the warm window in work). Allocates nothing. |
 | `isBuilding(entity): boolean` | Whether an entity is built aside or held warm: it belongs to the running build or to a warm window (its view, what `adopt` marked, an element registered for it while closed), also inside an `onAdded` hook of its components. Two set lookups, allocates nothing. |
 | `onBuild(check)` | Registers "my part of the build is done" (`ui`, `renderer`); the same checks tell when a warm window's view is built, and a world with none warms nothing. The remover is safe to call twice. |
-| `adopt(entity)` | Marks an entity another plugin spawned for a root built aside or held warm (`ui`'s elements): it joins the running build, else the warm window in work. Nothing when neither runs. |
+| `adopt(entity)` | Marks an entity another plugin spawned for a root built aside or held warm (`ui`'s elements): it joins the running build, else the warm window in work. When neither runs it marks nothing, but the `registerKey` of the same entity that follows holds it with its projection's held window. |
 
 The authoring helpers are pure and exported from the package root:
 `component`, `tag`, `resource`, `mut`, `system`, `projection`, and `Layer`, `Order`, `Exiting`,
@@ -355,19 +355,22 @@ export const settingsSheet = projection({
   and its components, so `isBuilding` answers true in every `onAdded` hook. ui and the renderer
   build it in parts under `left()` and keep it off stage: never drawn, never hit, never found.
   `keyOf` and `causeOf` answer for it (`"change"`, so its enter plays when it is shown); `entityOf`
-  and `entitiesOf` do not. A key `from` shows is not warmed: an open window is not built twice.
+  and `entitiesOf` do not. A key `from` shows with the warm item's content is not warmed: an open
+  window is not built twice. A key `from` shows with another content is (see "A gated window").
 - **Late elements.** `adopt` marks only for the record in work. An element whose key is registered
-  (`registerKey`) for a projection whose window is held, not shown, while the projection shows no
-  live view is held with the window too: a row a windowed list ranges in after the window was
-  ready. `isBuilding` answers true and `entityOf` nothing until the open; a discard despawns it with
-  the view. The sweep after a despawn forgets every held entity that is gone (the rows a refresh
-  took away), so the held sets of a window held for a long session do not grow.
+  (`registerKey`) for a projection whose window is held, not shown, is held with the window too
+  when the projection shows no live view, or when `adopt` was handed it since its spawn (ui adopts
+  every element of a held root): a row a windowed list ranges in after the window was ready.
+  `isBuilding` answers true and `entityOf` nothing until the open; a discard despawns it with the
+  view. The sweep after a despawn forgets every held entity that is gone (the rows a refresh took
+  away), so the held sets of a window held for a long session do not grow.
 - **One step a frame**, in world's `input` callback after the reconcile: the `onBuild` checks of the
   record in work are polled (all true: the view is ready and `left()` is `Infinity` again), or the
   next record with work, in mounted order, spawns, patches or drops its view. The step runs only in
   a live world, with no scene build, with at least one `onBuild` check (a drawing plugin: headless
   warms nothing) and while no motion that owns its fields runs (a loop and a motion that repeats
-  forever do not count: they never end): the frames of an animation get no warm step. Where the
+  forever do not count: they never end): the frames of an animation get no warm step, but for the
+  next view of a gated window (below). Where the
   step may not run, the record in work is dropped: a paused or fast world builds no part of it, so
   `left()` is `Infinity` through the pause and no frame is asked for it; it is built again once the
   world is live. The budget
@@ -402,9 +405,23 @@ export const settingsSheet = projection({
   state. `onStop` forgets every record.
 - **A throw.** A `warm` or a `view` that throws for the warm item is logged as
   `world:projection-failed` once per commit; nothing is held, and the window opens as before.
+- **A gated window** (slice F, F202) keeps one key from its dim into its open: `from` shows the dim
+  item first (a scrim, a loader), then the open one, while `ready` loads its pictures. A `warm` that
+  answers the open item while the dim shows (and nothing otherwise) has the open view built aside
+  under the dim, as for a closed window. That record is stepped and polled also while a motion that owns its fields
+  runs (the press tween of the tapped button lasts the whole dim; any other record waits for it to
+  end, with the read it made, and is stepped once it ends), within the same warm budget. The commit
+  of the open item swaps the views in one frame: the dim view leaves at once (cause `"discard"`, no
+  exit hook) and the held one is shown as at an open, the difference written if the open item
+  differs from the warm one; a record still in work is built whole in that frame. A commit of the
+  dim's content as a new object swaps nothing; a `view` that throws for the open item logs
+  `world:projection-failed` and leaves the dim live and the record held until the next commit.
+  While the dim shows, a held element whose key a live element of the dim holds too (the root, the
+  scrim) waits: `entityOf` answers the dim's until the swap, then the open's. The `ready` effect of
+  `assets` waits for the build too, at most 400 ms after its bundles settled.
 - **Limits.** A held root hosts no live projection view: a `ui` host takes only views held as it is.
-  A projection that shows other keys live while it warms one holds no late element of its held root:
-  an element registered for it is taken as one of the live views'.
+  An element a plugin other than ui registers for a projection that shows other keys live while it
+  warms one, without `adopt`, is taken as one of the live views'.
   The editor's `game.projections` lists a held view, as it lists a view built aside. The cost is the
   memory of every held view.
 
