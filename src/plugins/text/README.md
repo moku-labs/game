@@ -100,7 +100,10 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `max(widest line, box)`, not in its widest line, and its anchor moves by that width too. `ui`
   writes a box only once the text wrapped at it: so a centred label centres in its box while it
   wraps, and on its own widest line while it fits on one line. `measure` answers the widest line
-  either way, and every other wrap aligns in its widest line as before.
+  either way, and every other wrap aligns in its widest line as before. So a centred one-line text
+  in a box wider than its line (a stretched column, a fixed width) draws from the box's left edge
+  (F208, kept by design): centre it with a `row` of `justify: "center"` that shrinks to it.
+  `wrap: "box"` does not help a line that fits: it gets no box.
 
   **Line box and baseline (F152).** Every line is a CSS line box. A piece in a look of its own,
   a `<span>` of a known style or a `<b>` run of `boldStyle`, stands by the metrics of the font it

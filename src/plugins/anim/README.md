@@ -138,6 +138,14 @@ holds the key then. Every step of the timeline writes that entity:
 - An entity and `spawned(id)` resolve as before. `at(target)` in `build` is unchanged: it reads the
   rest poses when the tree is built.
 
+## Colour fields
+
+A tween of a colour field, the `tint` of a `Sprite` or a `NineSlice` and the `fill` and `stroke`
+of a `Shape`, mixes `0xrrggbb` per channel and rounds each channel to a whole number (F219), as a
+particle tint does: `0xffffff` to `0xc7c7c7` passes only greys, `0xe3e3e3` halfway on a linear
+ease. Every other field, a game's own `fill` included, mixes as one number. A text has no colour
+field: its colour lives in its style.
+
 ## Flights and the gate
 
 A node that awaits a flight keeps the gate closed while the flight runs. For a flight that must not

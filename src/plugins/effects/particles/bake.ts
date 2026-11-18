@@ -3,6 +3,7 @@
  * reach of its particles and its textures; and the cosmetic random source every instance owns.
  * Pure: no ctx, no state, no Pixi.
  */
+import { mixColor } from "../../renderer/color";
 import type { PixiTexture } from "../../renderer/types";
 import type {
   BakedEmitter,
@@ -141,30 +142,6 @@ function along(curve: Curve, t: number): number {
 }
 
 /**
- * A colour between two colours, linear per channel.
- *
- * @param curve - The two `0xrrggbb` ends.
- * @param t - Where between them, 0..1.
- * @returns The `0xrrggbb` colour at `t`.
- * @example
- * ```ts
- * mixColor({ from: 0x000000, to: 0xff_ff_ff }, 0.5); // 0x808080
- * ```
- */
-function mixColor(curve: Curve, t: number): number {
-  let color = 0;
-
-  for (const shift of [16, 8, 0]) {
-    const from = (curve.from >> shift) & 0xff;
-    const to = (curve.to >> shift) & 0xff;
-
-    color |= Math.round(from + (to - from) * t) << shift;
-  }
-
-  return color;
-}
-
-/**
  * How far from the origin a particle is born at most.
  *
  * @param shape - The birth shape.
@@ -232,7 +209,7 @@ export function bakeEmitter(
 
     scaleTable[index] = along(config.scale, t);
     alphaTable[index] = along(config.alpha, t);
-    tintTable[index] = toBgr(mixColor(config.tint, t));
+    tintTable[index] = toBgr(mixColor(config.tint.from, config.tint.to, t));
     // The alpha as the table stores it (float32), under the byte of the tint: what a step reads, never recomputed.
     colorTable[index] = ((tintTable[index] ?? 0) | (alphaByte(alphaTable[index] ?? 1) << 24)) >>> 0;
   }

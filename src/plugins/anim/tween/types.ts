@@ -52,6 +52,8 @@ export type Track = {
    * field reads, the base plus every offset. Kept here so no number crosses a call boxed.
    */
   readonly values: Float64Array;
+  /** `1` for a slot that is a colour field (`isColorField`): it mixes per channel and rounds (F219). */
+  readonly colors: Uint8Array;
   /**
    * Per slot, the value this track last left in the field or found there, `NaN` while unknown: at
    * the start and while another writer holds the field. A frame whose value moved off it writes

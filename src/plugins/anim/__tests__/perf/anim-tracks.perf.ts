@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET } from "./budgets";
-import { heldLoopsFixture, partialTracksFixture, tracksFixture } from "./fixtures";
+import {
+  colourTracksFixture,
+  heldLoopsFixture,
+  partialTracksFixture,
+  tracksFixture
+} from "./fixtures";
 
 /** The bytes per call two windows of `alloc` may differ by: its own tolerance. */
 const NOISE = 1;
@@ -22,5 +27,9 @@ describe("anim tracks: heap bytes per frame step", () => {
 
   it("runs 50 tracks that move some of their fields, keeping only the numbers that cross into world", () => {
     expect(alloc(partialTracksFixture())).toBeLessThanOrEqual(BUDGET.animTracksPartial + NOISE);
+  });
+
+  it("runs 50 tint tweens mixed per channel, keeping only the numbers that cross into world", () => {
+    expect(alloc(colourTracksFixture())).toBeLessThanOrEqual(BUDGET.animTracksColour + NOISE);
   });
 });

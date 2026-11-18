@@ -46,6 +46,12 @@ export const BUDGET = {
    * its patch of the moved fields.
    */
   animTracksPartial: 50 * MOVED_FIELD,
+  /**
+   * 50 tweens of a `Sprite.tint` (F219), 50 colours mixed per channel a frame. New: at most
+   * 50 × 16 = 800 B, the number handed to world (`MOVED_FIELD`) or read back (`STILL_FIELD`) per
+   * field; the per-channel mix adds nothing.
+   */
+  animTracksColour: 50 * MOVED_FIELD,
   /** 10 timelines that only wait. Before: 822 B. Now 0. */
   timelinesWaiting: 0,
   /**

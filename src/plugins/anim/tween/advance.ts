@@ -3,6 +3,7 @@
  * offsets accumulator of the additive tracks, the per-frame advance with its repeats, reduced
  * motion and the two ways out. Deterministic: the only clock is the `delta` a caller hands in.
  */
+import { isColorField, mixColor } from "../../renderer/color";
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import { neutralOf } from "../../world/ecs/define";
 import type { AnyComponent } from "../../world/ecs/types";
@@ -164,6 +165,22 @@ function beginTrack(actx: AnimCtx, track: Track, stored: Readonly<Record<string,
 }
 
 /**
+ * The value of a slot between two values at the eased time in `values[slot]`: a number mixed as
+ * one, a colour per channel and rounded (F219), so white to grey passes only greys.
+ *
+ * @param track - The track, its eased time in `values[slot]`.
+ * @param slot - The slot.
+ * @param from - The value at eased time 0.
+ * @param to - The value at eased time 1.
+ * @returns The value of the slot now.
+ */
+function mixed(track: Track, slot: number, from: number, to: number): number {
+  const t = track.values[slot] ?? 0;
+
+  return track.colors[slot] === 1 ? mixColor(from, to, t) : from + (to - from) * t;
+}
+
+/**
  * Walks the keyframe segments of a track to its normalised time `clock[1]`, for one slot. Each
  * segment eases, with its own curve or the track's, from where the segment before left the
  * field; a segment that does not name the field holds it, and past the last segment the field
@@ -204,7 +221,7 @@ function walkSlot(track: Track, segments: readonly TrackSegment[], slot: number)
       }
 
       easeCell(segment.ease ?? track.ease, values, slot);
-      values[slot] = from + (target - from) * (values[slot] ?? 0);
+      values[slot] = mixed(track, slot, from, target);
 
       return;
     }
@@ -240,7 +257,7 @@ function slotValue(track: Track, slot: number, final: boolean): void {
 
     values[slot] = track.clock[1] ?? 0;
     easeCell(track.ease, values, slot);
-    values[slot] = start + ((track.targets[slot] ?? 0) - start) * (values[slot] ?? 0);
+    values[slot] = mixed(track, slot, start, track.targets[slot] ?? 0);
   } else {
     walkSlot(track, segments, slot);
   }
@@ -804,6 +821,7 @@ export function startTrack(
     live: new Uint8Array(names.length).fill(1),
     moved: new Uint8Array(names.length),
     values: new Float64Array(names.length),
+    colors: Uint8Array.from(names, field => (isColorField(component, field) ? 1 : 0)),
     seen: new Float64Array(names.length).fill(Number.NaN),
     muted,
     additive: options.additive === true,
