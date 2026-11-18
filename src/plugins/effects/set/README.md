@@ -41,7 +41,7 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
 | `GradientMap` | `dark: 0x000000`, `middle: 0x808080`, `light: 0xffffff`, `amount: 1` (0..1) | new: sepia, a night tint, a duotone | screen | 1 | ≤ 1.065 | its quad | not run yet (stage 4) |
 | `Wave` | `amplitude: 4` (CSS px), `wavelength: 48` (CSS px), `phase: 0`, `angle: 0` (radians) | new: water, heat, a dream; a `phase` loop | screen | 1 | ≤ 1.065 | its quad | not run yet (stage 4) |
 | `Mirror` | `axis: 1` (1 top to bottom, 0 left to right), `alpha: 1` (0..1), `fade: 0` (share of the view; 0 none) | new: a reflection, on a copy of a view | screen | 1 | ≤ 1.065 | its quad | not run yet (stage 4) |
-| `Shadow` | `x: 0`, `y: 4`, `soft: 4` (CSS px; `\|x\| + soft` and `\|y\| + soft` within 16), `color: 0x000000`, `alpha: 0.5` (0..1) | new: a lifted card, a dragged piece | tile | 1 | ≤ 0.1024 | its quad | not run yet (stage 4) |
+| `Shadow` | `x: 0`, `y: 4`, `soft: 4` (CSS px; `\|x\| + soft` and `\|y\| + soft` within 8), `color: 0x000000`, `alpha: 0.5` (0..1) | new: a lifted card, a dragged piece | tile | 1 | ≤ 0.083 | its quad | not run yet (stage 4) |
 
 - **`Flash`** mixes the view towards `color` by `amount`, at the view's own alpha: 0 draws it as it is, 1 draws its
   shape in `color`, the transparent pixels around it stay transparent. `amount` is clamped to 0..1, so a tween that
@@ -129,8 +129,8 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
   original, with `Mirror` on the copy.
 - **`Shadow`** draws a drop shadow of `color` under the view: the mean alpha of 13 samples of the view, the place
   moved back by `x`, `y` CSS px and a ring of 12 around it at `soft` CSS px (the spokes of `Aura`), times `alpha`
-  clamped to 0..1, under the source: where the view is opaque nothing shows. It is padded by 16 CSS px, its reach:
-  `soft` is clamped to 0..16 and `x`, `y` each to `16 − soft` either way, so the shadow is never cut at its frame. With
+  clamped to 0..1, under the source: where the view is opaque nothing shows. It is padded by 8 CSS px, its reach:
+  `soft` is clamped to 0..8 and `x`, `y` each to `8 − soft` either way, so the shadow is never cut at its frame. With
   13 samples a wide `soft` bands a little; with the view's own sample it reads 14.
 
 ## How a member draws
@@ -193,7 +193,7 @@ a tile, 128 × 128. At resolution 2 one pass over the screen is 384 × 693 × 4 
 | `GradientMap` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 | `Wave` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 | `Mirror` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
-| `Shadow` | 1 | 14 (13 of the shadow, 1 of the view) | ≤ 1.065 Mpx | ≤ 0.1024 Mpx (padded by 16: (128 + 32)² × 4) | quad |
+| `Shadow` | 1 | 14 (13 of the shadow, 1 of the view) | ≤ 1.065 Mpx | ≤ 0.083 Mpx (padded by 8: (128 + 16)² × 4) | quad |
 | `Outline` (built-in, on the place part of the head) | 1 | 13 | ≤ 1.065 Mpx | ≤ 0.07 Mpx (padded by its default `thickness` 2) | quad |
 
 A padded member draws its frame grown by the padding on every side: a tile under `Aura` (at its default `spread` 8) or
@@ -201,9 +201,9 @@ A padded member draws its frame grown by the padding on every side: a tile under
 
 A member adds no JavaScript per frame: `filters-sync.perf.ts` measures a `Flash` amount tweened on one of 12 filtered
 views, its quad handed over, at 0 B a frame, beside the `Glow` line of the same shape, and a `Wave` phase the same, 0 B
-(Node 24.21). A `Pixelate` size tween measures 32 B a frame when the file runs whole and 16 when it runs alone
-(`filtersPixelateTween`): it comes with a member of one number field (a scratch copy with a second uniform measured 0),
-most likely V8 boxing the fraction at the sync's reads by name, not proven. `Bloom`'s chain answers one of
+(Node 24.21). A `Pixelate` size tween measures 0 B too; it measured 32 B (16 alone) while V8 kept the stored `size`
+as a raw double, which each read of the sync by the uniform's name boxed, until an instance moved the number fields of
+its value and its uniform group to V8's tagged form once, as it is built. `Bloom`'s chain answers one of
 two arrays made once, written in place: called as a tween calls it, over both ladders, 0 B. Its `strength` tweened on
 one of the 12 views, its quad handed over with `bright` named, costs 32 B a frame (`budgets.ts`, `filtersBloomTween`,
 Node 24.21; 2 920 B before the engine's `evaluate` walked its steps by index; the same 32 with the quad, whose names

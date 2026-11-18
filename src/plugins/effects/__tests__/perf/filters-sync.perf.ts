@@ -76,7 +76,8 @@ describe("effects:filters, heap bytes per frame step", () => {
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
   });
 
-  // Bug it guards: a `Pixelate` that sharpens allocates more than the boxes of its one fraction (`budgets.ts`).
+  // Bug it guards: the sync reads a stored number field V8 keeps as a raw double (a `Pixelate`'s one `size`) by the
+  // uniform's name, and every read hands back a new box: 16 B at the compare and 16 at the write, per frame.
   it("one Pixelate size tweened on one of 12 filtered views, its quad handed over", () => {
     const fixture = filtersFixture([Pixelate.filter], PIXELATE_SIZE);
     const step = bytesPerCall(tweenStep(fixture));
@@ -84,7 +85,7 @@ describe("effects:filters, heap bytes per frame step", () => {
     const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);
 
     expect(handed.some(set => set.slots[0]?.quad !== undefined)).toBe(true);
-    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersPixelateTween + NOISE);
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
   });
 
   // Bug it guards: the chain of a member makes its ladder per call: a strength tween runs the chain in every frame.

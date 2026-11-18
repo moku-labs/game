@@ -27,7 +27,7 @@ function constantOf(body: string, name: string): number | undefined {
 const REACH = { SHADOW_REACH: constantOf(SHADOW_WGSL, "SHADOW_REACH") ?? Number.NaN };
 
 describe("Shadow", () => {
-  memberCases({ member: Shadow, wgsl: SHADOW_WGSL, glsl: SHADOW_GLSL, padding: 16 });
+  memberCases({ member: Shadow, wgsl: SHADOW_WGSL, glsl: SHADOW_GLSL, padding: 8 });
 
   // Bug: the table's defaults are lost (a Shadow at rest drawn nowhere), or the example lies.
   it("drops 4 px down by default and takes the fields of its example", () => {
@@ -50,8 +50,8 @@ describe("Shadow", () => {
 
   // Bug: an offset or a softness past the padding: the shadow is cut at the edge of the padded frame; or the clamp
   // moves an offset that had room.
-  it("clamps its offset and softness so |x| + soft and |y| + soft stay within 16", () => {
-    for (const soft of [-4, 0, 4, 10, 16, 40]) {
+  it("clamps its offset and softness so |x| + soft and |y| + soft stay within 8", () => {
+    for (const soft of [-4, 0, 2, 4, 8, 40]) {
       for (const offset of [-40, -12, -3, 0, 5, 12, 40]) {
         const radius = evaluate(SHADOW_WGSL, { from: "radius", to: "radius" }, { ...REACH, soft });
         const off = evaluate(
@@ -61,9 +61,9 @@ describe("Shadow", () => {
         ) as unknown as Vec2;
 
         expect(radius).toBeGreaterThanOrEqual(0);
-        expect(Math.abs(off.x) + radius).toBeLessThanOrEqual(16);
-        expect(Math.abs(off.y) + radius).toBeLessThanOrEqual(16);
-        if (Math.abs(offset) + radius <= 16) expect(off.x).toBe(offset);
+        expect(Math.abs(off.x) + radius).toBeLessThanOrEqual(8);
+        expect(Math.abs(off.y) + radius).toBeLessThanOrEqual(8);
+        if (Math.abs(offset) + radius <= 8) expect(off.x).toBe(offset);
       }
     }
   });

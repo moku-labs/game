@@ -627,7 +627,7 @@ async function run(): Promise<SetResult> {
     await play(app, {
       name: "Shadow: held",
       kind: "held",
-      scene: { entities: card(Shadow({ color: 0xff_ff_ff, x: 4, y: 6, soft: 6 })) }
+      scene: { entities: card(Shadow({ color: 0xff_ff_ff, x: 2, y: 3, soft: 4 })) }
     }),
     await play(app, {
       name: "Shadow: tween",

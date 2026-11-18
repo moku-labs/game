@@ -196,6 +196,32 @@ function startValue(uniform: UniformSpec, value: Readonly<FilterFields>): number
 }
 
 /**
+ * Moves the number fields the sync reads by a uniform's name to V8's tagged form, once, as an instance is built. V8 may
+ * keep a number field as a raw double, by the history of the object's shape: a `Pixelate`'s one `size` came out so,
+ * `Wave`'s `phase` did not. A read by a name the code learns only at run time, as every read of the sync is
+ * (`value[uniform.name]`, `uniforms[name]`), then hands back a new box of that double: 16 B per read, two reads per
+ * sync of a tweened view. A field that held a non-number once stays tagged for every object of its shape, and a read
+ * hands its number as it is. The number is written back at once; a frozen object (the defaults, a probe's value) is
+ * left alone.
+ *
+ * @param target - The stored filter value, or the values of the uniform group.
+ * @param uniforms - The uniforms of the definition.
+ */
+function tagNumbers(target: Record<string, unknown>, uniforms: readonly UniformSpec[]): void {
+  if (Object.isFrozen(target)) return;
+
+  for (const { name } of uniforms) {
+    const held = target[name];
+
+    if (typeof held !== "number") continue;
+
+    // Once per instance, not per frame: the non-number moves the field, the number goes back before anyone reads it.
+    Reflect.set(target, name, false);
+    target[name] = held;
+  }
+}
+
+/**
  * The padding of an instance of ours: a fixed number, or the live value of a number uniform.
  *
  * @param definition - The filter definition.
@@ -280,6 +306,10 @@ function createOurs(
     definition.backdrop ||
     definition.origin !== undefined;
   const group = bindsUniforms ? new pixi.UniformGroup(structures) : undefined;
+
+  // The two objects the sync reads by a uniform's name in every frame of a tween: neither may hand back a new box.
+  tagNumbers(value, definition.uniforms);
+  if (group !== undefined) tagNumbers(group.uniforms, definition.uniforms);
   const resources: Record<string, unknown> = group === undefined ? {} : { fu: group };
   const empty = pixi.Texture.EMPTY.source;
 
