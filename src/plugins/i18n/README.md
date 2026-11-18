@@ -57,7 +57,7 @@ app.i18n.format(tr("hud.coins", { n: 25, icon: coin }));
 // [{ kind: "element", node: coin }, { kind: "text", text: " 25" }]
 ```
 
-An element parameter keeps its place in the sentence, which is what makes an icon inside a line possible without string surgery. An array parameter is formatted through `Intl.ListFormat`, because ICU MessageFormat 1 has no list syntax. A number in a plain argument goes through `Intl.NumberFormat`.
+An element parameter keeps its place in the sentence, which is what makes an icon inside a line possible without string surgery. An array parameter is formatted through `Intl.ListFormat`, because ICU MessageFormat 1 has no list syntax. A number in a plain argument goes through `Intl.NumberFormat`. A message passed as a parameter, `{ key: "album.set" }` or what `tr` returned, reads as its words in the locale the outer message is read in, at any depth (F209); its elements are dropped, as in `plain`. The typed `tr` of a game does not accept a message there yet: `Argument` has no `Message`.
 
 A string parameter, and every string item of a list parameter, is escaped for the tag pass of `text`: every `<` arrives as `\<`, so a player named `<b>x` shows `<b>x` and is never bold, also inside a list. Tags in the message itself stay tags. `format` keeps the `\<`, `plain` answers the parameter as written: `plain(tr("lobby.host", { name: "<b>x" }))` is `"Host: <b>x"`. Numbers and elements are not escaped. Edge: a parameter that ends in `\` right before a literal tag of the message is not specially treated.
 
