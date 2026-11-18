@@ -137,6 +137,35 @@ export function tracksFixture(): () => void {
   });
 }
 
+/**
+ * The track table with 50 tweens of a `Sprite.tint` from white to black (F219): every frame mixes
+ * 50 colours per channel. A channel moves by one in about 39 s of this long tween, so a frame
+ * mostly finds the tint where it was and reads it back (`STILL_FIELD`), else writes it.
+ *
+ * @returns One frame step of the track table.
+ */
+export function colourTracksFixture(): () => void {
+  const mock = createMockAnim();
+  const driver = createDriver(mock.actx);
+
+  for (let index = 0; index < TRACKS; index++) {
+    const entity = spawnTestEntity(mock, [Sprite({ texture: "x", tint: 0xff_ff_ff })]);
+
+    driver.track(
+      entity,
+      Sprite,
+      { tint: 0x00_00_00 },
+      { ms: TWEEN_MS, ease: "inOut" },
+      nothingMuted
+    );
+  }
+
+  return warmed((): void => {
+    beginFrame(mock.actx);
+    advanceTracks(mock.actx, FRAME_MS);
+  });
+}
+
 /** The fields a hand holds on every view of the partial fixture: `y`, one set for every track. */
 const HELD_Y: ReadonlySet<string> = new Set(["y"]);
 
