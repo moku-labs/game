@@ -195,6 +195,9 @@ function startValue(uniform: UniformSpec, value: Readonly<FilterFields>): number
   return vector;
 }
 
+/** What `tagNumbers` writes in place: a stored filter value (the world's component value) or a uniform group's values. */
+type TaggedFields = Readonly<FilterFields> | UniformValues;
+
 /**
  * Moves the number fields the sync reads by a uniform's name to V8's tagged form, once, as an instance is built. V8 may
  * keep a number field as a raw double, by the history of the object's shape: a `Pixelate`'s one `size` came out so,
@@ -204,10 +207,10 @@ function startValue(uniform: UniformSpec, value: Readonly<FilterFields>): number
  * hands its number as it is. The number is written back at once; a frozen object (the defaults, a probe's value) is
  * left alone.
  *
- * @param target - The stored filter value, or the values of the uniform group.
+ * @param target - The stored filter value, or the values of the uniform group. Written in place.
  * @param uniforms - The uniforms of the definition.
  */
-function tagNumbers(target: Record<string, unknown>, uniforms: readonly UniformSpec[]): void {
+function tagNumbers(target: TaggedFields, uniforms: readonly UniformSpec[]): void {
   if (Object.isFrozen(target)) return;
 
   for (const { name } of uniforms) {
@@ -217,7 +220,7 @@ function tagNumbers(target: Record<string, unknown>, uniforms: readonly UniformS
 
     // Once per instance, not per frame: the non-number moves the field, the number goes back before anyone reads it.
     Reflect.set(target, name, false);
-    target[name] = held;
+    Reflect.set(target, name, held);
   }
 }
 
@@ -308,8 +311,11 @@ function createOurs(
   const group = bindsUniforms ? new pixi.UniformGroup(structures) : undefined;
 
   // The two objects the sync reads by a uniform's name in every frame of a tween: neither may hand back a new box.
+  // `value` is the world's stored component value, read-only by contract: it is written here in place, each number
+  // field set to `false` and back to the same number at once, so no reader ever sees another value.
   tagNumbers(value, definition.uniforms);
   if (group !== undefined) tagNumbers(group.uniforms, definition.uniforms);
+
   const resources: Record<string, unknown> = group === undefined ? {} : { fu: group };
   const empty = pixi.Texture.EMPTY.source;
 

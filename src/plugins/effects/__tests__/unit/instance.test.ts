@@ -166,6 +166,18 @@ describe("createFilter — ours", () => {
 
     expect((instance.filter as unknown as FakeFilter).padding).toBe(14);
   });
+
+  // Bug: the build's one-time retag of the number fields (V8's field form, against a boxed read per frame) loses the
+  // number it writes back, so the stored value or the uniform group holds `false`.
+  it("leaves every number of the stored value and of the uniform group as it was", () => {
+    const { mock, pixi } = started();
+    const value = Tint({ amount: 0.25 }).value;
+    const instance = build(mock, pixi, "fx.tint", value);
+    const group = (instance.filter as unknown as FakeFilter).resources.fu as FakeUniformGroup;
+
+    expect(value.amount).toBe(0.25);
+    expect(group.uniforms.amount).toBe(0.25);
+  });
 });
 
 describe("createFilter — the Pixi-core kinds", () => {

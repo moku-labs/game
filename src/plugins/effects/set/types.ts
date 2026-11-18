@@ -248,7 +248,7 @@ export type MirrorValue = {
 
 /**
  * `Shadow`: a shadow of `color` at `alpha` (0..1) under the view, moved by `x`, `y` CSS px and `soft` CSS px wide;
- * `|x| + soft` and `|y| + soft` are held within the padding of 16.
+ * `|x| + soft` and `|y| + soft` are held within the padding of 8.
  *
  * @example
  * ```ts
