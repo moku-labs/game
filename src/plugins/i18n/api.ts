@@ -20,6 +20,9 @@ import type {
   State
 } from "./types";
 
+/** The parameters of a message without any: one frozen object, so a format builds none. */
+const EMPTY_PARAMS: Readonly<Record<string, unknown>> = Object.freeze({});
+
 /**
  * Answers the formatter kit of one locale, building it on first use.
  *
@@ -77,6 +80,70 @@ function missing(ctx: I18nCtx, key: string, locale: string): readonly Part[] {
 }
 
 /**
+ * Tells whether a parameter is a message `tr` built: an object with a string `key` and no
+ * `type`, which an element passed as a parameter always has.
+ *
+ * @param value - One parameter of a message.
+ * @returns True for a message.
+ * @example
+ * ```ts
+ * isMessage({ key: "album.set" }); // true
+ * ```
+ */
+function isMessage(value: unknown): value is Message {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+
+  return typeof (value as { key?: unknown }).key === "string" && !("type" in value);
+}
+
+/**
+ * The parameters a compiled message reads: a message passed as a parameter is replaced by its
+ * words in the same locale (F209). The parameters themselves when none is a message, so a label
+ * without one builds nothing.
+ *
+ * @param ctx - Kernel context of the i18n plugin.
+ * @param params - The parameters of the outer message.
+ * @param locale - The locale the outer message is read in.
+ * @returns The parameters to hand the compiled message.
+ */
+function paramsIn(
+  ctx: I18nCtx,
+  params: Readonly<Record<string, unknown>>,
+  locale: string
+): Readonly<Record<string, unknown>> {
+  let words: Record<string, unknown> | undefined;
+
+  for (const name in params) {
+    const value = params[name];
+
+    if (!isMessage(value)) continue;
+
+    words ??= { ...params };
+    words[name] = plainOf(formatAt(ctx, value, locale));
+  }
+
+  return words ?? params;
+}
+
+/**
+ * Formats one message in a locale that can be read, through the fallback chain.
+ *
+ * @param ctx - Kernel context of the i18n plugin.
+ * @param message - What `tr` returned.
+ * @param target - The locale to read first.
+ * @returns The parts of the sentence, adjacent text merged.
+ */
+function formatAt(ctx: I18nCtx, message: Message, target: string): readonly Part[] {
+  const compiled = resolve(ctx.state, message.key, target, ctx.config.fallback);
+
+  if (compiled === undefined) return missing(ctx, message.key, target);
+
+  const params = paramsIn(ctx, message.params ?? EMPTY_PARAMS, target);
+
+  return mergeParts(compiled(params, kitOf(ctx.state, target)));
+}
+
+/**
  * Formats one message in one locale, through the fallback chain.
  *
  * @param ctx - Kernel context of the i18n plugin.
@@ -87,11 +154,8 @@ function missing(ctx: I18nCtx, key: string, locale: string): readonly Part[] {
  */
 function formatIn(ctx: I18nCtx, message: Message, locale?: string): readonly Part[] {
   const target = locale === undefined ? ctx.state.locale : readable(ctx, locale);
-  const compiled = resolve(ctx.state, message.key, target, ctx.config.fallback);
 
-  if (compiled === undefined) return missing(ctx, message.key, target);
-
-  return mergeParts(compiled(message.params ?? {}, kitOf(ctx.state, target)));
+  return formatAt(ctx, message, target);
 }
 
 /**

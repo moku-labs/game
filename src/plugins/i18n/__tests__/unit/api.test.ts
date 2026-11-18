@@ -193,6 +193,70 @@ describe("a string parameter that looks like markup", () => {
   });
 });
 
+/**
+ * A mock with a message that names a set, and the set's name in both locales (F209).
+ *
+ * @returns The started mock, current locale `ru`.
+ */
+async function setNameMock(): Promise<MockI18n> {
+  const mock = createMockI18n({ locale: "ru", fallback: "en" });
+  const ru = {
+    "album.open": messageOf("Открыт набор «{name}»"),
+    "album.set": messageOf("Детство")
+  };
+  const en = {
+    "album.open": messageOf("Set “{name}” is open"),
+    "album.set": messageOf("Childhood"),
+    "album.host": messageOf("Host: {name}"),
+    "album.tagged": messageOf(String.raw`Ann \<3`)
+  };
+
+  mock.flow.features.push({ name: "album", description: { strings: { ru, en } } });
+  await mock.start();
+
+  return mock;
+}
+
+describe("a message passed as a parameter of another message (F209)", () => {
+  const open = { key: "album.open", params: { name: { key: "album.set" } } };
+
+  // The bug: the inner message reaches the compiled one as an object and prints "[object Object]".
+  it("is read as its words in the current locale", async () => {
+    const mock = await setNameMock();
+
+    expect(mock.api.plain(open)).toBe("Открыт набор «Детство»");
+  });
+
+  // The bug: the inner message is read in the current locale while the outer one reads another.
+  it("is read in the locale the outer message is read in", async () => {
+    const mock = await setNameMock();
+
+    expect(mock.api.format(open, "en")).toEqual([
+      { kind: "text", text: "Set “Childhood” is open" }
+    ]);
+  });
+
+  // The bug: an inner message of another message's parameter stays an object.
+  it("is read at any depth", async () => {
+    const mock = await setNameMock();
+    const host = { key: "album.host", params: { name: open } };
+
+    expect(mock.api.format(host, "en")).toEqual([
+      { kind: "text", text: "Host: Set “Childhood” is open" }
+    ]);
+  });
+
+  // The bug: an escaped `<` of the inner message's words turns into a tag of the outer one.
+  it("keeps an escaped tag of the inner words plain text", async () => {
+    const mock = await setNameMock();
+    const host = { key: "album.host", params: { name: { key: "album.tagged" } } };
+
+    expect(mock.api.format(host, "en")).toEqual([
+      { kind: "text", text: String.raw`Host: Ann \<3` }
+    ]);
+  });
+});
+
 describe("has", () => {
   it("answers true for a key of the current locale and of the fallback", async () => {
     const mock = await startedMock();
