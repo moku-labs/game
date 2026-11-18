@@ -9,7 +9,7 @@ import type { NodeInfo } from "../../../flow/types";
 import { lookupTexture } from "../../api";
 import { pickVictim, releaseSceneLeft } from "../../budget";
 import { neighbourhood } from "../../preload";
-import { passReadyNode } from "../../ready";
+import { passReadyNode, stepReady } from "../../ready";
 import { loadBundle } from "../../tiers";
 import { createMockAssets, graphOf, manifestOf, sceneOf } from "../unit/mock-assets";
 
@@ -30,6 +30,36 @@ export function bytesPerCall(fn: () => void): number {
   for (let call = 0; call < WARM_CALLS; call += 1) fn();
 
   return alloc(fn, CALLS);
+}
+
+/** The frame a system of phase `sync` gets: one kept object, its game clock moved by the fixture. */
+type Frame = { time: { elapsed: number } };
+
+/**
+ * One frame of the system `assets.ready` (F202): at rest, no `ready` waiting for a warm view, or while one waits for a
+ * build that goes on, under its cap.
+ *
+ * @param waiting - Whether a `ready` waits for a warm view in work.
+ * @returns The run the world makes in phase `sync`.
+ */
+export function readyStep(waiting: boolean): () => void {
+  const mock = createMockAssets();
+  const frame: Frame = { time: { elapsed: 0 } };
+
+  if (waiting) {
+    mock.world.left = 3;
+    mock.ctx.state.readyWait = "warm";
+    mock.ctx.state.readySince = 0;
+  }
+
+  // The fixture must measure the path it names.
+  stepReady(mock.assetsCtx, frame);
+
+  if (mock.ctx.state.readyWait !== (waiting ? "warm" : "none") || mock.flow.posted.length > 0) {
+    throw new Error("readyStep: the wait is not as asked");
+  }
+
+  return () => stepReady(mock.assetsCtx, frame);
 }
 
 /**

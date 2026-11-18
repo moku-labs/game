@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { settled, warmCallsFixture, warmPruneFixture } from "./fixtures";
+import {
+  entryFixture,
+  settled,
+  warmCallsFixture,
+  warmNextFixture,
+  warmPruneFixture,
+  warmWaitingFixture
+} from "./fixtures";
 
 // F61 slice B+D: a warm window held hidden costs its memory and nothing a frame. World's `input` callback takes one
 // warm step every frame; ui and the renderer ask `left()` and `isBuilding` while they build the held view.
@@ -51,5 +58,43 @@ describe("warm windows: heap per frame", () => {
 
     await annotate(`sweep after a despawn, 600 held elements: ${bytes} B a frame`);
     expect(bytes).toBeLessThanOrEqual(BUDGET.warmPruneSweep + NOISE_BYTES);
+  });
+});
+
+// F202 (spec 33, slice F): the open view of a gated window built under its dim, through the press tween of the tapped
+// button, and the reconcile's check for a held next view of a live key.
+describe("the open view built under the dim: heap per frame", () => {
+  // Bug caught: the frames of the build under the dim, which run through an owned motion now, allocate in the poll.
+  it("the warm step polling the next view's checks under an owned motion keeps nothing", async ({
+    annotate
+  }) => {
+    const bytes = alloc(settled(warmNextFixture()));
+
+    await annotate(`stepWarm, next view in work under a motion: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.warmNextPoll + NOISE_BYTES);
+  });
+
+  // Bug caught: the walk that passes a waiting record over runs every frame of a motion now; a closure or an iterator
+  // per frame is a GC pause in every animation.
+  it("the warm step under an owned motion with a sheet waiting keeps nothing", async ({
+    annotate
+  }) => {
+    const bytes = alloc(settled(warmWaitingFixture()));
+
+    await annotate(`stepWarm, a sheet waiting under a motion: ${bytes} B a frame`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.warmWaitingWalk + NOISE_BYTES);
+  });
+
+  // Bug caught: every live key of every commit pays for the swap check, with nothing warm (a board of 300 items).
+  it("applyEntry of an unchanged live key and the swap check of a new item keep nothing with nothing warm", async ({
+    annotate
+  }) => {
+    const calls = entryFixture();
+    const same = alloc(settled(calls.same));
+    const swapCheck = alloc(settled(calls.swapCheck));
+
+    await annotate(`applyEntry same item: ${same} B, swap check: ${swapCheck} B`);
+    expect(same).toBeLessThanOrEqual(BUDGET.entrySame + NOISE_BYTES);
+    expect(swapCheck).toBeLessThanOrEqual(BUDGET.entrySwapCheck + NOISE_BYTES);
   });
 });

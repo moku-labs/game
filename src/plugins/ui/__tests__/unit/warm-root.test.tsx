@@ -652,6 +652,41 @@ describe("a windowed list of a window held warm", () => {
   });
 });
 
+describe("the open view of a gated window built under its dim (F202)", () => {
+  // Bug: a row the open view's list ranges in after its build was ready is taken for one of the live dim's (the
+  // projection shows a live view): `entityOf` answers a row nobody sees; or a row of the dim is held and its button
+  // answers nothing; or the dim's scrim loses its key to the open one's while the dim shows, or keeps it after the swap.
+  it("holds the late rows of the held view, not the dim's, and swaps the keys at the open", async () => {
+    const warm = await start();
+    const { projection } = warm.app.world;
+
+    warm.mount(["warm.gate"]);
+    warm.frame();
+    await warm.answer("openGateDim");
+    untilWarm(warm, 1);
+
+    for (let index = 0; index < 3; index += 1) warm.frame();
+
+    const late = markedIn(warm, "gw15") ?? 0;
+    const dimRow = markedIn(warm, "dw15") ?? 0;
+
+    expect(warm.app.world.ecs.ownerOf(late)).toBeDefined();
+    expect(projection.isBuilding(late)).toBe(true);
+    expect(projection.entityOf("warm.gate", "gw15")).toBeUndefined();
+    expect(projection.isBuilding(dimRow)).toBe(false);
+    expect(projection.entityOf("warm.gate", "dw15")).toBe(dimRow);
+    expect(projection.entityOf("warm.gate", "gateScrim")).toBe(markedIn(warm, "dimScrim"));
+
+    await warm.answer("openGate");
+    warm.frame();
+
+    expect(projection.entityOf("warm.gate", "gateScrim")).toBe(markedIn(warm, "openScrim"));
+    expect(projection.entityOf("warm.gate", "gw15")).toBe(late);
+    expect(projection.isBuilding(late)).toBe(false);
+    expect(markedIn(warm, "dimScrim")).toBeUndefined();
+  });
+});
+
 describe("an overlay of a window held warm", () => {
   // Bug: the overlay of a closed sheet starts its level or lands while it is held, so the screen
   // under it is dimmed or covered by a window nobody opened.

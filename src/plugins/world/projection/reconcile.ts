@@ -263,8 +263,54 @@ function adoptEntry(
   record: HeldRecord,
   entry: { key: string; item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
 ): void {
+  showWithItem(pctx, spec, mounted, record, entry, heldDifference(pctx, spec, record, entry.item));
+}
+
+/**
+ * The output of `view` a held view needs to show an item: none for an item with the content of the held one, else
+ * `view(item)`. A `view` that throws throws here, before anything is shown.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param record - The warm record that holds the view.
+ * @param item - The item the view is shown with.
+ * @returns The component values, or `undefined` when nothing is to be written.
+ */
+function heldDifference(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  record: HeldRecord,
+  item: unknown
+): Map<string, AnyComponentValue> | undefined {
+  return sameItem(record.item, item) ? undefined : collectView(pctx, spec, item);
+}
+
+/**
+ * Shows the held view of a record with an item: the record is shown, then the item is stored (no `view` ran) or the
+ * difference `next` is written directly, with no `change` hook, and the view comes as a spawned view does
+ * (`playEnter`).
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param mounted - The mounted projection.
+ * @param record - The warm record that holds the view.
+ * @param entry - The key, its item, the peers, the mode and the used hints.
+ * @param entry.key - The model key.
+ * @param entry.item - The model item.
+ * @param entry.peers - The new and the old items.
+ * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.used - The hints that reached an entry.
+ * @param next - The output of `view(item)`, or `undefined` for an item with the held one's content.
+ */
+function showWithItem(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  mounted: Mounted,
+  record: HeldRecord,
+  entry: { key: string; item: unknown; peers: Peers; direct: boolean; used: Set<Hint> },
+  next: Map<string, AnyComponentValue> | undefined
+): void {
   const view = record.view;
-  const next = sameItem(record.item, entry.item) ? undefined : collectView(pctx, spec, entry.item);
 
   showHeld(pctx, mounted, record, entry.direct ? "mount" : "change");
 
@@ -276,6 +322,74 @@ function adoptEntry(
   }
 
   playEnter(pctx, spec, view, entry);
+}
+
+/**
+ * The record whose held view takes the place of a live view: a warm record holds a view of the live key, not shown
+ * (the open view of a gated window, built under its dim, F202), and the new item differs in content from the live
+ * one. `heldFor` is asked first: with nothing warm it reads one size. The gate's own dim → dim commit (a new object,
+ * the same content) swaps nothing.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param live - The live view of the key.
+ * @param item - The new item, another object than the live one's.
+ * @returns The record, or `undefined` when the live view changes as before.
+ */
+export function swapFor(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  live: View,
+  item: unknown
+): HeldRecord | undefined {
+  const held = heldFor(pctx.ctx.state.projection, spec.name, live.key);
+
+  return held === undefined || sameItem(live.item, item) ? undefined : held;
+}
+
+/**
+ * Swaps the held view of a record in for the live view of its key: the new item's `view` runs first, then the live
+ * view leaves at once (out of `live`, the cause `"discard"`, despawned with no exit hook) and the held view is shown
+ * with the item (`showWithItem`: the difference written if any, its enter played). A `view` that throws is logged as
+ * a projection that failed and changes nothing: the key keeps its live view and the record its held one until the
+ * next commit.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param mounted - The mounted projection.
+ * @param live - The live view of the key.
+ * @param record - The record that holds the next view of the key.
+ * @param entry - The key, its item, the peers, the mode and the used hints.
+ * @param entry.key - The model key.
+ * @param entry.item - The model item.
+ * @param entry.peers - The new and the old items.
+ * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.used - The hints that reached an entry.
+ * @returns True when the held view was swapped in.
+ */
+function swapEntry(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  mounted: Mounted,
+  live: View,
+  record: HeldRecord,
+  entry: { key: string; item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
+): boolean {
+  let next: Map<string, AnyComponentValue> | undefined;
+
+  try {
+    next = heldDifference(pctx, spec, record, entry.item);
+  } catch (error) {
+    pctx.ctx.log.error("world:projection-failed", { projection: spec.name }, asError(error));
+
+    return false;
+  }
+
+  live.cause = "discard";
+  despawnView(pctx, mounted, live);
+  showWithItem(pctx, spec, mounted, record, entry, next);
+
+  return true;
 }
 
 /**
@@ -511,8 +625,61 @@ function settleUnchanged(
 }
 
 /**
- * Routes one key of the new state to the entry it belongs to: a live view changes, a queued view
- * revives, a key a warm window holds is shown, an unknown key enters.
+ * The entry of a key that has a live view. The same object, or in play mode the same content: nothing to project. A
+ * restore and a load still write its rest pose, once for every live view, in `convergeMounted`; a rollback settles it
+ * when it stands off it. A warm record that holds the next view of the key (a gated window's open view, built under
+ * its dim) has it swapped in, or nothing happens when its `view` throws. Otherwise the view changes.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param mounted - The mounted projection.
+ * @param live - The live view of the key.
+ * @param entry - The key, its item, the peers, the mode, the flags and the used hints.
+ * @param entry.key - The model key.
+ * @param entry.item - The model item.
+ * @param entry.peers - The new and the old items.
+ * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.force - Whether an unchanged item is projected again.
+ * @param entry.settle - Whether an unchanged view that stands off its rest pose is settled.
+ * @param entry.used - The hints that reached an entry.
+ * @param entry.unchanged - The unchanged views of a direct reconcile that settles.
+ * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
+ * @param counts - The counters of this reconcile.
+ */
+function applyLive(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  mounted: Mounted,
+  live: View,
+  entry: {
+    key: string;
+    item: unknown;
+    peers: Peers;
+    direct: boolean;
+    force: boolean;
+    settle: boolean;
+    used: Set<Hint>;
+    unchanged: View[];
+    rewritten: View[];
+  },
+  counts: Counts
+): void {
+  const same = !entry.force && live.item === entry.item;
+  const swap = same ? undefined : swapFor(pctx, spec, live, entry.item);
+
+  if (swap !== undefined) {
+    if (swapEntry(pctx, spec, mounted, live, swap, entry)) counts.entered += 1;
+  } else if (!same && changeEntry(pctx, spec, live, entry)) {
+    counts.changed += 1;
+  } else if (entry.settle) {
+    settleUnchanged(pctx, spec, live, entry);
+  }
+}
+
+/**
+ * Routes one key of the new state to the entry it belongs to: a live view changes, or gives its place to the next
+ * view a warm record holds of its key, a queued view revives, a key a warm window holds is shown, an unknown key
+ * enters.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -529,7 +696,7 @@ function settleUnchanged(
  * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
  * @param counts - The counters of this reconcile.
  */
-function applyEntry(
+export function applyEntry(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   mounted: Mounted,
@@ -549,13 +716,7 @@ function applyEntry(
   const live = mounted.live.get(entry.key);
 
   if (live !== undefined) {
-    // The same object, or in play mode the same content: nothing to project. A restore and a
-    // load still write its rest pose, once for every live view, in `convergeMounted`. A rollback
-    // settles it when it stands off it.
-    const same = !entry.force && live.item === entry.item;
-
-    if (!same && changeEntry(pctx, spec, live, entry)) counts.changed += 1;
-    else if (entry.settle) settleUnchanged(pctx, spec, live, entry);
+    applyLive(pctx, spec, mounted, live, entry, counts);
 
     return;
   }

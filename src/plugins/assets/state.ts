@@ -83,6 +83,9 @@ export function createAssetsState(): State {
     restPending: false,
     restedLive: false,
     readyFailed: emptySet(),
-    warmed: emptyMap()
+    warmed: emptyMap(),
+    readyWait: "none",
+    readySince: -1,
+    readyWarmAsk: 0
   };
 }

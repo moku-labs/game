@@ -264,8 +264,8 @@ function dropDeadRest(_pose: RestPose, entity: Entity, rests: Map<Entity, RestPo
 }
 
 /**
- * Drops the key of an element whose entity is gone, and its side of the key table when the key
- * still names that entity.
+ * Drops the key of an element whose entity is gone, and its side of the key table, or of the keys
+ * held elements wait with, when the key still names that entity.
  *
  * @param place - The projection and key of the element.
  * @param entity - Its entity.
@@ -282,9 +282,14 @@ function dropDeadKey(
 
   keysByEntity.delete(entity);
 
-  const byKey = pctx.ctx.state.projection.keys.get(place.projection);
+  const state = pctx.ctx.state.projection;
+  const byKey = state.keys.get(place.projection);
 
   if (byKey?.get(place.key) === entity) byKey.delete(place.key);
+
+  const waiting = state.heldKeys.size > 0 ? state.heldKeys.get(place.projection) : undefined;
+
+  if (waiting?.get(place.key) === entity) waiting.delete(place.key);
 }
 
 /**
