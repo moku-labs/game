@@ -33,6 +33,11 @@ const SET_IDS = [
   "effects.shine",
   "effects.aura",
   "effects.fold",
+  "effects.pixelate",
+  "effects.gradientMap",
+  "effects.wave",
+  "effects.mirror",
+  "effects.shadow",
   "effects.bloom",
   "effects.bloomDown",
   "effects.bloomBlur"
@@ -247,7 +252,8 @@ describe("a game build with and without effectsPlugin", () => {
   }, 60_000);
 
   // Bug: a lost `/*#__PURE__*/`, a concatenation at module scope or a barrel of the set: every member's shader, or
-  // the set head, ships in a game that lists none.
+  // the set head, ships in a game that lists none. The built-in `Outline` draws on the head's place helpers (F126 s4),
+  // so one `inputPlace` ships with `effectsPlugin`, its own; the hash and a second copy of the helpers never do.
   it("carries no member of the effect set and no set head when the game lists none", () => {
     for (const profile of ["release", "dev"] as const) {
       for (const shape of ["source", "package"] as const) {
@@ -258,7 +264,9 @@ describe("a game build with and without effectsPlugin", () => {
           SET_IDS.filter(id => code.includes(id)),
           `${profile}, ${shape}`
         ).toEqual([]);
-        expect(code, `${profile}, ${shape}`).not.toContain("inputPlace");
+        const places = code.split("fn inputPlace(").length - 1;
+
+        expect(places, `${profile}, ${shape}`).toBeLessThanOrEqual(1);
         expect(code, `${profile}, ${shape}`).not.toContain("setHash");
       }
     }

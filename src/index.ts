@@ -456,8 +456,12 @@ export { Dissolve } from "./plugins/effects/set/dissolve";
 export { Flash } from "./plugins/effects/set/flash";
 export { Fold } from "./plugins/effects/set/fold";
 export { Grade } from "./plugins/effects/set/grade";
+export { GradientMap } from "./plugins/effects/set/gradient-map";
+export { Mirror } from "./plugins/effects/set/mirror";
+export { Pixelate } from "./plugins/effects/set/pixelate";
 export { RevealLine } from "./plugins/effects/set/reveal-line";
 export { RevealRound } from "./plugins/effects/set/reveal-round";
+export { Shadow } from "./plugins/effects/set/shadow";
 export { Shine } from "./plugins/effects/set/shine";
 export type {
   AuraValue,
@@ -466,12 +470,18 @@ export type {
   FlashValue,
   FoldValue,
   GradeValue,
+  GradientMapValue,
+  MirrorValue,
+  PixelateValue,
   RevealLineValue,
   RevealRoundValue,
+  ShadowValue,
   ShineValue,
-  VignetteValue
+  VignetteValue,
+  WaveValue
 } from "./plugins/effects/set/types";
 export { Vignette } from "./plugins/effects/set/vignette";
+export { Wave } from "./plugins/effects/set/wave";
 export { Emitter } from "./plugins/effects/particles/component";
 export { defineEmitter } from "./plugins/effects/particles/define";
 // platform: the provider seam a game fills, and what one Back press ends in

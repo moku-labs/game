@@ -26,6 +26,7 @@ Open `http://127.0.0.1:4173/#slope-4`. Change the part after `#` and the scene c
 | `#arms=rest,full,rows,set-flash,set-grade,set-vignette,set-grade-full,sweep-grade&every=2&k=8` | The arms of the effect set's first slice with the arms its lines compare against. |
 | `#arms=rest,rows,set-reveal-line,set-reveal-round,set-dissolve,set-shine,set-aura,set-fold&every=2&k=8` | The arms of the effect set's second slice with `rest` and `rows`, which its lines compare against. |
 | `#arms=rest,set-bloom,set-bloom-held,set-bloom-one,sweep-blur,sweep-blur-q4,sweep-grade&every=2&k=8` | The arms of the effect set's third slice with `rest`, which the lines of `set-bloom-held` and `set-bloom-one` compare against, and the three arms `sweep` splits into. |
+| `#arms=rest,rows,set-pixelate,set-gradient-map,set-wave,set-mirror,set-shadow,set-outline&every=2&k=8` | The arms of the effect set's fourth slice (stage 4 item 2) with `rest` and `rows`, which its lines compare against. |
 
 From the editor: open this folder as a game. The command `bench.scene` (`{ scene, k? }`) switches the
 scene, the sources `bench.scenes` and `bench.readout` list the scenes and the numbers.
@@ -65,6 +66,12 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `set-shine` | The same rows under `Shine`, its `position` written each frame from -0.5 to 1.5. | A glint on a reward. |
 | `set-aura` | The same rows under `Aura`, its `strength` written each frame: 13 samples a pixel over the rows padded by 8. | A hinted tile, a selected card. |
 | `set-fold` | The same rows under `Fold`, its `angle` written each frame as `rows` writes its own, padded by 8 as `rows` is. | OrderFlip, CoverFold. |
+| `set-pixelate` | The same rows under `Pixelate`, its `size` written each frame: 1 sample, no padding. | A picture that sharpens as it loads. |
+| `set-gradient-map` | The same rows under `GradientMap`, its `amount` written each frame: 1 sample, no padding. | A tinted memory, a duotone. |
+| `set-wave` | The same rows under `Wave`, its `phase` written each frame: 1 sample, no padding. | Water, heat, a flag. |
+| `set-mirror` | The same rows under `Mirror` with `fade` 0.9, its `alpha` written each frame: 1 sample, no padding. | PromoMirror on a copy view. |
+| `set-shadow` | The same rows under `Shadow`, its `soft` written each frame: 10 samples over the rows padded by 8. | A lifted card, a dragged tile. |
+| `set-outline` | The same rows under `Outline`, its `alpha` written each frame: 13 samples, padded by its thickness. | A selected item. |
 | `set-bloom` | 12 tiles 128 × 128 (the tiles of `fog`) under the engine's `Bloom`, its `strength` written each frame: a change of `strength` leaves the chain's steps as they were, so the chain is held and on WebGPU each tile draws its body on its own quad in the canvas pass, over the held chain result (F126 stage 4 slice 1): no pass of its own, `canvasPasses` 1. The chain is still answered in JavaScript each frame. On WebGL the held chain's stage 3 is drawn again each frame, 3 passes a tile; a moving `threshold` or `radius` reruns the chain and stage 3 on both, 7. The worst case, reported with its pass count. | A glow on a reward or a gem. |
 | `set-bloom-held` | The same 12 tiles, their `strength` written once to 0.6, then at rest, one small sprite moving so frames are drawn: 12 kept pictures, a batched sprite each. Against `rest`. | Blooming rewards that stand still. |
 | `set-bloom-one` | The same 12 tiles, one of them its `strength` written each frame, the other 11 kept: the moving one on its quad over the held chain result on WebGPU, no pass of its own (3 a frame on WebGL). Against `rest`. | One reward pulsing among still ones. |

@@ -3,6 +3,8 @@ import { Glow } from "../../filters/builtins";
 import type { FilterFields } from "../../filters/types";
 import { Bloom } from "../../set/bloom";
 import { Flash } from "../../set/flash";
+import { Pixelate } from "../../set/pixelate";
+import { Wave } from "../../set/wave";
 import { BUDGET, NOISE } from "./budgets";
 import {
   BLOOM_STRENGTH,
@@ -13,9 +15,11 @@ import {
   fadeWrite,
   filtersFixture,
   HALF,
+  PIXELATE_SIZE,
   RESTING,
   tweenStep,
-  tweenWrite
+  tweenWrite,
+  WAVE_PHASE
 } from "./fixtures";
 
 // ---------------------------------------------------------------------------
@@ -52,6 +56,30 @@ describe("effects:filters, heap bytes per frame step", () => {
   // Bug it guards: a member of the effect set allocates per frame of a tween where a game's own filter does not.
   it("one Flash amount tweened on one of 12 filtered views, its quad handed over", () => {
     const fixture = filtersFixture([Flash.filter], FLASH_AMOUNT);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
+    const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);
+
+    expect(handed.some(set => set.slots[0]?.quad !== undefined)).toBe(true);
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
+  });
+
+  // Bug it guards: a member of stage 4 allocates per frame of its loop: a `Wave` whose phase flows for as long as a scene
+  // is open, on its quad.
+  it("one Wave phase tweened on one of 12 filtered views, its quad handed over", () => {
+    const fixture = filtersFixture([Wave.filter], WAVE_PHASE);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
+    const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);
+
+    expect(handed.some(set => set.slots[0]?.quad !== undefined)).toBe(true);
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersTween + NOISE);
+  });
+
+  // Bug it guards: the sync reads a stored number field V8 keeps as a raw double (a `Pixelate`'s one `size`) by the
+  // uniform's name, and every read hands back a new box: 16 B at the compare and 16 at the write, per frame.
+  it("one Pixelate size tweened on one of 12 filtered views, its quad handed over", () => {
+    const fixture = filtersFixture([Pixelate.filter], PIXELATE_SIZE);
     const step = bytesPerCall(tweenStep(fixture));
     const write = bytesPerCall(tweenWrite(fixture));
     const handed = fixture.mock.renderer.sets.filter(set => set.entity === fixture.tweened);

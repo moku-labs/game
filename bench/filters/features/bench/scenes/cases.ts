@@ -14,15 +14,20 @@ import {
   Fold,
   Glow,
   Grade,
+  GradientMap,
+  Mirror,
   Outline,
+  Pixelate,
   RevealLine,
   RevealRound,
+  Shadow as SetShadow,
   Shape,
   Shine,
   Sprite,
   Text,
   Transform,
   Vignette,
+  Wave,
   type World
 } from "../../../../../src/index.ts";
 import { Emitter } from "../../../kit";
@@ -890,6 +895,42 @@ const SET_SCENES: readonly BenchScene[] = [
     "the rows under Fold, its angle written each frame: on the quad, padded by 8, the shape of rows",
     Fold,
     (elapsedMs, index) => ({ angle: elapsedMs / 500 + index * 0.4 })
+  ),
+  memberRowScene(
+    "set-pixelate",
+    "the rows under Pixelate, its size written each frame: on the quad, 1 sample, no padding",
+    Pixelate,
+    (elapsedMs, index) => ({ size: 6 + 4 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-gradient-map",
+    "the rows under GradientMap, its amount written each frame: on the quad, 1 sample, no padding",
+    GradientMap,
+    (elapsedMs, index) => ({ amount: 0.5 + 0.5 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-wave",
+    "the rows under Wave, its phase written each frame: on the quad, 1 sample, no padding",
+    Wave,
+    (elapsedMs, index) => ({ phase: elapsedMs / 200 + index * 0.4 })
+  ),
+  memberRowScene(
+    "set-mirror",
+    "the rows under Mirror, its alpha written each frame: on the quad, 1 sample, no padding",
+    Mirror,
+    (elapsedMs, index) => ({ alpha: 0.5 + 0.5 * wave(elapsedMs, index), fade: 0.9 })
+  ),
+  memberRowScene(
+    "set-shadow",
+    "the rows under Shadow, its soft written each frame: on the quad, 10 samples, padded by 8",
+    SetShadow,
+    (elapsedMs, index) => ({ soft: 4 + 4 * wave(elapsedMs, index) })
+  ),
+  memberRowScene(
+    "set-outline",
+    "the rows under Outline, its alpha written each frame: on the quad, 13 samples, padded by its thickness",
+    Outline,
+    (elapsedMs, index) => ({ alpha: 0.5 + 0.5 * wave(elapsedMs, index) })
   )
 ];
 

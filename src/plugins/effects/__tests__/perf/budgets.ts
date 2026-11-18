@@ -13,7 +13,10 @@ export const BUDGET = {
   // map, a `for…of` iterator over each frozen uniform list, a sort per view, the budget walk). Now 0: no view syncs.
   filtersIdle: 0,
   // E1: one `Glow` strength tweened on one of 12 filtered views, the tween's own write subtracted. Before: 4 698 B. Now
-  // 0: one view syncs, its uniforms walked by index.
+  // 0: one view syncs, its uniforms walked by index. Also the budget of the `Flash`, `Wave` and `Pixelate` tweens of
+  // the effect set. `Pixelate`'s `size` measured 32 (16 when its case ran alone): V8 kept the stored `size` as a raw
+  // double, and each of the sync's two reads of it by the uniform's name (the compare, the write) handed back a new box.
+  // Now 0, by the tagged fields of `tagNumbers` (instance.ts).
   filtersTween: 0,
   // Change 2026-10-18-memory-render, M4: the `Alpha` of one of 12 filtered views touches 1 in every other step, the
   // fade's own write subtracted; its filter stays on (it is switched off only after `CALM_AFTER` syncs at 1). Before:
@@ -33,10 +36,10 @@ export const BUDGET = {
   // (the list of taken textures cut with `length = 0` gave up its store, and the next apply grew a new one). Now 0.
   backdropChainApply: 0,
   // B1: the `spread` of a backdrop tweened, the tween's own write subtracted: its view synced, its slot compared (a
-  // backdrop's chains are read for what the slot says it blurs). 16: the tweened fraction, boxed once when the sync
-  // stores it in the uniform group, because here the stored value keeps it unboxed (the `Glow` case boxes it in the
-  // write); a filter of ours that is no backdrop, of the same uniforms, measures the same 16. New.
-  backdropTween: 16,
+  // backdrop's chains are read for what the slot says it blurs). Was 16: V8 kept the stored `spread` as a raw double,
+  // and the sync's read of it by the uniform's name handed back a new box. Now 0: an instance moves the number fields
+  // of its stored value and of its uniform group to V8's tagged form once, as it is built (`tagNumbers`, instance.ts).
+  backdropTween: 0,
   // Change 2026-11-05-f126-s3-bloom: the chain of `Bloom` alone, called as a tween calls it, its radius stepping between
   // the two ladders. New. 0: it answers one of two arrays made once, their threshold and sigma written in place.
   bloomChain: 0,

@@ -321,8 +321,13 @@ export type {
   FlashValue,
   FoldValue,
   GradeValue,
+  GradientMapValue,
+  MirrorValue,
+  PixelateValue,
   RevealLineValue,
   RevealRoundValue,
+  ShadowValue,
   ShineValue,
-  VignetteValue
+  VignetteValue,
+  WaveValue
 } from "./set/types";

@@ -25,6 +25,8 @@ import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import { Bloom } from "../../set/bloom";
 import { Flash } from "../../set/flash";
+import { Pixelate } from "../../set/pixelate";
+import { Wave } from "../../set/wave";
 import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
 import { Frosted, Under } from "../filter-fixtures";
 import { createMockEffects, type MockEffects } from "../unit/mock-effects";
@@ -201,6 +203,20 @@ export const BLOOM_STRENGTH: TweenedField = {
   make: start => Bloom({ strength: start })
 };
 
+/** The `phase` of the effect set's `Wave`: the loop a game runs for as long as a scene is open. */
+export const WAVE_PHASE: TweenedField = {
+  component: Wave,
+  field: "phase",
+  make: start => Wave({ phase: start })
+};
+
+/** The `size` of the effect set's `Pixelate`: a picture that sharpens as it loads. */
+export const PIXELATE_SIZE: TweenedField = {
+  component: Pixelate,
+  field: "size",
+  make: start => Pixelate({ size: start })
+};
+
 /** A started mock with filtered views, the step of its `sync` phase and the stored filter a tween moves. */
 export type FiltersFixture = {
   mock: MockEffects;
@@ -250,7 +266,7 @@ function viewComponents(index: number, tween: TweenedField): AnyComponentValue[]
 /**
  * Starts a mock with `FILTERED_VIEWS` filtered views, runs the frames that build and hand over their instances, and
  * clears every change set. The first view carries the filter a tween case moves: `Glow` by default. The feature lists
- * the game's `Tint` and the effect set's `Flash` and `Bloom`.
+ * the game's `Tint` and the effect set's `Flash`, `Bloom`, `Wave` and `Pixelate`.
  *
  * @param quads - The definitions whose quad passed its check: their slots hand a quad over.
  * @param tween - The filter and the field a tween case moves on the first view.
@@ -264,7 +280,10 @@ export function filtersFixture(
 
   for (const definition of quads) mock.state.checks.quads.add(definition);
 
-  mock.features.push({ name: "perf", description: { filters: [Tint, Flash, Bloom] } });
+  mock.features.push({
+    name: "perf",
+    description: { filters: [Tint, Flash, Bloom, Wave, Pixelate] }
+  });
 
   const counter = plainRenderer(mock);
 
