@@ -48,6 +48,7 @@ const FUNCTIONS = {
   smoothstep,
   step: (edge: number, x: number) => (x < edge ? 0 : 1),
   distance: (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y),
+  dot: (a: Vec2, b: Vec2) => a.x * b.x + a.y * b.y,
   // The pixel's place is `uv` itself, and its input a white opaque pixel: `c` is 1.
   inputPlace: (uv: Vec2): Vec2 => uv,
   sampleInput: (): number => 1,

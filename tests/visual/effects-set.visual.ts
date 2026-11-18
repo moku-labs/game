@@ -5,8 +5,10 @@
  * oracle's thresholds (a channel over 24, a ratio over 0.001); a tweening value runs on the view's own quad on WebGPU
  * and stays within 1/255 of its live frame; one pixel by hand (Flash at amount 1 is its colour, Grade at saturation 0
  * of red is the luma, Vignette's centre is the source; RevealLine's far corners at π/4 and progress 1, Shine's line and
- * a transparent corner under it, Aura next to an edge, Fold at a half turn, Bloom at threshold 1; `effects-set/page.ts`
- * has the numbers) is within 2/255; `Bloom`, which reads a chain, is held within 1/255 of live at radius 16 and 32 and
+ * a transparent corner under it, Aura next to an edge, Fold at a half turn, Bloom at threshold 1; of stage 4 a pixel of
+ * a Pixelate block reads its centre, GradientMap of black is `dark`, Wave at amplitude 0 is the source, Mirror shows the
+ * square flipped, Shadow under an opaque card is its colour at its alpha, Outline 3 CSS px off an edge is on a ring of
+ * 4 at either resolution; `effects-set/page.ts` has the numbers) is within 2/255; `Bloom`, which reads a chain, is held within 1/255 of live at radius 16 and 32 and
  * in its tween on both backends, its `strength` tween on the quad over the held chain result on WebGPU, and a
  * `threshold` tween after it off the quad in a frame that reran the chain, within 1/255 of live on both backends (stage
  * 4 slice 1); and every WebGL capture is held against the WebGPU capture of the same row: alpha within 2/255 and

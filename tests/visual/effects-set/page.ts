@@ -8,7 +8,9 @@
  * at a quarter turn of the diagonal; `Shine` two, its line and a transparent corner). `Bloom`, the member with a chain:
  * its held rows at radius 16 and 32 are its kept picture (stage 3) within 1/255 of live; its `strength` tween runs on
  * the view's own quad on WebGPU over the held chain result, within 1/255 of live; and a `threshold` tween after it
- * reruns the chain, which leaves the quad in that frame for stage 2 and 3, within 1/255 of live. Every capture stays in the
+ * reruns the chain, which leaves the quad in that frame for stage 2 and 3, within 1/255 of live. Stage 4's members
+ * (`Pixelate`, `GradientMap`, `Wave`, `Mirror`, `Shadow`) and the built-in `Outline`, now in CSS px on the head's place
+ * helpers, play the same three kinds of row. Every capture stays in the
  * page, so the leg can hand the WebGPU pictures to the WebGL page (`compareSet`) and hold the GLSL twins against the
  * WGSL bodies. It answers in `globalThis.effectsSet`.
  *
@@ -25,15 +27,21 @@ import {
   Flash,
   Fold,
   Grade,
+  GradientMap,
   Layer,
+  Mirror,
+  Outline,
   Parent,
+  Pixelate,
   RevealLine,
   RevealRound,
+  Shadow,
   Shape,
   Shine,
   Transform,
   type,
-  Vignette
+  Vignette,
+  Wave
 } from "../../../src/index";
 import manifestJson from "../../fixtures/mini-game/generated/manifest.json";
 
@@ -157,7 +165,23 @@ const main = kit.defineScene("main", {
 });
 const feature = kit.defineFeature("visual", {
   scenes: [main],
-  filters: [Flash, Grade, Vignette, RevealLine, RevealRound, Dissolve, Shine, Aura, Fold, Bloom]
+  filters: [
+    Flash,
+    Grade,
+    Vignette,
+    RevealLine,
+    RevealRound,
+    Dissolve,
+    Shine,
+    Aura,
+    Fold,
+    Bloom,
+    Pixelate,
+    GradientMap,
+    Wave,
+    Mirror,
+    Shadow
+  ]
 });
 
 /** The manifest of the page: the mini game's `ui` bundle without its files, so the scene loads nothing. */
@@ -503,6 +527,144 @@ async function run(): Promise<SetResult> {
     };
   };
 
+  /**
+   * The rows of stage 4: `Pixelate`, `GradientMap`, `Wave`, `Mirror`, `Shadow`, and the built-in `Outline` in CSS px.
+   *
+   * @returns Their answers, in order.
+   */
+  const stageFour = async (): Promise<SetRow[]> => [
+    // Pixelate: blocks of 16 from the card's top-left; the block 136..152 × 176..192 has its centre in the square.
+    await play(app, {
+      name: "Pixelate: held",
+      kind: "held",
+      scene: { entities: card(Pixelate({ size: 12 })) }
+    }),
+    await play(app, {
+      name: "Pixelate: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Pixelate({ size: 4 }),
+        (entity, turn) => ecs.set(entity, Pixelate, { size: 4 + 2 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Pixelate: probe, a pixel of the card reads its block's centre in the square",
+      kind: "probe",
+      scene: { entities: card(Pixelate({ size: 16 })) },
+      probe: { x: 138, y: 178, rgb: [0xff, 0xcc, 0x00] }
+    }),
+    // GradientMap: a duotone; black maps to dark.
+    await play(app, {
+      name: "GradientMap: held",
+      kind: "held",
+      scene: { entities: card(GradientMap({ dark: 0x20_10_40, light: 0xff_e0_a0 })) }
+    }),
+    await play(app, {
+      name: "GradientMap: tween",
+      kind: "tween",
+      scene: tweened(
+        () => GradientMap({ dark: 0x20_10_40, amount: 0.2 }),
+        (entity, turn) => ecs.set(entity, GradientMap, { amount: 0.2 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "GradientMap: probe, black is dark",
+      kind: "probe",
+      scene: { entities: card(GradientMap({ dark: 0x33_88_ff }), 0x00_00_00, false) },
+      probe: { x: 240, y: 240, rgb: [0x33, 0x88, 0xff] }
+    }),
+    // Wave: rows sway; its phase loop; at amplitude 0 the view is its source.
+    await play(app, {
+      name: "Wave: held",
+      kind: "held",
+      scene: { entities: card(Wave({ amplitude: 6, phase: 1 })) }
+    }),
+    await play(app, {
+      name: "Wave: held, angle π/2",
+      kind: "held",
+      scene: { entities: card(Wave({ amplitude: 6, angle: Math.PI / 2 })) }
+    }),
+    await play(app, {
+      name: "Wave: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Wave({ phase: 0.3 }),
+        (entity, turn) => ecs.set(entity, Wave, { phase: 0.3 + 0.4 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Wave: probe, at amplitude 0 the edge of the square is the source",
+      kind: "probe",
+      scene: { entities: card(Wave({ amplitude: 0 })) },
+      probe: { x: 141, y: 200, rgb: [0xff, 0xcc, 0x00] }
+    }),
+    // Mirror: the card flipped top to bottom, fading; the square shows below where it stands.
+    await play(app, {
+      name: "Mirror: held",
+      kind: "held",
+      scene: { entities: card(Mirror({ fade: 0.5 })) }
+    }),
+    await play(app, {
+      name: "Mirror: held, axis 0",
+      kind: "held",
+      scene: { entities: card(Mirror({ axis: 0 })) }
+    }),
+    await play(app, {
+      name: "Mirror: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Mirror({ alpha: 0.4 }),
+        (entity, turn) => ecs.set(entity, Mirror, { alpha: 0.4 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Mirror: probe, the square flipped: a pixel under it reads it",
+      kind: "probe",
+      scene: { entities: card(Mirror()) },
+      probe: { x: 180, y: 290, rgb: [0xff, 0xcc, 0x00] }
+    }),
+    // Shadow: a white shadow, so it shows on the black page; under the card's straight bottom edge, hard, at 0.5.
+    await play(app, {
+      name: "Shadow: held",
+      kind: "held",
+      scene: { entities: card(Shadow({ color: 0xff_ff_ff, x: 4, y: 6, soft: 6 })) }
+    }),
+    await play(app, {
+      name: "Shadow: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Shadow({ color: 0xff_ff_ff, y: 2 }),
+        (entity, turn) => ecs.set(entity, Shadow, { y: 2 + turn })
+      )
+    }),
+    await play(app, {
+      name: "Shadow: probe, below an opaque card at y 4 it is the colour at its alpha",
+      kind: "probe",
+      scene: { entities: card(Shadow({ color: 0xff_ff_ff, soft: 0 })) },
+      probe: { x: 240, y: 322, rgb: [128, 128, 128] }
+    }),
+    // Outline: a white ring 4 CSS px out at any resolution; 3 px left of a straight edge is on it.
+    await play(app, {
+      name: "Outline: held",
+      kind: "held",
+      scene: { entities: card(Outline({ thickness: 4, color: 0xff_d7_00 })) }
+    }),
+    await play(app, {
+      name: "Outline: tween",
+      kind: "tween",
+      scene: tweened(
+        () => Outline({ thickness: 4, color: 0xff_d7_00, alpha: 0.4 }),
+        (entity, turn) => ecs.set(entity, Outline, { alpha: 0.4 + 0.1 * turn })
+      )
+    }),
+    await play(app, {
+      name: "Outline: probe, 3 CSS px left of a straight edge is on a ring of 4",
+      kind: "probe",
+      scene: { entities: card(Outline({ thickness: 4, color: 0xff_ff_ff }), 0x33_88_ff, false) },
+      probe: { x: 117, y: 240, rgb: [0xff, 0xff, 0xff] }
+    })
+  ];
+
   // The rows play one after another: an array literal evaluates its awaits in order.
   const rows: SetRow[] = [
     // Flash: a gold wash.
@@ -759,7 +921,8 @@ async function run(): Promise<SetResult> {
       kind: "probe",
       scene: { entities: card(Bloom({ threshold: 1 }), 0x33_88_ff, false) },
       probe: { x: 240, y: 240, rgb: [0x33, 0x88, 0xff] }
-    })
+    }),
+    ...(await stageFour())
   ];
 
   const warnings = app.log

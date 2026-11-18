@@ -54,6 +54,12 @@ export const BUDGET = {
   // (change 2026-11-06-f126-s4-quad-chain): 32. The names are made once with the quad; the renderer holds the chain,
   // whose answer did not change, but this sync still evaluates it, and the 32 B are that walk's.
   filtersBloomTween: 32,
+  // Change 2026-11-11-f126-s4-effects: the `size` of a `Pixelate` tweened on one of 12 filtered views, its quad handed
+  // over, the tween's own write subtracted. New. 32 on Node 24.21 when the file runs whole, 16 when the case runs alone.
+  // The same sync measures 0 for `Wave`'s `phase` in the same file (under `filtersTween`), and a scratch copy of
+  // `Pixelate` with a second uniform measured 0 too: the bytes come with a member of one number field. Not proven where:
+  // most likely V8 boxing the fraction at the sync's reads of it by the uniform's name, as in `filtersBloomTween`.
+  filtersPixelateTween: 32,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the
   // frame's delta boxed into each step call). Now 0: nothing is written for a still host.

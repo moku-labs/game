@@ -1,34 +1,30 @@
 /**
- * @file effects/filters — the fragment body of `Outline`: the source drawn over a ring of
- * `thickness` pixels in `color × alpha`, sampled in 8 directions, 12 from 6 px, as the `text`
- * outline does.
+ * @file effects/filters — the fragment body of `Outline`: the source drawn over a hard ring of `thickness` CSS px in
+ * `color × alpha`, the largest alpha of 12 probes on that ring, over the place helpers of the effect set's head.
  */
 
 /**
- * The WGSL fragment body of `Outline`. Reads `fu.thickness`, `fu.color`, `fu.alpha`.
+ * The WGSL fragment body of `Outline`. Reads `fu.thickness`, `fu.color`, `fu.alpha`. The probes stand on a ring of
+ * `thickness` CSS px around the pixel: `thickness / inputFrame()` is that radius in 0..1 of the padded frame, as
+ * `Aura`'s ring, so the line is as wide as the padding at any resolution. The ring is hard: the largest alpha of the
+ * 12 probes, not their mean. The line is drawn in `color` under the source.
  */
 export const OUTLINE_WGSL = /* wgsl */ `const OUTLINE_TAU: f32 = 6.283185307179586;
 
 @fragment
 fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-  let source = textureSample(uTexture, uSampler, uv);
-  let texel = gfu.uInputSize.zw;
-  let spokes = select(8, 12, fu.thickness >= 6.0);
-  var edge = 0.0;
+  let n = inputPlace(uv);
+  let c = sampleInput(n);
+  let reach = fu.thickness / inputFrame();
+  var ring = 0.0;
 
-  for (var spoke = 0; spoke < spokes; spoke++) {
-    let turn = OUTLINE_TAU * f32(spoke) / f32(spokes);
-    let probe = clamp(
-      uv + vec2<f32>(cos(turn), sin(turn)) * texel * fu.thickness,
-      gfu.uInputClamp.xy,
-      gfu.uInputClamp.zw
-    );
-
-    edge = max(edge, textureSample(uTexture, uSampler, probe).a);
+  for (var i = 0; i < 12; i++) {
+    let turn = OUTLINE_TAU * f32(i) / 12.0;
+    ring = max(ring, sampleInput(n + vec2<f32>(cos(turn), sin(turn)) * reach).a);
   }
 
-  let line = edge * fu.alpha;
+  let line = ring * fu.alpha;
 
-  return source + vec4<f32>(fu.color * line, line) * (1.0 - source.a);
+  return c + vec4<f32>(fu.color * line, line) * (1.0 - c.a);
 }
 `;

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { Outline } from "../../../filters/builtins";
+import { OUTLINE_GLSL } from "../../../filters/outline-glsl";
+import { OUTLINE_WGSL } from "../../../filters/outline-wgsl";
 import type { FilterComponent, FilterFields } from "../../../filters/types";
 import { AURA_GLSL, AURA_WGSL, Aura } from "../../../set/aura";
 import { BLOOM_GLSL, BLOOM_WGSL, Bloom } from "../../../set/bloom";
@@ -6,10 +9,15 @@ import { DISSOLVE_GLSL, DISSOLVE_WGSL, Dissolve } from "../../../set/dissolve";
 import { FLASH_GLSL, FLASH_WGSL, Flash } from "../../../set/flash";
 import { FOLD_GLSL, FOLD_WGSL, Fold } from "../../../set/fold";
 import { GRADE_GLSL, GRADE_WGSL, Grade } from "../../../set/grade";
+import { GRADIENT_MAP_GLSL, GRADIENT_MAP_WGSL, GradientMap } from "../../../set/gradient-map";
+import { MIRROR_GLSL, MIRROR_WGSL, Mirror } from "../../../set/mirror";
+import { PIXELATE_GLSL, PIXELATE_WGSL, Pixelate } from "../../../set/pixelate";
 import { REVEAL_LINE_GLSL, REVEAL_LINE_WGSL, RevealLine } from "../../../set/reveal-line";
 import { REVEAL_ROUND_GLSL, REVEAL_ROUND_WGSL, RevealRound } from "../../../set/reveal-round";
+import { SHADOW_GLSL, SHADOW_WGSL, Shadow } from "../../../set/shadow";
 import { SHINE_GLSL, SHINE_WGSL, Shine } from "../../../set/shine";
 import { VIGNETTE_GLSL, VIGNETTE_WGSL, Vignette } from "../../../set/vignette";
+import { WAVE_GLSL, WAVE_WGSL, Wave } from "../../../set/wave";
 
 // ---------------------------------------------------------------------------
 // Unit test: the budget of every member of the set, from its definition and its
@@ -45,8 +53,10 @@ type Row = {
 };
 
 /**
- * Every single-pass member of slices 1 and 2. `Aura` reads its pixel and 12 probes on a ring; `Aura` (at its default
- * `spread` 8) and `Fold` are padded by 8 px: a tile's frame is 144 × 144, 0.083 Mpx at 2.
+ * Every single-pass member of slices 1 and 2 and of stage 4, and the built-in `Outline`, which draws on the set head's
+ * place helpers. `Aura` and `Outline` read their pixel and 12 probes on a ring, `Shadow` its pixel, the centre of its
+ * shadow and 12 probes around it; `Aura` (at its default `spread` 8) and `Fold` are padded by 8 px: a tile's frame is
+ * 144 × 144, 0.083 Mpx at 2; `Shadow` by 16, 160 × 160, 0.1024 Mpx; `Outline` by its default `thickness` 2, 0.0697.
  */
 const MEMBERS: readonly Row[] = [
   { member: Flash, wgsl: FLASH_WGSL, glsl: FLASH_GLSL, samples: 1, tile: 0.066 },
@@ -63,7 +73,19 @@ const MEMBERS: readonly Row[] = [
   { member: Dissolve, wgsl: DISSOLVE_WGSL, glsl: DISSOLVE_GLSL, samples: 1, tile: 0.066 },
   { member: Shine, wgsl: SHINE_WGSL, glsl: SHINE_GLSL, samples: 1, tile: 0.066 },
   { member: Aura, wgsl: AURA_WGSL, glsl: AURA_GLSL, samples: 13, tile: 0.083 },
-  { member: Fold, wgsl: FOLD_WGSL, glsl: FOLD_GLSL, samples: 1, tile: 0.083 }
+  { member: Fold, wgsl: FOLD_WGSL, glsl: FOLD_GLSL, samples: 1, tile: 0.083 },
+  { member: Pixelate, wgsl: PIXELATE_WGSL, glsl: PIXELATE_GLSL, samples: 1, tile: 0.066 },
+  {
+    member: GradientMap,
+    wgsl: GRADIENT_MAP_WGSL,
+    glsl: GRADIENT_MAP_GLSL,
+    samples: 1,
+    tile: 0.066
+  },
+  { member: Wave, wgsl: WAVE_WGSL, glsl: WAVE_GLSL, samples: 1, tile: 0.066 },
+  { member: Mirror, wgsl: MIRROR_WGSL, glsl: MIRROR_GLSL, samples: 1, tile: 0.066 },
+  { member: Shadow, wgsl: SHADOW_WGSL, glsl: SHADOW_GLSL, samples: 14, tile: 0.1025 },
+  { member: Outline, wgsl: OUTLINE_WGSL, glsl: OUTLINE_GLSL, samples: 13, tile: 0.07 }
 ];
 
 /** The phone's full resolution: the A26's device pixel ratio, past the bench's `maxResolution` 2. */

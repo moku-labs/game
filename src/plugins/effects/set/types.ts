@@ -179,3 +179,88 @@ export type BloomValue = {
   enabled: boolean;
   order: number;
 };
+
+/**
+ * `Pixelate`: the view drawn in square blocks `size` CSS px wide, from its top-left; 1 or less draws it as it is.
+ *
+ * @example
+ * ```ts
+ * const value: PixelateValue = { size: 8, enabled: true, order: 0 };
+ * ```
+ */
+export type PixelateValue = {
+  size: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `GradientMap`: the view's light mapped from `dark` through `middle` to `light`, mixed in by `amount` (0..1).
+ *
+ * @example
+ * ```ts
+ * const value: GradientMapValue = { dark: 0x2b1a0e, middle: 0x9c6b3c, light: 0xf5e6c8, amount: 1, enabled: true, order: 0 };
+ * ```
+ */
+export type GradientMapValue = {
+  dark: number;
+  middle: number;
+  light: number;
+  amount: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `Wave`: the view swaying by `amplitude` CSS px, one wave every `wavelength` CSS px, shifted by `phase` (radians);
+ * at `angle` 0 its rows sway left and right, at `π / 2` its columns up and down.
+ *
+ * @example
+ * ```ts
+ * const value: WaveValue = { amplitude: 4, wavelength: 48, phase: Math.PI, angle: 0, enabled: true, order: 0 };
+ * ```
+ */
+export type WaveValue = {
+  amplitude: number;
+  wavelength: number;
+  phase: number;
+  angle: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `Mirror`: the view flipped top to bottom (`axis: 1`) or left to right (`axis: 0`), at `alpha` (0..1), fading out to
+ * nothing at `fade` of its size from the mirror line; `fade: 0` keeps it whole.
+ *
+ * @example
+ * ```ts
+ * const value: MirrorValue = { axis: 1, alpha: 0.4, fade: 0.5, enabled: true, order: 0 };
+ * ```
+ */
+export type MirrorValue = {
+  axis: number;
+  alpha: number;
+  fade: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
+ * `Shadow`: a shadow of `color` at `alpha` (0..1) under the view, moved by `x`, `y` CSS px and `soft` CSS px wide;
+ * `|x| + soft` and `|y| + soft` are held within the padding of 16.
+ *
+ * @example
+ * ```ts
+ * const value: ShadowValue = { x: 0, y: 4, soft: 4, color: 0x000000, alpha: 0.5, enabled: true, order: 0 };
+ * ```
+ */
+export type ShadowValue = {
+  x: number;
+  y: number;
+  soft: number;
+  color: number;
+  alpha: number;
+  enabled: boolean;
+  order: number;
+};

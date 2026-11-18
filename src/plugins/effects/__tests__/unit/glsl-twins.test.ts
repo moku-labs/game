@@ -5,12 +5,15 @@ import { GLOW_WGSL } from "../../filters/glow-wgsl";
 import { brokenMark } from "../../filters/mark";
 import { OUTLINE_GLSL } from "../../filters/outline-glsl";
 import { OUTLINE_WGSL } from "../../filters/outline-wgsl";
+import { memberCases } from "./set/member-checks";
 
 // ---------------------------------------------------------------------------
 // Unit test: the GLSL twins of Glow and Outline do the same math as their
 // WGSL. Bun has no GPU, so the pixels are checked in a browser; here the text
 // pins the constants, the probes, the weights and the final colour, line by
-// line against the WGSL
+// line against the WGSL. Outline draws on the place helpers of the set head
+// (F126 s4), so it takes the set's member cases too: the quad, "local", its
+// padding and its twin line for line.
 // ---------------------------------------------------------------------------
 
 /**
@@ -121,22 +124,40 @@ describe("the Outline GLSL", () => {
     expect(readsOf(OUTLINE_GLSL, names)).toEqual(names);
   });
 
-  it("walks the same ring: 8 spokes, 12 from 6 px, the largest alpha", () => {
+  // Bug: the ring measured in physical px (`uInputSize.zw`), as before F126 s4: at resolution 2 the line is half as
+  // wide as its padding; or the spokes switch count with the thickness, so a tween of it jumps.
+  it("walks the same ring: 12 spokes, thickness CSS px out, the largest alpha", () => {
     expect(constant(OUTLINE_GLSL, "OUTLINE_TAU")).toBe(constant(OUTLINE_WGSL, "OUTLINE_TAU"));
-    expect(OUTLINE_WGSL).toContain("let spokes = select(8, 12, fu.thickness >= 6.0);");
-    expect(OUTLINE_GLSL).toContain("int spokes = thickness >= 6.0 ? 12 : 8;");
-    expect(OUTLINE_GLSL).toContain("float turn = OUTLINE_TAU * float(spoke) / float(spokes);");
+    expect(constant(OUTLINE_WGSL, "OUTLINE_TAU")).toBeCloseTo(2 * Math.PI, 12);
+    expect(OUTLINE_WGSL).toContain("let reach = fu.thickness / inputFrame();");
+    expect(OUTLINE_GLSL).toContain("vec2 reach = thickness / inputFrame();");
+    expect(OUTLINE_WGSL).toContain("for (var i = 0; i < 12; i++) {");
+    expect(OUTLINE_GLSL).toContain("for (int i = 0; i < 12; i++) {");
+    expect(OUTLINE_GLSL).toContain("float turn = OUTLINE_TAU * float(i) / 12.0;");
     expect(OUTLINE_GLSL).toContain(
-      "vTextureCoord + vec2(cos(turn), sin(turn)) * texel * thickness,"
+      "ring = max(ring, sampleInput(n + vec2(cos(turn), sin(turn)) * reach).a);"
     );
-    expect(OUTLINE_GLSL).toContain("edge = max(edge, texture(uTexture, probe).a);");
+    expect(OUTLINE_WGSL).not.toContain("uInputSize");
   });
 
   it("draws the source over the same premultiplied ring", () => {
-    expect(OUTLINE_GLSL).toContain("float line = edge * alpha;");
-    expect(OUTLINE_GLSL).toContain(
-      "finalColor = source + vec4(color * line, line) * (1.0 - source.a);"
-    );
+    expect(OUTLINE_GLSL).toContain("float line = ring * alpha;");
+    expect(OUTLINE_GLSL).toContain("finalColor = c + vec4(color * line, line) * (1.0 - c.a);");
+  });
+
+  // Bug: the built-in draws on the whole set head: every game that composes effectsPlugin ships `setHash`.
+  it("carries the place helpers of the set head and not its hash", () => {
+    expect(Outline.filter.source).toContain("fn inputPlace(");
+    expect(Outline.filter.source).not.toContain("setHash");
+    expect(Outline.filter.glsl).toContain("vec2 inputPlace(");
+    expect(Outline.filter.glsl).not.toContain("setHash");
+  });
+
+  memberCases({
+    member: Outline,
+    wgsl: OUTLINE_WGSL,
+    glsl: OUTLINE_GLSL,
+    padding: "thickness"
   });
 });
 

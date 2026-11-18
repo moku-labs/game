@@ -260,7 +260,7 @@ A stand-in hands no quad, so a broken kind keeps its dev mark, and WebGL has non
 | Component | Fields and defaults | Source | Passes |
 |---|---|---|---|
 | `Glow` | `strength: 2, distance: 10, color: 0xffffff, alpha: 1` | our WGSL and GLSL, padded by `distance`; 64 to 256 probes per pixel, by radius in physical pixels | 1 |
-| `Outline` | `thickness: 2, color: 0x000000, alpha: 1` | our WGSL and GLSL, padded by `thickness` | 1 |
+| `Outline` | `thickness: 2, color: 0x000000, alpha: 1` | our WGSL and GLSL on the place helpers of the set head (`withPlaceWgsl`, no hash), padded by `thickness`; a hard ring `thickness` CSS px out, the largest alpha of 12 probes, at any resolution; on WebGPU a still one is a kept picture and a value change rides its quad | 1 |
 | `Blur` | `strength: 8, quality: 0, resolution: 0, repeatEdgePixels: true` | Pixi `BlurFilter` | `2 × quality` |
 | `ColorMatrix` | `brightness: 1, saturation: 0, contrast: 0, hue: 0, grayscale: 0` | Pixi `ColorMatrixFilter` | 1 |
 | `Noise` | `amount: 0.5, seed: 0` | Pixi `NoiseFilter`, the seed always given | 1 |
@@ -275,7 +275,7 @@ An `Alpha` at `alpha: 1` and `resolution: 0` would copy its subtree unchanged th
 
 ### The effect set
 
-Ready members a game lists in a feature's `filters`, as its own filters, from the root: `Flash` (a colour wash), `Grade` (contrast, brightness, saturation, tint), `Vignette` (darker, or coloured, outside a disc), `RevealLine` (shown up to a sweeping line), `RevealRound` (shown inside a growing disc), `Dissolve` (eaten by a noise, with a rim), `Shine` (a band of light sweeping across), `Aura` (a soft halo around the shape), `Fold` (turned about an axis, as a card flips) and `Bloom` (light around what is bright). Each is a `defineFilter` of the engine: one pass, `cache: "local"`, one sample of the input (`Aura` 13), no padding (`Aura` its live `spread`, `Fold` 8 px), so a still view is kept as a picture and a moving value draws on the view's own quad from its third write (WebGPU; on WebGL each frame of a tween is one filter pass). `Bloom` is the one with a chain: its input `bright` is drawn by two stages of the set (the light above `threshold` cut and boxed down to ¼, or ⅛ for a wide radius, in one pass, then a 13-tap blur there in one more), 3 passes with its body at any radius and resolution, so it is for an object, not the screen; a still one is kept as a picture; a `strength` tween keeps its chain and draws on the view's quad over the held result on WebGPU (stage 3 again on WebGL, 3 passes a frame), and a `threshold` or `radius` tween reruns its chain and stage 3, 7 passes a frame. Nothing of the set is registered by itself, and a game that lists no member carries none of its shaders. The members, their fields, budgets and phone numbers: [set/README.md](set/README.md).
+Ready members a game lists in a feature's `filters`, as its own filters, from the root: `Flash` (a colour wash), `Grade` (contrast, brightness, saturation, tint), `Vignette` (darker, or coloured, outside a disc), `RevealLine` (shown up to a sweeping line), `RevealRound` (shown inside a growing disc), `Dissolve` (eaten by a noise, with a rim), `Shine` (a band of light sweeping across), `Aura` (a soft halo around the shape), `Fold` (turned about an axis, as a card flips), `Bloom` (light around what is bright), `Pixelate` (square blocks), `GradientMap` (recoloured by its light), `Wave` (swaying in a sine wave), `Mirror` (flipped in place, for a reflection) and `Shadow` (a soft drop shadow). Each is a `defineFilter` of the engine: one pass, `cache: "local"`, one sample of the input (`Aura` 13, `Shadow` 14), no padding (`Aura` its live `spread`, `Fold` 8 px, `Shadow` 16 px), so a still view is kept as a picture and a moving value draws on the view's own quad from its third write (WebGPU; on WebGL each frame of a tween is one filter pass). `Bloom` is the one with a chain: its input `bright` is drawn by two stages of the set (the light above `threshold` cut and boxed down to ¼, or ⅛ for a wide radius, in one pass, then a 13-tap blur there in one more), 3 passes with its body at any radius and resolution, so it is for an object, not the screen; a still one is kept as a picture; a `strength` tween keeps its chain and draws on the view's quad over the held result on WebGPU (stage 3 again on WebGL, 3 passes a frame), and a `threshold` or `radius` tween reruns its chain and stage 3, 7 passes a frame. Nothing of the set is registered by itself, and a game that lists no member carries none of its shaders. The members, their fields, budgets and phone numbers: [set/README.md](set/README.md).
 
 ### The filter sync
 
@@ -316,7 +316,8 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 
 The filter components are root exports, not members of `app.effects`: the built-ins (`Glow`, `Blur`, …, see Built-in
 filters) and the effect set (`Flash`, `Grade`, `Vignette`, `RevealLine`, `RevealRound`, `Dissolve`, `Shine`, `Aura`,
-`Fold`, `Bloom`, see `set/README.md`), each listed in a feature's `filters`.
+`Fold`, `Bloom`, `Pixelate`, `GradientMap`, `Wave`, `Mirror`, `Shadow`, see `set/README.md`), each listed in a
+feature's `filters`.
 
 | Member | Behaviour |
 |---|---|

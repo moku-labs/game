@@ -6,6 +6,7 @@
  */
 import type { FilterCache } from "../../renderer/types";
 import { component } from "../../world/ecs/define";
+import { withPlaceGlsl, withPlaceWgsl } from "../set/head";
 import { defineFilter } from "./define";
 import { GLOW_GLSL } from "./glow-glsl";
 import { GLOW_WGSL } from "./glow-wgsl";
@@ -78,9 +79,17 @@ export const Glow: FilterComponent<GlowValue> = /*#__PURE__*/ defineFilter("effe
   padding: "distance"
 });
 
+/** The whole WGSL `Outline` is defined with: the place helpers of the set head, then its body. */
+const OUTLINE_SOURCE = /*#__PURE__*/ withPlaceWgsl(OUTLINE_WGSL);
+
+/** The whole GLSL `Outline` is defined with. */
+const OUTLINE_GLSL_SOURCE = /*#__PURE__*/ withPlaceGlsl(OUTLINE_GLSL);
+
 /**
- * A ring of `thickness` pixels in `color` around the opaque pixels of a view and its subtree; the
- * view is padded by its live `thickness`. One render pass per apply.
+ * A hard ring of `thickness` CSS px in `color` around the opaque pixels of a view and its subtree,
+ * the largest alpha of 12 probes on that ring; the view is padded by its live `thickness`. One
+ * render pass per apply; on WebGPU a tween of `alpha` draws on the view's own quad, no pass, from
+ * its third frame.
  *
  * @example
  * ```ts
@@ -91,8 +100,8 @@ export const Glow: FilterComponent<GlowValue> = /*#__PURE__*/ defineFilter("effe
 export const Outline: FilterComponent<OutlineValue> = /*#__PURE__*/ defineFilter(
   "effects.outline",
   {
-    wgsl: OUTLINE_WGSL,
-    glsl: OUTLINE_GLSL,
+    wgsl: OUTLINE_SOURCE,
+    glsl: OUTLINE_GLSL_SOURCE,
     uniforms: { thickness: 2, color: { color: 0x00_00_00 }, alpha: 1 },
     padding: "thickness"
   }
