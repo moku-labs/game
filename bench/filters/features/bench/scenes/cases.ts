@@ -922,7 +922,7 @@ const SET_SCENES: readonly BenchScene[] = [
   ),
   memberRowScene(
     "set-shadow",
-    "the rows under Shadow, its soft written each frame: on the quad, 14 samples, padded by 16",
+    "the rows under Shadow, its soft written each frame: on the quad, 10 samples, padded by 8",
     SetShadow,
     (elapsedMs, index) => ({ soft: 4 + 4 * wave(elapsedMs, index) })
   ),

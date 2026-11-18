@@ -68,12 +68,12 @@ describe("Shadow", () => {
     }
   });
 
-  // Bug: the mean divided by another count than it sums (12 spokes and the centre): a shadow too dark or too light.
-  it("averages the centre and a ring of 12, and turns its spokes by the same full turn in both languages", () => {
+  // Bug: the mean divided by another count than it sums (8 spokes and the centre): a shadow too dark or too light.
+  it("averages the centre and a ring of 8, and turns its spokes by the same full turn in both languages", () => {
     const spokes = /for \(var i = 0; i < (\d+); i\+\+\)/.exec(SHADOW_WGSL)?.[1];
     const divisor = /cover \/ ([\d.]+) \*/.exec(SHADOW_WGSL)?.[1];
 
-    expect(Number(spokes)).toBe(12);
+    expect(Number(spokes)).toBe(8);
     expect(Number(divisor)).toBe(Number(spokes) + 1);
     expect(SHADOW_WGSL).toContain("var cover = sampleInput(base).a;");
     expect(constantOf(SHADOW_WGSL, "SHADOW_TAU")).toBeCloseTo(2 * Math.PI, 12);
@@ -82,7 +82,7 @@ describe("Shadow", () => {
 
   // Bug: the shadow drawn over the view (a dark card), or its alpha past 1.
   it("draws the shadow under the source, its alpha clamped to 1", () => {
-    expect(SHADOW_WGSL).toContain("let shade = clamp(cover / 13.0 * fu.alpha, 0.0, 1.0);");
+    expect(SHADOW_WGSL).toContain("let shade = clamp(cover / 9.0 * fu.alpha, 0.0, 1.0);");
     expect(SHADOW_WGSL).toContain("return c + vec4<f32>(fu.color * shade, shade) * (1.0 - c.a);");
   });
 });

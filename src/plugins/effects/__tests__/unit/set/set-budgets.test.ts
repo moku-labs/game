@@ -55,7 +55,7 @@ type Row = {
 /**
  * Every single-pass member of slices 1 and 2 and of stage 4, and the built-in `Outline`, which draws on the set head's
  * place helpers. `Aura` and `Outline` read their pixel and 12 probes on a ring, `Shadow` its pixel, the centre of its
- * shadow and 12 probes around it; `Aura` (at its default `spread` 8) and `Fold` are padded by 8 px: a tile's frame is
+ * shadow and 8 probes around it; `Aura` (at its default `spread` 8) and `Fold` are padded by 8 px: a tile's frame is
  * 144 × 144, 0.083 Mpx at 2; `Shadow` by 8, 144 × 144, 0.083 Mpx; `Outline` by its default `thickness` 2, 0.0697.
  */
 const MEMBERS: readonly Row[] = [
@@ -84,7 +84,7 @@ const MEMBERS: readonly Row[] = [
   },
   { member: Wave, wgsl: WAVE_WGSL, glsl: WAVE_GLSL, samples: 1, tile: 0.066 },
   { member: Mirror, wgsl: MIRROR_WGSL, glsl: MIRROR_GLSL, samples: 1, tile: 0.066 },
-  { member: Shadow, wgsl: SHADOW_WGSL, glsl: SHADOW_GLSL, samples: 14, tile: 0.083 },
+  { member: Shadow, wgsl: SHADOW_WGSL, glsl: SHADOW_GLSL, samples: 10, tile: 0.083 },
   { member: Outline, wgsl: OUTLINE_WGSL, glsl: OUTLINE_GLSL, samples: 13, tile: 0.07 }
 ];
 

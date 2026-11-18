@@ -127,11 +127,12 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
   edge for axis 0, by `smoothstep(0, fade, t)`, `t` the distance from the line as a share of the view: gone from `t =
   fade` on. `fade: 0` keeps it whole. It draws inside its own view: a reflection is a copy of a view placed under the
   original, with `Mirror` on the copy.
-- **`Shadow`** draws a drop shadow of `color` under the view: the mean alpha of 13 samples of the view, the place
-  moved back by `x`, `y` CSS px and a ring of 12 around it at `soft` CSS px (the spokes of `Aura`), times `alpha`
+- **`Shadow`** draws a drop shadow of `color` under the view: the mean alpha of 9 samples of the view, the place
+  moved back by `x`, `y` CSS px and a ring of 8 around it at `soft` CSS px, 45° apart, times `alpha`
   clamped to 0..1, under the source: where the view is opaque nothing shows. It is padded by 8 CSS px, its reach:
   `soft` is clamped to 0..8 and `x`, `y` each to `8 − soft` either way, so the shadow is never cut at its frame. With
-  13 samples a wide `soft` bands a little; with the view's own sample it reads 14.
+  9 samples a wide `soft` bands a little; with the view's own sample it reads 10. (Anya's pick 2026-11-18, after the
+  A26 read 12 spokes at `rest` + 2.8 ms against the line + 2.0.)
 
 ## How a member draws
 
@@ -193,7 +194,7 @@ a tile, 128 × 128. At resolution 2 one pass over the screen is 384 × 693 × 4 
 | `GradientMap` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 | `Wave` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 | `Mirror` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
-| `Shadow` | 1 | 14 (13 of the shadow, 1 of the view) | ≤ 1.065 Mpx | ≤ 0.083 Mpx (padded by 8: (128 + 16)² × 4) | quad |
+| `Shadow` | 1 | 10 (9 of the shadow, 1 of the view) | ≤ 1.065 Mpx | ≤ 0.083 Mpx (padded by 8: (128 + 16)² × 4) | quad |
 | `Outline` (built-in, on the place part of the head) | 1 | 13 | ≤ 1.065 Mpx | ≤ 0.07 Mpx (padded by its default `thickness` 2) | quad |
 
 A padded member draws its frame grown by the padding on every side: a tile under `Aura` (at its default `spread` 8) or
