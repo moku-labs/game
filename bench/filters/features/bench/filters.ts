@@ -11,10 +11,15 @@ import {
   Flash,
   Fold,
   Grade,
+  GradientMap,
+  Mirror,
+  Pixelate,
   RevealLine,
   RevealRound,
+  Shadow as SetShadow,
   Shine,
-  Vignette
+  Vignette,
+  Wave
 } from "../../../../src/index.ts";
 
 /** The GLSL twin the filter API asks for. */
@@ -280,5 +285,10 @@ export const BENCH_FILTERS = [
   Shine,
   Aura,
   Fold,
-  Bloom
+  Bloom,
+  Pixelate,
+  GradientMap,
+  Wave,
+  Mirror,
+  SetShadow
 ];
