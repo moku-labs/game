@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CompiledMessages, ElementNode } from "../../types";
+import type { CompiledMessages, ElementNode, Message } from "../../types";
 import { messageOf } from "./evaluate";
 import { createMockI18n, type MockI18n, moduleOf } from "./mock-i18n";
 
@@ -217,8 +217,21 @@ async function setNameMock(): Promise<MockI18n> {
   return mock;
 }
 
+/**
+ * A message whose `name` parameter is another message. The cast is the point of the test:
+ * `Argument` has no `Message` (not widened without a «да»), so only a cast or an untyped call
+ * reaches `format` with one, and that call must still read words, not "[object Object]".
+ *
+ * @param key - The key of the outer message.
+ * @param name - The message passed as its `name`.
+ * @returns The outer message.
+ */
+function nested(key: string, name: Message): Message {
+  return { key, params: { name } } as unknown as Message;
+}
+
 describe("a message passed as a parameter of another message (F209)", () => {
-  const open = { key: "album.open", params: { name: { key: "album.set" } } };
+  const open = nested("album.open", { key: "album.set" });
 
   // The bug: the inner message reaches the compiled one as an object and prints "[object Object]".
   it("is read as its words in the current locale", async () => {
@@ -239,7 +252,7 @@ describe("a message passed as a parameter of another message (F209)", () => {
   // The bug: an inner message of another message's parameter stays an object.
   it("is read at any depth", async () => {
     const mock = await setNameMock();
-    const host = { key: "album.host", params: { name: open } };
+    const host = nested("album.host", open);
 
     expect(mock.api.format(host, "en")).toEqual([
       { kind: "text", text: "Host: Set “Childhood” is open" }
@@ -249,7 +262,7 @@ describe("a message passed as a parameter of another message (F209)", () => {
   // The bug: an escaped `<` of the inner message's words turns into a tag of the outer one.
   it("keeps an escaped tag of the inner words plain text", async () => {
     const mock = await setNameMock();
-    const host = { key: "album.host", params: { name: { key: "album.tagged" } } };
+    const host = nested("album.host", { key: "album.tagged" });
 
     expect(mock.api.format(host, "en")).toEqual([
       { kind: "text", text: String.raw`Host: Ann \<3` }
