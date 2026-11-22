@@ -420,6 +420,12 @@ export const settingsSheet = projection({
   While the dim shows, a held element whose key a live element of the dim holds too (the root, the
   scrim) waits: `entityOf` answers the dim's until the swap, then the open's. The `ready` effect of
   `assets` waits for the build too, at most 400 ms after its bundles settled.
+- **Keep a window's dim in a projection of its own** when its `warm` answers the open item at rest
+  too, before any tap (F221, F222). A dim item that enters under the key holding a ready warm view
+  adopts that view, as an open on another item does; the record is then lost and the open builds the
+  whole window in one frame (A26 vitrine: 75 ms, 33 ms with the dim on its own). A dim element
+  under the open view's key is also a new element at the swap, so it enters again. The shop,
+  settings and the vitrine keep their dim apart (`vitrine.dim`).
 - **Limits.** A held root hosts no live projection view: a `ui` host takes only views held as it is.
   An element a plugin other than ui registers for a projection that shows other keys live while it
   warms one, without `adopt`, is taken as one of the live views'.
