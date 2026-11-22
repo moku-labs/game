@@ -212,8 +212,8 @@ describe("a Draggable child of a JSX projection", () => {
 
   it("let go right where it rests, plays no settle hook", async () => {
     const { app, pixi } = await startStrip();
-    // The grab is taken at the first move past the slop: a finger back on that point holds the element at rest.
-    const grabbedAt = { x: 760, y: 1100 };
+    // The grab keeps the offset of the press: a finger back on the press point holds the element at rest.
+    const grabbedAt = { x: 700, y: 1100 };
 
     pointer(app, pixi, "pointerdown", { x: 700, y: 1100 });
     step(app);

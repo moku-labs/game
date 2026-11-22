@@ -298,7 +298,9 @@ function onMove(ctx: InputCtx, point: Point): void {
     return;
   }
 
-  grab(ctx, entity, point);
+  // The offset is read from the press, not from this move: a long first move would leave the view
+  // that far behind the finger for the whole drag, and drop it there (F224).
+  grab(ctx, entity, start);
   ctx.state.phase = "dragging";
 }
 

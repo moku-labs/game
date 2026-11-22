@@ -27,6 +27,14 @@ function grabbed(
   return entity;
 }
 
+/** The kinds of touch sample a frame-step test records. */
+type TouchKind = "down" | "move" | "up";
+
+// Records one touch sample of pointer 1 at a client point.
+function sample(mock: MockInput, kind: TouchKind, x: number, y: number): void {
+  record(mock.state, { kind, pointerType: "touch", pointerId: 1, clientX: x, clientY: y });
+}
+
 describe("grab", () => {
   it("tags, mutes, lifts and tells the gate, in that order", () => {
     const mock = createMockInput();
@@ -406,21 +414,21 @@ describe("the drag of a parented view", () => {
     at("move", 140, 210);
     mock.frame();
 
-    // The grab keeps the offset of the drag start: the view stays put, 50 px behind the finger.
+    // The grab keeps the offset of the press: the view moved with the finger from (90, 160).
     expect(mock.has(item, Parent)).toBe(false);
-    expect(mock.read(item, Transform)).toMatchObject({ x: 90, y: 160, scale: 0.5 });
+    expect(mock.read(item, Transform)).toMatchObject({ x: 140, y: 210, scale: 0.5 });
 
     at("move", 190, 260);
     mock.frame();
 
     // The finger moved 50 px, so did the view: 1:1, not 0.5 times.
-    expect(mock.read(item, Transform)).toMatchObject({ x: 140, y: 210 });
+    expect(mock.read(item, Transform)).toMatchObject({ x: 190, y: 260 });
 
     at("up", 190, 260);
     mock.frame();
 
     expect(mock.read(item, Parent)).toEqual({ entity: slot });
-    expect(mock.read(item, Transform)).toMatchObject({ x: 200, y: 300, scale: 1 });
+    expect(mock.read(item, Transform)).toMatchObject({ x: 300, y: 400, scale: 1 });
     expect(mock.has(item, Held)).toBe(false);
   });
 });
@@ -737,8 +745,9 @@ describe("the lifted look of the view in the hand (heldScale)", () => {
     at("up", 140, 210);
     mock.frame();
 
+    // Set down where the finger took it, at (140, 210) in root space: (200, 300) under the slot.
     expect(mock.read(item, Parent)).toEqual({ entity: slot });
-    expect(mock.read(item, Transform)).toMatchObject({ x: 100, y: 200, scale: 1 });
+    expect(mock.read(item, Transform)).toMatchObject({ x: 200, y: 300, scale: 1 });
   });
 });
 
@@ -1065,7 +1074,8 @@ describe("the carried stack", () => {
       `set:Transform:${held}`
     ]);
     expect(mock.has(c4, Parent)).toBe(false);
-    expect(rootOf(mock, c4)).toMatchObject({ x: 100, y: 190 });
+    // The stack moved 20 px with the finger before c4 left it.
+    expect(rootOf(mock, c4)).toMatchObject({ x: 120, y: 190 });
   });
 
   it("lifts the followers' mutes on stop", () => {
@@ -1193,6 +1203,56 @@ describe("the aim of the view in the hand", () => {
     mock.state.grabOffset = { x: 0, y: 10 };
     // Posed from the identity pose, the aim would stand at (50, 60), on `a`.
     release(mock.input, { x: 50, y: 150 });
+
+    expect(mock.answers).toEqual([{ intent: "b", payload: { from: "i1" } }]);
+  });
+
+  // An item that stands in row `c`, aimed at its own origin, pressed at that origin.
+  function aimedItem(mock: MockInput): Entity {
+    const item = mock.spawn(
+      [Draggable({ payload: { from: "i1" }, aim: { x: 0, y: 0 } }), Transform({ x: 50, y: 250 })],
+      { projection: "board.items", key: "i1" }
+    );
+
+    mock.boxes.push({ entity: item, x: 0, y: 200, width: 100, height: 100 });
+    mock.start();
+
+    return item;
+  }
+
+  it("F224: a press, one long move and a release in one frame drop under the finger, not where the view was pressed", () => {
+    const mock = createMockInput();
+
+    rows(mock);
+    aimedItem(mock);
+    // Pressed on `c`, one move to `a`, let go there: no frame step between them.
+    sample(mock, "down", 50, 250);
+    sample(mock, "move", 50, 50);
+    sample(mock, "up", 50, 50);
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "a", payload: { from: "i1" } }]);
+  });
+
+  it("a drag in small moves with frames between drops under the finger", () => {
+    const mock = createMockInput();
+
+    rows(mock);
+
+    const item = aimedItem(mock);
+
+    sample(mock, "down", 50, 250);
+    mock.frame();
+    for (let y = 240; y >= 150; y -= 10) {
+      sample(mock, "move", 50, y);
+      mock.frame();
+    }
+
+    // The view holds the spot it was pressed at under the finger.
+    expect(mock.read(item, Transform)).toMatchObject({ x: 50, y: 150 });
+
+    sample(mock, "up", 50, 150);
+    mock.frame();
 
     expect(mock.answers).toEqual([{ intent: "b", payload: { from: "i1" } }]);
   });
