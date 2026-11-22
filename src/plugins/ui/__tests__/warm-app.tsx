@@ -41,9 +41,9 @@ export const Marked = component("WarmMarked", { name: "" });
 
 /**
  * What the hooks of the sheets' elements saw: the keys whose enter played, the `change.Box` plays,
- * and the loops the rows of the windowed list started.
+ * the loops the rows of the windowed list started and the exits of the tabs sheet's packs card.
  */
-export const seen = { enters: [] as string[], changes: 0, loops: 0 };
+export const seen = { enters: [] as string[], changes: 0, loops: 0, exits: 0 };
 
 /**
  * The motion of a keyed element of the big sheet: its enter notes its key, a moved rect is counted.
@@ -335,18 +335,29 @@ const dimScreen = projection({
   warm: (): Item => ({ id: "dim" })
 });
 
+/** How long the track of the tabs sheet slides to a moved rest pose, and its packs card leaves, in ms. */
+export const SLIDE_MS = 420;
+
 /**
- * The motion of the track of the tabs sheet: a moved rest pose is counted, and taken at once, as a
- * game's `landOnBox` does.
+ * The motion of the track of the tabs sheet: a moved rest pose is counted, and slid to over 420 ms,
+ * as the shop of A Memory Missing slides between its tabs.
  */
 const TRACK_MOTION: ElementMotion = {
   change: {
-    Transform: (view, _previous, next) => {
+    Transform: view => {
       seen.changes += 1;
-      view.set(Transform, { x: next.x, y: next.y, pivot: next.pivot });
 
-      return undefined;
+      return view.toRest(Transform, { ms: SLIDE_MS, reduced: "keep" });
     }
+  }
+};
+
+/** The motion of the card only the packs tab shows: its exit is counted and slides it away for 420 ms. */
+const PACKS_CARD_MOTION: ElementMotion = {
+  exit: view => {
+    seen.exits += 1;
+
+    return view.tween(Transform, { x: 800 }, { ms: SLIDE_MS, reduced: "keep" });
   }
 };
 
@@ -398,6 +409,14 @@ const tabsScreen = projection({
           ))}
         </row>
       </row>
+      {item.tab === "packs" ? (
+        <stack
+          key="packsCard"
+          style={{ width: 60, height: 30 }}
+          motion={PACKS_CARD_MOTION}
+          components={[Marked({ name: "packsCard" })]}
+        />
+      ) : undefined}
     </column>
   ),
   warm: (): TabsItem => ({ id: "tabs", tab: "packs" })
@@ -662,6 +681,7 @@ export async function startWarm(options: WarmOptions = {}) {
   seen.enters.length = 0;
   seen.changes = 0;
   seen.loops = 0;
+  seen.exits = 0;
 
   /** Steps one frame of 16 ms, the fake clock first. */
   const frame = (): void => {

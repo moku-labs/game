@@ -990,18 +990,18 @@ describe("the carried stack through the frame step", () => {
 
     expect(mock.state.phase).toBe("dragging");
     expect(mock.read(c3, Parent)).toEqual({ entity: held });
-    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([130, 160, 190]);
+    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([140, 170, 200]);
 
     record(mock.state, moved(300, 240));
     mock.frame();
 
-    expect(mock.read(held, Transform)).toMatchObject({ x: 300, y: 230 });
-    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([230, 260, 290]);
+    expect(mock.read(held, Transform)).toMatchObject({ x: 300, y: 240 });
+    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([240, 270, 300]);
 
     record(mock.state, moved(400, 340));
     mock.frame();
 
-    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([330, 360, 390]);
+    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([340, 370, 400]);
 
     record(mock.state, sample("cancel", "touch", 400, 340));
     mock.frame();

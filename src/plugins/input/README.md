@@ -226,11 +226,13 @@ system that reads it is not locked.
 
 | Step | What happens |
 |---|---|
-| grab | tag `Held`; the rest scale is read; a view with a `Parent` leaves it (below); the scale becomes rest scale × `heldScale` (below); `world.projection.mute(entity, Transform, ["x", "y"])`, plus `"scale"` when `heldScale` is not 1; `lift(entity, true)`; `flow.gate.pointer(true)`; the offset to the finger is read last, so a view that is still sliding is picked up with no jump |
+| grab | tag `Held`; the rest scale is read; a view with a `Parent` leaves it (below); the scale becomes rest scale × `heldScale` (below); `world.projection.mute(entity, Transform, ["x", "y"])`, plus `"scale"` when `heldScale` is not 1; `lift(entity, true)`; `flow.gate.pointer(true)`; the offset to the press point is read last, so a view that is still sliding is picked up where it is, and the view keeps the spot pressed under the finger however far the move that started the drag went: a press, one long move and a release in one frame drop under the finger (F224) |
 | move | `world.ecs.set(entity, Transform, …)` once per frame, from the last sample |
 | hover | the topmost drop target under the finger, or under the aim point, gets `Hovered`; the old one loses it |
 | release | the drop target under the finger, or under the aim point, posed at the release point before the rest scale comes back; both components read NOW; the rest scale is written back; a view that left a parent is hung back under it; with a target: `flow.gate.answer(dropAnswer(...))`. Then always, in this order: `unmute()`; `settle(entity)`, always: an accepted answer may still be refused by the node with no state change, and a commit that follows retargets from where the view is; `lift(entity, false)`; the tags go; `flow.gate.pointer(false)` |
 | abort | the held view is `Exiting` or gone: `unmute()`, a view that still exists gets the rest scale back and, when it left a parent, is hung back under it, the tags go, `flow.gate.pointer(false)`. No answer, no `settle`, no `lift(false)`: the exit motion and its layer belong to the projection |
+
+The carried view keeps the pressed spot under the finger from the first drag frame: the move that starts the drag carries the view the whole way from the press, however far it went (F224).
 
 ### A carried stack
 

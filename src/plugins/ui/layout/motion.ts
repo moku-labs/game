@@ -129,7 +129,10 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
  * open of a window held warm (spec 33 B+D): it has not entered, and it or its root belongs to the
  * build or to the held view. An element a held root makes while no warm work runs is not marked
  * by `world`; its root is. Its hooks wait for its enter at the swap; a change before it plays no
- * motion and is written at once, so the enter starts from where it stands.
+ * motion and is written at once, so the enter starts from where it stands. A live element that has
+ * not entered is held too: it was never drawn. The open frame of a warm window opened on another item
+ * than the one it was built for moves elements of the held root once `world` holds it no more, and
+ * they stand where a cold open stands, with no `change` motion (F220).
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element a hook would play on.
@@ -137,6 +140,7 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
  */
 export function isHeld(ctx: UiCtx, element: Element): boolean {
   if (element.entered) return false;
+  if (element.live) return true;
 
   const projection = ctx.deps.world.projection;
 

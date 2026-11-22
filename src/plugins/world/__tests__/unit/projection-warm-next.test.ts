@@ -342,6 +342,26 @@ describe("warm next: the swap (W3)", () => {
     expect(recordOf(world)?.phase).toBe("shown");
   });
 
+  // Bug (F221): the view shown from the warm record enters with no hint of the open's commit, or with another cause
+  // than a view that commit builds (`"change"`), so its enter cannot go on from where the dim stood.
+  it("hands the swapped-in view's enter the open commit's hint and the cause change", () => {
+    const enter = vi.fn();
+    const { world } = gatedWorld([gateSpec({ motion: { enter } })]);
+
+    dimAndBuild(world);
+    enter.mockClear();
+    world.release({
+      kind: "dim.fade",
+      payload: { projection: VITRINE, key: KEY, at: 0.4 },
+      hint: true
+    });
+    commit(world, { gate: "open" });
+
+    expect(enter).toHaveBeenCalledOnce();
+    expect(enter.mock.calls[0]?.[2]).toMatchObject({ kind: "dim.fade", payload: { at: 0.4 } });
+    expect(enter.mock.calls[0]?.[3]).toBe("change");
+  });
+
   // Bug: an open on another item than the warm one shows the held view as it was built, with the warm item's content.
   it("writes the difference into the held view when the open item differs from the held one", () => {
     const { world } = gatedWorld();

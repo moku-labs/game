@@ -193,6 +193,28 @@ describe("texture", () => {
     expect(mock.renderer.invalidated.at(-1)).toEqual(["board.cell", "board.item"]);
   });
 
+  // Bug (F221 note): a warm window held hidden asks for its art before its bundle loads, which latches the
+  // warning of that key for good: a later miss of a view on the screen, after an unload, is silent.
+  it("warns again for a key asked after its bundle was loaded and unloaded", async () => {
+    const mock = createMockAssets({ manifest });
+
+    await mock.start();
+
+    expect(mock.api.texture("board.cell")).toBeUndefined();
+    await tick();
+
+    expect(mock.api.isLoaded("board")).toBe(true);
+
+    mock.api.unload("board");
+
+    expect(mock.api.texture("board.cell")).toBeUndefined();
+    expect(mock.log.warn).toHaveBeenCalledTimes(2);
+    expect(mock.log.warn).toHaveBeenLastCalledWith("assets: texture is not loaded yet", {
+      key: "board.cell",
+      bundle: "board"
+    });
+  });
+
   it("asks again after a failed background load, and still warns only once", async () => {
     const mock = createMockAssets({ manifest });
 

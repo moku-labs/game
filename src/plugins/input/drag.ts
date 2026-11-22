@@ -356,7 +356,8 @@ function ownedFields(unparented: boolean, scaled: boolean): string[] {
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view under the finger.
- * @param point - Where the finger is, in reference units.
+ * @param point - Where the finger took hold, in reference units: the press point, so the view
+ *   keeps that spot under the finger however far the move that started the drag went.
  */
 export function grab(ctx: InputCtx, entity: Entity, point: Point): void {
   const { ecs, projection } = ctx.deps.world;

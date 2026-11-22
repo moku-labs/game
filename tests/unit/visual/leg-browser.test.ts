@@ -626,7 +626,7 @@ describe("runBrowserLeg", () => {
     expect(log.pagesClosed).toBe(1);
   });
 
-  it("pauses the page for the devtools before the restore, so every test starts at the same game time", async () => {
+  it("pauses the page for the leg before the restore, so every test starts at the same game time", async () => {
     const { app } = await pageGame();
     const seen: Array<{ id: string; elapsed: number }> = [];
 
@@ -651,11 +651,10 @@ describe("runBrowserLeg", () => {
     expect(seen).toEqual([
       // The check of skipped frames goes on first, before the game time is held.
       { id: "game.debug", elapsed: 83.236_666 },
-      { id: "game.pause", elapsed: 83.236_666 },
       { id: "game.restore", elapsed: START_MS },
       { id: "game.tap", elapsed: expect.any(Number) }
     ]);
-    expect(app.lifecycle.reasons()).toEqual(["devtools"]);
+    expect(app.lifecycle.reasons()).toEqual(["visual"]);
     expect(app.renderer.sync.debug.state().verifyFrames).toBe(true);
   });
 

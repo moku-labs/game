@@ -17,7 +17,7 @@ is anchored to the bottom or the right edge sits less than one unit past it (F11
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key (`Text.style` when its bind names a format of the game), `value` on a text field, `window` on a windowed scroll, `motion` on an element whose `motion` prop carries an `id` (`defineMotion({ id })`), `scroll` on a scroll (see [Scroll](#scroll)), children |
+| `app.ui.tree()` | the live screen as plain data: natural rect (on screen inside a `scroll`: moved back by the offset of every scroll above, F228), style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key (`Text.style` when its bind names a format of the game), `value` on a text field, `window` on a windowed scroll, `motion` on an element whose `motion` prop carries an `id` (`defineMotion({ id })`), `scroll` on a scroll (see [Scroll](#scroll)), children |
 | `app.ui.find(key)` | the entity of a keyed element, live only, never one of a scene built aside or of a window held warm |
 | `app.ui.lint()` | on the screen, never in a scene built aside: tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `hollow` style with no `nineSlice` (`hollow-without-nine-slice`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
@@ -751,7 +751,8 @@ again the elements stand on the rest `world` wrote in step 1. Two things keep th
 the content box of its parent (the rect less its padding). Its rest `Transform.scale` is
 `min(1, contentW / w, contentH / h)`. Its children keep their natural rects: `Box` under a fitted
 element is natural space. `lint()` and the `guide` window scale a rect by every fitted element on
-the way up; `tree()` reports the natural rect and adds `fitScale`.
+the way up; `tree()` reports the natural rect and adds `fitScale`. Inside a `scroll` the rect is
+where the element is on screen: shifted by the current offset of each scroll above it, on its axis.
 
 ```tsx
 <column key="slot" style={{ grow: 1, padding: 20 }}>
@@ -1116,7 +1117,9 @@ JSX is a root of `ui`, held:
   done gets the rest in one block in that frame: its parked children are diffed whatever the
   budget, and it is laid out and applied whole with no motion, so no half-built frame is drawn.
   An element applied before the open whose rest pose the open moved (another tab than the warm
-  one) takes the new pose at once, its `Transform` included, as a cold open places it (F200).
+  one) takes the new pose at once, its `Transform` included, as a cold open places it (F200), also
+  when the record was ready: an element that has not entered plays no `change` motion, and one
+  only the warm item had leaves at once, with no exit (F220).
 - **The close** plays the exits as for any root; the world builds the window again in idle frames.
 - **At rest** the held roots cost a few numbers a frame: the walk for a released root runs only
   when the membership of the world's projections moved, the queue of held

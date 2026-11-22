@@ -390,7 +390,8 @@ export const settingsSheet = projection({
   builds the rest of its root in one block. Such a record opened on another item than the warm one
   (another tab) stands where a cold open stands in that frame: ui gives the elements the difference
   moved their new pose at once, with no `change` motion (F200). A ready record opened on another item
-  stands there too, but its moved elements still play their `change` motion (known, a follow-up).
+  stands there too: an element that has not entered plays no `change` motion, and one only the warm
+  item had leaves at once, with no exit (F220).
 - **The close** plays the exit as before. The record goes cold and is built again in idle frames,
   after the exit motion ended.
 - **A commit while the window rests.** The step reads `warm` again: the same content changes nothing;
