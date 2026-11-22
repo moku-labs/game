@@ -273,7 +273,7 @@ describe("pageStep", () => {
 describe("pagePause", () => {
   const place = { test: "open-popup", where: "the start" };
 
-  it("pauses the game for the devtools and steps it to the start time, never more than a frame of 1000/60 at once", async () => {
+  it("pauses the game for the leg and steps it to the start time, never more than a frame of 1000/60 at once", async () => {
     const { app } = await pageGame();
 
     await pageStart({ url: URL, settleFrames: 600 });
@@ -284,7 +284,7 @@ describe("pagePause", () => {
     app.time.onFrame("input", time => deltas.push(time.delta));
 
     expect(await pagePause({ ...place, startMs: 1000 })).toEqual({ ok: true, value: 1000 });
-    expect(app.lifecycle.reasons()).toEqual(["devtools"]);
+    expect(app.lifecycle.reasons()).toEqual(["visual"]);
     expect(app.time.isPaused()).toBe(true);
     expect(app.time.snapshot().elapsed).toBe(1000);
     expect(deltas).toHaveLength(Math.ceil((1000 - from) / FRAME_MS));
@@ -308,14 +308,11 @@ describe("pagePause", () => {
     expect(await pagePause({ ...place, startMs: 1000 })).toEqual({ ok: true, value: 2000 });
   });
 
-  it("answers the reason when the page refuses the pause", async () => {
-    await pageGame();
-    vi.stubGlobal("__MOKU_GAME_DEV__", false);
-
+  it("answers the reason when the page has no game and doors", async () => {
     expect(await pagePause({ ...place, startMs: 1000 })).toEqual({
       ok: false,
       reason:
-        "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
+        "[game] The page exposes no game and doors.\n  Set globalThis.game and globalThis.doors in the dev page."
     });
   });
 });
@@ -336,6 +333,23 @@ describe("pageStep while the leg holds the pause", () => {
     expect(deltas.length).toBeGreaterThan(0);
     expect(new Set(deltas)).toEqual(new Set([FRAME_MS]));
     expect(app.time.isPaused()).toBe(true);
+  });
+
+  it("keeps the clock where the headless leg's stands through the pause and the steps (F227)", async () => {
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pagePause({ test: "open-popup", where: "the start", startMs: 1000 });
+    await pageStep(restore);
+    await pageStep({ ...restore, where: "step 1 (tap)", name: "tap", input: { key: "open" } });
+    await pageStep({
+      ...restore,
+      where: "step 2 (step)",
+      name: "step",
+      input: { frames: 60, deltaMs: 16 }
+    });
+
+    expect(app.clock.now()).toBe(1000);
   });
 
   it("steps frames while a command waits for them", async () => {

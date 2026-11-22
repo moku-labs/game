@@ -320,26 +320,29 @@ export async function pageStart(argument: {
 }
 
 /**
- * Holds the game for a test: the `pause` command, the editor's pause, so the browser's frames no
+ * Holds the game for a test: the pause reason `visual` on the lifecycle, so the browser's frames no
  * longer move game time; then stepped frames up to the start time, 1000/60 ms each and the last
  * one shorter, so the game lands on it to the last bit. The page's own start took a different
- * time on every run; from here on every test starts at the same game time.
+ * time on every run; from here on every test starts at the same game time. Not the `pause`
+ * command: its reason `devtools` makes every `game.step` move the clock with the frames (F169),
+ * and the headless leg's clock never moves, so the page's clock ran ahead of it, by the frames up
+ * to the start time and by every frame after (F227). Under `visual` the clock stands, as there.
  *
  * @param argument - The test and the step, and the game time a test starts at.
  * @param argument.startMs - The game time a test starts at, in milliseconds; a page whose clock
  *   is already past it starts at the next multiple of it.
- * @returns The game time the test starts at, or why the page refused the pause.
+ * @returns The game time the test starts at, or why the page failed.
  */
 export async function pagePause(
   argument: Place & { startMs: number }
 ): Promise<PageAnswer<number>> {
   try {
     const handles = pageHandles();
-    const { game, doors } = handles;
+    const { game } = handles;
     const { startMs } = argument;
     const frameMs = 1000 / 60;
 
-    await doors.run(game, doors.commands.pause);
+    game.lifecycle.push("visual");
 
     const start = Math.max(startMs, Math.ceil(game.time.snapshot().elapsed / startMs) * startMs);
 
