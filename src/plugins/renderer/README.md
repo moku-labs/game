@@ -993,9 +993,10 @@ scene for `ms` from the swap. WebGPU only: elsewhere the switch is as without it
   canvas while a transition runs (about 10 MB for a 1080 × 2340 canvas, by arithmetic), 0 B at rest. The sprite, the mesh, its geometry, its global numbers and one shader
   per body kind are made at the first transition that needs them and kept for the life of the application.
 - **Cost.** The capture frame adds one texture copy and no pass; a frame of a transition draws one more sprite or mesh
-  in the stage pass. A step while it plays (`transition.perf.ts`): 0 B a frame for a fade and a wipe; 16 B for a
-  slide, an iris after another kind and a dissolve, each one number written into a fake Pixi object's field
-  (`budgets.ts`).
+  in the stage pass. A step while it plays (`transition.perf.ts`, real Pixi objects and effects' bodies): 0 B a frame
+  for every kind (`budgets.ts`). On a Galaxy A26 (Chrome 158, bench `trans-*` arms, 18–24 switches a kind, medians):
+  the frames of a transition draw 1 canvas pass, as the same rooms at rest; GPU 13.1–14.0 ms against 10.7–11.3 ms at
+  rest, +2.0 ms (slide, wipe, iris), +2.2 (dissolve), +3.3 (fade): the fill of one full-screen picture for `ms`.
 
 ## Shots of the frame
 
