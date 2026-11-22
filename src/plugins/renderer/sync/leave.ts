@@ -34,6 +34,12 @@ const TURN_MS = 1000;
 /** A whole turn, in radians. */
 const TURN = 2 * Math.PI;
 
+/** The most clock milliseconds `time` counts for one frame (its default `maxDeltaMs`). */
+const MAX_DELTA_MS = 50;
+
+/** The frames a parked layer waits beyond the veil's fade-out: the frame `scenes` starts counting in, and its last. */
+const SPARE_FRAMES = 2;
+
 /** The engine's ring: three quarters of a white circle 96 u across, 10 u wide, round ends, turned about its centre. */
 const RING: Readonly<ShapeValue> = Object.freeze({
   kind: "arc",
@@ -166,7 +172,7 @@ function putBack(sctx: SyncCtx, container: PixiContainer, name: string | undefin
  * ```
  */
 function parkFrames(outMs: number): number {
-  return Math.ceil(outMs / 50) + 2;
+  return Math.ceil(outMs / MAX_DELTA_MS) + SPARE_FRAMES;
 }
 
 /**

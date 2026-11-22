@@ -54,7 +54,7 @@ export function createAnimApi(ctx: KernelSlice): AnimApi {
 
     setReducedMotion: (on: boolean): void => {
       actx.state.reducedMotion = on;
-      ctx.require(rendererPlugin).sync.leave.reducedMotion(on);
+      ctx.require(rendererPlugin).sync.leave.setReducedMotion(on);
     },
 
     replace: (definition: AnyAnimationDefinition): void => {

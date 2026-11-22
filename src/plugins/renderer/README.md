@@ -236,7 +236,7 @@ internal markup: select them by nothing, set the properties instead.
 | `leave.capture()` | `scenes`' swap gate for a look with `transition`: `"wait"` until the next drawn frame copied the canvas (the first call asks for it), `"ready"` then, `"none"` when no picture can be taken (no transition, reduced motion cut it, after the swap, WebGL, no device). See "The transition". |
 | `leave.play()` | `scenes` right after `swapIn` once `capture()` answered `"ready"`: the picture is drawn over the next scene for the transition's `ms`, then freed; the veil and the loader leave at once. No picture: nothing. |
 | `leave.body(kind, quad, member)` | `effects` at start: the body of a listed `RevealLine` (`"wipe"`), `RevealRound` (`"iris"`) or `Dissolve` (`"dissolve"`) to draw that kind on. Answers the take-back, which `effects` calls at stop. |
-| `leave.reducedMotion(on)` | `anim` at start and on every `setReducedMotion`: a look shown while it is on drops a transition with `reduced: "cut"`. |
+| `leave.setReducedMotion(on)` | `anim` at start and on every `setReducedMotion`: a look shown while it is on drops a transition with `reduced: "cut"`. |
 | `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
@@ -972,7 +972,7 @@ scene for `ms` from the swap. WebGPU only: elsewhere the switch is as without it
   `land` after it changes nothing. The picture hangs in `renderer.leave` (the veil and the frame hidden), last on the
   stage, from the swap frame on; `playStartedAt` is `clock.now()`.
 - **Frames.** Each render phase: `t = clamp((now - playStartedAt) / ms, 0, 1)`, `e` the ease of `t` (`easeCell` of
-  `anim/tween/easing.ts`, a pure import), a frame asked for. `fade`: a sprite over the canvas (`host.screen()`), alpha
+  `world/projection/easing.ts`, a pure import), a frame asked for. `fade`: a sprite over the canvas (`host.screen()`), alpha
   `1 - e`. `slide`: the same sprite moved by `e` × the width (or the height) towards `to`. `wipe`, `iris`, `dissolve`:
   the unit quad as a mesh over the canvas with the set body `effects` handed (`sync.leave.body`), the picture bound as
   its input, the global filter numbers of a pass over the whole canvas, and the body's uniforms written by name: wipe
@@ -982,7 +982,7 @@ scene for `ms` from the swap. WebGPU only: elsewhere the switch is as without it
 - **Bodies.** `wipe` draws on `RevealLine`, `iris` on `RevealRound`, `dissolve` on `Dissolve`; `effects` hands each
   listed member's body under its kind at start and takes it back at stop. A kind with no body plays as `fade`, and a
   dev or agent build warns once per kind: `renderer:transition-body-missing`, its hint naming the member to list.
-- **Reduced motion.** `anim` tells `sync.leave.reducedMotion(on)`. A look shown while it is on drops a transition with
+- **Reduced motion.** `anim` tells `sync.leave.setReducedMotion(on)`. A look shown while it is on drops a transition with
   `reduced: "cut"` (`capture()` answers `"none"`); `"keep"` plays as written.
 - **Runs that meet.** `land` after a capture that was not played (the gate gave up, the world not live) frees the
   picture. `show` during a transition ends it at once, picture freed; the new look's own capture copies the screen as

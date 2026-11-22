@@ -5,6 +5,7 @@
  */
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
+import { easeCell } from "../../../world/projection/easing";
 import { AnimPlayer } from "../../components";
 import { createRuntime } from "../../lifecycle";
 import { advanceTimelines, startTimeline } from "../../timeline/play";
@@ -20,7 +21,6 @@ import {
 import { advanceTracks, beginFrame } from "../../tween/advance";
 import { cubicBezier } from "../../tween/bezier";
 import { createDriver } from "../../tween/driver";
-import { easeCell } from "../../tween/easing";
 import type { Target } from "../../types";
 import { createMockAnim, type MockAnim, spawnTestEntity } from "../unit/mock-anim";
 

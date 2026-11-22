@@ -8,7 +8,7 @@
  * bytes at rest. The sprite, the mesh and its numbers are made once per application and kept, like the veil. This file
  * imports nothing of `leave.ts`; the take-down of the look at `play` is there.
  */
-import { easeCell } from "../../anim/tween/easing";
+import { easeCell } from "../../world/projection/easing";
 import { filterGlobals, NAMES_PER_INPUT, quadShader, ROOT_TARGET, unitQuad, VECTOR } from "../quad";
 import { destroyWhole } from "../sources";
 import type {
@@ -185,9 +185,11 @@ export function captureLeave(sctx: SyncCtx): "wait" | "ready" | "none" {
   const leave = sctx.ctx.state.sync.leave;
   const playing = leave.playing;
 
-  if (playing !== undefined && playing.capture !== "playing") {
-    if (playing.capture === "taken") return "ready";
+  // A picture taken is ready for the swap; one still playing is not asked about.
+  if (playing?.capture === "taken") return "ready";
 
+  // A picture asked for and not yet taken: ask for a frame again and wait.
+  if (playing?.capture === "asked") {
     sctx.deps.demand.request();
 
     return "wait";
@@ -394,7 +396,24 @@ export function handBody(
   }
 
   return () => {
+    const leave = sctx.ctx.state.sync.leave;
+
     if (bodies.get(kind) === quad) bodies.delete(kind);
+
+    // A run drawing on this body ends: the body's owner is gone, and its picture would hang on a dead quad.
+    if (leave.playing?.quad === quad) endTransition(sctx);
+
+    // The shader made on the body goes with it, so a feature that stops frees what its set member made.
+    const shaders = leave.objects?.picture.shaders;
+
+    if (shaders === undefined) return;
+
+    for (const [shadersKind, held] of shaders) {
+      if (held.quad !== quad) continue;
+
+      held.shader.destroy();
+      shaders.delete(shadersKind);
+    }
   };
 }
 
@@ -459,31 +478,39 @@ function paintSprite(
 
   AT.x = screen.x;
   AT.y = screen.y;
+  SCALED.x = screen.width / picture.width;
+  SCALED.y = screen.height / picture.height;
 
-  if (transition.kind === "slide") {
-    switch (transition.to) {
-      case "left": {
-        AT.x = screen.x - eased * screen.width;
-        break;
-      }
-      case "right": {
-        AT.x = screen.x + eased * screen.width;
-        break;
-      }
-      case "up": {
-        AT.y = screen.y - eased * screen.height;
-        break;
-      }
-      case "down": {
-        AT.y = screen.y + eased * screen.height;
-        break;
-      }
+  // A fade stays where it is and lowers its alpha from 1 to 0.
+  if (transition.kind !== "slide") {
+    sprite.alpha = 1 - eased;
+    placeAt(sprite);
+
+    return;
+  }
+
+  // A slide stays opaque and moves whole off the canvas towards `to`.
+  sprite.alpha = 1;
+
+  switch (transition.to) {
+    case "left": {
+      AT.x = screen.x - eased * screen.width;
+      break;
+    }
+    case "right": {
+      AT.x = screen.x + eased * screen.width;
+      break;
+    }
+    case "up": {
+      AT.y = screen.y - eased * screen.height;
+      break;
+    }
+    case "down": {
+      AT.y = screen.y + eased * screen.height;
+      break;
     }
   }
 
-  SCALED.x = screen.width / picture.width;
-  SCALED.y = screen.height / picture.height;
-  sprite.alpha = transition.kind === "slide" ? 1 : 1 - eased;
   placeAt(sprite);
 }
 
@@ -814,15 +841,16 @@ export function stepTransition(
 
   if (pixi === undefined || texture === undefined) return;
 
+  // The progress: the time since `play` over the transition's length, held to 0..1, then eased into `EASED[0]`.
   const t = ms > 0 ? (sctx.ctx.deps.clock.now() - playing.playStartedAt) / ms : 1;
 
   EASED[0] = Math.min(1, Math.max(0, t));
   easeCell(ease, EASED, 0);
 
-  const shown =
-    playing.drawn === "fade" || playing.drawn === "slide"
-      ? spriteOf(pixi, objects.picture)
-      : paintMesh(sctx, pixi, objects, playing, screen);
+  const drawsOnSprite = playing.drawn === "fade" || playing.drawn === "slide";
+  const shown = drawsOnSprite
+    ? spriteOf(pixi, objects.picture)
+    : paintMesh(sctx, pixi, objects, playing, screen);
 
   if (shown === undefined) return;
 

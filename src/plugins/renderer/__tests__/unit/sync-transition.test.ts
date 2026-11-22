@@ -536,14 +536,14 @@ describe("reduced motion", () => {
   it("drops a cut transition at show and plays a kept one", async () => {
     const { mock } = await drawing();
 
-    mock.api.sync.leave.reducedMotion(true);
+    mock.api.sync.leave.setReducedMotion(true);
     mock.api.sync.leave.show({ cover: VEIL, transition: FADE });
     expect(mock.api.sync.leave.capture()).toBe("none");
 
     mock.api.sync.leave.show({ cover: VEIL, transition: { ...FADE, reduced: "keep" } });
     expect(mock.api.sync.leave.capture()).toBe("wait");
 
-    mock.api.sync.leave.reducedMotion(false);
+    mock.api.sync.leave.setReducedMotion(false);
     mock.api.sync.leave.show({ cover: VEIL, transition: FADE });
     expect(mock.api.sync.leave.capture()).toBe("wait");
   });
@@ -605,6 +605,48 @@ describe("runs that meet", () => {
     frameAt(mock, 1116);
     expect(playing.destroyed).toBe(true);
     expect(spriteOf(mock).parent).toBeNull();
+  });
+
+  // Bug: a body taken back mid-transition leaves the run drawing on a body nobody holds, its picture kept and its
+  // shader alive.
+  it("a body taken back mid-transition ends it, frees the picture and destroys the body's shader", async () => {
+    const { mock } = await drawing();
+    const body = bodyOf({ progress: 0, angle: 0, soft: 0.05 });
+    const takeBack = mock.api.sync.leave.body("wipe", body.quad, "RevealLine");
+
+    playedAt(mock, WIPE, 1000);
+    frameAt(mock, 1100);
+
+    const picture = pictureOf(mock);
+    const mesh = meshOf(mock);
+    const shaders = mock.ctx.state.sync.leave.objects?.picture.shaders;
+
+    expect(shaders?.get("wipe")?.quad).toBe(body.quad);
+
+    const destroy = vi.spyOn(mesh.shader, "destroy");
+
+    takeBack();
+
+    expect(mock.ctx.state.sync.leave.playing).toBeUndefined();
+    expect(picture.destroyed).toBe(true);
+    expect(mesh.parent).toBeNull();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(shaders?.has("wipe")).toBe(false);
+  });
+
+  // Bug: taking back a body no run draws on ends a transition that plays on another body.
+  it("a body taken back that the run does not draw on leaves it playing", async () => {
+    const { mock } = await drawing();
+    const line = bodyOf({ progress: 0, angle: 0, soft: 0.05 });
+    const round = bodyOf({ x: 0.5, y: 0.5, radius: 0, soft: 0.05, wobble: 0 });
+    const takeBackRound = mock.api.sync.leave.body("iris", round.quad, "RevealRound");
+
+    mock.api.sync.leave.body("wipe", line.quad, "RevealLine");
+    playedAt(mock, WIPE, 1000);
+    frameAt(mock, 1100);
+    takeBackRound();
+
+    expect(mock.ctx.state.sync.leave.playing?.capture).toBe("playing");
   });
 
   // Bug: a lost device leaves the transition stepping objects of the dead stage, or hangs it on the new one.

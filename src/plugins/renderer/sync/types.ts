@@ -1106,7 +1106,7 @@ export type LeaveApi = {
    * the last swap), the loader waits for its `afterMs`. A look shown while another runs replaces it. Asks for a frame.
    * Inert, nothing is drawn and nothing is kept.
    *
-   * @param look - The veil and the loader, resolved.
+   * @param look - The veil, the loader and the transition, resolved.
    * @example
    * ```ts
    * // `scenes` leaves a scene whose `leave` names a turning texture: the veil from the next frame, the texture at 400 ms.
@@ -1183,7 +1183,8 @@ export type LeaveApi = {
    * @param kind - The transition kind the body draws.
    * @param quad - The member's body on its quad, as on its filter slot.
    * @param member - The member's export name, for the logs.
-   * @returns What takes the body back; a later transition of the kind plays as `fade`.
+   * @returns What takes the body back; a transition playing on it ends at once, its picture freed and its shader
+   * destroyed, and a later transition of the kind plays as `fade`.
    * @example
    * ```ts
    * // `effects` at start, for a `RevealLine` listed in a feature's `filters`, its warm filter's quad in hand.
@@ -1201,10 +1202,10 @@ export type LeaveApi = {
    * @example
    * ```ts
    * // `anim`, at start and when the player turns reduced motion on in the settings.
-   * ctx.require(rendererPlugin).sync.leave.reducedMotion(true);
+   * ctx.require(rendererPlugin).sync.leave.setReducedMotion(true);
    * ```
    */
-  reducedMotion(on: boolean): void;
+  setReducedMotion(on: boolean): void;
 };
 
 /**
@@ -1472,7 +1473,8 @@ export type SyncApi = {
   filters: FiltersApi;
 
   /**
-   * The picture of a scene being left: the veil and the loader `scenes` shows during a live switch.
+   * The picture of a scene being left: the veil and the loader `scenes` shows during a live switch, and the transition
+   * picture it plays over the next scene.
    *
    * @example
    * ```ts

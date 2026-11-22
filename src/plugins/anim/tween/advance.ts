@@ -7,12 +7,12 @@ import { isColorField, mixColor } from "../../renderer/color";
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import { neutralOf } from "../../world/ecs/define";
 import type { AnyComponent } from "../../world/ecs/types";
+import { easeCell } from "../../world/projection/easing";
 import type { Entity, TrackOptions, TrackSegment } from "../../world/types";
 import { Animation, countPlaying } from "../components";
 import { dropEnded } from "../dense";
 import type { AnimCtx } from "../types";
 import { baseOr, cellValue, setBase, setOffset, sumOffsets } from "./cells";
-import { easeCell } from "./easing";
 import type { StepMotion, Track } from "./types";
 
 /**

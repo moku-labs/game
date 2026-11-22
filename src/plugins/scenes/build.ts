@@ -173,7 +173,9 @@ function pictureTaken(ctx: ScenesCtx): boolean {
 
   const answer = ctx.deps.renderer.sync.leave.capture();
 
-  if (answer === "wait" && gate.captureFrames < CAPTURE_FRAMES) {
+  const isWaiting = answer === "wait" && gate.captureFrames < CAPTURE_FRAMES;
+
+  if (isWaiting) {
     gate.captureFrames += 1;
     ctx.deps.time.wake();
 

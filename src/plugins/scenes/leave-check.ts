@@ -4,7 +4,7 @@
  * wrong shape throws where it was written, not in the middle of a switch. A transition (spec 36) is checked by its kind:
  * every field of the kind in its range, and no field of another kind.
  */
-import { EASE_NAMES } from "../anim/tween/easing";
+import { EASE_NAMES } from "../world/projection/easing";
 
 /** What a field of a `leave` part must be, and the second line of its error. */
 type FieldRule = { readonly ok: (value: unknown) => boolean; readonly hint: string };
@@ -290,6 +290,16 @@ function checkPart(where: string, part: unknown, rules: Readonly<Record<string, 
 }
 
 /**
+ * Tells whether a value names one of the transition kinds: `isKnownKind("iris") // true`.
+ *
+ * @param kind - What the game wrote as `kind`.
+ * @returns True for a kind of `TRANSITION_KINDS`.
+ */
+function isKnownKind(kind: unknown): kind is keyof typeof TRANSITION_KINDS {
+  return typeof kind === "string" && Object.hasOwn(TRANSITION_KINDS, kind);
+}
+
+/**
  * Checks a transition a game wrote: an object whose `kind` is one of the five, whose common fields and whose kind's
  * own fields have the right shape, and that holds no field of another kind.
  *
@@ -299,21 +309,22 @@ function checkPart(where: string, part: unknown, rules: Readonly<Record<string, 
  * @throws {Error} For the first field of the wrong shape, and for a field the kind does not take.
  */
 function checkTransition(where: string, transition: unknown, offable: boolean): void {
-  if (transition === undefined || (offable && transition === false)) return;
+  const isSkipped = transition === undefined || (offable && transition === false);
+
+  if (isSkipped) return;
   if (!isRecord(transition)) {
     throw wrong(where, transition, offable ? "an object { kind } or false" : "an object { kind }");
   }
 
+  // Resolve the kind and the fields it takes.
   const kind = transition.kind;
-  const own =
-    typeof kind === "string" && Object.hasOwn(TRANSITION_KINDS, kind)
-      ? TRANSITION_KINDS[kind]
-      : undefined;
+  const own = isKnownKind(kind) ? TRANSITION_KINDS[kind] : undefined;
 
   if (own === undefined) throw wrong(`${where}.kind`, kind, TRANSITION_RULES.kind?.hint ?? "");
 
   const takes: readonly string[] = [...TRANSITION_COMMON, ...own];
 
+  // Refuse a field of another kind.
   for (const field of Object.keys(transition)) {
     if (!takes.includes(field)) {
       throw new Error(
@@ -322,6 +333,7 @@ function checkTransition(where: string, transition: unknown, offable: boolean): 
     }
   }
 
+  // Check each field against its rule.
   for (const field of takes) {
     const value = transition[field];
     const rule = TRANSITION_RULES[field];

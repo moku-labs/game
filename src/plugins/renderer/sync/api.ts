@@ -976,7 +976,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       body: (kind: TransitionBodyKind, quad: FilterSlotQuad, member: string): (() => void) =>
         handBody(sctx, kind, quad, member),
 
-      reducedMotion: (on: boolean): void => {
+      setReducedMotion: (on: boolean): void => {
         state.leave.reduced = on;
       }
     },

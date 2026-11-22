@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EASE_NAMES } from "../../../anim/tween/easing";
+import { EASE_NAMES } from "../../../world/projection/easing";
 import { defineScene } from "../../define";
 import { checkConfig } from "../../lifecycle";
 import type { SceneEnter, SceneLeave } from "../../types";

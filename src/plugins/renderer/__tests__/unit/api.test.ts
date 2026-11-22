@@ -51,7 +51,7 @@ describe("renderer api", () => {
       "drop",
       "land",
       "play",
-      "reducedMotion",
+      "setReducedMotion",
       "show"
     ]);
     expect(Object.keys(mock.api.sync.textures).toSorted()).toEqual([
