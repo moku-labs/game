@@ -6,7 +6,9 @@ import { playingTransition } from "./transition-fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: a frame of a scene switch's transition (spec 36): the step of the picture while it plays, per kind. The
-// sprite, the mesh, its numbers and the shader are made at the first step; every frame after writes numbers only.
+// sprite, the mesh, its numbers and the shader are made at the first step; every frame after writes numbers only. What
+// draws is real Pixi (the sprite, the mesh, the shader, the uniform groups, the bodies of `effects`): a fake's number
+// fields are not in Pixi's form, and a fake setter does not box what Pixi's does.
 // ---------------------------------------------------------------------------
 
 /** The kinds and their budget rows. */

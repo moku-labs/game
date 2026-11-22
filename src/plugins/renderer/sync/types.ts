@@ -1254,6 +1254,12 @@ export type TransitionRun = {
   quad: FilterSlotQuad | undefined;
   /** The `edgeColor` written into a dissolve body's colour uniform in this run; -1 before. */
   edgeColor: number;
+  /**
+   * The transition's numbers a frame reads, copied at `play` into 64-bit floats of this run's own (`ms`, a wipe's
+   * `angle`, an iris's `x`, `y` and the radius that shows the whole canvas, ...). A frame reads these, never the
+   * transition object's fields, whose form V8 keeps by the history of their shape. Laid out by `sync/transition.ts`.
+   */
+  numbers: Float64Array;
 };
 
 /** What the loader of a running look draws once it is due. Not public. */

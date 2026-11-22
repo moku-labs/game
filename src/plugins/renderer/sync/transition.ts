@@ -54,6 +54,34 @@ const BODY_HINT =
 /** Label of the picture's texture and of what draws it. */
 const PICTURE_LABEL = "renderer.leave.picture";
 
+/** Where each number of a run sits in `TransitionRun.numbers`: the time, then what each kind writes by name. */
+const MS = 0;
+const ANGLE = 1;
+const SOFT = 2;
+const X = 3;
+const Y = 4;
+/** An iris's radius that shows every pixel: the distance to the farthest corner, past the soft edge. */
+const OPEN = 5;
+const SCALE = 6;
+const EDGE = 7;
+
+/** How many numbers a run holds. */
+const NUMBERS = 8;
+
+/** A number V8 cannot keep as a small integer: the first store of a field in double form, never shown. */
+const DOUBLE_SEED = 0.5;
+
+/**
+ * Where the display object goes this frame (its left and top edge, CSS px), as point data Pixi's `copyFrom` reads. The
+ * fields start as doubles, so V8 keeps them in double form and each write lands in place. Pixi's own setter
+ * (`position.x = x`) takes the number as an argument, and a double handed to a call that is not inlined is boxed: 16 B
+ * a frame, whether it is inlined or not depends on the optimizer's budget (`transition.perf.ts`).
+ */
+const AT = { x: DOUBLE_SEED, y: DOUBLE_SEED };
+
+/** What the display object is scaled by this frame, on x and on y; point data like `AT`. */
+const SCALED = { x: DOUBLE_SEED, y: DOUBLE_SEED };
+
 /** The eased progress of the frame, in place: `easeCell` takes no number and returns none, so a frame boxes none. */
 const EASED = new Float64Array(1);
 
@@ -179,7 +207,8 @@ export function captureLeave(sctx: SyncCtx): "wait" | "ready" | "none" {
     capture: "asked",
     drawn: transition.kind,
     quad: undefined,
-    edgeColor: -1
+    edgeColor: -1,
+    numbers: new Float64Array(NUMBERS)
   };
   sctx.deps.demand.request();
 
@@ -275,6 +304,45 @@ function warnMissingBody(sctx: SyncCtx, kind: TransitionBodyKind): void {
 }
 
 /**
+ * Copies the numbers a frame of the transition reads into the run's own array, once at `play`.
+ *
+ * @param playing - The run.
+ */
+function copyNumbers(playing: TransitionRun): void {
+  const { transition, numbers } = playing;
+
+  numbers[MS] = transition.ms;
+
+  switch (transition.kind) {
+    case "wipe": {
+      numbers[ANGLE] = transition.angle;
+      numbers[SOFT] = transition.soft;
+      break;
+    }
+    case "iris": {
+      const reachX = Math.max(transition.x, 1 - transition.x);
+      const reachY = Math.max(transition.y, 1 - transition.y);
+
+      numbers[X] = transition.x;
+      numbers[Y] = transition.y;
+      numbers[SOFT] = transition.soft;
+      // `Math.hypot` measured 60 B a frame here (`transition.perf.ts`); the square root of the sum allocates nothing.
+      // eslint-disable-next-line unicorn/prefer-modern-math-apis -- the root of the sum allocates nothing.
+      numbers[OPEN] = Math.sqrt(reachX * reachX + reachY * reachY) + transition.soft;
+      break;
+    }
+    case "dissolve": {
+      numbers[SCALE] = transition.scale;
+      numbers[EDGE] = transition.edge;
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+}
+
+/**
  * Starts a transition whose picture is taken, from now on the clock: what it is drawn with is picked, a kind whose body
  * was not handed is drawn as a fade.
  *
@@ -289,6 +357,7 @@ export function startTransition(sctx: SyncCtx, playing: TransitionRun): void {
   playing.playStartedAt = sctx.ctx.deps.clock.now();
   playing.quad = quad;
   playing.drawn = !isBodyKind(kind) || quad !== undefined ? kind : "fade";
+  copyNumbers(playing);
 
   if (isBodyKind(kind) && quad === undefined) warnMissingBody(sctx, kind);
 
@@ -383,59 +452,48 @@ function paintSprite(
 ): void {
   const eased = EASED[0] ?? 0;
   const { transition } = playing;
-  let x = screen.x;
-  let y = screen.y;
 
   if (sprite.texture !== picture) sprite.texture = picture;
+
+  AT.x = screen.x;
+  AT.y = screen.y;
 
   if (transition.kind === "slide") {
     switch (transition.to) {
       case "left": {
-        x -= eased * screen.width;
+        AT.x = screen.x - eased * screen.width;
         break;
       }
       case "right": {
-        x += eased * screen.width;
+        AT.x = screen.x + eased * screen.width;
         break;
       }
       case "up": {
-        y -= eased * screen.height;
+        AT.y = screen.y - eased * screen.height;
         break;
       }
       case "down": {
-        y += eased * screen.height;
+        AT.y = screen.y + eased * screen.height;
         break;
       }
     }
   }
 
+  SCALED.x = screen.width / picture.width;
+  SCALED.y = screen.height / picture.height;
   sprite.alpha = transition.kind === "slide" ? 1 : 1 - eased;
-  placeAt(sprite, x, y, screen.width / picture.width, screen.height / picture.height);
+  placeAt(sprite);
 }
 
 /**
- * Writes the place and the scale of a display object, each number where it differs: a number handed to Pixi's point
- * setter is boxed in every frame, a number compared is not.
+ * Places a display object at `AT` and scales it by `SCALED`: Pixi's `copyFrom` compares both numbers with the point's
+ * own and writes them where they differ, reading them inside Pixi, so no number is handed to a call.
  *
  * @param shown - The sprite or the mesh.
- * @param x - Its left edge, CSS px.
- * @param y - Its top edge, CSS px.
- * @param scaleX - Its scale on x.
- * @param scaleY - Its scale on y.
  */
-function placeAt(
-  shown: PixiSprite | NonNullable<PictureObjects["mesh"]>,
-  x: number,
-  y: number,
-  scaleX: number,
-  scaleY: number
-): void {
-  const { position, scale } = shown;
-
-  if (position.x !== x) position.x = x;
-  if (position.y !== y) position.y = y;
-  if (scale.x !== scaleX) scale.x = scaleX;
-  if (scale.y !== scaleY) scale.y = scaleY;
+function placeAt(shown: PixiSprite | NonNullable<PictureObjects["mesh"]>): void {
+  shown.position.copyFrom(AT);
+  shown.scale.copyFrom(SCALED);
 }
 
 /**
@@ -588,34 +646,34 @@ function writeGlobals(
  * Writes a wipe's uniforms for the frame's eased progress (`EASED[0]`): its line sweeps the picture away, `progress`
  * from 1 to 0; `angle` and `soft` where they differ. One function per kind: each write site sees one body's group.
  *
- * @param transition - The wipe.
+ * @param numbers - The run's numbers.
  * @param uniforms - The values of the body's uniform group.
  */
-function writeWipe(transition: KindOf<"wipe">, uniforms: BodyUniforms): void {
+function writeWipe(numbers: Float64Array, uniforms: BodyUniforms): void {
+  const angle = numbers[ANGLE] ?? 0;
+  const soft = numbers[SOFT] ?? 0;
+
   uniforms.progress = 1 - (EASED[0] ?? 0);
-  if (uniforms.angle !== transition.angle) uniforms.angle = transition.angle;
-  if (uniforms.soft !== transition.soft) uniforms.soft = transition.soft;
+  if (uniforms.angle !== angle) uniforms.angle = angle;
+  if (uniforms.soft !== soft) uniforms.soft = soft;
 }
 
 /**
- * Writes an iris's uniforms for the frame's eased progress (`EASED[0]`): it closes around (`x`, `y`), `radius` from the
- * distance to the canvas's farthest corner past the soft edge, where every pixel shows, to 0; the rest where they
- * differ.
+ * Writes an iris's uniforms for the frame's eased progress (`EASED[0]`): it closes around (`x`, `y`), `radius` from
+ * `OPEN`, where every pixel shows, to 0; the rest where they differ.
  *
- * @param transition - The iris.
+ * @param numbers - The run's numbers.
  * @param uniforms - The values of the body's uniform group.
  */
-function writeIris(transition: KindOf<"iris">, uniforms: BodyUniforms): void {
-  const reachX = Math.max(transition.x, 1 - transition.x);
-  const reachY = Math.max(transition.y, 1 - transition.y);
-  // `Math.hypot` measured 60 B a frame here (`transition.perf.ts`); the square root of the sum allocates nothing.
-  // eslint-disable-next-line unicorn/prefer-modern-math-apis -- the root of the sum allocates nothing.
-  const open = Math.sqrt(reachX * reachX + reachY * reachY) + transition.soft;
+function writeIris(numbers: Float64Array, uniforms: BodyUniforms): void {
+  const x = numbers[X] ?? 0;
+  const y = numbers[Y] ?? 0;
+  const soft = numbers[SOFT] ?? 0;
 
-  uniforms.radius = open * (1 - (EASED[0] ?? 0));
-  if (uniforms.x !== transition.x) uniforms.x = transition.x;
-  if (uniforms.y !== transition.y) uniforms.y = transition.y;
-  if (uniforms.soft !== transition.soft) uniforms.soft = transition.soft;
+  uniforms.radius = (numbers[OPEN] ?? 0) * (1 - (EASED[0] ?? 0));
+  if (uniforms.x !== x) uniforms.x = x;
+  if (uniforms.y !== y) uniforms.y = y;
+  if (uniforms.soft !== soft) uniforms.soft = soft;
 }
 
 /**
@@ -632,9 +690,12 @@ function writeDissolve(
   transition: KindOf<"dissolve">,
   uniforms: BodyUniforms
 ): void {
+  const scale = playing.numbers[SCALE] ?? 0;
+  const edge = playing.numbers[EDGE] ?? 0;
+
   uniforms.progress = EASED[0] ?? 0;
-  if (uniforms.scale !== transition.scale) uniforms.scale = transition.scale;
-  if (uniforms.edge !== transition.edge) uniforms.edge = transition.edge;
+  if (uniforms.scale !== scale) uniforms.scale = scale;
+  if (uniforms.edge !== edge) uniforms.edge = edge;
 
   const color = uniforms.edgeColor;
   const hex = transition.edgeColor;
@@ -658,11 +719,11 @@ function writeBody(playing: TransitionRun, uniforms: BodyUniforms): void {
 
   switch (transition.kind) {
     case "wipe": {
-      writeWipe(transition, uniforms);
+      writeWipe(playing.numbers, uniforms);
       break;
     }
     case "iris": {
-      writeIris(transition, uniforms);
+      writeIris(playing.numbers, uniforms);
       break;
     }
     case "dissolve": {
@@ -715,7 +776,11 @@ function paintMesh(
 
   if (mesh.shader !== shader) mesh.shader = shader;
 
-  placeAt(mesh, screen.x, screen.y, screen.width, screen.height);
+  AT.x = screen.x;
+  AT.y = screen.y;
+  SCALED.x = screen.width;
+  SCALED.y = screen.height;
+  placeAt(mesh);
   writeGlobals(picture, texture.source, screen, sctx.deps.host.resolution());
 
   if (fu !== undefined) writeBody(playing, fu.uniforms);
@@ -742,7 +807,8 @@ export function stepTransition(
 ): void {
   const pixi = sctx.deps.host.pixi();
   const texture = playing.picture;
-  const { ms, ease } = playing.transition;
+  const { ease } = playing.transition;
+  const ms = playing.numbers[MS] ?? 0;
 
   if (pixi === undefined || texture === undefined) return;
 

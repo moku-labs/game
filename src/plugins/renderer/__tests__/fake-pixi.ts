@@ -286,6 +286,21 @@ export class FakePoint {
     this.x = x;
     this.y = y;
   }
+
+  /**
+   * Copies both coordinates of a point, as Pixi's `copyFrom`.
+   *
+   * @param point - The point to copy.
+   * @param point.x - Its x.
+   * @param point.y - Its y.
+   * @returns This point.
+   */
+  public copyFrom(point: { x: number; y: number }): this {
+    this.x = point.x;
+    this.y = point.y;
+
+    return this;
+  }
 }
 
 /**
