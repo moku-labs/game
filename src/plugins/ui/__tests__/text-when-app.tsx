@@ -25,7 +25,7 @@ import { uiPlugin } from "../index";
 export const Coins = component("Coins", { value: 0 });
 
 /** The text style keys of the fixture. */
-type StyleKey = "tw.short" | "tw.tall" | "tw.other" | "tw.format";
+type StyleKey = "tw.short" | "tw.tall" | "tw.other" | "tw.format" | "tw.wrap";
 
 const { bind, defineFeature, defineFlow, defineNode, defineTextFormats, tr } = defineGame<{
   player: { level: number };
@@ -68,7 +68,8 @@ const textStyles = defineTextStyles({
   "tw.short": { font: "ui.font-body", size: 19, fill: 0 },
   "tw.tall": { font: "ui.font-body", size: 41, fill: 0 },
   "tw.other": { font: "ui.font-body", size: 30, fill: 0 },
-  "tw.format": { font: "ui.font-body", size: 14, fill: 0 }
+  "tw.format": { font: "ui.font-body", size: 14, fill: 0 },
+  "tw.wrap": { font: "ui.font-body", size: 19, fill: 0, wrap: "box" }
 });
 
 /** A format that answers its own style. */
@@ -103,6 +104,12 @@ export const textWhenScreen = projection({
         key="boxed"
         content={tr("tw.title")}
         style={{ width: 300, height: 60, text: "tw.short", when: { tall: { text: "tw.tall" } } }}
+      />
+      <text key="wrapped" content={tr("tw.title")} style={{ width: 120, text: "tw.wrap" }} />
+      <text
+        key="clipped"
+        content={tr("tw.title")}
+        style={{ width: 120, height: 20, text: "tw.wrap" }}
       />
       <text key="plain" content="Plain" style={{ alignSelf: "start" }} />
       <text key="keyed" content="Keyed" style="tw.short" />

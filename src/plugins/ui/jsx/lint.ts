@@ -73,7 +73,8 @@ function formatIfLoaded(ctx: UiCtx, message: Message, locale: string): readonly 
 
 /**
  * Measures a text in every loaded locale, in the key its markup names for this frame, and reports
- * the widest one that does not fit. A lazy locale the player has not picked yet cannot be
+ * the widest one that does not fit. A wrapping style is measured at the element's width, so its
+ * lines are compared by height. A lazy locale the player has not picked yet cannot be
  * measured, so it is skipped.
  *
  * @param ctx - Domain context of the ui plugin.
@@ -94,7 +95,8 @@ function textOverflow(ctx: UiCtx, element: Element): Finding | undefined {
     if (parts === undefined) continue;
 
     const joined = parts.map(part => (part.kind === "text" ? part.text : "")).join("");
-    const size = ctx.deps.text.measure(joined, style);
+    // A `wrap: "box"` style wraps at the laid-out width, as it is drawn (F233); others ignore it.
+    const size = ctx.deps.text.measure(joined, style, element.rect.w);
 
     if (size.width <= element.rect.w && size.height <= element.rect.h) continue;
 
