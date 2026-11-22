@@ -117,7 +117,7 @@ function itemAt(index: number): { x: number; y: number } {
  * @param alpha - Where its dissolve starts.
  * @returns The root.
  */
-function fadeRoot(stage: Stage, fill: number, alpha: number): World.Entity {
+export function fadeRoot(stage: Stage, fill: number, alpha: number): World.Entity {
   const root = stage.spawn(
     Transform({ x: 0, y: 0 }),
     Shape({ w: 390, h: stage.height, fill }),

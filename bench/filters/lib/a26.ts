@@ -53,7 +53,12 @@ export const ARMS = [
   "set-bloom-held",
   "set-bloom-one",
   "sweep-blur",
-  "sweep-blur-q4"
+  "sweep-blur-q4",
+  "trans-fade",
+  "trans-slide",
+  "trans-wipe",
+  "trans-iris",
+  "trans-dissolve"
 ] as const;
 
 /** The apps that may stand in front of a free phone. */

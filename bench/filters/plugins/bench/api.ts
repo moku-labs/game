@@ -38,6 +38,10 @@ export type BenchHost = {
   monitor: Pick<Renderer.PerfMonitorApi, "frames" | "mark" | "setResolution">;
   now(): number;
   warn(event: string, data: Record<string, string>): void;
+  /** The scene the engine has mounted. */
+  scene(): string | undefined;
+  /** Answers the gate of the graph's rest node so the engine switches to the other scene; `false` while it is shut. */
+  switchScene(): boolean;
 };
 
 /**
@@ -108,7 +112,9 @@ function stageOf(state: BenchState, host: BenchHost, n: number | undefined): Sta
     mark: label => {
       state.marks.push({ label, frame: host.monitor.frames().written - state.since });
       host.monitor.mark(label);
-    }
+    },
+    scene: () => host.scene(),
+    switchScene: () => host.switchScene()
   };
 }
 

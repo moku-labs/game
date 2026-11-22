@@ -13,6 +13,7 @@ import {
 } from "../../kit";
 import { uiAssets } from "../ui/assets";
 import { BENCH_FILTERS } from "./filters";
+import { transitionLeave } from "./scenes/trans";
 
 /** The layer of the K full-screen sprites, under everything. */
 export const BALLAST_LAYER = "ballast";
@@ -20,27 +21,44 @@ export const BALLAST_LAYER = "ballast";
 /** The layer of the scene. */
 export const MAIN_LAYER = "main";
 
-/** The rest node the bench stands on, for as long as the page is open. */
+/** The rest node the bench stands on, for as long as the page is open. `over` is the switch of the `trans-*` arms. */
 const bench = defineNode({
   scene: "bench",
-  outcomes: { go: type() },
+  outcomes: { go: type(), over: type() },
   rest: true,
   checkpoint: true
 });
 
-/** The graph: one node. */
-export const benchFlow = defineFlow("main", {
-  nodes: { bench },
-  start: "bench",
-  edges: { bench: { go: "bench" } }
+/** The other side of a `trans-*` arm: a rest node on the second scene. */
+const away = defineNode({
+  scene: "bench-b",
+  outcomes: { back: type() },
+  rest: true,
+  checkpoint: true
 });
 
-/** The scene: the ballast under the measured views. */
-const benchSceneDefinition = defineScene("bench", {
-  bundle: "ui",
-  layers: { [BALLAST_LAYER]: { sort: "none" }, [MAIN_LAYER]: { sort: "none" } },
-  projections: []
+/** The graph: the rest node, and the one the `trans-*` arms switch to and back. */
+export const benchFlow = defineFlow("main", {
+  nodes: { bench, away },
+  start: "bench",
+  edges: { bench: { go: "bench", over: "away" }, away: { back: "bench" } }
 });
+
+/**
+ * One scene of the graph: the ballast under the measured views. Both leave with the transition the arm on screen
+ * names, which is what a `trans-*` arm measures.
+ *
+ * @param id - The scene.
+ * @returns Its definition.
+ */
+function sceneOf(id: "bench" | "bench-b") {
+  return defineScene(id, {
+    bundle: "ui",
+    layers: { [BALLAST_LAYER]: { sort: "none" }, [MAIN_LAYER]: { sort: "none" } },
+    projections: [],
+    leave: transitionLeave
+  });
+}
 
 /** The stream of the `fade` scene: a particle container that changes in every frame. */
 const ember = defineEmitter("fx.ember", {
@@ -52,7 +70,7 @@ const ember = defineEmitter("fx.ember", {
 });
 
 export const benchFeature = defineFeature("filterBench", {
-  scenes: [benchSceneDefinition],
+  scenes: [sceneOf("bench"), sceneOf("bench-b")],
   filters: BENCH_FILTERS,
   emitters: [ember],
   textStyles: defineTextStyles({

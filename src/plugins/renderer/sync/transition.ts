@@ -315,7 +315,9 @@ function copyNumbers(playing: TransitionRun): void {
 
   switch (transition.kind) {
     case "wipe": {
-      numbers[ANGLE] = transition.angle;
+      // RevealLine keeps the part before its line; a turn of π keeps the old screen ahead of the edge, so angle 0
+      // moves the edge left to right as the contract says.
+      numbers[ANGLE] = transition.angle + Math.PI;
       numbers[SOFT] = transition.soft;
       break;
     }

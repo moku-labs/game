@@ -413,7 +413,8 @@ describe("the frames of a transition", () => {
     expect(mesh.shader.resources.uTexture).toBe(picture.source);
     expect(mesh.shader.resources.fu).toBe(body.quad.fu);
     expect([mesh.scale.x, mesh.scale.y]).toEqual([1080, 1920]);
-    expect(body.values).toEqual({ progress: 1, angle: 1.25, soft: 0.04 });
+    // The body's line runs the other way: angle 0 moves the edge left to right, the old screen left on the right.
+    expect(body.values).toEqual({ progress: 1, angle: 1.25 + Math.PI, soft: 0.04 });
     expect([...(globals?.uInputSize ?? [])]).toEqual([
       1080,
       1920,

@@ -6,6 +6,7 @@ import { fakeClock } from "../../../src/testing.ts";
 import { diskIo, openPage, type Watched, watch } from "../../../tests/integration/drawn-helpers";
 import { benchScene } from "../features/bench/bench.dev";
 import { CASE_SCENES, scaleScene, scaleUpScene } from "../features/bench/scenes/cases";
+import { TRANS_SCENES, TRANSITION_MS, transitionLeave } from "../features/bench/scenes/trans";
 import type { Stage } from "../features/bench/scenes/types";
 import game from "../index";
 import { ARMS } from "../lib/a26";
@@ -64,7 +65,12 @@ const EVERY_SCENE = [
   "set-bloom-held",
   "set-bloom-one",
   "sweep-blur",
-  "sweep-blur-q4"
+  "sweep-blur-q4",
+  "trans-fade",
+  "trans-slide",
+  "trans-wipe",
+  "trans-iris",
+  "trans-dissolve"
 ] as const;
 
 /** The running game of a test. */
@@ -103,6 +109,10 @@ async function open(onPage?: () => void): Promise<{ app: App; driver: Watched }>
   running.push(app);
   await app.start();
   app.flow.run().catch(() => undefined);
+
+  // The fake canvas has no WebGPU context: the picture of a transition cannot be copied, and the engine gives the
+  // transition up (the switch itself goes on). The copy is the engine's own test, `renderer/__tests__`.
+  Object.assign(page.stage.last().canvas, { getContext: () => undefined });
 
   const driver = watch(app, page, clock);
 
@@ -426,7 +436,9 @@ function recordingStage(asked: Asked[]): Stage {
 
       return 2;
     },
-    mark: () => undefined
+    mark: () => undefined,
+    scene: () => "bench",
+    switchScene: () => true
   };
 }
 
@@ -534,5 +546,197 @@ describe("the Bloom arms", () => {
     expect(frames.map(frame => frame.length)).toEqual([1, 1, 1, 1]);
     expect(new Set(frames.map(frame => frame[0]?.[0])).size).toBe(1);
     expect(frames.every(frame => "strength" in (frame[0]?.[1] ?? {}))).toBe(true);
+  });
+});
+
+/** What a trans arm asked of a fake stage, in order. */
+type TransAsked = { call: string; label?: string; entity?: number };
+
+/**
+ * A stage for a `trans-*` arm: it counts the views spawned, answers the gate as told and keeps the clock where the test puts it.
+ *
+ * @param asked - Takes what is asked, in order.
+ * @param gate - The gate of the graph: `false` while shut.
+ * @param gate.open - Whether the next answer is taken.
+ * @param clock - The game clock.
+ * @param clock.ms - The epoch milliseconds.
+ * @returns The stage.
+ */
+function transStage(asked: TransAsked[], gate: { open: boolean }, clock: { ms: number }): Stage {
+  let spawned = 0;
+
+  return {
+    ...recordingStage([]),
+    spawn: () => {
+      spawned += 1;
+      asked.push({ call: "spawn", entity: spawned });
+
+      return spawned;
+    },
+    child: () => {
+      spawned += 1;
+      asked.push({ call: "spawn", entity: spawned });
+
+      return spawned;
+    },
+    despawn: entity => {
+      asked.push({ call: "despawn", entity });
+    },
+    now: () => clock.ms,
+    mark: label => {
+      asked.push({ call: "mark", label });
+    },
+    scene: () => "bench",
+    switchScene: () => {
+      asked.push({ call: "switch" });
+
+      return gate.open;
+    }
+  };
+}
+
+describe("the trans arms", () => {
+  const wipe = TRANS_SCENES.find(scene => scene.name === "trans-wipe");
+
+  // Bug: an arm of the schedule is missing from the table, or two kinds share an arm.
+  it("has one arm for each of the five kinds", () => {
+    expect(TRANS_SCENES.map(scene => scene.name)).toEqual([
+      "trans-fade",
+      "trans-slide",
+      "trans-wipe",
+      "trans-iris",
+      "trans-dissolve"
+    ]);
+  });
+
+  // Bug: the arm on screen measures another kind than its name: the scenes leave with the one the last arm wrote.
+  it("makes the scenes leave with the transition of the arm on screen, 400 ms, no veil and no loader", () => {
+    for (const scene of TRANS_SCENES) {
+      scene.mount(transStage([], { open: true }, { ms: 0 }));
+
+      expect(transitionLeave()).toEqual({
+        cover: false,
+        loader: false,
+        transition: { kind: scene.name.slice("trans-".length), ms: 400 }
+      });
+    }
+  });
+
+  // Bug: the switch is asked for at the arm's first frame, inside the frames the summary drops; or never again after
+  // the first turn; or a turn asks twice.
+  it("asks for one switch a turn, 300 ms into it, and marks it when the gate took the answer", () => {
+    const asked: TransAsked[] = [];
+    const mounted = wipe?.mount(transStage(asked, { open: true }, { ms: 0 }));
+
+    asked.length = 0;
+
+    for (const elapsed of [0, 299, 300, 316, 1000, 1299, 1300, 1316]) mounted?.tick?.(elapsed);
+
+    expect(asked).toEqual([
+      { call: "switch" },
+      { call: "mark", label: "switch" },
+      { call: "switch" },
+      { call: "mark", label: "switch" }
+    ]);
+  });
+
+  // Bug: a shut gate (the engine still builds the scene before) loses the turn's switch, or marks a switch that never started.
+  it("asks again each frame while the gate is shut, and marks only the answer that was taken", () => {
+    const asked: TransAsked[] = [];
+    const gate = { open: false };
+    const mounted = wipe?.mount(transStage(asked, gate, { ms: 0 }));
+
+    asked.length = 0;
+    mounted?.tick?.(400);
+    mounted?.tick?.(416);
+    expect(asked).toEqual([{ call: "switch" }, { call: "switch" }]);
+
+    gate.open = true;
+    asked.length = 0;
+    mounted?.tick?.(432);
+    mounted?.tick?.(448);
+    expect(asked).toEqual([{ call: "switch" }, { call: "mark", label: "switch" }]);
+  });
+
+  // Bug: the old room stays under the new one (every turn adds 40 views), the swap is not marked, or the end is marked
+  // before the transition's 400 ms are over, or never.
+  it("swaps the room whole in the swap, marks it, and marks the end 400 ms later", () => {
+    const asked: TransAsked[] = [];
+    const clock = { ms: 1000 };
+    const mounted = wipe?.mount(transStage(asked, { open: true }, clock));
+    const before = asked.filter(entry => entry.call === "spawn").length;
+
+    asked.length = 0;
+    mounted?.swapped?.("bench-b");
+
+    const gone = asked.filter(entry => entry.call === "despawn").map(entry => entry.entity);
+    const made = asked.filter(entry => entry.call === "spawn").length;
+
+    // Every view of the room that stood is taken off, and a whole room put in its place.
+    expect(gone).toEqual(Array.from({ length: before }, (_unused, index) => index + 1));
+    expect(made).toBe(before);
+    expect(asked.at(-1)).toEqual({ call: "mark", label: "swap" });
+
+    asked.length = 0;
+    clock.ms += TRANSITION_MS - 1;
+    mounted?.tick?.(0);
+    expect(asked.filter(entry => entry.call === "mark")).toEqual([]);
+
+    clock.ms += 1;
+    mounted?.tick?.(0);
+    mounted?.tick?.(0);
+    expect(asked.filter(entry => entry.call === "mark")).toEqual([{ call: "mark", label: "end" }]);
+  });
+});
+
+describe("a real switch", () => {
+  // Bug: the arm never moves the graph: the engine does not switch, so no picture is taken and no swap happens; or the
+  // marks come out of order, and the rows cannot be read frame by frame.
+  it("trans-wipe switches the engine's scene every turn, and marks switch, swap and end in that order", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const { app, driver } = await open();
+
+    app.bench.show("trans-wipe", { k: 0 });
+    expect(app.scenes.current()).toBe("bench");
+
+    // 0.3 s in, the first turn asks for the switch; the room of the other scene stands from the swap.
+    await driver.frames(60);
+    expect(app.scenes.current()).toBe("bench-b");
+
+    // The second turn switches back, and its transition ends 1.75 s in.
+    await driver.frames(50);
+    expect(app.scenes.current()).toBe("bench");
+
+    expect(app.bench.read().marks.map(mark => mark.label)).toEqual([
+      "switch",
+      "swap",
+      "end",
+      "switch",
+      "swap",
+      "end"
+    ]);
+    expect(complaints(app)).toEqual([]);
+  });
+
+  // Bug: the old room is left on the screen at a swap: the room count grows with every switch.
+  it("keeps one room on the screen through the switches", async () => {
+    const { app, driver } = await open();
+
+    app.bench.show("trans-fade", { k: 0 });
+
+    // Settled: the first switch is over (0.3 s + its 0.4 s), the scene is the other one.
+    await driver.frames(70);
+    expect(app.scenes.current()).toBe("bench-b");
+
+    const room = app.world.ecs.count();
+
+    // Settled again after the second switch (1.3 s + 0.4 s), and after the fourth one (3.3 s + 0.4 s).
+    await driver.frames(60);
+    expect(app.scenes.current()).toBe("bench");
+    expect(app.world.ecs.count()).toBe(room);
+    await driver.frames(130);
+    expect(app.scenes.current()).toBe("bench");
+    expect(app.world.ecs.count()).toBe(room);
   });
 });
