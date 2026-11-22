@@ -20,6 +20,12 @@ afterEach(() => {
 
 const owner = { kind: "plugin", name: "test" } as const;
 
+/**
+ * The leave state with no look, no objects and no transition: what stays of it is the transition bodies, the reduced
+ * motion switch and the kinds warned of (spec 36), none of them set by these tests.
+ */
+const LEFT_ALONE = { bodies: new Map(), reduced: false, warnedKinds: new Set() };
+
 /** A veil that fades in over 100 ms to 0.6 and out over 200 ms. */
 const VEIL = { color: 0x10_20_30, alpha: 0.6, inMs: 100, outMs: 200 };
 
@@ -647,7 +653,7 @@ describe("a layer loader at the swap", () => {
     frameAt(stopped, 350);
     stopped.stop();
 
-    expect(stopped.ctx.state.sync.leave).toEqual({});
+    expect(stopped.ctx.state.sync.leave).toEqual(LEFT_ALONE);
   });
 });
 
@@ -695,6 +701,6 @@ describe("the objects of the picture", () => {
     mock.stop();
 
     expect([top.destroyed, texture.destroyed, loading.destroyed]).toEqual([true, false, false]);
-    expect(mock.ctx.state.sync.leave).toEqual({});
+    expect(mock.ctx.state.sync.leave).toEqual(LEFT_ALONE);
   });
 });

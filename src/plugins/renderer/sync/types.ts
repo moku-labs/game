@@ -1,11 +1,19 @@
 /**
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
-import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
+import type {
+  ComponentHandle,
+  Ease,
+  EcsApi,
+  Entity,
+  LayerSort,
+  LayerSpec
+} from "../../world/types";
 import type { OverlayValue, ShapeValue, TransformValue } from "../components";
 import type { DemandReason, Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { FilterCache, KeptState, RetakeWhy, WhyLive } from "../kept/types";
+import type { FilterGlobalsHandle } from "../quad";
 import type {
   DemandModule,
   KeptModule,
@@ -1008,13 +1016,60 @@ export type LeaveLoader = {
   due?: () => string | undefined;
 };
 
+/** The fields every transition of a scene switch carries, resolved: its length, its curve and its reduced-motion rule. */
+type LeaveTransitionCommon = {
+  /** Clock milliseconds the picture takes to go, more than 0. */
+  ms: number;
+  /** The curve of its progress: a name `applyEase` knows, or a function of the time 0..1. */
+  ease: Ease;
+  /** With reduced motion on: `"cut"` swaps at once with no transition, `"keep"` plays it as written. */
+  reduced: "cut" | "keep";
+};
+
 /**
- * What a scene switch shows over the scene being left: the veil, the loader, or both. A part left out is not drawn.
+ * The transition of a scene switch (spec 36), every field resolved by `scenes`: the picture of the last frame of the
+ * scene being left, drawn over the next scene from the swap for `ms`, then gone. `fade` lowers its alpha to 0, `slide`
+ * moves it off the canvas towards `to`, `wipe` hides it behind a line at `angle` (radians, edge `soft`), `iris` closes it
+ * into the point `x`, `y` (0..1 of the canvas, edge `soft`), `dissolve` eats it away by a noise of `scale` cells with a
+ * rim of `edge` in `edgeColor`. `wipe`, `iris` and `dissolve` draw on the bodies of `RevealLine`, `RevealRound` and
+ * `Dissolve`, and play as `fade` when that member is listed in no feature's `filters`.
+ *
+ * @example
+ * ```ts
+ * // A board left with `leave: { transition: { kind: "wipe", angle: Math.PI } }`: the defaults filled in.
+ * const wipe: LeaveTransition = { kind: "wipe", ms: 400, ease: "inOut", reduced: "cut", angle: Math.PI, soft: 0.04 };
+ * const fade: LeaveTransition = { kind: "fade", ms: 400, ease: "inOut", reduced: "cut" };
+ * ```
+ */
+export type LeaveTransition = LeaveTransitionCommon &
+  (
+    | { kind: "fade" }
+    | { kind: "slide"; to: "left" | "right" | "up" | "down" }
+    | { kind: "wipe"; angle: number; soft: number }
+    | { kind: "iris"; x: number; y: number; soft: number }
+    | { kind: "dissolve"; scale: number; edge: number; edgeColor: number }
+  );
+
+/**
+ * The kinds of transition drawn on the body of a set member that `effects` hands over (`sync.leave.body`).
+ *
+ * @example
+ * ```ts
+ * const kind: TransitionBodyKind = "iris"; // drawn on the body of `RevealRound`
+ * ```
+ */
+export type TransitionBodyKind = "wipe" | "iris" | "dissolve";
+
+/**
+ * What a scene switch shows over the scene being left: the veil, the loader, or both, and the transition from its last
+ * frame to the next scene. A part left out is not drawn.
  *
  * @example
  * ```ts
  * // The default of `scenes`: the veil from the start, the engine's ring once the switch took 400 ms.
  * const look: LeaveLook = { cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } };
+ * // A scene left with a fade and neither veil nor loader: the look is the transition alone.
+ * const faded: LeaveLook = { transition: { kind: "fade", ms: 400, ease: "inOut", reduced: "cut" } };
  * ```
  */
 export type LeaveLook = {
@@ -1022,13 +1077,20 @@ export type LeaveLook = {
   cover?: LeaveCover;
   /** The loader; absent for none. */
   loader?: LeaveLoader;
+  /**
+   * The transition, resolved; absent for none. The swap waits for `capture()`, which copies the last drawn frame, veil
+   * and loader included, and `play()` draws that picture over the next scene. With reduced motion on, a transition with
+   * `reduced: "cut"` is dropped at `show`.
+   */
+  transition?: LeaveTransition;
 };
 
 /**
  * The picture of a scene being left, `app.renderer.sync.leave` (spec 33, slice A2): a veil over the whole canvas and a
  * loader at its centre, drawn in a container of the engine above the root and every layer. `scenes` drives it: it
- * shows it at the start of a live switch, lands it at the swap and drops it on an abort. It takes no hit: the hit test
- * walks the layers of the scene only.
+ * shows it at the start of a live switch, lands it at the swap and drops it on an abort. A look with a transition (spec
+ * 36) holds the swap on `capture` until the last frame is copied, and `play` draws that picture over the next scene.
+ * It takes no hit: the hit test walks the layers of the scene only.
  *
  * @example
  * ```ts
@@ -1080,13 +1142,90 @@ export type LeaveApi = {
    * ```
    */
   drop(): void;
+
+  /**
+   * Asks for the picture of the transition the running look carries: the canvas as the next drawn frame stands, veil and
+   * loader included, copied on the GPU with no render pass. `"wait"` until that frame was drawn (the first call asks for
+   * it), `"ready"` once the picture holds it, `"none"` when no picture can be taken: no transition, reduced motion cut
+   * it, the swap came, WebGL, no device.
+   *
+   * @returns Whether the swap may commit with the transition now.
+   * @example
+   * ```ts
+   * // `scenes`, the board built and its look carrying a wipe: the swap waits one frame for the picture of the ward.
+   * const leave = ctx.require(rendererPlugin).sync.leave;
+   * leave.capture(); // "wait": the next drawn frame is copied
+   * leave.capture(); // "ready", one frame later; "none" on a WebGL device, and the swap commits as before
+   * ```
+   */
+  capture(): "wait" | "ready" | "none";
+
+  /**
+   * Starts the transition whose picture `capture()` answered `"ready"` for: the picture is drawn over the next scene
+   * from this frame, and goes over the transition's `ms` on the clock. The veil and a ring or texture loader leave at
+   * once (they are in the picture); a layer loader waits unseen for its views to leave. `land()` after it changes
+   * nothing of the transition. No picture taken: nothing happens.
+   *
+   * @example
+   * ```ts
+   * // `scenes`, in the signals phase the capture answered "ready", right after `swapIn`: the swap frame draws the board
+   * // under the picture of the ward, which fades out over 400 ms.
+   * ctx.require(rendererPlugin).sync.leave.play();
+   * ```
+   */
+  play(): void;
+
+  /**
+   * Hands the renderer the body of a set member to draw a transition of its kind on: `wipe` on `RevealLine`, `iris` on
+   * `RevealRound`, `dissolve` on `Dissolve`. A kind with no body plays as `fade`, and a dev or agent build warns once
+   * (`renderer:transition-body-missing`). A body handed again for a kind replaces the one before.
+   *
+   * @param kind - The transition kind the body draws.
+   * @param quad - The member's body on its quad, as on its filter slot.
+   * @param member - The member's export name, for the logs.
+   * @returns What takes the body back; a later transition of the kind plays as `fade`.
+   * @example
+   * ```ts
+   * // `effects` at start, for a `RevealLine` listed in a feature's `filters`, its warm filter's quad in hand.
+   * const takeBack = ctx.require(rendererPlugin).sync.leave.body("wipe", revealLineQuad, "RevealLine");
+   * takeBack(); // at stop: a wipe after it plays as a fade
+   * ```
+   */
+  body(kind: TransitionBodyKind, quad: FilterSlotQuad, member: string): () => void;
+
+  /**
+   * Tells the renderer whether the player asked for reduced motion: a look shown while it is on drops a transition whose
+   * `reduced` is `"cut"`, and its `capture()` answers `"none"`. A transition with `reduced: "keep"` plays as written.
+   *
+   * @param on - True while reduced motion is on.
+   * @example
+   * ```ts
+   * // `anim`, at start and when the player turns reduced motion on in the settings.
+   * ctx.require(rendererPlugin).sync.leave.reducedMotion(true);
+   * ```
+   */
+  reducedMotion(on: boolean): void;
+};
+
+/**
+ * The engine's objects of a transition's picture, made at the first transition that needs each and kept for the
+ * application's life: the sprite of a `fade` or a `slide`; the mesh on the unit quad, its geometry and its global filter
+ * uniforms for the kinds drawn on a set body, with one shader per kind, bound to the picture of each run. Not public.
+ */
+export type PictureObjects = {
+  sprite?: PixiSprite;
+  mesh?: PixiMesh;
+  geometry?: PixiMeshGeometry;
+  globals?: FilterGlobalsHandle;
+  /** One shader per body kind, made for the body handed then: a new body builds it again. */
+  shaders: Map<TransitionBodyKind, { quad: FilterSlotQuad; shader: PixiShader }>;
 };
 
 /**
  * The engine's objects of the picture of a scene being left, made once per application at the first step that needs
  * them and kept: `top` hangs on the stage above the root while a look runs; `veil` (the white texture, tinted) covers
  * the canvas; `frame` carries the root's transform, so `ring`, `spinner` and `held` (where a lifted layer hangs) are in
- * reference units. Not public.
+ * reference units; `picture`, what a transition's picture is drawn with. Not public.
  */
 export type LeaveObjects = {
   top: PixiContainer;
@@ -1095,6 +1234,26 @@ export type LeaveObjects = {
   ring: PixiGraphics;
   spinner: PixiSprite;
   held: PixiContainer;
+  picture: PictureObjects;
+};
+
+/**
+ * The transition of a switch (spec 36): asked for by `capture`, its picture taken by the next drawn frame, then playing
+ * from `play` at `playStartedAt` on the clock, drawn as `drawn` (the transition's kind, or `"fade"` for a kind with no
+ * body) on `quad`, the body held at `play`. Beside the look run, so the take-down of the look never drops it. Not
+ * public.
+ */
+export type TransitionRun = {
+  transition: LeaveTransition;
+  /** The copy of the canvas; absent until the frame that takes it. */
+  picture: PixiRenderTexture | undefined;
+  playStartedAt: number;
+  capture: "asked" | "taken" | "playing";
+  drawn: LeaveTransition["kind"];
+  /** The body a `wipe`, an `iris` or a `dissolve` draws on, taken at `play`; absent for a sprite. */
+  quad: FilterSlotQuad | undefined;
+  /** The `edgeColor` written into a dissolve body's colour uniform in this run; -1 before. */
+  edgeColor: number;
 };
 
 /** What the loader of a running look draws once it is due. Not public. */
@@ -1124,6 +1283,11 @@ export type LeaveRun = {
   lifted?: PixiContainer;
   /** The loader is shown: past its `afterMs`, before the swap; after it, a layer loader that showed, while it fades. */
   shown: boolean;
+  /**
+   * The look's transition while it may still play: absent without one, when reduced motion cut it at `show`, and once
+   * no picture could be taken.
+   */
+  transition: LeaveTransition | undefined;
 };
 
 /**
@@ -1144,9 +1308,19 @@ export type LeaveParked = {
 /**
  * The picture of a scene being left (spec 33, slice A2): the running look, absent while none runs; the engine's
  * objects, absent until the first look needs them and after the application that held them was lost; and the loader
- * layer that waits for its views to leave, absent while none does. Not public.
+ * layer that waits for its views to leave, absent while none does. Its transition (spec 36): the one asked for or
+ * playing, the set bodies `effects` handed by kind, whether reduced motion is on, and the kinds warned of once for a
+ * missing body. Not public.
  */
-export type LeaveState = { run?: LeaveRun; objects?: LeaveObjects; parked?: LeaveParked };
+export type LeaveState = {
+  run?: LeaveRun;
+  objects?: LeaveObjects;
+  parked?: LeaveParked;
+  playing?: TransitionRun;
+  bodies: Map<TransitionBodyKind, FilterSlotQuad>;
+  reduced: boolean;
+  warnedKinds: Set<TransitionBodyKind>;
+};
 
 /**
  * sync module API, `app.renderer.sync`. The one owner of every display object: it builds them
@@ -1432,6 +1606,14 @@ export type SyncInternal = {
    * callback before the decision. One field read and no allocation while no look runs.
    */
   stepLeave(): void;
+
+  /**
+   * The picture of a transition, right after the stage render (spec 36): when one is asked for and the frame was drawn,
+   * the canvas texture is copied into it, one copy and one submit, no render pass. One field read while none is asked.
+   *
+   * @param drawn - Whether Pixi drew the frame (never the heat map).
+   */
+  leaveAfter(drawn: boolean): void;
 
   /**
    * Hands Pixi again the filters of every view whose filters were switched on or off since they were written: Pixi

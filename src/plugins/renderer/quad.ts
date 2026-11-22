@@ -15,6 +15,9 @@ import type {
 /** Numbers of a vector of the global filter uniforms. */
 export const VECTOR = 4;
 
+/** `uOutputTexture.z` of a pass that ends on the canvas: Pixi's sign for a root target, which turns `y` over. */
+export const ROOT_TARGET = -1;
+
 /** A uniform of the group as Pixi takes it. */
 type Vector = { value: Float32Array; type: "vec4<f32>" };
 

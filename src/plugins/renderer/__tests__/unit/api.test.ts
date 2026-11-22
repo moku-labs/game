@@ -45,7 +45,15 @@ describe("renderer api", () => {
       "renderPasses",
       "textures"
     ]);
-    expect(Object.keys(mock.api.sync.leave).toSorted()).toEqual(["drop", "land", "show"]);
+    expect(Object.keys(mock.api.sync.leave).toSorted()).toEqual([
+      "body",
+      "capture",
+      "drop",
+      "land",
+      "play",
+      "reducedMotion",
+      "show"
+    ]);
     expect(Object.keys(mock.api.sync.textures).toSorted()).toEqual([
       "create",
       "destroy",

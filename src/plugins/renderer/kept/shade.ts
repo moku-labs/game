@@ -8,7 +8,7 @@
  * The filter's uniform group is the instance's own, read by the mesh as it stands. A filter that reads inputs binds the
  * record's held stage 2 results under the names its quad gives (F126 stage 4).
  */
-import { filterGlobals, NAMES_PER_INPUT, quadShader, unitQuad, VECTOR } from "../quad";
+import { filterGlobals, NAMES_PER_INPUT, quadShader, ROOT_TARGET, unitQuad, VECTOR } from "../quad";
 import type {
   FilterSlot,
   FilterSlotQuad,
@@ -25,9 +25,6 @@ import type { KeptCtx, KeptMatrices, KeptQuad, KeptRecord, KeptShade, KeptState 
 
 /** The numbers `renderShade` wants in the group this frame, in the order of `writeGlobals`. One array: it allocates nothing. */
 const WANTED = new Float32Array(6 * VECTOR);
-
-/** `uOutputTexture.z` of a pass that ends on the canvas: Pixi's sign for a root target, which turns `y` over. */
-const ROOT_TARGET = -1;
 
 /**
  * The first enabled slot of a stack: the one slot of a stack that fits the mode.

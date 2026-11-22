@@ -418,10 +418,18 @@ export class FakeUniformGroup {
     }
   };
 
+  /** How often the group was marked for an upload, as Pixi's `UniformGroup.update`. */
+  public updates = 0;
+
   public constructor(structures: Record<string, { value: unknown }>) {
     this.uniforms = Object.fromEntries(
       Object.entries(structures).map(([name, structure]) => [name, structure.value])
     );
+  }
+
+  /** Marks the group for an upload: counted. */
+  public update(): void {
+    this.updates += 1;
   }
 }
 
@@ -1612,10 +1620,17 @@ export class FakeShader {
   public glProgram: unknown;
   public resources: Record<string, unknown>;
 
+  public destroyed = false;
+
   public constructor(options: FakeShaderOptions) {
     this.gpuProgram = options.gpuProgram;
     this.glProgram = options.glProgram;
     this.resources = options.resources ?? {};
+  }
+
+  /** Frees the shader, as Pixi's `destroy`. */
+  public destroy(): void {
+    this.destroyed = true;
   }
 }
 

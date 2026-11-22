@@ -207,6 +207,19 @@ export const BUDGET = {
   // F107 part 3: a frame after the fade-out while the loader's layer waits, at alpha 0, for its views to leave. New:
   // two fields and one length read.
   leaveWait: 0,
+  // F126 s4 (spec 36): a frame of a scene switch's transition while it plays, per kind, after its first step made what
+  // draws it. New: the eased time in place, the sprite's alpha and place, or the body's uniforms and the global numbers
+  // compared and written, a frame asked for. Measured 0 B for the fade and the wipe.
+  transitionFade: 0,
+  // Measured 16 B: the moving x written into the fake sprite's `position.x` each frame (0 B with that write left out).
+  transitionSlide: 16,
+  transitionWipe: 0,
+  // Measured 0 B alone, 13 to 16 B run after the wipe in one process: one write site of the shared mesh path boxes once
+  // it saw two kinds' bodies.
+  transitionIris: 16,
+  // Measured 16 B: the write of `progress` into the fake body's uniform group (0 B when the same number goes to a field
+  // the step adds), whatever the field's first value or place.
+  transitionDissolve: 16,
   // F134: `shots.after` right after the stage render of a frame with nothing wanted, one shot held. New: one length read.
   shotsIdle: 0,
   // F134: the same in a game without `shots`. New: the same length read of an empty list.
