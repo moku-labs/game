@@ -160,7 +160,9 @@ export type FakeClock = {
 
 /**
  * The fake `renderer`: its host's `ready`, a spy answering false, its performance log's `event`, a spy, and the
- * picture of a scene being left, three spies that record the scene current when each was called.
+ * picture of a scene being left, five spies: `show`, `land`, `drop` and `play` record the scene current when each was
+ * called, and `capture` answers what `captures` holds: each answer once, in order, the last one for every call after
+ * it, and `"none"` (no picture can be taken) while it is empty.
  */
 export type FakeRenderer = {
   host: { ready: Mock<() => boolean> };
@@ -170,10 +172,14 @@ export type FakeRenderer = {
       show: Mock<(look: LeaveLook) => void>;
       land: Mock<() => void>;
       drop: Mock<() => void>;
+      capture: Mock<() => "wait" | "ready" | "none">;
+      play: Mock<() => void>;
     };
   };
-  /** Every call of `sync.leave`, in order, with the scene current then. */
-  leaves: Array<{ call: "show" | "land" | "drop"; current: string | undefined }>;
+  /** The answers of `sync.leave.capture`, set by a test. */
+  captures: Array<"wait" | "ready" | "none">;
+  /** Every call of `sync.leave` but `capture`, in order, with the scene current then. */
+  leaves: Array<{ call: "show" | "land" | "drop" | "play"; current: string | undefined }>;
 };
 
 /** What the fake `flow` recorded and what it answers with. */
@@ -678,6 +684,7 @@ export function createMockScenes(config?: Config): MockScenes {
   const clock = createFakeClock();
   const model = createFakeModel();
   const leaves: FakeRenderer["leaves"] = [];
+  const captures: FakeRenderer["captures"] = [];
   const renderer: FakeRenderer = {
     host: { ready: vi.fn(() => false) },
     monitor: {
@@ -695,9 +702,19 @@ export function createMockScenes(config?: Config): MockScenes {
         }),
         drop: vi.fn(() => {
           leaves.push({ call: "drop", current: state.current });
+        }),
+        capture: vi.fn((): "wait" | "ready" | "none" => {
+          journal.push("renderer:capture");
+
+          return (captures.length > 1 ? captures.shift() : captures[0]) ?? "none";
+        }),
+        play: vi.fn(() => {
+          journal.push("renderer:play");
+          leaves.push({ call: "play", current: state.current });
         })
       }
     },
+    captures,
     leaves
   };
   const apis: Record<string, unknown> = {

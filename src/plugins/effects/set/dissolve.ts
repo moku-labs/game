@@ -5,6 +5,7 @@
 import { defineFilter } from "../filters/define";
 import type { FilterComponent } from "../filters/types";
 import { withSetGlsl, withSetWgsl } from "./head";
+import { markTransition } from "./transition-mark";
 import type { DissolveValue } from "./types";
 
 /**
@@ -65,6 +66,8 @@ const DISSOLVE_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(DISSOLVE_GLSL);
  * `filters`, as a game's own filter. One render pass, one sample of the input; on WebGPU a tween draws on the view's
  * own quad, no pass, from its third frame.
  *
+ * Listed, it is also the body of the `dissolve` scene transition (`transition: { kind: "dissolve" }`).
+ *
  * @example
  * ```ts
  * // A cleared piece burns away with a white rim.
@@ -72,11 +75,12 @@ const DISSOLVE_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(DISSOLVE_GLSL);
  * view.tween(Dissolve, { progress: 1 }, { ms: 600 });
  * ```
  */
-export const Dissolve: FilterComponent<DissolveValue> = /*#__PURE__*/ defineFilter(
-  "effects.dissolve",
-  {
+export const Dissolve: FilterComponent<DissolveValue> = /*#__PURE__*/ markTransition(
+  /*#__PURE__*/ defineFilter("effects.dissolve", {
     wgsl: DISSOLVE_SOURCE,
     glsl: DISSOLVE_GLSL_SOURCE,
     uniforms: { progress: 0, scale: 8, edge: 0.08, edgeColor: { color: 0xff_ff_ff } }
-  }
+  }),
+  "dissolve",
+  "Dissolve"
 );

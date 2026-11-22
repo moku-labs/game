@@ -18,6 +18,16 @@ A view that carries a member, or any filter, that no feature lists draws unfilte
 `effects:filter-unlisted` `{ filter: "effects.flash", entity, hint: 'Filter "effects.flash" is on a view but no feature
 lists it in filters' }`.
 
+## Transition bodies
+
+Three members double as the bodies of a scene transition (`scenes`, a `leave` or `enter` with `transition: { kind: "wipe" | "iris" | "dissolve" }`): `RevealLine` draws `wipe`, `RevealRound` draws `iris`, `Dissolve` draws `dissolve`. List the member in a feature's `filters` to use its kind:
+
+```ts
+defineFeature("board", { filters: [RevealLine, RevealRound], scenes: [board, night] }); // wipe and iris
+```
+
+Each of the three marks itself (`markTransition`, `set/transition-mark.ts`) as the initialiser of its export, so the mark ships with the member and only with it. Once the member's quad check settled, `effects` builds a warm filter of it, puts its uniform group in the double form that writes in place, and hands it to `renderer.sync.leave.body(kind, quad, member)`; stop takes it back and destroys the filter. The renderer draws the picture of the scene being left on that quad and writes the uniforms by name (`progress`, `angle`, `soft` of a wipe; `radius`, `x`, `y`, `soft` of an iris; `progress`, `scale`, `edge`, `edgeColor` of a dissolve) in every frame of the transition, 0 B a frame (`transition-body.perf.ts`). A kind whose member no feature lists plays as a fade, and a dev build says which member to list. WebGPU only: on WebGL, or where the member's quad check failed, no body is handed and the kind plays as a fade. A game that lists none carries none of this: no member, no mark.
+
 ## Members
 
 Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tweened. Every member also carries

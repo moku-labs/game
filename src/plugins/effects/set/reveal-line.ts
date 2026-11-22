@@ -5,6 +5,7 @@
 import { defineFilter } from "../filters/define";
 import type { FilterComponent } from "../filters/types";
 import { withSetGlsl, withSetWgsl } from "./head";
+import { markTransition } from "./transition-mark";
 import type { RevealLineValue } from "./types";
 
 /**
@@ -55,6 +56,8 @@ const REVEAL_LINE_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(REVEAL_LINE_GLSL);
  * in or out of a card, a panel, a picture. List it in a feature's `filters`, as a game's own filter. One render pass,
  * one sample; on WebGPU a tween draws on the view's own quad, no pass, from its third frame.
  *
+ * Listed, it is also the body of the `wipe` scene transition (`transition: { kind: "wipe" }`).
+ *
  * @example
  * ```ts
  * // A level card wipes in from the top: it starts hidden, and a motion tweens progress to 1.
@@ -62,11 +65,12 @@ const REVEAL_LINE_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(REVEAL_LINE_GLSL);
  * view.tween(RevealLine, { progress: 1 }, { ms: 400 });
  * ```
  */
-export const RevealLine: FilterComponent<RevealLineValue> = /*#__PURE__*/ defineFilter(
-  "effects.revealLine",
-  {
+export const RevealLine: FilterComponent<RevealLineValue> = /*#__PURE__*/ markTransition(
+  /*#__PURE__*/ defineFilter("effects.revealLine", {
     wgsl: REVEAL_LINE_SOURCE,
     glsl: REVEAL_LINE_GLSL_SOURCE,
     uniforms: { progress: 0, angle: 0, soft: 0.05 }
-  }
+  }),
+  "wipe",
+  "RevealLine"
 );

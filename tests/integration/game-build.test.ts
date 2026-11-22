@@ -43,6 +43,12 @@ const SET_IDS = [
   "effects.bloomBlur"
 ];
 
+/**
+ * The export names of the three members that double as transition bodies, as their mark names them (`markTransition`):
+ * a bundle carries one only with the member a feature lists.
+ */
+const TRANSITION_MEMBERS = ["RevealLine", "RevealRound", "Dissolve"];
+
 /** The names Pixi's three WebGPU draw classes go by: only the counting subclasses name them. */
 const drawClasses = ["GpuBatchAdaptor", "GpuGraphicsAdaptor", "GpuEncoderSystem"];
 
@@ -57,9 +63,15 @@ const packerPackages = ["sharp", "maxrects-packer"];
 
 /**
  * What the game composes: the screen set, the screen set and `effectsPlugin`, or both with a feature that lists the
- * effect set's `Flash` in its `filters`.
+ * effect set's `Flash`, or its `RevealLine` (a transition body), in its `filters`.
  */
-type Composition = "screen" | "screen+effects" | "screen+effects+flash";
+type Composition = "screen" | "screen+effects" | "screen+effects+flash" | "screen+effects+reveal";
+
+/** The member a composition lists in its feature's `filters`, if it lists one. */
+const LISTED: Partial<Record<Composition, string>> = {
+  "screen+effects+flash": "Flash",
+  "screen+effects+reveal": "RevealLine"
+};
 
 /** The flags as each page defines them. */
 const PROFILES = {
@@ -167,12 +179,15 @@ function bundle(composition: Composition, profile: Profile, shape: EngineShape =
   if (known !== undefined) return known;
 
   const effects = composition !== "screen";
-  const flash = composition === "screen+effects+flash";
+  const listed = LISTED[composition];
+  const feature = listed === undefined ? "" : `defineFeature, ${listed}, `;
   const engine = shape === "package" ? "./engine.mjs" : rootModule;
   const game = [
-    `import { createApp, defineGame, ${effects ? "effectsPlugin, " : ""}${flash ? "defineFeature, Flash, " : ""}screen } from ${JSON.stringify(engine)};`,
+    `import { createApp, defineGame, ${effects ? "effectsPlugin, " : ""}${feature}screen } from ${JSON.stringify(engine)};`,
     "export const kit = defineGame();",
-    ...(flash ? ['export const board = defineFeature("board", { filters: [Flash] });'] : []),
+    ...(listed === undefined
+      ? []
+      : [`export const board = defineFeature("board", { filters: [${listed}] });`]),
     `export function start() { return createApp({ plugins: [...screen${effects ? ", effectsPlugin" : ""}] }); }`
   ].join("\n");
   const script = `
@@ -268,6 +283,11 @@ describe("a game build with and without effectsPlugin", () => {
 
         expect(places, `${profile}, ${shape}`).toBeLessThanOrEqual(1);
         expect(code, `${profile}, ${shape}`).not.toContain("setHash");
+        // Nor the mark of a transition body: its export name lives in the member's own module.
+        expect(
+          TRANSITION_MEMBERS.filter(name => code.includes(`"${name}"`)),
+          `${profile}, ${shape}`
+        ).toEqual([]);
       }
     }
   }, 60_000);
@@ -279,6 +299,24 @@ describe("a game build with and without effectsPlugin", () => {
     expect(code).toContain('"effects.flash"');
     expect(code).toContain("inputPlace");
     expect(SET_IDS.filter(id => id !== "effects.flash" && code.includes(id))).toEqual([]);
+  }, 60_000);
+
+  // Bug: the mark of a transition body ships in a game that lists none, or listing one drags the other two in.
+  it("carries the transition mark of the member a feature lists and of no other", () => {
+    for (const shape of ["source", "package"] as const) {
+      const code = bundle("screen+effects+reveal", "release", shape);
+
+      expect(code, shape).toContain('"effects.revealLine"');
+      expect(code, shape).toContain('"RevealLine"');
+      expect(
+        TRANSITION_MEMBERS.filter(name => name !== "RevealLine" && code.includes(`"${name}"`)),
+        shape
+      ).toEqual([]);
+      expect(
+        SET_IDS.filter(id => id !== "effects.revealLine" && code.includes(id)),
+        shape
+      ).toEqual([]);
+    }
   }, 60_000);
 
   it("the striped mark of a broken filter leaves a release bundle and stays in a dev bundle", () => {

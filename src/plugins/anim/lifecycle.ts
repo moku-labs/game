@@ -387,8 +387,12 @@ export function startAnim(ctx: KernelSlice): void {
     runInFast: false
   });
   openFrameLoops(actx);
-  // The one renderer member anim reads: whether an endless loop of a view the player cannot see writes nothing.
-  actx.state.loopsHeld = ctx.require(rendererPlugin).sync.loopsHeld;
+  const renderer = ctx.require(rendererPlugin);
+
+  // `sync.loopsHeld`: whether an endless loop of a view the player cannot see writes nothing.
+  actx.state.loopsHeld = renderer.sync.loopsHeld;
+  // `sync.leave.reducedMotion`: the renderer cuts a scene transition marked reduced "cut" from the start value on.
+  renderer.sync.leave.reducedMotion(actx.state.reducedMotion);
 }
 
 /**

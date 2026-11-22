@@ -5,6 +5,7 @@
 import { defineFilter } from "../filters/define";
 import type { FilterComponent } from "../filters/types";
 import { withSetGlsl, withSetWgsl } from "./head";
+import { markTransition } from "./transition-mark";
 import type { RevealRoundValue } from "./types";
 
 /**
@@ -51,6 +52,8 @@ const REVEAL_ROUND_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(REVEAL_ROUND_GLSL);
  * feature's `filters`, as a game's own filter. One render pass, one sample; on WebGPU a tween draws on the view's own
  * quad, no pass, from its third frame.
  *
+ * Listed, it is also the body of the `iris` scene transition (`transition: { kind: "iris" }`).
+ *
  * @example
  * ```ts
  * // A lens opens over the map: the window starts closed and grows to show the whole view.
@@ -58,11 +61,12 @@ const REVEAL_ROUND_GLSL_SOURCE = /*#__PURE__*/ withSetGlsl(REVEAL_ROUND_GLSL);
  * view.tween(RevealRound, { radius: 1.2 }, { ms: 640 });
  * ```
  */
-export const RevealRound: FilterComponent<RevealRoundValue> = /*#__PURE__*/ defineFilter(
-  "effects.revealRound",
-  {
+export const RevealRound: FilterComponent<RevealRoundValue> = /*#__PURE__*/ markTransition(
+  /*#__PURE__*/ defineFilter("effects.revealRound", {
     wgsl: REVEAL_ROUND_SOURCE,
     glsl: REVEAL_ROUND_GLSL_SOURCE,
     uniforms: { x: 0.5, y: 0.5, radius: 0, soft: 0.05, wobble: 0 }
-  }
+  }),
+  "iris",
+  "RevealRound"
 );
