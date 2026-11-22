@@ -54,8 +54,8 @@ export function lookupTexture(ctx: AssetsCtx, key: string): Texture | undefined 
     return record.textures.get(key);
   }
 
-  // `warned` latches the log line only: one key says "not loaded yet" once, however many sprites
-  // and frames ask for it.
+  // `warned` latches the log line only: one key says "not loaded yet" once until its bundle loads,
+  // however many sprites and frames ask for it.
   if (!state.warned.has(key)) {
     state.warned.add(key);
     ctx.log.warn("assets: texture is not loaded yet", { key, bundle });

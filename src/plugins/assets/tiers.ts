@@ -522,7 +522,8 @@ function reportSettled(ctx: AssetsCtx, progress: Progress, signal: AbortSignal):
 
 /**
  * Publishes a loaded bundle: what was loaded moves into the record, a failure `ready` remembered
- * is forgotten, `renderer` re-resolves the keys, the event goes out, the frame loop wakes and the
+ * is forgotten, its keys may warn "not loaded yet" again (a warm window asked for them hidden, before
+ * the load), `renderer` re-resolves the keys, the event goes out, the frame loop wakes and the
  * budget is enforced.
  *
  * @param ctx - Domain context of the plugin.
@@ -550,7 +551,12 @@ function finish(
   // A failure `ready` counted as there is over: the next `ready` waits for this bundle's warm (F52).
   ctx.state.readyFailed.delete(bundle);
 
-  ctx.deps.renderer.sync.textures.invalidate(bundleKeys(ctx.state, bundle));
+  const keys = bundleKeys(ctx.state, bundle);
+
+  // A miss before the load latched its key: a later miss, after an unload, is reported again.
+  for (const key of keys) ctx.state.warned.delete(key);
+
+  ctx.deps.renderer.sync.textures.invalidate(keys);
 
   ctx.emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
 

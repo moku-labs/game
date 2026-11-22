@@ -697,7 +697,7 @@ export type State = {
   queue: PreloadQueue | undefined;
   current: NodeInfo | undefined;
   useCounter: number;
-  /** Keys already reported missing, so one key warns and starts its background load once. */
+  /** Keys reported missing since their bundle last loaded, so one key warns once per miss before a load. */
   warned: Set<string>;
   /**
    * `onEnter`, the `load` and `ready` handlers, the texture provider, the start and the end of an exit in `world`,
