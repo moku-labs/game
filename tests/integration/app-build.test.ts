@@ -22,6 +22,9 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { copyMiniGame, REPO, removeCopies, runBin } from "./app-helpers";
 
+/** V8's explicit compile hint: a script whose first line it is has all its functions compiled at load. */
+const COMPILE_HINT = "//# allFunctionsCalledOnLoad";
+
 /** A string only the marked scenario holds: a build that ships scenarios carries it. */
 const SCENARIO_MARKER = "scenario-marker-7f3a2c";
 
@@ -95,6 +98,18 @@ function pageCode(out: string): string {
     .filter(file => file.endsWith(".js") || file.endsWith(".html"))
     .map(file => readFileSync(path.join(out, file), "utf8"))
     .join("\n");
+}
+
+/**
+ * The scripts of a built page that open without V8's compile hint as their first line.
+ *
+ * @param out - The output folder.
+ * @returns Their paths, empty when every script carries it.
+ */
+function scriptsWithoutHint(out: string): string[] {
+  return filesUnder(out)
+    .filter(file => file.endsWith(".js"))
+    .filter(file => !readFileSync(path.join(out, file), "utf8").startsWith(`${COMPILE_HINT}\n`));
 }
 
 /**
@@ -207,6 +222,13 @@ describe("moku-game build", () => {
     expect(readFileSync(path.join(built.out, boot))).toEqual(
       readFileSync(path.join(built.root, "features", "ui", "assets", "font-body.png"))
     );
+  });
+
+  // Bug F230: V8 compiles a function at its first call, so the first merge of a session paid the compile of every
+  // path it ran for the first time on its commit frame (225–288 ms against 81–120 ms later, desktop at 6×).
+  it("every script of the page opens with the compile hint, so V8 compiles it at load", () => {
+    expect(filesUnder(built.out).some(file => file.endsWith(".js"))).toBe(true);
+    expect(scriptsWithoutHint(built.out)).toEqual([]);
   });
 
   it("build writes nothing under .moku", () => {
@@ -329,6 +351,10 @@ describe("moku-game build --debug", () => {
     expect(code).toContain('"moku:script"');
     expect(code).toContain('"moku:main"');
     expect(code).toContain("<title>mini-game Debug</title>");
+  });
+
+  it("every script of the debug page opens with the compile hint too: the phone measures this page", () => {
+    expect(scriptsWithoutHint(debug.out)).toEqual([]);
   });
 
   it("carries no hot swap, no scenario, no frame recorder and no audio journal", () => {

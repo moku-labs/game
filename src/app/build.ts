@@ -107,6 +107,14 @@ const EDITOR_READS_OFF = "0.10.19";
  */
 const AGENT_MARKERS = ["/__editor/hello", "[moku-editor]"] as const;
 
+/**
+ * V8's explicit compile hint, the first line of every script of the page: V8 compiles all its functions while the
+ * script loads instead of each at its first call. Without it the first merge of a session
+ * compiled every path it ran for the first time on its commit frame (F230: 225–288 ms against 81–120 ms for a later
+ * merge, desktop Chromium at 6×). An engine without the hint reads a plain comment.
+ */
+const COMPILE_HINT = "//# allFunctionsCalledOnLoad";
+
 /** The link prefix of the in-memory page, two folders under the game. */
 const TO_ROOT = "../../";
 
@@ -468,6 +476,7 @@ async function bundlePage(
     publicPath: "./",
     minify: true,
     target: "browser",
+    banner: COMPILE_HINT,
     define: definesOf(page),
     naming: {
       entry: "[name].[ext]",
