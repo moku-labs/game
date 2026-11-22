@@ -707,7 +707,7 @@ export type TextApi = {
    * is the same in a browser and in plain Bun. A block with pieces of other looks (`<span>`,
    * `boldStyle`) is as high as the line boxes of its lines, and the width counts `textIndent`.
    * Cached per style and resolved string, and per width for a `"box"` style. A call with a width is a layout's (`ui.layout` is the caller it is
-   * meant for): it marks the style as laid out, so a label of it with no box (one that fits its
+   * meant for, and `ui.lint` measures at the laid-out width too): it marks the style as laid out, so a label of it with no box (one that fits its
    * row) no longer warns `wrap "box" outside layout` (F65).
    *
    * @param content - A plain string, or what `tr` returned.

@@ -5,16 +5,19 @@
  * renderer runs for real over Pixi's own display objects (`drawn-helpers.ts`); the tree oracle
  * checks every frame, so a frame skipped over a changed picture fails the test.
  */
-import type { Assets, World } from "@moku-labs/game";
+import type { Anim, Assets, World } from "@moku-labs/game";
 import {
+  defineAnimation,
   defineFilter,
   defineGame,
   Layer,
   mut,
   Parent,
+  parallel,
   Shape,
   system,
   Transform,
+  tween,
   type
 } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
@@ -98,6 +101,59 @@ const rewriteGlow = system({
       glow.shift = [...glow.shift];
       glow.tint = Number(glow.tint);
     }
+  }
+});
+
+/** One period of the nudge, ms: fifty frames. */
+const NUDGE_MS = 800;
+
+/** The way of a nudge: out 10 units across and 4 down, as offsets over the rest pose. */
+const NUDGE_WAY = { x: 10, y: 4 } as const;
+
+/**
+ * A nudge of a view without end, like the board's hint (F234): two tracks of one `Transform`,
+ * its scale and its place, out, held, home in the first 240 ms of each period, then a hold at no
+ * offset to its end.
+ */
+const nudge = defineAnimation("fixture.nudge", {
+  slots: {
+    box: type<Anim.Target>(),
+    gone: type<Anim.Target>()
+  },
+  build: ({ box, gone }) => {
+    const walk = { ms: NUDGE_MS, additive: true, repeat: "forever" } as const;
+
+    return parallel(
+      tween(gone, Transform, { scale: 0 }, { ...walk, segments: [{ at: 1, to: { scale: 0 } }] }),
+      tween(
+        box,
+        Transform,
+        { scale: 0 },
+        {
+          ...walk,
+          segments: [
+            { at: 0.1, ease: "linear", to: { scale: 0.15 } },
+            { at: 0.2, to: { scale: 0.15 } },
+            { at: 0.3, ease: "linear", to: { scale: 0 } },
+            { at: 1, to: { scale: 0 } }
+          ]
+        }
+      ),
+      tween(
+        box,
+        Transform,
+        { x: 0, y: 0 },
+        {
+          ...walk,
+          segments: [
+            { at: 0.1, ease: "linear", to: NUDGE_WAY },
+            { at: 0.2, to: NUDGE_WAY },
+            { at: 0.3, ease: "linear", to: { x: 0, y: 0 } },
+            { at: 1, to: { x: 0, y: 0 } }
+          ]
+        }
+      )
+    );
   }
 });
 
@@ -308,6 +364,46 @@ describe("renderer.onDemand: the change of a frame is drawn in that frame", () =
     expect(moved).toBe(SLIDE_MS / FRAME_MS);
     expect(undrawn).toEqual([]);
     expect(await fixture.frames(20)).toBe(0);
+  });
+
+  // Catches (F234): a forever track that holds its value through the rest of its period drawing
+  // every frame of the hold. The track writes no unchanged field, and a write of an unchanged
+  // value is not drawn either, so it fails only when both stop holding.
+  it("draws no frame while a forever additive walk holds its offsets at 0, and draws its moves", async () => {
+    const fixture = await open();
+    const box = fixture.view("fixture.box");
+    const poseOf = () => {
+      const pose = fixture.app.world.ecs.get(box, Transform);
+
+      return `${String(pose?.x)} ${String(pose?.y)} ${String(pose?.scale)}`;
+    };
+    const handle = fixture.app.anim.play(nudge, {
+      box: { projection: "fixture.box", key: "fixture.box" },
+      gone: { projection: "fixture.box", key: "fixture.badge" }
+    });
+    const idle: number[] = [];
+    const undrawn: number[] = [];
+    let moved = 0;
+
+    // Two periods of 50 frames: 15 frames of a bump, 35 of a hold at the rest pose.
+    for (let frame = 0; frame < (2 * NUDGE_MS) / FRAME_MS; frame += 1) {
+      const before = poseOf();
+      const drawn = await fixture.frames(1);
+
+      if (poseOf() === before) {
+        if (drawn !== 0) idle.push(frame);
+        continue;
+      }
+
+      moved += 1;
+      if (drawn !== 1) undrawn.push(frame);
+    }
+
+    handle.cancel();
+
+    expect(moved).toBeGreaterThan(10);
+    expect(undrawn).toEqual([]);
+    expect(idle).toEqual([]);
   });
 
   it("draws a filter that got another value, which Pixi does not see", async () => {
