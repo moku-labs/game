@@ -528,10 +528,10 @@ describe("a warm window opened on another item", () => {
     expect(seen.changes).toBe(0);
   });
 
-  // Bug a fix could bring: a ready record opened on another item no longer moves the elements the
-  // item moves. Known, older than F200: a ready record still plays the moved elements' `change` motion
-  // (one here), where a cold open plays none; a follow-up of its own.
-  it("opened when its record is ready, stands where a cold open stands", async () => {
+  // Bug (F220): a ready record opened on another item plays the moved elements' `change` motion with
+  // the enter, so the track slides 420 ms from the warm tab's pose (frame 1 of the open off its place),
+  // and an element only the warm item had, which never entered, plays its exit and stays 420 ms.
+  it("opened when its record is ready, stands where a cold open stands from its first frame", async () => {
     const cold = await coldMarket();
     const warm = await start();
 
@@ -539,11 +539,15 @@ describe("a warm window opened on another item", () => {
     untilWarm(warm, 1);
     await openAndClose(warm);
     untilWarm(warm, 1);
+    seen.changes = 0;
+    seen.exits = 0;
     await warm.answer("openMarket");
-
-    for (let index = 0; index < 3; index += 1) warm.frame();
+    warm.frame();
 
     expect(posesOf(warm)).toEqual(cold);
+    expect(seen.changes).toBe(0);
+    expect(seen.exits).toBe(0);
+    expect(markedIn(warm, "packsCard")).toBeUndefined();
   });
 });
 

@@ -404,8 +404,15 @@ describe("createLayoutApi", () => {
       pivot: { x: 50, y: 50 }
     });
 
-    // An element that is not the build's plays its hook before its enter as before.
+    // Bug (F220): an element of a warm window's root, live and not entered at its open, is the build's no
+    // more, and plays its `change` hook with the enter. Not entered, it was never drawn: it is held too.
     building.clear();
+
+    expect(layout.change(held, { x: 0, y: 0, w: 0, h: 0 })).toBe(false);
+    expect(box).not.toHaveBeenCalled();
+
+    // Once it entered, it plays its hook.
+    held.entered = true;
 
     expect(layout.change(held, { x: 0, y: 0, w: 0, h: 0 })).toBe(true);
     expect(box).toHaveBeenCalledOnce();

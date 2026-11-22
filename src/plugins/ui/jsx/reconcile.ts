@@ -1715,14 +1715,15 @@ export function createReconciler(
 
   /**
    * Starts the exit of an element and of everything under it. An element of a root built aside was
-   * never seen: it goes at once, with no exit (spec 31).
+   * never seen: it goes at once, with no exit (spec 31). So does an element that has not entered: the
+   * held view of a warm window opened on another item drops what only the warm item had (F220).
    *
    * @param element - The element that left the description.
    * @param cause - Why it leaves: `"change"` for a commit, `"mount"` when it goes with its screen.
    * @param leads - The element is the top of a root that goes with its screen.
    */
   function exitElement(element: Element, cause: MotionCause, leads = false): void {
-    if (isAside(element.root)) {
+    if (!element.entered || isAside(element.root)) {
       dropElement(element);
 
       return;
