@@ -63,5 +63,13 @@ export const BUDGET = {
   particlesStill: 0,
   // E2: the same three streams emitting. Before: 897 B. Now 0: a birth draws from a random source whose state is a
   // typed cell and whose step hands nothing back; a particle's colour is read from a baked table, not returned by a call.
-  particlesEmitting: 0
+  particlesEmitting: 0,
+  // Change 2026-11-22-f126-s4-transitions: the renderer writes the uniforms of a transition body by name every frame
+  // (`progress`, `radius`, ...), a changing double, into the real `UniformGroup` `effects` hands over. Before the fix: 16 B
+  // a frame and member (the group built by `createWarmFilter` holds tagged number fields, after `tagNumbers`, and every write
+  // of a new double boxed it). Now 0: `createTransitionBody` moves the fields to double form (`transition.ts`).
+  transitionBodyWrite: 0,
+  // The same group read back by name, as Pixi's upload reads it, after those writes, through the upload's own template (`v = uv.progress`). 0. Keyed reads of a double field box, 16 B each:
+  // nobody reads the handed group by a name known only at run time.
+  transitionBodyRead: 0
 } as const;

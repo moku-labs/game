@@ -33,8 +33,8 @@ export const boardFeature = defineFeature("board", {
 | `layers` | `Record<string, { sort? }>` | Layer name to its sort rule. The order of the lines is draw order, bottom first. A layer `ui` is appended |
 | `projections` | `ProjectionSpec[]` | The projections the scene mounts. Their `layer` and `lift` are checked against the keys of `layers` and `ui` |
 | `music` | `AudioKey` | Optional. The audio keys of the game (`G["assets"]`). Carried in `scenes:changed`, so `audio` needs no lookup |
-| `leave` | `SceneLeave` or `(sw: LeaveSwitch) => SceneLeave \| undefined` | Optional. What a live switch shows over this scene when it is left: a veil and a loader, merged field by field over `config.leave`; `false` shows nothing. A function is asked per switch with `{ from, to }`; with it the scene is no longer plain data. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
-| `enter` | `SceneEnter` | Optional. What a live switch to this scene shows: `{ cover: { color?, alpha? } }`, the colour and the alpha of the veil over the scene being left. See [A switch to the scene: `enter`](#a-switch-to-the-scene-enter) |
+| `leave` | `SceneLeave` or `(sw: LeaveSwitch) => SceneLeave \| undefined` | Optional. What a live switch shows over this scene when it is left: a veil and a loader, merged field by field over `config.leave`; `false` shows nothing. `leave.transition` adds a [transition](#a-transition-between-scenes) from the last frame of this scene to the next one. A function is asked per switch with `{ from, to }`; with it the scene is no longer plain data. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
+| `enter` | `SceneEnter` | Optional. What a live switch to this scene shows: `{ cover: { color?, alpha? }, transition? }`, the colour and the alpha of the veil over the scene being left, and a [transition](#a-transition-between-scenes) that replaces the one the scene being left writes. See [A switch to the scene: `enter`](#a-switch-to-the-scene-enter) |
 
 The layer names are inferred from the keys of `layers`, and `NoInfer` keeps `projections` out of that inference: a wrong `layer` or `lift` is an error on the projection that is wrong, with no generic at the call site. The same check runs at run time for a caller without types:
 
@@ -245,6 +245,7 @@ defineScene("memory", { ..., leave: sw => (sw.to === "ward" ? { loader: false } 
 | | `holdMs` | `0` | Milliseconds after the switch start, on the clock or in game time, before the swap may happen: a floor, see **The floor** below |
 | | `texture` | none | An asset key: the game's texture turns at the centre of the frame, once a second |
 | | `projection` | none | A registered projection: kept built and hidden while the scene stands, shown once the loader is due, its layer drawn above the veil; it fades out with the veil after the swap |
+| `transition` | `SceneTransition \| false` | none | A picture of the last frame of the scene being left drawn over the next scene from the swap, see [A transition between scenes](#a-transition-between-scenes). A level that writes one replaces the one below whole (no field merge); `false` turns it off for this scene |
 
 With neither `texture` nor `projection` the loader is a white ring the engine draws.
 
@@ -404,12 +405,91 @@ defineScene("night", { bundle: "night", layers: { sky: {} }, projections: [night
   (the type refuses one).
 - **Never on.** A veil the scene being left turned off (`cover: false`, or `leave: false`) stays off: `enter` never
   turns one on, and it says nothing about the loader.
+- **A transition on top.** `enter.transition` replaces whatever transition the scene being left resolved, whole, and
+  `false` of the scene being left (`transition: false`, `leave: false`) is final: see
+  [A transition between scenes](#a-transition-between-scenes). `enter.transition: false` is refused.
 - **Absent by default.** A scene without `enter` changes nothing; `defineScene` copies `enter` onto the scene only when
   it was given. A wrong value throws at `defineScene`, by the rules of `leave.cover`:
 
 ```
 [game] Scene "night": enter.cover.alpha is 2.
   Give the alpha the veil fades in to, a number from 0 to 1.
+```
+
+## A transition between scenes
+
+A live switch may play a transition (spec 36): the renderer keeps one picture of the last frame of the scene being left,
+veil and loader as they were drawn, and draws it over the new scene from the swap for `ms`, then it is gone. The old scene
+stays live and playable until the swap; the new one takes taps from the swap on, the picture takes none.
+
+```ts
+// The board leaves with a wipe from right to left.
+defineScene("board", { ..., leave: { transition: { kind: "wipe", angle: Math.PI } } });
+// Every way into the night is an iris of 500 ms, whatever scene it comes from.
+defineScene("night", { ..., enter: { transition: { kind: "iris", ms: 500 } } });
+// A game-wide default.
+createApp({ pluginConfigs: { scenes: { leave: { transition: { kind: "fade" } } } } });
+// Per pair, through the `leave` function.
+defineScene("memory", { ..., leave: sw => (sw.to === "ward" ? { transition: { kind: "dissolve", edgeColor: 0xffd27a } } : undefined) });
+// Off for this scene.
+defineScene("map", { ..., leave: { transition: false } });
+```
+
+Every kind takes `ms`, `ease` and `reduced`, and the fields of its own kind. A field the kind does not take throws.
+
+| `kind` | What the player sees | Own fields (default) |
+|---|---|---|
+| `fade` | The picture fades out | none |
+| `slide` | The picture slides off the screen | `to`: `"left"` \| `"right"` \| `"up"` \| `"down"` (`"left"`) |
+| `wipe` | An edge sweeps the picture away | `angle`: radians, 0 sweeps from left to right (`0`); `soft`: 0..1 of the screen (`0.04`) |
+| `iris` | The picture closes into a point | `x`, `y`: 0..1 of the screen (`0.5`, `0.5`); `soft`: 0..1 (`0.05`) |
+| `dissolve` | Noise eats the picture away, with a rim | `scale`: cells across, above 0 (`8`); `edge`: rim width 0..1 (`0.08`); `edgeColor`: `0xRRGGBB` (`0xffffff`) |
+
+| Common field | Default | Meaning |
+|---|---|---|
+| `ms` | `400` | Clock milliseconds the picture takes to go: above 0, at most 5000 |
+| `ease` | `"inOut"` | A curve name (`"linear"`, `"in"`, `"out"`, `"inOut"`, `"inCubic"`, `"outCubic"`, `"inOutCubic"`, `"inBack"`, `"outBack"`) or a function of the time 0..1 |
+| `reduced` | `"cut"` | With reduced motion on: `"cut"` swaps at once with no transition, `"keep"` plays it as written |
+
+- **Which one plays.** The `enter.transition` of the scene being entered, else the `leave.transition` of the scene being
+  left, else `config.leave.transition`, else none. A level replaces the one below whole: no field is merged. `false`
+  that the scene being left resolves to (`leave: false`, `transition: false`, or the config's `false` while the scene
+  writes none) gives none, and `enter` never turns a transition on over it, as it never turns a veil on over `cover:
+  false`.
+- **Its own look.** A resolved transition makes a look by itself: with `cover: false, loader: false` and a transition,
+  nothing is drawn before the swap, and the picture plays at it. Fast mode, a headless app, the first scene of a run and
+  a switch that mounts in one block (the world refused to build aside, or stopped running live) play none, and the
+  switch is as without it. So does a device with no WebGPU.
+- **Defaults are filled in a new object.** The renderer is handed a frozen copy with every default; the game's own
+  object is never written into.
+- **The swap waits one frame.** When the new scene is built and a floor (`loader.holdMs`) passed, the switch asks the
+  renderer for the picture (`sync.leave.capture()`): `"wait"` keeps the old scene on and the loop awake, and the next
+  drawn frame is copied on the GPU (no render pass); `"ready"` commits the swap and calls `sync.leave.play()` in the
+  same `signals` phase right after it, so the swap frame already draws the picture over the new scene; `"none"` (WebGL,
+  a lost device, reduced motion that cuts) commits at once as without a transition. A renderer that still says
+  `"wait"` after 3 frames is given up on: the switch commits without the transition and the picture is freed. An abort
+  while it waits drops the look and the picture.
+- **The loader is in the picture.** After a played transition the veil and a ring or a texture loader are gone at once,
+  and the loader projection of the switch is unmounted at once (as with a veil of `outMs: 0`), not faded out over the
+  new scene.
+- **Reduced motion.** The renderer decides: with reduced motion on (`anim` tells it) a transition with `reduced: "cut"`
+  is not played, and one with `"keep"` is. `scenes` reads no motion setting.
+- **Wipe, iris and dissolve need a member of the effects set.** They are drawn with the bodies of `RevealLine`,
+  `RevealRound` and `Dissolve`, which `effects` hands over only when a feature lists them in `filters`
+  (`defineFeature("board", { filters: [RevealLine, RevealRound], ... })`), so a game without them carries no shader
+  text. A kind whose member is not listed plays as `fade`, and a dev build warns once per kind
+  (`renderer:transition-body-missing`) with the member to list.
+- **A wrong value throws where it was written**, with the check of `leave`: at `createApp` for the config, at
+  `defineScene` for a scene's `leave` and `enter`; the result of a `leave` function is checked at the switch and logged
+  as `scenes:leave-failed` while the config's look shows:
+
+```
+[game] Scene "board": leave.transition.ms is 5001.
+  Give the milliseconds the transition takes, more than 0 and at most 5000.
+[game] scenes.leave.transition.soft is 1.5.
+  Give the softness of the edge, a number from 0 to 1.
+[game] Scene "board": leave.transition.angle is 1.
+  A "slide" transition takes kind, ms, ease, reduced and to; leave "angle" out.
 ```
 
 ## A projection both scenes list
@@ -464,7 +544,7 @@ HUD that is not shared does not blink either.
 |---|---|---|---|
 | `buildMs` | `number \| "auto"` | `"auto"` | Milliseconds per frame the next scene's building work may take on a live switch, after the live work. `"auto"` is two thirds of the frame interval the loop runs at, `(1000 / time.rate().fps) * 2 / 3`, read once at the build start: 11.1 ms at 60 Hz, 5.56 ms at 120 Hz (two thirds of a 60 Hz frame, ≈ 11.1 ms, if `time` answers no usable rate). A number is a fixed budget |
 
-| `leave` | `SceneLeave` | `{ cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }` | What a live switch shows over the scene being left, for every scene; a scene's `leave` is merged over it field by field, and a field the config leaves out keeps the engine's default (the kernel merges `pluginConfigs` shallowly and replaces the whole object; the field-by-field merge is the plugin's own). `false` turns a part or the whole off. See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
+| `leave` | `SceneLeave` | `{ cover: { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }` | What a live switch shows over the scene being left, for every scene; a scene's `leave` is merged over it field by field, and a field the config leaves out keeps the engine's default (the kernel merges `pluginConfigs` shallowly and replaces the whole object; the field-by-field merge is the plugin's own). `false` turns a part or the whole off. `transition` is the game-wide transition (none by default), see [A transition between scenes](#a-transition-between-scenes). See [What a switch shows over the scene being left](#what-a-switch-shows-over-the-scene-being-left) |
 
 A `buildMs` that is neither `"auto"` nor a finite number above 0 throws in `onInit`, so `createApp` throws:
 
@@ -496,7 +576,7 @@ one, the hook returns at once.
 | `flow` | `onEnter("begin", fn)` for the look, `onEnter("scene", fn)` for the switch, `features.all()`: the scenes, and the `layer` of a loader projection's spec |
 | `world` | `projection.hold` of the loader projection of a scene that stands and `projection.show` of it once its loader is due; `projection.feed` of the switch it reads, right after the hold and from the switch start to its swap or drop; `projection.mount`, `projection.entitiesOf` and `ecs.get(entity, Layer)` of a loader projection the scene did not hold, once its loader is due; `projection.unmount` of a loader at a drop, after the veil's fade, and of a held loader the next switch does not use; `ecs.mode()`, which keeps the look to a world that runs live; `projection.setLayers`, `projection.mount` (which keeps a projection a scene before mounted), `projection.unmount` of what only the leaving scene lists; `projection.build`, `built`, `commit`, `discard` for a scene built aside, and `ecs.mode()`, which keeps a build to a world that runs live; `ecs.setScene` of the mounted scene |
 | `assets` | `load(bundle)`; `warm(bundle)` before a live switch; `isLoaded(bundle)` at the switch start and the hook `assets:bundle-progress` for the progress a loader projection reads; `sceneComing(named)` at the start of a build and `sceneComing([])` on its discard; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"`, and one the scene before named stays until its elements played their exit |
-| `renderer` | `host.ready()`, which picks the path of a live switch and whether it shows a look; `sync.leave.show` at its start, `sync.leave.land` after its swap and `sync.leave.drop` on an abort or a throw; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
+| `renderer` | `host.ready()`, which picks the path of a live switch and whether it shows a look; `sync.leave.show` at its start, `sync.leave.land` after its swap and `sync.leave.drop` on an abort or a throw; `sync.leave.capture()` while a look with a transition holds the swap and `sync.leave.play()` right after the swap that commits with it; `monitor.event("scene:build", …)` at a build start and `monitor.event("scene", …)` at the swap, with `buildFrames`, `buildMs` and `budgetMs` (the budget of a frame it ran with) for a scene built aside: the performance log of an agent build names the switch |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate; `sceneChanged()`, so the adaptive frame rate judges the new screen on its own frames with its back-off started over; `onFrame("signals", …)` while a build runs, removed at its commit or discard, and while a loader projection fades out with the veil, removed in the frame its `outMs` ran out; `rate().fps` at a build start, for the budget of `"auto"`, and for a fade frame at time scale 0; `agentClock()`, the page clock of a build's `buildMs` in an agent build; `snapshot().frame` and `snapshot().elapsed` at the start of a look with a floor, the game time of every frame a floor holds a built scene and at a build with nothing left, and `wake()` every frame a floor holds a built scene |
 | `clock` | `now()`, the clock of the look, which a floor on the swap (`loader.holdMs`) is counted on, beside the game time |
 | `model` | `store.snapshot()`, the committed state `bundles` reads |

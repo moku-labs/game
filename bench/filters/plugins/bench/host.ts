@@ -2,15 +2,18 @@
  * @file The bench plugin's seam with the engine: the host its work reads, and what it does when the
  * game starts, enters its scene and stops.
  */
-import type { Clock, Renderer, World } from "../../../../src/index.ts";
+import type { Clock, Flow, Renderer, Scenes, World } from "../../../../src/index.ts";
 import { type BenchHost, benchFrame, followAddress } from "./api";
 import type { BenchState } from "./types";
 
 /** The log as the bench writes to it. */
 type BenchLog = { warn(event: string, data: Record<string, string>): void };
 
-/** The name of the one scene of the graph. */
+/** The scene the graph starts on, where the address is followed. */
 const BENCH_SCENE = "bench";
+
+/** The answer that takes the graph from each of its two scenes to the other: the `trans-*` arms' switch. */
+const SWITCH_INTENT: Readonly<Record<string, string>> = { bench: "over", "bench-b": "back" };
 
 /**
  * The address of the page.
@@ -28,13 +31,17 @@ function hashOfPage(): string {
  * @param renderer - The renderer plugin.
  * @param clock - The clock plugin.
  * @param log - The log.
+ * @param flow - The flow plugin: its gate takes the answer that switches the scene.
+ * @param scenes - The scenes plugin: which scene stands.
  * @returns The host.
  */
 export function hostOf(
   world: Pick<World.Api, "ecs">,
   renderer: Pick<Renderer.Api, "viewport" | "stats" | "monitor">,
   clock: Pick<Clock.Api, "now">,
-  log: Pick<BenchLog, "warn">
+  log: Pick<BenchLog, "warn">,
+  flow: Pick<Flow.Api, "gate">,
+  scenes: Pick<Scenes.ScenesApi, "current">
 ): BenchHost {
   return {
     ecs: world.ecs,
@@ -42,18 +49,31 @@ export function hostOf(
     stats: () => renderer.stats(),
     monitor: renderer.monitor,
     now: () => clock.now(),
-    warn: (event, data) => log.warn(event, data)
+    warn: (event, data) => log.warn(event, data),
+    scene: () => scenes.current(),
+    switchScene: () => {
+      const intent = SWITCH_INTENT[scenes.current() ?? ""];
+
+      return intent !== undefined && flow.gate.answer({ intent });
+    }
   };
 }
 
 /**
- * Follows the address when the game enters the bench's scene for the first time.
+ * Follows the address when the game enters the bench's scene for the first time, and tells the arm on screen about a
+ * switch of scenes: its swap.
  *
  * @param state - The bench's state.
  * @param to - The scene entered.
  */
 export function enterScene(state: BenchState, to: string): void {
-  if (to !== BENCH_SCENE || state.scene !== undefined || state.host === undefined) return;
+  if (state.scene !== undefined) {
+    state.mounted?.swapped?.(to);
+
+    return;
+  }
+
+  if (to !== BENCH_SCENE || state.host === undefined) return;
 
   followAddress(state, state.host, hashOfPage());
 }

@@ -207,6 +207,20 @@ export const BUDGET = {
   // F107 part 3: a frame after the fade-out while the loader's layer waits, at alpha 0, for its views to leave. New:
   // two fields and one length read.
   leaveWait: 0,
+  // F126 s4 (spec 36): a frame of a scene switch's transition while it plays, per kind, after its first step made what
+  // draws it, on real Pixi objects (sprite, mesh, shader, uniform groups, the bodies `effects` hands over). New: the
+  // eased time in place, the sprite's alpha and place, or the body's uniforms and the global numbers compared and
+  // written, a frame asked for. Measured 0 B for every kind, in any order of kinds in one process.
+  // The place and scale go to Pixi's `copyFrom` from two point-data objects: Pixi's `position.x = x` takes the number as
+  // an argument, and when the optimizer does not inline that setter the double is boxed at the call, 16 B a frame (a
+  // slide measured 16 B on and off between runs of one build; the allocation sampler named `ObservablePoint.set x`).
+  // The run's numbers a frame reads (`ms`, `angle`, an iris's `x`, `y` and radius) are copied once into a Float64Array of
+  // the run: an iris read the transition's own `x` field and measured 16 B once a wipe had run in the process.
+  transitionFade: 0,
+  transitionSlide: 0,
+  transitionWipe: 0,
+  transitionIris: 0,
+  transitionDissolve: 0,
   // F134: `shots.after` right after the stage render of a frame with nothing wanted, one shot held. New: one length read.
   shotsIdle: 0,
   // F134: the same in a game without `shots`. New: the same length read of an empty list.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Ease } from "../../../world/types";
-import { applyEase, EASE_NAMES } from "../../tween/easing";
+import { applyEase, EASE_NAMES } from "../../projection/easing";
+import type { Ease } from "../../types";
 
-describe("anim/tween easing", () => {
+describe("world/projection easing", () => {
   it("knows the nine named curves", () => {
     expect([...EASE_NAMES]).toEqual([
       "linear",

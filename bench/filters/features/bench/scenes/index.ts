@@ -3,6 +3,7 @@
  */
 import { CASE_SCENES } from "./cases";
 import { SLOPE_SCENES } from "./slope";
+import { TRANS_SCENES } from "./trans";
 import type { BenchScene } from "./types";
 
 /** The scene of the ballast alone: the K sprites, nothing on top. */
@@ -13,4 +14,9 @@ const ballastScene: BenchScene = {
 };
 
 /** Every scene of the bench. */
-export const SCENES: readonly BenchScene[] = [ballastScene, ...SLOPE_SCENES, ...CASE_SCENES];
+export const SCENES: readonly BenchScene[] = [
+  ballastScene,
+  ...SLOPE_SCENES,
+  ...CASE_SCENES,
+  ...TRANS_SCENES
+];

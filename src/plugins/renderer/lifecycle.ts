@@ -53,7 +53,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * drawn and clears them; a drawn frame draws the probes of the warm-up onto the canvas first (F4: the
  * stage pass clears them, in the same task, so they never show), then uploads the queued texture sources (F60), then
  * the kept pictures (`kept.flush`, so the canvas stays one pass, E7), then the stage, then a shot of the frame just drawn
- * while the canvas texture holds it (`shots.after`, never of the heat map), then, when Pixi drew it, the decoded images
+ * while the canvas texture holds it (`shots.after`, never of the heat map), then the copy of a transition's picture
+ * (`sync.leaveAfter`, spec 36), then, when Pixi drew it, the decoded images
  * now on the GPU are freed (`sync.releaseStep`, F189), then the pixel leg of the kept oracle;
  * `demand` settles the frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
  * waiting capture; last, `host` trims Pixi's texture pool when a rest or a scene change is due. The display objects
@@ -120,6 +121,8 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
 
     // In this task: the canvas texture is gone when it ends.
     modules.shots.after(rendered && !overdraw);
+    // Spec 36: the picture of a transition, copied from the same canvas texture, no render pass.
+    modules.sync.leaveAfter(rendered && !overdraw);
 
     if (rendered) {
       ctx.deps.time.frameDrawn();

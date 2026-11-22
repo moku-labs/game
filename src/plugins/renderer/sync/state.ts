@@ -203,7 +203,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     hudLayer: undefined,
     aside: createAsideQueue(),
     heldViews: { entities: [], count: 0, version: 0, reported: false },
-    leave: {},
+    leave: { bodies: emptyMap(), reduced: false, warnedKinds: emptySet() },
     cleanups: []
   };
 }

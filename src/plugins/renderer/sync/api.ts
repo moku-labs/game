@@ -33,7 +33,7 @@ import { forgetBuild } from "./held";
 import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
 import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
-import { dropLeave, forgetLeave, landLeave, showLeave, stepLeave } from "./leave";
+import { dropLeave, forgetLeave, landLeave, playLeave, showLeave, stepLeave } from "./leave";
 import { drawOverdraw } from "./overdraw";
 import {
   drainOverlayEvents,
@@ -48,6 +48,7 @@ import { parentOf } from "./pose";
 import { releaseStep } from "./release";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
+import { afterLeave, captureLeave, handBody } from "./transition";
 import { checkTree } from "./tree-check";
 import type {
   CreateTextureOptions,
@@ -65,6 +66,7 @@ import type {
   SyncCtx,
   SyncDeps,
   TextureProvider,
+  TransitionBodyKind,
   View,
   WarmListener,
   WhyEntry
@@ -965,7 +967,18 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       land: (): void => landLeave(sctx),
 
-      drop: (): void => dropLeave(sctx)
+      drop: (): void => dropLeave(sctx),
+
+      capture: (): "wait" | "ready" | "none" => captureLeave(sctx),
+
+      play: (): void => playLeave(sctx),
+
+      body: (kind: TransitionBodyKind, quad: FilterSlotQuad, member: string): (() => void) =>
+        handBody(sctx, kind, quad, member),
+
+      setReducedMotion: (on: boolean): void => {
+        state.leave.reduced = on;
+      }
     },
 
     renderPasses: (): number => renderPassesOf(state, ctx.state.kept),
@@ -981,6 +994,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     stepOverlays: (): void => stepOverlays(sctx),
 
     stepLeave: (): void => stepLeave(sctx),
+
+    leaveAfter: (drawn: boolean): void => afterLeave(sctx, drawn),
 
     stepFilters: (): void => applySwitched(state, deps.kept),
 

@@ -8,8 +8,8 @@ import type { AssetKey, BundleKey } from "./generated/assets";
 /** The bench saves nothing and keeps nothing in its session. */
 export type Empty = Record<string, never>;
 
-/** The one scene of the graph: what is on it is the bench's own business. */
-export type SceneId = "bench";
+/** The scenes of the graph: what is on them is the bench's own business. `bench-b` is the other side of a `trans-*` arm. */
+export type SceneId = "bench" | "bench-b";
 
 export const {
   defineBundles,

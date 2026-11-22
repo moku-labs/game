@@ -330,7 +330,14 @@ export function createShotRenderer(options: ShotOptions = {}): ShotRenderer {
         opened.created.push(textureOptions);
 
         return new FakeTexture({
-          source: { width: textureOptions.width, height: textureOptions.height, destroyed: false }
+          source: {
+            width: textureOptions.width,
+            height: textureOptions.height,
+            // Resolution 1, as every texture of a take and of a transition's picture: its pixels are its size.
+            pixelWidth: textureOptions.width,
+            pixelHeight: textureOptions.height,
+            destroyed: false
+          }
         });
       }
     }

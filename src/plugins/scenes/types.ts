@@ -9,9 +9,16 @@ import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
 import type { Api as ClockApi } from "../clock/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Json, Api as ModelApi } from "../model/types";
-import type { Api as RendererApi } from "../renderer/types";
+import type { LeaveTransition, Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
-import type { LayerSort, LayerSpec, Owner, SceneSwitch, Api as WorldApi } from "../world/types";
+import type {
+  Ease,
+  LayerSort,
+  LayerSpec,
+  Owner,
+  SceneSwitch,
+  Api as WorldApi
+} from "../world/types";
 
 /**
  * How a layer orders what is drawn in it. The scene's name for the rule `world` stores.
@@ -187,13 +194,88 @@ export type SceneLoader<Asset extends string = string> = {
   projection?: string;
 };
 
+/** The fields every transition of a scene switch may carry. */
+type SceneTransitionCommon = {
+  /** Milliseconds the picture takes to go, above 0 and at most 5000. Default 400. */
+  ms?: number;
+  /** The curve of its progress: a name (`"linear"`, `"in"`, `"out"`, `"inOut"`, ...) or a function of the time 0..1. Default `"inOut"`. */
+  ease?: Ease;
+  /**
+   * With reduced motion on: `"cut"` swaps at once with no transition, `"keep"` plays it as written. Default `"cut"`.
+   */
+  reduced?: "cut" | "keep";
+};
+
 /**
- * What a live switch shows over the scene being left: the veil and the loader. The scene being left decides: its
- * `leave` is merged field by field over `config.leave`, which is merged over the engine's default (`{ cover: { color:
- * 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }`). `false` turns a part or the whole off;
- * a part written over `false` starts from the engine's default. The scene being entered may set the veil's `color` and
- * `alpha` on top (`enter.cover`). Fast mode, a headless app and the first scene of a run show nothing. A scene may
- * also write a function of the switch that gives one (`SceneSpec.leave`).
+ * A transition from a picture of the last frame of the scene being left, drawn over the next scene from the swap for
+ * `ms`, then gone (spec 36). One of five kinds, each with the fields it takes; a field the kind does not take is an
+ * error. The picture holds what stood on the screen, the veil and the loader included, and takes no tap: the next scene
+ * takes taps from the swap. Fast mode, a headless app, the first scene of a run and a device with no WebGPU play none.
+ *
+ * | kind | what it does | fields (default) |
+ * |---|---|---|
+ * | `fade` | the picture fades out | none |
+ * | `slide` | the picture slides off the screen | `to` (`"left"`) |
+ * | `wipe` | an edge sweeps the picture away | `angle` (0, radians; 0 sweeps from left to right), `soft` (0.04) |
+ * | `iris` | the picture closes into a point | `x`, `y` (0.5, shares of the screen), `soft` (0.05) |
+ * | `dissolve` | noise eats the picture away | `scale` (8 cells), `edge` (0.08), `edgeColor` (`0xffffff`) |
+ *
+ * `wipe`, `iris` and `dissolve` draw on the bodies of `RevealLine`, `RevealRound` and `Dissolve` of the effects set:
+ * list them in the `filters` of a feature, or the transition plays as a `fade` (a dev build says which member to list).
+ *
+ * @example
+ * ```ts
+ * // The board leaves with a wipe from right to left; every way into the night is an iris of 500 ms; a memory
+ * // dissolves into the ward with a golden rim.
+ * const wipe: SceneTransition = { kind: "wipe", angle: Math.PI };
+ * const iris: SceneTransition = { kind: "iris", ms: 500 };
+ * const dissolve: SceneTransition = { kind: "dissolve", edgeColor: 0xffd27a };
+ * ```
+ */
+export type SceneTransition = SceneTransitionCommon &
+  (
+    | { kind: "fade" }
+    | {
+        kind: "slide";
+        /** The edge of the screen the picture slides off to. Default `"left"`. */
+        to?: "left" | "right" | "up" | "down";
+      }
+    | {
+        kind: "wipe";
+        /** The direction the edge moves in, radians; 0 sweeps from left to right. Default 0. */
+        angle?: number;
+        /** The softness of the edge, a share of the screen from 0 to 1. Default 0.04. */
+        soft?: number;
+      }
+    | {
+        kind: "iris";
+        /** The point the picture closes into, a share of the screen width from 0 to 1. Default 0.5. */
+        x?: number;
+        /** The point the picture closes into, a share of the screen height from 0 to 1. Default 0.5. */
+        y?: number;
+        /** The softness of the edge, a share of the screen from 0 to 1. Default 0.05. */
+        soft?: number;
+      }
+    | {
+        kind: "dissolve";
+        /** The cells of the noise across the screen, above 0. Default 8. */
+        scale?: number;
+        /** The width of the rim where the picture burns away, from 0 to 1. Default 0.08. */
+        edge?: number;
+        /** The colour of the rim, `0xRRGGBB`. Default `0xffffff`. */
+        edgeColor?: number;
+      }
+  );
+
+/**
+ * What a live switch shows over the scene being left: the veil, the loader and the transition. The scene being left
+ * decides: its `leave` is merged field by field over `config.leave`, which is merged over the engine's default (`{ cover:
+ * { color: 0x000000, alpha: 0.45, inMs: 50, outMs: 150 }, loader: { afterMs: 400 } }`, and no transition). `false`
+ * turns a part or the whole off; a part written over `false` starts from the engine's default. `transition` is no
+ * merge: the level that writes one replaces the one below whole, and `transition: false` turns it off for this scene
+ * (the scene being entered then cannot turn it on). The scene being entered may set the veil's `color` and `alpha` and
+ * the transition on top (`enter`). Fast mode, a headless app and the first scene of a run show nothing. A scene may also
+ * write a function of the switch that gives one (`SceneSpec.leave`).
  *
  * @example
  * ```ts
@@ -202,10 +284,18 @@ export type SceneLoader<Asset extends string = string> = {
  * const ward: SceneLeave = false;
  * // The veil without a loader.
  * const quiet: SceneLeave = { loader: false };
+ * // A wipe from right to left over the new scene, and the map leaves with none.
+ * const wiped: SceneLeave = { transition: { kind: "wipe", angle: Math.PI } };
+ * const map: SceneLeave = { transition: false };
  * ```
  */
 export type SceneLeave<Asset extends string = string> =
-  | { cover?: SceneCover | false; loader?: SceneLoader<Asset> | false }
+  | {
+      cover?: SceneCover | false;
+      loader?: SceneLoader<Asset> | false;
+      /** The transition from the last frame of this scene to the next one; `false` turns the config's off. Absent: the config's. */
+      transition?: SceneTransition | false;
+    }
   | false;
 
 /**
@@ -226,18 +316,24 @@ export type LeaveSwitch = { readonly from: string; readonly to: string };
  * What a live switch to this scene shows over the scene being left: the veil takes this scene's `color` and `alpha`,
  * each over what the scene being left resolved (its `leave` over `config.leave` over the engine's). Only the look of
  * the veil: `inMs` and `outMs` stay the left scene's, and a veil the scene being left turned off (`cover: false`)
- * stays off, as `enter` never turns one on. Absent: the scene being left decides alone.
+ * stays off, as `enter` never turns one on. `transition` replaces whatever transition the scene being left resolved,
+ * whole, except `false` of that scene (`leave: false`, or `transition: false`), which no `enter` turns on again.
+ * Absent: the scene being left decides alone.
  *
  * @example
  * ```ts
  * // Every way into the night scene dims the scene being left in navy at 70 %: ward → night shows the veil
  * // { color: 0x0b1020, alpha: 0.7, inMs: 50, outMs: 150 } over a ward that leaves with the engine's.
  * const enter: SceneEnter = { cover: { color: 0x0b1020, alpha: 0.7 } };
+ * // ... and closes the old picture into the centre of the screen over 500 ms.
+ * const night: SceneEnter = { transition: { kind: "iris", ms: 500 } };
  * ```
  */
 export type SceneEnter = {
   /** The `color` and the `alpha` of the veil of a switch to this scene. */
   cover?: Pick<SceneCover, "color" | "alpha">;
+  /** The transition of every switch to this scene, over the one the scene being left writes. */
+  transition?: SceneTransition;
 };
 
 /**
@@ -298,7 +394,10 @@ export type SceneSpec<
    * ```
    */
   leave?: SceneLeave<Asset> | ((sw: LeaveSwitch) => SceneLeave<Asset> | undefined);
-  /** What a live switch to this scene shows: the `color` and `alpha` of the veil over the scene being left. */
+  /**
+   * What a live switch to this scene shows: the `color` and `alpha` of the veil over the scene being left, and the
+   * transition that replaces the one the scene being left writes.
+   */
   enter?: SceneEnter;
 };
 
@@ -408,7 +507,8 @@ export type Config = {
   /**
    * What a live switch shows over the scene being left, for every scene; a scene's own `leave` is merged over it field
    * by field. A field left out keeps the engine's default, `{ cover: { color: 0x000000, alpha: 0.45, inMs: 50,
-   * outMs: 150 }, loader: { afterMs: 400 } }`, which holds no swap (no `holdMs`); `false` turns a part or the whole off.
+   * outMs: 150 }, loader: { afterMs: 400 } }`, which holds no swap (no `holdMs`) and plays no transition; `false` turns
+   * a part or the whole off. `transition` is the game-wide transition of a live switch (spec 36).
    *
    * @example
    * ```ts
@@ -421,6 +521,11 @@ export type Config = {
    * createApp({
    *   plugins: [...screen, boardFeature],
    *   pluginConfigs: { scenes: { leave: { loader: { afterMs: 0, holdMs: 260, projection: "opening" } } } }
+   * });
+   * // Every switch fades the last frame of the scene being left out over the next scene in 400 ms.
+   * createApp({
+   *   plugins: [...screen, boardFeature],
+   *   pluginConfigs: { scenes: { leave: { transition: { kind: "fade" } } } }
    * });
    * // No veil and no loader on any switch.
    * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { scenes: { leave: false } } });
@@ -573,7 +678,10 @@ export type Leaving = {
    * with the veil after a land. Absent while it mounted and showed none.
    */
   projection?: string;
-  /** Milliseconds the veil fades out over after the swap, 0 without a veil: a loader shown goes with it. */
+  /**
+   * Milliseconds the veil fades out over after the swap, 0 without a veil: a loader shown goes with it. A transition
+   * that was played at the swap sets it to 0: the veil and the loader are in its picture and leave at once.
+   */
   outMs: number;
   /**
    * The floor on the swap (F130), for a loader that is on with `holdMs` above 0: the clock moment the swap may happen at,
@@ -582,6 +690,12 @@ export type Leaving = {
    * (`dropLeftOver` and `leaveFor` keep it so), which is why the build reads it there.
    */
   hold?: { until: number; elapsedUntil: number; frame: number };
+  /**
+   * The gate of a look that carries a transition (spec 36): the frames the swap waited for the picture, and whether
+   * the renderer answered it was taken, so the commit plays it right after the swap. Absent for a look without one:
+   * the swap asks the renderer for nothing.
+   */
+  transition?: { captureFrames: number; ready: boolean };
   /**
    * The loader projection the switch feeds its `SceneSwitch` (F107 part 1), from its start to its swap or drop. Absent
    * when it feeds none: a ring, a texture, a loader turned off, or a projection another owner shows.
@@ -648,9 +762,14 @@ export type FullLoader = {
 };
 
 /**
- * What a switch shows over the scene being left, every level merged: each part resolved or off.
+ * What a switch shows over the scene being left, every level merged: each part resolved or off, and the transition
+ * with every field filled when one is resolved.
  */
-export type FullLeave = { cover: FullCover | false; loader: FullLoader | false };
+export type FullLeave = {
+  cover: FullCover | false;
+  loader: FullLoader | false;
+  transition?: Readonly<LeaveTransition>;
+};
 
 /**
  * scenes plugin events.

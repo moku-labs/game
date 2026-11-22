@@ -7,7 +7,7 @@
  * in. An abort of the node discards the build and leaves the world as it stood.
  */
 import { swapIn } from "./swap";
-import type { SceneBuild, SceneDefinition, ScenesCtx } from "./types";
+import type { Leaving, SceneBuild, SceneDefinition, ScenesCtx } from "./types";
 
 /** A second in ms: the frame interval is this over the frame rate. */
 const SECOND_MS = 1000;
@@ -24,6 +24,12 @@ const FALLBACK_FRAME_MS = SECOND_MS / 60;
  * whole floor.
  */
 const HOLD_FRAMES = 2;
+
+/**
+ * The frames the swap waits for the picture of a transition: the first asks for it, the next one holds it. A renderer
+ * that still answers `"wait"` after this many frames gets no more: the switch commits without the transition.
+ */
+const CAPTURE_FRAMES = 3;
 
 /**
  * Tells whether a value is a number a frame can count with: finite and above 0. Pure.
@@ -104,6 +110,8 @@ function endBuild(ctx: ScenesCtx, build: SceneBuild, how: "commit" | "mount"): v
 
   if (how === "mount") ctx.deps.world.projection.discard();
 
+  const leaving = ctx.state.leaving;
+
   try {
     swapIn(ctx, build.scene, build.named, how === "commit" ? build : undefined);
   } catch (error) {
@@ -115,6 +123,8 @@ function endBuild(ctx: ScenesCtx, build: SceneBuild, how: "commit" | "mount"): v
 
     return;
   }
+
+  if (leaving?.transition?.ready === true) playTransition(ctx, leaving);
 
   build.resolve();
 }
@@ -147,8 +157,53 @@ function holdOver(ctx: ScenesCtx, frame: number, elapsed: number): boolean {
 }
 
 /**
- * Tells whether a running build may commit now: every part of it is done and the floor on the swap
- * passed. Two calls, no allocation.
+ * Asks the renderer whether the swap may commit with the transition of the look (spec 36). `"ready"`: the picture holds
+ * the last drawn frame, the commit plays it. `"none"`: no picture can be taken, the swap commits as without a transition.
+ * `"wait"`: the swap holds and the loop is kept awake for the frame that copies the picture, until `CAPTURE_FRAMES` frames
+ * passed, then it commits without one (the renderer frees the picture asked for when the look lands). A look with no
+ * transition asks nothing. One call and a counter step, no allocation.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns True when the swap may commit.
+ */
+function pictureTaken(ctx: ScenesCtx): boolean {
+  const gate = ctx.state.leaving?.transition;
+
+  if (gate === undefined) return true;
+
+  const answer = ctx.deps.renderer.sync.leave.capture();
+
+  const isWaiting = answer === "wait" && gate.captureFrames < CAPTURE_FRAMES;
+
+  if (isWaiting) {
+    gate.captureFrames += 1;
+    ctx.deps.time.wake();
+
+    return false;
+  }
+
+  gate.ready = answer === "ready";
+
+  return true;
+}
+
+/**
+ * Plays the transition of the look right after the swap, in the same phase, so the swap frame draws the picture of the
+ * scene that left over the scene that came. The veil and a ring or texture loader leave with the picture's start: the
+ * loader projection the switch mounted is unmounted at once as well, as with a veil of `outMs: 0`, since it is in the
+ * picture.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param leaving - The look of the switch.
+ */
+function playTransition(ctx: ScenesCtx, leaving: Leaving): void {
+  ctx.deps.renderer.sync.leave.play();
+  leaving.outMs = 0;
+}
+
+/**
+ * Tells whether a running build may commit now: every part of it is done, the floor on the swap
+ * passed and the picture of a transition is taken. Three calls, no allocation.
  *
  * @param ctx - Domain context of the plugin.
  * @param frame - The frame counter now.
@@ -156,7 +211,7 @@ function holdOver(ctx: ScenesCtx, frame: number, elapsed: number): boolean {
  * @returns True when the build may commit.
  */
 function readyToCommit(ctx: ScenesCtx, frame: number, elapsed: number): boolean {
-  return ctx.deps.world.projection.built() && holdOver(ctx, frame, elapsed);
+  return ctx.deps.world.projection.built() && holdOver(ctx, frame, elapsed) && pictureTaken(ctx);
 }
 
 /**

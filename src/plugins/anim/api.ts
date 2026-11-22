@@ -3,6 +3,7 @@
  * frame step and the `play` handler run on, so a choreography played from a test and one played
  * from a node are the same timeline.
  */
+import { rendererPlugin } from "../renderer";
 import { createRuntime, finishAllAnim, withDeps } from "./lifecycle";
 import { startTimeline } from "./timeline/play";
 import { snapshotOf } from "./timeline/ring";
@@ -53,6 +54,7 @@ export function createAnimApi(ctx: KernelSlice): AnimApi {
 
     setReducedMotion: (on: boolean): void => {
       actx.state.reducedMotion = on;
+      ctx.require(rendererPlugin).sync.leave.setReducedMotion(on);
     },
 
     replace: (definition: AnyAnimationDefinition): void => {

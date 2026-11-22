@@ -41,8 +41,9 @@ const config: Config = { maxTracks: 2000, reducedMotion: false };
  */
 export const animPlugin = /*#__PURE__*/ createPlugin("anim", {
   // rendererPlugin: the edge orders the plugins, so the `Sprite` a `frames` step writes and the
-  // `Transform` and `rootPoseOf` `at` reads belong to a plugin already there; `sync.loopsHeld` is
-  // the one member anim calls, before an endless loop writes.
+  // `Transform` and `rootPoseOf` `at` reads belong to a plugin already there; two `sync` members are
+  // all anim calls: `loopsHeld`, before an endless loop writes, and `leave.setReducedMotion`, at start and
+  // at every `setReducedMotion`, so a scene transition marked reduced "cut" is cut.
   depends: [timePlugin, flowPlugin, worldPlugin, rendererPlugin],
   config,
   events: (register: RegisterFunction) =>

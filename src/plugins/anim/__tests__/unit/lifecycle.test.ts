@@ -32,6 +32,27 @@ const fartherFlight = defineAnimation("hud.coinsFly", {
 });
 
 describe("anim lifecycle", () => {
+  it("hands the start value of reduced motion to the renderer's leave", () => {
+    const off = createMockAnim();
+    const on = createMockAnim({ reducedMotion: true });
+
+    off.start();
+    on.start();
+
+    expect(off.reducedCalls).toEqual([false]);
+    expect(on.reducedCalls).toEqual([true]);
+  });
+
+  it("hands every later setReducedMotion to the renderer's leave, as it is", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+    mock.api.setReducedMotion(true);
+    mock.api.setReducedMotion(false);
+
+    expect(mock.reducedCalls).toEqual([false, true, false]);
+  });
+
   it("installs the tween driver of world in onStart and takes it back in onStop", () => {
     const mock = createMockAnim();
 

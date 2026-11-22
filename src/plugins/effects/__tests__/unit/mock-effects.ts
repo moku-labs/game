@@ -19,7 +19,8 @@ import type {
   FilterSlotQuad,
   PixiFilter,
   Api as RendererApi,
-  RendererKind
+  RendererKind,
+  TransitionBodyKind
 } from "../../../renderer/types";
 import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/types";
 import { createWorldApi } from "../../../world/api";
@@ -51,6 +52,14 @@ const noRemover = (): void => undefined;
 
 /** One `time.onFrame` registration. */
 type FrameRegistration = { phase: Phase; callback: FrameCallback };
+
+/** One body `effects` handed to `sync.leave.body`, and whether it took it back. */
+export type HandedBody = {
+  kind: TransitionBodyKind;
+  quad: FilterSlotQuad;
+  member: string;
+  takenBack: boolean;
+};
 
 /** What the fake renderer answers and records. */
 export type FakeRendererState = {
@@ -84,6 +93,8 @@ export type FakeRendererState = {
   warmAnswer: boolean | "later";
   /** Answers every warm still waiting. */
   answerWarm(warmed: boolean): void;
+  /** Every `sync.leave.body` call, in order; `takenBack` turns true when the returned function ran. */
+  bodies: HandedBody[];
   /** Entities `sync.displayOf` answers an object for. */
   displays: Set<Entity>;
   /** `viewport.size()` width and height, reference units. */
@@ -191,6 +202,7 @@ export function createMockEffects(
     answerWarm: (warmed: boolean): void => {
       for (const resolve of warmWaiting.splice(0)) resolve(warmed);
     },
+    bodies: [],
     displays: new Set(),
     viewport: { width: 1080, height: 1920 }
   };
@@ -288,6 +300,17 @@ export function createMockEffects(
           return new Promise(resolve => {
             warmWaiting.push(resolve);
           });
+        }
+      },
+      leave: {
+        body: (kind: TransitionBodyKind, quad: FilterSlotQuad, member: string): (() => void) => {
+          const handed: HandedBody = { kind, quad, member, takenBack: false };
+
+          renderer.bodies.push(handed);
+
+          return (): void => {
+            handed.takenBack = true;
+          };
         }
       },
       renderPasses: (): number => renderer.passes,

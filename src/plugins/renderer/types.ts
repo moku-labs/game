@@ -759,6 +759,7 @@ export type {
   LeaveCover,
   LeaveLoader,
   LeaveLook,
+  LeaveTransition,
   NineBorders,
   OverlayMode,
   OverlayPhase,
@@ -770,6 +771,7 @@ export type {
   SyncState,
   TextureProvider,
   TexturesApi,
+  TransitionBodyKind,
   View,
   ViewKind,
   WhyEntry

@@ -13,6 +13,7 @@ import { builtInKinds } from "./filters/builtins";
 import { dropChecks, gateChecks } from "./filters/check";
 import { filtersMade, readsScreen } from "./filters/define";
 import { createFilterSystem, forgetFilter, retireAllFilters, trackFilter } from "./filters/system";
+import { openTransitionBodies } from "./filters/transition";
 import type { FilterDefinition, FilterFields, FilterKind, KindEntry } from "./filters/types";
 import { Emitter } from "./particles/component";
 import {
@@ -313,7 +314,8 @@ function warnUnlisted(ectx: EffectsCtx, id: string, entity: Entity): void {
  * Starts the plugin in `onStart`. The teardown closure goes first into `state.removers`, because
  * a teardown context carries no `ctx`: it captures the world and the renderer here. Then the
  * phone, the kinds, the `load` gate that holds every node entry until the shader checks answered,
- * the emitters and the world side. Nothing is compiled here: the host is not ready yet.
+ * the emitters, the world side and, for a listed member that is a transition body, the hand-over to the
+ * renderer once its checks answered. Nothing is compiled here: the host is not ready yet.
  *
  * @param ctx - Kernel context of the effects plugin.
  */
@@ -332,6 +334,7 @@ export function startEffects(ctx: KernelSlice): void {
   state.removers.push(ectx.deps.flow.onEnter("load", (node, run) => gateChecks(ectx, node, run)));
   registerEmitters(ectx);
   openWorld(ectx, state.kindList);
+  openTransitionBodies(ectx);
 }
 
 /**

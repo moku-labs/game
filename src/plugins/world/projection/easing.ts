@@ -1,9 +1,9 @@
 /**
- * @file anim/tween — the named easing curves. Pure functions of the normalised time: no ctx, no
+ * @file world/projection — the named easing curves (world owns `Ease`; renderer, scenes, anim and ui read them from here). Pure functions of the normalised time: no ctx, no
  * state, no allocation. Every named curve answers 0 at 0 and 1 at 1, so the last frame of a
  * track writes the exact target whatever curve it runs on.
  */
-import type { Ease } from "../../world/types";
+import type { Ease } from "../types";
 
 /** How far the two back curves overshoot. */
 const BACK = 1.701_58;

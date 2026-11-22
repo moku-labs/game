@@ -232,7 +232,11 @@ internal markup: select them by nothing, set the properties instead.
 | `filters.warm(filter, quad?)` | Creates the GPU pipelines of a filter before a screen needs them, and of its body on its `quad` when it has one: drawn invisibly before a frame (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
 | `leave.show(look)` | `scenes` at the start of a live switch: a veil over the whole canvas fading in, and a loader that waits for its `afterMs`, drawn above every layer; replaces a look that runs. See "The picture of a scene being left". Inert: nothing. |
 | `leave.land()` | `scenes` after the swap: the veil fades out over its `outMs` and leaves the stage; a ring or a texture loader goes at once, a layer loader that shows fades out with the veil. Nothing runs: nothing. |
-| `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once, a lifted layer back under the root. Nothing runs: nothing. |
+| `leave.drop()` | `scenes` on an abort or a throw: the veil and the loader go at once, a lifted layer back under the root, a transition's picture freed. Nothing runs: nothing. |
+| `leave.capture()` | `scenes`' swap gate for a look with `transition`: `"wait"` until the next drawn frame copied the canvas (the first call asks for it), `"ready"` then, `"none"` when no picture can be taken (no transition, reduced motion cut it, after the swap, WebGL, no device). See "The transition". |
+| `leave.play()` | `scenes` right after `swapIn` once `capture()` answered `"ready"`: the picture is drawn over the next scene for the transition's `ms`, then freed; the veil and the loader leave at once. No picture: nothing. |
+| `leave.body(kind, quad, member)` | `effects` at start: the body of a listed `RevealLine` (`"wipe"`), `RevealRound` (`"iris"`) or `Dissolve` (`"dissolve"`) to draw that kind on. Answers the take-back, which `effects` calls at stop. |
+| `leave.setReducedMotion(on)` | `anim` at start and on every `setReducedMotion`: a look shown while it is on drops a transition with `reduced: "cut"`. |
 | `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
@@ -840,7 +844,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, the held views world released (a committed scene build, an opened warm window), added views, changed components, invalidated texture keys; then, while a scene or a warm window is built aside, the views of its aside queue under the build budget (see "The next scene built aside"). |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then a shot of that frame while the canvas texture holds it (`shots.after`, one length read with no key waiting), then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then the step of the picture of a scene being left (spec 33 A2), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame draws the warm-up's probes, then uploads up to `uploads` queued texture sources, then renders the kept pictures (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then a shot of that frame while the canvas texture holds it (`shots.after`, one length read with no key waiting), then the copy of a transition's picture asked for (`sync.leaveAfter`, spec 36, one field read with none asked), then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -949,7 +953,50 @@ README). The renderer's part, `sync.leave`:
   the first step that needs them and kept for the life of the application: a switch makes no Pixi object. A lost
   device takes them with its stage; the step makes them again on the restored one, and a look that ran on goes on. A
   stop frees them; the game's texture and a lifted layer are not freed with them. With no look running a step reads
-  two fields: 0 B a frame, and 0 B a frame of the fade-out and of the wait too (`leave.perf.ts`).
+  three fields: 0 B a frame, and 0 B a frame of the fade-out and of the wait too (`leave.perf.ts`).
+
+### The transition (spec 36)
+
+A look may carry `transition` (`LeaveTransition`, resolved by `scenes`: `fade`, `slide`, `wipe`, `iris`, `dissolve`
+with every field filled). The switch then plays the picture of the last frame of the scene being left over the next
+scene for `ms` from the swap. WebGPU only: elsewhere the switch is as without it.
+
+- **Capture.** `scenes` holds the swap on `sync.leave.capture()`. The first call marks the picture asked for and asks
+  for a frame: `"wait"`. Right after the stage render of the next drawn frame (`sync.leaveAfter`, beside
+  `shots.after`, same task, never the heat map), the canvas texture is copied into the picture: one command encoder,
+  one `copyTextureToTexture`, one submit, no render pass. The look is not hidden for that frame (unlike a shot): the
+  picture holds the veil and the loader as drawn. The next call answers `"ready"`. `"none"`: no transition, the swap
+  came already, WebGL or no device, or a drawn frame with no canvas texture to copy (the transition is given up).
+- **Play.** `sync.leave.play()`, right after `swapIn` in the same phase: the veil and a ring or texture loader leave at
+  once (they are in the picture), a layer loader's layer waits unseen as after `outMs: 0`, and the look's run ends, so
+  `land` after it changes nothing. The picture hangs in `renderer.leave` (the veil and the frame hidden), last on the
+  stage, from the swap frame on; `playStartedAt` is `clock.now()`.
+- **Frames.** Each render phase: `t = clamp((now - playStartedAt) / ms, 0, 1)`, `e` the ease of `t` (`easeCell` of
+  `world/projection/easing.ts`, a pure import), a frame asked for. `fade`: a sprite over the canvas (`host.screen()`), alpha
+  `1 - e`. `slide`: the same sprite moved by `e` × the width (or the height) towards `to`. `wipe`, `iris`, `dissolve`:
+  the unit quad as a mesh over the canvas with the set body `effects` handed (`sync.leave.body`), the picture bound as
+  its input, the global filter numbers of a pass over the whole canvas, and the body's uniforms written by name: wipe
+  `progress = 1 - e`, `angle`, `soft`; iris `radius` from the distance of (`x`, `y`) to the farthest corner plus `soft`
+  down to 0, `x`, `y`, `soft`; dissolve `progress = e`, `scale`, `edge`, and `edgeColor` into the three channels of the
+  colour uniform's own array. At `t = 1` the picture leaves the stage and its texture is destroyed.
+- **Bodies.** `wipe` draws on `RevealLine`, `iris` on `RevealRound`, `dissolve` on `Dissolve`; `effects` hands each
+  listed member's body under its kind at start and takes it back at stop. A kind with no body plays as `fade`, and a
+  dev or agent build warns once per kind: `renderer:transition-body-missing`, its hint naming the member to list.
+- **Reduced motion.** `anim` tells `sync.leave.setReducedMotion(on)`. A look shown while it is on drops a transition with
+  `reduced: "cut"` (`capture()` answers `"none"`); `"keep"` plays as written.
+- **Runs that meet.** `land` after a capture that was not played (the gate gave up, the world not live) frees the
+  picture. `show` during a transition ends it at once, picture freed; the new look's own capture copies the screen as
+  it stands, the old picture's frame included. `drop`, a lost device and a stop end the transition and free the
+  picture. The picture takes no tap: it is not under the root.
+- **Memory.** The picture is a `RenderTexture` of the canvas's pixel size and format, resolution 1, linear, clamped,
+  `autoGarbageCollect: false`, counted as kept (`host.keep`) and put on the GPU at once: width × height × 4 B of the
+  canvas while a transition runs (about 10 MB for a 1080 × 2340 canvas, by arithmetic), 0 B at rest. The sprite, the mesh, its geometry, its global numbers and one shader
+  per body kind are made at the first transition that needs them and kept for the life of the application.
+- **Cost.** The capture frame adds one texture copy and no pass; a frame of a transition draws one more sprite or mesh
+  in the stage pass. A step while it plays (`transition.perf.ts`, real Pixi objects and effects' bodies): 0 B a frame
+  for every kind (`budgets.ts`). On a Galaxy A26 (Chrome 158, bench `trans-*` arms, 18–24 switches a kind, medians):
+  the frames of a transition draw 1 canvas pass, as the same rooms at rest; GPU 13.1–14.0 ms against 10.7–11.3 ms at
+  rest, +2.0 ms (slide, wipe, iris), +2.2 (dissolve), +3.3 (fade): the fill of one full-screen picture for `ms`.
 
 ## Shots of the frame
 

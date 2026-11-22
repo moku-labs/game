@@ -298,7 +298,7 @@ keys, `loop.ms` or `loop.reduced`) starts a new track under the new label.
 An endless track (a `motion.loop`, a `"forever"` tween) and an endless `Frames` loop write nothing to an
 entity whose view the player cannot see: under an opaque overlay or in the blurred kept picture of one,
 at alpha 0, under a view at alpha 0, or a leaf wholly off the screen. Before such a write `anim` asks
-`renderer.sync.loopsHeld(entity, track.reveals)`, the one renderer member it calls. `reveals` is what the
+`renderer.sync.loopsHeld(entity, track.reveals)`, one of the two renderer members it calls (the other is `sync.leave.setReducedMotion`, see "Reduced motion"). `reveals` is what the
 track writes that could show the view again, computed once when the track is made: `"alpha"` for an
 `alpha` field, `"place"` for a field of `Transform` or a size of a Sprite, NineSlice or Shape, `"both"`
 for both and for any other component (a game's own, a filter's values, a text's style: anim cannot know
@@ -378,6 +378,10 @@ one at once, and walks on from its first key when the switch goes off. A timelin
 step started under reduced motion does not play at all: it writes nothing and its step ends at once.
 A loop that stands writes its first key once, not every frame. Tracks already running keep their length. A `Frames` loop stops on
 the frame it shows and walks on from that frame when the switch goes off.
+
+The renderer knows the switch too: `anim` calls `renderer.sync.leave.setReducedMotion(on)` with the start value
+when it starts and with the new value at every `setReducedMotion(on)`. A scene transition marked reduced
+`"cut"` is then cut by the renderer: the scene changes at once, with no picture to play.
 
 The author marks the tracks reduced motion keeps, a fade for one: the engine never guesses.
 `reduced: "keep"` plays a track as written, with its length, delay and repeats, and a kept loop
@@ -667,4 +671,6 @@ door, `@moku-labs/game/control`, dev builds only. Input `{ on: "boolean" }`: it 
 `world` (the driver seam, `projection.entityOf`, `restOf`, `mute` for `Sprite.texture`, the ecs with `spawn` and `despawn`,
 `onAdded`, `onRemoved` and `query` for `Frames`, `resource` for `AnimPlayer`, the `Layer` and `Order` components), `renderer`
 (its `Sprite`, `Transform` and `Parent` components and
-the `rootPoseOf`, `localPoseOf` and `parentOf` pose helpers of `sync/pose.ts`; no API call).
+the `rootPoseOf`, `localPoseOf` and `parentOf` pose helpers of `sync/pose.ts`; two API calls: `sync.loopsHeld`
+before an endless loop writes, and `sync.leave.setReducedMotion(on)` at start and at every `setReducedMotion`, so a
+scene transition marked reduced "cut" is cut).

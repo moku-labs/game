@@ -3,10 +3,12 @@
  */
 import type { World } from "../../../../../src/index.ts";
 
-/** What a mounted scene does later: `tick` once a frame, `leave` when the next scene comes. */
+/** What a mounted scene does later: `tick` once a frame, `swapped` at a scene switch, `leave` when the next scene comes. */
 export type Mounted = {
   /** Called every frame with the milliseconds since the scene mounted. */
   tick?: (elapsedMs: number) => void;
+  /** Called in the swap of a scene switch of the engine, with the scene now mounted: the frame the new scene first draws. */
+  swapped?: (scene: string) => void;
   /** Hands back what the scene changed outside its views. */
   leave?: () => void;
 };
@@ -37,6 +39,10 @@ export type Stage = {
   setResolution(resolution: number | undefined): number;
   /** Marks this frame in the arm's row and in the perf log. */
   mark(label: string): void;
+  /** The scene the engine has mounted, `undefined` before the first one. */
+  scene(): string | undefined;
+  /** Answers the gate of the graph's rest node so the engine switches to the other scene; `false` while the gate is shut. */
+  switchScene(): boolean;
 };
 
 /** One scene of the table. */

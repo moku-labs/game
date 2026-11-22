@@ -179,14 +179,15 @@ function namesOf(
  * `bundles` names bundles that depend on the committed state: the scene is mounted once those
  * are in too. `leave` is what a live switch shows over the scene when it is left, merged over the
  * config's: `false` shows nothing; a function of the switch is called once per switch with `{ from, to }` and kept as it
- * is. `enter` sets the colour and the alpha of the veil of every live switch to the scene.
+ * is. `enter` sets the colour and the alpha of the veil of every live switch to the scene. A `transition` in `leave` or
+ * `enter` plays a picture of the last frame of the scene being left over the new scene.
  *
  * @param id - Id of the scene. A node names it with `defineNode({ scene: id })`.
  * @param scene - The bundle, the optional bundles of state, the layers, the projections, the
  *   optional music key, the optional `leave` and the optional `enter`.
  * @returns The scene as frozen data, ready for the `scenes` key of a feature.
  * @throws {Error} For an integer-like layer name, for a `layer` or `lift` that is not declared, for two HUD layers,
- *   an `above` other than `"overlays"`, a `ui` declared after the HUD layer, and a `leave` value or an `enter` of the
+ *   an `above` other than `"overlays"`, a `ui` declared after the HUD layer, and a `leave` value (its `transition` included) or an `enter` of the
  *   wrong shape (the result of a `leave` function is checked at the switch and logged).
  * @example
  * ```ts
@@ -238,6 +239,20 @@ function namesOf(
  * });
  * typeof memory.leave; // "function", called with { from: "memory", to: "ward" } at the switch,
  * // and with { from: "memory", to: "memory" } when the memory stands live
+ *
+ * // The board leaves with a wipe from right to left; every way into the night is an iris of 500 ms.
+ * defineScene("board", {
+ *   bundle: "board",
+ *   layers: { cells: {} },
+ *   projections: [],
+ *   leave: { transition: { kind: "wipe", angle: Math.PI } }
+ * }).leave; // { transition: { kind: "wipe", angle: Math.PI } }, the defaults are filled in at the switch
+ * defineScene("night", {
+ *   bundle: "night",
+ *   layers: { sky: {} },
+ *   projections: [],
+ *   enter: { transition: { kind: "iris", ms: 500 } }
+ * }).enter; // { transition: { kind: "iris", ms: 500 } }
  * ```
  */
 export function defineScene<

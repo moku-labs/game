@@ -3,7 +3,8 @@
  * `begin` stage of the node that switches, before the `load` stage downloads its bundles, so a cold first visit reacts in
  * the next frame, and a loader when the switch is not done `afterMs` after its start. The scene being left decides: its
  * `leave` (a value, or a function of the switch asked once per switch and once per hold of its loader) over
- * `config.leave` over the engine's default, field by field. The renderer draws both
+ * `config.leave` over the engine's default, field by field; the transition of the look (spec 36) is the scene being
+ * entered's `enter.transition` over that, and a transition alone makes a look. The renderer draws both
  * (`renderer.sync.leave`); this file resolves the look, with the veil's colour and alpha of the scene being entered on
  * top (`enter.cover`), hands the renderer the `due` of a loader projection (`loader.ts` shows or mounts it), starts
  * feeding that loader the switch (`progress.ts`), stamps a loader's floor on the swap for `build.ts` to read, and lands
@@ -14,6 +15,7 @@ import type { LeaveLoader, LeaveLook } from "../renderer/types";
 import { checkLeave } from "./leave-check";
 import { dropLoader, dueLoader, landLoader } from "./loader";
 import { startFeeding } from "./progress";
+import { transitionOf } from "./transition";
 import type {
   FullCover,
   FullLeave,
@@ -155,11 +157,14 @@ function loaderOver(
 
 /**
  * Resolves what a switch shows over the scene being left: the scene's `leave` over the config's over the engine's,
- * field by field. `false` at a level turns both parts off there.
+ * field by field. `false` at a level turns both parts off there. The transition (spec 36) is resolved on its own:
+ * the scene being entered over the scene being left over the config (`transition.ts`), and it makes a look by itself
+ * when the veil and the loader are both off.
  *
  * @param config - `config.leave`.
  * @param scene - The `leave` of the scene being left.
- * @returns Both parts, each resolved or `false`; `undefined` when both are off.
+ * @param enter - The `enter` of the scene being entered.
+ * @returns Both parts, each resolved or `false`, and the transition when one is resolved; `undefined` when all are off.
  * @example
  * ```ts
  * leaveOf({ loader: false }, { cover: { alpha: 0.6 } }); // { cover: { color: 0, alpha: 0.6, inMs: 50, outMs: 150 }, loader: false }
@@ -167,7 +172,8 @@ function loaderOver(
  */
 export function leaveOf(
   config: SceneLeave | undefined,
-  scene: SceneLeave | undefined
+  scene: SceneLeave | undefined,
+  enter?: SceneEnter
 ): FullLeave | undefined {
   let cover: Readonly<FullCover> | false = FALLBACK_LEAVE.cover;
   let loader: Readonly<FullLoader> | false = FALLBACK_LEAVE.loader;
@@ -182,6 +188,9 @@ export function leaveOf(
     }
   }
 
+  const transition = transitionOf(config, scene, enter);
+
+  if (transition !== undefined) return { cover, loader, transition };
   if (cover === false && loader === false) return undefined;
 
   return { cover, loader };
@@ -339,7 +348,7 @@ export function startLeave(
 
   if (from === undefined) return undefined;
 
-  const leave = leaveOf(ctx.config.leave, sceneLeaveOf(ctx, from, scene.id));
+  const leave = leaveOf(ctx.config.leave, sceneLeaveOf(ctx, from, scene.id), scene.enter);
 
   if (leave === undefined) {
     // The `scene` stage of this node must not ask the scene's `leave` function for this switch again.
@@ -367,6 +376,12 @@ export function startLeave(
   if (leave.loader !== false) {
     look.loader = loaderLook(ctx, leave.loader, { from, to: scene }, leaving);
     stampHold(ctx, leaving, leave.loader);
+  }
+
+  // A transition holds the swap until the renderer holds the picture of the last frame (`build.ts`).
+  if (leave.transition !== undefined) {
+    look.transition = leave.transition;
+    leaving.transition = { captureFrames: 0, ready: false };
   }
 
   // Shown now, before the bundles are awaited; an abort of the node drops it at once.

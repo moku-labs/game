@@ -1,13 +1,15 @@
 /**
  * Bench plugin, Standard tier, Layer 3: the consumer plugin of the filter bench. It puts the scene
  * the address or the editor names on the running game, keeps the ballast under it, turns the arms
- * of a run and keeps a row of numbers per arm. No events.
+ * of a run and keeps a row of numbers per arm. The `trans-*` arms ask the graph for a real switch
+ * between its two scenes. No events.
  *
  * @see ../../README.md
  */
 import {
   clockPlugin,
   createPlugin,
+  flowPlugin,
   rendererPlugin,
   scenesPlugin,
   timePlugin,
@@ -25,14 +27,16 @@ import { enterScene, hostOf, startBench, stopBench } from "./host";
  * ```
  */
 export const benchPlugin = createPlugin("bench", {
-  depends: [worldPlugin, rendererPlugin, scenesPlugin, timePlugin, clockPlugin],
+  depends: [worldPlugin, rendererPlugin, scenesPlugin, timePlugin, clockPlugin, flowPlugin],
   createState: createBenchState,
   api: ctx => {
     const host = hostOf(
       ctx.require(worldPlugin),
       ctx.require(rendererPlugin),
       ctx.require(clockPlugin),
-      ctx.log
+      ctx.log,
+      ctx.require(flowPlugin),
+      ctx.require(scenesPlugin)
     );
 
     ctx.state.host = host;

@@ -56,6 +56,8 @@ export type MockAnim = {
   held: Set<Entity>;
   /** Every ask of the stand-in's `sync.loopsHeld`, in call order, with what the loop reveals. */
   asks: Array<{ entity: Entity; reveals: LoopReveals | undefined }>;
+  /** Every value the stand-in's `sync.leave.setReducedMotion` got, in call order. */
+  reducedCalls: boolean[];
   /** When set, answers `sync.loopsHeld` in place of `held`, as the renderer's rule for unseen views would. */
   rule: { answer: ((entity: Entity, reveals: LoopReveals | undefined) => boolean) | undefined };
   time: Time;
@@ -175,8 +177,14 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
   const held = new Set<Entity>();
   const asks: MockAnim["asks"] = [];
   const rule: MockAnim["rule"] = { answer: undefined };
+  const reducedCalls: boolean[] = [];
   const renderer = {
     sync: {
+      leave: {
+        setReducedMotion: (on: boolean): void => {
+          reducedCalls.push(on);
+        }
+      },
       loopsHeld: (entity: Entity, reveals?: LoopReveals): boolean => {
         asks.push({ entity, reveals });
 
@@ -210,6 +218,7 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
     wakes,
     held,
     asks,
+    reducedCalls,
     rule,
     time,
     start: (): void => {
