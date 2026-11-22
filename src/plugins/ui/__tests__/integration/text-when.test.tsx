@@ -221,14 +221,12 @@ describe("lint of a text whose key follows the frame (F182)", () => {
   // Catches: lint measuring with the `style` prop or with `body` instead of the frame's key.
   it("reports a tall key that overflows its box on a tall frame, and nothing on a short one", async () => {
     const app = await startTextWhenApp(SHORT);
-    const overflows = (): boolean =>
-      app.ui.lint().some(finding => finding.rule === "text-overflow" && finding.key === "boxed");
 
-    expect(overflows()).toBe(false);
+    expect(overflows(app, "boxed")).toBe(false);
 
     frameOn(app, TALL);
 
-    expect(overflows()).toBe(true);
+    expect(overflows(app, "boxed")).toBe(true);
 
     await app.stop();
   });
