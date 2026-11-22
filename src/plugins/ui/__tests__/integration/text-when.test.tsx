@@ -234,18 +234,18 @@ describe("lint of a text whose key follows the frame (F182)", () => {
   });
 });
 
-describe("lint of a text that wraps in its box (F233)", () => {
-  /**
-   * Whether lint reports a keyed text as overflowing.
-   *
-   * @param app - The running app.
-   * @param key - The key of the text.
-   * @returns True when a `text-overflow` finding names it.
-   */
-  function overflows(app: TextWhenApp, key: string): boolean {
-    return app.ui.lint().some(finding => finding.rule === "text-overflow" && finding.key === key);
-  }
+/**
+ * Whether lint reports a keyed text as overflowing.
+ *
+ * @param app - The running app.
+ * @param key - The key of the text.
+ * @returns True when a `text-overflow` finding names it.
+ */
+function overflows(app: TextWhenApp, key: string): boolean {
+  return app.ui.lint().some(finding => finding.rule === "text-overflow" && finding.key === key);
+}
 
+describe("lint of a text that wraps in its box (F233)", () => {
   // Catches: lint measuring a `wrap: "box"` text on one line, wider than the box it wraps in.
   it("reports nothing for a wrapping text whose lines fit its width and height", async () => {
     const app = await startTextWhenApp(SHORT);
