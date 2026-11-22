@@ -146,12 +146,39 @@ function scrollOf(element: Element, stopsOf: StopsOf | undefined): UiNode["scrol
 }
 
 /**
+ * How far a scroll has moved its content on one axis.
+ *
+ * @param element - The element to read.
+ * @param axis - The axis asked for.
+ * @returns The current offset when the element is a placed scroll of that axis, else 0.
+ */
+function offsetOn(element: Element, axis: "x" | "y"): number {
+  const motion = element.scroll;
+
+  return motion?.placed === true && motion.axis === axis ? motion.offset : 0;
+}
+
+/**
+ * A layout rect where it is on screen under the scrolls above it.
+ *
+ * @param rect - The layout rect.
+ * @param shiftX - The sum of the offsets of the horizontal scrolls above.
+ * @param shiftY - The sum of the offsets of the vertical scrolls above.
+ * @returns The rect itself when nothing is scrolled, else a moved copy.
+ */
+function scrolledRect(rect: Rect, shiftX: number, shiftY: number): Rect {
+  return shiftX === 0 && shiftY === 0 ? rect : { ...rect, x: rect.x - shiftX, y: rect.y - shiftY };
+}
+
+/**
  * Turns one element and its subtree into snapshot nodes. The rect is natural; a fitted element
  * adds the scale it is drawn at; a text adds the words it draws and the style key of a keyed
  * text; a text field adds its value; a windowed scroll adds its window; an element with a
  * motion id adds it, a scroll adds where it stands and its snap stops. The spacers of a windowed
  * scroll are left out: its content lists the live rows. The rects of a root laid out in a slot are
- * in the slot's units: `place` maps them into root coordinates.
+ * in the slot's units: `place` maps them into root coordinates. The rect of an element inside a
+ * scroll is where it is on screen: moved back by the offset of every scroll above it, on the
+ * scroll's axis (F228); the scroll itself stays where it is.
  *
  * @param state - The jsx state.
  * @param element - The element to read.
@@ -159,6 +186,8 @@ function scrollOf(element: Element, stopsOf: StopsOf | undefined): UiNode["scrol
  * @param shownStyleOf - Reads `Text.style` of a text entity; none in a read without a world.
  * @param stopsOf - Reads the stops of a `snap` prop; none in a read without a layout.
  * @param place - Maps a rect of a slotted root into root coordinates; none for a root on the viewport.
+ * @param shiftX - The sum of the offsets of the horizontal scrolls above the element.
+ * @param shiftY - The sum of the offsets of the vertical scrolls above the element.
  * @returns The node, with its children in child order.
  */
 function nodeOf(
@@ -167,8 +196,13 @@ function nodeOf(
   resolvedOf: ResolvedOf | undefined,
   shownStyleOf: ShownStyleOf | undefined,
   stopsOf: StopsOf | undefined,
-  place?: (rect: Rect) => Rect
+  place?: (rect: Rect) => Rect,
+  shiftX = 0,
+  shiftY = 0
 ): UiNode {
+  // What a child sits under: this scroll's offset on its axis, on top of the scrolls above.
+  const belowX = shiftX + offsetOn(element, "x");
+  const belowY = shiftY + offsetOn(element, "y");
   // The children, in child order; the spacers of a windowed scroll are skipped.
   const children: UiNode[] = [];
 
@@ -176,15 +210,18 @@ function nodeOf(
     const childElement = state.elements.get(child);
 
     if (childElement !== undefined && !isOwnKey(childElement.key)) {
-      children.push(nodeOf(state, childElement, resolvedOf, shownStyleOf, stopsOf, place));
+      children.push(
+        nodeOf(state, childElement, resolvedOf, shownStyleOf, stopsOf, place, belowX, belowY)
+      );
     }
   }
 
   // The base node every element has: key, type, natural rect, style, state flags, children.
+  const rect = scrolledRect(element.rect, shiftX, shiftY);
   const node: UiNode = {
     key: element.key,
     type: element.type,
-    rect: place === undefined ? { ...element.rect } : place(element.rect),
+    rect: place === undefined ? { ...rect } : place(rect),
     style: element.style,
     state: { ...element.is },
     children

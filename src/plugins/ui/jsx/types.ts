@@ -683,7 +683,9 @@ export type Anchor = {
 
 /**
  * One node of the snapshot `tree()` answers with. `rect` is natural: under a `fit` ancestor it
- * is the rect before that ancestor's scale. An element with `fit: "contain"` adds `fitScale`,
+ * is the rect before that ancestor's scale. It is on screen for a scroll: an element inside a
+ * `scroll` is reported moved back by the scroll's current offset on its axis (every scroll above
+ * it adds its own), the scroll itself stays in place. An element with `fit: "contain"` adds `fitScale`,
  * the scale it is drawn at. A `text` adds `content`: the words it draws. A `text` given a text
  * style key adds `textStyle`. An `input` adds `value`: the text being typed while it is edited,
  * else the local field it writes. A windowed `scroll` adds `window`: the rows that exist, which

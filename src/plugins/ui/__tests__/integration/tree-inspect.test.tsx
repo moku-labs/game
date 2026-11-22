@@ -166,3 +166,34 @@ describe("ui.tree() motion", () => {
     expect(Object.hasOwn(nodeOf(tree, "unnamed") ?? {}, "motion")).toBe(false);
   });
 });
+
+describe("ui.tree() rects inside a scroll", () => {
+  it("shifts a child by the offset of the scroll on its axis, as it is on screen", async () => {
+    // Bug caught: the door reports a scrolled child at its layout place, as if the offset were 0.
+    const app = await start("free");
+    const resting = nodeOf(app.ui.tree(), "freeTrack")?.rect;
+
+    app.ui.scroll("free", 250);
+
+    const scrolled = nodeOf(app.ui.tree(), "freeTrack")?.rect;
+
+    expect(scrolled).toEqual({ ...resting, x: (resting?.x ?? 0) - 250 });
+    expect(nodeOf(app.ui.tree(), "free")?.rect.x).toBe(nodeOf(app.ui.tree(), "freeRoot")?.rect.x);
+  });
+
+  it("adds the offsets of nested scrolls, each on its own axis", async () => {
+    // Bug caught: only the nearest scroll (or only one axis) shifts the rect of an inner child.
+    const app = await start("nested");
+    const resting = nodeOf(app.ui.tree(), "shelfTrack")?.rect;
+    const page = nodeOf(app.ui.tree(), "page")?.rect;
+
+    app.ui.scroll("page", 200);
+    app.ui.scroll("shelf", 90);
+
+    const scrolled = nodeOf(app.ui.tree(), "shelfTrack")?.rect;
+
+    expect(scrolled).toEqual({ ...resting, x: (resting?.x ?? 0) - 90, y: (resting?.y ?? 0) - 200 });
+    // The inner scroll is a child of the outer one: it moves with the page only.
+    expect(nodeOf(app.ui.tree(), "shelf")?.rect.y).toBe((page?.y ?? 0) - 200);
+  });
+});
