@@ -15,7 +15,7 @@ import type { MockRenderer } from "../mock-renderer";
 import { type ShotRenderer, settle, startShots } from "../shots-gpu";
 
 // ---------------------------------------------------------------------------
-// Unit: the transition of a scene switch (spec 36), `renderer.sync.leave.capture / play / body / reducedMotion`, over
+// Unit: the transition of a scene switch (spec 36), `renderer.sync.leave.capture / play / body / setReducedMotion`, over
 // the real modules and the real frame of the mock renderer on the fake GPU of the shots tests. A 1080 x 1920 CSS mount
 // whose canvas texture holds 2160 x 3840 device pixels: the picture is the canvas's pixels, drawn over its CSS size.
 // The fake clock is `setNow`; a frame is `runPhase("render")`. `ease: "linear"` makes `e` the time.

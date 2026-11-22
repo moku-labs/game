@@ -4,9 +4,10 @@
  * follows the root's own enter and exit motion (its longest timed track); `fade` times it only when the root plays
  * none (LEAD-FIXES-4 item 5a). The layout module plays the tracks: it is injected, never imported.
  */
-import { applyEase } from "../../anim/tween/easing";
+
 import { Overlay, OverlayLevel, type OverlayValue } from "../../renderer/components";
 import { Exiting } from "../../world/ecs/define";
+import { applyEase } from "../../world/projection/easing";
 import type { TweenOptions } from "../../world/projection/types";
 import type { AnyComponentValue, ComponentValue, Ease } from "../../world/types";
 import type { LayoutModule, MotionSpan } from "../layout/types";

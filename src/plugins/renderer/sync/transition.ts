@@ -375,7 +375,8 @@ export function startTransition(sctx: SyncCtx, playing: TransitionRun): void {
  * @param kind - The kind.
  * @param quad - The body.
  * @param member - The member's export name.
- * @returns What takes this body back, once: a later body for the kind stays.
+ * @returns What takes this body back, once: a later body for the kind stays; it ends a run drawn on the body and
+ * destroys the shaders made on it.
  */
 export function handBody(
   sctx: SyncCtx,
