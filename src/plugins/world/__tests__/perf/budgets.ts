@@ -134,6 +134,13 @@ export const BUDGET = {
   entrySame: 0,
   /** F202: the swap check of a live key with a new item, nothing warm: one size read. New: 0 B. */
   entrySwapCheck: 0,
+  /**
+   * F230: `applyEntry` of a live key handed a new object with the same content: one compare, no `view`. Measured 0 B
+   * with the compare's `for…in` seen only on this item's shape, 40 B (Node 24, the Mac, 2026-11-23) after the other
+   * fixtures of the file fed it many shapes: V8 then lists the 4 keys of the item into an array. `Object.keys` makes
+   * that array on every call. The budget is a merge's compare of one item, not a `view` call.
+   */
+  entryEqual: 64,
   /** F103: world's `input` step at rest with a loader held ready: frame start, no reconcile, no owed show, warm step. New: 0 B. */
   heldInputRest: 0,
   /** F107: the same step with the loader fed: the switch of the standing scene, then one only stored. New: 0 B. */

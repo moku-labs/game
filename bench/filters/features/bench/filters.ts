@@ -256,6 +256,50 @@ export const PromoStroke = defineFilter("bench.promoStroke", {
   uniforms: { sweep: 0 }
 });
 
+/** One step of the frost's blur: a 3 × 3 box of the step before, 1.5 texels apart. A stage draws alone. */
+export const FrostBox = defineFilter("bench.frostBox", {
+  wgsl: body(`var sum = vec4<f32>(0.0);
+  for (var i = -1; i <= 1; i++) {
+    for (var j = -1; j <= 1; j++) {
+      let at = uv + vec2<f32>(f32(i), f32(j)) * 1.5 * gfu.uInputPixel.zw;
+      sum += textureSampleLevel(uTexture, uSampler, clamp(at, gfu.uInputClamp.xy, gfu.uInputClamp.zw), 0.0);
+    }
+  }
+  return sum / 9.0;`),
+  glsl: GLSL_PASS
+});
+
+/**
+ * The two steps of the frost's chain, made once: the scene under the window boxed down to ¼ twice.
+ *
+ * @returns The steps.
+ */
+function frostSteps() {
+  return Object.freeze([
+    Object.freeze({ stage: FrostBox, scale: 0.25 }),
+    Object.freeze({ stage: FrostBox, scale: 0.25 })
+  ]);
+}
+
+/** The steps every call of the frost's chain answers: the same array, so a frame allocates nothing. */
+const FROST_STEPS = frostSteps();
+
+/**
+ * The blur of a window over the scene: today's backdrop path. Pixi copies what was drawn under the window, the chain
+ * blurs the copy at ¼ in two steps, the body lays it under the window's own milk. Drawn live in every frame: a backdrop
+ * is never kept.
+ */
+export const WindowFrost = defineFilter("bench.windowFrost", {
+  wgsl: `@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  let c = textureSampleLevel(uTexture, uSampler, uv, 0.0);
+  let blurred = sampleBlur(uv);
+  return vec4<f32>(blurred.rgb * (1.0 - c.a) + c.rgb, 1.0) * step(0.001, c.a);
+}`,
+  glsl: GLSL_PASS,
+  backdrop: true,
+  inputs: { blur: { from: "back", stages: [FrostBox], chain: () => FROST_STEPS } }
+});
+
 /** Every filter of the bench, for the feature: its own, then the members of the engine's effect set its arms draw. */
 export const BENCH_FILTERS = [
   Breaker,
@@ -271,6 +315,7 @@ export const BENCH_FILTERS = [
   RowFlip,
   RowFlipLive,
   RestShade,
+  WindowFrost,
   LensWindow,
   PromoMap,
   PromoProcedural,

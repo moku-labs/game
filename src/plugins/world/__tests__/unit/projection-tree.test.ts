@@ -140,13 +140,50 @@ describe("projection Tree", () => {
 
     expect(changed).not.toHaveBeenCalled();
 
-    // A new node object with the same contents: changed, because Tree diffs by identity.
+    // A new item with other content whose node has the same contents: changed, because Tree diffs by identity.
     node = hudNode(5);
-    world.model.player = { hud: { coins: 5 } };
+    world.model.player = { hud: { coins: 6 } };
     world.commit();
     world.frame(16);
 
     expect(changed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("projection Tree — F230: a screen whose new item has the same content", () => {
+  it("runs no view and keeps the node, so the ui root is not reconciled again", () => {
+    const world = createMockWorld();
+    const view = vi.fn((hud: Hud) => hudNode(hud.coins));
+
+    world.model.player = { hud: { coins: 5 } };
+    world.api.projection.setLayers([{ name: "ui", sort: "none" }]);
+    world.api.projection.register(
+      projection({
+        name: HUD,
+        layer: "ui",
+        from: (player: { hud: Hud }) => player.hud,
+        view
+      }) as AnyProjectionSpec
+    );
+    world.start();
+    world.api.projection.mount([HUD], MOUNT_OWNER);
+
+    const entity = world.api.projection.entityOf(HUD, HUD) ?? 0;
+    const first = world.api.ecs.get(entity, Tree)?.node;
+
+    world.model.player = { hud: { coins: 5 } };
+    world.commit();
+    world.frame(16);
+
+    expect(view).toHaveBeenCalledTimes(1);
+    expect(world.api.ecs.get(entity, Tree)?.node).toBe(first);
+
+    world.model.player = { hud: { coins: 7 } };
+    world.commit();
+    world.frame(16);
+
+    expect(view).toHaveBeenCalledTimes(2);
+    expect(world.api.ecs.get(entity, Tree)?.node).toEqual(hudNode(7));
   });
 });
 

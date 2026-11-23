@@ -8,7 +8,19 @@ import { CANVAS_RESTARTS, type FrameRing } from "../../../src/index.ts";
 
 /** The part of the frame ring an arm reads. */
 export type RingView = Pick<FrameRing, "capacity" | "size" | "newest" | "written"> & {
-  columns: Pick<FrameRing["columns"], "frame" | "t" | "workMs" | "gpuMs" | "gpuPartial" | "drawn">;
+  columns: Pick<
+    FrameRing["columns"],
+    | "frame"
+    | "t"
+    | "workMs"
+    | "gpuMs"
+    | "gpuPartial"
+    | "drawn"
+    | "compiles"
+    | "uploads"
+    | "uploadMb"
+    | "retakes"
+  >;
   passes: Pick<FrameRing["passes"], "size" | "frame" | "restart">;
 };
 
@@ -38,13 +50,84 @@ export type ArmSummary = {
   workMs: number | null;
 };
 
+/** The first draw of an arm: what its head frames paid once, before the arm settled. */
+export type ArmHead = {
+  /** The frames of the ring read, drawn or not. */
+  frames: number;
+  /** Shader programs compiled. */
+  compiles: number;
+  /** Textures uploaded to the GPU, and their MB. */
+  uploads: number;
+  uploadMb: number;
+  /** Kept pictures taken. */
+  retakes: number;
+  /** The slowest drawn frame, CPU and GPU; `null` without a drawn frame or a GPU time. */
+  worstWorkMs: number | null;
+  worstGpuMs: number | null;
+};
+
 /** One arm, read from the ring. */
 export type ArmRead = {
   frames: FrameSample[];
   /** How many canvas passes began for each reason. */
   restarts: Record<string, number>;
   summary: ArmSummary;
+  head: ArmHead;
 };
+
+/** The frames of an arm's head: one second at 30 fps, long enough for a member's third write and its quad. */
+export const HEAD_FRAMES = 30;
+
+/**
+ * A count of the ring as a number: NaN, a column not counted yet, is 0.
+ *
+ * @param value - The cell.
+ * @returns The count.
+ * @example
+ * ```ts
+ * countOf(Number.NaN); // 0
+ * ```
+ */
+function countOf(value: number | undefined): number {
+  return value === undefined || Number.isNaN(value) ? 0 : value;
+}
+
+/**
+ * Reads the head of an arm: its first frames after the cursor, oldest first.
+ *
+ * @param ring - The frame ring.
+ * @param count - The frames of the arm in the ring.
+ * @param oldest - The slot of the oldest of them.
+ * @param headFrames - How many frames the head holds.
+ * @returns The head.
+ */
+function headOf(ring: RingView, count: number, oldest: number, headFrames: number): ArmHead {
+  const { columns, capacity } = ring;
+  const head: ArmHead = {
+    frames: Math.min(count, headFrames),
+    compiles: 0,
+    uploads: 0,
+    uploadMb: 0,
+    retakes: 0,
+    worstWorkMs: null,
+    worstGpuMs: null
+  };
+
+  for (let index = 0; index < head.frames; index += 1) {
+    const slot = (oldest + index) % capacity;
+    const gpuMs = columns.gpuMs[slot] ?? Number.NaN;
+
+    head.compiles += countOf(columns.compiles[slot]);
+    head.uploads += countOf(columns.uploads[slot]);
+    head.uploadMb += countOf(columns.uploadMb[slot]);
+    head.retakes += countOf(columns.retakes[slot]);
+    if (columns.drawn[slot] !== 1) continue;
+    head.worstWorkMs = Math.max(head.worstWorkMs ?? 0, columns.workMs[slot] ?? 0);
+    if (!Number.isNaN(gpuMs)) head.worstGpuMs = Math.max(head.worstGpuMs ?? 0, gpuMs);
+  }
+
+  return head;
+}
 
 /**
  * The median of a list.
@@ -104,9 +187,15 @@ function canvasPassesOf(
  * @param ring - The frame ring of the monitor.
  * @param since - The ring's `written` when the arm began.
  * @param skip - The frames the summary drops at the head: the switch itself.
- * @returns The frames, the begins per reason and the medians.
+ * @param headFrames - The frames the head reads: the first draw of the arm.
+ * @returns The frames, the begins per reason, the medians and the head.
  */
-export function readArm(ring: RingView, since: number, skip: number): ArmRead {
+export function readArm(
+  ring: RingView,
+  since: number,
+  skip: number,
+  headFrames = HEAD_FRAMES
+): ArmRead {
   const { columns, capacity, newest } = ring;
 
   // How many frames of the ring belong to the arm, and where the oldest of them sits.
@@ -145,6 +234,7 @@ export function readArm(ring: RingView, since: number, skip: number): ArmRead {
       gpuMs: median(settled.flatMap(frame => (frame.gpuMs === null ? [] : [frame.gpuMs]))),
       partialFrames: settled.filter(frame => frame.gpuMs !== null && frame.partial).length,
       workMs: median(settled.map(frame => frame.workMs))
-    }
+    },
+    head: headOf(ring, count, oldest, headFrames)
   };
 }

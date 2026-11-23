@@ -5,7 +5,7 @@
 import type { Hint } from "../../flow/types";
 import type { Snapshot } from "../../model/types";
 import type { AnyComponentValue, Entity } from "../ecs/types";
-import { diffComponents } from "./diff";
+import { deepEquals, diffComponents } from "./diff";
 import { cancelTracks } from "./driver";
 import { routeHint } from "./hints";
 import {
@@ -664,7 +664,14 @@ function applyLive(
   },
   counts: Counts
 ): void {
-  const same = !entry.force && live.item === entry.item;
+  // A play reconcile takes a new object with the same content for the same item: `view` is a projection of the
+  // item, so it would give the same output (F230: ~70 board items a merge). A direct reconcile writes as before.
+  const same =
+    !entry.force &&
+    (live.item === entry.item || (!entry.direct && deepEquals(live.item, entry.item)));
+
+  if (same) live.item = entry.item;
+
   const swap = same ? undefined : swapFor(pctx, spec, live, entry.item);
 
   if (swap !== undefined) {

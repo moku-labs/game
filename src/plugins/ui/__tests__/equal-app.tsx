@@ -75,7 +75,7 @@ export const TALL: ViewportSize = {
 export const renders = { grid: 0 };
 
 /** One item of the grid projection: the three drawn fields of the model. */
-type GridItem = { id: string; coins: number; name: string; skin: string };
+type GridItem = { id: string; coins: number; name: string; skin: string; ticks: number };
 
 /**
  * One list row: an icon, two fixed texts and a button. Every style is a new object per call.
@@ -104,14 +104,15 @@ function listRow(index: number) {
 }
 
 /**
- * The screen of 200 elements. `ticks` is not part of the item, so a commit that only raises it
- * re-renders an equal description.
+ * The screen of 200 elements. The item carries `ticks`, which the view does not draw, so a commit
+ * that only raises it is a new item whose view renders an equal description. (An item with the
+ * same content would not run the view at all: the world takes it as unchanged, F230.)
  */
 export const gridScreen = projection({
   name: "grid",
   layer: "ui",
   from: (player: GridPlayer): GridItem[] => [
-    { id: "grid", coins: player.coins, name: player.name, skin: player.skin }
+    { id: "grid", coins: player.coins, name: player.name, skin: player.skin, ticks: player.ticks }
   ],
   key: (item: GridItem) => item.id,
   view: (item: GridItem) => {

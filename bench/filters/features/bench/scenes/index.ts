@@ -2,6 +2,7 @@
  * @file The table of the scenes.
  */
 import { CASE_SCENES } from "./cases";
+import { PV_SCENES } from "./pv";
 import { SLOPE_SCENES } from "./slope";
 import { TRANS_SCENES } from "./trans";
 import type { BenchScene } from "./types";
@@ -18,5 +19,6 @@ export const SCENES: readonly BenchScene[] = [
   ballastScene,
   ...SLOPE_SCENES,
   ...CASE_SCENES,
-  ...TRANS_SCENES
+  ...TRANS_SCENES,
+  ...PV_SCENES
 ];

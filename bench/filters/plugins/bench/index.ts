@@ -7,6 +7,7 @@
  * @see ../../README.md
  */
 import {
+  assetsPlugin,
   clockPlugin,
   createPlugin,
   flowPlugin,
@@ -16,7 +17,7 @@ import {
   worldPlugin
 } from "../../../../src/index.ts";
 import { createBenchApi, createBenchState } from "./api";
-import { enterScene, hostOf, startBench, stopBench } from "./host";
+import { enterScene, hostOf, loadPixi, startBench, stopBench } from "./host";
 
 /**
  * The bench on `game.bench`.
@@ -27,7 +28,15 @@ import { enterScene, hostOf, startBench, stopBench } from "./host";
  * ```
  */
 export const benchPlugin = createPlugin("bench", {
-  depends: [worldPlugin, rendererPlugin, scenesPlugin, timePlugin, clockPlugin, flowPlugin],
+  depends: [
+    worldPlugin,
+    rendererPlugin,
+    scenesPlugin,
+    timePlugin,
+    clockPlugin,
+    flowPlugin,
+    assetsPlugin
+  ],
   createState: createBenchState,
   api: ctx => {
     const host = hostOf(
@@ -36,7 +45,8 @@ export const benchPlugin = createPlugin("bench", {
       ctx.require(clockPlugin),
       ctx.log,
       ctx.require(flowPlugin),
-      ctx.require(scenesPlugin)
+      ctx.require(scenesPlugin),
+      { api: ctx.require(assetsPlugin), holder: ctx.state.pixi }
     );
 
     ctx.state.host = host;
@@ -46,9 +56,11 @@ export const benchPlugin = createPlugin("bench", {
   hooks: ctx => ({
     "scenes:changed": ({ to }) => enterScene(ctx.state, to)
   }),
-  onStart: ctx =>
+  onStart: ctx => {
+    loadPixi(ctx.state.pixi);
     startBench(ctx.state, run =>
       ctx.require(timePlugin).onFrame("animate", time => run(time.elapsed))
-    ),
+    );
+  },
   onStop: ctx => stopBench(ctx.state)
 });

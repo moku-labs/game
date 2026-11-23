@@ -15,7 +15,11 @@ function ring(): RingView {
       workMs: Float32Array.from([2, 3, 4, 0]),
       gpuMs: Float32Array.from([5, Number.NaN, 9, 0]),
       gpuPartial: Uint8Array.from([0, 0, 0, 0]),
-      drawn: Uint8Array.from([1, 1, 1, 0])
+      drawn: Uint8Array.from([1, 1, 1, 0]),
+      compiles: Float32Array.from([2, 0, 1, 0]),
+      uploads: Float32Array.from([1, 1, 0, 0]),
+      uploadMb: Float32Array.from([0.25, 0.5, 0, 0]),
+      retakes: Float32Array.from([Number.NaN, 3, 0, 0])
     },
     passes: {
       size: 6,
@@ -108,7 +112,34 @@ describe("one arm read from the ring", () => {
     expect(readArm(empty, 0, 0)).toEqual({
       frames: [],
       restarts: {},
-      summary: { frames: 0, canvasPasses: null, gpuMs: null, partialFrames: 0, workMs: null }
+      summary: { frames: 0, canvasPasses: null, gpuMs: null, partialFrames: 0, workMs: null },
+      head: {
+        frames: 0,
+        compiles: 0,
+        uploads: 0,
+        uploadMb: 0,
+        retakes: 0,
+        worstWorkMs: null,
+        worstGpuMs: null
+      }
     });
+  });
+
+  // Bug: the first draw of a case (its shader compiles, its texture uploads, its picture takes) is lost in the median.
+  it("sums the compiles, uploads and takes of the arm's head and keeps its worst frame", () => {
+    expect(readArm(ring(), 10, 2).head).toEqual({
+      frames: 3,
+      compiles: 3,
+      uploads: 2,
+      uploadMb: 0.75,
+      retakes: 3,
+      worstWorkMs: 4,
+      worstGpuMs: 9
+    });
+  });
+
+  // Bug: the head reads past its window, and a later compile is billed to the first draw.
+  it("reads the head over its first frames only", () => {
+    expect(readArm(ring(), 10, 0, 2).head).toMatchObject({ frames: 2, compiles: 2, uploads: 2 });
   });
 });
