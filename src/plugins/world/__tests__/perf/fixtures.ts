@@ -1310,6 +1310,8 @@ export type EntryCalls = {
   same(): void;
   /** The swap check of a live key whose item is another object, nothing warm. */
   swapCheck(): void;
+  /** `applyEntry` of a live key handed a new object with the same content each call: compared, not projected (F230). */
+  equal(): void;
 };
 
 /**
@@ -1357,6 +1359,9 @@ export function entryFixture(): EntryCalls {
     hintsDropped: 0
   };
   const other = { ...(live.item as Item) };
+  const copies = [{ ...(live.item as Item) }, { ...(live.item as Item) }] as const;
+  const equalEntry = { ...entry };
+  let turn = 0;
 
   return {
     same: (): void => {
@@ -1364,6 +1369,12 @@ export function entryFixture(): EntryCalls {
     },
     swapCheck: (): void => {
       sink.value = swapFor(pctx, spec, live, other);
+    },
+    equal: (): void => {
+      // Two copies in turn: every call meets another object than the live view holds.
+      turn ^= 1;
+      equalEntry.item = copies[turn];
+      applyEntry(pctx, spec, mounted, equalEntry, counts);
     }
   };
 }

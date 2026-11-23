@@ -1599,14 +1599,57 @@ describe("projection reconcile — A2: an item with the same content keeps the r
     commitItems(world, [equal]);
     world.frame(16);
 
-    // `view` runs once for the new object: its output is what the diff compares.
-    expect(view).toHaveBeenCalledTimes(2);
+    // F230: the new object has the same content, so `view` does not run again; the object is stored.
+    expect(view).toHaveBeenCalledTimes(1);
     expect(viewOf(world, "a")?.item).toBe(equal);
 
     world.commit();
     world.frame(16);
 
-    expect(view).toHaveBeenCalledTimes(2);
+    expect(view).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs view for no key whose new object has the same content, and for each key whose content changed (F230)", () => {
+    const world = createMockWorld({ reconciledEvent: true });
+    const view = vi.fn((item: Item) => [
+      Level({ level: item.level }),
+      Transform({ x: item.x, y: item.y, scale: 1 })
+    ]);
+
+    world.model.player = {
+      items: [
+        { id: "a", level: 1, x: 0, y: 0 },
+        { id: "b", level: 1, x: 10, y: 0 },
+        { id: "c", level: 1, x: 20, y: 0 }
+      ]
+    };
+    world.api.projection.setLayers(LAYERS);
+    world.api.projection.register({
+      name: BOARD,
+      layer: "items",
+      from: (player: { items: Item[] }) => player.items,
+      key: (found: Item) => found.id,
+      view
+    });
+    world.start();
+    world.api.projection.mount([BOARD], MOUNT_OWNER);
+    view.mockClear();
+    world.emitted.length = 0;
+
+    // A merge: `from` hands out a new object for every item, only "b" has new content.
+    commitItems(world, [
+      { id: "a", level: 1, x: 0, y: 0 },
+      { id: "b", level: 2, x: 10, y: 0 },
+      { id: "c", level: 1, x: 20, y: 0 }
+    ]);
+    world.frame(16);
+
+    expect(view).toHaveBeenCalledTimes(1);
+    expect(view.mock.calls[0]?.[0]).toMatchObject({ id: "b", level: 2 });
+    expect(world.api.ecs.get(world.api.projection.entityOf(BOARD, "b") ?? 0, Level)).toEqual({
+      level: 2
+    });
+    expect(world.emitted[0]?.payload).toMatchObject({ mode: "play", changed: 1 });
   });
 
   it("leaves a hint for that key unused", () => {
