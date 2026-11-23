@@ -38,7 +38,8 @@ function underOf(world: WorldApi, entity: Entity): Under | undefined {
  * // The editor's stats panel on the board of Timber Town, in a dev build.
  * read(app, sources.render);
  * // { fps: 60, drawn: 60, frameMs: 3.4, textures: 12, textureMb: 41.25,
- * //   textureMbSplit: { art: 30.1, targets: 9.75, kept: 1.4 }, views: 180, pooled: 24, renderPasses: 1, …, drawCalls: 14 }
+ * //   textureMbSplit: { art: 28.1, text: 2, targets: 9.75, kept: 1.4, other: 0, idle: { targets: 4, kept: 0 } },
+ * //   views: 180, pooled: 24, renderPasses: 1, …, drawCalls: 14 }
  * ```
  */
 export const renderSource = defineSource({

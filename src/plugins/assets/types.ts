@@ -762,14 +762,27 @@ export type State = {
 export type BundleUsage = { name: string; tier: Tier; mb: number; lastUsed: number };
 
 /**
- * What `usage()` reports: the numbers a dev overlay and the tests read.
+ * What `usage()` reports: the numbers a dev overlay and the tests read. `textureMb` is the cost of the loaded bundles
+ * by the manifest (each bundle's `mb`), counted from the load on, drawn or not; the budget evicts by it. It is not GPU
+ * memory: `renderer.stats().textureMb` is.
  *
  * @example
  * ```ts
- * const report: Usage = { textureMb: 3.5, budgetMb: 192, bundles: [] };
+ * const report: Usage = {
+ *   textureMb: 3.5,
+ *   budgetMb: 192,
+ *   bundles: [{ name: "board", tier: "scene", mb: 3.5, lastUsed: 12 }]
+ * };
  * ```
  */
-export type Usage = { textureMb: number; budgetMb: number; bundles: readonly BundleUsage[] };
+export type Usage = {
+  /** The manifest megabytes of the loaded bundles, from load on, drawn or not: what the budget evicts by. */
+  textureMb: number;
+  /** `textureBudgetMb` of the config. */
+  budgetMb: number;
+  /** One entry per loaded bundle, sorted by name. */
+  bundles: readonly BundleUsage[];
+};
 
 /**
  * assets plugin events.
@@ -968,7 +981,9 @@ export type Api = {
   audio(key: string): AudioAsset | undefined;
 
   /**
-   * What the loaded bundles cost, sorted by name. `lastUsed` is the use counter, not a clock.
+   * What the loaded bundles cost, sorted by name. `lastUsed` is the use counter, not a clock. `textureMb` is the
+   * manifest cost of the loaded bundles, counted from the load on, drawn or not, and the budget evicts by it; it is not
+   * GPU memory, which `renderer.stats().textureMb` gives.
    *
    * @returns The used and allowed megabytes and one entry per loaded bundle.
    * @example

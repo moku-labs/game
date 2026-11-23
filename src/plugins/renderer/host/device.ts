@@ -55,7 +55,7 @@ function beginLoss(ctx: RendererCtx, kind: "webgpu" | "webgl", reason: string): 
   const info: LossInfo = {
     kind,
     reason,
-    textureBytes: state.app === undefined ? 0 : textureUsage(state.app, state.kept).bytes
+    textureBytes: state.app === undefined ? 0 : textureUsage(state.app, state).bytes
   };
 
   state.ready = false;

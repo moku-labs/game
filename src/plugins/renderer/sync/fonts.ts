@@ -71,7 +71,7 @@ function parseFont(pixi: PixiModule, key: string, fnt: string): BitmapFontData {
 /**
  * Installs a font for an asset key. Installing the same key again replaces the font, which is
  * what a bundle that was unloaded and loaded again needs. The first font of a device queues the
- * text probe of the warm-up (F4).
+ * text probe of the warm-up (F4). Its page counts as text in `stats().textureMbSplit` (F236).
  *
  * @param sctx - Domain context of the sync module.
  * @param key - The asset key of the font.
@@ -92,6 +92,9 @@ export function installFont(sctx: SyncCtx, key: string, fnt: string, texture: Pi
   const font = new pixi.BitmapFont({ data: parseFont(pixi, key, fnt), textures: [texture] });
 
   drawFromLineTop(font);
+  // F236: the page, made as art by `textures.create`, counts as text. The packer copies a page as a file of its own,
+  // never an atlas slice, so the mark reaches the font alone.
+  sctx.deps.host.mark(texture.source, "text");
 
   const cacheKey = `${key}${CACHE_SUFFIX}`;
 

@@ -31,7 +31,10 @@ import type {
  * // The board of Timber Town in a dev build: one glowing button on screen, kept as a picture at rest.
  * const stats: RenderStats = {
  *   fps: 60, drawn: 60, frameMs: 3.4, textures: 12, textureMb: 41.25,
- *   textureMbSplit: { art: 30.1, targets: 9.75, kept: 1.4 }, views: 180, pooled: 24,
+ *   textureMbSplit: {
+ *     art: 28.1, text: 2, targets: 9.75, kept: 1.4, other: 0, idle: { targets: 4, kept: 0 }
+ *   },
+ *   views: 180, pooled: 24,
  *   renderPasses: 1, renderPassesMax: 3, canvasPasses: 1, canvasPassesMax: 2,
  *   kept: { pictures: 1, mb: 1.4, retakes: 0, evicted: 0, refused: 0 }, drawCalls: 14
  * };
@@ -64,10 +67,22 @@ export type RenderStats = {
   /** Estimated GPU memory of those sources in MiB: 4 bytes per pixel, every mip level. */
   textureMb: number;
   /**
-   * The same memory split into the art a game loaded, the render targets Pixi draws into and the
-   * pictures the engine keeps, MiB with 2 decimals; all 0 while inert.
+   * The same memory split five ways, MiB with 2 decimals; all 0 while inert. `art`: the sources made through
+   * `sync.textures.create` (the bundles of `assets`), font pages left out. `text`: the font pages installed through
+   * `sync.fonts.install`. `targets`: the render targets Pixi draws into (filters, effects, transitions). `kept`: the
+   * pictures the engine keeps. `other`: every other live source, what Pixi made itself (gradients, its white texture).
+   * A source counts once, the first that fits of kept, target, text, art, other, so the five add up to `textureMb` up
+   * to the rounding. `idle` holds the share of `targets` and of `kept` that waits in a pool for reuse: the idle
+   * textures of Pixi's `TexturePool` with the targets the trim holds, and the kept pool of pictures whose views left.
    */
-  textureMbSplit: { art: number; targets: number; kept: number };
+  textureMbSplit: {
+    art: number;
+    text: number;
+    targets: number;
+    kept: number;
+    other: number;
+    idle: { targets: number; kept: number };
+  };
   /** Display objects `sync` holds for entities. */
   views: number;
   /** Display objects waiting in the pools. */
@@ -697,7 +712,7 @@ export type MonitorState = {
  * @example
  * ```ts
  * // A headless test: nothing is drawn, so every counter is 0 and there is no picture.
- * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, canvasPasses: 0, canvasPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
+ * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, textureMbSplit: { art: 0, text: 0, targets: 0, kept: 0, other: 0, idle: { targets: 0, kept: 0 } }, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, canvasPasses: 0, canvasPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
  * await app.renderer.capture(); // undefined
  * ```
  */
@@ -709,14 +724,15 @@ export type MonitorApi = {
    * (the estimate of the filter slots where nothing counts). `drawCalls`, `redraws` and `rebuilds` are there in a dev
    * build only.
    *
-   * @returns Frames per second, frame work, GPU textures and their memory, views, pooled objects,
+   * @returns Frames per second, frame work, GPU textures and their memory, split into art, text, targets, kept and other with the idle share of targets
+   *   and kept, views, pooled objects,
    *   render passes and canvas passes with their most in the last second, the kept pictures, and in a dev build the
    *   draw calls of the last frame and the Graphics redraws and Pixi rebuilds per second. Inert: all 0.
    * @example
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
-   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, canvasPasses: 1, canvasPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
+   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, textureMbSplit: { art: 0, text: 0, targets: 0, kept: 0, other: 0, idle: { targets: 0, kept: 0 } }, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, canvasPasses: 1, canvasPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
    * // The same frame in a dev build also counts the one sprite batch, and the one instruction build of the first
    * // frame: { ..., drawCalls: 1, redraws: 0, rebuilds: 1 }
    * app.renderer.stats(); // { fps: 120, drawn: 0, … }: a still board with onDemand

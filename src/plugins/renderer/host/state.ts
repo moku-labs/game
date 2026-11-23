@@ -1,7 +1,7 @@
 /**
  * @file renderer/host — state factory.
  */
-import type { HostState, PoolState } from "./types";
+import type { HostState, PoolState, SourceKind } from "./types";
 
 /**
  * Creates an empty weak set. It lives in its own non-exported function because lint rule L5
@@ -11,6 +11,15 @@ import type { HostState, PoolState } from "./types";
  */
 function emptyWeakSet(): WeakSet<object> {
   return new WeakSet();
+}
+
+/**
+ * Creates an empty weak map, out of the exported declaration for lint rule L5 as `emptyWeakSet` is.
+ *
+ * @returns An empty weak map.
+ */
+function emptyWeakMap<Value>(): WeakMap<object, Value> {
+  return new WeakMap();
 }
 
 /**
@@ -25,8 +34,8 @@ export function createPoolState(): PoolState {
 /**
  * Creates the initial host state: no Pixi, no application, nothing drawn, nothing listening, no
  * counting, no bitmap text pipe and no render-group pipe installed, the resolution of a page without a window (device
- * pixels 1, cap 2, no override, nothing pending, the whole scale, no scale allowed yet), no own GPU, no kept picture
- * and no pool trim yet.
+ * pixels 1, cap 2, no override, nothing pending, the whole scale, no scale allowed yet), no own GPU, no kept picture,
+ * no marked or idle source and no pool trim yet.
  *
  * @returns The host branch of the plugin state.
  */
@@ -55,6 +64,8 @@ export function createHostState(): HostState {
     onResolutionChange: [],
     ownGpu: undefined,
     kept: emptyWeakSet(),
+    marks: emptyWeakMap<SourceKind>(),
+    idle: emptyWeakSet(),
     pixelsFailed: false,
     pool: createPoolState(),
     onTrim: [],

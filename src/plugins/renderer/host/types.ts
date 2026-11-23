@@ -81,6 +81,22 @@ export type PoolState = {
 export type OwnGpu = { adapter: GPUAdapter; device: GPUDevice };
 
 /**
+ * What `sync` made a texture source for: the art a game loaded through `assets`, or the page of a bitmap font. Not
+ * public.
+ */
+export type SourceKind = "art" | "text";
+
+/**
+ * The weak tables the texture walk tells one source from another by: the kept pictures, the marks of `sync`, and the
+ * kept pictures waiting in the kept pool. `HostState` satisfies it. Not public.
+ */
+export type SourceKinds = {
+  kept: WeakSet<object>;
+  marks: WeakMap<object, SourceKind>;
+  idle: WeakSet<object>;
+};
+
+/**
  * host module state.
  */
 export type HostState = {
@@ -145,6 +161,10 @@ export type HostState = {
   ownGpu: OwnGpu | undefined;
   /** Texture sources the engine keeps as pictures (F12, C14): `textures()` counts them apart. */
   kept: WeakSet<object>;
+  /** What `sync` made a texture source for (F236): a game's art, or a font page. `textures()` splits by it. */
+  marks: WeakMap<object, SourceKind>;
+  /** The kept sources waiting in the kept pool (F119, F236): `textures()` counts them as idle too. */
+  idle: WeakSet<object>;
   /** A pixel read of the oracle failed and was logged: the next failures stay quiet. */
   pixelsFailed: boolean;
   /** The pool trim of C14. */
@@ -271,23 +291,38 @@ export type HostApi = {
 };
 
 /**
- * The textures the GPU holds: how many sources, their estimated bytes, and the bytes split into
- * art, render targets and kept pictures.
+ * The textures the GPU holds: how many sources, their estimated bytes, and the bytes split into five kinds that add up
+ * to `bytes` (art, font pages, render targets, kept pictures, everything else), with the idle share of the targets and
+ * of the kept pictures.
  *
  * @example
  * ```ts
- * const usage: TextureUsage = { count: 2, bytes: 5_242_880, art: 4_194_304, targets: 1_048_576, kept: 0 };
+ * // One 1024 x 1024 image a game loaded and one 512 x 512 filter target waiting in Pixi's pool.
+ * const usage: TextureUsage = {
+ *   count: 2, bytes: 5_242_880, art: 4_194_304, text: 0, targets: 1_048_576, kept: 0, other: 0,
+ *   idleTargets: 1_048_576, idleKept: 0
+ * };
  * ```
  */
 export type TextureUsage = {
+  /** Live texture sources. */
   count: number;
+  /** Their estimated bytes: the sum of the five kinds below. */
   bytes: number;
-  /** Bytes of the sources a game loaded: images, atlases. */
+  /** Bytes of the sources a game loaded through `sync.textures.create`: images, atlases; font pages not. */
   art: number;
+  /** Bytes of the font pages installed through `sync.fonts.install`. */
+  text: number;
   /** Bytes of the render targets: filter textures, pictures Pixi renders into. */
   targets: number;
   /** Bytes of the sources the engine keeps as pictures. */
   kept: number;
+  /** Bytes of every other live source: what Pixi made itself, a gradient, its own white texture. */
+  other: number;
+  /** Of `targets`: the idle textures of Pixi's pool and the targets the trim holds. Filled by `host.textures()`. */
+  idleTargets: number;
+  /** Of `kept`: the kept pictures waiting in the kept pool. */
+  idleKept: number;
 };
 
 /**
@@ -309,7 +344,8 @@ export type HostDeps = {
 
 /**
  * What a `decideLoss` callback hears of a loss: the backend, what the browser said, and the bytes of every texture
- * source the lost application held (art, targets and kept pictures), measured before it went. Not public.
+ * source the lost application held (every kind: art, font pages, targets, kept pictures and the rest), measured before
+ * it went. Not public.
  */
 export type LossInfo = { kind: "webgpu" | "webgl"; reason: string; textureBytes: number };
 
@@ -504,6 +540,23 @@ export type HostInternal = {
   keep(source: object, on: boolean): void;
 
   /**
+   * Marks what a texture source was made for, so `textures()` counts it as art or as text. A later mark replaces an
+   * earlier one: a font page made as art becomes text.
+   *
+   * @param source - The source.
+   * @param kind - `"art"` for an image `sync` made, `"text"` for a font page.
+   */
+  mark(source: object, kind: SourceKind): void;
+
+  /**
+   * Counts a kept picture's source as idle in `textures()`, waiting in the kept pool, or no longer.
+   *
+   * @param source - The source.
+   * @param on - True while it waits in the pool.
+   */
+  idle(source: object, on: boolean): void;
+
+  /**
    * Draws the stage into a PNG over the whole canvas. Every container in `hidden` is set
    * `visible = false` around the synchronous render inside Pixi's extract and set back right after
    * that call returns its promise, so no drawn frame sees it hidden. A failed read is logged.
@@ -514,8 +567,11 @@ export type HostInternal = {
   extract(hidden: readonly PixiContainer[]): Promise<string | undefined>;
 
   /**
-   * The texture sources the GPU holds and their estimated memory, read at call time, split into
-   * art, render targets and kept pictures.
+   * The texture sources the GPU holds and their estimated memory, read at call time, split into art, font pages,
+   * render targets, kept pictures and the rest, with the idle targets and kept pictures. Allocates nothing while the
+   * application draws: the answer is one module-level object shared by every renderer of the page, written over by
+   * the next call and also by the pool trim (`afterFrame`/`trimPool` in `host/pool.ts`) and a device loss
+   * (`host/device.ts`), so a caller reads the numbers at once. While inert it answers a fresh zero object.
    *
    * @returns The usage; zero while nothing draws.
    */

@@ -178,7 +178,8 @@ function fromPool(
 
 /**
  * Puts a texture of a record whose view left into the pool (F119), for the next take of its size: a scene that leaves
- * and comes back makes no render target. Its bytes count in the budget until it is taken or dropped.
+ * and comes back makes no render target. Its bytes count in the budget, and as idle in `host.textures()`, until it is
+ * taken or dropped.
  *
  * @param kctx - The kept context.
  * @param texture - The texture.
@@ -193,10 +194,12 @@ export function poolTexture(kctx: KeptCtx, texture: PixiRenderTexture): void {
   kctx.state.pool.push(texture);
   kctx.state.bytes += bytes;
   kctx.state.poolBytes += bytes;
+  // F236: `stats().textureMbSplit.idle.kept` counts it until it is taken or dropped.
+  kctx.host.idle(source, true);
 }
 
 /**
- * Gives back the bytes of a texture that left the pool.
+ * Gives back the bytes of a texture that left the pool, taken or destroyed; it is idle no longer.
  *
  * @param kctx - The kept context.
  * @param texture - The texture.
@@ -207,6 +210,7 @@ function unpool(kctx: KeptCtx, texture: PixiRenderTexture): void {
 
   kctx.state.bytes -= bytes;
   kctx.state.poolBytes -= bytes;
+  kctx.host.idle(source, false);
 }
 
 /**

@@ -238,7 +238,14 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   frameMs: number;
   textures: number;
   textureMb: number;
-  textureMbSplit: { art: number; targets: number; kept: number };
+  textureMbSplit: {
+    art: number;
+    text: number;
+    targets: number;
+    kept: number;
+    other: number;
+    idle: { targets: number; kept: number };
+  };
   views: number;
   pooled: number;
   renderPasses: number;

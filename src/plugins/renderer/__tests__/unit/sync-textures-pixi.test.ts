@@ -170,7 +170,7 @@ class StubBitmap {
 function readyHost(): SyncCtx {
   return {
     ctx: { state: { sync: createSyncState({ nineSlice: false }) } },
-    deps: { host: { pixi: () => pixi, ready: () => true } }
+    deps: { host: { pixi: () => pixi, ready: () => true, mark: () => undefined } }
   } as unknown as SyncCtx;
 }
 
@@ -381,7 +381,7 @@ function drawing(initSource: (source: pixi.TextureSource) => void = vi.fn()): Sy
       log: { warn: vi.fn() }
     },
     deps: {
-      host: { pixi: () => pixi, ready: () => true, initSource },
+      host: { pixi: () => pixi, ready: () => true, initSource, mark: () => undefined },
       demand: { request: vi.fn() }
     }
   } as unknown as SyncCtx;

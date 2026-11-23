@@ -1,10 +1,16 @@
 /**
  * @file renderer/host — what a tool reads back from the one application: a PNG of the stage over
  * the whole canvas, some layers left out on request, and the textures the GPU holds with an
- * estimate of their memory.
+ * estimate of their memory by kind, and the idle share waiting in Pixi's pool (F236).
  */
-import type { PixiApplication, PixiContainer, RendererCtx } from "../types";
-import type { TextureUsage } from "./types";
+import type {
+  PixiApplication,
+  PixiContainer,
+  PixiModule,
+  PixiTexture,
+  RendererCtx
+} from "../types";
+import type { SourceKind, SourceKinds, TextureUsage } from "./types";
 
 /** Bytes of one pixel: the engine loads PNG and WebP only, so every source is 8-bit RGBA. */
 const BYTES_PER_PIXEL = 4;
@@ -61,21 +67,47 @@ function isTarget(source: { uploadMethodId: string; resource: unknown }): boolea
 }
 
 /**
- * Counts the texture sources the GPU holds and sums their estimated bytes, split three ways: a
- * source with no upload method and no resource is a render target (a filter texture, a picture
- * Pixi renders into), one the engine keeps as a picture is kept, every other source is art.
- * Pixi's `managedTextures` exists on the WebGPU and the WebGL texture system alike (checked in
- * 8.22); Pixi's canvas renderer keeps no GPU texture and answers zero. Both systems answer
- * `Object.values` of a `GCManagedHash`, which keeps a `null` slot for every unloaded source, so
- * only the live sources are counted. An indexed walk: no array is made.
+ * The one usage the walk writes into: `textureUsage` runs at every `stats()` call, so it makes no object. Every call
+ * writes over it.
+ */
+const usage: TextureUsage = {
+  count: 0,
+  bytes: 0,
+  art: 0,
+  text: 0,
+  targets: 0,
+  kept: 0,
+  other: 0,
+  idleTargets: 0,
+  idleKept: 0
+};
+
+/**
+ * Counts the texture sources the GPU holds and sums their estimated bytes, split five ways, the first that fits: a
+ * source the engine keeps as a picture is kept (and idle too while it waits in the kept pool); one with no upload
+ * method and no resource is a render target (a filter texture, a picture Pixi renders into); one `sync` marked is text
+ * or art; every other source is other. Pixi's `managedTextures` exists on the WebGPU and the WebGL texture system
+ * alike (checked in 8.22); Pixi's canvas renderer keeps no GPU texture and answers zero. Both systems answer
+ * `Object.values` of a `GCManagedHash`, which keeps a `null` slot for every unloaded source, so only the live sources
+ * are counted. One indexed walk that makes nothing: the answer is the same object every call, `idleTargets` 0 (only
+ * `host.textures()` reads Pixi's pool).
  *
  * @param app - The application that draws.
- * @param kept - The sources the engine keeps as pictures.
- * @returns The count, the bytes and their split.
+ * @param kinds - The kept sources, the marks of `sync` and the idle kept sources: the host state.
+ * @returns The count, the bytes and their split, written over by the next call.
  */
-export function textureUsage(app: PixiApplication, kept: WeakSet<object>): TextureUsage {
+export function textureUsage(app: PixiApplication, kinds: SourceKinds): TextureUsage {
   const system = app.renderer.texture;
-  const usage: TextureUsage = { count: 0, bytes: 0, art: 0, targets: 0, kept: 0 };
+
+  usage.count = 0;
+  usage.bytes = 0;
+  usage.art = 0;
+  usage.text = 0;
+  usage.targets = 0;
+  usage.kept = 0;
+  usage.other = 0;
+  usage.idleTargets = 0;
+  usage.idleKept = 0;
 
   if (!("managedTextures" in system)) return usage;
 
@@ -93,12 +125,102 @@ export function textureUsage(app: PixiApplication, kept: WeakSet<object>): Textu
     usage.count += 1;
     usage.bytes += bytes;
 
-    if (kept.has(source)) usage.kept += bytes;
-    else if (isTarget(source)) usage.targets += bytes;
-    else usage.art += bytes;
+    if (kinds.kept.has(source)) {
+      usage.kept += bytes;
+      if (kinds.idle.has(source)) usage.idleKept += bytes;
+    } else if (isTarget(source)) usage.targets += bytes;
+    else addMarked(kinds.marks.get(source), bytes);
   }
 
   return usage;
+}
+
+/**
+ * Adds the bytes of a source that is neither kept nor a target to its kind: text, art, or other without a mark.
+ *
+ * @param kind - The mark `sync` gave it, or `undefined`.
+ * @param bytes - Its bytes.
+ */
+function addMarked(kind: SourceKind | undefined, bytes: number): void {
+  if (kind === "text") usage.text += bytes;
+  else if (kind === "art") usage.art += bytes;
+  else usage.other += bytes;
+}
+
+/** The idle textures of Pixi's pool by bucket: a private field Pixi 8 keeps, read here and by the trim (F187). */
+export type PoolBuckets = { _buckets?: Map<number, PixiTexture[]> };
+
+/**
+ * The scratch of the bucket walk: the kept sources it skips, set for the length of one `idleTargetBytes` call, and the
+ * bytes it summed so far. One walk at a time, nothing of it leaves.
+ */
+const walk: { kept: WeakSet<object> | undefined; bytes: number } = { kept: undefined, bytes: 0 };
+
+/**
+ * The bytes of one texture that waits for reuse: a live source the engine does not keep.
+ *
+ * @param texture - An idle texture.
+ * @param kept - The sources the engine keeps as pictures.
+ * @returns Its bytes, or 0.
+ */
+function idleBytes(texture: PixiTexture | undefined, kept: WeakSet<object>): number {
+  if (texture === undefined) return 0;
+
+  const { source } = texture;
+
+  return source.destroyed || kept.has(source) ? 0 : sourceBytes(source);
+}
+
+/**
+ * Adds the idle textures of one bucket of Pixi's pool to the walk: the callback `Map.prototype.forEach` takes, made
+ * once at module level, so the walk makes no function and no iterator.
+ *
+ * @param textures - The idle textures of one bucket.
+ */
+function addBucket(textures: readonly PixiTexture[]): void {
+  const { kept } = walk;
+
+  if (kept === undefined) return;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < textures.length; index += 1) {
+    walk.bytes += idleBytes(textures[index], kept);
+  }
+}
+
+/**
+ * The bytes of the render targets waiting for reuse: the idle textures of Pixi's `TexturePool` and the targets the
+ * trim holds until their bind groups let go (`pool.held`). A texture counts when its source is not destroyed and not
+ * kept. Reads the private buckets of Pixi 8, as the trim does; without them it answers 0. Makes nothing: one
+ * `forEach` with a module-level callback, indexed walks inside.
+ *
+ * @param pixi - The module the renderer loaded.
+ * @param held - The targets the trim holds.
+ * @param kept - The sources the engine keeps as pictures.
+ * @returns The bytes.
+ */
+export function idleTargetBytes(
+  pixi: PixiModule,
+  held: readonly PixiTexture[],
+  kept: WeakSet<object>
+): number {
+  const buckets = (pixi.TexturePool as unknown as PoolBuckets)._buckets;
+
+  if (!(buckets instanceof Map)) return 0;
+
+  walk.kept = kept;
+  walk.bytes = 0;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, read without an iterator, by a module-level callback
+  buckets.forEach(addBucket);
+
+  let bytes = walk.bytes;
+
+  walk.kept = undefined;
+  walk.bytes = 0;
+
+  for (let index = 0; index < held.length; index += 1) bytes += idleBytes(held[index], kept);
+
+  return bytes;
 }
 
 /**

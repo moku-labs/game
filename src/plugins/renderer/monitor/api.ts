@@ -211,8 +211,14 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
         textureMb: roundTo(usage.bytes / BYTES_PER_MB, 2),
         textureMbSplit: {
           art: roundTo(usage.art / BYTES_PER_MB, 2),
+          text: roundTo(usage.text / BYTES_PER_MB, 2),
           targets: roundTo(usage.targets / BYTES_PER_MB, 2),
-          kept: roundTo(usage.kept / BYTES_PER_MB, 2)
+          kept: roundTo(usage.kept / BYTES_PER_MB, 2),
+          other: roundTo(usage.other / BYTES_PER_MB, 2),
+          idle: {
+            targets: roundTo(usage.idleTargets / BYTES_PER_MB, 2),
+            kept: roundTo(usage.idleKept / BYTES_PER_MB, 2)
+          }
         },
         views: counts.views,
         pooled: counts.pooled,

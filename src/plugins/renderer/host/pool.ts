@@ -6,19 +6,19 @@
  */
 import { BYTES_PER_MB, roundTo } from "../monitor/units";
 import type { PixiApplication, PixiModule, PixiTexture, PoolTrim, RendererCtx } from "../types";
-import { sourceBytes, textureUsage } from "./readback";
-import type { PoolState, TrimReason } from "./types";
+import { type PoolBuckets, sourceBytes, textureUsage } from "./readback";
+import type { PoolState, SourceKinds, TrimReason } from "./types";
 
 /**
  * The bytes of the render targets the GPU holds now: the `targets` share of `host.textures()`. One walk of Pixi's
  * managed textures; called only when a trim is due.
  *
  * @param app - The application that draws.
- * @param kept - The sources the engine keeps as pictures: never counted as targets.
+ * @param kinds - The host state: its kept pictures are never counted as targets.
  * @returns The bytes.
  */
-function targetBytes(app: PixiApplication, kept: WeakSet<object>): number {
-  return textureUsage(app, kept).targets;
+function targetBytes(app: PixiApplication, kinds: SourceKinds): number {
+  return textureUsage(app, kinds).targets;
 }
 
 /**
@@ -47,9 +47,6 @@ function dueReason(
 
   return pool.sceneAt !== undefined && now - pool.sceneAt >= config.restMs ? "scene" : undefined;
 }
-
-/** The idle textures of Pixi's pool by bucket: a private field Pixi 8 keeps, read only here (F187). */
-type PoolBuckets = { _buckets?: Map<number, PixiTexture[]> };
 
 /**
  * Tells whether a bind group of a shader still holds a texture's source: a bind group listens to its resources'
@@ -137,11 +134,11 @@ export function trimPool(ctx: RendererCtx, reason: TrimReason): number {
 
   if (!state.ready || pixi === undefined || app === undefined) return 0;
 
-  const before = targetBytes(app, state.kept);
+  const before = targetBytes(app, state);
 
   clearPool(pixi, state.pool.held);
 
-  const after = targetBytes(app, state.kept);
+  const after = targetBytes(app, state);
   const freedMb = roundTo((before - after) / BYTES_PER_MB, 2);
 
   state.pool.baseline = after;
@@ -187,7 +184,7 @@ export function afterFrame(ctx: RendererCtx, drawn: boolean): void {
 
   if (due === undefined) return;
 
-  if (targetBytes(app, state.kept) - pool.baseline < config.aboveMb * BYTES_PER_MB) {
+  if (targetBytes(app, state) - pool.baseline < config.aboveMb * BYTES_PER_MB) {
     // One look per rest or scene change: a still screen does not walk the textures every frame.
     pool.restDone = true;
     pool.sceneAt = undefined;
@@ -211,7 +208,7 @@ export function trimOnPause(ctx: RendererCtx): number {
 
   if (!state.ready || app === undefined) return 0;
 
-  return targetBytes(app, state.kept) > state.pool.baseline ? trimPool(ctx, "pause") : 0;
+  return targetBytes(app, state) > state.pool.baseline ? trimPool(ctx, "pause") : 0;
 }
 
 /**
