@@ -144,6 +144,34 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
   9 samples a wide `soft` bands a little; with the view's own sample it reads 10. (Anya's pick 2026-11-18, after the
   A26 read 12 spokes at `rest` + 2.8 ms against the line + 2.0.)
 
+## Pictures or filters (A26)
+
+The bench arms `pv-*` (`bench/filters`, F126 stage 4 piece В) draw seven cases four ways: a **baked** picture (an
+asset drawn ahead, 2 px a unit), the member **at rest** (the engine keeps its picture), the member **moving** (its
+number written each frame: on its quad), and the **kept** picture moving sideways with the member still. Each at rest
+and moving, 1 and 8 items of 140 units. The run of 2026-11-23 (`perf/a26-2026-11-23-f126-s4-pv`, engine 0.15.159,
+Chrome, WebGPU, k=8, 221 MHz on every frame, medians of 3 rounds after a warm-up round): GPU ms of the whole frame with
+8 items, against the bare item (a `Shape` with a sprite) at 17.37; every arm 1 canvas pass but the backdrop.
+
+| Case (member) | Baked, rest / moving | Member at rest (kept) | Member moving (quad) | Kept, moving | Worst first frame of 8 (CPU / GPU ms) |
+|---|---|---|---|---|---|
+| Glow (`Aura`) | 17.89 / 17.89 | 17.17 | 18.28 | 17.24 | 45.9 / 39.8 |
+| Shadow (`Shadow`) | 17.83 / 17.89 | 17.24 | 17.76 | 17.17 | 21.1 / 27.8 |
+| Outline (`Outline`) | 17.69 / 17.83 | 17.04 | 17.96 | 17.04 | 23.5 / 27.9 |
+| Grade or tint (`Grade`; baked moving: a sprite tint) | 17.04 / 17.04 | 17.04 | 16.52 | 17.10 | 35.3 / 28.0 |
+| Dissolve (`Dissolve`; baked: 8 frames) | 17.04 / 17.04 | 17.04 | 16.91 | 17.04 | 23.8 / 26.4 |
+| Tilt (`Fold`; baked: 8 frames) | 17.10 / 17.17 | 17.17 | 16.52 | 17.17 | 19.2 / 23.5 |
+| Tilt on a Pixi `PerspectiveMesh` in a `Display` | — | 16.97 | 16.91 | — | 18.2 / 19.1 |
+| Blur behind a window (a backdrop with a ¼ chain; baked: a frost patch) | 17.04 / 17.04 | 29.88, 9 passes, CPU 9.6 | 30.05, 9 passes | — (a backdrop is never kept) | 18.1 / 34.7 |
+
+With one item every arm reads 16.3–16.6, but the backdrop window: 18.48, 2 canvas passes. The baked rows' worst first
+frame is 5–11 ms CPU and 16–20 ms GPU, an ordinary frame: their 22 textures (8.35 MB) went up with the boot bundle, so
+no arm uploaded one (an upload costs about 9 ms on the A26, renderer README `uploads`). Memory: a kept glow picture is
+0.47 MB, 8 hold 3.74 MB, and the kept pool stayed at 3.3–3.7 MB through every later arm: a new view reuses what a gone
+one held. A baked item is its picture plus its effect layer, 0.30 + 0.39 MB, shared by every copy; a baked flipbook of 8
+frames 2.5–3.1 MB. No arm redrew a `Graphics` path at rest. Rules for a game, in Russian for the owner:
+[pictures vs filters](https://claude.ai/artifact/XPeyw1bBSMkNhscHPxFmJz).
+
 ## How a member draws
 
 Every member's body has the plain signature `@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0)
