@@ -97,4 +97,16 @@ describe("the open view built under the dim: heap per frame", () => {
     expect(same).toBeLessThanOrEqual(BUDGET.entrySame + NOISE_BYTES);
     expect(swapCheck).toBeLessThanOrEqual(BUDGET.entrySwapCheck + NOISE_BYTES);
   });
+
+  // Bug caught: a merge hands every board item out as a new object; the content compare that spares their `view`
+  // makes a key array or a closure per item (F230: ~70 items a merge).
+  it("applyEntry of a live key handed a new object with the same content keeps nothing and runs no view", async ({
+    annotate
+  }) => {
+    const calls = entryFixture();
+    const bytes = alloc(settled(calls.equal));
+
+    await annotate(`applyEntry, a new object with the same content: ${bytes} B`);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.entryEqual + NOISE_BYTES);
+  });
 });

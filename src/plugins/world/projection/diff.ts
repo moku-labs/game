@@ -21,22 +21,55 @@ export function deepEquals(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   if (left === null || right === null) return false;
   if (typeof left !== "object" || typeof right !== "object") return false;
-  if (Array.isArray(left)) {
-    return (
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((entry, index) => deepEquals(entry, right[index]))
-    );
-  }
+  if (Array.isArray(left)) return Array.isArray(right) && sameEntries(left, right);
   if (Array.isArray(right)) return false;
 
-  const keys = Object.keys(left);
+  return sameFields(left as Record<string, unknown>, right as Record<string, unknown>);
+}
 
-  if (keys.length !== Object.keys(right).length) return false;
+/**
+ * Compares two arrays entry by entry, with an index loop: no closure and no iterator.
+ *
+ * @param left - First array.
+ * @param right - Second array.
+ * @returns True when both have the same length and equal entries.
+ */
+function sameEntries(left: readonly unknown[], right: readonly unknown[]): boolean {
+  if (left.length !== right.length) return false;
 
-  return keys.every(key =>
-    deepEquals((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key])
-  );
+  // eslint-disable-next-line unicorn/no-for-loop -- the index reads both arrays; no iterator on the hot path
+  for (let index = 0; index < left.length; index += 1) {
+    if (!deepEquals(left[index], right[index])) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Compares the own fields of two objects: every field of `left` equals the same field of `right`,
+ * and both have as many own fields. A `for…in` with an own check reads the keys without the array
+ * `Object.keys` builds, so a compare allocates nothing; the result is the one `Object.keys` gave.
+ *
+ * @param left - First object.
+ * @param right - Second object.
+ * @returns True when both hold the same data.
+ */
+function sameFields(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  let count = 0;
+
+  for (const key in left) {
+    if (!Object.hasOwn(left, key)) continue;
+
+    count += 1;
+
+    if (!deepEquals(left[key], right[key])) return false;
+  }
+
+  for (const key in right) {
+    if (Object.hasOwn(right, key)) count -= 1;
+  }
+
+  return count === 0;
 }
 
 /**
