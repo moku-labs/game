@@ -203,7 +203,6 @@ describe("a backdrop filter on a running app", () => {
 
     expect(soft.pixi.last().initOptions).toMatchObject({ format: "rgba8unorm" });
     await soft.app.stop();
-    vi.unstubAllGlobals();
   });
 
   // Bug: the frosted panels are kept as a picture, or a change of the scene under them asks for no frame: the panels

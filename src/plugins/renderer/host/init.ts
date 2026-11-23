@@ -203,11 +203,12 @@ function wantsBackBuffer(features: readonly RegisteredFeature[]): boolean {
  * @returns The preferred format, or `undefined` without `navigator.gpu`.
  */
 function preferredCanvasFormat(): string | undefined {
-  const gpu = (
-    globalThis.navigator as { gpu?: { getPreferredCanvasFormat?: () => string } } | undefined
-  )?.gpu;
+  const gpu = typeof globalThis.navigator === "undefined" ? undefined : globalThis.navigator.gpu;
 
-  return gpu?.getPreferredCanvasFormat?.();
+  // A partial `gpu` (an embedder's shim) may lack the method: Pixi keeps its own format then.
+  return typeof gpu?.getPreferredCanvasFormat === "function"
+    ? gpu.getPreferredCanvasFormat()
+    : undefined;
 }
 
 /**
@@ -241,6 +242,7 @@ export async function createApplication(
     startupMark("moku:pixi-end");
   }
 
+  // The engine's swaps of Pixi classes go in before `new Application()`: Pixi builds its systems inside `init`.
   state.pixi = pixi;
   installTextBatch(ctx, pixi);
   installCounting(ctx, pixi, deps);
@@ -281,6 +283,7 @@ export async function createApplication(
   state.canvas = app.canvas;
   state.mount = mount;
   state.kind = app.renderer.name === "webgpu" ? "webgpu" : "webgl";
+
   // A canvas is inline by default and leaves a line gap under it: the page grows past the window
   // and scrolls. Block layout keeps it exactly the size of its mount.
   app.canvas.style.display = "block";
