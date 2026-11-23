@@ -4,7 +4,7 @@
     "ui": {
       "feature": "ui",
       "tier": "boot",
-      "mb": 1.031,
+      "mb": 8.346,
       "files": [
         {
           "key": "ui.font-body",
@@ -26,6 +26,160 @@
           "width": 85,
           "height": 96,
           "mb": 0.031
+        },
+        {
+          "key": "ui.pv-dissolve-0",
+          "path": "features/ui/assets/pv-dissolve-0.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-dissolve-1",
+          "path": "features/ui/assets/pv-dissolve-1.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-dissolve-2",
+          "path": "features/ui/assets/pv-dissolve-2.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-dissolve-3",
+          "path": "features/ui/assets/pv-dissolve-3.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-dissolve-4",
+          "path": "features/ui/assets/pv-dissolve-4.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-dissolve-5",
+          "path": "features/ui/assets/pv-dissolve-5.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-dissolve-6",
+          "path": "features/ui/assets/pv-dissolve-6.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-dissolve-7",
+          "path": "features/ui/assets/pv-dissolve-7.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-frost",
+          "path": "features/ui/assets/pv-frost.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-graded",
+          "path": "features/ui/assets/pv-graded.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-halo",
+          "path": "features/ui/assets/pv-halo.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-item",
+          "path": "features/ui/assets/pv-item.webp",
+          "width": 280,
+          "height": 280,
+          "mb": 0.299
+        },
+        {
+          "key": "ui.pv-outline",
+          "path": "features/ui/assets/pv-outline.webp",
+          "width": 288,
+          "height": 288,
+          "mb": 0.316
+        },
+        {
+          "key": "ui.pv-shadow",
+          "path": "features/ui/assets/pv-shadow.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-0",
+          "path": "features/ui/assets/pv-tilt-0.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-1",
+          "path": "features/ui/assets/pv-tilt-1.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-2",
+          "path": "features/ui/assets/pv-tilt-2.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-3",
+          "path": "features/ui/assets/pv-tilt-3.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-4",
+          "path": "features/ui/assets/pv-tilt-4.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-5",
+          "path": "features/ui/assets/pv-tilt-5.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-6",
+          "path": "features/ui/assets/pv-tilt-6.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
+        },
+        {
+          "key": "ui.pv-tilt-7",
+          "path": "features/ui/assets/pv-tilt-7.webp",
+          "width": 312,
+          "height": 312,
+          "mb": 0.371
         }
       ]
     }

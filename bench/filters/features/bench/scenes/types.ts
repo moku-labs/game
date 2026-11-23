@@ -13,6 +13,23 @@ export type Mounted = {
   leave?: () => void;
 };
 
+/** A perspective mesh of a texture, for a `Display`: its four corners written in place. */
+export type Perspective = {
+  /** The Pixi object a `Display` carries. */
+  readonly object: unknown;
+  /** Writes the corners, top left, top right, bottom right, bottom left, in the view's units. */
+  corners(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    x3: number,
+    y3: number
+  ): void;
+};
+
 /** The stage of a scene: the screen, the views and what else a scene may touch. */
 export type Stage = {
   /** The width of the screen in reference units. */
@@ -43,6 +60,8 @@ export type Stage = {
   scene(): string | undefined;
   /** Answers the gate of the graph's rest node so the engine switches to the other scene; `false` while the gate is shut. */
   switchScene(): boolean;
+  /** A perspective mesh of a loaded texture; `undefined` before Pixi or the texture is there. */
+  perspective(texture: string): Perspective | undefined;
 };
 
 /** One scene of the table. */

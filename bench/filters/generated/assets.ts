@@ -2,7 +2,29 @@
 
 export type AssetKey =
   | "ui.font-body"
-  | "ui.fx-spark";
+  | "ui.fx-spark"
+  | "ui.pv-dissolve-0"
+  | "ui.pv-dissolve-1"
+  | "ui.pv-dissolve-2"
+  | "ui.pv-dissolve-3"
+  | "ui.pv-dissolve-4"
+  | "ui.pv-dissolve-5"
+  | "ui.pv-dissolve-6"
+  | "ui.pv-dissolve-7"
+  | "ui.pv-frost"
+  | "ui.pv-graded"
+  | "ui.pv-halo"
+  | "ui.pv-item"
+  | "ui.pv-outline"
+  | "ui.pv-shadow"
+  | "ui.pv-tilt-0"
+  | "ui.pv-tilt-1"
+  | "ui.pv-tilt-2"
+  | "ui.pv-tilt-3"
+  | "ui.pv-tilt-4"
+  | "ui.pv-tilt-5"
+  | "ui.pv-tilt-6"
+  | "ui.pv-tilt-7";
 
 export type FontKey =
   | "ui.font-body";

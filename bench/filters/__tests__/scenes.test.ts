@@ -6,11 +6,18 @@ import { fakeClock } from "../../../src/testing.ts";
 import { diskIo, openPage, type Watched, watch } from "../../../tests/integration/drawn-helpers";
 import { benchScene } from "../features/bench/bench.dev";
 import { CASE_SCENES, scaleScene, scaleUpScene } from "../features/bench/scenes/cases";
+import { PV_SCENES } from "../features/bench/scenes/pv";
 import { TRANS_SCENES, TRANSITION_MS, transitionLeave } from "../features/bench/scenes/trans";
 import type { Stage } from "../features/bench/scenes/types";
 import game from "../index";
-import { ARMS } from "../lib/a26";
-import { type BenchHost, benchFrame, createBenchState, followAddress } from "../plugins/bench/api";
+import { ARMS, PV_ARMS } from "../lib/a26";
+import {
+  type BenchHost,
+  benchFrame,
+  createBenchApi,
+  createBenchState,
+  followAddress
+} from "../plugins/bench/api";
 
 /** The bench folder: the manifest and the files of the game. */
 const FOLDER = new URL("../", import.meta.url);
@@ -160,6 +167,47 @@ describe("every scene", () => {
     expect(complaints(app)).toEqual([]);
   });
 
+  // Bug: the pv schedule and the pv scenes drift apart: an arm is missing on the phone or never mounts.
+  it("the pv schedule names every pv scene, in its order", () => {
+    expect(PV_ARMS).toEqual(PV_SCENES.map(scene => scene.name));
+    expect(PV_ARMS).toHaveLength(76);
+  });
+
+  // Bug: a pv arm throws on mount or on its tick, or a filter of it is not in the feature.
+  it.each(PV_ARMS)("%s mounts, draws and moves without a complaint", async name => {
+    const { app, driver } = await open();
+
+    app.bench.show(name, { k: 0 });
+    await driver.frames(40);
+    expect(app.bench.current()?.scene).toBe(name);
+    expect(complaints(app)).toEqual([]);
+  });
+
+  // Bug: a baked arm draws a filter, a resting filter is not kept, or the window's frost is kept: the table compares
+  // the wrong things.
+  it.each([
+    ["pv-glow-baked-move-8", 1],
+    ["pv-glow-filter-rest-8", 1],
+    ["pv-tilt-mesh-move-8", 1],
+    ["pv-blur-filter-rest-8", 9]
+  ] as const)("%s draws %i canvas passes", async (name, passes) => {
+    const { app, driver } = await open();
+
+    app.bench.show(name, { k: 0 });
+    await driver.frames(40);
+    expect(app.renderer.stats().canvasPasses).toBe(passes);
+  });
+
+  // Bug: Pixi is not there yet when the arm mounts, and the mesh arm draws nothing at all.
+  it("the mesh arms put a perspective mesh on screen", async () => {
+    const { app, driver } = await open();
+
+    app.bench.show("pv-tilt-mesh-rest-8", { k: 0 });
+    await driver.frames(2);
+    // The full-screen picture and the 8 meshes.
+    expect(app.renderer.stats().views).toBe(9);
+  });
+
   // Bug: the schedule of the phone names a scene the table does not have: the arm is lost on the run.
   it("the schedule of the phone names only scenes of the table", async () => {
     const { app } = await open();
@@ -254,7 +302,8 @@ describe("the rows on their shaders", () => {
     const host = {
       ecs: { despawnOwnedBy: vi.fn(), spawn: vi.fn(() => 1) },
       screen: () => ({ width: 1, height: 1 }),
-      monitor: { frames: () => ({ written: 0 }), mark: vi.fn() }
+      monitor: { frames: () => ({ written: 0 }), mark: vi.fn() },
+      stats: () => ({ textureMb: 0, textureMbSplit: { targets: 0 }, kept: { mb: 0 } })
     } as unknown as BenchHost;
 
     followAddress(state, host, "#arms=ballast&hold=500");
@@ -265,6 +314,42 @@ describe("the rows on their shaders", () => {
     followAddress(state, host, "#ballast");
 
     expect(state.hold).toBeUndefined();
+  });
+
+  // Bug: the memory an arm added is read against the wrong start: the kept pictures of the arm before count as its own.
+  it("a row keeps the memory of its start beside the memory of its end", () => {
+    const state = createBenchState();
+    const memory = { textureMb: 10, targets: 3, kept: 1 };
+    const host = {
+      ecs: { despawnOwnedBy: vi.fn(), spawn: vi.fn(() => 1) },
+      screen: () => ({ width: 1, height: 1 }),
+      monitor: {
+        frames: () => ({
+          written: 0,
+          size: 0,
+          capacity: 0,
+          newest: -1,
+          columns: { frame: new Uint32Array(0) },
+          passes: { size: 0 }
+        }),
+        mark: vi.fn()
+      },
+      stats: () => ({
+        textureMb: memory.textureMb,
+        textureMbSplit: { art: 0, targets: memory.targets, kept: memory.kept },
+        kept: { mb: memory.kept, pictures: 0, evicted: 0, refused: 0 }
+      })
+    } as unknown as BenchHost;
+    const api = createBenchApi(state, host);
+
+    api.show("ballast", { k: 0 });
+    memory.textureMb = 14;
+    memory.kept = 4;
+
+    const row = api.read();
+
+    expect(row.before).toEqual({ textureMb: 10, targetsMb: 3, keptMb: 1 });
+    expect([row.stats.textureMb, row.stats.keptMb]).toEqual([14, 4]);
   });
 
   // Bug: the value keeps moving under a compare of pixels.
@@ -437,6 +522,7 @@ function recordingStage(asked: Asked[]): Stage {
       return 2;
     },
     mark: () => undefined,
+    perspective: () => undefined,
     scene: () => "bench",
     switchScene: () => true
   };

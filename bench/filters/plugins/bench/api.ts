@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/no-null -- a row is JSON: "no number" is `null`. */
 /**
  * @file The bench plugin's work: scenes in and out, the ballast, the arms and their rows. It reaches
  * the engine only through `BenchHost`, so the plugin file stays wiring.
@@ -13,10 +14,10 @@ import {
 import { BALLAST_LAYER, MAIN_LAYER } from "../../features/bench";
 import { SCENES } from "../../features/bench/scenes";
 import { PICTURE } from "../../features/bench/scenes/shared";
-import type { BenchScene, Stage } from "../../features/bench/scenes/types";
+import type { BenchScene, Perspective, Stage } from "../../features/bench/scenes/types";
 import { readArm } from "../../lib/readout";
 import { parseToken } from "../../lib/token";
-import type { ArmRow, BenchApi, BenchState, ShowOptions } from "./types";
+import type { ArmMemory, ArmRow, BenchApi, BenchState, ShowOptions } from "./types";
 
 /** The K of `#ballast` when the address names none. */
 const DEFAULT_K = 8;
@@ -42,6 +43,8 @@ export type BenchHost = {
   scene(): string | undefined;
   /** Answers the gate of the graph's rest node so the engine switches to the other scene; `false` while it is shut. */
   switchScene(): boolean;
+  /** A perspective mesh of a loaded texture; `undefined` before Pixi or the texture is there. */
+  perspective(texture: string): Perspective | undefined;
 };
 
 /**
@@ -65,7 +68,9 @@ export function createBenchState(): BenchState {
     slot: 0,
     rows: [],
     cycle: undefined,
-    off: []
+    off: [],
+    before: { textureMb: 0, targetsMb: 0, keptMb: 0 },
+    pixi: { pixi: undefined }
   };
 }
 
@@ -114,7 +119,8 @@ function stageOf(state: BenchState, host: BenchHost, n: number | undefined): Sta
       host.monitor.mark(label);
     },
     scene: () => host.scene(),
-    switchScene: () => host.switchScene()
+    switchScene: () => host.switchScene(),
+    perspective: texture => host.perspective(texture)
   };
 }
 
@@ -142,6 +148,20 @@ function setBallast(state: BenchState, host: BenchHost, count: number): void {
 }
 
 /**
+ * The memory the renderer holds now.
+ *
+ * @param stats - The renderer's numbers.
+ * @returns All textures, the render targets and the kept pictures, MiB.
+ */
+function memoryOf(stats: Renderer.RenderStats): ArmMemory {
+  return {
+    textureMb: stats.textureMb,
+    targetsMb: stats.textureMbSplit.targets,
+    keptMb: stats.kept.mb
+  };
+}
+
+/**
  * The row of the arm that runs.
  *
  * @param state - The state.
@@ -158,13 +178,22 @@ function rowOf(state: BenchState, host: BenchHost): ArmRow {
     origin: typeof performance === "undefined" ? 0 : performance.timeOrigin,
     ...readArm(host.monitor.frames(), state.since, SETTLE_FRAMES),
     marks: [...state.marks],
+    before: { ...state.before },
     stats: {
       canvasPasses: stats.canvasPasses,
       canvasPassesMax: stats.canvasPassesMax,
       frameMs: stats.frameMs,
       fps: stats.fps,
       evicted: stats.kept.evicted,
-      refused: stats.kept.refused
+      refused: stats.kept.refused,
+      textureMb: stats.textureMb,
+      artMb: stats.textureMbSplit.art,
+      targetsMb: stats.textureMbSplit.targets,
+      keptMb: stats.kept.mb,
+      keptPictures: stats.kept.pictures,
+      views: stats.views,
+      redraws: stats.redraws ?? null,
+      drawCalls: stats.drawCalls ?? null
     }
   };
 }
@@ -218,6 +247,7 @@ function openScene(
   state.mounted = scene.mount(stageOf(state, host, state.n));
   state.mountedMs = state.nowMs;
   state.since = host.monitor.frames().written;
+  state.before = memoryOf(host.stats());
   host.monitor.mark(`arm ${scene.name} k=${state.k}`);
 }
 
