@@ -235,7 +235,12 @@ export type FakeRenderer = {
 export type FakeModel = { player: Json; session: Json; api: ModelApi };
 
 /** The fake `time`: the one member `assets` calls when a load settles. */
-export type FakeTime = { wake: Mock<() => void>; api: TimeApi };
+export type FakeTime = {
+  wake: Mock<() => void>;
+  /** What `isRunning()` answers: false as in plain Bun, true when a test plays a real frame source. */
+  running: boolean;
+  api: TimeApi;
+};
 
 /** What the fake `flow` recorded and what it answers with. */
 export type FakeFlow = {
@@ -277,8 +282,11 @@ export type MockAssets = {
  */
 function createFakeTime(): FakeTime {
   const wake: Mock<() => void> = vi.fn();
+  const fake: FakeTime = { wake, running: false, api: undefined as unknown as TimeApi };
 
-  return { wake, api: { wake } as unknown as TimeApi };
+  fake.api = { wake, isRunning: () => fake.running } as unknown as TimeApi;
+
+  return fake;
 }
 
 /**

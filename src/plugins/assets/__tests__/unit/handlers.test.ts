@@ -80,12 +80,8 @@ describe("createHandlers", () => {
     ]);
     mock.ctx.state.current = alphaNode;
 
-    mock.connect();
-
+    // No frame source (plain Bun): no frame would ever come, so the walk runs at once.
     createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
-    // The rest's own task and the frame it lands in walk nothing; the next frame at rest does (F230).
-    mock.world.sync(0);
-    mock.world.sync(16);
 
     expect(mock.ctx.state.queue?.bundles).toEqual(["alpha", "beta"]);
 
@@ -144,6 +140,8 @@ async function resting() {
 
   await mock.start();
   mock.connect();
+  // A real frame source drives the loop: the walk waits for a frame.
+  mock.time.running = true;
   mock.flow.graph = graph as never;
   mock.ctx.state.scenes = new Map([
     ["alpha", sceneOf("alpha", "alpha")],
@@ -154,7 +152,7 @@ async function resting() {
   return mock;
 }
 
-describe("the preload walk of a live rest, in a later frame (F230)", () => {
+describe("the preload walk of a live rest, in a later frame while frames run (F230)", () => {
   // Bug caught: the walk runs in the task of the answer again, inside the commit frame of every merge.
   it("walks nothing in the rest's own task, nor in the first frame after it", async () => {
     const mock = await resting();

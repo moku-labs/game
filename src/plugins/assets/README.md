@@ -348,7 +348,8 @@ queue. The walk does not run in the hook: the hook runs in the task of the answe
 in the commit frame of the move (F230). The system `assets.preload` of phase `sync` runs it in a
 later frame: never the first frame after the rest, then the first frame the world rests
 (`world.projection.left()` infinite), or 500 ms of game clock after that first frame on a screen
-that never stops playing. Two rests before that frame walk once. The walk is
+that never stops playing. Two rests before that frame walk once. Without a frame source (`time.isRunning()` false, plain Bun) no frame would come, so the hook
+walks at once, as before. The walk is
 breadth-first over `flow.describe()` from the current node, at most `preloadDepth` edges:
 `"node"` and `"map:node"` move inside the flow, a node with `subFlow` adds the start node of that
 flow at the same distance, a node with `slot` adds the start nodes of `graph.slots[slot]`, and

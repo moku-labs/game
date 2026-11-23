@@ -5,7 +5,7 @@
  */
 import { enforceBudget } from "./budget";
 import { withDeps } from "./lifecycle";
-import { requestPreload } from "./preload";
+import { requestPreload, startPreload } from "./preload";
 import { ageReadyWaiting } from "./ready";
 import { createSwap } from "./swap";
 import type { AssetsCtx, FlowRest, HotSwap, KernelSlice } from "./types";
@@ -65,8 +65,10 @@ export function createHandlers(
 
       if (!live) return;
 
-      // The walk waits for a later frame: here it would land in the commit frame of the move (F230).
-      requestPreload(assets.state);
+      // With frames running the walk waits for a later frame: here it would land in the commit frame
+      // of the move (F230). Without a frame source (plain Bun) no frame would come: it walks at once.
+      if (assets.deps.time.isRunning()) requestPreload(assets.state);
+      else startPreload(assets);
     },
 
     /**

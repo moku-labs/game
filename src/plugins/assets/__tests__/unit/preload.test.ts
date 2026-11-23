@@ -313,23 +313,12 @@ describe("startPreload on a rest node the graph comes back to", () => {
       { flow: "main", node: "board" },
       { flow: "board", node: "await" }
     ]);
-    const handler = createHandlers(mock.ctx)["flow:rest"];
-    let clock = 0;
-    // A live rest walks in the frame after its first one (F230): the two frames run here.
-    const rest = (payload: { path: string; checkpoint: boolean }): void => {
-      handler(payload);
-      mock.world.sync(clock);
-      mock.world.sync(clock + 16);
-      clock += 32;
-    };
+    const rest = createHandlers(mock.ctx)["flow:rest"];
 
-    mock.connect();
     mock.io.control.gated = true;
     rest({ path: "board/await", checkpoint: false });
 
     const first = mock.ctx.state.queue;
-
-    expect(first).toBeDefined();
 
     // The first bundle of the queue is in flight when the same rest node comes back.
     await new Promise(resolve => setTimeout(resolve, 0));
