@@ -190,6 +190,22 @@ describe("a backdrop filter on a running app", () => {
     await app.stop();
   });
 
+  // Bug: a backdrop game gets the platform's rgba8unorm canvas, and Pixi's copy of the canvas into its bgra8unorm
+  // pool texture fails validation: the frosted panels draw nothing on WebGPU.
+  it("keeps Pixi's canvas format for a backdrop, and takes the preferred one without", async () => {
+    vi.stubGlobal("navigator", { gpu: { getPreferredCanvasFormat: () => "rgba8unorm" } });
+    const frosted = await startPanels([Frosted], Frosted(), "webgpu");
+
+    expect(frosted.pixi.last().initOptions).not.toHaveProperty("format");
+    await frosted.app.stop();
+
+    const soft = await startPanels([Soft], Soft(), "webgpu");
+
+    expect(soft.pixi.last().initOptions).toMatchObject({ format: "rgba8unorm" });
+    await soft.app.stop();
+    vi.unstubAllGlobals();
+  });
+
   // Bug: the frosted panels are kept as a picture, or a change of the scene under them asks for no frame: the panels
   // show the blur of an old scene.
   it("draws the panels live, a frame when the scene under them changes, and none at rest", async () => {

@@ -65,6 +65,28 @@ describe("host init", () => {
     });
   });
 
+  // Bug (F226): the canvas stays in Pixi's default bgra8unorm where the platform's canvas format is rgba8unorm
+  // (Android), and Chromium holds ~10 MB of driver memory per frame stream to convert it while frames are drawn.
+  it("asks Pixi for the canvas in the platform's preferred format", async () => {
+    const mock = createMockRenderer();
+
+    vi.stubGlobal("navigator", { gpu: { getPreferredCanvasFormat: () => "rgba8unorm" } });
+    await mock.start();
+
+    expect(mock.pixi.last().initOptions).toMatchObject({ format: "rgba8unorm" });
+  });
+
+  // Bug: a page without WebGPU throws on `navigator.gpu`, or hands Pixi a format nobody chose.
+  it("leaves the canvas format to Pixi on a page without WebGPU", async () => {
+    const mock = createMockRenderer();
+
+    vi.stubGlobal("navigator", {});
+    await mock.start();
+
+    expect(mock.api.host.ready()).toBe(true);
+    expect(mock.pixi.last().initOptions).not.toHaveProperty("format");
+  });
+
   it("turns Pixi's own pointer handling off, so a move is hit-tested once, by the engine", async () => {
     const mock = createMockRenderer();
 

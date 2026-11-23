@@ -194,6 +194,23 @@ function wantsBackBuffer(features: readonly RegisteredFeature[]): boolean {
 }
 
 /**
+ * The canvas format the platform composites without a conversion (`rgba8unorm` on Android, `bgra8unorm` on desktop).
+ * A WebGPU canvas in another format makes Chromium hold a converted copy while frames are drawn: on the A26 about
+ * 10 MB of GPU memory more for as long as every frame is drawn (F226). Unknown on a page without WebGPU.
+ * A game with a backdrop filter keeps Pixi's bgra8unorm: Pixi copies the canvas into a pool texture of that format,
+ * and a copy needs both in one format.
+ *
+ * @returns The preferred format, or `undefined` without `navigator.gpu`.
+ */
+function preferredCanvasFormat(): string | undefined {
+  const gpu = (
+    globalThis.navigator as { gpu?: { getPreferredCanvasFormat?: () => string } } | undefined
+  )?.gpu;
+
+  return gpu?.getPreferredCanvasFormat?.();
+}
+
+/**
  * Loads Pixi once, creates the application and appends its canvas, at the target resolution of
  * now: a restore after a lost device comes back at it, override included. Pixi picks WebGL by
  * itself when WebGPU is missing, so only a device with neither ends up in the catch of the
@@ -235,7 +252,11 @@ export async function createApplication(
   state.resolution.pending = undefined;
 
   const app = new pixi.Application();
+  const backBuffer = wantsBackBuffer(ctx.deps.flow.features.all());
+  const format = backBuffer ? undefined : preferredCanvasFormat();
   const options = {
+    // Pixi passes its init options on to the canvas texture, whose default is bgra8unorm.
+    ...(format === undefined ? {} : { format }),
     preference: ctx.config.preference,
     background: ctx.config.background,
     antialias: ctx.config.antialias,
@@ -244,7 +265,7 @@ export async function createApplication(
     autoDensity: false,
     autoStart: false,
     sharedTicker: false,
-    useBackBuffer: wantsBackBuffer(ctx.deps.flow.features.all()),
+    useBackBuffer: backBuffer,
     // `input` hit-tests every pointer sample itself (`sync.hitTest`) and owns the cursor, `touch-action` and
     // `preventDefault`; nothing listens to a Pixi event. Pixi's own handling would hit-test the tree again (F118).
     eventMode: "none",
