@@ -437,11 +437,14 @@ See "Shots of the frame".
 | `monitor.setResolution(n \| undefined)` | Every build: draws at `n` from the next frame; `undefined` goes back to the policy (see "Resolution"). Answers the resolution of the next frame. |
 | `monitor.counts.register(name, read)` | Agent builds: adds a count to the live object counts, read once a second (see "Live object counts"). A name registered again gets the new reader. At most 16: the 17th throws `[game] Monitor count table is full (16).` The remover; the renderer's `onStop` drops every count. Nothing kept without the flag. |
 | `monitor.sections(next?)` | Agent builds: which sections of the monitor run (see "Sections"), one frozen `MonitorSections` until a switch. With `next` it switches the sections named, from the next frame on, and writes a `sections` event; a write needs control (a dev page or `--debug`): on a `--debug=read` page a switch that would change a section throws an `Error` with `reason: "read-only"`, and the sections stay. Without the flag every section answers on. |
+| `capture(options?)` | Dev builds only. `{ png }`: a PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `{ png, legend }` with `legend: true`. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). Options: `legend`, `layers`, `sheet`, `against`; see "Capture". |
 
 `frameAt(ring, age)` (root export) turns one slot into a plain record: NaN as `null`, bits as
 names, the path id as the flow path. A reader of the columns names the bits itself with two root exports:
 `PERF_CAUSES[i]` is bit `1 << i` of `causes` (a gap spike after a compile reads 9, `["gap", "compile"]`), and
-`DEMAND_REASONS[reason]` is the draw reason of `reason` (255: no decision). Both only ever grow at the end. `textureMbSplit` splits `textureMb` five ways (F236):
+`DEMAND_REASONS[reason]` is the draw reason of `reason` (255: no decision). Both only ever grow at the end.
+
+`textureMbSplit` splits `textureMb` five ways (F236):
 `art`, the sources made by `sync.textures.create` (the bundles of `assets`), font pages left out; `text`, the font pages
 installed by `sync.fonts.install`; `targets`, the render targets Pixi draws into (filters, effects, transitions);
 `kept`, the pictures the engine keeps (`host.keep`, from F12/C14); `other`, every other live source, what Pixi made
@@ -449,7 +452,6 @@ itself (gradients, its white texture). A source counts once, the first that fits
 the five add up to `textureMb` up to the rounding. `idle: { targets, kept }` is the share of `targets` and of `kept`
 waiting in a pool for reuse: the idle textures of Pixi's `TexturePool` with the targets the trim holds, and the kept
 pool (F119) of pictures whose views left. MiB with 2 decimals, all 0 while inert.
-| `capture(options?)` | Dev builds only. `{ png }`: a PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `{ png, legend }` with `legend: true`. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). Options: `legend`, `layers`, `sheet`, `against`; see "Capture". |
 
 - `fps` counts the frames of the loop, drawn or not, over one second of `clock` time; 0 before the
   first full second and when no frame ran in the last second. A gap over one second, a pause or a

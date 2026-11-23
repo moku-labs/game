@@ -204,15 +204,16 @@ describe("the kind of a texture source", () => {
     onGpu(mock, imageSource(77, 99), 77, 99);
     mock.modules.host.keep(kept, true);
 
+    const stats = mock.api.stats();
+    const split = stats.textureMbSplit;
     const usage = mock.modules.host.textures();
-    const split = mock.api.stats().textureMbSplit;
 
     expect(usage.art + usage.text + usage.targets + usage.kept + usage.other).toBe(usage.bytes);
     expect(
       [usage.art, usage.text, usage.targets, usage.kept, usage.other].every(bytes => bytes > 0)
     ).toBe(true);
     expect(split.art + split.text + split.targets + split.kept + split.other).toBeCloseTo(
-      mock.api.stats().textureMb,
+      stats.textureMb,
       1
     );
   });
@@ -365,10 +366,30 @@ afterAll(async () => {
  * @returns The bytes.
  */
 function readbackBytes(node: ProfileNode): number {
-  const { functionName, url } = node.callFrame;
-  const own = functionName !== "" && READBACK.test(url) ? node.selfSize : 0;
+  return node.children.reduce((sum, child) => sum + readbackBytes(child), ownBytes(node));
+}
 
-  return node.children.reduce((sum, child) => sum + readbackBytes(child), own);
+/**
+ * Counts the nodes of a profile whose frame is in `readback.ts`.
+ *
+ * @param node - A node of the profile.
+ * @returns The count.
+ */
+function readbackNodes(node: ProfileNode): number {
+  const own = READBACK.test(node.callFrame.url) ? 1 : 0;
+
+  return node.children.reduce((sum, child) => sum + readbackNodes(child), own);
+}
+
+/**
+ * The bytes sampled in one named function of `readback.ts`, children left out.
+ *
+ * @param node - A node of the profile.
+ * @returns The bytes.
+ */
+function ownBytes(node: ProfileNode): number {
+  const { functionName, url } = node.callFrame;
+  return functionName !== "" && READBACK.test(url) ? node.selfSize : 0;
 }
 
 describe("the texture walk", () => {
@@ -411,6 +432,7 @@ describe("the texture walk", () => {
     run(5000);
 
     const sampled: number[] = [];
+    let nodes = 0;
 
     for (let round = 0; round < 3; round += 1) {
       await session?.post("HeapProfiler.startSampling", {
@@ -425,8 +447,11 @@ describe("the texture walk", () => {
       };
 
       sampled.push(readbackBytes(answer.profile.head));
+      nodes += readbackNodes(answer.profile.head);
     }
 
+    // Positive control: the profile does reach frames of readback.ts, so a zero above is a measurement.
+    expect(nodes).toBeGreaterThan(0);
     expect(sink).toBeGreaterThan(0);
     expect(Math.min(...sampled)).toBeLessThanOrEqual(ALLOWED_BYTES);
   }, 60_000);

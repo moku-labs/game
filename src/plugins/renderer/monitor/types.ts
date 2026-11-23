@@ -724,7 +724,8 @@ export type MonitorApi = {
    * (the estimate of the filter slots where nothing counts). `drawCalls`, `redraws` and `rebuilds` are there in a dev
    * build only.
    *
-   * @returns Frames per second, frame work, GPU textures and their memory, views, pooled objects,
+   * @returns Frames per second, frame work, GPU textures and their memory, split into art, text, targets, kept and other with the idle share of targets
+   *   and kept, views, pooled objects,
    *   render passes and canvas passes with their most in the last second, the kept pictures, and in a dev build the
    *   draw calls of the last frame and the Graphics redraws and Pixi rebuilds per second. Inert: all 0.
    * @example

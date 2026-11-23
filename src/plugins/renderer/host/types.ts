@@ -305,7 +305,9 @@ export type HostApi = {
  * ```
  */
 export type TextureUsage = {
+  /** Live texture sources. */
   count: number;
+  /** Their estimated bytes: the sum of the five kinds below. */
   bytes: number;
   /** Bytes of the sources a game loaded through `sync.textures.create`: images, atlases; font pages not. */
   art: number;
@@ -567,8 +569,9 @@ export type HostInternal = {
   /**
    * The texture sources the GPU holds and their estimated memory, read at call time, split into art, font pages,
    * render targets, kept pictures and the rest, with the idle targets and kept pictures. Allocates nothing while the
-   * application draws: the same object answers every call and the next call writes over it, so a caller reads the
-   * numbers at once.
+   * application draws: the answer is one module-level object shared by every renderer of the page, written over by
+   * the next call and also by the pool trim (`afterFrame`/`trimPool` in `host/pool.ts`) and a device loss
+   * (`host/device.ts`), so a caller reads the numbers at once. While inert it answers a fresh zero object.
    *
    * @returns The usage; zero while nothing draws.
    */
