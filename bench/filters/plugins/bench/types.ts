@@ -3,7 +3,7 @@
  */
 import type { World } from "../../../../src/index.ts";
 import type { BenchScene, Mounted } from "../../features/bench/scenes/types";
-import type { ArmSummary, FrameSample } from "../../lib/readout";
+import type { ArmHead, ArmSummary, FrameSample } from "../../lib/readout";
 import type { BenchHost } from "./api";
 
 /** What a show may set. */
@@ -24,6 +24,19 @@ export type ArmStats = {
   fps: number;
   evicted: number;
   refused: number;
+  /** GPU memory of every live texture, MiB, and its split into loaded art, render targets and kept pictures. */
+  textureMb: number;
+  artMb: number;
+  targetsMb: number;
+  keptMb: number;
+  /** Kept pictures drawn in the last frame. */
+  keptPictures: number;
+  /** Display objects `sync` holds. */
+  views: number;
+  /** Graphics paths drawn in the last second; `null` on a release page. */
+  redraws: number | null;
+  /** Draw calls of the last frame; `null` on a release page. */
+  drawCalls: number | null;
 };
 
 /** A frame a scene marked: where it stands in the row's `frames`. */
@@ -47,6 +60,8 @@ export type ArmRow = {
   restarts: Record<string, number>;
   /** The medians, on a debug page. */
   summary: ArmSummary;
+  /** The first draw of the arm, on a debug page: compiles, uploads, takes, the worst frame. */
+  head: ArmHead;
   /** The renderer's numbers, on every page. */
   stats: ArmStats;
 };
@@ -177,4 +192,6 @@ export type BenchState = {
   cycle: Cycle | undefined;
   /** Removes the frame listener and the address listener. */
   off: (() => void)[];
+  /** Pixi's module once loaded: a perspective mesh is made with it. */
+  pixi: { pixi: typeof import("pixi.js") | undefined };
 };

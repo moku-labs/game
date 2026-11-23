@@ -28,6 +28,7 @@ Open `http://127.0.0.1:4173/#slope-4`. Change the part after `#` and the scene c
 | `#arms=rest,set-bloom,set-bloom-held,set-bloom-one,sweep-blur,sweep-blur-q4,sweep-grade&every=2&k=8` | The arms of the effect set's third slice with `rest`, which the lines of `set-bloom-held` and `set-bloom-one` compare against, and the three arms `sweep` splits into. |
 | `#arms=rest,rows,set-pixelate,set-gradient-map,set-wave,set-mirror,set-shadow,set-outline&every=2&k=8` | The arms of the effect set's fourth slice (stage 4 item 2) with `rest` and `rows`, which its lines compare against. |
 | `#arms=rest,trans-fade,trans-slide,trans-wipe,trans-iris,trans-dissolve&every=2&k=8` | The five arms of the scene transitions (F126 stage 4 item 4) with `rest`, which their lines compare against. A 2 s arm holds two switches. |
+| `#arms=pv-glow-baked-rest-8,pv-glow-filter-rest-8&every=2&k=8` | Two of the 76 "pictures vs filters" arms (F126 stage 4 piece В). The A26 script runs them all with `--set pv --rounds 4`. |
 
 From the editor: open this folder as a game. The command `bench.scene` (`{ scene, k? }`) switches the
 scene, the sources `bench.scenes` and `bench.readout` list the scenes and the numbers.
@@ -79,6 +80,7 @@ K and every scene with a uniform keep the frame busy: nothing here waits for a c
 | `sweep-blur` | A full-screen `Blur({ strength: 6 })` at quality 0, so the config's 2: 4 passes at 0.5 on a phone, its strength written each frame (6 ± 0.5). | The blur of an overlay, alone. |
 | `sweep-blur-q4` | The game's pan: a full-screen `Blur` at quality 4, its strength 0 to 16 in a 1 s loop: 8 passes. | The connect sweep's blur, without its colour matrix. |
 | `trans-fade`, `trans-slide`, `trans-wipe`, `trans-iris`, `trans-dissolve` | A REAL scene switch of the engine every 1 s, 0.3 s into the turn: the arm answers the gate of the graph's rest node (`bench` to `away` and back, the scenes `bench` and `bench-b`), the scene being left declares `leave: { cover: false, loader: false, transition: { kind, ms: 400 } }` (no veil and no loader, so the transition is what is measured), the engine builds the other scene aside, takes the picture of the last frame, swaps and plays it for 400 ms over the new scene. Each scene has one room shaped like a room of `fade` (40 shadowed items, a countdown, an emitter) in its own fill; the room changes in the swap. `marks` in the row name three frames: `switch` (the gate took the answer), `swap` (the frame the new scene first draws: the hook of `scenes:changed`) and `end` (the first frame 400 ms of the game clock after the swap), so a row shows the passes of each frame across the window. `wipe`, `iris` and `dissolve` draw on `RevealLine`, `RevealRound` and `Dissolve`, which the feature lists. A switch needs WebGPU to play the picture. | The fade, slide, wipe, iris and dissolve between two screens. |
+| `pv-<case>-<way>-<state>-<count>` | "Pictures vs filters" (F126 stage 4 piece В), 76 arms. Cases: `plain` (the item alone: a 140-unit rounded square of `Graphics` with a sprite in it), `glow` (`Aura`), `shadow` (`Shadow`), `outline` (`Outline`), `grade` (`Grade`), `dissolve` (`Dissolve`), `tilt` (`Fold`, and `mesh`: the item's picture on a Pixi `PerspectiveMesh` in a `Display`), `blur` (a window that blurs the scene under it: `bench.windowFrost`, today's backdrop path, a chain of two ¼ steps). Ways: `baked` (sprites of assets drawn ahead by `tools/bake.ts`, 2 px a unit: the item, and the effect as a layer of its own whose alpha moves; a flipbook of 8 frames for the dissolve and the tilt; a tint for the grade), `filter` (the live item under the filter; at rest the engine keeps its picture, in motion its number is written each frame), `kept` (the kept picture moving sideways, its filter still). States `rest` and `move`; counts 1 and 8, in two columns of four. | When to bake and when to filter. |
 | `promo` | A perspective map of live text, a time-driven procedural quad, a mirrored column with a gradient, a stroke sweep. | The promo screen. |
 
 Every filter body is the bench's own, shaped like the case, in WGSL, but for the `set-*` arms, which
@@ -147,6 +149,11 @@ The phone is shared. Ask first, and never run this while another session holds i
    localabstract:chrome_devtools_remote` once the script runs, because it refuses a held port; then
    `Runtime.evaluate` of `JSON.stringify(game.bench.rows())`, then `adb forward --remove tcp:9444`.
    Port 9333 belongs to other tools on this phone: leave it alone.
+
+`--set pv` runs the 76 `pv-*` arms instead of the full table, and `--rounds N` plans N turns of the arms at `--fps`
+(the first is the warm-up: its `head` holds the first draw of each arm). Each row carries `head` (the compiles, uploads
+and kept takes of its first 30 frames, and its worst frame) and, in `stats`, the memory: `textureMb` split into `artMb`,
+`targetsMb` and `keptMb`, `keptPictures`, `views`, `redraws` and `drawCalls`.
 
 Each line of the clocks file is `{ t, gpu, mif, busy, nodes }`: `t` is the phone's epoch ms, `busy`
 the load of the GPU in percent, `nodes` every devfreq node the shell may read. On the A26 that is

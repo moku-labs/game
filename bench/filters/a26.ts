@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * @file The A26 run of the bench: `bun bench/filters/a26.ts <serial> [--log perf.jsonl] [--port 4173]
- * [--seconds N] [--fps 30] [--k 8] [--adb adb]`. It checks that the phone is free and refuses when
+ * [--seconds N] [--fps 30] [--k 8] [--set all|pv] [--rounds N] [--adb adb]`. It checks that the phone is free and refuses when
  * it is not, then brings the page's port to the phone, prints the arms schedule and the address, and
  * samples the GPU and MIF clocks at 10 Hz into a JSONL beside the perf log until the schedule ends
  * or Ctrl+C. It takes no port it found held, and gives back only the one it took.
@@ -9,7 +9,7 @@
 import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import {
-  ARMS,
+  ARM_SETS,
   armSchedule,
   armsAddress,
   clocksPathOf,
@@ -47,6 +47,8 @@ const { values, positionals } = parseArgs({
     seconds: { type: "string" },
     fps: { type: "string", default: "30" },
     k: { type: "string", default: "8" },
+    set: { type: "string", default: "all" },
+    rounds: { type: "string" },
     adb: { type: "string", default: "adb" }
   }
 });
@@ -89,10 +91,18 @@ if (!verdict.free) {
   process.exit(1);
 }
 
-// The plan of the run.
+// The plan of the run: `--rounds` asks for that many turns of the arms at `--fps`, or the frames decide.
+const ARMS = ARM_SETS[values.set];
+
+if (ARMS === undefined) {
+  console.error(`No set "${values.set}". Known: ${Object.keys(ARM_SETS).join(", ")}.`);
+  process.exit(2);
+}
+
+const perRound = SLOT_SECONDS * Number(values.fps) - SKIP;
 const schedule = armSchedule(ARMS, {
   slotSeconds: SLOT_SECONDS,
-  minFrames: MIN_FRAMES,
+  minFrames: values.rounds === undefined ? MIN_FRAMES : Number(values.rounds) * perRound,
   fps: Number(values.fps),
   skip: SKIP
 });

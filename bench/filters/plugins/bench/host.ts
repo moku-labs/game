@@ -2,7 +2,8 @@
  * @file The bench plugin's seam with the engine: the host its work reads, and what it does when the
  * game starts, enters its scene and stops.
  */
-import type { Clock, Flow, Renderer, Scenes, World } from "../../../../src/index.ts";
+import type { Assets, Clock, Flow, Renderer, Scenes, World } from "../../../../src/index.ts";
+import type { Perspective } from "../../features/bench/scenes/types";
 import { type BenchHost, benchFrame, followAddress } from "./api";
 import type { BenchState } from "./types";
 
@@ -24,6 +25,52 @@ function hashOfPage(): string {
   return typeof location === "undefined" ? "" : location.hash;
 }
 
+/** Pixi's module, loaded lazily once the bench starts: what a perspective mesh is made with. */
+type PixiModule = typeof import("pixi.js");
+
+/** The Pixi module once it is loaded. */
+type PixiHolder = { pixi: PixiModule | undefined };
+
+/** The subdivisions of a perspective mesh a side: Pixi's own default. */
+const MESH_VERTICES = 10;
+
+/**
+ * Loads Pixi into the holder, once.
+ *
+ * @param holder - Where it goes.
+ */
+export function loadPixi(holder: PixiHolder): void {
+  import("pixi.js")
+    .then(module => {
+      holder.pixi = module;
+    })
+    .catch(() => undefined);
+}
+
+/**
+ * A perspective mesh of a texture, its corners written in place.
+ *
+ * @param holder - Pixi, once loaded.
+ * @param texture - The Pixi texture.
+ * @returns The mesh; `undefined` before Pixi or the texture is there.
+ */
+function perspectiveOf(holder: PixiHolder, texture: unknown): Perspective | undefined {
+  const { pixi } = holder;
+
+  if (pixi === undefined || texture === undefined) return undefined;
+
+  const mesh = new pixi.PerspectiveMesh({
+    texture: texture as InstanceType<PixiModule["Texture"]>,
+    verticesX: MESH_VERTICES,
+    verticesY: MESH_VERTICES
+  });
+
+  return {
+    object: mesh,
+    corners: (x0, y0, x1, y1, x2, y2, x3, y3) => mesh.setCorners(x0, y0, x1, y1, x2, y2, x3, y3)
+  };
+}
+
 /**
  * The engine as the bench reads it.
  *
@@ -33,6 +80,9 @@ function hashOfPage(): string {
  * @param log - The log.
  * @param flow - The flow plugin: its gate takes the answer that switches the scene.
  * @param scenes - The scenes plugin: which scene stands.
+ * @param assets - The assets plugin and Pixi: the texture and the class of a perspective mesh.
+ * @param assets.api - The assets plugin: a texture by its key.
+ * @param assets.holder - Pixi, once loaded.
  * @returns The host.
  */
 export function hostOf(
@@ -41,7 +91,8 @@ export function hostOf(
   clock: Pick<Clock.Api, "now">,
   log: Pick<BenchLog, "warn">,
   flow: Pick<Flow.Api, "gate">,
-  scenes: Pick<Scenes.ScenesApi, "current">
+  scenes: Pick<Scenes.ScenesApi, "current">,
+  assets: { api: Pick<Assets.Api, "texture">; holder: PixiHolder }
 ): BenchHost {
   return {
     ecs: world.ecs,
@@ -55,7 +106,8 @@ export function hostOf(
       const intent = SWITCH_INTENT[scenes.current() ?? ""];
 
       return intent !== undefined && flow.gate.answer({ intent });
-    }
+    },
+    perspective: texture => perspectiveOf(assets.holder, assets.api.texture(texture))
   };
 }
 

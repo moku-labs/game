@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/no-null -- a row is JSON: "no number" is `null`. */
 /**
  * @file The bench plugin's work: scenes in and out, the ballast, the arms and their rows. It reaches
  * the engine only through `BenchHost`, so the plugin file stays wiring.
@@ -13,7 +14,7 @@ import {
 import { BALLAST_LAYER, MAIN_LAYER } from "../../features/bench";
 import { SCENES } from "../../features/bench/scenes";
 import { PICTURE } from "../../features/bench/scenes/shared";
-import type { BenchScene, Stage } from "../../features/bench/scenes/types";
+import type { BenchScene, Perspective, Stage } from "../../features/bench/scenes/types";
 import { readArm } from "../../lib/readout";
 import { parseToken } from "../../lib/token";
 import type { ArmRow, BenchApi, BenchState, ShowOptions } from "./types";
@@ -42,6 +43,8 @@ export type BenchHost = {
   scene(): string | undefined;
   /** Answers the gate of the graph's rest node so the engine switches to the other scene; `false` while it is shut. */
   switchScene(): boolean;
+  /** A perspective mesh of a loaded texture; `undefined` before Pixi or the texture is there. */
+  perspective(texture: string): Perspective | undefined;
 };
 
 /**
@@ -65,7 +68,8 @@ export function createBenchState(): BenchState {
     slot: 0,
     rows: [],
     cycle: undefined,
-    off: []
+    off: [],
+    pixi: { pixi: undefined }
   };
 }
 
@@ -114,7 +118,8 @@ function stageOf(state: BenchState, host: BenchHost, n: number | undefined): Sta
       host.monitor.mark(label);
     },
     scene: () => host.scene(),
-    switchScene: () => host.switchScene()
+    switchScene: () => host.switchScene(),
+    perspective: texture => host.perspective(texture)
   };
 }
 
@@ -164,7 +169,15 @@ function rowOf(state: BenchState, host: BenchHost): ArmRow {
       frameMs: stats.frameMs,
       fps: stats.fps,
       evicted: stats.kept.evicted,
-      refused: stats.kept.refused
+      refused: stats.kept.refused,
+      textureMb: stats.textureMb,
+      artMb: stats.textureMbSplit.art,
+      targetsMb: stats.textureMbSplit.targets,
+      keptMb: stats.kept.mb,
+      keptPictures: stats.kept.pictures,
+      views: stats.views,
+      redraws: stats.redraws ?? null,
+      drawCalls: stats.drawCalls ?? null
     }
   };
 }
