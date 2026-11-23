@@ -33,6 +33,11 @@ describe("the open view of a gated window built under its dim (F202)", () => {
   bench("stepWarm(), a sheet waiting under an owned motion", waiting, BENCH_OPTIONS);
   bench("applyEntry, a live key with the same item, nothing warm", entry.same, BENCH_OPTIONS);
   bench(
+    "applyEntry, a live key handed a new object with the same content (F230)",
+    entry.equal,
+    BENCH_OPTIONS
+  );
+  bench(
     "the swap check of a live key with a new item, nothing warm",
     entry.swapCheck,
     BENCH_OPTIONS

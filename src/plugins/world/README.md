@@ -758,9 +758,13 @@ loop from there on: see [Motions](#motions).
 | `restore`, `load` | direct | written to its rest pose; `view` does not run again |
 
 **When an item did not change.** An item that is the same object as before is never projected
-again: `view` does not run. An item that is another object goes through `view`, and its
-components are compared with the rest pose of the view. In play mode an empty diff is no change:
-the new item is stored and nothing else happens. No motion of the view is cancelled, no hook runs,
+again: `view` does not run. In play mode neither is another object with the same content (equal
+field by field, as plain data): it is stored and nothing else happens, so a screen whose item says
+the same keeps its node and `ui` does not reconcile it again (F230: a merge hands ~70 board items
+out as new objects). An item with other content goes through `view`, and its components are
+compared with the rest pose of the view. In play mode an empty diff is no change: the new item is
+stored and nothing else happens. `view` is a projection of its item: a value it reads from
+elsewhere (a clock, a module variable) shows when the item changes, a forced rerun or a locale. No motion of the view is cancelled, no hook runs,
 nothing is written, no loose component is settled, no hint is used and `changed` of
 `world:reconciled` does not count the view. So a `from` that maps or spreads may build a new
 object on every commit and its views keep their motions; a game needs no frozen item table for
