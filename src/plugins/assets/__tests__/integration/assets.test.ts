@@ -286,23 +286,29 @@ describe("assets plugin integration — with an io seam", () => {
     await app.stop();
   });
 
-  it("preloads the neighbourhood at a rest node, so the next node does not wait", async () => {
+  it("preloads the neighbourhood in a frame after the rest, not in the task of the answer (F230)", async () => {
     const io = createFakeIo();
     const app = await startApp(io);
 
     expect(app.flow.gate.answer({ intent: "play" })).toBe(true);
     await tick();
 
-    // The edge commits and `flow:rest` fires before the next node is entered, so the walk from
-    // "home" already queued "board" (one edge away) and "shop" (two). Entering "board" joins the
-    // running load instead of starting its own, which is why the reason stays "preload".
+    // The edge commits and `flow:rest` fires; the walk waits for a later frame (F230), so the
+    // entered node "board" loads its own bundle, and nothing two edges away is asked yet.
     expect(app.flow.state().path).toBe("board");
     expect(heard.loaded.find(entry => entry.bundle === "board")).toEqual({
       bundle: "board",
       tier: "scene",
       mb: 0.126,
-      reason: "preload"
+      reason: "enter"
     });
+    expect(heard.loaded.find(entry => entry.bundle === "shop")).toBeUndefined();
+
+    // The frame after the rest's first one, at rest: the walk from "board" queues "shop".
+    app.time.step(16);
+    app.time.step(16);
+    await tick();
+
     expect(heard.loaded.find(entry => entry.bundle === "shop")).toEqual({
       bundle: "shop",
       tier: "scene",

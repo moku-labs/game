@@ -8,7 +8,7 @@ import { alloc } from "../../../../../tests/perf/alloc";
 import type { NodeInfo } from "../../../flow/types";
 import { lookupTexture } from "../../api";
 import { pickVictim, releaseSceneLeft } from "../../budget";
-import { neighbourhood } from "../../preload";
+import { neighbourhood, PRELOAD_NONE, stepPreload } from "../../preload";
 import { passReadyNode, stepReady } from "../../ready";
 import { loadBundle } from "../../tiers";
 import { createMockAssets, graphOf, manifestOf, sceneOf } from "../unit/mock-assets";
@@ -60,6 +60,34 @@ export function readyStep(waiting: boolean): () => void {
   }
 
   return () => stepReady(mock.assetsCtx, frame);
+}
+
+/**
+ * One frame of the system `assets.preload` (F230): no rest waits for its walk, or one waits while the world still
+ * plays, under its cap.
+ *
+ * @param waiting - Whether a live rest waits for its walk.
+ * @returns The run the world makes in phase `sync`.
+ */
+export function preloadStep(waiting: boolean): () => void {
+  const mock = createMockAssets();
+  const frame: Frame = { time: { elapsed: 0 } };
+
+  if (waiting) {
+    mock.world.left = 3;
+    mock.ctx.state.preloadSince = 0;
+  }
+
+  stepPreload(mock.assetsCtx, frame);
+
+  if (
+    mock.ctx.state.preloadSince !== (waiting ? 0 : PRELOAD_NONE) ||
+    mock.ctx.state.queue !== undefined
+  ) {
+    throw new Error("preloadStep: the wait is not as asked");
+  }
+
+  return () => stepPreload(mock.assetsCtx, frame);
 }
 
 /**

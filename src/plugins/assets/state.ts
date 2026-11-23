@@ -69,6 +69,7 @@ export function createAssetsState(): State {
     pinned: emptySet(),
     sceneId: undefined,
     queue: undefined,
+    preloadSince: -2,
     current: undefined,
     useCounter: 0,
     warned: emptySet(),

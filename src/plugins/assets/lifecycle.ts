@@ -1,5 +1,5 @@
 /**
- * @file assets plugin — lifecycle: the eight registrations of `onInit`, the boot of `onStart`
+ * @file assets plugin — lifecycle: the nine registrations of `onInit`, the boot of `onStart`
  * and the teardown that frees every texture and cancels every fetch.
  */
 import { flowPlugin } from "../flow";
@@ -13,7 +13,7 @@ import { Exiting, system } from "../world/ecs/define";
 import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
 import { releaseAssets, releaseLeftBundles, releaseSceneLeft } from "./budget";
-import { bundlesOfNode } from "./preload";
+import { bundlesOfNode, stepPreload } from "./preload";
 import { answerReady, isWarm, passReadyNode, stepReady } from "./ready";
 import { bootTiers, loadBundle, touch } from "./tiers";
 import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "./types";
@@ -188,7 +188,8 @@ async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promi
  * start and the end of an exit in `world`, counted, the system `assets.leave` of phase `sync`,
  * which lets a leaving scene's bundles go once its elements played their exit (F51), and the system
  * `assets.ready` of the same phase, which posts a `ready` that waits for a warm view once its build
- * ended (F202). The eight removers go to the state, because `onStop` has nothing but the state.
+ * ended (F202), and the system `assets.preload` of the same phase, which runs the preload walk a live rest asked for in a
+ * later frame (F230). The nine removers go to the state, because `onStop` has nothing but the state.
  *
  * @param ctx - Kernel context of the assets plugin.
  */
@@ -233,6 +234,15 @@ export function connectAssets(ctx: KernelSlice): void {
         phase: "sync",
         query: [],
         run: (_rows, frame) => stepReady(assets, frame)
+      })
+    ),
+    // In phase `sync`: the preload walk a live rest asked for, in a frame after the move's commit frame (F230).
+    assets.deps.world.ecs.system(
+      system({
+        name: "assets.preload",
+        phase: "sync",
+        query: [],
+        run: (_rows, frame) => stepPreload(assets, frame)
       })
     )
   );
@@ -321,7 +331,7 @@ export async function startAssets(ctx: KernelSlice): Promise<void> {
 
 /**
  * Frees everything in `onStop`: the preload and every running load are aborted, every texture is
- * destroyed, the eight registrations are removed and the registries are emptied, the companions
+ * destroyed, the nine registrations are removed and the registries are emptied, the companions
  * too. A teardown context carries the state and nothing else, so no other plugin is called here:
  * no companion's `unload` either, its plugin stopped before this one.
  *

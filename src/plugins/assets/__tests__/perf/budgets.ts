@@ -25,5 +25,9 @@ export const BUDGET = {
   // F202: the system `assets.ready` with no `ready` waiting for a warm view: one field read. New.
   readyRest: 0,
   // F202: the same while a `ready` waits for a build under its cap: `left()`, a clock read and a subtraction. New.
-  readyWaiting: 0
+  readyWaiting: 0,
+  // F230: the system `assets.preload` with no rest waiting for its walk: one field read. New.
+  preloadRest: 0,
+  // F230: the same while a rest waits for the world to rest, under its cap: `left()`, a clock read and a subtraction.
+  preloadWaiting: 0
 } as const;

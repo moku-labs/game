@@ -695,13 +695,18 @@ export type State = {
   /** The scene of the node entered last. A node without `scene` keeps it. */
   sceneId: string | undefined;
   queue: PreloadQueue | undefined;
+  /**
+   * The walk a live rest asked for (F230): `-2` none waits, `-1` asked and not yet in a frame, else the game clock of
+   * the first frame of the wait. The system `assets.preload` of phase `sync` runs it.
+   */
+  preloadSince: number;
   current: NodeInfo | undefined;
   useCounter: number;
   /** Keys reported missing since their bundle last loaded, so one key warns once per miss before a load. */
   warned: Set<string>;
   /**
    * `onEnter`, the `load` and `ready` handlers, the texture provider, the start and the end of an exit in `world`,
-   * and the systems `assets.leave` and `assets.ready` of phase `sync`.
+   * and the systems `assets.leave`, `assets.ready` and `assets.preload` of phase `sync`.
    */
   removers: Array<() => void>;
   /** The `files` map of the stamp the dev hot swap applied last. `undefined` until the first swap. */

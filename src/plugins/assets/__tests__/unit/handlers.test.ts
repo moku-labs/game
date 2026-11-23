@@ -80,7 +80,12 @@ describe("createHandlers", () => {
     ]);
     mock.ctx.state.current = alphaNode;
 
+    mock.connect();
+
     createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
+    // The rest's own task and the frame it lands in walk nothing; the next frame at rest does (F230).
+    mock.world.sync(0);
+    mock.world.sync(16);
 
     expect(mock.ctx.state.queue?.bundles).toEqual(["alpha", "beta"]);
 
@@ -126,6 +131,91 @@ describe("createHandlers", () => {
     createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
 
     expect(mock.ctx.state.queue).toBeUndefined();
+  });
+});
+
+/**
+ * A started mock resting on "alpha", its systems registered.
+ *
+ * @returns The mock.
+ */
+async function resting() {
+  const mock = createMockAssets({ manifest });
+
+  await mock.start();
+  mock.connect();
+  mock.flow.graph = graph as never;
+  mock.ctx.state.scenes = new Map([
+    ["alpha", sceneOf("alpha", "alpha")],
+    ["beta", sceneOf("beta", "beta")]
+  ]);
+  mock.ctx.state.current = alphaNode;
+
+  return mock;
+}
+
+describe("the preload walk of a live rest, in a later frame (F230)", () => {
+  // Bug caught: the walk runs in the task of the answer again, inside the commit frame of every merge.
+  it("walks nothing in the rest's own task, nor in the first frame after it", async () => {
+    const mock = await resting();
+
+    createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
+
+    expect(mock.ctx.state.queue).toBeUndefined();
+
+    mock.world.sync(0);
+
+    expect(mock.ctx.state.queue).toBeUndefined();
+  });
+
+  // Bug caught: the walk lands in a frame of the merge's animation instead of after it.
+  it("waits while the world still plays, and walks in the first frame it rests", async () => {
+    const mock = await resting();
+
+    mock.world.left = 120;
+    createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
+    mock.world.sync(0);
+    mock.world.sync(200);
+
+    expect(mock.ctx.state.queue).toBeUndefined();
+
+    mock.world.left = Number.POSITIVE_INFINITY;
+    mock.world.sync(216);
+
+    expect(mock.ctx.state.queue?.bundles).toEqual(["alpha", "beta"]);
+  });
+
+  // Bug caught: a screen that never stops moving (a looping ring) never gets its neighbours preloaded.
+  it("walks at 500 ms after the rest's first frame even when the world never rests", async () => {
+    const mock = await resting();
+
+    mock.world.left = 120;
+    createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
+    mock.world.sync(1000);
+    mock.world.sync(1499);
+
+    expect(mock.ctx.state.queue).toBeUndefined();
+
+    mock.world.sync(1500);
+
+    expect(mock.ctx.state.queue?.bundles).toEqual(["alpha", "beta"]);
+  });
+
+  // Bug caught: two quick rests walk twice, or the second rest restarts the wait of the first late.
+  it("walks once for two rests before its frame", async () => {
+    const mock = await resting();
+    const handlers = createHandlers(mock.ctx);
+
+    handlers["flow:rest"]({ path: "main/alpha", checkpoint: false });
+    handlers["flow:rest"]({ path: "main/alpha", checkpoint: false });
+    mock.world.sync(0);
+    mock.world.sync(16);
+    const first = mock.ctx.state.queue;
+
+    mock.world.sync(32);
+
+    expect(first?.bundles).toEqual(["alpha", "beta"]);
+    expect(mock.ctx.state.queue).toBe(first);
   });
 });
 

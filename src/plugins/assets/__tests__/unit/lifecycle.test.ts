@@ -42,7 +42,7 @@ function tick(): Promise<void> {
 }
 
 describe("connectAssets", () => {
-  it("registers the enter callback, the load and ready handlers, the texture provider, the exits of the world, assets.leave and assets.ready", () => {
+  it("registers the enter callback, the load and ready handlers, the texture provider, the exits of the world, assets.leave, assets.ready and assets.preload", () => {
     const mock = createMockAssets({ manifest });
 
     mock.connect();
@@ -52,7 +52,7 @@ describe("connectAssets", () => {
     // Bug: a fast walk to a rest point skips `ready` and answers otherwise than the live game (F52).
     expect(mock.flow.handlers.get("ready")?.runInFast).toBe(true);
     expect(mock.renderer.providers).toHaveLength(1);
-    expect(mock.ctx.state.removers).toHaveLength(8);
+    expect(mock.ctx.state.removers).toHaveLength(9);
   });
 
   it("answers the renderer's provider with a loaded texture", async () => {

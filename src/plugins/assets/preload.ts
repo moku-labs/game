@@ -588,6 +588,61 @@ function isSameQueue(state: State, queue: PreloadQueue, bundles: readonly string
   return at === bundles.length;
 }
 
+/** `State.preloadSince` while no live rest waits for its walk. */
+export const PRELOAD_NONE = -2;
+
+/** `State.preloadSince` from a live rest to the first frame after it, which stamps the wait's start. */
+const PRELOAD_DUE = -1;
+
+/** At most this long, in game ms after the first frame of the wait, the walk waits for the world to rest. */
+const PRELOAD_CAP_MS = 500;
+
+/**
+ * Marks that a live rest wants its preload walk. The walk does not run here, in the task of the answer, whose work
+ * lands in the commit frame of the move: the system `assets.preload` runs it in a later frame (F230). A second rest
+ * before that frame keeps the one wait.
+ *
+ * @param state - The plugin state.
+ */
+export function requestPreload(state: State): void {
+  if (state.preloadSince === PRELOAD_NONE) state.preloadSince = PRELOAD_DUE;
+}
+
+/**
+ * One frame of the system `assets.preload` (phase `sync`): with no wait it reads one field. A waiting walk skips the
+ * first frame after its rest, the commit frame of the move, then runs in the first frame the world rests
+ * (`left()` infinite, nothing plays or builds), or `PRELOAD_CAP_MS` after its first frame on a screen that never
+ * stops playing.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param frame - What the system run gets: the frame's `Time`.
+ * @param frame.time - The frame's `Time`, its game clock read only while a walk waits.
+ * @param frame.time.elapsed - The game clock, in scaled ms.
+ */
+export function stepPreload(
+  ctx: AssetsCtx,
+  frame: { readonly time: { readonly elapsed: number } }
+): void {
+  const state = ctx.state;
+  const since = state.preloadSince;
+
+  if (since === PRELOAD_NONE) return;
+
+  const now = frame.time.elapsed;
+
+  if (since === PRELOAD_DUE) {
+    state.preloadSince = now;
+
+    return;
+  }
+
+  if (ctx.deps.world.projection.left() !== Number.POSITIVE_INFINITY && now - since < PRELOAD_CAP_MS)
+    return;
+
+  state.preloadSince = PRELOAD_NONE;
+  startPreload(ctx);
+}
+
 /**
  * Points the background preload at the neighbourhood of the node the game rests on. The same
  * neighbourhood keeps the running queue, so a rest node the graph comes back to often does not

@@ -343,8 +343,12 @@ a failure and is never logged.
 
 ## Preload and budget
 
-The `flow:rest` hook marks the release (below), enforces the budget and rebuilds the background
-queue. The walk is
+The `flow:rest` hook marks the release (below), enforces the budget and asks for the background
+queue. The walk does not run in the hook: the hook runs in the task of the answer, whose work lands
+in the commit frame of the move (F230). The system `assets.preload` of phase `sync` runs it in a
+later frame: never the first frame after the rest, then the first frame the world rests
+(`world.projection.left()` infinite), or 500 ms of game clock after that first frame on a screen
+that never stops playing. Two rests before that frame walk once. The walk is
 breadth-first over `flow.describe()` from the current node, at most `preloadDepth` edges:
 `"node"` and `"map:node"` move inside the flow, a node with `subFlow` adds the start node of that
 flow at the same distance, a node with `slot` adds the start nodes of `graph.slots[slot]`, and
@@ -555,7 +559,7 @@ preload, no event and no budget work.
 | `stamp.ts` | The stamp of the keys watch: the type guard `isAssetStamps`, `stampsOf` (the stamp out of a `ui:hot-swap`) and `changedPaths`. |
 | `paths.ts` | The paths of the manifest for the hot swap: `indexPaths`, `refusalOf` (why the page reloads instead) and `batchesOf` (the changed files by bundle). |
 | `swap.ts` | The replace itself: `createSwap` (the handler behind `ui:hot-swap`), one bundle after another. |
-| `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
+| `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue, the walk's frame (`requestPreload`, `stepPreload`). |
 | `budget.ts` | `usedMb`, `bundleKeys` (the frozen key list of a bundle), `pickVictim` (skips a drawn or reload-held bundle), `enforceBudget`, `unloadBundle` (it forgets the bundle's warm), `releaseAssets` (slices, then pages, then font pages), `releaseLeftBundles` (the release a rest marked), `nameSceneBundles`, `nameComingBundles`, `isHeld`, `featuresOnStack`, and `releaseSceneLeft` (the body of the system `assets.leave`). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |

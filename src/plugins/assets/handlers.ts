@@ -5,7 +5,7 @@
  */
 import { enforceBudget } from "./budget";
 import { withDeps } from "./lifecycle";
-import { startPreload } from "./preload";
+import { requestPreload } from "./preload";
 import { ageReadyWaiting } from "./ready";
 import { createSwap } from "./swap";
 import type { AssetsCtx, FlowRest, HotSwap, KernelSlice } from "./types";
@@ -39,8 +39,8 @@ export function createHandlers(
 
   return {
     /**
-     * Marks the release of a live rest, settles the texture memory and rebuilds the background
-     * preload.
+     * Marks the release of a live rest, settles the texture memory and asks for the background
+     * preload, which the system `assets.preload` rebuilds in a later frame.
      *
      * @param _payload - Where the graph rests. The position itself comes from the state.
      */
@@ -65,7 +65,8 @@ export function createHandlers(
 
       if (!live) return;
 
-      startPreload(assets);
+      // The walk waits for a later frame: here it would land in the commit frame of the move (F230).
+      requestPreload(assets.state);
     },
 
     /**
