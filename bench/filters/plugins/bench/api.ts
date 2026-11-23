@@ -17,7 +17,7 @@ import { PICTURE } from "../../features/bench/scenes/shared";
 import type { BenchScene, Perspective, Stage } from "../../features/bench/scenes/types";
 import { readArm } from "../../lib/readout";
 import { parseToken } from "../../lib/token";
-import type { ArmRow, BenchApi, BenchState, ShowOptions } from "./types";
+import type { ArmMemory, ArmRow, BenchApi, BenchState, ShowOptions } from "./types";
 
 /** The K of `#ballast` when the address names none. */
 const DEFAULT_K = 8;
@@ -69,6 +69,7 @@ export function createBenchState(): BenchState {
     rows: [],
     cycle: undefined,
     off: [],
+    before: { textureMb: 0, targetsMb: 0, keptMb: 0 },
     pixi: { pixi: undefined }
   };
 }
@@ -147,6 +148,20 @@ function setBallast(state: BenchState, host: BenchHost, count: number): void {
 }
 
 /**
+ * The memory the renderer holds now.
+ *
+ * @param stats - The renderer's numbers.
+ * @returns All textures, the render targets and the kept pictures, MiB.
+ */
+function memoryOf(stats: Renderer.RenderStats): ArmMemory {
+  return {
+    textureMb: stats.textureMb,
+    targetsMb: stats.textureMbSplit.targets,
+    keptMb: stats.kept.mb
+  };
+}
+
+/**
  * The row of the arm that runs.
  *
  * @param state - The state.
@@ -163,6 +178,7 @@ function rowOf(state: BenchState, host: BenchHost): ArmRow {
     origin: typeof performance === "undefined" ? 0 : performance.timeOrigin,
     ...readArm(host.monitor.frames(), state.since, SETTLE_FRAMES),
     marks: [...state.marks],
+    before: { ...state.before },
     stats: {
       canvasPasses: stats.canvasPasses,
       canvasPassesMax: stats.canvasPassesMax,
@@ -231,6 +247,7 @@ function openScene(
   state.mounted = scene.mount(stageOf(state, host, state.n));
   state.mountedMs = state.nowMs;
   state.since = host.monitor.frames().written;
+  state.before = memoryOf(host.stats());
   host.monitor.mark(`arm ${scene.name} k=${state.k}`);
 }
 

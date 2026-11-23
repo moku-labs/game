@@ -39,6 +39,9 @@ export type ArmStats = {
   drawCalls: number | null;
 };
 
+/** The memory of the renderer at one moment, MiB: an arm's row has it at its start and at its end. */
+export type ArmMemory = { textureMb: number; targetsMb: number; keptMb: number };
+
 /** A frame a scene marked: where it stands in the row's `frames`. */
 export type ArmMark = { label: string; frame: number };
 
@@ -64,6 +67,8 @@ export type ArmRow = {
   head: ArmHead;
   /** The renderer's numbers, on every page. */
   stats: ArmStats;
+  /** The memory when the arm began: the end's minus it is what the arm added, or freed. */
+  before: ArmMemory;
 };
 
 /** The scene that runs. */
@@ -192,6 +197,8 @@ export type BenchState = {
   cycle: Cycle | undefined;
   /** Removes the frame listener and the address listener. */
   off: (() => void)[];
+  /** The memory when the arm on screen began. */
+  before: ArmMemory;
   /** Pixi's module once loaded: a perspective mesh is made with it. */
   pixi: { pixi: typeof import("pixi.js") | undefined };
 };

@@ -11,7 +11,13 @@ import { TRANS_SCENES, TRANSITION_MS, transitionLeave } from "../features/bench/
 import type { Stage } from "../features/bench/scenes/types";
 import game from "../index";
 import { ARMS, PV_ARMS } from "../lib/a26";
-import { type BenchHost, benchFrame, createBenchState, followAddress } from "../plugins/bench/api";
+import {
+  type BenchHost,
+  benchFrame,
+  createBenchApi,
+  createBenchState,
+  followAddress
+} from "../plugins/bench/api";
 
 /** The bench folder: the manifest and the files of the game. */
 const FOLDER = new URL("../", import.meta.url);
@@ -296,7 +302,8 @@ describe("the rows on their shaders", () => {
     const host = {
       ecs: { despawnOwnedBy: vi.fn(), spawn: vi.fn(() => 1) },
       screen: () => ({ width: 1, height: 1 }),
-      monitor: { frames: () => ({ written: 0 }), mark: vi.fn() }
+      monitor: { frames: () => ({ written: 0 }), mark: vi.fn() },
+      stats: () => ({ textureMb: 0, textureMbSplit: { targets: 0 }, kept: { mb: 0 } })
     } as unknown as BenchHost;
 
     followAddress(state, host, "#arms=ballast&hold=500");
@@ -307,6 +314,42 @@ describe("the rows on their shaders", () => {
     followAddress(state, host, "#ballast");
 
     expect(state.hold).toBeUndefined();
+  });
+
+  // Bug: the memory an arm added is read against the wrong start: the kept pictures of the arm before count as its own.
+  it("a row keeps the memory of its start beside the memory of its end", () => {
+    const state = createBenchState();
+    const memory = { textureMb: 10, targets: 3, kept: 1 };
+    const host = {
+      ecs: { despawnOwnedBy: vi.fn(), spawn: vi.fn(() => 1) },
+      screen: () => ({ width: 1, height: 1 }),
+      monitor: {
+        frames: () => ({
+          written: 0,
+          size: 0,
+          capacity: 0,
+          newest: -1,
+          columns: { frame: new Uint32Array(0) },
+          passes: { size: 0 }
+        }),
+        mark: vi.fn()
+      },
+      stats: () => ({
+        textureMb: memory.textureMb,
+        textureMbSplit: { art: 0, targets: memory.targets, kept: memory.kept },
+        kept: { mb: memory.kept, pictures: 0, evicted: 0, refused: 0 }
+      })
+    } as unknown as BenchHost;
+    const api = createBenchApi(state, host);
+
+    api.show("ballast", { k: 0 });
+    memory.textureMb = 14;
+    memory.kept = 4;
+
+    const row = api.read();
+
+    expect(row.before).toEqual({ textureMb: 10, targetsMb: 3, keptMb: 1 });
+    expect([row.stats.textureMb, row.stats.keptMb]).toEqual([14, 4]);
   });
 
   // Bug: the value keeps moving under a compare of pixels.
