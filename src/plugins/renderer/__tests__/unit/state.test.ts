@@ -47,6 +47,8 @@ describe("renderer state", () => {
       onResolutionChange: [],
       ownGpu: undefined,
       kept: new WeakSet(),
+      marks: new WeakMap(),
+      idle: new WeakSet(),
       pixelsFailed: false,
       pool: { lastDrawnAt: undefined, sceneAt: undefined, restDone: false, baseline: 0, held: [] },
       onTrim: []

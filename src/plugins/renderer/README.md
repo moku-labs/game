@@ -429,7 +429,7 @@ See "Shots of the frame".
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, canvasPasses, canvasPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }`. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit: { art, text, targets, kept, other, idle: { targets, kept } }, views, pooled, renderPasses, renderPassesMax, canvasPasses, canvasPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }`. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `scene:build` at the start of a scene built aside, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
@@ -441,8 +441,14 @@ See "Shots of the frame".
 `frameAt(ring, age)` (root export) turns one slot into a plain record: NaN as `null`, bits as
 names, the path id as the flow path. A reader of the columns names the bits itself with two root exports:
 `PERF_CAUSES[i]` is bit `1 << i` of `causes` (a gap spike after a compile reads 9, `["gap", "compile"]`), and
-`DEMAND_REASONS[reason]` is the draw reason of `reason` (255: no decision). Both only ever grow at the end. `textureMbSplit` splits `textureMb` into the art a game loaded,
-the render targets Pixi draws into, and the pictures the engine keeps (`host.keep`, from F12/C14).
+`DEMAND_REASONS[reason]` is the draw reason of `reason` (255: no decision). Both only ever grow at the end. `textureMbSplit` splits `textureMb` five ways (F236):
+`art`, the sources made by `sync.textures.create` (the bundles of `assets`), font pages left out; `text`, the font pages
+installed by `sync.fonts.install`; `targets`, the render targets Pixi draws into (filters, effects, transitions);
+`kept`, the pictures the engine keeps (`host.keep`, from F12/C14); `other`, every other live source, what Pixi made
+itself (gradients, its white texture). A source counts once, the first that fits of kept, target, text, art, other, so
+the five add up to `textureMb` up to the rounding. `idle: { targets, kept }` is the share of `targets` and of `kept`
+waiting in a pool for reuse: the idle textures of Pixi's `TexturePool` with the targets the trim holds, and the kept
+pool (F119) of pictures whose views left. MiB with 2 decimals, all 0 while inert.
 | `capture(options?)` | Dev builds only. `{ png }`: a PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `{ png, legend }` with `legend: true`. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). Options: `legend`, `layers`, `sheet`, `against`; see "Capture". |
 
 - `fps` counts the frames of the loop, drawn or not, over one second of `clock` time; 0 before the

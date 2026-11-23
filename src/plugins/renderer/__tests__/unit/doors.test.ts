@@ -61,7 +61,14 @@ describe("game.render", () => {
       frameMs: 0,
       textures: 0,
       textureMb: 0,
-      textureMbSplit: { art: 0, targets: 0, kept: 0 },
+      textureMbSplit: {
+        art: 0,
+        text: 0,
+        targets: 0,
+        kept: 0,
+        other: 0,
+        idle: { targets: 0, kept: 0 }
+      },
       views: 0,
       pooled: 0,
       renderPasses: 0,

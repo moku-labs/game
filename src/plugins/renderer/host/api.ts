@@ -15,7 +15,7 @@ import type {
 import { liveDevice, liveGl, watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
 import { afterFrame, sceneChanged, trimPool } from "./pool";
-import { extractStage, readPixels, textureUsage } from "./readback";
+import { extractStage, idleTargetBytes, readPixels, textureUsage } from "./readback";
 import {
   allowRuleScale,
   askResolution,
@@ -31,6 +31,7 @@ import type {
   HostDeps,
   LossInfo,
   ResolutionListener,
+  SourceKind,
   TextureUsage,
   TrimListener,
   TrimReason
@@ -201,6 +202,15 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       else state.kept.delete(source);
     },
 
+    mark: (source: object, kind: SourceKind): void => {
+      state.marks.set(source, kind);
+    },
+
+    idle: (source: object, on: boolean): void => {
+      if (on) state.idle.add(source);
+      else state.idle.delete(source);
+    },
+
     extract: async (hidden: readonly PixiContainer[]): Promise<string | undefined> => {
       const app = state.app;
 
@@ -220,10 +230,26 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       const app = state.app;
 
       if (!state.ready || app === undefined) {
-        return { count: 0, bytes: 0, art: 0, targets: 0, kept: 0 };
+        return {
+          count: 0,
+          bytes: 0,
+          art: 0,
+          text: 0,
+          targets: 0,
+          kept: 0,
+          other: 0,
+          idleTargets: 0,
+          idleKept: 0
+        };
       }
 
-      return textureUsage(app, state.kept);
+      const usage = textureUsage(app, state);
+
+      if (state.pixi !== undefined) {
+        usage.idleTargets = idleTargetBytes(state.pixi, state.pool.held, state.kept);
+      }
+
+      return usage;
     },
 
     pixels: (resolution?: number): Uint8ClampedArray | undefined => {

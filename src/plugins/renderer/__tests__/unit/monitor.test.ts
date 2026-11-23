@@ -82,7 +82,14 @@ describe("renderer stats", () => {
       frameMs: 0,
       textures: 0,
       textureMb: 0,
-      textureMbSplit: { art: 0, targets: 0, kept: 0 },
+      textureMbSplit: {
+        art: 0,
+        text: 0,
+        targets: 0,
+        kept: 0,
+        other: 0,
+        idle: { targets: 0, kept: 0 }
+      },
       views: 0,
       pooled: 0,
       renderPasses: 0,
@@ -159,9 +166,11 @@ describe("renderer stats", () => {
   it("splits the texture memory into art, render targets and the pictures the engine keeps", async () => {
     const mock = await started();
     const kept = { pixelWidth: 512, pixelHeight: 512, mipLevelCount: 1, uploadMethodId: "unknown" };
+    const art = { pixelWidth: 1024, pixelHeight: 1024, mipLevelCount: 1 };
 
+    mock.modules.host.mark(art, "art");
     mock.pixi.last().renderer.texture.managedTextures.push(
-      { pixelWidth: 1024, pixelHeight: 1024, mipLevelCount: 1 },
+      art,
       {
         pixelWidth: 1024,
         pixelHeight: 512,
@@ -173,16 +182,32 @@ describe("renderer stats", () => {
       kept as never
     );
     mock.modules.host.keep(kept, true);
+    mock.modules.host.idle(kept, true);
 
     expect(mock.api.stats()).toMatchObject({
       textures: 3,
       textureMb: 7,
-      textureMbSplit: { art: 4, targets: 2, kept: 1 }
+      textureMbSplit: {
+        art: 4,
+        text: 0,
+        targets: 2,
+        kept: 1,
+        other: 0,
+        idle: { targets: 0, kept: 1 }
+      }
     });
 
     mock.modules.host.keep(kept, false);
+    mock.modules.host.idle(kept, false);
 
-    expect(mock.api.stats().textureMbSplit).toEqual({ art: 4, targets: 3, kept: 0 });
+    expect(mock.api.stats().textureMbSplit).toEqual({
+      art: 4,
+      text: 0,
+      targets: 3,
+      kept: 0,
+      other: 0,
+      idle: { targets: 0, kept: 0 }
+    });
   });
 
   it("answers no texture for Pixi's canvas renderer, which keeps none on a GPU", async () => {
@@ -223,12 +248,18 @@ describe("renderer stats", () => {
     } as unknown as PixiApplication;
 
     // (16 + 4) pixels * 4 bytes.
-    expect(textureUsage(app, new WeakSet())).toEqual({
+    expect(
+      textureUsage(app, { kept: new WeakSet(), marks: new WeakMap(), idle: new WeakSet() })
+    ).toEqual({
       count: 2,
       bytes: 80,
-      art: 80,
+      art: 0,
+      text: 0,
       targets: 0,
-      kept: 0
+      kept: 0,
+      other: 80,
+      idleTargets: 0,
+      idleKept: 0
     });
   });
 

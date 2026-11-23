@@ -151,6 +151,7 @@ function defaultBordersOf(nine: NineBorders): {
 /**
  * Makes a Pixi texture out of a decoded image, on behalf of `assets`, which decides when it leaves the GPU.
  * An ImageBitmap is held until its source is on the GPU, then closed and replaced by a 1x1 stand-in (sync/release.ts).
+ * Its source counts as art in `stats().textureMbSplit` (F236).
  *
  * @param sctx - Domain context of the sync module.
  * @param image - The decoded image.
@@ -173,6 +174,8 @@ export function createTexture(
   // `ImageSource` writes true after its options, so only this reaches it. Its owner frees it with `destroyTexture`:
   // Pixi's collector would take a warmed picture off the GPU a minute later, with no event, under the budget (F129).
   base.source.autoGarbageCollect = false;
+  // F236: `stats().textureMbSplit` counts it as the game's art.
+  sctx.deps.host.mark(base.source, "art");
 
   // F189: the decoded bitmap is freed once the source is on the GPU.
   holdImage(sctx.ctx.state.sync, base.source);

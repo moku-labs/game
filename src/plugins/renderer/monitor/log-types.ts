@@ -448,7 +448,21 @@ export type PerfSampleLine = PerfLine<"sample"> & {
   rebuilds: number | null;
   longFrames: { count: number; maxMs: number; blockingMs: number | null } | null;
   heapMb: number | null;
-  textures: { count: number; mb: number; art: number; targets: number; kept: number };
+  /**
+   * The GPU textures of the moment, MiB: the five kinds of `stats().textureMbSplit` add up to `mb`, `idle` is the share
+   * of the targets and the kept pictures waiting in a pool (F236). The engine always writes `text`, `other` and `idle`;
+   * optional for a reader of an older log.
+   */
+  textures: {
+    count: number;
+    mb: number;
+    art: number;
+    text?: number;
+    targets: number;
+    kept: number;
+    other?: number;
+    idle?: { targets: number; kept: number };
+  };
   /** Kept pictures: the most drawn in a frame, their MiB, the takes and the stage-3 refreshes of the second. */
   kept: { pictures: number; mb: number; retakes: number; refreshes: number } | null;
   views: number;

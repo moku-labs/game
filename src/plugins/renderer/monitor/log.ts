@@ -851,8 +851,14 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
       count: usage.count,
       mb: ms(usage.bytes / BYTES_PER_MB),
       art: ms(usage.art / BYTES_PER_MB),
+      text: ms(usage.text / BYTES_PER_MB),
       targets: ms(usage.targets / BYTES_PER_MB),
-      kept: ms(usage.kept / BYTES_PER_MB)
+      kept: ms(usage.kept / BYTES_PER_MB),
+      other: ms(usage.other / BYTES_PER_MB),
+      idle: {
+        targets: ms(usage.idleTargets / BYTES_PER_MB),
+        kept: ms(usage.idleKept / BYTES_PER_MB)
+      }
     },
     views: views.views,
     pooled: views.pooled,

@@ -63,7 +63,8 @@ function drawing(): { sctx: SyncCtx; uploaded: Set<pixi.TextureSource> } {
       host: {
         pixi: () => pixi,
         ready: () => true,
-        onGpu: (source: pixi.TextureSource) => uploaded.has(source)
+        onGpu: (source: pixi.TextureSource) => uploaded.has(source),
+        mark: () => undefined
       }
     }
   } as unknown as SyncCtx;

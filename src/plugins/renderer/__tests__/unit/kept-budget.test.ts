@@ -2,6 +2,7 @@ import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Entity } from "../../../world/types";
 import { Shape, Transform } from "../../components";
+import { sourceBytes } from "../../host/readback";
 import { createRendererState } from "../../state";
 import type { Config } from "../../types";
 import { type Drawn, startDrawn } from "../demand-harness";
@@ -179,6 +180,31 @@ describe("the budget of the kept pictures", () => {
     expect(kept.pool).toHaveLength(0);
     expect(kept.poolBytes).toBe(0);
     expect(again?.s1?.source.label).toBe(`kept:Shape#${back}#1`);
+  });
+
+  // Bug F236: the pictures waiting in the pool were not told from the ones on screen, so a board that left looked as
+  // if it still drew them.
+  it("counts the textures waiting in the pool as idle kept bytes, and drops them when a take takes them back", async () => {
+    const drawn = await withRoomFor(2);
+    const gone = keep(drawn, 100);
+    const record = drawn.mock.ctx.state.kept.byEntity.get(gone);
+    const sources = [record?.s1?.source, record?.s3?.source].filter(source => source !== undefined);
+    const host = drawn.mock.modules.host;
+
+    drawn.stage.last().renderer.texture.managedTextures.push(...sources);
+
+    const pictureBytes = sources.reduce((sum, source) => sum + sourceBytes(source), 0);
+
+    expect(host.textures()).toMatchObject({ kept: pictureBytes, idleKept: 0 });
+
+    drawn.mock.world.ecs.despawn(gone);
+    drawn.frame();
+
+    expect(host.textures()).toMatchObject({ kept: pictureBytes, idleKept: pictureBytes });
+
+    keep(drawn, 200);
+
+    expect(host.textures()).toMatchObject({ kept: pictureBytes, idleKept: 0 });
   });
 
   // Bug F132: a view that keeps coming back at a size the pool does not hold left two more textures each time, until

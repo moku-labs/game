@@ -252,7 +252,7 @@ function writeTrail(ctx: RendererCtx, trail: TrailState, record: TrailRecord): v
   record.path = pathOf(ctx);
   record.kind = host.kind;
   record.textureMb =
-    host.app === undefined ? 0 : tenth(textureUsage(host.app, host.kept).bytes / BYTES_PER_MB);
+    host.app === undefined ? 0 : tenth(textureUsage(host.app, host).bytes / BYTES_PER_MB);
   record.heapMb = heapMb();
   record.fps = spanMs > 0 ? tenth((trail.frames * MS_PER_S) / spanMs) : 0;
   record.uploadFrames = trail.uploadFrames;
