@@ -121,6 +121,7 @@ function readFresh(yoga: Yoga): KeptStyle {
   fresh[OVERFLOW] = node.getOverflow();
   fresh[POSITION_TYPE] = node.getPositionType();
   node.free();
+
   for (let slot = GAP + 1; slot < SLOTS; slot += 2) fresh[slot] = Number.NaN;
   fresh[ASPECT] = Number.NEGATIVE_INFINITY;
 
@@ -264,6 +265,12 @@ function lengthMoved(kept: KeptStyle | undefined, staged: KeptStyle, slot: numbe
   return true;
 }
 
+/** Where each edge's number sits from the first slot of a padding or margin (a kind comes first). */
+const EDGE_TOP_AT = 1;
+const EDGE_RIGHT_AT = 3;
+const EDGE_BOTTOM_AT = 5;
+const EDGE_LEFT_AT = 7;
+
 /**
  * Stages the four edges of a padding or margin given per edge; an edge it leaves out is unset.
  *
@@ -280,10 +287,10 @@ function stageSides(
   slot: number,
   edges: { top?: number; right?: number; bottom?: number; left?: number }
 ): void {
-  staged[slot + 1] = edges.top ?? Number.NaN;
-  staged[slot + 3] = edges.right ?? Number.NaN;
-  staged[slot + 5] = edges.bottom ?? Number.NaN;
-  staged[slot + 7] = edges.left ?? Number.NaN;
+  staged[slot + EDGE_TOP_AT] = edges.top ?? Number.NaN;
+  staged[slot + EDGE_RIGHT_AT] = edges.right ?? Number.NaN;
+  staged[slot + EDGE_BOTTOM_AT] = edges.bottom ?? Number.NaN;
+  staged[slot + EDGE_LEFT_AT] = edges.left ?? Number.NaN;
 }
 
 /**
@@ -325,19 +332,19 @@ function stageEdges(staged: KeptStyle, style: ResolvedStyle): void {
   else {
     const all = padding ?? Number.NaN;
 
-    staged[PADDING + 1] = all;
-    staged[PADDING + 3] = all;
-    staged[PADDING + 5] = all;
-    staged[PADDING + 7] = all;
+    staged[PADDING + EDGE_TOP_AT] = all;
+    staged[PADDING + EDGE_RIGHT_AT] = all;
+    staged[PADDING + EDGE_BOTTOM_AT] = all;
+    staged[PADDING + EDGE_LEFT_AT] = all;
   }
   if (typeof margin === "object") stageSides(staged, MARGIN, margin);
   else {
     const all = margin ?? Number.NaN;
 
-    staged[MARGIN + 1] = all;
-    staged[MARGIN + 3] = all;
-    staged[MARGIN + 5] = all;
-    staged[MARGIN + 7] = all;
+    staged[MARGIN + EDGE_TOP_AT] = all;
+    staged[MARGIN + EDGE_RIGHT_AT] = all;
+    staged[MARGIN + EDGE_BOTTOM_AT] = all;
+    staged[MARGIN + EDGE_LEFT_AT] = all;
   }
 }
 
@@ -351,6 +358,7 @@ function stageEdges(staged: KeptStyle, style: ResolvedStyle): void {
 function stageExtents(staged: KeptStyle, style: ResolvedStyle): void {
   const { width, height, minWidth, minHeight, maxWidth, maxHeight } = style;
 
+  // Size: a word may be "auto".
   if (typeof width === "number") {
     staged[WIDTH] = POINT;
     staged[WIDTH + 1] = width;
@@ -359,6 +367,8 @@ function stageExtents(staged: KeptStyle, style: ResolvedStyle): void {
     staged[HEIGHT] = POINT;
     staged[HEIGHT + 1] = height;
   } else stageWord(staged, HEIGHT, height, false);
+
+  // Min: "auto" writes nothing.
   if (typeof minWidth === "number") {
     staged[MIN_WIDTH] = POINT;
     staged[MIN_WIDTH + 1] = minWidth;
@@ -367,6 +377,8 @@ function stageExtents(staged: KeptStyle, style: ResolvedStyle): void {
     staged[MIN_HEIGHT] = POINT;
     staged[MIN_HEIGHT + 1] = minHeight;
   } else stageWord(staged, MIN_HEIGHT, minHeight, true);
+
+  // Max: "auto" writes nothing.
   if (typeof maxWidth === "number") {
     staged[MAX_WIDTH] = POINT;
     staged[MAX_WIDTH + 1] = maxWidth;
@@ -375,6 +387,8 @@ function stageExtents(staged: KeptStyle, style: ResolvedStyle): void {
     staged[MAX_HEIGHT] = POINT;
     staged[MAX_HEIGHT + 1] = maxHeight;
   } else stageWord(staged, MAX_HEIGHT, maxHeight, true);
+
+  // Aspect: unset is NaN.
   staged[ASPECT] = style.aspect ?? Number.NaN;
 }
 

@@ -56,17 +56,24 @@ export function slotCellsOf(count: number): SlotCells {
   const buffer = new ArrayBuffer(doubleBytes + BYTE_ARRAYS * count);
   const step = count * DOUBLE;
   const live = new Uint8Array(buffer, doubleBytes, count).fill(1);
-  const seen = new Float64Array(buffer, CLOCK_CELLS * DOUBLE + 3 * step, count).fill(Number.NaN);
+  const targetsAt = CLOCK_CELLS * DOUBLE;
+  const startsAt = targetsAt + step;
+  const valuesAt = startsAt + step;
+  const seenAt = valuesAt + step;
+  const movedAt = doubleBytes + count;
+  const colorsAt = movedAt + count;
+  const partialAt = colorsAt + count;
+  const seen = new Float64Array(buffer, seenAt, count).fill(Number.NaN);
 
   return {
     clock: new Float64Array(buffer, 0, CLOCK_CELLS),
-    targets: new Float64Array(buffer, CLOCK_CELLS * DOUBLE, count),
-    starts: new Float64Array(buffer, CLOCK_CELLS * DOUBLE + step, count),
-    values: new Float64Array(buffer, CLOCK_CELLS * DOUBLE + 2 * step, count),
+    targets: new Float64Array(buffer, targetsAt, count),
+    starts: new Float64Array(buffer, startsAt, count),
+    values: new Float64Array(buffer, valuesAt, count),
     seen,
     live,
-    moved: new Uint8Array(buffer, doubleBytes + count, count),
-    colors: new Uint8Array(buffer, doubleBytes + 2 * count, count),
-    partialMoved: new Uint8Array(buffer, doubleBytes + 3 * count, count)
+    moved: new Uint8Array(buffer, movedAt, count),
+    colors: new Uint8Array(buffer, colorsAt, count),
+    partialMoved: new Uint8Array(buffer, partialAt, count)
   };
 }
