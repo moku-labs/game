@@ -129,6 +129,8 @@ export default defineConfig({
         test: {
           name: "perf",
           include: ["src/plugins/**/__tests__/perf/**/*.perf.ts", "tests/perf/**/*.perf.ts"],
+          // The cold files run in the `perf-cold` project below, unoptimized.
+          exclude: ["**/node_modules/**", "**/*.cold.perf.ts"],
           pool: "forks",
           execArgv: ["--expose-gc", "--min-semi-space-size=256", "--max-semi-space-size=256"],
           fileParallelism: false,
@@ -137,6 +139,28 @@ export default defineConfig({
           benchmark: {
             include: ["src/plugins/**/__tests__/perf/**/*.bench.ts", "tests/perf/**/*.bench.ts"]
           }
+        }
+      },
+      {
+        // The same bytes per call, measured while V8 runs the code in the interpreter and the baseline tier
+        // (`--max-opt=1`: nothing optimizes), as a phone runs engine code in its first seconds. `allocCold`
+        // throws without that flag. Same one-file-at-a-time rule as `perf`.
+        extends: true,
+        test: {
+          name: "perf-cold",
+          include: [
+            "src/plugins/**/__tests__/perf/**/*.cold.perf.ts",
+            "tests/perf/**/*.cold.perf.ts"
+          ],
+          pool: "forks",
+          execArgv: [
+            "--expose-gc",
+            "--max-opt=1",
+            "--min-semi-space-size=256",
+            "--max-semi-space-size=256"
+          ],
+          fileParallelism: false,
+          testTimeout: 60_000
         }
       }
     ],

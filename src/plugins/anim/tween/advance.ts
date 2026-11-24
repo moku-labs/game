@@ -13,6 +13,7 @@ import { Animation, countPlaying } from "../components";
 import { dropEnded } from "../dense";
 import type { AnimCtx } from "../types";
 import { baseOr, cellValue, setBase, setOffset, sumOffsets } from "./cells";
+import { type SlotCells, slotCellsOf } from "./slots";
 import type { StepMotion, Track } from "./types";
 
 /**
@@ -613,30 +614,32 @@ function endTrack(actx: AnimCtx, track: Track): void {
 function dropField(actx: AnimCtx, track: Track, field: string): void {
   delete track.to[field];
   track.live[track.names.indexOf(field)] = 0;
+  track.kept -= 1;
   // The patch keeps exactly the fields of `to`: a field the newer track took is never written back.
   track.patch = { ...track.to };
-  if (Object.keys(track.to).length === 0) endTrack(actx, track);
+  if (track.kept === 0) endTrack(actx, track);
 }
 
 /**
- * Books every field of an absolute track and cancels the older owner of each, field by field.
+ * Books every field of an absolute track and cancels the older owner of each, field by field: the
+ * older owner drops the field as the walk reaches it, and ends with its last one.
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The new absolute track.
  */
 function claimFields(actx: AnimCtx, track: Track): void {
-  const taken: Array<{ older: Track; field: string }> = [];
+  const { names, slotKeys } = track;
 
-  for (const field of Object.keys(track.to)) {
-    const key = keyOf(track, field);
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes two arrays of the track
+  for (let slot = 0; slot < names.length; slot++) {
+    const field = names[slot] ?? "";
+    const key = slotKeys[slot] ?? "";
     const ownerId = actx.state.owner.get(key);
     const older = ownerId === undefined ? undefined : actx.state.tracks.get(ownerId);
 
     actx.state.owner.set(key, track.id);
-    if (older !== undefined) taken.push({ older, field });
+    if (older !== undefined) dropField(actx, older, field);
   }
-
-  for (const entry of taken) dropField(actx, entry.older, entry.field);
 }
 
 /**
@@ -700,6 +703,33 @@ function targetOf(
   for (const segment of segments ?? []) Object.assign(target, segment.to);
 
   return Object.assign(target, to);
+}
+
+/**
+ * The typed arrays of a new track, over one buffer, with the target and the colour flag of each
+ * slot written in.
+ *
+ * @param component - The component the track writes.
+ * @param names - The target fields in slot order.
+ * @param target - The target record the track owns.
+ * @returns The nine views of the track.
+ */
+function cellsOf(
+  component: AnyComponent,
+  names: readonly string[],
+  target: Readonly<Record<string, number>>
+): SlotCells {
+  const cells = slotCellsOf(names.length);
+
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes two arrays of the track
+  for (let slot = 0; slot < names.length; slot++) {
+    const field = names[slot] ?? "";
+
+    cells.targets[slot] = target[field] ?? 0;
+    cells.colors[slot] = isColorField(component, field) ? 1 : 0;
+  }
+
+  return cells;
 }
 
 /**
@@ -812,17 +842,11 @@ export function startTrack(
     ms: instant ? 0 : options.ms,
     ease: options.ease ?? "out",
     delayMs: instant ? 0 : (options.delayMs ?? 0),
-    clock: new Float64Array(2),
+    ...cellsOf(component, names, target),
     begun: false,
     names,
+    kept: names.length,
     slotKeys: names.map(field => keys[field] ?? ""),
-    targets: Float64Array.from(names, field => target[field] ?? 0),
-    starts: new Float64Array(names.length),
-    live: new Uint8Array(names.length).fill(1),
-    moved: new Uint8Array(names.length),
-    values: new Float64Array(names.length),
-    colors: Uint8Array.from(names, field => (isColorField(component, field) ? 1 : 0)),
-    seen: new Float64Array(names.length).fill(Number.NaN),
     muted,
     additive: options.additive === true,
     driven,
@@ -835,8 +859,7 @@ export function startTrack(
     keep,
     reveals: revealsOf(component, target),
     patch: { ...target },
-    partial: undefined,
-    partialMoved: new Uint8Array(names.length)
+    partial: undefined
   };
 
   actx.state.nextId += 1;
