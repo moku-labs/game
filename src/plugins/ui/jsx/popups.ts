@@ -8,7 +8,7 @@ import { Tree } from "../../world/ecs/define";
 import type { Entity } from "../../world/types";
 import { Covered } from "../components";
 import type { UiCtx } from "../types";
-import type { JsxState, PopupLink, Root } from "./types";
+import type { JsxState, PopupLink, PopupWalk, Root } from "./types";
 
 /**
  * Tells whether the flow has come to rest: its loop is not running, it stands on no node, or the
@@ -169,18 +169,39 @@ function waits(state: JsxState, root: Root): boolean {
 }
 
 /**
+ * The walk of the popup step over the roots: its callback made once per jsx state.
+ *
+ * @param state - The jsx state the walk belongs to.
+ * @returns The walk.
+ */
+function createPopupWalk(state: JsxState): PopupWalk {
+  const walk: PopupWalk = {
+    found: false,
+    waiting: root => {
+      if (!walk.found && waits(state, root)) walk.found = true;
+    }
+  };
+
+  return walk;
+}
+
+/**
  * Tells whether any root waits for the settle step. Allocates nothing, so a frame without a
- * released or covered popup costs one scan.
+ * released or covered popup costs one scan: a callback made once, no iterator (F230 U3).
  *
  * @param state - The jsx state.
  * @returns True when at least one root waits.
  */
 function anyWaits(state: JsxState): boolean {
-  for (const root of state.roots.values()) {
-    if (waits(state, root)) return true;
-  }
+  state.popupWalk ??= createPopupWalk(state);
 
-  return false;
+  const walk = state.popupWalk;
+
+  walk.found = false;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a callback made once: no iterator, no entry arrays, also cold.
+  state.roots.forEach(walk.waiting);
+
+  return walk.found;
 }
 
 /**

@@ -12,7 +12,7 @@ import type { Entity } from "../../world/types";
 import type { ElementLookup, Rect } from "../layout/types";
 import type { UiCtx } from "../types";
 import { drawnRect, visualRectOf } from "../visual";
-import type { AsideOf, DescriptionNode, Element, JsxState, Root } from "./types";
+import type { AsideOf, DescriptionNode, Element, HostWalk, JsxState, Root } from "./types";
 
 /** What an element that hosts nothing answers: one frozen list, never a new one. */
 const NO_HOSTS: readonly string[] = Object.freeze([]);
@@ -26,12 +26,63 @@ const NO_HOSTS: readonly string[] = Object.freeze([]);
 function isNameList(value: unknown): value is readonly string[] {
   if (!Array.isArray(value)) return false;
 
-  // A loop, not `every` with an arrow: the slots read the names, and no closure is built per call.
-  for (const name of value) {
-    if (typeof name !== "string") return false;
+  // An index loop: no closure, and no iterator while the code runs unoptimized (F230 U3).
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+  for (let index = 0; index < value.length; index += 1) {
+    if (typeof value[index] !== "string") return false;
   }
 
   return true;
+}
+
+/**
+ * The walks of the hosting step over the host set and the hosted views: a callback each, made
+ * once per jsx state, and the fields the walk under way reads and answers. A `for…of` over a set
+ * or a map builds an iterator and its results while the code runs unoptimized (F230 U3).
+ *
+ * @param state - The jsx state the walks belong to.
+ * @returns The walks.
+ */
+function createHostWalk(state: JsxState): HostWalk {
+  const walk: HostWalk = {
+    ctx: undefined,
+    name: "",
+    owner: undefined,
+    owners: host => {
+      if (walk.owner !== undefined) return;
+
+      const element = liveHost(state, host);
+
+      if (element !== undefined && hostsOf(element.node).includes(walk.name)) walk.owner = host;
+    },
+    hosting: host => {
+      const element = liveHost(state, host);
+
+      if (element !== undefined && walk.ctx !== undefined) hostNames(walk.ctx, state, element);
+    },
+    releasing: (host, view) => {
+      const ctx = walk.ctx;
+
+      if (ctx === undefined || stillHosts(ctx, state, view, host)) return;
+
+      state.hosted.delete(view);
+      unparent(ctx, view, host);
+    }
+  };
+
+  return walk;
+}
+
+/**
+ * The walks of one jsx state, made at their first use.
+ *
+ * @param state - The jsx state.
+ * @returns Its walks.
+ */
+function walkOf(state: JsxState): HostWalk {
+  state.hostWalk ??= createHostWalk(state);
+
+  return state.hostWalk;
 }
 
 /**
@@ -114,13 +165,15 @@ function liveHost(state: JsxState, host: Entity): Element | undefined {
  * @returns The owning host, `undefined` when no live host names the projection.
  */
 function ownerOf(state: JsxState, name: string): Entity | undefined {
-  for (const host of state.hosts) {
-    const element = liveHost(state, host);
+  const walk = walkOf(state);
 
-    if (element !== undefined && hostsOf(element.node).includes(name)) return host;
-  }
+  walk.name = name;
+  walk.owner = undefined;
+  // The first live host that names it wins; the callback skips the rest once one did.
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a callback made once: no iterator, no entry arrays, also cold.
+  state.hosts.forEach(walk.owners);
 
-  return undefined;
+  return walk.owner;
 }
 
 /**
@@ -139,8 +192,13 @@ function parentViews(ctx: UiCtx, state: JsxState, name: string, host: Entity): v
   const ecs = ctx.deps.world.ecs;
   const projection = ctx.deps.world.projection;
   const aside = projection.isBuilding(host);
+  const views = projection.entitiesOf(name);
 
-  for (const view of projection.entitiesOf(name)) {
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+  for (let index = 0; index < views.length; index += 1) {
+    const view = views[index];
+
+    if (view === undefined) continue;
     if (ecs.has(view, Held) || projection.isBuilding(view) !== aside) continue;
     // A parent the full step of this frame took back is still there until the flush: the view is free (H3).
     if (ecs.has(view, Parent) && !state.released.has(view)) continue;
@@ -217,11 +275,11 @@ export function hostViews(ctx: UiCtx, state: JsxState, only?: ReadonlySet<Entity
   }
 
   // Only the host elements are walked, never the whole screen.
-  for (const host of only ?? state.hosts) {
-    const element = liveHost(state, host);
+  const walk = walkOf(state);
 
-    if (element !== undefined) hostNames(ctx, state, element);
-  }
+  walk.ctx = ctx;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a callback made once: no iterator, no entry arrays, also cold.
+  (only ?? state.hosts).forEach(walk.hosting);
 }
 
 /**
@@ -235,15 +293,13 @@ function releaseLeft(ctx: UiCtx, state: JsxState): void {
   // A `clear()` allocates a new table, also on an empty set.
   if (state.released.size > 0) state.released.clear();
 
-  // The keys, not `[view, host]` entries: no pair is built per view.
-  for (const view of state.hosted.keys()) {
-    const host = state.hosted.get(view);
+  // A callback made once: no `[view, host]` pair, no iterator. Deleting the entry being visited is
+  // safe in `forEach`, as it was in the walk of the keys.
+  const walk = walkOf(state);
 
-    if (host === undefined || stillHosts(ctx, state, view, host)) continue;
-
-    state.hosted.delete(view);
-    unparent(ctx, view, host);
-  }
+  walk.ctx = ctx;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a callback made once: no iterator, no entry arrays, also cold.
+  state.hosted.forEach(walk.releasing);
 }
 
 /**

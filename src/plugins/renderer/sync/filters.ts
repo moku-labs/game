@@ -531,8 +531,12 @@ function passesOf(slots: readonly FilterSlot[]): number {
   let passes = 0;
   let enabled = false;
 
-  for (const slot of slots) {
-    if (slot.filter.enabled) {
+  // per frame and filtered view: the frozen list is walked by index, `for…of` makes an iterator when unoptimized.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+
+    if (slot?.filter.enabled) {
       passes += slot.passes;
       enabled = true;
     }
@@ -562,7 +566,12 @@ function addFiltered(slots: readonly FilterSlot[], entity: Entity): void {
 
   const cache = sync.passes;
 
-  for (const slot of slots) {
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < slots.length; index += 1) {
+    const slot = slots[index];
+
+    if (slot === undefined) continue;
+
     cache.filters[cache.count] = slot.filter;
     cache.enabled[cache.count] = slot.filter.enabled;
     cache.count += 1;

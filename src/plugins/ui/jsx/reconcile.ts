@@ -263,7 +263,15 @@ type Change = {
  * ```
  */
 function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
-  return WRITTEN.every(name => sameValue(previous.props[name], next.props[name]));
+  // Per patch: an index walk, no callback.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+  for (let index = 0; index < WRITTEN.length; index += 1) {
+    const name = WRITTEN[index] ?? "";
+
+    if (!sameValue(previous.props[name], next.props[name])) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -310,6 +318,94 @@ export function identityOf(parentIdentity: string, node: DescriptionNode, index:
   const name = node.key ?? `${node.type}@${index}`;
 
   return `${parentIdentity}|${name}|${node.type}`;
+}
+
+/** The char code of `|`, the separator of an identity. */
+const BAR = 124;
+
+/** The char code of `@`, between the type and the index of an unkeyed name. */
+const AT = 64;
+
+/** The char code of `0`. */
+const ZERO = 48;
+
+/* eslint-disable unicorn/prefer-code-point -- an identity holds ASCII separators and digits: one UTF-16 unit each, so `charCodeAt` is the right read and never answers `undefined`. */
+/**
+ * Tells whether an identity is the one `identityOf` builds for a node, without building it: the
+ * parent identity, `|`, the key or the type, `@` and the index, `|`, the type, compared in place.
+ *
+ * @param identity - The identity an element keeps.
+ * @param parentIdentity - The identity of the parent element.
+ * @param node - The node being placed.
+ * @param index - Its position among its siblings.
+ * @returns True when `identityOf(parentIdentity, node, index)` equals `identity`.
+ * @example
+ * ```ts
+ * isIdentityOf("0|row@2|row", "0", { type: "row", props: {}, children: [] }, 2); // true
+ * ```
+ */
+export function isIdentityOf(
+  identity: string,
+  parentIdentity: string,
+  node: DescriptionNode,
+  index: number
+): boolean {
+  const type = node.type;
+  const head = parentIdentity.length + 1;
+  const tail = identity.length - type.length - 1;
+  const framed =
+    tail >= head &&
+    identity.startsWith(parentIdentity) &&
+    identity.charCodeAt(head - 1) === BAR &&
+    identity.charCodeAt(tail) === BAR &&
+    identity.endsWith(type);
+
+  if (!framed) return false;
+  if (node.key !== undefined)
+    return tail - head === node.key.length && identity.startsWith(node.key, head);
+
+  // An unkeyed name: the type, `@`, then the digits of the index, read from the last one back.
+  const at = head + type.length;
+
+  if (!identity.startsWith(type, head) || identity.charCodeAt(at) !== AT) return false;
+
+  let digit = tail - 1;
+  let rest = index;
+
+  do {
+    const last = rest % 10;
+
+    if (digit <= at || identity.charCodeAt(digit) !== ZERO + last) return false;
+    // An exact division: a small integer all the way, never a fraction boxed in unoptimized code.
+    rest = (rest - last) / 10;
+    digit -= 1;
+  } while (rest > 0);
+
+  return digit === at;
+}
+/* eslint-enable unicorn/prefer-code-point */
+
+/**
+ * The identity of a node placed where an element stood: the element's own string when it is the
+ * one `identityOf` would build, so an element that stayed concatenates nothing; else a new one.
+ *
+ * @param parentIdentity - The identity of the parent element.
+ * @param node - The node being placed.
+ * @param index - Its position among its siblings.
+ * @param old - The element that stood at that place at the last diff, if any.
+ * @returns The identity.
+ */
+function identityAt(
+  parentIdentity: string,
+  node: DescriptionNode,
+  index: number,
+  old: Element | undefined
+): string {
+  if (old !== undefined && isIdentityOf(old.identity, parentIdentity, node, index)) {
+    return old.identity;
+  }
+
+  return identityOf(parentIdentity, node, index);
 }
 
 /**
@@ -677,6 +773,56 @@ function entitySet(entities: Iterable<Entity>): Set<Entity> {
 }
 
 /**
+ * Tells whether the entities a diff placed are a child list as it stands: the same entities in the
+ * same order.
+ *
+ * @param placed - The entities of this render, a scratch buffer.
+ * @param count - How many of them this render placed.
+ * @param children - The child list of the last diff.
+ * @returns True when the list stays.
+ */
+function sameEntities(
+  placed: readonly Entity[],
+  count: number,
+  children: readonly Entity[]
+): boolean {
+  if (count !== children.length) return false;
+
+  for (let index = 0; index < count; index += 1) {
+    if (placed[index] !== children[index]) return false;
+  }
+
+  return true;
+}
+
+/**
+ * The change record a reconciler writes every compare into, before its first compare.
+ *
+ * @returns A record with no flag set and an empty style.
+ */
+function emptyChange(): Change {
+  return {
+    is: {
+      pressed: false,
+      hover: false,
+      focus: false,
+      disabled: false,
+      active: false,
+      selected: false,
+      covered: false
+    },
+    style: {},
+    rowHeight: undefined,
+    resolved: false,
+    moved: false,
+    measures: false,
+    keepsText: false,
+    keepsKey: false,
+    unchanged: false
+  };
+}
+
+/**
  * Collects the identities of the children of one render. Its own function, because lint rule L5
  * refuses a collection built inside an exported declaration.
  *
@@ -793,6 +939,53 @@ export function createReconciler(
       modules.layout.changeExtra(element, name, values, hintOf(state, element)),
     whole: (element, value) => writeValue(element, value),
     others: (element, type, next) => writeOthers(element, next, type)
+  };
+  // The scratch of the diff (F230 U2), kept so an element that stayed allocates nothing of its own:
+  // what a compare found, one object each compare writes and its patch reads before the next; the
+  // two results of `expand`; and per depth of the child diff, the identities of a render and the
+  // entities they placed, a stack of buffers the depth indexes.
+  const change: Change = emptyChange();
+  let expandedNode: DescriptionNode | undefined;
+  let expandedInstance: string | undefined;
+  const identityStack: string[][] = [];
+  const entityStack: Entity[][] = [];
+  let depth = 0;
+  // The per-frame walks over the roots and the scrolls (F230 U3): a callback each, made once here,
+  // and the fields it reads and counts. A `for…of` over a map or a set builds an iterator and its
+  // results while the code runs unoptimized.
+  let viewportMoved = false;
+  let dirtyCount = 0;
+  let pendingCount = 0;
+  let scrollsAside = false;
+  const listDirty = (root: Root): void => {
+    if (state.removing.has(root.entity)) return;
+
+    if (viewportMoved) root.needsSolve = true;
+    else if (!root.dirty) return;
+
+    // Per frame: written by index into the kept list, its count beside it.
+    dirtyList[dirtyCount] = root;
+    dirtyCount += 1;
+  };
+  const notePending = (root: Root): void => {
+    const waits =
+      root.element !== undefined &&
+      lookup(root.element) !== undefined &&
+      (root.needsSolve || root.slot !== undefined);
+
+    root.pending = waits;
+    if (waits) pendingCount += 1;
+  };
+  const listScroll = (entity: Entity): void => {
+    const element = state.elements.get(entity);
+
+    if (element?.live !== true) return;
+    // Per frame: one number while no part of a build waits; one read of the root while a root
+    // is built aside or held.
+    if (parts.working() && parts.waits(state.roots.get(element.root))) return;
+    if (!scrollsAside && isAsideScroll(element)) return;
+
+    scrollList.push(element);
   };
 
   /**
@@ -1290,12 +1483,23 @@ export function createReconciler(
   function compare(root: Root, element: Element, node: DescriptionNode): Change {
     const previous = element.node;
     const parent = parentOf(element);
-    const is = isFlagsOf(node, {
-      pressed: element.is.pressed,
-      hover: element.is.hover,
-      focus: element.is.focus,
-      covered: root.covered
-    });
+    // The flags the node and the root give, checked against the element's own first: while they
+    // hold, the element keeps its flags object and none is built.
+    const declared = node.props.state as Partial<IsFlags> | undefined;
+    const kept = element.is;
+    const flagsHold =
+      kept.covered === root.covered &&
+      kept.disabled === (declared?.disabled === true) &&
+      kept.active === (declared?.active === true) &&
+      kept.selected === (declared?.selected === true);
+    const is = flagsHold
+      ? kept
+      : isFlagsOf(node, {
+          pressed: kept.pressed,
+          hover: kept.hover,
+          focus: kept.focus,
+          covered: root.covered
+        });
 
     // What a style is resolved on besides the node itself.
     const rowHeight = range.rowHeightOf(parent, node);
@@ -1311,17 +1515,18 @@ export function createReconciler(
     const keepsKey =
       namedKeyOf(element.style, previous.props.style) === namedKeyOf(style, node.props.style);
 
-    return {
-      is,
-      style,
-      rowHeight,
-      resolved: !keepsStyle,
-      moved: !keepsStyle && modules.layout.affectsRect(element.style, style),
-      measures: !stands || !sameStyle || !sameContent,
-      keepsText: sameStyle && sameContent && sameValue(previous.props.bind, node.props.bind),
-      keepsKey,
-      unchanged: keepsStyle && sameContent && writesSame(previous, node)
-    };
+    // One object per reconciler, written in place: the patch reads it before the next compare.
+    change.is = is;
+    change.style = style;
+    change.rowHeight = rowHeight;
+    change.resolved = !keepsStyle;
+    change.moved = !keepsStyle && modules.layout.affectsRect(element.style, style);
+    change.measures = !stands || !sameStyle || !sameContent;
+    change.keepsText = sameStyle && sameContent && sameValue(previous.props.bind, node.props.bind);
+    change.keepsKey = keepsKey;
+    change.unchanged = keepsStyle && sameContent && writesSame(previous, node);
+
+    return change;
   }
 
   /**
@@ -1334,7 +1539,9 @@ export function createReconciler(
    * @param change - What the patch found.
    */
   function rewrite(root: Root, element: Element, change: Change): void {
-    const applies = change.moved || change.measures;
+    // Read at once: the record is the reconciler's one, written again by the next compare.
+    const { moved, keepsText, keepsKey } = change;
+    const applies = moved || change.measures;
 
     // One style pass: the style was resolved again, or is written onto the layout node again.
     if (change.resolved || applies) state.styled += 1;
@@ -1346,10 +1553,10 @@ export function createReconciler(
 
     if (!element.live) return;
 
-    writeLive(element, change.keepsText, change.keepsKey);
+    writeLive(element, keepsText, keepsKey);
 
     // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
-    if (!change.moved) {
+    if (!moved) {
       modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
     }
   }
@@ -1379,6 +1586,8 @@ export function createReconciler(
     warnAxis(element, node);
 
     const change = compare(root, element, node);
+    // The record is the reconciler's one: what the patch reads after a call out is taken now.
+    const { unchanged, rowHeight } = change;
     const motion = node.props.motion as ElementMotion | undefined;
     const loopChanged = !sameLoop(element.motion?.loop, motion?.loop);
     const motionChanged = motion !== element.motion;
@@ -1390,7 +1599,7 @@ export function createReconciler(
 
     // A changed element has no basis until its write went through: a patch that throws on the way
     // is done in full at the next render, not taken for one that says the same.
-    if (!change.unchanged) delete element.basis;
+    if (!unchanged) delete element.basis;
 
     element.node = node;
     element.is = change.is;
@@ -1405,9 +1614,9 @@ export function createReconciler(
     // has not entered yet starts the loop of its motion when it enters.
     if (loopChanged && element.entered) modules.layout.loop(element);
 
-    if (!change.unchanged) {
+    if (!unchanged) {
       rewrite(root, element, change);
-      element.basis = { epoch: state.epoch, rowHeight: change.rowHeight };
+      element.basis = { epoch: state.epoch, rowHeight };
     }
 
     // A dev build names a `change` hook of a new motion the element will not play.
@@ -1470,27 +1679,31 @@ export function createReconciler(
 
   /**
    * Expands a component node with its instance, so the view runs with the local state of that
-   * identity.
+   * identity. The subtree to place goes to `expandedNode`, the instance it belongs to to
+   * `expandedInstance`: no object is built, and the caller reads both before it places anything.
    *
    * @param node - The node the markup wrote.
    * @param identity - Its identity.
-   * @returns The subtree to place and the instance it belongs to.
    */
-  function expand(
-    node: DescriptionNode,
-    identity: string
-  ): { node: DescriptionNode | undefined; instance: string | undefined } {
+  function expand(node: DescriptionNode, identity: string): void {
     const definition = state.components.get(node.type);
 
-    if (definition === undefined) return { node, instance: undefined };
+    if (definition === undefined) {
+      expandedNode = node;
+      expandedInstance = undefined;
+
+      return;
+    }
 
     const instance = instanceFor(state, identity, definition, node.props);
 
     instance.dirty = false;
 
+    // The two are written after the view ran: nothing it does on the way can change them.
     const produced = runView(ctx, definition, instance, node.key);
 
-    return { node: produced, instance: identity };
+    expandedNode = produced;
+    expandedInstance = identity;
   }
 
   /**
@@ -1516,10 +1729,12 @@ export function createReconciler(
     instance?: string
   ): Entity | undefined {
     // Expand a component into its view; the view it produced takes the key of the component node.
-    const expanded = expand(node, identity);
-    const view = expanded.node;
-    const owner = expanded.instance ?? instance;
-    const isComponentView = view !== undefined && expanded.instance !== undefined;
+    expand(node, identity);
+
+    const view = expandedNode;
+    const expansion = expandedInstance;
+    const owner = expansion ?? instance;
+    const isComponentView = view !== undefined && expansion !== undefined;
     const effective = isComponentView ? withKey(view, node.key) : view;
 
     if (effective === undefined) return state.byIdentity.get(identity);
@@ -1571,22 +1786,94 @@ export function createReconciler(
     nodes: readonly DescriptionNode[],
     instance: string | undefined
   ): void {
+    // The scratch of this depth: a child's own diff runs one level deeper, on buffers of its own.
+    const level = depth;
+
+    depth += 1;
+
+    try {
+      diffChildrenAt(root, parent, nodes, instance, level);
+    } finally {
+      depth = level;
+    }
+  }
+
+  /**
+   * The diff of `diffChildren` on the scratch buffers of one depth: the identities of this render
+   * and the entities they placed, counted, so an element whose children stayed builds no array, no
+   * set and no string, and keeps its child list.
+   *
+   * @param root - The root being reconciled.
+   * @param parent - The element whose children are diffed.
+   * @param nodes - The children of this render.
+   * @param instance - The identity of the nearest component instance.
+   * @param level - The depth whose buffers this diff uses.
+   */
+  function diffChildrenAt(
+    root: Root,
+    parent: Element,
+    nodes: readonly DescriptionNode[],
+    instance: string | undefined,
+    level: number
+  ): void {
+    // A depth reached for the first time makes its two buffers; every later diff there reuses them.
+    const identities = identityStack[level] ?? [];
+    const placed = entityStack[level] ?? [];
+    const before = parent.children;
+
+    identityStack[level] = identities;
+    entityStack[level] = placed;
+
     // The old children this render leaves out leave first, so a key a new child shares with one of
     // them, or with an element under it, is the new child's (F84).
-    const identities = nodes.map((node, index) => identityOf(parent.identity, node, index));
+    // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      const old = before[index];
 
-    leaveOut(parent, identities);
+      if (node === undefined) continue;
+      identities[index] = identityAt(
+        parent.identity,
+        node,
+        index,
+        old === undefined ? undefined : state.elements.get(old)
+      );
+    }
+
+    leaveOut(parent, identities, nodes.length);
 
     // Diff each child of this render; a component that threw before its first view has no entity.
-    const next: Entity[] = [];
+    let count = 0;
 
-    for (const [index, node] of nodes.entries()) {
+    // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+
+      if (node === undefined) continue;
+
       const identity = identities[index] ?? identityOf(parent.identity, node, index);
       const entity = diffNode(root, parent, node, index, identity, instance);
 
-      if (entity !== undefined) next.push(entity);
+      if (entity === undefined) continue;
+      placed[count] = entity;
+      count += 1;
     }
 
+    // The same children in the same order: the list stays, nothing leaves, nothing is placed again.
+    if (sameEntities(placed, count, parent.children)) return;
+
+    commitChildren(root, parent, placed.slice(0, count));
+  }
+
+  /**
+   * Makes a changed list of children the parent's: an old child no entity of this render took leaves,
+   * the new ones are drawn in the order of the render and laid out again, and the root solves again.
+   *
+   * @param root - The root being reconciled.
+   * @param parent - The element whose children changed.
+   * @param next - The entities of this render, in markup order.
+   */
+  function commitChildren(root: Root, parent: Element, next: Entity[]): void {
     // An old child no entity of this render took (one of two siblings under one key) leaves now.
     const kept = entitySet(next);
 
@@ -1598,14 +1885,7 @@ export function createReconciler(
       if (element !== undefined) removeChild(parent, element);
     }
 
-    // Keep the new list; the same children in the same order need no new placement.
-    const same =
-      next.length === parent.children.length &&
-      next.every((entity, index) => parent.children[index] === entity);
-
     parent.children = next;
-
-    if (same) return;
 
     // Draw the children in the order of this render, then re-place them in the layout once, and solve again.
     placeChildren(parent, next);
@@ -1685,18 +1965,25 @@ export function createReconciler(
    * starts, and everything under it plays its own, before a new child enters.
    *
    * @param parent - The element whose children are diffed.
-   * @param identities - The identities of the children of this render, in markup order.
+   * @param identities - The identities of the children of this render, in markup order; a scratch
+   *   buffer, of which the first `count` are this render's.
+   * @param count - How many children this render has.
    */
-  function leaveOut(parent: Element, identities: readonly string[]): void {
+  function leaveOut(parent: Element, identities: readonly string[], count: number): void {
     let listed: ReadonlySet<string> | undefined;
+    const children = parent.children;
 
-    for (const [index, old] of parent.children.entries()) {
-      const element = state.elements.get(old);
+    // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+    for (let index = 0; index < children.length; index += 1) {
+      const old = children[index];
+      const element = old === undefined ? undefined : state.elements.get(old);
 
       // A child that kept its place keeps its identity there: no set is built for a list that holds.
-      if (element === undefined || identities[index] === element.identity) continue;
+      if (element === undefined || (index < count && identities[index] === element.identity)) {
+        continue;
+      }
 
-      listed ??= identitySet(identities);
+      listed ??= identitySet(identities.slice(0, count));
       if (!listed.has(element.identity)) removeChild(parent, element);
     }
   }
@@ -2205,20 +2492,12 @@ export function createReconciler(
    * @returns How many roots wait.
    */
   function pendingRoots(): number {
-    let count = 0;
-
+    pendingCount = 0;
     // Per solve: a flag on the root, not a new set.
-    for (const root of state.roots.values()) {
-      const waits =
-        root.element !== undefined &&
-        lookup(root.element) !== undefined &&
-        (root.needsSolve || root.slot !== undefined);
+    // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a callback made once: no iterator, no entry arrays, also cold.
+    state.roots.forEach(notePending);
 
-      root.pending = waits;
-      if (waits) count += 1;
-    }
-
-    return count;
+    return pendingCount;
   }
 
   /**
@@ -2568,7 +2847,6 @@ export function createReconciler(
    * @param root - The root to reconcile.
    */
   function reconcileRoot(root: Root): void {
-    const identity = identityOf(String(root.entity), root.tree, 0);
     const first = root.element === undefined;
 
     if (first) root.cause ??= ctx.deps.world.projection.causeOf(root.entity) ?? "change";
@@ -2576,6 +2854,7 @@ export function createReconciler(
     // A tree whose top names another key or tag is another element: the old top leaves first, with
     // its exit and out of `find`, and the new one enters with the keys they share (F83).
     const previous = root.element === undefined ? undefined : lookup(root.element);
+    const identity = identityAt(String(root.entity), root.tree, 0, previous);
 
     if (previous !== undefined && previous.identity !== identity) exitElement(previous, "change");
 
@@ -2603,17 +2882,9 @@ export function createReconciler(
     // Per frame: one kept list, emptied by `pop` (a cut by `length` would free its store).
     while (scrollList.length > 0) scrollList.pop();
 
-    for (const entity of state.scrolls) {
-      const element = state.elements.get(entity);
-
-      if (element?.live !== true) continue;
-      // Per frame: one number while no part of a build waits; one read of the root while a root
-      // is built aside or held.
-      if (parts.working() && parts.waits(state.roots.get(element.root))) continue;
-      if (!aside && isAsideScroll(element)) continue;
-
-      scrollList.push(element);
-    }
+    scrollsAside = aside;
+    // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a callback made once: no iterator, no entry arrays, also cold.
+    state.scrolls.forEach(listScroll);
 
     return scrollList;
   }
@@ -2633,20 +2904,12 @@ export function createReconciler(
       if (root !== undefined && !state.removing.has(entity)) root.dirty = true;
     }
 
-    let count = 0;
+    dirtyCount = 0;
+    viewportMoved = viewportChanged;
+    // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a callback made once: no iterator, no entry arrays, also cold.
+    state.roots.forEach(listDirty);
 
-    for (const root of state.roots.values()) {
-      if (state.removing.has(root.entity)) continue;
-
-      if (viewportChanged) root.needsSolve = true;
-      else if (!root.dirty) continue;
-
-      // Per frame: written by index into the kept list, its count beside it.
-      dirtyList[count] = root;
-      count += 1;
-    }
-
-    return count;
+    return dirtyCount;
   }
 
   /**

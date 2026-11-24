@@ -16,6 +16,7 @@ import { drawnInto, drawnPoseInto, isTargetList, readerOf, unionInto, upOf } fro
 import { sameValue } from "./jsx/same";
 import { ownRect } from "./jsx/state";
 import type { Anchor, Element, JsxModule } from "./jsx/types";
+import { keepSize } from "./layout/apply";
 import { handleOf, still } from "./layout/motion";
 import { fitInto } from "./layout/solve";
 import type { Rect } from "./layout/types";
@@ -578,6 +579,8 @@ export function createAnchorPass(ctx: UiCtx, jsx: Pick<JsxModule, "applyAnchored
 
     node.setWidth(element.rect.w);
     node.setHeight(element.rect.h);
+    // The style write skips a value its kept record holds: the record learns this size.
+    keepSize(layout.kept.get(node), element.rect);
     node.calculateLayout(element.rect.w, element.rect.h, yoga.DIRECTION_LTR);
     layout.solves += 1;
     placeUnder(element);

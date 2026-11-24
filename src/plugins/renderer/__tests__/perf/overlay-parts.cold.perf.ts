@@ -7,18 +7,22 @@ import type { SyncCtx } from "../../sync/types";
 import { startOverlayStage } from "../overlay-harness";
 
 // ---------------------------------------------------------------------------
-// Cold perf (change 2026-11-24-f230-hot-path, step 0): what `stepParts` allocates while V8 runs it in the
-// interpreter or the baseline tier (`--max-opt=1`), as a phone runs it in its first seconds. It walks the set of HUD
-// parts with `for…of`, which costs a set iterator and its result objects there; an index loop over a list costs none.
-// Measured on Node 24.21, today's code, 2 overlays and 6 HUD parts:
-//   stepParts today                2248 B per call
+// Cold perf (change 2026-11-24-f230-hot-path, step 0 and R1): what `stepParts` allocates while V8 runs it in the
+// interpreter or the baseline tier (`--max-opt=1`), as a phone runs it in its first seconds. A `for…of` costs an
+// iterator and its result objects there; an index loop over a list, or `forEach` with a callback made once, costs none.
+// Measured on Node 24.21, 2 overlays and 6 HUD parts:
+//   stepParts before R1            2248 B per call (the `for…of` over the Set of parts: 320 B; the `for…of` over the
+//                                  overlay order in `factorOf`, `targetOf` and `inertOf` per part and in
+//                                  `holdsSame` over the faded tops: a bare `for…of` over the 2 overlays is 168 B and
+//                                  over the faded tops 328 B, the rest of the 2248 B)
+//   stepParts after R1                0 B per call
 //   a bare `for…of` over the Set    320 B per call
 //   a bare `for…of` over an array   327 B per call
 //   the same walk with an index       0 B per call
 // ---------------------------------------------------------------------------
 
-/** What `stepParts` costs today, cold, plus 52 B of margin. A fix lowers this number, never raises it. */
-const STEP_PARTS_COLD = 2300;
+/** What `stepParts` costs after R1, cold, plus 16 B of margin. A fix lowers this number, never raises it. */
+const STEP_PARTS_COLD = 16;
 
 /** What a bare `for…of` over the set of 6 parts costs, cold, plus 16 B of margin. */
 const SET_WALK_COLD = 336;

@@ -342,7 +342,13 @@ function keeps(record: OverlayRecord, key: string): number {
 function factorOf(order: readonly OverlayRecord[], key: string): number {
   let factor = 1;
 
-  for (const record of order) factor += (keeps(record, key) - factor) * record.level;
+  // per frame and part: the order is walked by index, `for…of` makes an iterator in the unoptimized tiers.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < order.length; index += 1) {
+    const record = order[index];
+
+    if (record !== undefined) factor += (keeps(record, key) - factor) * record.level;
+  }
 
   return factor;
 }
@@ -357,7 +363,12 @@ function factorOf(order: readonly OverlayRecord[], key: string): number {
 function targetOf(order: readonly OverlayRecord[], key: string): number {
   let target = 1;
 
-  for (const record of order) if (record.phase !== "exiting") target = keeps(record, key);
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < order.length; index += 1) {
+    const record = order[index];
+
+    if (record !== undefined && record.phase !== "exiting") target = keeps(record, key);
+  }
 
   return target;
 }
@@ -371,7 +382,12 @@ function targetOf(order: readonly OverlayRecord[], key: string): number {
  * @returns True when a tap does not reach the part.
  */
 function inertOf(order: readonly OverlayRecord[], key: string): boolean {
-  for (const record of order) {
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < order.length; index += 1) {
+    const record = order[index];
+
+    if (record === undefined) continue;
+
     const { hud, hudInert } = record.value;
 
     if (!hudInert || hud === "none" || hud === "under") continue;
@@ -391,7 +407,12 @@ function inertOf(order: readonly OverlayRecord[], key: string): boolean {
 function holdsSame(list: readonly PixiContainer[], set: ReadonlySet<PixiContainer>): boolean {
   if (list.length !== set.size) return false;
 
-  for (const node of list) if (!set.has(node)) return false;
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < list.length; index += 1) {
+    const node = list[index];
+
+    if (node !== undefined && !set.has(node)) return false;
+  }
 
   return true;
 }
@@ -415,7 +436,12 @@ function keepOff(sctx: SyncCtx, count: number): void {
   const next = overlay.nextOff;
 
   if (next.size > 0) next.clear();
-  for (const top of offList) next.add(top);
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < offList.length; index += 1) {
+    const top = offList[index];
+
+    if (top !== undefined) next.add(top);
+  }
 
   overlay.nextOff = overlay.offTops;
   overlay.offTops = next;
@@ -440,6 +466,59 @@ function warnOutside(sctx: SyncCtx, entity: Entity, key: string): void {
   sctx.ctx.log.warn("renderer:hud-part-outside", { entity, key });
 }
 
+/** What the walk of the HUD parts reads, set before the walk: one at a time, no closure per frame. */
+const partsWalk: {
+  sctx: SyncCtx | undefined;
+  hud: string | undefined;
+  settling: boolean;
+  count: number;
+} = { sctx: undefined, hud: undefined, settling: false, count: 0 };
+
+/**
+ * Steps one HUD part of the walk: judged against the HUD layer, faded by the factor of the overlays, and noted in the
+ * list of the tops that take no tap when it fades, is going to fade, or is kept by an inert overlay.
+ *
+ * @param entity - The part.
+ */
+function stepPart(entity: Entity): void {
+  const { sctx, hud, settling } = partsWalk;
+
+  if (sctx === undefined) return;
+
+  const state = sctx.ctx.state.sync;
+  const overlay = state.overlay;
+  const view = state.views.get(entity);
+
+  if (view === undefined) return;
+
+  const key = sctx.ctx.deps.world.ecs.get(entity, HudPart)?.key ?? "";
+
+  if (hud === undefined || layerOf(sctx, entity) !== hud) {
+    // A part of a build is judged once its scene's layers stand: a HUD part is not outside a layer list not yet its own.
+    const building = settling || sctx.ctx.deps.world.projection.isBuilding(entity);
+
+    if (!building) warnOutside(sctx, entity, key);
+    applyHud(sctx, entity, view, 1);
+
+    return;
+  }
+
+  const factor = factorOf(overlay.order, key);
+
+  applyHud(sctx, entity, view, factor);
+
+  // Fading, going to fade, or kept by an inert overlay.
+  const takesNoTap = factor < 1 || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key);
+
+  if (takesNoTap) {
+    const top = view.wrapper ?? view.object;
+    const { offList } = overlay;
+
+    if (offList[partsWalk.count] !== top) offList[partsWalk.count] = top;
+    partsWalk.count += 1;
+  }
+}
+
 /**
  * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame, and the
  * parts leaving or not fully back take no tap, and the parts an inert overlay keeps shown take no tap either. A part
@@ -456,48 +535,19 @@ export function stepParts(sctx: SyncCtx): void {
   if (overlay.parts.size === 0 && overlay.offTops.size === 0) return;
 
   // per frame: the HUD layer's name kept with the layers, no walk of the layer table.
-  const hud = state.hudLayer;
+  partsWalk.sctx = sctx;
+  partsWalk.hud = state.hudLayer;
   // A build committed after this frame's pass: its layers and its held views come with the next one.
-  const settling = heldWaiting(sctx);
-  const ecs = sctx.ctx.deps.world.ecs;
-  const projection = sctx.ctx.deps.world.projection;
-
+  partsWalk.settling = heldWaiting(sctx);
   // per frame: the faded tops written in place into the reused list, the tap set touched only when they change.
-  const { offList } = overlay;
-  let count = 0;
+  partsWalk.count = 0;
+  // per frame: a Set walked with `forEach` and a callback made once, no iterator and no result objects.
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.parts.forEach(stepPart);
 
-  for (const entity of overlay.parts) {
-    const view = state.views.get(entity);
+  const count = partsWalk.count;
 
-    if (view === undefined) continue;
-
-    const key = ecs.get(entity, HudPart)?.key ?? "";
-
-    if (hud === undefined || layerOf(sctx, entity) !== hud) {
-      // A part of a build is judged once its scene's layers stand: a HUD part is not outside a layer list not yet its own.
-      const building = settling || projection.isBuilding(entity);
-
-      if (!building) warnOutside(sctx, entity, key);
-      applyHud(sctx, entity, view, 1);
-
-      continue;
-    }
-
-    const factor = factorOf(overlay.order, key);
-
-    applyHud(sctx, entity, view, factor);
-
-    // Fading, going to fade, or kept by an inert overlay.
-    const takesNoTap =
-      factor < 1 || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key);
-
-    if (takesNoTap) {
-      const top = view.wrapper ?? view.object;
-
-      if (offList[count] !== top) offList[count] = top;
-      count += 1;
-    }
-  }
-
+  partsWalk.sctx = undefined;
+  partsWalk.hud = undefined;
   keepOff(sctx, count);
 }

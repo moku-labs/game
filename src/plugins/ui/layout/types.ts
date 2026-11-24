@@ -2,7 +2,7 @@
  * @file ui/layout — type definitions: the Yoga handles the module keeps, its state and the shape
  * it is injected into `jsx` with.
  */
-import type { Yoga, Node as YogaNode } from "yoga-layout/load";
+import type { Align, Justify, Overflow, Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import type { Message } from "../../i18n/types";
@@ -117,6 +117,29 @@ export type Guide = {
 };
 
 /**
+ * The Yoga-level values last written onto one node, one slot a scalar (an enum, a flex factor, the
+ * aspect ratio) and two a length (its kind, then its number; `NaN` for unset). `apply.ts` owns the
+ * slot order.
+ */
+export type KeptStyle = Float64Array;
+
+/**
+ * What a style write reads for one loaded Yoga module, built once: the module, the enum of every
+ * word a style names, the kept record of a node Yoga just made (its scalars read from a fresh node's
+ * getters, its lengths unset), and the record a write stages its numbers in.
+ */
+export type StyleTables = {
+  yoga: Yoga;
+  justify: Readonly<Record<NonNullable<ResolvedStyle["justify"]>, Justify>>;
+  align: Readonly<Record<NonNullable<ResolvedStyle["align"]>, Align>>;
+  alignSelf: Readonly<Record<NonNullable<ResolvedStyle["alignSelf"]>, Align>>;
+  overflow: Readonly<Record<NonNullable<ResolvedStyle["overflow"]>, Overflow>>;
+  fresh: KeptStyle;
+  /** The numbers of the write in hand, in the slot order of a kept record; written in place. */
+  staged: KeptStyle;
+};
+
+/**
  * layout module state. `nodes` is attach minus detach: Yoga 3.2.1 has no instance counter.
  * `scrolling` is the scroll the finger holds; `scrollClock` the ms the scroll step has run, the
  * clock of the samples; `scrollRing` the last pointer samples of the press on its axis, a
@@ -126,6 +149,10 @@ export type Guide = {
 export type LayoutState = {
   yoga: Yoga | undefined;
   byEntity: Map<Entity, YogaNode>;
+  /** The style tables of the loaded module; none before Yoga loads. */
+  tables: StyleTables | undefined;
+  /** The values last written onto each node, from its creation to its free. */
+  kept: Map<YogaNode, KeptStyle>;
   nodes: number;
   measured: number;
   solves: number;

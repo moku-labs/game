@@ -23,6 +23,7 @@ import type { AnyComponentValue, ComponentType, Entity, MotionCause } from "../.
 import type { BoxValue } from "../components";
 import type { MotionSpan } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style } from "../styles/types";
+import type { UiCtx } from "../types";
 import type { ElementComponents } from "./intrinsics";
 
 /**
@@ -567,6 +568,33 @@ export type TextState = {
 };
 
 /**
+ * The walks of the hosting step over `hosts` and `hosted`, a callback each made once per jsx state
+ * (F230 U3), and the fields the walk under way reads and answers: the context of the step, the
+ * projection whose owner is looked for and the owner found.
+ */
+export type HostWalk = {
+  ctx: UiCtx | undefined;
+  name: string;
+  owner: Entity | undefined;
+  /** Notes the first live host that names `name` in `owner`. */
+  owners: (host: Entity) => void;
+  /** Hosts the views of one live host. */
+  hosting: (host: Entity) => void;
+  /** Takes the parent back from one hosted view its host no longer holds. */
+  releasing: (host: Entity, view: Entity) => void;
+};
+
+/**
+ * The walk of the popup step over `roots`, a callback made once per jsx state (F230 U3), and
+ * whether the walk under way found a root that waits.
+ */
+export type PopupWalk = {
+  found: boolean;
+  /** Notes a root that waits for the settle step. */
+  waiting: (root: Root) => void;
+};
+
+/**
  * jsx module state. `hosts` holds the elements with a `hosts` prop; `hosted` maps a world view to
  * the element that hosts it; `fields` holds the text fields by entity. `hints` buffers the hints
  * released since the last frame step; `scrolls` holds the scroll containers; `windowRenders`
@@ -589,6 +617,10 @@ export type JsxState = {
   removing: Set<Entity>;
   hosts: Set<Entity>;
   hosted: Map<Entity, Entity>;
+  /** The walks of the hosting step, made at their first use. */
+  hostWalk?: HostWalk;
+  /** The walk of the popup step, made at its first use. */
+  popupWalk?: PopupWalk;
   hostsVersion: number;
   hostsSeen: number;
   membershipSeen: number;

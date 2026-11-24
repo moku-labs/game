@@ -7,9 +7,10 @@ import type { DescriptionNode } from "../../jsx/types";
 // Cold perf (change 2026-11-24-f230-hot-path, step 0): what `hostsOf` allocates while V8 runs it in the interpreter
 // or the baseline tier (`--max-opt=1`), as a phone runs it in its first seconds. Its `isNameList` walks the names with
 // `for…of`: that costs an array iterator and its result objects there, which an index loop does not.
-// Measured on Node 24.21, today's code, 3 names:
-//   hostsOf today            208 B per call
-//   the same with an index     0 B per call
+// Measured on Node 24.21, 3 names:
+//   hostsOf before the change   208 B per call
+//   the same with an index        0 B per call
+//   hostsOf now (U3)              0 B per call: `isNameList` walks the names with an index
 // ---------------------------------------------------------------------------
 
 /** A node that hosts three projections. */
@@ -19,8 +20,8 @@ const NODE: DescriptionNode = {
   children: []
 };
 
-/** What `hostsOf` costs today, cold, plus 8 B of margin. A fix lowers this number, never raises it. */
-const HOSTS_OF_COLD = 216;
+/** What `hostsOf` costs cold now, 0 B, plus 8 B of margin: under the 208 B before U3. */
+const HOSTS_OF_COLD = 8;
 
 /** What the index-looped copy costs, cold, plus 8 B of margin. */
 const INDEXED_COLD = 8;
@@ -61,7 +62,7 @@ function hostsOfIndexed(node: DescriptionNode): readonly string[] {
 const sink: { names: readonly string[] | undefined } = { names: undefined };
 
 describe("hostsOf, run unoptimized", () => {
-  it("stays within what it costs today", () => {
+  it("walks the names with no iterator", () => {
     const bytes = allocCold(() => {
       sink.names = hostsOf(NODE);
     });

@@ -11,7 +11,7 @@ import type { MotionCause } from "../../world/types";
 import { Box } from "../components";
 import type { Element, JsxModule } from "../jsx/types";
 import type { UiCtx } from "../types";
-import { applyStyleToNode, layoutChanged } from "./apply";
+import { applyStyleToNode, layoutChanged, styleTablesOf } from "./apply";
 import { beginExit, canDespawn } from "./exit";
 import { createGuideHandler } from "./guide";
 import { iconLineMoved, installMeasure, markMeasured, remeasureShown } from "./measure";
@@ -77,7 +77,15 @@ function writeStyle(state: LayoutState, source: TextSource, element: Element): v
 
   const tag = element.scroll?.axis === "x" ? "row" : element.type;
 
-  applyStyleToNode(state.yoga, node, element.style, tag, element.parentType);
+  applyStyleToNode(
+    state.yoga,
+    node,
+    element.style,
+    tag,
+    element.parentType,
+    state.kept.get(node),
+    state.tables
+  );
   installMeasure(state, node, element, source);
 }
 
@@ -95,7 +103,10 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
   return {
     load: async (): Promise<void> => {
-      state.yoga = await loadYogaModule();
+      const yoga = await loadYogaModule();
+
+      state.yoga = yoga;
+      state.tables = styleTablesOf(yoga);
     },
 
     loaded: () => state.yoga !== undefined,
