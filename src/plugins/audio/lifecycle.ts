@@ -82,10 +82,11 @@ export function startAudio(ctx: KernelSlice): void {
 
 /**
  * Frees everything `onStart` opened: the three handler registrations, the two window listeners,
- * a renewal that waits or runs, the music track, every named sound, every streamed track still
- * fading with its timer, the journal, the audio session and the context itself. The tracks are
- * freed before the close, while their nodes can still disconnect. A browser caps how many
- * contexts a page may hold, so the close is the point of this teardown.
+ * a renewal that waits or runs, the music track, every named sound and every loop, the mounted
+ * scene (a start again begins before any scene), every streamed track still fading with its timer,
+ * the journal, the audio session and the context itself. The tracks are freed before the close,
+ * while their nodes can still disconnect. A browser caps how many contexts a page may hold, so the
+ * close is the point of this teardown.
  *
  * @param state - The plugin state, all a teardown context carries.
  * @returns A promise that resolves when the context is closed.
@@ -98,6 +99,8 @@ export async function stopAudio(state: State): Promise<void> {
   removeUnlock(state);
   stopMusic(state);
   stopAllNamed(state);
+  state.loops.clear();
+  state.scene = undefined;
 
   for (const entry of state.retiring) disposeStream(state, entry.stream);
 

@@ -7,6 +7,7 @@ import { setBusVolume } from "./api";
 import { cancelRenewal, scheduleRenewal } from "./context";
 import { applyAllGains, isBus } from "./graph";
 import { withDeps } from "./lifecycle";
+import { stopSceneLoops } from "./loops";
 import { pauseMusic, playMusic, resumeMusic, trackMusic } from "./playback";
 import type {
   AssetsReplaced,
@@ -167,13 +168,19 @@ export function createHandlers(ctx: KernelSlice): {
     },
 
     /**
-     * Switches the music to the track the next scene declared. A scene that declares none keeps
-     * the track that plays. The switch is tracked, never awaited: a hook is synchronous.
+     * Notes the scene that is mounted now, fades out the loops of the scene that left over the
+     * music's fade, and switches the music to the track the next scene declared. A scene that
+     * declares none keeps the track that plays. The switch is tracked, never awaited: a hook is
+     * synchronous.
      *
-     * @param payload - The scene that was entered and the music it declared.
+     * @param payload - The scene that left, the scene that was entered and the music it declared.
      */
     "scenes:changed": (payload: SceneChanged): void => {
       const audioCtx = domain();
+
+      audioCtx.state.scene = payload.to;
+      stopSceneLoops(audioCtx.state, payload.from, audioCtx.config.musicFadeMs);
+
       // eslint-disable-next-line unicorn/no-null -- `null` is the seam: it stops the music.
       const key = payload.music ?? audioCtx.state.music?.key ?? null;
 

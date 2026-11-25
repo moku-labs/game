@@ -1,15 +1,18 @@
 /**
- * @file audio plugin — the three effect handlers and the decode cache. A sound is a new source
- * every time, and a sound with an id also gets a gain of its own (`named.ts`), which is what the
- * next sound with that id and `stopSfx` fade. Music is one looping track on its own gain, which is
- * what cross-fades. At `music: "decode"` the track is a buffer source, at `music: "stream"` a
- * media element.
+ * @file audio plugin — the three effect handlers. A sound is a new source every time, and a sound
+ * with an id also gets a gain of its own (`named.ts`), which is what the next sound with that id
+ * and `stopSfx` fade; a loop is a sound with an id that fades in, loops, and is remembered for the
+ * unlock (`loops.ts`). Every buffer comes from the decode cache (`decode.ts`). Music is one looping
+ * track on its own gain, which is what cross-fades. At `music: "decode"` the track is a buffer
+ * source, at `music: "stream"` a media element.
  */
 import type { Descriptor, Hint } from "../flow/types";
 import type { Json } from "../model/types";
+import { bufferOf, warnOnce } from "./decode";
 import { isBus, ramp } from "./graph";
 import { recordSound } from "./journal";
-import { claimNamed, startNamed, stopNamed, waitingKey } from "./named";
+import { playLoop } from "./loops";
+import { playNamed, stopNamed, waitingKey } from "./named";
 import {
   canStream,
   disposeStream,
@@ -21,7 +24,6 @@ import {
 import type {
   AudioContextLike,
   AudioCtx,
-  Bus,
   MusicRequest,
   MusicSwitch,
   SfxRequest,
@@ -64,8 +66,9 @@ function fadeOf(descriptor: Descriptor | Hint, fadeMs: number): number {
 }
 
 /**
- * Takes a fade a descriptor named only when the clock can schedule it: a finite number, 0 or more.
- * `NaN` or a negative fade would make the ramp and the stop throw inside the handler.
+ * Takes a fade a descriptor or a caller named only when the clock can schedule it: a finite number,
+ * 0 or more. `NaN` or a negative fade would make the ramp and the stop throw. The `stopSfx` handler
+ * and `app.audio.stop` both clamp through here.
  *
  * @param fade - The `fadeMs` the payload carries.
  * @param fallback - The configured fade.
@@ -75,12 +78,13 @@ function fadeOf(descriptor: Descriptor | Hint, fadeMs: number): number {
  * validFade(-5, 120); // 120
  * ```
  */
-function validFade(fade: Json | undefined, fallback: number): number {
+export function validFade(fade: Json | undefined, fallback: number): number {
   return typeof fade === "number" && Number.isFinite(fade) && fade >= 0 ? fade : fallback;
 }
 
 /**
- * Reads the key, the bus, the id and the fade out of the `sfx` descriptor `anim` builds.
+ * Reads the key, the bus, the id, the fade and the loop flag out of the `sfx` descriptor `anim`
+ * builds.
  *
  * @param descriptor - The descriptor the handler was called with.
  * @param fadeMs - The configured fade of a named sound, used when the descriptor names none.
@@ -97,7 +101,8 @@ function sfxOf(descriptor: Descriptor | Hint, fadeMs: number): SfxRequest | unde
     key,
     bus: typeof bus === "string" ? bus : DEFAULT_BUS,
     id: typeof id === "string" ? id : undefined,
-    fadeMs: fadeOf(descriptor, fadeMs)
+    fadeMs: fadeOf(descriptor, fadeMs),
+    loop: fieldOf(descriptor.payload, "loop") === true
   };
 }
 
@@ -119,82 +124,13 @@ export function musicOf(descriptor: Descriptor | Hint, fadeMs: number): MusicReq
 }
 
 /**
- * Warns about one key exactly once per run. A missing file is a mistake in the manifest, not a
- * reason to flood the log of every frame that plays the sound.
- *
- * @param ctx - Domain context of the plugin.
- * @param key - The asset key the warning is about.
- * @param event - What happened.
- */
-function warnOnce(ctx: AudioCtx, key: string, event: string): void {
-  if (ctx.state.warned.has(key)) return;
-
-  ctx.state.warned.add(key);
-  ctx.log.warn(event, { key });
-}
-
-/**
- * Decodes one key, at most once. The promise is cached before it settles, so two plays of the
- * same sound in one frame decode a single time.
- *
- * @param ctx - Domain context of the plugin.
- * @param key - Asset key of an audio file, `.mp3` or `.m4a`.
- * @returns The pending buffer, or `undefined` when the bundle carries no such file.
- */
-export function decode(ctx: AudioCtx, key: string): Promise<AudioBuffer> | undefined {
-  const state = ctx.state;
-  const cached = state.decoded.get(key);
-
-  if (cached !== undefined) return cached;
-
-  const context = state.context;
-
-  if (context === undefined) return undefined;
-
-  const asset = ctx.deps.assets.audio(key);
-
-  if (asset === undefined) {
-    warnOnce(ctx, key, "audio: no audio for key");
-
-    return undefined;
-  }
-
-  // eslint-disable-next-line unicorn/prefer-spread -- an ArrayBuffer copy: decodeAudioData detaches what it gets.
-  const pending = context.decodeAudioData(asset.bytes.slice(0));
-
-  state.decoded.set(key, pending);
-
-  return pending;
-}
-
-/**
- * Awaits the decoded buffer of one key. A file that does not decode warns once and plays nothing.
- *
- * @param ctx - Domain context of the plugin.
- * @param key - Asset key of an audio file, `.mp3` or `.m4a`.
- * @returns The buffer, or `undefined` when there is nothing to play.
- */
-async function bufferOf(ctx: AudioCtx, key: string): Promise<AudioBuffer | undefined> {
-  const pending = decode(ctx, key);
-
-  if (pending === undefined) return undefined;
-
-  try {
-    return await pending;
-  } catch {
-    warnOnce(ctx, key, "audio: the audio file did not decode");
-
-    return undefined;
-  }
-}
-
-/**
  * Plays one sound: the handler of the kind `"sfx"`. Every play is its own source, so the same key
  * twice in one frame is heard twice, and the promise resolves when the sound STARTED. The handler
  * ignores its signal: a sound that began plays to its end, unless a sound with its id or a stop
  * ends it. While a gesture's `resume()` is pending the sound waits in `pendingSfx`, one per id
  * and one per key without an id. A locked context no gesture is resuming drops it: the start
- * attempt of the unlock queues nothing.
+ * attempt of the unlock queues nothing. A loop goes through `playLoop`, and the latest request
+ * for an id wins: a sound that plays once under it forgets the loop there.
  *
  * @param ctx - Domain context of the plugin.
  * @param descriptor - The `sfx` descriptor `anim` built.
@@ -202,11 +138,25 @@ async function bufferOf(ctx: AudioCtx, key: string): Promise<AudioBuffer | undef
 export async function playSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): Promise<void> {
   const state = ctx.state;
 
-  if (state.context === undefined) return;
+  // Headless: no context, and no renewal on its way to a new one.
+  if (state.context === undefined && state.renewing === undefined) return;
 
   const request = sfxOf(descriptor, ctx.config.sfxFadeMs);
 
   if (request === undefined) return;
+
+  // A loop with no id plays once: nothing could stop it.
+  if (request.loop && request.id !== undefined) {
+    await playLoop(ctx, request, request.id);
+
+    return;
+  }
+
+  // A one-shot under a loop's id forgets the loop, unless its bus is refused and it never plays.
+  if (request.id !== undefined && isBus(state, request.bus)) state.loops.delete(request.id);
+
+  // Between the two contexts of a renewal a sound that plays once is dropped.
+  if (state.context === undefined) return;
 
   if (!state.unlocked) {
     queueWhileResuming(state, request);
@@ -246,43 +196,6 @@ export function stopNamedSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): void
 }
 
 /**
- * Plays a sound under its id: the sound that has the id fades out over the fade of this one, and
- * this one starts through its own gain once its buffer is there, unless a later sound with the id
- * or a stop took its place while it decoded. A file that is missing frees the id.
- *
- * @param ctx - Domain context of the plugin.
- * @param request - The key, the fade and the id of the sound.
- * @param sound - The id and the bus, both checked.
- * @param sound.id - The id the sound plays under.
- * @param sound.bus - The bus it goes to.
- */
-async function playNamed(
-  ctx: AudioCtx,
-  request: SfxRequest,
-  sound: { id: string; bus: Bus }
-): Promise<void> {
-  const state = ctx.state;
-  const { id, bus } = sound;
-  const entry = claimNamed(state, id, request.fadeMs / 1000);
-  const buffer = await bufferOf(ctx, request.key);
-
-  // A later sound with this id, or a stop, took its place: it starts nothing.
-  if (state.named.get(id) !== entry) return;
-
-  const context = state.context;
-  const gain = state.buses[bus].gain;
-
-  if (buffer === undefined || context === undefined || gain === undefined) {
-    state.named.delete(id);
-
-    return;
-  }
-
-  startNamed(state, context, { id, entry, buffer, bus: gain });
-  recordSound(ctx, { key: request.key, bus, kind: "sfx", id });
-}
-
-/**
  * Starts one source of a sound on its bus. `playSfx` calls it for a live play and the unlock for
  * every sound that waited for the resume. A sound with an id goes through `playNamed`.
  *
@@ -302,7 +215,9 @@ export async function playRequest(ctx: AudioCtx, request: SfxRequest): Promise<v
   }
 
   if (request.id !== undefined) {
-    await playNamed(ctx, request, { id: request.id, bus: request.bus });
+    const { key, bus, fadeMs } = request;
+
+    await playNamed(ctx, { id: request.id, key, bus, fadeMs, loop: undefined });
 
     return;
   }

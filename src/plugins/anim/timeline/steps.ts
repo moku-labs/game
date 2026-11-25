@@ -458,34 +458,48 @@ export function spawned(id: string): { spawned: string } {
  * A sound. `anim` owns the descriptor because it sits below `audio`; `audio` owns the handler,
  * and a game without `audio` plays nothing and hears no error. A sound with an `id` is named:
  * one sound plays per id, a new one with the same id fades the old one out over `fadeMs`, and
- * `stopSfx(id)` stops it. The payload carries `id` and `fadeMs` only when they are given, so a
- * sound without them stays `{ key, bus }`.
+ * `stopSfx(id)` stops it. With `loop: true` the sound loops until `stopSfx(id)` or until its scene
+ * leaves, so a loop needs an `id`: a loop without one does not compile. The payload carries `id`,
+ * `fadeMs` and `loop` only when they are given, so a sound without them stays `{ key, bus }`.
  *
  * @param key - Asset key of the sound.
- * @param options - The bus, the name and the fade.
+ * @param options - The bus, the name, the fade and the loop.
  * @param options.bus - `"sfx"` when omitted.
  * @param options.id - Name of the sound; one sound per id plays.
- * @param options.fadeMs - Fade of the sound with the same id this one replaces; `audio`'s
- *   `sfxFadeMs` when omitted.
+ * @param options.fadeMs - Fade of the sound with the same id this one replaces, and the fade-in
+ *   of a loop; `audio`'s `sfxFadeMs` when omitted.
+ * @param options.loop - `true` to loop the sound until `stopSfx(id)` or until its scene leaves;
+ *   needs an `id`.
  * @returns The descriptor, usable as a timeline step and as `fx(...)` in a node.
  * @example
  * ```ts
  * sfx("board.merge"); // { kind: "sfx", payload: { key: "board.merge", bus: "sfx" }, cosmetic: true }
  * sfx("voice.hello", { id: "voice", fadeMs: 200 });
  * // { kind: "sfx", payload: { key: "voice.hello", bus: "sfx", id: "voice", fadeMs: 200 }, cosmetic: true }
+ * sfx("rain.room", { id: "rain", loop: true });
+ * // { kind: "sfx", payload: { key: "rain.room", bus: "sfx", id: "rain", loop: true }, cosmetic: true }
  * ```
  */
 export function sfx(
   key: string,
+  options: { bus?: string; id: string; fadeMs?: number; loop: true }
+): SfxDescriptor;
+export function sfx(
+  key: string,
   options?: { bus?: string; id?: string; fadeMs?: number }
+): SfxDescriptor;
+export function sfx(
+  key: string,
+  options?: { bus?: string; id?: string; fadeMs?: number; loop?: true }
 ): SfxDescriptor {
-  const payload: { key: string; bus: string; id?: string; fadeMs?: number } = {
+  const payload: { key: string; bus: string; id?: string; fadeMs?: number; loop?: true } = {
     key,
     bus: options?.bus ?? DEFAULT_BUS
   };
 
   if (options?.id !== undefined) payload.id = options.id;
   if (options?.fadeMs !== undefined) payload.fadeMs = options.fadeMs;
+  if (options?.loop === true) payload.loop = true;
 
   return Object.freeze({
     kind: "sfx" as const,

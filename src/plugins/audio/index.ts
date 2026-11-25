@@ -1,5 +1,6 @@
 /**
- * Audio plugin — Standard tier.
+ * Audio plugin — Complex tier: one concern per file, flat (buses, unlock, renewal, named sounds,
+ * loops, decode cache, music, streaming, session, journal).
  *
  * WebAudio buses, sounds as fx descriptors, music from the scene, volumes from the player.
  * Emits no events.

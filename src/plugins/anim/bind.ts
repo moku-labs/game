@@ -26,7 +26,10 @@ export type AnimKit<Asset extends string> = {
     target: Target,
     options: { keys: readonly Asset[]; fps: number; loop?: boolean }
   ) => Step;
-  sfx: (key: Asset, options?: { bus?: string; id?: string; fadeMs?: number }) => SfxDescriptor;
+  sfx: {
+    (key: Asset, options: { bus?: string; id: string; fadeMs?: number; loop: true }): SfxDescriptor;
+    (key: Asset, options?: { bus?: string; id?: string; fadeMs?: number }): SfxDescriptor;
+  };
   play: typeof play;
   Frames: Narrowed<FramesValue, Partial<Omit<FramesValue, "keys">> & { keys?: readonly Asset[] }>;
 };
@@ -35,7 +38,9 @@ export type AnimKit<Asset extends string> = {
  * Binds `frames`, `sfx` and `Frames` to one game's asset keys. Type-only: the same functions and
  * the same component object.
  *
- * @returns The five helpers, with the asset arguments narrowed to `Asset`.
+ * @returns The `AnimKit` of this game: `defineAnimation`, `frames`, `sfx`, `play` and `Frames`, where
+ * the asset keys of `frames`, `sfx` and `Frames` are narrowed to `Asset`; `defineAnimation` and
+ * `play` are the unchanged functions.
  * @example
  * ```ts
  * const { sfx } = animFor<"board.merge">();

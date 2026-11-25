@@ -84,6 +84,7 @@ frames(target, { keys, fps, loop? })    // writes Sprite.texture, one key per fr
 spawn(id, components, { layer?, order? }) // a temporary entity, made when the step is reached
 spawned(id)                             // the target of an entity a spawn step of this timeline made
 sfx(key, { bus?, id?, fadeMs? })        // a sound; with an id one sound plays per id (see below)
+sfx(key, { id, loop: true, bus?, fadeMs? }) // a loop: plays until stopSfx(id) or its scene leaves; needs an id
 stopSfx(id, { fadeMs? })                // stops the named sound of that id
 haptic(kind)                            // sfx, stopSfx, haptic: descriptors anim owns; audio and
                                         // platform own the handlers
@@ -108,6 +109,9 @@ node, `fx.start(stopSfx("voice"))`. The hint form is `hint("stopSfx", { id: "voi
 the old one out over `fadeMs` (`audio`'s `sfxFadeMs` when omitted), and `stopSfx(id, { fadeMs? })`
 stops it. The payload carries `id` and `fadeMs` only when they are given, so `sfx("board.merge")` is
 still `{ kind: "sfx", payload: { key: "board.merge", bus: "sfx" }, cosmetic: true }`.
+`loop: true` makes the sound loop until `stopSfx(id)` or until its scene leaves, and it needs an `id`
+(a loop without one does not compile); `sfx("rain.room", { id: "rain", loop: true })` is
+`{ kind: "sfx", payload: { key: "rain.room", bus: "sfx", id: "rain", loop: true }, cosmetic: true }`.
 
 `defineGame` spreads the kit of `anim`: `defineAnimation`, `play`, and `frames`, `sfx` and the
 `Frames` component with their keys narrowed to the game's asset keys. `Frames({ keys: ["nope"] })`

@@ -5,6 +5,7 @@
  */
 import { applyGain, isBus } from "./graph";
 import { stopNamed } from "./named";
+import { validFade } from "./playback";
 import type { AudioApi, Bus, KernelSlice, SoundEntry, State } from "./types";
 
 /**
@@ -75,6 +76,6 @@ export function createAudioApi(ctx: KernelSlice): AudioApi {
     unlocked: (): boolean => state.unlocked,
     journal: (): readonly SoundEntry[] => state.journal,
     stop: (id: string, options?: { fadeMs?: number }): void =>
-      stopNamed(state, id, options?.fadeMs ?? ctx.config.sfxFadeMs)
+      stopNamed(state, id, validFade(options?.fadeMs, ctx.config.sfxFadeMs))
   };
 }

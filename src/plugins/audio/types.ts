@@ -165,7 +165,9 @@ export type StreamTrack = {
 export type RetiringTrack = { stream: StreamTrack; timer: ReturnType<typeof setTimeout> };
 
 /**
- * audio plugin config.
+ * What a game can set on the audio plugin: the start gain of each bus, the fades of music and named
+ * sounds, the volumes reader, the context factory, the journal size, the music mode and the iOS
+ * session. A game sets it through `pluginConfigs.audio`.
  *
  * @example
  * ```ts
@@ -206,12 +208,14 @@ export type Config = {
 /**
  * One sound that started: a play of an `sfx` or a music track that began. `at` is the elapsed
  * game time in milliseconds, `app.time.snapshot().elapsed` at the start. `id` is there only for
- * an `sfx` started with one.
+ * an `sfx` started with one, and `loop: true` only for an `sfx` started with `{ id, loop: true }`:
+ * a loop has one entry, at its first start, and none when the iOS renewal starts it again.
  *
  * @example
  * ```ts
  * const entry: SoundEntry = { key: "ui.click", bus: "sfx", kind: "sfx", at: 1600 };
  * const line: SoundEntry = { key: "story.line1", bus: "sfx", kind: "sfx", id: "voice", at: 2400 };
+ * const bed: SoundEntry = { key: "room-rain", bus: "sfx", kind: "sfx", id: "rain", loop: true, at: 0 };
  * ```
  */
 export type SoundEntry = {
@@ -219,6 +223,7 @@ export type SoundEntry = {
   readonly bus: Bus;
   readonly kind: "sfx" | "music";
   readonly id?: string;
+  readonly loop?: true;
   readonly at: number;
 };
 
@@ -272,7 +277,31 @@ export type NamedSound = {
 };
 
 /**
- * audio plugin state.
+ * One loop a game asked for with `sfx(key, { id, loop: true })`, kept under its id until a stop,
+ * a sound that takes the id, the leave of its scene or `onStop`. It outlives the sound itself: a
+ * locked context and an iOS renewal start it again from here, as the remembered music.
+ * `fadeMs` is its fade-in and the fade of the sound it replaced; `scene` is the scene mounted
+ * when it was asked for (`undefined`: before any scene, so only a stop ends it); `started` is set
+ * at its first real start, so a start again after a renewal writes no journal entry.
+ */
+export type LoopSound = {
+  key: string;
+  bus: Bus;
+  fadeMs: number;
+  scene: string | undefined;
+  started: boolean;
+};
+
+/**
+ * What the walk of a scene leave reads for each loop: the scene that leaves and the fade, in real
+ * milliseconds, of the loops that belong to it.
+ */
+export type LeavingScene = { scene: string; fadeMs: number };
+
+/**
+ * What the audio plugin keeps between calls: the context and its graph, the buses, the pause and
+ * unlock flags, the named sounds and the remembered loops, the decoded buffers, the music track
+ * and the journal. Owned and written only by the audio plugin.
  */
 export type State = {
   /** `undefined` means headless: no graph, no sound, every member still keeps its value. */
@@ -290,6 +319,18 @@ export type State = {
   pendingSfx: Map<string, SfxRequest>;
   /** The sound that plays, or decodes, under each id; an entry leaves when its sound ends or stops. */
   named: Map<string, NamedSound>;
+  /**
+   * The loops the game asked for, by id: kept across a locked context and an iOS renewal, which
+   * `stopAllNamed` survives, and cleared by `onStop` only.
+   */
+  loops: Map<string, LoopSound>;
+  /** The mounted scene, as the last `scenes:changed` named it; `undefined` before the first. */
+  scene: string | undefined;
+  /**
+   * The scene that leaves and the fade, written by `stopSceneLoops` before its walk of `loops`:
+   * one object for the whole run, so the walk makes nothing.
+   */
+  leaving: LeavingScene;
   /** Per key, evicted per key on `assets:bundle-unloaded` and `assets:replaced`, and when a music track stops being the one that plays. */
   decoded: Map<string, Promise<AudioBuffer>>;
   /** Asset keys that already got their one warning. */
@@ -418,9 +459,11 @@ export type AudioApi = {
 
   /**
    * The sounds that started, oldest first: every play of an `sfx` and every music track that
-   * began, at most `config.journal` of them. A sound dropped before the unlock, a missing file
-   * and a music switch to the track that already plays are not in it. Empty while
-   * `config.journal` is 0, the default, and after the app stopped.
+   * began, at most `config.journal` of them. A loop is in it once, with `loop: true`, at its first
+   * start: a request for the loop that already plays under its id and the start again after an iOS
+   * renewal add nothing. A sound dropped before the unlock, a missing file and a music switch to
+   * the track that already plays are not in it. Empty while `config.journal` is 0, the default,
+   * and after the app stopped.
    *
    * No copy and no live view: the list and its entries are never written. Every new sound replaces the plugin's list
    * with a new frozen one, so a list read earlier keeps what it held, and a caller cannot change the journal through it.
@@ -433,15 +476,19 @@ export type AudioApi = {
    * app.audio.journal();
    * // [{ key: "board.theme", bus: "music", kind: "music", at: 0 },
    * //  { key: "orders.complete", bus: "sfx", kind: "sfx", at: 1600 }]
+   *
+   * // The ward's node fired `sfx("room-rain", { id: "rain", loop: true })` at 2400.
+   * app.audio.journal().at(-1); // { key: "room-rain", bus: "sfx", kind: "sfx", id: "rain", loop: true, at: 2400 }
    * ```
    */
   journal(): readonly SoundEntry[];
 
   /**
-   * Fades out and ends the sound that plays under one id, an `sfx` started with `{ id }`. The
-   * same stop as the effect kind `stopSfx`: a sound with that id still decoding never starts, one
-   * waiting for the unlock is dropped, and an id nothing plays under changes nothing. Headless it
-   * does nothing.
+   * Fades out and ends the sound that plays under one id, an `sfx` started with `{ id }`, a loop
+   * of `{ id, loop: true }` too. The same stop as the effect kind `stopSfx`: a sound with that id
+   * still decoding never starts, one waiting for the unlock is dropped (a loop remembered while
+   * the context is locked as well), and an id nothing plays under changes nothing. A stopped loop
+   * is not started again by an iOS renewal. Headless it does nothing.
    *
    * @param id - The id the sound was started with, `"voice"` for `sfx(key, { id: "voice" })`.
    * @param options - How the sound ends.
@@ -451,13 +498,17 @@ export type AudioApi = {
    * // A test composed with `journal: 200` cuts the narrator's line before it checks the next screen.
    * app.audio.journal().at(-1); // { key: "story.line1", bus: "sfx", kind: "sfx", id: "voice", at: 0 }
    * app.audio.stop("voice", { fadeMs: 0 }); // the line ends now and stays in the journal
+   *
+   * // The rain of the ward loops until the test ends it.
+   * app.audio.stop("rain", { fadeMs: 0 }); // the loop ends now; nothing starts it again
    * ```
    */
   stop(id: string, options?: { fadeMs?: number }): void;
 };
 
 /**
- * Resolved dependency APIs.
+ * The four plugin APIs audio resolves once through `ctx.require`: `flow` for the effect handlers,
+ * `assets` for the bytes, `model` for the committed player volumes and `time` for the journal clock.
  */
 export type Deps = { flow: FlowApi; assets: AssetsApi; model: ModelApi; time: TimeApi };
 
@@ -504,9 +555,17 @@ export type AssetsReplaced = AssetsEvents["assets:replaced"];
 
 /**
  * What one play of a sound asks for: the key, the bus the sound goes to, the id it plays under
- * (`undefined`: none), and the fade in milliseconds of the sound with that id it replaces.
+ * (`undefined`: none), the fade in milliseconds of the sound with that id it replaces, and
+ * whether the payload asked for a loop with `loop: true`. Only a loop with an id loops: one with
+ * none could never be stopped, so it plays once.
  */
-export type SfxRequest = { key: string; bus: string; id: string | undefined; fadeMs: number };
+export type SfxRequest = {
+  key: string;
+  bus: string;
+  id: string | undefined;
+  fadeMs: number;
+  loop: boolean;
+};
 
 /**
  * What one music switch asks for: the key, or `null` to fade the current track out.
