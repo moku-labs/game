@@ -917,8 +917,9 @@ export type DebugApi = {
 
   /**
    * What every overlay does this frame, bottom first: its phase, its mode, its level, how many entries its range has
-   * and whether a picture holds them. The level and the landing are the engine's state of the overlay, read here. For
-   * the editor's tools page and for tests.
+   * and whether a picture holds them. The level and the landing are the engine's state of the overlay, read here. An
+   * overlay leaving whose `hudReturn` runs carries its delay, its fade and the game time counted so far. For the
+   * editor's tools page and for tests.
    *
    * @returns One report per overlay, a fresh array; `[]` with none, and while inert.
    * @example
@@ -926,6 +927,8 @@ export type DebugApi = {
    * // The shop rests over the board.
    * app.renderer.sync.debug.overlays();
    * // [{ entity: 1_048_601, label: "Shape#1048601 shop.dim:shopDimLayer", phase: "shown", mode: "freeze", level: 1, range: 2, kept: true }]
+   * // The splash, 480 ms of game time into its leave, with `hudReturn: { delayMs: 1100, fadeMs: 700 }`.
+   * app.renderer.sync.debug.overlays()[0]?.hudReturn; // { delayMs: 1100, fadeMs: 700, elapsed: 480 }
    * ```
    */
   overlays(): readonly OverlayReport[];
@@ -1966,11 +1969,18 @@ export type OverlayMode = "cover" | "freeze" | "live";
 /**
  * One overlay as `debug.overlays()` reports it: the marked entity and its view's label, its phase, its mode, its level
  * (0 to 1), how many entries the range it owns has (0 for an overlay that owns none), and whether a picture holds them.
+ * While the return of the HUD parts it hid runs (`Overlay.hudReturn`, from its first exit frame), `hudReturn` carries
+ * its delay, its fade (0 under reduced motion) and the game time counted since the leave started; absent otherwise.
  *
  * @example
  * ```ts
  * const report: OverlayReport = {
  *   entity: 1_048_601, label: "Shape#1048601 shop.dim:shopDimLayer", phase: "shown", mode: "freeze", level: 1, range: 2, kept: true
+ * };
+ * // The splash leaving, 480 ms of game time after its leave started.
+ * const leaving: OverlayReport = {
+ *   entity: 1_048_590, label: "Shape#1048590 splash", phase: "exiting", mode: "live", level: 0.5, range: 0, kept: false,
+ *   hudReturn: { delayMs: 1100, fadeMs: 700, elapsed: 480 }
  * };
  * ```
  */
@@ -1982,6 +1992,41 @@ export type OverlayReport = {
   level: number;
   range: number;
   kept: boolean;
+  /** The return of the HUD parts this overlay hid, while it runs. */
+  hudReturn?: { delayMs: number; fadeMs: number; elapsed: number };
+};
+
+/**
+ * An overlay's `hudReturn` as the step reads it: the record's own copy, made again only when a write gives the marker a
+ * new value, its times 0 or more, each key of `parts` with both times resolved. Private to the renderer.
+ */
+export type ClampedHudReturn = {
+  readonly delayMs: number;
+  readonly fadeMs: number;
+  /** The keys with their own times; `undefined` without `parts`. */
+  readonly parts: ReadonlyMap<string, ClampedReturnPart> | undefined;
+};
+
+/** The times of one key of a clamped `hudReturn`, both filled in from the overlay's when not given. */
+export type ClampedReturnPart = { readonly delayMs: number; readonly fadeMs: number };
+
+/**
+ * One return of the HUD parts in progress (F240): whose leave started it, the game time counted since, the clamped
+ * value and the `hud` taken at the leave, so it knows which keys it holds after the record is gone, and the game time
+ * it ends at. Pooled. Private to the renderer.
+ */
+export type HudReturnRun = {
+  owner: Entity;
+  label: string;
+  /** Game time since the leave started, ms: the frame deltas the render phase received. */
+  elapsed: number;
+  value: ClampedHudReturn;
+  /** The keys it holds: every key with `"none"`, the keys not listed with a list. */
+  hud: "none" | readonly string[];
+  /** Reduced motion was on at the leave: every fade is 0. */
+  reduced: boolean;
+  /** The last delay plus fade over the keys it holds, chosen at the start. */
+  endsMs: number;
 };
 
 /**
@@ -2022,6 +2067,10 @@ export type OverlayRecord = {
   seen: boolean;
   /** The event to log once the step has decided the modes: `"open"`, `"landed"` or `"leave"`. */
   news: OverlayEventDetail["what"] | undefined;
+  /** The `hudReturn` the marker carried when the copy below was made, compared by reference every frame. */
+  hudReturnRaw: OverlayValue["hudReturn"];
+  /** Its clamped copy; `undefined` without one, or when it was malformed. */
+  hudReturn: ClampedHudReturn | undefined;
 };
 
 /**
@@ -2121,6 +2170,10 @@ export type OverlayState = {
   left: boolean;
   /** Scratch of the cover test of `blurred`: made on first use from the Pixi module the renderer loaded. */
   bounds: PixiBounds | undefined;
+  /** The returns of the HUD parts in progress (F240), written in place and cut to their count; they outlive records. */
+  returns: HudReturnRun[];
+  /** The runs that ended, taken again by the next leave: a frame makes none after the first. */
+  returnPool: HudReturnRun[];
 };
 
 /**
@@ -2301,6 +2354,10 @@ export type SyncState = {
   heldViews: HeldViews;
   /** The picture of a scene being left: the running look and the engine's objects (spec 33, slice A2). */
   leave: LeaveState;
+  /** The game time of this frame, ms: `Time.delta` of the render phase, written before the overlay step (F240). */
+  frameDelta: number;
+  /** `Time.idle` of this frame: the loop is about to drop to its idle rate unless something wakes it. */
+  frameIdle: boolean;
   cleanups: Array<() => void>;
 };
 

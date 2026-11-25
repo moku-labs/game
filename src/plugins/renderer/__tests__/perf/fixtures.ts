@@ -28,6 +28,7 @@ import { WHY } from "../../kept/types";
 import { withDeps } from "../../lifecycle";
 import { commitFrame } from "../../monitor/commit";
 import { COUNT } from "../../monitor/types";
+import { stepParts } from "../../sync/overlay-look";
 import type { SyncCtx } from "../../sync/types";
 import type { PixiFilter } from "../../types";
 import { box, demandAlone } from "../demand-harness";
@@ -530,6 +531,63 @@ export async function inertPartBoard(): Promise<() => void> {
   }
 
   return () => sync.stepOverlays();
+}
+
+/** A board with a HUD return (F240): one overlay step of a frame, and the HUD parts' step alone. */
+export type ReturnBoard = { step: () => void; parts: () => void };
+
+/**
+ * A board of the HUD return (change 2026-11-25-f240-hud-return), over the real Pixi of the overlay stage: 20 views of
+ * the ward, the HUD parts `energy`, `gems` and `stars`, and an overlay with a `hudReturn` of three keys in `parts`.
+ * `"standing"`: the overlay landed, `hud: ["energy"]`, its value copied once and compared by reference every step.
+ * `"running"`: an overlay with `hud: "none"` left and is gone, its run in its delay (a billion ms), so every step counts
+ * time into it and multiplies three parts by 0. `"ended"`: the same run over, back in the pool, the parts at 1.
+ *
+ * @param kind - Which moment of a return.
+ * @returns The overlay step and the parts' step of a frame.
+ */
+export async function returnBoard(kind: "standing" | "running" | "ended"): Promise<ReturnBoard> {
+  const stage = await startOverlayStage();
+  const { mock } = stage.drawn;
+  const { sync, host, viewport, demand, kept } = mock.modules;
+
+  for (let index = 0; index < 20; index += 1) {
+    stage.view({ layer: "scene", x: (index % 5) * 200, y: Math.floor(index / 5) * 200 });
+  }
+
+  for (const [index, key] of ["energy", "gems", "stars"].entries()) {
+    stage.view({ layer: "hud", x: 100 + index * 300, extra: [HudPart({ key })] });
+  }
+
+  const parts = { energy: { fadeMs: 200 }, gems: { delayMs: 1250 }, stars: { delayMs: 1400 } };
+  const delayMs = kind === "running" ? 1_000_000_000 : 100;
+  const splash = stage.overlay(
+    { hud: kind === "standing" ? ["energy"] : "none", hudReturn: { delayMs, fadeMs: 400, parts } },
+    { order: 2 }
+  );
+
+  stage.level(splash, 1, true);
+  stage.frames(3);
+
+  const { overlay } = mock.ctx.state.sync;
+
+  if (kind !== "standing") {
+    stage.leave(splash);
+    stage.frame();
+    mock.world.ecs.despawn(splash);
+    // The "ended" run: 100 + 400 ms (stars: 1400 + 400) over at 16 ms a frame.
+    stage.frames(kind === "ended" ? 120 : 3);
+  }
+
+  const expected = { standing: [1, 0], running: [0, 1], ended: [0, 0] }[kind];
+
+  if (overlay.records.size !== expected[0] || overlay.returns.length !== expected[1]) {
+    throw new Error(`perf fixture: the ${kind} return board does not hold what it says`);
+  }
+
+  const sctx: SyncCtx = { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } };
+
+  return { step: () => sync.stepOverlays(), parts: () => stepParts(sctx) };
 }
 
 /** What an endless loop hands `loopsHeld`: what it writes that could show its view again. */

@@ -75,7 +75,9 @@ function createOverlayState(): OverlayState {
     offList: [],
     step: { fresh: false, entriesChanged: false, othersChanged: false, wholes: emptySet() },
     left: false,
-    bounds: undefined
+    bounds: undefined,
+    returns: [],
+    returnPool: []
   };
 }
 
@@ -204,6 +206,8 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     aside: createAsideQueue(),
     heldViews: { entities: [], count: 0, version: 0, reported: false },
     leave: { bodies: emptyMap(), reduced: false, warnedKinds: emptySet() },
+    frameDelta: 0,
+    frameIdle: false,
     cleanups: []
   };
 }

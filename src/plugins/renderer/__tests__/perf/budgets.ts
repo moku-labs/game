@@ -68,6 +68,17 @@ export const BUDGET = {
   // walks the overlay order and the stored key list with `includes`, no closure, no object, no string; the tap set is
   // built again only when its members change.
   hudPartsInert: 0,
+  // F240: new, measured 0 B. The overlay step of a landed overlay whose `hudReturn` has three keys in `parts`: one
+  // reference compared a step, the copy made only on a new value. Bench (`hud-return.bench.ts`, Node 24.21 on
+  // macOS): 1.46 µs a step, beside 1.35 µs for the resting shop of `hudPartsFaded`.
+  hudReturnStanding: 0,
+  // F240: new, measured 0 B. A run in progress after its record is gone, three HUD parts held: the frame's delta added
+  // in place, one indexed walk of the runs per part, the clock woken only in a frame it marks idle. Bench: 0.76 µs a
+  // step; `stepParts` alone 0.68 µs with the run, 0.61 µs without one.
+  hudReturnRunning: 0,
+  // F240: new, measured 0 B. Three HUD parts after the run ended, its object back in the pool: one length read per
+  // part. Bench: 0.70 µs a step.
+  hudReturnEnded: 0,
   // A26 heap profile: before 22 400 B (a new SDF shader made at every layout of a text and dropped by Pixi: its bind
   // groups, its resource accessors, its uniform group); then 2 831 B with the text's own shader kept. S: the text gets
   // no shader at all; measured 2 767 B, all of it Pixi laying the label out again (its graphics context's

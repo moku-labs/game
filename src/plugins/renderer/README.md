@@ -37,7 +37,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `NineSlice({ texture, width, height, alpha, tint, debug, clip, hollow?, blend? })` | `"", 0, 0, 1, 0xffffff, false, false`; `hollow` and `blend` absent (read as `false` and `"normal"`) | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. `hollow: true` draws the rim alone, the eight border cells and never the centre (see "Hollow nine-slices"); the hit box stays the whole panel. `blend: "add"` or `"screen"` lays the panel, filled or hollow, over what is under it (see "Blend"). |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
-| `Overlay({ dim, dimColor, cover, hud, hudInert, fade, hold })` | `0, 0x000000, "none", "all", false, 250, false` | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep, or with `hud: "under"` draws the whole HUD under its dim. `hold: true` holds the endless loops under it while it stands. See "Overlays and the HUD". |
+| `Overlay({ dim, dimColor, cover, hud, hudInert, fade, hold, hudReturn? })` | `0, 0x000000, "none", "all", false, 250, false`, `hudReturn` absent | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep, or with `hud: "under"` draws the whole HUD under its dim. `hold: true` holds the endless loops under it while it stands. `hudReturn: { delayMs, fadeMs, parts? }` brings the parts it hid back on their own clock after it leaves. See "Overlays and the HUD". |
 | `HudPart({ key })` | `""` | A view of the HUD layer an overlay keeps shown or lets fade, by `key`. |
 | `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip, sweep?, cap? })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false`; `sweep` and `cap` absent (an arc reads them as `1` and `"round"`, `arcDefaults`) | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. With `kind: "arc"` a stroke on the circle inscribed in the box, `min(w, h) − strokeWidth` across and centred, so the stroke stays inside the box: from 12 o'clock clockwise over `sweep` of the circle (clamped to 0..1; 0 draws nothing and leaves the build, 1 is a closed ring with no ends), ended by `cap` (`"round"` or `"butt"`), in `stroke`, `strokeWidth` and `alpha`; `sweep` and `cap` are optional: only an arc reads them; a rectangle or a triangle ignores them. It is stroked in segments as many as its angle needs (48 for a ring). An arc draws no fill and ignores `radius` and `dash`; its `clip` masks the children to its box. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape and the entity's children (see the alpha rule under "Layers, sort and lift"). `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. The path is built again only when a field it is drawn from changed: a still arc costs nothing a frame, a new `sweep` builds it once, a new `fill` does not build it. Motions tween only the numeric fields (`sweep` among them), never `kind` or `cap`. |
 
@@ -222,7 +222,7 @@ internal markup: select them by nothing, set the properties instead.
 | `fonts.installed(key)` | Whether that font key is installed in this application. |
 | `displayOf(entity)` | The Pixi object of the entity, for debugging. |
 | `loopsHeld(entity, reveals?)` | The seam of `anim`: whether an endless loop of the entity writes nothing now: its view lies under an opaque cover or in a blurred kept picture of an overlay, or nobody sees it (it or a view above it is at alpha 0, or it is a leaf wholly off the screen). `reveals` says what the loop writes that could show the view again (`"alpha"`, `"place"`, `"both"`): such a loop is not held for its own alpha 0 or for being off the screen. Its clock runs on. Inert, and without a view: `false`. See "What is not drawn". |
-| `debug.overlays()` | Every overlay, bottom first: `{ entity, label, phase, mode, level, range, kept }`, a fresh array; `[]` with none. |
+| `debug.overlays()` | Every overlay, bottom first: `{ entity, label, phase, mode, level, range, kept, hudReturn? }`, a fresh array; `[]` with none. `hudReturn: { delayMs, fadeMs, elapsed }` is on the line of an overlay whose return of the HUD runs (from its first exit frame until its record goes). |
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.overdraw(on)` | Dev and debug builds: draws every frame as the overdraw heat map (see "Overdraw heat map"); off draws the game again from the next frame. Elsewhere the switch stays off. |
 | `debug.why()` | Agent builds: why every view with an enabled filter is drawn as it is, in draw order: `{ view, mode, reason, calmIn, retake }`, a fresh array, built when called. Every other build, and while inert: a frozen `[]`. See "Why a view is drawn live". |
@@ -1448,7 +1448,7 @@ the same flush.
 ## Overlays and the HUD
 
 A game marks the view an overlay is drawn from with `Overlay({ dim, dimColor, cover, hud, hudInert, fade, hold })`
-in its `components`, and tags the views of its HUD with `HudPart({ key })`. A scene declares its HUD
+(and the optional `hudReturn`) in its `components`, and tags the views of its HUD with `HudPart({ key })`. A scene declares its HUD
 layer with `{ above: "overlays" }` (`scenes`). `Overlay`, `HudPart` and `OverlayLevel` are engine
 component names: a game component of the same name is the kernel's duplicate-name error. Only an
 element `ui` owns is honoured.
@@ -1548,6 +1548,35 @@ as a fading part is not. The set changes only when its members change; the step 
 A press already down on a part when the overlay arrives is not cancelled, as for a part that starts to fade: the
 part keeps its `Pressed`, and the release sends its intent (the release does no hit test).
 
+**The HUD's own return (`hudReturn`, F240).** Without it, the parts an overlay hid come back with its own leave, as
+its level falls. With it, they come back on a clock of their own, counted from the overlay's first exit frame:
+
+```tsx
+// The splash fades out over 800 ms; the pills: none at 800 ms, half at 1450 ms, all at 1800 ms.
+<stack key="splash" components={[Overlay({ cover: "opaque", hud: "none", hudReturn: { delayMs: 1100, fadeMs: 700 } })]} />
+// One pill after the other, each over 400 ms: energy at 1100, gems at 1250, stars at 1400.
+Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: { delayMs: 1250 }, stars: { delayMs: 1400 } } } })
+```
+
+- **Which parts.** Only the parts this overlay hid wait: every part with `hud: "none"`, the parts not in the list
+  with a list. `"all"` and `"under"` hide none, and start no return.
+- **The clock.** Game time: the frame deltas the render phase receives, as the overlay's own `fade` (a `ui` tween)
+  counts. A part's return is 0 until its delay, then rises linearly to 1 over its fade; a fade of 0 shows it at
+  once. A paused game holds it, `time.setScale(0.5)` takes it twice as long. A key of `parts` takes its own
+  `delayMs` or `fadeMs`; a key not listed takes the overlay's, and a key the overlay keeps changes nothing.
+- **Together with the overlay.** A part is drawn at the overlays' factor times every return in progress: while the
+  splash still leaves, both hold the pill down. An overlay opened during a return hides the parts as usual and the
+  return runs on under it; once that one is gone, a part is drawn at the return's factor (1 when it is over). Two
+  returns that hid the same part multiply. A part below 1 takes no tap, also with no overlay open.
+- **Its end.** The return outlives the overlay's record and ends at the last delay plus fade over the parts it holds,
+  chosen when it starts. It ends at once when the same overlay shows again (its leave cancelled), and on new layers
+  (a scene change). An overlay removed with no exit frame starts none.
+- **Reduced motion.** On when the leave starts (`sync.leave.setReducedMotion`): the delay is kept, the fade is cut.
+- **Cost.** One reference compare a frame for the value (it is copied and clamped only when a write gives a new one);
+  per part per frame one walk of the returns in progress by index, normally none or one; the returns are pooled, so
+  a frame allocates nothing (`__tests__/perf/hud-return.perf.ts`). A delay draws no frame while nothing changes; in a
+  frame the clock marks idle, a return in progress wakes it, so the loop never drops to its idle rate mid-return.
+
 **The HUD under the veil (`hud: "under"`).** `Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })`
 draws the whole HUD layer under the overlay's own dim, dimmed with everything else, every part kept
 at 1. The engine attaches the HUD layer container to one Pixi `RenderLayer` the overlay owns, placed
@@ -1585,13 +1614,17 @@ hit as before.
 `renderer:overlay-above-hud` (an overlay in or above the HUD layer), `renderer:hud-part-outside` (a
 `HudPart` outside the HUD layer), `renderer:hud-inert-unused` (`hudInert: true` with `hud: "none"` or
 `"under"`, kept and without effect), `renderer:overlay-value` (a value out of range, clamped; a `hold` or a
-`hudInert` that is no boolean reads as `false`; a value stored without `hudInert` is quiet). A refused
+`hudInert` that is no boolean reads as `false`; a value stored without `hudInert` is quiet),
+`renderer:overlay-hud-return-ignored` (a `hudReturn` that is no object of finite `delayMs` and `fadeMs`, or whose
+`parts` hold a value that is not, is read as absent; a negative time is clamped to 0 quietly). A refused
 picture logs `renderer:overlay-live` at debug level and draws the range live. An agent build writes
 the `overlay` event line (`OverlayEventDetail`: `what` ∈ `open`, `landed`, `leave`, `gone`, `live`,
 `kept`).
 
 `app.renderer.sync.debug.overlays()` reports every overlay, bottom first:
-`[{ entity, label, phase: "shown", mode: "freeze", level: 1, range: 2, kept: true }]`.
+`[{ entity, label, phase: "shown", mode: "freeze", level: 1, range: 2, kept: true }]`. The line of an overlay whose
+HUD return runs carries `hudReturn: { delayMs: 1100, fadeMs: 700, elapsed: 480 }` (its fade 0 under reduced motion);
+a return whose record is gone is in no line.
 
 ## Layers, sort and lift
 

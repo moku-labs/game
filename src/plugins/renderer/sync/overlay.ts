@@ -8,6 +8,14 @@ import { HudPart, Overlay, OverlayLevel, type OverlayValue } from "../components
 import type { OverlayEventDetail, PixiContainer, PixiModule } from "../types";
 import { dropUnder, dropUnders, stepDims, stepHold, stepParts } from "./overlay-look";
 import { clearRange, rangeHolds, stepRange } from "./overlay-range";
+import {
+  clampedReturn,
+  endReturnOf,
+  endReturns,
+  runOf,
+  startReturn,
+  stepReturns
+} from "./overlay-return";
 import { isLeaving, parentOf } from "./pose";
 import type {
   ActiveRange,
@@ -126,6 +134,44 @@ function clampInto(
 }
 
 /**
+ * The return of the HUD parts of one overlay (F240): its `hudReturn` copied again when the marker carries a new value
+ * (one malformed is absent, warned once), a run started at its first exit frame or when it is first seen leaving, and
+ * its run ended when it shows again.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param record - The overlay, its phase and its value read this frame.
+ * @param raw - The marker as the entity carries it.
+ * @param isNew - The record was made this frame.
+ */
+function seeReturn(
+  sctx: SyncCtx,
+  record: OverlayRecord,
+  raw: Readonly<OverlayValue>,
+  isNew: boolean
+): void {
+  const state = sctx.ctx.state.sync;
+
+  // per frame: one reference compared; a write of the marker gives a new value, and only then is it copied.
+  if (raw.hudReturn !== record.hudReturnRaw) {
+    record.hudReturnRaw = raw.hudReturn;
+    record.hudReturn = clampedReturn(raw.hudReturn);
+
+    if (raw.hudReturn !== undefined && record.hudReturn === undefined) {
+      warnOnce(sctx, "renderer:overlay-hud-return-ignored", record.entity, {});
+    }
+  }
+
+  if (record.phase !== "exiting") {
+    // The leave was cancelled: the overlay shows again, and its parts follow its level.
+    if (state.overlay.returns.length > 0) endReturnOf(state.overlay, record.entity);
+
+    return;
+  }
+
+  if (isNew || record.turned === "exiting") startReturn(state.overlay, record, state.leave.reduced);
+}
+
+/**
  * The root of an entity's `Parent` chain, depth-bounded.
  *
  * @param sctx - Domain context of the sync module.
@@ -225,7 +271,9 @@ function createRecord(
     under: undefined,
     sized: false,
     seen: false,
-    news: "open"
+    news: "open",
+    hudReturnRaw: undefined,
+    hudReturn: undefined
   };
 }
 
@@ -311,6 +359,7 @@ function seeOverlay(sctx: SyncCtx, entity: Entity): void {
   record.phase = phase;
   record.seen = true;
   clampInto(sctx, entity, record.value, raw);
+  seeReturn(sctx, record, raw, known === undefined);
 }
 
 /**
@@ -501,7 +550,8 @@ function ownedRange(overlay: OverlayState, record: OverlayRecord): ActiveRange |
 }
 
 /**
- * Tells whether the overlay step has nothing to do: no marked entity, no HUD part, no record and no range held.
+ * Tells whether the overlay step has nothing to do: no marked entity, no HUD part, no record, no range held and no
+ * return of the HUD in progress.
  *
  * @param overlay - The overlay state.
  * @returns True when the step can return at once.
@@ -511,7 +561,8 @@ function overlaysIdle(overlay: OverlayState): boolean {
     overlay.entities.size === 0 &&
     overlay.parts.size === 0 &&
     overlay.records.size === 0 &&
-    overlay.active === undefined
+    overlay.active === undefined &&
+    overlay.returns.length === 0
   );
 }
 
@@ -538,7 +589,12 @@ export function stepOverlays(sctx: SyncCtx): void {
     clearRange(sctx);
     // New layers: the HUD is let go and every render layer made again where the records hang now (U5).
     dropUnders(sctx);
+    // The HUD of the new scene waits for no return of the old one (F240).
+    endReturns(overlay);
   }
+
+  // Before the overlays are seen: a run a leave starts this frame counts from 0.
+  if (overlay.returns.length > 0) stepReturns(sctx);
 
   for (const record of overlay.records.values()) record.seen = false;
   for (const entity of overlay.entities) seeOverlay(sctx, entity);
@@ -586,8 +642,8 @@ export function overlayReports(sctx: SyncCtx): readonly OverlayReport[] {
 
   return overlay.order.map(record => {
     const owned = ownedRange(overlay, record);
-
-    return {
+    const run = runOf(overlay, record.entity);
+    const report: OverlayReport = {
       entity: record.entity,
       label: record.label,
       phase: record.phase,
@@ -596,6 +652,16 @@ export function overlayReports(sctx: SyncCtx): readonly OverlayReport[] {
       range: owned?.entries.length ?? 0,
       kept: owned !== undefined && sctx.deps.kept.kept(record.entity)
     };
+
+    if (run !== undefined) {
+      report.hudReturn = {
+        delayMs: run.value.delayMs,
+        fadeMs: run.reduced ? 0 : run.value.fadeMs,
+        elapsed: run.elapsed
+      };
+    }
+
+    return report;
   });
 }
 
