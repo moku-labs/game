@@ -376,7 +376,7 @@ export function initAnim(ctx: KernelSlice): void {
  *
  * @param actx - Domain context of the anim plugin.
  */
-function sampleBornLive(actx: AnimCtx): void {
+export function sampleBornLive(actx: AnimCtx): void {
   if (actx.deps.world.ecs.mode() === "live") sampleBorn(actx);
 }
 

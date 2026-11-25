@@ -6,6 +6,8 @@ import {
   colourTracksFixture,
   heldLoopsFixture,
   partialTracksFixture,
+  sampledStepFixture,
+  sampleIdleFixture,
   tracksFixture
 } from "./fixtures";
 
@@ -30,9 +32,21 @@ describe("anim tracks: heap bytes per frame step", () => {
     expect(alloc(partialTracksFixture())).toBeLessThanOrEqual(BUDGET.animTracksPartial + NOISE);
   });
 
-  // Bug: the pass before the draw (F241) walks or copies the track table in a frame where no track was born.
-  it("writes the first samples of no track born since the step, over 50 running ones, and allocates nothing", () => {
+  // Bug: the system anim.sample (F241), which runs every frame in every mode, makes an object on a frame where
+  // nothing animates, or walks or copies the track table on a frame where no track was born.
+  it("runs anim.sample over no track and allocates nothing", () => {
+    expect(alloc(sampleIdleFixture(), IDLE_CALLS)).toBeLessThanOrEqual(
+      BUDGET.animSampleIdle + NOISE
+    );
+  });
+
+  it("runs anim.sample over 50 running tracks, none born, and allocates nothing", () => {
     expect(alloc(bornRestFixture(), IDLE_CALLS)).toBeLessThanOrEqual(BUDGET.animBornRest + NOISE);
+  });
+
+  // Bug: anim.sample adds bytes to a frame whose tracks run: the frame costs more than its step.
+  it("adds nothing to the frame step of 50 running tracks", () => {
+    expect(alloc(sampledStepFixture())).toBeLessThanOrEqual(BUDGET.animTracks + NOISE);
   });
 
   it("runs 50 tint tweens mixed per channel, keeping only the numbers that cross into world", () => {

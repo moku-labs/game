@@ -7,7 +7,7 @@ import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { easeCell } from "../../../world/projection/easing";
 import { AnimPlayer } from "../../components";
-import { createRuntime } from "../../lifecycle";
+import { createRuntime, sampleBornLive } from "../../lifecycle";
 import { advanceTimelines, startTimeline } from "../../timeline/play";
 import {
   defineAnimation,
@@ -18,7 +18,7 @@ import {
   use,
   wait
 } from "../../timeline/steps";
-import { advanceTracks, beginFrame, sampleBorn, startTrack } from "../../tween/advance";
+import { advanceTracks, beginFrame, startTrack } from "../../tween/advance";
 import { cubicBezier } from "../../tween/bezier";
 import { createDriver } from "../../tween/driver";
 import type { Target } from "../../types";
@@ -138,10 +138,21 @@ export function tracksFixture(): () => void {
 }
 
 /**
- * The pass before the draw over a table of 50 running tracks, none born since the step (F241): the cost every frame
- * pays for it.
+ * The run of the world system `anim.sample` (F241) over an empty track table: what a frame with nothing animating pays.
  *
- * @returns The pass.
+ * @returns One run of the system.
+ */
+export function sampleIdleFixture(): () => void {
+  const mock = createMockAnim();
+
+  return warmed((): void => sampleBornLive(mock.actx));
+}
+
+/**
+ * The run of the world system `anim.sample` (F241) over a table of 50 running tracks, none born since the step: the
+ * cost of the system in a frame where views move.
+ *
+ * @returns One run of the system.
  */
 export function bornRestFixture(): () => void {
   const mock = createMockAnim();
@@ -156,7 +167,40 @@ export function bornRestFixture(): () => void {
   beginFrame(mock.actx);
   advanceTracks(mock.actx, FRAME_MS);
 
-  return warmed((): void => sampleBorn(mock.actx));
+  return warmed((): void => sampleBornLive(mock.actx));
+}
+
+/**
+ * The frame step of `tracksFixture`'s 50 running tracks followed by the run of `anim.sample` (F241): the frame's
+ * allocation is the step's alone.
+ *
+ * @returns One frame step and the system's run.
+ */
+export function sampledStepFixture(): () => void {
+  const mock = createMockAnim();
+  const driver = createDriver(mock.actx);
+
+  for (let index = 0; index < TRACKS; index++) {
+    const entity = spawnTestEntity(mock, [Transform({ x: index, y: index })]);
+
+    if (index % 2 === 0) {
+      driver.track(
+        entity,
+        Transform,
+        { x: 500, y: 300 },
+        { ms: TWEEN_MS, ease: "inOut" },
+        nothingMuted
+      );
+    } else {
+      startBob(mock, entity);
+    }
+  }
+
+  return warmed((): void => {
+    beginFrame(mock.actx);
+    advanceTracks(mock.actx, FRAME_MS);
+    sampleBornLive(mock.actx);
+  });
 }
 
 /**
