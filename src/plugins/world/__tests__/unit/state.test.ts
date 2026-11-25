@@ -78,7 +78,8 @@ describe("createWorldState", () => {
       plan: { names: [], written: [] },
       stores: [],
       scenes: undefined,
-      skipped: false
+      skipped: false,
+      entry: -1
     });
     first.projection.hints.push({ kind: "merged", hint: true });
 

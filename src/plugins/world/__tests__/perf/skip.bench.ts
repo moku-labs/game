@@ -1,6 +1,11 @@
 import { bench, describe } from "vitest";
 import { BENCH_OPTIONS } from "../../../../../tests/perf/alloc";
-import { emptyQueryFixture, sceneSkipFixture, skipCheckFixture } from "./fixtures";
+import {
+  emptyQueryFixture,
+  sceneEntryFixture,
+  sceneSkipFixture,
+  skipCheckFixture
+} from "./fixtures";
 
 describe("skipped systems", () => {
   bench(
@@ -21,6 +26,11 @@ describe("skipped systems", () => {
   bench(
     "frame, 40 systems that pass the check (two stores, no scenes)",
     skipCheckFixture(false).frame,
+    BENCH_OPTIONS
+  );
+  bench(
+    "frame, a scene switch and 40 systems told entered",
+    sceneEntryFixture().frame,
     BENCH_OPTIONS
   );
 });

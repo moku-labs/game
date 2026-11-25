@@ -822,6 +822,49 @@ export function sceneSkipFixture(): SkipFrame {
   return { frame: () => runFrame(ecs, time), runs: (): number => counted.runs };
 }
 
+/**
+ * Forty systems of phase `animate` without a query, half on the ward and half on the board, and
+ * an entity that carries `Exiting`, so both scenes stay leaving: every frame switches the mounted
+ * scene, and each system is told `entered` on every second frame (F243).
+ *
+ * @returns One frame (the switch, then the four phases and the clear), and how often a system
+ *   was told it entered.
+ */
+export function sceneEntryFixture(): SkipFrame {
+  const world = createMockWorld();
+  const { ecs } = stableModules(world);
+  const counted = { runs: 0 };
+  const scenes = ["ward", "board"] as const;
+  let turn = 0;
+
+  ecs.spawn(OWNER, [Exiting()]);
+
+  for (let index = 0; index < SYSTEMS; index += 1) {
+    ecs.system(
+      system({
+        name: `perf.entry${index}`,
+        phase: "animate",
+        query: [],
+        scenes: [scenes[index % 2] ?? "ward"],
+        run: (_rows, { entered }) => {
+          if (entered) counted.runs += 1;
+        }
+      })
+    );
+  }
+
+  const time = frameTime();
+
+  return {
+    frame: (): void => {
+      turn = 1 - turn;
+      ecs.setScene(scenes[turn] ?? "ward");
+      runFrame(ecs, time);
+    },
+    runs: (): number => counted.runs
+  };
+}
+
 /** Calls before a measure, so a tier-up of V8 never falls inside one of `alloc`'s windows. */
 const SETTLE = 30_000;
 

@@ -15,6 +15,7 @@ import type {
   EcsState,
   PhaseContext,
   ResourceType,
+  SceneState,
   SystemContext,
   SystemEntry,
   WorldPhase
@@ -229,6 +230,7 @@ export function registerSystem(
     stores: storeSlots(plan.names.length),
     scenes: definition.scenes === undefined ? undefined : [...definition.scenes],
     skipped: false,
+    entry: -1,
     hidesAside,
     walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan, hidesAside)
   };
@@ -269,7 +271,8 @@ function createPhaseContext(
       resourceValue(state, resourceType),
     snapshot,
     time,
-    resumed: false
+    resumed: false,
+    entered: false
   };
 
   state.phaseContext = context;
@@ -304,14 +307,37 @@ function phaseContextOf(ctx: WorldCtx, world: EcsApi, time: Readonly<Time>): Pha
 }
 
 /**
+ * Tells whether a system that runs now meets an entry of its scene it was not told of: the mounted
+ * scene is one of its `scenes` (any scene without them) and changed since its last entry. Marks the
+ * entry told. Two reads and a compare: no walk while its scene is mounted and was told.
+ *
+ * @param scene - The scene state.
+ * @param entry - The system, which runs in this phase.
+ * @returns True on its first run after the entry.
+ */
+function entersScene(scene: SceneState, entry: SystemEntry): boolean {
+  if (entry.entry === scene.mounts) return false;
+
+  const scenes = entry.scenes;
+
+  if (scenes !== undefined && (scene.mounted === undefined || !scenes.includes(scene.mounted))) {
+    return false;
+  }
+
+  entry.entry = scene.mounts;
+
+  return true;
+}
+
+/**
  * Tells whether a system runs in this phase: one of its `scenes` is mounted or leaving, and no
  * term of its query has an empty store. A skipped system remembers it; one that runs is told in
- * `resumed` whether its last chance was skipped. No walk, no mark and no clock read happen for a
+ * `resumed` whether its last chance was skipped and `entered` whether its scene was mounted since. No walk, no mark and no clock read happen for a
  * skipped system: the check comes before all three.
  *
  * @param state - The ecs branch of the plugin state.
  * @param entry - The system.
- * @param context - What its `run` receives; `resumed` is written here.
+ * @param context - What its `run` receives; `resumed` and `entered` are written here.
  * @returns True when the system runs.
  */
 function wakes(state: EcsState, entry: SystemEntry, context: PhaseContext): boolean {
@@ -325,6 +351,7 @@ function wakes(state: EcsState, entry: SystemEntry, context: PhaseContext): bool
 
   context.resumed = entry.skipped;
   entry.skipped = false;
+  context.entered = entersScene(state.scene, entry);
 
   return true;
 }

@@ -657,6 +657,28 @@ inside a system read the build's entities as they are.
 and false on every other run. `world.changed()` holds this frame's changes only, so a system that
 keeps in a resource what it drew, or what it saw last, starts over from the components then.
 
+`ctx.entered` is true on the first run after the mounted scene became one of the system's `scenes`
+(any scene for a system without `scenes`), and on its very first run. Every entry counts, also a
+return while the scene still leaves: the system ran through the leave, so `resumed` stays false,
+and `entered` is what tells it. It is false on every other run, and on the runs while its scene only
+leaves. A scene's leave ends the named loops asked while it was mounted (audio README), so a system
+that keeps a loop playing asks for it again when `entered` is true. One counter and one compare per
+run, 0 B (`__tests__/perf/skip.perf.ts`).
+
+```ts
+// The ward leaves into a memory and comes back 300 ms later: the leave ended the rain, and the
+// first run after the return asks for it again. A slow return is an entry the same way.
+export const rainBed = system({
+  name: "location.rainBed",
+  phase: "input",
+  query: [],
+  scenes: ["ward"],
+  run: (_rows, { res, entered }) => {
+    if (entered) res(AnimPlayer).play(rainStart, {});
+  }
+});
+```
+
 The rules are the same for every system: the ones a feature lists in `systems`, the ones
 `ecs.system` registers, the engine's own. Both read the world and the scene the flow mounted, never
 a clock or the renderer, so two runs of one session run the same systems in every phase. A system
@@ -696,6 +718,7 @@ out of its query:
 | walks its rows and does nothing else | sleeps while it has no entity: nothing on screen changes | as it is |
 | does frame work besides its rows: follows a hover, ends a press or a drop when the finger left, resets a resource when its last entity left, steps what outlives its entities | stops doing it once its query is empty | `query: []` with `scenes`, the rows read inside with `world.query()`; or a query on a component that is there whenever the work is |
 | remembers in a resource what it saw last (a cue, a cache of what it drew) | misses what happened while it slept | starts over when `ctx.resumed` is true |
+| keeps a named loop of its scene playing | is silent after a return: the leave ended the loop | asks for the loop again when `ctx.entered` is true |
 | works on a component every screen has (`Sprite`, `Transform`) | never sleeps | add `scenes` |
 
 ```ts

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET, NOISE_BYTES } from "./budgets";
-import { emptyQueryFixture, sceneSkipFixture, settled, skipCheckFixture } from "./fixtures";
+import {
+  emptyQueryFixture,
+  sceneEntryFixture,
+  sceneSkipFixture,
+  settled,
+  skipCheckFixture
+} from "./fixtures";
 
 describe("skipped systems: heap per frame", () => {
   // Bug caught: a system whose query has no entity still runs, walks its first store or allocates,
@@ -37,5 +43,16 @@ describe("skipped systems: heap per frame", () => {
     await annotate(`skip check, 40 systems that run: ${bytes} B a frame`);
     expect(fixture.runs()).toBeGreaterThan(0);
     expect(bytes).toBeLessThanOrEqual(BUDGET.skipCheck + NOISE_BYTES);
+  });
+
+  // Bug caught (F243): telling a system it entered its scene makes an object, a closure or an
+  // array per switch or per system.
+  it("a switch every frame that tells 40 systems entered keeps nothing", async ({ annotate }) => {
+    const fixture = sceneEntryFixture();
+    const bytes = alloc(settled(fixture.frame), 1000);
+
+    await annotate(`scene entry, 40 systems, a switch a frame: ${bytes} B a frame`);
+    expect(fixture.runs()).toBeGreaterThan(0);
+    expect(bytes).toBeLessThanOrEqual(BUDGET.sceneEntry + NOISE_BYTES);
   });
 });
