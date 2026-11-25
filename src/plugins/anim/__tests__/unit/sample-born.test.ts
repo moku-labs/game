@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Transform } from "../../../renderer/components";
+import type { TrackOptions } from "../../../world/projection/types";
 import { advanceTracks, beginFrame, sampleBorn, startTrack } from "../../tween/advance";
 import { startStepTrack } from "../../tween/driver";
 import { createMockAnim, spawnTestEntity } from "./mock-anim";
@@ -21,6 +22,49 @@ const WALK = {
     { at: 1, ease: (t: number) => t, to: { y: 0 } }
   ]
 } as const;
+
+/** A walk of the way back from 0 to the settled 100: an offset of -100 that comes home over 600 ms. */
+const BACK = {
+  ms: 600,
+  additive: true,
+  segments: [
+    { at: 0, ease: (t: number) => t, to: { y: -100 } },
+    { at: 1, ease: (t: number) => t, to: { y: 0 } }
+  ]
+} as const;
+
+/** A settle of the field to 100 that the next step lands: 0 ms, waiting 1 ms. */
+const SETTLE = { ms: 0, delayMs: 1 } as const;
+
+/**
+ * Starts an absolute owner to 100 and an additive walk on `y` after the step, as a change hook does, then draws two
+ * frames.
+ *
+ * @param owner - The options of the absolute owner.
+ * @param walk - The options of the additive walk.
+ * @param ownerFirst - Whether the owner starts before the walk.
+ * @returns The field after the pass of the born frame and after the next frame.
+ */
+function bornOverOwner(owner: TrackOptions, walk: TrackOptions, ownerFirst: boolean): number[] {
+  const mock = createMockAnim();
+  const entity = spawnTestEntity(mock, [Transform({ x: 0, y: 0 })]);
+  const drawn: number[] = [];
+
+  beginFrame(mock.actx);
+  advanceTracks(mock.actx, 16);
+  if (ownerFirst) startTrack(mock.actx, entity, Transform, { y: 100 }, owner, open);
+  startTrack(mock.actx, entity, Transform, { y: 0 }, walk, open);
+  if (!ownerFirst) startTrack(mock.actx, entity, Transform, { y: 100 }, owner, open);
+  sampleBorn(mock.actx);
+  drawn.push(mock.world.ecs.get(entity, Transform)?.y ?? Number.NaN);
+
+  beginFrame(mock.actx);
+  advanceTracks(mock.actx, 16);
+  sampleBorn(mock.actx);
+  drawn.push(mock.world.ecs.get(entity, Transform)?.y ?? Number.NaN);
+
+  return drawn;
+}
 
 describe("anim sampleBorn", () => {
   // Bug: the walk stands at rest in the frame it is born; or the pass hands it a delta, so the
@@ -138,5 +182,22 @@ describe("anim sampleBorn", () => {
 
     expect(track.ended).toBe(true);
     expect(x()).toBe(587);
+  });
+
+  // Bug (F241 regression, the game's xp ring): a change hook settles a field with a 0 ms tween that waits 1 ms and starts
+  // an additive walk of the way back over it. The pass wrote the walk's start offset over the old base, so the commit
+  // frame drew old + offset (a sweep of -1/3) instead of where the field stood; the step writes the two together.
+  it("leaves an additive walk to the step while its field waits for a settle tween, in either start order", () => {
+    const next = -100 + (100 * 16) / 600 + 100;
+
+    expect(bornOverOwner(SETTLE, BACK, true)).toEqual([0, next]);
+    expect(bornOverOwner(SETTLE, BACK, false)).toEqual([0, next]);
+  });
+
+  // Bug: an owner with a length starts from the stored value, so its base is right now; skipping the walk there stood
+  // the view one frame at rest, the F241 blink again.
+  it("samples an additive walk over a born owner that has a length, in either start order", () => {
+    expect(bornOverOwner({ ms: 300 }, WALK, true)[0]).toBe(300);
+    expect(bornOverOwner({ ms: 300 }, WALK, false)[0]).toBe(300);
   });
 });

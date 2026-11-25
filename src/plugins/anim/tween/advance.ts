@@ -1116,7 +1116,8 @@ export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
  * first, so the view stood one frame at rest. A walk that jumps to its start offset stands there from the frame the
  * view is first drawn. The additive ones go first, as in the step. A track with a length of 0, one a timeline drives,
  * one that began or one still in its delay writes nothing here; the next step advances each from where it stands, so
- * no track runs a frame early.
+ * no track runs a frame early. Nor does an additive track over a field a 0 ms owner has not landed yet: its base is not
+ * written yet, and the step writes base and offset in one frame.
  *
  * @param actx - Domain context of the anim plugin.
  */
@@ -1128,7 +1129,7 @@ export function sampleBorn(actx: AnimCtx): void {
   for (let index = from; index < list.length; index++) {
     const track = list[index];
 
-    if (track?.additive && startsUnsampled(track)) advanceTrack(actx, track, 0);
+    if (track?.additive && samplesBeforeDraw(actx, track)) advanceTrack(actx, track, 0);
   }
 
   for (let index = from; index < list.length; index++) {
@@ -1153,6 +1154,41 @@ function startsUnsampled(track: Track): boolean {
   return (
     !track.ended && !track.driven && !track.begun && track.ms > 0 && (track.clock[0] ?? 0) === 0
   );
+}
+
+/**
+ * Tells whether a born additive track writes its first sample before the draw: it starts unsampled and no field it
+ * adds to waits for a jump of its base.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - An additive track born since the step.
+ * @returns True when `sampleBorn` writes it.
+ */
+function samplesBeforeDraw(actx: AnimCtx, track: Track): boolean {
+  return startsUnsampled(track) && !waitsForBase(actx, track);
+}
+
+/**
+ * Tells whether an additive track adds to a field whose absolute owner jumps it when the step lands it: one of 0 ms
+ * that has not begun, a settle tween in its delay. The base under the offset is not written yet, so the offset is
+ * left to the step, which writes the two together; written now, the frame would draw the old base with the new
+ * offset. An owner with a length starts from the stored value, so the offset over that value is right now. The whole
+ * track waits, every field of it; a settle that waits longer than one step leaves the walk at rest for that frame.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - An additive track born since the step.
+ * @returns True when a field it adds to waits for its base.
+ */
+function waitsForBase(actx: AnimCtx, track: Track): boolean {
+  // per frame: an indexed walk over the slot keys, only for tracks born since the step.
+  for (let slot = 0; slot < track.slotKeys.length; slot++) {
+    const ownerId = actx.state.owner.get(track.slotKeys[slot] ?? "");
+    const owner = ownerId === undefined ? undefined : actx.state.tracks.get(ownerId);
+
+    if (owner !== undefined && !owner.begun && owner.ms <= 0) return true;
+  }
+
+  return false;
 }
 
 /**
