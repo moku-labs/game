@@ -42,6 +42,7 @@ import {
   stepOverlays,
   watchOverlays
 } from "./overlay";
+import { hudReturnReports } from "./overlay-return";
 import { forgetOverlays } from "./overlay-state";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { parentOf } from "./pose";
@@ -58,6 +59,7 @@ import type {
   FilterSlot,
   FilterSlotQuad,
   HitBox,
+  HudReturnReport,
   LeaveLook,
   OverlayEventSink,
   OverlayReport,
@@ -87,6 +89,9 @@ import { startWarm, warmFilter, warmStep } from "./warm";
 
 /** Label of the container the viewport transform is written on. */
 const ROOT_LABEL = "renderer.root";
+
+/** What `debug.hudReturns()` answers outside a dev or agent build: one frozen list, never written. */
+const NO_HUD_RETURNS: readonly HudReturnReport[] = Object.freeze([]);
 
 /** The change steps of a pass that write an entity's view: what `runStep` does for each changed component. */
 const STEP = {
@@ -941,6 +946,18 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       },
 
       overlays: (): readonly OverlayReport[] => overlayReports(sctx),
+
+      hudReturns: (): readonly HudReturnReport[] => {
+        // Inline and positive: a production `define` folds the guard, and the reader leaves the bundle.
+        if (
+          (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+          (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+        ) {
+          return hudReturnReports(sctx);
+        }
+
+        return NO_HUD_RETURNS;
+      },
 
       why: (): readonly WhyEntry[] => deps.kept.why(),
 

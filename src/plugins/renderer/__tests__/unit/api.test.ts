@@ -72,6 +72,7 @@ describe("renderer api", () => {
     ]);
     expect(Object.keys(mock.api.sync.fonts).toSorted()).toEqual(["install", "installed"]);
     expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual([
+      "hudReturns",
       "kept",
       "nineSlice",
       "overdraw",

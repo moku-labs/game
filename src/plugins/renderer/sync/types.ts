@@ -915,6 +915,33 @@ export type WhyEntry = {
 };
 
 /**
+ * One return of the HUD parts in progress, as `sync.debug.hudReturns()` reports it: the entity whose leave started it,
+ * the label its overlay had, the delay and the fade of the return (the fade is 0 when reduced motion was on at the
+ * leave) and the game time counted since the leave started. It stays while the overlay's record is gone, until the run
+ * ends.
+ *
+ * @example
+ * ```ts
+ * // The splash with `hudReturn: { delayMs: 1100, fadeMs: 700 }`, 1450 ms of game time after its leave started.
+ * const report: HudReturnReport = {
+ *   owner: 1_048_590, label: "Shape#1048590 splash", delayMs: 1100, fadeMs: 700, elapsed: 1450
+ * };
+ * ```
+ */
+export type HudReturnReport = {
+  /** The entity whose leave started the run. */
+  owner: Entity;
+  /** The label of the overlay's view, as `debug.overlays()` names it. */
+  label: string;
+  /** Game time after the leave start at which the parts begin to come back, ms. */
+  delayMs: number;
+  /** The time the parts take to come back, ms; 0 under reduced motion. */
+  fadeMs: number;
+  /** Game time counted since the leave started, ms. */
+  elapsed: number;
+};
+
+/**
  * The debug drawing of the renderer, `app.renderer.sync.debug`. The switch outlines every
  * nine-slice at once; a single panel asks for its own outline with `NineSlice.debug` (`ui`:
  * `style.debug`).
@@ -1002,8 +1029,8 @@ export type DebugApi = {
   /**
    * What every overlay does this frame, bottom first: its phase, its mode, its level, how many entries its range has
    * and whether a picture holds them. The level and the landing are the engine's state of the overlay, read here. An
-   * overlay leaving whose `hudReturn` runs carries its delay, its fade and the game time counted so far. For the
-   * editor's tools page and for tests.
+   * overlay leaving whose `hudReturn` runs carries its delay, its fade and the game time counted so far; once its record
+   * is gone the run has no line here, and `hudReturns()` reads it. For the editor's tools page and for tests.
    *
    * @returns One report per overlay, a fresh array; `[]` with none, and while inert.
    * @example
@@ -1016,6 +1043,23 @@ export type DebugApi = {
    * ```
    */
   overlays(): readonly OverlayReport[];
+
+  /**
+   * Every return of the HUD parts in progress, in the order the runs started: its owner, its label, its delay, its fade
+   * and the game time counted so far. A run outlives its overlay, so this is the way to read one whose record is gone;
+   * `overlays()` has no line for it then. Built when called, never per frame. Dev and agent builds only; every other
+   * build answers a frozen `[]`, and an inert renderer an empty array.
+   *
+   * @returns One report per run, a fresh array; a frozen `[]` in every other build.
+   * @example
+   * ```ts
+   * // The splash left with `hudReturn: { delayMs: 1100, fadeMs: 700 }`; its overlay is gone, 1450 ms of game time on.
+   * app.renderer.sync.debug.hudReturns();
+   * // [{ owner: 1_048_590, label: "Shape#1048590 splash", delayMs: 1100, fadeMs: 700, elapsed: 1450 }]
+   * app.renderer.sync.debug.overlays(); // []
+   * ```
+   */
+  hudReturns(): readonly HudReturnReport[];
 
   /**
    * Why every view with an enabled filter is drawn as it is, in draw order: from its picture, by its quad, or live and

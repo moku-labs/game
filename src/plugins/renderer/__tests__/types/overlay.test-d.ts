@@ -1,5 +1,9 @@
 import { expectTypeOf } from "vitest";
-import { defineGame, type HudReturn as RootHudReturn } from "../../../../index";
+import {
+  defineGame,
+  type HudReturn as RootHudReturn,
+  type HudReturnReport as RootHudReturnReport
+} from "../../../../index";
 import type { LayerMap } from "../../../scenes/types";
 import type { Entity } from "../../../world/types";
 import {
@@ -9,7 +13,7 @@ import {
   Overlay,
   type OverlayValue
 } from "../../components";
-import type { Api, OverlayReport } from "../../types";
+import type { Api, HudReturnReport, OverlayReport } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only (spec 22, LEAD-FIXES-4 item 5). `tsc --noEmit` is the runner: every `@ts-expect-error` below must
@@ -162,5 +166,23 @@ expectTypeOf({
   ...shopReport,
   hudReturn: { delayMs: 1100, fadeMs: 700 }
 }).not.toExtend<OverlayReport>();
+// A run's report carries all five fields, and `hudReturns()` answers a read-only list of them.
+expectTypeOf({
+  owner: 1_048_590,
+  label: "Shape#1048590 splash",
+  delayMs: 1100,
+  fadeMs: 700,
+  elapsed: 1450
+}).toExtend<HudReturnReport>();
+expectTypeOf({
+  owner: 1_048_590,
+  label: "Shape#1048590 splash",
+  delayMs: 1100,
+  fadeMs: 700
+}).not.toExtend<HudReturnReport>();
+expectTypeOf<Api["sync"]["debug"]["hudReturns"]>().returns.toEqualTypeOf<
+  readonly HudReturnReport[]
+>();
+expectTypeOf<RootHudReturnReport>().toEqualTypeOf<HudReturnReport>();
 // The root exports the type a game names its shared constant with.
 expectTypeOf<RootHudReturn<"energy">>().toEqualTypeOf<HudReturn<"energy">>();
