@@ -73,6 +73,7 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     reducedMotion: ctx.config.reducedMotion,
     removeDriver: undefined,
     offFrame: undefined,
+    offSample: undefined,
     offPlay: undefined,
     finishAll: undefined,
     frameLoops: emptyMap(),

@@ -32,8 +32,9 @@ async function start(options: WarmOptions = {}): Promise<Warm> {
 }
 
 /**
- * Records, in phase `render` of every frame, how far the fading root stands off its rest `y`,
- * once it is live: what the renderer draws it at.
+ * Records, at the end of phase `sync` of every frame, how far the fading root stands off its rest
+ * `y`, once it is live: what `renderer.sync`, the last system of the phase, handed to Pixi. A value
+ * written later in the frame is not drawn in it.
  *
  * @param warm - The started fixture.
  * @returns The offsets, one per frame the root was live and shown.
@@ -41,7 +42,7 @@ async function start(options: WarmOptions = {}): Promise<Warm> {
 function drawnOffsets(warm: Warm): number[] {
   const offsets: number[] = [];
 
-  warm.app.time.onFrame("render", () => {
+  warm.app.time.onFrame("sync", () => {
     const root = markedIn(warm, "fadeRoot");
 
     if (root === undefined || warm.app.world.projection.isBuilding(root)) return;

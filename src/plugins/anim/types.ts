@@ -444,8 +444,10 @@ export type State = {
   reducedMotion: boolean;
   /** Remover of `world.projection.setDriver`. */
   removeDriver: (() => void) | undefined;
-  /** Remover of `time.onFrame("animate")` and `time.onFrame("signals")`. */
+  /** Remover of `time.onFrame("animate")`. */
   offFrame: (() => void) | undefined;
+  /** Remover of the world system that samples the tracks born since the step (F241). */
+  offSample: (() => void) | undefined;
   /** Remover of `flow.fx.handle("play")`. */
   offPlay: (() => void) | undefined;
   /** Bound in `onInit`, so the teardown context can end everything with the state alone. */

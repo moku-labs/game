@@ -11,8 +11,9 @@ import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
+import { SAMPLES_SYSTEM } from "../world/ecs/systems";
 import type { AnyComponent, AnyComponentValue } from "../world/ecs/types";
-import type { Entity, Owner, TrackOptions } from "../world/types";
+import type { AnySystem, Entity, Owner, TrackOptions } from "../world/types";
 import { AnimPlayer } from "./components";
 import {
   closeFrameLoops,
@@ -366,14 +367,7 @@ export function initAnim(ctx: KernelSlice): void {
   const rt = createRuntime(actx);
 
   actx.state.finishAll = (): void => finishAllAnim(actx, rt);
-  const offStep = actx.deps.time.onFrame("animate", time => stepAnim(actx, rt, time));
-  // Before `world`'s own `signals`, which clears the frame's changes: the renderer sees the samples it writes.
-  const offSample = actx.deps.time.onFrame("signals", () => sampleBornLive(actx));
-
-  actx.state.offFrame = (): void => {
-    offStep();
-    offSample();
-  };
+  actx.state.offFrame = actx.deps.time.onFrame("animate", time => stepAnim(actx, rt, time));
 }
 
 /**
@@ -387,9 +381,26 @@ function sampleBornLive(actx: AnimCtx): void {
 }
 
 /**
+ * The world system that writes the first sample of the tracks born since the frame step (F241). `world` keeps a
+ * system of this name last before `renderer.sync`, after the enter hooks of `ui.enter`, so the renderer draws a view
+ * at its enter's start in the frame it is first drawn.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @returns The system definition `world.ecs.system` takes.
+ */
+function sampleSystem(actx: AnimCtx): AnySystem {
+  return {
+    name: SAMPLES_SYSTEM,
+    phase: "sync",
+    query: [],
+    run: (): void => sampleBornLive(actx)
+  };
+}
+
+/**
  * Opens what the plugin owns: the animations of every feature, the `play` of the `AnimPlayer`
- * resource, the tween driver of `world`, the handler of the `play` effect and the two world hooks
- * that keep the `Frames` loops.
+ * resource, the tween driver of `world`, the handler of the `play` effect, the two world hooks
+ * that keep the `Frames` loops and the system that samples the tracks born since the step (F241).
  *
  * @param ctx - Kernel context of the anim plugin.
  */
@@ -404,6 +415,7 @@ export function startAnim(ctx: KernelSlice): void {
     runInFast: false
   });
   openFrameLoops(actx);
+  actx.state.offSample = actx.deps.world.ecs.system(sampleSystem(actx));
   const renderer = ctx.require(rendererPlugin);
 
   // `sync.loopsHeld`: whether an endless loop of a view the player cannot see writes nothing.
@@ -423,12 +435,14 @@ export function stopAnim(state: State): void {
   state.finishAll?.();
   state.removeDriver?.();
   state.offFrame?.();
+  state.offSample?.();
   state.offPlay?.();
   closeFrameLoops(state);
 
   state.finishAll = undefined;
   state.removeDriver = undefined;
   state.offFrame = undefined;
+  state.offSample = undefined;
   state.offPlay = undefined;
   state.loopsHeld = undefined;
 
@@ -445,4 +459,5 @@ export function stopAnim(state: State): void {
   state.registry.clear();
   state.markListeners.clear();
   state.overMaxTracks = false;
+  state.bornFrom = 0;
 }

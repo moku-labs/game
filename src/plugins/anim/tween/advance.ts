@@ -1102,7 +1102,12 @@ export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
   }
 
   dropEnded(list);
-  actx.state.bornFrom = list.length;
+
+  // The tracks born in this step (an `onMark` listener, a timeline) are the tail of the list: they are sampled too.
+  let born = list.length;
+
+  while (born > 0 && list[born - 1]?.bornFrame === frame) born -= 1;
+  actx.state.bornFrom = born;
 }
 
 /**

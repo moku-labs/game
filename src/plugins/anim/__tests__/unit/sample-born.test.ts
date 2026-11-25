@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Transform } from "../../../renderer/components";
 import { advanceTracks, beginFrame, sampleBorn, startTrack } from "../../tween/advance";
+import { startStepTrack } from "../../tween/driver";
 import { createMockAnim, spawnTestEntity } from "./mock-anim";
 
 // ---------------------------------------------------------------------------
@@ -75,5 +76,34 @@ describe("anim sampleBorn", () => {
     sampleBorn(mock.actx);
 
     expect(track.ended).toBe(false);
+  });
+
+  // Bug: a track born inside the step (an `onMark` listener) is skipped by it and stands a frame at rest.
+  it("writes the start pose of a walk born inside the step", () => {
+    const mock = createMockAnim();
+    const entity = spawnTestEntity(mock, [Transform({ x: 0, y: 0 })]);
+
+    beginFrame(mock.actx);
+    startTrack(mock.actx, entity, Transform, { y: 0 }, WALK, open);
+    advanceTracks(mock.actx, 16);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(0);
+
+    sampleBorn(mock.actx);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(300);
+  });
+
+  // Bug: the pass advances a track a timeline step drives, which the step hands its time itself.
+  it("leaves a track a timeline step drives to that step", () => {
+    const mock = createMockAnim();
+    const entity = spawnTestEntity(mock, [Transform({ x: 0, y: 0 })]);
+
+    beginFrame(mock.actx);
+    advanceTracks(mock.actx, 16);
+    startStepTrack(mock.actx, entity, Transform, { y: 0 }, WALK);
+    sampleBorn(mock.actx);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(0);
   });
 });
