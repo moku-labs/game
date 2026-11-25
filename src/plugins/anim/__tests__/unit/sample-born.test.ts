@@ -139,4 +139,52 @@ describe("anim sampleBorn", () => {
     expect(track.ended).toBe(true);
     expect(x()).toBe(587);
   });
+
+  // Bug (F241 regression, the game's xp ring): a change hook settles a field with a 0 ms tween that waits 1 ms and starts
+  // an additive walk of the way back over it. The pass wrote the walk's start offset over the old base, so the commit
+  // frame drew old + offset (a sweep of -1/3) instead of where the field stood; the step writes the two together.
+  it("leaves an additive walk to the step while its field waits for a settle tween, in either start order", () => {
+    expect(settledWalk(true)).toEqual([0, -100 + (100 * 16) / 600 + 100]);
+    expect(settledWalk(false)).toEqual([0, -100 + (100 * 16) / 600 + 100]);
+  });
 });
+
+/** A walk of the way back from 0 to the settled 100: an offset of -100 that comes home over 600 ms. */
+const BACK = {
+  ms: 600,
+  additive: true,
+  segments: [
+    { at: 0, ease: (t: number) => t, to: { y: -100 } },
+    { at: 1, ease: (t: number) => t, to: { y: 0 } }
+  ]
+} as const;
+
+/**
+ * Starts a settle to 100 that waits 1 ms and the walk back over it after the step, as a change hook does, then draws
+ * two frames.
+ *
+ * @param settleFirst - Whether the settle starts before the walk.
+ * @returns The field after the pass of the commit frame and after the next frame.
+ */
+function settledWalk(settleFirst: boolean): number[] {
+  const mock = createMockAnim();
+  const entity = spawnTestEntity(mock, [Transform({ x: 0, y: 0 })]);
+  const drawn: number[] = [];
+
+  beginFrame(mock.actx);
+  advanceTracks(mock.actx, 16);
+  if (settleFirst)
+    startTrack(mock.actx, entity, Transform, { y: 100 }, { ms: 0, delayMs: 1 }, open);
+  startTrack(mock.actx, entity, Transform, { y: 0 }, BACK, open);
+  if (!settleFirst)
+    startTrack(mock.actx, entity, Transform, { y: 100 }, { ms: 0, delayMs: 1 }, open);
+  sampleBorn(mock.actx);
+  drawn.push(mock.world.ecs.get(entity, Transform)?.y ?? Number.NaN);
+
+  beginFrame(mock.actx);
+  advanceTracks(mock.actx, 16);
+  sampleBorn(mock.actx);
+  drawn.push(mock.world.ecs.get(entity, Transform)?.y ?? Number.NaN);
+
+  return drawn;
+}
