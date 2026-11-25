@@ -20,7 +20,7 @@ function emptyMap<Key, Value>(): Map<Key, Value> {
  * @returns An empty scene state.
  */
 function emptyScene(): SceneState {
-  return { mounted: undefined, leaving: [], declared: undefined };
+  return { mounted: undefined, mounts: 0, leaving: [], declared: undefined };
 }
 
 /**

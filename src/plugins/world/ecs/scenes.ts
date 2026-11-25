@@ -91,8 +91,8 @@ export function checkScenes(scene: SceneState, definition: AnySystem): void {
 }
 
 /**
- * Mounts a scene for the systems: the scene mounted before starts leaving. The same scene again
- * changes nothing.
+ * Mounts a scene for the systems: the scene mounted before starts leaving, and the count of mounts
+ * grows, so the systems on it are told `entered`. The same scene again changes nothing.
  *
  * @param scene - The scene state.
  * @param id - The id of the scene now mounted.
@@ -104,6 +104,7 @@ export function mountScene(scene: SceneState, id: string): void {
   if (before !== undefined && !scene.leaving.includes(before)) scene.leaving.push(before);
 
   scene.mounted = id;
+  scene.mounts += 1;
 }
 
 /**

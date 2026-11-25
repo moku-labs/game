@@ -318,6 +318,7 @@ export type QueryTuple<Terms extends readonly QueryTerm[]> = [Entity, ...QueryVa
  *   ctx.res(Pointer).x = 0;
  *   ctx.time.delta; // 16
  *   ctx.resumed; // false: the system ran in the frame before
+ *   ctx.entered; // false: its scene was mounted before the run before
  * };
  * ```
  */
@@ -333,6 +334,35 @@ export type SystemContext = {
    * components when this is true. False on every other run. Read it during the run.
    */
   readonly resumed: boolean;
+  /**
+   * True on the first run after the mounted scene became one of this system's `scenes` (any scene for a system
+   * without `scenes`), and on its very first run. Every entry counts, also a return while the scene still leaves:
+   * its runs then never skipped, so `resumed` stays false. False on every other run, and on the runs while its scene
+   * only leaves. A scene's leave ends the named loops asked while it was mounted, so a system that keeps a loop
+   * playing asks for it again when this is true. Read it during the run.
+   *
+   * @example
+   * ```ts
+   * // The ward leaves into a memory and comes back 300 ms later, before its exit played out:
+   * // the leave ended the rain, and the first run after the return asks for it again.
+   * const rainStart = defineAnimation("location.rainStart", {
+   *   slots: {},
+   *   build: () => sfx("ep06.sounds.rain-window", { id: "location.rain", loop: true, fadeMs: 800 })
+   * });
+   *
+   * system({
+   *   name: "location.rainBed",
+   *   phase: "input",
+   *   query: [],
+   *   scenes: ["ward"],
+   *   run: (_rows, { res, entered }) => {
+   *     // true on the first run after each mount of the ward, the quick return too
+   *     if (entered) res(AnimPlayer).play(rainStart, {});
+   *   }
+   * });
+   * ```
+   */
+  readonly entered: boolean;
 };
 
 /**
@@ -486,6 +516,8 @@ export type SystemEntry = {
   readonly scenes: readonly string[] | undefined;
   /** Its last chance to run was skipped: the next run is told so with `resumed`. */
   skipped: boolean;
+  /** The `mounts` of the scene state at the last entry it was told of; -1 before its first run. */
+  entry: number;
   /** A feature brought it: its rows pass over the entities of a scene built aside (F155). */
   readonly hidesAside?: boolean;
   /**
@@ -503,6 +535,8 @@ export type SystemEntry = {
 export type SceneState = {
   /** The mounted scene, `undefined` before the first switch. */
   mounted: string | undefined;
+  /** How many times the mounted scene changed: an entry of the systems on it is a new value here. */
+  mounts: number;
   /** The scenes a switch replaced while something still carries `Exiting`, oldest first; no repeats. */
   leaving: string[];
   /** The scene ids the features declare, read at start for the dev check of `scenes`; `undefined` before. */
@@ -555,6 +589,8 @@ export type PhaseContext = {
   time: Readonly<Time>;
   /** Written before every run: the system's last chance to run before this one was skipped. */
   resumed: boolean;
+  /** Written before every run: its scene was mounted since its run before (F243). */
+  entered: boolean;
 };
 
 /**
