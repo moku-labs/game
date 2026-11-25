@@ -224,6 +224,7 @@ internal markup: select them by nothing, set the properties instead.
 | `displayOf(entity)` | The Pixi object of the entity, for debugging. |
 | `loopsHeld(entity, reveals?)` | The seam of `anim`: whether an endless loop of the entity writes nothing now: its view lies under an opaque cover or in a blurred kept picture of an overlay, or nobody sees it (it or a view above it is at alpha 0, or it is a leaf wholly off the screen). `reveals` says what the loop writes that could show the view again (`"alpha"`, `"place"`, `"both"`): such a loop is not held for its own alpha 0 or for being off the screen. Its clock runs on. Inert, and without a view: `false`. See "What is not drawn". |
 | `debug.overlays()` | Every overlay, bottom first: `{ entity, label, phase, mode, level, range, kept, hudReturn? }`, a fresh array; `[]` with none. `hudReturn: { delayMs, fadeMs, elapsed }` is on the line of an overlay whose return of the HUD runs (from its first exit frame until its record goes). |
+| `debug.hudReturns()` | Every return of the HUD parts in progress, in the order the runs started: `{ owner, label, delayMs, fadeMs, elapsed }`, a fresh array, also after its overlay is gone (`overlays()` has no line for it then); `fadeMs` is 0 under reduced motion. Dev and agent builds only: every other build answers a frozen `[]`, an inert renderer `[]`. |
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.overdraw(on)` | Dev and debug builds: draws every frame as the overdraw heat map (see "Overdraw heat map"); off draws the game again from the next frame. Elsewhere the switch stays off. |
 | `debug.why()` | Agent builds: why every view with an enabled filter is drawn as it is, in draw order: `{ view, mode, reason, calmIn, retake }`, a fresh array, built when called. Every other build, and while inert: a frozen `[]`. See "Why a view is drawn live". |
@@ -1679,7 +1680,9 @@ the `overlay` event line (`OverlayEventDetail`: `what` ∈ `open`, `landed`, `le
 `app.renderer.sync.debug.overlays()` reports every overlay, bottom first:
 `[{ entity, label, phase: "shown", mode: "freeze", level: 1, range: 2, kept: true }]`. The line of an overlay whose
 HUD return runs carries `hudReturn: { delayMs: 1100, fadeMs: 700, elapsed: 480 }` (its fade 0 under reduced motion);
-a return whose record is gone is in no line.
+a return whose record is gone is in no line of `overlays()`; it is read through `debug.hudReturns()` (dev and agent
+builds): `[{ owner: 1_048_590, label: "Shape#1048590 splash", delayMs: 1100, fadeMs: 700, elapsed: 1450 }]`, one entry
+per return in progress, in the order they started, a fresh array; every other build answers a frozen `[]`.
 
 ## Layers, sort and lift
 

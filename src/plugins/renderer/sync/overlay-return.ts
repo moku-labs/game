@@ -10,6 +10,7 @@ import type {
   ClampedHudReturn,
   ClampedReturnPart,
   EndsWalk,
+  HudReturnReport,
   HudReturnRun,
   OverlayRecord,
   OverlayState,
@@ -454,4 +455,25 @@ export function stepReturns(sctx: SyncCtx): void {
  */
 export function runOf(overlay: OverlayState, owner: Entity): HudReturnRun | undefined {
   return overlay.returns.find(run => run.owner === owner);
+}
+
+/**
+ * Every return in progress as `debug.hudReturns()` reports it, in the order the runs started, as a fresh array. A run
+ * is read here whether or not its overlay's record is still there. Built only when asked, never per frame.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @returns One report per run; `[]` with none, and while inert.
+ */
+export function hudReturnReports(sctx: SyncCtx): readonly HudReturnReport[] {
+  const state = sctx.ctx.state.sync;
+
+  if (state.root === undefined) return [];
+
+  return state.overlay.returns.map(run => ({
+    owner: run.owner,
+    label: run.label,
+    delayMs: run.value.delayMs,
+    fadeMs: run.reduced ? 0 : run.value.fadeMs,
+    elapsed: run.elapsed
+  }));
 }

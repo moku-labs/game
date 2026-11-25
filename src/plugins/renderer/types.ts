@@ -757,6 +757,7 @@ export type {
   FiltersApi,
   FontsApi,
   HitBox,
+  HudReturnReport,
   LayerEntry,
   LeaveApi,
   LeaveCover,

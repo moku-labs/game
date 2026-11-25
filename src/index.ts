@@ -366,6 +366,7 @@ export type {
   ShaderWhat,
   SourceStats,
   WarmDetail,
+  HudReturnReport,
   WhyEntry,
   WhyLive
 } from "./plugins/renderer/types";
