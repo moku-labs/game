@@ -350,15 +350,41 @@ export function isIdentityOf(
   node: DescriptionNode,
   index: number
 ): boolean {
-  const type = node.type;
   const head = parentIdentity.length + 1;
-  const tail = identity.length - type.length - 1;
-  const framed =
-    tail >= head &&
-    identity.startsWith(parentIdentity) &&
+
+  return (
+    identity.length > head &&
     identity.charCodeAt(head - 1) === BAR &&
-    identity.charCodeAt(tail) === BAR &&
-    identity.endsWith(type);
+    identity.startsWith(parentIdentity) &&
+    isNameOf(identity, head, node, index)
+  );
+}
+
+/**
+ * Tells whether the part of an identity after its parent's is the one `identityOf` builds for a node: the key or the
+ * type, `@` and the index, `|`, the type. The parent part is not read: a child of the parent being diffed was built
+ * under its identity, which an element keeps for its whole life, and a deep identity is hundreds of characters
+ * (F244: the album's 572 elements compared their whole parent identity at every render).
+ *
+ * @param identity - The identity an element keeps.
+ * @param head - Where its name starts: the length of the parent identity, plus one for `|`.
+ * @param node - The node being placed.
+ * @param index - Its position among its siblings.
+ * @returns True when the name and the type are the node's.
+ * @example
+ * ```ts
+ * isNameOf("0|row@2|row", 2, { type: "row", props: {}, children: [] }, 2); // true
+ * ```
+ */
+export function isNameOf(
+  identity: string,
+  head: number,
+  node: DescriptionNode,
+  index: number
+): boolean {
+  const type = node.type;
+  const tail = identity.length - type.length - 1;
+  const framed = tail >= head && identity.charCodeAt(tail) === BAR && identity.endsWith(type);
 
   if (!framed) return false;
   if (node.key !== undefined)
@@ -393,19 +419,25 @@ export function isIdentityOf(
  * @param node - The node being placed.
  * @param index - Its position among its siblings.
  * @param old - The element that stood at that place at the last diff, if any.
+ * @param parent - The entity of the parent element, when `old` is one of its children: its name alone is compared.
  * @returns The identity.
  */
 function identityAt(
   parentIdentity: string,
   node: DescriptionNode,
   index: number,
-  old: Element | undefined
+  old: Element | undefined,
+  parent?: Entity
 ): string {
-  if (old !== undefined && isIdentityOf(old.identity, parentIdentity, node, index)) {
-    return old.identity;
-  }
+  if (old === undefined) return identityOf(parentIdentity, node, index);
 
-  return identityOf(parentIdentity, node, index);
+  // A child of the parent being diffed carries the parent's identity in front: only its name is read.
+  const same =
+    parent !== undefined && old.parent === parent
+      ? isNameOf(old.identity, parentIdentity.length + 1, node, index)
+      : isIdentityOf(old.identity, parentIdentity, node, index);
+
+  return same ? old.identity : identityOf(parentIdentity, node, index);
 }
 
 /**
@@ -1043,6 +1075,9 @@ export function createReconciler(
   // True while a root shown before its parts were done is applied still: a live element whose rest
   // pose moved takes it at once, with no hook and no track, as a held one does (F200).
   let applyingStill = false;
+  // The number of the solve `applyRects` applies, read off the root it stamped; none when no solve of the layout
+  // stamps elements: the whole root is applied (F244).
+  let applyStamp: number | undefined;
   // The membership version of the world's projections the last walk for a released root read, and the
   // one the last pass of the held enters read with the length of the queue it left: a frame with
   // windows held warm and at rest compares numbers and walks nothing (spec 33 B+D).
@@ -2001,7 +2036,8 @@ export function createReconciler(
         parent.identity,
         node,
         index,
-        old === undefined ? undefined : state.elements.get(old)
+        old === undefined ? undefined : state.elements.get(old),
+        parent.entity
       );
     }
 
@@ -2404,8 +2440,14 @@ export function createReconciler(
     let hooked = quiet;
 
     if (element.moved) {
-      modules.layout.commit(element, parent);
-      writeLive(element, true);
+      // Slid with its parent: its rest pose, relative to the parent, and its visual, sized by its box, stand; only
+      // the `Box` in root coordinates moves (F244: every card of a page the album turns).
+      if (element.slid === true) ecs.set(element.entity, Box, element.rect);
+      else {
+        modules.layout.commit(element, parent);
+        writeLive(element, true);
+      }
+
       if (!quiet) hooked = modules.layout.change(element, element.previous, hint);
     }
 
@@ -2479,16 +2521,43 @@ export function createReconciler(
    *
    * @param element - The element to apply.
    * @param quiet - Whether a live element takes its rect with no motion.
+   * @param whole - Whether every element is applied, stamped by this solve or not.
    */
-  function applyRects(element: Element, quiet = false): void {
+  function applyRects(element: Element, quiet = false, whole = false): void {
+    // The solve stamps the root and every element with work, and their parents: a subtree it did not stamp has
+    // nothing to apply (F244). A root the layout did not stamp is applied whole, and so is one whose elements an
+    // earlier solve placed while their application waited: a root built aside or held warm, applied in parts or still.
+    applyStamp = whole ? undefined : element.placed;
+    applyTree(element, quiet);
+  }
+
+  /**
+   * The walk of `applyRects`: the element, then its children with work in this solve, top-down.
+   *
+   * @param element - The element to apply.
+   * @param quiet - Whether a live element takes its rect with no motion.
+   */
+  function applyTree(element: Element, quiet: boolean): void {
     applyElement(element, quiet);
 
-    // Then its children, top-down.
     for (const child of element.children) {
       const childElement = lookup(child);
 
-      if (childElement !== undefined) applyRects(childElement, quiet);
+      if (childElement !== undefined && hasWork(childElement)) applyTree(childElement, quiet);
     }
+  }
+
+  /**
+   * Tells whether the application of this solve has work under an element: the solve stamped it, or no solve of the
+   * layout stamps anything here.
+   *
+   * @param element - A child of an applied element.
+   * @returns True when it is applied.
+   */
+  function hasWork(element: Element): boolean {
+    return (
+      applyStamp === undefined || element.placed === undefined || element.placed === applyStamp
+    );
   }
 
   /**
@@ -2741,7 +2810,8 @@ export function createReconciler(
       applyStill(element);
       delete root.still;
     } else {
-      applyRects(element, quiet);
+      // A root built aside or held warm may hold elements an earlier solve placed and no application reached yet.
+      applyRects(element, quiet, root.aside !== undefined);
     }
 
     return true;
@@ -2759,7 +2829,7 @@ export function createReconciler(
     applyingStill = true;
 
     try {
-      applyRects(element, true);
+      applyRects(element, true, true);
     } finally {
       applyingStill = false;
     }

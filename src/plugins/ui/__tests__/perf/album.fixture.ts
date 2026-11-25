@@ -40,7 +40,7 @@ function albumRoot(ui: PerfUi): Entity {
   const ecs = ui.app.world.ecs;
 
   for (const [entity] of ecs.query(Tree)) {
-    if (ecs.get(entity, Tree)?.node === ALBUM.peek[0]) return entity;
+    if (ecs.get(entity, Tree)?.node === ALBUM.first) return entity;
   }
 
   throw new Error("perf: the album root was not mounted");
@@ -84,9 +84,7 @@ export async function startAlbumPerf(): Promise<AlbumPerf> {
     render,
     turn: (): void => {
       at[0] = at[0] === 0 ? 1 : 0;
-      render(
-        at[0] === 1 ? (ALBUM.turned[0] as DescriptionNode) : (ALBUM.peek[0] as DescriptionNode)
-      );
+      render(at[0] === 1 ? (ALBUM.turned[0] as DescriptionNode) : ALBUM.first);
       frame();
     },
     swipe: (): void => {

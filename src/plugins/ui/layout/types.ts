@@ -6,6 +6,7 @@ import type { Align, Justify, Overflow, Yoga, Node as YogaNode } from "yoga-layo
 import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import type { Message } from "../../i18n/types";
+import type { TransformValue } from "../../renderer/components";
 import type { AxisPose } from "../../renderer/sync/types";
 import type { FormattedNumber, Size } from "../../text/types";
 import type { Time } from "../../time/types";
@@ -156,6 +157,12 @@ export type LayoutState = {
   nodes: number;
   measured: number;
   solves: number;
+  /** The frames of the solve's walk by depth, written in place: where a parent sits and its content box (F244). */
+  frames: { origin: { x: number; y: number }; content: Rect }[];
+  /** How far the parent at each depth of the solve's walk moved, x then y, written in place (F244). */
+  steps: Float64Array[];
+  /** The rest pose a repose compares before it builds one, written in place (F244). */
+  pose: TransformValue & { scaleX: number; scaleY: number };
   scrolling: Entity | undefined;
   scrollClock: number;
   scrollRing: Float64Array;

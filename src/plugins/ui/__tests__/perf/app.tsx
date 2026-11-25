@@ -423,7 +423,7 @@ const albumScreen = projection({
   name: "album",
   layer: "ui",
   from: (): Item => ({ id: "album" }),
-  view: () => ALBUM.peek[0]
+  view: () => ALBUM.first
 });
 
 /** The sheets the warm files mount, closed. */

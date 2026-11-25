@@ -67,7 +67,10 @@ function overview() {
   ));
 
   return (
-    <column key="albumOverview" style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}>
+    <column
+      key="albumOverview"
+      style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}
+    >
       <row key="albumOverviewHead" style={{ height: 60, gap: 8, align: "center" }}>
         <image texture="ui.coin" style={{ width: 40, height: 40 }} />
         <text style={{ width: 200, height: 30 }} content="Album" />
@@ -198,20 +201,31 @@ function albumTree(on: number, beside: number, side: -1 | 1): DescriptionNode {
           <button key="albumBack" intent="back" style={{ width: 44, height: 44 }}>
             <image texture="ui.coin" style={{ width: 44, height: 44 }} />
           </button>
-          <text key="albumSetTitle" style={{ width: 200, height: 30 }} content={`Set ${on + 1} of 15`} />
+          <text
+            key="albumSetTitle"
+            style={{ width: 200, height: 30 }}
+            content={`Set ${on + 1} of 15`}
+          />
           <button key="albumClose" intent="close" style={{ width: 44, height: 44 }}>
             <image texture="ui.coin" style={{ width: 44, height: 44 }} />
           </button>
         </row>
         <stack key="albumPageArea" style={{ grow: 1, minHeight: 0, overflow: "hidden" }}>
-          <stack key="albumPages" style={{ position: "absolute", left: 21, top: 0, width: PAGE_WIDTH }}>
+          <stack
+            key="albumPages"
+            style={{ position: "absolute", left: 21, top: 0, width: PAGE_WIDTH }}
+          >
             {stripPage(on, 0)}
             {stripPage(beside, side * PITCH)}
           </stack>
           <button key="albumPrev" intent="view" style={{ position: "absolute", left: 0, top: 300 }}>
             <image texture="ui.coin" style={{ width: 40, height: 40 }} />
           </button>
-          <button key="albumNext" intent="view" style={{ position: "absolute", right: 0, top: 300 }}>
+          <button
+            key="albumNext"
+            intent="view"
+            style={{ position: "absolute", right: 0, top: 300 }}
+          >
             <image texture="ui.coin" style={{ width: 40, height: 40 }} />
           </button>
         </stack>
@@ -221,17 +235,24 @@ function albumTree(on: number, beside: number, side: -1 | 1): DescriptionNode {
   ) as DescriptionNode;
 }
 
+/** The tree the album root mounts with: set 0 on show, set 1 peeking. */
+const first = albumTree(0, 1, 1);
+
 /**
  * The trees of a swipe through the album, built once: from set `n` the finger peeks at set `n + 1`, which slides in
  * beside it, then the page turns and set `n + 1` stands at 0 with set `n` left behind on the left. The next peek drops
  * set `n` and brings set `n + 2`. A turn alone swaps the two pages of the strip and moves the wide dot: `peek` and
- * `turned` of one set, in turn, mount and drop nothing.
+ * `turned` of one set, in turn, mount and drop nothing. `first` is `peek[0]`.
  */
 export const ALBUM = {
+  first,
   /** `peek[n]`: set `n` on show, set `n + 1` beside it on the right. */
-  peek: Array.from({ length: ALBUM_SETS }, (_unused, set) =>
-    albumTree(set, (set + 1) % ALBUM_SETS, 1)
-  ),
+  peek: [
+    first,
+    ...Array.from({ length: ALBUM_SETS - 1 }, (_unused, index) =>
+      albumTree(index + 1, (index + 2) % ALBUM_SETS, 1)
+    )
+  ],
   /** `turned[n]`: set `n + 1` on show, set `n` left on the left. */
   turned: Array.from({ length: ALBUM_SETS }, (_unused, set) =>
     albumTree((set + 1) % ALBUM_SETS, set, -1)

@@ -296,6 +296,17 @@ export type Element = {
   rect: { x: number; y: number; w: number; h: number };
   previous: { x: number; y: number; w: number; h: number };
   moved: boolean;
+  /**
+   * The last solve moved the element with its parent, by the parent's step, its size and fit kept: its rest pose and
+   * its visual stand, only its `Box` moves (F244).
+   */
+  slid?: boolean;
+  /**
+   * The number of the last solve that gave the application work on the element: a new rect or fit, a parent that
+   * moved, its first application. A subtree with no element of the current solve is not walked by the application.
+   * None while no solve of the layout placed it.
+   */
+  placed?: number;
   fit: number;
   rest: TransformValue;
   handles: MotionHandle[];
