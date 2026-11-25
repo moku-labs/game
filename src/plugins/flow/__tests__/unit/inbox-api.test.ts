@@ -90,6 +90,7 @@ const createTestState = (): State => ({
     hintListeners: [],
     settled: [],
     guides: [],
+    unshown: undefined,
     mode: "live"
   },
   gate: createGateState(),

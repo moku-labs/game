@@ -198,6 +198,8 @@ export type FxState = {
   settled: Array<() => void>;
   /** The child controllers of the `guide` handlers that are showing something right now. */
   guides: AbortController[];
+  /** The handler of the answered effect whose gate opened in fast mode and still waits. */
+  unshown: (() => void) | undefined;
   mode: "live" | "fast";
 };
 
