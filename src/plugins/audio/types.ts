@@ -291,7 +291,15 @@ export type LoopSound = {
 };
 
 /**
- * audio plugin state.
+ * What the walk of a scene leave reads for each loop: the scene that leaves and the fade, in real
+ * milliseconds, of the loops that belong to it.
+ */
+export type LeavingScene = { scene: string; fadeMs: number };
+
+/**
+ * What the audio plugin keeps between calls: the context and its graph, the buses, the pause and
+ * unlock flags, the named sounds and the remembered loops, the decoded buffers, the music track
+ * and the journal. Owned and written only by the audio plugin.
  */
 export type State = {
   /** `undefined` means headless: no graph, no sound, every member still keeps its value. */
@@ -316,6 +324,11 @@ export type State = {
   loops: Map<string, LoopSound>;
   /** The mounted scene, as the last `scenes:changed` named it; `undefined` before the first. */
   scene: string | undefined;
+  /**
+   * The scene that leaves and the fade, written by `stopSceneLoops` before its walk of `loops`:
+   * one object for the whole run, so the walk makes nothing.
+   */
+  leaving: LeavingScene;
   /** Per key, evicted per key on `assets:bundle-unloaded` and `assets:replaced`, and when a music track stops being the one that plays. */
   decoded: Map<string, Promise<AudioBuffer>>;
   /** Asset keys that already got their one warning. */

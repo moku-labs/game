@@ -5,7 +5,7 @@
  * `*.bench.ts`.
  */
 import { alloc } from "../../../../../tests/perf/alloc";
-import { isSameLoop, stopSceneLoops } from "../../named";
+import { isSameLoop, stopSceneLoops } from "../../loops";
 import { forgetTrack } from "../../playback";
 import type { AudioContextLike, LoopSound, NamedSound, State } from "../../types";
 import { createMockAudio } from "../unit/mock-audio";

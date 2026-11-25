@@ -1,16 +1,18 @@
 /**
- * @file audio plugin — the three effect handlers and the decode cache. A sound is a new source
- * every time, and a sound with an id also gets a gain of its own (`named.ts`), which is what the
- * next sound with that id and `stopSfx` fade; a loop is a sound with an id that fades in, loops, and
- * is remembered in `loops` for the unlock. Music is one looping track on its own gain, which is
- * what cross-fades. At `music: "decode"` the track is a buffer source, at `music: "stream"` a
- * media element.
+ * @file audio plugin — the three effect handlers. A sound is a new source every time, and a sound
+ * with an id also gets a gain of its own (`named.ts`), which is what the next sound with that id
+ * and `stopSfx` fade; a loop is a sound with an id that fades in, loops, and is remembered for the
+ * unlock (`loops.ts`). Every buffer comes from the decode cache (`decode.ts`). Music is one looping
+ * track on its own gain, which is what cross-fades. At `music: "decode"` the track is a buffer
+ * source, at `music: "stream"` a media element.
  */
 import type { Descriptor, Hint } from "../flow/types";
 import type { Json } from "../model/types";
+import { bufferOf, warnOnce } from "./decode";
 import { isBus, ramp } from "./graph";
 import { recordSound } from "./journal";
-import { claimNamed, isSameLoop, startNamed, stopNamed, waitingKey } from "./named";
+import { playLoop } from "./loops";
+import { playNamed, stopNamed, waitingKey } from "./named";
 import {
   canStream,
   disposeStream,
@@ -22,8 +24,6 @@ import {
 import type {
   AudioContextLike,
   AudioCtx,
-  Bus,
-  LoopSound,
   MusicRequest,
   MusicSwitch,
   SfxRequest,
@@ -32,9 +32,6 @@ import type {
 
 /** One music switch on its way: the key, the length of the cross-fade in seconds, and its token. */
 type TrackStart = { key: string; seconds: number; pending: MusicSwitch };
-
-/** One named sound on its way: the id, the key, the checked bus, the fade in milliseconds, and the loop it is, if one. */
-type NamedPlay = { id: string; key: string; bus: Bus; fadeMs: number; loop: LoopSound | undefined };
 
 /** The bus a sound goes to when the descriptor names none. */
 const DEFAULT_BUS = "sfx";
@@ -69,8 +66,9 @@ function fadeOf(descriptor: Descriptor | Hint, fadeMs: number): number {
 }
 
 /**
- * Takes a fade a descriptor named only when the clock can schedule it: a finite number, 0 or more.
- * `NaN` or a negative fade would make the ramp and the stop throw inside the handler.
+ * Takes a fade a descriptor or a caller named only when the clock can schedule it: a finite number,
+ * 0 or more. `NaN` or a negative fade would make the ramp and the stop throw. The `stopSfx` handler
+ * and `app.audio.stop` both clamp through here.
  *
  * @param fade - The `fadeMs` the payload carries.
  * @param fallback - The configured fade.
@@ -80,7 +78,7 @@ function fadeOf(descriptor: Descriptor | Hint, fadeMs: number): number {
  * validFade(-5, 120); // 120
  * ```
  */
-function validFade(fade: Json | undefined, fallback: number): number {
+export function validFade(fade: Json | undefined, fallback: number): number {
   return typeof fade === "number" && Number.isFinite(fade) && fade >= 0 ? fade : fallback;
 }
 
@@ -126,76 +124,6 @@ export function musicOf(descriptor: Descriptor | Hint, fadeMs: number): MusicReq
 }
 
 /**
- * Warns about one key exactly once per run. A missing file is a mistake in the manifest, not a
- * reason to flood the log of every frame that plays the sound.
- *
- * @param ctx - Domain context of the plugin.
- * @param key - The asset key the warning is about.
- * @param event - What happened.
- */
-function warnOnce(ctx: AudioCtx, key: string, event: string): void {
-  if (ctx.state.warned.has(key)) return;
-
-  ctx.state.warned.add(key);
-  ctx.log.warn(event, { key });
-}
-
-/**
- * Decodes one key, at most once. The promise is cached before it settles, so two plays of the
- * same sound in one frame decode a single time.
- *
- * @param ctx - Domain context of the plugin.
- * @param key - Asset key of an audio file, `.mp3` or `.m4a`.
- * @returns The pending buffer, or `undefined` when the bundle carries no such file.
- */
-export function decode(ctx: AudioCtx, key: string): Promise<AudioBuffer> | undefined {
-  const state = ctx.state;
-  const cached = state.decoded.get(key);
-
-  if (cached !== undefined) return cached;
-
-  const context = state.context;
-
-  if (context === undefined) return undefined;
-
-  const asset = ctx.deps.assets.audio(key);
-
-  if (asset === undefined) {
-    warnOnce(ctx, key, "audio: no audio for key");
-
-    return undefined;
-  }
-
-  // eslint-disable-next-line unicorn/prefer-spread -- an ArrayBuffer copy: decodeAudioData detaches what it gets.
-  const pending = context.decodeAudioData(asset.bytes.slice(0));
-
-  state.decoded.set(key, pending);
-
-  return pending;
-}
-
-/**
- * Awaits the decoded buffer of one key. A file that does not decode warns once and plays nothing.
- *
- * @param ctx - Domain context of the plugin.
- * @param key - Asset key of an audio file, `.mp3` or `.m4a`.
- * @returns The buffer, or `undefined` when there is nothing to play.
- */
-async function bufferOf(ctx: AudioCtx, key: string): Promise<AudioBuffer | undefined> {
-  const pending = decode(ctx, key);
-
-  if (pending === undefined) return undefined;
-
-  try {
-    return await pending;
-  } catch {
-    warnOnce(ctx, key, "audio: the audio file did not decode");
-
-    return undefined;
-  }
-}
-
-/**
  * Plays one sound: the handler of the kind `"sfx"`. Every play is its own source, so the same key
  * twice in one frame is heard twice, and the promise resolves when the sound STARTED. The handler
  * ignores its signal: a sound that began plays to its end, unless a sound with its id or a stop
@@ -224,7 +152,8 @@ export async function playSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): Pro
     return;
   }
 
-  if (request.id !== undefined) state.loops.delete(request.id);
+  // A one-shot under a loop's id forgets the loop, unless its bus is refused and it never plays.
+  if (request.id !== undefined && isBus(state, request.bus)) state.loops.delete(request.id);
 
   // Between the two contexts of a renewal a sound that plays once is dropped.
   if (state.context === undefined) return;
@@ -236,70 +165,6 @@ export async function playSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): Pro
   }
 
   await playRequest(ctx, request);
-}
-
-/**
- * Plays a loop, or remembers it: the loop that already holds its id with its key changes nothing,
- * any other request takes the id, and a one-shot waiting for the unlock under it is dropped. A
- * locked context, or a renewal between two contexts, only keeps it in `loops`; the unlock starts
- * it. The scene it belongs to is the one mounted now.
- *
- * @param ctx - Domain context of the plugin.
- * @param request - The key, the bus and the fade of the loop.
- * @param id - The id it plays under.
- */
-async function playLoop(ctx: AudioCtx, request: SfxRequest, id: string): Promise<void> {
-  const state = ctx.state;
-  const bus = request.bus;
-
-  if (!isBus(state, bus)) {
-    ctx.log.warn("audio: unknown bus", { bus });
-
-    return;
-  }
-
-  if (isSameLoop(state, id, request.key)) return;
-
-  const loop: LoopSound = {
-    key: request.key,
-    bus,
-    fadeMs: request.fadeMs,
-    scene: state.scene,
-    started: false
-  };
-
-  state.loops.set(id, loop);
-  state.pendingSfx.delete(waitingKey(id));
-
-  if (!state.unlocked) return;
-
-  await startLoop(ctx, id, loop);
-}
-
-/**
- * Starts one loop the plugin keeps under its id, with its own fade.
- *
- * @param ctx - Domain context of the plugin.
- * @param id - The id the loop plays under.
- * @param loop - The loop, as `loops` keeps it.
- */
-async function startLoop(ctx: AudioCtx, id: string, loop: LoopSound): Promise<void> {
-  await playNamed(ctx, { id, key: loop.key, bus: loop.bus, fadeMs: loop.fadeMs, loop });
-}
-
-/**
- * Starts every remembered loop whose id has no sound: what the unlock does once the context runs,
- * the first one and the one after an iOS renewal. A loop that already plays or decodes is left alone,
- * so a gesture and the start attempt that settle together start it once.
- *
- * @param ctx - Domain context of the plugin.
- */
-export function startLoops(ctx: AudioCtx): void {
-  const state = ctx.state;
-
-  for (const [id, loop] of state.loops) {
-    if (!state.named.has(id)) void startLoop(ctx, id, loop);
-  }
 }
 
 /**
@@ -328,68 +193,6 @@ export function stopNamedSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): void
   if (typeof id !== "string") return;
 
   stopNamed(ctx.state, id, fadeOf(descriptor, ctx.config.sfxFadeMs));
-}
-
-/**
- * Plays a sound under its id: the sound that has the id fades out over the fade of this one, and
- * this one starts through its own gain once its buffer is there, unless a later sound with the id
- * or a stop took its place while it decoded. A loop fades in over the same fade. A file that is
- * missing frees the id, and forgets a loop, so no unlock tries it again.
- *
- * @param ctx - Domain context of the plugin.
- * @param sound - The id, the key, the checked bus, the fade and the loop it is.
- */
-async function playNamed(ctx: AudioCtx, sound: NamedPlay): Promise<void> {
-  const state = ctx.state;
-  const { id, loop } = sound;
-  const seconds = sound.fadeMs / 1000;
-  const entry = claimNamed(state, id, seconds);
-  const buffer = await bufferOf(ctx, sound.key);
-
-  // A later sound with this id, or a stop, took its place: it starts nothing.
-  if (state.named.get(id) !== entry) return;
-
-  const context = state.context;
-  const gain = state.buses[sound.bus].gain;
-
-  if (buffer === undefined || context === undefined || gain === undefined) {
-    state.named.delete(id);
-
-    if (loop !== undefined) state.loops.delete(id);
-
-    return;
-  }
-
-  startNamed(state, context, {
-    id,
-    entry,
-    buffer,
-    bus: gain,
-    loopFadeIn: loop === undefined ? undefined : seconds
-  });
-  journalNamed(ctx, sound);
-}
-
-/**
- * Writes the journal entry of a named sound that started. A loop has one, at its first start: its
- * start again after an iOS renewal is the same sound.
- *
- * @param ctx - Domain context of the plugin.
- * @param sound - The named sound that started.
- */
-function journalNamed(ctx: AudioCtx, sound: NamedPlay): void {
-  const { key, bus, id, loop } = sound;
-
-  if (loop === undefined) {
-    recordSound(ctx, { key, bus, kind: "sfx", id });
-
-    return;
-  }
-
-  if (loop.started) return;
-
-  loop.started = true;
-  recordSound(ctx, { key, bus, kind: "sfx", id, loop: true });
 }
 
 /**

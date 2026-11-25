@@ -113,6 +113,7 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     named: emptyNamed(),
     loops: emptyLoops(),
     scene: undefined,
+    leaving: { scene: "", fadeMs: 0 },
     decoded: emptyCache(),
     warned: emptyWarned(),
     warnedVolumes: false,

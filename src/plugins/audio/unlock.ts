@@ -7,7 +7,8 @@
  * webview with the requirement switched off, lets the context run at once. So the plugin also
  * asks once at start, and unlocks with no touch where the answer is yes.
  */
-import { isMusicPlaying, playMusic, playRequest, startLoops, trackMusic } from "./playback";
+import { startLoops } from "./loops";
+import { isMusicPlaying, playMusic, playRequest, trackMusic } from "./playback";
 import type { AudioContextLike, AudioCtx, State } from "./types";
 
 /** The two gestures that unlock a context. The first of them to arrive wins. */

@@ -7,7 +7,7 @@ import { setBusVolume } from "./api";
 import { cancelRenewal, scheduleRenewal } from "./context";
 import { applyAllGains, isBus } from "./graph";
 import { withDeps } from "./lifecycle";
-import { stopSceneLoops } from "./named";
+import { stopSceneLoops } from "./loops";
 import { pauseMusic, playMusic, resumeMusic, trackMusic } from "./playback";
 import type {
   AssetsReplaced,

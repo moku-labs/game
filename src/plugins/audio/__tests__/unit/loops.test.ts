@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Descriptor } from "../../../flow/types";
-import type { AudioContextLike, Config, LifecycleChanged } from "../../types";
+import type { AudioContextLike, Bus, Config, LifecycleChanged } from "../../types";
 import {
   createFakeContext,
   type FakeContext,
+  type FakeGain,
+  type FakeSource,
   installFakeWindow,
   keyOf
 } from "../fake-audio-context";
@@ -124,6 +126,19 @@ async function tick(times = 10): Promise<void> {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
 }
 
+/** The gain node a source is connected to, among the gains its context made. */
+function gainOf(
+  context: FakeContext | undefined,
+  source: FakeSource | undefined
+): FakeGain | undefined {
+  return context?.gains.find(gain => source !== undefined && gain === source.connectedTo);
+}
+
+/** The gain of one bus: the graph makes master, music and sfx first, in that order. */
+function busGain(context: FakeContext | undefined, bus: Bus): FakeGain | undefined {
+  return context?.gains[(["master", "music", "sfx"] as const).indexOf(bus)];
+}
+
 /** The key and the loop flag of every source a context made, in order. */
 function played(context: FakeContext | undefined): Array<[string | undefined, boolean]> {
   return (context?.sources ?? []).map(source => [keyOf(source.buffer), source.loop]);
@@ -139,8 +154,9 @@ describe("a loop plays", () => {
     const [source] = context.sources;
 
     expect(played(context)).toEqual([["rain.room", true]]);
-    expect(source?.connectedTo).toBe(context.gains[3]);
-    expect(context.gains[3]?.connectedTo).toBe(context.gains[2]);
+    expect(gainOf(context, source)).toBeDefined();
+    expect(gainOf(context, source)).not.toBe(busGain(context, "sfx"));
+    expect(gainOf(context, source)?.connectedTo).toBe(busGain(context, "sfx"));
     expect(mock.state.named.get("rain")?.source).toBe(source);
   });
 
@@ -152,12 +168,12 @@ describe("a loop plays", () => {
     context.currentTime = 10;
     await mock.fx("sfx", loop("rain.room", { fadeMs: 800 }));
 
-    const [line] = context.sources;
+    const [line, bed] = context.sources;
 
-    expect(context.gains[3]?.gain.ramps).toEqual([[0, 10.8]]);
+    expect(gainOf(context, line)?.gain.ramps).toEqual([[0, 10.8]]);
     expect(line?.stoppedAt).toBe(10.8);
-    expect(context.gains[4]?.gain.sets).toEqual([[0, 10]]);
-    expect(context.gains[4]?.gain.ramps).toEqual([[1, 10.8]]);
+    expect(gainOf(context, bed)?.gain.sets).toEqual([[0, 10]]);
+    expect(gainOf(context, bed)?.gain.ramps).toEqual([[1, 10.8]]);
   });
 
   it("fades in over config.sfxFadeMs when it names no fadeMs", async () => {
@@ -166,7 +182,7 @@ describe("a loop plays", () => {
 
     await mock.fx("sfx", loop("rain.room"));
 
-    expect(context.gains[3]?.gain.ramps).toEqual([[1, 0.25]]);
+    expect(gainOf(context, context.sources[0])?.gain.ramps).toEqual([[1, 0.25]]);
   });
 
   it("goes through the music bus when it names bus music", async () => {
@@ -175,7 +191,7 @@ describe("a loop plays", () => {
 
     await mock.fx("sfx", loop("rain.room", { bus: "music" }));
 
-    expect(context.gains[3]?.connectedTo).toBe(context.gains[1]);
+    expect(gainOf(context, context.sources[0])?.connectedTo).toBe(busGain(context, "music"));
   });
 
   it("still decodes into a looping buffer source at music: stream", async () => {
@@ -204,7 +220,7 @@ describe("a loop plays", () => {
     });
 
     expect(played(context)).toEqual([["rain.room", false]]);
-    expect(context.sources[0]?.connectedTo).toBe(context.gains[2]);
+    expect(gainOf(context, context.sources[0])).toBe(busGain(context, "sfx"));
     expect(mock.state.loops.size).toBe(0);
   });
 
@@ -219,6 +235,22 @@ describe("a loop plays", () => {
     expect(mock.state.named.size).toBe(0);
     expect(mock.state.loops.size).toBe(0);
     expect(mock.log.warn).toHaveBeenCalledWith("audio: no audio for key", { key: "rain.gone" });
+  });
+
+  it("frees its id and is forgotten when its file does not decode, with one warning", async () => {
+    // Bug caught: a bed whose bytes are broken is retried at every unlock, or warns on every request.
+    const { context, ...mock } = unlocked();
+
+    await mock.fx("sfx", loop("rain.bad"));
+    await mock.fx("sfx", loop("rain.bad"));
+
+    expect(context.sources).toEqual([]);
+    expect(mock.state.named.size).toBe(0);
+    expect(mock.state.loops.size).toBe(0);
+    expect(mock.log.warn).toHaveBeenCalledTimes(1);
+    expect(mock.log.warn).toHaveBeenCalledWith("audio: the audio file did not decode", {
+      key: "rain.bad"
+    });
   });
 
   it("stores nothing and resolves at once headless", async () => {
@@ -242,7 +274,7 @@ describe("a loop asked for again under its id", () => {
 
     expect(context.sources).toHaveLength(1);
     expect(context.gains).toHaveLength(4);
-    expect(context.gains[3]?.gain.ramps).toEqual([[1, 0.12]]);
+    expect(gainOf(context, context.sources[0])?.gain.ramps).toEqual([[1, 0.12]]);
     expect(context.sources[0]?.stoppedAt).toBeUndefined();
     expect(mock.api.journal()).toHaveLength(1);
   });
@@ -376,7 +408,7 @@ describe("a loop and the scene", () => {
     const [hum, rain, wind] = context.sources;
 
     expect(rain?.stoppedAt).toBe(2.5);
-    expect(context.gains[4]?.gain.ramps.at(-1)).toEqual([0, 2.5]);
+    expect(gainOf(context, rain)?.gain.ramps.at(-1)).toEqual([0, 2.5]);
     expect(mock.state.named.has("rain")).toBe(false);
     expect([...mock.state.loops.keys()]).toEqual(["hum", "wind"]);
 
@@ -431,7 +463,7 @@ describe("a loop and the iOS renewal", () => {
 
     expect(old?.sources[0]?.stoppedAt).toBe(0);
     expect(played(fresh)).toEqual([["rain.room", true]]);
-    expect(fresh?.gains[3]?.connectedTo).toBe(fresh?.gains[2]);
+    expect(gainOf(fresh, fresh?.sources[0])?.connectedTo).toBe(busGain(fresh, "sfx"));
   });
 
   it("starts in the new context when it is asked for while the old one closes", async () => {
@@ -512,5 +544,116 @@ describe("a loop and onStop", () => {
 
     expect(context.sources[0]?.stoppedAt).toBe(0);
     expect(mock.state.loops.size).toBe(0);
+  });
+});
+
+describe("a loop and what goes wrong around it", () => {
+  it("app.audio.stop with a NaN fade stops the loop over the configured fade and frees its id", async () => {
+    // Bug caught: the NaN reaches the ramp and the stop, which a real context refuses with a throw,
+    // so the looping source is never stopped and plays on with no id left to stop it.
+    const { context, ...mock } = unlocked();
+
+    await mock.fx("sfx", loop("rain.room"));
+    mock.api.stop("rain", { fadeMs: Number.NaN });
+
+    expect(context.sources[0]?.stoppedAt).toBe(0.12);
+    expect(gainOf(context, context.sources[0])?.gain.ramps.at(-1)).toEqual([0, 0.12]);
+    expect(mock.state.named.has("rain")).toBe(false);
+    expect(mock.state.loops.has("rain")).toBe(false);
+  });
+
+  it("a one-shot with an unknown bus under the loop's id leaves the loop to its scene", async () => {
+    // Bug caught: the refused one-shot forgets the loop, so the bed plays on past the leave of its scene.
+    const { context, ...mock } = unlocked();
+
+    mock.hooks["scenes:changed"]({ from: undefined, to: "ward", music: undefined });
+    await mock.fx("sfx", loop("rain.room"));
+    await mock.fx("sfx", {
+      kind: "sfx",
+      payload: { key: "x", bus: "nope", id: "rain" },
+      cosmetic: true
+    });
+
+    expect(mock.log.warn).toHaveBeenCalledWith("audio: unknown bus", { bus: "nope" });
+    expect(played(context)).toEqual([["rain.room", true]]);
+    expect(context.sources[0]?.stoppedAt).toBeUndefined();
+
+    mock.hooks["scenes:changed"]({ from: "ward", to: "yard", music: undefined });
+
+    expect(context.sources[0]?.stoppedAt).toBe(0.6);
+  });
+
+  it("a loop the unlock cannot start goes to the log, not to an unhandled rejection", async () => {
+    // Bug caught: a throw of the context while the unlock starts a remembered bed escapes as an
+    // unhandled rejection, which fails the page's error handler and says nothing in the log.
+    const mock = locked();
+
+    vi.spyOn(mock.context, "createBufferSource").mockImplementationOnce(() => {
+      throw new Error("no source");
+    });
+    await mock.fx("sfx", loop("rain.room"));
+    await mock.touch();
+
+    expect(mock.log.error).toHaveBeenCalledWith(
+      "audio: the loop did not start",
+      undefined,
+      new Error("no source")
+    );
+  });
+
+  it("a loop the unlock could not start starts at the next unlock of the same context", async () => {
+    // Bug caught: the failed start keeps its id claimed with no sound, so every later unlock skips the bed.
+    const mock = locked();
+    const dialog: LifecycleChanged = {
+      reason: "system-dialog",
+      action: "push",
+      reasons: ["system-dialog"],
+      paused: true,
+      resumed: false
+    };
+
+    vi.spyOn(mock.context, "createBufferSource").mockImplementationOnce(() => {
+      throw new Error("no source");
+    });
+    await mock.fx("sfx", loop("rain.room"));
+    await mock.touch();
+
+    expect(mock.log.error).toHaveBeenCalledTimes(1);
+
+    // iOS interrupts the context; its resume hangs until the next touch.
+    mock.context.state = "interrupted";
+    mock.context.hangs = true;
+    mock.hooks["lifecycle:changed"](dialog);
+    mock.hooks["lifecycle:changed"]({
+      ...dialog,
+      action: "pop",
+      reasons: [],
+      paused: false,
+      resumed: true
+    });
+    mock.context.hangs = false;
+    await mock.touch();
+
+    expect(played(mock.context)).toEqual([["rain.room", true]]);
+    expect(mock.state.loops.has("rain")).toBe(true);
+  });
+
+  it("a restarted app ties a loop asked before its first switch to no scene", async () => {
+    // Bug caught: the scene of the previous run stays in the state, so the next run's bed asked
+    // before any scene is cut when a scene of that name leaves.
+    const mock = createMockAudio({
+      config: { context: (): AudioContextLike => createFakeContext({ state: "running" }) }
+    });
+
+    mock.start();
+    mock.hooks["scenes:changed"]({ from: undefined, to: "ward", music: undefined });
+    await mock.stop();
+    mock.start();
+    await mock.fx("sfx", loop("rain.room"));
+    mock.hooks["scenes:changed"]({ from: undefined, to: "ward", music: undefined });
+    mock.hooks["scenes:changed"]({ from: "ward", to: "yard", music: undefined });
+
+    expect(mock.state.loops.has("rain")).toBe(true);
+    expect(mock.state.named.get("rain")?.source?.loop).toBe(true);
   });
 });
