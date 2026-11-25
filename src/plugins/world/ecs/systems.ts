@@ -307,6 +307,18 @@ function phaseContextOf(ctx: WorldCtx, world: EcsApi, time: Readonly<Time>): Pha
 }
 
 /**
+ * Tells whether the mounted scene is one of a system's scenes: `undefined`, before any switch, is
+ * none of them.
+ *
+ * @param scenes - The system's `scenes`.
+ * @param mounted - The mounted scene.
+ * @returns True when the system's scenes name it.
+ */
+function isOneOf(scenes: readonly string[], mounted: string | undefined): boolean {
+  return mounted !== undefined && scenes.includes(mounted);
+}
+
+/**
  * Tells whether a system that runs now meets an entry of its scene it was not told of: the mounted
  * scene is one of its `scenes` (any scene without them) and changed since its last entry. Marks the
  * entry told. Two reads and a compare: no walk while its scene is mounted and was told.
@@ -317,12 +329,7 @@ function phaseContextOf(ctx: WorldCtx, world: EcsApi, time: Readonly<Time>): Pha
  */
 function entersScene(scene: SceneState, entry: SystemEntry): boolean {
   if (entry.entry === scene.mounts) return false;
-
-  const scenes = entry.scenes;
-
-  if (scenes !== undefined && (scene.mounted === undefined || !scenes.includes(scene.mounted))) {
-    return false;
-  }
+  if (entry.scenes !== undefined && !isOneOf(entry.scenes, scene.mounted)) return false;
 
   entry.entry = scene.mounts;
 
@@ -332,8 +339,9 @@ function entersScene(scene: SceneState, entry: SystemEntry): boolean {
 /**
  * Tells whether a system runs in this phase: one of its `scenes` is mounted or leaving, and no
  * term of its query has an empty store. A skipped system remembers it; one that runs is told in
- * `resumed` whether its last chance was skipped and `entered` whether its scene was mounted since. No walk, no mark and no clock read happen for a
- * skipped system: the check comes before all three.
+ * `resumed` whether its last chance was skipped and in `entered` whether its scene was mounted
+ * since. No walk, no mark and no clock read happen for a skipped system: the check comes before
+ * all three.
  *
  * @param state - The ecs branch of the plugin state.
  * @param entry - The system.

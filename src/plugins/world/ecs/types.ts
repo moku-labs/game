@@ -318,7 +318,7 @@ export type QueryTuple<Terms extends readonly QueryTerm[]> = [Entity, ...QueryVa
  *   ctx.res(Pointer).x = 0;
  *   ctx.time.delta; // 16
  *   ctx.resumed; // false: the system ran in the frame before
- *   ctx.entered; // false: its scene was mounted before the run before
+ *   ctx.entered; // false: no new mount of its scene since the run before
  * };
  * ```
  */
