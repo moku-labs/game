@@ -319,7 +319,9 @@ function beginGuide(state: FxState, signal: AbortSignal): AbortSignal {
  * gate opened. The spread keeps a payload-less answer without a `payload` key, and `at` replaces
  * one a caller put on the answer. In live mode the handler is called as well: it only shows the UI,
  * the answer comes through the gate, so its failure is logged and does not block the node. Its
- * signal ends with the answer — that is how the popup layer knows to unmount what it showed.
+ * signal ends with the answer — that is how the popup layer knows to unmount what it showed. In
+ * fast mode the call waits in `state.unshown` until the answer: when the mode goes back to live
+ * first (a walk rests at this gate), `setMode` shows the popup then.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param gate - Internal gate API.
@@ -335,15 +337,25 @@ function openForAnswers(
   answers: readonly string[],
   signal: AbortSignal
 ): Promise<Answered> {
+  const state = ctx.state.fx;
   const answered = gate
     .open({ allowed: answers })
     .then((answer): Answered => ({ ...answer, at: ctx.deps.clock.now() }));
-
-  if (ctx.state.fx.mode !== "live") return answered;
-
   const shown = childOf(signal);
+  /**
+   * Calls the handler with the signal that ends with the answer.
+   */
+  const show = (): void => {
+    invoke(state, ctx.log, descriptor, shown.signal);
+  };
 
-  invoke(ctx.state.fx, ctx.log, descriptor, shown.signal);
+  if (state.mode === "live") show();
+  else if (!shown.signal.aborted) state.unshown = show;
+
+  // A node that ends before its answer takes its unshown popup with it.
+  shown.signal.addEventListener("abort", () => {
+    if (state.unshown === show) state.unshown = undefined;
+  });
 
   return answered.finally(() => {
     shown.abort();
@@ -456,7 +468,14 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
     },
 
     setMode: (mode: "live" | "fast"): void => {
+      const unshown = state.unshown;
+
       state.mode = mode;
+      if (mode !== "live" || unshown === undefined) return;
+
+      // The gate a fast walk rests at shows its popup now that the handler runs live.
+      state.unshown = undefined;
+      unshown();
     }
   };
 }

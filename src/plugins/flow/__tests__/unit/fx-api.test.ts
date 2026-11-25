@@ -814,6 +814,47 @@ describe("the signal of a handler with answers", () => {
     expect(seen[0]?.reason).toBe("restore");
   });
 
+  it("shows a popup opened in fast mode once the mode is live again, and only once", async () => {
+    const { api, gateStub } = setup();
+    const seen = captureSignals(api, "popup");
+
+    api.setMode("fast");
+    const pending = api.run({ kind: "popup", answers: ["claim"] }, new AbortController().signal);
+    await tick();
+
+    expect(seen).toHaveLength(0);
+
+    api.setMode("live");
+    api.setMode("fast");
+    api.setMode("live");
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.aborted).toBe(false);
+
+    gateStub.reply({ intent: "claim" });
+    await pending;
+
+    expect(seen[0]?.aborted).toBe(true);
+  });
+
+  it("shows nothing on live for a fast popup that was answered or whose node ended", async () => {
+    const { api, gateStub } = setup();
+    const node = new AbortController();
+    const seen = captureSignals(api, "popup");
+
+    api.setMode("fast");
+    const answered = api.run({ kind: "popup", answers: ["claim"] }, new AbortController().signal);
+    await tick();
+    gateStub.reply({ intent: "claim" });
+    await answered;
+    api.run({ kind: "popup", answers: ["claim"] }, node.signal).catch(() => undefined);
+    await tick();
+    node.abort("restore");
+    api.setMode("live");
+
+    expect(seen).toHaveLength(0);
+  });
+
   it("keeps the node signal for a descriptor without answers", async () => {
     const { api } = setup();
     const node = new AbortController();

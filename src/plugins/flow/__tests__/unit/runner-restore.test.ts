@@ -1224,7 +1224,7 @@ describe("walk({ from }) with a rest bookmark", () => {
     await stopRunner(harness.ctx);
   });
 
-  it("walks its route in fast mode once the node is entered", async () => {
+  it("walks its route in fast mode once the node is entered, and shows the popup it rests at", async () => {
     const harness = setup();
 
     await harness.start();
@@ -1238,7 +1238,9 @@ describe("walk({ from }) with a rest bookmark", () => {
       { path: "home", mode: "live" },
       { path: "ask", mode: "fast" }
     ]);
-    expect(harness.shown).toEqual([]);
+    // F238: the walk rests at the popup's gate; back in live mode the popup is shown.
+    expect(harness.shown).toHaveLength(1);
+    expect(harness.shown[0]?.aborted).toBe(false);
     expect(state).toMatchObject({ path: "ask", mode: "live" });
     await stopRunner(harness.ctx);
   });

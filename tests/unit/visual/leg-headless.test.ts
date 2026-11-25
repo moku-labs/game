@@ -199,7 +199,7 @@ describe("the headless leg", () => {
     expect(moved).toBe(61_000);
   });
 
-  it("does not mount a popup that the last node of a walk opens", async () => {
+  it("mounts the popup that the last node of a walk opens: the leg runs live (F238)", async () => {
     const test = openPopup(7, [
       { walk: { route: [{ at: "home", intent: "open" }] } },
       { checkpoint: "walked" }
@@ -212,8 +212,8 @@ describe("the headless leg", () => {
     const described = await baseline("open-popup", "walked", "describe.json");
 
     expect(state.path).toBe("reward");
-    expect(keysOf(described.ui)).not.toContain("reward");
-    expect(keysOf(described.ui)).not.toContain("claim");
+    expect(keysOf(described.ui)).toContain("reward");
+    expect(keysOf(described.ui)).toContain("claim");
   });
 
   it("lands every motion at a checkpoint: anim.active() is 0 when the screen is read", async () => {

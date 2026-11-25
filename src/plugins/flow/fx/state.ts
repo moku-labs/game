@@ -30,6 +30,7 @@ export function createFxState(): FxState {
     hintListeners: [],
     settled: [],
     guides: [],
+    unshown: undefined,
     mode: "live"
   };
 }

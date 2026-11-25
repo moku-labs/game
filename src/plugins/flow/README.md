@@ -79,7 +79,7 @@ app.flow.state().pending.gate; // ["ok", "close"]
 | What runs | The node is entered again, with the bookmark's input. | The node runs again from its first line, live, with the bookmark's input. Its effects before the gate play again. A failure retries this node. |
 | `restore` resolves | When the node is entered, before its scene stage. Or when the loop ends first: the node is not entered. | When the node opened its gate, or at the rest node or the end of the loop it reaches without one. Or when the loop ends before the node is entered: it never runs. |
 | `flow:rest` | Emitted once. `checkpoint` is the node's flag. | Emitted once, with `checkpoint: false`. |
-| `walk(route, { from })` | Enters before the switch to fast mode, then walks. The stages of the node see the mode of the caller. | Enters after the switch to fast mode, without waiting for the gate. The node runs in fast mode, so its popup is not shown. The route answers it. |
+| `walk(route, { from })` | Enters before the switch to fast mode, then walks. The stages of the node see the mode of the caller. | Enters after the switch to fast mode, without waiting for the gate. The node runs in fast mode, so its popup is not shown while the walk plays. The route answers it; a popup the walk ends at is shown when live mode comes back. |
 
 A repro (`runRepro`, `reproBookmark`, `game.restore` with `repro`) starts at a rest node only. A
 `checkpoint` that names a transit node is refused.
@@ -335,8 +335,12 @@ refuse the bookmark, and so does a `rest` that is not `{ path, input }`. Flow im
 
 `game.bookmark` at a waiting transit node answers with that node's `path` and with `rest`.
 `game.restore` of such a bookmark answers once the node's gate is open, so the state it returns
-already has `pending.gate`. No `walk([])` is needed after it, and a fast walk would not show the
-popup.
+already has `pending.gate`. No `walk([])` is needed after it.
+
+A walk on a live app that ends at a popup's gate shows that popup once the mode is live again
+(F238): a `.dev` command may post an event and `await app.flow.walk([])`, and the popup the graph
+reaches is drawn. The popups the route answers on its way are never shown, and a headless walk,
+which stays fast, shows nothing.
 
 ## Effects in a node
 

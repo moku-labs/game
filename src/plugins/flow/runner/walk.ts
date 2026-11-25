@@ -398,7 +398,8 @@ async function playRoute(
  * after the switch, so it never starts live and never shows its popup. The mode of the caller
  * is put back afterwards, also when the bookmark is refused or a step rejects, and a
  * substitution the route never reached is disarmed: it must not skip a sub-flow in the live play
- * that follows. Back in live mode, the guide of the node the walk ends at is shown.
+ * that follows. Back in live mode, the guide of the node the walk ends at is shown, and `fx`
+ * shows the popup whose gate the walk rests at.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
