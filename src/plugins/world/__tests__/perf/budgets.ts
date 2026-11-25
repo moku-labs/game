@@ -98,6 +98,8 @@ export const BUDGET = {
    * before the check and run at 731 000 with it: about 13 ns a system.
    */
   skipCheck: 0,
+  /** F243: a frame that switches the scene and tells 40 systems `entered`. New: 0 B. */
+  sceneEntry: 0,
   /** F61 S2: `projection.left()` with no build: one field read. New: 0 B. */
   buildLeftIdle: 0,
   /** F61 S2: `projection.left()` while a build runs: a clock read and a subtraction. New: 0 B. */
