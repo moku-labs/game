@@ -5,6 +5,7 @@ import { type } from "../../../flow/runner/define";
 import type { NodeFx } from "../../../flow/types";
 import { Sprite, Transform } from "../../../renderer/components";
 import type { ResourceType } from "../../../world/ecs/types";
+import { animFor } from "../../bind";
 import { AnimPlayer, Frames } from "../../components";
 import { defineMotion } from "../../motion";
 import {
@@ -365,3 +366,21 @@ expectTypeOf(fx(haptic("light"))).toEqualTypeOf<Promise<void>>();
 expectTypeOf(fx(play(deliverOrder, { items: [card], card }))).toEqualTypeOf<Promise<void>>();
 expectTypeOf(sfx("board.merge")).toExtend<FxStep>();
 sequence(sfx("board.merge"), haptic("light"));
+
+// A loop must be stoppable: `loop: true` needs an id, in the root helper and in the bound kit.
+sfx("rain.room", { id: "rain", loop: true });
+sfx("rain.room", { bus: "ambience", id: "rain", fadeMs: 300, loop: true });
+// @ts-expect-error — a loop without an id cannot be stopped
+sfx("rain.room", { loop: true });
+// @ts-expect-error — `loop: false` is not a loop: only `true` is taken
+sfx("rain.room", { id: "rain", loop: false });
+sfx("rain.room", { id: "rain" });
+
+const { sfx: boundSfx } = animFor<"rain.room" | "board.merge">();
+
+boundSfx("rain.room", { id: "rain", loop: true });
+boundSfx("board.merge");
+// @ts-expect-error — a loop without an id cannot be stopped
+boundSfx("rain.room", { loop: true });
+// @ts-expect-error — only the asset keys of the game are sounds
+boundSfx("nope", { id: "rain", loop: true });

@@ -116,7 +116,8 @@ export function cancelRenewal(state: State): void {
 
 /**
  * Drops every sound of the old context and keeps the music key: the track that plays, or the
- * switch on its way. A decode still running on the old context may reject when it closes; such a
+ * switch on its way. The loops stay in `loops`, so the unlock of the new context starts them again,
+ * as the music. A decode still running on the old context may reject when it closes; such a
  * key is forgotten, so its next play decodes again.
  *
  * @param state - The plugin state.
@@ -145,9 +146,9 @@ function dropInFlight(state: State): void {
 /**
  * Renews the context: the old one goes with every sound in it, the session is written again, and
  * a new context gets the graph at the same volumes and the unlock. The decoded buffers stay, an
- * AudioBuffer is bound to no context. The unlock starts the remembered music once the new context
- * runs. While the old context closes the plugin is headless: a sound is dropped and a music switch
- * is remembered. A stop, or a newer renewal, during the close makes this one end there.
+ * AudioBuffer is bound to no context. The unlock starts the remembered music and loops once the new
+ * context runs. While the old context closes the plugin is headless: a sound is dropped, and a music
+ * switch and a loop are remembered. A stop, or a newer renewal, during the close makes this one end there.
  *
  * @param ctx - Domain context of the plugin.
  */

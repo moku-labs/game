@@ -9,7 +9,8 @@ import type { AudioCtx, Bus, SoundEntry } from "./types";
  * Replaces the journal with a frozen list that ends with one started sound, stamped with the
  * elapsed game time, and keeps only the newest `config.journal` entries. A size of 0, or anything
  * that is not a positive number, records nothing. The entry has an `id` only when the sound has
- * one: the caller leaves the field out otherwise, so no entry carries an `undefined` key.
+ * one, and `loop` only for a loop: the caller leaves the fields out otherwise, so no entry carries
+ * an `undefined` key.
  *
  * @param ctx - Domain context of the plugin.
  * @param sound - What started.
@@ -17,10 +18,11 @@ import type { AudioCtx, Bus, SoundEntry } from "./types";
  * @param sound.bus - The bus it plays on.
  * @param sound.kind - `"sfx"` for a play, `"music"` for a track.
  * @param sound.id - The id of a named sound; absent for every other sound.
+ * @param sound.loop - `true` for a loop; absent for every other sound.
  */
 export function recordSound(
   ctx: AudioCtx,
-  sound: { key: string; bus: Bus; kind: SoundEntry["kind"]; id?: string }
+  sound: { key: string; bus: Bus; kind: SoundEntry["kind"]; id?: string; loop?: true }
 ): void {
   const size = Math.floor(ctx.config.journal);
 

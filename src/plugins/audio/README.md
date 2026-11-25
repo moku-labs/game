@@ -30,7 +30,7 @@ createApp({
 
 | Kind | Built by | Behaviour |
 |---|---|---|
-| `sfx` | `anim`'s `sfx(key, { bus?, id?, fadeMs? })` | A new `AudioBufferSourceNode` per play into its bus. Two plays in one frame are heard twice. The promise resolves when `start()` was called; the handler's `signal` is ignored, because a sound that began plays to its end. With `id` the sound is named (see Named sounds): it plays through a gain of its own, and it fades out the sound that had its `id`, over `fadeMs`, else `sfxFadeMs`. Without `id` nothing of that happens |
+| `sfx` | `anim`'s `sfx(key, { bus?, id?, fadeMs?, loop? })` | A new `AudioBufferSourceNode` per play into its bus. Two plays in one frame are heard twice. The promise resolves when `start()` was called; the handler's `signal` is ignored, because a sound that began plays to its end. With `id` the sound is named (see Named sounds): it plays through a gain of its own, and it fades out the sound that had its `id`, over `fadeMs`, else `sfxFadeMs`. With `id` and `loop: true` it loops until it is stopped or its scene leaves (see Loops). Without `id` nothing of that happens |
 | `stopSfx` | `anim`'s `stopSfx(id, { fadeMs? })` | Fades out and ends the sound named `id`, over `fadeMs`, else `sfxFadeMs`. A sound with that `id` still decoding never starts, one waiting for the unlock is dropped. An `id` nothing plays under changes nothing |
 | `music` | `music(key \| null, { fadeMs? })` of this plugin | One looping track on its own gain into the `music` bus: a buffer source at `music: "decode"`, an `<audio>` element at `music: "stream"`. The same key does nothing, a new key cross-fades, `null` fades out. A key still on its way counts as the same key; any other request replaces it, and the replaced switch starts nothing |
 
@@ -58,9 +58,54 @@ app.audio.stop("voice", { fadeMs: 0 });
 - While the unlock resumes the context, one sound per `id` waits (the latest), next to one per key for
   the sounds without one; a stop of the `id` drops the waiting one.
 - A scene change and a restore leave named sounds alone: a line plays on into the next scene until a
-  sound with its `id` or a stop ends it. `onStop` stops every named sound at once.
+  sound with its `id` or a stop ends it. A loop is the one exception (below). `onStop` stops every
+  named sound at once.
 - Cost: one `GainNode` per named sound, made when it starts and disconnected when it ends or its fade
   is over; nothing per frame. A sound without an `id` costs what it cost before.
+
+### Loops
+
+A named sound with `loop: true` is an ambient bed under the scene's music: rain, a hum, a crowd. It
+loops without a seam until a stop, a sound with its `id`, the leave of its scene or `onStop` ends it.
+`loop` needs an `id`: `sfx(key, { loop: true })` without one does not compile, since nothing could stop it.
+
+```ts
+// The ward: a node on entering the scene
+fx.start(sfx("room-rain", { id: "rain", loop: true, fadeMs: 800 }));
+
+// A panorama inside the memory scene, and its leave
+fx.start(sfx("rain-car", { id: "rain", loop: true, fadeMs: 600 }));
+fx.start(stopSfx("rain", { fadeMs: 600 }));
+
+// Leaving the scene: the loop fades out by itself
+```
+
+- **Fade-in.** A loop starts at gain 0 and rises to 1 over its `fadeMs`, else `sfxFadeMs`; the sound
+  it replaces under its `id` fades out over the same time. A sound that plays once still starts at 1.
+- **The same loop again.** A request for the loop that already holds its `id` with the same key,
+  playing, decoding or waiting for the unlock, changes nothing: no restart, no second source, no
+  journal entry, and the loop keeps the scene it belongs to. Another key under the `id` cross-fades;
+  a sound that plays once under the `id` replaces the loop and forgets it.
+- **Scene leave.** On `scenes:changed` every loop asked for while the scene that leaves was mounted
+  fades out over `musicFadeMs` and frees its `id`. A loop fired by the first node of a scene belongs
+  to that scene: `scenes` mounts the scene before the node's body runs. A loop asked for before any
+  scene belongs to none and only a stop ends it.
+- **Unlock.** A loop asked for while the context is locked is remembered, not queued, whether a
+  gesture is resuming it or not, and starts once the context runs. It drops a sound that plays once
+  waiting for the unlock under its `id`: the latest request for an `id` wins. A stop of its `id`
+  forgets it.
+- **iOS renewal.** The renewal drops every sound in flight, the loops too, and keeps them
+  remembered: the unlock of the new context starts each again at its bus, like the scene's music. A
+  loop asked for while the old context closes starts there too. A stopped loop does not come back.
+- **Bus.** `"sfx"` by default; `bus: "music"` puts the bed under the music slider and mute.
+- **Pause.** Like decoded music: the buses are held at zero and the loop runs on silent, the same source.
+- **Fast mode.** The `sfx` handler does not run in a fast walk, so a walk starts no loop and remembers none.
+- **Stream mode.** A loop always decodes into a looping `AudioBufferSourceNode`, so its seam is
+  gapless at `music: "stream"` too.
+- **Missing file.** One warning, like every named sound; the loop is forgotten, so no unlock tries it again.
+- **Memory.** A loop's buffer stays decoded while it plays (its source holds it), and in the cache
+  until its bundle unloads, as every sound's. An 8 s stereo bed at 48 kHz is
+  8 × 48 000 × 2 channels × 4 bytes ≈ 3 MB decoded (a calculation, not a measurement): keep beds short.
 
 ## Volumes come from the player, not from a call
 
@@ -95,7 +140,7 @@ pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.m
 
 ## The journal
 
-With `journal` above 0 every sound that started is kept in a ring of that size: each `sfx` play and each music track that began, as `{ key, bus, kind, at }`, where `at` is `app.time.snapshot().elapsed`. A named sound adds its `id`; every other entry has no `id` key at all. A sound dropped before the unlock, a missing file and a switch to the track that already plays leave no entry. `app.audio.journal()` returns the list itself, oldest first: it is frozen, and every new sound replaces it with a new frozen list, so a list read earlier never changes. `onStop` resets it to a frozen empty list. Tests and the dev page set `journal: 200`.
+With `journal` above 0 every sound that started is kept in a ring of that size: each `sfx` play and each music track that began, as `{ key, bus, kind, at }`, where `at` is `app.time.snapshot().elapsed`. A named sound adds its `id`; every other entry has no `id` key at all. A loop adds `loop: true` and has one entry, written when it really starts (at the unlock for a loop asked for before it); the start again after an iOS renewal adds none. A sound dropped before the unlock, a missing file and a switch to the track that already plays leave no entry. `app.audio.journal()` returns the list itself, oldest first: it is frozen, and every new sound replaces it with a new frozen list, so a list read earlier never changes. `onStop` resets it to a frozen empty list. Tests and the dev page set `journal: 200`.
 
 ```ts
 app.audio.journal();

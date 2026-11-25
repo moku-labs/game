@@ -156,6 +156,22 @@ describe("anim/timeline step builders", () => {
     });
   });
 
+  it("writes loop: true into the payload only when the sound loops", () => {
+    expect(sfx("rain.room", { id: "rain", loop: true })).toStrictEqual({
+      kind: "sfx",
+      payload: { key: "rain.room", bus: "sfx", id: "rain", loop: true },
+      cosmetic: true
+    });
+    expect(
+      sfx("rain.room", { bus: "ambience", id: "rain", fadeMs: 300, loop: true }).payload
+    ).toStrictEqual({ key: "rain.room", bus: "ambience", id: "rain", fadeMs: 300, loop: true });
+
+    const oneShot = sfx("voice.hello", { id: "voice" }).payload;
+
+    expect("loop" in oneShot).toBe(false);
+    expect("loop" in sfx("board.merge").payload).toBe(false);
+  });
+
   it("builds a frozen stopSfx descriptor, the fade only when given", () => {
     const stop = stopSfx("voice", { fadeMs: 200 });
 

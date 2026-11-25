@@ -7,7 +7,7 @@
  * webview with the requirement switched off, lets the context run at once. So the plugin also
  * asks once at start, and unlocks with no touch where the answer is yes.
  */
-import { isMusicPlaying, playMusic, playRequest, trackMusic } from "./playback";
+import { isMusicPlaying, playMusic, playRequest, startLoops, trackMusic } from "./playback";
 import type { AudioContextLike, AudioCtx, State } from "./types";
 
 /** The two gestures that unlock a context. The first of them to arrive wins. */
@@ -16,10 +16,11 @@ const UNLOCK_EVENTS = ["pointerdown", "touchend"] as const;
 /**
  * Reacts to a resume that went through, of a gesture or of the start attempt. The context is
  * unlocked only when it really runs, and only then do the listeners come off; the sounds fired
- * during the resume and the track a scene declared while it was locked start here. A context that still does not run drops the sounds:
+ * during the resume, the loops remembered while it was locked and the track a scene declared start
+ * here. A context that still does not run drops the sounds and keeps the loops:
  * the next gesture is a new moment. A gesture and the start attempt that settle together both
- * come here, and the music still starts once: a track that is on its way or already plays is not
- * started again. A later gesture on an unlocked context tries a remembered track again.
+ * come here, and the music and each loop still start once: what is on its way or already plays is
+ * not started again. A later gesture on an unlocked context tries a remembered track again.
  *
  * @param ctx - Domain context of the plugin.
  */
@@ -38,6 +39,7 @@ function onResumed(ctx: AudioCtx): void {
   state.unlocked = true;
   removeUnlock(state);
   drainSfx(ctx);
+  startLoops(ctx);
 
   const remembered = state.music;
 

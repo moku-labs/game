@@ -26,12 +26,13 @@ export type ErasedFields = AnyComponent extends ComponentType<infer Value> ? Val
  * A sound, owned by `anim` and handled by `audio`. It is a `flow` descriptor and a timeline step
  * at once: `fx(sfx("board.merge"))` in a node, or `sfx("board.merge")` inside a `sequence`. A
  * sound with an `id` is named: a second one with the same id fades the first out over `fadeMs`,
- * and `stopSfx(id)` stops it. The payload carries `id` and `fadeMs` only when they were given.
+ * and `stopSfx(id)` stops it. The payload carries `id`, `fadeMs` and `loop` only when they were
+ * given.
  *
  * @example
  * ```ts
  * const descriptor: SfxDescriptor = {
- *   kind: "sfx", payload: { key: "voice.hello", bus: "sfx", id: "voice", fadeMs: 200 }, cosmetic: true
+ *   kind: "sfx", payload: { key: "rain.room", bus: "sfx", id: "rain", loop: true }, cosmetic: true
  * };
  * ```
  */
@@ -44,6 +45,8 @@ export type SfxDescriptor = {
     readonly id?: string;
     /** Fade of the sound with the same id this one replaces; `audio`'s `sfxFadeMs` when absent. */
     readonly fadeMs?: number;
+    /** The sound loops until `stopSfx(id)` or until its scene leaves; set only with an `id`. */
+    readonly loop?: true;
   };
   readonly cosmetic: true;
   /** Never set: `await fx(sfx(...))` resolves nothing. */

@@ -89,7 +89,7 @@ const manifest: Manifest = {
 };
 
 /** The I/O seam of `assets`: every file answers with its own URL as bytes. */
-function createIo(): AssetsIo {
+function createIo(served: Manifest = manifest): AssetsIo {
   return {
     fetch: (url: string) =>
       Promise.resolve({
@@ -97,7 +97,7 @@ function createIo(): AssetsIo {
         status: 200,
         // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
         headers: { get: () => null },
-        json: () => Promise.resolve(manifest),
+        json: () => Promise.resolve(served),
         blob: () => Promise.resolve(new Blob()),
         text: () => Promise.resolve(""),
         arrayBuffer: () => Promise.resolve(new TextEncoder().encode(url).buffer as ArrayBuffer)
@@ -487,6 +487,138 @@ describe("audio plugin integration — a sound with an id and its stop", () => {
     expect(line.source?.stoppedAt).toBe(0);
     expect(gain?.gain.ramps.at(-1)).toEqual([0, 0]);
     expect(app.audio.journal().at(-1)?.key).toBe("story.line1");
+
+    await app.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F239: a loop through a real `scenes` switch. The hall leads to the ward, whose first node fires
+// the rain; the ward's rest node leads to the yard.
+// ---------------------------------------------------------------------------
+
+/** The bed `anim`'s `sfx("ward.rain", { id: "rain", loop: true })` builds. */
+const rainLoop: Descriptor = {
+  kind: "sfx",
+  payload: { key: "ward.rain", bus: "sfx", id: "rain", loop: true },
+  cosmetic: true
+};
+
+/** One bundle per scene; only the ward carries a sound. */
+const roomsManifest: Manifest = {
+  version: 1,
+  bundles: {
+    hall: { feature: "rooms", tier: "scene", mb: 0, files: [] },
+    ward: { feature: "rooms", tier: "scene", mb: 0.004, files: [sound("ward.rain", "rain")] },
+    yard: { feature: "rooms", tier: "scene", mb: 0, files: [] }
+  }
+};
+
+const hallRoom = defineNode({ rest: true, scene: "hall", outcomes: { enter: type() } });
+
+const wardEntry = defineNode({
+  scene: "ward",
+  outcomes: { done: type() },
+  run: ({ fx, out }) => {
+    fx.start(rainLoop);
+
+    return out.done();
+  }
+});
+
+const wardBed = defineNode({ rest: true, scene: "ward", outcomes: { leave: type() } });
+
+const yardRoom = defineNode({ rest: true, scene: "yard", outcomes: { back: type() } });
+
+const rooms = defineFlow("walk", {
+  nodes: { hall: hallRoom, ward: wardEntry, bed: wardBed, yard: yardRoom },
+  start: "hall",
+  edges: {
+    hall: { enter: "ward" },
+    ward: { done: "bed" },
+    bed: { leave: "yard" },
+    yard: { back: "hall" }
+  }
+});
+
+const roomsFeature = defineFeature("rooms", {
+  flows: [rooms],
+  scenes: [
+    defineScene("hall", { bundle: "hall", layers: {}, projections: [] }),
+    defineScene("ward", { bundle: "ward", layers: {}, projections: [] }),
+    defineScene("yard", { bundle: "yard", layers: {}, projections: [] })
+  ]
+});
+
+/** Starts the screen set plus `audio` on the rooms over the fake context. */
+async function startRooms(context: FakeContext, journal = 0) {
+  const app = createApp({
+    plugins: [...screen, audioPlugin, roomsFeature],
+    pluginConfigs: {
+      flow: { mainFlow: rooms },
+      model: {
+        initialPlayer: { coins: 0, settings: { audio: { master: 1, music: 0.6, sfx: 1 } } },
+        initialSession: { visits: 0 },
+        seed: 1
+      },
+      assets: { manifest: roomsManifest, io: createIo(roomsManifest) },
+      audio: { journal, context: () => context }
+    }
+  });
+
+  await app.start();
+  app.flow.run().catch(() => undefined);
+  await tick();
+
+  return app;
+}
+
+/** The source of the ward's rain, when one was made. */
+function rainOf(context: FakeContext): FakeSource | undefined {
+  return context.sources.find(candidate => keyOf(candidate.buffer)?.includes("rain.mp3"));
+}
+
+describe("audio plugin integration — a loop and the scenes", () => {
+  it("keeps the loop the first node of a scene fired through that scene's own switch, and fades it out at the next", async () => {
+    // Bug caught: the switch into the ward, heard after the node fired the rain, cuts it at once.
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const app = await startRooms(context);
+
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+    expect(app.flow.gate.answer({ intent: "enter" })).toBe(true);
+    await tick();
+
+    const rain = rainOf(context);
+
+    expect(app.scenes.current()).toBe("ward");
+    expect(rain?.loop).toBe(true);
+    expect(rain?.stoppedAt).toBeUndefined();
+
+    context.currentTime = 5;
+    expect(app.flow.gate.answer({ intent: "leave" })).toBe(true);
+    await tick();
+
+    expect(app.scenes.current()).toBe("yard");
+    expect(rain?.stoppedAt).toBe(5.6);
+
+    await app.stop();
+  });
+
+  it("starts no loop and remembers none on a fast walk through the node that fires it", async () => {
+    // Bug caught: a fast walk to a save point leaves a bed behind that the first touch starts.
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const app = await startRooms(context, 200);
+
+    await app.flow.walk([{ at: "hall", intent: "enter" }]);
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+
+    expect(app.audio.unlocked()).toBe(true);
+    expect(rainOf(context)).toBeUndefined();
+    expect(app.audio.journal().filter(entry => entry.loop === true)).toEqual([]);
 
     await app.stop();
   });

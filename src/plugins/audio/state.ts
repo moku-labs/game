@@ -7,6 +7,7 @@ import type {
   Bus,
   BusState,
   Config,
+  LoopSound,
   MusicSwitch,
   MusicTrack,
   NamedSound,
@@ -49,6 +50,15 @@ function emptyPending(): Map<string, SfxRequest> {
  * @returns An empty map, keyed by id.
  */
 function emptyNamed(): Map<string, NamedSound> {
+  return new Map();
+}
+
+/**
+ * Creates the map of the loops the game asked for.
+ *
+ * @returns An empty map, keyed by id.
+ */
+function emptyLoops(): Map<string, LoopSound> {
   return new Map();
 }
 
@@ -101,6 +111,8 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     resuming: false,
     pendingSfx: emptyPending(),
     named: emptyNamed(),
+    loops: emptyLoops(),
+    scene: undefined,
     decoded: emptyCache(),
     warned: emptyWarned(),
     warnedVolumes: false,
