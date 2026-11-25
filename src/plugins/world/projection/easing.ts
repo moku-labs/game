@@ -44,6 +44,10 @@ export function easeCell(ease: Ease, cells: Float64Array, at: number): void {
     return;
   }
 
+  // The ends are exact: `outBack` at 0 and `inBack` at 1 are 1e-16 off in floats, and a first
+  // sample at 0 (F241) must leave a field where it stands.
+  if (t === 0 || t === 1) return;
+
   switch (ease) {
     case "in": {
       cells[at] = t * t;

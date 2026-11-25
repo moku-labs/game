@@ -17,10 +17,12 @@ describe("world/projection easing", () => {
     ]);
   });
 
-  it("starts at 0 and lands on 1 for every named curve", () => {
+  // Bug (F241): `outBack` at 0 and `inBack` at 1 were 1e-16 off, so a first sample at 0 moved a field off its
+  // start (a knob at 407 drawn at 407.00000000000006).
+  it("starts at exactly 0 and lands on exactly 1 for every named curve", () => {
     for (const name of EASE_NAMES) {
-      expect(applyEase(name, 0)).toBeCloseTo(0, 10);
-      expect(applyEase(name, 1)).toBeCloseTo(1, 10);
+      expect(applyEase(name, 0)).toBe(0);
+      expect(applyEase(name, 1)).toBe(1);
     }
   });
 

@@ -106,4 +106,37 @@ describe("anim sampleBorn", () => {
 
     expect(mock.world.ecs.get(entity, Transform)?.y).toBe(0);
   });
+
+  // Bug (F241, ticktoe's level knob): the first sample of an absolute `outBack` tween moved its field 1e-13 off the
+  // start (407.00000000000006); or the track, sampled before the draw, did not end exactly on its target.
+  it("leaves an outBack tween exactly at its start in the first frame, and ends it exactly on its target", () => {
+    const mock = createMockAnim();
+    const entity = spawnTestEntity(mock, [Transform({ x: 407, y: 0 })]);
+    const x = (): number | undefined => mock.world.ecs.get(entity, Transform)?.x;
+
+    beginFrame(mock.actx);
+    advanceTracks(mock.actx, 16);
+
+    const track = startTrack(
+      mock.actx,
+      entity,
+      Transform,
+      { x: 587 },
+      { ms: 220, ease: "outBack" },
+      open
+    );
+
+    sampleBorn(mock.actx);
+
+    expect(x()).toBe(407);
+
+    for (let frame = 0; frame < 15; frame += 1) {
+      beginFrame(mock.actx);
+      advanceTracks(mock.actx, 16);
+      sampleBorn(mock.actx);
+    }
+
+    expect(track.ended).toBe(true);
+    expect(x()).toBe(587);
+  });
 });
