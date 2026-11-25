@@ -68,6 +68,7 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     registry: emptyMap(),
     markListeners: emptySet(),
     frame: 0,
+    bornFrom: 0,
     overMaxTracks: false,
     reducedMotion: ctx.config.reducedMotion,
     removeDriver: undefined,

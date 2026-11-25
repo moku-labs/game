@@ -487,6 +487,53 @@ const gateScreen = {
     session.open === "gateDim" ? { id: "gate", phase: "open" } : undefined
 } as typeof gateBase;
 
+/** How far under its place the fading sheet's root starts its enter, in units (F241). */
+export const FADE_DY = 300;
+
+/** How long the fading sheet's root comes in, in ms (F241). */
+export const FADE_MS = 600;
+
+/**
+ * The enter of the fading sheet's root, as A Memory Missing's `ladder-in` walks it (F241): an additive walk that jumps
+ * to its start offset at once and comes home over 600 ms.
+ */
+const FADE_MOTION: ElementMotion = {
+  enter: view =>
+    view.tween(
+      Transform,
+      { y: 0 },
+      {
+        ms: FADE_MS,
+        additive: true,
+        reduced: "keep",
+        segments: [
+          { at: 0.0005, ease: () => 1, to: { y: FADE_DY } },
+          { at: 1, ease: t => t, to: { y: 0 } }
+        ]
+      }
+    )
+};
+
+/** A sheet whose root comes in with an additive walk that starts off its rest pose (F241). */
+const fadeScreen = projection({
+  name: "warm.fade",
+  layer: "ui",
+  from: (_player: WarmPlayer, session: WarmSession): Item[] =>
+    session.open === "fade" ? [{ id: "fade" }] : [],
+  key: (item: Item) => item.id,
+  view: () => (
+    <column
+      key="fadeRoot"
+      style={{ width: 1080, height: 1920 }}
+      motion={FADE_MOTION}
+      components={[Marked({ name: "fadeRoot" })]}
+    >
+      <button key="fadeClose" intent="close" style={{ width: 200, height: 80 }} />
+    </column>
+  ),
+  warm: (): Item => ({ id: "fade" })
+});
+
 const home = defineNode({
   rest: true,
   outcomes: {
@@ -500,6 +547,7 @@ const home = defineNode({
     openRows: type(),
     openClash: type(),
     openWide: type(),
+    openFade: type(),
     close: type(),
     scroll: type(),
     coin: type()
@@ -566,6 +614,7 @@ const main = defineFlow("main", {
     openRows: opens("rows"),
     openClash: opens("clash"),
     openWide: opens("wide"),
+    openFade: opens("fade"),
     close,
     scroll,
     coin
@@ -584,6 +633,7 @@ const main = defineFlow("main", {
       openRows: "openRows",
       openClash: "openClash",
       openWide: "openWide",
+      openFade: "openFade",
       close: "close",
       scroll: "scroll",
       coin: "coin"
@@ -598,6 +648,7 @@ const main = defineFlow("main", {
     openRows: { done: "home" },
     openClash: { done: "home" },
     openWide: { done: "home" },
+    openFade: { done: "home" },
     close: { done: "home" },
     scroll: { done: "home" },
     coin: { done: "home" }
@@ -615,7 +666,8 @@ const warmFeature = defineFeature("warm", {
     clashScreen,
     wideScreen,
     tabsScreen,
-    gateScreen
+    gateScreen,
+    fadeScreen
   ],
   components: [Marked]
 });

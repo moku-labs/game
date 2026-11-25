@@ -30,7 +30,7 @@ import {
 import { resetRing } from "./timeline/ring";
 import { localTargetOf } from "./timeline/space";
 import type { ErasedFields, FxStep, TimelineRuntime } from "./timeline/types";
-import { advanceTracks, beginFrame, finishAllTracks } from "./tween/advance";
+import { advanceTracks, beginFrame, finishAllTracks, sampleBorn } from "./tween/advance";
 import { createDriver, startStepTrack } from "./tween/driver";
 import type {
   AnimCtx,
@@ -366,7 +366,24 @@ export function initAnim(ctx: KernelSlice): void {
   const rt = createRuntime(actx);
 
   actx.state.finishAll = (): void => finishAllAnim(actx, rt);
-  actx.state.offFrame = actx.deps.time.onFrame("animate", time => stepAnim(actx, rt, time));
+  const offStep = actx.deps.time.onFrame("animate", time => stepAnim(actx, rt, time));
+  // Before `world`'s own `signals`, which clears the frame's changes: the renderer sees the samples it writes.
+  const offSample = actx.deps.time.onFrame("signals", () => sampleBornLive(actx));
+
+  actx.state.offFrame = (): void => {
+    offStep();
+    offSample();
+  };
+}
+
+/**
+ * Writes the first sample of the tracks born since the frame step, in a live world only (F241): a paused world moves
+ * nothing, a fast one finished them.
+ *
+ * @param actx - Domain context of the anim plugin.
+ */
+function sampleBornLive(actx: AnimCtx): void {
+  if (actx.deps.world.ecs.mode() === "live") sampleBorn(actx);
 }
 
 /**
