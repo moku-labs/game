@@ -280,6 +280,8 @@ export type KeptInternal = {
   watchSources(): Array<() => void>;
   /** `sync.filters.onUnserved`: hears of each window that stays on the backdrop path for want of a Source, once. */
   onUnserved(listener: (entity: Entity) => void): () => void;
+  /** Whether a container holds a Source's top below it: a new order of its children may change a window's find. */
+  holdsSource(node: PixiContainer): boolean;
 };
 
 /**
@@ -317,8 +319,16 @@ export type HeldChain = {
   owner: FilterSlotInputs;
   /** The Source `version` it was drawn from; -1 before its first draw. */
   at: number;
+  /** The resolution of the Source's texture it was drawn from: another one draws other steps. */
+  resolution: number;
+  /** The device size of the Source's texture its targets were sized for; -1 before. */
+  sizedWidth: number;
+  /** The same down. */
+  sizedHeight: number;
   /** One texture per input; `undefined` for an empty chain, whose input reads the Source itself. */
   readonly targets: Array<PixiRenderTexture | undefined>;
+  /** The scale each target was sized at, by input. */
+  readonly scales: number[];
   /** The windows that read it. */
   refs: number;
   /** Bytes of the targets. */
@@ -336,6 +346,8 @@ export type SourceRecord = {
   scale: number;
   /** The picture of the subtree at its canvas place, the screen's size; `undefined` while no window reads it. */
   texture: PixiRenderTexture | undefined;
+  /** The texture's resolution at the last take (texels per CSS px); 0 before the first. */
+  resolution: number;
   /** Grows at every take. */
   version: number;
   /** Something under the top changed since the last take, or the texture went. */
@@ -346,6 +358,8 @@ export type SourceRecord = {
   readonly held: HeldChain[];
   /** The top's world transform, read at a take. */
   readonly matrix: PixiMatrix;
+  /** The top's world transform of this frame, compared with `matrix`: a node above the top moved. */
+  readonly seen: PixiMatrix;
   /** The transform the chains' keeper is drawn with: none. */
   readonly identity: PixiMatrix;
   /** A sprite of the texture carrying the keeper, made at the first chain. */
@@ -543,6 +557,8 @@ export type KeptRecord = {
   heldVersion: number;
   /** A window with no Source under it was reported once (`sync.filters.onUnserved`). */
   unserved: boolean;
+  /** The `KeptState.frame` of the flush that last stepped it: the flush steps the records that read no Source first. */
+  steppedAt: number;
 };
 
 /** One picture of an overlay's range (P7), keyed by the owner overlay's entity. */

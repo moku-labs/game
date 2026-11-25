@@ -32,15 +32,18 @@ export function stopRunning(): void {
  * @param options.kind - The backend.
  * @param options.dev - A dev build.
  * @param options.onDemand - `config.onDemand`; off when left out.
+ * @param options.builds - Pixi's own render group system on every render: it sorts a layer whose depths changed, as a
+ *   real render does, so a find through a sorted layer may be kept.
  * @returns The running renderer.
  */
 export async function openSources(
-  options: { kind?: "webgpu" | "webgl"; dev?: boolean; onDemand?: boolean } = {}
+  options: { kind?: "webgpu" | "webgl"; dev?: boolean; onDemand?: boolean; builds?: boolean } = {}
 ): Promise<Drawn> {
   const drawn = await startDrawn({
     onDemand: options.onDemand ?? false,
     kind: options.kind ?? "webgpu",
-    ...(options.dev === true ? { dev: true } : {})
+    ...(options.dev === true ? { dev: true } : {}),
+    ...(options.builds === true ? { builds: true } : {})
   });
 
   running.push(drawn);

@@ -666,6 +666,8 @@ export type Place = {
   readonly definition: FilterDefinition;
   readonly body: OursBody;
   scale: number;
+  /** A hash of the definition's id, made with the place: the key of the steps folds it, no string per fold. */
+  readonly idHash: number;
 };
 
 /**
@@ -685,8 +687,13 @@ export type InputsState = {
   readonly fromBack: boolean;
   /** Changes whenever what the stages draw changes; 1 after the first evaluation. */
   version: number;
-  /** A number of the steps the chains draw now, made with `version`: equal for two instances that draw the same. */
+  /**
+   * A number of the steps the chains draw: equal for two instances that draw the same. Folded when a reader asks
+   * (`slot.key`), for the `version` in `keyVersion`.
+   */
   key: number;
+  /** The `version` `key` was folded for; -1 before the first ask. */
+  keyVersion: number;
   /** The object `chain` receives, reused: its `resolution` is written before each call. */
   readonly context: { resolution: number };
   /** Per input, its places in draw order (each with the scale of its step). */

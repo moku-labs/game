@@ -306,9 +306,10 @@ describe("the quad over the slot", () => {
       ]
     });
 
+    // A backdrop without inputs keeps today's path: no quad, so no kept record and no warning (W4).
     view(mock, [Under()]);
 
-    expect(lastSlots(mock)[0]?.quad?.back?.inputs).toEqual([]);
+    expect(lastSlots(mock)[0]).not.toHaveProperty("quad");
   });
 
   // Bug: WebGL builds a program nothing draws, and a slot promises a mesh it cannot have.

@@ -6,7 +6,7 @@ import type { Entity } from "../../../world/types";
 import { Parent, Shape, Source, Transform } from "../../components";
 import type { PixiContainer } from "../../types";
 import { type Drawn, startDrawn } from "../demand-harness";
-import { backSeam, backSlot } from "../quad-harness";
+import { type BackSeam, backSeam, backSlot } from "../quad-harness";
 
 /** The windows over the room: the ward's notes. */
 const WINDOWS = 8;
@@ -17,6 +17,8 @@ type FrostBoard = {
   readonly child: Entity;
   readonly other: Entity;
   readonly windows: readonly Entity[];
+  /** The seam of each window's frosted slot. */
+  readonly seams: readonly BackSeam[];
 };
 
 /**
@@ -48,8 +50,13 @@ async function startFrostBoard(): Promise<FrostBoard> {
   const other = drawn.spawn(Transform({ x: 500, y: 500 }), Shape({ w: 10, h: 10 }));
 
   drawn.frame();
-  for (const window of windows)
-    drawn.mock.api.sync.filters.set(window, Object.freeze([backSlot(backSeam(7))]));
+
+  const seams = windows.map(() => backSeam(7));
+
+  for (const [index, window] of windows.entries()) {
+    drawn.mock.api.sync.filters.set(window, Object.freeze([backSlot(seams[index])]));
+  }
+
   drawn.frames(8);
 
   const { records } = drawn.mock.ctx.state.kept;
@@ -61,7 +68,7 @@ async function startFrostBoard(): Promise<FrostBoard> {
     throw new Error("perf fixture: a window of the frost board is not on its quad over the Source");
   }
 
-  return { drawn, child, other, windows };
+  return { drawn, child, other, windows, seams };
 }
 
 /**
@@ -141,6 +148,57 @@ export async function frostMovingBoard(): Promise<() => void> {
       if (top !== undefined && window !== undefined) {
         top.x += step === 0 ? -2 : 2;
         demand.markMoved(window);
+      }
+    }
+
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * The frame of a room that changes in every frame under eight windows of one key: the Source is taken, the one result
+ * they share drawn again in place, and every window binds and places it again. The renders themselves are Pixi's (and
+ * the stand-in's log of them): `host.renderTo` answers drawn without drawing, so the window counts the engine's bytes.
+ *
+ * @returns One frame: the mark inside the room, the collect and the flush.
+ */
+export async function frostLiveBoard(): Promise<() => void> {
+  const { drawn, child } = await startFrostBoard();
+  const { kept, demand, host } = drawn.mock.modules;
+
+  host.renderTo = (): boolean => true;
+
+  return () => {
+    demand.mark(child);
+    kept.collect();
+    kept.flush();
+  };
+}
+
+/**
+ * The frame of eight windows whose blur is tweened together over a room at rest: every seam's steps move (its version,
+ * and its key between two values), the Source is not taken, the one result they share is drawn again in place.
+ *
+ * @returns One frame: the steps moved, the collect and the flush.
+ */
+export async function frostTweenBoard(): Promise<() => void> {
+  const { drawn, seams } = await startFrostBoard();
+  const { kept, host } = drawn.mock.modules;
+  let step = 0;
+
+  host.renderTo = (): boolean => true;
+
+  return () => {
+    step = step === 0 ? 1 : 0;
+
+    // eslint-disable-next-line unicorn/no-for-loop -- the measured frame: `entries()` would allocate its iterator.
+    for (let index = 0; index < seams.length; index += 1) {
+      const seam = seams[index];
+
+      if (seam !== undefined) {
+        seam.state.version += 1;
+        seam.state.key = step === 0 ? 7 : 8;
       }
     }
 

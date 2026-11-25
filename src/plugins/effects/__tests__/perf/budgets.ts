@@ -56,7 +56,22 @@ export const BUDGET = {
   // a double, it came back boxed at both reads too, 64. Measured again with its quad handed over, its input named
   // (change 2026-11-06-f126-s4-quad-chain): 32. The names are made once with the quad; the renderer holds the chain,
   // whose answer did not change, but this sync still evaluates it, and the 32 B are that walk's.
-  filtersBloomTween: 32,
+  // F126 stage 5 review: now 0. A step's numbers are tagged when its place is built (`placeFor`, instance.ts), so the
+  // threshold's two reads by name hand it as it is.
+  filtersBloomTween: 0,
+  // F126 stage 5 review, B2: the `radius` of a `Bloom` or the `blur` of a `Frost` tweened on one of 12 filtered views,
+  // the tween's own write subtracted, with and without the key a window over a Source asks. Each frame changes the
+  // chain's steps (its sigma). Before the fix every such frame folded the steps into the key through an array of
+  // strings, `String()` of each number, `[...vector].join` and a `join(";")`, in every game. Now the key is folded only
+  // when a reader asks for it, once per version, from numbers, the id hashed once per place, into a 30-bit integer every
+  // call hands back unboxed; the sync runs the chains at the resolutions the state holds, none handed to a call (a
+  // fraction passed is boxed: 32 B a frame on a canvas of a fractional resolution); `Frost`'s chain reads its scales by
+  // index (a scale read off a ladder through `??` was boxed, 32 B); a step's numbers are tagged when its place is built,
+  // so the engine's reads by name hand them as they are. Measured 16 (48 and 96 on the way). Not measured apart, read
+  // from the code: the chain writes a new sigma every frame into a field that is tagged now, and a fraction stored in a
+  // tagged field is a new number, as the tween's own write is (subtracted here); before the tag the field was a double
+  // and the engine's two reads of it by name boxed it, 32.
+  filtersChainTween: 16,
   // E2: three local-space emitters following a still host, their streams held. Before: 890 B (a root pose and its
   // chain per emitter, the container's `Transform` written every frame, `[...orphans]`, the count's iterators, the
   // frame's delta boxed into each step call). Now 0: nothing is written for a still host.

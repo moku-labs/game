@@ -858,8 +858,9 @@ function cacheWithInputs(
 }
 
 /**
- * The quad text of a definition: a filter whose inputs all read the view, or a backdrop whose inputs all read back (its
- * quad reads a Source in place of the canvas under the view); none for a mix.
+ * The quad text of a definition: a filter whose inputs all read the view, or a backdrop with inputs that all read back
+ * (its quad reads a Source in place of the canvas under the view, as `Frost`'s); none for a mix. A backdrop without
+ * inputs opts into no Source: it keeps today's backdrop path, with no kept record and no warning.
  *
  * @param uniforms - The read uniforms.
  * @param wgsl - The WGSL body.
@@ -877,6 +878,7 @@ function quadSourceOf(
 ): string | undefined {
   const from = backdrop ? "back" : "input";
 
+  if (backdrop && inputs.length === 0) return undefined;
   if (!inputs.every(input => input.from === from)) return undefined;
 
   return assembleQuad(uniforms, wgsl, origin, inputs, backdrop);

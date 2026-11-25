@@ -1,10 +1,12 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { Parent } from "../../components";
+import { Layer } from "../../../world/ecs/define";
+import { Parent, Shape, Source, Sprite, Transform } from "../../components";
 import { findSource } from "../../kept/source";
 import { createKeptState } from "../../kept/state";
 import type { KeptState, SourceRecord } from "../../kept/types";
 import type { PixiContainer } from "../../types";
+import { OWNER } from "../demand-harness";
 import {
   openSources,
   sourceOf,
@@ -36,11 +38,13 @@ function stateWith(...tops: PixiContainer[]): { state: KeptState; records: Sourc
       wasGroup: false,
       scale: 0.25,
       texture: undefined,
+      resolution: 0,
       version: 0,
       dirty: true,
       readers: 0,
       held: [],
       matrix: new pixi.Matrix(),
+      seen: new pixi.Matrix(),
       identity: new pixi.Matrix(),
       sprite: undefined,
       keeper: undefined,
@@ -153,5 +157,85 @@ describe("the cached find of a window", () => {
     drawn.frames(2);
 
     expect(windowOf(drawn, window).source).toBe(source);
+  });
+
+  // Bug (W5): every depth write of a y-sorted layer moves the structure version, so in a game with a walking character
+  // every frosted window walks the tree for its Source in every frame.
+  it("keeps its answer while a sprite walks in a y-sorted layer that holds no Source", async () => {
+    // Pixi's own sort on every render, as on a device: the layer is sorted again after each depth write.
+    const drawn = await openSources({ builds: true });
+    const { ecs, projection } = drawn.mock.world;
+
+    projection.setLayers([
+      { name: "room", sort: "none" },
+      { name: "items", sort: "y" }
+    ]);
+    drawn.frame();
+
+    const room = ecs.spawn(OWNER, [
+      Layer({ name: "room" }),
+      Transform({ x: 0, y: 0 }),
+      Shape({ w: 200, h: 200 }),
+      Source()
+    ]);
+
+    ecs.spawn(OWNER, [
+      Parent({ entity: room }),
+      Transform({ x: 10, y: 10 }),
+      Shape({ w: 20, h: 20 })
+    ]);
+
+    const walker = drawn.spawn(
+      Transform({ x: 20, y: 0 }),
+      Sprite({ texture: "hero", width: 8, height: 8 })
+    );
+
+    drawn.frame();
+
+    const window = spawnWindow(drawn);
+
+    drawn.frames(4);
+
+    const record = windowOf(drawn, window);
+    const sync = drawn.mock.ctx.state.sync;
+    const seen = sync.structureVersion;
+
+    expect(record.source).toBe(sourceOf(drawn, room));
+    expect(record.sourceAt).toBe(seen);
+
+    // The walker crosses the window's depth back and forth: its zIndex changes in every frame.
+    for (let frame = 1; frame <= 6; frame += 1) {
+      ecs.set(walker, Transform, { y: frame % 2 === 0 ? 0 : 120 });
+      drawn.frame();
+    }
+
+    expect(sync.structureVersion).toBe(seen);
+    expect(record.sourceAt).toBe(seen);
+
+    // A view hung in the walker's layer moves the version in a frame the walker writes its depth: the window finds
+    // again, and its answer is kept though its layer waits for Pixi's sort (no Source hangs there).
+    ecs.set(walker, Transform, { y: 120 });
+    drawn.spawn(Transform({ x: 300, y: 300 }), Shape({ w: 4, h: 4 }));
+    drawn.frame();
+
+    expect(sync.structureVersion).toBeGreaterThan(seen);
+    expect(record.sourceAt).toBe(sync.structureVersion);
+  });
+
+  // Bug: the find reads the structure version before the Source's new top bumps it, so it finds once more in the next
+  // frame for nothing.
+  it("holds the find made in the frame its Source got its top", async () => {
+    const drawn = await openSources({ builds: true });
+    const room = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 200, h: 200 }));
+    const window = spawnWindow(drawn);
+
+    drawn.frames(3);
+    drawn.mock.world.ecs.add(room, Source());
+    drawn.frame();
+
+    const record = windowOf(drawn, window);
+
+    expect(record.source).toBe(sourceOf(drawn, room));
+    expect(record.sourceAt).toBe(drawn.mock.ctx.state.sync.structureVersion);
   });
 });

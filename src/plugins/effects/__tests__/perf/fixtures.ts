@@ -25,6 +25,7 @@ import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import { Bloom } from "../../set/bloom";
 import { Flash } from "../../set/flash";
+import { Frost } from "../../set/frost";
 import { Pixelate } from "../../set/pixelate";
 import { Wave } from "../../set/wave";
 import { atlasTexture, FakeFxFilter } from "../fake-effects-pixi";
@@ -203,6 +204,20 @@ export const BLOOM_STRENGTH: TweenedField = {
   make: start => Bloom({ strength: start })
 };
 
+/** The `radius` of `Bloom`: its chain's steps change (the blur's sigma), so the instance's chain version moves. */
+export const BLOOM_RADIUS: TweenedField = {
+  component: Bloom,
+  field: "radius",
+  make: start => Bloom({ radius: start })
+};
+
+/** The `blur` of the effect set's `Frost`: a backdrop whose chain from back changes its sigma with it. */
+export const FROST_BLUR: TweenedField = {
+  component: Frost,
+  field: "blur",
+  make: start => Frost({ blur: start })
+};
+
 /** The `phase` of the effect set's `Wave`: the loop a game runs for as long as a scene is open. */
 export const WAVE_PHASE: TweenedField = {
   component: Wave,
@@ -266,7 +281,7 @@ function viewComponents(index: number, tween: TweenedField): AnyComponentValue[]
 /**
  * Starts a mock with `FILTERED_VIEWS` filtered views, runs the frames that build and hand over their instances, and
  * clears every change set. The first view carries the filter a tween case moves: `Glow` by default. The feature lists
- * the game's `Tint` and the effect set's `Flash`, `Bloom`, `Wave` and `Pixelate`.
+ * the game's `Tint` and the effect set's `Flash`, `Bloom`, `Wave`, `Pixelate` and `Frost`.
  *
  * @param quads - The definitions whose quad passed its check: their slots hand a quad over.
  * @param tween - The filter and the field a tween case moves on the first view.
@@ -282,7 +297,7 @@ export function filtersFixture(
 
   mock.features.push({
     name: "perf",
-    description: { filters: [Tint, Flash, Bloom, Wave, Pixelate] }
+    description: { filters: [Tint, Flash, Bloom, Wave, Pixelate, Frost] }
   });
 
   const counter = plainRenderer(mock);
@@ -365,6 +380,41 @@ export function tweenStep(fixture: FiltersFixture): () => void {
   return (): void => {
     write();
     run();
+  };
+}
+
+/**
+ * The step of a tween on a backdrop's chain over a Source (F126 stage 5): the write and the `sync` phase, then the ask
+ * the renderer makes of the tweened view's slot when its chain's version moved, the key of its steps at the Source's
+ * resolution, as a window over a Source asks it at every step change.
+ *
+ * @param fixture - A fixture of `filtersFixture` whose first view carries a backdrop with inputs from back.
+ * @param resolution - The resolution of the Source's texture.
+ * @returns The step.
+ * @throws {Error} When the tweened view handed no slot with inputs.
+ */
+export function keyedTweenStep(fixture: FiltersFixture, resolution: number): () => void {
+  const step = tweenStep(fixture);
+  const handed = fixture.mock.renderer.sets.findLast(set => set.entity === fixture.tweened);
+  const inputs = handed?.slots[0]?.inputs;
+  const key = inputs?.key;
+
+  if (inputs === undefined || key === undefined) {
+    throw new Error("perf fixture: the tweened view handed no slot with a key");
+  }
+
+  let seen = inputs.version();
+
+  return (): void => {
+    step();
+
+    const version = inputs.version();
+
+    // The renderer asks only when the chain's version moved: a window whose result is current reads two numbers.
+    if (version !== seen) {
+      seen = version;
+      key(resolution);
+    }
   };
 }
 

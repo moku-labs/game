@@ -32,6 +32,7 @@ import { canKeep, dropTexture, emptyPool, matricesOf } from "./render";
 import { dropQuadParts } from "./shade";
 import {
   dropSourceTextures,
+  holdsSource,
   markAllSources,
   markSources,
   resolveReaders,
@@ -126,26 +127,38 @@ function changed(record: KeptRecord, entity: Entity): void {
 }
 
 /**
- * Steps every record of a drawn frame, in the list's order (inner first): a record whose top changed is renewed, and
- * its new record steps later in the same loop.
+ * Steps the records of a drawn frame, in the list's order (inner first): a record whose top changed is renewed, and
+ * its new record steps later in the same loop. The flush steps in two passes (F126 stage 5): first every record that
+ * reads no Source, so a kept picture inside a Source is taken again before the Source is; then, after the Sources are
+ * taken, the windows that read them and every record the first pass left.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
  * @param matrices - The scratch matrices.
+ * @param readers - False for the first pass, true for the second.
  */
-function stepRecords(kctx: KeptCtx, pixi: PixiModule, matrices: KeptMatrices): void {
-  const { records } = kctx.state;
+function stepRecords(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  readers: boolean
+): void {
+  const { records, frame } = kctx.state;
 
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index];
 
-    if (record === undefined) continue;
+    if (record === undefined || record.steppedAt === frame) continue;
+    // A window found over a Source waits for its take.
+    if (!readers && record.source !== undefined) continue;
 
     if (renew(kctx, pixi, record)) {
       index -= 1;
 
       continue;
     }
+
+    record.steppedAt = frame;
 
     const view = kctx.ctx.state.sync.views.get(record.entity);
 
@@ -374,11 +387,13 @@ export function createKeptApi(
         state.firstTakes = 0;
         state.frameRefines = 0;
         markAlphaDue(kctx, pixi);
-        // F126 stage 5 (A5): each window finds its Source and is counted, each dirty Source with readers is taken and
-        // the results its windows read brought up to it, then the records step and bind them.
+        // F126 stage 5 (A5): each window finds its Source and is counted; the records that read none step, so a kept
+        // picture inside a Source is drawn as it is now; each dirty Source with readers is taken and the results its
+        // windows read brought up to it; then the windows step and bind them.
         resolveReaders(kctx);
+        stepRecords(kctx, pixi, matrices, false);
         takeSources(kctx, pixi);
-        stepRecords(kctx, pixi, matrices);
+        stepRecords(kctx, pixi, matrices, true);
         // A flush that no collect went before steps every record.
         state.calm = false;
       } else {
@@ -502,6 +517,8 @@ export function createKeptApi(
     sources: (): SourceStats => sourceStats(state),
 
     watchSources: (): Array<() => void> => watchSources(kctx),
+
+    holdsSource: (node: PixiContainer): boolean => holdsSource(state, node),
 
     onUnserved: (listener: (entity: Entity) => void): (() => void) => {
       state.unserved.push(listener);

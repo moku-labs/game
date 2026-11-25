@@ -269,6 +269,11 @@ export function backSeam(key = 7, scale: number | undefined = 0.5): BackSeam {
   const draws: number[] = [];
   const state = { key, scale, version: 1 };
 
+  // Tagged, as `effects` keeps the scale of a place: a read through the seam hands the number it holds, so a perf window
+  // counts the renderer's bytes, not the boxes of this stand-in.
+  Reflect.set(state, "scale", false);
+  state.scale = scale;
+
   return {
     draws,
     state,

@@ -3,15 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defineFilter } from "../../filters/define";
 import type { UniformSpec } from "../../filters/types";
 import { assemble, assembleQuad, HEADER } from "../../filters/wgsl";
-import {
-  Frosted,
-  SOFT_BODIES,
-  SOFT_STAGES,
-  Soft,
-  softChain,
-  UNDER_BODIES,
-  Under
-} from "../filter-fixtures";
+import { Frosted, SOFT_BODIES, SOFT_STAGES, Soft, softChain, Under } from "../filter-fixtures";
 
 // ---------------------------------------------------------------------------
 // Unit test: the quad program (F126 stage 2), the WGSL that runs a filter's own
@@ -225,8 +217,9 @@ describe("defineFilter and the quad text", () => {
   });
 
   // Bug: a mesh over a chain of the view under a backdrop, which no Source can feed, gets a quad; a backdrop whose inputs
-  // all read back, or that reads none, has one over a Source (F126 stage 5, A2).
-  it("has none for a backdrop whose input reads its view, one for a backdrop without inputs or with inputs from back", () => {
+  // all read back has one over a Source (F126 stage 5, A2). A backdrop without inputs opts into nothing (W4): with a
+  // quad it would get a kept record and the no-Source warning in a game that uses neither Source nor Frost.
+  it("has none for a backdrop whose input reads its view or that reads none, one for inputs from back", () => {
     const Misted = defineFilter("fixture.quadMisted", {
       ...SOFT_BODIES,
       uniforms: { spread: 1, tone: 0 },
@@ -236,9 +229,7 @@ describe("defineFilter and the quad text", () => {
 
     expect(Misted.filter.inputs[0]?.from).toBe("input");
     expect(Misted.filter.quadSource).toBeUndefined();
-    expect(Under.filter.quadSource).toBe(
-      assembleQuad(Under.filter.uniforms, UNDER_BODIES.wgsl, undefined, [], true)
-    );
+    expect(Under.filter.quadSource).toBeUndefined();
     expect(Frosted.filter.quadSource).toBe(
       assembleQuad(
         Frosted.filter.uniforms,

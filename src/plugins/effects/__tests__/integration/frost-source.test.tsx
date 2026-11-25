@@ -16,6 +16,7 @@ import { uiPlugin } from "../../../ui";
 import { worldPlugin } from "../../../world";
 import { effectsPlugin } from "../../index";
 import { Frost } from "../../set/frost";
+import { Under } from "../filter-fixtures";
 
 // ---------------------------------------------------------------------------
 // Integration (F126 stage 5): eight `Frost` notes over a room under `Source()`, the whole app on the real Pixi stage,
@@ -74,13 +75,17 @@ async function tick(times = 60): Promise<void> {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
 }
 
+/** The glass of the notes: a `Frost`, or a game's own backdrop without inputs. */
+type Glass = "frost" | "under";
+
 /**
  * The ward: the room, under a `Source` or not, with a bed in it, and eight notes after it.
  *
  * @param source - True to put `Source()` on the room.
+ * @param glass - The filter of the notes.
  * @returns The projection.
  */
-function ward(source: boolean) {
+function ward(source: boolean, glass: Glass) {
   return projection({
     name: "fixture.ward",
     layer: "scene",
@@ -115,7 +120,7 @@ function ward(source: boolean) {
               height: 300,
               fill: 0xff_f8_e7
             }}
-            components={[Frost({ blur: 12, tint: 0x62_58_5b })]}
+            components={[glass === "frost" ? Frost({ blur: 12, tint: 0x62_58_5b }) : Under()]}
           />
         ))}
       </stack>
@@ -130,9 +135,15 @@ function ward(source: boolean) {
  * @param options.source - True to put `Source()` on the room.
  * @param options.kind - The backend.
  * @param options.dev - A dev build.
+ * @param options.glass - The filter of the notes; `Frost` when left out.
  * @returns The app and the stage.
  */
-async function start(options: { source: boolean; kind?: "webgpu" | "webgl"; dev?: boolean }) {
+async function start(options: {
+  source: boolean;
+  kind?: "webgpu" | "webgl";
+  dev?: boolean;
+  glass?: Glass;
+}) {
   if (options.dev === true) vi.stubGlobal("__MOKU_GAME_DEV__", true);
 
   installFakeDom({ width: 1080, height: 1920 });
@@ -147,8 +158,8 @@ async function start(options: { source: boolean; kind?: "webgpu" | "webgl"; dev?
   });
   const feature = defineFeature("fixture", {
     flows: [main],
-    projections: [ward(options.source)],
-    filters: [Frost]
+    projections: [ward(options.source, options.glass ?? "frost")],
+    filters: [Frost, Under]
   });
   const app = createApp({
     plugins: [
@@ -353,5 +364,18 @@ describe("Frost over a Source", () => {
 
     expect(warnings(over, "effects:frost-no-source")).toEqual([]);
     await over.app.stop();
+  });
+
+  // Bug (W4): a game's own backdrop without inputs, in a game with neither Source nor Frost, gets a quad, a kept record
+  // and the Frost warning: what it draws and logs is no longer what it was before Source existed.
+  it("leaves a backdrop without inputs as it was: no kept record, no warning, a break per note", async () => {
+    const started = await start({ source: false, dev: true, glass: "under" });
+
+    await frames(started, 5);
+
+    expect(warnings(started, "effects:frost-no-source")).toEqual([]);
+    expect(started.app.renderer.sync.debug.why()).toEqual([]);
+    expect(started.app.renderer.stats().canvasPasses).toBe(1 + NOTES);
+    await started.app.stop();
   });
 });

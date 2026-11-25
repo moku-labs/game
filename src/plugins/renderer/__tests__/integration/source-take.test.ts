@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Shape, Transform } from "../../components";
-import { backSeam, backSlot } from "../quad-harness";
+import { Parent, Shape, Source, Transform } from "../../components";
+import { backSeam, backSlot, shadedSlot } from "../quad-harness";
 import {
   openSources,
   rendersNow,
@@ -122,5 +122,43 @@ describe("a Source and its takes", () => {
     expect(windowOf(drawn, window).reader).toBe(false);
     expect(takesOf(drawn, source, from)).toBe(0);
     expect(source.texture).toBeUndefined();
+  });
+
+  // Bug (W1): a kept picture inside the Source that is taken again in this flush is drawn into the Source before its
+  // step, so the Source holds its old picture and reads clean: the glass shows the panel as it was.
+  it("is taken after the kept pictures inside it have stepped", async () => {
+    const drawn = await openSources();
+    const room = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 200, h: 200 }), Source());
+    const panel = drawn.spawn(
+      Parent({ entity: room }),
+      Transform({ x: 10, y: 10 }),
+      Shape({ w: 80, h: 80 })
+    );
+    const dot = drawn.spawn(
+      Parent({ entity: panel }),
+      Transform({ x: 5, y: 5 }),
+      Shape({ w: 10, h: 10 })
+    );
+
+    drawn.frame();
+    drawn.mock.api.sync.filters.set(panel, [shadedSlot()]);
+    spawnWindow(drawn);
+    drawn.frames(12);
+
+    const inner = windowOf(drawn, panel);
+    const source = sourceOf(drawn, room);
+
+    expect(inner.mode).toBe("kept");
+
+    // At the take of the Source, whether the panel's change was still owed (its step clears it).
+    const owed: boolean[] = [];
+
+    drawn.stage.last().renderer.watchers.push(call => {
+      if (call.container === source.top) owed.push(inner.dirtyS1);
+    });
+    drawn.mock.world.ecs.set(dot, Transform, { x: 30 });
+    drawn.frame();
+
+    expect(owed).toEqual([false]);
   });
 });

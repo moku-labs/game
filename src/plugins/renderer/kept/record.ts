@@ -38,6 +38,7 @@ import {
 } from "./geometry";
 import {
   bytesOf,
+  drawsItself,
   dropTexture,
   endLoan,
   firstInputs,
@@ -51,7 +52,7 @@ import {
   standInOf
 } from "./render";
 import { enabledSlot, enterShade, leaveShade, renderShade } from "./shade";
-import { backSlot, heldCurrent, releaseHeld } from "./source";
+import { backSlot, heldCurrent, markSources, releaseHeld } from "./source";
 import { destroyRecord } from "./state";
 import {
   type FilterCache,
@@ -727,7 +728,8 @@ export function createRecord(
     held: undefined,
     heldOf: undefined,
     heldVersion: -1,
-    unserved: false
+    unserved: false,
+    steppedAt: -1
   };
   const { state } = kctx;
 
@@ -1540,19 +1542,6 @@ function toKept(kctx: KeptCtx, record: KeptRecord, view: View): void {
   record.calmIn = 0;
   record.idleSeen = false;
   kctx.sync.swapHidden(kctx.hidden, view, "kept", true);
-}
-
-/**
- * Tells whether a node draws itself: a Pixi view (a sprite, a nine-slice, a graphics, a particle container), not a
- * plain container. Pixi types `renderPipeId` on every container, but only a view holds one.
- *
- * @param node - The node.
- * @returns True for a view.
- */
-function drawsItself(node: PixiContainer): boolean {
-  const pipe: string | undefined = node.renderPipeId;
-
-  return pipe !== undefined;
 }
 
 /**
@@ -2696,8 +2685,8 @@ function takenAfterInner(pixi: PixiModule, above: KeptRecord): boolean {
 }
 
 /**
- * Marks every record above a record as changed: its picture holds what this one drew, and the flush renders inner
- * records first, so they are retaken in the same flush (P4.5). A refining alone leaves a record above that is taken
+ * Marks every record and every Source above a record as changed: its picture holds what this one drew, and the flush
+ * renders inner records first, so they are retaken in the same flush (P4.5). A refining alone leaves a record above that is taken
  * whole after it (F126).
  *
  * @param kctx - The kept context.
@@ -2705,6 +2694,9 @@ function takenAfterInner(pixi: PixiModule, above: KeptRecord): boolean {
  * @param record - The record whose drawing changed.
  */
 function dirtyAbove(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
+  // A Source above it holds what it drew too (F126 stage 5): taken after the records that are no windows step.
+  if (record.top.parent !== null) markSources(kctx.state, record.top.parent);
+
   for (let node = record.top.parent; node !== null; node = node.parent) {
     const above = kctx.state.byTop.get(node);
 

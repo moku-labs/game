@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Transform } from "../../components";
+import { Parent, Shape, Source, Transform } from "../../components";
 import {
   openSources,
   rendersNow,
@@ -90,5 +90,37 @@ describe("a Source's dirty flag", () => {
 
       expect(takesOf(drawn, source, from)).toBe(1);
     }
+  });
+
+  // Bug (W2): the Source's texture is in canvas space, but a move of a node above its top marks only that node: the
+  // glass keeps reading the room where it was before the move.
+  it("is set when an ancestor of its top moves, and not again at rest", async () => {
+    const drawn = await openSources();
+    const holder = drawn.spawn(Transform({ x: 0, y: 0 }), Shape({ w: 10, h: 10 }));
+    const room = drawn.spawn(
+      Parent({ entity: holder }),
+      Transform({ x: 0, y: 0 }),
+      Shape({ w: 200, h: 200 }),
+      Source()
+    );
+
+    drawn.spawn(Parent({ entity: room }), Transform({ x: 10, y: 10 }), Shape({ w: 20, h: 20 }));
+    drawn.frame();
+    spawnWindow(drawn);
+    drawn.frames(6);
+
+    const source = sourceOf(drawn, room);
+    const from = rendersNow(drawn);
+
+    drawn.mock.world.ecs.set(holder, Transform, { x: 25 });
+    drawn.frame();
+
+    expect(takesOf(drawn, source, from)).toBe(1);
+
+    const rested = rendersNow(drawn);
+
+    drawn.frames(4);
+
+    expect(takesOf(drawn, source, rested)).toBe(0);
   });
 });

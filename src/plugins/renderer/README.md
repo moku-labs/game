@@ -1385,15 +1385,19 @@ a view on its shader in any of the three places.
 ### Sources
 
 A frosted window reads the picture under it from a `Source` instead of a copy of the canvas (F126 stage 5, change
-2026-11-25-f126-s5-source). A slot whose quad names a `back` (the set's `Frost`, any backdrop whose inputs all read
-`from: "back"`) finds the nearest `Source` drawn before its view: from its top up the parents to the stage, at each
+2026-11-25-f126-s5-source). A slot whose quad names a `back` (the set's `Frost`, any backdrop with inputs that all read
+`from: "back"`; a backdrop without inputs gets no quad and keeps the backdrop path) finds the nearest `Source` drawn before its view: from its top up the parents to the stage, at each
 level the earlier siblings, last first, each subtree depth first, last child first. A `Source` on an ancestor of the
 window never counts (it would read itself). The find is cached on the window and done again only when
-`sync.structureVersion` moves: a view hung, re-hung or gone, a wrapper made, a depth written, a `Source` added or removed.
+`sync.structureVersion` moves: a view hung, re-hung or gone, a wrapper made, a `Source` added or removed, or a depth
+written in a container that holds a `Source` (a character walking in a y-sorted layer with no `Source` in it moves
+nothing). A window whose filter is switched off forgets its find, and finds again when it is back.
 
-In the flush of a drawn frame, before the records step: every window finds its `Source` and is counted as a reader
-while its last step was eligible with it (WebGPU, one enabled filter, ancestors that draw it as a picture would); every
-dirty `Source` with a reader is taken (`renderTo` of its top at its canvas transform into a texture the screen's size at
+In the flush of a drawn frame: every window finds its `Source` and is counted as a reader while its last step was
+eligible with it (WebGPU, one enabled filter, ancestors that draw it as a picture would); the records that read no
+`Source` step first, so a kept picture inside a `Source` is taken again before the `Source` is (a record whose drawing
+changes marks the `Source`s above it, as it marks the pictures above it); then every dirty `Source` with a reader is
+taken (`renderTo` of its top at its canvas transform into a texture the screen's size at
 `resolution × scale`, rounded up; the take makes the top a render group, undone when the `Source` lets its texture go);
 then every reader's chain is brought up to that take: drawn from the `Source`'s texture, at its resolution, into results
 the `Source` holds, keyed by the filter kind and `FilterSlotInputs.key` (the steps of the chain there), so windows of
@@ -1403,15 +1407,22 @@ steps as a kept view on its quad: its own pixels in its picture, the `Source` an
 `clamp` half a texel in) written in place, compare-then-write. A moving window writes only these numbers.
 
 - A `Source` is dirty when it is made, when its texture went, after a mark inside its subtree (the same walk that marks
-  pictures), and on a resize (also a resolution step), a restore and a debug switch. A mark outside it and a moving
-  window do not touch it. A take happens only in the flush of a drawn frame: a take in an undrawn frame shows an empty
+  pictures), when its top stands elsewhere on the canvas than at its take (a node above it moved: its world transform
+  is compared in every drawn frame it is read, into a scratch matrix), and on a resize (also a resolution step), a
+  restore and a debug switch. A mark outside it and a moving window do not touch it. A take happens only in the flush of a drawn frame: a take in an undrawn frame shows an empty
   canvas on WebGPU.
 - A `Source` no window reads holds no texture and is never taken. The last reader gone, a removed component, the kept
   switch off and WebGL (no quad twin there: the backdrop path) all let its texture and results go.
 - A window that becomes eligible draws its first frame on the backdrop path; its `Source` is taken in the next drawn
   flush and it goes on its quad from then. A window whose `Source` is removed is on the backdrop path the next frame.
 - A hidden or transparent `Source` is taken as drawn: a transparent picture. A `Source` whose top is itself kept is taken
-  live from its subtree.
+  live from its subtree. A `Source` on a bare view that draws itself (an image with no child) gets its wrapper before its
+  first take, as a picture does (D4): the root of the take is a plain container, and the image keeps its own transform,
+  tint and alpha.
+- A take that redraws its texture in place, at its size, leaves the windows as they stand (their meshes bind that
+  texture); the result windows of equal steps share is drawn again in place, its label and size made only for a new
+  texture. The engine's part of a take, its chains and the steps of its windows allocates nothing; the renders do
+  (`host.renderTo` hands Pixi a fresh options object, as every take of a picture does, and Pixi's render its own).
 - `stats().sources` is `{ count, takes, mb, mpx }`: the views that carry `Source`, the takes of the last drawn frame, the
   MiB of their textures and results, and the device Mpx the takes and their chains drew off the canvas in that frame. A
   take counts as an off-canvas pass in `renderPasses`, never as a canvas pass.

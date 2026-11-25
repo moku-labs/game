@@ -2,7 +2,9 @@
  * @file The page of the Frost-over-a-Source browser leg (`tests/visual/frost-source.visual.ts`, F126 stage 5). Not a
  * test: the leg bundles it with the flags of a dev page and opens it in Chrome on WebGPU, at resolution 1 and 2. A
  * small game draws, on the real engine, the real Pixi and the real GPU: a room of coloured stripes and a pane of milk
- * over it with the set's `Frost`. `source(on)` puts `Source()` on the room or takes it off and draws a few game frames;
+ * over it with the set's `Frost`; with `?bare=1` the room is one bare tinted, half-transparent image instead, with no
+ * child (a Source on a view that draws itself: wrapped before its first take, review W3). `source(on)` puts `Source()`
+ * on the room or takes it off and draws a few game frames;
  * the leg reads the canvas from the browser's own screenshot, once over the Source and once on the backdrop path. The
  * page answers in `globalThis.frostSource`.
  */
@@ -112,13 +114,50 @@ async function step(app: App, count: number): Promise<void> {
 }
 
 /**
- * Starts the game and spawns the room of stripes and the pane of milk with `Frost` over it.
+ * Spawns the dark room the stripes hang in.
+ *
+ * @param app - The app.
+ * @returns The room.
+ */
+function stripedRoom(app: App): number {
+  return app.world.ecs.spawn(OWNER, [
+    Layer({ name: "scene" }),
+    Transform({ x: 0, y: 0 }),
+    Sprite({ texture: WHITE, width: SIDE, height: LONG, anchor: { x: 0, y: 0 }, tint: 0x20_20_20 })
+  ]);
+}
+
+/**
+ * Spawns a bare room: one green image, half transparent, moved off the corner, under the left half of the pane. Its
+ * tint and alpha drawn twice, or its place lost, show as other pixels under the glass.
+ *
+ * @param app - The app.
+ * @returns The room.
+ */
+function bareRoom(app: App): number {
+  return app.world.ecs.spawn(OWNER, [
+    Layer({ name: "scene" }),
+    Transform({ x: 40, y: 120 }),
+    Sprite({
+      texture: WHITE,
+      width: 220,
+      height: 360,
+      anchor: { x: 0, y: 0 },
+      tint: 0x40_a0_50,
+      alpha: 0.6
+    })
+  ]);
+}
+
+/**
+ * Starts the game and spawns the room and the pane of milk with `Frost` over it.
  *
  * @returns The page's answer.
  */
 async function start(): Promise<FrostSourcePage> {
   const query = new URLSearchParams(location.search);
   const resolution = Number(query.get("resolution") ?? "1");
+  const bare = query.get("bare") === "1";
   const mount = document.createElement("div");
 
   mount.id = "game";
@@ -153,18 +192,16 @@ async function start(): Promise<FrostSourcePage> {
 
   const { ecs } = app.world;
   const stripe = SIDE / STRIPES.length;
-  const room = ecs.spawn(OWNER, [
-    Layer({ name: "scene" }),
-    Transform({ x: 0, y: 0 }),
-    Sprite({ texture: WHITE, width: SIDE, height: LONG, anchor: { x: 0, y: 0 }, tint: 0x20_20_20 })
-  ]);
+  const room = bare ? bareRoom(app) : stripedRoom(app);
 
-  for (const [index, tint] of STRIPES.entries()) {
-    ecs.spawn(OWNER, [
-      Parent({ entity: room }),
-      Transform({ x: index * stripe, y: 0 }),
-      Sprite({ texture: WHITE, width: stripe / 2, height: LONG, anchor: { x: 0, y: 0 }, tint })
-    ]);
+  if (!bare) {
+    for (const [index, tint] of STRIPES.entries()) {
+      ecs.spawn(OWNER, [
+        Parent({ entity: room }),
+        Transform({ x: index * stripe, y: 0 }),
+        Sprite({ texture: WHITE, width: stripe / 2, height: LONG, anchor: { x: 0, y: 0 }, tint })
+      ]);
+    }
   }
 
   ecs.spawn(OWNER, [

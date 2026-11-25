@@ -15,14 +15,16 @@ import type {
   FilterSlotInputs,
   FilterSlotQuadTexture,
   PixiContainer,
+  PixiFilter,
   PixiFilterManager,
   PixiModule,
+  PixiRenderTexture,
   PixiShader,
   PixiTexture,
   PixiTextureSource
 } from "../types";
-import { textureBytes } from "./geometry";
-import { dropTexture, fitTexture, labelOf } from "./render";
+import { TEXEL_BYTES } from "./geometry";
+import { drawsItself, dropTexture, fitTexture, labelOf } from "./render";
 import { enabledSlot } from "./shade";
 import type {
   HeldChain,
@@ -43,33 +45,26 @@ const MPX = 1e6;
 /** A find walked a container whose children Pixi sorts before the next render: its answer is not kept. */
 const FIND = { unsettled: false };
 
+/** The size a take or a result asks `fitTexture` for: one object, written in place (a literal per take allocates). */
+const SIZE = { width: 0, height: 0, resolution: 1 };
+
 /** The values of a uniform group, as the placement writes them. */
 type UniformValues = Record<string, unknown>;
 
 /**
- * The share a Source's value asks for: 0.5 or 0.25, anything else 0.25.
- *
- * @param scale - The `scale` of the component.
- * @returns The share.
- * @example
- * ```ts
- * scaleOf(0.125); // 0.25
- * ```
- */
-export function scaleOf(scale: unknown): number {
-  return typeof scale === "number" && (scale === 0.5 || scale === 0.25) ? scale : DEFAULT_SCALE;
-}
-
-/**
- * Reads the scale of a Source's component, warning once in a dev build for one it does not draw at.
+ * Reads the scale of a Source's component into its record: 0.5 or 0.25, anything else 0.25, warning once in a dev build
+ * for one it does not draw at. Written, not answered: a fraction a call hands back is boxed when it is not inlined.
  *
  * @param kctx - The kept context.
- * @param entity - The entity.
- * @returns The share.
+ * @param source - The Source.
  */
-function readScale(kctx: KeptCtx, entity: Entity): number {
-  const asked: unknown = kctx.ctx.deps.world.ecs.get(entity, Source)?.scale;
-  const scale = scaleOf(asked);
+function readScale(kctx: KeptCtx, source: SourceRecord): void {
+  const { entity } = source;
+  const value = kctx.ctx.deps.world.ecs.get(entity, Source);
+  // Read plainly and compared in place, at every take: a fraction read through `?.` into a value of no known type, or
+  // handed to a call, is boxed (16 B a take).
+  const asked = value === undefined ? DEFAULT_SCALE : value.scale;
+  const scale = asked === 0.5 ? 0.5 : DEFAULT_SCALE;
   const { warnedScale } = kctx.state;
 
   if (
@@ -82,7 +77,7 @@ function readScale(kctx: KeptCtx, entity: Entity): number {
     kctx.ctx.log.warn("renderer:source-scale", { entity, scale: asked });
   }
 
-  return scale;
+  source.scale = scale;
 }
 
 /**
@@ -101,13 +96,15 @@ export function addSource(kctx: KeptCtx, pixi: PixiModule | undefined, entity: E
     entity,
     top: undefined,
     wasGroup: false,
-    scale: readScale(kctx, entity),
+    scale: DEFAULT_SCALE,
     texture: undefined,
+    resolution: 0,
     version: 0,
     dirty: true,
     readers: 0,
     held: [],
     matrix: new pixi.Matrix(),
+    seen: new pixi.Matrix(),
     identity: new pixi.Matrix(),
     sprite: undefined,
     keeper: undefined,
@@ -115,6 +112,11 @@ export function addSource(kctx: KeptCtx, pixi: PixiModule | undefined, entity: E
     bytes: 0
   };
 
+  // The resolution is handed to each window's seam when its steps move (`key`): a field V8 keeps tagged hands the number
+  // it holds, where a double field would box it at every ask. A non-number once moves the field; the number goes back.
+  Reflect.set(source, "resolution", false);
+  source.resolution = 0;
+  readScale(kctx, source);
   state.sources.push(source);
   state.sourceByEntity.set(entity, source);
   kctx.ctx.state.sync.structureVersion += 1;
@@ -143,7 +145,8 @@ function ungroupTop(state: KeptState, top: PixiContainer): void {
 }
 
 /**
- * Frees one result: its targets back to the module's pool as textures, its bytes given back.
+ * Frees one result: its targets destroyed (each was registered with `host.keep`, so it is let go there first), and the
+ * result taken off its Source.
  *
  * @param kctx - The kept context.
  * @param source - Its Source.
@@ -304,15 +307,50 @@ function sourceIn(state: KeptState, node: PixiContainer | undefined): SourceReco
 
   const { children } = node;
 
-  if (node.sortableChildren && node.sortDirty) FIND.unsettled = true;
-
   for (let at = children.length - 1; at >= 0; at -= 1) {
     const found = sourceIn(state, children[at]);
 
-    if (found !== undefined) return found;
+    // Which of two Sources in the subtree comes first may change when Pixi sorts it: the answer waits for the sort. A
+    // subtree with no Source answers none in any order.
+    if (found !== undefined) {
+      if (node.sortableChildren && node.sortDirty) FIND.unsettled = true;
+
+      return found;
+    }
   }
 
   return undefined;
+}
+
+/**
+ * Tells whether a container holds a Source below it: the order of its children can then change what a window finds.
+ * Per call: a walk up the parents of each Source's top, nothing made.
+ *
+ * @param state - The kept state.
+ * @param node - The container.
+ * @returns True when a Source's top is under it.
+ */
+export function holdsSource(state: KeptState, node: PixiContainer): boolean {
+  for (let index = 0; index < state.sources.length; index += 1) {
+    const top = state.sources[index]?.top;
+
+    if (top !== undefined && isBelow(top, node)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tells whether a node hangs below another, at any depth. Per call: a walk up the parents, nothing made.
+ *
+ * @param node - The node.
+ * @param above - The other.
+ * @returns True when `above` is one of its ancestors.
+ */
+function isBelow(node: PixiContainer, above: PixiContainer): boolean {
+  for (let at = node.parent; at !== null; at = at.parent) if (at === above) return true;
+
+  return false;
 }
 
 /**
@@ -334,7 +372,10 @@ export function findSource(state: KeptState, top: PixiContainer): SourceRecord |
   for (let parent = node.parent; parent !== null; parent = parent.parent) {
     const { children } = parent;
 
-    if (parent.sortableChildren && parent.sortDirty) FIND.unsettled = true;
+    // A sort Pixi still owes moves which siblings come before the window only when a Source hangs under this level.
+    if (parent.sortableChildren && parent.sortDirty && holdsSource(state, parent)) {
+      FIND.unsettled = true;
+    }
 
     for (let at = children.indexOf(node) - 1; at >= 0; at -= 1) {
       const found = sourceIn(state, children[at]);
@@ -396,9 +437,7 @@ export function heldCurrent(record: KeptRecord): boolean {
  * @returns The key.
  */
 function keyOf(inputs: FilterSlotInputs, source: SourceRecord): number {
-  const resolution = source.texture?.source.resolution ?? 1;
-
-  return inputs.key === undefined ? Number.NaN : inputs.key(resolution);
+  return inputs.key === undefined ? Number.NaN : inputs.key(source.resolution);
 }
 
 /**
@@ -410,9 +449,12 @@ function keyOf(inputs: FilterSlotInputs, source: SourceRecord): number {
  */
 export function resolveReaders(kctx: KeptCtx): void {
   const { state } = kctx;
+
+  // The tops first: a Source that got its top moves the version, and the finds of this flush are made after it.
+  syncTops(kctx);
+
   const version = kctx.ctx.state.sync.structureVersion;
 
-  syncTops(kctx);
   for (let index = 0; index < state.sources.length; index += 1) {
     const source = state.sources[index];
 
@@ -469,7 +511,7 @@ function resolveOne(kctx: KeptCtx, record: KeptRecord, version: number): void {
 }
 
 /**
- * A window lets its Source go: its result is released, it reads none.
+ * A window lets its Source go: its result is released, it reads none, its cached find is dropped.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -478,6 +520,8 @@ function leaveSource(kctx: KeptCtx, record: KeptRecord): void {
   releaseHeld(kctx, record);
   record.source = undefined;
   record.reader = false;
+  // The answer it was found for is gone: a window that comes back finds again, whatever the structure did.
+  record.sourceAt = -1;
 }
 
 /**
@@ -545,7 +589,9 @@ export function takeSources(kctx: KeptCtx, pixi: PixiModule): void {
   for (let index = 0; index < state.sources.length; index += 1) {
     const source = state.sources[index];
 
-    if (source !== undefined && source.readers > 0 && source.dirty) takeSource(kctx, pixi, source);
+    if (source === undefined || source.readers === 0) continue;
+    if (!source.dirty && movedSinceTake(source)) source.dirty = true;
+    if (source.dirty) takeSource(kctx, pixi, source);
   }
   for (let index = 0; index < state.records.length; index += 1) {
     const record = state.records[index];
@@ -553,6 +599,61 @@ export function takeSources(kctx: KeptCtx, pixi: PixiModule): void {
     if (record?.reader === true && record.source?.texture !== undefined)
       bringHeld(kctx, pixi, record);
   }
+}
+
+/**
+ * Tells whether a taken Source's top stands elsewhere on the canvas than at its take: a node above it moved, which marks
+ * only that node, and the texture holds the subtree at its canvas place. Per drawn frame and read Source: the top's world
+ * transform read into a scratch matrix and compared, nothing made.
+ *
+ * @param source - The Source, read.
+ * @returns True when its texture shows the subtree where it no longer is.
+ */
+function movedSinceTake(source: SourceRecord): boolean {
+  const { top, texture, matrix, seen } = source;
+
+  if (top === undefined || top.destroyed || texture === undefined) return false;
+
+  top.getGlobalTransform(seen, false);
+
+  return (
+    seen.a !== matrix.a ||
+    seen.b !== matrix.b ||
+    seen.c !== matrix.c ||
+    seen.d !== matrix.d ||
+    seen.tx !== matrix.tx ||
+    seen.ty !== matrix.ty
+  );
+}
+
+/**
+ * Gives a bare view under a Source its wrapper before its first take, as a picture's first take does (spec 23 D4): a
+ * view that draws itself made the root of the take's render group draws other pixels than live (Pixi's sprite pipe
+ * keeps the group transform it cached, the root's own tint and alpha are applied twice). The Source moves to the
+ * wrapper; the wrap marks nothing, it draws the same pixels.
+ *
+ * @param kctx - The kept context.
+ * @param source - The Source, its top known.
+ * @param top - Its top.
+ * @returns The top to take: the wrapper, or the top as it was.
+ */
+function wrapBareSource(kctx: KeptCtx, source: SourceRecord, top: PixiContainer): PixiContainer {
+  const view = kctx.ctx.state.sync.views.get(source.entity);
+
+  if (view === undefined || view.wrapper !== undefined || !drawsItself(top)) return top;
+
+  const wrapper = kctx.wrap(source.entity);
+
+  if (wrapper === undefined || wrapper === top) return top;
+
+  const { state } = kctx;
+
+  if (state.sourceByTop.get(top) === source) state.sourceByTop.delete(top);
+  source.top = wrapper;
+  source.wasGroup = wrapper.isRenderGroup;
+  state.sourceByTop.set(wrapper, source);
+
+  return wrapper;
 }
 
 /**
@@ -566,26 +667,16 @@ export function takeSources(kctx: KeptCtx, pixi: PixiModule): void {
  * @param source - The Source, dirty, with readers.
  */
 function takeSource(kctx: KeptCtx, pixi: PixiModule, source: SourceRecord): void {
-  const { top } = source;
   const screen = kctx.host.screen();
 
-  if (top === undefined || top.destroyed || screen === undefined) return;
+  if (source.top === undefined || source.top.destroyed || screen === undefined) return;
 
-  source.scale = readScale(kctx, source.entity);
+  const top = wrapBareSource(kctx, source, source.top);
 
-  const resolution = kctx.host.resolution() * source.scale;
-  const width = Math.ceil(screen.width * resolution) / resolution;
-  const height = Math.ceil(screen.height * resolution) / resolution;
-  const texture = fitTexture(
-    kctx,
-    pixi,
-    source.texture,
-    { width, height, resolution },
-    `source:${labelOf(top)}`
-  );
-
-  source.texture = texture;
-
+  const was = source.texture;
+  const wasWidth = was === undefined ? -1 : was.source.pixelWidth;
+  const wasHeight = was === undefined ? -1 : was.source.pixelHeight;
+  const texture = fitSource(kctx, pixi, source, top, screen);
   const group = top.isRenderGroup;
   const kept = kctx.state.byTop.get(top)?.mode === "kept" && !top.renderable;
 
@@ -606,12 +697,16 @@ function takeSource(kctx: KeptCtx, pixi: PixiModule, source: SourceRecord): void
 
   source.version += 1;
   source.dirty = false;
-  source.bytes = textureBytes(texture.source.width, texture.source.height, resolution);
+  // Its device size, as `textureBytes` counts it: a fraction handed to a call per take is boxed.
+  source.bytes = pixelWidth * pixelHeight * TEXEL_BYTES;
   kctx.state.sourceTakes += 1;
   kctx.state.sourcePixels += pixelWidth * pixelHeight;
   kctx.state.flushPasses += 1;
 
-  // Every window over it binds and places again: the texture may be new or of another size.
+  // A texture drawn again in place, at its size, is read by every window as it stands: their meshes bind it and their
+  // placement holds. A new texture, or one of another size, is bound and placed again by each.
+  if (texture === was && pixelWidth === wasWidth && pixelHeight === wasHeight) return;
+
   for (let index = 0; index < kctx.state.records.length; index += 1) {
     const record = kctx.state.records[index];
 
@@ -620,9 +715,78 @@ function takeSource(kctx: KeptCtx, pixi: PixiModule, source: SourceRecord): void
 }
 
 /**
+ * Gives a Source its texture for a take: the screen's size at `resolution × scale`, rounded up, the one it holds resized
+ * in place, or a new one (its label made only then); the resolution kept on the record.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param source - The Source.
+ * @param top - Its top, for the label.
+ * @param screen - The screen, CSS px.
+ * @param screen.width - Its width.
+ * @param screen.height - Its height.
+ * @returns The texture, on the Source.
+ */
+function fitSource(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  source: SourceRecord,
+  top: PixiContainer,
+  screen: { readonly width: number; readonly height: number }
+): PixiRenderTexture {
+  readScale(kctx, source);
+
+  const resolution = kctx.host.resolution() * source.scale;
+
+  SIZE.width = Math.ceil(screen.width * resolution) / resolution;
+  SIZE.height = Math.ceil(screen.height * resolution) / resolution;
+  SIZE.resolution = resolution;
+
+  // The label only for a texture made or taken from the pool: a texture kept is resized in place, its label stands.
+  const texture = fitTexture(
+    kctx,
+    pixi,
+    source.texture,
+    SIZE,
+    needsTexture(source.texture) ? `source:${labelOf(top)}` : ""
+  );
+
+  source.texture = texture;
+  // Kept plainly: Pixi answers a source's resolution through a getter, a boxed fraction when the call is not inlined.
+  // Written only when it moves: the tagged field takes a new number at each write.
+  if (source.resolution !== resolution) source.resolution = resolution;
+
+  return texture;
+}
+
+/**
+ * Tells whether `fitTexture` makes or takes a texture for this one (none held, or destroyed): only then is a label read.
+ *
+ * @param texture - The texture held.
+ * @returns True when a texture is to be made.
+ */
+function needsTexture(texture: PixiRenderTexture | undefined): boolean {
+  return texture === undefined || texture.destroyed;
+}
+
+/**
+ * Tells whether a result was drawn with the steps a seam's chain draws now: an equal key, or for a seam without one,
+ * the same seam.
+ *
+ * @param held - The result.
+ * @param inputs - The seam.
+ * @param key - Its key at the Source's resolution; NaN for none.
+ * @returns True when it was.
+ */
+function sameSteps(held: HeldChain, inputs: FilterSlotInputs, key: number): boolean {
+  return Number.isNaN(key) ? held.owner === inputs : held.key === key;
+}
+
+/**
  * Brings a reader's result up to its Source's take and its chain's steps: kept when current; else one of another window
- * with equal steps, shared; else its own drawn again in place when nobody else reads it, or a new one. A change of the
- * result its mesh binds owes the mesh its bindings (`dirtyS3`).
+ * with equal steps, shared; else its own drawn again in place when nobody else reads it or every window that reads it
+ * draws the same steps (a retake of the Source under windows that share), or a new one. A change of the result its
+ * mesh binds owes the mesh its bindings (`dirtyS3`).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -636,6 +800,18 @@ function bringHeld(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
   if (slot === undefined || source === undefined || inputs === undefined) return;
   if (heldCurrent(record)) return;
 
+  const own = record.held;
+
+  // A take of the Source under a window whose steps stand: its result drawn again in place, shared or not. Its key is
+  // the one it was drawn with; none is asked (a fraction handed to the seam boxes).
+  if (own !== undefined && stepsStand(record, own, slot, inputs, source)) {
+    own.owner = inputs;
+    drawHeld(kctx, pixi, source, own, inputs, true);
+    noteSeam(record, inputs);
+
+    return;
+  }
+
   const key = keyOf(inputs, source);
   const shared = sharedHeld(source, slot, key);
 
@@ -646,11 +822,27 @@ function bringHeld(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
     return;
   }
 
-  const own = record.held;
-  const held =
-    own !== undefined && own.refs === 1
-      ? own
-      : { kind: slot.kind, key, owner: inputs, at: -1, targets: [], refs: 0, bytes: 0 };
+  // Its own again: nobody else reads it, it holds these steps (the other readers share them, by their equal key), or
+  // every other reader's steps moved too (a tween of them all): each asks its key at its turn and leaves if it differs.
+  const reuse =
+    own !== undefined &&
+    own.kind === slot.kind &&
+    (own.refs === 1 || sameSteps(own, inputs, key) || othersMoved(kctx, record, own));
+  const held = reuse
+    ? own
+    : {
+        kind: slot.kind,
+        key,
+        owner: inputs,
+        at: -1,
+        resolution: 0,
+        sizedWidth: -1,
+        sizedHeight: -1,
+        targets: [],
+        scales: [],
+        refs: 0,
+        bytes: 0
+      };
 
   if (held !== own) {
     source.held.push(held);
@@ -658,9 +850,69 @@ function bringHeld(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
   }
 
   held.owner = inputs;
-  drawHeld(kctx, pixi, source, held, inputs);
-  held.key = keyOf(inputs, source);
+  drawHeld(kctx, pixi, source, held, inputs, false);
+  // The key asked once: the draw runs the chains at the resolution the ask ran them at.
+  held.key = key;
   noteSeam(record, inputs);
+}
+
+/**
+ * Tells whether every other window that reads a result has steps that moved since it was drawn: none of them reads it
+ * as current, so it may be drawn again in place with this window's steps. Per call: a walk of the records, two whole
+ * numbers each, nothing made.
+ *
+ * @param kctx - The kept context.
+ * @param record - The window that asks.
+ * @param held - The result.
+ * @returns True when no other reader holds it current.
+ */
+function othersMoved(kctx: KeptCtx, record: KeptRecord, held: HeldChain): boolean {
+  for (let index = 0; index < kctx.state.records.length; index += 1) {
+    const other = kctx.state.records[index];
+
+    if (other === undefined || other === record || other.held !== held) continue;
+
+    const inputs = backSlot(other)?.inputs;
+
+    if (
+      inputs === undefined ||
+      (other.heldOf === inputs && other.heldVersion === inputs.version())
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Tells whether a window's result was drawn with the steps its chain draws now, at the resolution the Source has now:
+ * the same seam, its version as noted, the same kind. Numbers compared, no call.
+ *
+ * @param record - The window's record.
+ * @param held - Its result.
+ * @param slot - Its slot.
+ * @param inputs - The slot's seam.
+ * @param source - Its Source, with a texture.
+ * @returns True when a take of the Source owes the result a draw and nothing else.
+ */
+function stepsStand(
+  record: KeptRecord,
+  held: HeldChain,
+  slot: FilterSlot,
+  inputs: FilterSlotInputs,
+  source: SourceRecord
+): boolean {
+  const { texture } = source;
+
+  // The texture read plainly (a fraction through `?.` is boxed), the resolution off the record (Pixi's is a getter).
+  return (
+    texture !== undefined &&
+    held.kind === slot.kind &&
+    record.heldOf === inputs &&
+    record.heldVersion === inputs.version() &&
+    held.resolution === source.resolution
+  );
 }
 
 /**
@@ -712,7 +964,7 @@ function holdResult(kctx: KeptCtx, record: KeptRecord, held: HeldChain): void {
 
 /**
  * Sizes a result's targets: the Source's frame at its resolution times each input's scale; an empty chain leaves a hole,
- * and its input reads the Source itself.
+ * and its input reads the Source itself. A target made, dropped or resized owes its windows their bindings.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -732,8 +984,11 @@ function sizeHeld(
 
   if (texture === undefined) return false;
 
-  const { width, height, resolution } = texture.source;
+  const { pixelWidth, pixelHeight } = texture.source;
+  // The Source is of the size the targets were made for: a target at its scale stands as it is.
+  const same = held.sizedWidth === pixelWidth && held.sizedHeight === pixelHeight;
   let any = false;
+  let moved = false;
 
   held.bytes = 0;
 
@@ -742,27 +997,96 @@ function sizeHeld(
     const target = held.targets[index];
 
     if (scale === undefined) {
-      if (target !== undefined) dropTexture(kctx, target);
+      if (target !== undefined) {
+        dropTexture(kctx, target);
+        moved = true;
+      }
 
       // A hole: the input reads the Source as it is.
       held.targets[index] = undefined;
       continue;
     }
 
-    const fitted = fitTexture(
-      kctx,
-      pixi,
-      target,
-      { width, height, resolution: resolution * scale },
-      `source:${source.entity}#${index}`
-    );
+    const stands =
+      same && target !== undefined && !target.destroyed && held.scales[index] === scale;
 
-    held.targets[index] = fitted;
-    held.bytes += textureBytes(width, height, resolution * scale);
+    held.scales[index] = scale;
     any = true;
+    if (!stands && fitTarget(kctx, pixi, source, held, index)) moved = true;
+
+    const fitted = held.targets[index];
+
+    if (fitted !== undefined) {
+      held.bytes += fitted.source.pixelWidth * fitted.source.pixelHeight * TEXEL_BYTES;
+    }
   }
 
+  // Another texture, or one of another size, under an input: every window that reads the result binds and places again.
+  if (moved) markHolders(kctx, held);
+
   return any;
+}
+
+/**
+ * Fits one target of a result to its Source at the scale `held.scales` holds for it (read there: a fraction handed to a
+ * call is boxed): resized in place, or made, its label only then.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param source - The Source, with its texture.
+ * @param held - The result.
+ * @param index - The input.
+ * @returns True when the target is another texture, or of another size, than before.
+ */
+function fitTarget(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  source: SourceRecord,
+  held: HeldChain,
+  index: number
+): boolean {
+  const { texture } = source;
+  const target = held.targets[index];
+
+  if (texture === undefined) return false;
+
+  const wasWidth = target === undefined ? -1 : target.source.pixelWidth;
+  const wasHeight = target === undefined ? -1 : target.source.pixelHeight;
+
+  // The resolution off the record: Pixi answers a source's through a getter, a boxed fraction when it is not inlined.
+  SIZE.width = texture.source.width;
+  SIZE.height = texture.source.height;
+  SIZE.resolution = source.resolution * (held.scales[index] ?? 1);
+
+  const fitted = fitTexture(
+    kctx,
+    pixi,
+    target,
+    SIZE,
+    needsTexture(target) ? `source:${source.entity}#${index}` : ""
+  );
+
+  held.targets[index] = fitted;
+
+  return (
+    fitted !== target ||
+    fitted.source.pixelWidth !== wasWidth ||
+    fitted.source.pixelHeight !== wasHeight
+  );
+}
+
+/**
+ * Owes every window that reads a result its bindings and placement (`dirtyS3`).
+ *
+ * @param kctx - The kept context.
+ * @param held - The result.
+ */
+function markHolders(kctx: KeptCtx, held: HeldChain): void {
+  for (let index = 0; index < kctx.state.records.length; index += 1) {
+    const record = kctx.state.records[index];
+
+    if (record?.held === held) record.dirtyS3 = true;
+  }
 }
 
 /**
@@ -775,32 +1099,42 @@ function sizeHeld(
  */
 function keeperOf(pixi: PixiModule, source: SourceRecord): NonNullable<SourceRecord["sprite"]> {
   const texture = source.texture ?? pixi.Texture.EMPTY;
+  // Made in a function of its own: a closure over `source` here would give every call a context for it, 40 B a draw.
+  const keeper = source.keeper ?? makeKeeper(pixi, source);
+  const { resolution } = source;
 
-  if (source.keeper === undefined) {
-    const keeper = new pixi.AlphaFilter({ alpha: 1 });
-
-    keeper.apply = (manager: PixiFilterManager, input: PixiTexture): void => {
-      const { drawing } = source;
-
-      drawing?.owner.draw(manager, input, drawing.targets);
-    };
-    source.keeper = keeper;
-  }
-
-  const resolution = texture.source.resolution;
-
-  if (source.keeper.resolution !== resolution) source.keeper.resolution = resolution;
-  if (source.keeper.padding !== 0) source.keeper.padding = 0;
+  if (keeper.resolution !== resolution) keeper.resolution = resolution;
+  if (keeper.padding !== 0) keeper.padding = 0;
 
   if (source.sprite === undefined || source.sprite.destroyed) {
     source.sprite = new pixi.Sprite(texture);
     source.sprite.label = `source:${source.entity}#chain`;
-    source.sprite.filters = [source.keeper];
+    source.sprite.filters = [keeper];
   } else if (source.sprite.texture !== texture) {
     source.sprite.texture = texture;
   }
 
   return source.sprite;
+}
+
+/**
+ * Makes the keeper of a Source, once: an `AlphaFilter` whose apply draws the chain of the result being drawn.
+ *
+ * @param pixi - The module that draws.
+ * @param source - The Source.
+ * @returns The keeper, kept on the Source.
+ */
+function makeKeeper(pixi: PixiModule, source: SourceRecord): PixiFilter {
+  const keeper = new pixi.AlphaFilter({ alpha: 1 });
+
+  keeper.apply = (manager: PixiFilterManager, input: PixiTexture): void => {
+    const { drawing } = source;
+
+    drawing?.owner.draw(manager, input, drawing.targets);
+  };
+  source.keeper = keeper;
+
+  return keeper;
 }
 
 /**
@@ -813,36 +1147,51 @@ function keeperOf(pixi: PixiModule, source: SourceRecord): NonNullable<SourceRec
  * @param source - The Source, with its texture.
  * @param held - The result.
  * @param inputs - The seam that draws it.
+ * @param stand - Its steps and its Source's resolution are those it was last drawn with.
  */
 function drawHeld(
   kctx: KeptCtx,
   pixi: PixiModule,
   source: SourceRecord,
   held: HeldChain,
-  inputs: FilterSlotInputs
+  inputs: FilterSlotInputs,
+  stand: boolean
 ): void {
   const texture = source.texture;
 
   held.at = source.version;
 
-  if (texture === undefined || !sizeHeld(kctx, pixi, source, held, inputs)) return;
+  if (texture === undefined) return;
+
+  held.resolution = source.resolution;
+
+  const { pixelWidth, pixelHeight } = texture.source;
+  // Steps that stand over a Source of the size the targets were made for: they stand too, and no scale is asked of the
+  // seam (a fraction a seam answers through a call it is not inlined into is boxed, 16 B a call).
+  const sized = stand && held.sizedWidth === pixelWidth && held.sizedHeight === pixelHeight;
+
+  if (sized ? !drawsTarget(held) : !sizeHeld(kctx, pixi, source, held, inputs)) return;
+
+  held.sizedWidth = pixelWidth;
+  held.sizedHeight = pixelHeight;
 
   const sprite = keeperOf(pixi, source);
 
   source.drawing = held;
   kctx.host.renderTo(sprite, texture, source.identity, false);
 
-  if (scalesMoved(held, inputs) && sizeHeld(kctx, pixi, source, held, inputs)) {
+  if (!sized && scalesMoved(held, inputs) && sizeHeld(kctx, pixi, source, held, inputs)) {
     kctx.host.renderTo(sprite, texture, source.identity, false);
   }
 
   source.drawing = undefined;
 
-  const { pixelWidth, pixelHeight } = texture.source;
   const perInput = inputs.stages.length / Math.max(inputs.count, 1);
   let pixels = pixelWidth * pixelHeight;
 
-  for (const target of held.targets) {
+  for (let index = 0; index < held.targets.length; index += 1) {
+    const target = held.targets[index];
+
     if (target !== undefined)
       pixels += target.source.pixelWidth * target.source.pixelHeight * perInput;
   }
@@ -852,7 +1201,22 @@ function drawHeld(
 }
 
 /**
- * Tells whether a scale of a chain changed inside its draw: the targets have another size than it asks for now.
+ * Tells whether a result has a target to draw: an empty chain leaves only holes.
+ *
+ * @param held - The result.
+ * @returns True when one target or more is there.
+ */
+function drawsTarget(held: HeldChain): boolean {
+  for (let index = 0; index < held.targets.length; index += 1) {
+    if (held.targets[index] !== undefined) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tells whether a scale of a chain changed inside its draw: a target was sized at another scale than it asks for now, or
+ * a hole and a target changed places.
  *
  * @param held - The result, drawn.
  * @param inputs - The seam that drew it.
@@ -864,11 +1228,8 @@ function scalesMoved(held: HeldChain, inputs: FilterSlotInputs): boolean {
     const target = held.targets[index];
 
     if ((scale === undefined) !== (target === undefined)) return true;
-    if (target !== undefined && scale !== undefined) {
-      const wanted = Math.round(target.source.width * target.source.resolution);
-
-      if (Math.abs(wanted - target.source.pixelWidth) > 1) return true;
-    }
+    // The scale each target was sized at, kept with it: no size is read back through Pixi's getters.
+    if (scale !== undefined && held.scales[index] !== scale) return true;
   }
 
   return false;

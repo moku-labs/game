@@ -182,7 +182,7 @@ export const Frost = defineFilter("Frost", {
 - Inside the box, everything already drawn under the view is in the copy: the scene and an overlay's dim alike.
 
 **Over a Source** (F126 stage 5). Put `Source()` on the view under the glass (the room, the board), and a backdrop whose
-inputs all read `from: "back"` (or none), such as the set's `Frost`, no longer copies the canvas: the renderer draws its
+inputs all read `from: "back"` (one or more), such as the set's `Frost`, no longer copies the canvas: the renderer draws its
 chains from the Source's texture, once per take of the Source (and when the chain's values change), off the canvas, and
 its body on the window's quad inside the canvas pass. It breaks no canvas pass and runs no filter pass of its own; a
 moving window takes nothing again. For it `defineFilter` assembles a quad text with the back at group 3 after the
@@ -190,7 +190,8 @@ inputs (`uBackTexture`, `uBackSampler`) and hands the slot `quad.back`, the name
 struct has, after each input from back and after the back, an offset (`<input>Offset`, `backOffset`, `vec2<f32>`): the
 helpers read `uv * size * scale + offset`, the live apply writes the offsets at 0, so the live path draws as before. The
 declaration is the same with or without a Source; without one the view keeps the backdrop path, and a dev build on WebGPU
-warns once per window `effects:frost-no-source` `{ entity, hint: "put Source() on the view under the glass" }`. WebGL
+warns once per window `effects:frost-no-source` `{ entity, hint: "put Source() on the view under the glass" }`. A
+backdrop without inputs opts into nothing: no quad, no kept record, no warning, drawn as before Sources existed. WebGL
 keeps the backdrop path. Renderer README, "Sources".
 
 ### Filters that are kept

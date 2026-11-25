@@ -87,6 +87,21 @@ function frostLadders(): readonly Ladder[] {
 /** The ladders, made at module scope once: the chain answers one of them, its sigma written in place. */
 const LADDERS = /*#__PURE__*/ frostLadders();
 
+/**
+ * The scales of the ladders as plain numbers, by index. A function: the module-scope rule sees no collection literal.
+ *
+ * @returns The scales, widest first.
+ */
+function ladderScales(): Float64Array {
+  return Float64Array.from(SCALES);
+}
+
+/**
+ * The scales the chain reads, by index: a scale read off a ladder object (`LADDERS[at]?.scale ?? 1`) is a boxed number
+ * in every call of a tweened blur, 16 B a read.
+ */
+const LADDER_SCALES = /*#__PURE__*/ ladderScales();
+
 /** The steps of a blur of 0: none, the body reads what was drawn under the window as it is. */
 const NO_STEPS: readonly FilterStep[] = Object.freeze([]);
 
@@ -108,19 +123,16 @@ function frostChain(
 
   if (Number.isNaN(blur) || blur <= 0) return NO_STEPS;
 
+  const { resolution } = context;
+  const last = LADDER_SCALES.length - 1;
   let at = 0;
 
-  while (at < LADDERS.length - 1 && context.resolution * (LADDERS[at]?.scale ?? 1) > DENSITY)
-    at += 1;
-  while (
-    at < LADDERS.length - 1 &&
-    blur * context.resolution * (LADDERS[at]?.scale ?? 1) > MAX_SIGMA
-  )
-    at += 1;
+  while (at < last && resolution * (LADDER_SCALES[at] ?? 1) > DENSITY) at += 1;
+  while (at < last && blur * resolution * (LADDER_SCALES[at] ?? 1) > MAX_SIGMA) at += 1;
 
   const ladder = LADDERS[at] ?? ladderAt(1);
 
-  ladder.blur.sigma = Math.min(blur * context.resolution * ladder.scale, MAX_SIGMA);
+  ladder.blur.sigma = Math.min(blur * resolution * (LADDER_SCALES[at] ?? 1), MAX_SIGMA);
 
   return ladder.steps;
 }

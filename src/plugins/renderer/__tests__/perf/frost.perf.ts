@@ -4,8 +4,10 @@ import { bytesPerCall } from "./fixtures";
 import {
   frostDirtyBoard,
   frostIdleBoard,
+  frostLiveBoard,
   frostMovingBoard,
-  frostSteppedBoard
+  frostSteppedBoard,
+  frostTweenBoard
 } from "./frost-fixtures";
 
 // ---------------------------------------------------------------------------
@@ -39,6 +41,23 @@ describe("eight frosted windows over a Source", () => {
   it("allocates nothing for eight windows that slide every frame, their placement written in place", async () => {
     expect(bytesPerCall(await frostMovingBoard(), 20_000)).toBeLessThanOrEqual(
       BUDGET.sourceServe + NOISE
+    );
+  });
+
+  // Bug (W6): a take builds a label and a size object for a texture it reuses, and the result two windows share is made
+  // again (a new object, new targets) at every take: a room that changes every frame allocates every frame. Engine side
+  // only: the renders are stubbed (Pixi's own and the stand-in's bytes are not the engine's).
+  it("allocates nothing for a room that changes every frame under eight windows of one key", async () => {
+    expect(bytesPerCall(await frostLiveBoard(), 20_000)).toBeLessThanOrEqual(
+      BUDGET.sourceLive + NOISE
+    );
+  });
+
+  // Bug (W6, B2): eight windows whose blur is tweened together build a new shared result, with new targets, in every
+  // frame (the one they share is held by others when the first of them moves), and ask each seam's key twice.
+  it("allocates nothing for eight windows whose blur is tweened together over a room at rest", async () => {
+    expect(bytesPerCall(await frostTweenBoard(), 20_000)).toBeLessThanOrEqual(
+      BUDGET.sourceTween + NOISE
     );
   });
 });
