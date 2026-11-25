@@ -9,14 +9,15 @@ import type { HudReturn } from "../components";
 import type {
   ClampedHudReturn,
   ClampedReturnPart,
+  EndsWalk,
   HudReturnRun,
   OverlayRecord,
   OverlayState,
   SyncCtx
 } from "./types";
 
-/** What a run holds while it waits in the pool: no overlay's value, so the last one is let go. */
-const NO_RETURN: ClampedHudReturn = { delayMs: 0, fadeMs: 0, parts: undefined };
+/** What a run holds while it waits in the pool: no overlay's value, so the last one is let go. Frozen: never written. */
+const NO_RETURN: ClampedHudReturn = Object.freeze({ delayMs: 0, fadeMs: 0, parts: undefined });
 
 /**
  * Tells whether a value is a time of `hudReturn`: a finite number. Pure.
@@ -193,40 +194,34 @@ function holds(hud: "none" | readonly string[], key: string): boolean {
   return hud === "none" || !hud.includes(key);
 }
 
-/** The walk of `endsOf` over the keys of `parts`: the run's `hud` and motion, and the latest end found so far. */
-const endsWalk: { hud: "none" | readonly string[]; reduced: boolean; ends: number } = {
-  hud: "none",
-  reduced: false,
-  ends: 0
-};
-
 /**
- * Takes one key of `parts` into the walk of `endsOf`: its end when the run holds it.
+ * Takes one key of `parts` into the walk of `endsOf`: its end when the run holds it. Called by `Map.forEach` with the
+ * state's scratch as `this`, so the walk makes no closure and keeps nothing outside the state.
  *
+ * @param this - The walk's scratch, `OverlayState.endsWalk`.
  * @param part - The key's clamped times.
  * @param key - The key.
  */
-function endOfPart(part: ClampedReturnPart, key: string): void {
-  if (!holds(endsWalk.hud, key)) return;
+function endOfPart(this: EndsWalk, part: ClampedReturnPart, key: string): void {
+  if (!holds(this.hud, key)) return;
 
-  endsWalk.ends = Math.max(endsWalk.ends, part.delayMs + (endsWalk.reduced ? 0 : part.fadeMs));
+  this.ends = Math.max(this.ends, part.delayMs + (this.reduced ? 0 : part.fadeMs));
 }
 
 /**
  * The game time a run ends at: the last delay plus fade over the keys it holds, the overlay's own included (every key
  * `parts` does not list takes it); under reduced motion, the last delay. Walked once, when the run starts, with
- * `forEach` and a callback made once: a `for…of` over the Map makes an iterator and an entry per key.
+ * `forEach`, a callback of the module and the state's scratch as its `this`: a `for…of` over the Map makes an iterator
+ * and an entry per key.
  *
+ * @param walk - The scratch of the walk, `OverlayState.endsWalk`.
  * @param value - The clamped value.
  * @param hud - The `hud` taken at the leave.
  * @param reduced - Reduced motion was on at the leave.
  * @returns Milliseconds of game time from the leave.
- * @example
- * ```ts
- * endsOf({ delayMs: 1100, fadeMs: 400, parts: new Map([["stars", { delayMs: 1400, fadeMs: 400 }]]) }, "none", false); // 1800
- * ```
  */
 export function endsOf(
+  walk: EndsWalk,
   value: ClampedHudReturn,
   hud: "none" | readonly string[],
   reduced: boolean
@@ -235,15 +230,16 @@ export function endsOf(
 
   if (value.parts === undefined) return ends;
 
-  endsWalk.hud = hud;
-  endsWalk.reduced = reduced;
-  endsWalk.ends = ends;
-  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no iterator.
-  value.parts.forEach(endOfPart);
+  walk.hud = hud;
+  walk.reduced = reduced;
+  walk.ends = ends;
+  // A Map, not an array: `forEach` makes no iterator, and its `this` argument carries the state's scratch, no closure.
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference, unicorn/no-array-method-this-argument -- see above.
+  value.parts.forEach(endOfPart, walk);
   // The walk lets the overlay's key list go.
-  endsWalk.hud = "none";
+  walk.hud = "none";
 
-  return endsWalk.ends;
+  return walk.ends;
 }
 
 /**
@@ -407,7 +403,7 @@ export function startReturn(overlay: OverlayState, record: OverlayRecord, reduce
   run.value = value;
   run.hud = hud;
   run.reduced = reduced;
-  run.endsMs = endsOf(value, hud, reduced);
+  run.endsMs = endsOf(overlay.endsWalk, value, hud, reduced);
   overlay.returns.push(run);
 }
 

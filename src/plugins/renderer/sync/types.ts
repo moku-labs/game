@@ -2030,6 +2030,17 @@ export type HudReturnRun = {
 };
 
 /**
+ * The scratch of the walk that chooses a run's end over the keys of `parts`: the run's `hud` and motion, and the latest
+ * end found so far. One object for the life of the state, passed to the walk's callback as its `this`. Private to the
+ * renderer.
+ */
+export type EndsWalk = {
+  hud: "none" | readonly string[];
+  reduced: boolean;
+  ends: number;
+};
+
+/**
  * One overlay the step knows: the marked element, the root it hangs from and where that root is drawn, the clamped
  * marker, its level, phase and mode, and its dim. Private to the renderer.
  */
@@ -2174,6 +2185,8 @@ export type OverlayState = {
   returns: HudReturnRun[];
   /** The runs that ended, taken again by the next leave: a frame makes none after the first. */
   returnPool: HudReturnRun[];
+  /** Scratch of the walk that chooses a run's end when it starts: written in place, cleared at stop. */
+  endsWalk: EndsWalk;
 };
 
 /**

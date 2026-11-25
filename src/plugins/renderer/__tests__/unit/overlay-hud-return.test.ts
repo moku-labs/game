@@ -104,6 +104,17 @@ function step(stage: OverlayStage, deltaMs: number): boolean {
   return stage.frame();
 }
 
+/**
+ * Stops a stage a test registered, for a test whose point is the stop: taken off the list first, so `afterEach` does
+ * not stop it again, and stopped there instead when an assertion before this throws.
+ *
+ * @param stage - The stage.
+ */
+function stopNow(stage: OverlayStage): void {
+  running.splice(running.indexOf(stage), 1);
+  stage.drawn.mock.stop();
+}
+
 describe("the run of a HUD return", () => {
   // Bug: a leave with no `hudReturn` starts a run (a default return): the parts wait after every overlay.
   it("starts none without hudReturn: the parts come back with the overlay's own leave, as before", async () => {
@@ -531,6 +542,9 @@ describe("the step around a run", () => {
   // Bug: a stop keeps the runs and the pooled ones, holding the stopped app's overlay values.
   it("forgets every run and its pool at stop", async () => {
     const stage = await startOverlayStage();
+
+    running.push(stage);
+
     const { overlay } = stage.drawn.mock.ctx.state.sync;
     const first = stage.overlay({ hud: "none", hudReturn: SPLASH });
     const second = stage.overlay(
@@ -547,8 +561,26 @@ describe("the step around a run", () => {
     stage.frame();
     expect([overlay.returns.length, overlay.returnPool.length]).toEqual([1, 1]);
 
-    stage.drawn.mock.stop();
+    stopNow(stage);
     expect([overlay.returns.length, overlay.returnPool.length]).toEqual([0, 0]);
+  });
+
+  // Bug: the walk of a run's end is a module-level object: one scratch shared by every app, holding the last overlay's
+  // list and end past a stop.
+  it("walks a run's end on its own state, holds no overlay's list after it, and clears it at stop", async () => {
+    const { stage } = await returnStage();
+    const overlay = overlayOf(stage);
+    const splash = shown(stage, {
+      hud: ["energy"],
+      hudReturn: { delayMs: 100, fadeMs: 200, parts: { gems: { delayMs: 400 } } }
+    });
+
+    leaveAndGo(stage, splash);
+    expect(overlay.returns[0]?.endsMs).toBe(600);
+    expect(overlay.endsWalk).toEqual({ hud: "none", reduced: false, ends: 600 });
+
+    stopNow(stage);
+    expect(overlay.endsWalk).toEqual({ hud: "none", reduced: false, ends: 0 });
   });
 
   // Bug: the overlays are seen before the root is checked: an overlay that leaves while the tree is gone starts a run.

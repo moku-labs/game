@@ -226,6 +226,12 @@ on a `layer`: a `<layer components={[Blur(...)]} />` blurs its own children only
   a new name is added; a name whose fields changed (shallow, `Object.is` per field) is set, without
   the fields its type gives to a plugin; a name that left is removed. The same fields write
   nothing, so a tween on `Glow.strength` from a motion hook survives an unrelated re-render.
+- Dropped field: a re-render that leaves out an optional field its last render gave (an
+  `Overlay` without the `hudReturn` it had) clears it on the entity. The value is stored again
+  whole, without that key (never a key holding `undefined`, so the component stays in
+  `world.ecs.snapshot()` and the frame history); the fields its type gives to a plugin keep the
+  entity's values, and the rest recorded for the extra has no dropped key either. Inside a frame the
+  write lands with the phase's world commands. A render that drops nothing allocates nothing for the check.
 - Exit: nothing is removed. An exiting element keeps its extras until it despawns.
 - `Overlay` (renderer, "Overlays and the HUD"): the element also gets the engine's `OverlayLevel`.
   Its level is one of the element's own motion tracks: 0 to 1 with its enter motion (the length,

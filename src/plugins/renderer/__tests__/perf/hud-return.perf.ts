@@ -10,7 +10,8 @@ import { bytesPerCall, returnBoard, returnCycleBoard } from "./fixtures";
 // kept. (b) A run in progress after its record is gone, three parts held: time counted in place, three products by
 // index. (c) The same run over, back in the pool: the step of a scene with no run. (d) A run in its fade: every step
 // draws the three parts at a new factor between 0 and 1. (e) A run started from the warm pool and ended again, a leave
-// and a return of the overlay a call. (f) The run of (b) in frames the clock marks idle: every step wakes the clock.
+// and a return of the overlay a call. (e2) The cycle of (e) under reduced motion. (f) The run of (b) in frames the clock
+// marks idle: every step wakes the clock.
 // ---------------------------------------------------------------------------
 
 describe("the overlay step with a HUD return", () => {
@@ -51,6 +52,14 @@ describe("the overlay step with a HUD return", () => {
     const cycle = await returnCycleBoard();
 
     expect(bytesPerCall(cycle, 20_000)).toBeLessThanOrEqual(BUDGET.hudReturnCycle + NOISE);
+  });
+
+  // Bug: the walk of a reduced-motion end takes another way (a closure for the fade cut, a list of the delays) that
+  // allocates at each leave.
+  it("starts a run under reduced motion from the warm pool and ends it again without allocating", async () => {
+    const cycle = await returnCycleBoard(true);
+
+    expect(bytesPerCall(cycle, 20_000)).toBeLessThanOrEqual(BUDGET.hudReturnCycleReduced + NOISE);
   });
 
   // Bug: the wake of an idle frame builds something (a closure, a reason) at each call.

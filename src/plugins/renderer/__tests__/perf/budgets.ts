@@ -91,6 +91,9 @@ export const BUDGET = {
   // of runs cut with `pop`. Before: 192 B, of it 152 B from `length = 0` (the list's backing store dropped, the next
   // start made a new one) and 40 B from the `for…of` over `parts` in `endsOf` (now a `forEach`).
   hudReturnCycle: 0,
+  // F240 verify 2: new, measured 0 B. The cycle of `hudReturnCycle` with every leave under reduced motion: the end
+  // walked over the delays alone, its scratch on the overlay state (`OverlayState.endsWalk`, the callback's `this`).
+  hudReturnCycleReduced: 0,
   // F240 verify: new, measured 0 B. The run of `hudReturnRunning` in frames the clock marks idle: the clock
   // woken at every step.
   hudReturnIdle: 0,

@@ -1580,8 +1580,9 @@ Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: {
   (`__tests__/perf/hud-return.perf.ts`). A delay draws no frame while nothing changes; in a frame the clock marks idle,
   a return that counted game time in it wakes the clock, so the loop never drops to its idle rate mid-return. A paused
   game (or `time.setScale(0)`) counts nothing and wakes nothing.
-- **A dropped field.** A render that leaves `hudReturn` out of a live overlay's `Overlay` clears it on the entity:
-  the next leave starts no return.
+- **A dropped field.** A render that leaves `hudReturn` out of a live overlay's `Overlay` clears it on the entity
+  (ui stores the value again without the key, see ui's "Extra components"): the next leave starts no return, and the
+  `Overlay` stays in `world.ecs.snapshot()`.
 
 **The HUD under the veil (`hud: "under"`).** `Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })`
 draws the whole HUD layer under the overlay's own dim, dimmed with everything else, every part kept

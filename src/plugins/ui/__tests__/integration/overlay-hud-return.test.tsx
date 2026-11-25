@@ -11,6 +11,8 @@ import { Overlay, type OverlayValue } from "../../../renderer/components";
 import { scenesPlugin } from "../../../scenes";
 import { textPlugin } from "../../../text";
 import { worldPlugin } from "../../../world";
+import { component } from "../../../world/ecs/define";
+import type { Entity } from "../../../world/types";
 import { uiPlugin } from "../../index";
 import { defineComponent } from "../../jsx/component";
 
@@ -37,9 +39,24 @@ const SPLASH_RETURNING: Partial<OverlayValue> = {
 /** A button's box. */
 const control = { width: 60, height: 60 } as const;
 
-/** The splash, its return switched by a button, and the buttons that open and close it. */
+/**
+ * What `Badge` holds: the fields a plugin derives (`seen`, and `by`, which a render may name at the start), and an
+ * optional one a render may drop (`note`).
+ */
+type BadgeValue = { label: string; seen: number; by?: string; note?: string };
+
+/** The defaults of `Badge`: no `note`. */
+const badgeDefaults: BadgeValue = { label: "", seen: 0 };
+
+/** A game's own component with an owned field and an optional one, as `Overlay.hudReturn` is optional. */
+const Badge = component("Badge", badgeDefaults, { owned: ["seen", "by"] });
+
+/**
+ * The splash, its return switched by a button, the buttons that open and close it, and a row whose `Badge` drops its
+ * `note` and changes its `label` at a tap.
+ */
 const Splash = defineComponent("Splash", {
-  local: { open: false, returns: true },
+  local: { open: false, returns: true, noted: true },
   view: (_props: object, local) => (
     <column key="splashRoot" style={{ width: 800, height: 800 }}>
       {local.open ? (
@@ -49,8 +66,14 @@ const Splash = defineComponent("Splash", {
           components={[Overlay(local.returns ? SPLASH_RETURNING : SPLASH)]}
         />
       ) : undefined}
+      <row
+        key="badge"
+        style={control}
+        components={[Badge(local.noted ? { label: "a", by: "ui", note: "new" } : { label: "b" })]}
+      />
       <button key="open" local={{ open: true }} style={control} />
       <button key="dropReturn" local={{ returns: false }} style={control} />
+      <button key="dropNote" local={{ noted: false }} style={control} />
       <button key="close" local={{ open: false }} style={control} />
     </column>
   )
@@ -163,6 +186,22 @@ function tap(app: App, key: string): void {
 }
 
 /**
+ * The entity of an element of the fixture.
+ *
+ * @param app - The running app.
+ * @param key - The element's key.
+ * @returns Its entity.
+ */
+function entityOf(app: App, key: string): Entity {
+  // eslint-disable-next-line unicorn/no-array-callback-reference -- `ui.find` takes a key, not a callback.
+  const entity = app.ui.find(key);
+
+  if (entity === undefined) throw new Error(`no ${key}`);
+
+  return entity;
+}
+
+/**
  * Opens the splash, lands it, optionally renders it again without its return, then starts its leave.
  *
  * @param app - The running app.
@@ -204,6 +243,43 @@ describe("ui — an overlay's hudReturn a render drops", () => {
     expect(
       splash === undefined ? "no splash" : app.world.ecs.get(splash, Overlay)?.hudReturn
     ).toBeUndefined();
+    await app.stop();
+  });
+
+  // Bug: the dropped field is stored as an own key holding `undefined`, which is no JSON: the whole `Overlay` leaves
+  // `world.ecs.snapshot()` (named under skipped) and the frame history records it as no longer JSON.
+  it("keeps the overlay in the world's snapshot after a render drops hudReturn", async () => {
+    const app = await start();
+
+    tap(app, "open");
+    run(app, 200);
+    tap(app, "dropReturn");
+
+    const splash = entityOf(app, "splash");
+    const line = app.world.ecs.snapshot().entities.find(entry => entry.id === splash);
+
+    expect(line?.skipped).not.toContain("Overlay");
+    expect(line?.components.Overlay).toStrictEqual({ ...Overlay(SPLASH).value });
+    expect(Object.hasOwn(app.world.ecs.get(splash, Overlay) ?? {}, "hudReturn")).toBe(false);
+    await app.stop();
+  });
+
+  // Bug: a drop writes the render's value whole and the plugin's own fields go back to their defaults (or one the first
+  // render named is dropped with `note`); the stored value keeps the entity's old fields and loses this render's
+  // change; or the rest pose is recorded from the entity before the drop, so it keeps `note` and a restore writes it back.
+  it("drops an optional field of an extra whole, keeping the plugin's own field, on the entity and in its rest", async () => {
+    const app = await start();
+    const badge = entityOf(app, "badge");
+
+    app.world.ecs.set(badge, Badge, { seen: 7, by: "plugin" });
+    run(app, 20);
+    tap(app, "dropNote");
+
+    // This render's label, the plugin's two fields, no `note`.
+    const kept = { label: "b", seen: 7, by: "plugin" };
+
+    expect(app.world.ecs.get(badge, Badge)).toStrictEqual(kept);
+    expect(app.world.projection.restOf(badge, Badge)).toStrictEqual(kept);
     await app.stop();
   });
 });

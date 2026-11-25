@@ -678,11 +678,13 @@ export async function returnBoard(moment: ReturnMoment): Promise<ReturnBoard> {
  * with `hud: "none"` and a `hudReturn`, its pool warmed by one real leave and return through the overlay step. Every
  * call does what the overlay step does at the two turns of a cycle: the run of the leave taken from the pool, one frame
  * of 16 ms of game time counted into it, the run ended when the overlay shows again. The `Exiting` tag a game writes is
- * left out: its write is a world command, the world's bytes, not the renderer's.
+ * left out: its write is a world command, the world's bytes, not the renderer's. With `reduced`, every leave starts
+ * under reduced motion: the run's end is the last delay, no fade.
  *
+ * @param reduced - Reduced motion is on at every leave.
  * @returns One leave-and-return cycle.
  */
-export async function returnCycleBoard(): Promise<() => void> {
+export async function returnCycleBoard(reduced = false): Promise<() => void> {
   const stage = await startOverlayStage();
   const { mock } = stage.drawn;
   const { host, viewport, demand, kept } = mock.modules;
@@ -714,8 +716,19 @@ export async function returnCycleBoard(): Promise<() => void> {
 
   const sctx: SyncCtx = { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } };
 
+  // The end the leave chooses: stars' 1400 ms delay, plus its 400 ms fade in full motion.
+  startReturn(overlay, record, reduced);
+
+  const endsMs = overlay.returns[0]?.endsMs;
+
+  endReturnOf(overlay, splash);
+
+  if (endsMs !== (reduced ? 1400 : 1800)) {
+    throw new Error("perf fixture: the cycle board's run does not end where its motion says");
+  }
+
   return () => {
-    startReturn(overlay, record, false);
+    startReturn(overlay, record, reduced);
     state.frameDelta = RETURN_FRAME_MS;
     stepReturns(sctx);
     endReturnOf(overlay, splash);

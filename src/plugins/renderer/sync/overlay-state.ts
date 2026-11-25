@@ -56,7 +56,7 @@ export function forgetOverlays(state: SyncState): void {
 
 /**
  * Forgets every overlay at stop: dims and HUD render layers destroyed, records, ranges, taps, events, the returns of
- * the HUD with their pool and the watched entities cleared.
+ * the HUD with their pool and the scratch of their end, and the watched entities cleared.
  *
  * @param state - The sync state.
  */
@@ -66,6 +66,9 @@ export function stopOverlays(state: SyncState): void {
   forgetOverlays(state);
   overlay.returns.length = 0;
   overlay.returnPool.length = 0;
+  overlay.endsWalk.hud = "none";
+  overlay.endsWalk.reduced = false;
+  overlay.endsWalk.ends = 0;
   overlay.records.clear();
   overlay.entities.clear();
   overlay.parts.clear();

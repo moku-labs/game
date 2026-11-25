@@ -77,7 +77,8 @@ function createOverlayState(): OverlayState {
     left: false,
     bounds: undefined,
     returns: [],
-    returnPool: []
+    returnPool: [],
+    endsWalk: { hud: "none", reduced: false, ends: 0 }
   };
 }
 
