@@ -929,7 +929,7 @@ export type WhyEntry = {
  * ```
  */
 export type HudReturnReport = {
-  /** The entity whose leave started the run. */
+  /** The entity whose leave started the run: the `entity` of that overlay's `debug.overlays()` line. */
   owner: Entity;
   /** The label of the overlay's view, as `debug.overlays()` names it. */
   label: string;
