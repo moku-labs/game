@@ -36,6 +36,22 @@ const SPLASH_RETURNING: Partial<OverlayValue> = {
   hudReturn: { delayMs: 1100, fadeMs: 700 }
 };
 
+/**
+ * The splash's value for a state of the fixture.
+ *
+ * @param local - Which return the render asks for.
+ * @param local.undef - Pass `hudReturn` as an explicit `undefined`.
+ * @param local.returns - Ask for the return.
+ * @returns The overlay value.
+ */
+function splashValue(local: { undef: boolean; returns: boolean }): Partial<OverlayValue> {
+  // A game built without `exactOptionalPropertyTypes` can write `hudReturn: cond ? x : undefined`; this repo's flag
+  // rejects it, so the value is cast.
+  if (local.undef) return { ...SPLASH, hudReturn: undefined } as unknown as Partial<OverlayValue>;
+
+  return local.returns ? SPLASH_RETURNING : SPLASH;
+}
+
 /** A button's box. */
 const control = { width: 60, height: 60 } as const;
 
@@ -56,14 +72,14 @@ const Badge = component("Badge", badgeDefaults, { owned: ["seen", "by"] });
  * `note` and changes its `label` at a tap.
  */
 const Splash = defineComponent("Splash", {
-  local: { open: false, returns: true, noted: true },
+  local: { open: false, returns: true, noted: true, undef: false },
   view: (_props: object, local) => (
     <column key="splashRoot" style={{ width: 800, height: 800 }}>
       {local.open ? (
         <panel
           key="splash"
           style={{ width: 100, height: 100 }}
-          components={[Overlay(local.returns ? SPLASH_RETURNING : SPLASH)]}
+          components={[Overlay(splashValue(local))]}
         />
       ) : undefined}
       <row
@@ -74,6 +90,7 @@ const Splash = defineComponent("Splash", {
       <button key="open" local={{ open: true }} style={control} />
       <button key="dropReturn" local={{ returns: false }} style={control} />
       <button key="dropNote" local={{ noted: false }} style={control} />
+      <button key="undefReturn" local={{ undef: true }} style={control} />
       <button key="close" local={{ open: false }} style={control} />
     </column>
   )
@@ -261,6 +278,29 @@ describe("ui — an overlay's hudReturn a render drops", () => {
     expect(line?.skipped).not.toContain("Overlay");
     expect(line?.components.Overlay).toStrictEqual({ ...Overlay(SPLASH).value });
     expect(Object.hasOwn(app.world.ecs.get(splash, Overlay) ?? {}, "hudReturn")).toBe(false);
+    await app.stop();
+  });
+
+  // Bug: a render that passes `hudReturn: undefined` (an own key, not a missing one) is not seen as a drop: the key is
+  // stored holding `undefined`, the return still starts or the overlay leaves the snapshot.
+  it("treats an explicit undefined hudReturn as a drop: no return, the overlay stays in the snapshot, no own key", async () => {
+    const app = await start();
+
+    tap(app, "open");
+    run(app, 200);
+    tap(app, "undefReturn");
+
+    const splash = entityOf(app, "splash");
+    const line = app.world.ecs.snapshot().entities.find(entry => entry.id === splash);
+
+    expect(line?.skipped).not.toContain("Overlay");
+    expect(line?.components.Overlay).toStrictEqual({ ...Overlay(SPLASH).value });
+    expect(Object.hasOwn(app.world.ecs.get(splash, Overlay) ?? {}, "hudReturn")).toBe(false);
+
+    tap(app, "close");
+    expect(
+      app.renderer.sync.debug.overlays().find(entry => entry.phase === "exiting")?.hudReturn
+    ).toBeUndefined();
     await app.stop();
   });
 

@@ -232,6 +232,8 @@ on a `layer`: a `<layer components={[Blur(...)]} />` blurs its own children only
   `world.ecs.snapshot()` and the frame history); the fields its type gives to a plugin keep the
   entity's values, and the rest recorded for the extra has no dropped key either. Inside a frame the
   write lands with the phase's world commands. A render that drops nothing allocates nothing for the check.
+  A field passed as `undefined` counts as dropped. A render that drops a field writes the whole value at the
+  end of the phase, so a `set` on the same extra later in that phase is replaced when it lands.
 - Exit: nothing is removed. An exiting element keeps its extras until it despawns.
 - `Overlay` (renderer, "Overlays and the HUD"): the element also gets the engine's `OverlayLevel`.
   Its level is one of the element's own motion tracks: 0 to 1 with its enter motion (the length,

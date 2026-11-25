@@ -685,8 +685,9 @@ function sameFields(previous: object | true, next: object | true): boolean {
 }
 
 /**
- * Tells whether a field is one a render of an extra dropped: the previous render declared it, this one does not, and
- * its type does not give it to a plugin. Pure.
+ * Tells whether a field is one a render of an extra dropped: the previous render gave it a value, this one leaves it out
+ * or passes `undefined` (a game built without `exactOptionalPropertyTypes` can write `field: cond ? x : undefined`),
+ * and its type does not give it to a plugin. Pure.
  *
  * @param field - The field.
  * @param previous - The value of the previous render.
@@ -704,7 +705,56 @@ function isDropped(
   next: object,
   owned: readonly string[]
 ): boolean {
-  return Object.hasOwn(previous, field) && !Object.hasOwn(next, field) && !owned.includes(field);
+  return (
+    Object.hasOwn(previous, field) &&
+    Reflect.get(previous, field) !== undefined &&
+    Reflect.get(next, field) === undefined &&
+    !owned.includes(field)
+  );
+}
+
+/**
+ * Tells whether a value carries a field holding `undefined`, which is no JSON. The walk makes no list. Pure.
+ *
+ * @param value - A component value.
+ * @returns True when a field holds `undefined`.
+ * @example
+ * ```ts
+ * hasUndefinedField({ label: "a", note: undefined }); // true
+ * ```
+ */
+function hasUndefinedField(value: object): boolean {
+  // A component value is a plain object: every key `for…in` walks is its own.
+  for (const field in value) {
+    if (Reflect.get(value, field) === undefined) return true;
+  }
+
+  return false;
+}
+
+/**
+ * The patch of an extra without the fields that hold `undefined`: such a key must never reach the entity. The patch
+ * itself when it holds none, so a render without one allocates nothing. Pure.
+ *
+ * @param patch - The fields to write.
+ * @returns The fields to write, each with a value.
+ * @example
+ * ```ts
+ * definedOnly({ label: "a", note: undefined }); // { label: "a" }
+ * ```
+ */
+function definedOnly(patch: object): object {
+  if (!hasUndefinedField(patch)) return patch;
+
+  const kept: Record<string, unknown> = {};
+
+  for (const field in patch) {
+    const value = Reflect.get(patch, field);
+
+    if (value !== undefined) kept[field] = value;
+  }
+
+  return kept;
 }
 
 /**
@@ -1349,6 +1399,9 @@ export function createReconciler(
    * the entity's fields without the dropped ones, the plugin's own as the entity carries them, and this render's patch
    * on top unless a `change` hook brings the numbers home. That add lands with the phase's commands, so the rest is
    * recorded from the value it stores. A render that drops nothing walks the previous value's keys and makes no more.
+   * A field this render passes as `undefined` counts as dropped, and is never written as a key. A render that drops a
+   * field writes the whole value at the end of the phase, so a `set` on the same extra later in that phase is replaced
+   * when it lands.
    *
    * @param element - The live element that changed.
    * @param name - The extra's component name.
@@ -1377,7 +1430,7 @@ export function createReconciler(
       { previous, next },
       hintOf(state, element)
     );
-    const patch = played ? undefined : livePatch(next, owned);
+    const patch = played ? undefined : definedOnly(livePatch(next, owned));
 
     if (stored !== undefined) {
       ecs.add(element.entity, { type: value.type, value: { ...stored, ...patch } });
