@@ -7,7 +7,7 @@ import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { easeCell } from "../../../world/projection/easing";
 import { AnimPlayer } from "../../components";
-import { createRuntime } from "../../lifecycle";
+import { createRuntime, sampleBornLive } from "../../lifecycle";
 import { advanceTimelines, startTimeline } from "../../timeline/play";
 import {
   defineAnimation,
@@ -134,6 +134,72 @@ export function tracksFixture(): () => void {
   return warmed((): void => {
     beginFrame(mock.actx);
     advanceTracks(mock.actx, FRAME_MS);
+  });
+}
+
+/**
+ * The run of the world system `anim.sample` (F241) over an empty track table: what a frame with nothing animating pays.
+ *
+ * @returns One run of the system.
+ */
+export function sampleIdleFixture(): () => void {
+  const mock = createMockAnim();
+
+  return warmed((): void => sampleBornLive(mock.actx));
+}
+
+/**
+ * The run of the world system `anim.sample` (F241) over a table of 50 running tracks, none born since the step: the
+ * cost of the system in a frame where views move.
+ *
+ * @returns One run of the system.
+ */
+export function bornRestFixture(): () => void {
+  const mock = createMockAnim();
+  const driver = createDriver(mock.actx);
+
+  for (let index = 0; index < TRACKS; index++) {
+    const entity = spawnTestEntity(mock, [Transform({ x: index, y: index })]);
+
+    driver.track(entity, Transform, { x: 500 }, { ms: TWEEN_MS, ease: "inOut" }, nothingMuted);
+  }
+
+  beginFrame(mock.actx);
+  advanceTracks(mock.actx, FRAME_MS);
+
+  return warmed((): void => sampleBornLive(mock.actx));
+}
+
+/**
+ * The frame step of `tracksFixture`'s 50 running tracks followed by the run of `anim.sample` (F241): the frame's
+ * allocation is the step's alone.
+ *
+ * @returns One frame step and the system's run.
+ */
+export function sampledStepFixture(): () => void {
+  const mock = createMockAnim();
+  const driver = createDriver(mock.actx);
+
+  for (let index = 0; index < TRACKS; index++) {
+    const entity = spawnTestEntity(mock, [Transform({ x: index, y: index })]);
+
+    if (index % 2 === 0) {
+      driver.track(
+        entity,
+        Transform,
+        { x: 500, y: 300 },
+        { ms: TWEEN_MS, ease: "inOut" },
+        nothingMuted
+      );
+    } else {
+      startBob(mock, entity);
+    }
+  }
+
+  return warmed((): void => {
+    beginFrame(mock.actx);
+    advanceTracks(mock.actx, FRAME_MS);
+    sampleBornLive(mock.actx);
   });
 }
 

@@ -431,6 +431,11 @@ export type State = {
   markListeners: Set<MarkListener>;
   /** Counter of the frame steps. A track born in the running step is not advanced by it. */
   frame: number;
+  /**
+   * The length of the dense track list when the last frame step left it: a track at this index or past it was born
+   * after that step, and `sampleBorn` writes its first sample before the frame is drawn (F241).
+   */
+  bornFrom: number;
   /** True while the track count is over `maxTracks`, so the warning is one per crossing. */
   overMaxTracks: boolean;
   /** The animations already warned for a looping `frames` step that blocks the rest of a `sequence` (dev). */
@@ -441,6 +446,8 @@ export type State = {
   removeDriver: (() => void) | undefined;
   /** Remover of `time.onFrame("animate")`. */
   offFrame: (() => void) | undefined;
+  /** Remover of the world system that samples the tracks born since the step (F241). */
+  offSample: (() => void) | undefined;
   /** Remover of `flow.fx.handle("play")`. */
   offPlay: (() => void) | undefined;
   /** Bound in `onInit`, so the teardown context can end everything with the state alone. */

@@ -31,6 +31,49 @@ const fartherFlight = defineAnimation("hud.coinsFly", {
     sequence(wait(50), tween(it, Transform, { x: 300 }, { ms: 100, ease: "linear" }))
 });
 
+/**
+ * Starts the mock with a sync system that starts an additive walk (a jump to 300, home over 600 ms) in its first
+ * run, as an enter hook of `ui.enter` does, and steps one frame in the given mode.
+ *
+ * @param mode - The world mode of the frame.
+ * @returns The walked entity's `y` after the frame.
+ */
+function drawnAt(mode: "live" | "paused"): number | undefined {
+  const mock = createMockAnim();
+
+  mock.start();
+
+  const entity = spawnTestEntity(mock, [Transform()]);
+  let started = false;
+
+  mock.world.ecs.system({
+    name: "test.enter",
+    phase: "sync",
+    query: [],
+    run: () => {
+      if (started) return;
+
+      started = true;
+      mock.world.projection.viewOf(entity, { kind: "plugin", name: "test" })?.tween(
+        Transform,
+        { y: 0 },
+        {
+          ms: 600,
+          additive: true,
+          segments: [
+            { at: 0.0005, ease: () => 1, to: { y: 300 } },
+            { at: 1, ease: t => t, to: { y: 0 } }
+          ]
+        }
+      );
+    }
+  });
+  mock.world.ecs.setMode(mode);
+  mock.frame(16);
+
+  return mock.world.ecs.get(entity, Transform)?.y;
+}
+
 describe("anim lifecycle", () => {
   it("hands the start value of reduced motion to the renderer's leave", () => {
     const off = createMockAnim();
@@ -189,6 +232,13 @@ describe("anim lifecycle", () => {
     expect(handle.active()).toBe(false);
     expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
     expect(mock.api.active()).toBe(0);
+  });
+
+  // Bug (F241): a walk an enter hook starts in phase sync stands at rest in the frame it is drawn; or a paused world,
+  // which moves nothing, has it written all the same.
+  it("draws a walk started in phase sync at its start in that frame, and not while the world is paused", () => {
+    expect(drawnAt("live")).toBe(300);
+    expect(drawnAt("paused")).toBe(0);
   });
 
   it("leaves a loop standing through a fast frame, lets it run on, and ends it on finishAll", () => {

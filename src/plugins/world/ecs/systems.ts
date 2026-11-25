@@ -45,6 +45,33 @@ const ALWAYS = "sync";
  */
 export const DRAWS_SYSTEM = "renderer.sync";
 
+/**
+ * The name of the system that writes the first sample of the tracks born since the frame step (F241): right before
+ * `renderer.sync`, after every other system of its phase, so a track an enter hook of phase `sync` starts is drawn at
+ * its start in that frame. `anim` registers its system under this name.
+ */
+export const SAMPLES_SYSTEM = "anim.sample";
+
+/**
+ * Where a new system goes in the list of its phase: `renderer.sync` at the end; the sampler before it; any other
+ * system before the first of the two, so a system registered after them still runs before the draw.
+ *
+ * @param list - The systems of the phase, in run order.
+ * @param name - The name of the new system.
+ * @returns The index to insert it at.
+ */
+function slotOf(list: readonly SystemEntry[], name: string): number {
+  if (name === DRAWS_SYSTEM) return list.length;
+
+  const at = list.findIndex(
+    known =>
+      known.definition.name === DRAWS_SYSTEM ||
+      (name !== SAMPLES_SYSTEM && known.definition.name === SAMPLES_SYSTEM)
+  );
+
+  return at === -1 ? list.length : at;
+}
+
 /** Rows a timing table holds before it first grows. */
 const TIMING_ROWS = 16;
 
@@ -206,12 +233,9 @@ export function registerSystem(
     walk: plan.names.length === 0 ? undefined : new SystemWalk(ctx, plan, hidesAside)
   };
   const list = state.systems[definition.phase];
-  const draws = list.findIndex(known => known.definition.name === DRAWS_SYSTEM);
-
   // A system registered after the renderer started runs before its pass, not a frame late:
-  // the ui's enter hooks are one (F48), a feature added later another.
-  if (draws === -1) list.push(entry);
-  else list.splice(draws, 0, entry);
+  // the ui's enter hooks are one (F48), a feature added later another; the sampler stays last before it (F241).
+  list.splice(slotOf(list, definition.name), 0, entry);
 
   if (state.timing !== undefined) giveRow(state, state.timing, definition.name);
 

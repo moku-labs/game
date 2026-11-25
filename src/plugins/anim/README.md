@@ -628,6 +628,13 @@ callback and the sweep of the same frame sees the tracks it just advanced.
 A system of phase `input` that plays through `res(AnimPlayer)` runs before this step, so its tree
 moves in `animate` of the same frame.
 
+A track born after the step (an `enter` hook plays in phase `layout` or `sync`), or inside it, writes
+its sample at its start in a live world, from the system `anim.sample`, which `world` keeps last
+before `renderer.sync` in phase `sync` (F241): a walk that jumps to
+its start offset stands there from the frame the view is first drawn, never one frame at rest. The
+next step advances it by one delta from there, so nothing runs a frame early. A track of 0 ms, one
+in its delay and one a timeline step drives write nothing in that pass.
+
 Additive tracks advance before the absolute ones, so the absolute owner of a field writes the sum
 of this frame's offsets. An absolute track of 0 ms with no delay, no repeat and no keys writes its
 target, with this frame's offsets, the moment it starts, so a pose set in phase `layout` is drawn

@@ -1102,6 +1102,57 @@ export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
   }
 
   dropEnded(list);
+
+  // The tracks born in this step (an `onMark` listener, a timeline) are the tail of the list: they are sampled too.
+  let born = list.length;
+
+  while (born > 0 && list[born - 1]?.bornFrame === frame) born -= 1;
+  actx.state.bornFrom = born;
+}
+
+/**
+ * Writes the first sample of every track born since the frame step, at its start, before the frame is drawn (F241):
+ * an `enter` hook starts its tracks in phase `layout` or `sync`, after the step, and the next step would write them
+ * first, so the view stood one frame at rest. A walk that jumps to its start offset stands there from the frame the
+ * view is first drawn. The additive ones go first, as in the step. A track with a length of 0, one a timeline drives,
+ * one that began or one still in its delay writes nothing here; the next step advances each from where it stands, so
+ * no track runs a frame early.
+ *
+ * @param actx - Domain context of the anim plugin.
+ */
+export function sampleBorn(actx: AnimCtx): void {
+  const list = actx.state.trackList;
+  const from = Math.min(actx.state.bornFrom, list.length);
+
+  // per frame: two indexed passes over the tracks born since the step, none at rest.
+  for (let index = from; index < list.length; index++) {
+    const track = list[index];
+
+    if (track?.additive && startsUnsampled(track)) advanceTrack(actx, track, 0);
+  }
+
+  for (let index = from; index < list.length; index++) {
+    const track = list[index];
+
+    if (track !== undefined && !track.additive && startsUnsampled(track)) {
+      advanceTrack(actx, track, 0);
+    }
+  }
+
+  actx.state.bornFrom = list.length;
+}
+
+/**
+ * Tells whether a track born since the frame step writes its first sample before the draw: it runs, has a length,
+ * no timeline step drives it and its clock has not moved. One in its delay writes nothing in `advanceTrack`.
+ *
+ * @param track - A track born since the step.
+ * @returns True when `sampleBorn` writes it.
+ */
+function startsUnsampled(track: Track): boolean {
+  return (
+    !track.ended && !track.driven && !track.begun && track.ms > 0 && (track.clock[0] ?? 0) === 0
+  );
 }
 
 /**
@@ -1141,6 +1192,7 @@ export function finishAllTracks(actx: AnimCtx, keepLoops = false): void {
   }
 
   dropEnded(list);
+  actx.state.bornFrom = list.length;
 }
 
 /**
