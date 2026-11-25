@@ -165,7 +165,9 @@ export type StreamTrack = {
 export type RetiringTrack = { stream: StreamTrack; timer: ReturnType<typeof setTimeout> };
 
 /**
- * audio plugin config.
+ * What a game can set on the audio plugin: the start gain of each bus, the fades of music and named
+ * sounds, the volumes reader, the context factory, the journal size, the music mode and the iOS
+ * session. A game sets it through `pluginConfigs.audio`.
  *
  * @example
  * ```ts
@@ -505,7 +507,8 @@ export type AudioApi = {
 };
 
 /**
- * Resolved dependency APIs.
+ * The four plugin APIs audio resolves once through `ctx.require`: `flow` for the effect handlers,
+ * `assets` for the bytes, `model` for the committed player volumes and `time` for the journal clock.
  */
 export type Deps = { flow: FlowApi; assets: AssetsApi; model: ModelApi; time: TimeApi };
 

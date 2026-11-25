@@ -120,6 +120,8 @@ export function startNamed(
     },
     { once: true }
   );
+
+  // Publish the sound on its entry, then start it.
   entry.gain = gain;
   entry.source = source;
   source.start();
@@ -147,7 +149,9 @@ export async function playNamed(ctx: AudioCtx, sound: NamedPlay): Promise<void> 
   const context = state.context;
   const gain = state.buses[sound.bus].gain;
 
-  if (buffer === undefined || context === undefined || gain === undefined) {
+  const hasNothingToStart = buffer === undefined || context === undefined || gain === undefined;
+
+  if (hasNothingToStart) {
     state.named.delete(id);
 
     if (loop !== undefined) state.loops.delete(id);

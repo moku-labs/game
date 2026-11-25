@@ -638,6 +638,23 @@ describe("a loop and what goes wrong around it", () => {
     expect(mock.state.loops.has("rain")).toBe(true);
   });
 
+  it("a repeat request of a loop whose start failed starts it on the unlocked context", async () => {
+    // Bug caught: the kept loop makes the repeat a no-op, so the bed stays silent until the next unlock.
+    const mock = locked();
+
+    vi.spyOn(mock.context, "createBufferSource").mockImplementationOnce(() => {
+      throw new Error("no source");
+    });
+    await mock.fx("sfx", loop("rain.room"));
+    await mock.touch();
+
+    expect(mock.log.error).toHaveBeenCalledTimes(1);
+
+    await mock.fx("sfx", loop("rain.room"));
+
+    expect(played(mock.context)).toEqual([["rain.room", true]]);
+  });
+
   it("a restarted app ties a loop asked before its first switch to no scene", async () => {
     // Bug caught: the scene of the previous run stays in the state, so the next run's bed asked
     // before any scene is cut when a scene of that name leaves.

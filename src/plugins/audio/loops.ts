@@ -28,7 +28,15 @@ export async function playLoop(ctx: AudioCtx, request: SfxRequest, id: string): 
     return;
   }
 
-  if (isSameLoop(state, id, request.key)) return;
+  if (isSameLoop(state, id, request.key)) {
+    // A start that threw freed the sound and kept the loop: the repeat starts it again.
+    const kept = state.loops.get(id);
+
+    if (kept !== undefined && state.unlocked && !state.named.has(id))
+      await startLoop(ctx, id, kept);
+
+    return;
+  }
 
   const loop: LoopSound = {
     key: request.key,
