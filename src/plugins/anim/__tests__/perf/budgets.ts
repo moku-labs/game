@@ -52,6 +52,8 @@ export const BUDGET = {
    * field; the per-channel mix adds nothing.
    */
   animTracksColour: 50 * MOVED_FIELD,
+  /** The pass before the draw over 50 running tracks, none born since the step (F241). New: 0. */
+  animBornRest: 0,
   /** 10 timelines that only wait. Before: 822 B. Now 0. */
   timelinesWaiting: 0,
   /**

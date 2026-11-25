@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { BUDGET } from "./budgets";
 import {
+  bornRestFixture,
   colourTracksFixture,
   heldLoopsFixture,
   partialTracksFixture,
@@ -27,6 +28,11 @@ describe("anim tracks: heap bytes per frame step", () => {
 
   it("runs 50 tracks that move some of their fields, keeping only the numbers that cross into world", () => {
     expect(alloc(partialTracksFixture())).toBeLessThanOrEqual(BUDGET.animTracksPartial + NOISE);
+  });
+
+  // Bug: the pass before the draw (F241) walks or copies the track table in a frame where no track was born.
+  it("writes the first samples of no track born since the step, over 50 running ones, and allocates nothing", () => {
+    expect(alloc(bornRestFixture(), IDLE_CALLS)).toBeLessThanOrEqual(BUDGET.animBornRest + NOISE);
   });
 
   it("runs 50 tint tweens mixed per channel, keeping only the numbers that cross into world", () => {

@@ -1139,19 +1139,14 @@ export function sampleBorn(actx: AnimCtx): void {
 
 /**
  * Tells whether a track born since the frame step writes its first sample before the draw: it runs, has a length,
- * no timeline step drives it, its clock has not moved and it has no delay.
+ * no timeline step drives it and its clock has not moved. One in its delay writes nothing in `advanceTrack`.
  *
  * @param track - A track born since the step.
  * @returns True when `sampleBorn` writes it.
  */
 function startsUnsampled(track: Track): boolean {
   return (
-    !track.ended &&
-    !track.driven &&
-    !track.begun &&
-    track.ms > 0 &&
-    track.delayMs === 0 &&
-    (track.clock[0] ?? 0) === 0
+    !track.ended && !track.driven && !track.begun && track.ms > 0 && (track.clock[0] ?? 0) === 0
   );
 }
 
