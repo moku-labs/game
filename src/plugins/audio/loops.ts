@@ -9,8 +9,10 @@ import { playNamed, stopNamed, waitingKey } from "./named";
 import type { AudioCtx, LoopSound, SfxRequest, State } from "./types";
 
 /**
- * Plays a loop, or remembers it: the loop that already holds its id with its key changes nothing,
- * any other request takes the id, and a one-shot waiting for the unlock under it is dropped. A
+ * Plays a loop, or remembers it: the loop that already holds its id with its key changes nothing
+ * while a sound plays or decodes under the id, and is started again on an unlocked context when an
+ * earlier start failed and left no sound; any other request takes the id, and a one-shot waiting
+ * for the unlock under it is dropped. A
  * locked context, or a renewal between two contexts, only keeps it in `loops`; the unlock starts
  * it. The scene it belongs to is the one mounted now.
  *
@@ -100,7 +102,7 @@ function trackLoop(ctx: AudioCtx, pending: Promise<void>): void {
 
 /**
  * Tells whether an id already holds a loop of a key, playing, decoding or remembered for the
- * unlock: a request for it changes nothing, so the bed plays on from where it is.
+ * unlock: a request for it does not start a second sound, so the bed plays on from where it is.
  *
  * @param state - The plugin state.
  * @param id - The id of the loop request.
