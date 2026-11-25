@@ -13,6 +13,7 @@ import {
   endReturnOf,
   endReturns,
   runOf,
+  sameReturn,
   startReturn,
   stepReturns
 } from "./overlay-return";
@@ -134,9 +135,35 @@ function clampInto(
 }
 
 /**
- * The return of the HUD parts of one overlay (F240): its `hudReturn` copied again when the marker carries a new value
- * (one malformed is absent, warned once), a run started at its first exit frame or when it is first seen leaving, and
- * its run ended when it shows again.
+ * Copies an overlay's `hudReturn` again when the marker carries a new value (F240): one reference compared a frame; a
+ * new reference with the same times (an inline literal a render writes again) keeps the copy; a malformed one is absent,
+ * warned once.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param record - The overlay.
+ * @param raw - The marker as the entity carries it.
+ */
+function copyReturn(sctx: SyncCtx, record: OverlayRecord, raw: Readonly<OverlayValue>): void {
+  // per frame: one reference compared; a write of the marker gives a new value, and only then is it read.
+  if (raw.hudReturn === record.hudReturnRaw) return;
+
+  // The same times in a new object: compared field by field, nothing made.
+  const isSame = sameReturn(raw.hudReturn, record.hudReturnRaw);
+
+  record.hudReturnRaw = raw.hudReturn;
+
+  if (isSame) return;
+
+  record.hudReturn = clampedReturn(raw.hudReturn);
+
+  if (raw.hudReturn !== undefined && record.hudReturn === undefined) {
+    warnOnce(sctx, "renderer:overlay-hud-return-ignored", record.entity, {});
+  }
+}
+
+/**
+ * The return of the HUD parts of one overlay (F240): its `hudReturn` copied when it changed, a run started at its first
+ * exit frame or when it is first seen leaving, and its run ended when it shows again.
  *
  * @param sctx - Domain context of the sync module.
  * @param record - The overlay, its phase and its value read this frame.
@@ -149,26 +176,15 @@ function seeReturn(
   raw: Readonly<OverlayValue>,
   isNew: boolean
 ): void {
-  const state = sctx.ctx.state.sync;
+  const { overlay, leave } = sctx.ctx.state.sync;
+  const isExiting = record.phase === "exiting";
+  const startsLeaving = isNew || record.turned === "exiting";
 
-  // per frame: one reference compared; a write of the marker gives a new value, and only then is it copied.
-  if (raw.hudReturn !== record.hudReturnRaw) {
-    record.hudReturnRaw = raw.hudReturn;
-    record.hudReturn = clampedReturn(raw.hudReturn);
+  copyReturn(sctx, record, raw);
 
-    if (raw.hudReturn !== undefined && record.hudReturn === undefined) {
-      warnOnce(sctx, "renderer:overlay-hud-return-ignored", record.entity, {});
-    }
-  }
-
-  if (record.phase !== "exiting") {
-    // The leave was cancelled: the overlay shows again, and its parts follow its level.
-    if (state.overlay.returns.length > 0) endReturnOf(state.overlay, record.entity);
-
-    return;
-  }
-
-  if (isNew || record.turned === "exiting") startReturn(state.overlay, record, state.leave.reduced);
+  // The leave was cancelled: the overlay shows again, and its parts follow its level.
+  if (!isExiting && overlay.returns.length > 0) endReturnOf(overlay, record.entity);
+  if (isExiting && startsLeaving) startReturn(overlay, record, leave.reduced);
 }
 
 /**

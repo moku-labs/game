@@ -25,6 +25,7 @@ import { Exiting, Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/defin
 import type {
   AnyComponentType,
   AnyComponentValue,
+  ComponentHandle,
   Entity,
   LayerSpec,
   MotionCause,
@@ -881,6 +882,9 @@ export function createReconciler(
 ) {
   const state: JsxState = ctx.state.jsx;
   const ecs = ctx.deps.world.ecs;
+  // The patches that clear one field an extra no longer declares, by field name: each made at the first drop of its
+  // field and kept, so a later drop makes nothing (one shared patch given a key and losing it again allocates).
+  const clears = new Map<string, Readonly<Record<string, undefined>>>();
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
   const range = createRange(ctx, modules.layout, {
     diffSlots: (root, scroll, slots) =>
@@ -1267,6 +1271,50 @@ export function createReconciler(
   }
 
   /**
+   * The patch that writes one field `undefined`, made once per field name.
+   *
+   * @param field - The field to clear.
+   * @returns The patch.
+   */
+  function clearOf(field: string): Readonly<Record<string, undefined>> {
+    const known = clears.get(field);
+
+    if (known !== undefined) return known;
+
+    const patch = { [field]: undefined };
+
+    clears.set(field, patch);
+
+    return patch;
+  }
+
+  /**
+   * Clears on the entity every field the previous render of an extra declared and this one does
+   * not. `ecs.set` merges, so an optional field a render drops (`Overlay.hudReturn`) would stay;
+   * each is written `undefined`, which its readers take as absent. The walk reads the previous
+   * value's own keys and makes no list; a render that drops nothing writes nothing, and a drop
+   * writes a patch kept for its field.
+   *
+   * @param element - The live element that changed.
+   * @param handle - The extra's type, as `ecs.set` takes it.
+   * @param previous - Its value of the previous render.
+   * @param next - Its value of this render.
+   */
+  function clearDropped(
+    element: Element,
+    handle: ComponentHandle<object>,
+    previous: object,
+    next: object
+  ): void {
+    // A component value is a plain object: every key `for…in` walks is its own.
+    for (const field in previous) {
+      if (Object.hasOwn(next, field)) continue;
+
+      ecs.set(element.entity, handle, clearOf(field));
+    }
+  }
+
+  /**
    * Adds a new, tag or missing extra whole, and plays or patches the changed fields of the rest.
    * An extra with the same fields writes nothing.
    *
@@ -1297,6 +1345,7 @@ export function createReconciler(
       }
 
       recordRest(ctx, element, value);
+      clearDropped(element, asHandle(value.type), previous.value, value.value);
 
       const values = { previous: previous.value, next: value.value };
 

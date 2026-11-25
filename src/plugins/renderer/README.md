@@ -1572,10 +1572,16 @@ Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: {
   chosen when it starts. It ends at once when the same overlay shows again (its leave cancelled), and on new layers
   (a scene change). An overlay removed with no exit frame starts none.
 - **Reduced motion.** On when the leave starts (`sync.leave.setReducedMotion`): the delay is kept, the fade is cut.
-- **Cost.** One reference compare a frame for the value (it is copied and clamped only when a write gives a new one);
-  per part per frame one walk of the returns in progress by index, normally none or one; the returns are pooled, so
-  a frame allocates nothing (`__tests__/perf/hud-return.perf.ts`). A delay draws no frame while nothing changes; in a
-  frame the clock marks idle, a return in progress wakes it, so the loop never drops to its idle rate mid-return.
+- **Cost.** One reference compare a frame for the value. A new reference with the same times (an inline literal a
+  render writes again) is compared field by field and keeps the copy; only new times are copied and clamped. Hoist
+  the value into a constant (`const SPLASH_RETURN: HudReturn<"energy" | "gems"> = { delayMs: 1100, fadeMs: 700 };`): the
+  compare stays one reference and `ui` writes nothing on a render that changes nothing else. Per part per frame one
+  walk of the returns in progress by index, normally none or one; the returns are pooled, so a frame allocates nothing
+  (`__tests__/perf/hud-return.perf.ts`). A delay draws no frame while nothing changes; in a frame the clock marks idle,
+  a return that counted game time in it wakes the clock, so the loop never drops to its idle rate mid-return. A paused
+  game (or `time.setScale(0)`) counts nothing and wakes nothing.
+- **A dropped field.** A render that leaves `hudReturn` out of a live overlay's `Overlay` clears it on the entity:
+  the next leave starts no return.
 
 **The HUD under the veil (`hud: "under"`).** `Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })`
 draws the whole HUD layer under the overlay's own dim, dimmed with everything else, every part kept

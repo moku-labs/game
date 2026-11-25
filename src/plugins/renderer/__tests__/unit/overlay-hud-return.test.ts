@@ -121,23 +121,24 @@ describe("the run of a HUD return", () => {
     expect(overlayOf(stage).returns).toHaveLength(0);
   });
 
-  // Bug: the run starts when the record goes (an 800 ms leave added to the delay), or for a `hud` that hid nothing.
-  it.each<[OverlayValue["hud"], number]>([
-    ["none", 1],
-    [["energy"], 1],
-    ["all", 0],
-    ["under", 0]
-  ])("with hud %j starts %i run at 0 in the first exit frame", async (hud, runs) => {
+  // Bug: the run starts when the record goes (an 800 ms leave added to the delay), or for a `hud` that hid nothing (a
+  // run in the exit frame or in the frame after it).
+  it.each<[OverlayValue["hud"], number[], number[]]>([
+    ["none", [0], [16]],
+    [["energy"], [0], [16]],
+    ["all", [], []],
+    ["under", [], []]
+  ])("with hud %j the runs count %j in the first exit frame and %j in the next", async (hud, first, next) => {
     const { stage } = await returnStage();
     const splash = shown(stage, { dim: 0.5, hud, hudReturn: SPLASH });
+    const elapsed = (): number[] => overlayOf(stage).returns.map(run => run.elapsed);
 
     stage.leave(splash);
     stage.frame();
-    expect(overlayOf(stage).returns).toHaveLength(runs);
-    expect(overlayOf(stage).returns[0]?.elapsed ?? 0).toBe(0);
+    expect(elapsed()).toEqual(first);
 
     stage.frame();
-    expect(overlayOf(stage).returns[0]?.elapsed ?? 16).toBe(16);
+    expect(elapsed()).toEqual(next);
   });
 
   // Bug: only a turn starts a run, so an overlay whose record is made in its exit frame never holds its parts.
@@ -480,6 +481,29 @@ describe("the step around a run", () => {
     expect(mock.time.wakes()).toBe(before + 2);
   });
 
+  // Bug: the clock is woken in idle frames while no game time passes (a paused game, `time.setScale(0)`): each wake draws a
+  // frame at full rate for a return that does not move.
+  it("wakes nothing in idle frames while the game time stands still, and wakes again once it counts", async () => {
+    const { stage } = await returnStage();
+    const { mock } = stage.drawn;
+    const splash = shown(stage, { hud: "none", hudReturn: { delayMs: 1000, fadeMs: 0 } });
+
+    mock.setFrameDelta(50);
+    leaveAndGo(stage, splash);
+    mock.setTimeScale(0);
+    mock.setIdle(true);
+
+    const before = mock.time.wakes();
+
+    stage.frames(3);
+    expect(overlayOf(stage).returns.map(run => run.elapsed)).toEqual([0]);
+    expect(mock.time.wakes()).toBe(before);
+
+    mock.setTimeScale(1);
+    stage.frames(2);
+    expect(mock.time.wakes()).toBe(before + 2);
+  });
+
   // Bug: the report misses the run, reports it on every overlay, or reports a run whose record is gone.
   it("reports the run on its overlay's line while the record is there, and nowhere once it is gone", async () => {
     const { stage } = await returnStage();
@@ -527,30 +551,37 @@ describe("the step around a run", () => {
     expect([overlay.returns.length, overlay.returnPool.length]).toEqual([0, 0]);
   });
 
-  it("counts nothing and wakes nothing while the renderer has no tree", async () => {
+  // Bug: the overlays are seen before the root is checked: an overlay that leaves while the tree is gone starts a run.
+  it("counts nothing, wakes nothing and starts no run while the renderer has no tree", async () => {
     const stage = await startOverlayStage();
     const { mock } = stage.drawn;
+
+    running.push(stage);
 
     stage.view({ layer: "hud", extra: [HudPart({ key: "energy" })] });
 
     const splash = stage.overlay({ hud: "none", hudReturn: SPLASH });
+    const sheet = stage.overlay({ hud: "none", hudReturn: SPLASH }, { order: 3 });
 
     stage.level(splash, 1, true);
+    stage.level(sheet, 1, true);
     stage.frames(2);
     leaveAndGo(stage, splash);
 
-    const run = overlayOf(stage).returns[0];
+    const { returns } = overlayOf(stage);
+    const run = returns[0];
     const before = mock.time.wakes();
 
-    // A lost device: the tree is gone until a restore.
+    // A lost device: the tree is gone until a restore, and the sheet starts its leave meanwhile.
     mock.modules.sync.forget();
+    stage.leave(sheet);
     mock.setIdle(true);
     mock.modules.sync.stepOverlays();
     mock.modules.sync.stepOverlays();
 
+    expect(returns).toEqual([run]);
     expect(run?.elapsed).toBe(0);
     expect(mock.time.wakes()).toBe(before);
-    mock.stop();
   });
 });
 
@@ -586,6 +617,63 @@ describe("the hudReturn value", () => {
     leaveAndGo(stage, splash);
     stage.frame();
     expect(factor(stage, energy)).toBe(0.05);
+  });
+
+  // Bug: a new reference with the same times copies and clamps again (a Map and objects at every render of an inline
+  // literal); or a value whose times differ in any field keeps the old copy.
+  it.each<[string, HudReturn, boolean]>([
+    ["the same times", { delayMs: 1100, fadeMs: 700, parts: { gems: { delayMs: 1250 } } }, false],
+    ["another delay", { delayMs: 1000, fadeMs: 700, parts: { gems: { delayMs: 1250 } } }, true],
+    ["another fade", { delayMs: 1100, fadeMs: 600, parts: { gems: { delayMs: 1250 } } }, true],
+    [
+      "another part's delay",
+      { delayMs: 1100, fadeMs: 700, parts: { gems: { delayMs: 1300 } } },
+      true
+    ],
+    [
+      "a part's fade added",
+      { delayMs: 1100, fadeMs: 700, parts: { gems: { delayMs: 1250, fadeMs: 700 } } },
+      true
+    ],
+    [
+      "a part more",
+      { delayMs: 1100, fadeMs: 700, parts: { gems: { delayMs: 1250 }, stars: {} } },
+      true
+    ],
+    ["a part less", { delayMs: 1100, fadeMs: 700, parts: {} }, true],
+    ["no parts", { delayMs: 1100, fadeMs: 700 }, true]
+  ])("a new value with %s (%j) is copied again: %s", async (_name, next, copies) => {
+    const { stage } = await returnStage();
+    const before: HudReturn = { delayMs: 1100, fadeMs: 700, parts: { gems: { delayMs: 1250 } } };
+    const splash = shown(stage, { hud: "none", hudReturn: before });
+    const copyOf = () => overlayOf(stage).records.get(splash)?.hudReturn;
+    const copy = copyOf();
+
+    stage.drawn.mock.world.ecs.set(splash, Overlay, { hudReturn: next });
+    stage.frame();
+
+    expect(copy).toBeDefined();
+    expect(copyOf() !== copy).toBe(copies);
+    expect(copyOf()?.delayMs).toBe(next.delayMs);
+    expect([...(copyOf()?.parts?.keys() ?? [])]).toEqual(Object.keys(next.parts ?? {}));
+  });
+
+  // Bug: a malformed value whose `parts` holds every key of the copy's and one more that holds nothing is taken for it:
+  // the old times stay, not none.
+  it("drops the copy for a malformed value whose parts add a key that holds nothing", async () => {
+    const { stage } = await returnStage();
+    const before: HudReturn = { delayMs: 1100, fadeMs: 700, parts: { gems: { delayMs: 1250 } } };
+    const splash = shown(stage, { hud: "none", hudReturn: before });
+    const malformed: unknown = {
+      delayMs: 1100,
+      fadeMs: 700,
+      parts: { gems: { delayMs: 1250 }, stars: undefined }
+    };
+
+    stage.drawn.mock.world.ecs.set(splash, Overlay, { hudReturn: malformed as HudReturn });
+    stage.frame();
+
+    expect(overlayOf(stage).records.get(splash)?.hudReturn).toBeUndefined();
   });
 
   // Bug: the copy is made once with the record, so a value written later is never read.

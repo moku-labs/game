@@ -40,8 +40,9 @@ expectTypeOf<keyof OverlayValue>().toEqualTypeOf<
   "dim" | "dimColor" | "cover" | "hud" | "hudInert" | "fade" | "hold" | "hudReturn"
 >();
 
-// F240: `hudReturn` is optional, so a full value written before it still compiles.
-const splashBefore: OverlayValue = {
+// F240: `hudReturn` is optional, so a full value written before it still compiles. Unannotated, so a required
+// `hudReturn` fails the check at the end of the file instead of the declaration.
+const splashBefore = {
   dim: 0,
   dimColor: 0,
   cover: "opaque",
@@ -49,7 +50,7 @@ const splashBefore: OverlayValue = {
   hudInert: false,
   fade: 800,
   hold: false
-};
+} as const;
 
 Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 700 } });
 
@@ -135,10 +136,31 @@ sync.loopsHeld(1, "size");
 expectTypeOf<Api["sync"]["debug"]["overlays"]>().returns.toEqualTypeOf<readonly OverlayReport[]>();
 expectTypeOf(ward).toEqualTypeOf<LayerMap>();
 expectTypeOf(wrong).toEqualTypeOf<LayerMap>();
-expectTypeOf(splashBefore).toEqualTypeOf<OverlayValue>();
-expectTypeOf(onlyEnergy).toEqualTypeOf<HudReturn<"energy">>();
-expectTypeOf<OverlayReport["hudReturn"]>().toEqualTypeOf<
-  { delayMs: number; fadeMs: number; elapsed: number } | undefined
+expectTypeOf(splashBefore).toExtend<OverlayValue>();
+// The parts of a typed return take the game's keys alone, each with its two optional times.
+expectTypeOf(onlyEnergy.parts).toEqualTypeOf<
+  Partial<Record<"energy", { delayMs?: number; fadeMs?: number }>> | undefined
 >();
+
+// A report is whole without `hudReturn` (an overlay with no run), and its `hudReturn` carries all three numbers.
+const shopReport = {
+  entity: 1_048_601,
+  label: "shop",
+  phase: "shown",
+  mode: "freeze",
+  level: 1,
+  range: 2,
+  kept: true
+} as const;
+
+expectTypeOf(shopReport).toExtend<OverlayReport>();
+expectTypeOf({
+  ...shopReport,
+  hudReturn: { delayMs: 1100, fadeMs: 700, elapsed: 480 }
+}).toExtend<OverlayReport>();
+expectTypeOf({
+  ...shopReport,
+  hudReturn: { delayMs: 1100, fadeMs: 700 }
+}).not.toExtend<OverlayReport>();
 // The root exports the type a game names its shared constant with.
 expectTypeOf<RootHudReturn<"energy">>().toEqualTypeOf<HudReturn<"energy">>();

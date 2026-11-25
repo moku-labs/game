@@ -33,7 +33,8 @@ function isTime(value: unknown): value is number {
 }
 
 /**
- * Tells whether a value is a plain object, not a list. Pure.
+ * Tells whether a value is a plain object, not a list: its fields can then be read, each still to be checked. The
+ * stored value is a real boundary (a game's JSON, an older build), so its fields are `unknown` until checked. Pure.
  *
  * @param value - The value.
  * @returns True for an object that is no array and not `null`.
@@ -42,7 +43,7 @@ function isTime(value: unknown): value is number {
  * isObject(["gems"]); // false
  * ```
  */
-function isObject(value: unknown): value is object {
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -60,7 +61,7 @@ function isObject(value: unknown): value is object {
 function isOverride(value: unknown): boolean {
   if (!isObject(value)) return false;
 
-  const { delayMs, fadeMs } = value as { delayMs?: unknown; fadeMs?: unknown };
+  const { delayMs, fadeMs } = value;
 
   return (delayMs === undefined || isTime(delayMs)) && (fadeMs === undefined || isTime(fadeMs));
 }
@@ -79,11 +80,7 @@ function isOverride(value: unknown): boolean {
 function isHudReturn(value: unknown): value is HudReturn {
   if (!isObject(value)) return false;
 
-  const { delayMs, fadeMs, parts } = value as {
-    delayMs?: unknown;
-    fadeMs?: unknown;
-    parts?: unknown;
-  };
+  const { delayMs, fadeMs, parts } = value;
 
   if (!isTime(delayMs) || !isTime(fadeMs)) return false;
   if (parts === undefined) return true;
@@ -114,15 +111,71 @@ export function clampedReturn(value: unknown): ClampedHudReturn | undefined {
   const parts = new Map<string, ClampedReturnPart>();
 
   for (const [key, part] of Object.entries(value.parts)) {
-    if (part !== undefined) {
-      parts.set(key, {
-        delayMs: Math.max(0, part.delayMs ?? delayMs),
-        fadeMs: Math.max(0, part.fadeMs ?? fadeMs)
-      });
-    }
+    // Only narrows the type: `isHudReturn` refused a value with a key that holds no override.
+    if (part === undefined) continue;
+
+    parts.set(key, {
+      delayMs: Math.max(0, part.delayMs ?? delayMs),
+      fadeMs: Math.max(0, part.fadeMs ?? fadeMs)
+    });
   }
 
   return { delayMs, fadeMs, parts };
+}
+
+/**
+ * Tells whether two values carry the same `delayMs` and `fadeMs`: each read as stored, so two equal malformed values are
+ * the same too; two values that are no objects are the same only when they are one. Pure.
+ *
+ * @param next - The value written now.
+ * @param previous - The value the copy was made from.
+ * @returns True when both times are the same.
+ * @example
+ * ```ts
+ * sameTimes({ delayMs: 1250 }, { delayMs: 1250 }); // true
+ * ```
+ */
+function sameTimes(next: unknown, previous: unknown): boolean {
+  if (!isObject(next) || !isObject(previous)) return Object.is(next, previous);
+
+  return Object.is(next.delayMs, previous.delayMs) && Object.is(next.fadeMs, previous.fadeMs);
+}
+
+/**
+ * Tells whether a `hudReturn` written now says what the one its copy was made from said: the same times, the same keys
+ * of `parts` with the same times. An inline literal a render writes again is a new object with the same content, and
+ * keeps the copy. Walks the keys with `for…in`, so no list is made. Pure.
+ *
+ * @param next - The value written now.
+ * @param previous - The value the copy was made from.
+ * @returns True when the copy still holds.
+ * @example
+ * ```ts
+ * sameReturn({ delayMs: 1100, fadeMs: 700, parts: { gems: {} } }, { delayMs: 1100, fadeMs: 700, parts: { gems: {} } }); // true
+ * ```
+ */
+export function sameReturn(next: unknown, previous: unknown): boolean {
+  if (!isObject(next) || !isObject(previous)) return Object.is(next, previous);
+  if (!sameTimes(next, previous)) return false;
+
+  const nextParts = next.parts;
+  const previousParts = previous.parts;
+
+  if (!isObject(nextParts) || !isObject(previousParts)) return Object.is(nextParts, previousParts);
+
+  // Every written key stored before with the same times, then no stored key left out. A plain object: every key
+  // `for…in` walks is its own.
+  for (const key in nextParts) {
+    if (!Object.hasOwn(previousParts, key) || !sameTimes(nextParts[key], previousParts[key])) {
+      return false;
+    }
+  }
+
+  for (const key in previousParts) {
+    if (!Object.hasOwn(nextParts, key)) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -140,9 +193,29 @@ function holds(hud: "none" | readonly string[], key: string): boolean {
   return hud === "none" || !hud.includes(key);
 }
 
+/** The walk of `endsOf` over the keys of `parts`: the run's `hud` and motion, and the latest end found so far. */
+const endsWalk: { hud: "none" | readonly string[]; reduced: boolean; ends: number } = {
+  hud: "none",
+  reduced: false,
+  ends: 0
+};
+
+/**
+ * Takes one key of `parts` into the walk of `endsOf`: its end when the run holds it.
+ *
+ * @param part - The key's clamped times.
+ * @param key - The key.
+ */
+function endOfPart(part: ClampedReturnPart, key: string): void {
+  if (!holds(endsWalk.hud, key)) return;
+
+  endsWalk.ends = Math.max(endsWalk.ends, part.delayMs + (endsWalk.reduced ? 0 : part.fadeMs));
+}
+
 /**
  * The game time a run ends at: the last delay plus fade over the keys it holds, the overlay's own included (every key
- * `parts` does not list takes it); under reduced motion, the last delay. Walked once, when the run starts. Pure.
+ * `parts` does not list takes it); under reduced motion, the last delay. Walked once, when the run starts, with
+ * `forEach` and a callback made once: a `for…of` over the Map makes an iterator and an entry per key.
  *
  * @param value - The clamped value.
  * @param hud - The `hud` taken at the leave.
@@ -158,15 +231,19 @@ export function endsOf(
   hud: "none" | readonly string[],
   reduced: boolean
 ): number {
-  let ends = value.delayMs + (reduced ? 0 : value.fadeMs);
+  const ends = value.delayMs + (reduced ? 0 : value.fadeMs);
 
   if (value.parts === undefined) return ends;
 
-  for (const [key, part] of value.parts) {
-    if (holds(hud, key)) ends = Math.max(ends, part.delayMs + (reduced ? 0 : part.fadeMs));
-  }
+  endsWalk.hud = hud;
+  endsWalk.reduced = reduced;
+  endsWalk.ends = ends;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no iterator.
+  value.parts.forEach(endOfPart);
+  // The walk lets the overlay's key list go.
+  endsWalk.hud = "none";
 
-  return ends;
+  return endsWalk.ends;
 }
 
 /**
@@ -230,6 +307,17 @@ export function returnOf(returns: readonly HudReturnRun[], key: string): number 
 }
 
 /**
+ * Cuts the runs in progress to their count with `pop`: V8 keeps the array's backing store, where `length = 0` drops it
+ * and the next leave's `push` makes a new one (measured).
+ *
+ * @param returns - The runs in progress.
+ * @param count - How many stay.
+ */
+function cutRuns(returns: HudReturnRun[], count: number): void {
+  while (returns.length > count) returns.pop();
+}
+
+/**
  * Puts an ended run back in the pool, holding nothing of its overlay.
  *
  * @param overlay - The overlay state.
@@ -258,7 +346,7 @@ export function endReturnOf(overlay: OverlayState, owner: Entity): void {
 
     releaseRun(overlay, run);
     returns[index] = returns.at(-1) ?? run;
-    returns.length -= 1;
+    cutRuns(returns, returns.length - 1);
 
     return;
   }
@@ -279,7 +367,7 @@ export function endReturns(overlay: OverlayState): void {
     if (run !== undefined) releaseRun(overlay, run);
   }
 
-  returns.length = 0;
+  cutRuns(returns, 0);
 }
 
 /**
@@ -292,13 +380,16 @@ export function endReturns(overlay: OverlayState): void {
  * @param reduced - Reduced motion is on.
  */
 export function startReturn(overlay: OverlayState, record: OverlayRecord, reduced: boolean): void {
+  // What the leave starts from: the record's clamped copy and the parts it hides now.
   const value = record.hudReturn;
   const { hud } = record.value;
 
   endReturnOf(overlay, record.entity);
 
+  // No readable value, or an overlay that hid nothing: no run.
   if (value === undefined || hud === "all" || hud === "under") return;
 
+  // A run of the pool, made only before the first one ended.
   const run: HudReturnRun = overlay.returnPool.pop() ?? {
     owner: record.entity,
     label: "",
@@ -309,6 +400,7 @@ export function startReturn(overlay: OverlayState, record: OverlayRecord, reduce
     endsMs: 0
   };
 
+  // Its fields written for this leave, its end chosen once.
   run.owner = record.entity;
   run.label = record.label;
   run.elapsed = 0;
@@ -321,8 +413,9 @@ export function startReturn(overlay: OverlayState, record: OverlayRecord, reduce
 
 /**
  * Counts this frame's game time into every run, ends the runs that reached their end (back in the pool, the others
- * written in place and the list cut to their count), and wakes the clock in a frame it marks idle while a run is left,
- * so the loop never drops to its idle rate during a delay where nothing else asks for a frame.
+ * written in place and the list cut to their count), and wakes the clock in a frame it marks idle while a run is left
+ * and this frame counted game time, so the loop never drops to its idle rate during a delay where nothing else asks for
+ * a frame. A paused game (a delta of 0) counts nothing and wakes nothing.
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -343,14 +436,17 @@ export function stepReturns(sctx: SyncCtx): void {
 
     if (run.elapsed >= run.endsMs) {
       releaseRun(overlay, run);
-    } else {
-      if (returns[count] !== run) returns[count] = run;
-      count += 1;
+
+      continue;
     }
+
+    // A run still in progress moves down over the ended ones before it.
+    if (returns[count] !== run) returns[count] = run;
+    count += 1;
   }
 
-  if (returns.length !== count) returns.length = count;
-  if (count > 0 && state.frameIdle) sctx.ctx.deps.time.wake();
+  cutRuns(returns, count);
+  if (count > 0 && state.frameIdle && delta > 0) sctx.ctx.deps.time.wake();
 }
 
 /**
