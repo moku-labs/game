@@ -5,8 +5,9 @@
  * of the board name two world projections each, forty sprite views per projection. The scroll
  * files mount one more root, an order strip; the box files one more, a list of names that wrap at
  * their box; the warm files two closed sheets the world holds warm; the text-when files a column of
- * ten texts whose style object names their key in `when` (F182). Real flow, world, text and Yoga;
- * inert renderer, headless.
+ * ten texts whose style object names their key in `when` (F182); the stayed files a root of 108
+ * elements whose prebuilt trees are equal (`STAYED`), mounted by them only (F230 U2). Real flow,
+ * world, text and Yoga; inert renderer, headless.
  */
 import {
   createApp,
@@ -333,6 +334,88 @@ const settingsSheet = projection({
   warm: (): Item => ({ id: "settings" })
 });
 
+/** The sections of the stayed root. */
+const STAYED_SECTIONS = 6;
+
+/**
+ * One section of the stayed root: a header row of an image, a title and a filled box; a stack of a
+ * filled box under a column of two lines; a row of two cells, each a filled box over a text. 17
+ * elements, 4 deep.
+ *
+ * @param index - The index of the section.
+ * @param changed - Whether the title says something else, in the first three sections only.
+ * @returns The section.
+ */
+function stayedSection(index: number, changed: boolean) {
+  return (
+    <column key={`stayedSection${index}`} style={{ gap: 6, padding: 8 }}>
+      <row style={{ height: 48, gap: 8, align: "center" }}>
+        <image texture="ui.coin" style={{ width: 40, height: 40 }} />
+        <text
+          style={{ width: 300, height: 40 }}
+          content={changed && index < 3 ? `retitled ${index}` : `title ${index}`}
+        />
+        <stack style={{ width: 24, height: 24, fill: 0x22_33_44 }} />
+      </row>
+      <stack style={{ width: 600, height: 120 }}>
+        <stack style={{ width: 600, height: 120, fill: 0x11_11_11 }} />
+        <column style={{ padding: 12, gap: 4 }}>
+          <text style={{ width: 400, height: 32 }} content="line one" />
+          <text style={{ width: 400, height: 32 }} content={`line ${index}`} />
+        </column>
+      </stack>
+      <row style={{ gap: 12 }}>
+        {[0, 1].map(cell => (
+          <column key={`stayedCell${index}x${cell}`} style={{ width: 280, gap: 4 }}>
+            <stack style={{ width: 280, height: 60, fill: 0x22_22_22 }} />
+            <text style={{ width: 280, height: 32 }} content={`cell ${cell}`} />
+          </column>
+        ))}
+      </row>
+    </column>
+  );
+}
+
+/**
+ * The stayed root of change 2026-11-24-f230-hot-path (U2): a top bar of four elements and six
+ * sections, 108 elements of rows, columns, stacks, texts, filled boxes and images, 5 deep. No scroll,
+ * no keyed component.
+ *
+ * @param changed - Whether three titles say something else.
+ * @returns The root's tree.
+ */
+function stayedTree(changed: boolean) {
+  return (
+    <column key="stayedRoot" style={{ width: 1080, height: 1920, gap: 4 }}>
+      <row key="stayedTop" style={{ height: 80, gap: 8 }}>
+        <icon name="ui.gear" style={{ width: 48, height: 48 }} />
+        <text style={{ width: 200, height: 40 }} content="top" />
+        <stack style={{ width: 80, height: 40, fill: 0x44_44_44 }} />
+        <image texture="ui.coin" style={{ width: 48, height: 48 }} />
+      </row>
+      {Array.from({ length: STAYED_SECTIONS }, (_unused, index) => stayedSection(index, changed))}
+    </column>
+  );
+}
+
+/**
+ * The trees of the stayed root, built once: two equal ones, which a window hands the root in turn,
+ * and one with three titles changed.
+ */
+export const STAYED = {
+  first: stayedTree(false),
+  second: stayedTree(false),
+  changed: stayedTree(true)
+};
+
+/** The stayed root of the U2 files, mounted by them only: its tree is the first prebuilt one. */
+const stayedScreen = projection({
+  name: "stayed",
+  layer: "ui",
+  from: (): Item => ({ id: "stayed" }),
+  view: () => STAYED.first
+});
+
 /** The sheets the warm files mount, closed. */
 export const WARM_SHEETS: readonly string[] = ["shopSheet", "settingsSheet"];
 
@@ -351,7 +434,8 @@ const perfFeature = defineFeature("perf", {
     boxesScreen,
     whenTextsScreen,
     shopSheet,
-    settingsSheet
+    settingsSheet,
+    stayedScreen
   ],
   ui: [Board],
   textStyles: defineTextStyles({

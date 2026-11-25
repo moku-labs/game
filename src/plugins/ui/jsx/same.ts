@@ -52,12 +52,21 @@ function sameList(left: readonly unknown[], right: unknown): boolean {
  * ```
  */
 function sameFieldsDeep(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  const keys = Object.keys(left);
+  // Walked with `for…in` and counted, so a compare builds no key list and no callback (F230 U2):
+  // a plain object's prototype holds no enumerable key, and `hasOwn` keeps the walk to its own.
+  let count = 0;
 
-  return (
-    keys.length === Object.keys(right).length &&
-    keys.every(key => Object.hasOwn(right, key) && sameValue(left[key], right[key]))
-  );
+  for (const key in left) {
+    if (!Object.hasOwn(left, key)) continue;
+    if (!Object.hasOwn(right, key) || !sameValue(left[key], right[key])) return false;
+    count += 1;
+  }
+
+  for (const key in right) {
+    if (Object.hasOwn(right, key)) count -= 1;
+  }
+
+  return count === 0;
 }
 
 /**

@@ -53,6 +53,8 @@ export function createLayoutState(): LayoutState {
   return {
     yoga: undefined,
     byEntity: emptyMap(),
+    tables: undefined,
+    kept: emptyMap(),
     nodes: 0,
     measured: 0,
     solves: 0,

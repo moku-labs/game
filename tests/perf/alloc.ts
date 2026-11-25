@@ -134,3 +134,58 @@ export function alloc(fn: () => void, calls = 10_000): number {
 
   return smallest;
 }
+
+/** Calls before the cold measurement: few, so the function has not left the interpreter or the baseline tier. */
+export const WARM_COLD = 100;
+
+/**
+ * Measures the heap bytes one call of `fn` keeps allocated while V8 runs it unoptimized: the interpreter and the
+ * baseline tier, as a phone runs engine code in its first seconds. Same windows, control and soundness check as
+ * `alloc`, but the warm-up is 100 calls, and the Node must be started with `--max-opt=0` or `--max-opt=1` (the
+ * `perf-cold` project of vitest) so that no optimizing tier ever takes the function over, whatever its call count.
+ * What an optimized call erases (an iterator of `for…of`, a closure, a short array) shows here. Number boxing in
+ * unoptimized code is counted too: a budget leaves room for it. Needs an exposed `gc` (`--expose-gc`), never Bun.
+ *
+ * @param fn - The function to measure; it runs `100 + 9 × calls / 2` times or more.
+ * @param calls - Calls in the full window.
+ * @returns Bytes per call (smallest of 3 windows), the control subtracted.
+ * @throws {Error} "allocCold needs Node with --max-opt=0 or 1" when the Node may optimize.
+ * @throws {Error} "allocCold needs Node with --expose-gc" under Bun or without an exposed `gc`.
+ * @throws {Error} "allocCold: a GC inside the window" when 12 windows give fewer than 3 sound ones.
+ * @example
+ * ```ts
+ * const names = ["board.items", "board.rings", "board.fx"];
+ * let last = "";
+ * allocCold(() => {
+ *   for (const name of names) last = name;
+ * }); // ≈ 208: the array iterator and its result objects, built at every call outside the optimizing tiers
+ * allocCold(() => {
+ *   for (let index = 0; index < names.length; index += 1) last = names[index] ?? "";
+ * }); // 0: the same walk with an index
+ * ```
+ */
+export function allocCold(fn: () => void, calls = 2000): number {
+  if (!process.execArgv.some(flag => flag === "--max-opt=0" || flag === "--max-opt=1")) {
+    throw new Error("allocCold needs Node with --max-opt=0 or 1");
+  }
+
+  const gc = globalThis.gc;
+  if (process.versions.bun !== undefined || gc === undefined) {
+    throw new Error("allocCold needs Node with --expose-gc");
+  }
+  for (let call = 0; call < WARM_COLD; call++) fn();
+  heapGrowth(gc, empty, WARM_COLD);
+
+  let smallest = Number.POSITIVE_INFINITY;
+  let found = 0;
+  for (let attempt = 0; attempt < ATTEMPTS && found < ROUNDS; attempt++) {
+    const full = perCall(gc, fn, calls);
+    const half = perCall(gc, fn, Math.floor(calls / 2));
+    if (!sound(full, half)) continue;
+    found++;
+    smallest = Math.min(smallest, full);
+  }
+  if (found < ROUNDS) throw new Error("allocCold: a GC inside the window");
+
+  return smallest;
+}

@@ -18,7 +18,7 @@ import {
   use,
   wait
 } from "../../timeline/steps";
-import { advanceTracks, beginFrame } from "../../tween/advance";
+import { advanceTracks, beginFrame, startTrack } from "../../tween/advance";
 import { cubicBezier } from "../../tween/bezier";
 import { createDriver } from "../../tween/driver";
 import type { Target } from "../../types";
@@ -198,6 +198,27 @@ export function partialTracksFixture(): () => void {
     beginFrame(mock.actx);
     advanceTracks(mock.actx, FRAME_MS);
   });
+}
+
+/**
+ * One pass of the exit case: a 2-field absolute track starts on an entity whose two fields an older
+ * track owns, so the new one claims both and the older one drops them and ends. Every call chains
+ * on the track of the call before, so it is one start and one end.
+ *
+ * @returns One start of a track and the end of the one before it.
+ */
+export function startTrackFixture(): () => void {
+  const mock = createMockAnim();
+  const entity = spawnTestEntity(mock, [Transform({ x: 0, y: 0 })]);
+  const to = { x: 500, y: 300 };
+  const options = { ms: TWEEN_MS, ease: "out" } as const;
+
+  return (): void => {
+    // Born in this frame step, the new track is not advanced; the older one ended and leaves the list.
+    beginFrame(mock.actx);
+    startTrack(mock.actx, entity, Transform, to, options, nothingMuted);
+    advanceTracks(mock.actx, 0);
+  };
 }
 
 /**

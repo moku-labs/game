@@ -37,6 +37,12 @@ export type Track = {
   begun: boolean;
   /** The target fields in slot order: every field `to` held when the track started. */
   readonly names: readonly string[];
+  /**
+   * How many fields `to` still holds: `names.length` at the start, one less for every field a
+   * newer absolute track took. At 0 the track has nothing to drive and ends. The typed arrays
+   * below (`clock` to `partialMoved`) are views of one shared buffer.
+   */
+  kept: number;
   /** The key of each slot: the strings of `keys`, by slot. */
   readonly slotKeys: readonly string[];
   /** The target of each slot. */

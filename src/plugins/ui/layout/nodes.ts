@@ -2,13 +2,33 @@
  * @file ui/layout — the lifetime of a Yoga node: one per ui entity, inserted into its parent
  * when the element enters, removed before it is freed. `nodes` is attach minus detach.
  */
-import type { Node as YogaNode } from "yoga-layout/load";
+import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Element } from "../jsx/types";
 import { ANCHOR } from "../visual";
-import type { LayoutState } from "./types";
+import { freshKept, styleTablesOf } from "./apply";
+import type { LayoutState, StyleTables } from "./types";
 
 /**
- * Creates the node of an element and counts it.
+ * The style tables of the loaded module, built the first time a node of it is made.
+ *
+ * @param state - The layout state.
+ * @param yoga - The loaded Yoga module.
+ * @returns The tables.
+ */
+function tablesOf(state: LayoutState, yoga: Yoga): StyleTables {
+  const tables = state.tables;
+
+  if (tables !== undefined && tables.yoga === yoga) return tables;
+
+  const built = styleTablesOf(yoga);
+
+  state.tables = built;
+
+  return built;
+}
+
+/**
+ * Creates the node of an element and counts it, with the kept record of a fresh node.
  *
  * @param state - The layout state.
  * @param element - The element that entered.
@@ -24,6 +44,7 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
   const node = state.yoga.Node.create();
 
   state.byEntity.set(element.entity, node);
+  state.kept.set(node, freshKept(tablesOf(state, state.yoga)));
   state.nodes += 1;
 
   return node;
@@ -60,6 +81,7 @@ export function freeNode(state: LayoutState, element: Element): void {
   // eslint-disable-next-line unicorn/no-null -- Yoga clears a measure function with null.
   node.setMeasureFunc(null);
   node.free();
+  state.kept.delete(node);
   state.byEntity.delete(element.entity);
   state.nodes -= 1;
 }
