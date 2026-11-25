@@ -104,7 +104,7 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 | `color: { color: 0xffd700 }` | `vec3<f32>` | `uniform vec3 color;` | the hex number |
 | `offset: [2, 3]` (2 to 4 numbers) | `vec2<f32>` … `vec4<f32>` | `uniform vec2 offset;` … `vec4` | an array, not tweenable |
 
-Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is; `resolution` (default 0, the resolution of the canvas) is the texels per CSS px, from 0 to 4, the view and its filters are drawn at under this filter; a filter with inputs runs its chains first at it. A WGSL without `mainFragment`, a GLSL without `void main(`, a reserved or badly named uniform, a bad `passes`, `padding` or `resolution` (below 0, above 4 or not a number) throw at definition; two components under one id or the id of a built-in throw in `onStart`. The same component listed again, by a second feature or the same one, is one kind at the place of its first listing: two features of a game may both list `Flash`. A view that carries a filter no feature lists draws unfiltered; a dev build warns `effects:filter-unlisted` `{ filter, entity, hint }` once per id, at the first such view. The reserved names are `enabled`, `order` and the names the headers declare: `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture`, `uTexture`, `uSampler`, the GLSL header's `finalColor` and `vTextureCoord`, and a backdrop's `uBackTexture`, `backScale`, `backClamp` and `sampleBack`.
+Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is; `resolution` (default 0, the resolution of the canvas) is the texels per CSS px, from 0 to 4, the view and its filters are drawn at under this filter; a filter with inputs runs its chains first at it. A WGSL without `mainFragment`, a GLSL without `void main(`, a reserved or badly named uniform, a bad `passes`, `padding` or `resolution` (below 0, above 4 or not a number) throw at definition; two components under one id or the id of a built-in throw in `onStart`. The same component listed again, by a second feature or the same one, is one kind at the place of its first listing: two features of a game may both list `Flash`. A view that carries a filter no feature lists draws unfiltered; a dev build warns `effects:filter-unlisted` `{ filter, entity, hint }` once per id, at the first such view. The reserved names are `enabled`, `order` and the names the headers declare: `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture`, `uTexture`, `uSampler`, the GLSL header's `finalColor` and `vTextureCoord`, and a backdrop's `uBackTexture`, `uBackSampler`, `backScale`, `backClamp`, `backOffset` and `sampleBack`; an input from back also makes `<input>Offset`, which a uniform of the same filter may not take (an input from the view makes none).
 
 ### Area: the box a filter draws in
 
@@ -180,6 +180,18 @@ export const Frost = defineFilter("Frost", {
 - Its slot says it blurs (`blurs`) only for an input from the view's own input: a chain from back blurs the scene under the view, not the view, so an overlay over it holds no loops for it.
 - WebGL copies from Pixi's back buffer: the renderer asks for it when a feature brings a backdrop (renderer README, `preference`); WebGPU copies from the canvas.
 - Inside the box, everything already drawn under the view is in the copy: the scene and an overlay's dim alike.
+
+**Over a Source** (F126 stage 5). Put `Source()` on the view under the glass (the room, the board), and a backdrop whose
+inputs all read `from: "back"` (or none), such as the set's `Frost`, no longer copies the canvas: the renderer draws its
+chains from the Source's texture, once per take of the Source (and when the chain's values change), off the canvas, and
+its body on the window's quad inside the canvas pass. It breaks no canvas pass and runs no filter pass of its own; a
+moving window takes nothing again. For it `defineFilter` assembles a quad text with the back at group 3 after the
+inputs (`uBackTexture`, `uBackSampler`) and hands the slot `quad.back`, the names the renderer binds and writes; its
+struct has, after each input from back and after the back, an offset (`<input>Offset`, `backOffset`, `vec2<f32>`): the
+helpers read `uv * size * scale + offset`, the live apply writes the offsets at 0, so the live path draws as before. The
+declaration is the same with or without a Source; without one the view keeps the backdrop path, and a dev build on WebGPU
+warns once per window `effects:frost-no-source` `{ entity, hint: "put Source() on the view under the glass" }`. WebGL
+keeps the backdrop path. Renderer README, "Sources".
 
 ### Filters that are kept
 

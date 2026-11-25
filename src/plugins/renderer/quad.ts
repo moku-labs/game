@@ -106,6 +106,7 @@ type QuadResources = Record<
  * The shader of a quad over a texture. `fu` is left out for a filter that binds none: Pixi throws on an undefined
  * resource. Each input the quad names gets that texture too, its sampler that texture's style, until the kept cache
  * binds the held result there (`shade.ts`): Pixi builds a group only of what is bound, and a draw over a hole throws.
+ * A backdrop's quad gets it under every name of its `back` too, until the Source and its results are bound (A12).
  *
  * @param pixi - The module that draws.
  * @param quad - The slot's quad.
@@ -127,6 +128,13 @@ export function quadShader(
   // Texture then sampler, input by input; once, at the making of a shader.
   for (const [index, name] of inputNames.entries()) {
     resources[name] = index % NAMES_PER_INPUT === 0 ? source : source.style;
+  }
+
+  if (quad.back !== undefined) {
+    for (const names of [quad.back, ...quad.back.inputs]) {
+      resources[names.texture] = source;
+      resources[names.sampler] = source.style;
+    }
   }
 
   return new pixi.Shader({ gpuProgram: program, resources });

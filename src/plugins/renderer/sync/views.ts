@@ -1239,8 +1239,9 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   // The subtree reasons move from the visual up to the wrapper; the visual keeps only its own.
   sctx.ctx.state.sync.viewOfTop.delete(view.object);
   sctx.ctx.state.sync.viewOfTop.set(wrapper, view);
-  // A new top for the view: the render passes walk a new chain (Q2).
+  // A new top for the view: the render passes walk a new chain (Q2), a window finds its Source again (A4).
   sctx.ctx.state.sync.passesVersion += 1;
+  sctx.ctx.state.sync.structureVersion += 1;
   writeRenderable(view);
   applyTransform(sctx, parentEntity, view);
   // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.
@@ -1338,6 +1339,8 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
 
   // Structural: `addChild` re-adds the view and moves it among equal depths, so it always marks.
   markView(sctx, entity);
+  // Where it hangs may change what a frosted window reads (A4).
+  state.structureVersion += 1;
   // A view that leaves an overlay's range changes its picture: judged where it was.
   noteLeaving(state, view);
 
@@ -1645,6 +1648,7 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
   if (host !== undefined) detachChildren(sctx, entity, host);
 
   state.views.delete(entity);
+  state.structureVersion += 1;
   // Its filters and area stay while the entity lives: the pass looks for its despawn.
   if (state.filters.has(entity) || state.areas.has(entity)) state.viewlessEntries = true;
   state.orphans.delete(entity);

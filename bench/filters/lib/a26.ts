@@ -75,20 +75,27 @@ const PV_WAYS = {
     kept: ["move"],
     mesh: ["rest", "move"]
   },
-  blur: { baked: ["rest", "move"], filter: ["rest", "move"] }
+  blur: { baked: ["rest", "move"], filter: ["rest", "move"], source: ["rest", "move", "live"] }
 } as const;
 
 /**
  * The arms of the "pictures vs filters" run (F126 stage 4, piece В): `pv-<case>-<way>-<state>-<count>`, 1 and 8 of each.
  */
 export const PV_ARMS: readonly string[] = Object.entries(PV_WAYS).flatMap(([name, ways]) =>
-  Object.entries(ways).flatMap(([way, states]) =>
+  Object.entries<readonly string[]>(ways).flatMap(([way, states]) =>
     states.flatMap(state => [1, 8].map(count => `pv-${name}-${way}-${state}-${count}`))
   )
 );
 
+/** The arms of the glass run (F126 stage 5): every `pv-blur-*` arm, the backdrop, the baked picture and the Source. */
+export const GLASS_ARMS: readonly string[] = PV_ARMS.filter(arm => arm.startsWith("pv-blur-"));
+
 /** The arms of a run, by the name `--set` gives. */
-export const ARM_SETS: Readonly<Record<string, readonly string[]>> = { all: ARMS, pv: PV_ARMS };
+export const ARM_SETS: Readonly<Record<string, readonly string[]>> = {
+  all: ARMS,
+  pv: PV_ARMS,
+  glass: GLASS_ARMS
+};
 
 /** The apps that may stand in front of a free phone. */
 const FREE_FRONT = new Set(["com.sec.android.app.launcher", "com.android.chrome"]);

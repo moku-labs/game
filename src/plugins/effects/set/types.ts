@@ -181,6 +181,22 @@ export type BloomValue = {
 };
 
 /**
+ * `Frost`: frosted glass, the picture under the window blurred `blur` CSS px wide (0..48) and multiplied by `tint`, the
+ * window's own pixels laid over it.
+ *
+ * @example
+ * ```ts
+ * const value: FrostValue = { blur: 12, tint: 0x62585b, enabled: true, order: 0 };
+ * ```
+ */
+export type FrostValue = {
+  blur: number;
+  tint: number;
+  enabled: boolean;
+  order: number;
+};
+
+/**
  * `Pixelate`: the view drawn in square blocks `size` CSS px wide, from its top-left; 1 or less draws it as it is.
  *
  * @example

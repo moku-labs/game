@@ -6,7 +6,17 @@ import type { AnyComponentValue, Entity } from "../../../world/types";
 import { Alpha, Blur, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { type FakeFxFilter, FakeFxGpuProgram } from "../fake-effects-pixi";
-import { Frosted, Small, Soft, SoftDim, Veiled } from "../filter-fixtures";
+import {
+  Frosted,
+  Small,
+  SOFT_BODIES,
+  SOFT_STAGES,
+  Soft,
+  SoftDim,
+  softChain,
+  Under,
+  Veiled
+} from "../filter-fixtures";
 import { createMockEffects, type MockEffects } from "./mock-effects";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +58,14 @@ const Position = defineFilter("fx.quadPosition", {
   wgsl: "@fragment fn mainFragment(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> { return at; }",
   glsl: "void main() { finalColor = vec4(0.0); }",
   cache: false
+});
+
+/** A backdrop whose input reads its view: no quad, the renderer cannot draw that chain from a Source. */
+const Misted = defineFilter("fx.quadMisted", {
+  ...SOFT_BODIES,
+  uniforms: { spread: 1, tone: 0 },
+  backdrop: true,
+  inputs: { soft: { stages: SOFT_STAGES, chain: softChain } }
 });
 
 /** What a fake compiler says about a text that does not compile. */
@@ -244,9 +262,10 @@ describe("the quad over the slot", () => {
     expect(membersOf(kind.filter.quadSource)).toEqual(members);
   });
 
-  // Bug: a body that reads the canvas under its view, or that the wrapper cannot call, is moved to the mesh.
+  // Bug: a body that reads the canvas under its view through a chain of its own input, or that the wrapper cannot call,
+  // is moved to the mesh.
   it.each([
-    ["a backdrop with an input from back", Frosted, () => Frosted()],
+    ["a backdrop with an input from its view", Misted, () => Misted()],
     ["a body the rewrite does not fit", Position, () => Position()],
     ["a core kind", undefined, () => Blur({ strength: 4 })],
     ["an Alpha", undefined, () => Alpha({ alpha: 0.5 })]
@@ -257,6 +276,39 @@ describe("the quad over the slot", () => {
 
     expect(lastSlots(mock)).toHaveLength(1);
     expect(lastSlots(mock)[0]).not.toHaveProperty("quad");
+  });
+
+  // Bug: a backdrop's slot names no Source binding, so the renderer cannot serve it, or names held inputs it never
+  // draws (F126 stage 5): the quad of a backdrop names the back and each input from back, and no `inputNames`.
+  it("hands a backdrop with inputs from back a quad that names the Source and each input, no inputNames", async () => {
+    const mock = await checked([Frosted, Under]);
+
+    view(mock, [Frosted()]);
+
+    const frosted = lastSlots(mock)[0]?.quad;
+
+    expect(frosted?.program).toBe(quadPrograms(Frosted.filter.quadSource)[0]);
+    expect(frosted?.inputNames).toBeUndefined();
+    expect(frosted?.back).toEqual({
+      texture: "uBackTexture",
+      sampler: "uBackSampler",
+      scale: "backScale",
+      offset: "backOffset",
+      clamp: "backClamp",
+      inputs: [
+        {
+          texture: "softTexture",
+          sampler: "softSampler",
+          scale: "softScale",
+          offset: "softOffset",
+          clamp: "softClamp"
+        }
+      ]
+    });
+
+    view(mock, [Under()]);
+
+    expect(lastSlots(mock)[0]?.quad?.back?.inputs).toEqual([]);
   });
 
   // Bug: WebGL builds a program nothing draws, and a slot promises a mesh it cannot have.

@@ -30,6 +30,15 @@ import {
 } from "./record";
 import { canKeep, dropTexture, emptyPool, matricesOf } from "./render";
 import { dropQuadParts } from "./shade";
+import {
+  dropSourceTextures,
+  markAllSources,
+  markSources,
+  resolveReaders,
+  sourceStats,
+  takeSources,
+  watchSources
+} from "./source";
 import { destroyRange } from "./state";
 import {
   type KeptCtx,
@@ -37,6 +46,7 @@ import {
   type KeptRange,
   type KeptRecord,
   type KeptStats,
+  type SourceStats,
   WHY
 } from "./types";
 import { drawLive, verifyPictures } from "./verify";
@@ -253,6 +263,9 @@ export function createKeptApi(
     const top = view.wrapper ?? view.object;
     const own = state.byTop.get(top);
 
+    // A Source at the top or above it holds the change in its picture (F126 stage 5).
+    markSources(state, top);
+
     if (own !== undefined) {
       const demand = deps.demand;
 
@@ -315,12 +328,21 @@ export function createKeptApi(
     collect: (): void => {
       state.frameTakes = 0;
 
-      if (state.records.length === 0) return;
+      // A Source is marked by the same walk as a picture: no record, but a Source, still collects (A6).
+      if (state.records.length === 0 && state.sources.length === 0) return;
 
       const wholes = deps.demand.wholes();
 
       if (wholes.has("debug") || wholes.has("restore")) {
         for (const record of state.records) record.dirtyS1 = true;
+      }
+
+      if (state.sources.length > 0) {
+        // A resize (also a resolution step), a restore and a debug switch take every Source again; new layers move
+        // where views hang (A4, A6).
+        if (wholes.has("debug") || wholes.has("restore") || wholes.has("resize"))
+          markAllSources(state);
+        if (wholes.has("layers")) ctx.state.sync.structureVersion += 1;
       }
 
       const marked = deps.demand.marked();
@@ -352,6 +374,10 @@ export function createKeptApi(
         state.firstTakes = 0;
         state.frameRefines = 0;
         markAlphaDue(kctx, pixi);
+        // F126 stage 5 (A5): each window finds its Source and is counted, each dirty Source with readers is taken and
+        // the results its windows read brought up to it, then the records step and bind them.
+        resolveReaders(kctx);
+        takeSources(kctx, pixi);
         stepRecords(kctx, pixi, matrices);
         // A flush that no collect went before steps every record.
         state.calm = false;
@@ -362,7 +388,12 @@ export function createKeptApi(
 
           record.why = WHY.off;
           record.calmIn = 0;
+          record.reader = false;
         }
+
+        // No window is served: the Sources hold nothing (A6).
+        state.sourceTakes = 0;
+        dropSourceTextures(kctx);
       }
 
       flushRanges(kctx);
@@ -468,6 +499,20 @@ export function createKeptApi(
 
     isOn: (): boolean => state.on,
 
+    sources: (): SourceStats => sourceStats(state),
+
+    watchSources: (): Array<() => void> => watchSources(kctx),
+
+    onUnserved: (listener: (entity: Entity) => void): (() => void) => {
+      state.unserved.push(listener);
+
+      return (): void => {
+        const at = state.unserved.indexOf(listener);
+
+        if (at !== -1) state.unserved.splice(at, 1);
+      };
+    },
+
     reset: (): void => {
       for (let record = state.records[0]; record !== undefined; record = state.records[0]) {
         dropRecord(kctx, record, viewOf(record), true);
@@ -483,6 +528,7 @@ export function createKeptApi(
         state.spare = undefined;
       }
 
+      dropSourceTextures(kctx);
       emptyPool(kctx);
       dropQuadParts(state);
       state.bytes = 0;

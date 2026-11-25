@@ -48,10 +48,11 @@ const MAIN_GLSL = /\bvoid\s+main\s*\(/;
  * Names a uniform cannot take: the two fields every filter component carries, and the names the
  * shader headers declare, which a game uniform would clash with (on WebGL only, for most). The
  * GLSL header also declares `finalColor` and `vTextureCoord`; a backdrop's, `uBackTexture`,
- * `backScale`, `backClamp` and `sampleBack`.
+ * `backScale`, `backClamp`, `backOffset` and `sampleBack`, and its quad `uBackSampler`. An input from back makes its
+ * own `<input>Offset` too (`namesOf`), which a uniform of the filter may not take.
  */
 const RESERVED_NAME =
-  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler|finalColor|vTextureCoord|keptOrigin|canvasPixel|uBackTexture|backScale|backClamp|sampleBack)$/;
+  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler|finalColor|vTextureCoord|keptOrigin|canvasPixel|uBackTexture|uBackSampler|backScale|backClamp|backOffset|sampleBack)$/;
 
 /**
  * What a body reads of the screen: the root target's frame, the fragment position, the output target's size, the
@@ -518,31 +519,38 @@ function drawsAlone(definition: FilterDefinition): boolean {
 
 /**
  * The names the engine declares for an input: its texture, sampler, scale and clamp uniforms and
- * its sample function.
+ * its sample function; for an input from back its offset uniform too (F126 stage 5).
  *
  * @param name - The input name.
- * @returns The five names.
+ * @param from - Where its first step reads.
+ * @returns The names: five, six from back.
  * @example
  * ```ts
- * namesOf("blur"); // { texture: "blurTexture", sampler: "blurSampler", scale: "blurScale", clamp: "blurClamp", sample: "sampleBlur" }
+ * namesOf("blur", "input"); // { texture: "blurTexture", sampler: "blurSampler", scale: "blurScale", clamp: "blurClamp", sample: "sampleBlur" }
+ * namesOf("blur", "back").offset; // "blurOffset"
  * ```
  */
-function namesOf(name: string): {
+function namesOf(
+  name: string,
+  from: "input" | "back"
+): {
   texture: string;
   sampler: string;
   scale: string;
   clamp: string;
   sample: string;
+  offset?: string;
 } {
   const upper = `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
-
-  return {
+  const names = {
     texture: `${name}Texture`,
     sampler: `${name}Sampler`,
     scale: `${name}Scale`,
     clamp: `${name}Clamp`,
     sample: `sample${upper}`
   };
+
+  return from === "back" ? { ...names, offset: `${name}Offset` } : names;
 }
 
 /**
@@ -576,14 +584,16 @@ function clashOf(
  *
  * @param id - The filter id.
  * @param name - The input name.
+ * @param from - Where its first step reads: an input from back makes an offset name too.
  * @param uniforms - The read uniforms.
  * @param taken - The names earlier inputs made; the new ones are added.
- * @returns The five names.
+ * @returns The names.
  * @throws {Error} When the name is not valid or a made name clashes.
  */
 function checkInputNames(
   id: string,
   name: string,
+  from: "input" | "back",
   uniforms: readonly UniformSpec[],
   taken: Set<string>
 ): ReturnType<typeof namesOf> {
@@ -594,7 +604,7 @@ function checkInputNames(
     );
   }
 
-  const names = namesOf(name);
+  const names = namesOf(name, from);
 
   for (const made of Object.values(names)) {
     const clash = clashOf(made, uniforms, taken);
@@ -699,8 +709,8 @@ function readInputs<Value>(
 
   return Object.freeze(
     entries.map(([name, input]) => {
-      const names = checkInputNames(id, name, uniforms, taken);
       const from = readFrom(id, name, input.from, backdrop);
+      const names = checkInputNames(id, name, from, uniforms, taken);
       const stages = readStages(id, name, input.stages);
 
       if (typeof input.chain !== "function") {
@@ -717,6 +727,10 @@ function readInputs<Value>(
         sampler: names.sampler,
         scale: Object.freeze({ name: names.scale, type: "vec2<f32>", form: "vector", size: 2 }),
         clamp: Object.freeze({ name: names.clamp, type: "vec4<f32>", form: "vector", size: 4 }),
+        offset:
+          names.offset === undefined
+            ? undefined
+            : Object.freeze({ name: names.offset, type: "vec2<f32>", form: "vector", size: 2 }),
         sample: names.sample,
         stages,
         // The chain reads the stored value of this filter; the engine hands it over with the kind erased.
@@ -844,6 +858,31 @@ function cacheWithInputs(
 }
 
 /**
+ * The quad text of a definition: a filter whose inputs all read the view, or a backdrop whose inputs all read back (its
+ * quad reads a Source in place of the canvas under the view); none for a mix.
+ *
+ * @param uniforms - The read uniforms.
+ * @param wgsl - The WGSL body.
+ * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
+ * @param inputs - The read inputs.
+ * @param backdrop - Whether the filter reads what was drawn under its view.
+ * @returns The quad text, or `undefined`.
+ */
+function quadSourceOf(
+  uniforms: readonly UniformSpec[],
+  wgsl: string,
+  origin: UniformSpec | undefined,
+  inputs: readonly FilterInputDefinition[],
+  backdrop: boolean
+): string | undefined {
+  const from = backdrop ? "back" : "input";
+
+  if (!inputs.every(input => input.from === from)) return undefined;
+
+  return assembleQuad(uniforms, wgsl, origin, inputs, backdrop);
+}
+
+/**
  * Turns a WGSL fragment body and its GLSL ES 3.0 twin into a filter component type; Pixi draws
  * the one of the running backend. A still view under the filter is kept as a picture by the
  * renderer (`cache`, default `"local"`); a body that needs its canvas position calls
@@ -918,11 +957,9 @@ export function defineFilter<
     id,
     source: assemble(uniforms, inputs, spec.wgsl, origin, backdrop),
     glsl: assembleGlsl(uniforms, inputs, spec.glsl, origin, backdrop),
-    // A mesh binds the held results of inputs drawn from the view, never the canvas under it.
-    quadSource:
-      !backdrop && inputs.every(input => input.from === "input")
-        ? assembleQuad(uniforms, spec.wgsl, origin, inputs)
-        : undefined,
+    // A mesh binds the held results of inputs drawn from the view; a backdrop's, those of inputs drawn from a Source
+    // the renderer took under the window (F126 stage 5), so its inputs all start from back.
+    quadSource: quadSourceOf(uniforms, spec.wgsl, origin, inputs, backdrop),
     uniforms,
     passes,
     padding,

@@ -959,7 +959,10 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         setArea(sctx, entity, area),
 
       warm: (filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean> =>
-        warmFilter(sctx, filter, quad)
+        warmFilter(sctx, filter, quad),
+
+      onUnserved: (listener: (entity: Entity) => void): (() => void) =>
+        deps.kept.onUnserved(listener)
     },
 
     leave: {
@@ -1071,6 +1074,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         ecs.onRemoved(Display, markRemoved),
         ecs.onRemoved(Parent, markReparented),
         ...watchOverlays(sctx),
+        // F126 stage 5: the views a frosted window reads.
+        ...deps.kept.watchSources(),
         ecs.system(createSyncSystem(pass)),
         // The renderer's part of a scene build: every building view made (spec 31).
         ctx.deps.world.projection.onBuild(() => buildReady(sctx))

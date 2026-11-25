@@ -86,6 +86,8 @@ export type FakeRendererState = {
   warms: PixiFilter[];
   /** The quad handed with each of `warms`, at the same index; `undefined` for a filter handed alone. */
   warmQuads: Array<FilterSlotQuad | undefined>;
+  /** Who listens through `sync.filters.onUnserved`: a test calls them as the renderer would (F126 stage 5). */
+  unserved: Array<(entity: Entity) => void>;
   /**
    * What `sync.filters.warm` answers, at once: `false` by default (a renderer with nothing to warm, `warm: 0`);
    * `"later"` keeps every answer for `answerWarm`.
@@ -198,6 +200,7 @@ export function createMockEffects(
     areas: [],
     warms: [],
     warmQuads: [],
+    unserved: [],
     warmAnswer: false,
     answerWarm: (warmed: boolean): void => {
       for (const resolve of warmWaiting.splice(0)) resolve(warmed);
@@ -300,6 +303,13 @@ export function createMockEffects(
           return new Promise(resolve => {
             warmWaiting.push(resolve);
           });
+        },
+        onUnserved: (listener: (entity: Entity) => void): (() => void) => {
+          renderer.unserved.push(listener);
+
+          return (): void => {
+            renderer.unserved.splice(renderer.unserved.indexOf(listener), 1);
+          };
         }
       },
       leave: {

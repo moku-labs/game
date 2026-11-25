@@ -335,6 +335,23 @@ export function startEffects(ctx: KernelSlice): void {
   registerEmitters(ectx);
   openWorld(ectx, state.kindList);
   openTransitionBodies(ectx);
+  state.removers.push(warnUnserved(ectx));
+}
+
+/**
+ * Logs, once per window, a frosted view drawn on the backdrop path because no `Source` is drawn before it (F126 stage
+ * 5, A8): the renderer tells of it in a dev build on WebGPU only. A log code, not an event.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @returns The remover.
+ */
+function warnUnserved(ectx: EffectsCtx): () => void {
+  return ectx.deps.renderer.sync.filters.onUnserved(entity => {
+    ectx.log.warn("effects:frost-no-source", {
+      entity,
+      hint: "put Source() on the view under the glass"
+    });
+  });
 }
 
 /**

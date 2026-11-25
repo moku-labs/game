@@ -59,6 +59,8 @@ function writeDepth(sctx: SyncCtx, entity: Entity, target: PixiContainer, value:
   // The depth of the view's top: its kept picture only moves with it (spec 23 P9.4).
   sctx.deps.demand.markMoved(entity);
   target.zIndex = value;
+  // Another order among its siblings: a frosted window finds its Source again (A4).
+  sctx.ctx.state.sync.structureVersion += 1;
 }
 
 /**

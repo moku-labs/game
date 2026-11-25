@@ -173,6 +173,13 @@ export const BUDGET = {
   // take, a number of each written every frame. New. The step reads the place of each as a placed view's, through the
   // category on the record, and asks whether it fits its mesh on the frame's one object.
   keptScreen: 0,
+  // F126 stage 5: new. Eight frosted windows over one Source, on their quads over one shared result. A calm flush with no
+  // dirty Source; a flush that steps every window over its cached find; a mark walked up to its Source; eight windows
+  // sliding every frame, their placement written in place, compare-then-write.
+  sourceIdle: 0,
+  sourceFind: 0,
+  sourceDirty: 0,
+  sourceServe: 0,
   // E3: new. Pixi holds only the enabled filters; with nothing switched the step compares and writes nothing. Before,
   // Pixi pushed and popped 12 disabled filters every frame: 672 B in its filter system, and 24 batch breaks.
   filterSwitchStill: 0,

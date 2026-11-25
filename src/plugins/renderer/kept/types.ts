@@ -274,6 +274,88 @@ export type KeptInternal = {
   isOn(): boolean;
   /** Every record back to live, every texture destroyed: device loss, rebuild, stop. */
   reset(): void;
+  /** The numbers `stats().sources` reports. */
+  sources(): SourceStats;
+  /** Watches the `Source` components: the ones there already, then every add and removal. Answers the removers. */
+  watchSources(): Array<() => void>;
+  /** `sync.filters.onUnserved`: hears of each window that stays on the backdrop path for want of a Source, once. */
+  onUnserved(listener: (entity: Entity) => void): () => void;
+};
+
+/**
+ * The numbers `stats().sources` reports (F126 stage 5): the `Source` views, the takes of the last drawn frame, the MiB
+ * their textures and the results drawn from them hold, and the Mpx the takes and their chains drew in that frame, off
+ * the canvas.
+ *
+ * @example
+ * ```ts
+ * // The ward room under eight frosted notes, the frame after a bed changed:
+ * const sources: SourceStats = { count: 1, takes: 1, mb: 0.45, mpx: 0.22 };
+ * ```
+ */
+export type SourceStats = {
+  /** Views that carry `Source`. */
+  count: number;
+  /** Sources taken in the last drawn frame. */
+  takes: number;
+  /** The MiB the Source textures and the results drawn from them hold. */
+  mb: number;
+  /** Device Mpx the takes and their chains drew in the last drawn frame. */
+  mpx: number;
+};
+
+/**
+ * One result of a window's chain drawn from a Source (F126 stage 5): windows whose filters draw equal steps there share
+ * it. Owned by its Source; freed when no window holds it.
+ */
+export type HeldChain = {
+  /** The filter kind of the slot that drew it. */
+  readonly kind: string | undefined;
+  /** What the chain's steps were at the Source's resolution (`FilterSlotInputs.key`); NaN for a seam without one. */
+  key: number;
+  /** The seam that draws it; another window shares it only by an equal key. */
+  owner: FilterSlotInputs;
+  /** The Source `version` it was drawn from; -1 before its first draw. */
+  at: number;
+  /** One texture per input; `undefined` for an empty chain, whose input reads the Source itself. */
+  readonly targets: Array<PixiRenderTexture | undefined>;
+  /** The windows that read it. */
+  refs: number;
+  /** Bytes of the targets. */
+  bytes: number;
+};
+
+/** One view that carries `Source` (F126 stage 5): its texture, its version and the results drawn from it. */
+export type SourceRecord = {
+  readonly entity: Entity;
+  /** The view's top now; `undefined` while it has no view. */
+  top: PixiContainer | undefined;
+  /** The top was a render group before the first take: it stays one at release. */
+  wasGroup: boolean;
+  /** The share of the canvas resolution it is drawn at: 0.5 or 0.25. */
+  scale: number;
+  /** The picture of the subtree at its canvas place, the screen's size; `undefined` while no window reads it. */
+  texture: PixiRenderTexture | undefined;
+  /** Grows at every take. */
+  version: number;
+  /** Something under the top changed since the last take, or the texture went. */
+  dirty: boolean;
+  /** Windows that read it in this flush. */
+  readers: number;
+  /** The results drawn from it. */
+  readonly held: HeldChain[];
+  /** The top's world transform, read at a take. */
+  readonly matrix: PixiMatrix;
+  /** The transform the chains' keeper is drawn with: none. */
+  readonly identity: PixiMatrix;
+  /** A sprite of the texture carrying the keeper, made at the first chain. */
+  sprite: PixiSprite | undefined;
+  /** An `AlphaFilter` whose apply draws the chain of `drawing` from the texture. */
+  keeper: PixiFilter | undefined;
+  /** The result the keeper draws in this render. */
+  drawing: HeldChain | undefined;
+  /** Bytes of the texture. */
+  bytes: number;
 };
 
 /** The two lives of a record. */
@@ -444,6 +526,23 @@ export type KeptRecord = {
   retakeBy: Entity;
   /** The `KeptState.frame` of the last take. */
   retakeAt: number;
+  /**
+   * The nearest `Source` drawn before a window whose slot names a back (F126 stage 5); `undefined` for none, and for a
+   * record whose slot names none.
+   */
+  source: SourceRecord | undefined;
+  /** The `structureVersion` `source` was found at; -1 before the first find. */
+  sourceAt: number;
+  /** It was eligible on its last step with a Source to serve it: its Source is taken for it. */
+  reader: boolean;
+  /** The result drawn from its Source that its mesh binds. */
+  held: HeldChain | undefined;
+  /** The seam `held` was found or drawn for. */
+  heldOf: FilterSlotInputs | undefined;
+  /** That seam's `version()` then: another version owes another result. */
+  heldVersion: number;
+  /** A window with no Source under it was reported once (`sync.filters.onUnserved`). */
+  unserved: boolean;
 };
 
 /** One picture of an overlay's range (P7), keyed by the owner overlay's entity. */
@@ -552,6 +651,20 @@ export type KeptState = {
   alphaDue: boolean;
   /** Live records drawn live with a filter in this flush (F119): from `CROWD` on, their first takes do not wait. */
   liveWaiting: number;
+  /** The views that carry `Source` (F126 stage 5), in the order they came. */
+  sources: SourceRecord[];
+  /** The same, by entity. */
+  sourceByEntity: Map<Entity, SourceRecord>;
+  /** The same, by top: what the find of a window looks up. */
+  sourceByTop: Map<PixiContainer, SourceRecord>;
+  /** Sources taken in the last drawn frame. */
+  sourceTakes: number;
+  /** Device pixels the takes and their chains drew in the last drawn frame. */
+  sourcePixels: number;
+  /** The entities warned for a scale other than 0.5 or 0.25, once each. */
+  warnedScale: Set<Entity>;
+  /** Who hears of a window that stays on the backdrop path for want of a Source (`sync.filters.onUnserved`). */
+  unserved: Array<(entity: Entity) => void>;
 };
 
 /** The scratch matrices of the module, made once from the Pixi module. */

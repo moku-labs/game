@@ -17,6 +17,7 @@
 
 import { CALM_AFTER } from "../../renderer/kept/record";
 import type {
+  FilterSlotQuad,
   PixiFilter,
   PixiFilterManager,
   PixiGpuProgram,
@@ -45,7 +46,7 @@ import type {
   UniformValues,
   WarmProbe
 } from "./types";
-import { BACK_CLAMP, BACK_SCALE } from "./wgsl";
+import { BACK_CLAMP, BACK_OFFSET, BACK_SCALE, structMembers } from "./wgsl";
 
 /**
  * The resolution of every filter but `Blur`: the render target's, so a filter draws at the
@@ -270,36 +271,14 @@ function createOurs(
     structures[uniform.name] = { value: startValue(uniform, value), type: uniform.type };
   }
 
-  // The engine's two uniforms per input, filled by every apply from the texture it binds.
-  for (const input of definition.inputs) {
-    structures[input.scale.name] = {
-      value: new Float32Array(input.scale.size),
-      type: input.scale.type
-    };
-    structures[input.clamp.name] = {
-      value: new Float32Array(input.clamp.size),
-      type: input.clamp.type
-    };
-  }
+  // The engine's members after the declared ones, in the struct's own order (`structMembers`): per input its scale and
+  // clamp (and offset from back), a backdrop's three, the canvas origin of a kept picture for `canvasPixel`. Filled by
+  // every apply from the texture it binds, the origin in place by the renderer (spec 23). The group's order is the
+  // struct's: one member out of place reads the wrong numbers.
+  const engine = structMembers([], definition.inputs, definition.origin, definition.backdrop);
 
-  // A backdrop's two uniforms, filled by every apply from the copy Pixi made of the canvas under the view.
-  if (definition.backdrop) {
-    structures[BACK_SCALE.name] = {
-      value: new Float32Array(BACK_SCALE.size),
-      type: BACK_SCALE.type
-    };
-    structures[BACK_CLAMP.name] = {
-      value: new Float32Array(BACK_CLAMP.size),
-      type: BACK_CLAMP.type
-    };
-  }
-
-  // The canvas origin of a kept picture for `canvasPixel`: 0 drawn live, written in place by the renderer (spec 23).
-  if (definition.origin !== undefined) {
-    structures[definition.origin.name] = {
-      value: new Float32Array(definition.origin.size),
-      type: definition.origin.type
-    };
+  for (const member of engine) {
+    structures[member.name] = { value: new Float32Array(member.size), type: member.type };
   }
 
   // A group only for a filter that binds a uniform of its own: a declared one, an input's, a backdrop's or the origin.
@@ -700,23 +679,32 @@ function backOf(pixi: PixiModule, manager: PixiFilterManager): PixiTexture {
 
 /**
  * Writes the scale and the clamp that place a sample of the body's uv on a texture: one over the size of its backing,
- * and half a texel inside the part of it its frame covers, rounded to float32. Written only where a value differs, so
- * Pixi's bind group stays cached; no array is allocated.
+ * and half a texel inside the part of it its frame covers, rounded to float32; and its offset at `(0, 0)`, so a slot
+ * the renderer drew on a Source a frame before samples the live texture right (F126 stage 5). Written only where a
+ * value differs, so Pixi's bind group stays cached; no array is allocated.
  *
  * @param uniforms - The values of the uniform group.
  * @param scaleName - The `vec2` scale uniform.
  * @param clampName - The `vec4` clamp uniform.
  * @param texture - The texture the body samples through them.
+ * @param offsetName - The `vec2` offset uniform of an input from back or of the back; `undefined` for none.
  */
 function writePlacement(
   uniforms: UniformValues,
   scaleName: string,
   clampName: string,
-  texture: PixiTexture
+  texture: PixiTexture,
+  offsetName: string | undefined
 ): void {
   const { source } = texture;
   const scale = uniforms[scaleName];
   const clamp = uniforms[clampName];
+  const offset = offsetName === undefined ? undefined : uniforms[offsetName];
+
+  if (offset instanceof Float32Array) {
+    writeAt(offset, 0, 0, true);
+    writeAt(offset, 1, 0, true);
+  }
   const halfX = 0.5 / source.pixelWidth;
   const halfY = 0.5 / source.pixelHeight;
 
@@ -744,7 +732,9 @@ function writePlacement(
 function bindBack(body: OursBody, back: PixiTexture): void {
   const uniforms = body.group?.uniforms;
 
-  if (uniforms !== undefined) writePlacement(uniforms, BACK_SCALE.name, BACK_CLAMP.name, back);
+  if (uniforms !== undefined) {
+    writePlacement(uniforms, BACK_SCALE.name, BACK_CLAMP.name, back, BACK_OFFSET.name);
+  }
 }
 
 /**
@@ -896,7 +886,7 @@ function bindInput(instance: OursInstance, index: number, last: PixiTexture): vo
   if (resources[input.texture] !== source) resources[input.texture] = source;
   if (resources[input.sampler] !== source.style) resources[input.sampler] = source.style;
 
-  writePlacement(uniforms, input.scale.name, input.clamp.name, last);
+  writePlacement(uniforms, input.scale.name, input.clamp.name, last, input.offset?.name);
 }
 
 /**
@@ -1023,7 +1013,7 @@ function drawInto(
   inputs: InputsState,
   manager: PixiFilterManager,
   picture: PixiTexture,
-  targets: readonly PixiTexture[]
+  targets: readonly (PixiTexture | undefined)[]
 ): void {
   const { resolution } = picture.source;
 
@@ -1047,6 +1037,76 @@ function drawInto(
 }
 
 /**
+ * The key of what the chains draw from a picture at a resolution (F126 stage 5): they are run at it first when they
+ * last ran at another, as `draw` would run them. Equal keys draw equal results from the same picture, so the renderer
+ * keeps one result for two windows over one Source. Per frame and window: a number read, nothing made.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param instance - The instance.
+ * @param inputs - Its chains.
+ * @param resolution - The resolution of the picture the chains would draw from.
+ * @returns The key; -1 for a broken instance, which draws nothing.
+ */
+function keyAt(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  instance: OursInstance,
+  inputs: InputsState,
+  resolution: number
+): number {
+  if (
+    !instance.broken &&
+    (resolution !== inputs.resolution || resolution !== inputs.backResolution)
+  ) {
+    evaluateInRender(ectx, pixi, instance, inputs, resolution, resolution);
+  }
+
+  return instance.broken ? -1 : inputs.key;
+}
+
+/**
+ * A number for the steps every chain of an instance draws now: the definition of each place, its scale and its uniform
+ * values, folded by two FNV-1a hashes into one safe integer. Made when the steps change, never per frame.
+ *
+ * @param inputs - The chains of the instance.
+ * @returns The number.
+ */
+function stepsKey(inputs: InputsState): number {
+  const parts: string[] = [];
+
+  for (const places of inputs.places) {
+    parts.push("|");
+
+    for (const place of places) {
+      parts.push(place.definition.id, String(place.scale));
+
+      const uniforms = place.body.group?.uniforms ?? {};
+
+      for (const uniform of place.definition.uniforms) {
+        const value: unknown = Reflect.get(uniforms, uniform.name);
+
+        parts.push(value instanceof Float32Array ? [...value].join(",") : String(value));
+      }
+    }
+  }
+
+  const text = parts.join(";");
+  let low = 0x81_1c_9d_c5;
+  let high = 0x01_00_01_93;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.codePointAt(index) ?? 0;
+
+    low = Math.imul(low ^ code, 0x01_00_01_93) >>> 0;
+    high = Math.imul(high ^ code, 0x5b_d1_e9_95) >>> 0;
+  }
+
+  // 21 bits of the second hash over the first: a safe integer.
+  return (high & 0x1f_ff_ff) * 0x1_00_00_00_00 + low;
+}
+
+/**
  * Gives an instance of ours its chains: their state and slot seam, its own `apply`, and the first
  * evaluation at the renderer's resolution.
  *
@@ -1064,6 +1124,7 @@ function wireInputs(ectx: EffectsCtx, pixi: PixiModule, instance: OursInstance):
     fromInput: declared.some(input => input.from === "input"),
     fromBack: declared.some(input => input.from === "back"),
     version: 0,
+    key: 0,
     context: { resolution: 0 },
     places: Array.from({ length: count }, (): Place[] => []),
     retired: [],
@@ -1078,11 +1139,12 @@ function wireInputs(ectx: EffectsCtx, pixi: PixiModule, instance: OursInstance):
       draw: (
         manager: PixiFilterManager,
         picture: PixiTexture,
-        targets: readonly PixiTexture[]
+        targets: readonly (PixiTexture | undefined)[]
       ): void => drawInto(ectx, pixi, instance, inputs, manager, picture, targets),
       hold: (results: readonly PixiTexture[] | undefined): void => {
         inputs.held = results;
-      }
+      },
+      key: (resolution: number): number => keyAt(ectx, pixi, instance, inputs, resolution)
     })
   };
 
@@ -1491,7 +1553,10 @@ function evaluate(
   inputs.stale = false;
   instance.passes = passes;
 
-  if (changed) inputs.version += 1;
+  if (changed) {
+    inputs.version += 1;
+    inputs.key = stepsKey(inputs);
+  }
 }
 
 /**
@@ -1673,12 +1738,57 @@ export function createWarmFilter(
 ): WarmProbe {
   const body = createOurs(pixi, definition, PROBE_VALUE);
   // The probe's mesh binds every input the program declares, or Pixi throws on the missing resource.
-  const quad =
-    program === undefined
-      ? undefined
-      : { program, fu: body.group, inputNames: quadInputNames(definition) };
+  const quad = program === undefined ? undefined : quadFor(program, body.group, definition);
 
   return { filter: body.filter, quad, destroy: (): void => destroyBody(body) };
+}
+
+/**
+ * What a backdrop's quad binds and writes by name (F126 stage 5): the back texture and sampler the renderer binds the
+ * Source under, the back's three placement uniforms, and the same five names of each input, all from back. Made once
+ * with the quad object it goes on, never per frame.
+ *
+ * @param definition - A backdrop's definition.
+ * @returns The names, frozen.
+ */
+export function quadBackNames(definition: FilterDefinition): NonNullable<FilterSlotQuad["back"]> {
+  return Object.freeze({
+    texture: "uBackTexture",
+    sampler: "uBackSampler",
+    scale: BACK_SCALE.name,
+    offset: BACK_OFFSET.name,
+    clamp: BACK_CLAMP.name,
+    inputs: Object.freeze(
+      definition.inputs.map(input =>
+        Object.freeze({
+          texture: input.texture,
+          sampler: input.sampler,
+          scale: input.scale.name,
+          offset: input.offset?.name ?? `${input.name}Offset`,
+          clamp: input.clamp.name
+        })
+      )
+    )
+  });
+}
+
+/**
+ * The quad of a definition's instance or probe: its program and numbers, and the names its mesh binds: each input's
+ * held result, or for a backdrop the Source and the results drawn from it (`back`, no `inputNames`).
+ *
+ * @param program - The quad program.
+ * @param fu - The instance's uniform group.
+ * @param definition - The definition.
+ * @returns The quad.
+ */
+export function quadFor(
+  program: PixiGpuProgram,
+  fu: FilterSlotQuad["fu"],
+  definition: FilterDefinition
+): FilterSlotQuad {
+  return definition.backdrop
+    ? { program, fu, back: quadBackNames(definition) }
+    : { program, fu, inputNames: quadInputNames(definition) };
 }
 
 /**

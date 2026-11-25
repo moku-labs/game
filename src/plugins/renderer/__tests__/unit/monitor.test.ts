@@ -96,7 +96,9 @@ describe("renderer stats", () => {
       renderPassesMax: 0,
       canvasPasses: 0,
       canvasPassesMax: 0,
-      kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }
+      kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 },
+      // A9 (F126 stage 5): a game without Sources reads zeros, the rest unchanged.
+      sources: { count: 0, takes: 0, mb: 0, mpx: 0 }
     });
     expect("drawCalls" in stats).toBe(false);
   });

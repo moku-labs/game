@@ -226,7 +226,8 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
         renderPassesMax: measured(passes.max),
         canvasPasses: measuredCanvas(canvas.last),
         canvasPassesMax: measuredCanvas(canvas.max),
-        kept: deps.kept.stats()
+        kept: deps.kept.stats(),
+        sources: deps.kept.sources()
       };
 
       // The dev or agent guard, inline as in `capture()`: the field is absent from a production

@@ -10,7 +10,7 @@ import { PV_SCENES } from "../features/bench/scenes/pv";
 import { TRANS_SCENES, TRANSITION_MS, transitionLeave } from "../features/bench/scenes/trans";
 import type { Stage } from "../features/bench/scenes/types";
 import game from "../index";
-import { ARMS, PV_ARMS } from "../lib/a26";
+import { ARM_SETS, ARMS, PV_ARMS } from "../lib/a26";
 import {
   type BenchHost,
   benchFrame,
@@ -170,7 +170,8 @@ describe("every scene", () => {
   // Bug: the pv schedule and the pv scenes drift apart: an arm is missing on the phone or never mounts.
   it("the pv schedule names every pv scene, in its order", () => {
     expect(PV_ARMS).toEqual(PV_SCENES.map(scene => scene.name));
-    expect(PV_ARMS).toHaveLength(76);
+    // F126 stage 5: the six `pv-blur-source-*` arms joined the 76.
+    expect(PV_ARMS).toHaveLength(82);
   });
 
   // Bug: a pv arm throws on mount or on its tick, or a filter of it is not in the feature.
@@ -189,13 +190,30 @@ describe("every scene", () => {
     ["pv-glow-baked-move-8", 1],
     ["pv-glow-filter-rest-8", 1],
     ["pv-tilt-mesh-move-8", 1],
-    ["pv-blur-filter-rest-8", 9]
+    ["pv-blur-filter-rest-8", 9],
+    // F126 stage 5: the same eight windows over the picture under `Source()` break no canvas pass.
+    ["pv-blur-source-rest-8", 1],
+    ["pv-blur-source-move-8", 1],
+    ["pv-blur-source-live-8", 1]
   ] as const)("%s draws %i canvas passes", async (name, passes) => {
     const { app, driver } = await open();
 
     app.bench.show(name, { k: 0 });
     await driver.frames(40);
     expect(app.renderer.stats().canvasPasses).toBe(passes);
+  });
+
+  // Bug: the glass set misses an arm of the comparison, or holds another case's.
+  it("the glass set holds every pv-blur arm and nothing else", () => {
+    expect(ARM_SETS.glass).toEqual(PV_ARMS.filter(arm => arm.startsWith("pv-blur-")));
+    expect(ARM_SETS.glass).toEqual(
+      expect.arrayContaining([
+        "pv-blur-filter-rest-8",
+        "pv-blur-baked-rest-8",
+        "pv-blur-source-live-1"
+      ])
+    );
+    expect(ARM_SETS.glass).toHaveLength(14);
   });
 
   // Bug: Pixi is not there yet when the arm mounts, and the mesh arm draws nothing at all.

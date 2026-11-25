@@ -9,10 +9,12 @@ import {
   Display,
   Dissolve,
   Fold,
+  Frost,
   Grade,
   Outline,
   Shadow,
   Shape,
+  Source,
   Sprite,
   Transform,
   type World
@@ -64,8 +66,16 @@ type Move = (elapsedMs: number, wave: number) => void;
 /** One way of drawing a case: makes one item and answers what moves it. */
 type Way = (stage: Stage, spot: Spot) => Move;
 
-/** A case drawn one way, at rest or in motion. */
-type Arm = { readonly way: string; readonly state: "rest" | "move"; readonly make: Way };
+/**
+ * A case drawn one way, at rest, in motion, or (`live`) with a child of its Source changed in every frame. A `source`
+ * arm draws the full picture under `Source()` (F126 stage 5).
+ */
+type Arm = {
+  readonly way: string;
+  readonly state: "rest" | "move" | "live";
+  readonly make: Way;
+  readonly source?: true;
+};
 
 /**
  * The item drawn live: a rounded square of `Graphics` with a sprite in it, the view a filter goes on.
@@ -407,7 +417,8 @@ const CASES: Readonly<Record<string, readonly Arm[]>> = {
     { way: "mesh", state: "rest", make: meshTilt(false) },
     { way: "mesh", state: "move", make: meshTilt(true) }
   ],
-  // Today's backdrop path: a window that blurs what is under it, read from the canvas in every frame, never kept.
+  // Today's backdrop path: a window that blurs what is under it, read from the canvas in every frame, never kept; and
+  // the same glass as the set's `Frost` over the full picture under `Source()` (F126 stage 5).
   blur: [
     {
       way: "baked",
@@ -441,8 +452,66 @@ const CASES: Readonly<Record<string, readonly Arm[]>> = {
           stage.spawn(Transform({ x: spot.x, y: spot.y }), Shape(PANE), WindowFrost()),
           spot
         )
-    }
+    },
+    { way: "source", state: "rest", source: true, make: frostPane(false) },
+    { way: "source", state: "move", source: true, make: frostPane(true) },
+    { way: "source", state: "live", source: true, make: frostPane(false) }
   ]
+};
+
+/**
+ * A pane of milk with the set's `Frost` on it, over the picture under `Source()`.
+ *
+ * @param moving - Whether it slides in every frame.
+ * @returns The way.
+ */
+function frostPane(moving: boolean): Way {
+  return (stage, spot) => {
+    const pane = stage.spawn(Transform({ x: spot.x, y: spot.y }), Shape(PANE), Frost({ blur: 12 }));
+
+    return moving ? slide(stage, pane, spot) : still;
+  };
+}
+
+/**
+ * The full picture under `Source()`, with a spark in it: a `live` arm moves the spark in every frame, so the Source is
+ * taken again in every frame.
+ *
+ * @param stage - The stage.
+ * @returns What moves the spark.
+ */
+function sourcePicture(stage: Stage): Move {
+  const picture = fullSprite(stage, Source());
+  const spark = stage.child(
+    picture,
+    Transform({ x: 40, y: 40 }),
+    Shape({ w: 24, h: 24, fill: 0xff_f0_a0, radius: 12 })
+  );
+  const patch = { x: 40 };
+
+  return (_elapsedMs, wave) => {
+    patch.x = 40 + 30 * wave;
+    stage.set(spark, Transform, patch);
+  };
+}
+
+/**
+ * The full picture with no Source under the arm: nothing of it moves.
+ *
+ * @param stage - The stage.
+ * @returns What moves nothing.
+ */
+function plainPicture(stage: Stage): Move {
+  fullSprite(stage);
+
+  return still;
+}
+
+/** How an arm's state reads in its line. */
+const STANDS: Readonly<Record<Arm["state"], string>> = {
+  rest: "at rest",
+  move: "in motion",
+  live: "its Source changed every frame"
 };
 
 /**
@@ -456,13 +525,14 @@ const CASES: Readonly<Record<string, readonly Arm[]>> = {
 function pvScene(name: string, arm: Arm, count: (typeof PV_COUNTS)[number]): BenchScene {
   return {
     name: `pv-${name}-${arm.way}-${arm.state}-${count}`,
-    stands: `${name} as ${arm.way}, ${arm.state === "rest" ? "at rest" : "in motion"}, ${count} on screen`,
+    stands: `${name} as ${arm.way}, ${STANDS[arm.state]}, ${count} on screen`,
     mount: stage => {
-      fullSprite(stage);
-
+      const spark = arm.source === true ? sourcePicture(stage) : plainPicture(stage);
       const moves = SPOTS[count].map(spot => arm.make(stage, spot));
 
       if (arm.state === "rest") return undefined;
+      if (arm.state === "live")
+        return { tick: elapsedMs => spark(elapsedMs, Math.sin(elapsedMs / 500)) };
 
       return {
         tick: elapsedMs => {

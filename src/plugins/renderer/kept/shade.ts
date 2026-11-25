@@ -21,6 +21,7 @@ import type {
 } from "../types";
 import { KEY } from "./geometry";
 import { labelOf, outputOf, setOrigins } from "./render";
+import { bindServed } from "./source";
 import type { KeptCtx, KeptMatrices, KeptQuad, KeptRecord, KeptShade, KeptState } from "./types";
 
 /** The numbers `renderShade` wants in the group this frame, in the order of `writeGlobals`. One array: it allocates nothing. */
@@ -441,6 +442,18 @@ export function renderShade(
 
   // After a shader built again too: it binds the output in the place of each result.
   bindHeld(shade, record);
+
+  // A window a Source serves binds the Source and its results, placed at the window's picture origin (F126 stage 5).
+  if (shade.quad.back !== undefined && record.source !== undefined) {
+    const Ps = key[KEY.Ps] ?? 0;
+
+    bindServed(
+      shade,
+      record,
+      (key[KEY.X0] ?? 0) - Ps + now.tx - (key[KEY.tx] ?? 0),
+      (key[KEY.Y0] ?? 0) - Ps + now.ty - (key[KEY.ty] ?? 0)
+    );
+  }
 
   // `outputOf` resizes `s3` in place, which blanks it without moving `s1Version`.
   const resized =

@@ -323,8 +323,8 @@ export type FilterInput<Value> = {
  * @example
  * ```ts
  * const [blur] = Frost.filter.inputs;
- * [blur?.texture, blur?.sampler, blur?.scale.name, blur?.clamp.name, blur?.sample, blur?.from];
- * // ["blurTexture", "blurSampler", "blurScale", "blurClamp", "sampleBlur", "back"]
+ * [blur?.texture, blur?.sampler, blur?.scale.name, blur?.clamp.name, blur?.offset?.name, blur?.sample, blur?.from];
+ * // ["blurTexture", "blurSampler", "blurScale", "blurClamp", "blurOffset", "sampleBlur", "back"]
  * ```
  */
 export type FilterInputDefinition = {
@@ -335,6 +335,11 @@ export type FilterInputDefinition = {
   readonly sampler: string;
   readonly scale: UniformSpec;
   readonly clamp: UniformSpec;
+  /**
+   * An input from back only: where its helper reads moves by it, `(0, 0)` on the live path and the window's place on a
+   * Source on its quad (F126 stage 5); `undefined` for an input from the view.
+   */
+  readonly offset: UniformSpec | undefined;
   readonly sample: string;
   readonly stages: readonly FilterStage[];
   readonly chain: FilterInput<FilterFields>["chain"];
@@ -680,6 +685,8 @@ export type InputsState = {
   readonly fromBack: boolean;
   /** Changes whenever what the stages draw changes; 1 after the first evaluation. */
   version: number;
+  /** A number of the steps the chains draw now, made with `version`: equal for two instances that draw the same. */
+  key: number;
   /** The object `chain` receives, reused: its `resolution` is written before each call. */
   readonly context: { resolution: number };
   /** Per input, its places in draw order (each with the scale of its step). */

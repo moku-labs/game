@@ -253,6 +253,7 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   canvasPasses: number;
   canvasPassesMax: number;
   kept: KeptStats;
+  sources: { count: number; takes: number; mb: number; mpx: number };
   drawCalls?: number;
   redraws?: number;
   rebuilds?: number;
