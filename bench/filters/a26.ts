@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * @file The A26 run of the bench: `bun bench/filters/a26.ts <serial> [--log perf.jsonl] [--port 4173]
- * [--seconds N] [--fps 30] [--k 8] [--set all|pv] [--rounds N] [--adb adb]`. It checks that the phone is free and refuses when
+ * [--seconds N] [--fps 30] [--k 8] [--set all|pv|glass] [--rounds N] [--adb adb]`. It checks that the phone is free and refuses when
  * it is not, then brings the page's port to the phone, prints the arms schedule and the address, and
  * samples the GPU and MIF clocks at 10 Hz into a JSONL beside the perf log until the schedule ends
  * or Ctrl+C. It takes no port it found held, and gives back only the one it took.

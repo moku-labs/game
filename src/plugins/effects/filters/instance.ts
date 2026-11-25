@@ -17,6 +17,7 @@
 
 import { CALM_AFTER } from "../../renderer/kept/record";
 import type {
+  FilterSlotQuad,
   PixiFilter,
   PixiFilterManager,
   PixiGpuProgram,
@@ -45,7 +46,7 @@ import type {
   UniformValues,
   WarmProbe
 } from "./types";
-import { BACK_CLAMP, BACK_SCALE } from "./wgsl";
+import { BACK_CLAMP, BACK_OFFSET, BACK_SCALE, structMembers } from "./wgsl";
 
 /**
  * The resolution of every filter but `Blur`: the render target's, so a filter draws at the
@@ -195,8 +196,11 @@ function startValue(uniform: UniformSpec, value: Readonly<FilterFields>): number
   return vector;
 }
 
-/** What `tagNumbers` writes in place: a stored filter value (the world's component value) or a uniform group's values. */
-type TaggedFields = Readonly<FilterFields> | UniformValues;
+/**
+ * What `tagNumbers` writes in place: a stored filter value (the world's component value), a uniform group's values, or
+ * the uniforms of a chain's step.
+ */
+type TaggedFields = Readonly<FilterFields> | UniformValues | NonNullable<FilterStep["uniforms"]>;
 
 /**
  * Moves the number fields the sync reads by a uniform's name to V8's tagged form, once, as an instance is built. V8 may
@@ -270,36 +274,14 @@ function createOurs(
     structures[uniform.name] = { value: startValue(uniform, value), type: uniform.type };
   }
 
-  // The engine's two uniforms per input, filled by every apply from the texture it binds.
-  for (const input of definition.inputs) {
-    structures[input.scale.name] = {
-      value: new Float32Array(input.scale.size),
-      type: input.scale.type
-    };
-    structures[input.clamp.name] = {
-      value: new Float32Array(input.clamp.size),
-      type: input.clamp.type
-    };
-  }
+  // The engine's members after the declared ones, in the struct's own order (`structMembers`): per input its scale and
+  // clamp (and offset from back), a backdrop's three, the canvas origin of a kept picture for `canvasPixel`. Filled by
+  // every apply from the texture it binds, the origin in place by the renderer (spec 23). The group's order is the
+  // struct's: one member out of place reads the wrong numbers.
+  const engine = structMembers([], definition.inputs, definition.origin, definition.backdrop);
 
-  // A backdrop's two uniforms, filled by every apply from the copy Pixi made of the canvas under the view.
-  if (definition.backdrop) {
-    structures[BACK_SCALE.name] = {
-      value: new Float32Array(BACK_SCALE.size),
-      type: BACK_SCALE.type
-    };
-    structures[BACK_CLAMP.name] = {
-      value: new Float32Array(BACK_CLAMP.size),
-      type: BACK_CLAMP.type
-    };
-  }
-
-  // The canvas origin of a kept picture for `canvasPixel`: 0 drawn live, written in place by the renderer (spec 23).
-  if (definition.origin !== undefined) {
-    structures[definition.origin.name] = {
-      value: new Float32Array(definition.origin.size),
-      type: definition.origin.type
-    };
+  for (const member of engine) {
+    structures[member.name] = { value: new Float32Array(member.size), type: member.type };
   }
 
   // A group only for a filter that binds a uniform of its own: a declared one, an input's, a backdrop's or the origin.
@@ -700,23 +682,32 @@ function backOf(pixi: PixiModule, manager: PixiFilterManager): PixiTexture {
 
 /**
  * Writes the scale and the clamp that place a sample of the body's uv on a texture: one over the size of its backing,
- * and half a texel inside the part of it its frame covers, rounded to float32. Written only where a value differs, so
- * Pixi's bind group stays cached; no array is allocated.
+ * and half a texel inside the part of it its frame covers, rounded to float32; and its offset at `(0, 0)`, so a slot
+ * the renderer drew on a Source a frame before samples the live texture right (F126 stage 5). Written only where a
+ * value differs, so Pixi's bind group stays cached; no array is allocated.
  *
  * @param uniforms - The values of the uniform group.
  * @param scaleName - The `vec2` scale uniform.
  * @param clampName - The `vec4` clamp uniform.
  * @param texture - The texture the body samples through them.
+ * @param offsetName - The `vec2` offset uniform of an input from back or of the back; `undefined` for none.
  */
 function writePlacement(
   uniforms: UniformValues,
   scaleName: string,
   clampName: string,
-  texture: PixiTexture
+  texture: PixiTexture,
+  offsetName: string | undefined
 ): void {
   const { source } = texture;
   const scale = uniforms[scaleName];
   const clamp = uniforms[clampName];
+  const offset = offsetName === undefined ? undefined : uniforms[offsetName];
+
+  if (offset instanceof Float32Array) {
+    writeAt(offset, 0, 0, true);
+    writeAt(offset, 1, 0, true);
+  }
   const halfX = 0.5 / source.pixelWidth;
   const halfY = 0.5 / source.pixelHeight;
 
@@ -744,7 +735,9 @@ function writePlacement(
 function bindBack(body: OursBody, back: PixiTexture): void {
   const uniforms = body.group?.uniforms;
 
-  if (uniforms !== undefined) writePlacement(uniforms, BACK_SCALE.name, BACK_CLAMP.name, back);
+  if (uniforms !== undefined) {
+    writePlacement(uniforms, BACK_SCALE.name, BACK_CLAMP.name, back, BACK_OFFSET.name);
+  }
 }
 
 /**
@@ -896,7 +889,7 @@ function bindInput(instance: OursInstance, index: number, last: PixiTexture): vo
   if (resources[input.texture] !== source) resources[input.texture] = source;
   if (resources[input.sampler] !== source.style) resources[input.sampler] = source.style;
 
-  writePlacement(uniforms, input.scale.name, input.clamp.name, last);
+  writePlacement(uniforms, input.scale.name, input.clamp.name, last, input.offset?.name);
 }
 
 /**
@@ -1023,7 +1016,7 @@ function drawInto(
   inputs: InputsState,
   manager: PixiFilterManager,
   picture: PixiTexture,
-  targets: readonly PixiTexture[]
+  targets: readonly (PixiTexture | undefined)[]
 ): void {
   const { resolution } = picture.source;
 
@@ -1047,6 +1040,175 @@ function drawInto(
 }
 
 /**
+ * The key of what the chains draw from a picture at a resolution (F126 stage 5): they are run at it first when they
+ * last ran at another, as `draw` would run them. Equal keys draw equal results from the same picture, so the renderer
+ * keeps one result for two windows over one Source. Folded here, once per version of the chains, never in `evaluate`:
+ * only a window over a Source asks, and a tween of the steps in a game without one pays nothing. Nothing made.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param instance - The instance.
+ * @param inputs - Its chains.
+ * @param resolution - The resolution of the picture the chains would draw from.
+ * @returns The key; -1 for a broken instance, which draws nothing.
+ */
+function keyAt(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  instance: OursInstance,
+  inputs: InputsState,
+  resolution: number
+): number {
+  if (
+    !instance.broken &&
+    (resolution !== inputs.resolution || resolution !== inputs.backResolution)
+  ) {
+    evaluateInRender(ectx, pixi, instance, inputs, resolution, resolution);
+  }
+
+  if (instance.broken) return -1;
+
+  if (inputs.keyVersion !== inputs.version) {
+    inputs.key = stepsKey(inputs);
+    inputs.keyVersion = inputs.version;
+  }
+
+  return inputs.key;
+}
+
+/** The two FNV-1a states `stepsKey` folds into, and the cell it reads a number's bits through: made once. */
+const FOLD = /*#__PURE__*/ foldCells();
+
+/**
+ * Makes the cells of `FOLD`. A function: the module-scope rule sees no collection literal.
+ *
+ * @returns The hash states and the number cell with its two words.
+ */
+function foldCells(): { hash: Uint32Array; number: Float64Array; words: Uint32Array } {
+  const number = new Float64Array(1);
+
+  return { hash: new Uint32Array(2), number, words: new Uint32Array(number.buffer) };
+}
+
+/**
+ * Folds one 32-bit word into both hash states of `FOLD`.
+ *
+ * @param word - The word.
+ */
+function foldWord(word: number): void {
+  const { hash } = FOLD;
+
+  hash[0] = Math.imul((hash[0] ?? 0) ^ word, 0x01_00_01_93);
+  hash[1] = Math.imul((hash[1] ?? 0) ^ word, 0x5b_d1_e9_95);
+}
+
+/**
+ * Folds the number in `FOLD.number` by its 64 bits into both hash states: no string of it is made. The caller writes
+ * the number into the cell: a fraction handed to a call as an argument is boxed, 16 B.
+ */
+function foldBits(): void {
+  const { words } = FOLD;
+
+  foldWord(words[0] ?? 0);
+  foldWord(words[1] ?? 0);
+}
+
+/**
+ * A 32-bit FNV-1a hash of a text, folding `codePointAt` of each index: the id of a stage's definition, hashed once per
+ * place.
+ *
+ * @param text - The text.
+ * @returns The hash.
+ * @example
+ * ```ts
+ * textHash(""); // 2166136261
+ * ```
+ */
+function textHash(text: string): number {
+  let hash = 0x81_1c_9d_c5;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = Math.imul(hash ^ (text.codePointAt(index) ?? 0), 0x01_00_01_93) >>> 0;
+  }
+
+  return hash;
+}
+
+/**
+ * A number for the steps every chain of an instance draws now: the definition of each place (its id hashed once, when
+ * the place was built), its scale and its uniform values, folded by two FNV-1a hashes into one 30-bit integer. Made
+ * when a reader asks after the steps changed, never per frame; nothing made, no string.
+ *
+ * @param inputs - The chains of the instance.
+ * @returns The number.
+ */
+function stepsKey(inputs: InputsState): number {
+  const { hash } = FOLD;
+  const { places } = inputs;
+
+  hash[0] = 0x81_1c_9d_c5;
+  hash[1] = 0x01_00_01_93;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- the fold of a tweened chain's key: no iterator.
+  for (let input = 0; input < places.length; input += 1) {
+    const list = places[input] ?? [];
+
+    // The input's place in the list and its count of steps: two chains of the same steps in other inputs differ.
+    foldWord(0xff_ff_ff_ff);
+    foldWord(list.length);
+
+    // eslint-disable-next-line unicorn/no-for-loop -- the fold of a tweened chain's key: no iterator.
+    for (let at = 0; at < list.length; at += 1) {
+      const place = list[at];
+
+      if (place !== undefined) foldPlace(place);
+    }
+  }
+
+  // Both hashes mixed into 30 bits: a small integer, which every call hands back as it is (a wider number is a new box at
+  // each return, 16 B). Two windows of other steps share a result only on a match of 1 in 2^30.
+  return ((hash[0] ?? 0) ^ Math.imul(hash[1] ?? 0, 0x9e_37_79_b1)) & 0x3f_ff_ff_ff;
+}
+
+/**
+ * Folds one place of a chain into `FOLD`: its definition's id hash, its scale, each uniform's value, a vector element by
+ * element.
+ *
+ * @param place - The place.
+ */
+function foldPlace(place: Place): void {
+  const { number } = FOLD;
+
+  foldWord(place.idHash);
+  number[0] = place.scale;
+  foldBits();
+
+  const uniforms = place.body.group?.uniforms;
+  const specs = place.definition.uniforms;
+
+  if (uniforms === undefined) return;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- a frozen list walked by index: `for…of` over it allocates.
+  for (let index = 0; index < specs.length; index += 1) {
+    const spec = specs[index];
+
+    // The group's fields are tagged (`tagNumbers`): a read by name hands the number as it is, no box.
+    const value: unknown = spec === undefined ? undefined : uniforms[spec.name];
+
+    if (typeof value === "number") {
+      number[0] = value;
+      foldBits();
+    } else if (value instanceof Float32Array) {
+      // eslint-disable-next-line unicorn/no-for-loop -- a vector's numbers by index: no iterator.
+      for (let element = 0; element < value.length; element += 1) {
+        number[0] = value[element] ?? 0;
+        foldBits();
+      }
+    } else foldWord(0);
+  }
+}
+
+/**
  * Gives an instance of ours its chains: their state and slot seam, its own `apply`, and the first
  * evaluation at the renderer's resolution.
  *
@@ -1064,6 +1226,8 @@ function wireInputs(ectx: EffectsCtx, pixi: PixiModule, instance: OursInstance):
     fromInput: declared.some(input => input.from === "input"),
     fromBack: declared.some(input => input.from === "back"),
     version: 0,
+    key: 0,
+    keyVersion: -1,
     context: { resolution: 0 },
     places: Array.from({ length: count }, (): Place[] => []),
     retired: [],
@@ -1078,11 +1242,12 @@ function wireInputs(ectx: EffectsCtx, pixi: PixiModule, instance: OursInstance):
       draw: (
         manager: PixiFilterManager,
         picture: PixiTexture,
-        targets: readonly PixiTexture[]
+        targets: readonly (PixiTexture | undefined)[]
       ): void => drawInto(ectx, pixi, instance, inputs, manager, picture, targets),
       hold: (results: readonly PixiTexture[] | undefined): void => {
         inputs.held = results;
-      }
+      },
+      key: (resolution: number): number => keyAt(ectx, pixi, instance, inputs, resolution)
     })
   };
 
@@ -1342,11 +1507,21 @@ function placeFor(
 
   if (kept !== undefined) retired.push(kept.body);
 
+  // The step's numbers are read by a uniform's name in every run of a chain whose steps move (a tweened blur): tagged,
+  // as the instance's own value is, a read hands each number as it is, no box (a ladder's steps are made once).
+  if (step.uniforms !== undefined) tagNumbers(step.uniforms, step.stage.filter.uniforms);
+
   const place: Place = {
     definition: step.stage.filter,
     body: createOurs(pixi, step.stage.filter, PROBE_VALUE),
-    scale: step.scale
+    scale: step.scale,
+    idHash: textHash(step.stage.filter.id)
   };
+
+  // The scale is answered to the renderer through the seam (`scaleOf`) whenever the steps move: tagged, the read hands
+  // the number it holds; a double field would box it at every ask. A non-number once moves the field.
+  Reflect.set(place, "scale", false);
+  place.scale = step.scale;
 
   places[at] = place;
 
@@ -1448,8 +1623,41 @@ function evaluate(
   resolution: number,
   backResolution: number
 ): void {
+  const before = inputs.resolution;
+  const backBefore = inputs.backResolution;
+  const moved = resolution !== before || backResolution !== backBefore;
+
+  inputs.resolution = resolution;
+  inputs.backResolution = backResolution;
+
+  // A broken instance keeps the resolutions of its last good run.
+  if (!runChains(ectx, pixi, instance, inputs, moved)) {
+    inputs.resolution = before;
+    inputs.backResolution = backBefore;
+  }
+}
+
+/**
+ * Runs the chain of every input at the resolutions `inputs` holds, as `evaluate` describes. The sync of a tween runs
+ * it with no resolution handed over: a fraction read off the state and passed to a call is boxed, 16 B each, in every
+ * frame of a tween on a canvas of a fractional resolution.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param instance - The instance.
+ * @param inputs - Its chains, their resolutions written.
+ * @param moved - A resolution changed: the steps draw at another one.
+ * @returns False when a chain broke the instance.
+ */
+function runChains(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  instance: OursInstance,
+  inputs: InputsState,
+  moved: boolean
+): boolean {
   const kind = ectx.state.kinds.get(instance.kindId);
-  let changed = resolution !== inputs.resolution || backResolution !== inputs.backResolution;
+  let changed = moved;
   let passes = 1;
 
   const declared = instance.definition.inputs;
@@ -1463,14 +1671,14 @@ function evaluate(
 
     let steps: readonly FilterStep[];
 
-    inputs.context.resolution = input.from === "back" ? backResolution : resolution;
+    inputs.context.resolution = input.from === "back" ? inputs.backResolution : inputs.resolution;
 
     try {
       steps = input.chain(instance.value, inputs.context);
     } catch (error) {
       breakInstance(ectx, instance, kind, "chain", messageOf(error), { input: input.name });
 
-      return;
+      return false;
     }
 
     const problem = stepsProblem(input, steps);
@@ -1478,7 +1686,7 @@ function evaluate(
     if (problem !== undefined) {
       breakInstance(ectx, instance, kind, "chain", problem, { input: input.name });
 
-      return;
+      return false;
     }
 
     if (placeSteps(pixi, inputs, index, steps)) changed = true;
@@ -1486,12 +1694,13 @@ function evaluate(
     passes += steps.length;
   }
 
-  inputs.resolution = resolution;
-  inputs.backResolution = backResolution;
   inputs.stale = false;
   instance.passes = passes;
 
+  // The key of the new steps is folded when a reader asks for it (`keyAt`): a tween in a game without a Source makes none.
   if (changed) inputs.version += 1;
+
+  return true;
 }
 
 /**
@@ -1547,7 +1756,8 @@ export function refreshInputs(
 
   if (instance.broken || !instance.filter.enabled || off || !inputs.stale) return;
 
-  evaluate(ectx, pixi, instance, inputs, inputs.resolution, inputs.backResolution);
+  // At the resolutions of the last run, read off the state inside: none handed over (a fraction passed is boxed).
+  runChains(ectx, pixi, instance, inputs, false);
 }
 
 /**
@@ -1673,12 +1883,57 @@ export function createWarmFilter(
 ): WarmProbe {
   const body = createOurs(pixi, definition, PROBE_VALUE);
   // The probe's mesh binds every input the program declares, or Pixi throws on the missing resource.
-  const quad =
-    program === undefined
-      ? undefined
-      : { program, fu: body.group, inputNames: quadInputNames(definition) };
+  const quad = program === undefined ? undefined : quadFor(program, body.group, definition);
 
   return { filter: body.filter, quad, destroy: (): void => destroyBody(body) };
+}
+
+/**
+ * What a backdrop's quad binds and writes by name (F126 stage 5): the back texture and sampler the renderer binds the
+ * Source under, the back's three placement uniforms, and the same five names of each input, all from back. Made once
+ * with the quad object it goes on, never per frame.
+ *
+ * @param definition - A backdrop's definition.
+ * @returns The names, frozen.
+ */
+export function quadBackNames(definition: FilterDefinition): NonNullable<FilterSlotQuad["back"]> {
+  return Object.freeze({
+    texture: "uBackTexture",
+    sampler: "uBackSampler",
+    scale: BACK_SCALE.name,
+    offset: BACK_OFFSET.name,
+    clamp: BACK_CLAMP.name,
+    inputs: Object.freeze(
+      definition.inputs.map(input =>
+        Object.freeze({
+          texture: input.texture,
+          sampler: input.sampler,
+          scale: input.scale.name,
+          offset: input.offset?.name ?? `${input.name}Offset`,
+          clamp: input.clamp.name
+        })
+      )
+    )
+  });
+}
+
+/**
+ * The quad of a definition's instance or probe: its program and numbers, and the names its mesh binds: each input's
+ * held result, or for a backdrop the Source and the results drawn from it (`back`, no `inputNames`).
+ *
+ * @param program - The quad program.
+ * @param fu - The instance's uniform group.
+ * @param definition - The definition.
+ * @returns The quad.
+ */
+export function quadFor(
+  program: PixiGpuProgram,
+  fu: FilterSlotQuad["fu"],
+  definition: FilterDefinition
+): FilterSlotQuad {
+  return definition.backdrop
+    ? { program, fu, back: quadBackNames(definition) }
+    : { program, fu, inputNames: quadInputNames(definition) };
 }
 
 /**

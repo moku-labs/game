@@ -9,7 +9,7 @@
  * Pure strings.
  */
 import type { FilterInputDefinition, UniformSpec } from "./types";
-import { BACK_CLAMP, BACK_SCALE } from "./wgsl";
+import { placeOf, structMembers } from "./wgsl";
 
 /**
  * The head of every filter's GLSL. `#version 300 es` comes first, so Pixi compiles both stages
@@ -77,7 +77,7 @@ export function glslInputs(inputs: readonly FilterInputDefinition[]): string {
       input =>
         `uniform sampler2D ${input.texture};\n\n` +
         `vec4 ${input.sample}(vec2 uv) {\n` +
-        `  return textureLod(${input.texture}, clamp(uv * uInputSize.xy * ${input.scale.name}, ${input.clamp.name}.xy, ${input.clamp.name}.zw), 0.0);\n` +
+        `  return textureLod(${input.texture}, clamp(${placeOf(input, "", "uInputSize.xy")}, ${input.clamp.name}.xy, ${input.clamp.name}.zw), 0.0);\n` +
         "}\n\n"
     )
     .join("");
@@ -94,14 +94,14 @@ export const GLSL_CANVAS_PIXEL = /* glsl */ `vec2 canvasPixel(vec2 uv) {
 export const GLSL_SAMPLE_BACK = /* glsl */ `uniform sampler2D uBackTexture;
 
 vec4 sampleBack(vec2 uv) {
-  return textureLod(uBackTexture, clamp(uv * uInputSize.xy * backScale, backClamp.xy, backClamp.zw), 0.0);
+  return textureLod(uBackTexture, clamp(uv * uInputSize.xy * backScale + backOffset, backClamp.xy, backClamp.zw), 0.0);
 }
 
 `;
 
 /**
- * The whole GLSL of a filter: the header, the uniforms (then the scale and the clamp of each input, then a backdrop's
- * back scale and clamp, then the engine's `keptOrigin` of a body that calls `canvasPixel`), the inputs, a backdrop's
+ * The whole GLSL of a filter: the header, the uniforms in the order of `structMembers` (then the scale, the clamp and
+ * the offset of each input, then a backdrop's back scale, clamp and offset, then `keptOrigin`), the inputs, a backdrop's
  * `sampleBack`, the `canvasPixel` helper, the body.
  *
  * @param uniforms - The uniforms in declaration order.
@@ -122,12 +122,7 @@ export function assembleGlsl(
   origin?: UniformSpec,
   backdrop = false
 ): string {
-  const declared = glslUniforms([
-    ...uniforms,
-    ...inputs.flatMap(input => [input.scale, input.clamp]),
-    ...(backdrop ? [BACK_SCALE, BACK_CLAMP] : []),
-    ...(origin === undefined ? [] : [origin])
-  ]);
+  const declared = glslUniforms(structMembers(uniforms, inputs, origin, backdrop));
   const back = backdrop ? GLSL_SAMPLE_BACK : "";
   const helper = origin === undefined ? "" : GLSL_CANVAS_PIXEL;
 

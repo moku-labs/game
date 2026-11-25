@@ -683,6 +683,7 @@ export type {
   KeptState,
   KeptStats,
   RetakeWhy,
+  SourceStats,
   WhyLive
 } from "./kept/types";
 export type {
@@ -751,6 +752,8 @@ export type {
   FilterSlot,
   FilterSlotInputs,
   FilterSlotQuad,
+  FilterSlotQuadBack,
+  FilterSlotQuadTexture,
   FiltersApi,
   FontsApi,
   HitBox,

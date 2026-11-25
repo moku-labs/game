@@ -33,6 +33,9 @@ describe("the editor doors", () => {
     for (const name of ["sources", "commands", "read", "watch", "run", "defineSource"]) {
       expect(names).not.toContain(name);
     }
-    expect(names.filter(name => /(Source|Command)$/u.test(name))).toEqual([]);
+    // `Source` alone is the renderer's component (F126 stage 5, owner-approved form A), no door descriptor: those are
+    // named `<what>Source` or `<what>Command`.
+    expect(names.filter(name => /.(?:Source|Command)$/u.test(name))).toEqual([]);
+    expect(names).not.toContain("Command");
   });
 });

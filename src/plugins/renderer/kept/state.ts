@@ -1,11 +1,13 @@
 /**
  * @file renderer/kept — the state of the kept-picture cache, and its stop from state alone.
  */
+
+import type { Entity } from "../../world/types";
 import { BYTES_PER_MB } from "../monitor/units";
 import { destroyWhole } from "../sources";
 import type { Config, PixiContainer, PixiRenderTexture } from "../types";
 import { destroyShade, dropQuadParts } from "./shade";
-import type { KeptRecord, KeptState, RangeRecord } from "./types";
+import type { KeptRecord, KeptState, RangeRecord, SourceRecord } from "./types";
 
 /**
  * Creates an empty record list. It lives in its own non-exported function because lint rule L5 refuses a collection
@@ -100,8 +102,42 @@ export function createKeptState(config: Readonly<Pick<Config, "keptMb" | "debug"
     firstTakes: 0,
     frameRefines: 0,
     alphaDue: false,
-    liveWaiting: 0
+    liveWaiting: 0,
+    sources: emptySources(),
+    sourceByEntity: emptyMap(),
+    sourceByTop: emptyMap(),
+    sourceTakes: 0,
+    sourcePixels: 0,
+    warnedScale: emptyEntities(),
+    unserved: emptyListeners()
   };
+}
+
+/**
+ * Creates an empty Source list. Same reason as `emptyRecords`.
+ *
+ * @returns An empty list.
+ */
+function emptySources(): SourceRecord[] {
+  return [];
+}
+
+/**
+ * Creates an empty set of entities. Same reason as `emptyRecords`.
+ *
+ * @returns An empty set.
+ */
+function emptyEntities(): Set<Entity> {
+  return new Set();
+}
+
+/**
+ * Creates an empty listener list. Same reason as `emptyRecords`.
+ *
+ * @returns An empty list.
+ */
+function emptyListeners(): Array<(entity: Entity) => void> {
+  return [];
 }
 
 /**
@@ -147,6 +183,39 @@ export function destroyRecord(
 }
 
 /**
+ * Destroys every texture and object of the Sources, the render groups their takes made undone, and forgets them: the
+ * next start watches the components again.
+ *
+ * @param state - The kept state.
+ */
+function stopSources(state: KeptState): void {
+  for (const source of state.sources) {
+    const { top } = source;
+
+    if (top !== undefined && state.madeGroups.has(top) && !top.destroyed) {
+      top.disableRenderGroup();
+      state.madeGroups.delete(top);
+    }
+
+    if (source.texture !== undefined) destroyWhole(source.texture);
+    for (const held of source.held)
+      for (const target of held.targets) if (target !== undefined) destroyWhole(target);
+    source.sprite?.destroy();
+    source.texture = undefined;
+    source.sprite = undefined;
+    source.keeper = undefined;
+    source.held.length = 0;
+  }
+
+  state.sources.length = 0;
+  state.sourceByEntity.clear();
+  state.sourceByTop.clear();
+  state.sourceTakes = 0;
+  state.sourcePixels = 0;
+  state.warnedScale.clear();
+}
+
+/**
  * Destroys the engine objects of one range picture: the sprite leaves the tree, the picture goes.
  *
  * @param range - The range record.
@@ -187,6 +256,8 @@ export function stopKept(state: KeptState): void {
   }
 
   for (const range of state.ranges.values()) destroyRange(range, destroyTexture);
+
+  stopSources(state);
 
   if (state.spare !== undefined) destroyWhole(state.spare);
   state.spare = undefined;

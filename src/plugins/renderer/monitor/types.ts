@@ -4,7 +4,7 @@
 import type { Json } from "../../model/types";
 import type * as Time from "../../time/types";
 import type { HostApi, HostInternal } from "../host/types";
-import type { KeptStats } from "../kept/types";
+import type { KeptStats, SourceStats } from "../kept/types";
 import type { SyncApi, SyncInternal } from "../sync/types";
 import type { DemandModule, KeptModule, PixiModule, RendererCtx } from "../types";
 import type { ViewportApi, ViewportInternal } from "../viewport/types";
@@ -36,7 +36,8 @@ import type {
  *   },
  *   views: 180, pooled: 24,
  *   renderPasses: 1, renderPassesMax: 3, canvasPasses: 1, canvasPassesMax: 2,
- *   kept: { pictures: 1, mb: 1.4, retakes: 0, evicted: 0, refused: 0 }, drawCalls: 14
+ *   kept: { pictures: 1, mb: 1.4, retakes: 0, evicted: 0, refused: 0 },
+ *   sources: { count: 0, takes: 0, mb: 0, mpx: 0 }, drawCalls: 14
  * };
  * // The same board at rest with `onDemand`: the loop runs, nothing is drawn.
  * const still: RenderStats = { ...stats, drawn: 0 };
@@ -125,6 +126,20 @@ export type RenderStats = {
    * `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }` while inert or with `keptMb: 0`.
    */
   kept: KeptStats;
+  /**
+   * The `Source` views (F126 stage 5): how many, the takes of the last drawn frame, the MiB their textures and the
+   * results drawn from them hold, and the device Mpx the takes and their chains drew off the canvas in that frame. A
+   * take is an off-canvas pass, never a canvas pass. `{ count: 0, takes: 0, mb: 0, mpx: 0 }` for a game without one.
+   *
+   * @example
+   * ```ts
+   * // The ward room under eight frosted notes, the frame after a bed in it changed: one take, one blur.
+   * app.renderer.stats().sources; // { count: 1, takes: 1, mb: 0.45, mpx: 0.22 }
+   * // The next frame, at rest:
+   * app.renderer.stats().sources.takes; // 0
+   * ```
+   */
+  sources: SourceStats;
   /**
    * Draw calls of the last drawn frame: a skipped frame keeps the count. Dev and debug builds
    * only, counted on WebGPU: absent in a production build, 0 while inert and on the WebGL
@@ -712,7 +727,7 @@ export type MonitorState = {
  * @example
  * ```ts
  * // A headless test: nothing is drawn, so every counter is 0 and there is no picture.
- * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, textureMbSplit: { art: 0, text: 0, targets: 0, kept: 0, other: 0, idle: { targets: 0, kept: 0 } }, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, canvasPasses: 0, canvasPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
+ * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, textureMbSplit: { art: 0, text: 0, targets: 0, kept: 0, other: 0, idle: { targets: 0, kept: 0 } }, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, canvasPasses: 0, canvasPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }, sources: { count: 0, takes: 0, mb: 0, mpx: 0 } }
  * await app.renderer.capture(); // undefined
  * ```
  */
@@ -732,7 +747,7 @@ export type MonitorApi = {
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
-   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, textureMbSplit: { art: 0, text: 0, targets: 0, kept: 0, other: 0, idle: { targets: 0, kept: 0 } }, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, canvasPasses: 1, canvasPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 } }
+   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, textureMbSplit: { art: 0, text: 0, targets: 0, kept: 0, other: 0, idle: { targets: 0, kept: 0 } }, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, canvasPasses: 1, canvasPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }, sources: { count: 0, takes: 0, mb: 0, mpx: 0 } }
    * // The same frame in a dev build also counts the one sprite batch, and the one instruction build of the first
    * // frame: { ..., drawCalls: 1, redraws: 0, rebuilds: 1 }
    * app.renderer.stats(); // { fps: 120, drawn: 0, … }: a still board with onDemand

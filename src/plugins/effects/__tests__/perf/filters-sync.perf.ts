@@ -3,18 +3,22 @@ import { Glow } from "../../filters/builtins";
 import type { FilterFields } from "../../filters/types";
 import { Bloom } from "../../set/bloom";
 import { Flash } from "../../set/flash";
+import { Frost } from "../../set/frost";
 import { Pixelate } from "../../set/pixelate";
 import { Wave } from "../../set/wave";
 import { BUDGET, NOISE } from "./budgets";
 import {
+  BLOOM_RADIUS,
   BLOOM_STRENGTH,
   bytesPerCall,
   CROSSING,
   FLASH_AMOUNT,
+  FROST_BLUR,
   fadeStep,
   fadeWrite,
   filtersFixture,
   HALF,
+  keyedTweenStep,
   PIXELATE_SIZE,
   RESTING,
   tweenStep,
@@ -118,6 +122,35 @@ describe("effects:filters, heap bytes per frame step", () => {
     expect(handed.some(set => set.slots[0]?.inputs?.count === 1)).toBe(true);
     expect(handed.some(set => set.slots[0]?.quad?.inputNames?.length === 2)).toBe(true);
     expect(step - write).toBeLessThanOrEqual(BUDGET.filtersBloomTween + NOISE);
+  });
+
+  // Bug it guards (B2): a tween that changes a chain's steps (the blur's sigma) folds the steps into a key through
+  // strings, arrays and a join in every frame, in every game, though only a window over a Source ever reads it.
+  it("one Bloom radius tweened on one of 12 filtered views, its quad handed over", () => {
+    const fixture = filtersFixture([Bloom.filter], BLOOM_RADIUS);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
+
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersChainTween + NOISE);
+  });
+
+  // Bug it guards (B2): the same for a `Frost` on today's backdrop path, no Source under it.
+  it("one Frost blur tweened on one of 12 filtered views, on the backdrop path", () => {
+    const fixture = filtersFixture([], FROST_BLUR);
+    const step = bytesPerCall(tweenStep(fixture));
+    const write = bytesPerCall(tweenWrite(fixture));
+
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersChainTween + NOISE);
+  });
+
+  // Bug it guards (B2): over a Source the renderer asks the key at every step change; the key is folded from the steps
+  // with no string, array or join, the definition's id hashed once.
+  it("one Frost blur tweened on one of 12 filtered views, its key asked as over a Source", () => {
+    const fixture = filtersFixture([Frost.filter], FROST_BLUR);
+    const step = bytesPerCall(keyedTweenStep(fixture, 0.5));
+    const write = bytesPerCall(tweenWrite(fixture));
+
+    expect(step - write).toBeLessThanOrEqual(BUDGET.filtersChainTween + NOISE);
   });
 
   // Bug it guards: the steady pass-budget count (F117) boxed its frames or made a record per frame over the budget.

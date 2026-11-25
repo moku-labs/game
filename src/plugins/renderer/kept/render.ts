@@ -70,6 +70,19 @@ export function labelOf(top: PixiContainer): string {
 }
 
 /**
+ * Tells whether a node draws itself: a Pixi view (a sprite, a nine-slice, a graphics, a particle container), not a
+ * plain container. Pixi types `renderPipeId` on every container, but only a view holds one.
+ *
+ * @param node - The node.
+ * @returns True for a view.
+ */
+export function drawsItself(node: PixiContainer): boolean {
+  const pipe: string | undefined = node.renderPipeId;
+
+  return pipe !== undefined;
+}
+
+/**
  * Gives a texture the asked size and resolution: the one held, resized in place when it differs, or a new one,
  * registered with `host.keep`. Pixi rounds the device size at `resize`. Every texture is dynamic: Pixi's sprites follow
  * a texture's resize only then, so the quad, the stand-ins and a range's sprite draw a picture retaken at another size

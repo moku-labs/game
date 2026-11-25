@@ -38,6 +38,7 @@ import {
 } from "./geometry";
 import {
   bytesOf,
+  drawsItself,
   dropTexture,
   endLoan,
   firstInputs,
@@ -51,6 +52,7 @@ import {
   standInOf
 } from "./render";
 import { enabledSlot, enterShade, leaveShade, renderShade } from "./shade";
+import { backSlot, heldCurrent, markSources, releaseHeld } from "./source";
 import { destroyRecord } from "./state";
 import {
   type FilterCache,
@@ -279,6 +281,10 @@ function shadeFits(kctx: KeptCtx, record: KeptRecord, stack: Stack): boolean {
  * @returns True when they fit.
  */
 function inputsFit(record: KeptRecord, slot: FilterSlot, quad: FilterSlotQuad): boolean {
+  // A window over a Source (F126 stage 5, A1): its mesh draws over the results its Source holds, current for its take
+  // and its chain's steps; the record's own stage 2 is never drawn.
+  if (quad.back !== undefined) return record.source !== undefined && heldCurrent(record);
+
   const { inputs } = slot;
   const names = quad.inputNames?.length ?? 0;
 
@@ -362,19 +368,21 @@ function holdsFilters(node: PixiContainer): boolean {
 }
 
 /**
- * Tells whether the filters of a stack draw like a picture: none reads the backdrop, every one blends normally.
+ * Tells whether the filters of a stack draw like a picture: none reads the backdrop (but the one a Source serves, F126
+ * stage 5), every one blends normally.
  *
  * @param slots - The record's slots.
+ * @param served - The one enabled filter is a window a Source serves: its backdrop reads the Source.
  * @returns 0 when they do, else the `WHY` of the first that does not.
  */
-function filtersWhy(slots: readonly FilterSlot[]): number {
+function filtersWhy(slots: readonly FilterSlot[], served: boolean): number {
   // per drawn frame and record: a frozen list, walked by index (`for…of` allocates over a frozen array).
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
   for (let index = 0; index < slots.length; index += 1) {
     const filter = slots[index]?.filter;
 
     if (filter === undefined || !filter.enabled) continue;
-    if (filter.blendRequired) return WHY.backdrop;
+    if (filter.blendRequired && !served) return WHY.backdrop;
     if (!plainBlend(filter.blendMode)) return WHY.filterBlend;
   }
 
@@ -503,11 +511,15 @@ function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): 
 
   if (!keepingOn(kctx) || stage === undefined || stack.enabled === 0) return WHY.off;
 
-  const filters = filtersWhy(record.slots);
+  const served = sourceBranch(kctx, record, stack);
+  const filters = filtersWhy(record.slots, served);
 
   if (filters !== 0) return filters;
-  // A body that reads the screen draws from a picture only on its quad: stage 3 would read the picture's target.
-  if (record.category === "screen" && !shadeFits(kctx, record, stack)) return WHY.cacheFalse;
+  // A body that reads the screen draws from a picture only on its quad: stage 3 would read the picture's target. A
+  // window a Source serves is judged without its results (A12): they gate its draw, not its reading.
+  if (record.category === "screen" && !served && !shadeFits(kctx, record, stack)) {
+    return WHY.cacheFalse;
+  }
 
   const picture = pictureWhy(record.top, view);
 
@@ -515,6 +527,24 @@ function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): 
   if (!topDrawn(kctx.sync, view)) return WHY.hidden;
 
   return ancestorsWhy(kctx, record, stage, stack);
+}
+
+/**
+ * Tells whether a record takes the Source branch (F126 stage 5): on WebGPU, one enabled filter whose quad names a back,
+ * and a Source found drawn before the window. Allocates nothing.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @param stack - The stack of this frame.
+ * @returns True when a Source may serve it.
+ */
+function sourceBranch(kctx: KeptCtx, record: KeptRecord, stack: Stack): boolean {
+  return (
+    record.source !== undefined &&
+    stack.enabled === 1 &&
+    kctx.host.kind() === "webgpu" &&
+    backSlot(record) !== undefined
+  );
 }
 
 /**
@@ -691,7 +721,15 @@ export function createRecord(
     markBy: 0,
     retakeWhy: 0,
     retakeBy: 0,
-    retakeAt: 0
+    retakeAt: 0,
+    source: undefined,
+    sourceAt: -1,
+    reader: false,
+    held: undefined,
+    heldOf: undefined,
+    heldVersion: -1,
+    unserved: false,
+    steppedAt: -1
   };
   const { state } = kctx;
 
@@ -807,6 +845,9 @@ export function dropRecord(
 
   if (record.mode === "kept") goLive(kctx, record, view, putBack);
 
+  releaseHeld(kctx, record);
+  record.source = undefined;
+  record.reader = false;
   endLoan(record.s2Of);
   // Its textures wait in the pool for the next take of their size (F119).
   destroyRecord(record, texture => poolTexture(kctx, texture));
@@ -1165,7 +1206,7 @@ function renderStages(
 
   if (live) handFilters(kctx, pixi, record, view);
 
-  const inputs = firstInputs(record.slots);
+  const inputs = ownInputs(record);
   let ok = renderStage1(kctx, pixi, matrices, record);
 
   // A stack of alphas draws the picture itself (F54): no pre-pass, no filter output.
@@ -1200,6 +1241,17 @@ function renderStages(
   if (!ok && live) putFiltersBack(kctx, record, view);
 
   return ok;
+}
+
+/**
+ * The inputs whose chain the record draws from its own picture (stage 2): the first enabled filter's, none for a window
+ * a Source serves, whose chain runs from the Source (A1).
+ *
+ * @param record - The record.
+ * @returns The seam, or `undefined`.
+ */
+function ownInputs(record: KeptRecord): FilterSlotInputs | undefined {
+  return record.source === undefined ? firstInputs(record.slots) : undefined;
 }
 
 /**
@@ -1490,19 +1542,6 @@ function toKept(kctx: KeptCtx, record: KeptRecord, view: View): void {
   record.calmIn = 0;
   record.idleSeen = false;
   kctx.sync.swapHidden(kctx.hidden, view, "kept", true);
-}
-
-/**
- * Tells whether a node draws itself: a Pixi view (a sprite, a nine-slice, a graphics, a particle container), not a
- * plain container. Pixi types `renderPipeId` on every container, but only a view holds one.
- *
- * @param node - The node.
- * @returns True for a view.
- */
-function drawsItself(node: PixiContainer): boolean {
-  const pipe: string | undefined = node.renderPipeId;
-
-  return pipe !== undefined;
 }
 
 /**
@@ -2103,7 +2142,7 @@ function outputOwed(record: KeptRecord, hold: boolean): boolean {
  * @returns The `OWED`.
  */
 function stagesOwed(record: KeptRecord, hold: boolean): number {
-  const inputs = firstInputs(record.slots);
+  const inputs = ownInputs(record);
 
   if (inputs !== undefined && chainOwed(record, inputs)) return OWED.chain;
 
@@ -2529,7 +2568,13 @@ export function stepRecord(
   readStack(record.slots, pixi.AlphaFilter, NOW);
   NOW.under = false;
 
-  const why = eligible(kctx, record, view, NOW);
+  let why = eligible(kctx, record, view, NOW);
+  const served = why === 0 && sourceBranch(kctx, record, NOW);
+
+  // A window eligible with its Source reads it from the next flush on (A12); until its results are current it draws on
+  // the backdrop path, live.
+  record.reader = served;
+  if (served && !heldCurrent(record)) why = WHY.waiting;
 
   if (why === 0) stepEligible(kctx, pixi, matrices, record, view);
   else stepIneligible(kctx, record, view, why);
@@ -2640,8 +2685,8 @@ function takenAfterInner(pixi: PixiModule, above: KeptRecord): boolean {
 }
 
 /**
- * Marks every record above a record as changed: its picture holds what this one drew, and the flush renders inner
- * records first, so they are retaken in the same flush (P4.5). A refining alone leaves a record above that is taken
+ * Marks every record and every Source above a record as changed: its picture holds what this one drew, and the flush
+ * renders inner records first, so they are retaken in the same flush (P4.5). A refining alone leaves a record above that is taken
  * whole after it (F126).
  *
  * @param kctx - The kept context.
@@ -2649,6 +2694,9 @@ function takenAfterInner(pixi: PixiModule, above: KeptRecord): boolean {
  * @param record - The record whose drawing changed.
  */
 function dirtyAbove(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void {
+  // A Source above it holds what it drew too (F126 stage 5): taken after the records that are no windows step.
+  if (record.top.parent !== null) markSources(kctx.state, record.top.parent);
+
   for (let node = record.top.parent; node !== null; node = node.parent) {
     const above = kctx.state.byTop.get(node);
 

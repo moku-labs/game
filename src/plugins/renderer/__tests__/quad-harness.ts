@@ -4,7 +4,7 @@
  * one input whose chain the cache holds: the renderer holds no shader text of its own, so its tests bring theirs.
  */
 import * as pixi from "pixi.js";
-import type { FilterSlot, FilterSlotInputs, FilterSlotQuad } from "../types";
+import type { FilterSlot, FilterSlotInputs, FilterSlotQuad, FilterSlotQuadTexture } from "../types";
 
 /**
  * The stages of a quad program, shaped as `effects` assembles them: Pixi reads the groups out of this text. Each input
@@ -164,4 +164,157 @@ export function chainSlot(
   fields: Partial<FilterSlot> = {}
 ): FilterSlot {
   return shadedSlot({ inputs: seam.inputs, quad: chainQuadOfFilter(), ...fields });
+}
+
+/**
+ * The stages of a backdrop's quad program, as `effects` assembles them for a Source (F126 stage 5): each input from
+ * back at group 3 after `fu`, then the back texture and its own sampler.
+ *
+ * @param inputs - The names of the filter's inputs, every one from back.
+ * @returns The text.
+ */
+function backQuadWgsl(inputs: readonly string[]): string {
+  const back =
+    `@group(3) @binding(${1 + 2 * inputs.length}) var uBackTexture: texture_2d<f32>;\n` +
+    `@group(3) @binding(${2 + 2 * inputs.length}) var uBackSampler: sampler;\n`;
+
+  return quadWgsl(inputs)
+    .replace(
+      "struct FilterUniforms { amount: f32 };",
+      `struct FilterUniforms { ${backMembers(inputs)} };`
+    )
+    .replace("struct VSOutput", `${back}struct VSOutput`);
+}
+
+/**
+ * The struct members of a backdrop's group: the scale, clamp and offset of each input, then of the back.
+ *
+ * @param inputs - The names of the filter's inputs.
+ * @returns The members, WGSL.
+ */
+function backMembers(inputs: readonly string[]): string {
+  return [...inputs, "back"]
+    .map(name => `${name}Scale: vec2<f32>, ${name}Clamp: vec4<f32>, ${name}Offset: vec2<f32>`)
+    .join(", ");
+}
+
+/**
+ * The names a backdrop's quad gives one texture: its own, its sampler and its three placement uniforms.
+ *
+ * @param name - The prefix of the uniforms: an input's name, or `back`.
+ * @param texture - The texture's name.
+ * @param sampler - The sampler's name.
+ * @returns The names.
+ */
+function names(name: string, texture: string, sampler: string): FilterSlotQuadTexture {
+  return {
+    texture,
+    sampler,
+    scale: `${name}Scale`,
+    offset: `${name}Offset`,
+    clamp: `${name}Clamp`
+  };
+}
+
+/**
+ * The quad of a backdrop's instance whose inputs all read back, as `effects` hands one for a `Frost`: the program, the
+ * instance's numbers (each placement uniform of each input and of the back) and the names under `back`.
+ *
+ * @param inputs - The names of the filter's inputs; `blur` when left out.
+ * @returns The quad.
+ */
+export function backQuadOfFilter(inputs: readonly string[] = ["blur"]): FilterSlotQuad {
+  const source = backQuadWgsl(inputs);
+  const program = new pixi.GpuProgram({
+    name: "test.back",
+    vertex: { source, entryPoint: "mainVertex" },
+    fragment: { source, entryPoint: "mainFragment" }
+  });
+  const structures: Record<string, { value: Float32Array; type: "vec2<f32>" | "vec4<f32>" }> = {};
+
+  for (const name of [...inputs, "back"]) {
+    structures[`${name}Scale`] = { value: new Float32Array(2), type: "vec2<f32>" };
+    structures[`${name}Clamp`] = { value: new Float32Array(4), type: "vec4<f32>" };
+    structures[`${name}Offset`] = { value: new Float32Array(2), type: "vec2<f32>" };
+  }
+
+  return {
+    program,
+    fu: new pixi.UniformGroup(structures),
+    back: {
+      ...names("back", "uBackTexture", "uBackSampler"),
+      inputs: inputs.map(name => names(name, `${name}Texture`, `${name}Sampler`))
+    }
+  };
+}
+
+/** The seam of a backdrop's input from back, and what the cache asked of it. */
+export type BackSeam = {
+  readonly inputs: FilterSlotInputs;
+  /** `draw` calls, in order: the resolution of the picture each was drawn from. */
+  readonly draws: number[];
+  /** The key `key` answers: two seams of equal keys share one result. */
+  readonly state: { key: number; scale: number | undefined; version: number };
+};
+
+/**
+ * Makes the seam of a backdrop with one input from back: its chain draws nothing (no filter applies in these tests),
+ * the cache reads its key, scale and calls.
+ *
+ * @param key - The key of its steps.
+ * @param scale - The scale of its last step; `undefined` for an empty chain.
+ * @returns The seam.
+ */
+export function backSeam(key = 7, scale: number | undefined = 0.5): BackSeam {
+  const draws: number[] = [];
+  const state = { key, scale, version: 1 };
+
+  // Tagged, as `effects` keeps the scale of a place: a read through the seam hands the number it holds, so a perf window
+  // counts the renderer's bytes, not the boxes of this stand-in.
+  Reflect.set(state, "scale", false);
+  state.scale = scale;
+
+  return {
+    draws,
+    state,
+    inputs: {
+      stages: [],
+      count: 1,
+      version: () => state.version,
+      scaleOf: () => state.scale,
+      draw: (_manager, picture) => {
+        draws.push(picture.source.resolution);
+      },
+      hold: () => undefined,
+      key: () => state.key
+    }
+  };
+}
+
+/**
+ * The slot of a frosted window: a backdrop filter on `"inherit"` (`blendRequired`), `"screen"`, with a back quad and the
+ * seam of one input from back, as `effects` hands a `Frost`.
+ *
+ * @param seam - The seam.
+ * @param fields - Other fields of the slot.
+ * @returns The slot.
+ */
+export function backSlot(
+  seam: BackSeam = backSeam(),
+  fields: Partial<FilterSlot> = {}
+): FilterSlot {
+  const filter = new pixi.ColorMatrixFilter();
+
+  filter.resolution = "inherit";
+  filter.blendRequired = true;
+
+  return {
+    filter,
+    passes: 2,
+    kind: "effects.frost",
+    cache: "screen",
+    inputs: seam.inputs,
+    quad: backQuadOfFilter(),
+    ...fields
+  };
 }

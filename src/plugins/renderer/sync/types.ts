@@ -610,6 +610,53 @@ export type FilterSlotQuad = {
    * the held chain results there. Empty or left out for a filter with no inputs; a game's own slot leaves it out.
    */
   readonly inputNames?: readonly string[];
+  /**
+   * A backdrop's names (F126 stage 5): where the mesh binds the `Source` the window reads and each result drawn from it,
+   * and the uniforms of `fu` the renderer writes the window's place on it into. Set, the slot is drawn on its quad over
+   * the nearest `Source` drawn before the window, no canvas copy and no filter pass; with no such `Source` it stays on
+   * the backdrop path. `inputNames` is then left out: every input of the filter starts from back.
+   *
+   * @example
+   * ```ts
+   * // `effects` hands a Frost's quad over: the renderer binds the ward room's Source and the blur drawn from it.
+   * frostOfNote.quad?.back?.texture; // "uBackTexture"
+   * frostOfNote.quad?.back?.inputs[0]?.offset; // "blurOffset"
+   * ```
+   */
+  readonly back?: FilterSlotQuadBack;
+};
+
+/**
+ * The names a backdrop's quad binds and writes (F126 stage 5): a texture and its sampler, and three `fu` uniforms that
+ * place the body's uv on it: `scale` (1 / the texture's frame in canvas px), `offset` (the window's picture origin over
+ * that frame) and `clamp` (half a texel inside it).
+ *
+ * @example
+ * ```ts
+ * const blur: FilterSlotQuadTexture = {
+ *   texture: "blurTexture", sampler: "blurSampler", scale: "blurScale", offset: "blurOffset", clamp: "blurClamp"
+ * };
+ * ```
+ */
+export type FilterSlotQuadTexture = {
+  readonly texture: string;
+  readonly sampler: string;
+  readonly scale: string;
+  readonly offset: string;
+  readonly clamp: string;
+};
+
+/**
+ * What a backdrop's quad names (F126 stage 5): the back texture itself, the Source, and each input from back.
+ *
+ * @example
+ * ```ts
+ * frostOfNote.quad?.back?.inputs.map(input => input.texture); // ["blurTexture"]
+ * ```
+ */
+export type FilterSlotQuadBack = FilterSlotQuadTexture & {
+  /** Each input of the filter, every one from back, in declaration order. */
+  readonly inputs: readonly FilterSlotQuadTexture[];
 };
 
 /**
@@ -670,14 +717,19 @@ export type FilterSlotInputs = {
    *
    * @param manager - Pixi's filter system, as the `apply` received it.
    * @param picture - The kept picture of the view's subtree.
-   * @param targets - One engine-owned texture per input, of the picture's frame at `scaleOf(index)` × its resolution.
+   * @param targets - One engine-owned texture per input, of the picture's frame at `scaleOf(index)` × its resolution;
+   *   `undefined` for an input not to draw (its chain is empty).
    * @example
    * ```ts
    * // Spec 23 runs the stages once on the kept picture of the ward, inside a filter pass of its own.
    * keeper.apply = (manager, picture) => slot.inputs?.draw(manager, picture, [blurred]);
    * ```
    */
-  draw(manager: PixiFilterManager, picture: PixiTexture, targets: readonly PixiTexture[]): void;
+  draw(
+    manager: PixiFilterManager,
+    picture: PixiTexture,
+    targets: readonly (PixiTexture | undefined)[]
+  ): void;
   /**
    * Lends kept results to the filter: while held, its apply binds them and draws its main body only.
    *
@@ -688,6 +740,20 @@ export type FilterSlotInputs = {
    * ```
    */
   hold(results: readonly PixiTexture[] | undefined): void;
+  /**
+   * The key of what the stages draw from a picture at a resolution, running the chains at it first when they last ran at
+   * another (F126 stage 5): two filters with equal keys draw equal results from one picture, so two frosted windows over
+   * one `Source` share one blur. A game's own slot leaves it out: its results are never shared.
+   *
+   * @param resolution - The resolution of the picture.
+   * @returns The key; -1 for a filter that draws nothing.
+   * @example
+   * ```ts
+   * // Two notes frosted at `blur: 12` over the ward room's Source at ¼ of 2.625:
+   * noteA.inputs?.key?.(0.65625) === noteB.inputs?.key?.(0.65625); // true
+   * ```
+   */
+  key?(resolution: number): number;
 };
 
 /**
@@ -768,6 +834,24 @@ export type FiltersApi = {
    * ```
    */
   warm(filter: PixiFilter, quad?: FilterSlotQuad): Promise<boolean>;
+
+  /**
+   * Hears of each window whose slot names a `back` and stays on the backdrop path because no `Source` is drawn before
+   * it (F126 stage 5): called once per window, in the flush of a drawn frame, after the frame's structure settled. Dev
+   * builds on WebGPU only; never in a production build.
+   *
+   * @param listener - Called with the window's entity.
+   * @returns The remover.
+   * @example
+   * ```ts
+   * // `effects` at start: the note frosted over nothing gets one line in the log.
+   * const stop = ctx.require(rendererPlugin).sync.filters.onUnserved(entity => {
+   *   ctx.log.warn("effects:frost-no-source", { entity, hint: "put Source() on the view under the glass" });
+   * });
+   * stop(); // at the effects plugin's stop
+   * ```
+   */
+  onUnserved(listener: (entity: Entity) => void): () => void;
 };
 
 /**
@@ -2357,6 +2441,12 @@ export type SyncState = {
    * write a plugin announced with `invalidate`.
    */
   passesVersion: number;
+  /**
+   * Moves at every change of where views hang or in which order (F126 stage 5, A4): a view hung, re-hung or gone, a
+   * wrapper made, a depth written, a `Source` added or removed. The window of a frosted view finds its `Source` again
+   * only when it moved.
+   */
+  structureVersion: number;
   /** The filtered views' passes of `renderPassesOf`, counted at `passesVersion` `at` under `root`. */
   passes: PassCount;
   /** The name of the scene's HUD layer (`above: "overlays"`), kept with the layers; `undefined` without one. */

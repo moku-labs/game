@@ -297,6 +297,7 @@ export {
   Overlay,
   Parent,
   Shape,
+  Source,
   Sprite,
   sprite,
   Transform
@@ -305,6 +306,7 @@ export type {
   HudPartValue,
   HudReturn,
   OverlayValue,
+  SourceScale,
   SpriteBlend
 } from "./plugins/renderer/components";
 // renderer: the performance log of an agent build, its frame ring and the record of one frame
@@ -362,6 +364,7 @@ export type {
   RetakeWhy,
   ShaderEventDetail,
   ShaderWhat,
+  SourceStats,
   WarmDetail,
   WhyEntry,
   WhyLive
@@ -460,6 +463,7 @@ export { Bloom } from "./plugins/effects/set/bloom";
 export { Dissolve } from "./plugins/effects/set/dissolve";
 export { Flash } from "./plugins/effects/set/flash";
 export { Fold } from "./plugins/effects/set/fold";
+export { Frost } from "./plugins/effects/set/frost";
 export { Grade } from "./plugins/effects/set/grade";
 export { GradientMap } from "./plugins/effects/set/gradient-map";
 export { Mirror } from "./plugins/effects/set/mirror";
@@ -474,6 +478,7 @@ export type {
   DissolveValue,
   FlashValue,
   FoldValue,
+  FrostValue,
   GradeValue,
   GradientMapValue,
   MirrorValue,

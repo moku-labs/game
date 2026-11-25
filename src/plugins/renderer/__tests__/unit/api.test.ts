@@ -64,7 +64,12 @@ describe("renderer api", () => {
       "used"
     ]);
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
-    expect(Object.keys(mock.api.sync.filters).toSorted()).toEqual(["area", "set", "warm"]);
+    expect(Object.keys(mock.api.sync.filters).toSorted()).toEqual([
+      "area",
+      "onUnserved",
+      "set",
+      "warm"
+    ]);
     expect(Object.keys(mock.api.sync.fonts).toSorted()).toEqual(["install", "installed"]);
     expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual([
       "kept",

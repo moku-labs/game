@@ -33,7 +33,7 @@ Each of the three marks itself (`markTransition`, `set/transition-mark.ts`) as t
 Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tweened. Every member also carries
 `enabled: true` and `order: 0`. The value types `FlashValue`, `GradeValue`, `VignetteValue`, `RevealLineValue`,
 `RevealRoundValue`, `DissolveValue`, `ShineValue`, `AuraValue`, `FoldValue`, `BloomValue`, `PixelateValue`,
-`GradientMapValue`, `WaveValue`, `MirrorValue` and `ShadowValue` are root exports.
+`GradientMapValue`, `WaveValue`, `MirrorValue`, `ShadowValue` and `FrostValue` are root exports.
 
 | Member | Fields (default, range) | In A Memory Missing | Frame | Passes | Mpx at 2 | A value change costs | A26 ms (run) |
 |---|---|---|---|---|---|---|---|
@@ -47,6 +47,7 @@ Every number field is tweenable; a colour is a `0xrrggbb` number, set, not tween
 | `Aura` | `color: 0xffffff`, `strength: 1` (0..2), `spread: 8` (CSS px, the padding) | a cheap `Glow` | tile | 1 | ≤ 0.083 | its quad | 24.9 against `rest` 22.7; by round `rest` + 2.05 against its line + 2.0 (perf/a26-2026-11-04-f126-s3-slice2) |
 | `Fold` | `angle: 0` (radians), `axis: 0` (0 about the vertical axis, 1 about the horizontal), `perspective: 0.5` (0..1), `shade: 0.4` (0..1) | OrderFlip, CoverFold | tile | 1 | ≤ 0.083 | its quad | 22.7 against `rest` 22.7 (perf/a26-2026-11-04-f126-s3-slice2) |
 | `Bloom` | `strength: 0.6` (0..2), `threshold: 0.7` (0..1), `radius: 16` (CSS px) | new: light around what is bright | tile: for an object, not the screen | 3 at any radius and resolution: its 2 steps at ¼ (at ⅛ for a wide radius, and at 2.625) and its body | ≤ 0.074 (0.116 at 2.625) | a moving `strength`: its quad over the held chain result on WebGPU (stage 4 slice 1), stage 3 in every frame on WebGL, 3 passes; a moving `threshold` or `radius` reruns the chain and stage 3, 7 passes, on both | on its quad: 12 still + 0.6, one moving among 12 + 0.7, 12 moving 24.2 (+ 0.8) against `rest` 23.4, 1 pass; `perf/a26-2026-11-08-f126-s4-slice1`. Before it, at rest + 0.4 (12 still), + 2.3 (one moving among 12), 12 moving 89.0 against `rest` 22.5; `perf/a26-2026-11-05-f126-s3-bloom-2` |
+| `Frost` | `blur: 12` (0..48 CSS px, 0 for none), `tint: 0xffffff` | the frosted notes and sheets over the ward (F126 stage 5) | window: a backdrop | over a `Source`: 0 canvas breaks, its chain off the canvas once per take of the Source (box + blur, 2 steps at the Source's resolution); without one, today's backdrop path: 3 passes (box, blur, body) and a canvas break per window | over a `Source` at ¼ of 2.625: 0.1–0.25 off the canvas per take (the spike's target, `stats().sources.mpx` measures it) | a moving `tint`: its quad; a moving `blur` reruns the chain from the Source, no take | not measured yet on the real member; the spike's eight windows: Source at rest 17.99 against backdrop 32.11 and baked 17.10, 1 pass against 9 (`perf/a26-f126-s5-source-spike`) |
 | `Pixelate` | `size: 8` (CSS px; 1 or less draws the view as it is) | new: a memory that breaks up or sharpens | screen | 1 | ≤ 1.065 | its quad | 24.3 against `rest` 23.8 (perf/a26-2026-11-18-f126-s4-effects) |
 | `GradientMap` | `dark: 0x000000`, `middle: 0x808080`, `light: 0xffffff`, `amount: 1` (0..1) | new: sepia, a night tint, a duotone | screen | 1 | ≤ 1.065 | its quad | 24.5 against `rest` 23.8 (perf/a26-2026-11-18-f126-s4-effects) |
 | `Wave` | `amplitude: 4` (CSS px), `wavelength: 48` (CSS px), `phase: 0`, `angle: 0` (radians) | new: water, heat, a dream; a `phase` loop | screen | 1 | ≤ 1.065 | its quad | 24.3 against `rest` 23.8 (perf/a26-2026-11-18-f126-s4-effects) |
@@ -228,6 +229,7 @@ a tile, 128 × 128. At resolution 2 one pass over the screen is 384 × 693 × 4 
 | `Aura` | 1 | 13 | ≤ 1.065 Mpx | ≤ 0.083 Mpx (padded by 8) | quad |
 | `Fold` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.083 Mpx (padded by 8) | quad |
 | `Bloom` | 3, at 2 and at 2.625 | 1 of its own body; its steps 4 (`BloomDown`) and 13 (`BloomBlur`) | 1.20 Mpx; 1.89 at 2.625: for an object, not the screen | ≤ 0.1 Mpx (0.074); ≤ 0.16 at 2.625 (0.116) | quad for `strength`; chain + stage 3 for `threshold` or `radius` |
+| `Frost` | over a `Source`: 0 canvas breaks; its 2 steps once per take, off the canvas. Without: 3 a window (its 2 steps and its body), and a canvas break | 1 of its own body; its steps 4 (`FrostDown`) and 13 (`BloomBlur`) | over a `Source` at ¼: the screen at ¼ once per take; without: the window's box at 2, twice | the window's box | quad for `tint` over a `Source`; chain for `blur` |
 | `Pixelate` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 | `GradientMap` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |
 | `Wave` | 1 | 1 | ≤ 1.065 Mpx | ≤ 0.066 Mpx | quad |

@@ -3,9 +3,10 @@
  * filter system fills, the vertex stage, and the uniform struct generated from the declaration,
  * so the shader and the uniform layout cannot drift. For each input the engine declares the texture,
  * its sampler (WGSL only), its scale and clamp uniforms and `sample<Name>(uv)`; for a backdrop, the
- * texture Pixi copies the canvas under the view into (`uBackTexture`, group 0 binding 3), its scale
- * and clamp uniforms and `sampleBack(uv)`. For a kept view whose numbers change, the quad program: the same fragment
- * body on a mesh, in the pass that draws the canvas (F126 stage 2), its inputs bound at group 3 (stage 4). Pure strings.
+ * texture Pixi copies the canvas under the view into (`uBackTexture`, group 0 binding 3), its scale, clamp and offset
+ * uniforms and `sampleBack(uv)`. For a kept view whose numbers change, the quad program: the same fragment body on a
+ * mesh, in the pass that draws the canvas (F126 stage 2), its inputs bound at group 3 (stage 4); a backdrop's quad
+ * reads a Source the renderer took instead of the canvas copy (stage 5). Pure strings.
  */
 import type { FilterInputDefinition, UniformSpec } from "./types";
 
@@ -68,9 +69,66 @@ export function uniformStruct(uniforms: readonly UniformSpec[], group = 1): stri
 }
 
 /**
+ * Where an input's helper reads on its texture: the body's uv in CSS px times its scale, plus its offset for an input
+ * that starts from back (0 on the live path; the window's place on a Source on its quad, F126 stage 5).
+ *
+ * @param input - The input.
+ * @param prefix - What a uniform is read through: `"fu."` in WGSL, nothing in GLSL.
+ * @param size - The CSS size of the body's input: `gfu.uInputSize.xy` in WGSL, `uInputSize.xy` in GLSL.
+ * @returns The expression.
+ * @example
+ * ```ts
+ * placeOf({ scale: { name: "softScale" }, offset: undefined } as never, "fu.", "gfu.uInputSize.xy"); // "uv * gfu.uInputSize.xy * fu.softScale"
+ * ```
+ */
+export function placeOf(
+  input: Pick<FilterInputDefinition, "scale" | "offset">,
+  prefix: string,
+  size: string
+): string {
+  const scaled = `uv * ${size} * ${prefix}${input.scale.name}`;
+
+  return input.offset === undefined ? scaled : `${scaled} + ${prefix}${input.offset.name}`;
+}
+
+/**
+ * The engine's members of a filter's uniform struct after its own uniforms, in the one order the live source, the quad
+ * text, the GLSL twin and the instance's uniform group share (A2): per input its scale, its clamp and, for an input
+ * from back, its offset; then a backdrop's back scale, clamp and offset; then `keptOrigin`. A struct that differs from
+ * the group by one member reads the wrong numbers, a blank view with nothing in the logs.
+ *
+ * @param uniforms - The uniforms in declaration order.
+ * @param inputs - The inputs in declaration order.
+ * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
+ * @param backdrop - True for a filter that reads what was drawn under its view.
+ * @returns Every member, in struct order.
+ * @example
+ * ```ts
+ * structMembers([], [], undefined, true).map(member => member.name); // ["backScale", "backClamp", "backOffset"]
+ * ```
+ */
+export function structMembers(
+  uniforms: readonly UniformSpec[],
+  inputs: readonly FilterInputDefinition[],
+  origin: UniformSpec | undefined,
+  backdrop: boolean
+): UniformSpec[] {
+  return [
+    ...uniforms,
+    ...inputs.flatMap(input =>
+      input.offset === undefined
+        ? [input.scale, input.clamp]
+        : [input.scale, input.clamp, input.offset]
+    ),
+    ...(backdrop ? [BACK_SCALE, BACK_CLAMP, BACK_OFFSET] : []),
+    ...(origin === undefined ? [] : [origin])
+  ];
+}
+
+/**
  * The engine's half of each input: the texture and the sampler in the group of `fu`, after it (input `k` at bindings
- * `1 + 2k` and `2 + 2k`), and the function that reads the input at the body's uv, its scale and its clamp applied.
- * Nothing without inputs.
+ * `1 + 2k` and `2 + 2k`), and the function that reads the input at the body's uv, its scale, its offset (an input from
+ * back) and its clamp applied. Nothing without inputs.
  *
  * @param inputs - The inputs in declaration order.
  * @param group - The bind group of `fu` and the inputs: 1 in a filter's source, 3 in a quad program's.
@@ -90,7 +148,7 @@ export function inputBindings(inputs: readonly FilterInputDefinition[], group = 
         `@group(${group}) @binding(${1 + 2 * index}) var ${input.texture}: texture_2d<f32>;\n` +
         `@group(${group}) @binding(${2 + 2 * index}) var ${input.sampler}: sampler;\n\n` +
         `fn ${input.sample}(uv: vec2<f32>) -> vec4<f32> {\n` +
-        `  return textureSampleLevel(${input.texture}, ${input.sampler}, clamp(uv * gfu.uInputSize.xy * fu.${input.scale.name}, fu.${input.clamp.name}.xy, fu.${input.clamp.name}.zw), 0.0);\n` +
+        `  return textureSampleLevel(${input.texture}, ${input.sampler}, clamp(${placeOf(input, "fu.", "gfu.uInputSize.xy")}, fu.${input.clamp.name}.xy, fu.${input.clamp.name}.zw), 0.0);\n` +
         "}\n\n"
     )
     .join("");
@@ -127,21 +185,53 @@ export const BACK_CLAMP: UniformSpec = Object.freeze({
 });
 
 /**
+ * The engine's uniform a backdrop's `sampleBack` moves its uv by on the back texture: `(0, 0)` on the live path, the
+ * window's place on a Source on its quad (F126 stage 5).
+ */
+export const BACK_OFFSET: UniformSpec = Object.freeze({
+  name: "backOffset",
+  type: "vec2<f32>",
+  form: "vector",
+  size: 2
+});
+
+/**
  * What a backdrop's body reads what was drawn under its view through: the texture Pixi's filter system copies the
  * canvas into and binds at group 0 binding 3 (`Filter.blendRequired`), sampled at the body's uv with the engine's
- * scale and clamp, as an input is.
+ * scale, offset and clamp, as an input is.
  */
 export const SAMPLE_BACK = /* wgsl */ `@group(0) @binding(3) var uBackTexture: texture_2d<f32>;
 
 fn sampleBack(uv: vec2<f32>) -> vec4<f32> {
-  return textureSampleLevel(uBackTexture, uSampler, clamp(uv * gfu.uInputSize.xy * fu.backScale, fu.backClamp.xy, fu.backClamp.zw), 0.0);
+  return textureSampleLevel(uBackTexture, uSampler, clamp(uv * gfu.uInputSize.xy * fu.backScale + fu.backOffset, fu.backClamp.xy, fu.backClamp.zw), 0.0);
 }
 
 `;
 
 /**
- * The whole source of a filter: the header, the uniform struct (the uniforms, then the scale and the clamp of each
- * input, then a backdrop's back scale and clamp, then the engine's `keptOrigin` of a body that calls `canvasPixel`),
+ * The back texture of a backdrop's quad program: a plain binding of group 3 after the inputs' (input `k` at `1 + 2k`
+ * and `2 + 2k`), its own sampler, where the renderer binds the Source the window reads, and `sampleBack` over it.
+ *
+ * @param count - The number of the filter's inputs.
+ * @returns The WGSL lines.
+ * @example
+ * ```ts
+ * quadBack(1).startsWith("@group(3) @binding(3) var uBackTexture: texture_2d<f32>;"); // true
+ * ```
+ */
+export function quadBack(count: number): string {
+  return (
+    `@group(3) @binding(${1 + 2 * count}) var uBackTexture: texture_2d<f32>;\n` +
+    `@group(3) @binding(${2 + 2 * count}) var uBackSampler: sampler;\n\n` +
+    "fn sampleBack(uv: vec2<f32>) -> vec4<f32> {\n" +
+    "  return textureSampleLevel(uBackTexture, uBackSampler, clamp(uv * gfu.uInputSize.xy * fu.backScale + fu.backOffset, fu.backClamp.xy, fu.backClamp.zw), 0.0);\n" +
+    "}\n\n"
+  );
+}
+
+/**
+ * The whole source of a filter: the header, the uniform struct (`structMembers`: the uniforms, then the scale, the
+ * clamp and the offset of each input, then a backdrop's back scale, clamp and offset, then the engine's `keptOrigin`),
  * the input bindings, a backdrop's `sampleBack`, the `canvasPixel` helper, the body. A body without either helper
  * assembles byte-identically to one without the cache and without the backdrop.
  *
@@ -163,12 +253,7 @@ export function assemble(
   origin?: UniformSpec,
   backdrop = false
 ): string {
-  const struct = uniformStruct([
-    ...uniforms,
-    ...inputs.flatMap(input => [input.scale, input.clamp]),
-    ...(backdrop ? [BACK_SCALE, BACK_CLAMP] : []),
-    ...(origin === undefined ? [] : [origin])
-  ]);
+  const struct = uniformStruct(structMembers(uniforms, inputs, origin, backdrop));
   const back = backdrop ? SAMPLE_BACK : "";
   const helper = origin === undefined ? "" : CANVAS_PIXEL;
 
@@ -275,18 +360,20 @@ function quadBody(wgsl: string): string | undefined {
 }
 
 /**
- * The quad program of a filter: the head of the mesh, the uniform struct at group 3 (the uniforms, then the scale and
- * the clamp of each input, then the engine's `keptOrigin` of a body that calls `canvasPixel`, as `assemble` lists
- * them, so the struct matches the instance's group member for member: a shader that asks for more than the group holds
- * fails only as an asynchronous GPU validation error, a blank view with nothing in the logs), each input's texture and
- * sampler at group 3 after `fu` with its `sample<Name>` helper (the renderer binds the held chain results there), the
+ * The quad program of a filter: the head of the mesh, the uniform struct at group 3 (`structMembers`, as `assemble`
+ * lists them, so the struct matches the instance's group member for member: a shader that asks for more than the group
+ * holds fails only as an asynchronous GPU validation error, a blank view with nothing in the logs), each input's
+ * texture and sampler at group 3 after `fu` with its `sample<Name>` helper (the renderer binds the held chain results
+ * there), a backdrop's back texture and sampler after them with `sampleBack` (the renderer binds the Source there), the
  * `canvasPixel` helper, the body as `filterBody`, the entry point. Without inputs the text is the one of a filter that
  * reads none.
  *
  * @param uniforms - The uniforms in declaration order.
  * @param body - The fragment body the game wrote.
  * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
- * @param inputs - The inputs in declaration order, each starting from the view's own input; none by default.
+ * @param inputs - The inputs in declaration order: each from the view's own input, or each from back for a backdrop;
+ *   none by default.
+ * @param backdrop - True for a backdrop, whose quad reads a Source in place of the canvas under the view.
  * @returns The WGSL source of both stages, or `undefined` for a body the rewrite does not fit.
  * @example
  * ```ts
@@ -299,21 +386,16 @@ export function assembleQuad(
   uniforms: readonly UniformSpec[],
   body: string,
   origin?: UniformSpec,
-  inputs: readonly FilterInputDefinition[] = []
+  inputs: readonly FilterInputDefinition[] = [],
+  backdrop = false
 ): string | undefined {
   const rewritten = quadBody(body);
 
   if (rewritten === undefined) return undefined;
 
-  const struct = uniformStruct(
-    [
-      ...uniforms,
-      ...inputs.flatMap(input => [input.scale, input.clamp]),
-      ...(origin === undefined ? [] : [origin])
-    ],
-    3
-  );
+  const struct = uniformStruct(structMembers(uniforms, inputs, origin, backdrop), 3);
+  const back = backdrop ? quadBack(inputs.length) : "";
   const helper = origin === undefined ? "" : CANVAS_PIXEL;
 
-  return `${QUAD_HEADER}${struct}${inputBindings(inputs, 3)}${helper}${rewritten}${QUAD_TAIL}`;
+  return `${QUAD_HEADER}${struct}${inputBindings(inputs, 3)}${back}${helper}${rewritten}${QUAD_TAIL}`;
 }

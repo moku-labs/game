@@ -39,6 +39,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
 | `Overlay({ dim, dimColor, cover, hud, hudInert, fade, hold, hudReturn? })` | `0, 0x000000, "none", "all", false, 250, false`, `hudReturn` absent | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep, or with `hud: "under"` draws the whole HUD under its dim. `hold: true` holds the endless loops under it while it stands. `hudReturn: { delayMs, fadeMs, parts? }` brings the parts it hid back on their own clock after it leaves. See "Overlays and the HUD". |
 | `HudPart({ key })` | `""` | A view of the HUD layer an overlay keeps shown or lets fade, by `key`. |
+| `Source({ scale })` | `0.25` | Marks the view a frosted window reads in place of the canvas (F126 stage 5): the view and its subtree are drawn ahead of the canvas pass into a texture the screen's size at `scale` of the canvas resolution (`0.5` or `0.25`; another value draws at `0.25`, and a dev build warns `renderer:source-scale` `{ entity, scale }` once), kept until something under it changes. The view still draws on the canvas as before. See "Sources". |
 | `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip, sweep?, cap? })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false`; `sweep` and `cap` absent (an arc reads them as `1` and `"round"`, `arcDefaults`) | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. With `kind: "arc"` a stroke on the circle inscribed in the box, `min(w, h) − strokeWidth` across and centred, so the stroke stays inside the box: from 12 o'clock clockwise over `sweep` of the circle (clamped to 0..1; 0 draws nothing and leaves the build, 1 is a closed ring with no ends), ended by `cap` (`"round"` or `"butt"`), in `stroke`, `strokeWidth` and `alpha`; `sweep` and `cap` are optional: only an arc reads them; a rectangle or a triangle ignores them. It is stroked in segments as many as its angle needs (48 for a ring). An arc draws no fill and ignores `radius` and `dash`; its `clip` masks the children to its box. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape and the entity's children (see the alpha rule under "Layers, sort and lift"). `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. The path is built again only when a field it is drawn from changed: a still arc costs nothing a frame, a new `sweep` builds it once, a new `fill` does not build it. Motions tween only the numeric fields (`sweep` among them), never `kind` or `cap`. |
 
 ```ts
@@ -429,7 +430,7 @@ See "Shots of the frame".
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit: { art, text, targets, kept, other, idle: { targets, kept } }, views, pooled, renderPasses, renderPassesMax, canvasPasses, canvasPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }`. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit: { art, text, targets, kept, other, idle: { targets, kept } }, views, pooled, renderPasses, renderPassesMax, canvasPasses, canvasPassesMax, kept, sources }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, and `counts` (the live object counts, see "Live object counts") in an agent build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0, evicted: 0, refused: 0 }`, `sources` `{ count: 0, takes: 0, mb: 0, mpx: 0 }` (also for a game without a `Source`). |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `scene:build` at the start of a scene built aside, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
@@ -1380,6 +1381,53 @@ A mesh draws onto the canvas, whose target holds a stencil, or inside a filter p
 not: two pipelines (measured on Chrome, 2026-11-01: one of each per program). The warm-up draws a quad in both, the second
 into a texture of its own, in the frame of the first: 2 draws a quad, no frame more, and no pipeline in the first frame of
 a view on its shader in any of the three places.
+
+### Sources
+
+A frosted window reads the picture under it from a `Source` instead of a copy of the canvas (F126 stage 5, change
+2026-11-25-f126-s5-source). A slot whose quad names a `back` (the set's `Frost`, any backdrop with inputs that all read
+`from: "back"`; a backdrop without inputs gets no quad and keeps the backdrop path) finds the nearest `Source` drawn before its view: from its top up the parents to the stage, at each
+level the earlier siblings, last first, each subtree depth first, last child first. A `Source` on an ancestor of the
+window never counts (it would read itself). The find is cached on the window and done again only when
+`sync.structureVersion` moves: a view hung, re-hung or gone, a wrapper made, a `Source` added or removed, or a depth
+written in a container that holds a `Source` (a character walking in a y-sorted layer with no `Source` in it moves
+nothing). A window whose filter is switched off forgets its find, and finds again when it is back.
+
+In the flush of a drawn frame: every window finds its `Source` and is counted as a reader while its last step was
+eligible with it (WebGPU, one enabled filter, ancestors that draw it as a picture would); the records that read no
+`Source` step first, so a kept picture inside a `Source` is taken again before the `Source` is (a record whose drawing
+changes marks the `Source`s above it, as it marks the pictures above it); then every dirty `Source` with a reader is
+taken (`renderTo` of its top at its canvas transform into a texture the screen's size at
+`resolution × scale`, rounded up; the take makes the top a render group, undone when the `Source` lets its texture go);
+then every reader's chain is brought up to that take: drawn from the `Source`'s texture, at its resolution, into results
+the `Source` holds, keyed by the filter kind and `FilterSlotInputs.key` (the steps of the chain there), so windows of
+equal keys share one result. A chain whose steps change (a tweened `blur`) runs again without a take. The window then
+steps as a kept view on its quad: its own pixels in its picture, the `Source` and the results bound under
+`quad.back`'s names, and the placement uniforms (`scale` 1 / the frame, `offset` the window's picture origin over it,
+`clamp` half a texel in) written in place, compare-then-write. A moving window writes only these numbers.
+
+- A `Source` is dirty when it is made, when its texture went, after a mark inside its subtree (the same walk that marks
+  pictures), when its top stands elsewhere on the canvas than at its take (a node above it moved: its world transform
+  is compared in every drawn frame it is read, into a scratch matrix), and on a resize (also a resolution step), a
+  restore and a debug switch. A mark outside it and a moving window do not touch it. A take happens only in the flush of a drawn frame: a take in an undrawn frame shows an empty
+  canvas on WebGPU.
+- A `Source` no window reads holds no texture and is never taken. The last reader gone, a removed component, the kept
+  switch off and WebGL (no quad twin there: the backdrop path) all let its texture and results go.
+- A window that becomes eligible draws its first frame on the backdrop path; its `Source` is taken in the next drawn
+  flush and it goes on its quad from then. A window whose `Source` is removed is on the backdrop path the next frame.
+- A hidden or transparent `Source` is taken as drawn: a transparent picture. A `Source` whose top is itself kept is taken
+  live from its subtree. A `Source` on a bare view that draws itself (an image with no child) gets its wrapper before its
+  first take, as a picture does (D4): the root of the take is a plain container, and the image keeps its own transform,
+  tint and alpha.
+- A take that redraws its texture in place, at its size, leaves the windows as they stand (their meshes bind that
+  texture); the result windows of equal steps share is drawn again in place, its label and size made only for a new
+  texture. The engine's part of a take, its chains and the steps of its windows allocates nothing; the renders do
+  (`host.renderTo` hands Pixi a fresh options object, as every take of a picture does, and Pixi's render its own).
+- `stats().sources` is `{ count, takes, mb, mpx }`: the views that carry `Source`, the takes of the last drawn frame, the
+  MiB of their textures and results, and the device Mpx the takes and their chains drew off the canvas in that frame. A
+  take counts as an off-canvas pass in `renderPasses`, never as a canvas pass.
+- `sync.filters.onUnserved(listener)`: a dev build on WebGPU tells, once per window, of a slot with a `back` that stays on
+  the backdrop path because no `Source` is drawn before it; `effects` logs it as `effects:frost-no-source`.
 
 ### Why a view is drawn live
 

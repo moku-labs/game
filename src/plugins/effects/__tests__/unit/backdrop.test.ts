@@ -2,7 +2,13 @@ import * as pixi from "pixi.js";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FeatureFilter } from "../../../flow/types";
 import { Sprite, Transform } from "../../../renderer/components";
-import type { FilterSlot, PixiFilter, PixiModule, PixiTexture } from "../../../renderer/types";
+import type {
+  FilterSlot,
+  FilterSlotInputs,
+  PixiFilter,
+  PixiModule,
+  PixiTexture
+} from "../../../renderer/types";
 import type { Entity } from "../../../world/types";
 import { defineFilter } from "../../filters/define";
 import { createFilter, createStandIn } from "../../filters/instance";
@@ -176,12 +182,12 @@ describe("defineFilter — a backdrop filter", () => {
     );
     expect(Under.filter.source).toContain("fn sampleBack(uv: vec2<f32>) -> vec4<f32> {");
     expect(Under.filter.source).toContain(
-      "  spread: f32,\n  backScale: vec2<f32>,\n  backClamp: vec4<f32>,\n};"
+      "  spread: f32,\n  backScale: vec2<f32>,\n  backClamp: vec4<f32>,\n  backOffset: vec2<f32>,\n};"
     );
     expect(Under.filter.source.endsWith(UNDER_BODIES.wgsl)).toBe(true);
     expect(Under.filter.glsl).toContain("uniform sampler2D uBackTexture;");
     expect(Under.filter.glsl).toContain(
-      "uniform float spread;\nuniform vec2 backScale;\nuniform vec4 backClamp;\n"
+      "uniform float spread;\nuniform vec2 backScale;\nuniform vec4 backClamp;\nuniform vec2 backOffset;\n"
     );
     expect(Under.filter.glsl).toContain("vec4 sampleBack(vec2 uv) {");
     expect(Under.filter.glsl.endsWith(UNDER_BODIES.glsl)).toBe(true);
@@ -313,6 +319,16 @@ describe("defineFilter — a backdrop filter", () => {
   });
 });
 
+/**
+ * The seam of an instance of ours with inputs.
+ *
+ * @param instance - The instance.
+ * @returns Its seam, or `undefined`.
+ */
+function seam(instance: FilterInstance): FilterSlotInputs | undefined {
+  return instance.kind === "wgsl" ? instance.inputs?.slot : undefined;
+}
+
 describe("the apply of a backdrop filter — on the real Pixi module", () => {
   // Bug: the Pixi filter is built without `blendRequired`: Pixi copies nothing and binds its empty texture at binding 3.
   it("asks Pixi for the canvas under its view; a filter that is no backdrop does not", () => {
@@ -343,6 +359,38 @@ describe("the apply of a backdrop filter — on the real Pixi module", () => {
         Math.fround(value)
       )
     ]);
+  });
+
+  // Bug: a window the renderer drew on a Source a frame before samples the live back copy at the Source's place: the
+  // live apply writes each offset to (0, 0), every apply, beside the scale and the clamp (A12).
+  it("writes backOffset and each input-from-back offset at 0 on every live apply", () => {
+    const mock = started([Frosted]);
+    const instance = build(mock, "fixture.frosted", Frosted().value);
+    const { input, output } = textures(2);
+    const { manager } = recorder(backAt(2));
+    const { fu } = instance.filter.resources as { fu: { uniforms: Record<string, Float32Array> } };
+
+    fu.uniforms.backOffset?.set([0.25, 0.5]);
+    fu.uniforms.softOffset?.set([0.125, 0.75]);
+    instance.filter.apply(manager, input, output, false);
+
+    expect(uniformOf(instance.filter, "backOffset")).toEqual([0, 0]);
+    expect(uniformOf(instance.filter, "softOffset")).toEqual([0, 0]);
+  });
+
+  // Bug: two windows over one Source never share a blur, or a key read per frame runs the chains again (F126 stage 5).
+  it("answers the key of its steps at a resolution, equal for two instances of one value, running the chains once", () => {
+    const mock = started([Frosted]);
+    const one = build(mock, "fixture.frosted", Frosted().value);
+    const two = build(mock, "fixture.frosted", Frosted().value);
+    const other = build(mock, "fixture.frosted", Frosted({ spread: 3 }).value);
+    const version = seam(one)?.version() ?? 0;
+
+    expect(seam(one)?.key?.(0.5)).toBe(seam(two)?.key?.(0.5));
+    expect(seam(one)?.version()).toBe(version + 1);
+    expect(seam(one)?.key?.(0.5)).toBe(seam(two)?.key?.(0.5));
+    expect(seam(one)?.version()).toBe(version + 1);
+    expect(seam(other)?.key?.(0.5)).not.toBe(seam(one)?.key?.(0.5));
   });
 
   // Bug: the chain blurs the view's own content (the panel) instead of the scene under it.

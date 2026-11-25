@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { defineFilter } from "../../filters/define";
 import type { UniformSpec } from "../../filters/types";
-import { assembleQuad, HEADER } from "../../filters/wgsl";
+import { assemble, assembleQuad, HEADER } from "../../filters/wgsl";
 import { Frosted, SOFT_BODIES, SOFT_STAGES, Soft, softChain, Under } from "../filter-fixtures";
 
 // ---------------------------------------------------------------------------
@@ -216,9 +216,10 @@ describe("defineFilter and the quad text", () => {
     );
   });
 
-  // Bug: a mesh over the canvas under the view, which it cannot bind: a backdrop, with or without inputs, and an input
-  // drawn from what was drawn under the view stay off the quad.
-  it("has none for a backdrop, its inputs from its view or from back", () => {
+  // Bug: a mesh over a chain of the view under a backdrop, which no Source can feed, gets a quad; a backdrop whose inputs
+  // all read back has one over a Source (F126 stage 5, A2). A backdrop without inputs opts into nothing (W4): with a
+  // quad it would get a kept record and the no-Source warning in a game that uses neither Source nor Frost.
+  it("has none for a backdrop whose input reads its view or that reads none, one for inputs from back", () => {
     const Misted = defineFilter("fixture.quadMisted", {
       ...SOFT_BODIES,
       uniforms: { spread: 1, tone: 0 },
@@ -229,7 +230,15 @@ describe("defineFilter and the quad text", () => {
     expect(Misted.filter.inputs[0]?.from).toBe("input");
     expect(Misted.filter.quadSource).toBeUndefined();
     expect(Under.filter.quadSource).toBeUndefined();
-    expect(Frosted.filter.quadSource).toBeUndefined();
+    expect(Frosted.filter.quadSource).toBe(
+      assembleQuad(
+        Frosted.filter.uniforms,
+        SOFT_BODIES.wgsl,
+        undefined,
+        Frosted.filter.inputs,
+        true
+      )
+    );
   });
 });
 
@@ -261,9 +270,93 @@ describe("the source a filter draws with today", () => {
       "3e57d839b604d519"
     ],
     ["a body with an input", Soft.filter.source, "a46694a8596c61b9"],
-    ["a backdrop", Under.filter.source, "3c70dacd5b549e7d"],
-    ["a backdrop with an input", Frosted.filter.source, "58b51ccd131d12b8"]
+    // A2 (F126 stage 5): a backdrop's struct gains `backOffset`, an input from back its offset; the live apply writes 0.
+    ["a backdrop", Under.filter.source, "0a27dbb858b30146"],
+    ["a backdrop with an input", Frosted.filter.source, "5a26508d8b3e088a"]
   ])("does not move for %s", (_name, source, pinned) => {
     expect(digest(source)).toBe(pinned);
+  });
+});
+
+/**
+ * The members of the first `struct FilterUniforms` of a text, in order.
+ *
+ * @param source - A WGSL text.
+ * @returns The member lines, trimmed.
+ */
+function structOf(source: string | undefined): string[] {
+  const body = /struct FilterUniforms \{\n([\s\S]*?)\};/.exec(source ?? "")?.[1] ?? "";
+
+  return body
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line !== "");
+}
+
+describe("a backdrop over a Source (F126 stage 5)", () => {
+  // Bug: the quad's struct differs from the live struct by one member: the instance's one group reads the wrong numbers
+  // on the mesh, a silent blank view (A2).
+  it("lists the struct of the live text and of the quad text member for member, offsets after each clamp", () => {
+    const live = structOf(Frosted.filter.source);
+
+    expect(structOf(Frosted.filter.quadSource)).toEqual(live);
+    expect(live).toEqual([
+      "spread: f32,",
+      "tone: f32,",
+      "softScale: vec2<f32>,",
+      "softClamp: vec4<f32>,",
+      "softOffset: vec2<f32>,",
+      "backScale: vec2<f32>,",
+      "backClamp: vec4<f32>,",
+      "backOffset: vec2<f32>,"
+    ]);
+    expect(Frosted.filter.glsl).toContain(
+      "uniform vec2 softScale;\nuniform vec4 softClamp;\nuniform vec2 softOffset;\nuniform vec2 backScale;\nuniform vec4 backClamp;\nuniform vec2 backOffset;\n"
+    );
+  });
+
+  // Bug: the quad binds the Source where the input's result goes, or reads the window's place off nothing: the back
+  // texture is a plain group-3 binding after the inputs, with its own sampler, and both helpers add their offset.
+  it("binds the back after the inputs at group 3 and adds each offset; a filter that is no backdrop has none", () => {
+    const quad = Frosted.filter.quadSource ?? "";
+
+    expect(quad).toContain("@group(3) @binding(1) var softTexture: texture_2d<f32>;");
+    expect(quad).toContain("@group(3) @binding(3) var uBackTexture: texture_2d<f32>;");
+    expect(quad).toContain("@group(3) @binding(4) var uBackSampler: sampler;");
+    expect(quad).toContain("uv * gfu.uInputSize.xy * fu.softScale + fu.softOffset");
+    expect(quad).toContain(
+      "textureSampleLevel(uBackTexture, uBackSampler, clamp(uv * gfu.uInputSize.xy * fu.backScale + fu.backOffset"
+    );
+    expect(Frosted.filter.source).toContain(
+      "textureSampleLevel(uBackTexture, uSampler, clamp(uv * gfu.uInputSize.xy * fu.backScale + fu.backOffset"
+    );
+    expect(Soft.filter.quadSource).not.toMatch(/uBackTexture|Offset/);
+    expect(assemble([], Soft.filter.inputs, SOFT_BODIES.wgsl)).not.toContain("softOffset");
+  });
+
+  // Bug: a game uniform takes a name the engine declares for a backdrop: its struct holds the member twice (A2, A12).
+  it("refuses backOffset, uBackSampler and an input-from-back's offset as a uniform; a view input's offset stays free", () => {
+    const back = (uniforms: Record<string, number>): unknown =>
+      defineFilter("fixture.reservedBack", {
+        ...SOFT_BODIES,
+        uniforms: { spread: 1, tone: 0, ...uniforms },
+        backdrop: true,
+        inputs: { blur: { from: "back", stages: SOFT_STAGES, chain: softChain } }
+      });
+
+    expect(() => back({ backOffset: 0 })).toThrow(/uniform "backOffset" is reserved/);
+    expect(() => back({ uBackSampler: 0 })).toThrow(/uniform "uBackSampler" is reserved/);
+    expect(() => back({ blurOffset: 0 })).toThrow(
+      /makes "blurOffset", which is a uniform of the filter/
+    );
+
+    const Free = defineFilter("fixture.freeOffset", {
+      ...SOFT_BODIES,
+      uniforms: { spread: 1, tone: 0, blurOffset: 0 },
+      inputs: { blur: { stages: SOFT_STAGES, chain: softChain } }
+    });
+
+    expect(Free.filter.inputs[0]?.offset).toBeUndefined();
+    expect(structOf(Free.filter.source)).toContain("blurOffset: f32,");
   });
 });

@@ -66,7 +66,7 @@ export const MAX_SIDE = 4096;
 const ON_GRID = 1 / 64;
 
 /** Bytes of one RGBA texel. */
-const TEXEL_BYTES = 4;
+export const TEXEL_BYTES = 4;
 
 /**
  * The bounds of a box under the linear part (a, b, c, d) of a transform.

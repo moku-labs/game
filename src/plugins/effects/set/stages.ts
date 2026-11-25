@@ -1,6 +1,7 @@
 /**
  * @file effects/set — the shared stages a chain member of the set draws its second texture with: `BloomDown` (what is
- * above a threshold, boxed down in one pass) and `BloomBlur` (a 13-tap blur in two dimensions, one pass). Each is a
+ * above a threshold, boxed down in one pass), `FrostDown` (the input boxed down in one pass, nothing cut) and
+ * `BloomBlur` (a 13-tap blur in two dimensions, one pass). Each is a
  * `defineFilter` that draws alone, listed in a member's `inputs` and named by its chain's steps; none is a root
  * export (a game that wants a chain writes its own stages). Before each body the set head and `inputTexel()`.
  */
@@ -182,4 +183,40 @@ export const BloomBlur: FilterComponent<{ sigma: number; enabled: boolean; order
     wgsl: BLOOM_BLUR_SOURCE,
     glsl: BLOOM_BLUR_GLSL_SOURCE,
     uniforms: { sigma: 0 }
+  });
+
+/**
+ * The WGSL body of `FrostDown`: drawn at a share of its input, it reads it with 4 taps on the diagonals of its pixel,
+ * `reach` texels out on each axis, and averages them: a box of the input, premultiplied as it came, nothing cut.
+ */
+export const FROST_DOWN_WGSL = /* wgsl */ `@fragment
+fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  let n = inputPlace(uv);
+  let d = fu.reach * inputTexel();
+
+  return (sampleInput(n + d) + sampleInput(n - d) + sampleInput(n + vec2<f32>(d.x, -d.y)) + sampleInput(n + vec2<f32>(-d.x, d.y))) * 0.25;
+}
+`;
+
+/** The GLSL twin of `FROST_DOWN_WGSL`. */
+export const FROST_DOWN_GLSL = /* glsl */ `void main() {
+  vec2 n = inputPlace(vTextureCoord);
+  vec2 d = reach * inputTexel();
+
+  finalColor = (sampleInput(n + d) + sampleInput(n - d) + sampleInput(n + vec2(d.x, -d.y)) + sampleInput(n + vec2(-d.x, d.y))) * 0.25;
+}
+`;
+
+/** The whole WGSL `FrostDown` is defined with. */
+const FROST_DOWN_SOURCE = /*#__PURE__*/ withStageWgsl(FROST_DOWN_WGSL);
+
+/** The whole GLSL `FrostDown` is defined with. */
+const FROST_DOWN_GLSL_SOURCE = /*#__PURE__*/ withStageGlsl(FROST_DOWN_GLSL);
+
+/** The first stage of `Frost`: what was drawn under the window, boxed down to the step's scale in one pass. 4 samples. */
+export const FrostDown: FilterComponent<{ reach: number; enabled: boolean; order: number }> =
+  /*#__PURE__*/ defineFilter("effects.frostDown", {
+    wgsl: FROST_DOWN_SOURCE,
+    glsl: FROST_DOWN_GLSL_SOURCE,
+    uniforms: { reach: 1 }
   });

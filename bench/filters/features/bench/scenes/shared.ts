@@ -11,9 +11,13 @@ export const PICTURE = "ui.fx-spark";
  * A sprite that covers the screen.
  *
  * @param stage - The stage.
+ * @param extra - More components of it: `Source()` for the picture a frosted window reads (F126 stage 5).
  * @returns The sprite.
  */
-export function fullSprite(stage: Stage): World.Entity {
+export function fullSprite(
+  stage: Stage,
+  ...extra: readonly World.AnyComponentValue[]
+): World.Entity {
   return stage.spawn(
     Transform({ x: 0, y: 0 }),
     Sprite({
@@ -21,7 +25,8 @@ export function fullSprite(stage: Stage): World.Entity {
       width: stage.width,
       height: stage.height,
       anchor: { x: 0, y: 0 }
-    })
+    }),
+    ...extra
   );
 }
 

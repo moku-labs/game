@@ -546,6 +546,31 @@ export const HudPart = /*#__PURE__*/ component("HudPart", { key: "" });
  */
 export const OverlayLevel = /*#__PURE__*/ component("OverlayLevel", { level: 0, landed: false });
 
+/** The share of the canvas resolution a `Source` is drawn at. */
+export type SourceScale = 0.5 | 0.25;
+
+/** The defaults of `Source`: a quarter of the canvas resolution (on the A26 an eighth was not cheaper). */
+const sourceDefaults: { scale: SourceScale } = { scale: 0.25 };
+
+/**
+ * Marks the view a frosted window reads in place of the canvas (F126 stage 5): the engine draws that view and its
+ * subtree ahead of the canvas pass into a small texture at `scale` of the canvas resolution (`0.5` or `0.25`, the
+ * default; any other value draws at `0.25` and a dev build warns `renderer:source-scale`), and keeps it until something
+ * inside it changes, the canvas is resized or restored. The view itself still draws on the canvas as before. A `Frost`
+ * window reads the nearest `Source` drawn before it: no filter pass and no canvas break, its blur drawn once per take.
+ * A `Source` no window reads holds no texture and costs nothing.
+ *
+ * @example
+ * ```tsx
+ * // views/ward.tsx: the room under the notes is taken at ¼; a note frosts it.
+ * <view key="ward-room" components={[Source()]}>…</view>
+ * <view key="note" components={[Frost({ blur: 12, tint: 0x62585b })]}>…</view>
+ * // The frame after a bed in the room changes:
+ * app.renderer.stats().sources.takes; // 1
+ * ```
+ */
+export const Source = /*#__PURE__*/ component("Source", sourceDefaults);
+
 /**
  * Bundles the two components every visual needs, so a projection `view` reads as one line.
  *
