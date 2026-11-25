@@ -77,6 +77,15 @@ export type MockRenderer = {
   setWorldNow(ms: number): void;
   /** Sets the game time `time.snapshot().elapsed` answers, in milliseconds. */
   setElapsed(ms: number): void;
+  /** Sets the unscaled delta of the frames the phases receive, 16 ms when never set; `setTimeScale` scales it. */
+  setFrameDelta(ms: number): void;
+  /**
+   * Scales the delta of the frames the phases receive, as the real `time.setScale` does (the fake's `setScale` stays a
+   * bare spy: a closure over the frame there moves V8's choices in the perf files that share the fake).
+   */
+  setTimeScale(scale: number): void;
+  /** Sets the `idle` flag of the frames the phases receive, as the real clock's idle timer does. */
+  setIdle(idle: boolean): void;
   /** Sets what the fake `time.isPaused()` answers. */
   setPaused(paused: boolean): void;
   /** Runs `onStart`. */
@@ -290,6 +299,8 @@ export function createMockRenderer(
   const frames: FrameRegistration[] = [];
   const pauses: Array<{ action: "push" | "pop"; reason: PauseReason }> = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
+  // The frame's unscaled delta: the real clock hands the phases `delta × scale`.
+  const unscaled = { delta: 16 };
   const clock = { now: 0, paused: false, wakes: 0, pending: 0, listeners: 0 };
   const measures: MeasureListener[] = [];
   const charged: number[] = [];
@@ -443,6 +454,17 @@ export function createMockRenderer(
     },
     setElapsed: (ms: number): void => {
       time.elapsed = ms;
+    },
+    setFrameDelta: (ms: number): void => {
+      unscaled.delta = ms;
+      time.delta = ms * time.scale;
+    },
+    setTimeScale: (scale: number): void => {
+      time.scale = scale;
+      time.delta = unscaled.delta * scale;
+    },
+    setIdle: (idle: boolean): void => {
+      time.idle = idle;
     },
     setPaused: (paused: boolean): void => {
       clock.paused = paused;

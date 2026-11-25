@@ -68,6 +68,35 @@ export const BUDGET = {
   // walks the overlay order and the stored key list with `includes`, no closure, no object, no string; the tap set is
   // built again only when its members change.
   hudPartsInert: 0,
+  // F240: new, measured 0 B. The overlay step of a landed overlay whose `hudReturn` has three keys in `parts`: one
+  // reference compared a step, the copy made only on a new value. Bench (`hud-return.bench.ts`, Node 24.21 on
+  // macOS): 1.46 µs a step, beside 1.35 µs for the resting shop of `hudPartsFaded`.
+  hudReturnStanding: 0,
+  // F240: new, measured 0 B. A run in progress after its record is gone, three HUD parts held: the frame's delta added
+  // in place, one indexed walk of the runs per part, the clock woken only in an idle frame that counted game time
+  // (`hudReturnIdle`). Bench: 0.76 µs a
+  // step; `stepParts` alone 0.68 µs with the run, 0.61 µs without one.
+  hudReturnRunning: 0,
+  // F240: new, measured 0 B. Three HUD parts after the run ended, its object back in the pool: one length read per
+  // part. Bench: 0.70 µs a step.
+  hudReturnEnded: 0,
+  // F240 verify: new, measured 0 B. The value of `hudReturnStanding` written again before every step as a new
+  // object with the same times (an inline literal): compared field by field with a `for…in` walk, the copy kept.
+  // Before the compare: 744 B (a Map and its objects every step).
+  hudReturnRewritten: 0,
+  // F240 verify: new, measured 0 B. A run in its fade, record gone: three parts drawn at a new factor every
+  // step, the view marked each time.
+  hudReturnFading: 0,
+  // F240 verify: new, measured 0 B. A run taken from the warm pool, one frame counted, ended again: the list
+  // of runs cut with `pop`. Before: 192 B, of it 152 B from `length = 0` (the list's backing store dropped, the next
+  // start made a new one) and 40 B from the `for…of` over `parts` in `endsOf` (now a `forEach`).
+  hudReturnCycle: 0,
+  // F240 verify 2: new, measured 0 B. The cycle of `hudReturnCycle` with every leave under reduced motion: the end
+  // walked over the delays alone, its scratch on the overlay state (`OverlayState.endsWalk`, the callback's `this`).
+  hudReturnCycleReduced: 0,
+  // F240 verify: new, measured 0 B. The run of `hudReturnRunning` in frames the clock marks idle: the clock
+  // woken at every step.
+  hudReturnIdle: 0,
   // A26 heap profile: before 22 400 B (a new SDF shader made at every layout of a text and dropped by Pixi: its bind
   // groups, its resource accessors, its uniform group); then 2 831 B with the text's own shader kept. S: the text gets
   // no shader at all; measured 2 767 B, all of it Pixi laying the label out again (its graphics context's

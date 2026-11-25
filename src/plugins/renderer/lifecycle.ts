@@ -6,6 +6,7 @@ import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
+import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
 import { createModules } from "./api";
 import { stopDemand } from "./demand/state";
@@ -70,8 +71,13 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param modules - The seven modules.
+ * @param time - The frame's `Time`: its game delta and idle flag go to the overlay step for the HUD returns (F240).
  */
-function renderFrame(ctx: RendererCtx, modules: Modules): void {
+function renderFrame(ctx: RendererCtx, modules: Modules, time: Readonly<Time>): void {
+  // F240: read from the frame the phase hands over; `time.snapshot()` would copy it.
+  ctx.state.sync.frameDelta = time.delta;
+  ctx.state.sync.frameIdle = time.idle;
+
   if (modules.host.resolutionPending()) ctx.state.viewport.resizePending = true;
 
   if (modules.viewport.applyPending()) {
@@ -175,7 +181,7 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     modules.shots.start();
     rendererCtx.state.host.cleanups.push(
       rendererCtx.deps.time.onFrame("input", () => modules.monitor.begin()),
-      rendererCtx.deps.time.onFrame("render", () => renderFrame(rendererCtx, modules))
+      rendererCtx.deps.time.onFrame("render", time => renderFrame(rendererCtx, modules, time))
     );
     modules.monitor.attach();
     modules.monitor.attachPasses();

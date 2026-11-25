@@ -1,8 +1,14 @@
 import { expectTypeOf } from "vitest";
-import { defineGame } from "../../../../index";
+import { defineGame, type HudReturn as RootHudReturn } from "../../../../index";
 import type { LayerMap } from "../../../scenes/types";
 import type { Entity } from "../../../world/types";
-import { componentsFor, HudPart, Overlay, type OverlayValue } from "../../components";
+import {
+  componentsFor,
+  HudPart,
+  type HudReturn,
+  Overlay,
+  type OverlayValue
+} from "../../components";
 import type { Api, OverlayReport } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -31,8 +37,28 @@ Overlay({ level: 1 });
 Overlay({ landed: true });
 
 expectTypeOf<keyof OverlayValue>().toEqualTypeOf<
-  "dim" | "dimColor" | "cover" | "hud" | "hudInert" | "fade" | "hold"
+  "dim" | "dimColor" | "cover" | "hud" | "hudInert" | "fade" | "hold" | "hudReturn"
 >();
+
+// F240: `hudReturn` is optional, so a full value written before it still compiles. Unannotated, so a required
+// `hudReturn` fails the check at the end of the file instead of the declaration.
+const splashBefore = {
+  dim: 0,
+  dimColor: 0,
+  cover: "opaque",
+  hud: "none",
+  hudInert: false,
+  fade: 800,
+  hold: false
+} as const;
+
+Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 700 } });
+
+// @ts-expect-error — a return needs its fade, 0 for at once.
+Overlay({ hud: "none", hudReturn: { delayMs: 1100 } });
+
+// @ts-expect-error — "gems" is not a key of HudReturn<"energy">.
+const onlyEnergy: HudReturn<"energy"> = { delayMs: 1, fadeMs: 1, parts: { gems: {} } };
 
 // @ts-expect-error — hold is a switch, true or false.
 Overlay({ hold: "yes" });
@@ -63,6 +89,14 @@ kit.HudPart({ key: "energi" });
 
 // @ts-expect-error — nor in an overlay's list.
 kit.Overlay({ hud: ["energy", "gemz"] });
+
+kit.Overlay({
+  hud: "none",
+  hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: { delayMs: 1250 } } }
+});
+
+// @ts-expect-error — nor in the parts of its return.
+kit.Overlay({ hudReturn: { delayMs: 1, fadeMs: 1, parts: { nope: {} } } });
 
 const game = defineGame<{
   player: { coins: number };
@@ -102,3 +136,31 @@ sync.loopsHeld(1, "size");
 expectTypeOf<Api["sync"]["debug"]["overlays"]>().returns.toEqualTypeOf<readonly OverlayReport[]>();
 expectTypeOf(ward).toEqualTypeOf<LayerMap>();
 expectTypeOf(wrong).toEqualTypeOf<LayerMap>();
+expectTypeOf(splashBefore).toExtend<OverlayValue>();
+// The parts of a typed return take the game's keys alone, each with its two optional times.
+expectTypeOf(onlyEnergy.parts).toEqualTypeOf<
+  Partial<Record<"energy", { delayMs?: number; fadeMs?: number }>> | undefined
+>();
+
+// A report is whole without `hudReturn` (an overlay with no run), and its `hudReturn` carries all three numbers.
+const shopReport = {
+  entity: 1_048_601,
+  label: "shop",
+  phase: "shown",
+  mode: "freeze",
+  level: 1,
+  range: 2,
+  kept: true
+} as const;
+
+expectTypeOf(shopReport).toExtend<OverlayReport>();
+expectTypeOf({
+  ...shopReport,
+  hudReturn: { delayMs: 1100, fadeMs: 700, elapsed: 480 }
+}).toExtend<OverlayReport>();
+expectTypeOf({
+  ...shopReport,
+  hudReturn: { delayMs: 1100, fadeMs: 700 }
+}).not.toExtend<OverlayReport>();
+// The root exports the type a game names its shared constant with.
+expectTypeOf<RootHudReturn<"energy">>().toEqualTypeOf<HudReturn<"energy">>();

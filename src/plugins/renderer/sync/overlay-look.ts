@@ -9,6 +9,7 @@ import type { DemandReason } from "../demand/types";
 import type { PixiContainer, PixiModule, PixiRenderLayer, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
 import { heldWaiting } from "./build";
+import { returnOf } from "./overlay-return";
 import type { OverlayRecord, SyncCtx } from "./types";
 import { applyHud } from "./views";
 
@@ -503,7 +504,9 @@ function stepPart(entity: Entity): void {
     return;
   }
 
-  const factor = factorOf(overlay.order, key);
+  // The overlays' levels, times every return of the HUD in progress (F240): 1 with none.
+  const levels = factorOf(overlay.order, key);
+  const factor = overlay.returns.length === 0 ? levels : levels * returnOf(overlay.returns, key);
 
   applyHud(sctx, entity, view, factor);
 
@@ -520,11 +523,11 @@ function stepPart(entity: Entity): void {
 }
 
 /**
- * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame, and the
- * parts leaving or not fully back take no tap, and the parts an inert overlay keeps shown take no tap either. A part
- * outside the HUD layer is warned once and drawn as it is. A part of a scene built aside is not warned while it builds,
- * nor in the frame its build waits to be attached: the layers it is judged against are still the scene's being left (a
- * splash with no HUD layer), or none on a cold page (F117).
+ * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame times the
+ * returns in progress (F240), and the parts leaving or not fully back take no tap, and the parts an inert overlay keeps
+ * shown take no tap either. A part outside the HUD layer is warned once and drawn as it is. A part of a scene built
+ * aside is not warned while it builds, nor in the frame its build waits to be attached: the layers it is judged against
+ * are still the scene's being left (a splash with no HUD layer), or none on a cold page (F117).
  *
  * @param sctx - Domain context of the sync module.
  */

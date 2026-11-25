@@ -685,6 +685,131 @@ function sameFields(previous: object | true, next: object | true): boolean {
 }
 
 /**
+ * Tells whether a field is one a render of an extra dropped: the previous render gave it a value, this one leaves it out
+ * or passes `undefined` (a game built without `exactOptionalPropertyTypes` can write `field: cond ? x : undefined`),
+ * and its type does not give it to a plugin. Pure.
+ *
+ * @param field - The field.
+ * @param previous - The value of the previous render.
+ * @param next - The value of this render.
+ * @param owned - The fields the type gives to a plugin.
+ * @returns True when the entity should no longer carry it.
+ * @example
+ * ```ts
+ * isDropped("hudReturn", { hud: "none", hudReturn: { delayMs: 1100, fadeMs: 700 } }, { hud: "none" }, []); // true
+ * ```
+ */
+function isDropped(
+  field: string,
+  previous: object,
+  next: object,
+  owned: readonly string[]
+): boolean {
+  return (
+    Object.hasOwn(previous, field) &&
+    Reflect.get(previous, field) !== undefined &&
+    Reflect.get(next, field) === undefined &&
+    !owned.includes(field)
+  );
+}
+
+/**
+ * Tells whether a value carries a field holding `undefined`, which is no JSON. The walk makes no list. Pure.
+ *
+ * @param value - A component value.
+ * @returns True when a field holds `undefined`.
+ * @example
+ * ```ts
+ * hasUndefinedField({ label: "a", note: undefined }); // true
+ * ```
+ */
+function hasUndefinedField(value: object): boolean {
+  // A component value is a plain object: every key `for…in` walks is its own.
+  for (const field in value) {
+    if (Reflect.get(value, field) === undefined) return true;
+  }
+
+  return false;
+}
+
+/**
+ * The patch of an extra without the fields that hold `undefined`: such a key must never reach the entity. The patch
+ * itself when it holds none, so a render without one allocates nothing. Pure.
+ *
+ * @param patch - The fields to write.
+ * @returns The fields to write, each with a value.
+ * @example
+ * ```ts
+ * definedOnly({ label: "a", note: undefined }); // { label: "a" }
+ * ```
+ */
+function definedOnly(patch: object): object {
+  if (!hasUndefinedField(patch)) return patch;
+
+  const kept: Record<string, unknown> = {};
+
+  for (const field in patch) {
+    const value = Reflect.get(patch, field);
+
+    if (value !== undefined) kept[field] = value;
+  }
+
+  return kept;
+}
+
+/**
+ * Tells whether this render of an extra drops a field the previous one declared. The walk reads the previous value's own
+ * keys and makes no list, so a render that drops nothing allocates nothing. Pure.
+ *
+ * @param previous - The value of the previous render.
+ * @param next - The value of this render.
+ * @param owned - The fields the type gives to a plugin.
+ * @returns True when at least one field dropped.
+ * @example
+ * ```ts
+ * dropsField({ label: "a", note: "new" }, { label: "a" }, []); // true
+ * ```
+ */
+function dropsField(previous: object, next: object, owned: readonly string[]): boolean {
+  // A component value is a plain object: every key `for…in` walks is its own.
+  for (const field in previous) {
+    if (isDropped(field, previous, next, owned)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * The stored value of an extra without the fields a render dropped: every other field as the entity carries it, the
+ * ones its type gives to a plugin included. A new object, made only at a drop. Pure.
+ *
+ * @param current - The value the entity carries.
+ * @param previous - The value of the previous render.
+ * @param next - The value of this render.
+ * @param owned - The fields the type gives to a plugin.
+ * @returns The value to store whole.
+ * @example
+ * ```ts
+ * withoutDropped({ label: "a", seen: 7, note: "new" }, { label: "a", seen: 0, note: "new" }, { label: "a", seen: 0 }, ["seen"]);
+ * // { label: "a", seen: 7 }
+ * ```
+ */
+function withoutDropped(
+  current: object,
+  previous: object,
+  next: object,
+  owned: readonly string[]
+): Record<string, unknown> {
+  const kept: Record<string, unknown> = {};
+
+  for (const field in current) {
+    if (!isDropped(field, previous, next, owned)) kept[field] = Reflect.get(current, field);
+  }
+
+  return kept;
+}
+
+/**
  * Where the element of a root is drawn: the layer and the order of its root, and the slot it is
  * laid out in, with its place among the projections that slot hosts.
  */
@@ -1267,6 +1392,54 @@ export function createReconciler(
   }
 
   /**
+   * Plays or patches the changed fields of an extra the entity carries, never a field its type gives to a plugin. A
+   * field this render dropped (an optional one it no longer declares, `Overlay.hudReturn`) cannot be patched away:
+   * `ecs.set` merges, and a key holding `undefined` is no JSON, so the whole component would leave
+   * `world.ecs.snapshot()` and the frame history. The value is then stored whole with `ecs.add`, as `dropsPoint` does:
+   * the entity's fields without the dropped ones, the plugin's own as the entity carries them, and this render's patch
+   * on top unless a `change` hook brings the numbers home. That add lands with the phase's commands, so the rest is
+   * recorded from the value it stores. A render that drops nothing walks the previous value's keys and makes no more.
+   * A field this render passes as `undefined` counts as dropped, and is never written as a key. A render that drops a
+   * field writes the whole value at the end of the phase, so a `set` on the same extra later in that phase is replaced
+   * when it lands.
+   *
+   * @param element - The live element that changed.
+   * @param name - The extra's component name.
+   * @param value - The extra of this render.
+   * @param previous - Its value of the previous render.
+   * @param next - Its value of this render, `value.value`.
+   */
+  function patchExtra(
+    element: Element,
+    name: string,
+    value: AnyComponentValue,
+    previous: object,
+    next: object
+  ): void {
+    const owned = ecs.typeOf(name)?.owned ?? NO_OWNED;
+    // The value stored in place of the entity's, made only at a drop.
+    const stored = dropsField(previous, next, owned)
+      ? withoutDropped(ecs.get(element.entity, asHandle(value.type)) ?? next, previous, next, owned)
+      : undefined;
+
+    recordRest(ctx, element, value, stored);
+
+    const played = modules.layout.changeExtra(
+      element,
+      name,
+      { previous, next },
+      hintOf(state, element)
+    );
+    const patch = played ? undefined : definedOnly(livePatch(next, owned));
+
+    if (stored !== undefined) {
+      ecs.add(element.entity, { type: value.type, value: { ...stored, ...patch } });
+    } else if (patch !== undefined) {
+      ecs.set(element.entity, asHandle(value.type), patch);
+    }
+  }
+
+  /**
    * Adds a new, tag or missing extra whole, and plays or patches the changed fields of the rest.
    * An extra with the same fields writes nothing.
    *
@@ -1296,15 +1469,7 @@ export function createReconciler(
         continue;
       }
 
-      recordRest(ctx, element, value);
-
-      const values = { previous: previous.value, next: value.value };
-
-      if (modules.layout.changeExtra(element, name, values, hintOf(state, element))) continue;
-
-      const owned = ecs.typeOf(name)?.owned ?? [];
-
-      ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
+      patchExtra(element, name, value, previous.value, value.value);
     }
   }
 

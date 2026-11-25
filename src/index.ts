@@ -301,7 +301,12 @@ export {
   sprite,
   Transform
 } from "./plugins/renderer/components";
-export type { HudPartValue, OverlayValue, SpriteBlend } from "./plugins/renderer/components";
+export type {
+  HudPartValue,
+  HudReturn,
+  OverlayValue,
+  SpriteBlend
+} from "./plugins/renderer/components";
 // renderer: the performance log of an agent build, its frame ring and the record of one frame
 export {
   MONITOR_SECTIONS,

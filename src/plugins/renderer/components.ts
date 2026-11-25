@@ -344,6 +344,45 @@ export type OverlayValue = {
    * still draw.
    */
   hold: boolean;
+  /**
+   * When the HUD parts this overlay hid come back after it leaves, on a clock of their own (`HudReturn`). Absent by
+   * default: they come back with the overlay's own leave, as its level falls.
+   *
+   * @example
+   * ```tsx
+   * // The splash fades out over 800 ms; the pills wait until 1100 ms after its leave started, then fade in over 700.
+   * <stack key="splash" components={[Overlay({ cover: "opaque", hud: "none", hudReturn: { delayMs: 1100, fadeMs: 700 } })]} />
+   * ```
+   */
+  hudReturn?: HudReturn;
+};
+
+/**
+ * When the HUD parts an overlay hid come back after it leaves: `delayMs` of game time counted from the frame its leave
+ * starts, then a linear fade of `fadeMs` (0 shows them at once); a key of `parts` takes its own delay or fade. Only the
+ * parts the overlay hid wait: every part with `hud: "none"`, the parts not in the list with a list; `"all"` and
+ * `"under"` hide none. While the overlay still leaves, the lower of its own fade and the return holds a part down
+ * (they multiply). A paused game holds the return, a time scale slows it; with reduced motion on the fade is cut and
+ * the delay is kept. A new scene ends it, and so does the same overlay showing again. `HudKey` narrows the keys of
+ * `parts` to the game's HUD keys, as `componentsFor` does.
+ *
+ * @example
+ * ```ts
+ * // The splash: every pill comes back 1100 ms after the leave started, over 700 ms: none at 800, half at 1450, all at 1800.
+ * const splash: HudReturn = { delayMs: 1100, fadeMs: 700 };
+ * // One pill after the other, each over 400 ms: energy at 1100, gems at 1250, stars at 1400.
+ * const staggered: HudReturn<"energy" | "gems" | "stars"> = {
+ *   delayMs: 1100, fadeMs: 400, parts: { gems: { delayMs: 1250 }, stars: { delayMs: 1400 } }
+ * };
+ * ```
+ */
+export type HudReturn<HudKey extends string = string> = {
+  /** Milliseconds of game time from the frame the leave starts until a part starts to come back. */
+  delayMs: number;
+  /** Milliseconds a part takes to come back after its delay; 0 shows it at once. */
+  fadeMs: number;
+  /** Per HUD key, the delay or the fade of that part; a key not listed takes the values above. */
+  parts?: Partial<Record<HudKey, { delayMs?: number; fadeMs?: number }>>;
 };
 
 /**
@@ -485,6 +524,8 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * <stack key="pyramidChoice" components={[Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })]} />
  * // The daily suitcase: the energy and the gems stay bright above the dim and only show, a tap on them does nothing.
  * <stack key="dailySuitcase" components={[Overlay({ dim: 0.7, hud: ["energy", "gems"], hudInert: true })]} />
+ * // The splash: the pills come back 1100 ms after its leave started, over 700 ms, not with its own 800 ms fade.
+ * <stack key="splash" components={[Overlay({ cover: "opaque", hud: "none", hudReturn: { delayMs: 1100, fadeMs: 700 } })]} />
  * ```
  */
 export const Overlay = /*#__PURE__*/ component("Overlay", overlayDefaults);
@@ -549,6 +590,7 @@ export function sprite(
  * kit.Overlay({ dim: 0.56, hud: ["energy"] }).value.hud; // ["energy"]
  * kit.Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" }).value.hud; // "under"
  * kit.Overlay({ dim: 0.7, hud: ["energy"], hudInert: true }).value.hudInert; // true
+ * kit.Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: { delayMs: 1250 } } } }).value.hudReturn?.delayMs; // 1100
  * ```
  */
 export type RendererKit<Asset extends string, HudKey extends string = string> = {
@@ -562,7 +604,10 @@ export type RendererKit<Asset extends string, HudKey extends string = string> = 
   >;
   Overlay: Narrowed<
     OverlayValue,
-    Partial<Omit<OverlayValue, "hud">> & { hud?: "all" | "none" | "under" | readonly HudKey[] }
+    Partial<Omit<OverlayValue, "hud" | "hudReturn">> & {
+      hud?: "all" | "none" | "under" | readonly HudKey[];
+      hudReturn?: HudReturn<HudKey>;
+    }
   >;
   HudPart: Narrowed<HudPartValue, { key: HudKey }>;
 };

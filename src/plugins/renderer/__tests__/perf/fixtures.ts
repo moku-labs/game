@@ -7,14 +7,16 @@ import * as pixi from "pixi.js";
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import type { FrameMeasure } from "../../../time/types";
-import { Layer, Order } from "../../../world/ecs/define";
+import { Exiting, Layer, Order } from "../../../world/ecs/define";
 import { projection } from "../../../world/projection/define";
 import type { AnyProjectionSpec } from "../../../world/projection/types";
 import type { Entity, SystemTiming } from "../../../world/types";
 import {
   HudPart,
+  type HudReturn,
   NineSlice,
   type NineSliceValue,
+  Overlay,
   Parent,
   Shape,
   type ShapeValue,
@@ -28,6 +30,8 @@ import { WHY } from "../../kept/types";
 import { withDeps } from "../../lifecycle";
 import { commitFrame } from "../../monitor/commit";
 import { COUNT } from "../../monitor/types";
+import { stepParts } from "../../sync/overlay-look";
+import { endReturnOf, startReturn, stepReturns } from "../../sync/overlay-return";
 import type { SyncCtx } from "../../sync/types";
 import type { PixiFilter } from "../../types";
 import { box, demandAlone } from "../demand-harness";
@@ -530,6 +534,205 @@ export async function inertPartBoard(): Promise<() => void> {
   }
 
   return () => sync.stepOverlays();
+}
+
+/** A board with a HUD return (F240): one overlay step of a frame, and the HUD parts' step alone. */
+export type ReturnBoard = { step: () => void; parts: () => void };
+
+/**
+ * The moments of a HUD return a board stands at. `"standing"`: a landed overlay with `hud: ["energy"]` whose value is
+ * compared by reference every step. `"rewritten"`: the same overlay, its `hudReturn` written again before every step as
+ * a new object with the same times, as a render of an inline literal writes it. `"running"`: an overlay with `hud:
+ * "none"` left and is gone, its run in its delay (a billion ms), three parts multiplied by 0. `"fading"`: the same in
+ * its fade (delay 0, fades of a billion ms and more), so every step draws the three parts at a new factor between 0
+ * and 1. `"idle"`: the run of `"running"` in frames the clock marks idle, so every step wakes the clock. `"ended"`: the
+ * run over, back in the pool, the parts at 1.
+ */
+export type ReturnMoment = "standing" | "rewritten" | "running" | "fading" | "idle" | "ended";
+
+/** The game time of a frame the return boards step: 60 Hz. */
+const RETURN_FRAME_MS = 16;
+
+/**
+ * The `hudReturn` of a board's overlay: three keys in `parts`, with times that keep the run of its moment where it says
+ * for the whole window.
+ *
+ * @param moment - Which moment of a return.
+ * @returns A new value.
+ */
+function returnOfMoment(moment: ReturnMoment): HudReturn {
+  if (moment === "fading") {
+    return {
+      delayMs: 0,
+      fadeMs: 1_000_000_000,
+      parts: { gems: { fadeMs: 2_000_000_000 }, stars: { delayMs: 10, fadeMs: 3_000_000_000 } }
+    };
+  }
+
+  const delayMs = moment === "running" || moment === "idle" ? 1_000_000_000 : 100;
+
+  return {
+    delayMs,
+    fadeMs: 400,
+    parts: { energy: { fadeMs: 200 }, gems: { delayMs: 1250 }, stars: { delayMs: 1400 } }
+  };
+}
+
+/** The records and the runs a board of each moment holds once it is set. */
+const RETURN_HOLDS: Readonly<Record<ReturnMoment, readonly [number, number]>> = {
+  standing: [1, 0],
+  rewritten: [1, 0],
+  running: [0, 1],
+  fading: [0, 1],
+  idle: [0, 1],
+  ended: [0, 0]
+};
+
+/**
+ * A board of the HUD return (change 2026-11-25-f240-hud-return), over the real Pixi of the overlay stage: 20 views of
+ * the ward, the HUD parts `energy`, `gems` and `stars`, and an overlay with a `hudReturn` of three keys in `parts`, at
+ * one moment of its return (`ReturnMoment`). Every step is handed a frame of 16 ms of game time, as the render phase
+ * hands it, and the moment's idle flag.
+ *
+ * @param moment - Which moment of a return.
+ * @returns The overlay step and the parts' step of a frame.
+ */
+export async function returnBoard(moment: ReturnMoment): Promise<ReturnBoard> {
+  const stage = await startOverlayStage();
+  const { mock } = stage.drawn;
+  const { sync, host, viewport, demand, kept } = mock.modules;
+  const isStanding = moment === "standing" || moment === "rewritten";
+
+  for (let index = 0; index < 20; index += 1) {
+    stage.view({ layer: "scene", x: (index % 5) * 200, y: Math.floor(index / 5) * 200 });
+  }
+
+  const energy = stage.view({ layer: "hud", x: 100, extra: [HudPart({ key: "energy" })] });
+
+  stage.view({ layer: "hud", x: 400, extra: [HudPart({ key: "gems" })] });
+  stage.view({ layer: "hud", x: 700, extra: [HudPart({ key: "stars" })] });
+
+  const splash = stage.overlay(
+    { hud: isStanding ? ["energy"] : "none", hudReturn: returnOfMoment(moment) },
+    { order: 2 }
+  );
+
+  stage.level(splash, 1, true);
+  stage.frames(3);
+
+  const state = mock.ctx.state.sync;
+  const { overlay } = state;
+
+  if (!isStanding) {
+    stage.leave(splash);
+    stage.frame();
+    mock.world.ecs.despawn(splash);
+    // The "ended" run: 100 + 400 ms (stars: 1400 + 400) over at 16 ms a frame.
+    stage.frames(moment === "ended" ? 120 : 3);
+  }
+
+  const [records, runs] = RETURN_HOLDS[moment];
+
+  if (overlay.records.size !== records || overlay.returns.length !== runs) {
+    throw new Error(`perf fixture: the ${moment} return board does not hold what it says`);
+  }
+
+  const sctx: SyncCtx = { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } };
+  const isIdle = moment === "idle";
+  // Two values with the same times, written in turn: every step sees a new reference.
+  const first = { hudReturn: returnOfMoment(moment) };
+  const second = { hudReturn: returnOfMoment(moment) };
+  let isFirst = false;
+
+  /** One frame of the board: its game time and idle flag handed over, the overlay step run. */
+  const step = (): void => {
+    state.frameDelta = RETURN_FRAME_MS;
+    state.frameIdle = isIdle;
+    sync.stepOverlays();
+  };
+
+  /** One frame of a render that writes the inline literal again, then the overlay step. */
+  const rewrite = (): void => {
+    isFirst = !isFirst;
+    mock.world.ecs.set(splash, Overlay, isFirst ? first : second);
+    step();
+  };
+
+  if (moment === "fading") {
+    const before = state.views.get(energy)?.hud ?? 0;
+
+    step();
+
+    const after = state.views.get(energy)?.hud ?? 0;
+
+    if (!(after > before && after < 1)) {
+      throw new Error("perf fixture: the fading return board draws no new factor between 0 and 1");
+    }
+  }
+
+  return { step: moment === "rewritten" ? rewrite : step, parts: () => stepParts(sctx) };
+}
+
+/**
+ * A board of a run started and ended over and over (F240, a leave and a return of the same overlay): a landed overlay
+ * with `hud: "none"` and a `hudReturn`, its pool warmed by one real leave and return through the overlay step. Every
+ * call does what the overlay step does at the two turns of a cycle: the run of the leave taken from the pool, one frame
+ * of 16 ms of game time counted into it, the run ended when the overlay shows again. The `Exiting` tag a game writes is
+ * left out: its write is a world command, the world's bytes, not the renderer's. With `reduced`, every leave starts
+ * under reduced motion: the run's end is the last delay, no fade.
+ *
+ * @param reduced - Reduced motion is on at every leave.
+ * @returns One leave-and-return cycle.
+ */
+export async function returnCycleBoard(reduced = false): Promise<() => void> {
+  const stage = await startOverlayStage();
+  const { mock } = stage.drawn;
+  const { host, viewport, demand, kept } = mock.modules;
+
+  for (const [index, key] of ["energy", "gems", "stars"].entries()) {
+    stage.view({ layer: "hud", x: 100 + index * 300, extra: [HudPart({ key })] });
+  }
+
+  const splash = stage.overlay(
+    { hud: "none", hudReturn: returnOfMoment("standing") },
+    { order: 2 }
+  );
+
+  stage.level(splash, 1, true);
+  stage.frames(3);
+  // The pool warmed: one leave starts the run, the overlay shown again ends it.
+  stage.leave(splash);
+  stage.frame();
+  mock.world.ecs.untag(splash, Exiting);
+  stage.frame();
+
+  const state = mock.ctx.state.sync;
+  const { overlay } = state;
+  const record = overlay.records.get(splash);
+
+  if (record === undefined || overlay.returns.length > 0 || overlay.returnPool.length !== 1) {
+    throw new Error("perf fixture: the cycle board has no warm pool of one run");
+  }
+
+  const sctx: SyncCtx = { ctx: withDeps(mock.ctx), deps: { host, viewport, demand, kept } };
+
+  // The end the leave chooses: stars' 1400 ms delay, plus its 400 ms fade in full motion.
+  startReturn(overlay, record, reduced);
+
+  const endsMs = overlay.returns[0]?.endsMs;
+
+  endReturnOf(overlay, splash);
+
+  if (endsMs !== (reduced ? 1400 : 1800)) {
+    throw new Error("perf fixture: the cycle board's run does not end where its motion says");
+  }
+
+  return () => {
+    startReturn(overlay, record, reduced);
+    state.frameDelta = RETURN_FRAME_MS;
+    stepReturns(sctx);
+    endReturnOf(overlay, splash);
+  };
 }
 
 /** What an endless loop hands `loopsHeld`: what it writes that could show its view again. */

@@ -10,6 +10,7 @@ import { vi } from "vitest";
 import { Exiting, Layer, Order } from "../../world/ecs/define";
 import type { AnyComponentValue, Entity, LayerSpec } from "../../world/types";
 import { Overlay, OverlayLevel, type OverlayValue, Parent, Shape, Transform } from "../components";
+import type { HudReturnRun } from "../sync/types";
 import type { Config, PixiContainer } from "../types";
 import { type Drawn, startDrawn } from "./demand-harness";
 import { type OverlayOracle, watchOverlays } from "./overlay-oracle";
@@ -69,6 +70,31 @@ export type OverlayStage = {
 };
 
 /**
+ * The factor the returns in progress give a HUD key (F240), from their own numbers, written here and not imported from
+ * the step: 0 before the delay, linear over the fade, 1 after, for the keys a run holds; the runs multiply.
+ *
+ * @param returns - The runs in progress.
+ * @param key - The part's key.
+ * @returns The product, 1 with no run.
+ */
+function expectedReturn(returns: readonly HudReturnRun[], key: string): number {
+  let factor = 1;
+
+  for (const run of returns) {
+    if (run.hud !== "none" && run.hud.includes(key)) continue;
+
+    const part = run.value.parts?.get(key);
+    const delay = part?.delayMs ?? run.value.delayMs;
+    const fade = run.reduced ? 0 : (part?.fadeMs ?? run.value.fadeMs);
+
+    if (run.elapsed < delay) factor = 0;
+    else if (fade > 0) factor *= Math.min(1, (run.elapsed - delay) / fade);
+  }
+
+  return factor;
+}
+
+/**
  * Starts the renderer with the three layers of an overlay scene and the checkers on every frame.
  *
  * @param options - The switch and other config.
@@ -108,7 +134,8 @@ export async function startOverlayStage(
       overlays: () => mock.api.sync.debug.overlays(),
       ecs,
       displayOf: entity => mock.api.sync.displayOf(entity),
-      hudLayer: "hud"
+      hudLayer: "hud",
+      returnOf: key => expectedReturn(state.overlay.returns, key)
     },
     pixi
   );

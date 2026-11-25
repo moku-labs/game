@@ -6,7 +6,8 @@
  *   not transparent) is drawn by a range picture shown now, which rendered it, or lies under an opaque cover, or is the
  *   visual of a Shape that draws nothing (spec 26 B7);
  * - an overlay reported in mode `"freeze"` has its range picture shown in the frame;
- * - every HUD part of the HUD layer is drawn with the factor the overlays' levels of the same frame give it.
+ * - every HUD part of the HUD layer is drawn with the factor the overlays' levels of the same frame give it, times the
+ *   returns in progress (F240) the target computes from their own numbers.
  *
  * It imports nothing of the overlay step, so a hole in the step is not repeated here. `expectAtomic()` fails naming
  * the first frame and view.
@@ -27,6 +28,8 @@ export type OverlayTarget = {
   displayOf(entity: Entity): unknown;
   /** The scene's HUD layer: only its parts are faded. */
   hudLayer: string;
+  /** The product of the returns in progress for a key (F240), 1 with none; the levels' factor is multiplied by it. */
+  returnOf?(key: string): number;
 };
 
 /** One frame that broke K3: the frame and what was wrong. */
@@ -155,7 +158,7 @@ function expectedFactor(target: OverlayTarget, key: string): number {
       (keepsOf(target.ecs.get(report.entity, Overlay)?.hud ?? "all", key) - factor) * report.level;
   }
 
-  return factor;
+  return factor * (target.returnOf?.(key) ?? 1);
 }
 
 /**
