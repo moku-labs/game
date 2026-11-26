@@ -11,7 +11,7 @@ import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
-import { SAMPLES_SYSTEM } from "../world/ecs/systems";
+import { POSES_SYSTEM, SAMPLES_SYSTEM } from "../world/ecs/systems";
 import type { AnyComponent, AnyComponentValue } from "../world/ecs/types";
 import type { AnySystem, Entity, Owner, TrackOptions } from "../world/types";
 import { AnimPlayer } from "./components";
@@ -398,9 +398,27 @@ function sampleSystem(actx: AnimCtx): AnySystem {
 }
 
 /**
+ * The world system that writes the first sample of the tracks the enter hooks of phase `layout` started (F241): `world`
+ * keeps a system of this name first in phase `sync`, so the game's systems of that phase read an entering element at
+ * its start pose. Tracks born later in the phase are left to `anim.sample`.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @returns The system definition `world.ecs.system` takes.
+ */
+function posesSystem(actx: AnimCtx): AnySystem {
+  return {
+    name: POSES_SYSTEM,
+    phase: "sync",
+    query: [],
+    run: (): void => sampleBornLive(actx)
+  };
+}
+
+/**
  * Opens what the plugin owns: the animations of every feature, the `play` of the `AnimPlayer`
  * resource, the tween driver of `world`, the handler of the `play` effect, the two world hooks
- * that keep the `Frames` loops and the system that samples the tracks born since the step (F241).
+ * that keep the `Frames` loops and the two world systems that write the first samples: `anim.pose`
+ * first in phase `sync`, `anim.sample` in its tail (F241).
  *
  * @param ctx - Kernel context of the anim plugin.
  */
@@ -411,11 +429,17 @@ export function startAnim(ctx: KernelSlice): void {
   registerAnimations(actx);
   openPlayer(actx, rt);
   actx.state.removeDriver = actx.deps.world.projection.setDriver(createDriver(actx));
+
+  // The play effect and the frame loops.
   actx.state.offPlay = actx.deps.flow.fx.handle("play", createPlayHandler(actx, rt), {
     runInFast: false
   });
   openFrameLoops(actx);
+
+  // The first samples: the pose sampler first in phase sync, the sampler in its tail (F241).
   actx.state.offSample = actx.deps.world.ecs.system(sampleSystem(actx));
+  actx.state.offPose = actx.deps.world.ecs.system(posesSystem(actx));
+
   const renderer = ctx.require(rendererPlugin);
 
   // `sync.loopsHeld`: whether an endless loop of a view the player cannot see writes nothing.
@@ -436,6 +460,7 @@ export function stopAnim(state: State): void {
   state.removeDriver?.();
   state.offFrame?.();
   state.offSample?.();
+  state.offPose?.();
   state.offPlay?.();
   closeFrameLoops(state);
 
@@ -443,6 +468,7 @@ export function stopAnim(state: State): void {
   state.removeDriver = undefined;
   state.offFrame = undefined;
   state.offSample = undefined;
+  state.offPose = undefined;
   state.offPlay = undefined;
   state.loopsHeld = undefined;
 

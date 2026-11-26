@@ -60,19 +60,29 @@ export const SAMPLES_SYSTEM = "anim.sample";
  */
 export const FILTERS_SYSTEM = "effects:filters";
 
+/**
+ * The name of the system that writes the first sample of the tracks the enter hooks of phase `layout` started (F241):
+ * the first of phase `sync`, before every game system, so a game system that reads an entering element (A Memory
+ * Missing's `shared.alphaGate`, which switches an `Alpha` filter by the alpha) reads its start pose, not its rest pose.
+ * `anim` registers its system under this name.
+ */
+export const POSES_SYSTEM = "anim.pose";
+
 /** The tail of phase `sync`, in run order: the systems that read the frame's writes for the draw. */
 const TAIL: readonly string[] = [SAMPLES_SYSTEM, FILTERS_SYSTEM, DRAWS_SYSTEM];
 
 /**
- * Where a new system goes in the list of its phase: a system of the tail (the sampler, the filters, `renderer.sync`)
- * before the first known one that comes after it in the tail; any other system before the first of the tail, so a
- * system registered after them still runs before the draw.
+ * Where a new system goes in the list of its phase: the pose sampler first; a system of the tail (the sampler, the
+ * filters, `renderer.sync`) before the first known one that comes after it in the tail; any other system before the
+ * first of the tail, so a system registered after them still runs before the draw.
  *
  * @param list - The systems of the phase, in run order.
  * @param name - The name of the new system.
  * @returns The index to insert it at.
  */
 function slotOf(list: readonly SystemEntry[], name: string): number {
+  if (name === POSES_SYSTEM) return 0;
+
   const rank = TAIL.indexOf(name);
   const at = list.findIndex(known => TAIL.indexOf(known.definition.name) > rank);
 
@@ -190,7 +200,7 @@ function storeSlots(count: number): Array<ComponentStore | undefined> {
 
 /**
  * Registers a system at the end of its phase list and returns the remover. In phase `sync` it goes
- * before the tail (the sampler, the filters, `renderer.sync`), which stays last. Its query and its `scenes` are read here, once: a
+ * before the tail (the sampler, the filters, `renderer.sync`), which stays last; `anim.pose` goes first. Its query and its `scenes` are read here, once: a
  * later change to the definition is not seen. A dev build checks the `scenes` against the scenes
  * the features declare, once the world started.
  *
@@ -242,7 +252,7 @@ export function registerSystem(
   };
   const list = state.systems[definition.phase];
   // A system registered after the renderer started runs before its pass, not a frame late:
-  // the ui's enter hooks are one (F48), a feature added later another; the sampler and the filters stay last before it (F241).
+  // the ui's enter hooks are one (F48), a feature added later another; the sampler and the filters stay last before it, `anim.pose` first (F241).
   list.splice(slotOf(list, definition.name), 0, entry);
 
   if (state.timing !== undefined) giveRow(state, state.timing, definition.name);
