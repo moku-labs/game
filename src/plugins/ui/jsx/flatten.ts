@@ -46,19 +46,42 @@ export function isNode(child: JsxChild): child is DescriptionNode {
  * ```
  */
 export function flatten(child: JsxChild): DescriptionNode[] {
-  if (child === null || child === undefined || typeof child === "boolean") return [];
-  if (typeof child === "string" || typeof child === "number") return [textNode(child)];
+  const nodes: DescriptionNode[] = [];
 
-  if (Array.isArray(child)) {
-    const nodes: DescriptionNode[] = [];
+  flattenInto(child, nodes);
 
-    for (const item of child) nodes.push(...flatten(item));
+  return nodes;
+}
 
-    return nodes;
+/**
+ * Pushes what one child becomes onto a list: a nested array or a fragment adds its items one by one, with no list of
+ * its own built and spread (F244: a render of the album's 610 nodes built one per child).
+ *
+ * @param child - One child, an array of children, or nothing.
+ * @param nodes - The list the nodes are pushed onto.
+ */
+function flattenInto(child: JsxChild, nodes: DescriptionNode[]): void {
+  if (child === null || child === undefined || typeof child === "boolean") return;
+
+  if (typeof child === "string" || typeof child === "number") {
+    nodes.push(textNode(child));
+
+    return;
   }
 
-  if (!isNode(child)) return [];
-  if (child.type === FRAGMENT) return [...child.children];
+  if (Array.isArray(child)) {
+    for (const item of child) flattenInto(item, nodes);
 
-  return [child];
+    return;
+  }
+
+  if (!isNode(child)) return;
+
+  if (child.type !== FRAGMENT) {
+    nodes.push(child);
+
+    return;
+  }
+
+  for (const lifted of child.children) nodes.push(lifted);
 }

@@ -12,7 +12,10 @@ import type { DescriptionNode, JsxChild } from "./types";
 type JsxProperties = Record<string, unknown> & { children?: JsxChild };
 
 /**
- * Splits the children out of the props the compiler built, so a node never carries them twice.
+ * Splits the children out of the props the compiler built, so a node never carries them twice. Props without children
+ * are the node's as they came: the compiler builds a new object at every tag. The others are copied key by key, never
+ * spread and cut with `delete`: a deleted key leaves the object in V8's dictionary mode, and the reconcile reads every
+ * prop of every node at every render (F244).
  *
  * @param props - What the compiler passed.
  * @returns The props without `children`.
@@ -22,11 +25,33 @@ type JsxProperties = Record<string, unknown> & { children?: JsxChild };
  * ```
  */
 function withoutChildren(props: JsxProperties): Record<string, unknown> {
-  const rest: Record<string, unknown> = { ...props };
+  if (!("children" in props)) return props;
 
-  delete rest.children;
+  const rest: Record<string, unknown> = {};
+
+  for (const name in props) {
+    if (name !== "children") rest[name] = props[name];
+  }
 
   return rest;
+}
+
+/**
+ * Builds a node with its key, in the shape every keyed node has, without building it twice.
+ *
+ * @param type - The node's type.
+ * @param props - Its props.
+ * @param children - Its children.
+ * @param key - The key, if any.
+ * @returns The node.
+ */
+function nodeOf(
+  type: string,
+  props: Record<string, unknown>,
+  children: DescriptionNode[],
+  key: string | undefined
+): DescriptionNode {
+  return key === undefined ? { type, props, children } : { type, props, children, key };
 }
 
 /**
@@ -60,27 +85,20 @@ function asSingleNode(produced: JsxChild, key: string | undefined): DescriptionN
  * ```
  */
 export function jsx(type: unknown, props: JsxProperties, key?: string): DescriptionNode {
-  const rest = withoutChildren(props);
-
-  if (type === Fragment) return { type: FRAGMENT, props: rest, children: flatten(props.children) };
-
-  if (isComponentDefinition(type)) {
-    const node: DescriptionNode = { type: type.name, props, children: [] };
-
-    return key === undefined ? node : { ...node, key };
+  if (type === Fragment) {
+    return { type: FRAGMENT, props: withoutChildren(props), children: flatten(props.children) };
   }
+
+  if (isComponentDefinition(type)) return nodeOf(type.name, props, [], key);
 
   if (typeof type === "function") {
     return asSingleNode((type as (given: JsxProperties) => JsxChild)(props), key);
   }
 
-  const node: DescriptionNode = {
-    type: String(type),
-    props: rest,
-    children: flatten(props.children)
-  };
+  // Read before `withoutChildren`, which hands the props on as they came when they carry none.
+  const children = flatten(props.children);
 
-  return key === undefined ? node : { ...node, key };
+  return nodeOf(String(type), withoutChildren(props), children, key);
 }
 
 /**

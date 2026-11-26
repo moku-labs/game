@@ -6,7 +6,8 @@
  * files mount one more root, an order strip; the box files one more, a list of names that wrap at
  * their box; the warm files two closed sheets the world holds warm; the text-when files a column of
  * ten texts whose style object names their key in `when` (F182); the stayed files a root of 108
- * elements whose prebuilt trees are equal (`STAYED`), mounted by them only (F230 U2). Real flow,
+ * elements whose prebuilt trees are equal (`STAYED`), mounted by them only (F230 U2); the album files the album
+ * sheet on its set page (`ALBUM`, F244), mounted by them only. Real flow,
  * world, text and Yoga; inert renderer, headless.
  */
 import {
@@ -29,6 +30,7 @@ import { textPlugin } from "../../../text";
 import { worldPlugin } from "../../../world";
 import { uiPlugin } from "../../index";
 import { defineComponent } from "../../jsx/component";
+import { ALBUM } from "./album";
 
 const { defineNode, defineFlow, defineFeature } = defineGame<{
   player: { coins: number };
@@ -416,6 +418,14 @@ const stayedScreen = projection({
   view: () => STAYED.first
 });
 
+/** The album root of the F244 files, mounted by them only: its tree is set 0 with set 1 peeking. */
+const albumScreen = projection({
+  name: "album",
+  layer: "ui",
+  from: (): Item => ({ id: "album" }),
+  view: () => ALBUM.first
+});
+
 /** The sheets the warm files mount, closed. */
 export const WARM_SHEETS: readonly string[] = ["shopSheet", "settingsSheet"];
 
@@ -435,7 +445,8 @@ const perfFeature = defineFeature("perf", {
     whenTextsScreen,
     shopSheet,
     settingsSheet,
-    stayedScreen
+    stayedScreen,
+    albumScreen
   ],
   ui: [Board],
   textStyles: defineTextStyles({

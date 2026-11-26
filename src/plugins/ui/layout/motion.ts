@@ -92,6 +92,64 @@ export function restTransform(
 }
 
 /**
+ * Writes the rest pose `restTransform` builds into a kept record, building nothing. A style without a per-axis factor
+ * writes 1 there, which `samePose` reads as the factor a pose without the key has.
+ *
+ * @param out - The record written: the layout's scratch.
+ * @param rect - The rect of the element in root coordinates.
+ * @param parent - The rect of its parent, or nothing for a root element.
+ * @param style - The resolved style.
+ * @param fit - The element's own fit scale.
+ * @returns `out`.
+ */
+function restInto(
+  out: TransformValue & { scaleX: number; scaleY: number },
+  rect: Rect,
+  parent: Rect | undefined,
+  style: ResolvedStyle,
+  fit: number
+): TransformValue {
+  const origin = style.origin;
+  const pivot = out.pivot;
+
+  // `pivotOf`, inline.
+  switch (origin) {
+    case undefined:
+    case "center": {
+      pivot.x = rect.w / 2;
+      pivot.y = rect.h / 2;
+      break;
+    }
+    case "top": {
+      pivot.x = rect.w / 2;
+      pivot.y = 0;
+      break;
+    }
+    case "topLeft": {
+      pivot.x = 0;
+      pivot.y = 0;
+      break;
+    }
+    default: {
+      pivot.x = origin.x * rect.w;
+      pivot.y = origin.y * rect.h;
+    }
+  }
+
+  const centreX = rect.w / 2;
+  const centreY = rect.h / 2;
+
+  out.x = rect.x - (parent?.x ?? 0) + centreX + fit * (pivot.x + (style.offsetX ?? 0) - centreX);
+  out.y = rect.y - (parent?.y ?? 0) + centreY + fit * (pivot.y + (style.offsetY ?? 0) - centreY);
+  out.rotation = style.rotation ?? 0;
+  out.scale = fit * (style.scale ?? 1);
+  out.scaleX = style.scaleX ?? 1;
+  out.scaleY = style.scaleY ?? 1;
+
+  return out;
+}
+
+/**
  * Records the rest pose of one element before a hook runs: the transform from `Box` and the
  * style, and the visual the element is actually drawn with. The content of a scroll records no
  * rest `Transform`: the scroll step owns its pose, and the world brings an element back to every
@@ -652,7 +710,8 @@ export function still(element: Element): boolean {
  * rest. An element that has not spawned yet only records it, and so does one whose
  * `change.Box` motion already played. An element held for the swap of a scene build takes the
  * pose at once, with no hook and no track (spec 31). The content of a scroll keeps its `Transform`
- * and records no rest with the world: the scroll step owns it.
+ * and records no rest with the world: the scroll step owns it. An element whose rest pose is the
+ * one it has is left alone: nothing is built or written and no hook plays.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element whose rect, style or fit may have changed.
@@ -667,10 +726,19 @@ export function repose(
   hooked: boolean,
   hint?: Hint
 ): void {
+  // The pose that stands is read into the layout's scratch first: a solve reposes every element it reaches, and most
+  // of them keep their pose (F244).
+  const standing = restInto(
+    ctx.state.layout.pose,
+    element.rect,
+    parent,
+    element.style,
+    element.fit
+  );
+
+  if (samePose(element.rest, standing)) return;
+
   const next = restTransform(element.rect, parent, element.style, element.fit);
-
-  if (samePose(element.rest, next)) return;
-
   const previous = element.rest;
 
   element.rest = next;

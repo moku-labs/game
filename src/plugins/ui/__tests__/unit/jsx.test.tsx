@@ -71,6 +71,15 @@ describe("jsx runtime", () => {
 
     expect(node.children).toEqual([{ type: "text", props: {}, children: [] }]);
   });
+
+  it("keeps the children out of the props of a node that has some (F244)", () => {
+    // Bug caught: a node carries its children twice, in `children` and in `props.children`, so the
+    // reconcile's compare of its props walks every child node at every render.
+    const node = jsx("row", { style: { gap: 8 }, children: [jsx("text", {}), "b"] }, "tabs");
+
+    expect(node.props).toEqual({ style: { gap: 8 } });
+    expect(node.children.map(child => child.type)).toEqual(["text", "text"]);
+  });
 });
 
 // ─── flatten ──────────────────────────────────────────────────
