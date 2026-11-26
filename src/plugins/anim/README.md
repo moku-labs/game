@@ -631,7 +631,9 @@ moves in `animate` of the same frame.
 A track born after the step (an `enter` hook plays in phase `layout` or `sync`), or inside it, writes
 its sample at its start in a live world, from the system `anim.sample`, which `world` keeps
 before `effects:filters` and `renderer.sync` in phase `sync` (F241): a walk that jumps to
-its start offset stands there from the frame the view is first drawn, never one frame at rest. The
+its start offset stands there from the frame the view is first drawn, never one frame at rest. A
+track an enter hook of phase `layout` started is written already by `anim.pose`, the first system of
+phase `sync`, so the game's systems of `sync` read the element at its start pose too. The
 next step advances it by one delta from there, so nothing runs a frame early. A track of 0 ms, one
 in its delay and one a timeline step drives write nothing in that pass.
 
