@@ -350,6 +350,40 @@ describe("createLayoutApi", () => {
     expect(set).toHaveBeenCalledOnce();
   });
 
+  // Bug: the rest pose a `change.Transform` hook was handed is written in place by the next repose once the element has
+  // no hook any more, so a value the game kept moves under it.
+  it("keeps the pose a change.Transform hook was handed as it was after a later repose with no hook", async () => {
+    const { ctx } = layoutParts();
+    const { createLayoutApi } = await import("../../layout/api");
+    const layout = createLayoutApi(ctx);
+    const handed: unknown[] = [];
+    const element = elementOf({
+      type: "row",
+      rect: { x: 40, y: 0, w: 10, h: 10 },
+      motion: {
+        change: {
+          Transform: (_view, _previous, next) => {
+            handed.push(next);
+
+            return undefined;
+          }
+        }
+      }
+    });
+
+    layout.repose(element, undefined, false);
+
+    const held = handed[0] as { x: number };
+    const was = { ...held };
+
+    element.motion = undefined;
+    element.rect = { x: 80, y: 0, w: 10, h: 10 };
+    layout.repose(element, undefined, false);
+
+    expect(held).toEqual(was);
+    expect(element.rest.x).toBe(85);
+  });
+
   it("plays the enter and change hooks and keeps their handles", async () => {
     const { ctx, handle } = layoutParts();
     const { createLayoutApi } = await import("../../layout/api");

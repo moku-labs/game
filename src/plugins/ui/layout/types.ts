@@ -124,6 +124,9 @@ export type Guide = {
  */
 export type KeptStyle = Float64Array;
 
+/** A record written in place per component name, with the names of its fields in order (F244 В). */
+export type KeptFields = { names: string[]; record: Record<string, unknown> };
+
 /**
  * What a style write reads for one loaded Yoga module, built once: the module, the enum of every
  * word a style names, the kept record of a node Yoga just made (its scalars read from a fresh node's
@@ -154,6 +157,19 @@ export type LayoutState = {
   tables: StyleTables | undefined;
   /** The values last written onto each node, from its creation to its free. */
   kept: Map<YogaNode, KeptStyle>;
+  /**
+   * The children each parent's node holds, in order, as `placeChildren` and `appendChildren` inserted them: the
+   * handles of `byEntity`, so taking them out again asks Yoga for no child, whose answer is a new handle (F244 В).
+   */
+  placed: Map<YogaNode, YogaNode[]>;
+  /** The parent's node each placed child's node sits in, for `detachNode`. */
+  parents: Map<YogaNode, YogaNode>;
+  /** The element whose measure function each node holds; a node that measures nothing is not in it. */
+  measuring: Map<YogaNode, Element>;
+  /** The patches a live element's write is handed, per component name, written in place (`keptLivePatch`). */
+  livePatches: Map<string, KeptFields>;
+  /** The rest values a recorded rest is handed, per component name, written in place (`keptRestValue`). */
+  restValues: Map<string, KeptFields>;
   nodes: number;
   measured: number;
   solves: number;

@@ -3,6 +3,8 @@
  * `onStart` fills the registry and installs the driver.
  */
 import type { EndedRecord } from "./timeline/types";
+import { TrackTable } from "./tween/table";
+import type { Track } from "./tween/types";
 import type { Config, State } from "./types";
 
 /**
@@ -52,9 +54,11 @@ function blankRing(): EndedRecord[] {
  * @returns The plugin state.
  */
 export function createAnimState(ctx: { readonly config: Readonly<Config> }): State {
+  const trackList: Track[] = [];
+
   return {
-    tracks: emptyMap(),
-    trackList: [],
+    tracks: new TrackTable(trackList),
+    trackList,
     nextId: 1,
     owner: emptyMap(),
     offsets: emptyMap(),
@@ -82,6 +86,9 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     frameMutes: emptyMap(),
     offFrames: [],
     loopsHeld: undefined,
-    warnedLoops: emptySet()
+    warnedLoops: emptySet(),
+    freeTracks: [],
+    freeCells: [],
+    absent: new Int32Array(2)
   };
 }

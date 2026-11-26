@@ -8,25 +8,28 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
 /**
  * One running track: the numeric fields of one component of one entity moving from the values
  * read at the end of the delay to the exact target, straight or through keyframe segments. A
- * track with repeats walks again from its first segment each time a run ends.
+ * track with repeats walks again from its first segment each time a run ends. Once the frame step
+ * dropped an ended track, its record is kept and written again by a later start of as many slots
+ * (`pool.ts`), so every start gets a new `id`, and a handle answers only while the id is its own.
  */
 export type Track = {
-  readonly id: number;
-  readonly entity: Entity;
-  readonly component: AnyComponent;
+  /** Unique per start: a record reused by a later track gets a new one. */
+  id: number;
+  entity: Entity;
+  component: AnyComponent;
   /**
-   * The target fields. Retarget deletes the fields a newer absolute track took over. A frame reads
-   * the slots (`names`, `targets`, `live`) instead.
+   * The target fields, every one the track started with: a field a newer absolute track took over stays here and is
+   * dead by its slot (`live`). A frame reads the slots (`names`, `targets`, `live`) instead.
    */
   to: Record<string, number>;
   /**
    * The key of the owner, bases and offsets tables per field, built once when the track starts.
    * It keeps a field `to` lost, which nothing reads again.
    */
-  readonly keys: Readonly<Record<string, string>>;
-  readonly ms: number;
-  readonly ease: Ease;
-  readonly delayMs: number;
+  keys: Record<string, string>;
+  ms: number;
+  ease: Ease;
+  delayMs: number;
   /**
    * `[0]`: the milliseconds the track has run, its delay included; `[1]`: the normalised time of
    * the write that runs. Cells and not fields, so a frame writes them in place: a double stored in
@@ -36,15 +39,15 @@ export type Track = {
   /** True once the start values are read, when the delay ends, never earlier. */
   begun: boolean;
   /** The target fields in slot order: every field `to` held when the track started. */
-  readonly names: readonly string[];
+  names: readonly string[];
   /**
-   * How many fields `to` still holds: `names.length` at the start, one less for every field a
+   * How many slots are still live: `names.length` at the start, one less for every field a
    * newer absolute track took. At 0 the track has nothing to drive and ends. The typed arrays
    * below (`clock` to `partialMoved`) are views of one shared buffer.
    */
   kept: number;
   /** The key of each slot: the strings of `keys`, by slot. */
-  readonly slotKeys: readonly string[];
+  slotKeys: string[];
   /** The target of each slot. */
   readonly targets: Float64Array;
   /** The start value of each slot, read when the delay ends. */
@@ -66,18 +69,18 @@ export type Track = {
    * without reading the field back.
    */
   readonly seen: Float64Array;
-  readonly muted: () => ReadonlySet<string>;
-  readonly additive: boolean;
+  muted: () => ReadonlySet<string>;
+  additive: boolean;
   /** True for a track a timeline step advances by hand; the frame step leaves it alone. */
-  readonly driven: boolean;
+  driven: boolean;
   /** The frame step the track was born in. That step does not advance it a second time. */
-  readonly bornFrame: number;
+  bornFrame: number;
   ended: boolean;
   /**
    * The keyframe segments the track walks over `ms`, or `undefined` for a straight track. A
    * segment without an ease runs on the track's `ease`.
    */
-  readonly segments: readonly TrackSegment[] | undefined;
+  segments: readonly TrackSegment[] | undefined;
   /**
    * The runs still to go after the one that plays: `0` for a track that runs once, `Infinity`
    * for a loop (`repeat: "forever"`), which never ends by itself.
@@ -95,17 +98,18 @@ export type Track = {
    */
   masked: Set<string>;
   /** Started with `reduced: "keep"`: reduced motion neither shortens nor holds it. */
-  readonly keep: boolean;
+  keep: boolean;
   /**
    * What the track writes that could show its view again, handed to `renderer.sync.loopsHeld` by an endless track
    * (spec 26 R1.7.4): `"alpha"`, `"place"` (where the view is or how large), `"both"`, or `undefined` for a write
    * that cannot (a tint, a fill colour). Computed once when the track is made.
    */
-  readonly reveals: "alpha" | "place" | "both" | undefined;
+  reveals: "alpha" | "place" | "both" | undefined;
   /**
-   * The patch the track writes when a frame moves every field, one per track with every field of
-   * `to` in it: a frame fills it in place instead of building one. Rebuilt when the track loses a
-   * field.
+   * The patch the track writes when a frame moves every slot, one per track with every field of
+   * `to` in it: a frame fills it in place instead of building one. A field the track lost keeps its
+   * key here, set to `undefined`, and the track writes its patch of the moved fields from then on,
+   * so the lost field is never written back.
    */
   patch: Record<string, unknown>;
   /**

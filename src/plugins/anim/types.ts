@@ -10,6 +10,7 @@ import type { SyncApi } from "../renderer/sync/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Ease, Entity, MotionHandle, Api as WorldApi } from "../world/types";
 import type { EndedRecord, RunningTimeline, Step } from "./timeline/types";
+import type { TrackTable } from "./tween/table";
 import type { Track } from "./tween/types";
 
 /**
@@ -383,8 +384,8 @@ export type Config = {
  * offsets accumulator, the running timelines and the animation registry.
  */
 export type State = {
-  /** The one track table. Insertion order is advance order. */
-  tracks: Map<number, Track>;
+  /** The one track table: the running tracks by id, over `trackList`. Start order is advance order. */
+  tracks: TrackTable;
   /**
    * The tracks of the table in start order, as a dense list the frame step walks by index. An ended
    * track stays in it until the next frame step drops it.
@@ -440,6 +441,15 @@ export type State = {
   overMaxTracks: boolean;
   /** The animations already warned for a looping `frames` step that blocks the rest of a `sequence` (dev). */
   warnedLoops: Set<string>;
+  /** The records of the tracks the frame step dropped, by slot count, kept for the next start (F244 В, `tween/pool.ts`). */
+  freeTracks: Track[][];
+  /** The one-number cells the bases and offsets gave back, kept for the next ones (F244 В, `tween/pool.ts`). */
+  freeCells: Float64Array[];
+  /**
+   * `[0]`: the bases let go and kept absent in their table; `[1]`: the owner entries at id 0. The frame step drops
+   * them once either reaches 512 (`tween/cells.ts`).
+   */
+  absent: Int32Array;
   /** The live reduced-motion switch. The frozen `Config.reducedMotion` only seeds it. */
   reducedMotion: boolean;
   /** Remover of `world.projection.setDriver`. */

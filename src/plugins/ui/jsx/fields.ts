@@ -815,13 +815,14 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
     const current = text.lifted;
     const staysAtRest = current === undefined && units === 0;
     const alreadyLifted =
-      current !== undefined && current.units === units && current.rest === root.rest;
+      current !== undefined && current.units === units && current.moves === (root.restMoves ?? 0);
 
     if (staysAtRest || alreadyLifted) return;
 
     // Move the root, and remember the lift until it is back to 0.
     links.layout.lift(root, units);
-    text.lifted = units === 0 ? undefined : { element: root.entity, units, rest: root.rest };
+    text.lifted =
+      units === 0 ? undefined : { element: root.entity, units, moves: root.restMoves ?? 0 };
   }
 
   /**
@@ -963,7 +964,8 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
     place: (): void => {
       forgetRelabelled();
 
-      for (const field of state.fields.values()) placeField(field);
+      // Per solve: a screen with no field walks no iterator.
+      if (state.fields.size > 0) for (const field of state.fields.values()) placeField(field);
 
       placeInputAndLift();
     },

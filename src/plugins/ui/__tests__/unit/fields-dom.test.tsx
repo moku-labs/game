@@ -232,6 +232,40 @@ describe("the keyboard lift", () => {
     expect(app.world.ecs.get(root, Transform)?.y).toBe(rest);
     expect(page.dom.viewport.listeners()).toEqual([]);
   });
+
+  // Bug caught: a lift taken for one already written because its units stand, while a repose of the root wrote its
+  // unlifted rest under it: the root falls behind the keyboard at the keystroke that moved it.
+  it("writes the lift again over a root whose rest moved while it was lifted", async () => {
+    const { app, page } = await startFieldApp({ dom: true, innerHeight: 1440 });
+    const input = page?.dom.inputs[0];
+
+    running = app;
+    if (page === undefined || input === undefined) throw new Error("no hidden input was made");
+
+    mountScreen(app, "grow");
+
+    const root = find(app, "grow");
+    const rest = app.world.ecs.get(root, Transform)?.y ?? 0;
+
+    app.input.tap(find(app, "growField"));
+    app.time.step(16);
+    page.dom.viewport.resize(900);
+    app.time.step(16);
+    app.time.step(16);
+
+    const lifted = app.world.ecs.get(root, Transform)?.y;
+    const x = app.world.ecs.get(root, Transform)?.x;
+
+    expect(lifted).toBe(rest - 496);
+
+    // Two characters: the root is 20 units wider, its rest moved, and the lift stands where it stood.
+    input.type("ab");
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(root, Transform)?.x).not.toBe(x);
+    expect(app.world.ecs.get(root, Transform)?.y).toBe(lifted);
+  });
 });
 
 describe("more than one field", () => {

@@ -33,11 +33,15 @@ function isPlain(value: object): value is Record<string, unknown> {
  * ```
  */
 function sameList(left: readonly unknown[], right: unknown): boolean {
-  return (
-    Array.isArray(right) &&
-    left.length === right.length &&
-    left.every((entry, index) => sameValue(entry, right[index]))
-  );
+  if (!Array.isArray(right) || left.length !== right.length) return false;
+
+  // Per compare: an index loop, no callback and no closure around `right`.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+  for (let index = 0; index < left.length; index += 1) {
+    if (!sameValue(left[index], right[index])) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -52,19 +56,22 @@ function sameList(left: readonly unknown[], right: unknown): boolean {
  * ```
  */
 function sameFieldsDeep(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  // Walked with `for…in` and counted, so a compare builds no key list and no callback (F230 U2):
-  // a plain object's prototype holds no enumerable key, and `hasOwn` keeps the walk to its own.
+  // Walked with `for…in` and counted, so a compare builds no key list and no callback (F230 U2).
+  // A plain object's prototype holds no enumerable key, so the walk of each side meets its own keys
+  // only and one `hasOwn` a key of `left` is all it takes: a key `right` lacks, or holds with the
+  // value `undefined`, is told apart there. Were `Object.prototype` given an enumerable key, a
+  // plain object would answer "not the same" where it said "the same": a write too many, never one
+  // too few.
   let count = 0;
 
   for (const key in left) {
-    if (!Object.hasOwn(left, key)) continue;
     if (!Object.hasOwn(right, key) || !sameValue(left[key], right[key])) return false;
     count += 1;
   }
 
-  for (const key in right) {
-    if (Object.hasOwn(right, key)) count -= 1;
-  }
+  // The keys of `right` the first walk did not meet: a count that does not close is an extra key.
+  // eslint-disable-next-line sonarjs/no-unused-vars -- the key is only counted.
+  for (const _key in right) count -= 1;
 
   return count === 0;
 }
@@ -88,10 +95,9 @@ export function sameValue(left: unknown, right: unknown): boolean {
   if (left === right) return true;
 
   // Two values that are not both objects: only `NaN` is the same without being identical.
-  const areObjects =
-    typeof left === "object" && typeof right === "object" && left !== null && right !== null;
-
-  if (!areObjects) return Number.isNaN(left) && Number.isNaN(right);
+  if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) {
+    return Number.isNaN(left) && Number.isNaN(right);
+  }
 
   if (Array.isArray(left)) return sameList(left, right);
   if (Array.isArray(right) || !isPlain(left) || !isPlain(right)) return false;

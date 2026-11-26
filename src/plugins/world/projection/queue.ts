@@ -7,7 +7,14 @@
 
 import type { Entity } from "../ecs/types";
 import { cancelTracks, forgetEndedTracks } from "./driver";
-import { checkConvergence, finishHandles, restingPeers, startLoop, stillMoving } from "./motions";
+import {
+  checkConvergence,
+  finishHandles,
+  forgetHandle,
+  restingPeers,
+  startLoop,
+  stillMoving
+} from "./motions";
 import type {
   AnyProjectionSpec,
   MotionCause,
@@ -260,7 +267,13 @@ export function sweepQueue(pctx: ProjectionCtx): void {
  * @param rests - The table of rest poses.
  */
 function dropDeadRest(_pose: RestPose, entity: Entity, rests: Map<Entity, RestPose>): void {
-  if (sweeping.pctx?.deps.ecs.ownerOf(entity) === undefined) rests.delete(entity);
+  const pctx = sweeping.pctx;
+
+  if (pctx?.deps.ecs.ownerOf(entity) !== undefined) return;
+
+  rests.delete(entity);
+  // The handle `viewOf` kept for the element goes with its pose.
+  if (pctx !== undefined) forgetHandle(pctx.ctx.state.projection, entity);
 }
 
 /**

@@ -124,7 +124,7 @@ export function trackHost(state: JsxState, element: Element): void {
   if (hostsOf(element.node).length > 0) {
     state.hosts.add(element.entity);
     hostsMoved(state);
-  } else if (state.hosts.delete(element.entity)) {
+  } else if (state.hosts.size > 0 && state.hosts.delete(element.entity)) {
     hostsMoved(state);
   }
 }

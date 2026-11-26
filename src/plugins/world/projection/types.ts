@@ -253,6 +253,9 @@ export type TweenDriver = {
   /**
    * Starts one track on one component of one entity.
    *
+   * Ownership: the world may write `to` and `options` again for its next start once the track ended, so a driver reads
+   * them during this call and copies what it keeps. `muted` may be read only while its track runs.
+   *
    * @param entity - The entity to animate.
    * @param component - The component to animate.
    * @param to - The numeric target fields.
@@ -883,6 +886,12 @@ export type ProjectionState = {
    * entry of an entity that is gone is dropped by the sweep and by the converge step.
    */
   rests: Map<Entity, RestPose>;
+  /** The track records the sweep dropped once their track ended, kept for the next start (F244 В, `driver.ts`). */
+  freeTracks: Track[];
+  /** The handle `viewOf` keeps per element, with the view record it plays on, while its pose and key stand. */
+  elementHandles: Map<Entity, { view: View; handle: ViewHandle<unknown> }>;
+  /** The patch of the fields that are no number a `toRest` writes, kept per component name with its fields. */
+  othersPatches: Map<string, { names: string[]; patch: Record<string, unknown> }>;
   /** Projection name to key to the entity a plugin above registered under it. */
   keys: Map<string, Map<string, Entity>>;
   /**
@@ -1560,7 +1569,8 @@ export type ProjectionApi = {
    * Installs the tween engine every `ViewHandle.tween`, `toRest` and `all` then runs on. Without
    * one the world writes every target at once and hands back an inactive handle.
    *
-   * @param driver - The engine that runs the tracks.
+   * @param driver - The engine that runs the tracks. It reads the `to` and `options` of `track` during the call and
+   *   copies what it keeps; it reads `muted` only while its track runs.
    * @returns The remover; it puts the instant writes back.
    * @example
    * ```ts

@@ -95,6 +95,7 @@ export function createJsxState(): JsxState {
     debugWarned: false,
     overlays: emptySet(),
     asideRoots: 0,
+    draws: false,
     anchors: emptyMap()
   };
 }

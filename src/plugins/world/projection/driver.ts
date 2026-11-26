@@ -5,6 +5,7 @@
  */
 import type { AnyComponent, Entity } from "../ecs/types";
 import type {
+  Ease,
   MotionHandle,
   ProjectionCtx,
   ProjectionState,
@@ -235,24 +236,265 @@ export function startTrack(
   to: Record<string, number>,
   options: TrackOptions
 ): MotionHandle {
-  const state = pctx.ctx.state.projection;
-  const driver = state.driver ?? createInstantDriver(pctx);
-  const handle = driver.track(entity, component, to, options, () =>
-    mutedFields(pctx, entity, component.componentName)
-  );
+  const record = takeRecord(pctx, entity, component.componentName);
+  const driver = driverOf(pctx);
+  const muted = copiesStart(pctx, driver) ? record.muted : ownMuted(pctx, record);
+  const handle = driver.track(entity, component, to, options, muted);
 
-  if (handle.active()) {
-    state.tracks.push({
-      entity,
-      component: component.componentName,
-      handle,
-      additive: options.additive === true,
-      forever: options.repeat === "forever",
-      label: options.label
-    });
-  }
+  fileTrack(pctx, record, handle, options);
 
   return handle;
+}
+
+/**
+ * Starts the track `toRest` plays without a `reduced` rule or a label: to the numeric fields of a rest value, with
+ * the target and the options the record keeps for it, so a rest move of a kept record builds nothing (F244 В). The
+ * driver reads them during the call; the record keeps them for the track until it ended.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param entity - The entity to bring home.
+ * @param component - The component to bring home.
+ * @param rest - The rest value; its numeric fields are the target.
+ * @param timing - The length, the easing and the delay of the track.
+ * @returns The motion handle of the track.
+ */
+export function startRestTrack(
+  pctx: ProjectionCtx,
+  entity: Entity,
+  component: AnyComponent,
+  rest: Readonly<Record<string, unknown>>,
+  timing: RestTiming
+): MotionHandle {
+  const record = takeRecord(pctx, entity, component.componentName);
+  const options = record.options;
+
+  options.ms = timing.ms;
+  options.ease = timing.ease;
+  options.delayMs = timing.delayMs;
+  numericInto(record, rest);
+
+  const driver = driverOf(pctx);
+  // A driver of the engine copies what a start hands it; any other gets values of its own, which it may keep.
+  const handle = copiesStart(pctx, driver)
+    ? driver.track(entity, component, record.to, options, record.muted)
+    : driver.track(entity, component, { ...record.to }, { ...options }, ownMuted(pctx, record));
+
+  fileTrack(pctx, record, handle, options);
+
+  return handle;
+}
+
+/** What a rest track of `toRest` is timed by. */
+export type RestTiming = { ms: number; ease: Ease; delayMs: number };
+
+/**
+ * A track record of the projection with what its start hands the driver: the `muted` reader of its entity and
+ * component, made once per record, and the target and options of a rest track. A record the sweep drops once its
+ * track ended is kept for the next start.
+ */
+type KeptTrack = Track & {
+  /** The fields another writer owns on the record's entity and component, read by the driver at every write. */
+  readonly muted: () => ReadonlySet<string>;
+  /** The numeric target of a rest track, written in place while its fields stay the same. */
+  to: Record<string, number>;
+  /** The fields of `to`, in order. */
+  names: string[];
+  /** The options of a rest track. */
+  readonly options: { ms: number; ease: Ease; delayMs: number; additive: boolean };
+};
+
+/**
+ * Tells whether a filed track is a record `takeRecord` made, with its own `muted` reader: only such a record goes back
+ * to the free list (`state.freeTracks`), never a track filed by hand.
+ *
+ * @param track - A track of the projection's table.
+ * @returns True for a kept record.
+ */
+function isKept(track: Track): track is KeptTrack {
+  return "muted" in track;
+}
+
+/** The mark of a driver of the engine: one that copies the target and the options a start hands it. */
+const COPIES = Symbol("copies");
+
+/**
+ * Marks a driver of the engine as one that copies what a start hands it, so the projection hands it its kept target,
+ * options and `muted` reader, which a later start writes again once the track ended (F244 В). The `muted` reader it
+ * keeps is read only while its track runs. See `TweenDriver` for what a driver may keep.
+ *
+ * @param driver - The driver `anim` sets.
+ * @returns The same driver, marked.
+ */
+export function copyingDriver(driver: TweenDriver): TweenDriver {
+  Object.defineProperty(driver, COPIES, { value: true });
+
+  return driver;
+}
+
+/**
+ * Tells whether a start may hand the driver the kept records of the projection: the world's own instant driver, or one
+ * marked with `copyingDriver`. A driver a game sets may keep what it was handed, as it always could.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param driver - The driver of the start.
+ * @returns True when the driver keeps nothing it was handed.
+ */
+function copiesStart(pctx: ProjectionCtx, driver: TweenDriver): boolean {
+  return pctx.ctx.state.projection.driver === undefined || Object.hasOwn(driver, COPIES);
+}
+
+/**
+ * A `muted` reader of its own for the track of a driver that may keep it: the entity and the component of this start,
+ * not of the record, which a later start writes again.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param record - The record of the start.
+ * @returns The reader.
+ */
+function ownMuted(pctx: ProjectionCtx, record: KeptTrack): () => ReadonlySet<string> {
+  const { entity, component } = record;
+
+  return (): ReadonlySet<string> => mutedFields(pctx, entity, component);
+}
+
+/**
+ * The driver the next track starts on: the installed one, else the instant one.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @returns The driver.
+ */
+function driverOf(pctx: ProjectionCtx): TweenDriver {
+  return pctx.ctx.state.projection.driver ?? createInstantDriver(pctx);
+}
+
+/**
+ * A track record for a start on one component of one entity: a free one, else a new one with its own `muted` reader.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param entity - The entity the track animates.
+ * @param component - Component name.
+ * @returns The record, its entity and component written.
+ */
+function takeRecord(pctx: ProjectionCtx, entity: Entity, component: string): KeptTrack {
+  const free = pctx.ctx.state.projection.freeTracks.pop();
+  const record = free !== undefined && isKept(free) ? free : newRecord(pctx);
+
+  record.entity = entity;
+  record.component = component;
+
+  return record;
+}
+
+/**
+ * A new track record; its `muted` reads the entity and component the record holds at the call.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @returns The record.
+ */
+function newRecord(pctx: ProjectionCtx): KeptTrack {
+  const record: KeptTrack = {
+    entity: 0 as Entity,
+    component: "",
+    handle: INERT,
+    additive: false,
+    forever: false,
+    label: undefined,
+    muted: (): ReadonlySet<string> => mutedFields(pctx, record.entity, record.component),
+    to: {},
+    names: [],
+    options: { ms: 0, ease: "out", delayMs: 0, additive: false }
+  };
+
+  return record;
+}
+
+/**
+ * Files a started track with the projection, so it knows which components are driven; a track that is over at once
+ * gives its record back.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param record - The track's record.
+ * @param handle - The handle the driver gave.
+ * @param options - The options of the start.
+ */
+function fileTrack(
+  pctx: ProjectionCtx,
+  record: KeptTrack,
+  handle: MotionHandle,
+  options: TrackOptions
+): void {
+  const state = pctx.ctx.state.projection;
+
+  if (!handle.active()) {
+    releaseRecord(state, record);
+
+    return;
+  }
+
+  record.handle = handle;
+  record.additive = options.additive === true;
+  record.forever = options.repeat === "forever";
+  record.label = options.label;
+  state.tracks.push(record);
+}
+
+/** How many records of ended tracks the projection keeps for the next start; a record past it is left to the collector. */
+const FREE_TRACKS_MAX = 256;
+
+/**
+ * Keeps a record whose track ended for the next start, and lets its handle go.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param record - A record the track table dropped.
+ */
+function releaseRecord(state: ProjectionState, record: Track): void {
+  if (!isKept(record)) return;
+
+  record.handle = INERT;
+  // A full list drops the record: a burst of tracks does not leave its peak kept for good.
+  if (state.freeTracks.length < FREE_TRACKS_MAX) state.freeTracks.push(record);
+}
+
+/**
+ * Writes the numeric fields of a rest value into a record's target, in place while they are the fields it holds, in
+ * their order; else the record gets a new target.
+ *
+ * @param record - The record of a rest track.
+ * @param rest - The rest value.
+ */
+function numericInto(record: KeptTrack, rest: Readonly<Record<string, unknown>>): void {
+  const { names, to } = record;
+  let slot = 0;
+  let same = true;
+
+  // Per rest track: `for…in` over the rest value's own fields, no key array.
+  for (const field in rest) {
+    const value = rest[field];
+
+    if (typeof value !== "number") continue;
+
+    if (names[slot] === field) to[field] = value;
+    else same = false;
+
+    slot++;
+  }
+
+  if (same && slot === names.length) return;
+
+  const fresh: Record<string, number> = {};
+
+  names.length = 0;
+
+  for (const field in rest) {
+    const value = rest[field];
+
+    if (typeof value !== "number") continue;
+
+    fresh[field] = value;
+    names.push(field);
+  }
+
+  record.to = fresh;
 }
 
 /**
@@ -266,24 +508,30 @@ export function cancelTracks(pctx: ProjectionCtx, entity: Entity): void {
   const state = pctx.ctx.state.projection;
 
   state.driver?.cancelAll(entity);
-  keepTracks(state.tracks, entity);
+  keepTracks(state, entity);
 }
 
 /**
  * Compacts the track table in place: the tracks that still run stay, in order, and the tracks of
- * `entity` go. The tail is popped, never cut with `length`: cutting releases the array's store,
- * and the next track would allocate it again.
+ * `entity` go, their records kept for the next start. The tail is popped, never cut with `length`:
+ * cutting releases the array's store, and the next track would allocate it again.
  *
- * @param tracks - The track table.
+ * @param state - The projection branch of the plugin state.
  * @param entity - The entity whose tracks go; none when left out.
  */
-function keepTracks(tracks: Track[], entity?: Entity): void {
+function keepTracks(state: ProjectionState, entity?: Entity): void {
+  const tracks = state.tracks;
   let kept = 0;
 
   for (let index = 0; index < tracks.length; index += 1) {
     const track = tracks[index];
 
-    if (track === undefined || track.entity === entity || !track.handle.active()) continue;
+    if (track === undefined) continue;
+
+    if (track.entity === entity || !track.handle.active()) {
+      releaseRecord(state, track);
+      continue;
+    }
 
     tracks[kept] = track;
     kept += 1;
@@ -299,7 +547,7 @@ function keepTracks(tracks: Track[], entity?: Entity): void {
  */
 export function forgetEndedTracks(pctx: ProjectionCtx): void {
   // Per frame: compacted in place, no new table.
-  keepTracks(pctx.ctx.state.projection.tracks);
+  keepTracks(pctx.ctx.state.projection);
 }
 
 /**

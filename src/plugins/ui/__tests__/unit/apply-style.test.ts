@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Element } from "../../jsx/types";
-import { applyStyleToNode, keepSize } from "../../layout/apply";
+import { applyStyleToNode, keepSize, layoutChanged } from "../../layout/apply";
 import { createNode, freeNode } from "../../layout/nodes";
 import { createLayoutState } from "../../layout/state";
 import type { LayoutState } from "../../layout/types";
@@ -456,5 +456,21 @@ describe("a style write that skips what the node holds", () => {
 
     expect(gettersOf(yoga, again)).toEqual(gettersOf(yoga, reference));
     reference.free();
+  });
+});
+
+describe("layoutChanged", () => {
+  // Bug caught: the number fast path calls two widths that differ the same, or a style that dropped a field (read as 0)
+  // the same as one that holds another value; or it parts values JSON reads alike (NaN and Infinity are both null).
+  it("reads numbers as their JSON reads them, and an absent field as 0", () => {
+    expect(layoutChanged({ width: 120 }, { width: 121 })).toBe(true);
+    expect(layoutChanged({ width: 120 }, { width: 120 })).toBe(false);
+    expect(layoutChanged({ width: 0 }, {})).toBe(false);
+    expect(layoutChanged({ width: 8 }, {})).toBe(true);
+    expect(layoutChanged({ width: -0 }, { width: 0 })).toBe(false);
+    expect(layoutChanged({ width: Number.NaN }, { width: Number.POSITIVE_INFINITY })).toBe(false);
+    expect(layoutChanged({ width: Number.NaN }, { width: 0 })).toBe(true);
+    expect(layoutChanged({ width: "50%" }, { width: "50%" })).toBe(false);
+    expect(layoutChanged({ width: "50%" }, { width: 50 })).toBe(true);
   });
 });

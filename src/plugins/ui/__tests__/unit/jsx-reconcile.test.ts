@@ -674,6 +674,36 @@ describe("one prop changed alone", () => {
     expect(h.counters.styled - ELEMENTS).toBe(resolved === 1 || applied ? 1 : 0);
   });
 
+  // Bug: the input values kept for a button are taken again while only its intent changed: it answers the old one.
+  it("writes a new intent alone into the Tappable of a button whose payload stayed", () => {
+    const h = harness();
+    const payload = { id: 1 };
+
+    h.mount(screen({ go: { payload } }));
+    h.render(screen({ go: { intent: "stop", payload } }));
+    h.render(screen({ go: { intent: "back", payload } }));
+
+    expect(h.stored("go", Tappable)).toEqual({ intent: "back", payload: { id: 1 } });
+  });
+
+  // Bug: the rest a restyle records keeps the entity's old fields where this render wrote new ones, so a `toRest`
+  // brings a text home to its old content.
+  it("records the new content of a text as its rest, the field the text plugin owns as the entity holds it", () => {
+    const h = harness();
+    const rests: Array<{ entity: Entity; name: string; value: Record<string, unknown> }> = [];
+
+    h.mount(screen());
+    h.setRest.mockImplementation((entity: Entity, type: AnyComponentType, value: object) => {
+      rests.push({ entity, name: type.componentName, value: { ...value } });
+    });
+    h.render(screen({ title: { content: "plain" } }));
+    h.render(screen({ title: { content: "other" } }));
+
+    const title = rests.filter(rest => rest.entity === h.entity("title") && rest.name === "Text");
+
+    expect(title.at(-1)?.value).toMatchObject({ content: "other" });
+  });
+
   it("writes what the changed prop says", () => {
     const h = harness();
 
@@ -1462,5 +1492,44 @@ describe("the point prop of a button", () => {
     h.render(screen());
 
     expect(h.stored("go", Tappable)).toStrictEqual({ intent: "go", payload: { id: 1 } });
+  });
+});
+
+// ─── the child list of a render ─────────────────────────────────
+
+/**
+ * A column of texts, each under the key it is handed.
+ *
+ * @param keys - The keys of its children, in order.
+ * @returns The description.
+ */
+function column(keys: readonly string[]): DescriptionNode {
+  return {
+    type: "column",
+    key: "page",
+    props: {},
+    children: keys.map(key => ({ type: "text", key, props: { content: key }, children: [] }))
+  };
+}
+
+describe("the child list of a render", () => {
+  // Bug caught: two keyed siblings that swap places are taken for new ones and enter again, or keep a new identity.
+  it("keeps the elements and their identities of two keyed siblings that swap places", () => {
+    const h = harness();
+
+    h.mount(column(["left", "right"]));
+
+    const before = h.element("page").children.map(entity => h.state.jsx.elements.get(entity));
+
+    h.render(column(["right", "left"]));
+
+    const after = h.element("page").children.map(entity => h.state.jsx.elements.get(entity));
+
+    expect(after).toEqual([before[1], before[0]]);
+    expect(after.map(element => element?.identity)).toEqual([
+      before[1]?.identity,
+      before[0]?.identity
+    ]);
+    expect(h.state.jsx.exiting.size).toBe(0);
   });
 });
