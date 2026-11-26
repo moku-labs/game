@@ -1792,7 +1792,8 @@ export function createReconciler(
 
   /**
    * Reposes the elements a restyle left to this solve that its application did not reach: their rects stayed, their
-   * look may not have. The list is emptied in place.
+   * look may not have. An element the anchor pass places, and one on its way out, keeps the pose its owner gives it.
+   * The list is emptied in place.
    */
   function reposeRestyled(): void {
     while (restyledList.length > 0) {
@@ -1802,11 +1803,35 @@ export function createReconciler(
 
       element.restyled = false;
 
-      // An element gone or not live since its restyle has no pose to keep.
-      if (element.live && state.elements.get(element.entity) === element) {
-        modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
-      }
+      const posed = isPosedHere(element);
+
+      if (posed) modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
     }
+  }
+
+  /**
+   * Tells whether the solve owns the pose of a restyled element: it is still this element and live, no anchor places
+   * it, and neither it nor an element above it is leaving.
+   *
+   * @param element - A restyled element.
+   * @returns True when the solve reposes it.
+   */
+  function isPosedHere(element: Element): boolean {
+    const current = element.live && state.elements.get(element.entity) === element;
+    const anchored = state.anchors.size > 0 && isAnchored(element, lookup);
+
+    if (!current || anchored) return false;
+
+    let at: Element | undefined = element;
+
+    // Per restyled element only: the walk up to its root, one set lookup a level.
+    while (at !== undefined) {
+      if (state.exiting.has(at.entity)) return false;
+
+      at = at.parent === undefined ? undefined : lookup(at.parent);
+    }
+
+    return true;
   }
 
   /**
@@ -1848,6 +1873,17 @@ export function createReconciler(
     // A changed element has no basis until its write went through: a patch that throws on the way
     // is done in full at the next render, not taken for one that says the same.
     if (!unchanged) delete element.basis;
+
+    // A `change.Box` hook that went may have kept the two rects it was handed: the solve writes moves into them from
+    // now on, so the element takes its own copies (F244).
+    if (
+      motionChanged &&
+      element.motion?.change?.Box !== undefined &&
+      motion?.change?.Box === undefined
+    ) {
+      element.rect = { ...element.rect };
+      element.previous = { ...element.previous };
+    }
 
     element.node = node;
     element.is = change.is;
