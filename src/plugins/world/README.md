@@ -606,11 +606,12 @@ Before each system runs, the phase checks it: a system whose query has no entity
 whose `scenes` is mounted or leaving, is skipped in its slot; it walks nothing and marks nothing,
 and `ctx.resumed` is true on its next run ("When a system runs", below).
 
-A phase runs its systems in registration order, with two exceptions in phase `sync`:
-`renderer.sync` is always the last, and `anim.sample`, which writes the first sample of the tracks
-born since the frame step (F241), is kept right before it. A system registered after them (the ui's
-`ui.enter`, a feature added later) goes before both, so it still writes before the frame is drawn,
-and an enter it starts is drawn at its start in that frame.
+A phase runs its systems in registration order, except the tail of phase `sync`, which always
+runs last and in this order: `anim.sample`, which writes the first sample of the tracks born since
+the frame step (F241); `effects:filters`, which hands the views' filters to Pixi, so an `Alpha` walk's
+first sample is drawn in that frame too; and `renderer.sync`. A system registered after them (the
+ui's `ui.enter`, a feature added later) goes before the tail, so it still writes before the frame is
+drawn, and an enter it starts is drawn at its start in that frame.
 
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with

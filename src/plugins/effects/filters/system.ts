@@ -24,6 +24,7 @@ import type {
   PixiModule,
   ViewportSize
 } from "../../renderer/types";
+import { FILTERS_SYSTEM } from "../../world/ecs/systems";
 import type { AnySystem, Entity } from "../../world/types";
 import type { EffectsCtx } from "../types";
 import { CORE_CACHE } from "./builtins";
@@ -1181,7 +1182,7 @@ function runSync(ectx: EffectsCtx, pixi: PixiModule): void {
  */
 export function createFilterSystem(ectx: EffectsCtx): AnySystem {
   return {
-    name: "effects:filters",
+    name: FILTERS_SYSTEM,
     phase: "sync",
     query: [],
     run: (): void => {

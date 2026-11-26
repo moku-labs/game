@@ -6,8 +6,9 @@
  * cold. The oracle is the frame Pixi is handed: real Pixi with a stand-in `Application`, the real world, ui, anim and
  * effects. A view is drawn at the product of its own and its parents' alpha and of their switched-on `AlphaFilter`s.
  */
-import { Texture } from "pixi.js";
+
 import type * as pixi from "pixi.js";
+import { AlphaFilter, Texture } from "pixi.js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   Alpha,
@@ -198,9 +199,34 @@ function keptOf(node: pixi.Container): pixi.Container | undefined {
 }
 
 /**
- * The alpha a display object is drawn at on the stage: its own and its parents' alpha times their switched-on
- * `AlphaFilter`s, a container drawn as its kept picture at the picture's alpha; 0 when it or a parent is not visible
- * or not drawn, or it is not on the stage.
+ * The alpha one container adds to what it draws: its own alpha times its switched-on `AlphaFilter`s, or the alpha of
+ * its kept picture when it is not rendered live; 0 when it draws nothing.
+ *
+ * @param node - The container.
+ * @returns The factor.
+ */
+function factorOf(node: pixi.Container): number {
+  if (!node.visible) return 0;
+
+  let alpha = node.alpha;
+
+  if (!node.renderable) {
+    const kept = keptOf(node);
+
+    if (kept === undefined || !kept.visible || !kept.renderable) return 0;
+    alpha *= kept.alpha;
+  }
+
+  for (const filter of (node.filters as pixi.Filter[] | null | undefined) ?? []) {
+    if (filter.enabled && filter instanceof AlphaFilter) alpha *= filter.alpha;
+  }
+
+  return alpha;
+}
+
+/**
+ * The alpha a display object is drawn at on the stage: the product of the factors of it and its parents; 0 when it
+ * is not on the stage.
  *
  * @param object - The display object.
  * @param stage - The stage.
@@ -210,20 +236,7 @@ function drawnAlpha(object: pixi.Container | undefined, stage: pixi.Container): 
   let alpha = 1;
 
   for (let node: pixi.Container | null | undefined = object; node; node = node.parent) {
-    if (!node.visible) return 0;
-
-    if (!node.renderable) {
-      const kept = keptOf(node);
-
-      if (kept === undefined || !kept.visible || !kept.renderable) return 0;
-      alpha *= kept.alpha;
-    }
-
-    alpha *= node.alpha;
-
-    for (const filter of (node.filters as pixi.Filter[] | null | undefined) ?? []) {
-      if (filter.enabled && "alpha" in filter) alpha *= (filter as pixi.AlphaFilter).alpha;
-    }
+    alpha *= factorOf(node);
 
     if (node === stage) return alpha;
   }
@@ -277,25 +290,19 @@ async function openLadder(warm: boolean): Promise<{ held: number; drawn: Drawn[]
     if (app.world.projection.isBuilding(entity)) held += 1;
   }
 
-  const stored = (key: string): number =>
-    app.world.ecs.get(app.ui.find(key) ?? -1, Alpha)?.alpha ?? Number.NaN;
-
   application.renderer.watchers.push(call => {
     if (!opened || call.target !== undefined || call.container !== application.stage) return;
 
-    const of = (key: string) => {
-      const entity = app.ui.find(key);
-
-      return entity === undefined
-        ? undefined
-        : (app.renderer.sync.displayOf(entity) as pixi.Container | undefined);
-    };
+    const ladder = app.ui.find("ladder") ?? -1;
+    const veilEntity = app.ui.find("veil") ?? -1;
+    const display = (entity: number) =>
+      app.renderer.sync.displayOf(entity) as pixi.Container | undefined;
 
     drawn.push({
-      ladder: drawnAlpha(of("ladder"), application.stage),
-      veil: drawnAlpha(of("veil"), application.stage),
-      ladderStored: stored("ladder"),
-      veilStored: stored("veil")
+      ladder: drawnAlpha(display(ladder), application.stage),
+      veil: drawnAlpha(display(veilEntity), application.stage),
+      ladderStored: app.world.ecs.get(ladder, Alpha)?.alpha ?? Number.NaN,
+      veilStored: app.world.ecs.get(veilEntity, Alpha)?.alpha ?? Number.NaN
     });
   });
 

@@ -47,28 +47,34 @@ const ALWAYS = "sync";
 export const DRAWS_SYSTEM = "renderer.sync";
 
 /**
- * The name of the system that writes the first sample of the tracks born since the frame step (F241): right before
- * `renderer.sync`, after every other system of its phase, so a track an enter hook of phase `sync` starts is drawn at
- * its start in that frame. `anim` registers its system under this name.
+ * The name of the system that writes the first sample of the tracks born since the frame step (F241): before the
+ * filters and `renderer.sync`, after every other system of its phase, so a track an enter hook of phase `sync` starts
+ * is drawn at its start in that frame. `anim` registers its system under this name.
  */
 export const SAMPLES_SYSTEM = "anim.sample";
 
 /**
- * Where a new system goes in the list of its phase: `renderer.sync` at the end; the sampler before it; any other
- * system before the first of the two, so a system registered after them still runs before the draw.
+ * The name of the system that writes the filters of the views into Pixi: after the sampler, so a first sample the
+ * sampler writes reaches the view's `Alpha` and its other filters in that frame, not one frame late (F241: a window that
+ * comes in with an `Alpha` walk was drawn whole in its first frame). `effects` registers its system under this name.
+ */
+export const FILTERS_SYSTEM = "effects:filters";
+
+/** The tail of phase `sync`, in run order: the systems that read the frame's writes for the draw. */
+const TAIL: readonly string[] = [SAMPLES_SYSTEM, FILTERS_SYSTEM, DRAWS_SYSTEM];
+
+/**
+ * Where a new system goes in the list of its phase: a system of the tail (the sampler, the filters, `renderer.sync`)
+ * before the first known one that comes after it in the tail; any other system before the first of the tail, so a
+ * system registered after them still runs before the draw.
  *
  * @param list - The systems of the phase, in run order.
  * @param name - The name of the new system.
  * @returns The index to insert it at.
  */
 function slotOf(list: readonly SystemEntry[], name: string): number {
-  if (name === DRAWS_SYSTEM) return list.length;
-
-  const at = list.findIndex(
-    known =>
-      known.definition.name === DRAWS_SYSTEM ||
-      (name !== SAMPLES_SYSTEM && known.definition.name === SAMPLES_SYSTEM)
-  );
+  const rank = TAIL.indexOf(name);
+  const at = list.findIndex(known => TAIL.indexOf(known.definition.name) > rank);
 
   return at === -1 ? list.length : at;
 }
