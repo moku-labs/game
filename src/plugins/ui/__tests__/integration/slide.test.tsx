@@ -34,6 +34,56 @@ function keyed(perf: AlbumPerf, key: string): number {
   return entity;
 }
 
+/**
+ * A root of one box under a still column: a restyle may change its layout fields and its look together.
+ *
+ * @param style - The box's style.
+ * @returns The tree.
+ */
+function boxTree(style: Record<string, unknown>) {
+  return (
+    <column key="albumRoot" style={{ width: 390, height: 844 }}>
+      <stack key="probe" style={style} />
+    </column>
+  );
+}
+
+/** The box at rest: 100 by 40, a minimum height it stands well above. */
+const PLAIN = boxTree({ width: 100, height: 40, minHeight: 10, fill: 0x22_22_22 });
+
+/** The same rect, a new minimum height Yoga is told about, and a new scale. */
+const SCALED = boxTree({ width: 100, height: 40, minHeight: 20, scale: 0.9, fill: 0x22_22_22 });
+
+describe("a restyle that reaches Yoga and moves no rect", () => {
+  it("takes the new scale of its rest pose in the same frame (F244)", async () => {
+    // Bug caught: a restyle that writes a layout field leaves its rest pose to the solve, and the
+    // solve applies only elements whose rect moved: the box keeps scale 1 though its style says 0.9.
+    const perf = await startAlbumPerf();
+
+    running = perf;
+
+    const frame = (): void => {
+      perf.ui.reconcile();
+      perf.ui.solve();
+      perf.ui.enter();
+    };
+
+    perf.render(PLAIN);
+    frame();
+    frame();
+
+    const probe = keyed(perf, "probe");
+    const box = { ...perf.ui.app.world.ecs.get(probe, Box) };
+
+    perf.render(SCALED);
+    frame();
+
+    // The laid-out rect stays; the drawn one is the scaled box.
+    expect(perf.ui.app.world.ecs.get(probe, Box)).toEqual(box);
+    expect(perf.ui.app.world.projection.restOf(probe, Transform)?.scale).toBe(0.9);
+  });
+});
+
 describe("a card that moves with its page", () => {
   it("has its Box moved by the page's step, and its pose relative to the page kept", async () => {
     // Bug caught: a card that only slid with its page keeps the Box of where it stood, so a tap on

@@ -390,18 +390,32 @@ export function isNameOf(
   if (node.key !== undefined)
     return tail - head === node.key.length && identity.startsWith(node.key, head);
 
-  // An unkeyed name: the type, `@`, then the digits of the index, read from the last one back.
+  // An unkeyed name: the type, `@`, then the digits of the index.
   const at = head + type.length;
 
   if (!identity.startsWith(type, head) || identity.charCodeAt(at) !== AT) return false;
 
+  return isIndexAt(identity, at, tail, index);
+}
+
+/**
+ * Tells whether the digits between an `@` and the `|` after it spell an index, read from the last one back.
+ *
+ * @param identity - The identity an element keeps.
+ * @param at - Where its `@` stands.
+ * @param tail - Where the `|` after the digits stands.
+ * @param index - The index.
+ * @returns True when the digits are the index's, no more and no fewer.
+ */
+function isIndexAt(identity: string, at: number, tail: number, index: number): boolean {
   let digit = tail - 1;
   let rest = index;
 
   do {
     const last = rest % 10;
+    const mismatch = digit <= at || identity.charCodeAt(digit) !== ZERO + last;
 
-    if (digit <= at || identity.charCodeAt(digit) !== ZERO + last) return false;
+    if (mismatch) return false;
     // An exact division: a small integer all the way, never a fraction boxed in unoptimized code.
     rest = (rest - last) / 10;
     digit -= 1;
@@ -432,10 +446,10 @@ function identityAt(
   if (old === undefined) return identityOf(parentIdentity, node, index);
 
   // A child of the parent being diffed carries the parent's identity in front: only its name is read.
-  const same =
-    parent !== undefined && old.parent === parent
-      ? isNameOf(old.identity, parentIdentity.length + 1, node, index)
-      : isIdentityOf(old.identity, parentIdentity, node, index);
+  const isChild = parent !== undefined && old.parent === parent;
+  const same = isChild
+    ? isNameOf(old.identity, parentIdentity.length + 1, node, index)
+    : isIdentityOf(old.identity, parentIdentity, node, index);
 
   return same ? old.identity : identityOf(parentIdentity, node, index);
 }
@@ -1078,6 +1092,8 @@ export function createReconciler(
   // The number of the solve `applyRects` applies, read off the root it stamped; none when no solve of the layout
   // stamps elements: the whole root is applied (F244).
   let applyStamp: number | undefined;
+  // The live elements a restyle left to the solve with their layout fields written: emptied by `pop` at every solve.
+  const restyledList: Element[] = [];
   // The membership version of the world's projections the last walk for a released root read, and the
   // one the last pass of the held enters read with the length of the queue it left: a frame with
   // windows held warm and at rest compares numbers and walks nothing (spec 33 B+D).
@@ -1756,8 +1772,40 @@ export function createReconciler(
     writeLive(element, keepsText, keepsKey);
 
     // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
-    if (!moved) {
-      modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
+    if (moved) deferRepose(element);
+    else modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
+  }
+
+  /**
+   * Leaves the rest pose of a live element whose layout fields were written to the solve, and keeps it on the list the
+   * solve reposes at its end: the rect may come out the same, and then the application of the solve does not reach
+   * the element (F244).
+   *
+   * @param element - The restyled element.
+   */
+  function deferRepose(element: Element): void {
+    if (element.restyled === true) return;
+
+    element.restyled = true;
+    restyledList.push(element);
+  }
+
+  /**
+   * Reposes the elements a restyle left to this solve that its application did not reach: their rects stayed, their
+   * look may not have. The list is emptied in place.
+   */
+  function reposeRestyled(): void {
+    while (restyledList.length > 0) {
+      const element = restyledList.pop();
+
+      if (element?.restyled !== true) continue;
+
+      element.restyled = false;
+
+      // An element gone or not live since its restyle has no pose to keep.
+      if (element.live && state.elements.get(element.entity) === element) {
+        modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
+      }
     }
   }
 
@@ -2425,7 +2473,8 @@ export function createReconciler(
   /**
    * Applies a solved rect to an element that is already live. A moved one gets its `Box`, its
    * visual size and its `change.Box` motion; its rest pose then plays `change.Transform` unless
-   * the `change` hook already moves it. A quiet one plays neither: its root changed its place (a
+   * the `change` hook already moves it. One that slid with its parent by the same step writes its
+   * `Box` alone: its rest pose, relative to the parent, and its visual stand. A quiet one plays neither: its root changed its place (a
    * slot came or went), so its rects changed units, not places. One of a root applied still plays
    * neither and takes its new rest pose at once: the window opened on another item than the one it
    * was built for, and stands where a cold open would (F200).
@@ -2580,6 +2629,8 @@ export function createReconciler(
     }
 
     element.moved = false;
+    // Reposed here: the end of the solve has nothing left to do for it.
+    element.restyled = false;
   }
 
   /**
@@ -3426,6 +3477,9 @@ export function createReconciler(
 
     const changed = layOutRoots(viewportBox);
 
+    // The restyled elements whose rect stayed take their new rest pose now.
+    reposeRestyled();
+
     if (changed) ctx.deps.time.wake();
 
     // A solve may give a scroll a new range and a render a new `offset` prop; a scroll that came in
@@ -3624,7 +3678,8 @@ export function createReconciler(
 
     writeLive(element, true);
 
-    if (!moved) modules.layout.repose(element, parentRect(element), false);
+    if (moved) deferRepose(element);
+    else modules.layout.repose(element, parentRect(element), false);
   }
 
   /**

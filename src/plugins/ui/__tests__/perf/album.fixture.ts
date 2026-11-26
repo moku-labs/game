@@ -62,7 +62,8 @@ export async function startAlbumPerf(): Promise<AlbumPerf> {
   for (let frame = 0; frame < SETTLE_FRAMES; frame += 1) ui.app.time.step(16);
 
   const root = albumRoot(ui);
-  const tree = ecs.get(root, Tree) as { node: unknown } | undefined;
+  // The value the world keeps, written in place below: `get` hands it read-only.
+  const tree = ecs.get(root, Tree) as { node: DescriptionNode } | undefined;
 
   if (tree === undefined) throw new Error("perf: the album root has no Tree");
 

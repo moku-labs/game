@@ -307,6 +307,11 @@ export type Element = {
    * None while no solve of the layout placed it.
    */
   placed?: number;
+  /**
+   * A restyle wrote a layout field and left the rest pose to the solve: the solve reposes the element even when its
+   * rect stays and the application of the solve does not reach it (F244).
+   */
+  restyled?: boolean;
   fit: number;
   rest: TransformValue;
   handles: MotionHandle[];

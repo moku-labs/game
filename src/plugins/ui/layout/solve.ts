@@ -100,7 +100,8 @@ function writeFrame(state: LayoutState, frame: Frame, rect: Rect, node: YogaNode
  * @param width - Its width.
  * @param height - Its height.
  * @param fit - Its fit scale.
- * @param step - How far its parent moved, x then y; `NaN` for a root, whose rest pose is its rect.
+ * @param step - How far its parent moved, x then y; `NaN` for a root, whose rest pose is its rect: a root never slides
+ *   and is always stamped.
  * @returns True when its rect or its fit scale changed.
  */
 function settle(
@@ -113,25 +114,54 @@ function settle(
   fit: number,
   step: Float64Array
 ): boolean {
+  // What moved: the rect, the size, the fit, and how far the parent went.
   const before = element.rect;
   const sized = before.w === width && before.h === height;
   const moved = before.x !== x || before.y !== y || !sized;
   const fitted = fit !== element.fit;
   const stepX = step[0] ?? Number.NaN;
   const stepY = step[1] ?? Number.NaN;
+  const withParent = x - before.x === stepX && y - before.y === stepY;
+  const parentMoved = stepX !== 0 || stepY !== 0;
 
+  // The move is recorded; a rect that stayed keeps its object.
   element.moved = moved;
-  element.slid = moved && sized && !fitted && x - before.x === stepX && y - before.y === stepY;
+  element.slid = moved && sized && !fitted && withParent;
   element.fit = fit;
 
-  if (moved) {
-    element.previous = before;
-    element.rect = { x, y, w: width, h: height };
-  }
+  if (moved) moveRect(element, x, y, width, height);
 
-  if (moved || fitted || !element.live || stepX !== 0 || stepY !== 0) element.placed = state.solves;
+  // The application's work: a root's step is `NaN`, so a root is always stamped.
+  const hasWork = moved || fitted || !element.live || parentMoved;
+
+  if (hasWork) element.placed = state.solves;
 
   return moved || fitted;
+}
+
+/**
+ * Gives a moved element its new rect; the one it had becomes its `previous`. The rect before that is written over
+ * and becomes the new one, so a move builds nothing: every component value is a copy, and only the element holds its
+ * two rects. An element with a `change.Box` hook gets a new rect: the hook is handed both and may keep them (F244).
+ *
+ * @param element - The element that moved.
+ * @param x - Its new x in root coordinates.
+ * @param y - Its new y.
+ * @param width - Its new width.
+ * @param height - Its new height.
+ */
+function moveRect(element: Element, x: number, y: number, width: number, height: number): void {
+  const before = element.rect;
+  const spare = element.previous;
+  const handedOut = element.motion?.change?.Box !== undefined || spare === before;
+  const next = handedOut ? { x, y, w: width, h: height } : spare;
+
+  next.x = x;
+  next.y = y;
+  next.w = width;
+  next.h = height;
+  element.previous = before;
+  element.rect = next;
 }
 
 /**
@@ -154,13 +184,7 @@ function slide(
 
   const before = element.rect;
 
-  element.previous = before;
-  element.rect = {
-    x: before.x + (step[0] ?? 0),
-    y: before.y + (step[1] ?? 0),
-    w: before.w,
-    h: before.h
-  };
+  moveRect(element, before.x + (step[0] ?? 0), before.y + (step[1] ?? 0), before.w, before.h);
   element.moved = true;
   element.slid = true;
   element.placed = state.solves;
@@ -251,30 +275,51 @@ function placeChildren(
   own: Float64Array,
   lookup: ElementLookup
 ): boolean {
-  const still = own[0] === 0 && own[1] === 0;
   let changed = false;
 
   for (const child of element.children) {
     const childElement = lookup(child);
 
     if (childElement === undefined) continue;
+    if (placeOrSlide(state, childElement, depth, own, lookup)) changed = true;
 
-    const childNode = state.byEntity.get(child);
-
-    // Passed over by Yoga: the subtree stands relative to this element.
-    if (childNode !== undefined && !childNode.hasNewLayout()) {
-      if (!still) {
-        slide(state, childElement, own, lookup);
-        changed = true;
-      }
-    } else if (place(state, childElement, depth, own, lookup)) {
-      changed = true;
-    }
-
+    // A subtree with work for the application stamps its parent, so the application reaches it.
     if (childElement.placed === state.solves) element.placed = state.solves;
   }
 
   return changed;
+}
+
+/**
+ * Places one child: Yoga laid it out again, so its rect is read; or Yoga passed it over, so its subtree stands relative
+ * to its parent and is moved by the parent's step, or left alone when the parent stayed.
+ *
+ * @param state - The layout state.
+ * @param element - The child.
+ * @param depth - Its depth: the frame there is its parent's.
+ * @param own - How far its parent moved, x then y.
+ * @param lookup - How a child entity becomes its element.
+ * @returns True when a rect or a fit scale in its subtree changed.
+ */
+function placeOrSlide(
+  state: LayoutState,
+  element: Element,
+  depth: number,
+  own: Float64Array,
+  lookup: ElementLookup
+): boolean {
+  const node = state.byEntity.get(element.entity);
+  const passedOver = node !== undefined && !node.hasNewLayout();
+
+  if (!passedOver) return place(state, element, depth, own, lookup);
+
+  const parentStayed = own[0] === 0 && own[1] === 0;
+
+  if (parentStayed) return false;
+
+  slide(state, element, own, lookup);
+
+  return true;
 }
 
 /**

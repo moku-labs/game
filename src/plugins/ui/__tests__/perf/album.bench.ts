@@ -11,7 +11,9 @@ describe(`ui: the album swipe, a root of ${turns.elements} elements (F244)`, () 
   bench("a swipe step: a peek mounts a page and drops one, or a turn", swipes.swipe, BENCH_OPTIONS);
   bench(
     "a render of the album's tree: the JSX factory builds its nodes",
-    () => albumTree(3, 4, 1),
+    () => {
+      albumTree(3, 4, 1);
+    },
     BENCH_OPTIONS
   );
 });

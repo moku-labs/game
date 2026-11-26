@@ -710,7 +710,8 @@ export function still(element: Element): boolean {
  * rest. An element that has not spawned yet only records it, and so does one whose
  * `change.Box` motion already played. An element held for the swap of a scene build takes the
  * pose at once, with no hook and no track (spec 31). The content of a scroll keeps its `Transform`
- * and records no rest with the world: the scroll step owns it.
+ * and records no rest with the world: the scroll step owns it. An element whose rest pose is the
+ * one it has is left alone: nothing is built or written and no hook plays.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element whose rect, style or fit may have changed.
@@ -727,17 +728,17 @@ export function repose(
 ): void {
   // The pose that stands is read into the layout's scratch first: a solve reposes every element it reaches, and most
   // of them keep their pose (F244).
-  if (
-    samePose(
-      element.rest,
-      restInto(ctx.state.layout.pose, element.rect, parent, element.style, element.fit)
-    )
-  ) {
-    return;
-  }
+  const standing = restInto(
+    ctx.state.layout.pose,
+    element.rect,
+    parent,
+    element.style,
+    element.fit
+  );
+
+  if (samePose(element.rest, standing)) return;
 
   const next = restTransform(element.rect, parent, element.style, element.fit);
-
   const previous = element.rest;
 
   element.rest = next;
