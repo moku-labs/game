@@ -190,7 +190,7 @@ function storeSlots(count: number): Array<ComponentStore | undefined> {
 
 /**
  * Registers a system at the end of its phase list and returns the remover. In phase `sync` it goes
- * before `renderer.sync`, which stays last. Its query and its `scenes` are read here, once: a
+ * before the tail (the sampler, the filters, `renderer.sync`), which stays last. Its query and its `scenes` are read here, once: a
  * later change to the definition is not seen. A dev build checks the `scenes` against the scenes
  * the features declare, once the world started.
  *
@@ -242,7 +242,7 @@ export function registerSystem(
   };
   const list = state.systems[definition.phase];
   // A system registered after the renderer started runs before its pass, not a frame late:
-  // the ui's enter hooks are one (F48), a feature added later another; the sampler stays last before it (F241).
+  // the ui's enter hooks are one (F48), a feature added later another; the sampler and the filters stay last before it (F241).
   list.splice(slotOf(list, definition.name), 0, entry);
 
   if (state.timing !== undefined) giveRow(state, state.timing, definition.name);
