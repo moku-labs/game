@@ -507,11 +507,12 @@ function posePart(entity: Entity): void {
 
   // Rest with no run: a compare of six numbers once it stands there.
   restPose(POSE);
+
+  // Only a part of the HUD layer, with a run in progress, is walked.
+  const canWalk = returns.length > 0 && hud !== undefined && layerOf(sctx, entity) === hud;
+
   view.hudWalking =
-    returns.length > 0 &&
-    hud !== undefined &&
-    layerOf(sctx, entity) === hud &&
-    poseOf(returns, sctx.ctx.deps.world.ecs.get(entity, HudPart)?.key ?? "", POSE);
+    canWalk && poseOf(returns, sctx.ctx.deps.world.ecs.get(entity, HudPart)?.key ?? "", POSE);
 
   if (writeHudPose(view, POSE)) partsWalk.posed = true;
 }
@@ -588,6 +589,7 @@ function stepPart(entity: Entity): void {
 
   if (sctx === undefined) return;
 
+  // The part's view and key; a part with no view yet is not stepped.
   const state = sctx.ctx.state.sync;
   const overlay = state.overlay;
   const view = state.views.get(entity);
@@ -595,8 +597,10 @@ function stepPart(entity: Entity): void {
   if (view === undefined) return;
 
   const key = sctx.ctx.deps.world.ecs.get(entity, HudPart)?.key ?? "";
+  const isOutsideHud = hud === undefined || layerOf(sctx, entity) !== hud;
 
-  if (hud === undefined || layerOf(sctx, entity) !== hud) {
+  // A part outside the HUD layer: warned (not while it builds) and drawn as it is.
+  if (isOutsideHud) {
     // A part of a build is judged once its scene's layers stand: a HUD part is not outside a layer list not yet its own.
     const building = settling || sctx.ctx.deps.world.projection.isBuilding(entity);
 
@@ -619,14 +623,15 @@ function stepPart(entity: Entity): void {
 
   applyHud(sctx, entity, view, factor);
 
-  // Fading, going to fade, still walking, or kept by an inert overlay.
-  const takesNoTap =
+  // The tap rule, in the order the terms cost: fading, still walking, going to fade, kept by an inert overlay.
+  const isUntappable =
     factor < 1 ||
     view.hudWalking ||
     targetOf(overlay.order, key) < 1 ||
     inertOf(overlay.order, key);
 
-  if (takesNoTap) {
+  // An untappable part's top joins this frame's list of tops that take no tap, written in place.
+  if (isUntappable) {
     const top = view.wrapper ?? view.object;
     const { offList } = overlay;
 
@@ -638,9 +643,10 @@ function stepPart(entity: Entity): void {
 /**
  * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame times the
  * returns in progress (F240) and at the pose of their walks (F245), and the parts leaving, not fully back or still
- * walking take no tap, and the parts an inert overlay keeps shown take no tap either. A part outside the HUD layer is warned once and drawn as it is. A part of a scene built
- * aside is not warned while it builds, nor in the frame its build waits to be attached: the layers it is judged against
- * are still the scene's being left (a splash with no HUD layer), or none on a cold page (F117).
+ * walking take no tap, and the parts an inert overlay keeps shown take no tap either. A part outside the HUD layer is
+ * warned once and drawn as it is. A part of a scene built aside is not warned while it builds, nor in the frame its
+ * build waits to be attached: the layers it is judged against are still the scene's being left (a splash with no HUD
+ * layer), or none on a cold page (F117).
  *
  * @param sctx - Domain context of the sync module.
  */

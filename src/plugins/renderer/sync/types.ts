@@ -2177,7 +2177,7 @@ export type ClampedReturnPart = {
 
 /**
  * A curve of a clamped `hudReturn` (F245): a named curve of `world`, eased in a cell, or a cubic-bezier solved once by
- * `anim`'s `cubicBezier` and read into `table` (its progress at even steps of time, a frame reads two cells), its four
+ * `world`'s `cubicBezier` and read into `table` (its progress at even steps of time, a frame reads two cells), its four
  * numbers kept; `undefined` is linear. Private to the renderer.
  */
 export type ClampedCurve =

@@ -6,6 +6,7 @@ import {
   type HudReturnKey as RootHudReturnKey,
   type HudReturnReport as RootHudReturnReport
 } from "../../../../index";
+import type { MotionKeyframe } from "../../../anim/types";
 import type { LayerMap } from "../../../scenes/types";
 import type { Entity } from "../../../world/types";
 import {
@@ -201,6 +202,8 @@ kit.Overlay({ hudReturn: { delayMs: 1, fadeMs: 1, parts: { nope: { ease: "in" } 
 // The root exports the curve and the key a game names its motion constants with.
 expectTypeOf<RootHudEase>().toEqualTypeOf<HudEase>();
 expectTypeOf<RootHudReturnKey>().toEqualTypeOf<HudReturnKey>();
+// A key's `Transform` is the `Transform` of a `defineMotion` key: a field added to one and not the other is an error.
+expectTypeOf<HudReturnKey["Transform"]>().toEqualTypeOf<MotionKeyframe["Transform"]>();
 expectTypeOf<"outBack">().toExtend<HudEase>();
 expectTypeOf<(t: number) => number>().not.toExtend<HudEase>();
 

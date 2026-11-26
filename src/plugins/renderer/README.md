@@ -1648,7 +1648,7 @@ Overlay({
 ```
 
 - **The curve.** Without `ease` the fade is linear: every number of F240 stays. The factor is an alpha, kept within
-  0..1: `inBack` starts below 0 and stands at 0, `outBack` is 1 early. A tuple is solved once by `anim`'s
+  0..1: `inBack` starts below 0 and stands at 0, `outBack` is 1 early. A tuple is solved once by `world`'s
   `cubicBezier`, when the value changes; a frame reads its table. A curve that cannot be read (an unknown name, a
   tuple that is not four finite numbers or with x1 or x2 outside 0..1, a number, an object, a function written from
   JS) is linear; the rest of the value holds.

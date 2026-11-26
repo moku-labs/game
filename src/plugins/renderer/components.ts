@@ -395,8 +395,10 @@ export type HudReturn<HudKey extends string = string> = {
    */
   ease?: HudEase;
   /**
-   * The walk of each part over the fade, keyed as an enter of `defineMotion`: the part stands on the first key, walks
-   * the keys and rests where its `Transform` puts it at `at: 1`. Drawn on the part's view, never in its `Transform`.
+   * The walk of each part over the fade: the part stands on the first key, walks the keys and rests where its
+   * `Transform` puts it at `at: 1`. Drawn on the part's view, never in its `Transform`. Two things differ from the keys of
+   * a `defineMotion` enter: a key without `ease` takes the return's curve (linear without one), not `"inOut"`; and
+   * `rotation` adds to the rest pose while `scale`, `scaleX` and `scaleY` multiply it, where `defineMotion` sets them.
    * Keys that are empty, out of 0..1 or not ascending walk nothing, with a dev warning `renderer:hud-return-keys`.
    */
   keyframes?: readonly HudReturnKey[];

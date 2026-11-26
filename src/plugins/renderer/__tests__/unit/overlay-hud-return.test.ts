@@ -1268,4 +1268,24 @@ describe("F245: the walk on the stage", () => {
     expect([factor(stage, energy), factor(stage, gems)]).toEqual([0.5, 0.5]);
     expect([topY(stage, energy), topY(stage, gems)]).toEqual([96, 100]);
   });
+
+  // Bug: a bad curve of a key of `parts` is blamed on the overlay (no part in the warning), turns the overlay's own
+  // curve linear for every part, or is kept on that part.
+  it("names the key of parts with a bad curve, draws that part linear and the others on the overlay's", async () => {
+    const { stage, energy, gems } = await returnStage({ dev: true });
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const value = { delayMs: 0, fadeMs: 700, ease: "in", parts: { gems: { ease: "bounce" } } };
+    const splash = shown(stage, { hud: "none", hudReturn: value as HudReturn });
+
+    expect(copyOf(value).badEasePart).toBe("gems");
+
+    leaveAndGo(stage, splash);
+    step(stage, 350);
+
+    expect(warn.mock.calls.filter(([code]) => code === "renderer:hud-return-ease")).toEqual([
+      ["renderer:hud-return-ease", { entity: splash, label: expect.any(String), part: "gems" }]
+    ]);
+    // Halfway: the energy on the overlay's "in" (0.5²), the gems linear.
+    expect([factor(stage, energy), factor(stage, gems)]).toEqual([0.25, 0.5]);
+  });
 });

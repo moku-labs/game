@@ -7,8 +7,8 @@
  */
 import * as pixi from "pixi.js";
 import { vi } from "vitest";
-import { cubicBezier } from "../../anim/tween/bezier";
 import { Exiting, Layer, Order } from "../../world/ecs/define";
+import { cubicBezier } from "../../world/projection/bezier";
 import { applyEase } from "../../world/projection/easing";
 import type { AnyComponentValue, Entity, LayerSpec } from "../../world/types";
 import { Overlay, OverlayLevel, type OverlayValue, Parent, Shape, Transform } from "../components";

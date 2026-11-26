@@ -5,7 +5,7 @@
  * are pooled and walked by index: a frame with no run reads one length, a frame with runs allocates nothing; the curves
  * and the keys are read once, when the value changes.
  */
-import { cubicBezier } from "../../anim/tween/bezier";
+import { cubicBezier } from "../../world/projection/bezier";
 import { EASE_NAMES, easeCell } from "../../world/projection/easing";
 import type { Entity } from "../../world/types";
 import type { HudEase, HudReturn, HudReturnKey } from "../components";
@@ -48,6 +48,9 @@ const CURVE_STEPS = 512;
 /** The fields of a walk's pose, in the order of a pose and of a key after its `at`. */
 const POSE_FIELDS = ["dx", "dy", "rotation", "scale", "scaleX", "scaleY"] as const;
 
+/** How many fields of a pose are offsets that add (`dx`, `dy`, `rotation`); the ones after them are factors. */
+const OFFSET_FIELDS = 3;
+
 /** How many numbers one key takes in `ClampedKeys.data`: its `at`, then the six fields of a pose. */
 const KEY_STRIDE = 1 + POSE_FIELDS.length;
 
@@ -75,6 +78,11 @@ const TO = new Float64Array(POSE_FIELDS.length);
  * `Object.is`, a call): written into a cell it never is (measured, 16 B a field). A field that is no number is read
  * as its number, `undefined` as NaN; two NaN are told apart by `pairDiffers`. A field written as the string of the
  * same number therefore keeps the copy: a game's JSON gives numbers.
+ *
+ * Every read into the cells is written out by name, `"dx" in next ? (next.dx as number) : Number.NaN`, at the place it
+ * compares. The `as number` only names what the cell's write does anyway (the field was found by `in`, and a
+ * `Float64Array` stores any value as its number). One helper that takes the field's name does the read as a keyed load
+ * that meets every shape and boxes the fraction: measured 128 B a frame in `walkRewritten` of `hud-return.perf.ts`.
  */
 const PAIR = new Float64Array(2);
 
@@ -184,6 +192,26 @@ function inUnit(value: unknown): boolean {
   return isTime(value) && value >= 0 && value <= 1;
 }
 
+/** How many numbers a cubic-bezier `HudEase` holds: x1, y1, x2, y2. */
+const HUD_EASE_POINTS = 4;
+
+/**
+ * Tells whether a value is the four numbers of a CSS `cubic-bezier`: finite, x1 and x2 in 0..1. Pure.
+ *
+ * @param value - The `ease` as stored.
+ * @returns True for a tuple `cubicBezier` takes.
+ * @example
+ * ```ts
+ * isBezierTuple([0.25, 0.6, 0.3, 1]); // true
+ * ```
+ */
+function isBezierTuple(value: unknown): boolean {
+  if (!isList(value) || value.length !== HUD_EASE_POINTS) return false;
+  if (!value.every(item => isTime(item))) return false;
+
+  return inUnit(value[0]) && inUnit(value[2]);
+}
+
 /**
  * Tells whether a value is a curve of a `hudReturn` (F245): a named curve of `world`, or four finite numbers with x1
  * and x2 in 0..1. A function, a number or any other value is none. Pure.
@@ -197,9 +225,8 @@ function inUnit(value: unknown): boolean {
  */
 function isHudEase(value: unknown): value is HudEase {
   if (typeof value === "string") return (EASE_NAMES as readonly string[]).includes(value);
-  if (!isList(value) || value.length !== 4 || !value.every(item => isTime(item))) return false;
 
-  return inUnit(value[0]) && inUnit(value[2]);
+  return isBezierTuple(value);
 }
 
 /**
@@ -229,7 +256,8 @@ function curveOf(ease: HudEase): ClampedCurve {
 }
 
 /**
- * Notes the first curve that cannot be read, and the key of `parts` it is in.
+ * Notes the first curve that cannot be read, and the key of `parts` it is in. Only the first refusal is kept: a later
+ * bad curve changes nothing, so the one dev warning names the first.
  *
  * @param refusals - What the copy refused so far.
  * @param part - The key of `parts`, `undefined` for the overlay's own.
@@ -242,7 +270,8 @@ function refuseEase(refusals: Refusals, part: string | undefined): void {
 }
 
 /**
- * Notes the first keys that cannot be read, and the key of `parts` they are in.
+ * Notes the first keys that cannot be read, and the key of `parts` they are in. Only the first refusal is kept: later
+ * bad keys change nothing, so the one dev warning names the first.
  *
  * @param refusals - What the copy refused so far.
  * @param part - The key of `parts`, `undefined` for the overlay's own.
@@ -489,6 +518,7 @@ function samePlace(
   next: Readonly<Record<string, unknown>>,
   previous: Readonly<Record<string, unknown>>
 ): boolean {
+  // Read by name, inline, with `as number`: see `PAIR` for why no helper does it.
   PAIR[0] = "dx" in next ? (next.dx as number) : Number.NaN;
   PAIR[1] = "dx" in previous ? (previous.dx as number) : Number.NaN;
   if (pairDiffers(next, previous, "dx")) return false;
@@ -873,7 +903,9 @@ function factorOfRun(run: HudReturnRun, key: string, cells: Float64Array): void 
 }
 
 /**
- * Puts a pose at rest: no offset, no turn, its own size.
+ * Puts a pose at rest, the numbers of `HUD_REST` written in place: no offset, no turn, its own size. Used by `walkInto`
+ * once a walk is over and as the end of its last segment, and by `posePart` before the runs add their walks
+ * (`leavePart` hands `HUD_REST` itself).
  *
  * @param pose - The six numbers of a pose, written in place.
  */
@@ -896,15 +928,29 @@ export function restPose(pose: Float64Array): void {
  */
 function poseAtKey(data: Float64Array, index: number, into: Float64Array): void {
   for (let field = 0; field < POSE_FIELDS.length; field += 1) {
-    into[field] = HUD_REST[field] ?? 0;
+    fieldAtKey(data, index, field, into);
+  }
+}
 
-    for (let key = index; key >= 0; key -= 1) {
-      const named = data[key * KEY_STRIDE + 1 + field] ?? Number.NaN;
+/**
+ * Writes one field of the pose a key stands at into a pose: the key's own, else the last key before it that names the
+ * field, else rest. The number goes from array to array: none crosses the call.
+ *
+ * @param data - The flattened keys.
+ * @param index - The key.
+ * @param field - The field of the pose, an index of `POSE_FIELDS`.
+ * @param into - The pose.
+ */
+function fieldAtKey(data: Float64Array, index: number, field: number, into: Float64Array): void {
+  into[field] = HUD_REST[field] ?? 0;
 
-      if (!Number.isNaN(named)) {
-        into[field] = named;
-        break;
-      }
+  for (let key = index; key >= 0; key -= 1) {
+    const named = data[key * KEY_STRIDE + 1 + field] ?? Number.NaN;
+
+    if (!Number.isNaN(named)) {
+      into[field] = named;
+
+      return;
     }
   }
 }
@@ -948,12 +994,14 @@ function segmentCurveOf(
 function walkInto(keys: ClampedKeys, curve: ClampedCurve, into: Float64Array): void {
   const share = SHARE[0] ?? 0;
 
+  // Past the fade: at rest exactly.
   if (share >= 1) {
     restPose(into);
 
     return;
   }
 
+  // Which keys are poses, and where the walk leaves its first one.
   const { count, data, curves } = keys;
   const last = count - 1;
   const endsOnKey = data[last * KEY_STRIDE] === 1;
@@ -961,12 +1009,14 @@ function walkInto(keys: ClampedKeys, curve: ClampedCurve, into: Float64Array): v
   const poses = endsOnKey && count > 1 ? last : count;
   const firstAt = endsOnKey && count === 1 ? 0 : (data[0] ?? 0);
 
+  // Up to the first key's `at`: standing on it.
   if (share <= firstAt) {
     poseAtKey(data, 0, into);
 
     return;
   }
 
+  // The segment the share is in: from the last key at or before it, to the next key or to rest.
   let from = 0;
 
   while (from + 1 < poses && share >= (data[(from + 1) * KEY_STRIDE] ?? 1)) from += 1;
@@ -975,12 +1025,14 @@ function walkInto(keys: ClampedKeys, curve: ClampedCurve, into: Float64Array): v
   const start = from === 0 ? firstAt : (data[from * KEY_STRIDE] ?? 0);
   const end = isLast ? 1 : (data[(from + 1) * KEY_STRIDE] ?? 1);
 
+  // The share of the segment, eased on its curve; the two poses it goes between.
   CELL[0] = (share - start) / (end - start);
   easeInto(segmentCurveOf(curves, from, curve), CELL, 0);
   poseAtKey(data, from, FROM);
   if (isLast) restPose(TO);
   else poseAtKey(data, from + 1, TO);
 
+  // Each field on the line between the two poses at the eased share.
   const eased = CELL[0] ?? 0;
 
   for (let field = 0; field < POSE_FIELDS.length; field += 1) {
@@ -1035,9 +1087,11 @@ function poseOfRun(run: HudReturnRun, key: string, pose: Float64Array): boolean 
   SHARE[0] = run.elapsed < delay ? 0 : (run.elapsed - delay) / fade;
   walkInto(keys, part === undefined ? value.curve : part.curve, SAMPLE);
 
-  for (let field = 0; field < 3; field += 1)
+  // Offsets add, factors multiply: two runs on one part stack.
+  for (let field = 0; field < OFFSET_FIELDS; field += 1) {
     pose[field] = (pose[field] ?? 0) + (SAMPLE[field] ?? 0);
-  for (let field = 3; field < POSE_FIELDS.length; field += 1) {
+  }
+  for (let field = OFFSET_FIELDS; field < POSE_FIELDS.length; field += 1) {
     pose[field] = (pose[field] ?? 1) * (SAMPLE[field] ?? 1);
   }
 
