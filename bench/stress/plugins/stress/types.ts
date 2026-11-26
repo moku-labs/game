@@ -35,14 +35,17 @@ export type StressState = {
   running: boolean;
   /** The display object the fill estimate climbs to the stage from; `undefined` before the first estimate. */
   probe: unknown;
+  /** Every line the monitor's stream wrote since the last read, as JSON text. */
+  log: string[];
 };
 
 /** What the page reads: `game.stress`. */
 export type StressApi = {
   /**
    * The frames the ring finished since the last call, oldest first, as rows of numbers (frame, kind, start, work,
-   * six phases, GPU, draws, rebuilds, passes, filter Mpx, heap MB, then five pairs of system index and ms), with
-   * the names of the world systems the rows index.
+   * six phases, GPU, draws, rebuilds, passes, filter Mpx, heap MB, five pairs of system index and ms, then the
+   * monitor's cause bits, the demand reason, uploads, compiles and the agent's ms), with the names of the world
+   * systems the rows index.
    *
    * @returns The rows, the names, and the frames the ring dropped before this read.
    * @example
@@ -53,6 +56,17 @@ export type StressApi = {
    * ```
    */
   drain(): { rows: number[][]; systems: readonly string[]; lost: number };
+  /**
+   * The lines the monitor's stream wrote since the last call (the header, the per-second samples, the spikes, the
+   * marks, the events), each as JSON text: the raw log of the run.
+   *
+   * @returns The lines, oldest first.
+   * @example
+   * ```ts
+   * JSON.parse(game.stress.log()[0] ?? "{}").kind; // "header"
+   * ```
+   */
+  log(): string[];
   /**
    * Starts or stops the walk; the scene rests while it is stopped.
    *

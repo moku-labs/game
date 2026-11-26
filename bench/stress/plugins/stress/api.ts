@@ -27,7 +27,8 @@ export function createStressState(): StressState {
     rings: [],
     stale: true,
     running: true,
-    probe: undefined
+    probe: undefined,
+    log: []
   };
 }
 
@@ -63,6 +64,14 @@ function rowOf(state: StressState, columns: Renderer.FrameRing["columns"], slot:
   for (let top = 0; top < 5; top += 1) {
     row.push(columns.sysIdx[slot * 5 + top] ?? 0xff_ff, columns.sysMs[slot * 5 + top] ?? 0);
   }
+
+  row.push(
+    columns.causes[slot] ?? 0,
+    columns.reason[slot] ?? 255,
+    columns.uploads[slot] ?? 0,
+    columns.compiles[slot] ?? 0,
+    columns.agentMs[slot] ?? 0
+  );
 
   return row.map(value => (Number.isNaN(value) ? -1 : Math.round(value * 1000) / 1000));
 }
@@ -143,6 +152,13 @@ export function createStressApi(
       state.cursor = Math.max(state.cursor, until);
 
       return { rows, systems: ring.systemNames, lost };
+    },
+    log: () => {
+      const lines = state.log;
+
+      state.log = [];
+
+      return lines;
     },
     run: on => {
       state.running = on;

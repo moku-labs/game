@@ -57,7 +57,9 @@ const [file, topArgument, underFlag, underOf] = process.argv.slice(2);
 const top = Number(topArgument ?? 30);
 
 if (underFlag !== undefined && underFlag !== "--under" && underFlag !== "--callees") {
-  console.error("Usage: bun bench/stress/profile.ts <file> [top] [--under <function> | --callees <function>]");
+  console.error(
+    "Usage: bun bench/stress/profile.ts <file> [top] [--under <function> | --callees <function>]"
+  );
   process.exit(2);
 }
 
@@ -200,7 +202,8 @@ function printCallees(indexed: Indexed, name: string): void {
 
     whole += ms;
     callees.set(first, (callees.get(first) ?? 0) + ms);
-    if (second !== "") callees.set(`${first}${second}`, (callees.get(`${first}${second}`) ?? 0) + ms);
+    if (second !== "")
+      callees.set(`${first}${second}`, (callees.get(`${first}${second}`) ?? 0) + ms);
   }
 
   console.log(`under ${name}: ${whole.toFixed(1)} ms`);

@@ -100,6 +100,54 @@ function systemsOf(group: number[][], systems: readonly string[]): Record<string
   );
 }
 
+/** The monitor's spike causes, in bit order (`PERF_CAUSES` of the engine). */
+const CAUSES = ["gap", "js", "gpu", "compile", "upload", "longFrame", "gc?"];
+
+/** Why a frame was drawn, by index (`DEMAND_REASONS` of the engine). */
+const REASONS = [
+  "always",
+  "first",
+  "resize",
+  "restore",
+  "layers",
+  "debug",
+  "wake",
+  "capture",
+  "request",
+  "mark",
+  "verify",
+  "none",
+  "overlay",
+  "retake"
+];
+
+/**
+ * Counts the cause bits and the demand reasons of a group of frames: columns 26 and 27 of a row.
+ *
+ * @param group - The rows.
+ * @returns How many frames carry each cause, and each reason.
+ */
+function signalsOf(group: number[][]): {
+  causes: Record<string, number>;
+  reasons: Record<string, number>;
+} {
+  const causes: Record<string, number> = {};
+  const reasons: Record<string, number> = {};
+
+  for (const row of group) {
+    const bits = Math.max(0, row[26] ?? 0);
+    const reason = REASONS[row[27] ?? 255] ?? "not measured";
+
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+
+    for (const [bit, cause] of CAUSES.entries()) {
+      if ((bits & (1 << bit)) !== 0) causes[cause] = (causes[cause] ?? 0) + 1;
+    }
+  }
+
+  return { causes, reasons };
+}
+
 const out: Record<string, unknown> = {};
 
 for (const file of readdirSync(folder).filter(name => name.endsWith(".rows.json"))) {
@@ -124,6 +172,7 @@ for (const file of readdirSync(folder).filter(name => name.endsWith(".rows.json"
       systems: systemsOf(group, systems),
       gpu: spreadOf(group.map(row => row[10] ?? -1).filter(value => value >= 0)),
       draws: medianOf(group.map(row => row[11] ?? 0)),
+      ...signalsOf(group),
       rebuilds:
         Math.round((group.reduce((sum, row) => sum + (row[12] ?? 0), 0) / group.length) * 100) / 100
     };
@@ -141,6 +190,8 @@ for (const file of readdirSync(folder).filter(name => name.endsWith(".rows.json"
     fill: result.fill,
     over16: rows.filter(row => ownOf(row) > 16.7).length,
     over33: rows.filter(row => ownOf(row) > 33.3).length,
+    // The cause bits and the demand reasons of the frames over 16.7 ms.
+    peaks: signalsOf(rows.filter(row => ownOf(row) > 16.7)),
     // The wait for the frame's start added: a collection between two frames shows here, not in a phase.
     lateOver16: gaps.filter(ms => ms > 16.7).length,
     lateOver33: gaps.filter(ms => ms > 33.3).length,

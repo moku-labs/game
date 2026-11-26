@@ -30,13 +30,18 @@ export const stressPlugin = createPlugin("stress", {
   createState: createStressState,
   api: ctx => createStressApi(ctx.state, ctx.require(rendererPlugin), ctx.require(worldPlugin)),
   onStart: ctx => {
+    const monitor = ctx.require(rendererPlugin).monitor;
     const driven = {
+      mark: (label: string): void => monitor.mark(label),
       world: ctx.require(worldPlugin),
       flow: ctx.require(flowPlugin),
       ui: ctx.require(uiPlugin)
     };
 
     ctx.state.off.push(
+      monitor.stream(line => {
+        ctx.state.log.push(JSON.stringify(line));
+      }),
       ctx
         .require(timePlugin)
         .onFrame("input", time => walkFrame(ctx.state, driven, startingSession, time))

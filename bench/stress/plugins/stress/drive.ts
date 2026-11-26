@@ -17,10 +17,25 @@ import { KIND, type StressState } from "./types";
 
 /** What the walk drives. */
 export type Driven = {
+  /** Writes a mark into the monitor's log: one per commit of the walk. */
+  mark: (label: string) => void;
   world: Pick<World.Api, "ecs" | "projection">;
   flow: Pick<Flow.Api, "gate">;
   ui: Pick<Ui.UiApi, "find" | "scroll">;
 };
+
+/** The mark each commit of the walk writes, by its kind. */
+const KIND_LABELS: readonly string[] = [
+  "rest",
+  "drag",
+  "slide",
+  "stress: peek",
+  "stress: turn",
+  "stress: popup open",
+  "stress: popup close",
+  "stress: merge",
+  "scroll"
+];
 
 /**
  * The JS heap of the page in MB; 0 where the browser does not say.
@@ -177,4 +192,7 @@ export function walkFrame(
   }
 
   state.kinds[mark] = kind;
+
+  // A commit is marked in the monitor's log, so a spike line of the stream reads against what the walk did.
+  if (kind >= KIND.peek && kind <= KIND.merge) driven.mark(KIND_LABELS[kind] ?? "commit");
 }

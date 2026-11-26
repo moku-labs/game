@@ -13,6 +13,7 @@ type StressPage = {
   game?: {
     stress: {
       drain(): { rows: number[][]; systems: string[]; lost: number };
+      log(): string[];
       info(): unknown;
       fill(): unknown;
     };
@@ -144,6 +145,10 @@ export async function measureScene(
   );
   // The first seconds hold the engine's warm-up and V8's tiers: not a measurement.
   await sleep(4000);
+  // The log from the page's start is kept: its header says which GPU timer runs.
+  const stream: string[] =
+    (await page.evaluate(() => (globalThis as StressPage).game?.stress.log())) ?? [];
+
   await page.evaluate(() => {
     (globalThis as StressPage).game?.stress.drain();
     (globalThis as StressPage).game?.stress.fill();
@@ -173,6 +178,9 @@ export async function measureScene(
     rows.push(...(part?.rows ?? []));
     systems = part?.systems ?? systems;
     lost += part?.lost ?? 0;
+    stream.push(
+      ...((await page.evaluate(() => (globalThis as StressPage).game?.stress.log())) ?? [])
+    );
   }
 
   const collections =
@@ -201,6 +209,8 @@ export async function measureScene(
 
   writeFileSync(path.join(options.out, `${name}.json`), JSON.stringify(result, undefined, 1));
   writeFileSync(path.join(options.out, `${name}.rows.json`), JSON.stringify({ systems, rows }));
+  // The raw log of the monitor's stream, one line each, beside the results.
+  writeFileSync(path.join(options.out, `${name}.stream.jsonl`), `${stream.join("\n")}\n`);
   console.log(
     scene,
     JSON.stringify({
