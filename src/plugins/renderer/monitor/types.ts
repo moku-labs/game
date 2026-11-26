@@ -612,6 +612,14 @@ export type PerfState = {
   /** Per-system ms of the current second, by registration index. */
   secSum: Float64Array;
   secMax: Float32Array;
+  /** The flow's `edgeTimes().written` the last commit took the edges up to: the next commit takes the rest. */
+  edgeSeen: number;
+  /** The `written` the last flush wrote `edge` lines up to, or passed without a listener. */
+  edgeFlushed: number;
+  /** The frame each slot of the flow's edge ring (256, `index % 256`) is counted in, written when a commit takes it. */
+  edgeFrame: Float64Array;
+  /** The edges of the current second: `[count, ms, bodyMs, maxMs, path id of the costliest one's node]`. */
+  edgeSec: Float64Array;
   /** `PERF_GAP_BUCKETS` counts of the current second. */
   gapHist: Uint16Array;
   /** Sum of `listenersMs` of the current second: the monitor's own cost. */

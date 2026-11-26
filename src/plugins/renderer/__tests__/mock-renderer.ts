@@ -8,7 +8,7 @@ import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../config";
 import type { Api as ClockApi } from "../../clock/types";
-import type { Api as FlowApi } from "../../flow/types";
+import type { EdgeTiming, Api as FlowApi } from "../../flow/types";
 import type { Api as LifecycleApi, PauseReason } from "../../lifecycle/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../model/types";
 import { createRateState } from "../../time/rate";
@@ -110,6 +110,8 @@ export type MockRenderer = {
   setPath(path: string): void;
   /** Sets what the fake `world.systemTimes()` answers. */
   setSystemTimes(timing: SystemTiming | undefined): void;
+  /** Sets what the fake `flow.edgeTimes()` answers: the ring of the timed edges, or `undefined` (not timed). */
+  setEdgeTimes(timing: Readonly<EdgeTiming> | undefined): void;
   /** Sets what the fake `clock.pending()` and `clock.listeners()` answer. */
   setClockCounts(pending: number, listeners: number): void;
 };
@@ -317,6 +319,7 @@ export function createMockRenderer(
   };
   const flowState = { path: "home" };
   const systems: { timing: SystemTiming | undefined } = { timing: undefined };
+  const edges: { timing: Readonly<EdgeTiming> | undefined } = { timing: undefined };
 
   const timeApi = {
     onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {
@@ -366,7 +369,8 @@ export function createMockRenderer(
   const flowApi = {
     state: () => ({ mode: "live", path: flowState.path }),
     features: { all: () => [] },
-    fx: { onHint: noRemover }
+    fx: { onHint: noRemover },
+    edgeTimes: () => edges.timing
   } as unknown as FlowApi;
 
   const clockApi = {
@@ -497,6 +501,9 @@ export function createMockRenderer(
     },
     setPath: (path: string): void => {
       flowState.path = path;
+    },
+    setEdgeTimes: (timing: Readonly<EdgeTiming> | undefined): void => {
+      edges.timing = timing;
     },
     setSystemTimes: (timing: SystemTiming | undefined): void => {
       systems.timing = timing;

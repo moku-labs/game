@@ -179,6 +179,34 @@ describe("the performance monitor of an agent build", () => {
     await app.stop();
   });
 
+  // Bug caught: the monitor reading the edges of another object than the app's own flow, or the edge its ring timed
+  // never reaching the frame after it and the log.
+  it("takes the edge of the app's flow into the frame after it and into an `edge` line", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { app, clock } = await startApp();
+    const lines: PerfLogLine[] = [];
+
+    app.renderer.monitor.stream(line => lines.push(line));
+    app.flow.run().catch(() => undefined);
+    await tick();
+    app.flow.gate.answer({ intent: "play" });
+    await tick();
+    steps(app, clock, 130);
+
+    const ring = app.renderer.monitor.frames();
+    const counted = Array.from({ length: ring.size }, (_unused, age) => frameAt(ring, age)?.edges);
+
+    expect(counted.filter(Boolean)).toEqual([
+      { count: 1, ms: expect.any(Number), maxMs: expect.any(Number), maxNode: "home" }
+    ]);
+    expect(lines.filter(line => line.kind === "edge")).toMatchObject([
+      // eslint-disable-next-line unicorn/no-null -- a node without `run`: its body is "not measured", JSON null.
+      { node: "home", outcome: "play", next: "board", bodyMs: null }
+    ]);
+
+    await app.stop();
+  });
+
   it("measures nothing and calls no listener in a build without the flag", async () => {
     const { app, clock } = await startApp();
     const listener = vi.fn();

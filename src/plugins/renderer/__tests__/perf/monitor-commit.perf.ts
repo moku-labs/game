@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentRenderer } from "../perf-harness";
 import { BUDGET, NOISE } from "./budgets";
-import { bytesPerCall, monitorFrame, startPlainAgent, steadyFrame } from "./fixtures";
+import {
+  bytesPerCall,
+  edgeFrame,
+  monitorFrame,
+  startEdgeAgent,
+  startPlainAgent,
+  steadyFrame
+} from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the per-frame path of the monitor of an agent build (spec 11 "the per-frame path allocates nothing", R5 of
@@ -34,6 +41,36 @@ describe("the monitor's frame", () => {
 
     expect(bytesPerCall(() => monitorFrame(agent, record))).toBeLessThanOrEqual(
       BUDGET.monitorCommitLate + NOISE
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The flow edges of a frame (change 2026-11-26-hp-8-flow-timer): `commitEdges` reads `flow.edgeTimes()` in every frame.
+// A frame with none since the previous commit is one compare; a frame with two takes them into its columns and the
+// second's sums, its costliest node's path interned the first time and read from the map after.
+// ---------------------------------------------------------------------------
+
+describe("the monitor's frame with the flow's edges", () => {
+  let timed: AgentRenderer;
+
+  beforeAll(async () => {
+    timed = await startEdgeAgent();
+  });
+
+  it("allocates nothing on a steady frame when no edge came", () => {
+    const record = steadyFrame();
+
+    expect(bytesPerCall(() => monitorFrame(timed, record))).toBeLessThanOrEqual(
+      BUDGET.monitorCommitNoEdges + NOISE
+    );
+  });
+
+  it("allocates nothing on a steady frame with two edges before it", () => {
+    const record = steadyFrame();
+
+    expect(bytesPerCall(() => edgeFrame(timed, record))).toBeLessThanOrEqual(
+      BUDGET.monitorCommitEdges + NOISE
     );
   });
 });

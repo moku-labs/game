@@ -704,6 +704,8 @@ export type {
   PerfCollectorLine,
   PerfCounts,
   PerfDisplay,
+  PerfEdgeEntry,
+  PerfEdgeLine,
   PerfEventLine,
   PerfEventName,
   PerfGapLine,
