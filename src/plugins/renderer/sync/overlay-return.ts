@@ -1,13 +1,18 @@
 /**
  * @file renderer/sync — the return of the HUD parts an overlay hid (F240, `Overlay.hudReturn`): the record's clamped
  * copy of the value, the runs that count the game time of the render phase from the overlay's first exit frame and
- * outlive its record, and the factor a run gives a part. Runs are pooled and walked by index: a frame with no run reads
- * one length, a frame with runs allocates nothing.
+ * outlive its record, the factor a run gives a part on its curve, and the pose its walk draws the part at (F245). Runs
+ * are pooled and walked by index: a frame with no run reads one length, a frame with runs allocates nothing; the curves
+ * and the keys are read once, when the value changes.
  */
+import { cubicBezier } from "../../world/projection/bezier";
+import { EASE_NAMES, easeCell } from "../../world/projection/easing";
 import type { Entity } from "../../world/types";
-import type { HudReturn } from "../components";
+import type { HudEase, HudReturn, HudReturnKey } from "../components";
 import type {
+  ClampedCurve,
   ClampedHudReturn,
+  ClampedKeys,
   ClampedReturnPart,
   EndsWalk,
   HudReturnReport,
@@ -18,7 +23,76 @@ import type {
 } from "./types";
 
 /** What a run holds while it waits in the pool: no overlay's value, so the last one is let go. Frozen: never written. */
-const NO_RETURN: ClampedHudReturn = Object.freeze({ delayMs: 0, fadeMs: 0, parts: undefined });
+const NO_RETURN: ClampedHudReturn = Object.freeze({
+  delayMs: 0,
+  fadeMs: 0,
+  curve: undefined,
+  keys: undefined,
+  parts: undefined,
+  badEase: false,
+  badKeys: false,
+  badEasePart: undefined,
+  badKeysPart: undefined
+});
+
+/** The curve a `ease` that cannot be read is drawn on. Frozen: shared by every copy. */
+const LINEAR: ClampedCurve = Object.freeze({ name: "linear" });
+
+/**
+ * The even steps of time a tuple's curve is read at: the steps `cubicBezier` solves its own table at, so a frame's line
+ * between two cells is the one `cubicBezier` draws (a step it solves again at each call, where the curve leaves an end
+ * vertically, is drawn as the line here).
+ */
+const CURVE_STEPS = 512;
+
+/** The fields of a walk's pose, in the order of a pose and of a key after its `at`. */
+const POSE_FIELDS = ["dx", "dy", "rotation", "scale", "scaleX", "scaleY"] as const;
+
+/** How many fields of a pose are offsets that add (`dx`, `dy`, `rotation`); the ones after them are factors. */
+const OFFSET_FIELDS = 3;
+
+/** How many numbers one key takes in `ClampedKeys.data`: its `at`, then the six fields of a pose. */
+const KEY_STRIDE = 1 + POSE_FIELDS.length;
+
+/**
+ * The rest pose of a HUD part: no offset, no turn, its own size. Read by every reset to rest; never written.
+ */
+export const HUD_REST: Readonly<Float64Array> = Float64Array.of(0, 0, 0, 1, 1, 1);
+
+/** The cell a factor or a segment's time is eased in: a number eased in place is not boxed. */
+const CELL = new Float64Array(1);
+
+/** The share of the fade a walk is sampled at, handed over in a cell. */
+const SHARE = new Float64Array(1);
+
+/** The pose of one run, sampled before it joins the part's pose: written in place, one run at a time. */
+const SAMPLE = new Float64Array(POSE_FIELDS.length);
+
+/** The two poses a segment of a walk goes between: the key it starts on, and the key or the rest it goes to. */
+const FROM = new Float64Array(POSE_FIELDS.length);
+const TO = new Float64Array(POSE_FIELDS.length);
+
+/**
+ * The two cells `sameReturn` compares a number field of two keys in (`at`, the fields of a pose). A fraction read from
+ * keys of several shapes, next to a key that leaves the field out, is boxed by any use that needs a value (`===`,
+ * `Object.is`, a call): written into a cell it never is (measured, 16 B a field). A field that is no number is read
+ * as its number, `undefined` as NaN; two NaN are told apart by `pairDiffers`. A field written as the string of the
+ * same number therefore keeps the copy: a game's JSON gives numbers.
+ *
+ * Every read into the cells is written out by name, `"dx" in next ? (next.dx as number) : Number.NaN`, at the place it
+ * compares. The `as number` only names what the cell's write does anyway (the field was found by `in`, and a
+ * `Float64Array` stores any value as its number). One helper that takes the field's name does the read as a keyed load
+ * that meets every shape and boxes the fraction: measured 128 B a frame in `walkRewritten` of `hud-return.perf.ts`.
+ */
+const PAIR = new Float64Array(2);
+
+/** What `clampedReturn` refused while it read a value: the first curve and the first keys that cannot be read. */
+type Refusals = {
+  badEase: boolean;
+  badKeys: boolean;
+  badEasePart: string | undefined;
+  badKeysPart: string | undefined;
+};
 
 /**
  * Tells whether a value is a time of `hudReturn`: a finite number. Pure.
@@ -91,15 +165,260 @@ function isHudReturn(value: unknown): value is HudReturn {
 }
 
 /**
- * The record's own copy of a stored `hudReturn`: every time 0 or more, each key of `parts` with both of its times
- * filled in from the overlay's. Made only when the marker carries a new value. Pure.
+ * Tells whether a value is a list. Pure.
  *
- * @param value - The field as the marker carries it.
- * @returns The copy, or `undefined` for no value and for one that cannot be read.
+ * @param value - The value.
+ * @returns True for an array, its items still to be checked.
  * @example
  * ```ts
- * clampedReturn({ delayMs: -50, fadeMs: 400, parts: { gems: { delayMs: 1250 } } });
- * // { delayMs: 0, fadeMs: 400, parts: Map { "gems" => { delayMs: 1250, fadeMs: 400 } } }
+ * isList({ at: 0 }); // false
+ * ```
+ */
+function isList(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
+
+/**
+ * Tells whether a number lies in 0..1. Pure.
+ *
+ * @param value - The number.
+ * @returns True from 0 to 1, both included.
+ * @example
+ * ```ts
+ * inUnit(1.2); // false
+ * ```
+ */
+function inUnit(value: unknown): boolean {
+  return isTime(value) && value >= 0 && value <= 1;
+}
+
+/** How many numbers a cubic-bezier `HudEase` holds: x1, y1, x2, y2. */
+const HUD_EASE_POINTS = 4;
+
+/**
+ * Tells whether a value is the four numbers of a CSS `cubic-bezier`: finite, x1 and x2 in 0..1. Pure.
+ *
+ * @param value - The `ease` as stored.
+ * @returns True for a tuple `cubicBezier` takes.
+ * @example
+ * ```ts
+ * isBezierTuple([0.25, 0.6, 0.3, 1]); // true
+ * ```
+ */
+function isBezierTuple(value: unknown): boolean {
+  if (!isList(value) || value.length !== HUD_EASE_POINTS) return false;
+  if (!value.every(item => isTime(item))) return false;
+
+  return inUnit(value[0]) && inUnit(value[2]);
+}
+
+/**
+ * Tells whether a value is a curve of a `hudReturn` (F245): a named curve of `world`, or four finite numbers with x1
+ * and x2 in 0..1. A function, a number or any other value is none. Pure.
+ *
+ * @param value - The `ease` as stored.
+ * @returns True for a `HudEase`.
+ * @example
+ * ```ts
+ * isHudEase([1.2, 0, 0.3, 1]); // false
+ * ```
+ */
+function isHudEase(value: unknown): value is HudEase {
+  if (typeof value === "string") return (EASE_NAMES as readonly string[]).includes(value);
+
+  return isBezierTuple(value);
+}
+
+/**
+ * The curve a `HudEase` is drawn on: a name kept to be eased in a cell; a tuple solved once by `cubicBezier` and read
+ * into a table of its progress at the even steps of time `cubicBezier` keeps itself, so a frame reads two cells and
+ * calls no function: a fraction handed to the curve and back is boxed when V8 does not inline the call (measured, 32 B
+ * a part each frame). Pure.
+ *
+ * @param ease - The curve.
+ * @returns Its clamped curve.
+ * @example
+ * ```ts
+ * curveOf("outCubic"); // { name: "outCubic" }
+ * ```
+ */
+function curveOf(ease: HudEase): ClampedCurve {
+  if (typeof ease === "string") return { name: ease };
+
+  const [x1, y1, x2, y2] = ease;
+  const curve = cubicBezier(x1, y1, x2, y2);
+  const table = new Float64Array(CURVE_STEPS + 1);
+
+  // At a step, `cubicBezier` gives its own table's cell: a frame draws its line between two of them, as it does.
+  for (let step = 0; step <= CURVE_STEPS; step += 1) table[step] = curve(step / CURVE_STEPS);
+
+  return { table, points: [x1, y1, x2, y2] };
+}
+
+/**
+ * Notes the first curve that cannot be read, and the key of `parts` it is in. Only the first refusal is kept: a later
+ * bad curve changes nothing, so the one dev warning names the first.
+ *
+ * @param refusals - What the copy refused so far.
+ * @param part - The key of `parts`, `undefined` for the overlay's own.
+ */
+function refuseEase(refusals: Refusals, part: string | undefined): void {
+  if (refusals.badEase) return;
+
+  refusals.badEase = true;
+  refusals.badEasePart = part;
+}
+
+/**
+ * Notes the first keys that cannot be read, and the key of `parts` they are in. Only the first refusal is kept: later
+ * bad keys change nothing, so the one dev warning names the first.
+ *
+ * @param refusals - What the copy refused so far.
+ * @param part - The key of `parts`, `undefined` for the overlay's own.
+ */
+function refuseKeys(refusals: Refusals, part: string | undefined): void {
+  if (refusals.badKeys) return;
+
+  refusals.badKeys = true;
+  refusals.badKeysPart = part;
+}
+
+/**
+ * Reads one `ease` of a value: the one inherited when none is given, linear and noted when it cannot be read.
+ *
+ * @param ease - The `ease` as stored.
+ * @param inherited - The curve taken without one.
+ * @param refusals - What the copy refused so far.
+ * @param part - The key of `parts` it is in, `undefined` for the overlay's own.
+ * @returns The curve.
+ */
+function readCurve(
+  ease: unknown,
+  inherited: ClampedCurve,
+  refusals: Refusals,
+  part?: string
+): ClampedCurve {
+  if (ease === undefined) return inherited;
+  if (isHudEase(ease)) return curveOf(ease);
+
+  refuseEase(refusals, part);
+
+  return LINEAR;
+}
+
+/**
+ * Tells whether a value is a key of a walk: an object with an `at` in 0..1 and, when given, a `Transform` object whose
+ * six fields are each finite when given. Its `ease` is read apart: a bad curve leaves the key. Pure.
+ *
+ * @param value - One key as stored.
+ * @returns True when it can be walked.
+ * @example
+ * ```ts
+ * isKey({ at: 0, Transform: { dy: Number.NaN } }); // false
+ * ```
+ */
+function isKey(value: unknown): value is HudReturnKey {
+  if (!isObject(value) || !inUnit(value.at)) return false;
+
+  const pose = value.Transform;
+
+  if (pose === undefined) return true;
+  if (!isObject(pose)) return false;
+
+  return POSE_FIELDS.every(field => pose[field] === undefined || isTime(pose[field]));
+}
+
+/**
+ * Tells whether a value is the keys of a walk: a list of one key or more, their `at` strictly ascending. Pure.
+ *
+ * @param value - The `keyframes` as stored.
+ * @returns True when they can be walked.
+ * @example
+ * ```ts
+ * isKeyList([{ at: 0.5 }, { at: 0.25 }]); // false
+ * ```
+ */
+function isKeyList(value: unknown): value is readonly HudReturnKey[] {
+  if (!isList(value) || value.length === 0) return false;
+
+  let previous = Number.NEGATIVE_INFINITY;
+
+  for (const key of value) {
+    if (!isKey(key) || key.at <= previous) return false;
+
+    previous = key.at;
+  }
+
+  return true;
+}
+
+/**
+ * Flattens readable keys into the copy's numbers: `at` and the six fields of each key, NaN for a field it does not
+ * name, and the curve of the segment that ends on it (`undefined`: the return's).
+ *
+ * @param list - The keys, checked.
+ * @param refusals - What the copy refused so far: a key's curve that cannot be read is linear and noted.
+ * @param part - The key of `parts` they are in, `undefined` for the overlay's own.
+ * @returns The flattened keys.
+ */
+function flatKeys(
+  list: readonly HudReturnKey[],
+  refusals: Refusals,
+  part: string | undefined
+): ClampedKeys {
+  const data = new Float64Array(list.length * KEY_STRIDE);
+  const curves: ClampedCurve[] = [];
+
+  for (const [index, key] of list.entries()) {
+    const at = index * KEY_STRIDE;
+
+    data[at] = key.at;
+    for (const [field, name] of POSE_FIELDS.entries()) {
+      data[at + 1 + field] = key.Transform?.[name] ?? Number.NaN;
+    }
+    curves.push(readCurve(key.ease, undefined, refusals, part));
+  }
+
+  return { count: list.length, data, curves };
+}
+
+/**
+ * Reads one `keyframes` of a value: the keys inherited when none are given, no walk and noted when they cannot be read.
+ *
+ * @param keyframes - The `keyframes` as stored.
+ * @param inherited - The keys taken without any.
+ * @param refusals - What the copy refused so far.
+ * @param part - The key of `parts` they are in, `undefined` for the overlay's own.
+ * @returns The keys, or `undefined` for no walk.
+ */
+function readKeys(
+  keyframes: unknown,
+  inherited: ClampedKeys | undefined,
+  refusals: Refusals,
+  part?: string
+): ClampedKeys | undefined {
+  if (keyframes === undefined) return inherited;
+  if (isKeyList(keyframes)) return flatKeys(keyframes, refusals, part);
+
+  refuseKeys(refusals, part);
+
+  return undefined;
+}
+
+/**
+ * The record's own copy of a stored `hudReturn`: every time 0 or more, its curve resolved (a tuple solved once) and its
+ * keys flattened (F245), each key of `parts` with its times, curve and keys filled in from the overlay's when not given.
+ * A curve that cannot be read is linear, keys that cannot be read walk nothing; both are noted in the copy for the
+ * warnings. Made only when the marker carries a new value. Pure.
+ *
+ * @param value - The field as the marker carries it.
+ * @returns The copy, or `undefined` for no value and for one whose times cannot be read.
+ * @example
+ * ```ts
+ * clampedReturn({ delayMs: -50, fadeMs: 400, ease: "bounce", parts: { gems: { delayMs: 1250 } } });
+ * // { delayMs: 0, fadeMs: 400, curve: { name: "linear" }, keys: undefined,
+ * //   parts: Map { "gems" => { delayMs: 1250, fadeMs: 400, curve: { name: "linear" }, keys: undefined } },
+ * //   badEase: true, badKeys: false, badEasePart: undefined, badKeysPart: undefined }
  * ```
  */
 export function clampedReturn(value: unknown): ClampedHudReturn | undefined {
@@ -107,8 +426,17 @@ export function clampedReturn(value: unknown): ClampedHudReturn | undefined {
 
   const delayMs = Math.max(0, value.delayMs);
   const fadeMs = Math.max(0, value.fadeMs);
+  const refusals: Refusals = {
+    badEase: false,
+    badKeys: false,
+    badEasePart: undefined,
+    badKeysPart: undefined
+  };
+  const curve = readCurve(value.ease, undefined, refusals);
+  const keys = readKeys(value.keyframes, undefined, refusals);
 
-  if (value.parts === undefined) return { delayMs, fadeMs, parts: undefined };
+  if (value.parts === undefined)
+    return { delayMs, fadeMs, curve, keys, parts: undefined, ...refusals };
 
   const parts = new Map<string, ClampedReturnPart>();
 
@@ -118,35 +446,232 @@ export function clampedReturn(value: unknown): ClampedHudReturn | undefined {
 
     parts.set(key, {
       delayMs: Math.max(0, part.delayMs ?? delayMs),
-      fadeMs: Math.max(0, part.fadeMs ?? fadeMs)
+      fadeMs: Math.max(0, part.fadeMs ?? fadeMs),
+      curve: readCurve(part.ease, curve, refusals, key),
+      keys: readKeys(part.keyframes, keys, refusals, key)
     });
   }
 
-  return { delayMs, fadeMs, parts };
+  return { delayMs, fadeMs, curve, keys, parts, ...refusals };
 }
 
 /**
- * Tells whether two values carry the same `delayMs` and `fadeMs`: each read as stored, so two equal malformed values are
- * the same too; two values that are no objects are the same only when they are one. Pure.
+ * Tells whether two curves as stored are the same: a name or any other value by `Object.is`, a list by its items.
+ * Pure.
+ *
+ * @param next - The `ease` written now.
+ * @param previous - The `ease` the copy was made from.
+ * @returns True when they are the same.
+ * @example
+ * ```ts
+ * sameEase([0.25, 0.6, 0.3, 1], [0.25, 0.6, 0.3, 1]); // true
+ * ```
+ */
+function sameEase(next: unknown, previous: unknown): boolean {
+  if (!isList(next) || !isList(previous)) return Object.is(next, previous);
+  if (next.length !== previous.length) return false;
+
+  // `===` as in `samePose`: `Object.is` takes no type feedback and boxed the fractions of a tuple (measured, 96 B for
+  // `[0.25, 0.6, 0.3, 1]` against its equal). NaN is the same as NaN.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < next.length; index += 1) {
+    const item = next[index];
+    const before = previous[index];
+
+    if (item !== before && !bothNaN(item, before)) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Tells whether two `Transform` fields of a key as stored are the same: the six fields of a pose. Pure.
+ *
+ * @param next - The field written now.
+ * @param previous - The field the copy was made from.
+ * @returns True when they are the same.
+ * @example
+ * ```ts
+ * samePose({ dy: -8 }, { dy: -12 }); // false
+ * ```
+ */
+function samePose(next: unknown, previous: unknown): boolean {
+  if (!isObject(next) || !isObject(previous)) return Object.is(next, previous);
+
+  return samePlace(next, previous) && sameSize(next, previous);
+}
+
+/**
+ * Tells whether two `Transform` fields of a key carry the same `dx`, `dy` and `rotation`. Each field is read straight
+ * into the cells, by name, and only from a key that has it: a load that also meets a key without the field merges its
+ * fraction with `undefined` and boxes it, a cell or not (measured). See `PAIR`. Pure.
+ *
+ * @param next - The field written now.
+ * @param previous - The field the copy was made from.
+ * @returns True when the three are the same.
+ * @example
+ * ```ts
+ * samePlace({ dy: -8 }, { dy: -8, rotation: 0.05 }); // false
+ * ```
+ */
+function samePlace(
+  next: Readonly<Record<string, unknown>>,
+  previous: Readonly<Record<string, unknown>>
+): boolean {
+  // Read by name, inline, with `as number`: see `PAIR` for why no helper does it.
+  PAIR[0] = "dx" in next ? (next.dx as number) : Number.NaN;
+  PAIR[1] = "dx" in previous ? (previous.dx as number) : Number.NaN;
+  if (pairDiffers(next, previous, "dx")) return false;
+  PAIR[0] = "dy" in next ? (next.dy as number) : Number.NaN;
+  PAIR[1] = "dy" in previous ? (previous.dy as number) : Number.NaN;
+  if (pairDiffers(next, previous, "dy")) return false;
+  PAIR[0] = "rotation" in next ? (next.rotation as number) : Number.NaN;
+  PAIR[1] = "rotation" in previous ? (previous.rotation as number) : Number.NaN;
+
+  return !pairDiffers(next, previous, "rotation");
+}
+
+/**
+ * Tells whether two `Transform` fields of a key carry the same `scale`, `scaleX` and `scaleY`, read as `samePlace`
+ * reads. Pure.
+ *
+ * @param next - The field written now.
+ * @param previous - The field the copy was made from.
+ * @returns True when the three are the same.
+ * @example
+ * ```ts
+ * sameSize({ scale: 0.9 }, { scale: 0.9 }); // true
+ * ```
+ */
+function sameSize(
+  next: Readonly<Record<string, unknown>>,
+  previous: Readonly<Record<string, unknown>>
+): boolean {
+  PAIR[0] = "scale" in next ? (next.scale as number) : Number.NaN;
+  PAIR[1] = "scale" in previous ? (previous.scale as number) : Number.NaN;
+  if (pairDiffers(next, previous, "scale")) return false;
+  PAIR[0] = "scaleX" in next ? (next.scaleX as number) : Number.NaN;
+  PAIR[1] = "scaleX" in previous ? (previous.scaleX as number) : Number.NaN;
+  if (pairDiffers(next, previous, "scaleX")) return false;
+  PAIR[0] = "scaleY" in next ? (next.scaleY as number) : Number.NaN;
+  PAIR[1] = "scaleY" in previous ? (previous.scaleY as number) : Number.NaN;
+
+  return !pairDiffers(next, previous, "scaleY");
+}
+
+/**
+ * Tells whether the two numbers in `PAIR`, read from one field of two keys, say the fields differ: two equal numbers
+ * are the same; two NaN are the same only when the fields are by `Object.is` (left out on both, or NaN on both), read
+ * again by name on that path alone, where no fraction is read. Reads no number from its arguments.
+ *
+ * @param next - The object written now.
+ * @param previous - The object the copy was made from.
+ * @param field - The field the cells were read from.
+ * @returns True when the fields differ.
+ */
+function pairDiffers(
+  next: Readonly<Record<string, unknown>>,
+  previous: Readonly<Record<string, unknown>>,
+  field: string
+): boolean {
+  const written = PAIR[0] ?? 0;
+  const stored = PAIR[1] ?? 0;
+
+  if (written === stored) return false;
+  if (!Number.isNaN(written) || !Number.isNaN(stored)) return true;
+
+  return !Object.is(next[field], previous[field]);
+}
+
+/**
+ * Tells whether two values that are not `===` are both NaN, so a stored NaN keeps its copy as `Object.is` would. Pure.
  *
  * @param next - The value written now.
  * @param previous - The value the copy was made from.
- * @returns True when both times are the same.
+ * @returns True when both are NaN.
  * @example
  * ```ts
- * sameTimes({ delayMs: 1250 }, { delayMs: 1250 }); // true
+ * bothNaN(Number.NaN, Number.NaN); // true
  * ```
  */
-function sameTimes(next: unknown, previous: unknown): boolean {
-  if (!isObject(next) || !isObject(previous)) return Object.is(next, previous);
-
-  return Object.is(next.delayMs, previous.delayMs) && Object.is(next.fadeMs, previous.fadeMs);
+function bothNaN(next: unknown, previous: unknown): boolean {
+  return Number.isNaN(next) && Number.isNaN(previous);
 }
 
 /**
- * Tells whether a `hudReturn` written now says what the one its copy was made from said: the same times, the same keys
- * of `parts` with the same times. An inline literal a render writes again is a new object with the same content, and
- * keeps the copy. Walks the keys with `for…in`, so no list is made. Pure.
+ * Tells whether two `keyframes` as stored are the same: as many keys, each with the same `at`, `ease` and pose. Pure.
+ *
+ * @param next - The keys written now.
+ * @param previous - The keys the copy was made from.
+ * @returns True when they are the same.
+ * @example
+ * ```ts
+ * sameKeys([{ at: 0, Transform: { dy: -8 } }], [{ at: 0, Transform: { dy: -8 } }]); // true
+ * ```
+ */
+function sameKeys(next: unknown, previous: unknown): boolean {
+  if (!isList(next) || !isList(previous)) return Object.is(next, previous);
+  if (next.length !== previous.length) return false;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < next.length; index += 1) {
+    const key = next[index];
+    const before = previous[index];
+
+    if (!isObject(key) || !isObject(before)) {
+      if (!Object.is(key, before)) return false;
+
+      continue;
+    }
+
+    // The `at` read into the cells, as the fields of a pose: see `PAIR`.
+    PAIR[0] = "at" in key ? (key.at as number) : Number.NaN;
+    PAIR[1] = "at" in before ? (before.at as number) : Number.NaN;
+
+    const isSame =
+      !pairDiffers(key, before, "at") &&
+      sameEase(key.ease, before.ease) &&
+      samePose(key.Transform, before.Transform);
+
+    if (!isSame) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Tells whether two keys of `parts` carry the same `delayMs`, `fadeMs`, `ease` and `keyframes`: each read as stored,
+ * so two equal malformed values are the same too; two values that are no objects are the same only when they are one.
+ * Pure.
+ *
+ * @param next - The key's value written now.
+ * @param previous - The key's value the copy was made from.
+ * @returns True when the four fields are the same.
+ * @example
+ * ```ts
+ * sameOwn({ delayMs: 1250, ease: "out" }, { delayMs: 1250, ease: "out" }); // true
+ * ```
+ */
+function sameOwn(next: unknown, previous: unknown): boolean {
+  if (!isObject(next) || !isObject(previous)) return Object.is(next, previous);
+
+  // The times read into the cells, as the fields of a pose (see `PAIR`), at reads of their own: the overlay's times are
+  // read in `sameReturn`. A read that meets the shapes of both levels meets more than four and goes through V8's
+  // generic load, which boxes a time stored as a fraction (2e9 ms in a value of that shape; measured, 32 B a compare).
+  PAIR[0] = "delayMs" in next ? (next.delayMs as number) : Number.NaN;
+  PAIR[1] = "delayMs" in previous ? (previous.delayMs as number) : Number.NaN;
+  if (pairDiffers(next, previous, "delayMs")) return false;
+  PAIR[0] = "fadeMs" in next ? (next.fadeMs as number) : Number.NaN;
+  PAIR[1] = "fadeMs" in previous ? (previous.fadeMs as number) : Number.NaN;
+  if (pairDiffers(next, previous, "fadeMs")) return false;
+
+  return sameEase(next.ease, previous.ease) && sameKeys(next.keyframes, previous.keyframes);
+}
+
+/**
+ * Tells whether a `hudReturn` written now says what the one its copy was made from said: the same times, curve and
+ * keys, the same keys of `parts` with the same of each. An inline literal a render writes again is a new object with
+ * the same content, and keeps the copy. Walks the keys with `for…in` and the lists by index, so no list is made. Pure.
  *
  * @param next - The value written now.
  * @param previous - The value the copy was made from.
@@ -158,7 +683,17 @@ function sameTimes(next: unknown, previous: unknown): boolean {
  */
 export function sameReturn(next: unknown, previous: unknown): boolean {
   if (!isObject(next) || !isObject(previous)) return Object.is(next, previous);
-  if (!sameTimes(next, previous)) return false;
+
+  // The overlay's own times, at reads apart from those of the keys of `parts` in `sameOwn`.
+  PAIR[0] = "delayMs" in next ? (next.delayMs as number) : Number.NaN;
+  PAIR[1] = "delayMs" in previous ? (previous.delayMs as number) : Number.NaN;
+  if (pairDiffers(next, previous, "delayMs")) return false;
+  PAIR[0] = "fadeMs" in next ? (next.fadeMs as number) : Number.NaN;
+  PAIR[1] = "fadeMs" in previous ? (previous.fadeMs as number) : Number.NaN;
+  if (pairDiffers(next, previous, "fadeMs")) return false;
+  if (!sameEase(next.ease, previous.ease) || !sameKeys(next.keyframes, previous.keyframes)) {
+    return false;
+  }
 
   const nextParts = next.parts;
   const previousParts = previous.parts;
@@ -168,7 +703,7 @@ export function sameReturn(next: unknown, previous: unknown): boolean {
   // Every written key stored before with the same times, then no stored key left out. A plain object: every key
   // `for…in` walks is its own.
   for (const key in nextParts) {
-    if (!Object.hasOwn(previousParts, key) || !sameTimes(nextParts[key], previousParts[key])) {
+    if (!Object.hasOwn(previousParts, key) || !sameOwn(nextParts[key], previousParts[key])) {
       return false;
     }
   }
@@ -244,63 +779,365 @@ export function endsOf(
 }
 
 /**
- * The factor of a return at a moment: 0 before the delay, linear over the fade, 1 after it; a fade of 0 jumps to 1 at
- * the delay. Pure.
+ * Eases the time in one cell, in place, on a clamped curve: a name through `easeCell`, a tuple through its solved table;
+ * linear leaves it. Takes no number and returns none, so a frame boxes no double.
+ *
+ * @param curve - The curve, `undefined` for linear.
+ * @param cells - The cells.
+ * @param at - The index of the cell that holds the time and receives the eased fraction.
+ */
+function easeInto(curve: ClampedCurve, cells: Float64Array, at: number): void {
+  if (curve === undefined) return;
+
+  if ("name" in curve) {
+    easeCell(curve.name, cells, at);
+
+    return;
+  }
+
+  // The line between the two cells of the table around the time, as `cubicBezier` draws it: exactly 0 up to the start
+  // and 1 from the end on.
+  const time = cells[at] ?? 0;
+
+  if (time <= 0 || time >= 1) {
+    cells[at] = time <= 0 ? 0 : 1;
+
+    return;
+  }
+
+  const { table } = curve;
+  const scaled = time * CURVE_STEPS;
+  const step = Math.floor(scaled);
+  const low = table[step] ?? 0;
+
+  cells[at] = low + ((table[step + 1] ?? 1) - low) * (scaled - step);
+}
+
+/** The clock a factor is read at: a run's game time and its reduced motion, or a caller's own pair. */
+type ReturnClock = { readonly elapsed: number; readonly reduced: boolean };
+
+/** The times and the curve a factor is read on: a clamped value, one key of its `parts`, or a caller's own. */
+type ReturnTimes = {
+  readonly delayMs: number;
+  readonly fadeMs: number;
+  readonly curve: ClampedCurve;
+};
+
+/**
+ * Writes the factor of a return at a moment into `CELL[0]`: 0 before the delay, the curve over the fade (linear without
+ * one) kept within 0..1, 1 after it; a fade of 0, and reduced motion, jump to 1 at the delay. It reads the numbers from
+ * the two objects itself: a fraction handed to a call V8 does not inline is boxed (a fade of 2e9 ms is one), and the
+ * step of the HUD parts inlines less as it grows (measured); none is returned either.
+ *
+ * @param clock - The game time since the leave started, ms, and reduced motion.
+ * @param times - The part's delay, fade and curve; linear when its curve is `undefined`.
+ */
+function factorInCell(clock: ReturnClock, times: ReturnTimes): void {
+  const delay = times.delayMs;
+
+  if (clock.elapsed < delay) {
+    CELL[0] = 0;
+
+    return;
+  }
+
+  const fade = clock.reduced ? 0 : times.fadeMs;
+
+  if (fade <= 0) {
+    CELL[0] = 1;
+
+    return;
+  }
+
+  CELL[0] = Math.min(1, (clock.elapsed - delay) / fade);
+
+  const { curve } = times;
+
+  if (curve === undefined) return;
+
+  easeInto(curve, CELL, 0);
+  // An overshooting curve leaves 0..1 (`inBack`, `outBack`): the factor is an alpha.
+  CELL[0] = Math.min(1, Math.max(0, CELL[0] ?? 0));
+}
+
+/**
+ * The factor of a return at a moment: 0 before the delay, the curve over the fade (linear without one) kept within 0..1,
+ * 1 after it; a fade of 0 jumps to 1 at the delay. For a caller outside the frame: it makes two objects. Pure.
  *
  * @param elapsed - Game time since the leave started, ms.
  * @param delay - The part's delay, ms.
  * @param fade - The part's fade, ms.
+ * @param curve - The part's curve (F245); linear when left out.
  * @returns The factor, 0 to 1.
  * @example
  * ```ts
  * returnFactor(1450, 1100, 700); // 0.5
  * ```
  */
-export function returnFactor(elapsed: number, delay: number, fade: number): number {
-  if (elapsed < delay) return 0;
-  if (fade <= 0) return 1;
+export function returnFactor(
+  elapsed: number,
+  delay: number,
+  fade: number,
+  curve?: ClampedCurve
+): number {
+  factorInCell({ elapsed, reduced: false }, { delayMs: delay, fadeMs: fade, curve });
 
-  return Math.min(1, (elapsed - delay) / fade);
+  return CELL[0] ?? 0;
 }
 
 /**
- * The factor one run gives a part: 1 for a key it does not hold, else its return at the run's game time, the key's own
- * times read from the clamped copy.
+ * Multiplies the factor in `cells[0]` by the one a run gives a part: nothing for a key it does not hold, else its
+ * return at the run's game time, the key's own times and curve read from the clamped copy.
  *
  * @param run - The run.
  * @param key - The part's key.
- * @returns The factor, 0 to 1.
+ * @param cells - The cell of the product, written in place.
  */
-function factorOfRun(run: HudReturnRun, key: string): number {
-  if (!holds(run.hud, key)) return 1;
+function factorOfRun(run: HudReturnRun, key: string, cells: Float64Array): void {
+  if (!holds(run.hud, key)) return;
 
   const { value } = run;
-  const part = value.parts?.get(key);
-  const delay = part === undefined ? value.delayMs : part.delayMs;
-  const fade = part === undefined ? value.fadeMs : part.fadeMs;
 
-  return returnFactor(run.elapsed, delay, run.reduced ? 0 : fade);
+  factorInCell(run, value.parts?.get(key) ?? value);
+  cells[0] = (cells[0] ?? 1) * (CELL[0] ?? 0);
 }
 
 /**
- * The factor the returns in progress give a part: the product over the runs, 1 with none.
+ * Puts a pose at rest, the numbers of `HUD_REST` written in place: no offset, no turn, its own size. Used by `walkInto`
+ * once a walk is over and as the end of its last segment, and by `posePart` before the runs add their walks
+ * (`leavePart` hands `HUD_REST` itself).
+ *
+ * @param pose - The six numbers of a pose, written in place.
+ */
+export function restPose(pose: Float64Array): void {
+  pose[0] = 0;
+  pose[1] = 0;
+  pose[2] = 0;
+  pose[3] = 1;
+  pose[4] = 1;
+  pose[5] = 1;
+}
+
+/**
+ * Writes the pose one key stands at into a pose: each field the key's own, else the last key before it that names the
+ * field, else rest. Numbers stay in the arrays: no field is returned, so none is boxed.
+ *
+ * @param data - The flattened keys.
+ * @param index - The key.
+ * @param into - The pose.
+ */
+function poseAtKey(data: Float64Array, index: number, into: Float64Array): void {
+  for (let field = 0; field < POSE_FIELDS.length; field += 1) {
+    fieldAtKey(data, index, field, into);
+  }
+}
+
+/**
+ * Writes one field of the pose a key stands at into a pose: the key's own, else the last key before it that names the
+ * field, else rest. The number goes from array to array: none crosses the call.
+ *
+ * @param data - The flattened keys.
+ * @param index - The key.
+ * @param field - The field of the pose, an index of `POSE_FIELDS`.
+ * @param into - The pose.
+ */
+function fieldAtKey(data: Float64Array, index: number, field: number, into: Float64Array): void {
+  into[field] = HUD_REST[field] ?? 0;
+
+  for (let key = index; key >= 0; key -= 1) {
+    const named = data[key * KEY_STRIDE + 1 + field] ?? Number.NaN;
+
+    if (!Number.isNaN(named)) {
+      into[field] = named;
+
+      return;
+    }
+  }
+}
+
+/**
+ * The curve of the segment of a walk that starts on a key: the curve of the key it ends on, the next one (for the last
+ * segment, the key at `at: 1` when the walk ends on one), else the return's. The first key's own curve is never one:
+ * no segment ends on it. Pure.
+ *
+ * @param curves - The curves of the keys, `undefined` for a key without one.
+ * @param from - The key the segment starts on.
+ * @param curve - The return's curve.
+ * @returns The segment's curve.
+ * @example
+ * ```ts
+ * segmentCurveOf([undefined, { name: "out" }], 0, undefined); // { name: "out" }
+ * ```
+ */
+function segmentCurveOf(
+  curves: readonly ClampedCurve[],
+  from: number,
+  curve: ClampedCurve
+): ClampedCurve {
+  const end = from + 1;
+
+  // Past the last key the segment ends on rest: the return's curve.
+  return (end < curves.length ? curves[end] : undefined) ?? curve;
+}
+
+/**
+ * Samples a walk at the share of its fade in `SHARE[0]` into a pose, as an enter of `defineMotion` walks its keys
+ * (F245): on the first key up to its `at`, between two keys on the curve of the key it goes to (the return's without
+ * one), from the last key to rest at 1 on the curve of a key at `at: 1` (whose fields are no pose) or the return's, at
+ * rest from 1 on. A lone key at `at: 1` is the pose the walk starts from. A curve that overshoots carries the pose past
+ * its keys. The share comes in a cell and the poses go through `FROM` and `TO`: no number crosses a call.
+ *
+ * @param keys - The flattened keys.
+ * @param curve - The return's curve, `undefined` for linear.
+ * @param into - The pose, written in place.
+ */
+function walkInto(keys: ClampedKeys, curve: ClampedCurve, into: Float64Array): void {
+  const share = SHARE[0] ?? 0;
+
+  // Past the fade: at rest exactly.
+  if (share >= 1) {
+    restPose(into);
+
+    return;
+  }
+
+  // Which keys are poses, and where the walk leaves its first one.
+  const { count, data, curves } = keys;
+  const last = count - 1;
+  const endsOnKey = data[last * KEY_STRIDE] === 1;
+  // A last key at 1 only gives the last segment its curve; a lone one still stands where the walk starts.
+  const poses = endsOnKey && count > 1 ? last : count;
+  const firstAt = endsOnKey && count === 1 ? 0 : (data[0] ?? 0);
+
+  // Up to the first key's `at`: standing on it.
+  if (share <= firstAt) {
+    poseAtKey(data, 0, into);
+
+    return;
+  }
+
+  // The segment the share is in: from the last key at or before it, to the next key or to rest.
+  let from = 0;
+
+  while (from + 1 < poses && share >= (data[(from + 1) * KEY_STRIDE] ?? 1)) from += 1;
+
+  const isLast = from + 1 >= poses;
+  const start = from === 0 ? firstAt : (data[from * KEY_STRIDE] ?? 0);
+  const end = isLast ? 1 : (data[(from + 1) * KEY_STRIDE] ?? 1);
+
+  // The share of the segment, eased on its curve; the two poses it goes between.
+  CELL[0] = (share - start) / (end - start);
+  easeInto(segmentCurveOf(curves, from, curve), CELL, 0);
+  poseAtKey(data, from, FROM);
+  if (isLast) restPose(TO);
+  else poseAtKey(data, from + 1, TO);
+
+  // Each field on the line between the two poses at the eased share.
+  const eased = CELL[0] ?? 0;
+
+  for (let field = 0; field < POSE_FIELDS.length; field += 1) {
+    const value = FROM[field] ?? 0;
+
+    into[field] = value + ((TO[field] ?? 0) - value) * eased;
+  }
+}
+
+/**
+ * Samples a walk at a share of its fade into a pose: `walkInto` with the share handed over as a number. For a caller
+ * outside the frame; the step hands the share in a cell.
+ *
+ * @param keys - The flattened keys.
+ * @param curve - The return's curve, `undefined` for linear.
+ * @param share - The share of the fade, `(elapsed - delay) / fade`.
+ * @param into - The pose, written in place.
+ */
+export function samplePose(
+  keys: ClampedKeys,
+  curve: ClampedCurve,
+  share: number,
+  into: Float64Array
+): void {
+  SHARE[0] = share;
+  walkInto(keys, curve, into);
+}
+
+/**
+ * Adds the pose of one run to a part's pose: nothing for a key it does not hold, for a part with no walk, or once its
+ * walk is over; else its walk sampled at the run's game time, on the first key before the delay (reduced motion cuts
+ * the walk: rest from the delay on). Offsets add, factors multiply.
+ *
+ * @param run - The run.
+ * @param key - The part's key.
+ * @param pose - The part's pose.
+ * @returns True while the walk still moves the part.
+ */
+function poseOfRun(run: HudReturnRun, key: string, pose: Float64Array): boolean {
+  if (!holds(run.hud, key)) return false;
+
+  const { value } = run;
+  const part = value.parts?.get(key);
+  const keys = part === undefined ? value.keys : part.keys;
+  const delay = part === undefined ? value.delayMs : part.delayMs;
+  const ownFade = part === undefined ? value.fadeMs : part.fadeMs;
+  const fade = run.reduced ? 0 : ownFade;
+
+  if (keys === undefined || run.elapsed >= delay + fade) return false;
+
+  // Before the delay the part stands on its first key; `fade` is above 0 past the delay.
+  SHARE[0] = run.elapsed < delay ? 0 : (run.elapsed - delay) / fade;
+  walkInto(keys, part === undefined ? value.curve : part.curve, SAMPLE);
+
+  // Offsets add, factors multiply: two runs on one part stack.
+  for (let field = 0; field < OFFSET_FIELDS; field += 1) {
+    pose[field] = (pose[field] ?? 0) + (SAMPLE[field] ?? 0);
+  }
+  for (let field = OFFSET_FIELDS; field < POSE_FIELDS.length; field += 1) {
+    pose[field] = (pose[field] ?? 1) * (SAMPLE[field] ?? 1);
+  }
+
+  return true;
+}
+
+/**
+ * Adds the walks of the returns in progress to a part's pose (F245): every run that holds the key and has keys for it,
+ * normally one.
  *
  * @param returns - The runs in progress.
  * @param key - The part's key.
- * @returns The factor, 0 to 1.
+ * @param pose - The part's pose, at rest before the first run.
+ * @returns True while a walk still moves the part: it takes no tap.
  */
-export function returnOf(returns: readonly HudReturnRun[], key: string): number {
-  let factor = 1;
+export function poseOf(returns: readonly HudReturnRun[], key: string, pose: Float64Array): boolean {
+  let isWalking = false;
 
+  // per frame and part: the runs walked by index, as `returnOf`.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < returns.length; index += 1) {
+    const run = returns[index];
+
+    if (run !== undefined && poseOfRun(run, key, pose)) isWalking = true;
+  }
+
+  return isWalking;
+}
+
+/**
+ * Multiplies the factor in `cells[0]` by the one the returns in progress give a part: the product over the runs,
+ * nothing with none. In a cell, not returned: the step that calls it is too large for V8 to inline every callee, and a
+ * fraction returned by one it does not inline is boxed (measured, 16 B a part).
+ *
+ * @param returns - The runs in progress.
+ * @param key - The part's key.
+ * @param cells - The cell of the factor, written in place.
+ */
+export function returnOf(returns: readonly HudReturnRun[], key: string, cells: Float64Array): void {
   // per frame and part: the runs walked by index, normally none or one; `for…of` makes an iterator in the cold tiers.
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
   for (let index = 0; index < returns.length; index += 1) {
     const run = returns[index];
 
-    if (run !== undefined) factor *= factorOfRun(run, key);
+    if (run !== undefined) factorOfRun(run, key, cells);
   }
-
-  return factor;
 }
 
 /**

@@ -9,9 +9,18 @@ import type { DemandReason } from "../demand/types";
 import type { PixiContainer, PixiModule, PixiRenderLayer, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
 import { heldWaiting } from "./build";
-import { returnOf } from "./overlay-return";
-import type { OverlayRecord, SyncCtx } from "./types";
-import { applyHud } from "./views";
+import { poseOf, restPose, returnOf } from "./overlay-return";
+import type { OverlayRecord, OverlayState, SyncCtx } from "./types";
+import { applyHud, applyHudTop, applyHudTurn, writeHudPose } from "./views";
+
+/**
+ * The pose of the part being stepped (F245): the walks of the runs that hold it, sampled into it in place, one part at a
+ * time; never allocated in a frame.
+ */
+const POSE = new Float64Array(6);
+
+/** The factor of the part being stepped while a return is in progress: the overlays' levels times the returns (F245). */
+const FACTOR = new Float64Array(1);
 
 /**
  * Makes the dim of one overlay: a sprite of Pixi's white texture, never a view.
@@ -473,11 +482,105 @@ const partsWalk: {
   hud: string | undefined;
   settling: boolean;
   count: number;
-} = { sctx: undefined, hud: undefined, settling: false, count: 0 };
+  /** A part took a new pose in this frame's walk of `posePart` (F245): the parts are drawn after it. */
+  posed: boolean;
+} = { sctx: undefined, hud: undefined, settling: false, count: 0, posed: false };
+
+/**
+ * Poses one HUD part of the walk (F245): at the pose of the walks of the returns that hold it, at rest with no run and
+ * outside the HUD layer (a walk it was in leaves no pose on it), into its view's numbers, and notes on its view whether
+ * a walk still moves it, for the tap rule of `stepPart`. Draws nothing: `drawPart` does, in a walk of its own.
+ *
+ * @param entity - The part.
+ */
+function posePart(entity: Entity): void {
+  const { sctx, hud } = partsWalk;
+
+  if (sctx === undefined) return;
+
+  const state = sctx.ctx.state.sync;
+  const view = state.views.get(entity);
+
+  if (view === undefined) return;
+
+  const { returns } = state.overlay;
+
+  // Rest with no run: a compare of six numbers once it stands there.
+  restPose(POSE);
+
+  // Only a part of the HUD layer, with a run in progress, is walked.
+  const canWalk = returns.length > 0 && hud !== undefined && layerOf(sctx, entity) === hud;
+
+  view.hudWalking =
+    canWalk && poseOf(returns, sctx.ctx.deps.world.ecs.get(entity, HudPart)?.key ?? "", POSE);
+
+  if (writeHudPose(view, POSE)) partsWalk.posed = true;
+}
+
+/**
+ * Draws one HUD part at the pose its view's numbers hold (F245), in a frame where a part took a new pose: a compare for
+ * a part that did not. Each part walk is a `forEach` callback, so V8 compiles each on its own: the walk that samples the
+ * poses is too large for it to inline the Pixi writes as well, and a fraction handed to one it does not inline is boxed
+ * (measured, 16 B a number); in a callback this small they are inlined.
+ *
+ * @param entity - The part.
+ */
+function drawPart(entity: Entity): void {
+  const { sctx } = partsWalk;
+
+  if (sctx === undefined) return;
+
+  const view = sctx.ctx.state.sync.views.get(entity);
+
+  if (view !== undefined) applyHudTop(sctx, entity, view);
+}
+
+/**
+ * Turns one HUD part to the rotation its view's numbers hold (F245), in a frame where a part took a new pose: a walk of
+ * its own, as `drawPart`'s, since V8 inlines Pixi's rotation setter only into a callback this small (measured).
+ *
+ * @param entity - The part.
+ */
+function turnPart(entity: Entity): void {
+  const { sctx } = partsWalk;
+
+  if (sctx === undefined) return;
+
+  const view = sctx.ctx.state.sync.views.get(entity);
+
+  if (view !== undefined) applyHudTurn(sctx, entity, view);
+}
+
+/**
+ * The walks of the poses (F245), before the step of the parts, so its tap rule reads whether a walk still moves a part.
+ * A frame with no run whose parts the last walk put at rest walks none of them: a frame with no return costs what it
+ * cost before F245.
+ *
+ * @param overlay - The overlay step's state.
+ */
+function stepPoses(overlay: OverlayState): void {
+  const hasRuns = overlay.returns.length > 0;
+
+  if (!hasRuns && overlay.posesAtRest) return;
+
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.parts.forEach(posePart);
+  // A walk with no run put every part at rest and noted none walking: the next one with no run is skipped.
+  overlay.posesAtRest = !hasRuns;
+
+  if (!partsWalk.posed) return;
+
+  partsWalk.posed = false;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.parts.forEach(drawPart);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.parts.forEach(turnPart);
+}
 
 /**
  * Steps one HUD part of the walk: judged against the HUD layer, faded by the factor of the overlays, and noted in the
- * list of the tops that take no tap when it fades, is going to fade, or is kept by an inert overlay.
+ * list of the tops that take no tap when it fades, is going to fade, still walks (F245, as `posePart` noted), or is
+ * kept by an inert overlay.
  *
  * @param entity - The part.
  */
@@ -486,6 +589,7 @@ function stepPart(entity: Entity): void {
 
   if (sctx === undefined) return;
 
+  // The part's view and key; a part with no view yet is not stepped.
   const state = sctx.ctx.state.sync;
   const overlay = state.overlay;
   const view = state.views.get(entity);
@@ -493,8 +597,10 @@ function stepPart(entity: Entity): void {
   if (view === undefined) return;
 
   const key = sctx.ctx.deps.world.ecs.get(entity, HudPart)?.key ?? "";
+  const isOutsideHud = hud === undefined || layerOf(sctx, entity) !== hud;
 
-  if (hud === undefined || layerOf(sctx, entity) !== hud) {
+  // A part outside the HUD layer: warned (not while it builds) and drawn as it is.
+  if (isOutsideHud) {
     // A part of a build is judged once its scene's layers stand: a HUD part is not outside a layer list not yet its own.
     const building = settling || sctx.ctx.deps.world.projection.isBuilding(entity);
 
@@ -504,16 +610,28 @@ function stepPart(entity: Entity): void {
     return;
   }
 
-  // The overlays' levels, times every return of the HUD in progress (F240): 1 with none.
-  const levels = factorOf(overlay.order, key);
-  const factor = overlay.returns.length === 0 ? levels : levels * returnOf(overlay.returns, key);
+  // The overlays' levels, times every return of the HUD in progress (F240): 1 with none. The returns multiply into a
+  // cell: a fraction returned by a call V8 does not inline is boxed. With none no cell is read: a read of a
+  // `Float64Array` boxes its number in the cold tiers.
+  let factor = factorOf(overlay.order, key);
+
+  if (overlay.returns.length > 0) {
+    FACTOR[0] = factor;
+    returnOf(overlay.returns, key, FACTOR);
+    factor = FACTOR[0] ?? 1;
+  }
 
   applyHud(sctx, entity, view, factor);
 
-  // Fading, going to fade, or kept by an inert overlay.
-  const takesNoTap = factor < 1 || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key);
+  // The tap rule, in the order the terms cost: fading, still walking, going to fade, kept by an inert overlay.
+  const isUntappable =
+    factor < 1 ||
+    view.hudWalking ||
+    targetOf(overlay.order, key) < 1 ||
+    inertOf(overlay.order, key);
 
-  if (takesNoTap) {
+  // An untappable part's top joins this frame's list of tops that take no tap, written in place.
+  if (isUntappable) {
     const top = view.wrapper ?? view.object;
     const { offList } = overlay;
 
@@ -524,10 +642,11 @@ function stepPart(entity: Entity): void {
 
 /**
  * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame times the
- * returns in progress (F240), and the parts leaving or not fully back take no tap, and the parts an inert overlay keeps
- * shown take no tap either. A part outside the HUD layer is warned once and drawn as it is. A part of a scene built
- * aside is not warned while it builds, nor in the frame its build waits to be attached: the layers it is judged against
- * are still the scene's being left (a splash with no HUD layer), or none on a cold page (F117).
+ * returns in progress (F240) and at the pose of their walks (F245), and the parts leaving, not fully back or still
+ * walking take no tap, and the parts an inert overlay keeps shown take no tap either. A part outside the HUD layer is
+ * warned once and drawn as it is. A part of a scene built aside is not warned while it builds, nor in the frame its
+ * build waits to be attached: the layers it is judged against are still the scene's being left (a splash with no HUD
+ * layer), or none on a cold page (F117).
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -545,6 +664,7 @@ export function stepParts(sctx: SyncCtx): void {
   // per frame: the faded tops written in place into the reused list, the tap set touched only when they change.
   partsWalk.count = 0;
   // per frame: a Set walked with `forEach` and a callback made once, no iterator and no result objects.
+  stepPoses(overlay);
   // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
   overlay.parts.forEach(stepPart);
 

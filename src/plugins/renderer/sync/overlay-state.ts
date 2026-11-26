@@ -66,6 +66,8 @@ export function stopOverlays(state: SyncState): void {
   forgetOverlays(state);
   overlay.returns.length = 0;
   overlay.returnPool.length = 0;
+  // A run stopped mid-walk may leave a pose on a view: the first frame after a start walks the poses once.
+  overlay.posesAtRest = false;
   overlay.endsWalk.hud = "none";
   overlay.endsWalk.reduced = false;
   overlay.endsWalk.ends = 0;

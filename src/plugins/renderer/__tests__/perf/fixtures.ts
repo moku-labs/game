@@ -546,12 +546,50 @@ export type ReturnBoard = { step: () => void; parts: () => void };
  * "none"` left and is gone, its run in its delay (a billion ms), three parts multiplied by 0. `"fading"`: the same in
  * its fade (delay 0, fades of a billion ms and more), so every step draws the three parts at a new factor between 0
  * and 1. `"idle"`: the run of `"running"` in frames the clock marks idle, so every step wakes the clock. `"ended"`: the
- * run over, back in the pool, the parts at 1.
+ * run over, back in the pool, the parts at 1. `"walking"` (F245): a run in its fade with a named `ease` on top, a tuple
+ * in the `parts` key of the gems and a three-key walk with a curve per key, so every step eases three factors and draws
+ * three new poses. `"walkRewritten"` (F245): that value on a landed overlay, written again before every step as a new
+ * object with the same curves and keys.
  */
-export type ReturnMoment = "standing" | "rewritten" | "running" | "fading" | "idle" | "ended";
+export type ReturnMoment =
+  | "standing"
+  | "rewritten"
+  | "running"
+  | "fading"
+  | "idle"
+  | "ended"
+  | "walking"
+  | "walkRewritten";
 
 /** The game time of a frame the return boards step: 60 Hz. */
 const RETURN_FRAME_MS = 16;
+
+/**
+ * The `hudReturn` with a motion (F245): a named curve on top, a tuple in the gems' key of `parts`, and a walk of three
+ * keys, each after the first with its own curve; the gems fade twice as long, the stars three times and 10 ms later.
+ *
+ * @param delayMs - The delay: 0 for a run in its fade, any for a landed overlay.
+ * @param fadeMs - The fade: a billion ms keeps a run's walk in its first segment for the whole window; a landed
+ *   overlay takes times a game writes, whole numbers V8 keeps small (a time of 2e9 is a fraction to V8 and its own
+ *   compare would box it, F240's as well).
+ * @returns A new value.
+ */
+function motionReturn(delayMs: number, fadeMs: number): HudReturn {
+  return {
+    delayMs,
+    fadeMs,
+    ease: "outCubic",
+    keyframes: [
+      { at: 0, Transform: { dy: -8, scale: 0.9 } },
+      { at: 0.5, ease: "out", Transform: { dy: -2, rotation: 0.05 } },
+      { at: 1, ease: "inOutCubic" }
+    ],
+    parts: {
+      gems: { ease: [0.25, 0.6, 0.3, 1], fadeMs: fadeMs * 2 },
+      stars: { delayMs: delayMs + 10, fadeMs: fadeMs * 3 }
+    }
+  };
+}
 
 /**
  * The `hudReturn` of a board's overlay: three keys in `parts`, with times that keep the run of its moment where it says
@@ -561,6 +599,9 @@ const RETURN_FRAME_MS = 16;
  * @returns A new value.
  */
 function returnOfMoment(moment: ReturnMoment): HudReturn {
+  if (moment === "walking") return motionReturn(0, 1_000_000_000);
+  if (moment === "walkRewritten") return motionReturn(1100, 700);
+
   if (moment === "fading") {
     return {
       delayMs: 0,
@@ -585,7 +626,9 @@ const RETURN_HOLDS: Readonly<Record<ReturnMoment, readonly [number, number]>> = 
   running: [0, 1],
   fading: [0, 1],
   idle: [0, 1],
-  ended: [0, 0]
+  ended: [0, 0],
+  walking: [0, 1],
+  walkRewritten: [1, 0]
 };
 
 /**
@@ -601,7 +644,7 @@ export async function returnBoard(moment: ReturnMoment): Promise<ReturnBoard> {
   const stage = await startOverlayStage();
   const { mock } = stage.drawn;
   const { sync, host, viewport, demand, kept } = mock.modules;
-  const isStanding = moment === "standing" || moment === "rewritten";
+  const isStanding = moment === "standing" || moment === "rewritten" || moment === "walkRewritten";
 
   for (let index = 0; index < 20; index += 1) {
     stage.view({ layer: "scene", x: (index % 5) * 200, y: Math.floor(index / 5) * 200 });
@@ -658,19 +701,27 @@ export async function returnBoard(moment: ReturnMoment): Promise<ReturnBoard> {
     step();
   };
 
-  if (moment === "fading") {
+  if (moment === "fading" || moment === "walking") {
     const before = state.views.get(energy)?.hud ?? 0;
+    const walkedBefore = state.views.get(energy)?.hudDy ?? 0;
 
     step();
 
     const after = state.views.get(energy)?.hud ?? 0;
+    const walked = state.views.get(energy)?.hudDy ?? 0;
 
     if (!(after > before && after < 1)) {
       throw new Error("perf fixture: the fading return board draws no new factor between 0 and 1");
     }
+
+    if (moment === "walking" && !(walked > walkedBefore && walked < 0)) {
+      throw new Error("perf fixture: the walking return board draws no new pose on its walk");
+    }
   }
 
-  return { step: moment === "rewritten" ? rewrite : step, parts: () => stepParts(sctx) };
+  const rewrites = moment === "rewritten" || moment === "walkRewritten";
+
+  return { step: rewrites ? rewrite : step, parts: () => stepParts(sctx) };
 }
 
 /**

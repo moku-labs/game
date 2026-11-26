@@ -1,15 +1,20 @@
 import { expectTypeOf } from "vitest";
 import {
   defineGame,
+  type HudEase as RootHudEase,
   type HudReturn as RootHudReturn,
+  type HudReturnKey as RootHudReturnKey,
   type HudReturnReport as RootHudReturnReport
 } from "../../../../index";
+import type { MotionKeyframe } from "../../../anim/types";
 import type { LayerMap } from "../../../scenes/types";
 import type { Entity } from "../../../world/types";
 import {
   componentsFor,
+  type HudEase,
   HudPart,
   type HudReturn,
+  type HudReturnKey,
   Overlay,
   type OverlayValue
 } from "../../components";
@@ -141,10 +146,66 @@ expectTypeOf<Api["sync"]["debug"]["overlays"]>().returns.toEqualTypeOf<readonly 
 expectTypeOf(ward).toEqualTypeOf<LayerMap>();
 expectTypeOf(wrong).toEqualTypeOf<LayerMap>();
 expectTypeOf(splashBefore).toExtend<OverlayValue>();
-// The parts of a typed return take the game's keys alone, each with its two optional times.
+// The parts of a typed return take the game's keys alone, each with its two optional times, curve and keys (F245).
 expectTypeOf(onlyEnergy.parts).toEqualTypeOf<
-  Partial<Record<"energy", { delayMs?: number; fadeMs?: number }>> | undefined
+  | Partial<
+      Record<
+        "energy",
+        { delayMs?: number; fadeMs?: number; ease?: HudEase; keyframes?: readonly HudReturnKey[] }
+      >
+    >
+  | undefined
 >();
+
+// F245: exam-in, a cubic-bezier as four numbers and the Transform keys of defineMotion.
+Overlay({
+  hud: "none",
+  hudReturn: {
+    delayMs: 1100,
+    fadeMs: 700,
+    ease: [0.25, 0.6, 0.3, 1],
+    keyframes: [{ at: 0, Transform: { dy: -8 } }]
+  }
+});
+kit.Overlay({
+  hud: "none",
+  hudReturn: {
+    delayMs: 1100,
+    fadeMs: 700,
+    ease: "outCubic",
+    parts: {
+      gems: {
+        ease: [0.25, 0.6, 0.3, 1],
+        keyframes: [{ at: 0.5, ease: "in", Transform: { scale: 0.8 } }]
+      }
+    }
+  }
+});
+
+// @ts-expect-error — the curve is stored in the world as JSON: no function.
+Overlay({ hudReturn: { delayMs: 1100, fadeMs: 700, ease: (t: number) => t } });
+
+// @ts-expect-error — "bounce" is no curve of the engine.
+Overlay({ hudReturn: { delayMs: 1100, fadeMs: 700, ease: "bounce" } });
+
+Overlay({
+  // @ts-expect-error — a key's Transform moves in x, y, turn and scale; there is no dz.
+  hudReturn: { delayMs: 1100, fadeMs: 700, keyframes: [{ at: 0, Transform: { dz: 1 } }] }
+});
+
+// @ts-expect-error — a key needs its at.
+Overlay({ hudReturn: { delayMs: 1100, fadeMs: 700, keyframes: [{ Transform: { dy: -8 } }] } });
+
+// @ts-expect-error — the keys of a typed return's parts are still the game's HUD keys.
+kit.Overlay({ hudReturn: { delayMs: 1, fadeMs: 1, parts: { nope: { ease: "in" } } } });
+
+// The root exports the curve and the key a game names its motion constants with.
+expectTypeOf<RootHudEase>().toEqualTypeOf<HudEase>();
+expectTypeOf<RootHudReturnKey>().toEqualTypeOf<HudReturnKey>();
+// A key's `Transform` is the `Transform` of a `defineMotion` key: a field added to one and not the other is an error.
+expectTypeOf<HudReturnKey["Transform"]>().toEqualTypeOf<MotionKeyframe["Transform"]>();
+expectTypeOf<"outBack">().toExtend<HudEase>();
+expectTypeOf<(t: number) => number>().not.toExtend<HudEase>();
 
 // A report is whole without `hudReturn` (an overlay with no run), and its `hudReturn` carries all three numbers.
 const shopReport = {
