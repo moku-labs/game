@@ -53,7 +53,8 @@ import {
   isSprite,
   poolKeyOf,
   release,
-  releaseObject
+  releaseObject,
+  WRAPPER_POOL
 } from "./pools";
 import { isLeaving, parentOf } from "./pose";
 import { drawShapePath, isEmptyArc, paintShape } from "./shape-path";
@@ -1354,7 +1355,8 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   // A new level in the tree: structural, marked before it is built.
   markView(sctx, parentEntity);
 
-  const wrapper = new pixi.Container();
+  // A wrapper of a parent that left is taken before a new one is made (hot path 2в).
+  const wrapper = acquire(sctx.ctx.state.sync, WRAPPER_POOL) ?? new pixi.Container();
   const container = view.object.parent;
 
   wrapper.label = `parent#${parentEntity}`;
