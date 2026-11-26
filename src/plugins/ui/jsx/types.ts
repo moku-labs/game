@@ -394,6 +394,11 @@ export type Element = {
   basis?: StyleBasis;
   /** The motions of its hooks that started a `repeat: "forever"` track; made with the first one. */
   endless?: Set<MotionHandle>;
+  /**
+   * The element belongs to a subtree built in parts behind its clip whose build is open (spec 33 G): it is not seen
+   * yet, so its enter waits for the finish. Deleted at the finish, never written as `undefined`.
+   */
+  clipped?: true;
   /** What its enter hook did at the `Box`, until `ui.enter` keeps the play or plays it again (F49). */
   posed?: PosedEnter | undefined;
   /** The value of its visual last written: what a `change` hook of the visual gets as the value before (F85). */
@@ -734,6 +739,11 @@ export type JsxState = {
    * aside and no window is held warm.
    */
   asideRoots: number;
+  /**
+   * Whether the renderer draws, read once at the start: only then is a subtree wholly behind its clip built in parts
+   * (spec 33 G). False in a headless app.
+   */
+  draws: boolean;
   /** Every `<anchor>` from its enter to its despawn, with what the anchor pass keeps for it. */
   anchors: Map<Entity, Anchor>;
 };
@@ -1050,6 +1060,11 @@ export type JsxModule = {
    * @param quiet - Whether a live element takes its rect with no motion.
    */
   applyAnchored(element: Element, quiet: boolean): void;
+  /**
+   * The check of a dev build in phase `sync`, before `ui.enter`: names, once, a subtree built in parts behind its clip
+   * that meets the clip only after a game system wrote a `Transform` late; it finishes at the next layout (spec 33 G).
+   */
+  checkClips(): void;
   key(input: KeyInput): boolean;
   blur(): void;
 };

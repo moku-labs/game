@@ -16,7 +16,7 @@ const CARDS = 9;
 const PAGE_WIDTH = 348;
 
 /** The distance between two pages of the strip. */
-const PITCH = PAGE_WIDTH * 1.25;
+export const PITCH = PAGE_WIDTH * 1.25;
 
 /**
  * One tile of the overview: a button over a cover, a name, three stars and a pill with a count. 20 elements.
@@ -182,14 +182,13 @@ function dots(on: number) {
 }
 
 /**
- * The album root on the set page: the page on show and the one beside it, on its side.
+ * The album root on the set page with the pages of its strip.
  *
  * @param on - The page on show.
- * @param beside - The second page of the strip.
- * @param side - Its side: -1 left, 1 right.
+ * @param pages - The pages of the strip, each at its place.
  * @returns The root's tree.
  */
-export function albumTree(on: number, beside: number, side: -1 | 1): DescriptionNode {
+function albumWith(on: number, pages: readonly DescriptionNode[]): DescriptionNode {
   return (
     <stack key="albumRoot" style={{ width: 390, height: 844 }}>
       {overview()}
@@ -215,8 +214,7 @@ export function albumTree(on: number, beside: number, side: -1 | 1): Description
             key="albumPages"
             style={{ position: "absolute", left: 21, top: 0, width: PAGE_WIDTH }}
           >
-            {stripPage(on, 0)}
-            {stripPage(beside, side * PITCH)}
+            {pages}
           </stack>
           <button key="albumPrev" intent="view" style={{ position: "absolute", left: 0, top: 300 }}>
             <image texture="ui.coin" style={{ width: 40, height: 40 }} />
@@ -233,6 +231,47 @@ export function albumTree(on: number, beside: number, side: -1 | 1): Description
       </column>
     </stack>
   ) as DescriptionNode;
+}
+
+/**
+ * The album root on the set page: the page on show and the one beside it, on its side.
+ *
+ * @param on - The page on show.
+ * @param beside - The second page of the strip.
+ * @param side - Its side: -1 left, 1 right.
+ * @returns The root's tree.
+ */
+export function albumTree(on: number, beside: number, side: -1 | 1): DescriptionNode {
+  return albumWith(on, [stripPage(on, 0), stripPage(beside, side * PITCH)]);
+}
+
+/**
+ * The album root on the set page with both neighbours of the page on show mounted, one pitch to each side, as the
+ * game mounts them once a turn settles (F244 В): the page beside, wholly behind the clip, is built in parts.
+ *
+ * @param on - The page on show, not the first or the last.
+ * @returns The root's tree.
+ */
+export function albumTree3(on: number): DescriptionNode {
+  return albumWith(on, [stripPage(on - 1, -PITCH), stripPage(on, 0), stripPage(on + 1, PITCH)]);
+}
+
+/**
+ * The album root on the set page with set `on` on show, the set before it on the left and `count` more pages to the
+ * right, one pitch apart, all wholly behind the clip: the bench of the parts gets many frames of parts from one commit.
+ *
+ * @param on - The page on show, not the first.
+ * @param count - The pages to its right, `on + count` under `ALBUM_SETS`.
+ * @returns The root's tree.
+ */
+export function albumBehind(on: number, count: number): DescriptionNode {
+  return albumWith(on, [
+    stripPage(on - 1, -PITCH),
+    stripPage(on, 0),
+    ...Array.from({ length: count }, (_unused, index) =>
+      stripPage(on + 1 + index, (index + 1) * PITCH)
+    )
+  ]);
 }
 
 /** The tree the album root mounts with: set 0 on show, set 1 peeking. */

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
+import type { DescriptionNode } from "../../jsx/types";
+import { ALBUM } from "./album";
 import { type AlbumPerf, startAlbumPerf } from "./album.fixture";
 
 // ---------------------------------------------------------------------------
@@ -120,5 +122,40 @@ describe("ui: a turn of the album's set page, heap per turn", () => {
 
     await annotate(`a turn of ${perf.elements} elements: ${bytes} B`);
     expect(bytes).toBeLessThanOrEqual(TURN_BYTES + HANDLE_BYTES + YOGA_BYTES);
+  });
+});
+
+describe("ui: the album's page beside, built in parts behind the clip (spec 33 G), heap per frame", () => {
+  it("keeps nothing in a frame while the build is open and in the steady frame after its finish", async ({
+    annotate
+  }) => {
+    // Bug caught: the meet test of an open build (the drawn poses of the page and its clip, every frame until the
+    // pager brings the page in) or the field reads of the gate allocate per frame, a GC on the phone every few seconds
+    // while the album rests.
+    const perf = await startAlbumPerf();
+
+    running = perf;
+
+    const peek = ALBUM.peek[1] as DescriptionNode;
+
+    // The peek's commit parks the page beside; four frames make its parts; the build stays open, out of the clip.
+    perf.render(peek);
+
+    for (let frame = 0; frame < 5; frame += 1) perf.ui.app.time.step(16);
+
+    const open = alloc(perf.rest);
+
+    // A commit of the same tree finishes the build before its diff; then the root rests.
+    perf.render(peek);
+
+    for (let frame = 0; frame < 5; frame += 1) perf.ui.app.time.step(16);
+
+    const steady = alloc(perf.rest);
+
+    await annotate(
+      `a frame with the build open: ${open} B; the steady frame after it: ${steady} B`
+    );
+    expect(open).toBe(0);
+    expect(steady).toBe(0);
   });
 });

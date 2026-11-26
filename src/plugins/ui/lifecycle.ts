@@ -109,6 +109,8 @@ function drawsViews(ctx: UiCtx): boolean {
  * 31). On an agent page also the tap counter of `DebugTrigger` and its check of a view that takes
  * no press. The third system of `layout`, `ui.anchor`, runs after the solve and places every
  * `<anchor>` on its targets; the fourth, `ui.guide`, places the veil and the lock window of a guide.
+ * A dev build also opens `ui.clip` in phase `sync`, before `ui.enter`: it names a subtree built in
+ * parts behind its clip that meets the clip only after a late `Transform` write (spec 33 G).
  *
  * The `Box` hook plays an element's enter hook and queues it, so the game's systems see its start
  * pose (F49); `ui.enter` starts its loop after them and before the frame is drawn, and plays the
@@ -144,7 +146,18 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     // Registered after `ui.solve`: a phase runs its systems in registration order.
     ecs.system(system({ name: "ui.anchor", phase: "layout", query: [], run: anchors })),
     // After the anchors: the window of a guide sits where the game's own anchor on it does.
-    ecs.system(system({ name: "ui.guide", phase: "layout", query: [], run: createGuidePass(ctx) })),
+    ecs.system(system({ name: "ui.guide", phase: "layout", query: [], run: createGuidePass(ctx) }))
+  );
+
+  // A dev build checks, after the game's systems of `sync` and before `ui.enter`, whether a subtree built in parts
+  // behind its clip meets it only now (spec 33 G). The guard is inline and positive: a release build drops it.
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+    ctx.state.layout.cleanups.push(
+      ecs.system(system({ name: "ui.clip", phase: "sync", query: [], run: () => jsx.checkClips() }))
+    );
+  }
+
+  ctx.state.layout.cleanups.push(
     ecs.system(
       system({
         name: "ui.enter",
@@ -211,6 +224,8 @@ export async function startUi(ctx: KernelSlice): Promise<void> {
   const uctx = withDeps(ctx);
   const { jsx, layout } = createModules(uctx);
 
+  // Read once, as the part of a scene build is: a subtree behind its clip is built in parts only for a renderer that draws.
+  uctx.state.jsx.draws = drawsViews(uctx);
   registerComponents(uctx, jsx);
   openRegistrations(uctx, jsx, layout);
   jsx.open();
@@ -284,6 +299,7 @@ export function stopUi(state: State): void {
   state.jsx.anchors.clear();
   state.jsx.remount = false;
   state.jsx.asideRoots = 0;
+  state.jsx.draws = false;
   state.jsx.hints.length = 0;
   state.jsx.entering.list.length = 0;
   state.jsx.entering.count = 0;

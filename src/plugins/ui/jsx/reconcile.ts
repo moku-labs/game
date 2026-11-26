@@ -5,7 +5,8 @@
  * written. Beside it:
  * the range of a windowed scroll (`range.ts`), the rest and the motion of the extras
  * (`extras.ts`), the hint routed to a keyed element (`hints.ts`), the remeasure of the texts
- * `text` resolved again (`remeasure.ts`) and a scene build in parts (`parts.ts`).
+ * `text` resolved again (`remeasure.ts`), a scene build in parts (`parts.ts`) and a new subtree wholly behind its
+ * clip built in parts inside a live root (`clipped.ts`).
  */
 import { printOf } from "../../anim/motion";
 import { PointerOver, Pressed, Scrollable, Tappable, Touchable } from "../../input/components";
@@ -53,6 +54,7 @@ import {
   namesFormat,
   visualOf
 } from "../visual";
+import { createClipped } from "./clipped";
 import { cancelExtra, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
@@ -1178,6 +1180,11 @@ export function createReconciler(
     despawnTree
   });
   const parts = createParts(ctx, { enterChildren, applyElement, isMoving: range.isMoving });
+  const clipped = createClipped(ctx, {
+    enterChildren,
+    isMoving: range.isMoving,
+    released: releaseClipped
+  });
   // The reconciler's per-frame scratch, kept so an idle frame allocates nothing: the roots to
   // reconcile, the scroll containers, the roots whose slot changed in this solve, the roots still
   // waiting in it, the viewport box, what the slots were last assigned for, and the layer list
@@ -1425,10 +1432,12 @@ export function createReconciler(
     const nodes = childrenOf(node, range.slotsFor(element), element.scroll?.axis);
 
     // Past the frame's budget a root built aside makes the element and leaves its children for a
-    // later frame (spec 33 A2).
+    // later frame (spec 33 A2). On a live root, a subtree wholly behind its clip is built in parts (spec 33 G).
     if (aside && parts.parks() && nodes.length > 0) parts.park(root, element, nodes, instance, 0);
     else if (aside) enterChildren(root, element, nodes, instance, 0);
-    else diffChildren(root, element, nodes, instance);
+    else if (!clipped.takes(root, parent, element, nodes, instance)) {
+      diffChildren(root, element, nodes, instance);
+    }
 
     root.needsSolve = true;
 
@@ -2418,6 +2427,12 @@ export function createReconciler(
         break;
       }
 
+      // A part of a subtree behind its clip stops where the frame's parts are over (spec 33 G).
+      if (index > from && clipped.stops()) {
+        clipped.park(parent, nodes, instance, index);
+        break;
+      }
+
       const entity = diffNode(
         root,
         parent,
@@ -3217,7 +3232,8 @@ export function createReconciler(
    * the entity first (F48). The hook itself plays at once, so they see the start pose it writes (F49);
    * `ui.enter` plays it again when one of them changed what it read. An element of a root built
    * aside or held warm plays nothing here: its enter waits for the swap or the open, and
-   * `poseReleased` plays it at the same point of that frame (spec 31, spec 33 B+D).
+   * `poseReleased` plays it at the same point of that frame (spec 31, spec 33 B+D). So does an element of
+   * a subtree built in parts behind its clip, until the frame its build finishes (spec 33 G).
    *
    * @param entity - The entity the `Box` was attached to.
    */
@@ -3233,7 +3249,7 @@ export function createReconciler(
     const element = state.elements.get(entity);
 
     // Its hook plays now, so the game's systems see the element as it will be drawn (F49).
-    if (arrives(element) && !isAside(element.root)) {
+    if (arrives(element) && !isAside(element.root) && element.clipped !== true) {
       modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
     }
   }
@@ -3252,7 +3268,8 @@ export function createReconciler(
       const entity = entering.list[index];
       const element = entity === undefined ? undefined : state.elements.get(entity);
 
-      if (!arrives(element) || element.posed !== undefined || isAside(element.root)) continue;
+      if (!arrives(element) || element.posed !== undefined || element.clipped === true) continue;
+      if (isAside(element.root)) continue;
 
       modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
     }
@@ -3264,7 +3281,8 @@ export function createReconciler(
    * reads (a list's scroll), and before `renderer.sync`, so an element is never drawn at its rest
    * pose by mistake. An element despawned in between plays nothing. An element of a root built
    * aside or held warm stays queued, in its order, and plays in the first call after the swap or
-   * the open (spec 31, spec 33 B+D): its enter, posed by `poseReleased` in that frame's solve, its
+   * the open (spec 31, spec 33 B+D), and so does an element of a subtree built in parts behind its clip,
+   * until its finish (spec 33 G): its enter, posed by `poseReleased` in that frame's solve, its
    * loop and the level of an overlay start in the frame the root is first drawn. While nothing was
    * queued since the last call and no root was released, the queue holds only held enters and is
    * not walked.
@@ -3290,7 +3308,7 @@ export function createReconciler(
 
       if (entity === undefined || element === undefined) continue;
 
-      if (isAside(element.root)) {
+      if (element.clipped === true || isAside(element.root)) {
         entering.list[held] = entity;
         held += 1;
       } else {
@@ -3328,6 +3346,15 @@ export function createReconciler(
   }
 
   /**
+   * Releases the enters a subtree built in parts behind its clip held, at its finish (spec 33 G): this frame's solve
+   * poses them where a `Box` would land, and the next `ui.enter` walks the queue again and plays them.
+   */
+  function releaseClipped(): void {
+    released = true;
+    heldEnters = -1;
+  }
+
+  /**
    * Asks for every root to be built again. The world calls it after a restore or a load, when it
    * brought every element to its rest pose and ended every track on it. The next reconcile does
    * the work, because only then the tree of the restored state is here to build from.
@@ -3356,6 +3383,7 @@ export function createReconciler(
       const element = root.element === undefined ? undefined : lookup(root.element);
 
       parts.forgetParts(root);
+      clipped.forgetRoot(root);
 
       if (element !== undefined) {
         forgetSubtree(element);
@@ -3666,14 +3694,20 @@ export function createReconciler(
 
     rendered = count;
 
-    // The parked parts of the roots built aside go first, then the dirty roots, a root built aside
-    // while the budget lasts.
+    // The parked parts of the roots built aside go first, then the subtrees behind a clip that meet it now finish
+    // and the parts of the others are made, then the dirty roots, a root built aside while the budget lasts, a live
+    // one once its open builds behind a clip are finished (spec 33 G).
     parts.drainParked();
+    clipped.meet();
+    clipped.drain();
 
     for (let index = 0; index < count; index += 1) {
       const root = dirtyList[index];
 
-      if (root !== undefined && !parts.holdRoot(root)) reconcileDirtyRoot(root);
+      if (root === undefined || parts.holdRoot(root)) continue;
+
+      clipped.finishRoot(root);
+      reconcileDirtyRoot(root);
     }
 
     // Give the views a slot hosts their parent, take it back where the slot left, and publish the
@@ -3832,6 +3866,7 @@ export function createReconciler(
 
     // Its build ends here, whichever way it goes: no parked part is diffed under a leaving tree.
     parts.forgetParts(root);
+    clipped.forgetRoot(root);
 
     if (cause === "discard" || isAside(entity)) {
       dropRoot(root, element);
@@ -3955,6 +3990,7 @@ export function createReconciler(
     sweep,
     converged,
     asideBuilt,
-    applyAnchored
+    applyAnchored,
+    checkClips: clipped.checkLate
   };
 }
