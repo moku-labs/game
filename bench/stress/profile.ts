@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * @file Reads the profiles a run of the stress bench wrote: `bun bench/stress/profile.ts <file.cpuprofile |
- * file.heapprofile> [top=30] [--under <function>]`. A CPU profile gives the self time of each function and the time under each of the
+ * file.heapprofile> [top=30] [--under <function> | --callees <function>]`. A CPU profile gives the self time of each function and the time under each of the
  * marker functions (the engine's systems and Pixi's render steps), as shares of the sampled time that is not idle.
  * An allocation profile gives the bytes each function allocated, with its nearest named callers.
  */
@@ -56,8 +56,8 @@ const MARKERS = new Set([
 const [file, topArgument, underFlag, underOf] = process.argv.slice(2);
 const top = Number(topArgument ?? 30);
 
-if (underFlag !== undefined && underFlag !== "--under") {
-  console.error("Usage: bun bench/stress/profile.ts <file> [top] [--under <function>]");
+if (underFlag !== undefined && underFlag !== "--under" && underFlag !== "--callees") {
+  console.error("Usage: bun bench/stress/profile.ts <file> [top] [--under <function> | --callees <function>]");
   process.exit(2);
 }
 
@@ -180,6 +180,34 @@ function printCallers(indexed: Indexed, name: string): void {
 }
 
 /**
+ * Prints what a function spends its time in: its own code, and each function it calls, with what that one calls.
+ *
+ * @param indexed - The indexed profile.
+ * @param name - The function.
+ */
+function printCallees(indexed: Indexed, name: string): void {
+  const callees = new Map<string, number>();
+  let whole = 0;
+
+  for (const [id, ms] of indexed.self) {
+    const stack = stackOf(indexed, id);
+    const found = stack.indexOf(name);
+
+    if (found === -1) continue;
+
+    const first = found === 0 ? "(its own code)" : (stack[found - 1] ?? "");
+    const second = found < 2 ? "" : ` > ${stack[found - 2] ?? ""}`;
+
+    whole += ms;
+    callees.set(first, (callees.get(first) ?? 0) + ms);
+    if (second !== "") callees.set(`${first}${second}`, (callees.get(`${first}${second}`) ?? 0) + ms);
+  }
+
+  console.log(`under ${name}: ${whole.toFixed(1)} ms`);
+  print(`What ${name} calls (share of its time; "a > b" is b called from a)`, callees, whole, "ms");
+}
+
+/**
  * Reads a CPU profile: self time by function, and the time under each marker function; with `--under`, the callers
  * of one function instead.
  *
@@ -187,6 +215,12 @@ function printCallers(indexed: Indexed, name: string): void {
  */
 function readCpu(profile: CpuProfile): void {
   const indexed = indexOf(profile);
+
+  if (underOf !== undefined && underFlag === "--callees") {
+    printCallees(indexed, underOf);
+
+    return;
+  }
 
   if (underOf !== undefined) {
     printCallers(indexed, underOf);
