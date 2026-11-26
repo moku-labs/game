@@ -13,6 +13,8 @@
       "!tests/fixtures/mini-game/dist",
       "!tests/fixtures/layout-game",
       "!bench/filters/dist",
+      "!bench/stress/dist",
+      "!bench/stress/out*",
       "!**/.moku"
     ]
   },
