@@ -471,7 +471,7 @@ function retryLeftDrawn(ctx: AssetsCtx): void {
       continue;
     }
 
-    list[index] = list[list.length - 1] as string;
+    list[index] = list.at(-1) as string;
     list.length -= 1;
   }
 }
