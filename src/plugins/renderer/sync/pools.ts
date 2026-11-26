@@ -213,7 +213,8 @@ function oldestPool(state: SyncState): PixiContainer[] | undefined {
  * Puts a view's object back into its pool and evicts the oldest one when the pool grew past the
  * configured limit. A `Display` object belongs to the game and is only detached. The filters and the
  * filter area the renderer hung on the object or its wrapper come off first, so a pooled object never
- * carries a filter into its next life; the filter instances themselves belong to `effects`.
+ * carries a filter into its next life; the filter instances themselves belong to `effects`. A parent's wrapper goes
+ * back to the wrapper pool too, for the next parent (hot path 2в).
  *
  * @param sctx - Domain context of the sync module.
  * @param view - The view that left.
@@ -226,13 +227,14 @@ export function release(sctx: SyncCtx, view: View): void {
   // The filter area goes with the filters: a pooled object never keeps one (B4).
   clearArea(view.object);
 
-  // The wrapper is the renderer's own container, so it is destroyed, never pooled.
+  // The wrapper is the renderer's own container: it goes back to the wrapper pool for the next parent (hot path 2в).
   if (view.wrapper !== undefined) {
-    clearFilters(view.wrapper);
-    clearArea(view.wrapper);
-    detach(view.wrapper);
-    view.wrapper.destroy({ children: false });
+    const wrapper = view.wrapper;
+
+    clearFilters(wrapper);
+    clearArea(wrapper);
     view.wrapper = undefined;
+    releaseWrapper(sctx, wrapper);
   }
 
   // A `Display` object belongs to the game: it only leaves the tree, without the renderer's hidden reasons.
@@ -273,6 +275,47 @@ export function releaseObject(sctx: SyncCtx, object: PixiContainer, poolKey: str
   detach(object);
   resetNode(object);
   store(sctx, object, poolKey);
+}
+
+/**
+ * The pool the wrappers of parent views wait in. A pool key of a visual always holds a colon, so this one is apart.
+ */
+export const WRAPPER_POOL = "wrapper";
+
+/**
+ * Brings a wrapper of a view that left back to the state of a new `Container` and pools it. It comes out of the
+ * tree with every child (its visual, a dim, a picture's quad), without a mask or a render group, drawn, at rest and
+ * unnamed; its filters and filter area are off already. `ensureWrapper` sets the label, the sorting and the depth
+ * again when it takes it. A wrapper counts against `poolLimit` with the objects, so the pools stay bounded.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param wrapper - The wrapper, still in the tree.
+ */
+export function releaseWrapper(sctx: SyncCtx, wrapper: PixiContainer): void {
+  // Out of the tree, and no render group: the kept cache's, or one made by another hand (a window's group).
+  detach(wrapper);
+  dropGroup(sctx, wrapper);
+  if (wrapper.isRenderGroup) wrapper.disableRenderGroup();
+
+  // Every child out, last first, one at a time: Pixi's `removeChildren` builds a new array at every call, even for none.
+  for (let at = wrapper.children.length - 1; at >= 0; at -= 1) {
+    const child = wrapper.children[at];
+
+    if (child !== undefined) detach(child);
+  }
+
+  // Pixi answers `undefined` for no mask; `null` is how it clears one.
+  const masked = wrapper.mask !== null && wrapper.mask !== undefined;
+
+  // eslint-disable-next-line unicorn/no-null -- see above.
+  if (masked) wrapper.mask = null;
+
+  // Unnamed, drawn and at rest. `renderable` is written by the hidden reasons, which the view that left clears on its
+  // visual only.
+  wrapper.label = "";
+  wrapper.renderable = true;
+  resetNode(wrapper);
+  store(sctx, wrapper, WRAPPER_POOL);
 }
 
 /**
