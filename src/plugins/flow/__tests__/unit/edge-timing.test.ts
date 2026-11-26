@@ -247,8 +247,12 @@ describe("flow.edgeTimes in an agent build", () => {
       bodyMs: 1 + SLICE_MS,
       wallMs: STAGES_MS + 1 + SLICE_MS + 1 + AFTER_AWAIT_MS + 1
     });
-    expect(ring.at[1]).toBeLessThan(ring.at[2] ?? 0);
-    expect(ring.at[1]).toBeGreaterThan(ring.at[0] ?? Number.POSITIVE_INFINITY);
+    // `at` is the read before the commit. The page starts at 5000, and every read moves it 1 ms.
+    // Slot 0: entry read 5001, stages 16, the stamp 5018. Its edge then reads: after the commit,
+    // before the emit, hook 4, after the emit (5025). Slot 1: entry read 5026, stages 16, body
+    // start 5043, slice 8, body end 5052, after-await 32, the stamp 5085. Its edge reads 4 more and
+    // spends the hook (5092), so slot 2 stamps at 5093.
+    expect([ring.at[0], ring.at[1], ring.at[2]]).toEqual([5018, 5085, 5093]);
 
     await app.stop();
   });

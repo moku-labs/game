@@ -48,6 +48,7 @@ function takeEdges(
   let max = -1;
   let maxAt = 0;
 
+  // Sum the edges still in the flow's ring and find the costliest.
   for (let index = from; index < to; index += 1) {
     const at = index % timing.capacity;
     const ms = cellF64(timing.ms, at);
@@ -66,10 +67,12 @@ function takeEdges(
   const path = internPath(perf, timing.node[maxAt] ?? OVERFLOW_PATH);
 
   perf.edgeSeen = to;
+  // The frame's columns.
   c.edges[slot] = Math.min(count, EDGES_MAX);
   c.edgeMs[slot] = sum;
   c.edgeMaxMs[slot] = max;
   c.edgePath[slot] = path;
+  // Into the second's sums.
   sec[SEC_COUNT] = cellF64(sec, SEC_COUNT) + count;
   sec[SEC_MS] = cellF64(sec, SEC_MS) + sum;
   sec[SEC_BODY] = cellF64(sec, SEC_BODY) + body;

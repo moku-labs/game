@@ -268,6 +268,7 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
     },
 
     // Inline and positive: a release bundle answers `undefined` and keeps no ring.
+    // Hands out the live ring on purpose, zero allocation, as `world.systemTimes()` does; readers must not write it.
     edgeTimes: (): Readonly<EdgeTiming> | undefined =>
       typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ ? state.timing : undefined
   };
