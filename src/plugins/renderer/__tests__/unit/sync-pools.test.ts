@@ -260,6 +260,45 @@ describe("sync pools", () => {
     expect(mock.ctx.state.kept.madeGroups.has(wrapper)).toBe(false);
   });
 
+  // Bug: a wrapper that is a render group made by another hand (a window's group) stays one, and the kept cache's
+  // bookkeeping never undoes it.
+  it("takes a render group nobody recorded off a pooled wrapper", async () => {
+    const mock = await started();
+    const first = spawnParent(mock);
+
+    mock.modules.sync.pass();
+
+    const wrapper = mock.ctx.state.sync.views.get(first.parent)?.wrapper;
+    const disable = vi.fn(function (this: { isRenderGroup: boolean }) {
+      this.isRenderGroup = false;
+    });
+
+    if (wrapper === undefined) throw new Error("no wrapper");
+    Object.assign(wrapper, { isRenderGroup: true, disableRenderGroup: disable });
+    despawnAll(mock, first);
+    mock.modules.sync.pass();
+
+    expect(disable).toHaveBeenCalledTimes(1);
+    expect(wrapper.isRenderGroup).toBe(false);
+  });
+
+  // Bug: a mask hung on a wrapper clips the next parent that gets it.
+  it("takes a mask off a pooled wrapper", async () => {
+    const mock = await started();
+    const first = spawnParent(mock);
+
+    mock.modules.sync.pass();
+
+    const wrapper = mock.ctx.state.sync.views.get(first.parent)
+      ?.wrapper as unknown as FakeContainer;
+
+    wrapper.mask = new FakeContainer();
+    despawnAll(mock, first);
+    mock.modules.sync.pass();
+
+    expect(wrapper.mask).toBeNull();
+  });
+
   // Bug: pooled wrappers grow without a bound: they count against `poolLimit` with the objects.
   it("keeps wrappers and objects within one pool limit together", async () => {
     const mock = await started({ poolLimit: 3 });

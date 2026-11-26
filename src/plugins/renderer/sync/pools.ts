@@ -213,7 +213,8 @@ function oldestPool(state: SyncState): PixiContainer[] | undefined {
  * Puts a view's object back into its pool and evicts the oldest one when the pool grew past the
  * configured limit. A `Display` object belongs to the game and is only detached. The filters and the
  * filter area the renderer hung on the object or its wrapper come off first, so a pooled object never
- * carries a filter into its next life; the filter instances themselves belong to `effects`.
+ * carries a filter into its next life; the filter instances themselves belong to `effects`. A parent's wrapper goes
+ * back to the wrapper pool too, for the next parent (hot path 2в).
  *
  * @param sctx - Domain context of the sync module.
  * @param view - The view that left.
@@ -291,21 +292,27 @@ export const WRAPPER_POOL = "wrapper";
  * @param wrapper - The wrapper, still in the tree.
  */
 export function releaseWrapper(sctx: SyncCtx, wrapper: PixiContainer): void {
+  // Out of the tree, and no render group: the kept cache's, or one made by another hand (a window's group).
   detach(wrapper);
   dropGroup(sctx, wrapper);
-  // A render group made by another hand (a window's group) goes too: a new `Container` is none.
   if (wrapper.isRenderGroup) wrapper.disableRenderGroup();
-  // Last first, one at a time: Pixi's `removeChildren` builds a new array at every call, even for none.
+
+  // Every child out, last first, one at a time: Pixi's `removeChildren` builds a new array at every call, even for none.
   for (let at = wrapper.children.length - 1; at >= 0; at -= 1) {
     const child = wrapper.children[at];
 
     if (child !== undefined) detach(child);
   }
+
   // Pixi answers `undefined` for no mask; `null` is how it clears one.
+  const masked = wrapper.mask !== null && wrapper.mask !== undefined;
+
   // eslint-disable-next-line unicorn/no-null -- see above.
-  if (wrapper.mask !== null && wrapper.mask !== undefined) wrapper.mask = null;
+  if (masked) wrapper.mask = null;
+
+  // Unnamed, drawn and at rest. `renderable` is written by the hidden reasons, which the view that left clears on its
+  // visual only.
   wrapper.label = "";
-  // `renderable` is written by the hidden reasons, which the view that left clears on its visual only.
   wrapper.renderable = true;
   resetNode(wrapper);
   store(sctx, wrapper, WRAPPER_POOL);

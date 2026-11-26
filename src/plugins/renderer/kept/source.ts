@@ -210,6 +210,30 @@ export function dropSourceTexture(kctx: KeptCtx, source: SourceRecord): void {
 }
 
 /**
+ * Lets the top of a Source go when its view leaves, as `syncTops` does for a view that is gone: its texture dropped, its
+ * render group undone, out of the top map. The Source stays with its entity and finds its next top in `syncTops`. A
+ * leaving view's wrapper goes to a pool (hot path 2в), and a view of the same entity built in the same pass may get the
+ * same container back; `syncTops` would take it for the old top and keep the old picture.
+ *
+ * @param kctx - The kept context.
+ * @param entity - The entity whose view leaves.
+ */
+export function leaveSourceTop(kctx: KeptCtx, entity: Entity): void {
+  const { state } = kctx;
+  const source = state.sourceByEntity.get(entity);
+
+  if (source?.top === undefined) return;
+
+  dropSourceTexture(kctx, source);
+
+  if (state.sourceByTop.get(source.top) === source) state.sourceByTop.delete(source.top);
+
+  source.top = undefined;
+  source.wasGroup = false;
+  kctx.ctx.state.sync.structureVersion += 1;
+}
+
+/**
  * Drops the record of a view that lost `Source` or left: its texture and results freed, its render group restored, out
  * of the maps; every window finds again.
  *

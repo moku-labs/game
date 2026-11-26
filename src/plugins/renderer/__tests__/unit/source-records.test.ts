@@ -76,6 +76,31 @@ describe("a Source's texture", () => {
     expect(drawn.mock.ctx.state.kept.sourceByEntity.has(room)).toBe(false);
   });
 
+  // Bug (2в): a leaving view's wrapper goes to a pool, and a view of the same entity built in the same pass may get it
+  // back; a Source that keeps that top skips its re-key, keeps the old picture and the take's group of a reset wrapper.
+  it("lets its top go when its view leaves, its picture and render group with it", async () => {
+    const drawn = await openSources();
+    const { room } = spawnRoom(drawn);
+
+    spawnWindow(drawn);
+    drawn.frame();
+
+    const source = sourceOf(drawn, room);
+    const texture = source.texture;
+    const top = source.top;
+
+    expect(top?.isRenderGroup).toBe(true);
+
+    drawn.mock.modules.kept.forget(room);
+
+    expect(source.top).toBeUndefined();
+    expect(texture?.destroyed).toBe(true);
+    expect(top?.isRenderGroup).toBe(false);
+    expect(drawn.mock.ctx.state.kept.sourceByTop.has(top as never)).toBe(false);
+    // The Source stays with its entity: the next view's top is its top again.
+    expect(sourceOf(drawn, room)).toBe(source);
+  });
+
   // Bug: the last window leaves and the Source keeps a texture nobody reads (A10).
   it("is freed when its last reader goes, and taken again when one comes back", async () => {
     const drawn = await openSources();
