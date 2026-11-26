@@ -365,12 +365,18 @@ export function installMeasure(
 
   if (yoga === undefined) return;
 
+  // Per restyle: a node keeps the measure function of its element, and one that measures nothing is cleared once. The
+  // calls through yoga-layout's wrapper and the new callback a measure function is wrapped in are made only when the
+  // node's measure changes (F244 В).
   if (!needsMeasure(element)) {
-    // eslint-disable-next-line unicorn/no-null -- Yoga clears a measure function with null.
-    node.setMeasureFunc(null);
+    // What `setMeasureFunc(null)` calls, without the argument copies of the wrapper.
+    if (state.measuring.delete(node)) node.unsetMeasureFunc();
 
     return;
   }
+
+  // The function reads the element when Yoga calls it: the one installed for this element measures what it is now.
+  if (state.measuring.get(node) === element) return;
 
   const measureFunction: MeasureFunction = (width, widthMode, height, heightMode) => {
     const offered = offeredWidth(yoga, width, widthMode);
@@ -388,6 +394,7 @@ export function installMeasure(
   };
 
   node.setMeasureFunc(measureFunction);
+  state.measuring.set(node, element);
 }
 
 /**

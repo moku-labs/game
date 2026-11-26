@@ -8,6 +8,7 @@ import type { FeatureDescription } from "../flow/types";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
 import { createModules } from "./api";
+import { clearCommandPools } from "./ecs/commands";
 import { Now } from "./ecs/define";
 import { recordFrame, resetHistory } from "./ecs/history";
 import { declareScenes } from "./ecs/scenes";
@@ -225,7 +226,7 @@ export function connectWorld(ctx: KernelSlice): void {
 
 /**
  * Empties the world in `onStop`: the frame callbacks and the hint listener are removed, then
- * every track, view, queued view, entity and resource is dropped, a running scene build and the
+ * every track and kept track record, view, queued view, entity and resource is dropped, a running scene build and the
  * `onBuild` checks with them, every warm record, every held name and owed `show`, every value fed, and the scenes
  * and the frame history are reset.
  * No `onRemoved` fires, because `renderer` stopped earlier and destroyed its own objects.
@@ -248,6 +249,9 @@ export function clearWorld(state: State): void {
   state.projection.keys.clear();
   state.projection.keysByEntity.clear();
   state.projection.tracks.length = 0;
+  state.projection.freeTracks.length = 0;
+  state.projection.elementHandles.clear();
+  state.projection.othersPatches.clear();
   state.projection.driver = undefined;
   state.projection.hints.length = 0;
   state.projection.dirty = undefined;
@@ -296,4 +300,5 @@ export function clearWorld(state: State): void {
   state.ecs.scene.leaving.length = 0;
   state.ecs.scene.declared = undefined;
   resetHistory(state.ecs);
+  clearCommandPools();
 }

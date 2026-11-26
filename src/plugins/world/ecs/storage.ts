@@ -176,7 +176,10 @@ function fire(
   entity: Entity,
   value: unknown
 ): void {
-  for (const hook of hooks ?? []) {
+  // Per structural write: a component nobody listens to builds no empty list to walk.
+  if (hooks === undefined) return;
+
+  for (const hook of hooks) {
     try {
       hook(entity, value);
     } catch (error) {
@@ -287,9 +290,60 @@ export function writeComponent(
 
   // `Object.assign` and an own-key loop allocate the same, 16 B per double field read out of the
   // caller's patch (the box V8 makes for a generic read), 0 B for an integer field; the builtin is
-  // faster on a patch of two fields or more (measured, 2026-10-18).
-  Object.assign(stored, patch);
+  // faster on a patch of two fields or more (measured, 2026-10-18). A rect, the hot write of a
+  // layout (`ui`'s `Box` of every element a page slides), is written field by field by name, which
+  // reads no double through a key (F244 В).
+  if (isRect(patch)) writeRect(stored as Record<string, unknown>, patch);
+  else Object.assign(stored, patch);
   markChanged(state, componentType.componentName, entity);
+}
+
+/** A patch of exactly the four fields of a rect. */
+type RectPatch = { x: number; y: number; w: number; h: number };
+
+/**
+ * Tells whether a patch holds exactly the four fields of a rect, `x`, `y`, `w` and `h`, as numbers.
+ *
+ * @param patch - The patch of a write.
+ * @returns True for a rect.
+ * @example
+ * ```ts
+ * isRect({ x: 0, y: 8, w: 390, h: 60 }); // true
+ * ```
+ */
+function isRect(patch: object): patch is RectPatch {
+  let fields = 0;
+
+  // Per write: `for…in` reads the enum cache of the patch's shape, no key array.
+  for (const field in patch) {
+    if (field !== "x" && field !== "y" && field !== "w" && field !== "h") return false;
+
+    fields++;
+  }
+
+  if (fields !== 4) return false;
+
+  const rect = patch as Partial<RectPatch>;
+
+  return (
+    typeof rect.x === "number" &&
+    typeof rect.y === "number" &&
+    typeof rect.w === "number" &&
+    typeof rect.h === "number"
+  );
+}
+
+/**
+ * Writes the four fields of a rect into a stored value by name.
+ *
+ * @param stored - The stored component value.
+ * @param rect - The rect patch.
+ */
+function writeRect(stored: Record<string, unknown>, rect: RectPatch): void {
+  stored.x = rect.x;
+  stored.y = rect.y;
+  stored.w = rect.w;
+  stored.h = rect.h;
 }
 
 /**

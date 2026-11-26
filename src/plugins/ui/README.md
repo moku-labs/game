@@ -1154,6 +1154,43 @@ Limits:
   solve of a scene built aside.
 - A held root costs the memory of its elements and their Yoga nodes for as long as it is held.
 
+## Behind a clip, in parts
+
+A live root builds a new subtree the player cannot see yet in parts (spec 33, slice G; F244 В): the
+page beside the one on show in a pager, mounted while nothing moves, costs its commit frame one
+element instead of the whole page. No prop asks for it and nothing a game reads changes, except that
+a key of an element not made yet is not found.
+
+- **When.** Only with a renderer that draws: a headless app (a test, the CLI) mounts whole, and a
+  fast or paused world runs no layout at all. In `enter()` of a live root, not under a scroll and not
+  in a windowed range, a new `position: "absolute"` element with at least 32 description nodes under
+  it (a `defineComponent` counts as one, unexpanded) is built in parts when, on one axis, its offset
+  and size from its own style (`left` + `width`, `right` + `width` or `left` + `right`; the same
+  with `top`, `bottom`, `height`), through the drawn pose of its parent, lie wholly outside its
+  nearest `overflow: "hidden"` ancestor. A margin, a turn, a scale or a fit on it, a padding on its
+  parent, or a parent or clip not laid out yet: it mounts whole, as before.
+- **Parts.** The element enters in its commit; its children wait in a queue. Every next frame makes
+  them after the scroll step and before the dirty roots, at most 48 elements and 4 ms of the page
+  clock (read every 8 elements), at least one part a frame, and asks for the next frame while parts
+  wait. The root's live solve lays them out and applies them under the clip, which keeps them
+  unseen; the hit test keeps them untouchable. Their enter and `change` motions wait.
+- **Finish in one block.** In the first frame the subtree's drawn rect meets its clip, tested in
+  phase `layout` after the scroll step, and before the root's next diff, every part left is made,
+  the root is solved and applied, and the held enters play from their start pose, so the frame it
+  shows in draws it whole. Its exit, a drop, a remount and a discard forget the queue.
+- **The rule.** Building in parts is safe when the ancestors' `Transform` is written in `input` or
+  `animate`, as a pager does. A write in `sync` comes after the layout: the subtree is drawn
+  half-built in that frame and finishes at the next layout. A dev build names it once
+  (`ui:clip-late`, with the subtree's key and its root); a release build runs no such check.
+
+```ts
+// The album after a turn: set 1 on show, the neighbours mounted one pitch to each side.
+app.time.step(16); // the commit: albumPage2, at x 456 in the 390-wide page area, enters alone
+app.ui.find("albumCard2x0"); // undefined: not made yet
+app.time.step(16); // a part: 48 elements of it are made, unseen under the clip
+// The pager slides the strip in `animate`: in the frame the page first meets the area it is whole.
+```
+
 ## Doors
 
 `inspect.ts` holds the two ui sources of the editor's read door, `@moku-labs/game/inspect`. Both

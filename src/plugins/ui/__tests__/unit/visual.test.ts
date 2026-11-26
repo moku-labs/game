@@ -255,6 +255,63 @@ describe("visualOf", () => {
 
 // ─── the rest transform ───────────────────────────────────────
 
+/**
+ * A text element with one content.
+ *
+ * @param content - What it says.
+ * @param patch - What else to change about it.
+ * @returns The element.
+ */
+function textOf(content: string, patch: Partial<Element> = {}): Element {
+  return elementOf({
+    type: "text",
+    node: { type: "text", props: { content }, children: [] },
+    ...patch
+  });
+}
+
+describe("the kept Text of a text no change.Text hook watches", () => {
+  // Bug caught: the value written in place differs from what `Text({ ... })` builds, in a field or in its order.
+  it("holds the fields and the order Text builds", () => {
+    const [value] = visualOf(textOf("Set 1 of 15"));
+    const built = Text({
+      content: "Set 1 of 15",
+      style: "body",
+      bind: undefined,
+      anchor: { x: 0, y: 0 }
+    });
+
+    expect(value?.type).toBe(Text);
+    expect(value?.value).toEqual(built.value);
+    expect(Object.keys(value?.value ?? {})).toEqual(Object.keys(built.value));
+  });
+
+  // Bug caught: a turn of the album builds the title's value again, or the kept one keeps the content before.
+  it("hands out the same list with the new content at the next call", () => {
+    const element = textOf("Set 1 of 15");
+    const first = visualOf(element);
+
+    element.node = { type: "text", props: { content: "Set 2 of 15" }, children: [] };
+
+    const second = visualOf(element);
+
+    expect(second).toBe(first);
+    expect(second[0]?.value).toMatchObject({ content: "Set 2 of 15" });
+  });
+
+  // Bug caught: the box of a text that wrapped at its box, or the 0 of one that wrapped once, left out of the kept value.
+  it("carries the laid-out width of a text that wraps at its box, and 0 once it fits", () => {
+    const element = textOf("A long line", { measuredWidth: 150 });
+
+    expect(visualOf(element)[0]?.value).toMatchObject({ box: 200 });
+    expect(element.boxed).toBe(true);
+
+    element.measuredWidth = undefined;
+
+    expect(visualOf(element)[0]?.value).toMatchObject({ box: 0 });
+  });
+});
+
 describe("restTransform", () => {
   const rect = { x: 40, y: 80, w: 100, h: 60 };
   const parent = { x: 10, y: 20, w: 500, h: 500 };

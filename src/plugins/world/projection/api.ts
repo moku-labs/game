@@ -13,6 +13,9 @@ import {
   cancelHandles,
   createViewHandle,
   finishHandles,
+  forgetHandle,
+  keepHandle,
+  keptHandleOf,
   looseComponents,
   type Peers,
   playSettle,
@@ -32,6 +35,7 @@ import {
   sweepQueue
 } from "./queue";
 import { reconcile } from "./reconcile";
+import { restValue, writeRest } from "./rests";
 import type {
   AnyProjectionSpec,
   Cause,
@@ -143,14 +147,8 @@ function liveEntities(mounted: Mounted): Entity[] {
   return entities;
 }
 
-/**
- * Creates the peers of a handle that belongs to no projection: nothing to answer from.
- *
- * @returns Two empty item tables.
- */
-function noPeers(): Peers {
-  return { next: new Map(), previous: new Map() };
-}
+/** The items a handle that belongs to no projection answers `peer` from: none. Only read, never written. */
+const NO_PEERS: Peers = Object.freeze({ next: new Map(), previous: new Map() });
 
 /**
  * Creates the projection module: the public API `scenes`, `input` and `i18n` call, plus the
@@ -296,7 +294,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       const rest = state.byEntity.get(entity)?.rest ?? state.rests.get(entity);
       const stored = rest?.get(component.componentName);
 
-      return stored === undefined ? undefined : (stored.value as Value);
+      return stored === undefined ? undefined : (restValue(stored) as Value);
     },
 
     settle: (entity: Entity): void => {
@@ -407,9 +405,31 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       // The handle and a later `setRest` share one pose object. The key remover drops it, and so
       // does the sweep once the entity is gone.
-      state.rests.set(entity, restOf(entity));
+      const pose = restOf(entity);
 
-      return createViewHandle(pctx, elementView(entity), noPeers());
+      state.rests.set(entity, pose);
+      // A handle may start a motion the view keeps: the next sweep walks the live views, as for a new handle.
+      state.moving = true;
+
+      // One handle per element, kept while its pose and its key stand (F244 В): a solve asks for it at every move.
+      const kept = keptHandleOf(state, entity);
+      const place = state.keysByEntity.get(entity);
+
+      if (
+        kept !== undefined &&
+        kept.view.rest === pose &&
+        kept.view.projection === (place?.projection ?? "") &&
+        kept.view.key === (place?.key ?? "")
+      ) {
+        return kept.handle;
+      }
+
+      const view = elementView(entity);
+      const handle = createViewHandle(pctx, view, NO_PEERS);
+
+      keepHandle(state, entity, { view, handle });
+
+      return handle;
     },
 
     setRest: <Value extends object>(
@@ -421,7 +441,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       const pose = restOf(entity);
 
-      pose.set(component.componentName, component(value));
+      // Written in place: a turn of a page records its moved poses and makes no object (F244 В).
+      writeRest(pose, component, value);
       state.rests.set(entity, pose);
     },
 
@@ -450,6 +471,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         if (state.heldKeys.size > 0) dropHeldKey(state, projection, key, entity);
         if (state.keysByEntity.get(entity)?.key === key) state.keysByEntity.delete(entity);
         state.rests.delete(entity);
+        forgetHandle(state, entity);
       };
     },
 
@@ -594,6 +616,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.byEntity.clear();
       state.mutes.clear();
       state.rests.clear();
+      forgetHandle(state);
       state.keys.clear();
       state.keysByEntity.clear();
       state.leaving.clear();

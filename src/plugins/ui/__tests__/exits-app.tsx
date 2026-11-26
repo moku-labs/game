@@ -70,7 +70,8 @@ const fades = {
   cardADeep: fadeOut("cardADeep"),
   slot: fadeOut("slot"),
   slotInner: fadeOut("slotInner"),
-  swapShut: fadeOut("swapShut")
+  swapShut: fadeOut("swapShut"),
+  moveKept: fadeOut("moveKept")
 };
 
 /** What one call of a `change.Shape` hook got, and the motion it returned. */
@@ -262,6 +263,34 @@ export const swapScreen = projection({
   view: (item: Item) => <Swap step={item.step} />
 });
 
+/**
+ * The move (F244, slice 2): a column whose last child `moveLast`, holding the keyed `moveKept`, is dropped by the
+ * render that gives its sibling `moveSide` a `moveKept` of its own. Every child that stays keeps its place.
+ */
+export const moveScreen = projection({
+  name: "exits.move",
+  layer: "ui",
+  from: (player: ExitsPlayer): Item => ({ id: "move", step: player.step }),
+  view: (item: Item) => (
+    <column key="moveRoot" style={{ width: 1080, height: 1080 }}>
+      <button key="moveNext" intent="next" style={control} />
+      <row key="moveSide" style={card}>
+        {item.step === 0 ? undefined : <stack key="moveKept" style={{ width: 40, height: 40 }} />}
+      </row>
+      {item.step === 0 ? (
+        <row key="moveLast" style={card}>
+          <stack
+            key="moveKept"
+            style={{ width: 40, height: 40 }}
+            motion={fades.moveKept}
+            components={[Alpha()]}
+          />
+        </row>
+      ) : undefined}
+    </column>
+  )
+});
+
 /** The ring of the HUD (F85): its XP arc shows a quarter of a ring per answered `next`, dimmed while pressed. */
 export const ringScreen = projection({
   name: "exits.ring",
@@ -400,7 +429,15 @@ const main = defineFlow("main", {
 /** The feature of the fixture. */
 const exitsFeature = defineFeature("exits", {
   flows: [main],
-  projections: [wardScreen, swapScreen, listScreen, ringScreen, gaugeScreen, idleScreen],
+  projections: [
+    wardScreen,
+    swapScreen,
+    listScreen,
+    ringScreen,
+    gaugeScreen,
+    idleScreen,
+    moveScreen
+  ],
   ui: [Swap]
 });
 

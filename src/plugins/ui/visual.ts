@@ -17,8 +17,8 @@ import { Text } from "../text/components";
 import { isTextFormat } from "../text/format";
 import type { TextBind } from "../text/types";
 import type { AnyComponentType, AnyComponentValue } from "../world/types";
-import type { Element } from "./jsx/types";
-import type { ElementLookup, Rect } from "./layout/types";
+import type { Element, KeptShape, KeptText } from "./jsx/types";
+import type { ElementLookup, KeptFields, Rect } from "./layout/types";
 import type { ResolvedStyle } from "./styles/types";
 
 /** The tag of the one child a scroll container holds: everything inside it moves as one. */
@@ -75,8 +75,13 @@ export function writtenKeyOf(element: Element): string {
  * ```
  */
 export function isContainer(type: string): boolean {
-  return ["screen", "layer", "row", "column", "stack", "spacer", ANCHOR, CONTENT].includes(type);
+  return CONTAINERS.has(type);
 }
+
+/** The tags that draw nothing of their own: one frozen set, read by every `visualOf` of a container. */
+const CONTAINERS: ReadonlySet<string> = Object.freeze(
+  new Set(["screen", "layer", "row", "column", "stack", "spacer", ANCHOR, CONTENT])
+);
 
 /**
  * Reads the asset key of an image or an icon out of its props.
@@ -299,6 +304,144 @@ export function restValueOf(
   return { ...current, ...livePatch(value, owned) };
 }
 
+/**
+ * Writes one field into a kept record at its slot: in place while the record names the same field there.
+ *
+ * @param kept - The kept record, or nothing yet.
+ * @param slot - The slot of the field.
+ * @param field - The field.
+ * @param value - Its value.
+ * @returns False once the record names another field at the slot: it has to be built again.
+ */
+function writeSlot(
+  kept: KeptFields | undefined,
+  slot: number,
+  field: string,
+  value: unknown
+): boolean {
+  if (kept === undefined || kept.names[slot] !== field) return false;
+
+  kept.record[field] = value;
+
+  return true;
+}
+
+/**
+ * Keeps a new record under a component name: what a kept record is built from when its fields changed.
+ *
+ * @param cache - The kept patches or the kept rest values of the layout state.
+ * @param name - The component name.
+ * @returns The new, empty record, kept.
+ */
+function keepFields(cache: Map<string, KeptFields>, name: string): KeptFields {
+  const kept: KeptFields = { names: [], record: {} };
+
+  cache.set(name, kept);
+
+  return kept;
+}
+
+/**
+ * `livePatch`, written into a record kept per component name and read at once by the write it is passed to, which
+ * copies it (`ecs.set`). A value whose fields change gets a new record.
+ *
+ * @param cache - The kept patches of the layout state (`livePatches`).
+ * @param name - The component name.
+ * @param value - The component value the element carries now.
+ * @param owned - The fields left alone.
+ * @returns The fields to write.
+ */
+export function keptLivePatch(
+  cache: Map<string, KeptFields>,
+  name: string,
+  value: object,
+  owned: readonly string[]
+): object {
+  if (owned.length === 0) return value;
+
+  const fields = value as Readonly<Record<string, unknown>>;
+  let kept = cache.get(name);
+  let slot = 0;
+  let same = kept !== undefined;
+
+  // Per write: `for…in` over the value, no entries, no filter and no new object while the fields stand.
+  for (const field in fields) {
+    if (owned.includes(field)) continue;
+
+    same = writeSlot(kept, slot, field, fields[field]) && same;
+    slot++;
+  }
+
+  if (same && kept !== undefined && slot === kept.names.length) return kept.record;
+
+  kept = keepFields(cache, name);
+
+  for (const field in fields) {
+    if (owned.includes(field)) continue;
+
+    kept.names.push(field);
+    kept.record[field] = fields[field];
+  }
+
+  return kept.record;
+}
+
+/**
+ * `restValueOf`, written into a record kept per component name and read at once by the `setRest` it is passed to,
+ * which copies it: the fields of the entity's value, those of this render over them but the ones left alone, then the
+ * fields of this render the entity lacks. A value whose fields change gets a new record.
+ *
+ * @param cache - The kept rest values of the layout state (`restValues`).
+ * @param name - The component name.
+ * @param current - The value the entity carries now; none before the component is added.
+ * @param value - The value of this render.
+ * @param owned - The fields left alone.
+ * @returns The rest value.
+ */
+export function keptRestValue(
+  cache: Map<string, KeptFields>,
+  name: string,
+  current: object | undefined,
+  value: object,
+  owned: readonly string[]
+): object {
+  if (current === undefined || owned.length === 0) return value;
+
+  const now = current as Readonly<Record<string, unknown>>;
+  const fields = value as Readonly<Record<string, unknown>>;
+  let kept = cache.get(name);
+  let same = kept !== undefined;
+  let slot = 0;
+
+  // Per record: the two `for…in` walks the spread of `restValueOf` makes, written in place.
+  for (const field in now) {
+    const written = !owned.includes(field) && field in fields;
+
+    same = writeSlot(kept, slot, field, written ? fields[field] : now[field]) && same;
+    slot++;
+  }
+
+  for (const field in fields) {
+    if (field in now || owned.includes(field)) continue;
+
+    same = writeSlot(kept, slot, field, fields[field]) && same;
+    slot++;
+  }
+
+  if (same && kept !== undefined && slot === kept.names.length) return kept.record;
+
+  kept = keepFields(cache, name);
+
+  const built = restValueOf(current, value, owned) as Readonly<Record<string, unknown>>;
+
+  for (const field in built) {
+    kept.names.push(field);
+    kept.record[field] = built[field];
+  }
+
+  return kept.record;
+}
+
 /** The sizes of a sprite ui leaves alone, by axis: one list each, never a new one. */
 const LEFT_NONE: readonly string[] = [];
 const LEFT_WIDTH: readonly string[] = ["width"];
@@ -337,7 +480,7 @@ export function fieldsLeftAlone(
   type: AnyComponentType,
   owned: readonly string[]
 ): readonly string[] {
-  if (type === Text) return namesFormat(element) ? [...owned, "style"] : owned;
+  if (type === Text) return namesFormat(element) ? joined(owned, WITH_STYLE) : owned;
 
   const { style, rect } = element;
   const isImage = element.type === "image" || element.type === "icon";
@@ -350,8 +493,36 @@ export function fieldsLeftAlone(
 
   if (owned.length === 0) return sizes;
 
-  return sizes.length === 0 ? owned : [...owned, ...sizes];
+  return sizes.length === 0 ? owned : joined(owned, sizes);
 }
+
+/** The fields of `Text` ui leaves alone on a label whose format answered its style: one list, never a new one. */
+const TEXT_FORMATTED: readonly string[] = [...Text.owned, "style"];
+
+/** The fields of `Sprite` ui leaves alone with the sizes left alone, by axis: one list each, never a new one. */
+const SPRITE_LEFT_WIDTH: readonly string[] = [...Sprite.owned, "width"];
+const SPRITE_LEFT_HEIGHT: readonly string[] = [...Sprite.owned, "height"];
+const SPRITE_LEFT_BOTH: readonly string[] = [...Sprite.owned, "width", "height"];
+
+/**
+ * Two lists of fields one after the other: one of the module's lists when the owned fields are the type's own, else a
+ * new one, as a type registered with other owned fields has them.
+ *
+ * @param owned - The fields a component type gives to a plugin.
+ * @param more - `["style"]`, or one of the lists of sizes left alone.
+ * @returns The joined list.
+ */
+function joined(owned: readonly string[], more: readonly string[]): readonly string[] {
+  if (owned === Text.owned && more === WITH_STYLE) return TEXT_FORMATTED;
+  if (owned === Sprite.owned && more === LEFT_WIDTH) return SPRITE_LEFT_WIDTH;
+  if (owned === Sprite.owned && more === LEFT_HEIGHT) return SPRITE_LEFT_HEIGHT;
+  if (owned === Sprite.owned && more === LEFT_BOTH) return SPRITE_LEFT_BOTH;
+
+  return [...owned, ...more];
+}
+
+/** The style of a text whose format answered it, as a list `fieldsLeftAlone` joins to the owned fields. */
+const WITH_STYLE: readonly string[] = ["style"];
 
 /**
  * The visual component of an element: a sprite for an image or an icon (at alpha 0 while its style
@@ -396,6 +567,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
     ];
   }
 
+  // No `change.Text` hook reads the value before: the element's kept value is written in place (F244 В).
+  if (type === "text" && element.motion?.change?.Text === undefined) return keptTextOf(element);
+
   if (type === "text") {
     return [
       Text({
@@ -433,6 +607,11 @@ export function visualOf(element: Element): AnyComponentValue[] {
   const filled = style.fill !== undefined || style.stroke !== undefined;
   const invisible = isContainer(type) && !filled;
 
+  // No `change.Shape` hook reads the value before: the element's kept value is written in place (F244 В).
+  if (element.motion?.change?.Shape === undefined) {
+    return keptShapeOf(element, style, rect, invisible, clip || type === "input");
+  }
+
   const shape = {
     kind: style.shape ?? "rect",
     w: rect.w,
@@ -461,6 +640,121 @@ export function visualOf(element: Element): AnyComponentValue[] {
       cap: style.cap ?? arcDefaults.cap
     })
   ];
+}
+
+/**
+ * A new kept `Shape` of an element: the defaults of the type, in their order, its fields written by `keptShapeOf`.
+ *
+ * @param arc - Whether it draws an arc.
+ * @returns The kept value and its one-value list.
+ */
+function newKeptShape(arc: boolean): KeptShape {
+  const value: Record<string, unknown> = { ...Shape.defaults };
+  const entry: AnyComponentValue = { type: Shape, value };
+
+  return { arc, value, values: [entry] };
+}
+
+/**
+ * A kept `Text` value: the defaults, a box when it carries one, and its one-value list.
+ *
+ * @param boxed - Whether the text carries a box.
+ * @returns The kept value.
+ */
+function newKeptText(boxed: boolean): KeptText {
+  const value: Record<string, unknown> = { ...Text.defaults, anchor: { x: 0, y: 0 } };
+
+  if (boxed) value.box = 0;
+
+  const entry: AnyComponentValue = { type: Text, value };
+
+  return { boxed, value, values: [entry] };
+}
+
+/**
+ * The `Text` of an element no `change.Text` hook watches, as `visualOf` builds it, written into the element's kept
+ * value: the same fields `Text({ ... })` makes, in the same order. A text that starts to carry a box gets a new kept
+ * value.
+ *
+ * @param element - The text element.
+ * @returns The element's kept one-value list.
+ */
+function keptTextOf(element: Element): AnyComponentValue[] {
+  const props = element.node.props;
+  // `boxOf`, by its two cases: a text wrapped at its box carries it, and one that wrapped once carries 0.
+  const measured = element.measuredWidth !== undefined;
+
+  if (measured) element.boxed = true;
+
+  const boxed = element.boxed === true;
+  let kept = element.keptText;
+
+  if (kept?.boxed !== boxed) {
+    kept = newKeptText(boxed);
+    element.keptText = kept;
+  }
+
+  const value = kept.value;
+
+  value.content = contentOf(props);
+  value.style = writtenKeyOf(element);
+  value.bind = props.bind as TextBind | undefined;
+  if (boxed) value.box = measured ? element.rect.w : 0;
+
+  return kept.values;
+}
+
+/**
+ * The `Shape` of an element no `change.Shape` hook watches, as `visualOf` builds it, written into the element's kept
+ * value: the same fields as `Shape({ ... })` makes, so every write, record and add copies what it did. An arc keeps
+ * its share and its ends; a shape that turns into an arc, or back, gets a new kept value.
+ *
+ * @param element - The element to draw.
+ * @param style - Its resolved style.
+ * @param rect - Its rect.
+ * @param invisible - Whether it is a container that draws nothing.
+ * @param clip - Whether its rectangle clips.
+ * @returns The element's kept one-value list.
+ */
+function keptShapeOf(
+  element: Element,
+  style: ResolvedStyle,
+  rect: Rect,
+  invisible: boolean,
+  clip: boolean
+): AnyComponentValue[] {
+  const kind = style.shape ?? "rect";
+  const arc = kind === "arc";
+  let kept = element.keptShape;
+
+  if (kept?.arc !== arc) {
+    kept = newKeptShape(arc);
+    element.keptShape = kept;
+  }
+
+  const value = kept.value;
+
+  value.kind = kind;
+  value.w = rect.w;
+  value.h = rect.h;
+  value.fill = style.fill ?? Shape.defaults.fill;
+  // No `fill` paints nothing inside: a stroke-only ring, or a button whose label is all it shows.
+  value.fillAlpha = style.fill === undefined ? 0 : Shape.defaults.fillAlpha;
+  // The alpha fades the children too: a container that draws nothing keeps its style's.
+  value.alpha = style.alpha ?? 1;
+  value.radius = style.radius ?? 0;
+  value.stroke = style.stroke ?? Shape.defaults.stroke;
+  value.strokeWidth = invisible ? 0 : (style.strokeWidth ?? 0);
+  value.dash = style.dash ?? 0;
+  // A text field clips its value to its box, so a long one never leaves it.
+  value.clip = clip;
+
+  if (arc) {
+    value.sweep = style.sweep ?? arcDefaults.sweep;
+    value.cap = style.cap ?? arcDefaults.cap;
+  }
+
+  return kept.values;
 }
 
 /**

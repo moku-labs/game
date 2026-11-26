@@ -287,6 +287,43 @@ export function startTrackFixture(): () => void {
   };
 }
 
+/** The two rest poses a rest move alternates between: whole numbers, as a layout's rects mostly are. */
+const REST_POSES = [
+  { x: 0, y: 40, rotation: 0, scale: 1 },
+  { x: 456, y: 40, rotation: 0, scale: 1 }
+];
+
+/** The options of a rest move of 0 ms, as `toRest` hands them to the driver. */
+const REST_NOW = { ms: 0, ease: "out", delayMs: 0, additive: false } as const;
+
+/**
+ * One rest move of 0 ms of one element, start to end (change 2026-11-26-f244-peek-pool): the track starts and lands
+ * its target, and the next frame step ends it and drops it, as a turn of a page moves the page. With `handle` the
+ * track starts through the `TweenDriver` seam and its caller gets the handle; without, through `startTrack` alone.
+ *
+ * @param handle - Whether the start goes through the driver and makes the caller's handle.
+ * @returns One start and end of the track.
+ */
+export function restMoveFixture(handle: boolean): () => void {
+  const mock = createMockAnim();
+  const driver = createDriver(mock.actx);
+  const entity = spawnTestEntity(mock, [Transform({ x: 0, y: 40, rotation: 0, scale: 1 })]);
+  // The pose of each call lives in a cell: a number in a closure would be a new heap number.
+  const at = new Int32Array(1);
+
+  return warmed((): void => {
+    at[0] = at[0] === 0 ? 1 : 0;
+
+    const to = REST_POSES[at[0] ?? 0] ?? { x: 0 };
+
+    if (handle) driver.track(entity, Transform, to, REST_NOW, nothingMuted);
+    else startTrack(mock.actx, entity, Transform, to, REST_NOW, nothingMuted);
+
+    beginFrame(mock.actx);
+    advanceTracks(mock.actx, FRAME_MS);
+  });
+}
+
 /**
  * The track table with 50 bobbing loops whose views the player cannot see: the renderer holds
  * them, so every frame walks every track and writes nothing.

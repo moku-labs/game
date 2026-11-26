@@ -690,8 +690,13 @@ export function stepScroll(
 
   state.scrollClock += time.delta;
 
-  for (const container of containers) {
-    if (stepOne(ctx, state, container, lookup, pointer, time)) moving = true;
+  // Per frame: an indexed walk, no iterator, also cold.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+  for (let index = 0; index < containers.length; index += 1) {
+    const container = containers[index];
+
+    if (container !== undefined && stepOne(ctx, state, container, lookup, pointer, time))
+      moving = true;
   }
 
   if (moving && time.delta > 0) ctx.deps.time.wake();
@@ -885,11 +890,14 @@ export function settleScroll(
 ): void {
   let moving = false;
 
-  for (const container of containers) {
-    const motion = container.scroll;
-    const content = contentOf(container, lookup);
+  // Per solve: an indexed walk, no iterator, also cold.
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+  for (let index = 0; index < containers.length; index += 1) {
+    const container = containers[index];
+    const motion = container?.scroll;
+    const content = container === undefined ? undefined : contentOf(container, lookup);
 
-    if (motion === undefined || content === undefined) continue;
+    if (container === undefined || motion === undefined || content === undefined) continue;
 
     if (motion.placed) settle(ctx, state, container, content, motion);
     else place(ctx, container, content, motion);

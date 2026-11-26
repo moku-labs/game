@@ -58,12 +58,41 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
  */
 export function detachNode(state: LayoutState, element: Element): void {
   const node = state.byEntity.get(element.entity);
-  const parent = node?.getParent() ?? undefined;
 
-  if (node === undefined || parent === undefined) return;
+  if (node === undefined) return;
+
+  // The parent a placement put it in is known; a node placed some other way is asked for its parent.
+  const parent = state.parents.get(node) ?? node.getParent() ?? undefined;
+
+  if (parent === undefined) return;
 
   // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
   parent.removeChild(node);
+  unplace(state, parent, node);
+}
+
+/**
+ * Takes one child out of the record of what its parent's node holds, keeping the order of the rest.
+ *
+ * @param state - The layout state.
+ * @param parent - The parent's node.
+ * @param child - The child's node, just removed.
+ */
+function unplace(state: LayoutState, parent: YogaNode, child: YogaNode): void {
+  state.parents.delete(child);
+
+  const placed = state.placed.get(parent);
+
+  if (placed === undefined) return;
+
+  const at = placed.indexOf(child);
+
+  if (at === -1) return;
+
+  // Per detached child: the rest move up one, with no array cut out.
+  for (let index = at; index < placed.length - 1; index += 1)
+    placed[index] = placed[index + 1] as YogaNode;
+  placed.pop();
 }
 
 /**
@@ -80,6 +109,8 @@ export function freeNode(state: LayoutState, element: Element): void {
   detachNode(state, element);
   // eslint-disable-next-line unicorn/no-null -- Yoga clears a measure function with null.
   node.setMeasureFunc(null);
+  state.measuring.delete(node);
+  forgetPlaced(state, node);
   node.free();
   state.kept.delete(node);
   state.byEntity.delete(element.entity);
@@ -105,11 +136,7 @@ export function placeChildren(
 
   if (node === undefined) return;
 
-  for (let index = node.getChildCount() - 1; index >= 0; index -= 1) {
-    // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
-    node.removeChild(node.getChild(index));
-  }
-
+  const placed = takeOut(state, node);
   let index = 0;
 
   for (const child of children) {
@@ -118,8 +145,69 @@ export function placeChildren(
     if (childNode === undefined || child.type === ANCHOR) continue;
 
     node.insertChild(childNode, index);
+    placed.push(childNode);
+    state.parents.set(childNode, node);
     index += 1;
   }
+}
+
+/**
+ * Takes every child out of a parent's node: through the record of what it holds while that record counts as many as
+ * Yoga does, else by asking Yoga for each child. The record is left empty, for the children put back.
+ *
+ * @param state - The layout state.
+ * @param node - The parent's node.
+ * @returns The emptied record of its children.
+ */
+function takeOut(state: LayoutState, node: YogaNode): YogaNode[] {
+  const placed = state.placed.get(node) ?? noChildren();
+  const count = node.getChildCount();
+
+  if (placed.length === count) {
+    for (let index = count - 1; index >= 0; index -= 1) {
+      const child = placed[index] as YogaNode;
+
+      // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
+      node.removeChild(child);
+      state.parents.delete(child);
+    }
+  } else {
+    for (const child of placed) state.parents.delete(child);
+    for (let index = count - 1; index >= 0; index -= 1) {
+      // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
+      node.removeChild(node.getChild(index));
+    }
+  }
+
+  // `pop` and not `length = 0`: the record keeps its storage for the children put back.
+  while (placed.length > 0) placed.pop();
+  state.placed.set(node, placed);
+
+  return placed;
+}
+
+/**
+ * A new, empty record of the children of a node. Its own function, because lint rule L5 refuses a collection built
+ * inside an exported declaration.
+ *
+ * @returns An empty list.
+ */
+function noChildren(): YogaNode[] {
+  return [];
+}
+
+/**
+ * Forgets what a node that is freed held and where it sat: its record of children, and the parent entry of each.
+ *
+ * @param state - The layout state.
+ * @param node - The node about to be freed, already out of its parent.
+ */
+function forgetPlaced(state: LayoutState, node: YogaNode): void {
+  const placed = state.placed.get(node);
+
+  if (placed !== undefined) for (const child of placed) state.parents.delete(child);
+  state.placed.delete(node);
+  state.parents.delete(node);
 }
 
 /**
@@ -141,6 +229,9 @@ export function appendChildren(
   if (node === undefined) return;
 
   let index = node.getChildCount();
+  const placed = state.placed.get(node);
+  // The record of what it holds stays good only while it counted every child already in.
+  const tracked = placed !== undefined && placed.length === index;
 
   for (const child of children) {
     const childNode = state.byEntity.get(child.entity);
@@ -148,6 +239,10 @@ export function appendChildren(
     if (childNode === undefined || child.type === ANCHOR) continue;
 
     node.insertChild(childNode, index);
+    if (tracked) {
+      placed.push(childNode);
+      state.parents.set(childNode, node);
+    }
     index += 1;
   }
 }

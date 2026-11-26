@@ -97,7 +97,8 @@ function edgesOf(
     if (value !== undefined) resolved[edge] = value;
   }
 
-  return resolved;
+  // Frozen with the style that holds it: a kept resolution is shared by every element of one style object.
+  return Object.freeze(resolved);
 }
 
 /**

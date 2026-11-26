@@ -7,6 +7,7 @@
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { Pointer, Pressed, Scrollable } from "../../../input/components";
+import { timePlugin } from "../../../time";
 import type { Time } from "../../../time/types";
 import { Tree } from "../../../world/ecs/define";
 import type { AnySystem, Entity, SystemContext } from "../../../world/types";
@@ -51,9 +52,17 @@ const SYSTEM_FRAME = Object.freeze({ time: FRAME }) as unknown as SystemContext;
 /** A `Box` or `Pressed` hook of `ui`: it takes the entity the value was added to or removed from, and reads no value. */
 type WorldHook = (entity: Entity, value: true) => void;
 
+/** A frame callback of phase `animate`, as a plugin registered it with `time.onFrame`. */
+type FrameCallback = (time: Readonly<Time>) => void;
+
 /** The started perf app and the `ui` steps a window calls. */
 export type PerfUi = {
   app: PerfApp;
+  /**
+   * Phase `animate` of a frame, without the other phases: the frame step of `anim`, which ends the 0 ms rest tracks
+   * of the frame before and drops them from its list, then the sweep of `world`, which forgets them.
+   */
+  animate: Step;
   /** The system `ui.reconcile` of phase `layout`. */
   reconcile: Step;
   /** The system `ui.solve` of phase `layout`. */
@@ -70,13 +79,44 @@ export type PerfUi = {
   built: () => boolean;
 };
 
+/** How the perf app starts: by default its inert renderer answers as one that draws. */
+export type PerfOptions = {
+  /**
+   * False leaves the renderer headless: `ui` then builds nothing in parts, aside or behind a clip, and registers no
+   * part of a scene build (`built` throws). The row that measures a whole mount for comparison starts so.
+   */
+  drawing?: boolean;
+};
+
 /**
  * Starts the perf app, mounts every projection, and runs frames until the screen rests. The
  * systems and the hooks `ui` opens in its `onStart` are read off the world while they register.
  *
+ * @param options - Whether the renderer answers as one that draws.
  * @returns The app and its `ui` steps.
  */
-export async function startPerfUi(): Promise<PerfUi> {
+export async function startPerfUi(options: PerfOptions = {}): Promise<PerfUi> {
+  const animating: FrameCallback[] = [];
+  const timeApi = timePlugin.spec.api;
+
+  if (timeApi === undefined) throw new Error("perf: the time plugin has no api factory");
+
+  // `anim` registers its frame step in `onInit`, inside `createApp`: the time API it is handed is wrapped before, so
+  // the callbacks of phase `animate` are read off as they register, in their order.
+  vi.spyOn(timePlugin.spec, "api").mockImplementation(ctx => {
+    const api = timeApi(ctx);
+    const onFrame = api.onFrame;
+
+    return {
+      ...api,
+      onFrame: (phase, callback) => {
+        if (phase === "animate") animating.push(callback);
+
+        return onFrame(phase, callback);
+      }
+    };
+  });
+
   const app = createPerfApp();
   const ecs = app.world.ecs;
   const systems = new Map<string, Step>();
@@ -112,7 +152,7 @@ export async function startPerfUi(): Promise<PerfUi> {
   });
   // The renderer is inert here. ui registers its part of a build only with a renderer that draws:
   // it is asked as one would answer, the views themselves stay undrawn.
-  vi.spyOn(app.renderer.host, "kind").mockReturnValue("webgpu");
+  if (options.drawing !== false) vi.spyOn(app.renderer.host, "kind").mockReturnValue("webgpu");
 
   await app.start();
   vi.restoreAllMocks();
@@ -123,7 +163,15 @@ export async function startPerfUi(): Promise<PerfUi> {
   const enter = systems.get("ui.enter");
   const { boxed, press, release } = hooks;
   // The renderer registers a part of its own: ui's is the reconciler's `asideBuilt`.
-  const built = checks.find(check => check.name === "asideBuilt");
+  const found = checks.find(check => check.name === "asideBuilt");
+  // A headless app registers no part of a build: asking for it is a mistake of the bench.
+  const built =
+    found ??
+    (options.drawing === false
+      ? (): boolean => {
+          throw new Error("perf: a headless app builds nothing aside");
+        }
+      : undefined);
 
   if (
     reconcile === undefined ||
@@ -141,6 +189,10 @@ export async function startPerfUi(): Promise<PerfUi> {
 
   return {
     app,
+    animate: (): void => {
+      // per frame: an indexed walk of the callbacks, no iterator.
+      for (let index = 0; index < animating.length; index += 1) animating[index]?.(FRAME);
+    },
     reconcile,
     solve,
     enter,

@@ -4,7 +4,7 @@
  */
 import type { AnyComponentValue, ComponentType } from "../../world/types";
 import type { UiCtx } from "../types";
-import { fieldsLeftAlone, restValueOf } from "../visual";
+import { fieldsLeftAlone, keptRestValue } from "../visual";
 import type { Element } from "./types";
 
 /**
@@ -34,7 +34,13 @@ export function recordRest(
   // The entity is read only when a field stays as it carries it.
   const current =
     owned.length === 0 ? undefined : (stored ?? ctx.deps.world.ecs.get(element.entity, type));
-  const rest = restValueOf(current, value.value, owned);
+  const rest = keptRestValue(
+    ctx.state.layout.restValues,
+    type.componentName,
+    current,
+    value.value,
+    owned
+  );
 
   ctx.deps.world.projection.setRest(element.entity, type, rest);
 }

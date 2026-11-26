@@ -5,7 +5,8 @@
  * written. Beside it:
  * the range of a windowed scroll (`range.ts`), the rest and the motion of the extras
  * (`extras.ts`), the hint routed to a keyed element (`hints.ts`), the remeasure of the texts
- * `text` resolved again (`remeasure.ts`) and a scene build in parts (`parts.ts`).
+ * `text` resolved again (`remeasure.ts`), a scene build in parts (`parts.ts`) and a new subtree wholly behind its
+ * clip built in parts inside a live root (`clipped.ts`).
  */
 import { printOf } from "../../anim/motion";
 import { PointerOver, Pressed, Scrollable, Tappable, Touchable } from "../../input/components";
@@ -47,11 +48,13 @@ import {
   ANCHOR,
   CONTENT,
   fieldsLeftAlone,
+  keptLivePatch,
   livePatch,
   namedKeyOf,
   namesFormat,
   visualOf
 } from "../visual";
+import { createClipped } from "./clipped";
 import { cancelExtra, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
@@ -197,15 +200,15 @@ const CONTENT_STYLE: Style = Object.freeze({ origin: "topLeft" });
 const CONTENT_ROW_STYLE: Style = Object.freeze({ origin: "topLeft", direction: "row" });
 
 /**
- * The props, besides `style`, `state` and `content`, that a live element is written from: `bind`,
+ * The props, besides `style`, `state`, `content` and `bind`, that a live element is written from:
  * `texture`, `name` and `fit` reach its visual, `intent`, `payload`, `point`, `local` and `escape`
- * its input, `components` its extras. Every other prop is read from the node where it is used, at
- * every patch: `hosts`, the props of a windowed scroll, the props of a text field, and the
- * children. `motion` writes nothing: the patch stores it on the element at every render, and a new
- * identity of the same look rewrites nothing a running tween holds (F168).
+ * its input, `components` its extras. `bind` reaches its visual too; `compare` reads it itself, once,
+ * because it also says whether a text keeps its `Text`. Every other prop is read from the node where
+ * it is used, at every patch: `hosts`, the props of a windowed scroll, the props of a text field,
+ * and the children. `motion` writes nothing: the patch stores it on the element at every render, and
+ * a new identity of the same look rewrites nothing a running tween holds (F168).
  */
 const WRITTEN: readonly string[] = [
-  "bind",
   "texture",
   "name",
   "fit",
@@ -254,21 +257,21 @@ type Change = {
  * Tells whether two nodes write the same visual, input and extras: every prop of `WRITTEN` says
  * the same, as `sameValue` reads it.
  *
- * @param previous - The node the element was last patched from.
- * @param next - The node of this render.
+ * @param previous - The props of the node the element was last patched from.
+ * @param next - The props of the node of this render.
  * @returns True when no component of the element has to be written for these props.
  * @example
  * ```ts
- * writesSame({ type: "row", props: { payload: { id: 1 } }, children: [] }, { type: "row", props: { payload: { id: 2 } }, children: [] }); // false
+ * writesSame({ payload: { id: 1 } }, { payload: { id: 2 } }); // false
  * ```
  */
-function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
+function writesSame(previous: DescriptionNode["props"], next: DescriptionNode["props"]): boolean {
   // Per patch: an index walk, no callback.
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
   for (let index = 0; index < WRITTEN.length; index += 1) {
     const name = WRITTEN[index] ?? "";
 
-    if (!sameValue(previous.props[name], next.props[name])) return false;
+    if (!sameValue(previous[name], next[name])) return false;
   }
 
   return true;
@@ -384,18 +387,38 @@ export function isNameOf(
 ): boolean {
   const type = node.type;
   const tail = identity.length - type.length - 1;
-  const framed = tail >= head && identity.charCodeAt(tail) === BAR && identity.endsWith(type);
+  const framed =
+    tail >= head && identity.charCodeAt(tail) === BAR && isTextAt(identity, type, tail + 1);
 
   if (!framed) return false;
   if (node.key !== undefined)
-    return tail - head === node.key.length && identity.startsWith(node.key, head);
+    return tail - head === node.key.length && isTextAt(identity, node.key, head);
 
   // An unkeyed name: the type, `@`, then the digits of the index.
   const at = head + type.length;
 
-  if (!identity.startsWith(type, head) || identity.charCodeAt(at) !== AT) return false;
+  if (!isTextAt(identity, type, head) || identity.charCodeAt(at) !== AT) return false;
 
   return isIndexAt(identity, at, tail, index);
+}
+
+/**
+ * Tells whether a text stands in an identity at a place: `startsWith(text, at)` read in place, one unit a
+ * step, so a short compare is no call into the string builtins.
+ *
+ * @param identity - The identity an element keeps.
+ * @param text - The key or the type.
+ * @param at - Where the text should start.
+ * @returns True when the units from `at` are the text's.
+ */
+function isTextAt(identity: string, text: string, at: number): boolean {
+  if (at < 0 || at + text.length > identity.length) return false;
+
+  for (let unit = 0; unit < text.length; unit += 1) {
+    if (identity.charCodeAt(at + unit) !== text.charCodeAt(unit)) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -597,6 +620,54 @@ function inputOf(element: Element): AnyComponentValue[] {
 }
 
 /**
+ * The input values of a live element: the ones `inputOf` made last while its type, its `disabled` and `covered`
+ * flags and the props they read say the same, else new ones, kept.
+ *
+ * @param element - The element to make touchable.
+ * @returns The component values.
+ */
+function keptInputsOf(element: Element): AnyComponentValue[] {
+  const { type, node, is } = element;
+  const props = node.props;
+  const axis = element.scroll?.axis;
+  const kept = element.keptInputs;
+
+  if (
+    kept !== undefined &&
+    kept.type === type &&
+    kept.disabled === is.disabled &&
+    kept.covered === is.covered &&
+    kept.intent === props.intent &&
+    kept.payload === props.payload &&
+    kept.point === props.point &&
+    kept.local === props.local &&
+    kept.escape === props.escape &&
+    kept.locked === props.locked &&
+    kept.axis === axis
+  ) {
+    return kept.values;
+  }
+
+  const values = inputOf(element);
+
+  element.keptInputs = {
+    values,
+    type,
+    disabled: is.disabled,
+    covered: is.covered,
+    intent: props.intent,
+    payload: props.payload,
+    point: props.point,
+    local: props.local,
+    escape: props.escape,
+    locked: props.locked,
+    axis
+  };
+
+  return values;
+}
+
+/**
  * Creates the extras map of one element. Its own function, because lint rule L5 refuses a
  * collection built inside an exported declaration.
  *
@@ -635,8 +706,36 @@ function handleMap(): Map<string, MotionHandle> {
 function listedOf(node: DescriptionNode): readonly AnyComponentValue[] {
   const listed: unknown = node.props.components;
 
-  return Array.isArray(listed) ? (listed as readonly AnyComponentValue[]) : [];
+  // Per patch: a node without the prop answers one shared empty list, none is built.
+  return Array.isArray(listed) ? (listed as readonly AnyComponentValue[]) : NO_VALUES;
 }
+
+/** The epoch of a basis whose write did not go through yet: no frame has it, so the style is resolved again. */
+const NO_EPOCH = -1;
+
+/**
+ * Records what an element's style was resolved on, in the record it keeps: a patch of a changed element writes no new
+ * object.
+ *
+ * @param element - The element whose write went through.
+ * @param epoch - The viewport epoch of the frame.
+ * @param rowHeight - The row height its style was resolved on.
+ */
+function keepBasis(element: Element, epoch: number, rowHeight: number | undefined): void {
+  const basis = element.basis;
+
+  if (basis === undefined) {
+    element.basis = { epoch, rowHeight };
+
+    return;
+  }
+
+  basis.epoch = epoch;
+  basis.rowHeight = rowHeight;
+}
+
+/** The `components` of a node that writes none: one frozen list, read only. */
+const NO_VALUES: readonly AnyComponentValue[] = Object.freeze([]);
 
 /**
  * The extra components of an element: its `components` prop with every value whose type the
@@ -1004,6 +1103,27 @@ function identitySet(identities: readonly string[]): ReadonlySet<string> {
   return new Set(identities);
 }
 
+/** How many children a list may have and still be searched as it is, with no set built for it. */
+const SHORT_LIST = 16;
+
+/**
+ * Tells whether one of the first `count` identities of a render is the given one.
+ *
+ * @param identities - The identities of the children of a render, a scratch buffer.
+ * @param count - How many of them are this render's.
+ * @param identity - The identity looked for.
+ * @returns True when the render lists it.
+ * @example
+ * ```ts
+ * listsIdentity(["a", "b", "c"], 2, "c"); // false
+ * ```
+ */
+function listsIdentity(identities: readonly string[], count: number, identity: string): boolean {
+  for (let index = 0; index < count; index += 1) if (identities[index] === identity) return true;
+
+  return false;
+}
+
 /**
  * Tells whether an element is an `<anchor>` or lies under one: the anchor pass places it after
  * the solve, by its targets, so the solve leaves it alone.
@@ -1060,6 +1180,11 @@ export function createReconciler(
     despawnTree
   });
   const parts = createParts(ctx, { enterChildren, applyElement, isMoving: range.isMoving });
+  const clipped = createClipped(ctx, {
+    enterChildren,
+    isMoving: range.isMoving,
+    released: releaseClipped
+  });
   // The reconciler's per-frame scratch, kept so an idle frame allocates nothing: the roots to
   // reconcile, the scroll containers, the roots whose slot changed in this solve, the roots still
   // waiting in it, the viewport box, what the slots were last assigned for, and the layer list
@@ -1125,6 +1250,8 @@ export function createReconciler(
   let expandedInstance: string | undefined;
   const identityStack: string[][] = [];
   const entityStack: Entity[][] = [];
+  // The elements of a changed child list, handed to the layout to place; the next commit empties it.
+  const placing: Element[] = [];
   let depth = 0;
   // The per-frame walks over the roots and the scrolls (F230 U3): a callback each, made once here,
   // and the fields it reads and counts. A `for…of` over a map or a set builds an iterator and its
@@ -1305,10 +1432,12 @@ export function createReconciler(
     const nodes = childrenOf(node, range.slotsFor(element), element.scroll?.axis);
 
     // Past the frame's budget a root built aside makes the element and leaves its children for a
-    // later frame (spec 33 A2).
+    // later frame (spec 33 A2). On a live root, a subtree wholly behind its clip is built in parts (spec 33 G).
     if (aside && parts.parks() && nodes.length > 0) parts.park(root, element, nodes, instance, 0);
     else if (aside) enterChildren(root, element, nodes, instance, 0);
-    else diffChildren(root, element, nodes, instance);
+    else if (!clipped.takes(root, parent, element, nodes, instance)) {
+      diffChildren(root, element, nodes, instance);
+    }
 
     root.needsSolve = true;
 
@@ -1552,7 +1681,7 @@ export function createReconciler(
     // Remove the visuals and inputs the element no longer carries. Per restyle: the two lists are
     // read as they come, with no joined copy and no closure per type.
     const visuals = visualOf(element);
-    const inputs = inputOf(element);
+    const inputs = keptInputsOf(element);
 
     for (const type of LIVE_TYPES) {
       const isDropped = !carries(visuals, type) && !carries(inputs, type);
@@ -1679,7 +1808,11 @@ export function createReconciler(
     const typeOwned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
     const owned = leftAlone(element, value.type, typeOwned);
 
-    ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
+    ecs.set(
+      element.entity,
+      asHandle(value.type),
+      keptLivePatch(ctx.state.layout.livePatches, value.type.componentName, value.value, owned)
+    );
   }
 
   /**
@@ -1694,14 +1827,22 @@ export function createReconciler(
    * @param root - The root being reconciled: its covered flag is one of the state flags.
    * @param element - The element that stayed.
    * @param node - The node of this render.
+   * @param parent - The element whose children are diffed, when it is the parent of `element`.
    * @returns The flags and the style of this render, and what they change.
    */
-  function compare(root: Root, element: Element, node: DescriptionNode): Change {
-    const previous = element.node;
-    const parent = parentOf(element);
+  function compare(
+    root: Root,
+    element: Element,
+    node: DescriptionNode,
+    parent: Element | undefined
+  ): Change {
+    // Each prop is read from each node once: a props object has the shape of its tag and its markup, so the
+    // read is a lookup in a table of shapes, and a patch of a root of hundreds of elements makes thousands.
+    const before = element.node.props;
+    const after = node.props;
     // The flags the node and the root give, checked against the element's own first: while they
     // hold, the element keeps its flags object and none is built.
-    const declared = node.props.state as Partial<IsFlags> | undefined;
+    const declared = after.state as Partial<IsFlags> | undefined;
     const kept = element.is;
     const flagsHold =
       kept.covered === root.covered &&
@@ -1722,14 +1863,16 @@ export function createReconciler(
     const stands = element.basis?.epoch === state.epoch && element.basis.rowHeight === rowHeight;
 
     // Keep the resolved style while the raw one and the flags say the same; else resolve again.
-    const sameStyle = sameValue(previous.props.style, node.props.style);
+    const sameStyle = sameValue(before.style, after.style);
     const keepsStyle = stands && sameStyle && sameValue(element.is, is);
     const style = keepsStyle ? element.style : styleFor(parent, node, is);
-    const sameContent = sameValue(previous.props.content, node.props.content);
+    const sameContent = sameValue(before.content, after.content);
+    const sameBind = sameValue(before.bind, after.bind);
 
-    // Two property reads: a new viewport may resolve the same markup to another key (F182).
+    // A kept style names the key it named, and a raw style that says the same the key it wrote; else two
+    // property reads: a new viewport may resolve the same markup to another key (F182).
     const keepsKey =
-      namedKeyOf(element.style, previous.props.style) === namedKeyOf(style, node.props.style);
+      keepsStyle || namedKeyOf(element.style, before.style) === namedKeyOf(style, after.style);
 
     // One object per reconciler, written in place: the patch reads it before the next compare.
     change.is = is;
@@ -1738,9 +1881,9 @@ export function createReconciler(
     change.resolved = !keepsStyle;
     change.moved = !keepsStyle && modules.layout.affectsRect(element.style, style);
     change.measures = !stands || !sameStyle || !sameContent;
-    change.keepsText = sameStyle && sameContent && sameValue(previous.props.bind, node.props.bind);
+    change.keepsText = sameStyle && sameContent && sameBind;
     change.keepsKey = keepsKey;
-    change.unchanged = keepsStyle && sameContent && writesSame(previous, node);
+    change.unchanged = keepsStyle && sameContent && sameBind && writesSame(before, after);
 
     return change;
   }
@@ -1848,17 +1991,25 @@ export function createReconciler(
    * @param element - The element that stayed.
    * @param node - The node of this render.
    * @param instance - The identity of the nearest component instance.
+   * @param parent - The element whose children are diffed: the parent of `element`, which is not looked up again.
    */
   function patch(
     root: Root,
     element: Element,
     node: DescriptionNode,
-    instance: string | undefined
+    instance: string | undefined,
+    parent: Element | undefined
   ): void {
     checkWindow(node);
     warnAxis(element, node);
 
-    const change = compare(root, element, node);
+    // The element the diff came from is its parent: a lookup is for an element the diff reached another way.
+    const change = compare(
+      root,
+      element,
+      node,
+      element.parent === parent?.entity ? parent : parentOf(element)
+    );
     // The record is the reconciler's one: what the patch reads after a call out is taken now.
     const { unchanged, rowHeight } = change;
     const motion = node.props.motion as ElementMotion | undefined;
@@ -1872,15 +2023,17 @@ export function createReconciler(
 
     // A changed element has no basis until its write went through: a patch that throws on the way
     // is done in full at the next render, not taken for one that says the same.
-    if (!unchanged) delete element.basis;
+    // Marked stale in place (an epoch no frame has): a `delete` would leave the element's fields in dictionary mode.
+    if (!unchanged && element.basis !== undefined) element.basis.epoch = NO_EPOCH;
 
     // A `change.Box` hook that went may have kept the two rects it was handed: the solve writes moves into them from
     // now on, so the element takes its own copies (F244).
-    if (
+    const boxHookLeft =
       motionChanged &&
       element.motion?.change?.Box !== undefined &&
-      motion?.change?.Box === undefined
-    ) {
+      motion?.change?.Box === undefined;
+
+    if (boxHookLeft) {
       element.rect = { ...element.rect };
       element.previous = { ...element.previous };
     }
@@ -1900,7 +2053,7 @@ export function createReconciler(
 
     if (!unchanged) {
       rewrite(root, element, change);
-      element.basis = { epoch: state.epoch, rowHeight };
+      keepBasis(element, state.epoch, rowHeight);
     }
 
     // A dev build names a `change` hook of a new motion the element will not play.
@@ -2030,7 +2183,7 @@ export function createReconciler(
       element !== undefined && element.type === effective.type && element.key === effective.key;
 
     if (isSame) {
-      patch(root, element, effective, owner);
+      patch(root, element, effective, owner, parent);
 
       return element.entity;
     }
@@ -2053,6 +2206,46 @@ export function createReconciler(
 
     exitElement(element, "change");
     if (own !== undefined) state.instances.set(identity, own);
+  }
+
+  /**
+   * The identity of a child node: the string of the element that stood at its place, or of a child of a short list
+   * that its key moved, when it is the one `identityOf` builds; else a new one. So two keyed siblings that swap places
+   * build no string (F244 В).
+   *
+   * @param parent - The element whose children are diffed.
+   * @param node - The node being placed.
+   * @param index - Its position among its siblings.
+   * @param old - The element that stood at that place at the last diff, if any.
+   * @returns The identity.
+   */
+  function childIdentity(
+    parent: Element,
+    node: DescriptionNode,
+    index: number,
+    old: Element | undefined
+  ): string {
+    const head = parent.identity.length + 1;
+    const stays = old !== undefined && old.parent === parent.entity;
+
+    if (stays && isNameOf(old.identity, head, node, index)) return old.identity;
+
+    const before = parent.children;
+
+    // A key names the same child at any index: a short list is searched for it, as it is.
+    if (node.key !== undefined && before.length <= SHORT_LIST) {
+      // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+      for (let at = 0; at < before.length; at += 1) {
+        const entity = before[at];
+        const sibling = entity === undefined ? undefined : state.elements.get(entity);
+
+        if (sibling?.parent === parent.entity && isNameOf(sibling.identity, head, node, index)) {
+          return sibling.identity;
+        }
+      }
+    }
+
+    return identityAt(parent.identity, node, index, old, parent.entity);
   }
 
   /**
@@ -2109,23 +2302,29 @@ export function createReconciler(
     entityStack[level] = placed;
 
     // The old children this render leaves out leave first, so a key a new child shares with one of
-    // them, or with an element under it, is the new child's (F84).
+    // them, or with an element under it, is the new child's (F84). The walk that names the children
+    // sees each old child at its index: while every one keeps its identity there and no child is
+    // left over, none leaves, and `leaveOut` has nothing to find (and looks no child up again).
+    let settled = before.length <= nodes.length;
+
     // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
     for (let index = 0; index < nodes.length; index += 1) {
       const node = nodes[index];
       const old = before[index];
 
-      if (node === undefined) continue;
-      identities[index] = identityAt(
-        parent.identity,
-        node,
-        index,
-        old === undefined ? undefined : state.elements.get(old),
-        parent.entity
-      );
+      if (node === undefined) {
+        settled = false;
+        continue;
+      }
+
+      const standing = old === undefined ? undefined : state.elements.get(old);
+      const identity = childIdentity(parent, node, index, standing);
+
+      identities[index] = identity;
+      if (standing !== undefined && identity !== standing.identity) settled = false;
     }
 
-    leaveOut(parent, identities, nodes.length);
+    if (!settled) leaveOut(parent, identities, nodes.length);
 
     // Diff each child of this render; a component that threw before its first view has no entity.
     let count = 0;
@@ -2160,10 +2359,13 @@ export function createReconciler(
    */
   function commitChildren(root: Root, parent: Element, next: Entity[]): void {
     // An old child no entity of this render took (one of two siblings under one key) leaves now.
-    const kept = entitySet(next);
+    // A short list is searched as it is; a long one through a set, so a churn of a thousand rows stays linear.
+    const kept = next.length > SHORT_LIST ? entitySet(next) : undefined;
 
     for (const old of parent.children) {
-      if (kept.has(old) || state.exiting.has(old)) continue;
+      if ((kept === undefined ? next.includes(old) : kept.has(old)) || state.exiting.has(old)) {
+        continue;
+      }
 
       const element = state.elements.get(old);
 
@@ -2174,10 +2376,17 @@ export function createReconciler(
 
     // Draw the children in the order of this render, then re-place them in the layout once, and solve again.
     placeChildren(parent, next);
-    modules.layout.place(
-      parent,
-      next.map(entity => state.elements.get(entity)).filter(element => isElement(element))
-    );
+
+    // The elements of the list, in a buffer of the reconciler that the layout only reads; emptied by the next commit.
+    while (placing.length > 0) placing.pop();
+
+    for (const entity of next) {
+      const element = state.elements.get(entity);
+
+      if (isElement(element)) placing.push(element);
+    }
+
+    modules.layout.place(parent, placing);
     root.needsSolve = true;
   }
 
@@ -2216,6 +2425,12 @@ export function createReconciler(
 
       if (index > from && aside && parts.stops()) {
         parts.park(root, parent, nodes, instance, index);
+        break;
+      }
+
+      // A part of a subtree behind its clip stops where the frame's parts are over (spec 33 G).
+      if (index > from && clipped.stops()) {
+        clipped.park(parent, nodes, instance, index);
         break;
       }
 
@@ -2265,6 +2480,13 @@ export function createReconciler(
 
       // A child that kept its place keeps its identity there: no set is built for a list that holds.
       if (element === undefined || (index < count && identities[index] === element.identity)) {
+        continue;
+      }
+
+      // A short list is searched as it is; a long one through a set, built once.
+      if (count <= SHORT_LIST) {
+        if (!listsIdentity(identities, count, element.identity)) removeChild(parent, element);
+
         continue;
       }
 
@@ -2447,7 +2669,14 @@ export function createReconciler(
    * Despawns every exiting element whose motions finished, and closes a popup whose root is gone.
    */
   function sweep(): void {
-    // Despawn the exiting subtrees that stopped moving.
+    // Despawn the exiting subtrees that stopped moving; a frame with none walks no iterator.
+    if (state.exiting.size > 0) sweepExiting();
+
+    dropRemovedRoots();
+  }
+
+  /** Despawns the exiting subtrees that stopped moving. */
+  function sweepExiting(): void {
     for (const entity of state.exiting) {
       const element = state.elements.get(entity);
 
@@ -2466,8 +2695,6 @@ export function createReconciler(
 
       despawnTree(element);
     }
-
-    dropRemovedRoots();
   }
 
   /**
@@ -2536,13 +2763,13 @@ export function createReconciler(
       if (!quiet) hooked = modules.layout.change(element, element.previous, hint);
     }
 
-    const rest = element.rest;
+    const moves = element.restMoves;
 
     // Move the rest pose, which plays `change.Transform` only when no hook took it.
     modules.layout.repose(element, parent, hooked, hint);
 
-    // Per moved element of a still application only: a new rest pose is a new object.
-    if (applyingStill && element.rest !== rest) writeStillPose(element);
+    // Per moved element of a still application only: a rest pose that moved counts one more move.
+    if (applyingStill && element.restMoves !== moves) writeStillPose(element);
   }
 
   /**
@@ -3006,7 +3233,8 @@ export function createReconciler(
    * the entity first (F48). The hook itself plays at once, so they see the start pose it writes (F49);
    * `ui.enter` plays it again when one of them changed what it read. An element of a root built
    * aside or held warm plays nothing here: its enter waits for the swap or the open, and
-   * `poseReleased` plays it at the same point of that frame (spec 31, spec 33 B+D).
+   * `poseReleased` plays it at the same point of that frame (spec 31, spec 33 B+D). So does an element of
+   * a subtree built in parts behind its clip, until the frame its build finishes (spec 33 G).
    *
    * @param entity - The entity the `Box` was attached to.
    */
@@ -3022,7 +3250,7 @@ export function createReconciler(
     const element = state.elements.get(entity);
 
     // Its hook plays now, so the game's systems see the element as it will be drawn (F49).
-    if (arrives(element) && !isAside(element.root)) {
+    if (arrives(element) && !isAside(element.root) && element.clipped !== true) {
       modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
     }
   }
@@ -3041,7 +3269,8 @@ export function createReconciler(
       const entity = entering.list[index];
       const element = entity === undefined ? undefined : state.elements.get(entity);
 
-      if (!arrives(element) || element.posed !== undefined || isAside(element.root)) continue;
+      if (!arrives(element) || element.posed !== undefined || element.clipped === true) continue;
+      if (isAside(element.root)) continue;
 
       modules.layout.pose(element, overlayOf(element) === undefined ? undefined : createSpan());
     }
@@ -3053,7 +3282,8 @@ export function createReconciler(
    * reads (a list's scroll), and before `renderer.sync`, so an element is never drawn at its rest
    * pose by mistake. An element despawned in between plays nothing. An element of a root built
    * aside or held warm stays queued, in its order, and plays in the first call after the swap or
-   * the open (spec 31, spec 33 B+D): its enter, posed by `poseReleased` in that frame's solve, its
+   * the open (spec 31, spec 33 B+D), and so does an element of a subtree built in parts behind its clip,
+   * until its finish (spec 33 G): its enter, posed by `poseReleased` in that frame's solve, its
    * loop and the level of an overlay start in the frame the root is first drawn. While nothing was
    * queued since the last call and no root was released, the queue holds only held enters and is
    * not walked.
@@ -3079,7 +3309,7 @@ export function createReconciler(
 
       if (entity === undefined || element === undefined) continue;
 
-      if (isAside(element.root)) {
+      if (element.clipped === true || isAside(element.root)) {
         entering.list[held] = entity;
         held += 1;
       } else {
@@ -3117,6 +3347,15 @@ export function createReconciler(
   }
 
   /**
+   * Releases the enters a subtree built in parts behind its clip held, at its finish (spec 33 G): this frame's solve
+   * poses them where a `Box` would land, and the next `ui.enter` walks the queue again and plays them.
+   */
+  function releaseClipped(): void {
+    released = true;
+    heldEnters = -1;
+  }
+
+  /**
    * Asks for every root to be built again. The world calls it after a restore or a load, when it
    * brought every element to its rest pose and ended every track on it. The next reconcile does
    * the work, because only then the tree of the restored state is here to build from.
@@ -3145,6 +3384,7 @@ export function createReconciler(
       const element = root.element === undefined ? undefined : lookup(root.element);
 
       parts.forgetParts(root);
+      clipped.forgetRoot(root);
 
       if (element !== undefined) {
         forgetSubtree(element);
@@ -3455,14 +3695,20 @@ export function createReconciler(
 
     rendered = count;
 
-    // The parked parts of the roots built aside go first, then the dirty roots, a root built aside
-    // while the budget lasts.
+    // The parked parts of the roots built aside go first, then the subtrees behind a clip that meet it now finish
+    // and the parts of the others are made, then the dirty roots, a root built aside while the budget lasts, a live
+    // one once its open builds behind a clip are finished (spec 33 G).
     parts.drainParked();
+    clipped.meet();
+    clipped.drain();
 
     for (let index = 0; index < count; index += 1) {
       const root = dirtyList[index];
 
-      if (root !== undefined && !parts.holdRoot(root)) reconcileDirtyRoot(root);
+      if (root === undefined || parts.holdRoot(root)) continue;
+
+      clipped.finishRoot(root);
+      reconcileDirtyRoot(root);
     }
 
     // Give the views a slot hosts their parent, take it back where the slot left, and publish the
@@ -3621,6 +3867,7 @@ export function createReconciler(
 
     // Its build ends here, whichever way it goes: no parked part is diffed under a leaving tree.
     parts.forgetParts(root);
+    clipped.forgetRoot(root);
 
     if (cause === "discard" || isAside(entity)) {
       dropRoot(root, element);
@@ -3744,6 +3991,7 @@ export function createReconciler(
     sweep,
     converged,
     asideBuilt,
-    applyAnchored
+    applyAnchored,
+    checkClips: clipped.checkLate
   };
 }

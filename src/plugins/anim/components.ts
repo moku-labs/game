@@ -94,13 +94,27 @@ export function countPlaying(ecs: EcsApi, entity: Entity, delta: number): void {
   const current = ecs.get(entity, Animation);
 
   if (current === undefined) {
-    if (delta > 0) ecs.add(entity, Animation({ playing: delta }));
+    // The first writer: one frozen value for the count of one, which the world copies as it stores it.
+    if (delta > 0) ecs.add(entity, delta === 1 ? FIRST_PLAYING : Animation({ playing: delta }));
 
     return;
   }
 
   const next = current.playing + delta;
 
-  if (next > 0) ecs.set(entity, Animation, { playing: next });
-  else ecs.remove(entity, Animation);
+  if (next <= 0) {
+    ecs.remove(entity, Animation);
+
+    return;
+  }
+
+  // One patch, written in place: `ecs.set` merges it into the stored value at once.
+  PLAYING.playing = next;
+  ecs.set(entity, Animation, PLAYING);
 }
+
+/** The value of `Animation` an entity gets with its first writer. */
+const FIRST_PLAYING = /*#__PURE__*/ Animation({ playing: 1 });
+
+/** The patch every count of a running entity is written through. */
+const PLAYING = { playing: 0 };

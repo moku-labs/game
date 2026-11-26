@@ -222,6 +222,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     applyAnchored: frame.applyAnchored,
 
+    checkClips: frame.checkClips,
+
     key: (input: KeyInput): boolean => focus.key(input),
 
     blur: focus.blur

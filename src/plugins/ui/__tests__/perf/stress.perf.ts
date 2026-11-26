@@ -33,7 +33,8 @@ describe.each(SIZES)("the album of $sets sets, a whole frame of the app", ({ nam
     const bytes = {
       still: Math.round(alloc(release.still, 20_000)),
       turn: Math.round(alloc(release.turn, CALLS)),
-      swipe: Math.round(alloc(release.swipe, CALLS)),
+      // 80 and its half 40 are whole 20-step cycles: the delayed child placement (spec 33 G) churns ~16 entity-keyed Maps at the V8 shrink threshold.
+      swipe: Math.round(alloc(release.swipe, 80)),
       popup: Math.round(alloc(release.popup, CALLS))
     };
 
