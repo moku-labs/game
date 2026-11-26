@@ -255,6 +255,16 @@ export type ScrollMotion = {
 export type StyleBasis = { epoch: number; rowHeight: number | undefined };
 
 /**
+ * The `Text` of an element `visualOf` writes in place: whether it carries a box, the value, and the one-value list
+ * handed out. Kept while no `change.Text` hook reads the value before.
+ */
+export type KeptText = {
+  boxed: boolean;
+  value: Record<string, unknown>;
+  values: AnyComponentValue[];
+};
+
+/**
  * The `Shape` of an element `visualOf` writes in place: whether it draws an arc (its fields differ), the value, and the
  * one-value list handed out. Kept while no `change.Shape` hook reads the value before.
  */
@@ -343,6 +353,8 @@ export type Element = {
   restyled?: boolean;
   /** The `Shape` the element is drawn with while no `change.Shape` hook reads it, written in place (F244 В). */
   keptShape?: KeptShape;
+  /** The `Text` `visualOf` writes in place while no `change.Text` hook reads the value before. */
+  keptText?: KeptText;
   /** The input values `inputOf` made last, with the props they were made from: a restyle that keeps them reuses them. */
   keptInputs?: KeptInputs;
   fit: number;

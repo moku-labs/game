@@ -177,11 +177,22 @@ function poseOnto(
 
   const pivot = standing.pivot;
 
-  if (target.pivot.x !== pivot.x || target.pivot.y !== pivot.y) {
-    target.pivot = { x: pivot.x, y: pivot.y };
-  }
+  if (target.pivot.x !== pivot.x || target.pivot.y !== pivot.y) target.pivot = pointAt(pivot);
 
   return target;
+}
+
+/**
+ * The point a pivot that moved becomes: the one the last recorded rest holds when it stands there, else a new one. A
+ * point is never written again, so the commit of a restyle and the repose after it share the point it made (F244 В).
+ *
+ * @param pivot - Where the pivot stands now: the layout's scratch.
+ * @returns A point no one writes.
+ */
+function pointAt(pivot: Readonly<Point>): Point {
+  const recorded = RECORDED.pivot;
+
+  return recorded.x === pivot.x && recorded.y === pivot.y ? recorded : { x: pivot.x, y: pivot.y };
 }
 
 /** The rest pose `writeRest` hands `setRest`, which copies its fields: one record, written per call. */
@@ -213,7 +224,7 @@ function recordedRest(ctx: UiCtx, element: Element, parent: Rect | undefined): T
   if (RECORDED.y !== standing.y) RECORDED.y = standing.y;
   if (RECORDED.rotation !== standing.rotation) RECORDED.rotation = standing.rotation;
   if (RECORDED.scale !== standing.scale) RECORDED.scale = standing.scale;
-  RECORDED.pivot = own.x === pivot.x && own.y === pivot.y ? own : { x: pivot.x, y: pivot.y };
+  RECORDED.pivot = own.x === pivot.x && own.y === pivot.y ? own : pointAt(pivot);
 
   return RECORDED;
 }

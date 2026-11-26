@@ -597,7 +597,7 @@ function endTrack(actx: AnimCtx, track: Track): void {
   if (track.ended) return;
 
   track.ended = true;
-  actx.state.tracks.delete(track.id);
+  actx.state.tracks.ended();
   if (track.additive) unfileAdditive(actx, track);
 
   const ecs = actx.deps.world.ecs;
@@ -1039,8 +1039,8 @@ export function startTrack(
   if (track.additive) fileAdditive(actx, track);
   else claimFields(actx, track);
 
-  actx.state.tracks.set(track.id, track);
   actx.state.trackList.push(track);
+  actx.state.tracks.filed();
   countPlaying(actx.deps.world.ecs, entity, 1);
   actx.deps.time.wake();
   warnIfCrowded(actx);
@@ -1490,9 +1490,14 @@ export function finishAllTracks(actx: AnimCtx, keepLoops = false): void {
  * @param entity - The entity whose tracks end.
  */
 export function cancelTracksOf(actx: AnimCtx, entity: Entity): void {
-  // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-  for (const track of [...actx.state.tracks.values()]) {
-    if (track.entity === entity) cancelTrack(actx, track);
+  const list = actx.state.trackList;
+  // The tracks there were, in start order: one a cancel starts is not cancelled with them.
+  const count = list.length;
+
+  for (let index = 0; index < count; index++) {
+    const track = list[index];
+
+    if (track !== undefined && !track.ended && track.entity === entity) cancelTrack(actx, track);
   }
 
   actx.deps.world.ecs.remove(entity, Animation);

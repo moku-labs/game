@@ -1494,3 +1494,42 @@ describe("the point prop of a button", () => {
     expect(h.stored("go", Tappable)).toStrictEqual({ intent: "go", payload: { id: 1 } });
   });
 });
+
+// ─── the child list of a render ─────────────────────────────────
+
+/**
+ * A column of texts, each under the key it is handed.
+ *
+ * @param keys - The keys of its children, in order.
+ * @returns The description.
+ */
+function column(keys: readonly string[]): DescriptionNode {
+  return {
+    type: "column",
+    key: "page",
+    props: {},
+    children: keys.map(key => ({ type: "text", key, props: { content: key }, children: [] }))
+  };
+}
+
+describe("the child list of a render", () => {
+  // Bug caught: two keyed siblings that swap places are taken for new ones and enter again, or keep a new identity.
+  it("keeps the elements and their identities of two keyed siblings that swap places", () => {
+    const h = harness();
+
+    h.mount(column(["left", "right"]));
+
+    const before = h.element("page").children.map(entity => h.state.jsx.elements.get(entity));
+
+    h.render(column(["right", "left"]));
+
+    const after = h.element("page").children.map(entity => h.state.jsx.elements.get(entity));
+
+    expect(after).toEqual([before[1], before[0]]);
+    expect(after.map(element => element?.identity)).toEqual([
+      before[1]?.identity,
+      before[0]?.identity
+    ]);
+    expect(h.state.jsx.exiting.size).toBe(0);
+  });
+});

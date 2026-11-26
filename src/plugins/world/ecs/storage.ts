@@ -176,7 +176,10 @@ function fire(
   entity: Entity,
   value: unknown
 ): void {
-  for (const hook of hooks ?? []) {
+  // Per structural write: a component nobody listens to builds no empty list to walk.
+  if (hooks === undefined) return;
+
+  for (const hook of hooks) {
     try {
       hook(entity, value);
     } catch (error) {

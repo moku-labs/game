@@ -100,6 +100,23 @@ export const Profile = defineComponent("Profile", {
   )
 });
 
+/**
+ * A screen component whose root grows 10 units wider per character of its low field, so a keystroke moves the rest
+ * pose of the root while the keyboard lifts it.
+ */
+export const Growing = defineComponent("Growing", {
+  local: { low: "" },
+  view: (_props: object, local) => (
+    <column key="growRoot" style={{ width: 1000 + local.low.length * 10, height: 1400 }}>
+      <input
+        key="growField"
+        local="low"
+        style={{ position: "absolute", left: 0, top: 1300, width: 400, height: 80 }}
+      />
+    </column>
+  )
+});
+
 /** One row of a single-root screen. */
 type ScreenItem = { id: string };
 
@@ -110,6 +127,15 @@ export const profileScreen = projection({
   from: (): ScreenItem[] => [{ id: "profileView" }],
   key: (item: ScreenItem) => item.id,
   view: () => <Profile key="profile" />
+});
+
+/** The screen of the root that grows while its field is edited. */
+export const growScreen = projection({
+  name: "grow",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "growView" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => <Growing key="grow" />
 });
 
 /** Two fields straight in a projection view, outside every component; one is too small to tap. */
@@ -189,8 +215,8 @@ const main = defineFlow("main", {
 /** The feature of the text input fixture. */
 export const fieldFeature = defineFeature("fields", {
   flows: [main],
-  projections: [profileScreen, looseScreen, bareScreen],
-  ui: [Rename, Confirm, Profile],
+  projections: [profileScreen, looseScreen, bareScreen, growScreen],
+  ui: [Rename, Confirm, Profile, Growing],
   strings: { en: english }
 });
 

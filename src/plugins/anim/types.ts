@@ -10,6 +10,7 @@ import type { SyncApi } from "../renderer/sync/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Ease, Entity, MotionHandle, Api as WorldApi } from "../world/types";
 import type { EndedRecord, RunningTimeline, Step } from "./timeline/types";
+import type { TrackTable } from "./tween/table";
 import type { Track } from "./tween/types";
 
 /**
@@ -383,8 +384,8 @@ export type Config = {
  * offsets accumulator, the running timelines and the animation registry.
  */
 export type State = {
-  /** The one track table. Insertion order is advance order. */
-  tracks: Map<number, Track>;
+  /** The one track table: the running tracks by id, over `trackList`. Start order is advance order. */
+  tracks: TrackTable;
   /**
    * The tracks of the table in start order, as a dense list the frame step walks by index. An ended
    * track stays in it until the next frame step drops it.

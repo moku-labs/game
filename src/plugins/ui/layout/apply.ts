@@ -91,10 +91,30 @@ export function layoutChanged(first: ResolvedStyle, second: ResolvedStyle): bool
     const after = second[field as keyof ResolvedStyle];
 
     if (before === after) continue;
-    if (JSON.stringify(before ?? 0) !== JSON.stringify(after ?? 0)) return true;
+    if (!sameJson(before ?? 0, after ?? 0)) return true;
   }
 
   return false;
+}
+
+/**
+ * Tells whether two style values read the same as JSON. Two numbers are compared as numbers, building no string: a
+ * finite one by value, and every non-finite one as `null`, as `JSON.stringify` writes it (F244 В).
+ *
+ * @param before - The value of the last style.
+ * @param after - The value of this one.
+ * @returns True when their JSON is the same.
+ * @example
+ * ```ts
+ * sameJson(Number.NaN, Number.POSITIVE_INFINITY); // true
+ * ```
+ */
+function sameJson(before: unknown, after: unknown): boolean {
+  if (typeof before === "number" && typeof after === "number") {
+    return before === after || (!Number.isFinite(before) && !Number.isFinite(after));
+  }
+
+  return JSON.stringify(before) === JSON.stringify(after);
 }
 
 /**

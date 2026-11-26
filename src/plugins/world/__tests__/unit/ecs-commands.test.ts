@@ -8,6 +8,39 @@ const Held = tag("Held");
 const test: Owner = { kind: "plugin", name: "test" };
 
 describe("ecs command buffer", () => {
+  // Bug caught: a kept command given out again while it still waits in the queue, so the add queued first lands on
+  // the entity or with the value of the one queued after it.
+  it("applies every add and remove of a phase to its own entity, after commands applied at once", () => {
+    const world = createMockWorld();
+    const first = world.api.ecs.spawn(test, [Marker({ at: 1 })]);
+    const second = world.api.ecs.spawn(test, [Marker({ at: 2 })]);
+
+    // Applied at once, outside a phase: their commands are kept for the next ones.
+    world.api.ecs.tag(first, Held);
+    world.api.ecs.untag(first, Held);
+
+    world.api.ecs.system(
+      system({
+        name: "structural",
+        phase: "input",
+        query: [Marker],
+        run: (entities, ctx) => {
+          for (const [found, marker] of entities) {
+            ctx.world.add(found, Marker({ at: marker.at * 10 }));
+            if (marker.at === 1) ctx.world.tag(found, Held);
+          }
+        }
+      })
+    );
+    world.start();
+    world.frame();
+
+    expect(world.api.ecs.get(first, Marker)).toEqual({ at: 10 });
+    expect(world.api.ecs.get(second, Marker)).toEqual({ at: 20 });
+    expect(world.api.ecs.has(first, Held)).toBe(true);
+    expect(world.api.ecs.has(second, Held)).toBe(false);
+  });
+
   it("applies a structural change at once outside a phase", () => {
     const world = createMockWorld();
     const entity = world.api.ecs.spawn(test, []);

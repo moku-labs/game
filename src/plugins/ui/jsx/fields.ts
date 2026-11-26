@@ -964,7 +964,8 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
     place: (): void => {
       forgetRelabelled();
 
-      for (const field of state.fields.values()) placeField(field);
+      // Per solve: a screen with no field walks no iterator.
+      if (state.fields.size > 0) for (const field of state.fields.values()) placeField(field);
 
       placeInputAndLift();
     },

@@ -684,8 +684,36 @@ function handleMap(): Map<string, MotionHandle> {
 function listedOf(node: DescriptionNode): readonly AnyComponentValue[] {
   const listed: unknown = node.props.components;
 
-  return Array.isArray(listed) ? (listed as readonly AnyComponentValue[]) : [];
+  // Per patch: a node without the prop answers one shared empty list, none is built.
+  return Array.isArray(listed) ? (listed as readonly AnyComponentValue[]) : NO_VALUES;
 }
+
+/** The epoch of a basis whose write did not go through yet: no frame has it, so the style is resolved again. */
+const NO_EPOCH = -1;
+
+/**
+ * Records what an element's style was resolved on, in the record it keeps: a patch of a changed element writes no new
+ * object.
+ *
+ * @param element - The element whose write went through.
+ * @param epoch - The viewport epoch of the frame.
+ * @param rowHeight - The row height its style was resolved on.
+ */
+function keepBasis(element: Element, epoch: number, rowHeight: number | undefined): void {
+  const basis = element.basis;
+
+  if (basis === undefined) {
+    element.basis = { epoch, rowHeight };
+
+    return;
+  }
+
+  basis.epoch = epoch;
+  basis.rowHeight = rowHeight;
+}
+
+/** The `components` of a node that writes none: one frozen list, read only. */
+const NO_VALUES: readonly AnyComponentValue[] = Object.freeze([]);
 
 /**
  * The extra components of an element: its `components` prop with every value whose type the
@@ -1948,7 +1976,8 @@ export function createReconciler(
 
     // A changed element has no basis until its write went through: a patch that throws on the way
     // is done in full at the next render, not taken for one that says the same.
-    if (!unchanged) delete element.basis;
+    // Marked stale in place (an epoch no frame has): a `delete` would leave the element's fields in dictionary mode.
+    if (!unchanged && element.basis !== undefined) element.basis.epoch = NO_EPOCH;
 
     // A `change.Box` hook that went may have kept the two rects it was handed: the solve writes moves into them from
     // now on, so the element takes its own copies (F244).
@@ -1976,7 +2005,7 @@ export function createReconciler(
 
     if (!unchanged) {
       rewrite(root, element, change);
-      element.basis = { epoch: state.epoch, rowHeight };
+      keepBasis(element, state.epoch, rowHeight);
     }
 
     // A dev build names a `change` hook of a new motion the element will not play.
@@ -2132,6 +2161,46 @@ export function createReconciler(
   }
 
   /**
+   * The identity of a child node: the string of the element that stood at its place, or of a child of a short list
+   * that its key moved, when it is the one `identityOf` builds; else a new one. So two keyed siblings that swap places
+   * build no string (F244 В).
+   *
+   * @param parent - The element whose children are diffed.
+   * @param node - The node being placed.
+   * @param index - Its position among its siblings.
+   * @param old - The element that stood at that place at the last diff, if any.
+   * @returns The identity.
+   */
+  function childIdentity(
+    parent: Element,
+    node: DescriptionNode,
+    index: number,
+    old: Element | undefined
+  ): string {
+    const head = parent.identity.length + 1;
+    const stays = old !== undefined && old.parent === parent.entity;
+
+    if (stays && isNameOf(old.identity, head, node, index)) return old.identity;
+
+    const before = parent.children;
+
+    // A key names the same child at any index: a short list is searched for it, as it is.
+    if (node.key !== undefined && before.length <= SHORT_LIST) {
+      // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
+      for (let at = 0; at < before.length; at += 1) {
+        const entity = before[at];
+        const sibling = entity === undefined ? undefined : state.elements.get(entity);
+
+        if (sibling?.parent === parent.entity && isNameOf(sibling.identity, head, node, index)) {
+          return sibling.identity;
+        }
+      }
+    }
+
+    return identityAt(parent.identity, node, index, old, parent.entity);
+  }
+
+  /**
    * Diffs the children of one element and re-places them once when the list changed. The old
    * children the render leaves out start their exit before any new child enters.
    *
@@ -2192,12 +2261,11 @@ export function createReconciler(
       const old = before[index];
 
       if (node === undefined) continue;
-      identities[index] = identityAt(
-        parent.identity,
+      identities[index] = childIdentity(
+        parent,
         node,
         index,
-        old === undefined ? undefined : state.elements.get(old),
-        parent.entity
+        old === undefined ? undefined : state.elements.get(old)
       );
     }
 
@@ -2540,7 +2608,14 @@ export function createReconciler(
    * Despawns every exiting element whose motions finished, and closes a popup whose root is gone.
    */
   function sweep(): void {
-    // Despawn the exiting subtrees that stopped moving.
+    // Despawn the exiting subtrees that stopped moving; a frame with none walks no iterator.
+    if (state.exiting.size > 0) sweepExiting();
+
+    dropRemovedRoots();
+  }
+
+  /** Despawns the exiting subtrees that stopped moving. */
+  function sweepExiting(): void {
     for (const entity of state.exiting) {
       const element = state.elements.get(entity);
 
@@ -2559,8 +2634,6 @@ export function createReconciler(
 
       despawnTree(element);
     }
-
-    dropRemovedRoots();
   }
 
   /**

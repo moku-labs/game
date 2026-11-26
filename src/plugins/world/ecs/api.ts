@@ -5,7 +5,7 @@
 import type { Time } from "../../time/types";
 import type { EcsModule, WorldCtx } from "../types";
 import { changesOf, clearAllChanges } from "./changes";
-import { despawnEntity, flushCommands, queueOrApply } from "./commands";
+import { addCommand, despawnEntity, flushCommands, queueOrApply, removeCommand } from "./commands";
 import { reserveEntity } from "./entities";
 import { diffHistory, resetHistory } from "./history";
 import { runQuery } from "./query";
@@ -125,24 +125,24 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
     },
 
     add: (entity: Entity, value: AnyComponentValue): void => {
-      queueOrApply(ctx, { kind: "add", entity, value });
+      queueOrApply(ctx, addCommand(entity, value));
     },
 
     remove: (entity: Entity, component: AnyComponentType): void => {
       registerType(ctx, component);
-      queueOrApply(ctx, { kind: "remove", entity, component: component.componentName });
+      queueOrApply(ctx, removeCommand(entity, component.componentName));
     },
 
     has: (entity: Entity, component: AnyComponentType): boolean =>
       storeFor(ctx, component)?.has(entity) === true,
 
     tag: (entity: Entity, tagType: TagType): void => {
-      queueOrApply(ctx, { kind: "add", entity, value: tagType() });
+      queueOrApply(ctx, addCommand(entity, tagType()));
     },
 
     untag: (entity: Entity, tagType: TagType): void => {
       registerType(ctx, tagType);
-      queueOrApply(ctx, { kind: "remove", entity, component: tagType.componentName });
+      queueOrApply(ctx, removeCommand(entity, tagType.componentName));
     },
 
     query: <const Terms extends readonly QueryTerm[]>(

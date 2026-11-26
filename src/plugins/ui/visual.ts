@@ -17,7 +17,7 @@ import { Text } from "../text/components";
 import { isTextFormat } from "../text/format";
 import type { TextBind } from "../text/types";
 import type { AnyComponentType, AnyComponentValue } from "../world/types";
-import type { Element, KeptShape } from "./jsx/types";
+import type { Element, KeptShape, KeptText } from "./jsx/types";
 import type { ElementLookup, KeptFields, Rect } from "./layout/types";
 import type { ResolvedStyle } from "./styles/types";
 
@@ -567,6 +567,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
     ];
   }
 
+  // No `change.Text` hook reads the value before: the element's kept value is written in place (F244 В).
+  if (type === "text" && element.motion?.change?.Text === undefined) return keptTextOf(element);
+
   if (type === "text") {
     return [
       Text({
@@ -650,6 +653,55 @@ function newKeptShape(arc: boolean): KeptShape {
   const entry: AnyComponentValue = { type: Shape, value };
 
   return { arc, value, values: [entry] };
+}
+
+/**
+ * A kept `Text` value: the defaults, a box when it carries one, and its one-value list.
+ *
+ * @param boxed - Whether the text carries a box.
+ * @returns The kept value.
+ */
+function newKeptText(boxed: boolean): KeptText {
+  const value: Record<string, unknown> = { ...Text.defaults, anchor: { x: 0, y: 0 } };
+
+  if (boxed) value.box = 0;
+
+  const entry: AnyComponentValue = { type: Text, value };
+
+  return { boxed, value, values: [entry] };
+}
+
+/**
+ * The `Text` of an element no `change.Text` hook watches, as `visualOf` builds it, written into the element's kept
+ * value: the same fields `Text({ ... })` makes, in the same order. A text that starts to carry a box gets a new kept
+ * value.
+ *
+ * @param element - The text element.
+ * @returns The element's kept one-value list.
+ */
+function keptTextOf(element: Element): AnyComponentValue[] {
+  const props = element.node.props;
+  // `boxOf`, by its two cases: a text wrapped at its box carries it, and one that wrapped once carries 0.
+  const measured = element.measuredWidth !== undefined;
+
+  if (measured) element.boxed = true;
+
+  const boxed = element.boxed === true;
+  let kept = element.keptText;
+
+  if (kept?.boxed !== boxed) {
+    kept = newKeptText(boxed);
+    element.keptText = kept;
+  }
+
+  const value = kept.value;
+
+  value.content = contentOf(props);
+  value.style = writtenKeyOf(element);
+  value.bind = props.bind as TextBind | undefined;
+  if (boxed) value.box = measured ? element.rect.w : 0;
+
+  return kept.values;
 }
 
 /**

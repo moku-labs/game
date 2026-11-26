@@ -38,22 +38,46 @@ import { type AlbumPerf, startAlbumPerf } from "./album.fixture";
 //                       `setWidth`/`setPosition` (4 and 2 calls a turn) and Emscripten's call wrappers; the
 //                       `Animation` added and removed per rest track through the ECS commands and the store's Map;
 //                       the patch walk of the reconciler; the boxes of the doubles written into kept records.
+//   then                8 793 B (8 033 B in a second window): a changed element marks its style basis stale in place
+//                       (a `delete` and a new basis object per patch before); two keyed siblings that swap take the
+//                       identity strings their elements keep; a node with no `components` and a component nobody
+//                       listens to build no empty list; the ECS keeps its applied `add` and `remove` commands and the
+//                       emptied batches of a flush; anim finds a running track by id in its start-ordered list, not in a
+//                       `Map` whose ids are new at every start; the repose of a restyle takes the pivot its commit made;
+//                       a text keeps its `Text` value; a number in a layout field is compared without `JSON.stringify`;
+//                       no iterator walks an empty set of exits or of fields, nor the list of scrolls. Of the 8 793 B,
+//                       by the heap profile: yoga-layout's own frames ~2 790 B (`YOGA_BYTES`), the 8 handles 384 B
+//                       (`HANDLE_BYTES`), and the engine's ~5 620 B (`TURN_BYTES`): the boxes of doubles read and
+//                       written through keys (the rest values of the restyled dots in `writeRest`, the rest track's
+//                       target and start values in `numericInto`, `othersOf`, `beginTrack`, the track's patch and
+//                       `Object.assign`), the table V8 grows and shrinks for the store of `Animation` (its 8 entities
+//                       go and come back every turn), the copy of each `Animation` value added, the 6 new pivots of
+//                       the dots whose size moved, and the arguments boxed for the wrapped Yoga setters.
 // ---------------------------------------------------------------------------
 
 /** Calls of a window: a turn walks the whole root, ~1.1 ms; `alloc` warms it 5 000 times first. */
 const CALLS = 200;
 
 /**
- * The bytes a turn may keep, the handles left out: the measured 14 582 B and a margin, far under the 139 360 B before
- * the change. Yoga's own bytes are still in it, not yet split out as a named budget.
+ * The engine's own bytes a turn may keep, the handles and Yoga's bytes left out: the measured ~5 620 B and a margin,
+ * far under the 139 360 B before the change. Not 0: what is left is named in the comment above.
  */
-const TURN_BYTES = 16_000;
+const TURN_BYTES = 6400;
 
 /**
  * The bytes of the handles a turn's rest tracks hand their caller: one small object per started track, 8 tracks, 48 B
  * each, measured by `anim/__tests__/perf/rest-track.perf.ts`. A hook may keep a handle, so it is not pooled.
  */
 const HANDLE_BYTES = 8 * 48;
+
+/**
+ * The bytes of a turn made inside yoga-layout: its `wrapAssembly` wrapper of `setWidth` and `setPosition` (4 and 2
+ * calls a turn) copies its arguments into two arrays and calls through two spreads, and embind's own glue keeps some
+ * for `insertChild` and `removeChild` (2 each). The heap profile of a turn puts ~2 790 B in yoga-layout's frames;
+ * `yoga-calls.perf.ts` measures each call alone. The wrapped method is kept in the wrapper's closure: no call of the
+ * engine can reach it, and a reorder or a resize of a node has no other call.
+ */
+const YOGA_BYTES = 2800;
 
 /**
  * The x of a keyed element's rect.
@@ -95,6 +119,6 @@ describe("ui: a turn of the album's set page, heap per turn", () => {
     const bytes = alloc(perf.turn, CALLS);
 
     await annotate(`a turn of ${perf.elements} elements: ${bytes} B`);
-    expect(bytes).toBeLessThanOrEqual(TURN_BYTES + HANDLE_BYTES);
+    expect(bytes).toBeLessThanOrEqual(TURN_BYTES + HANDLE_BYTES + YOGA_BYTES);
   });
 });

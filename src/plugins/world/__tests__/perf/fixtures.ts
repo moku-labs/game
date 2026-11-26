@@ -1630,3 +1630,38 @@ export function feedShownFixture(): () => void {
     projection.reconcileIfDirty();
   };
 }
+
+/** The two rest poses `setRestFixture` writes in turn: a page of the album at the place of set 0 and of set 1. */
+const REST_POSES = [
+  { x: 195.5, y: 422.25, rotation: 0, scale: 1, pivot: { x: 195.5, y: 422.25 } },
+  { x: 683.5, y: 422.25, rotation: 0, scale: 1, pivot: { x: 195.5, y: 422.25 } }
+] as const;
+
+/** A component of a plain pose: the five fields of the rest a `ui` element records. */
+const RestPose = component("RestPose", {
+  x: 0,
+  y: 0,
+  rotation: 0,
+  scale: 1,
+  pivot: { x: 0, y: 0 }
+});
+
+/**
+ * One `setRest` of a plain pose that moved, as the repose of a page turn records it (F244 В): the entity's kept rest
+ * record is written in place, the two poses in turn.
+ *
+ * @returns One `setRest`.
+ */
+export function setRestFixture(): () => void {
+  const world = createMockWorld();
+  const entity = world.api.ecs.spawn(OWNER, [RestPose()]);
+  const setRest = world.api.projection.setRest;
+  let turn = 0;
+
+  setRest(entity, RestPose, REST_POSES[0]);
+
+  return (): void => {
+    turn = 1 - turn;
+    setRest(entity, RestPose, REST_POSES[turn] ?? REST_POSES[0]);
+  };
+}
