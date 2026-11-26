@@ -489,5 +489,6 @@ export function stopAnim(state: State): void {
   state.overMaxTracks = false;
   state.bornFrom = 0;
   state.freeTracks.length = 0;
+  state.freeCells.length = 0;
   state.absent.fill(0);
 }

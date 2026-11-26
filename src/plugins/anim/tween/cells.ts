@@ -7,6 +7,12 @@
 import type { AnimCtx } from "../types";
 import { takeCell } from "./pool";
 
+/** `[1]` of a base cell while the field has a base. */
+const PRESENT = 1;
+
+/** `[1]` of a base cell the field let go; the cell stays in its table for the next track. */
+const ABSENT = 0;
+
 /** The running sum of `sumOffsets`: a cell, so neither the sum nor its callback allocates. */
 const SUM = new Float64Array(1);
 
@@ -49,7 +55,7 @@ export function baseOr(actx: AnimCtx, key: string, fallback: number): number {
 export function baseOf(actx: AnimCtx, key: string): Float64Array | undefined {
   const cell = actx.state.bases.get(key);
 
-  return cell !== undefined && cell[1] === 1 ? cell : undefined;
+  return cell !== undefined && cell[1] === PRESENT ? cell : undefined;
 }
 
 /**
@@ -63,14 +69,14 @@ export function setBase(actx: AnimCtx, key: string, value: number): void {
   const cell = actx.state.bases.get(key);
 
   if (cell === undefined) {
-    actx.state.bases.set(key, Float64Array.of(value, 1));
+    actx.state.bases.set(key, Float64Array.of(value, PRESENT));
 
     return;
   }
 
-  if (cell[1] === 0) countAbsent(actx, BASES, -1);
+  if (cell[1] === ABSENT) countAbsent(actx, BASES, -1);
   cell[0] = value;
-  cell[1] = 1;
+  cell[1] = PRESENT;
 }
 
 /**
@@ -83,9 +89,9 @@ export function setBase(actx: AnimCtx, key: string, value: number): void {
 export function deleteBase(actx: AnimCtx, key: string): void {
   const cell = actx.state.bases.get(key);
 
-  if (cell === undefined || cell[1] === 0) return;
+  if (cell === undefined || cell[1] === ABSENT) return;
 
-  cell[1] = 0;
+  cell[1] = ABSENT;
   countAbsent(actx, BASES, 1);
 }
 
@@ -161,7 +167,7 @@ const pruning: {
  * @param key - The field key.
  */
 function dropAbsentBase(cell: Float64Array, key: string): void {
-  if (cell[1] === 0) pruning.bases?.delete(key);
+  if (cell[1] === ABSENT) pruning.bases?.delete(key);
 }
 
 /**
@@ -228,7 +234,7 @@ export function setOffset(actx: AnimCtx, key: string, id: number, delta: number)
 
   const cell = offsets.get(id);
 
-  if (cell === undefined) offsets.set(id, takeCell(delta));
+  if (cell === undefined) offsets.set(id, takeCell(actx.state, delta));
   else cell[0] = delta;
 }
 

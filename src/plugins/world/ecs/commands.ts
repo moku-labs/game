@@ -4,6 +4,7 @@
  */
 import type { WorldCtx } from "../types";
 import { forgetChanges } from "./changes";
+import { tag } from "./define";
 import { isAlive, ownerKey, releaseEntity } from "./entities";
 import { recordDespawn } from "./history";
 import { attachComponent, clearEntity, detachComponent } from "./storage";
@@ -107,6 +108,9 @@ type RemoveCommand = Extract<Command, { kind: "remove" }>;
 /** How many applied commands of one kind, and how many emptied batches, are kept for the next frame. */
 const POOL_SIZE = 256;
 
+/** What a kept `add` command holds in place of its component value: one shared tag value, which no world stores. */
+const INERT_VALUE: AnyComponentValue = tag("inert")();
+
 /**
  * The `add` and `remove` commands applied and kept for the next one, and the emptied batches of a flush: an
  * `Animation` counted up and down per track, a tag set and taken, queue nothing new once warm (F244 В). A command is
@@ -158,8 +162,23 @@ export function removeCommand(entity: Entity, component: string): Command {
  * @param command - A command that was just applied.
  */
 function releaseCommand(command: Command): void {
-  if (command.kind === "add" && freeAdds.length < POOL_SIZE) freeAdds.push(command);
-  else if (command.kind === "remove" && freeRemoves.length < POOL_SIZE) freeRemoves.push(command);
+  if (command.kind === "add" && freeAdds.length < POOL_SIZE) {
+    // A kept command holds no component value: a whole `Tree` stays reachable through a pooled command otherwise.
+    command.value = INERT_VALUE;
+    freeAdds.push(command);
+  } else if (command.kind === "remove" && freeRemoves.length < POOL_SIZE) {
+    freeRemoves.push(command);
+  }
+}
+
+/**
+ * Empties the pools of kept commands and batches, so a stopped world leaves nothing of its own in them. The pools are
+ * shared by the worlds of a process and hold only spare objects, so a world still running just makes new ones.
+ */
+export function clearCommandPools(): void {
+  freeAdds.length = 0;
+  freeRemoves.length = 0;
+  freeBatches.length = 0;
 }
 
 /**

@@ -7,12 +7,19 @@
 import type { AnyComponentValue, ComponentType } from "../ecs/types";
 import type { RestPose } from "./types";
 
+/**
+ * The fields of a component value, by name: the bag a rest pose writes into by field name. Components are authored by
+ * games, so their fields are known only at run time; the one place this shape is read is narrowed (`isPose`) or copied
+ * field by field.
+ */
+type FieldBag = Record<string, unknown>;
+
 /** The kept record of one component's rest pose: the type, the fields written in place, the copy last read. */
 type KeptRest = {
   readonly type: ComponentType<object>;
-  readonly value: Record<string, unknown>;
+  readonly value: FieldBag;
   /** The frozen copy a read hands out, `undefined` until the first read after a `setRest`. */
-  snapshot: Readonly<Record<string, unknown>> | undefined;
+  snapshot: Readonly<FieldBag> | undefined;
   /** How many fields the record holds besides the defaults of its type. */
   readonly extras: number;
 };
@@ -79,8 +86,8 @@ function extrasOf(defaults: object, value: object): number {
 export function writeRest(pose: RestPose, type: ComponentType<object>, value: object): void {
   const name = type.componentName;
   const entry = pose.get(name);
-  const defaults = type.defaults as Readonly<Record<string, unknown>>;
-  const fields = value as Readonly<Record<string, unknown>>;
+  const defaults = type.defaults as Readonly<FieldBag>;
+  const fields = value as Readonly<FieldBag>;
 
   if (entry !== undefined && isKept(entry) && entry.type === type && fits(entry, defaults, value)) {
     writeKept(entry.value, defaults, value);
@@ -103,6 +110,23 @@ export function writeRest(pose: RestPose, type: ComponentType<object>, value: ob
 type Pose = { x: number; y: number; rotation: number; scale: number; pivot: unknown };
 
 /**
+ * Tells whether a field name is one of the five fields of a plain transform.
+ *
+ * @param field - A field name.
+ * @returns True for `x`, `y`, `rotation`, `scale` and `pivot`.
+ * @example
+ * ```ts
+ * isPoseField("rotation"); // true
+ * isPoseField("alpha"); // false
+ * ```
+ */
+function isPoseField(field: string): boolean {
+  return (
+    field === "x" || field === "y" || field === "rotation" || field === "scale" || field === "pivot"
+  );
+}
+
+/**
  * Tells whether a value has exactly the five fields of a plain transform, with a number where a transform has one.
  *
  * @param value - A rest value, or a kept record.
@@ -117,15 +141,7 @@ function isPose(value: object): value is Pose {
 
   // Per `setRest`: `for…in` reads the enum cache of the value's shape, no key array.
   for (const field in value) {
-    if (
-      field !== "x" &&
-      field !== "y" &&
-      field !== "rotation" &&
-      field !== "scale" &&
-      field !== "pivot"
-    ) {
-      return false;
-    }
+    if (!isPoseField(field)) return false;
 
     fields++;
   }
@@ -165,18 +181,14 @@ function writePose(kept: Pose, pose: Pose): void {
  * @param defaults - The defaults of the component type.
  * @param value - The rest value of this call.
  */
-function writeKept(
-  kept: Record<string, unknown>,
-  defaults: Readonly<Record<string, unknown>>,
-  value: object
-): void {
+function writeKept(kept: FieldBag, defaults: Readonly<FieldBag>, value: object): void {
   if (isPose(value) && isPose(kept)) {
     writePose(kept, value);
 
     return;
   }
 
-  const fields = value as Readonly<Record<string, unknown>>;
+  const fields = value as Readonly<FieldBag>;
 
   // Per `setRest` of another shape: `for…in` over the record's own fields.
   for (const field in kept) {

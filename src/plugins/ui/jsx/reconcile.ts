@@ -2028,11 +2028,12 @@ export function createReconciler(
 
     // A `change.Box` hook that went may have kept the two rects it was handed: the solve writes moves into them from
     // now on, so the element takes its own copies (F244).
-    if (
+    const boxHookLeft =
       motionChanged &&
       element.motion?.change?.Box !== undefined &&
-      motion?.change?.Box === undefined
-    ) {
+      motion?.change?.Box === undefined;
+
+    if (boxHookLeft) {
       element.rect = { ...element.rect };
       element.previous = { ...element.previous };
     }

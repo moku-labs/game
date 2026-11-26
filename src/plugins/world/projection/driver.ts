@@ -320,7 +320,7 @@ const COPIES = Symbol("copies");
 /**
  * Marks a driver of the engine as one that copies what a start hands it, so the projection hands it its kept target,
  * options and `muted` reader, which a later start writes again once the track ended (F244 В). The `muted` reader it
- * keeps is read only while its track runs.
+ * keeps is read only while its track runs. See `TweenDriver` for what a driver may keep.
  *
  * @param driver - The driver `anim` sets.
  * @returns The same driver, marked.
@@ -340,7 +340,7 @@ export function copyingDriver(driver: TweenDriver): TweenDriver {
  * @returns True when the driver keeps nothing it was handed.
  */
 function copiesStart(pctx: ProjectionCtx, driver: TweenDriver): boolean {
-  return pctx.ctx.state.projection.driver === undefined || COPIES in driver;
+  return pctx.ctx.state.projection.driver === undefined || Object.hasOwn(driver, COPIES);
 }
 
 /**
@@ -438,6 +438,9 @@ function fileTrack(
   state.tracks.push(record);
 }
 
+/** How many records of ended tracks the projection keeps for the next start; a record past it is left to the collector. */
+const FREE_TRACKS_MAX = 256;
+
 /**
  * Keeps a record whose track ended for the next start, and lets its handle go.
  *
@@ -448,7 +451,8 @@ function releaseRecord(state: ProjectionState, record: Track): void {
   if (!isKept(record)) return;
 
   record.handle = INERT;
-  state.freeTracks.push(record);
+  // A full list drops the record: a burst of tracks does not leave its peak kept for good.
+  if (state.freeTracks.length < FREE_TRACKS_MAX) state.freeTracks.push(record);
 }
 
 /**

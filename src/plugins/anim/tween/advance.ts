@@ -575,7 +575,7 @@ function dropOffset(actx: AnimCtx, track: Track, key: string): boolean {
 
   if (offsets === undefined || offset === undefined) return false;
 
-  releaseCell(offset);
+  releaseCell(actx.state, offset);
   offsets.delete(track.id);
 
   if (offsets.size > 0) return false;

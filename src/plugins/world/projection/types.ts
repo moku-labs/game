@@ -253,6 +253,9 @@ export type TweenDriver = {
   /**
    * Starts one track on one component of one entity.
    *
+   * Ownership: the world may write `to` and `options` again for its next start once the track ended, so a driver reads
+   * them during this call and copies what it keeps. `muted` may be read only while its track runs.
+   *
    * @param entity - The entity to animate.
    * @param component - The component to animate.
    * @param to - The numeric target fields.
@@ -1566,7 +1569,8 @@ export type ProjectionApi = {
    * Installs the tween engine every `ViewHandle.tween`, `toRest` and `all` then runs on. Without
    * one the world writes every target at once and hands back an inactive handle.
    *
-   * @param driver - The engine that runs the tracks.
+   * @param driver - The engine that runs the tracks. It reads the `to` and `options` of `track` during the call and
+   *   copies what it keeps; it reads `muted` only while its track runs.
    * @returns The remover; it puts the instant writes back.
    * @example
    * ```ts

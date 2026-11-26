@@ -138,6 +138,29 @@ describe("resolveElement: the resolution kept per style object (F244 В)", () =>
     expect(styles.resolveElement(style, IDLE).gap).toBe(8);
   });
 
+  it("hands every element of one style the same object, and that object cannot be written", () => {
+    // Bug caught: a write into a resolved style (an element's own field, a padding edge) would reach every element
+    // that shares the style object and the state flags.
+    const { styles } = stylesModule();
+    const style = defineStyle({ gap: 8, padding: { top: 4, left: 2 } });
+
+    styles.useViewport(viewportOf());
+
+    const first = styles.resolveElement(style, IDLE);
+    const second = styles.resolveElement(style, IDLE);
+    const writeGap = (): void => {
+      (first as { gap?: number }).gap = 99;
+    };
+    const writeEdge = (): void => {
+      (first.padding as { top?: number }).top = 99;
+    };
+
+    expect(second).toBe(first);
+    expect(writeGap).toThrow(TypeError);
+    expect(writeEdge).toThrow(TypeError);
+    expect(second.gap).toBe(8);
+  });
+
   it("resolves a kept style again when the viewport changes its safe area or its size", () => {
     // Bug caught: a style kept across a new viewport keeps the old safe-area inset or the old `when` variant.
     const { styles } = stylesModule();

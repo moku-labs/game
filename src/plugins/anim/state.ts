@@ -88,6 +88,7 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     loopsHeld: undefined,
     warnedLoops: emptySet(),
     freeTracks: [],
+    freeCells: [],
     absent: new Int32Array(2)
   };
 }

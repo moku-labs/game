@@ -443,6 +443,8 @@ export type State = {
   warnedLoops: Set<string>;
   /** The records of the tracks the frame step dropped, by slot count, kept for the next start (F244 В, `tween/pool.ts`). */
   freeTracks: Track[][];
+  /** The one-number cells the bases and offsets gave back, kept for the next ones (F244 В, `tween/pool.ts`). */
+  freeCells: Float64Array[];
   /**
    * `[0]`: the bases let go and kept absent in their table; `[1]`: the owner entries at id 0. The frame step drops
    * them once either reaches 512 (`tween/cells.ts`).
