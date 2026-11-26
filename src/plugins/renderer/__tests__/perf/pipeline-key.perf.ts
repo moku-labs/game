@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { createLazyCanvasClasses } from "../../host/render-pass";
 import type { PixiModule } from "../../types";
 import { createPassStage, type PassStage } from "../pass-stage";
+import { BUDGET, NOISE } from "./budgets";
 import { bytesPerCall } from "./fixtures";
 
 // ---------------------------------------------------------------------------
-// SPIKE (item 6, 2026-11-26): the bytes of one draw's pipeline lookup. Pixi 8.22's `getPipeline` builds its cache key as
-// `geometryLayout * 2^45 + …`, a number past V8's small integers, so every draw boxes one. Measured on the real Pixi
-// systems over the recording stand-in of the GPU, ours and Pixi's own side by side.
+// Perf: one draw's pipeline lookup (item 6). Bug it guards: a draw that boxes a pipeline key again. Pixi 8.22's own
+// `getPipeline` keys its cache with `geometryLayout * 2^45 + …`, past V8's small integers, so it boxes one per draw
+// (16 B; ~27 MB over the A26 walk of «A Memory Missing»). Measured on the real Pixi systems over the recording stand-in
+// of the GPU, ours whole, Pixi's own beside it for the record.
 // ---------------------------------------------------------------------------
 
 const classes = createLazyCanvasClasses(pixi as unknown as PixiModule);
@@ -30,24 +32,24 @@ const own = quiet(
   createPassStage({ targets: pixi.GpuRenderTargetSystem, pipeline: pixi.PipelineSystem })
 );
 
-describe("SPIKE item 6: one draw's pipeline lookup", () => {
-  it("bytes per draw and per batch, ours and Pixi's own", async ({ annotate }) => {
+describe("one draw's pipeline lookup", () => {
+  it("allocates nothing per draw and per batch, where Pixi's own boxes its key", async ({
+    annotate
+  }) => {
     lazy.open();
     own.open();
     lazy.draw();
     own.draw();
 
-    const lazyDraw = bytesPerCall(() => lazy.draw());
-    const ownDraw = bytesPerCall(() => own.draw());
-    const lazyBatch = bytesPerCall(() => lazy.drawBatch());
-    const ownBatch = bytesPerCall(() => own.drawBatch());
+    const draw = bytesPerCall(() => lazy.draw());
+    const batch = bytesPerCall(() => lazy.drawBatch());
+    const pixiDraw = bytesPerCall(() => own.draw());
 
     lazy.close();
     own.close();
 
-    await annotate(
-      `draw: ours ${lazyDraw} B, Pixi ${ownDraw} B; batch: ours ${lazyBatch} B, Pixi ${ownBatch} B`
-    );
-    expect(ownDraw).toBeGreaterThanOrEqual(0);
+    await annotate(`draw ${draw} B, batch ${batch} B; Pixi's own draw ${pixiDraw} B`);
+    expect(draw).toBeLessThanOrEqual(BUDGET.pipelineDraw + NOISE);
+    expect(batch).toBeLessThanOrEqual(BUDGET.pipelineDraw + NOISE);
   });
 });

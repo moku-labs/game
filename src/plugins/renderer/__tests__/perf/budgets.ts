@@ -213,6 +213,10 @@ export const BUDGET = {
   // B3: what the lazy pipeline system adds to a draw and to a batch of Pixi's own, over Pixi's (64 B a draw and 16 B a
   // batch, its pipeline key, both measured the same with and without). New, measured 0 B: two booleans tested.
   lazyCanvasDraw: 0,
+  // Item 6 (2026-11-26): one draw and one batch through the lazy pipeline system, whole. Pixi 8.22's own boxes its
+  // pipeline key (16 B a draw, ~27 MB over the A26 walk of the real game); the front table of small-integer keys asks
+  // Pixi only on a miss. Measured 16 B before, 0 B after.
+  pipelineDraw: 0,
   // B3: what a frame that starts with a filter adds over Pixi's own frame. New, measured −344 B: the empty canvas pass
   // Pixi begins at render start, its descriptor and attachment objects, is never begun.
   lazyCanvasFrame: 0,
