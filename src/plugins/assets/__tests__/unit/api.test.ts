@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { lookupTexture } from "../../api";
 import { releaseLeftBundles, releaseSceneLeft } from "../../budget";
 import { loadBundle } from "../../tiers";
@@ -539,6 +539,79 @@ describe("the bundles of a leaving scene whose exit has not started yet (F51b)",
 
     mock.world.endExit(7);
     mock.world.sync();
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
+  });
+});
+
+describe("a leave bundle drawn when its release comes (F246)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Bug: the scene stopped naming a bundle whose picture still flew (the level-13 reward to the board button), the
+  // first sync with nothing exiting released it, and the drawn picture turned into a magenta placeholder.
+  it("keeps a dropped scene bundle while a view draws it, warns once, and lets it go at the first sync after", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board.chains"]);
+    mock.api.sceneBundles(["board"]);
+    mock.renderer.drawn.add("board.chain");
+    mock.world.sync();
+    mock.world.sync();
+
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+    expect(mock.ctx.state.sceneLeaving).toEqual([]);
+    expect(mock.log.warn).toHaveBeenCalledTimes(1);
+    expect(mock.log.warn).toHaveBeenCalledWith(
+      'assets: a "leave" bundle is drawn when it would be released; it goes once nothing draws it',
+      { bundle: "board.chains" }
+    );
+
+    mock.renderer.drawn.clear();
+    mock.world.sync();
+
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
+    expect(mock.ctx.state.leftDrawn).toEqual([]);
+  });
+
+  // Bug: a skipped bundle that the next scene names again was released by the retry under the scene that uses it.
+  it("forgets a skipped bundle the mounted scene names again: the retry does not release it", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board.chains"]);
+    mock.api.sceneBundles([]);
+    mock.renderer.drawn.add("board.chain");
+    mock.world.sync();
+    mock.api.sceneBundles(["board.chains"]);
+    mock.renderer.drawn.clear();
+    mock.world.sync();
+
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+    expect(mock.ctx.state.leftDrawn).toEqual([]);
+  });
+
+  // Bug: the rest released a left feature's bundle whose picture was still on screen.
+  it("keeps a left bundle a view draws at a rest, and lets it go at a later rest", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
+
+    await mock.start();
+    await mock.api.load("board.chains");
+    mock.renderer.drawn.add("board.chain");
+    releaseLeftBundles(mock.assetsCtx);
+
+    expect(mock.api.isLoaded("board.chains")).toBe(true);
+
+    mock.renderer.drawn.clear();
+    releaseLeftBundles(mock.assetsCtx);
+
     expect(mock.api.isLoaded("board.chains")).toBe(false);
   });
 });

@@ -350,8 +350,8 @@ export function isHeld(
 /**
  * Unloads every loaded `"leave"` bundle nobody holds any more, with the reason `"leave"`. A
  * leaving scene's bundles stay held: `releaseSceneLeft` lets them go, after the reconcile that
- * starts their exit (F51b). A running load is never aborted by it, and a `"budget"` bundle is never
- * touched. Headless it does nothing.
+ * starts their exit (F51b). A bundle a view draws stays, with a dev warning, and is asked again at the next rest
+ * (F246). A running load is never aborted by it, and a `"budget"` bundle is never touched. Headless it does nothing.
  *
  * @param ctx - Domain context of the plugin.
  */
@@ -362,7 +362,9 @@ export function releaseLeftBundles(ctx: AssetsCtx): void {
 
   const onStack = featuresOnStack(ctx);
 
-  for (const name of state.records.keys()) unloadIfLeft(ctx, name, onStack);
+  for (const name of state.records.keys()) {
+    if (unloadIfLeft(ctx, name, onStack) === "drawn") warnDrawn(ctx, name);
+  }
 }
 
 /**
@@ -417,6 +419,9 @@ export function nameComingBundles(state: State, named: readonly string[]): void 
 export function releaseSceneLeft(ctx: AssetsCtx): void {
   const state = ctx.state;
 
+  // A dropped bundle a view still drew: asked again in every sync until nothing draws it (F246).
+  if (state.leftDrawn.length > 0) retryLeftDrawn(ctx);
+
   // Nothing left, its elements still play their exit, or the scene that drops it has not begun to leave.
   if (state.sceneLeaving.length === 0 || state.exiting > 0 || state.sceneComing.length > 0) return;
 
@@ -426,28 +431,88 @@ export function releaseSceneLeft(ctx: AssetsCtx): void {
 
   if (state.io === undefined) return;
 
-  // Only a `feature`-tier bundle lives with its feature on the stack; a scene's goes with the scene.
-  const onStack = featuresOnStack(ctx);
-
   for (const name of names) {
-    const tier = state.manifest.bundles[name]?.tier;
+    if (unloadIfLeft(ctx, name, sceneLeftStack(ctx, name)) !== "drawn") continue;
+    if (state.leftDrawn.includes(name)) continue;
 
-    unloadIfLeft(ctx, name, tier === "feature" ? onStack : NO_FEATURES);
+    state.leftDrawn.push(name);
+    warnDrawn(ctx, name);
   }
 }
 
 /**
- * Unloads one bundle with the reason `"leave"` when it is a loaded `"leave"` bundle nobody holds.
+ * Picks what holds a bundle a leaving scene dropped: only a `feature`-tier bundle lives with its feature on the
+ * stack; a scene's goes with the scene.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param name - Name of the bundle.
+ * @returns The features on the stack for a `feature`-tier bundle, none for any other.
+ */
+function sceneLeftStack(ctx: AssetsCtx, name: string): ReadonlySet<string> {
+  return ctx.state.manifest.bundles[name]?.tier === "feature" ? featuresOnStack(ctx) : NO_FEATURES;
+}
+
+/**
+ * Asks again for every dropped bundle a view drew at its release: one that went another way or is held again is
+ * forgotten, one still drawn stays, and one nothing draws any more is unloaded with the reason `"leave"`. A bundle
+ * leaves the list by a swap with the last, so nothing is built (F246).
+ *
+ * @param ctx - Domain context of the plugin.
+ */
+function retryLeftDrawn(ctx: AssetsCtx): void {
+  const list = ctx.state.leftDrawn;
+  let index = 0;
+
+  while (index < list.length) {
+    const name = list[index] as string;
+
+    if (unloadIfLeft(ctx, name, sceneLeftStack(ctx, name)) === "drawn") {
+      index += 1;
+      continue;
+    }
+
+    list[index] = list[list.length - 1] as string;
+    list.length -= 1;
+  }
+}
+
+/**
+ * Warns in a dev build that a `"leave"` bundle was about to go under a view that draws it: the release waits for it,
+ * and the game may name the bundle a little longer instead (F246).
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param bundle - Name of the bundle.
+ */
+function warnDrawn(ctx: AssetsCtx, bundle: string): void {
+  if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return;
+
+  ctx.log.warn(
+    'assets: a "leave" bundle is drawn when it would be released; it goes once nothing draws it',
+    { bundle }
+  );
+}
+
+/** What `unloadIfLeft` did: unloaded it, left it alone, or kept it because a view draws it. */
+type LeftOutcome = "unloaded" | "kept" | "drawn";
+
+/**
+ * Unloads one bundle with the reason `"leave"` when it is a loaded `"leave"` bundle nobody holds and no view draws
+ * (`renderer.sync.textures.used`, asked last: it walks the keys). A drawn one would turn into a placeholder (F246).
  *
  * @param ctx - Domain context of the plugin.
  * @param name - Name of the bundle.
  * @param onStack - The features on the stack, from `featuresOnStack`.
+ * @returns `"drawn"` when only a view drawing it kept it, `"kept"` when it is not a release candidate.
  */
-function unloadIfLeft(ctx: AssetsCtx, name: string, onStack: ReadonlySet<string>): void {
-  const entry = ctx.state.manifest.bundles[name];
+function unloadIfLeft(ctx: AssetsCtx, name: string, onStack: ReadonlySet<string>): LeftOutcome {
+  const state = ctx.state;
+  const entry = state.manifest.bundles[name];
 
-  if (ctx.state.records.get(name)?.status !== "loaded" || entry?.release !== "leave") return;
-  if (isHeld(ctx, name, entry, onStack)) return;
+  if (state.records.get(name)?.status !== "loaded" || entry?.release !== "leave") return "kept";
+  if (isHeld(ctx, name, entry, onStack)) return "kept";
+  if (ctx.deps.renderer.sync.textures.used(bundleKeys(state, name))) return "drawn";
 
   unloadBundle(ctx, name, "leave");
+
+  return "unloaded";
 }
