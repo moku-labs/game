@@ -159,7 +159,12 @@ for (const file of readdirSync(folder).filter(name => name.endsWith(".rows.json"
     readFileSync(path.join(folder, file.replace(".rows.json", ".json")), "utf8")
   ) as Record<string, unknown> & {
     scene: string;
-    info?: { entities?: number; stats?: Record<string, unknown> };
+    info?: {
+      entities?: number;
+      pixiNodes?: number;
+      flips?: number;
+      stats?: Record<string, unknown>;
+    };
   };
   const kinds: Record<string, unknown> = {};
 
