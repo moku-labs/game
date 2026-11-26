@@ -484,12 +484,12 @@ function retryLeftDrawn(ctx: AssetsCtx): void {
  * @param bundle - Name of the bundle.
  */
 function warnDrawn(ctx: AssetsCtx, bundle: string): void {
-  if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return;
-
-  ctx.log.warn(
-    'assets: a "leave" bundle is drawn when it would be released; it goes once nothing draws it',
-    { bundle }
-  );
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+    ctx.log.warn(
+      'assets: a "leave" bundle is drawn when it would be released; it goes once nothing draws it',
+      { bundle }
+    );
+  }
 }
 
 /** What `unloadIfLeft` did: unloaded it, left it alone, or kept it because a view draws it. */
@@ -502,7 +502,8 @@ type LeftOutcome = "unloaded" | "kept" | "drawn";
  * @param ctx - Domain context of the plugin.
  * @param name - Name of the bundle.
  * @param onStack - The features on the stack, from `featuresOnStack`.
- * @returns `"drawn"` when only a view drawing it kept it, `"kept"` when it is not a release candidate.
+ * @returns `"unloaded"` when it went, `"drawn"` when only a view drawing it kept it, `"kept"` when it is not a
+ * release candidate.
  */
 function unloadIfLeft(ctx: AssetsCtx, name: string, onStack: ReadonlySet<string>): LeftOutcome {
   const state = ctx.state;

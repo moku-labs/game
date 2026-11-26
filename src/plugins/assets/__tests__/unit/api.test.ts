@@ -598,6 +598,35 @@ describe("a leave bundle drawn when its release comes (F246)", () => {
     expect(mock.ctx.state.leftDrawn).toEqual([]);
   });
 
+  // Bug: the swap with the last skipped or visited twice the entry it moved, or kept a bundle that went another way.
+  it("forgets one of two waiting bundles that a caller unloaded, and keeps the other while it is drawn", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board", "board.chains") });
+
+    mock.connect();
+    await mock.start();
+    await mock.api.load("board");
+    await mock.api.load("board.chains");
+    mock.api.sceneBundles(["board.chains", "board"]);
+    mock.api.sceneBundles([]);
+    mock.renderer.drawn.add("board.chain");
+    mock.renderer.drawn.add("board.cell");
+    mock.world.sync();
+
+    expect(mock.ctx.state.leftDrawn).toEqual(["board.chains", "board"]);
+
+    mock.api.unload("board.chains");
+    mock.world.sync();
+
+    expect(mock.ctx.state.leftDrawn).toEqual(["board"]);
+    expect(mock.api.isLoaded("board")).toBe(true);
+
+    mock.renderer.drawn.clear();
+    mock.world.sync();
+
+    expect(mock.ctx.state.leftDrawn).toEqual([]);
+    expect(mock.api.isLoaded("board")).toBe(false);
+  });
+
   // Bug: the rest released a left feature's bundle whose picture was still on screen.
   it("keeps a left bundle a view draws at a rest, and lets it go at a later rest", async () => {
     const mock = createMockAssets({ manifest: leaving(manifest, "board.chains") });
