@@ -11,6 +11,7 @@ import type { SystemTiming } from "../../world/types";
 import type { DemandReason } from "../demand/types";
 import { DEMAND_REASONS } from "../reasons";
 import { pageNow } from "./clock";
+import { commitEdges } from "./edges";
 import { annotateLongFrame, usedHeapBytes } from "./long-frames";
 import { accumulateProblems } from "./problems";
 import {
@@ -667,9 +668,10 @@ function closeCommit(
 
 /**
  * The `time.measure` listener of the monitor: writes the frame into the next slot of the ring, then the spike rule, the
- * GPU timer's frame, the display's ticks, the flush that is due, the accumulators, a `display` event after a resize, a
- * restore, a turn or a new display rate, and closes the frame. A section that is off skips its part, whose columns
- * read as not measured; each part that runs is a lap of the page clock, summed per section for the sample.
+ * GPU timer's frame, the display's ticks, the flush that is due, the accumulators, the flow edges since the previous
+ * commit, a `display` event after a resize, a restore, a turn or a new display rate, and closes the frame. A section
+ * that is off skips its part, whose columns read as not measured; each part that runs is a lap of the page clock,
+ * summed per section for the sample.
  *
  * @param pc - The perf context.
  * @param measure - What `time` measured of the frame; rewritten every frame, so only its numbers are kept.
@@ -715,5 +717,7 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
 
   accumulate(perf, measure);
   if ((sections & SECTION.systems) !== 0) commitSystems(pc, slot);
+  // No section: one compare while no flow edge came, and the base's lap holds it.
+  commitEdges(pc, slot, measure.frame);
   closeCommit(pc, measure, slot, causes);
 }

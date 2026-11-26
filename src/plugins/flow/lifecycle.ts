@@ -9,6 +9,7 @@ import { createFxApi } from "./fx/api";
 import type { Descriptor, FxApi, Hint } from "./fx/types";
 import { createGateApi } from "./gate/api";
 import { createInboxApi } from "./inbox/api";
+import { createEdgeTiming } from "./runner/timing";
 import type { Deps, FlowCtx, KernelSlice } from "./types";
 
 /**
@@ -83,7 +84,9 @@ function registerSchedule(ctx: FlowCtx, fx: FxApi): void {
  * frame and the elapsed game time of that frame, and registers the `schedule` handler. `onInit`
  * has no access to the plugin's own API, so it builds its own module objects — they are pure
  * functions over `ctx.state`, which is the one place the modules keep their data, so these
- * objects and the API's objects are the same gate and the same fx.
+ * objects and the API's objects are the same gate and the same fx. In an agent build with
+ * `time.agentClock()` it starts the edge timer: the ring of `edgeTimes()`, kept for the life of the
+ * app.
  *
  * @param ctx - Kernel context of the flow plugin.
  */
@@ -92,6 +95,14 @@ export function connectFlow(ctx: KernelSlice): void {
   const gate = createGateApi(flowCtx);
   const fx = createFxApi(flowCtx, { gate });
   const inbox = createInboxApi(flowCtx);
+
+  // Inline and positive, as world's system timing: Bun folds the guard under a production
+  // `define`, so a release bundle times no edge and drops `runner/timing.ts`.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    const clock = flowCtx.deps.time.agentClock();
+
+    if (clock !== undefined) flowCtx.state.runner.timing = createEdgeTiming(clock);
+  }
 
   flowCtx.deps.clock.onElapsed(input => {
     inbox.post({ type: "elapsed", payload: input });

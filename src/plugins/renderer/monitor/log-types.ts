@@ -67,6 +67,14 @@ export type FrameColumns = {
   targetsCreated: Float32Array;
   /** Render targets Pixi destroyed in the frame (a pool trim, a resize); NaN where not counted. */
   targetsDestroyed: Float32Array;
+  /** Flow edges taken before the frame, since the previous one (`flow.edgeTimes()`); 0 where edges are not timed. */
+  edges: Uint16Array;
+  /** Their whole-edge ms summed; 0 without an edge, NaN where edges are not timed. */
+  edgeMs: Float32Array;
+  /** The costliest of them, ms; 0 without an edge, NaN where edges are not timed. */
+  edgeMaxMs: Float32Array;
+  /** The path id (`paths`) of the node that took the costliest edge; 0 without one. */
+  edgePath: Uint16Array;
 };
 
 /**
@@ -484,6 +492,20 @@ export type PerfSampleLine = PerfLine<"sample"> & {
    * what to read. The engine always writes it; optional for a reader of an older log.
    */
   sectionsMs?: { readonly [Section in keyof MonitorSections | "base"]: number };
+  /**
+   * The flow edges the frames of the second took: how many, their whole-edge ms and node-body ms summed (a body that did
+   * not run adds nothing), the costliest and the path of its node (`null` without an edge), and `lost`, the edges the
+   * flow's ring of 256 overwrote before this flush could write their `edge` lines. `null` where edges are not timed (no
+   * `flow.edgeTimes()`). The engine always writes it; optional for a reader of an older log.
+   */
+  edges?: {
+    count: number;
+    ms: number;
+    bodyMs: number;
+    maxMs: number;
+    maxNode: string | null;
+    lost: number;
+  } | null;
 };
 
 /**
@@ -571,6 +593,11 @@ export type FrameRecord = {
   causes: readonly PerfCause[];
   /** Kept pictures drawn and taken in the frame (spec 23). */
   kept: { pictures: number; retakes: number } | null;
+  /**
+   * The flow edges taken before the frame: how many, their ms summed, the costliest and the path of its node; `null`
+   * without an edge and where edges are not timed. The engine always writes it; optional for a reader of an older log.
+   */
+  edges?: { count: number; ms: number; maxMs: number; maxNode: string } | null;
 };
 
 /**
@@ -618,7 +645,45 @@ export type PerfSpikeLine = PerfLine<"spike"> & {
   filters: readonly { kind: string; applies: number; mpx: number }[];
   passes: readonly PassRecord[];
   longFrames: readonly LongFrameEntry[];
+  /**
+   * The flow edges taken before the spike frame, oldest first, those the flow's ring still holds; `null` where edges
+   * are not timed. The engine always writes it; optional for a reader of an older log.
+   */
+  edges?: readonly PerfEdgeEntry[] | null;
 };
+
+/**
+ * One flow edge of an agent build, from `flow.edgeTimes()`: the frame it is counted in (the first frame that started
+ * after it), the node that took it, its outcome and the path it leads to, and its page-clock ms. `hooksMs` and
+ * `commitMs` hold only the first listener of their event up to its first `await`: the event bus awaits the listeners
+ * in turn. `bodyMs` is `null` when no body ran, `wallMs` when no node entry led to the edge.
+ *
+ * @example
+ * ```ts
+ * // The drop of a merge drag on the board of A Memory Missing.
+ * const edge: PerfEdgeEntry = {
+ *   frame: 1824, node: "mergeBoard/awaitIntent", outcome: "drop", next: "mergeBoard/drop",
+ *   ms: 0.42, commitMs: 0.18, hooksMs: 0.2, bodyMs: null, wallMs: 3120.5
+ * };
+ * ```
+ */
+export type PerfEdgeEntry = {
+  frame: number;
+  node: string;
+  outcome: string;
+  next: string;
+  ms: number;
+  commitMs: number;
+  hooksMs: number;
+  bodyMs: number | null;
+  wallMs: number | null;
+};
+
+/**
+ * A flow edge as its own line, built at the flush after the frame it is counted in; `t` is the page epoch ms of its
+ * start.
+ */
+export type PerfEdgeLine = PerfLine<"edge"> & PerfEdgeEntry;
 
 /**
  * A Long Animation Frame as its own line.
@@ -908,6 +973,7 @@ export type PerfLogLine =
   | PerfStartupLine
   | PerfSampleLine
   | PerfSpikeLine
+  | PerfEdgeLine
   | PerfLongFrameLine
   | PerfEventLine
   | PerfMarkLine

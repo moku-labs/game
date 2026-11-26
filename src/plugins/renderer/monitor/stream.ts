@@ -10,9 +10,11 @@
 import type { Json } from "../../model/types";
 import { nativeShell, readingOf, whenShellReady } from "../../time/native";
 import { takeShaderEvents } from "./compiles";
+import { firstUnflushed } from "./edges";
 import {
   deepFreeze,
   displayOf,
+  edgeLine,
   eventLine,
   headerLine,
   sampleLine,
@@ -315,8 +317,26 @@ function flushProblems(pc: PerfCtx): void {
 }
 
 /**
- * Starts a new second: the histogram, the system sums and maxima, the sections' cost and the monitor's own cost go back
- * to 0, the system accumulators grown when the world registered more systems than they hold.
+ * Writes an `edge` line for every flow edge the commits took since the last flush that the flow's ring still holds,
+ * oldest first. The ones it overwrote are the sample's `lost`, counted before this.
+ *
+ * @param pc - The perf context.
+ */
+function flushEdges(pc: PerfCtx): void {
+  const { perf } = pc;
+  const timing = pc.ctx.deps.flow.edgeTimes();
+
+  if (timing === undefined) return;
+
+  for (let index = firstUnflushed(perf, timing); index < perf.edgeSeen; index += 1) {
+    deliver(pc, edgeLine(perf, timing, index));
+  }
+}
+
+/**
+ * Starts a new second: the histogram, the system sums and maxima, the edge sums, the sections' cost and the monitor's
+ * own cost go back to 0, the system accumulators grown when the world registered more systems than they hold, and the
+ * edges taken so far count as flushed, written or not.
  *
  * @param pc - The perf context; `perf.staged[1]` is where the next window starts.
  */
@@ -333,14 +353,17 @@ function nextSecond(pc: PerfCtx): void {
   perf.secSum.fill(0);
   perf.secMax.fill(0);
   perf.sectionsMs.fill(0);
+  perf.edgeSec.fill(0);
+  perf.edgeFlushed = perf.edgeSeen;
   perf.listenersSum = 0;
   perf.lastFlushAt = cellF64(perf.staged, 1);
 }
 
 /**
  * The flush, once a second of page clock and on a pause: the GPU batch closes, the startup line is built once after
- * the first drawn frame, and with a listener the sample of the window, the spikes that may go and the compile and
- * upload events of the window are written. Without a listener the spikes waiting are dropped.
+ * the first drawn frame, and with a listener the sample of the window, the flow edges of the second, the spikes that
+ * may go and the compile and upload events of the window are written. Without a listener the spikes waiting are
+ * dropped, and the edges are passed.
  *
  * @param pc - The perf context; `perf.staged[1]` is the end of the window, page clock: frames that
  *   started before it are in it. Staged, not passed: a double handed to a call is boxed.
@@ -361,6 +384,7 @@ export function flushPerf(pc: PerfCtx): void {
 
   if (perf.listeners.length > 0 && !Number.isNaN(start)) {
     deliver(pc, sampleLine(pc, start, windowEnd));
+    flushEdges(pc);
     flushSpikes(pc, start);
     flushLoads(pc, start, windowEnd);
     flushShaders(pc);

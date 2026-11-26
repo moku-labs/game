@@ -19,7 +19,15 @@ import type {
 } from "./loop-types";
 import { noop, stages } from "./loop-types";
 import { answerResult, eventResult } from "./position";
-import type { AnyNode, AnyNodeContext, Modules, NodeInfo, RunnerState } from "./types";
+import { endBody, startBody } from "./timing";
+import type {
+  AnyNode,
+  AnyNodeContext,
+  EdgeTimingState,
+  Modules,
+  NodeInfo,
+  RunnerState
+} from "./types";
 
 /**
  * Tells whether a JSON value is an object with keys: not `null`, not an array.
@@ -471,17 +479,30 @@ export function abortOutcome(signal: AbortSignal): Promise<Aborted> {
 
 /**
  * Calls the body of a node and turns what it does into an outcome. Nothing is thrown out of here.
- * A body that settles closes the popups it left open before the loop moves on.
+ * A body that settles closes the popups it left open before the loop moves on. An agent build
+ * times the body's first synchronous slice, from the call to its first `await`.
  *
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
+ * @param timing - The edge timer, `undefined` without the agent clock.
  * @returns The result, the abort or the failure.
  */
-async function callBody(modules: Modules, step: Step): Promise<NodeOutcome> {
+async function callBody(
+  modules: Modules,
+  step: Step,
+  timing: EdgeTimingState | undefined
+): Promise<NodeOutcome> {
   const open: OpenEffect[] = [];
 
   try {
-    const result = await step.node.run?.(nodeContext(modules, step, open));
+    // Inside the try: a body that throws before its first `await` still fails the node.
+    if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) startBody(timing);
+
+    const pending = step.node.run?.(nodeContext(modules, step, open));
+
+    if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) endBody(timing);
+
+    const result = await pending;
 
     if (step.signal.aborted) return { kind: "aborted", reason: abortReason(step.signal) };
 
@@ -509,10 +530,15 @@ async function callBody(modules: Modules, step: Step): Promise<NodeOutcome> {
  *
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
+ * @param timing - The edge timer, `undefined` without the agent clock.
  * @returns The outcome of the body or of the abort, whichever comes first.
  */
-function runBody(modules: Modules, step: Step): Promise<NodeOutcome> {
-  return Promise.race([callBody(modules, step), abortOutcome(step.signal)]);
+function runBody(
+  modules: Modules,
+  step: Step,
+  timing: EdgeTimingState | undefined
+): Promise<NodeOutcome> {
+  return Promise.race([callBody(modules, step, timing), abortOutcome(step.signal)]);
 }
 
 /**
@@ -522,12 +548,14 @@ function runBody(modules: Modules, step: Step): Promise<NodeOutcome> {
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @param delivered - Holder of the event the inbox delivered.
+ * @param timing - The edge timer, `undefined` without the agent clock.
  * @returns The outcome of the body, or the delivered event.
  */
 async function runRestBody(
   modules: Modules,
   step: Step,
-  delivered: Delivery
+  delivered: Delivery,
+  timing: EdgeTimingState | undefined
 ): Promise<NodeOutcome> {
   /**
    * Looks for a deliverable event and aborts the node when one is there.
@@ -547,7 +575,7 @@ async function runRestBody(
   check();
 
   try {
-    const outcome = await runBody(modules, step);
+    const outcome = await runBody(modules, step, timing);
     const event = delivered.event;
 
     if (outcome.kind === "aborted" && outcome.reason === "inbox" && event !== undefined) {
@@ -628,17 +656,19 @@ function waitForAnswer(modules: Modules, step: Step): Promise<NodeOutcome> {
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @param delivered - Holder of the event the inbox delivered.
+ * @param timing - The edge timer of an agent build, `undefined` without the agent clock: a body is timed.
  * @returns The outcome of that node; read it through `failedOrAsIs`.
  */
 export function nodeOutcome(
   modules: Modules,
   step: Step,
-  delivered: Delivery
+  delivered: Delivery,
+  timing: EdgeTimingState | undefined
 ): Promise<NodeOutcome> {
   if (step.node.run === undefined) return waitForAnswer(modules, step);
-  if (step.node.rest) return runRestBody(modules, step, delivered);
+  if (step.node.rest) return runRestBody(modules, step, delivered, timing);
 
-  return runBody(modules, step);
+  return runBody(modules, step, timing);
 }
 
 /**

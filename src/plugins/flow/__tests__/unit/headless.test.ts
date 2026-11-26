@@ -150,6 +150,7 @@ const createFakeApp = (options: AppOptions = {}) => {
         calls.push(`mode:${mode}`);
         live.mode = mode;
       },
+      edgeTimes: () => undefined,
       gate: { answer: vi.fn(() => true), pointer: vi.fn(), state: vi.fn() },
       inbox: { post: vi.fn() },
       fx: { handle: () => unregister, dispatch: vi.fn(), onHint: () => unregister },

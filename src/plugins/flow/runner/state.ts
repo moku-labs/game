@@ -40,6 +40,7 @@ export function createRunnerState(): RunnerState {
     running: undefined,
     abort: undefined,
     failures: 0,
-    guide: undefined
+    guide: undefined,
+    timing: undefined
   };
 }

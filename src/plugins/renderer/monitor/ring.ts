@@ -18,7 +18,7 @@ import type {
   PerfChangeEntry
 } from "./log-types";
 import { PERF_CAUSES, PERF_GAP_BUCKETS } from "./log-types";
-import type { EventRing, PerfRing, RingPasses } from "./types";
+import type { EventRing, PerfRing, PerfState, RingPasses } from "./types";
 import { cellF32, cellF64, cellU8, cellU16, cellU32 } from "./units";
 
 /** Gaps below this many ms fall into 1 ms buckets of `frameHist`. */
@@ -62,6 +62,9 @@ export const EVENT_SLOTS = 64;
 
 /** The path of id 0: the ring holds 1024 paths, the rest share this one. */
 export const OVERFLOW_PATH = "…";
+
+/** Flow paths the ring interns; the rest share the overflow path of id 0. */
+const PATH_SLOTS = 1024;
 
 /** The bits of a frame's `changed` column. */
 export const CHANGED: Readonly<Record<PerfChange, number>> = {
@@ -209,7 +212,11 @@ function createColumns(capacity: number): FrameColumns {
     kept: new Float32Array(capacity).fill(Number.NaN),
     retakes: new Float32Array(capacity).fill(Number.NaN),
     targetsCreated: new Float32Array(capacity).fill(Number.NaN),
-    targetsDestroyed: new Float32Array(capacity).fill(Number.NaN)
+    targetsDestroyed: new Float32Array(capacity).fill(Number.NaN),
+    edges: new Uint16Array(capacity),
+    edgeMs: new Float32Array(capacity).fill(Number.NaN),
+    edgeMaxMs: new Float32Array(capacity).fill(Number.NaN),
+    edgePath: new Uint16Array(capacity)
   };
 }
 
@@ -449,8 +456,33 @@ function readRing(ring: PerfRing, into: FrameReadout, since: number): Readonly<F
   copyF32(into.retakes, columns.retakes, 1, ring, oldest, count);
   copyF32(into.targetsCreated, columns.targetsCreated, 1, ring, oldest, count);
   copyF32(into.targetsDestroyed, columns.targetsDestroyed, 1, ring, oldest, count);
+  copyU16(into.edges, columns.edges, 1, ring, oldest, count);
+  copyF32(into.edgeMs, columns.edgeMs, 1, ring, oldest, count);
+  copyF32(into.edgeMaxMs, columns.edgeMaxMs, 1, ring, oldest, count);
+  copyU16(into.edgePath, columns.edgePath, 1, ring, oldest, count);
 
   return result;
+}
+
+/**
+ * The id of a flow path in the ring's `paths`, interned the first time it is seen while the table has room; a path
+ * seen before is a map read, no allocation. Every path past the 1024th shares id 0, the overflow path.
+ *
+ * @param perf - The perf state.
+ * @param path - The flow path.
+ * @returns Its id.
+ */
+export function internPath(perf: PerfState, path: string): number {
+  const { paths } = perf.ring;
+  let id = perf.pathIds.get(path);
+
+  if (id === undefined && paths.length < PATH_SLOTS) {
+    id = paths.length;
+    paths.push(path);
+    perf.pathIds.set(path, id);
+  }
+
+  return id ?? 0;
 }
 
 /**
@@ -758,6 +790,30 @@ export function systemsAt(ring: FrameRing, slot: number): { name: string; ms: nu
 }
 
 /**
+ * The flow edges taken before a frame from its four columns; `null` without an edge.
+ *
+ * @param ring - The ring.
+ * @param slot - The slot.
+ * @returns The count, the ms summed, the costliest and its node's path, or `null`.
+ */
+function edgesAt(
+  ring: FrameRing,
+  slot: number
+): { count: number; ms: number; maxMs: number; maxNode: string } | null {
+  const { columns } = ring;
+  const count = cellU16(columns.edges, slot);
+
+  if (count === 0) return null;
+
+  return {
+    count,
+    ms: two(cellF32(columns.edgeMs, slot)),
+    maxMs: two(cellF32(columns.edgeMaxMs, slot)),
+    maxNode: ring.paths[cellU16(columns.edgePath, slot)] ?? OVERFLOW_PATH
+  };
+}
+
+/**
  * The changes of a frame with their subjects.
  *
  * @param ring - The ring.
@@ -908,7 +964,8 @@ export function recordAt(ring: FrameRing, slot: number): FrameRecord {
     path: ring.paths[cellU16(c.path, slot)] ?? OVERFLOW_PATH,
     changed: changesAt(ring, slot),
     causes: namesOf(cellU8(c.causes, slot), PERF_CAUSES),
-    kept: kept === null ? null : { pictures: kept, retakes: cellF32(c.retakes, slot) }
+    kept: kept === null ? null : { pictures: kept, retakes: cellF32(c.retakes, slot) },
+    edges: edgesAt(ring, slot)
   };
 }
 

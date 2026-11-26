@@ -1,6 +1,7 @@
 /**
  * @file flow/runner — the one loop: one turn, the loop, entering a position from outside.
  */
+import type { WorldEvent } from "../inbox/types";
 import type { FlowCtx } from "../types";
 import { applyResult, arrive, finishNode, handleAbort, handleFailure } from "./edge";
 import { checkGraph, collectGraph, requireMainFlow } from "./graph";
@@ -22,7 +23,55 @@ import { eventResult, framesOf, locateFrames } from "./position";
 import { recoverNode, takeRecovery } from "./recover";
 import { findNode, framePath, isRestCheckpoint, restlessCapOf } from "./registry";
 import { loopSeam, notifyGateOpen, notifyRest, takeSubstitution } from "./seam";
+import { clearNode, dropBody, enterNode } from "./timing";
 import type { AnyFlow, AnyNode, Bookmark, Modules, SlotNode } from "./types";
+
+/**
+ * Reads the moment a node is entered: the game clock its edge is journalled with. An agent build
+ * also starts the page-clock time of the node's stay here. Inline and positive, as world's system
+ * timing: Bun folds the guard under a production `define`, so a release bundle drops `timing.ts`.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @returns The `clock.now()` moment of the entry.
+ */
+function entryMoment(ctx: FlowCtx): number {
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    enterNode(ctx.state.runner.timing);
+  }
+
+  return ctx.deps.clock.now();
+}
+
+/**
+ * Takes the edge of the world event that ended a rest node: the node's transaction is discarded
+ * and the event's outcome is committed on an empty one. The event ended the node, not its body, so
+ * in an agent build the edge has no body time.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs.
+ * @param step - The node run the event aborted.
+ * @param event - The event the inbox delivered.
+ * @param safe - Whether the loop is already recovering.
+ * @returns Always `"continue"`.
+ */
+function takeEvent(
+  ctx: FlowCtx,
+  modules: Modules,
+  step: Step,
+  event: WorldEvent,
+  safe: Safe
+): Promise<StepOutcome> {
+  handleAbort(modules, step.transaction, "inbox");
+
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    dropBody(ctx.state.runner.timing);
+  }
+
+  return applyResult(ctx, modules, step.location, eventResult(event), safe, {
+    barrier: step.node.barrier,
+    now: step.now
+  });
+}
 
 /**
  * Runs one node: wait for the pointer, the recovery the loop owes the safe node, `onEnter` stages,
@@ -63,7 +112,7 @@ async function runNode(
 
   state.abort = abort;
 
-  const now = ctx.deps.clock.now();
+  const now = entryMoment(ctx);
 
   try {
     await runEnterCallbacks(ctx, nodeInfo(path, location, node), abort.signal);
@@ -117,7 +166,7 @@ async function runNode(
 
   const outcome: NodeOutcome =
     entered === undefined
-      ? failedOrAsIs(step, await nodeOutcome(modules, step, delivered))
+      ? failedOrAsIs(step, await nodeOutcome(modules, step, delivered, state.timing))
       : { kind: "failed", error: entered };
 
   // The guide derived from state goes with the node: a commit after this derives nothing.
@@ -133,14 +182,7 @@ async function runNode(
 
   if (outcome.kind === "aborted") return handleAbort(modules, step.transaction, outcome.reason);
 
-  if (outcome.kind === "event") {
-    handleAbort(modules, step.transaction, "inbox");
-
-    return applyResult(ctx, modules, location, eventResult(outcome.event), safe, {
-      barrier: node.barrier,
-      now
-    });
-  }
+  if (outcome.kind === "event") return takeEvent(ctx, modules, step, outcome.event, safe);
 
   return finishNode(
     ctx,
@@ -178,6 +220,9 @@ function enterSubFlow(
   const substituted = takeSubstitution(state, framePath(state.stack));
 
   if (substituted !== undefined) {
+    // No node entry leads to a substituted edge: neither a body nor a stay.
+    if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) clearNode(state.timing);
+
     return applyResult(ctx, modules, location, substituted, safe, {
       barrier: false,
       now: ctx.deps.clock.now()
@@ -218,6 +263,9 @@ function enterSlot(
   if (leave !== undefined) {
     state.slotLeave = undefined;
 
+    // A slot's edge belongs to no node entry: neither a body nor a stay.
+    if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) clearNode(state.timing);
+
     return applyResult(ctx, modules, location, leave, safe, {
       barrier: false,
       now: ctx.deps.clock.now()
@@ -236,6 +284,8 @@ function enterSlot(
   const next = pickContribution(ctx, modules.features, slot.name, from);
 
   if (next === undefined) {
+    if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) clearNode(state.timing);
+
     return applyResult(ctx, modules, location, { outcome: "done", payload: noPayload }, safe, {
       barrier: false,
       now: ctx.deps.clock.now()

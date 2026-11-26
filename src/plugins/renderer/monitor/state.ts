@@ -40,6 +40,12 @@ export const PENDING_SLOTS = 64;
 /** Rows the per-second system accumulators hold before they first grow. */
 const SYSTEM_ROWS = 16;
 
+/** Slots of the flow's edge ring (`flow.edgeTimes().capacity`): the frame each edge is counted in. */
+const EDGE_SLOTS = 256;
+
+/** The edge accumulators of a second: count, ms, body ms, the costliest ms, its node's path id. */
+const EDGE_SECOND = 5;
+
 /** The counts plugins may register with `monitor.counts.register`. */
 export const COUNT_SLOTS = 16;
 
@@ -263,6 +269,10 @@ export function createPerfState(config: Readonly<MonitorConfig>, sinks: MonitorS
     lastHeap: Number.NaN,
     secSum: new Float64Array(SYSTEM_ROWS),
     secMax: new Float32Array(SYSTEM_ROWS),
+    edgeSeen: 0,
+    edgeFlushed: 0,
+    edgeFrame: new Float64Array(EDGE_SLOTS),
+    edgeSec: new Float64Array(EDGE_SECOND),
     gapHist: new Uint16Array(PERF_GAP_BUCKETS),
     listenersSum: 0,
     events,

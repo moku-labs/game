@@ -1048,6 +1048,58 @@ export type LoopSeam = {
 };
 
 /**
+ * The time of the last 256 edges of an agent build, a ring the renderer's monitor drains every frame. The edge of
+ * index `i` (counted from 0 since the app started) sits in slot `i % capacity`; `written` counts every edge timed. All
+ * times are page-clock milliseconds of `time.agentClock()`. A live view, not a copy: the next edge overwrites a slot
+ * in place.
+ */
+export type EdgeTiming = {
+  /** Slots of the ring: 256. */
+  readonly capacity: number;
+  /** Edges timed since the app started. The newest is in slot `(written - 1) % capacity`. */
+  readonly written: number;
+  /** Path of the node that took the edge, `"mergeBoard/drop"`. */
+  readonly node: readonly string[];
+  /** Outcome of the edge, `"merged"`. */
+  readonly outcome: readonly string[];
+  /** Path the edge leads to, `"mergeBoard/awaitIntent"`. */
+  readonly next: readonly string[];
+  /** Page clock at the start of the edge. */
+  readonly at: Float64Array;
+  /** The whole edge: the commit, the journal and the `flow:edge` emit. */
+  readonly ms: Float64Array;
+  /** `transaction.commit()`, with the synchronous `model:committed` listener. */
+  readonly commitMs: Float64Array;
+  /** The `flow:edge` emit, with its synchronous listener. */
+  readonly hooksMs: Float64Array;
+  /** The node body's first synchronous slice, up to its first `await`; NaN when no body ran. */
+  readonly bodyMs: Float64Array;
+  /** From the node's entry to the start of its edge: stages, body and wait; NaN for an edge no node entry led to. */
+  readonly wallMs: Float64Array;
+};
+
+/** The ring of `EdgeTiming` as the runner writes it, with the clock and the numbers of the edge in progress. */
+export type EdgeTimingState = {
+  capacity: number;
+  written: number;
+  node: string[];
+  outcome: string[];
+  next: string[];
+  at: Float64Array;
+  ms: Float64Array;
+  commitMs: Float64Array;
+  hooksMs: Float64Array;
+  bodyMs: Float64Array;
+  wallMs: Float64Array;
+  /** The page clock of `time.agentClock()`. */
+  clock: () => number;
+  /** The node in progress: `[enteredAt, bodyMs]`, NaN when none. A double kept in a field of an object would be boxed. */
+  scratch: Float64Array;
+  /** The edge in progress: the clock before the commit, after it, and before the `flow:edge` emit. */
+  stage: Float64Array;
+};
+
+/**
  * runner module state.
  */
 export type RunnerState = {
@@ -1093,6 +1145,8 @@ export type RunnerState = {
    * and when the loop starts.
    */
   guide?: NodeGuideHost | undefined;
+  /** The edge timer of an agent build with `time.agentClock()`; `undefined` otherwise. Never reset by a stop. */
+  timing?: EdgeTimingState | undefined;
 };
 
 /**
@@ -1368,4 +1422,25 @@ export type RunnerApi = {
    * ```
    */
   setMode(mode: "live" | "fast"): void;
+
+  /**
+   * The time of the last 256 edges, in an agent build (dev pages and `--debug` builds) with `time.agentClock()`: per
+   * edge the node, its outcome and target, and the page-clock milliseconds of the commit, the `flow:edge` listeners,
+   * the body's first synchronous slice and the node's whole stay. `undefined` in a release build. The renderer's
+   * monitor drains it every frame. A live ring, the same object every call: read it, never write it, and copy what is
+   * kept past the frame.
+   *
+   * @returns The ring, or `undefined`.
+   * @example
+   * ```ts
+   * // The renderer's monitor on a debug page, right after a merge drag: the drop is the newest edge.
+   * const edges = ctx.require(flowPlugin).edgeTimes();
+   * const newest = edges === undefined ? -1 : (edges.written - 1) % edges.capacity;
+   * edges?.node[newest]; // "mergeBoard/drop"
+   * edges?.outcome[newest]; // "merged"
+   * edges?.next[newest]; // "mergeBoard/awaitIntent"
+   * // the store build: edges is undefined
+   * ```
+   */
+  edgeTimes(): Readonly<EdgeTiming> | undefined;
 };
