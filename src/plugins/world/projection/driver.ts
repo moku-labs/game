@@ -237,7 +237,9 @@ export function startTrack(
   options: TrackOptions
 ): MotionHandle {
   const record = takeRecord(pctx, entity, component.componentName);
-  const handle = driverOf(pctx).track(entity, component, to, options, record.muted);
+  const driver = driverOf(pctx);
+  const muted = copiesStart(pctx, driver) ? record.muted : ownMuted(pctx, record);
+  const handle = driver.track(entity, component, to, options, muted);
 
   fileTrack(pctx, record, handle, options);
 
@@ -271,7 +273,11 @@ export function startRestTrack(
   options.delayMs = timing.delayMs;
   numericInto(record, rest);
 
-  const handle = driverOf(pctx).track(entity, component, record.to, options, record.muted);
+  const driver = driverOf(pctx);
+  // A driver of the engine copies what a start hands it; any other gets values of its own, which it may keep.
+  const handle = copiesStart(pctx, driver)
+    ? driver.track(entity, component, record.to, options, record.muted)
+    : driver.track(entity, component, { ...record.to }, { ...options }, ownMuted(pctx, record));
 
   fileTrack(pctx, record, handle, options);
 
@@ -306,6 +312,49 @@ type KeptTrack = Track & {
  */
 function isKept(track: Track): track is KeptTrack {
   return "muted" in track;
+}
+
+/** The mark of a driver of the engine: one that copies the target and the options a start hands it. */
+const COPIES = Symbol("copies");
+
+/**
+ * Marks a driver of the engine as one that copies what a start hands it, so the projection hands it its kept target,
+ * options and `muted` reader, which a later start writes again once the track ended (F244 В). The `muted` reader it
+ * keeps is read only while its track runs.
+ *
+ * @param driver - The driver `anim` sets.
+ * @returns The same driver, marked.
+ */
+export function copyingDriver(driver: TweenDriver): TweenDriver {
+  Object.defineProperty(driver, COPIES, { value: true });
+
+  return driver;
+}
+
+/**
+ * Tells whether a start may hand the driver the kept records of the projection: the world's own instant driver, or one
+ * marked with `copyingDriver`. A driver a game sets may keep what it was handed, as it always could.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param driver - The driver of the start.
+ * @returns True when the driver keeps nothing it was handed.
+ */
+function copiesStart(pctx: ProjectionCtx, driver: TweenDriver): boolean {
+  return pctx.ctx.state.projection.driver === undefined || COPIES in driver;
+}
+
+/**
+ * A `muted` reader of its own for the track of a driver that may keep it: the entity and the component of this start,
+ * not of the record, which a later start writes again.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param record - The record of the start.
+ * @returns The reader.
+ */
+function ownMuted(pctx: ProjectionCtx, record: KeptTrack): () => ReadonlySet<string> {
+  const { entity, component } = record;
+
+  return (): ReadonlySet<string> => mutedFields(pctx, entity, component);
 }
 
 /**

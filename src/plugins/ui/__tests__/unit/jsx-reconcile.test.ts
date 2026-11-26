@@ -674,6 +674,36 @@ describe("one prop changed alone", () => {
     expect(h.counters.styled - ELEMENTS).toBe(resolved === 1 || applied ? 1 : 0);
   });
 
+  // Bug: the input values kept for a button are taken again while only its intent changed: it answers the old one.
+  it("writes a new intent alone into the Tappable of a button whose payload stayed", () => {
+    const h = harness();
+    const payload = { id: 1 };
+
+    h.mount(screen({ go: { payload } }));
+    h.render(screen({ go: { intent: "stop", payload } }));
+    h.render(screen({ go: { intent: "back", payload } }));
+
+    expect(h.stored("go", Tappable)).toEqual({ intent: "back", payload: { id: 1 } });
+  });
+
+  // Bug: the rest a restyle records keeps the entity's old fields where this render wrote new ones, so a `toRest`
+  // brings a text home to its old content.
+  it("records the new content of a text as its rest, the field the text plugin owns as the entity holds it", () => {
+    const h = harness();
+    const rests: Array<{ entity: Entity; name: string; value: Record<string, unknown> }> = [];
+
+    h.mount(screen());
+    h.setRest.mockImplementation((entity: Entity, type: AnyComponentType, value: object) => {
+      rests.push({ entity, name: type.componentName, value: { ...value } });
+    });
+    h.render(screen({ title: { content: "plain" } }));
+    h.render(screen({ title: { content: "other" } }));
+
+    const title = rests.filter(rest => rest.entity === h.entity("title") && rest.name === "Text");
+
+    expect(title.at(-1)?.value).toMatchObject({ content: "other" });
+  });
+
   it("writes what the changed prop says", () => {
     const h = harness();
 

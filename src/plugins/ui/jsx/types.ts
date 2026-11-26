@@ -265,6 +265,25 @@ export type KeptShape = {
 };
 
 /**
+ * The input values of an element as `inputOf` made them, and what they were made from: its type, its two flags that
+ * change them, and the props they read. The values are frozen and copied by every write, so a write with the same
+ * props takes them again (F244 В).
+ */
+export type KeptInputs = {
+  readonly values: AnyComponentValue[];
+  readonly type: string;
+  readonly disabled: boolean;
+  readonly covered: boolean;
+  readonly intent: unknown;
+  readonly payload: unknown;
+  readonly point: unknown;
+  readonly local: unknown;
+  readonly escape: unknown;
+  readonly locked: unknown;
+  readonly axis: string | undefined;
+};
+
+/**
  * One live element: the entity, the Yoga node, the resolved style and the place in the tree.
  * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit` is
  * the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform` last
@@ -324,8 +343,18 @@ export type Element = {
   restyled?: boolean;
   /** The `Shape` the element is drawn with while no `change.Shape` hook reads it, written in place (F244 В). */
   keptShape?: KeptShape;
+  /** The input values `inputOf` made last, with the props they were made from: a restyle that keeps them reuses them. */
+  keptInputs?: KeptInputs;
   fit: number;
+  /**
+   * The rest pose. Written in place by a repose with no `change.Transform` hook; made new while a hook is handed it
+   * (`restLent`), since the game may keep that value. Ask `restMoves` whether it moved, not its identity.
+   */
   rest: TransformValue;
+  /** The rest pose was handed to a `change.Transform` hook: the next repose makes a new one (F244 В). */
+  restLent?: boolean;
+  /** How many times a repose moved the rest pose: a pose compared by this count, as it is written in place. */
+  restMoves?: number;
   handles: MotionHandle[];
   loop: MotionHandle | undefined;
   motion: ElementMotion | undefined;
@@ -574,9 +603,9 @@ export type Keyboard = { inset: number; innerHeight: number; lift: number };
 
 /**
  * The root the keyboard lift was last written on: its root element, the lift in reference units,
- * and the rest pose it was added to, so a new rest is lifted again.
+ * and the count of rest moves of the root it was added to (`Element.restMoves`), so a new rest is lifted again.
  */
-export type Lifted = { element: Entity; units: number; rest: TransformValue };
+export type Lifted = { element: Entity; units: number; moves: number };
 
 /**
  * The text input: the one hidden DOM input (none headless), the field being edited, the mirror of

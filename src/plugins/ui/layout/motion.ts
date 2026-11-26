@@ -20,7 +20,7 @@ import { asError } from "../errors";
 import type { Element, PosedEnter, PoseWrite } from "../jsx/types";
 import type { Origin, ResolvedStyle } from "../styles/types";
 import type { UiCtx } from "../types";
-import { CONTENT, fieldsLeftAlone, restValueOf, samePose, visualOf } from "../visual";
+import { CONTENT, fieldsLeftAlone, keptRestValue, samePose, visualOf } from "../visual";
 import type { MotionSpan, Rect } from "./types";
 
 /**
@@ -150,6 +150,75 @@ function restInto(
 }
 
 /**
+ * Writes a pose that `restInto` read into the element's own rest record, when the record has the per-axis factors the
+ * style writes, so no key comes or goes. The pivot is no number a track writes: the world and the entity's `Transform`
+ * hold it as it is, so a pivot that moved is a new point and one that stands is kept; a point is never written again.
+ *
+ * @param target - The element's rest record, never handed to a hook.
+ * @param standing - The pose `restInto` read.
+ * @param style - The resolved style, which says whether the pose has `scaleX` and `scaleY`.
+ * @returns `target`, written; `undefined` when its keys are not the ones the pose needs.
+ */
+function poseOnto(
+  target: TransformValue,
+  standing: Readonly<TransformValue>,
+  style: ResolvedStyle
+): TransformValue | undefined {
+  if ("scaleX" in target !== (style.scaleX !== undefined)) return undefined;
+  if ("scaleY" in target !== (style.scaleY !== undefined)) return undefined;
+
+  // A field is written only when it moved: a number written into a field that holds any value is a new box.
+  if (target.x !== standing.x) target.x = standing.x;
+  if (target.y !== standing.y) target.y = standing.y;
+  if (target.rotation !== standing.rotation) target.rotation = standing.rotation;
+  if (target.scale !== standing.scale) target.scale = standing.scale;
+  if (style.scaleX !== undefined && target.scaleX !== style.scaleX) target.scaleX = style.scaleX;
+  if (style.scaleY !== undefined && target.scaleY !== style.scaleY) target.scaleY = style.scaleY;
+
+  const pivot = standing.pivot;
+
+  if (target.pivot.x !== pivot.x || target.pivot.y !== pivot.y) {
+    target.pivot = { x: pivot.x, y: pivot.y };
+  }
+
+  return target;
+}
+
+/** The rest pose `writeRest` hands `setRest`, which copies its fields: one record, written per call. */
+const RECORDED: TransformValue = { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } };
+
+/**
+ * The rest pose `setRest` records for an element, the one `restTransform` builds: written into one kept record for a
+ * style without per-axis factors, its pivot the element's own while it stands (`setRest` keeps the point as it is);
+ * built new for a style with them, which names more keys.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element that entered or moved.
+ * @param parent - The rect of its parent, or nothing.
+ * @returns The pose, read by the call it is passed to.
+ */
+function recordedRest(ctx: UiCtx, element: Element, parent: Rect | undefined): TransformValue {
+  const style = element.style;
+
+  if (style.scaleX !== undefined || style.scaleY !== undefined) {
+    return restTransform(element.rect, parent, style, element.fit);
+  }
+
+  const standing = restInto(ctx.state.layout.pose, element.rect, parent, style, element.fit);
+  const own = element.rest.pivot;
+  const pivot = standing.pivot;
+
+  // A field is written only when it moved (`poseOnto`).
+  if (RECORDED.x !== standing.x) RECORDED.x = standing.x;
+  if (RECORDED.y !== standing.y) RECORDED.y = standing.y;
+  if (RECORDED.rotation !== standing.rotation) RECORDED.rotation = standing.rotation;
+  if (RECORDED.scale !== standing.scale) RECORDED.scale = standing.scale;
+  RECORDED.pivot = own.x === pivot.x && own.y === pivot.y ? own : { x: pivot.x, y: pivot.y };
+
+  return RECORDED;
+}
+
+/**
  * Records the rest pose of one element before a hook runs: the transform from `Box` and the
  * style, and the visual the element is actually drawn with. The content of a scroll records no
  * rest `Transform`: the scroll step owns its pose, and the world brings an element back to every
@@ -163,11 +232,7 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
   const projection = ctx.deps.world.projection;
 
   if (element.type !== CONTENT) {
-    projection.setRest(
-      element.entity,
-      Transform,
-      restTransform(element.rect, parent, element.style, element.fit)
-    );
+    projection.setRest(element.entity, Transform, recordedRest(ctx, element, parent));
   }
 
   // The visual the element is drawn with; a self-sized image keeps the size its game wrote (F111).
@@ -179,7 +244,11 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
   const left = fieldsLeftAlone(element, type, type.owned);
   const current = left.length === 0 ? undefined : ctx.deps.world.ecs.get(element.entity, type);
 
-  projection.setRest(element.entity, type, restValueOf(current, visual.value, left));
+  projection.setRest(
+    element.entity,
+    type,
+    keptRestValue(ctx.state.layout.restValues, type.componentName, current, visual.value, left)
+  );
 }
 
 /**
@@ -768,25 +837,33 @@ export function repose(
 
   if (samePose(element.rest, standing)) return;
 
-  const next = restTransform(element.rect, parent, element.style, element.fit);
   const previous = element.rest;
+  const moves = element.type !== CONTENT && element.live && !hooked;
+  const held = moves && isHeld(ctx, element);
+  const hook = moves && !held ? element.motion?.change?.Transform : undefined;
+  // A pose a hook is handed, now or before, is a value the game may keep: it is made new and never written again. Any
+  // other is the element's own, and a turn of a page writes it in place (F244 В).
+  const next =
+    (hook === undefined && element.restLent !== true
+      ? poseOnto(previous, standing, element.style)
+      : undefined) ?? restTransform(element.rect, parent, element.style, element.fit);
 
   element.rest = next;
+  element.restLent = hook !== undefined;
+  element.restMoves = (element.restMoves ?? 0) + 1;
 
   if (element.type === CONTENT) return;
 
   ctx.deps.world.projection.setRest(element.entity, Transform, next);
 
-  if (!element.live || hooked) return;
+  if (!moves) return;
 
   // Held for the swap: the pose is written as `applyFirst` writes it, and the enter starts from it.
-  if (isHeld(ctx, element)) {
+  if (held) {
     ctx.deps.world.ecs.set(element.entity, Transform, { ...next, pivot: { ...next.pivot } });
 
     return;
   }
-
-  const hook = element.motion?.change?.Transform;
 
   if (hook !== undefined) {
     playChange(ctx, element, hook, previous, next, hint);

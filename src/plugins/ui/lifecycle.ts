@@ -256,6 +256,9 @@ export function stopUi(state: State): void {
   // Forget everything the modules kept, so a second start begins empty.
   state.layout.byEntity.clear();
   state.layout.kept.clear();
+  state.layout.placed.clear();
+  state.layout.parents.clear();
+  state.layout.measuring.clear();
   state.layout.nodes = 0;
   state.layout.yoga = undefined;
   state.layout.tables = undefined;

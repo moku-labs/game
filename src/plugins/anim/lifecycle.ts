@@ -13,6 +13,7 @@ import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
 import { SAMPLES_SYSTEM } from "../world/ecs/systems";
 import type { AnyComponent, AnyComponentValue } from "../world/ecs/types";
+import { copyingDriver } from "../world/projection/driver";
 import type { AnySystem, Entity, Owner, TrackOptions } from "../world/types";
 import { AnimPlayer } from "./components";
 import {
@@ -410,7 +411,8 @@ export function startAnim(ctx: KernelSlice): void {
 
   registerAnimations(actx);
   openPlayer(actx, rt);
-  actx.state.removeDriver = actx.deps.world.projection.setDriver(createDriver(actx));
+  // The anim driver copies what a start hands it: the projection may hand it its kept records (F244 В).
+  actx.state.removeDriver = actx.deps.world.projection.setDriver(copyingDriver(createDriver(actx)));
   actx.state.offPlay = actx.deps.flow.fx.handle("play", createPlayHandler(actx, rt), {
     runInFast: false
   });

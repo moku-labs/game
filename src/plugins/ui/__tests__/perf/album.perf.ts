@@ -27,16 +27,27 @@ import { type AlbumPerf, startAlbumPerf } from "./album.fixture";
 //                       `Animation` count added and removed per track through the ECS commands, and the table of
 //                       running tracks, whose ids are new at every start. Not yet 0: the remainder is named in the
 //                       report of the change, not hidden here.
+//   then                14 582 B: a rest pose with no `change.Transform` hook is written into the element's own
+//                       record (a count of its moves replaces its identity), its pivot kept while it stands; the
+//                       rest a commit records is one kept record; a plain pose is written into the world's kept rest
+//                       by name, a field only when it moved; the patches and rest values of a restyle are written
+//                       into records kept per component; the input values of an element are kept while their props
+//                       stand; a short child list is searched with no set; the layout takes a child out through the
+//                       handles it inserted, not a new handle per `getChild`; and a node keeps its measure function
+//                       while its element stands. Left, by the heap profile: yoga-layout's argument copies of
+//                       `setWidth`/`setPosition` (4 and 2 calls a turn) and Emscripten's call wrappers; the
+//                       `Animation` added and removed per rest track through the ECS commands and the store's Map;
+//                       the patch walk of the reconciler; the boxes of the doubles written into kept records.
 // ---------------------------------------------------------------------------
 
 /** Calls of a window: a turn walks the whole root, ~1.1 ms; `alloc` warms it 5 000 times first. */
 const CALLS = 200;
 
 /**
- * The bytes a turn may keep of the engine's own, the handles left out: the measured 22 512 to 23 638 B and a margin,
- * far under the 139 360 B before the change.
+ * The bytes a turn may keep, the handles left out: the measured 14 582 B and a margin, far under the 139 360 B before
+ * the change. Yoga's own bytes are still in it, not yet split out as a named budget.
  */
-const TURN_BYTES = 26_000;
+const TURN_BYTES = 16_000;
 
 /**
  * The bytes of the handles a turn's rest tracks hand their caller: one small object per started track, 8 tracks, 48 B

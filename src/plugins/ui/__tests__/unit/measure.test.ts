@@ -475,4 +475,21 @@ describe("a text without a bind that a system writes (F162)", () => {
     expect(remeasureShown(state, plain, source)).toBe(true);
     expect(solved(row, node).w).toBe(50);
   });
+
+  // Bug: a node keeps the measure function of the element it was given first, so the element that takes it after
+  // (its entity rebuilt) is laid out at the size of the old one's text.
+  it("measures the element a node is given next, not the one it measured first", () => {
+    const source = sourceOf(new Map());
+    const first = textElement({ content: "Play" });
+    const { state, row, node } = centredText(first, source);
+
+    expect(solved(row, node).w).toBe(40);
+
+    const next = textElement({ content: "Play again" });
+
+    installMeasure(state, node, next, source);
+    node.markDirty();
+
+    expect(solved(row, node).w).toBe(100);
+  });
 });

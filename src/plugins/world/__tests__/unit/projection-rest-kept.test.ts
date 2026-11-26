@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Entity, Owner } from "../../ecs/types";
+import type { TrackOptions, TweenDriver } from "../../projection/types";
 import { mountBoard, Transform } from "./board";
 import type { MockWorld } from "./mock-world";
 import { createMockWorld } from "./mock-world";
@@ -77,5 +78,64 @@ describe("projection setRest — a kept record, read through a frozen value", ()
     world.frame(16);
 
     expect(world.api.ecs.get(entity, Transform)).toMatchObject({ x: 40, y: 50, scale: 1 });
+  });
+
+  it("asks the sweep to walk again when a quiet sweep came between two rest moves through the kept handle", () => {
+    // Bug caught: the kept handle is handed back before `viewOf` marks the world moving, so after one quiet sweep a
+    // hookless rest move is never swept: no live view is settled while its track ends.
+    const world = createMockWorld();
+    const entity = spawnElement(world);
+    const projection = world.ctx.state.projection;
+    const first = world.api.projection.viewOf(entity, OWNER);
+
+    first?.toRest(Transform, { ms: 0 });
+    world.frame(16);
+    world.frame(16);
+
+    expect(projection.moving).toBe(false);
+
+    world.api.projection.setRest(entity, Transform, { x: 70, y: 20, scale: 1 });
+    const again = world.api.projection.viewOf(entity, OWNER);
+
+    expect(again).toBe(first);
+    expect(projection.moving).toBe(true);
+    again?.toRest(Transform, { ms: 0 });
+    world.frame(16);
+
+    expect(world.api.ecs.get(entity, Transform)).toMatchObject({ x: 70, y: 20 });
+  });
+
+  it("hands a driver a game sets a target, options and muted reader of its own, kept as they were", () => {
+    // Bug caught: a rest move hands a driver the projection's kept records, and a later rest move, once the first track
+    // ended, writes another entity's target into the object the driver still holds.
+    const world = createMockWorld();
+    const first = spawnElement(world);
+    const second = world.api.ecs.spawn(OWNER, [Transform({ x: 0, y: 0, scale: 1 })]);
+    const handed: Array<{
+      to: Record<string, number>;
+      options: TrackOptions;
+      muted: () => unknown;
+    }> = [];
+    const driver: TweenDriver = {
+      track: (_entity, _component, to, options, muted) => {
+        handed.push({ to, options, muted });
+
+        return { finish: () => undefined, cancel: () => undefined, active: () => false };
+      },
+      cancelAll: () => undefined
+    };
+
+    world.api.projection.setRest(second, Transform, { x: 5, y: 6, scale: 1 });
+    world.api.projection.setDriver(driver);
+    world.api.projection.viewOf(first, OWNER)?.toRest(Transform, { ms: 0 });
+    world.frame(16);
+    world.api.projection.viewOf(second, OWNER)?.toRest(Transform, { ms: 0 });
+
+    expect(handed).toHaveLength(2);
+    expect(handed[0]?.to).toMatchObject({ x: 10, y: 20 });
+    expect(handed[1]?.to).toMatchObject({ x: 5, y: 6 });
+    expect(handed[0]?.to).not.toBe(handed[1]?.to);
+    expect(handed[0]?.options).not.toBe(handed[1]?.options);
+    expect(handed[0]?.muted).not.toBe(handed[1]?.muted);
   });
 });

@@ -47,6 +47,7 @@ import {
   ANCHOR,
   CONTENT,
   fieldsLeftAlone,
+  keptLivePatch,
   livePatch,
   namedKeyOf,
   namesFormat,
@@ -597,6 +598,54 @@ function inputOf(element: Element): AnyComponentValue[] {
 }
 
 /**
+ * The input values of a live element: the ones `inputOf` made last while its type, its `disabled` and `covered`
+ * flags and the props they read say the same, else new ones, kept.
+ *
+ * @param element - The element to make touchable.
+ * @returns The component values.
+ */
+function keptInputsOf(element: Element): AnyComponentValue[] {
+  const { type, node, is } = element;
+  const props = node.props;
+  const axis = element.scroll?.axis;
+  const kept = element.keptInputs;
+
+  if (
+    kept !== undefined &&
+    kept.type === type &&
+    kept.disabled === is.disabled &&
+    kept.covered === is.covered &&
+    kept.intent === props.intent &&
+    kept.payload === props.payload &&
+    kept.point === props.point &&
+    kept.local === props.local &&
+    kept.escape === props.escape &&
+    kept.locked === props.locked &&
+    kept.axis === axis
+  ) {
+    return kept.values;
+  }
+
+  const values = inputOf(element);
+
+  element.keptInputs = {
+    values,
+    type,
+    disabled: is.disabled,
+    covered: is.covered,
+    intent: props.intent,
+    payload: props.payload,
+    point: props.point,
+    local: props.local,
+    escape: props.escape,
+    locked: props.locked,
+    axis
+  };
+
+  return values;
+}
+
+/**
  * Creates the extras map of one element. Its own function, because lint rule L5 refuses a
  * collection built inside an exported declaration.
  *
@@ -1004,6 +1053,27 @@ function identitySet(identities: readonly string[]): ReadonlySet<string> {
   return new Set(identities);
 }
 
+/** How many children a list may have and still be searched as it is, with no set built for it. */
+const SHORT_LIST = 16;
+
+/**
+ * Tells whether one of the first `count` identities of a render is the given one.
+ *
+ * @param identities - The identities of the children of a render, a scratch buffer.
+ * @param count - How many of them are this render's.
+ * @param identity - The identity looked for.
+ * @returns True when the render lists it.
+ * @example
+ * ```ts
+ * listsIdentity(["a", "b", "c"], 2, "c"); // false
+ * ```
+ */
+function listsIdentity(identities: readonly string[], count: number, identity: string): boolean {
+  for (let index = 0; index < count; index += 1) if (identities[index] === identity) return true;
+
+  return false;
+}
+
 /**
  * Tells whether an element is an `<anchor>` or lies under one: the anchor pass places it after
  * the solve, by its targets, so the solve leaves it alone.
@@ -1125,6 +1195,8 @@ export function createReconciler(
   let expandedInstance: string | undefined;
   const identityStack: string[][] = [];
   const entityStack: Entity[][] = [];
+  // The elements of a changed child list, handed to the layout to place; the next commit empties it.
+  const placing: Element[] = [];
   let depth = 0;
   // The per-frame walks over the roots and the scrolls (F230 U3): a callback each, made once here,
   // and the fields it reads and counts. A `for…of` over a map or a set builds an iterator and its
@@ -1552,7 +1624,7 @@ export function createReconciler(
     // Remove the visuals and inputs the element no longer carries. Per restyle: the two lists are
     // read as they come, with no joined copy and no closure per type.
     const visuals = visualOf(element);
-    const inputs = inputOf(element);
+    const inputs = keptInputsOf(element);
 
     for (const type of LIVE_TYPES) {
       const isDropped = !carries(visuals, type) && !carries(inputs, type);
@@ -1679,7 +1751,11 @@ export function createReconciler(
     const typeOwned = ecs.typeOf(value.type.componentName)?.owned ?? NO_OWNED;
     const owned = leftAlone(element, value.type, typeOwned);
 
-    ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
+    ecs.set(
+      element.entity,
+      asHandle(value.type),
+      keptLivePatch(ctx.state.layout.livePatches, value.type.componentName, value.value, owned)
+    );
   }
 
   /**
@@ -2160,10 +2236,13 @@ export function createReconciler(
    */
   function commitChildren(root: Root, parent: Element, next: Entity[]): void {
     // An old child no entity of this render took (one of two siblings under one key) leaves now.
-    const kept = entitySet(next);
+    // A short list is searched as it is; a long one through a set, so a churn of a thousand rows stays linear.
+    const kept = next.length > SHORT_LIST ? entitySet(next) : undefined;
 
     for (const old of parent.children) {
-      if (kept.has(old) || state.exiting.has(old)) continue;
+      if ((kept === undefined ? next.includes(old) : kept.has(old)) || state.exiting.has(old)) {
+        continue;
+      }
 
       const element = state.elements.get(old);
 
@@ -2174,10 +2253,17 @@ export function createReconciler(
 
     // Draw the children in the order of this render, then re-place them in the layout once, and solve again.
     placeChildren(parent, next);
-    modules.layout.place(
-      parent,
-      next.map(entity => state.elements.get(entity)).filter(element => isElement(element))
-    );
+
+    // The elements of the list, in a buffer of the reconciler that the layout only reads; emptied by the next commit.
+    while (placing.length > 0) placing.pop();
+
+    for (const entity of next) {
+      const element = state.elements.get(entity);
+
+      if (isElement(element)) placing.push(element);
+    }
+
+    modules.layout.place(parent, placing);
     root.needsSolve = true;
   }
 
@@ -2265,6 +2351,13 @@ export function createReconciler(
 
       // A child that kept its place keeps its identity there: no set is built for a list that holds.
       if (element === undefined || (index < count && identities[index] === element.identity)) {
+        continue;
+      }
+
+      // A short list is searched as it is; a long one through a set, built once.
+      if (count <= SHORT_LIST) {
+        if (!listsIdentity(identities, count, element.identity)) removeChild(parent, element);
+
         continue;
       }
 
@@ -2536,13 +2629,13 @@ export function createReconciler(
       if (!quiet) hooked = modules.layout.change(element, element.previous, hint);
     }
 
-    const rest = element.rest;
+    const moves = element.restMoves;
 
     // Move the rest pose, which plays `change.Transform` only when no hook took it.
     modules.layout.repose(element, parent, hooked, hint);
 
-    // Per moved element of a still application only: a new rest pose is a new object.
-    if (applyingStill && element.rest !== rest) writeStillPose(element);
+    // Per moved element of a still application only: a rest pose that moved counts one more move.
+    if (applyingStill && element.restMoves !== moves) writeStillPose(element);
   }
 
   /**

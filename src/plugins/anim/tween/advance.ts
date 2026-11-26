@@ -748,6 +748,25 @@ function sameNames(names: readonly string[], target: Readonly<Record<string, num
 }
 
 /**
+ * A copy of a target, built field by field onto an empty object as the track table always built its records: so the
+ * patch a frame fills has the shape whose number fields already hold boxes, and a double written into it is the one
+ * box of the field (`budgets.ts`). A spread of the caller's literal would give it the literal's shape, whose fields
+ * turn into in-place doubles, and every frame would box the number twice, once into the patch and once out of it.
+ *
+ * @param target - The target fields.
+ * @returns A new record of the same fields and values.
+ * @example
+ * ```ts
+ * fieldsOf({ x: 500, y: 300 }); // { x: 500, y: 300 }
+ * ```
+ */
+function fieldsOf(target: Readonly<Record<string, number>>): Record<string, number> {
+  const copy: Record<string, number> = {};
+
+  return Object.assign(copy, target);
+}
+
+/**
  * A blank track record of one component with the slots of a target, made when no free record of its slot count is
  * kept. Every track is this one shape, so the frame step reads one hidden class; `fitTrack` writes the start.
  *
@@ -761,7 +780,7 @@ function blankTrack(component: AnyComponent, target: Readonly<Record<string, num
     id: 0,
     entity: 0,
     component,
-    to: { ...target },
+    to: fieldsOf(target),
     keys: {},
     ms: 0,
     ease: "out",
@@ -782,7 +801,7 @@ function blankTrack(component: AnyComponent, target: Readonly<Record<string, num
     masked: new Set(),
     keep: false,
     reveals: undefined,
-    patch: { ...target },
+    patch: fieldsOf(target),
     partial: undefined
   };
 
@@ -816,8 +835,8 @@ function renameTrack(
   track.component = component;
   track.names = Object.keys(target);
   track.keys = {};
-  track.to = { ...target };
-  track.patch = { ...target };
+  track.to = fieldsOf(target);
+  track.patch = fieldsOf(target);
   track.partial = undefined;
   track.partialMoved.fill(0);
 }
@@ -845,7 +864,7 @@ function fitSlots(track: Track, entity: Entity, target: Readonly<Record<string, 
     slotKeys[slot] = key;
     keys[field] = key;
     targets[slot] = target[field] ?? 0;
-    to[field] = targets[slot] ?? 0;
+    to[field] = target[field] ?? 0;
     track.colors[slot] = isColorField(component, field) ? 1 : 0;
   }
 
@@ -880,7 +899,7 @@ function recordOf(
   if (kept !== undefined && (kept.component !== component || !sameNames(kept.names, target))) {
     renameTrack(kept, component, target);
   } else if (kept !== undefined && kept.kept < count) {
-    kept.patch = { ...target };
+    kept.patch = fieldsOf(target);
   }
 
   if (track.masked.size > 0) track.masked.clear();
